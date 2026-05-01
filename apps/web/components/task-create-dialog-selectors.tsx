@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- groups all create-dialog selector subcomponents; splitting per-selector files is a separate refactor. */
 "use client";
 
 import { useEffect, useRef, useState, memo, useCallback, useMemo } from "react";
@@ -5,6 +6,8 @@ import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconPaperclip } from "@tabler/icons-react";
 import { Combobox } from "./combobox";
+import { scoreBranch } from "@/lib/utils/branch-filter";
+import { BranchRefreshButton } from "./branch-refresh-button";
 import {
   processFile,
   formatBytes,
@@ -70,6 +73,7 @@ export const RepositorySelector = memo(function RepositorySelector({
 type BranchOption = {
   value: string;
   label: string;
+  keywords?: string[];
   renderLabel: () => React.ReactNode;
 };
 
@@ -81,6 +85,11 @@ type BranchSelectorProps = {
   placeholder: string;
   searchPlaceholder: string;
   emptyMessage: string;
+  onRefresh?: () => void;
+  refreshing?: boolean;
+  fetchedAt?: string;
+  fetchError?: string;
+  loading?: boolean;
 };
 
 export const BranchSelector = memo(function BranchSelector({
@@ -91,7 +100,20 @@ export const BranchSelector = memo(function BranchSelector({
   placeholder,
   searchPlaceholder,
   emptyMessage,
+  onRefresh,
+  refreshing,
+  fetchedAt,
+  fetchError,
+  loading,
 }: BranchSelectorProps) {
+  const headerAction = onRefresh ? (
+    <BranchRefreshButton
+      onRefresh={onRefresh}
+      refreshing={refreshing}
+      fetchedAt={fetchedAt}
+      fetchError={fetchError}
+    />
+  ) : undefined;
   return (
     <Combobox
       options={options}
@@ -104,6 +126,9 @@ export const BranchSelector = memo(function BranchSelector({
       dropdownLabel="Base Branch"
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       testId="branch-selector"
+      filter={scoreBranch}
+      headerAction={headerAction}
+      loading={loading}
     />
   );
 });

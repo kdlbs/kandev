@@ -84,6 +84,9 @@ type DialogFormBodyProps = {
   onLinearImport?: (issue: LinearIssue) => void;
   branchOptions: ReturnType<typeof useBranchOptions>;
   branchesLoading: boolean;
+  onRefreshBranches: () => void;
+  branchesFetchedAt?: string;
+  branchesFetchError?: string;
   agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;
   executorProfileOptions: Array<{
     value: string;
@@ -110,6 +113,7 @@ type DialogFormBodyProps = {
   onToggleFreshBranch: (enabled: boolean) => void;
 };
 
+// eslint-disable-next-line max-lines-per-function -- thin pass-through; each section already factored into its own component
 function DialogFormBody({
   isSessionMode,
   isCreateMode,
@@ -122,6 +126,9 @@ function DialogFormBody({
   onLinearImport,
   branchOptions,
   branchesLoading,
+  onRefreshBranches,
+  branchesFetchedAt,
+  branchesFetchError,
   agentProfileOptions,
   executorProfileOptions,
   agentProfiles,
@@ -164,6 +171,9 @@ function DialogFormBody({
           hasRepositorySelection,
           branchOptions,
           branchesLoading,
+          onRefreshBranches,
+          branchesFetchedAt,
+          branchesFetchError,
           agentProfiles,
           agentProfilesLoading,
           agentProfileOptions,
@@ -212,6 +222,9 @@ type CreateEditSelectorsRenderArgs = Pick<
   | "hasRepositorySelection"
   | "branchOptions"
   | "branchesLoading"
+  | "onRefreshBranches"
+  | "branchesFetchedAt"
+  | "branchesFetchError"
   | "agentProfiles"
   | "agentProfilesLoading"
   | "agentProfileOptions"
@@ -237,6 +250,9 @@ function renderCreateEditSelectors(args: CreateEditSelectorsRenderArgs) {
       branch={fs.branch}
       onBranchChange={args.onBranchChange}
       branchesLoading={args.branchesLoading}
+      onRefreshBranches={args.onRefreshBranches}
+      branchesFetchedAt={args.branchesFetchedAt}
+      branchesFetchError={args.branchesFetchError}
       localBranchesLoading={fs.localBranchesLoading}
       agentProfiles={args.agentProfiles}
       agentProfilesLoading={args.agentProfilesLoading}
@@ -392,6 +408,9 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     repositoriesLoading,
     branches,
     branchesLoading,
+    refreshBranches,
+    branchesFetchedAt,
+    branchesFetchError,
     computed,
   } = useTaskCreateDialogData(open, workspaceId, workflowId, defaultStepId, fs);
   const repositoryLocalPath = (() => {
@@ -439,6 +458,9 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     snapshots,
     repositoriesLoading,
     branchesLoading,
+    refreshBranches,
+    branchesFetchedAt,
+    branchesFetchError,
     computed,
     handlers,
     submitHandlers,
@@ -457,7 +479,8 @@ type DialogFormProps = {
 function DialogForm({ setup, workspaceId }: DialogFormProps) {
   const { fs, isSessionMode, isCreateMode, isTaskStarted, workflows, agentProfiles } = setup;
   const { snapshots, branchesLoading, computed, handlers, handleKeyDown } = setup;
-  const { handleJiraImport, handleLinearImport } = setup;
+  const { handleJiraImport, handleLinearImport, refreshBranches, branchesFetchedAt } = setup;
+  const { branchesFetchError } = setup;
   const { handleSubmit, handleUpdateWithoutAgent, handleCreateWithoutAgent } = setup.submitHandlers;
   const { handleCreateWithPlanMode, handleCancel } = setup.submitHandlers;
   return (
@@ -474,6 +497,9 @@ function DialogForm({ setup, workspaceId }: DialogFormProps) {
         onLinearImport={handleLinearImport}
         branchOptions={computed.branchOptions}
         branchesLoading={branchesLoading || (fs.useGitHubUrl && fs.githubBranchesLoading)}
+        onRefreshBranches={refreshBranches}
+        branchesFetchedAt={branchesFetchedAt}
+        branchesFetchError={branchesFetchError}
         agentProfileOptions={computed.agentProfileOptions}
         executorProfileOptions={computed.executorProfileOptions}
         agentProfiles={agentProfiles}
