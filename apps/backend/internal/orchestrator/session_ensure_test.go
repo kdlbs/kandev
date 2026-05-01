@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 func TestEnsureSession_RequiresTaskID(t *testing.T) {
@@ -157,9 +159,14 @@ func TestAcquireEnsureLock_SerializesPerTaskID(t *testing.T) {
 	}
 }
 
-// Distinct task ids must NOT serialize against each other.
+// Distinct task ids must NOT serialize against each other. Uses a
+// channel-based rendezvous (rather than a sleep) so the assertion is
+// deterministic on slow CI runners: every goroutine signals after acquiring
+// its lock, the test releases them all at once, and only then do they
+// observe peak concurrency.
 func TestAcquireEnsureLock_AllowsConcurrencyAcrossTaskIDs(t *testing.T) {
 	const N = 8
+	acquired := make(chan struct{}, N)
 	start := make(chan struct{})
 	var holding int
 	var mu sync.Mutex
@@ -172,6 +179,7 @@ func TestAcquireEnsureLock_AllowsConcurrencyAcrossTaskIDs(t *testing.T) {
 			defer wg.Done()
 			release := acquireEnsureLock(taskID)
 			defer release()
+			acquired <- struct{}{}
 			<-start
 			mu.Lock()
 			holding++
@@ -185,12 +193,90 @@ func TestAcquireEnsureLock_AllowsConcurrencyAcrossTaskIDs(t *testing.T) {
 			mu.Unlock()
 		}()
 	}
-	// Let all goroutines acquire their distinct locks, then release.
-	time.Sleep(20 * time.Millisecond)
+	for i := 0; i < N; i++ {
+		<-acquired
+	}
 	close(start)
 	wg.Wait()
 	if peak < 2 {
 		t.Errorf("expected concurrency across distinct task ids, peak=%d", peak)
+	}
+}
+
+// Service-level companion to the lock primitive tests: with no pre-existing
+// session, N concurrent EnsureSession calls must converge on exactly one
+// created session. This catches regressions in findExistingSession or
+// LaunchSession idempotency that the lock tests alone wouldn't surface.
+func TestEnsureSession_Concurrent_CreatesSingleSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	// Stub LaunchAgent so the background workspace launch goroutine spawned
+	// by PrepareTaskSession completes without nil-deref'ing on the response.
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	now := time.Now().UTC()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Test Workflow", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("seed workflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task1", WorkflowID: "wf1", Title: "T", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	// PrepareTaskSession resolves agent_profile_id from task metadata via
+	// scheduler.GetTask (backed by the mock taskRepo), so seed both stores.
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:          "task1",
+		WorkspaceID: "ws1",
+		Metadata:    map[string]any{"agent_profile_id": "profile1"},
+	}
+
+	const N = 8
+	var wg sync.WaitGroup
+	results := make([]string, N)
+	errs := make([]error, N)
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			resp, err := svc.EnsureSession(ctx, "task1")
+			if err != nil {
+				errs[idx] = err
+				return
+			}
+			results[idx] = resp.SessionID
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("call %d failed: %v", i, err)
+		}
+	}
+	first := results[0]
+	if first == "" {
+		t.Fatal("expected a session id from the first caller")
+	}
+	for i, sid := range results {
+		if sid != first {
+			t.Errorf("call %d: expected %q, got %q", i, first, sid)
+		}
+	}
+
+	sessions, err := repo.ListTaskSessions(ctx, "task1")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Errorf("expected exactly 1 session created, got %d", len(sessions))
 	}
 }
 
