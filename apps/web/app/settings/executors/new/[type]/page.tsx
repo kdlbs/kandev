@@ -201,13 +201,13 @@ function buildProfileConfig(input: BuildProfileConfigInput): Record<string, stri
   if (isSprites && networkPolicyRules.length > 0) {
     config.sprites_network_policy_rules = JSON.stringify(networkPolicyRules);
   }
-  if (isSprites && remoteCredentials.length > 0) {
+  if (isRemote && remoteCredentials.length > 0) {
     config.remote_credentials = JSON.stringify(remoteCredentials);
   }
   const nonNullEnvVars = Object.fromEntries(
     Object.entries(agentEnvVars).filter(([, v]) => v != null),
   );
-  if (isSprites && Object.keys(nonNullEnvVars).length > 0) {
+  if (isRemote && Object.keys(nonNullEnvVars).length > 0) {
     config.remote_auth_secrets = JSON.stringify(nonNullEnvVars);
   }
   if (isRemote) {

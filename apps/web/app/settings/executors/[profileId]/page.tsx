@@ -340,7 +340,7 @@ function buildSaveConfig(
   } else {
     delete config.sprites_network_policy_rules;
   }
-  if (form.isSprites && form.remoteCredentials.length > 0) {
+  if (form.isRemote && form.remoteCredentials.length > 0) {
     config.remote_credentials = JSON.stringify(form.remoteCredentials);
   } else {
     delete config.remote_credentials;
@@ -348,7 +348,7 @@ function buildSaveConfig(
   const nonNullEnvVars = Object.fromEntries(
     Object.entries(form.agentEnvVars).filter(([, v]) => v != null),
   );
-  if (form.isSprites && Object.keys(nonNullEnvVars).length > 0) {
+  if (form.isRemote && Object.keys(nonNullEnvVars).length > 0) {
     config.remote_auth_secrets = JSON.stringify(nonNullEnvVars);
   } else {
     delete config.remote_auth_secrets;
