@@ -244,6 +244,7 @@ function TabletHeader({
       title={title}
       subtitle={workspaceLabel}
       className={WORKBENCH_TOPBAR_CLASSNAME}
+      variant={title === "Home" ? "root" : "breadcrumb"}
       actionsClassName="gap-2"
       actions={
         <>
@@ -324,7 +325,8 @@ function DesktopHeader({
       className="w-72 xl:w-80 [&_input]:h-8"
     />
   ) : null;
-  const centerSearch = title === "Home" ? searchInput : null;
+  const isHome = title === "Home";
+  const centerSearch = isHome ? searchInput : null;
 
   return (
     <PageTopbar
@@ -332,6 +334,7 @@ function DesktopHeader({
       subtitle={workspaceLabel}
       center={centerSearch}
       className={WORKBENCH_TOPBAR_CLASSNAME}
+      variant={isHome ? "root" : "breadcrumb"}
       actions={
         <>
           {!centerSearch && searchInput}

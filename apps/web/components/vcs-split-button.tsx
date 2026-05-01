@@ -290,13 +290,13 @@ const VcsSplitButton = memo(function VcsSplitButton({
   });
 
   return (
-    <div className={cn("inline-flex rounded-md border border-border overflow-hidden", className)}>
+    <div className={cn("inline-flex", className)}>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
             size={buttonSize}
             variant="outline"
-            className="rounded-none border-0 cursor-pointer"
+            className="rounded-r-none border-r-0 cursor-pointer"
             onClick={primaryButtonConfig.onClick}
             disabled={isDisabled}
             data-testid={`vcs-primary-${primaryAction}`}
@@ -317,7 +317,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
           <Button
             size={buttonSize}
             variant="outline"
-            className="rounded-none border-0 border-l px-2 cursor-pointer"
+            className="-ml-px rounded-l-none px-2 cursor-pointer"
             disabled={isDisabled}
           >
             {isGitLoading ? (

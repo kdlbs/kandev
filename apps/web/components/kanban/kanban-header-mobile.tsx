@@ -42,6 +42,7 @@ export function KanbanHeaderMobile({
         title={title}
         subtitle={workspaceLabel}
         className="h-10 px-3 py-1"
+        variant={title === "Home" ? "root" : "breadcrumb"}
         actions={
           <Button
             variant="outline"
