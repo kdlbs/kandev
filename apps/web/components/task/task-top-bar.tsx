@@ -78,6 +78,25 @@ type GitStatusSummary = {
   behind: number;
 };
 
+type TopBarLeftProps = {
+  taskId?: string | null;
+  activeSessionId?: string | null;
+  taskTitle?: string;
+  repositoryName?: string | null;
+  displayBranch?: string;
+  repositoryPath?: string | null;
+  worktreePath?: string | null;
+  isRemoteExecutor?: boolean;
+  remoteExecutorName?: string | null;
+  remoteExecutorType?: string | null;
+  remoteState?: string | null;
+  remoteCreatedAt?: string | null;
+  remoteCheckedAt?: string | null;
+  remoteStatusError?: string | null;
+  workspaceId?: string | null;
+  onRenameBranch?: (newName: string) => Promise<void>;
+};
+
 const TaskTopBar = memo(function TaskTopBar({
   taskId,
   activeSessionId,
@@ -139,6 +158,7 @@ const TaskTopBar = memo(function TaskTopBar({
         remoteCreatedAt={remoteCreatedAt}
         remoteCheckedAt={remoteCheckedAt}
         remoteStatusError={remoteStatusError}
+        workspaceId={workspaceId}
         onRenameBranch={activeSessionId ? handleRenameBranch : undefined}
       />
       {workflowSteps && workflowSteps.length > 0 && (
@@ -217,24 +237,9 @@ function TopBarLeft({
   remoteCreatedAt,
   remoteCheckedAt,
   remoteStatusError,
+  workspaceId,
   onRenameBranch,
-}: {
-  taskId?: string | null;
-  activeSessionId?: string | null;
-  taskTitle?: string;
-  repositoryName?: string | null;
-  displayBranch?: string;
-  repositoryPath?: string | null;
-  worktreePath?: string | null;
-  isRemoteExecutor?: boolean;
-  remoteExecutorName?: string | null;
-  remoteExecutorType?: string | null;
-  remoteState?: string | null;
-  remoteCreatedAt?: string | null;
-  remoteCheckedAt?: string | null;
-  remoteStatusError?: string | null;
-  onRenameBranch?: (newName: string) => Promise<void>;
-}) {
+}: TopBarLeftProps) {
   return (
     <div className="flex items-center gap-2.5 min-w-0 overflow-hidden">
       <Breadcrumb className="min-w-0">
@@ -275,6 +280,8 @@ function TopBarLeft({
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
+
+      <IntegrationsMenu workspaceId={workspaceId ?? undefined} />
 
       <div className="shrink-0 @max-[1352px]/topbar:hidden">
         <BranchPathPopover
@@ -512,7 +519,6 @@ function TopBarRight({
 }) {
   return (
     <div className="flex min-w-0 items-center justify-end gap-2">
-      <IntegrationsMenu workspaceId={workspaceId ?? undefined} />
       {!isArchived && (
         <TopbarCluster label="Primary version control action">
           <VcsSplitButton

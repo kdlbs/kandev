@@ -245,6 +245,7 @@ function TabletHeader({
       subtitle={workspaceLabel}
       className={WORKBENCH_TOPBAR_CLASSNAME}
       variant={title === "Home" ? "root" : "breadcrumb"}
+      leftActions={<IntegrationsMenu workspaceId={workspaceId} />}
       actionsClassName="gap-2"
       actions={
         <>
@@ -335,6 +336,7 @@ function DesktopHeader({
       center={centerSearch}
       className={WORKBENCH_TOPBAR_CLASSNAME}
       variant={isHome ? "root" : "breadcrumb"}
+      leftActions={<IntegrationsMenu workspaceId={workspaceId} />}
       actions={
         <>
           {!centerSearch && searchInput}
@@ -347,7 +349,6 @@ function DesktopHeader({
             <IconPlus className="h-4 w-4" />
             Add task
           </Button>
-          <IntegrationsMenu workspaceId={workspaceId} />
           <QuickChatButton workspaceId={workspaceId} size="lg" />
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />

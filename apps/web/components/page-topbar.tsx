@@ -26,6 +26,8 @@ type PageTopbarProps = {
   leading?: ReactNode;
   /** Optional content rendered at the visual center of the topbar */
   center?: ReactNode;
+  /** Optional content rendered alongside the left orientation label */
+  leftActions?: ReactNode;
   /** Optional content rendered on the right side of the topbar */
   actions?: ReactNode;
   variant?: "breadcrumb" | "root";
@@ -42,6 +44,7 @@ export function PageTopbar({
   backLabel = "KanDev",
   leading,
   center,
+  leftActions,
   actions,
   variant = "breadcrumb",
   className,
@@ -87,6 +90,11 @@ export function PageTopbar({
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
+      )}
+      {leftActions && (
+        <div className="relative z-10 flex shrink-0 items-center gap-1 [&:empty]:hidden">
+          {leftActions}
+        </div>
       )}
       {center && (
         <div
