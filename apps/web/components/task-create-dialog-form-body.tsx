@@ -278,7 +278,13 @@ export const SessionSelectors = memo(function SessionSelectors({
 type WorkflowSectionProps = {
   isCreateMode: boolean;
   isTaskStarted: boolean;
-  workflows: Array<{ id: string; name: string; agent_profile_id?: string; [key: string]: unknown }>;
+  workflows: Array<{
+    id: string;
+    name: string;
+    agent_profile_id?: string;
+    hidden?: boolean;
+    [key: string]: unknown;
+  }>;
   snapshots: Record<string, WorkflowSnapshotData>;
   effectiveWorkflowId: string | null;
   onWorkflowChange: (value: string) => void;
@@ -288,13 +294,17 @@ type WorkflowSectionProps = {
 export const WorkflowSection = memo(function WorkflowSection({
   isCreateMode,
   isTaskStarted,
-  workflows,
+  workflows: allWorkflows,
   snapshots,
   effectiveWorkflowId,
   onWorkflowChange,
   agentProfiles,
 }: WorkflowSectionProps) {
   const [lastUsedWorkflowId, setLastUsedWorkflowId] = useState<string | null>(null);
+
+  // Hidden workflows (e.g. improve-kandev) are excluded from the picker; they
+  // remain reachable via their dedicated entry point.
+  const workflows = allWorkflows.filter((w) => !w.hidden);
 
   const handleWorkflowChange = useCallback(
     (workflowId: string) => {

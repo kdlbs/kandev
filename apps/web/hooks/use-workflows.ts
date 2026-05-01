@@ -8,7 +8,7 @@ export function useWorkflows(workspaceId: string | null, enabled = true) {
 
   useEffect(() => {
     if (!enabled || !workspaceId) return;
-    listWorkflows(workspaceId, { cache: "no-store" })
+    listWorkflows(workspaceId, { cache: "no-store", includeHidden: true })
       .then((response) => {
         const mapped = response.workflows.map((workflow) => ({
           id: workflow.id,
@@ -17,6 +17,7 @@ export function useWorkflows(workspaceId: string | null, enabled = true) {
           description: workflow.description,
           sortOrder: workflow.sort_order ?? 0,
           agent_profile_id: workflow.agent_profile_id,
+          hidden: workflow.hidden,
         }));
         setWorkflows(mapped);
       })

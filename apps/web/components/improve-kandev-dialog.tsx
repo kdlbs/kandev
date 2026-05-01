@@ -7,7 +7,9 @@ import { Button } from "@kandev/ui/button";
 import { IconAlertTriangle, IconStethoscope, IconCheck } from "@tabler/icons-react";
 
 import { useToast } from "@/components/toast-provider";
+import { useAppStore } from "@/components/state-provider";
 import { bootstrapImproveKandev } from "@/lib/api/domains/improve-kandev-api";
+import { listRepositories } from "@/lib/api/domains/workspace-api";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import { fetchSystemHealth } from "@/lib/api/domains/health-api";
 import type { Task } from "@/lib/types/http";
@@ -140,6 +142,7 @@ function useBootstrapKandev(
   setBootstrap: (s: BootstrapState) => void,
 ) {
   const { toast } = useToast();
+  const setRepositories = useAppStore((state) => state.setRepositories);
   useEffect(() => {
     if (mode !== "create" || !workspaceId) return;
     let cancelled = false;
@@ -147,8 +150,15 @@ function useBootstrapKandev(
     (async () => {
       try {
         const data = await bootstrapImproveKandev(workspaceId);
-        const stepsRes = await listWorkflowSteps(data.workflow_id);
+        // Refresh the workspace repository list so the newly-created kandev
+        // repo is in the store; otherwise the locked repo dropdown can't
+        // resolve a label for the bootstrapped repository_id.
+        const [stepsRes, reposRes] = await Promise.all([
+          listWorkflowSteps(data.workflow_id),
+          listRepositories(workspaceId, undefined, { cache: "no-store" }),
+        ]);
         if (cancelled) return;
+        setRepositories(workspaceId, reposRes.repositories);
         setBootstrap({ kind: "ready", data, steps: stepsRes.steps });
       } catch (err) {
         if (cancelled) return;
@@ -164,7 +174,7 @@ function useBootstrapKandev(
     return () => {
       cancelled = true;
     };
-  }, [mode, workspaceId, setBootstrap, toast]);
+  }, [mode, workspaceId, setBootstrap, setRepositories, toast]);
 }
 
 function IntroBody({

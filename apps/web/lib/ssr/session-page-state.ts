@@ -105,7 +105,12 @@ function buildResourceState(p: BuildSessionPageStateParams) {
       activeId: task.workspace_id,
     },
     workflows: {
-      items: workflows.map((w) => ({ id: w.id, workspaceId: w.workspace_id, name: w.name })),
+      items: workflows.map((w) => ({
+        id: w.id,
+        workspaceId: w.workspace_id,
+        name: w.name,
+        hidden: w.hidden,
+      })),
       activeId: task.workflow_id,
     },
     repositories: {
@@ -273,7 +278,9 @@ async function fetchTaskDataOnly(
     listAgents({ cache: "no-store" }),
     listRepositories(task.workspace_id, { includeScripts: true }, { cache: "no-store" }),
     listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
-    listWorkflows(task.workspace_id, { cache: "no-store" }).catch(() => ({ workflows: [] })),
+    listWorkflows(task.workspace_id, { cache: "no-store", includeHidden: true }).catch(() => ({
+      workflows: [],
+    })),
     fetchUserSettings({ cache: "no-store" }).catch(() => null),
   ]);
 
@@ -321,7 +328,9 @@ async function fetchSessionDataFromTask(
     listAgents({ cache: "no-store" }),
     listRepositories(task.workspace_id, { includeScripts: true }, { cache: "no-store" }),
     listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
-    listWorkflows(task.workspace_id, { cache: "no-store" }).catch(() => ({ workflows: [] })),
+    listWorkflows(task.workspace_id, { cache: "no-store", includeHidden: true }).catch(() => ({
+      workflows: [],
+    })),
     listSessionTurns(sessionId, { cache: "no-store" }).catch(() => ({ turns: [], total: 0 })),
     fetchUserSettings({ cache: "no-store" }).catch(() => null),
     fetchTerminals(sessionId).catch(() => []),
