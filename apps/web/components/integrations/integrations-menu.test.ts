@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getGitHubIntegrationStatus, getLinearHref } from "./integrations-menu";
+import { getAvailableIntegrationLinks, getGitHubIntegrationStatus } from "./integrations-menu";
 import type { GitHubStatus } from "@/lib/types/github";
 
 function status(overrides: Partial<GitHubStatus>): GitHubStatus {
@@ -36,16 +36,27 @@ describe("getGitHubIntegrationStatus", () => {
   });
 });
 
-describe("getLinearHref", () => {
-  it("links to the Linear workspace when available", () => {
-    expect(getLinearHref("workspace-1", true)).toBe("/linear");
+describe("getAvailableIntegrationLinks", () => {
+  it("returns only configured integration destinations", () => {
+    expect(
+      getAvailableIntegrationLinks({
+        githubReady: true,
+        jiraAvailable: false,
+        linearAvailable: true,
+      }),
+    ).toEqual([
+      { id: "github", label: "GitHub", href: "/github" },
+      { id: "linear", label: "Linear", href: "/linear" },
+    ]);
   });
 
-  it("links to workspace settings when Linear still needs setup", () => {
-    expect(getLinearHref("workspace-1", false)).toBe("/settings/workspace/workspace-1/linear");
-  });
-
-  it("falls back to settings when there is no active workspace", () => {
-    expect(getLinearHref(undefined, false)).toBe("/settings");
+  it("returns no setup destinations when integrations are unavailable", () => {
+    expect(
+      getAvailableIntegrationLinks({
+        githubReady: false,
+        jiraAvailable: false,
+        linearAvailable: false,
+      }),
+    ).toEqual([]);
   });
 });

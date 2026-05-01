@@ -28,7 +28,7 @@ import {
   IconAlertTriangle,
 } from "@tabler/icons-react";
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
-import { IntegrationsMenu } from "@/components/integrations/integrations-menu";
+import { IntegrationNavButtons } from "@/components/integrations/integrations-menu";
 import { PageTopbar } from "@/components/page-topbar";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
@@ -321,6 +321,7 @@ function DesktopHeader({
               className="w-64"
             />
           )}
+          <IntegrationNavButtons workspaceId={workspaceId} />
           <Button
             onClick={onCreateTask}
             className="cursor-pointer"
@@ -334,7 +335,6 @@ function DesktopHeader({
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} />
           </TooltipProvider>
           <KanbanDisplayDropdown />
-          <IntegrationsMenu workspaceId={workspaceId} />
           <ImproveKandevTopbarButton workspaceId={workspaceId} />
           <BoardUtilitiesMenu
             showReleaseNotesButton={showReleaseNotesButton}

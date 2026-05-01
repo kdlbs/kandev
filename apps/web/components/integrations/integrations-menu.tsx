@@ -1,22 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
-import {
-  IconBrandGithub,
-  IconChevronDown,
-  IconHexagon,
-  IconPlugConnected,
-  IconTicket,
-} from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { IconBrandGithub, IconHexagon, IconTicket } from "@tabler/icons-react";
 import { useJiraAvailable } from "@/components/jira/my-jira/use-jira-availability";
 import { useLinearAvailable } from "@/components/linear/use-linear-availability";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
@@ -30,14 +17,42 @@ type MobileIntegrationsSectionProps = IntegrationsProps & {
   onNavigate: () => void;
 };
 
-function getJiraHref(workspaceId: string | undefined, available: boolean): string {
-  if (available) return "/jira";
-  return workspaceId ? `/settings/workspace/${workspaceId}/jira` : "/settings";
-}
+type IntegrationId = "github" | "jira" | "linear";
 
-export function getLinearHref(workspaceId: string | undefined, available: boolean): string {
-  if (available) return "/linear";
-  return workspaceId ? `/settings/workspace/${workspaceId}/linear` : "/settings";
+type IntegrationLink = {
+  id: IntegrationId;
+  label: string;
+  href: string;
+};
+
+type IntegrationAvailability = {
+  githubReady: boolean;
+  jiraAvailable: boolean;
+  linearAvailable: boolean;
+};
+
+const INTEGRATION_LINKS: IntegrationLink[] = [
+  { id: "github", label: "GitHub", href: "/github" },
+  { id: "jira", label: "Jira", href: "/jira" },
+  { id: "linear", label: "Linear", href: "/linear" },
+];
+
+const INTEGRATION_ICONS = {
+  github: IconBrandGithub,
+  jira: IconTicket,
+  linear: IconHexagon,
+} satisfies Record<IntegrationId, typeof IconBrandGithub>;
+
+export function getAvailableIntegrationLinks({
+  githubReady,
+  jiraAvailable,
+  linearAvailable,
+}: IntegrationAvailability): IntegrationLink[] {
+  return INTEGRATION_LINKS.filter((link) => {
+    if (link.id === "github") return githubReady;
+    if (link.id === "jira") return jiraAvailable;
+    return linearAvailable;
+  });
 }
 
 function getStatusLabel(connected: boolean, loading: boolean | undefined): string {
@@ -51,72 +66,53 @@ export function getGitHubIntegrationStatus(status: GitHubStatus | null, loading:
   return { ready: false, label: getStatusLabel(false, loading) };
 }
 
-function IntegrationStatusBadge({
-  connected,
-  loading,
-  label,
-}: {
-  connected: boolean;
-  loading?: boolean;
-  label?: string;
-}) {
-  const statusLabel = label ?? getStatusLabel(connected, loading);
-  const className = connected ? "text-success" : "text-muted-foreground";
-
-  return (
-    <Badge variant="secondary" className={className}>
-      {statusLabel}
-    </Badge>
-  );
-}
-
-export function IntegrationsMenu({ workspaceId }: IntegrationsProps) {
+function useConfiguredIntegrationLinks(workspaceId: string | undefined): IntegrationLink[] {
   const { status, loading } = useGitHubStatus();
   const jiraAvailable = useJiraAvailable(workspaceId);
   const linearAvailable = useLinearAvailable(workspaceId);
   const githubStatus = getGitHubIntegrationStatus(status, loading);
-  const githubHref = githubStatus.ready ? "/github" : "/settings/general/github";
-  const jiraHref = getJiraHref(workspaceId, jiraAvailable);
-  const linearHref = getLinearHref(workspaceId, linearAvailable);
+
+  return getAvailableIntegrationLinks({
+    githubReady: githubStatus.ready,
+    jiraAvailable,
+    linearAvailable,
+  });
+}
+
+function DesktopIntegrationButton({ link }: { link: IntegrationLink }) {
+  const Icon = INTEGRATION_ICONS[link.id];
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" className="cursor-pointer">
-          <IconPlugConnected className="h-4 w-4" />
-          Integrations
-          <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          asChild
+          variant="ghost"
+          size="lg"
+          className="text-muted-foreground hover:text-foreground"
+        >
+          <Link href={link.href} aria-label={`Open ${link.label}`}>
+            <Icon className="h-4 w-4" />
+            <span className="hidden xl:inline">{link.label}</span>
+          </Link>
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64">
-        <DropdownMenuLabel>Integrations</DropdownMenuLabel>
-        <DropdownMenuItem asChild className="cursor-pointer">
-          <Link href={githubHref} className="gap-3">
-            <IconBrandGithub className="h-4 w-4 text-muted-foreground" />
-            <span className="flex-1">GitHub</span>
-            <IntegrationStatusBadge
-              connected={githubStatus.ready}
-              loading={loading}
-              label={githubStatus.label}
-            />
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild className="cursor-pointer">
-          <Link href={jiraHref} className="gap-3">
-            <IconTicket className="h-4 w-4 text-muted-foreground" />
-            <span className="flex-1">Jira</span>
-            <IntegrationStatusBadge connected={jiraAvailable} />
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild className="cursor-pointer">
-          <Link href={linearHref} className="gap-3">
-            <IconHexagon className="h-4 w-4 text-muted-foreground" />
-            <span className="flex-1">Linear</span>
-            <IntegrationStatusBadge connected={linearAvailable} />
-          </Link>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </TooltipTrigger>
+      <TooltipContent>Open {link.label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+export function IntegrationNavButtons({ workspaceId }: IntegrationsProps) {
+  const links = useConfiguredIntegrationLinks(workspaceId);
+
+  if (links.length === 0) return null;
+
+  return (
+    <nav className="flex items-center gap-1" aria-label="Configured integrations">
+      {links.map((link) => (
+        <DesktopIntegrationButton key={link.id} link={link} />
+      ))}
+    </nav>
   );
 }
 
@@ -124,42 +120,24 @@ export function MobileIntegrationsSection({
   workspaceId,
   onNavigate,
 }: MobileIntegrationsSectionProps) {
-  const { status, loading } = useGitHubStatus();
-  const jiraAvailable = useJiraAvailable(workspaceId);
-  const linearAvailable = useLinearAvailable(workspaceId);
-  const githubStatus = getGitHubIntegrationStatus(status, loading);
-  const githubHref = githubStatus.ready ? "/github" : "/settings/general/github";
-  const jiraHref = getJiraHref(workspaceId, jiraAvailable);
-  const linearHref = getLinearHref(workspaceId, linearAvailable);
+  const links = useConfiguredIntegrationLinks(workspaceId);
+
+  if (links.length === 0) return null;
 
   return (
     <div className="space-y-3">
       <div className="text-sm font-medium">Integrations</div>
-      <Button asChild variant="outline" className="w-full cursor-pointer justify-start gap-2">
-        <Link href={githubHref} onClick={onNavigate}>
-          <IconBrandGithub className="h-4 w-4" />
-          <span className="flex-1 text-left">GitHub</span>
-          <IntegrationStatusBadge
-            connected={githubStatus.ready}
-            loading={loading}
-            label={githubStatus.label}
-          />
-        </Link>
-      </Button>
-      <Button asChild variant="outline" className="w-full cursor-pointer justify-start gap-2">
-        <Link href={jiraHref} onClick={onNavigate}>
-          <IconTicket className="h-4 w-4" />
-          <span className="flex-1 text-left">Jira</span>
-          <IntegrationStatusBadge connected={jiraAvailable} />
-        </Link>
-      </Button>
-      <Button asChild variant="outline" className="w-full cursor-pointer justify-start gap-2">
-        <Link href={linearHref} onClick={onNavigate}>
-          <IconHexagon className="h-4 w-4" />
-          <span className="flex-1 text-left">Linear</span>
-          <IntegrationStatusBadge connected={linearAvailable} />
-        </Link>
-      </Button>
+      {links.map((link) => {
+        const Icon = INTEGRATION_ICONS[link.id];
+        return (
+          <Button key={link.id} asChild variant="outline" className="w-full justify-start gap-2">
+            <Link href={link.href} onClick={onNavigate}>
+              <Icon className="h-4 w-4" />
+              <span className="flex-1 text-left">{link.label}</span>
+            </Link>
+          </Button>
+        );
+      })}
     </div>
   );
 }
