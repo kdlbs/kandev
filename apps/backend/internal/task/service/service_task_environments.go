@@ -22,6 +22,22 @@ type EnvironmentDestroyer interface {
 	// workspace to its upstream. Returns an error if the push fails; callers can decide
 	// whether to abort the reset on failure.
 	PushEnvironmentBranch(ctx context.Context, env *models.TaskEnvironment) error
+	// GetContainerLiveStatus returns a real-time snapshot of a Docker container,
+	// or nil when the executor type doesn't have a container layer.
+	GetContainerLiveStatus(ctx context.Context, containerID string) (*ContainerLiveStatus, error)
+}
+
+// ContainerLiveStatus mirrors lifecycle.ContainerLiveStatus for the task service
+// layer so the EnvironmentDestroyer interface doesn't import lifecycle types.
+type ContainerLiveStatus struct {
+	ContainerID string `json:"container_id"`
+	State       string `json:"state"`
+	Status      string `json:"status"`
+	StartedAt   string `json:"started_at,omitempty"`
+	FinishedAt  string `json:"finished_at,omitempty"`
+	ExitCode    int    `json:"exit_code,omitempty"`
+	Health      string `json:"health,omitempty"`
+	Missing     bool   `json:"missing,omitempty"`
 }
 
 // ResetOptions controls destructive behavior of ResetTaskEnvironment.
@@ -54,6 +70,21 @@ func (s *Service) SetEnvironmentDestroyer(d EnvironmentDestroyer) {
 // service falls back to a default implementation over the existing session repo.
 func (s *Service) SetSessionRunningChecker(c SessionRunningChecker) {
 	s.sessionRunningChecker = c
+}
+
+// GetTaskEnvironmentLiveStatus returns a real-time snapshot of the task's
+// container, plus the recorded TaskEnvironment row. Returns (nil, nil) when
+// the task has no environment yet. Callers (e.g. Executor Settings popover)
+// poll this endpoint to surface live state changes.
+func (s *Service) GetTaskEnvironmentLiveStatus(ctx context.Context, taskID string) (*ContainerLiveStatus, error) {
+	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil || env == nil {
+		return nil, err
+	}
+	if env.ContainerID == "" || s.envDestroyer == nil {
+		return nil, nil
+	}
+	return s.envDestroyer.GetContainerLiveStatus(ctx, env.ContainerID)
 }
 
 // checkAnySessionRunning delegates to the configured checker or falls back to

@@ -64,6 +64,9 @@ func (s *stubDestroyer) PushEnvironmentBranch(context.Context, *models.TaskEnvir
 	s.pushCalls++
 	return s.pushErr
 }
+func (s *stubDestroyer) GetContainerLiveStatus(context.Context, string) (*ContainerLiveStatus, error) {
+	return nil, nil
+}
 
 type stubRunningChecker struct {
 	running bool

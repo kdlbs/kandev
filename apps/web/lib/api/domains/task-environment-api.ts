@@ -24,8 +24,33 @@ export type ResetTaskEnvironmentPayload = {
   push_branch?: boolean;
 };
 
+export type ContainerLiveStatus = {
+  container_id: string;
+  /** running, exited, paused, restarting, removing, dead, created, missing */
+  state: string;
+  /** Human-readable status, e.g. "Up 5 minutes". */
+  status: string;
+  started_at?: string;
+  finished_at?: string;
+  exit_code?: number;
+  health?: string;
+  missing?: boolean;
+};
+
+export type TaskEnvironmentLiveResponse = {
+  environment: TaskEnvironment;
+  container?: ContainerLiveStatus;
+};
+
 export async function fetchTaskEnvironment(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<TaskEnvironment>(`/api/v1/tasks/${taskId}/environment`, options);
+}
+
+export async function fetchTaskEnvironmentLive(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<TaskEnvironmentLiveResponse>(
+    `/api/v1/tasks/${taskId}/environment/live`,
+    options,
+  );
 }
 
 export async function resetTaskEnvironment(

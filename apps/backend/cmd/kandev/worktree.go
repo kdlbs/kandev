@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/common/config"
@@ -116,6 +117,28 @@ func (a *environmentDestroyerAdapter) DestroySandbox(ctx context.Context, sandbo
 func (a *environmentDestroyerAdapter) DestroyWorktree(ctx context.Context, worktreeID string) error {
 	// removeBranch=false: preserve the branch so unpushed work isn't lost.
 	return a.worktrees.RemoveByID(ctx, worktreeID, false)
+}
+
+func (a *environmentDestroyerAdapter) GetContainerLiveStatus(ctx context.Context, containerID string) (*taskservice.ContainerLiveStatus, error) {
+	live, err := a.lifecycle.GetContainerLiveStatus(ctx, containerID)
+	if err != nil || live == nil {
+		return nil, err
+	}
+	out := &taskservice.ContainerLiveStatus{
+		ContainerID: live.ContainerID,
+		State:       live.State,
+		Status:      live.Status,
+		ExitCode:    live.ExitCode,
+		Health:      live.Health,
+		Missing:     live.Missing,
+	}
+	if live.StartedAt != nil {
+		out.StartedAt = live.StartedAt.Format(time.RFC3339)
+	}
+	if live.FinishedAt != nil {
+		out.FinishedAt = live.FinishedAt.Format(time.RFC3339)
+	}
+	return out, nil
 }
 
 func (a *environmentDestroyerAdapter) PushEnvironmentBranch(ctx context.Context, env *models.TaskEnvironment) error {

@@ -304,12 +304,19 @@ function AuthSection({
   const ghTokenMethod = spec.methods.find((m) => m.type === "gh_cli_token");
   const hasOnlyEnv = envMethod && !fileMethod && !ghTokenMethod;
 
-  const [choice, setChoice] = useState<AuthChoice>(() =>
-    initialChoice({ fileMethod, envMethod, ghTokenMethod, selectedIds, envSecretId }),
-  );
+  // `choice` is derived from props so the configured-status badge updates live
+  // when the user picks a secret in the dropdown (which only flows back through
+  // `envSecretId`). Holding it in useState would freeze the badge to its initial
+  // value until a full page reload.
+  const choice: AuthChoice = initialChoice({
+    fileMethod,
+    envMethod,
+    ghTokenMethod,
+    selectedIds,
+    envSecretId,
+  });
 
   const handleChoice = (value: AuthChoice) => {
-    setChoice(value);
     if (fileMethod) {
       onCredentialToggle(fileMethod.method_id, value === "files");
     }
