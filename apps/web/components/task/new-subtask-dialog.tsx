@@ -138,8 +138,8 @@ function activateSubtaskSession(opts: {
 }) {
   opts.setActiveTask(opts.taskId);
   opts.setActiveSession(opts.taskId, opts.sessionId);
-  // Layout switch is handled by useEnvSwitchCleanup once the new session's
-  // task_environment_id arrives in the store (sub-task = new env).
+  // Layout switch is handled by useEnvSwitchCleanup when the new session's
+  // task_environment_id is present; the hook subscribes to env-id updates.
   replaceTaskUrl(opts.taskId);
 }
 
@@ -174,7 +174,6 @@ function NewSubtaskForm({
   onClose,
 }: SubtaskFormProps) {
   const { toast } = useToast();
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const setActiveTask = useAppStore((s) => s.setActiveTask);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const isUtilityConfigured = useIsUtilityConfigured();
@@ -291,7 +290,6 @@ function NewSubtaskForm({
       executorProfileId,
       parentTaskId,
       attachments,
-      activeSessionId,
       setActiveTask,
       setActiveSession,
     ],

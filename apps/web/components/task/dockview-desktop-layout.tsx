@@ -400,14 +400,10 @@ const VALID_COMPONENTS = new Set(Object.keys(components));
 // useEnvSwitchCleanup — backup layout switch for external session changes
 // ---------------------------------------------------------------------------
 
-function useEnvSwitchCleanup(effectiveSessionId: string | null) {
+function useEnvSwitchCleanup(effectiveSessionId: string | null, effectiveEnvId: string | null) {
   const prevEnvRef = useRef<string | null | undefined>(undefined);
-  const appStore = useAppStoreApi();
   useEffect(() => {
-    const state = appStore.getState();
-    const newEnvId = effectiveSessionId
-      ? (state.environmentIdBySessionId[effectiveSessionId] ?? null)
-      : null;
+    const newEnvId = effectiveEnvId;
 
     if (prevEnvRef.current === undefined) {
       prevEnvRef.current = newEnvId;
@@ -426,7 +422,7 @@ function useEnvSwitchCleanup(effectiveSessionId: string | null) {
     if (newEnvId) {
       performLayoutSwitch(oldEnvId, newEnvId, effectiveSessionId);
     }
-  }, [effectiveSessionId, appStore]);
+  }, [effectiveEnvId, effectiveSessionId]);
 }
 
 // ---------------------------------------------------------------------------
@@ -499,7 +495,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   // IMPORTANT: this must run BEFORE useAutoSessionTab so the old layout is
   // saved before a new session tab is created — otherwise the new session's
   // panel could leak into the old session's persisted layout.
-  useEnvSwitchCleanup(effectiveSessionId);
+  useEnvSwitchCleanup(effectiveSessionId, effectiveEnvId);
 
   // Auto-create a session tab when a session becomes active
   useAutoSessionTab(effectiveSessionId);

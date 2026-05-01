@@ -340,10 +340,7 @@ export function getEnvLayout(envId: string): object | null {
 export function setEnvLayout(envId: string, layout: object): void {
   if (typeof window === "undefined") return;
   try {
-    window.sessionStorage.setItem(
-      `${DOCKVIEW_ENV_LAYOUT_PREFIX}${envId}`,
-      JSON.stringify(layout),
-    );
+    window.sessionStorage.setItem(`${DOCKVIEW_ENV_LAYOUT_PREFIX}${envId}`, JSON.stringify(layout));
   } catch {
     // Ignore write failures (storage full, blocked, etc.)
   }
@@ -385,10 +382,7 @@ export function getEnvMaximizeState(envId: string): EnvMaximizeState | null {
 export function setEnvMaximizeState(envId: string, state: EnvMaximizeState): void {
   if (typeof window === "undefined") return;
   try {
-    window.sessionStorage.setItem(
-      `${DOCKVIEW_ENV_MAXIMIZE_PREFIX}${envId}`,
-      JSON.stringify(state),
-    );
+    window.sessionStorage.setItem(`${DOCKVIEW_ENV_MAXIMIZE_PREFIX}${envId}`, JSON.stringify(state));
   } catch {
     // Ignore write failures
   }

@@ -13,19 +13,10 @@ import { TaskRenameDialog } from "./task-rename-dialog";
 import { TaskArchiveConfirmDialog } from "./task-archive-confirm-dialog";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { replaceTaskUrl } from "@/lib/links";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
-import {
-  performLayoutSwitch,
-  releaseLayoutToDefault,
-  useDockviewStore,
-} from "@/lib/state/dockview-store";
-import { finalizeNoSessionSelect } from "./task-select-helpers";
-import { INTENT_PR_REVIEW } from "@/lib/state/layout-manager";
-import { launchSession } from "@/lib/services/session-launch-service";
-import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
+import { buildSwitchToSession, selectTaskWithLayout } from "./task-select-helpers";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useArchivedTaskState } from "./task-archived-context";
@@ -303,55 +294,6 @@ function useSidebarData(workspaceId: string | null) {
 }
 
 type StoreApi = ReturnType<typeof useAppStoreApi>;
-type SwitchFn = (
-  taskId: string,
-  sessionId: string,
-  oldSessionId: string | null | undefined,
-) => void;
-
-function buildSwitchToSession(
-  store: StoreApi,
-  setActiveSession: (taskId: string, sessionId: string) => void,
-): SwitchFn {
-  return (taskId, sessionId, oldSessionId) => {
-    const state = store.getState();
-    const oldEnvId = oldSessionId ? (state.environmentIdBySessionId[oldSessionId] ?? null) : null;
-    const newEnvId = state.environmentIdBySessionId[sessionId] ?? null;
-    setActiveSession(taskId, sessionId);
-    if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, sessionId);
-  };
-}
-
-async function prepareAndSwitchTask(
-  taskId: string,
-  store: StoreApi,
-  switchToSession: SwitchFn,
-  setPreparingTaskId: (id: string | null) => void,
-): Promise<boolean> {
-  setPreparingTaskId(taskId);
-  // Capture before the async launch — WS events may update activeSessionId
-  // by the time launchSession resolves, causing the layout switch to use the
-  // wrong "old" session and leave stale panels (e.g. plan panel) visible.
-  const oldSessionId = store.getState().tasks.activeSessionId;
-  try {
-    const { request } = buildPrepareRequest(taskId);
-    const resp = await launchSession(request);
-    if (resp.session_id) {
-      switchToSession(taskId, resp.session_id, oldSessionId);
-      // Apply PR review layout if the task has PR metadata
-      if (store.getState().taskPRs.byTaskId[taskId]) {
-        const { api, buildDefaultLayout } = useDockviewStore.getState();
-        if (api) buildDefaultLayout(api, INTENT_PR_REVIEW);
-      }
-      return true;
-    }
-    return false;
-  } catch {
-    return false;
-  } finally {
-    setPreparingTaskId(null);
-  }
-}
 
 function useMoveToStep(store: StoreApi) {
   const { moveTaskById } = useTaskActions();
@@ -456,44 +398,15 @@ function useSidebarActions(store: StoreApi) {
 
   const handleSelectTask = useCallback(
     (taskId: string) => {
-      const oldSessionId = store.getState().tasks.activeSessionId;
       const task = findTaskInSnapshots(store.getState().kanbanMulti.snapshots, taskId);
-      if (task?.primarySessionId) {
-        switchToSession(taskId, task.primarySessionId, oldSessionId);
-        loadTaskSessionsForTask(taskId);
-        replaceTaskUrl(taskId);
-        return;
-      }
-      loadTaskSessionsForTask(taskId).then(async (sessions) => {
-        const currentOldSessionId = store.getState().tasks.activeSessionId;
-        const primary = sessions.find((s: { is_primary?: boolean }) => s.is_primary);
-        const sessionId = primary?.id ?? sessions[0]?.id ?? null;
-        if (sessionId) {
-          switchToSession(taskId, sessionId, currentOldSessionId);
-          replaceTaskUrl(taskId);
-          return;
-        }
-        // No session — prepare workspace and switch to it. If preparation
-        // fails to launch a session, fall back to a clean default layout
-        // instead of leaving the dockview pointing at the outgoing session.
-        const switched = await prepareAndSwitchTask(
-          taskId,
-          store,
-          switchToSession,
-          setPreparingTaskId,
-        );
-        if (switched) {
-          replaceTaskUrl(taskId);
-        } else {
-          const currentOldEnvId = currentOldSessionId
-            ? (store.getState().environmentIdBySessionId[currentOldSessionId] ?? null)
-            : null;
-          finalizeNoSessionSelect(taskId, currentOldEnvId, {
-            setActiveTask,
-            releaseLayoutToDefault,
-            replaceTaskUrl,
-          });
-        }
+      selectTaskWithLayout({
+        taskId,
+        task,
+        store,
+        switchToSession,
+        loadTaskSessionsForTask,
+        setActiveTask,
+        setPreparingTaskId,
       });
     },
     [loadTaskSessionsForTask, switchToSession, setActiveTask, store],

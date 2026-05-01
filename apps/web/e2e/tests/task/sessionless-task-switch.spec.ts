@@ -143,18 +143,16 @@ test.describe("Sessionless task switching", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await session.expectLayoutHealthy();
 
-    // Resolve A's session id so we can target it precisely.
-    type TaskEntry = { id: string; primary_session_id?: string | null };
-    let sessionAId: string | null = null;
+    // Resolve A's task environment id so we can target the env-keyed layout.
+    let sessionAEnvId: string | null = null;
     await expect
       .poll(
         async () => {
-          const all = await apiClient.listTasks(seedData.workspaceId);
-          sessionAId =
-            all.tasks.find((x: TaskEntry) => x.id === taskA.id)?.primary_session_id ?? null;
-          return sessionAId;
+          const { sessions } = await apiClient.listTaskSessions(taskA.id);
+          sessionAEnvId = sessions[0]?.task_environment_id ?? null;
+          return sessionAEnvId;
         },
-        { timeout: 15_000, message: "Waiting for task A session id" },
+        { timeout: 15_000, message: "Waiting for task A environment id" },
       )
       .toBeTruthy();
 
@@ -164,7 +162,7 @@ test.describe("Sessionless task switching", () => {
     await session.expectLayoutHealthy();
 
     // Inject a corrupt layout for A while we're focused on B.
-    await testPage.evaluate((sid) => {
+    await testPage.evaluate((envId) => {
       const corrupt = {
         grid: {
           root: {
@@ -179,8 +177,8 @@ test.describe("Sessionless task switching", () => {
         panels: { chat: { id: "chat", contentComponent: "chat" } },
         activeGroup: "g1",
       };
-      window.sessionStorage.setItem(`kandev.dockview.layout.${sid}`, JSON.stringify(corrupt));
-    }, sessionAId!);
+      window.sessionStorage.setItem(`kandev.dockview.env-layout.${envId}`, JSON.stringify(corrupt));
+    }, sessionAEnvId!);
 
     // Switch back to A — performEnvSwitch should drop the corrupt blob
     // and rebuild the default instead of applying the zero-width layout.
