@@ -6,7 +6,7 @@ import { PassthroughTerminal } from "./passthrough-terminal";
 import { ShellTerminal } from "./shell-terminal";
 import { useAppStore } from "@/components/state-provider";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
-import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
+import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 
 type TerminalPanelProps = {
   panelId: string;
@@ -18,9 +18,7 @@ export const TerminalPanel = memo(function TerminalPanel({ params }: TerminalPan
   const type = (params.type as string) ?? "shell";
   const processId = params.processId as string | undefined;
 
-  // Only reconnect the terminal when the environment changes, not on every
-  // session tab switch within the same environment.
-  const sessionId = useEnvironmentSessionId();
+  const environmentId = useEnvironmentId();
 
   const devOutput = useAppStore((state) =>
     processId ? (state.processes.outputsByProcessId[processId] ?? "") : "",
@@ -47,11 +45,7 @@ export const TerminalPanel = memo(function TerminalPanel({ params }: TerminalPan
   return (
     <PanelRoot data-testid="terminal-panel">
       <PanelBody padding={false} scroll={false}>
-        <PassthroughTerminal
-          sessionId={sessionId ?? undefined}
-          mode="shell"
-          terminalId={terminalId}
-        />
+        <PassthroughTerminal mode="shell" environmentId={environmentId} terminalId={terminalId} />
       </PanelBody>
     </PanelRoot>
   );

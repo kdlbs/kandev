@@ -35,10 +35,11 @@ func NewShellHandlers(lifecycleMgr *lifecycle.Manager, scriptService scripts.Scr
 }
 
 func (h *ShellHandlers) resolveScopeID(ctx context.Context, sessionID string) (string, error) {
-	if _, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, sessionID); err != nil {
-		return "", fmt.Errorf("failed to ensure execution for scope: %w", err)
+	envID, err := h.lifecycleMgr.ResolveTaskEnvironmentID(ctx, sessionID)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve task environment for shell scope: %w", err)
 	}
-	return h.lifecycleMgr.ResolveScopeKey(sessionID), nil
+	return envID, nil
 }
 
 // RegisterHandlers registers shell handlers with the WebSocket dispatcher

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { sanitizeLayout } from "./dockview-layout-restore";
 
-const VALID_COMPONENTS = new Set<string>(["chat", "files", "shell", "git"]);
+const VALID_COMPONENTS = new Set<string>(["chat", "files", "shell", "git", "terminal"]);
 
 /**
  * Build a minimal valid SerializedDockview-shaped object — matches what

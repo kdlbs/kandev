@@ -212,3 +212,57 @@ func TestGetWorkspaceInfoForSession_SessionNotFound(t *testing.T) {
 		t.Fatal("expected error for nonexistent session")
 	}
 }
+
+func TestGetWorkspaceInfoForEnvironment(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID:        "env-123",
+		TaskID:    "task-123",
+		Status:    models.TaskEnvironmentStatusReady,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("failed to create task environment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "session-1",
+		TaskID:            "task-123",
+		TaskEnvironmentID: "env-123",
+		State:             models.TaskSessionStateCompleted,
+		AgentProfileSnapshot: map[string]interface{}{
+			"agent_name": "auggie",
+		},
+		StartedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "session-2",
+		TaskID:            "task-123",
+		TaskEnvironmentID: "env-123",
+		State:             models.TaskSessionStateCompleted,
+		AgentProfileSnapshot: map[string]interface{}{
+			"agent_name": "auggie",
+		},
+		StartedAt: now.Add(time.Minute),
+		UpdatedAt: now.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("failed to create newer session: %v", err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForEnvironment(ctx, "env-123")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForEnvironment returned error: %v", err)
+	}
+	if info.SessionID != "session-2" {
+		t.Errorf("SessionID = %q, want session-2", info.SessionID)
+	}
+	if info.TaskEnvironmentID != "env-123" {
+		t.Errorf("TaskEnvironmentID = %q, want env-123", info.TaskEnvironmentID)
+	}
+}

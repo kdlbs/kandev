@@ -170,7 +170,7 @@ type RightPanelContentProps = {
   scripts: RepositoryScript[];
   handleRunCommand: (script: RepositoryScript) => void;
   terminals: Terminal[];
-  sessionId: string | null;
+  environmentId: string | null;
   devProcessId: string | null | undefined;
   devOutput: string | undefined;
   isStoppingDev: boolean;
@@ -190,7 +190,7 @@ function RightPanelContent({
   scripts,
   handleRunCommand,
   terminals,
-  sessionId,
+  environmentId,
   devProcessId,
   devOutput,
   isStoppingDev,
@@ -236,7 +236,7 @@ function RightPanelContent({
             <CommandsTabContent scripts={scripts} onRunCommand={handleRunCommand} />
             <TerminalTabContents
               terminals={terminals}
-              sessionId={sessionId}
+              environmentId={environmentId}
               devProcessId={devProcessId}
               devOutput={devOutput}
               isStoppingDev={isStoppingDev}
@@ -268,6 +268,9 @@ const TaskRightPanel = memo(function TaskRightPanel({
   );
 
   const setRightPanelActiveTab = useAppStore((state) => state.setRightPanelActiveTab);
+  const environmentId = useAppStore((state) =>
+    sessionId ? (state.environmentIdBySessionId[sessionId] ?? null) : null,
+  );
   const closeLayoutPreview = useLayoutStore((state) => state.closePreview);
 
   // Use the terminals hook
@@ -326,7 +329,7 @@ const TaskRightPanel = memo(function TaskRightPanel({
       scripts={scripts}
       handleRunCommand={handleRunCommand}
       terminals={terminals}
-      sessionId={sessionId}
+      environmentId={environmentId}
       devProcessId={devProcessId}
       devOutput={devOutput}
       isStoppingDev={isStoppingDev}
@@ -368,13 +371,13 @@ function CommandsTabContent({
 /** Terminal tab contents (dev-server and shell terminals) */
 function TerminalTabContents({
   terminals,
-  sessionId,
+  environmentId,
   devProcessId,
   devOutput,
   isStoppingDev,
 }: {
   terminals: Terminal[];
-  sessionId: string | null;
+  environmentId: string | null;
   devProcessId: string | null | undefined;
   devOutput: string | undefined;
   isStoppingDev: boolean;
@@ -394,8 +397,8 @@ function TerminalTabContents({
             ) : (
               <PassthroughTerminal
                 key={terminal.id}
-                sessionId={sessionId ?? undefined}
                 mode="shell"
+                environmentId={environmentId}
                 terminalId={terminal.id}
                 label={terminal.type === "shell" ? terminal.label : undefined}
               />
