@@ -197,14 +197,20 @@ func (cm *ContainerManager) createInstanceAndClient(
 	return client, nil
 }
 
-// waitForHealth waits for agentctl to be healthy with retries
+// waitForHealth waits for agentctl to be healthy with retries.
+// The budget covers the time it takes for the container's bootstrap to run the
+// prepare script (git clone, optional network installs) and then exec agentctl.
+// 120s is generous but matches what real workspaces need on first launch.
 func (cm *ContainerManager) waitForHealth(ctx context.Context, ctl *agentctl.ControlClient) error {
-	const maxRetries = 30
+	const maxRetries = 240
 	const retryDelay = 500 * time.Millisecond
 
+	var lastErr error
 	for i := 0; i < maxRetries; i++ {
 		if err := ctl.Health(ctx); err == nil {
 			return nil
+		} else {
+			lastErr = err
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -212,7 +218,12 @@ func (cm *ContainerManager) waitForHealth(ctx context.Context, ctl *agentctl.Con
 		time.Sleep(retryDelay)
 	}
 
-	return fmt.Errorf("agentctl not healthy after %d retries", maxRetries)
+	if lastErr != nil {
+		return fmt.Errorf("agentctl not healthy after %s: %w",
+			time.Duration(maxRetries)*retryDelay, lastErr)
+	}
+	return fmt.Errorf("agentctl not healthy after %s",
+		time.Duration(maxRetries)*retryDelay)
 }
 
 // StopContainer stops and removes a Docker container
@@ -313,11 +324,19 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	// images from needing to bake an ENTRYPOINT or know which agent to run — they
 	// only need a runtime that supports the agent CLI (typically node + git).
 	//
-	// The agent's BuildCommand result (cmd.Args()) intentionally stops being passed
-	// here; agentctl receives the agent command later via the CreateInstance API.
+	// The agent's BuildCommand result intentionally stops being passed here;
+	// agentctl receives the agent command later via the CreateInstance API.
+	//
+	// Prepare runs in a subshell so its `set -e` (most prepare scripts opt in)
+	// can't kill the bootstrap before exec'ing agentctl. If prepare fails, we
+	// still bring agentctl up so the host can connect, surface the failure, and
+	// the user can debug from the Executor Settings popover.
 	bootstrap := []string{
 		"sh", "-c",
-		`if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then eval "$KANDEV_PREPARE_SCRIPT"; fi; exec /usr/local/bin/agentctl`,
+		`if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then
+  (eval "$KANDEV_PREPARE_SCRIPT") || echo "[kandev-bootstrap] prepare script failed; starting agentctl anyway" >&2
+fi
+exec /usr/local/bin/agentctl`,
 	}
 
 	containerCfg := docker.ContainerConfig{
