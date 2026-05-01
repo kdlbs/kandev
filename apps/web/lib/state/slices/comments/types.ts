@@ -107,11 +107,7 @@ export type CommentsActions = {
    * Omitting repositoryId matches comments regardless of repo, preserving
    * single-repo callers and legacy localStorage entries.
    */
-  getCommentsForFile: (
-    sessionId: string,
-    filePath: string,
-    repositoryId?: string,
-  ) => DiffComment[];
+  getCommentsForFile: (sessionId: string, filePath: string, repositoryId?: string) => DiffComment[];
   getPendingComments: () => Comment[];
 };
 

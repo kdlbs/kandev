@@ -437,9 +437,14 @@ export function useMobileGitActions(
   // SessionGit's commit fans out per-repo for multi-repo workspaces; the raw
   // useGitOperations.commit hits the workspace root and fails on multi-repo
   // tasks. Pull from useGitOperations only what SessionGit doesn't override.
-  const { pull, push, rebase, merge, createPR, isLoading: isGitLoading } = useGitOperations(
-    sessionId ?? null,
-  );
+  const {
+    pull,
+    push,
+    rebase,
+    merge,
+    createPR,
+    isLoading: isGitLoading,
+  } = useGitOperations(sessionId ?? null);
   const { commit } = useSessionGit(sessionId ?? null);
   const handleGitOperation = useGitToast();
 

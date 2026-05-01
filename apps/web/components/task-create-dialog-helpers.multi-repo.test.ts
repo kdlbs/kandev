@@ -35,7 +35,7 @@ describe("buildRepositoriesPayload — unified rows", () => {
       ],
       discoveredRepositories: [
         { path: "/home/me/projects/local-project", default_branch: "trunk" },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ] as any,
     });
     expect(payload).toEqual([

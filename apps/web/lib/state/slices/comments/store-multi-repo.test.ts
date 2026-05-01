@@ -38,14 +38,10 @@ describe("getCommentsForFile (multi-repo)", () => {
     store.addComment(diffComment({ id: "front", repositoryId: REPO_FRONT }));
     store.addComment(diffComment({ id: "back", repositoryId: "repo-back" }));
 
-    const front = useCommentsStore
-      .getState()
-      .getCommentsForFile(SESSION_ID, FILE_PATH, REPO_FRONT);
+    const front = useCommentsStore.getState().getCommentsForFile(SESSION_ID, FILE_PATH, REPO_FRONT);
     expect(front.map((c) => c.id)).toEqual(["front"]);
 
-    const back = useCommentsStore
-      .getState()
-      .getCommentsForFile(SESSION_ID, FILE_PATH, "repo-back");
+    const back = useCommentsStore.getState().getCommentsForFile(SESSION_ID, FILE_PATH, "repo-back");
     expect(back.map((c) => c.id)).toEqual(["back"]);
   });
 

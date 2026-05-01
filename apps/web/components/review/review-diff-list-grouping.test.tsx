@@ -6,7 +6,9 @@ import type { ReviewFile } from "./types";
 
 // FileDiffViewer is heavy and irrelevant to the grouping test — stub it.
 vi.mock("@/components/diff", () => ({
-  FileDiffViewer: ({ filePath }: { filePath: string }) => <div data-testid="diff-stub">{filePath}</div>,
+  FileDiffViewer: ({ filePath }: { filePath: string }) => (
+    <div data-testid="diff-stub">{filePath}</div>
+  ),
 }));
 
 vi.mock("@/components/editors/file-actions-dropdown", () => ({
@@ -100,11 +102,7 @@ describe("ReviewDiffList — multi-repo grouping", () => {
   });
 
   it("groups files into per-repo sections with the right counts", () => {
-    const files: ReviewFile[] = [
-      file("a.ts", "x"),
-      file("b.ts", "y"),
-      file("c.ts", "x"),
-    ];
+    const files: ReviewFile[] = [file("a.ts", "x"), file("b.ts", "y"), file("c.ts", "x")];
     const refs = new Map(files.map((f) => [f.path, createRef<HTMLDivElement>()]));
     render(withTooltips(<ReviewDiffList {...baseProps} files={files} fileRefs={refs} />));
     const groups = screen.getAllByTestId("changes-repo-group");

@@ -60,14 +60,12 @@ describe("session-runtime gitStatus multi-repo routing", () => {
   });
 
   it("routes per-repo statuses into byEnvironmentRepo keyed by repository_name", () => {
-    useStore.getState().setGitStatus(
-      SESSION,
-      entry({ modified: [FRONTEND_FILE], repository_name: REPO_FRONTEND }),
-    );
-    useStore.getState().setGitStatus(
-      SESSION,
-      entry({ modified: [BACKEND_FILE], repository_name: REPO_BACKEND }),
-    );
+    useStore
+      .getState()
+      .setGitStatus(SESSION, entry({ modified: [FRONTEND_FILE], repository_name: REPO_FRONTEND }));
+    useStore
+      .getState()
+      .setGitStatus(SESSION, entry({ modified: [BACKEND_FILE], repository_name: REPO_BACKEND }));
 
     const repoMap = useStore.getState().gitStatus.byEnvironmentRepo[SESSION];
     expect(Object.keys(repoMap).sort()).toEqual([REPO_BACKEND, REPO_FRONTEND]);
@@ -76,29 +74,28 @@ describe("session-runtime gitStatus multi-repo routing", () => {
   });
 
   it("does NOT overwrite the per-repo map when a sibling repo updates", () => {
-    useStore.getState().setGitStatus(
-      SESSION,
-      entry({ modified: [FRONTEND_FILE], repository_name: REPO_FRONTEND }),
-    );
-    useStore.getState().setGitStatus(
-      SESSION,
-      entry({ modified: [BACKEND_FILE], repository_name: REPO_BACKEND }),
-    );
+    useStore
+      .getState()
+      .setGitStatus(SESSION, entry({ modified: [FRONTEND_FILE], repository_name: REPO_FRONTEND }));
+    useStore
+      .getState()
+      .setGitStatus(SESSION, entry({ modified: [BACKEND_FILE], repository_name: REPO_BACKEND }));
     // Update frontend again — backend must still be there.
-    useStore.getState().setGitStatus(
-      SESSION,
-      entry({ modified: ["frontend2.tsx"], repository_name: REPO_FRONTEND }),
-    );
+    useStore
+      .getState()
+      .setGitStatus(
+        SESSION,
+        entry({ modified: ["frontend2.tsx"], repository_name: REPO_FRONTEND }),
+      );
     const repoMap = useStore.getState().gitStatus.byEnvironmentRepo[SESSION];
     expect(repoMap[REPO_FRONTEND].modified).toEqual(["frontend2.tsx"]);
     expect(repoMap[REPO_BACKEND].modified).toEqual([BACKEND_FILE]);
   });
 
   it("clearGitStatus drops both maps", () => {
-    useStore.getState().setGitStatus(
-      SESSION,
-      entry({ modified: ["x.ts"], repository_name: REPO_FRONTEND }),
-    );
+    useStore
+      .getState()
+      .setGitStatus(SESSION, entry({ modified: ["x.ts"], repository_name: REPO_FRONTEND }));
     useStore.getState().clearGitStatus(SESSION);
     const state = useStore.getState();
     expect(state.gitStatus.byEnvironmentId[SESSION]).toBeUndefined();

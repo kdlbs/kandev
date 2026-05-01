@@ -159,8 +159,7 @@ export const useCommentsStore = create<CommentsSlice>()(
         if (!comment || !isDiffComment(comment) || comment.filePath !== filePath) continue;
         // When a repo is specified, scope to that repo. Comments without a
         // repositoryId (legacy) match any repo so existing data keeps showing.
-        if (repositoryId && comment.repositoryId && comment.repositoryId !== repositoryId)
-          continue;
+        if (repositoryId && comment.repositoryId && comment.repositoryId !== repositoryId) continue;
         result.push(comment);
       }
       return result;
