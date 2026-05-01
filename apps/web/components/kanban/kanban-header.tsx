@@ -1,9 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@kandev/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
@@ -18,20 +26,22 @@ import {
   IconTicket,
   IconHexagon,
   IconStethoscope,
+  IconDots,
+  IconSparkles,
+  IconAlertTriangle,
 } from "@tabler/icons-react";
+import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
 import { useJiraAvailable } from "@/components/jira/my-jira/use-jira-availability";
 import { useLinearAvailable } from "@/components/linear/use-linear-availability";
-import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
-import { linkToTask } from "@/lib/links";
+import { PageTopbar } from "@/components/page-topbar";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
-import { ReleaseNotesButton } from "../release-notes/release-notes-button";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
-import { HealthIndicatorButton, HealthIssuesDialog } from "../system-health/health-indicator";
+import { HealthIssuesDialog } from "../system-health/health-indicator";
 import { TaskSearchInput } from "./task-search-input";
 import { QuickChatButton } from "@/components/task/quick-chat-button";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
-import { linkToTasks } from "@/lib/links";
+import { linkToTask, linkToTasks } from "@/lib/links";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
@@ -54,60 +64,105 @@ type ViewToggleItem = {
   label: string;
 };
 
+type HeaderUtilityMenuProps = {
+  workspaceId?: string;
+  showReleaseNotesButton: boolean;
+  onOpenReleaseNotes: () => void;
+  showHealthIndicator: boolean;
+  onOpenHealthDialog: () => void;
+};
+
 const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
   { value: "kanban", icon: IconLayoutKanban, label: "Kanban" },
   { value: "pipeline", icon: IconTimeline, label: "Pipeline" },
   { value: "list", icon: IconList, label: "List" },
 ];
 
-function GitHubTopbarButton() {
+function getWorkspaceLabel(
+  workspaces: Array<{ id: string; name: string }>,
+  activeWorkspaceId: string | null,
+): string {
+  if (!activeWorkspaceId) return "All workspaces";
+  return workspaces.find((workspace) => workspace.id === activeWorkspaceId)?.name ?? "Workspace";
+}
+
+function getHeaderTitle(currentPage: string): string {
+  return currentPage === "tasks" ? "Tasks" : "Board";
+}
+
+function BoardUtilitiesMenu({
+  workspaceId,
+  showReleaseNotesButton,
+  onOpenReleaseNotes,
+  showHealthIndicator,
+  onOpenHealthDialog,
+}: HeaderUtilityMenuProps) {
   const { status } = useGitHubStatus();
-  if (!status?.authenticated) return null;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button variant="outline" size="icon" asChild className="cursor-pointer">
-          <Link href="/github">
-            <IconBrandGithub className="h-4 w-4" />
-          </Link>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>GitHub</TooltipContent>
-    </Tooltip>
-  );
-}
+  const jiraAvailable = useJiraAvailable(workspaceId);
+  const linearAvailable = useLinearAvailable(workspaceId);
+  const hasIntegrations = status?.authenticated || jiraAvailable || linearAvailable;
 
-function JiraTopbarButton({ workspaceId }: { workspaceId: string | undefined }) {
-  const available = useJiraAvailable(workspaceId);
-  if (!available) return null;
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button variant="outline" size="icon" asChild className="cursor-pointer">
-          <Link href="/jira">
-            <IconTicket className="h-4 w-4" />
-          </Link>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="icon" className="cursor-pointer" aria-label="Utilities">
+          <IconDots className="h-4 w-4" />
         </Button>
-      </TooltipTrigger>
-      <TooltipContent>Jira</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function LinearTopbarButton({ workspaceId }: { workspaceId: string | undefined }) {
-  const available = useLinearAvailable(workspaceId);
-  if (!available) return null;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button variant="outline" size="icon" asChild className="cursor-pointer">
-          <Link href="/linear">
-            <IconHexagon className="h-4 w-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuLabel>Utilities</DropdownMenuLabel>
+        {status?.authenticated && (
+          <DropdownMenuItem asChild className="cursor-pointer">
+            <Link href="/github">
+              <IconBrandGithub className="h-4 w-4" />
+              GitHub
+            </Link>
+          </DropdownMenuItem>
+        )}
+        {jiraAvailable && (
+          <DropdownMenuItem asChild className="cursor-pointer">
+            <Link href="/jira">
+              <IconTicket className="h-4 w-4" />
+              Jira
+            </Link>
+          </DropdownMenuItem>
+        )}
+        {linearAvailable && (
+          <DropdownMenuItem asChild className="cursor-pointer">
+            <Link href="/linear">
+              <IconHexagon className="h-4 w-4" />
+              Linear
+            </Link>
+          </DropdownMenuItem>
+        )}
+        {hasIntegrations && <DropdownMenuSeparator />}
+        {showReleaseNotesButton && (
+          <DropdownMenuItem onClick={onOpenReleaseNotes} className="cursor-pointer">
+            <IconSparkles className="h-4 w-4" />
+            Release notes
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem onClick={onOpenHealthDialog} className="cursor-pointer">
+          <IconAlertTriangle
+            className={`h-4 w-4 ${showHealthIndicator ? "text-warning" : "text-muted-foreground"}`}
+          />
+          {showHealthIndicator ? "Health issues" : "System health"}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild className="cursor-pointer">
+          <Link href="/stats">
+            <IconChartBar className="h-4 w-4" />
+            Stats
           </Link>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Linear</TooltipContent>
-    </Tooltip>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild className="cursor-pointer">
+          <Link href="/settings">
+            <IconSettings className="h-4 w-4" />
+            Settings
+          </Link>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -188,109 +243,82 @@ function getToggleValue(currentPage: string, kanbanViewMode: string | null): str
 function TabletHeader({
   onCreateTask,
   workspaceId,
+  title,
+  workspaceLabel,
   searchQuery,
   onSearchChange,
   isSearchLoading,
   toggleValue,
   handleViewChange,
   setMenuOpen,
-  showReleaseNotesButton,
-  onOpenReleaseNotes,
-  showHealthIndicator,
-  onOpenHealthDialog,
 }: {
   onCreateTask: () => void;
   workspaceId?: string;
+  title: string;
+  workspaceLabel: string;
   searchQuery: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading: boolean;
   toggleValue: string;
   handleViewChange: (value: string) => void;
   setMenuOpen: (open: boolean) => void;
-  showReleaseNotesButton: boolean;
-  onOpenReleaseNotes: () => void;
-  showHealthIndicator: boolean;
-  onOpenHealthDialog: () => void;
 }) {
   return (
-    <header className="flex items-center justify-between p-4 pb-3 gap-3">
-      <div className="flex items-center gap-3 flex-shrink-0">
-        <Link href="/" className="text-xl font-bold hover:opacity-80">
-          KanDev
-        </Link>
-        <TooltipProvider>
-          <GitHubTopbarButton />
-          <JiraTopbarButton workspaceId={workspaceId} />
-          <LinearTopbarButton workspaceId={workspaceId} />
+    <PageTopbar
+      title={title}
+      subtitle={workspaceLabel}
+      actionsClassName="gap-2"
+      actions={
+        <>
+          {onSearchChange && (
+            <TaskSearchInput
+              value={searchQuery}
+              onChange={onSearchChange}
+              placeholder="Search..."
+              isLoading={isSearchLoading}
+              className="hidden md:flex w-48 lg:w-56"
+            />
+          )}
+          <Button
+            onClick={onCreateTask}
+            size="lg"
+            className="cursor-pointer"
+            data-testid="create-task-button"
+          >
+            <IconPlus className="h-4 w-4" />
+            <span className="hidden sm:inline ml-1">Add task</span>
+          </Button>
+          <QuickChatButton workspaceId={workspaceId} />
+          <TooltipProvider>
+            <ViewToggleGroup
+              toggleValue={toggleValue}
+              onValueChange={handleViewChange}
+              className="h-8"
+              itemClassName="h-8 w-8"
+            />
+          </TooltipProvider>
+          <KanbanDisplayDropdown />
           <ImproveKandevTopbarButton workspaceId={workspaceId} />
-        </TooltipProvider>
-      </div>
-      {onSearchChange && (
-        <TaskSearchInput
-          value={searchQuery}
-          onChange={onSearchChange}
-          placeholder="Search..."
-          isLoading={isSearchLoading}
-          className="flex-1 max-w-[200px]"
-        />
-      )}
-      <div className="flex items-center gap-2">
-        <Button
-          onClick={onCreateTask}
-          size="lg"
-          className="cursor-pointer"
-          data-testid="create-task-button"
-        >
-          <IconPlus className="h-4 w-4" />
-          <span className="hidden sm:inline ml-1">Add task</span>
-        </Button>
-        <QuickChatButton workspaceId={workspaceId} />
-        <TooltipProvider>
-          <ViewToggleGroup
-            toggleValue={toggleValue}
-            onValueChange={handleViewChange}
-            className="h-8"
-            itemClassName="h-8 w-8"
-          />
-          {showReleaseNotesButton && <ReleaseNotesButton hasUnseen onClick={onOpenReleaseNotes} />}
-          <HealthIndicatorButton hasIssues={showHealthIndicator} onClick={onOpenHealthDialog} />
-        </TooltipProvider>
-        <Button
-          variant="outline"
-          size="icon-lg"
-          onClick={() => setMenuOpen(true)}
-          className="cursor-pointer"
-        >
-          <IconMenu2 className="h-4 w-4" />
-          <span className="sr-only">Open menu</span>
-        </Button>
-      </div>
-    </header>
+          <Button
+            variant="outline"
+            size="icon-lg"
+            onClick={() => setMenuOpen(true)}
+            className="cursor-pointer"
+          >
+            <IconMenu2 className="h-4 w-4" />
+            <span className="sr-only">Open menu</span>
+          </Button>
+        </>
+      }
+    />
   );
-}
-
-// Width below which the centered search input no longer fits between the
-// left ("KanDev" + GitHub/Jira/Stats) and right (Add task + chat + view
-// toggle + indicators + display + settings) action groups.
-const DESKTOP_HEADER_NARROW_PX = 1100;
-
-function useIsHeaderNarrow(ref: React.RefObject<HTMLElement | null>): boolean {
-  const [isNarrow, setIsNarrow] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const update = () => setIsNarrow(el.clientWidth < DESKTOP_HEADER_NARROW_PX);
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [ref]);
-  return isNarrow;
 }
 
 function DesktopHeader({
   onCreateTask,
   workspaceId,
+  title,
+  workspaceLabel,
   searchQuery,
   onSearchChange,
   isSearchLoading,
@@ -303,6 +331,8 @@ function DesktopHeader({
 }: {
   onCreateTask: () => void;
   workspaceId?: string;
+  title: string;
+  workspaceLabel: string;
   searchQuery: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading: boolean;
@@ -313,69 +343,45 @@ function DesktopHeader({
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
 }) {
-  // The search input is absolutely centered, so the left/right action groups
-  // can grow into it and overlap. Hide the search when the header gets too
-  // narrow to fit all three regions side-by-side (e.g. when the kanban preview
-  // panel is open and squeezes the board area).
-  const headerRef = useRef<HTMLElement>(null);
-  const isNarrow = useIsHeaderNarrow(headerRef);
-  const showSearch = !!onSearchChange && !isNarrow;
   return (
-    <header ref={headerRef} className="relative flex items-center justify-between p-4 pb-3">
-      <div className="flex items-center gap-5">
-        <Link href="/" className="text-2xl font-bold hover:opacity-80">
-          KanDev
-        </Link>
-        <div className="flex items-center gap-3">
-          <TooltipProvider>
-            <GitHubTopbarButton />
-            <JiraTopbarButton workspaceId={workspaceId} />
-            <LinearTopbarButton workspaceId={workspaceId} />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="outline" size="icon" asChild className="cursor-pointer">
-                  <Link href="/stats">
-                    <IconChartBar className="h-4 w-4" />
-                  </Link>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Stats</TooltipContent>
-            </Tooltip>
-            <ImproveKandevTopbarButton workspaceId={workspaceId} />
-          </TooltipProvider>
-        </div>
-      </div>
-      {showSearch && (
-        <div className="absolute left-1/2 -translate-x-1/2" data-testid="kanban-header-search">
-          <TaskSearchInput
-            value={searchQuery}
-            onChange={onSearchChange}
-            placeholder="Search tasks..."
-            isLoading={isSearchLoading}
-            className="w-64"
-          />
-        </div>
-      )}
-      <div className="flex items-center gap-3">
-        <Button onClick={onCreateTask} className="cursor-pointer" data-testid="create-task-button">
-          <IconPlus className="h-4 w-4" />
-          Add task
-        </Button>
-        <QuickChatButton workspaceId={workspaceId} />
-        <TooltipProvider>
-          <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} />
-        </TooltipProvider>
-        {showReleaseNotesButton && <ReleaseNotesButton hasUnseen onClick={onOpenReleaseNotes} />}
-        <HealthIndicatorButton hasIssues={showHealthIndicator} onClick={onOpenHealthDialog} />
-        <KanbanDisplayDropdown />
-        <Link href="/settings" className="cursor-pointer">
-          <Button variant="outline" className="cursor-pointer gap-2">
-            <IconSettings className="h-4 w-4" />
-            <span className="hidden 2xl:inline">Settings</span>
+    <PageTopbar
+      title={title}
+      subtitle={workspaceLabel}
+      actions={
+        <>
+          {onSearchChange && (
+            <TaskSearchInput
+              value={searchQuery}
+              onChange={onSearchChange}
+              placeholder="Search tasks..."
+              isLoading={isSearchLoading}
+              className="w-64"
+            />
+          )}
+          <Button
+            onClick={onCreateTask}
+            className="cursor-pointer"
+            data-testid="create-task-button"
+          >
+            <IconPlus className="h-4 w-4" />
+            Add task
           </Button>
-        </Link>
-      </div>
-    </header>
+          <QuickChatButton workspaceId={workspaceId} />
+          <TooltipProvider>
+            <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} />
+          </TooltipProvider>
+          <KanbanDisplayDropdown />
+          <ImproveKandevTopbarButton workspaceId={workspaceId} />
+          <BoardUtilitiesMenu
+            workspaceId={workspaceId}
+            showReleaseNotesButton={showReleaseNotesButton}
+            onOpenReleaseNotes={onOpenReleaseNotes}
+            showHealthIndicator={showHealthIndicator}
+            onOpenHealthDialog={onOpenHealthDialog}
+          />
+        </>
+      }
+    />
   );
 }
 
@@ -409,11 +415,14 @@ export function KanbanHeader({
   const { isMobile, isTablet } = useResponsiveBreakpoint();
   const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
   const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
-  const { kanbanViewMode, onViewModeChange } = useKanbanDisplaySettings();
+  const { kanbanViewMode, onViewModeChange, workspaces, activeWorkspaceId } =
+    useKanbanDisplaySettings();
   const releaseNotes = useReleaseNotes();
   const healthIndicator = useSystemHealthIndicator();
   const toggleValue = getToggleValue(currentPage, kanbanViewMode);
   const handleViewChange = useHeaderViewChange(currentPage, workspaceId, onViewModeChange);
+  const title = getHeaderTitle(currentPage);
+  const workspaceLabel = getWorkspaceLabel(workspaces, activeWorkspaceId);
 
   const indicatorProps = {
     showReleaseNotesButton: releaseNotes.showTopbarButton,
@@ -430,6 +439,8 @@ export function KanbanHeader({
         <KanbanHeaderMobile
           workspaceId={workspaceId}
           currentPage={currentPage}
+          title={title}
+          workspaceLabel={workspaceLabel}
           {...sharedSearch}
           {...indicatorProps}
         />
@@ -440,11 +451,12 @@ export function KanbanHeader({
         <>
           <TabletHeader
             {...sharedActions}
+            title={title}
+            workspaceLabel={workspaceLabel}
             {...sharedSearch}
             toggleValue={toggleValue}
             handleViewChange={handleViewChange}
             setMenuOpen={setMenuOpen}
-            {...indicatorProps}
           />
           <MobileMenuSheet
             open={isMenuOpen}
@@ -452,6 +464,7 @@ export function KanbanHeader({
             workspaceId={workspaceId}
             currentPage={currentPage}
             {...sharedSearch}
+            {...indicatorProps}
           />
         </>
       );
@@ -459,6 +472,8 @@ export function KanbanHeader({
     return (
       <DesktopHeader
         {...sharedActions}
+        title={title}
+        workspaceLabel={workspaceLabel}
         {...sharedSearch}
         toggleValue={toggleValue}
         handleViewChange={handleViewChange}

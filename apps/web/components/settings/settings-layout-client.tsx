@@ -1,38 +1,30 @@
 "use client";
 
-import { IconArrowLeft } from "@tabler/icons-react";
 import { usePathname } from "next/navigation";
-import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList } from "@kandev/ui/breadcrumb";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@kandev/ui/sidebar";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { PageTopbar } from "@/components/page-topbar";
 import { SettingsAppSidebar } from "@/components/settings/settings-app-sidebar";
 
 export function SettingsLayoutClient({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isAgentDetail = pathname.startsWith("/settings/agents/") && pathname !== "/settings/agents";
-  const breadcrumbLabel = isAgentDetail ? "Agents" : "Home";
-  const breadcrumbHref = isAgentDetail ? "/settings/agents" : "/";
+  const backHref = isAgentDetail ? "/settings/agents" : "/";
+  const backLabel = isAgentDetail ? "Agents" : "KanDev";
+  const title = isAgentDetail ? "Agent" : "Settings";
 
   return (
     <TooltipProvider>
       <SidebarProvider>
         <SettingsAppSidebar />
         <SidebarInset>
-          <header className="flex h-16 shrink-0 items-center gap-2">
-            <div className="flex items-center gap-2 px-0 sm:px-4">
-              <SidebarTrigger size="lg" className="md:hidden h-10 w-10 cursor-pointer" />
-              <Breadcrumb>
-                <BreadcrumbList>
-                  <BreadcrumbItem>
-                    <BreadcrumbLink href={breadcrumbHref} className="flex items-center gap-2">
-                      <IconArrowLeft className="h-4 w-4" />
-                      {breadcrumbLabel}
-                    </BreadcrumbLink>
-                  </BreadcrumbItem>
-                </BreadcrumbList>
-              </Breadcrumb>
-            </div>
-          </header>
+          <PageTopbar
+            title={title}
+            backHref={backHref}
+            backLabel={backLabel}
+            className="h-16"
+            leading={<SidebarTrigger size="lg" className="md:hidden h-10 w-10 cursor-pointer" />}
+          />
           <div className="flex min-w-0 flex-1 flex-col gap-4 p-4 pt-0 mb-20">{children}</div>
         </SidebarInset>
       </SidebarProvider>

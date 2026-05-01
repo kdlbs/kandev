@@ -1,8 +1,8 @@
 "use client";
 
-import { memo, useCallback } from "react";
+import { memo, useCallback, type ReactNode } from "react";
 import Link from "next/link";
-import { IconBug, IconHome, IconSettings } from "@tabler/icons-react";
+import { IconBug, IconDots, IconHome, IconSettings } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   Breadcrumb,
@@ -12,6 +12,14 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@kandev/ui/breadcrumb";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { CommitStatBadge } from "@/components/diff-stat";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
@@ -62,6 +70,11 @@ type TaskTopBarProps = {
   remoteCreatedAt?: string | null;
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
+};
+
+type GitStatusSummary = {
+  ahead: number;
+  behind: number;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
@@ -295,7 +308,7 @@ function GitAheadBehindBadges({
   gitStatus,
   baseBranch,
 }: {
-  gitStatus: { ahead: number; behind: number };
+  gitStatus: GitStatusSummary;
   baseBranch?: string;
 }) {
   const ahead = gitStatus?.ahead ?? 0;
@@ -332,7 +345,145 @@ function GitAheadBehindBadges({
   );
 }
 
-/** Right section: git badges, debug toggle, document controls, editors, VCS, settings */
+function TopbarCluster({
+  label,
+  className = "",
+  children,
+}: {
+  label: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      aria-label={label}
+      className={`inline-flex shrink-0 items-center gap-1 rounded-md border border-border/70 bg-background/80 p-0.5 [&:empty]:hidden ${className}`}
+    >
+      {children}
+    </div>
+  );
+}
+
+function MoreToolsMenu({
+  showDebugOverlay,
+  onToggleDebugOverlay,
+}: {
+  showDebugOverlay?: boolean;
+  onToggleDebugOverlay?: () => void;
+}) {
+  const showDebugItem = DEBUG_UI && onToggleDebugOverlay;
+  const debugLabel = showDebugOverlay ? "Hide Debug Info" : "Show Debug Info";
+
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 cursor-pointer px-2"
+              aria-label="More task tools"
+            >
+              <IconDots className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>More tools</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuLabel className="text-xs">More tools</DropdownMenuLabel>
+        {showDebugItem && (
+          <>
+            <DropdownMenuItem className="cursor-pointer gap-2" onClick={onToggleDebugOverlay}>
+              <IconBug className="h-4 w-4 text-muted-foreground" />
+              <span>{debugLabel}</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        <DropdownMenuItem asChild className="cursor-pointer gap-2">
+          <Link href="/settings/general">
+            <IconSettings className="h-4 w-4 text-muted-foreground" />
+            <span>Settings</span>
+          </Link>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function AttentionStatusGroup({
+  taskId,
+  activeSessionId,
+  baseBranch,
+  gitStatus,
+  isArchived,
+  workspaceId,
+  isRemoteExecutor,
+  isAgentctlReady,
+  taskTitle,
+}: {
+  taskId?: string | null;
+  activeSessionId?: string | null;
+  baseBranch?: string;
+  gitStatus: GitStatusSummary;
+  isArchived?: boolean;
+  workspaceId?: string | null;
+  isRemoteExecutor?: boolean;
+  isAgentctlReady?: boolean;
+  taskTitle?: string;
+}) {
+  return (
+    <TopbarCluster label="Task status and attention" className="[&_button]:h-8 [&_button]:text-xs">
+      <GitAheadBehindBadges gitStatus={gitStatus} baseBranch={baseBranch} />
+      <DocumentControls activeSessionId={activeSessionId ?? null} />
+      {!isArchived && (
+        <>
+          <PortForwardButton
+            isRemoteExecutor={isRemoteExecutor}
+            sessionId={activeSessionId}
+            isAgentctlReady={isAgentctlReady}
+          />
+          <PRTopbarButton />
+          <IssueTrackerButtons taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
+        </>
+      )}
+    </TopbarCluster>
+  );
+}
+
+function TopbarToolsGroup({
+  activeSessionId,
+  workspaceId,
+  showDebugOverlay,
+  onToggleDebugOverlay,
+  isArchived,
+}: {
+  activeSessionId?: string | null;
+  workspaceId?: string | null;
+  showDebugOverlay?: boolean;
+  onToggleDebugOverlay?: () => void;
+  isArchived?: boolean;
+}) {
+  return (
+    <TopbarCluster label="Task tools" className="[&_button]:h-8 [&_button]:text-xs">
+      {!isArchived && (
+        <>
+          <QuickChatButton workspaceId={workspaceId} />
+          <LayoutPresetSelector />
+          <EditorsMenu activeSessionId={activeSessionId ?? null} />
+        </>
+      )}
+      <MoreToolsMenu
+        showDebugOverlay={showDebugOverlay}
+        onToggleDebugOverlay={onToggleDebugOverlay}
+      />
+    </TopbarCluster>
+  );
+}
+
+/** Right section: primary VCS action, status/attention, tools menu */
 function TopBarRight({
   taskId,
   activeSessionId,
@@ -349,7 +500,7 @@ function TopBarRight({
   taskId?: string | null;
   activeSessionId?: string | null;
   baseBranch?: string;
-  gitStatus: { ahead: number; behind: number };
+  gitStatus: GitStatusSummary;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
@@ -359,51 +510,30 @@ function TopBarRight({
   taskTitle?: string;
 }) {
   return (
-    <div className="flex items-center gap-2 justify-end">
-      {DEBUG_UI && onToggleDebugOverlay && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="sm"
-              variant={showDebugOverlay ? "default" : "outline"}
-              className="cursor-pointer px-2"
-              onClick={onToggleDebugOverlay}
-            >
-              <IconBug className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {showDebugOverlay ? "Hide Debug Info" : "Show Debug Info"}
-          </TooltipContent>
-        </Tooltip>
-      )}
-      <GitAheadBehindBadges gitStatus={gitStatus} baseBranch={baseBranch} />
-      <DocumentControls activeSessionId={activeSessionId ?? null} />
+    <div className="flex min-w-0 items-center justify-end gap-2">
       {!isArchived && (
-        <>
-          <PortForwardButton
-            isRemoteExecutor={isRemoteExecutor}
-            sessionId={activeSessionId}
-            isAgentctlReady={isAgentctlReady}
-          />
-          <PRTopbarButton />
-          <IssueTrackerButtons taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
-          <QuickChatButton workspaceId={workspaceId} />
+        <TopbarCluster label="Primary version control action">
           <VcsSplitButton sessionId={activeSessionId ?? null} baseBranch={baseBranch} />
-          <LayoutPresetSelector />
-          <EditorsMenu activeSessionId={activeSessionId ?? null} />
-        </>
+        </TopbarCluster>
       )}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button size="sm" variant="outline" className="cursor-pointer px-2" asChild>
-            <Link href="/settings/general">
-              <IconSettings className="h-4 w-4" />
-            </Link>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Settings</TooltipContent>
-      </Tooltip>
+      <AttentionStatusGroup
+        taskId={taskId}
+        activeSessionId={activeSessionId}
+        baseBranch={baseBranch}
+        gitStatus={gitStatus}
+        isArchived={isArchived}
+        workspaceId={workspaceId}
+        isRemoteExecutor={isRemoteExecutor}
+        isAgentctlReady={isAgentctlReady}
+        taskTitle={taskTitle}
+      />
+      <TopbarToolsGroup
+        activeSessionId={activeSessionId}
+        workspaceId={workspaceId}
+        showDebugOverlay={showDebugOverlay}
+        onToggleDebugOverlay={onToggleDebugOverlay}
+        isArchived={isArchived}
+      />
     </div>
   );
 }

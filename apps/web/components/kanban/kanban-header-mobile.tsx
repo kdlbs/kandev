@@ -1,17 +1,16 @@
 "use client";
 
-import Link from "next/link";
 import { Button } from "@kandev/ui/button";
-import { TooltipProvider } from "@kandev/ui/tooltip";
 import { IconMenu2 } from "@tabler/icons-react";
-import { ReleaseNotesButton } from "../release-notes/release-notes-button";
-import { HealthIndicatorButton } from "../system-health/health-indicator";
+import { PageTopbar } from "@/components/page-topbar";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 import { useAppStore } from "@/components/state-provider";
 
 type KanbanHeaderMobileProps = {
   workspaceId?: string;
   currentPage?: "kanban" | "tasks";
+  title: string;
+  workspaceLabel: string;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
@@ -24,6 +23,8 @@ type KanbanHeaderMobileProps = {
 export function KanbanHeaderMobile({
   workspaceId,
   currentPage = "kanban",
+  title,
+  workspaceLabel,
   searchQuery = "",
   onSearchChange,
   isSearchLoading = false,
@@ -37,21 +38,10 @@ export function KanbanHeaderMobile({
 
   return (
     <>
-      <header className="flex items-center justify-between p-4 pb-3">
-        <Link href="/" className="text-xl font-bold hover:opacity-80">
-          KanDev
-        </Link>
-        <div className="flex items-center gap-2">
-          {showReleaseNotesButton && (
-            <TooltipProvider>
-              <ReleaseNotesButton hasUnseen onClick={onOpenReleaseNotes} />
-            </TooltipProvider>
-          )}
-          {showHealthIndicator && (
-            <TooltipProvider>
-              <HealthIndicatorButton hasIssues={showHealthIndicator} onClick={onOpenHealthDialog} />
-            </TooltipProvider>
-          )}
+      <PageTopbar
+        title={title}
+        subtitle={workspaceLabel}
+        actions={
           <Button
             variant="outline"
             size="icon"
@@ -61,8 +51,8 @@ export function KanbanHeaderMobile({
             <IconMenu2 className="h-4 w-4" />
             <span className="sr-only">Open menu</span>
           </Button>
-        </div>
-      </header>
+        }
+      />
       <MobileMenuSheet
         open={isMenuOpen}
         onOpenChange={setMenuOpen}
@@ -71,6 +61,10 @@ export function KanbanHeaderMobile({
         searchQuery={searchQuery}
         onSearchChange={onSearchChange}
         isSearchLoading={isSearchLoading}
+        showReleaseNotesButton={showReleaseNotesButton}
+        onOpenReleaseNotes={onOpenReleaseNotes}
+        showHealthIndicator={showHealthIndicator}
+        onOpenHealthDialog={onOpenHealthDialog}
       />
     </>
   );
