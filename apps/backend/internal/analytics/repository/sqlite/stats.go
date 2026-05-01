@@ -45,7 +45,7 @@ func (r *Repository) GetTaskStats(
 		startArg = start.UTC().Format(time.RFC3339)
 	}
 	if limit <= 0 {
-		limit = 100
+		limit = 200
 	}
 
 	drv := r.ro.DriverName()

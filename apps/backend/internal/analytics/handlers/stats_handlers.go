@@ -86,6 +86,7 @@ func (h *StatsHandlers) httpGetStats(c *gin.Context) {
 			AvgDurationMsPerTask: raw.globalStats.AvgDurationMsPerTask,
 		},
 		TaskStats:         taskStatsToDTOs(raw.taskStats),
+		TaskStatsHasMore:  raw.globalStats.TotalTasks > len(raw.taskStats),
 		DailyActivity:     dailyActivityToDTOs(raw.dailyActivity),
 		CompletedActivity: completedActivityToDTOs(raw.completedActivity),
 		AgentUsage:        agentUsageToDTOs(raw.agentUsage),

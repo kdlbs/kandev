@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"path/filepath"
 	"testing"
@@ -379,6 +380,43 @@ func TestGetTaskStats_ExcludesEphemeralTasks(t *testing.T) {
 	}
 	if results[0].TaskID != "task-regular" {
 		t.Errorf("expected task-regular, got %s", results[0].TaskID)
+	}
+}
+
+func TestGetTaskStats_RespectsLimit(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+
+	for i := 0; i < 5; i++ {
+		taskID := fmt.Sprintf("task-%d", i)
+		taskTitle := fmt.Sprintf("Task %d", i)
+		execOrFatal(
+			t,
+			dbConn,
+			`INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES (?, 'ws-1', 'board-1', '', ?, 0, ?, ?)`,
+			taskID,
+			taskTitle,
+			nowStr,
+			now.Add(time.Duration(i)*time.Second).Format(time.RFC3339),
+		)
+	}
+
+	results, err := repo.GetTaskStats(ctx, "ws-1", nil, 3)
+	if err != nil {
+		t.Fatalf("GetTaskStats failed: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 task stats due to limit, got %d", len(results))
 	}
 }
 
