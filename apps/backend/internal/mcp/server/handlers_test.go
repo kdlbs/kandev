@@ -310,3 +310,45 @@ func TestMessageTask_MissingPrompt_ReturnsError(t *testing.T) {
 
 	assert.True(t, result.IsError)
 }
+
+func TestGetTaskConversation_ForwardsToBackend(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{
+			"task_id":    "task-target",
+			"session_id": "sess-1",
+			"messages":   []interface{}{},
+			"total":      0,
+			"has_more":   false,
+			"cursor":     "",
+		},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "get_task_conversation_kandev", map[string]interface{}{
+		"task_id":       "task-target",
+		"session_id":    "sess-1",
+		"limit":         25,
+		"sort":          "desc",
+		"message_types": []interface{}{"message", "tool_call"},
+	})
+
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPGetTaskConversation, backend.lastAction)
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-target", payload["task_id"])
+	assert.Equal(t, "sess-1", payload["session_id"])
+	assert.Equal(t, 25, payload["limit"])
+	assert.Equal(t, "desc", payload["sort"])
+	assert.Equal(t, []string{"message", "tool_call"}, payload["message_types"])
+}
+
+func TestGetTaskConversation_MissingTaskID_ReturnsError(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "get_task_conversation_kandev", map[string]interface{}{})
+
+	assert.True(t, result.IsError)
+}
