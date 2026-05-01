@@ -108,7 +108,7 @@ func TestAssociatePRWithTask_ReplacesStaleAssociation(t *testing.T) {
 		RepoName:    "repo",
 		AuthorLogin: "alice",
 	}
-	tp, err := svc.AssociatePRWithTask(ctx, "t1", newPR)
+	tp, err := svc.AssociatePRWithTask(ctx, "t1", "", newPR)
 	if err != nil {
 		t.Fatalf("AssociatePRWithTask: %v", err)
 	}

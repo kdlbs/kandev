@@ -219,8 +219,13 @@ type FileUpdateResponse struct {
 //
 // HTTP endpoint: POST /api/v1/workspace/file/create
 type FileCreateRequest struct {
-	// Path is the file path (relative to workspace root).
+	// Path is the file path (relative to the per-repo subpath when Repo is
+	// set, otherwise relative to the workspace root).
 	Path string `json:"path"`
+
+	// Repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo
+	// workspaces. When set, Path is interpreted relative to <workDir>/<Repo>.
+	Repo string `json:"repo,omitempty"`
 }
 
 // FileCreateResponse represents a response to a file create request.
@@ -262,11 +267,16 @@ type FileDeleteResponse struct {
 //
 // HTTP endpoint: POST /api/v1/workspace/file/rename
 type FileRenameRequest struct {
-	// OldPath is the current path (relative to workspace root).
+	// OldPath is the current path (relative to the per-repo subpath when
+	// Repo is set, otherwise relative to the workspace root).
 	OldPath string `json:"old_path"`
 
-	// NewPath is the new path (relative to workspace root).
+	// NewPath is the new path (same scoping rules as OldPath).
 	NewPath string `json:"new_path"`
+
+	// Repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo
+	// workspaces. Both OldPath and NewPath are scoped to this repo.
+	Repo string `json:"repo,omitempty"`
 }
 
 // FileRenameResponse represents a response to a rename request.

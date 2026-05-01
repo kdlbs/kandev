@@ -123,16 +123,19 @@ export type FileCreateResponse = {
 };
 
 /**
- * Create a new file in the workspace
+ * Create a new file in the workspace. `repo` scopes the create to a per-repo
+ * subdirectory for multi-repo task workspaces; omit for single-repo.
  */
 export async function createFile(
   client: WebSocketClient,
   sessionId: string,
   path: string,
+  repo?: string,
 ): Promise<FileCreateResponse> {
   return client.request<FileCreateResponse>("workspace.file.create", {
     session_id: sessionId,
     path,
+    ...(repo ? { repo } : {}),
   });
 }
 
@@ -146,16 +149,19 @@ export type FileDeleteResponse = {
 };
 
 /**
- * Delete a file from the workspace
+ * Delete a file from the workspace. `repo` scopes the delete to a per-repo
+ * subdirectory for multi-repo task workspaces; omit for single-repo.
  */
 export async function deleteFile(
   client: WebSocketClient,
   sessionId: string,
   path: string,
+  repo?: string,
 ): Promise<FileDeleteResponse> {
   return client.request<FileDeleteResponse>("workspace.file.delete", {
     session_id: sessionId,
     path,
+    ...(repo ? { repo } : {}),
   });
 }
 
@@ -170,17 +176,21 @@ export type FileRenameResponse = {
 };
 
 /**
- * Rename a file or directory in the workspace
+ * Rename a file or directory in the workspace. `repo` scopes BOTH oldPath and
+ * newPath to a per-repo subdirectory for multi-repo task workspaces; omit
+ * for single-repo. Cross-repo moves aren't supported.
  */
 export async function renameFile(
   client: WebSocketClient,
   sessionId: string,
   oldPath: string,
   newPath: string,
+  repo?: string,
 ): Promise<FileRenameResponse> {
   return client.request<FileRenameResponse>("workspace.file.rename", {
     session_id: sessionId,
     old_path: oldPath,
     new_path: newPath,
+    ...(repo ? { repo } : {}),
   });
 }

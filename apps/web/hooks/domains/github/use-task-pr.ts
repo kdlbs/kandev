@@ -53,6 +53,21 @@ export function getPrimaryTaskPR(prs: TaskPR[] | undefined): TaskPR | null {
   return prs && prs.length > 0 ? prs[0] : null;
 }
 
+/**
+ * Normalises the WS sync response into an array of TaskPR rows. Backend
+ * returns `{prs: TaskPR[]}` (current shape) for multi-repo support, but we
+ * accept the legacy bare-TaskPR shape too in case an older backend is
+ * still running. Empty / null / unknown shapes return an empty array.
+ */
+function normalizeSyncResponse(result: { prs?: TaskPR[] } | TaskPR | null | undefined): TaskPR[] {
+  if (!result) return [];
+  const envelope = result as { prs?: TaskPR[] };
+  if (Array.isArray(envelope.prs)) return envelope.prs;
+  const single = result as TaskPR;
+  if (single.task_id) return [single];
+  return [];
+}
+
 /** Fetch a single task's PR associations, with on-demand sync via WS. */
 export function useTaskPR(taskId: string | null) {
   const prs = useAppStore((state) => (taskId ? (state.taskPRs.byTaskId[taskId] ?? null) : null));
@@ -65,13 +80,20 @@ export function useTaskPR(taskId: string | null) {
     const client = getWebSocketClient();
     if (!client) return;
 
+    // Backend returns `{prs: TaskPR[]}` — multi-repo tasks have one row per
+    // repo. We push each into the store so the per-repo PR icon stays in
+    // sync. Empty array means no watches yet (the freshness retry below
+    // handles the polling cadence). Legacy single-PR shape (`TaskPR` only)
+    // is detected via the absence of `.prs`.
     client
-      .request<TaskPR | null>("github.task_pr.sync", { task_id: taskId })
+      .request<{ prs?: TaskPR[] } | TaskPR | null>("github.task_pr.sync", { task_id: taskId })
       .then((result) => {
-        if (result?.task_id) {
-          setTaskPR(taskId, result);
-          retryRef.current = 0;
+        const list = normalizeSyncResponse(result);
+        if (list.length === 0) return;
+        for (const pr of list) {
+          if (pr.task_id) setTaskPR(taskId, pr);
         }
+        retryRef.current = 0;
       })
       .catch(() => {
         // Ignore - sync may fail if no watch exists

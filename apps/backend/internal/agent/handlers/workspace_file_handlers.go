@@ -218,46 +218,47 @@ func (h *WorkspaceFileHandlers) wsUpdateFileContent(ctx context.Context, msg *ws
 // and returns the agentctl client, or an error response.
 func (h *WorkspaceFileHandlers) resolveSessionFileClient(
 	ctx context.Context, msg *ws.Message,
-) (sessionID, path string, client *agentctl.Client, errResp *ws.Message) {
+) (sessionID, path, repo string, client *agentctl.Client, errResp *ws.Message) {
 	var req struct {
 		SessionID string `json:"session_id"`
 		Path      string `json:"path"`
+		Repo      string `json:"repo,omitempty"`
 	}
 
 	if err := msg.ParsePayload(&req); err != nil {
 		errResp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-		return "", "", nil, errResp
+		return "", "", "", nil, errResp
 	}
 	if req.SessionID == "" {
 		errResp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-		return "", "", nil, errResp
+		return "", "", "", nil, errResp
 	}
 	if req.Path == "" {
 		errResp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "path is required", nil)
-		return "", "", nil, errResp
+		return "", "", "", nil, errResp
 	}
 
 	execution, resolveErr := h.lifecycle.GetOrEnsureExecution(ctx, req.SessionID)
 	if resolveErr != nil {
 		errResp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session: "+resolveErr.Error(), nil)
-		return "", "", nil, errResp
+		return "", "", "", nil, errResp
 	}
 	c := execution.GetAgentCtlClient()
 	if c == nil {
 		errResp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
-		return "", "", nil, errResp
+		return "", "", "", nil, errResp
 	}
-	return req.SessionID, req.Path, c, nil
+	return req.SessionID, req.Path, req.Repo, c, nil
 }
 
 // wsCreateFile handles workspace.file.create action
 func (h *WorkspaceFileHandlers) wsCreateFile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	sessionID, path, client, errResp := h.resolveSessionFileClient(ctx, msg)
+	sessionID, path, repo, client, errResp := h.resolveSessionFileClient(ctx, msg)
 	if errResp != nil {
 		return errResp, nil
 	}
 
-	response, err := client.CreateFile(ctx, path)
+	response, err := client.CreateFile(ctx, path, repo)
 	if err != nil {
 		h.logger.Error("failed to create file", zap.Error(err), zap.String("session_id", sessionID), zap.String("path", path))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to create file: %v", err), nil)
@@ -268,12 +269,12 @@ func (h *WorkspaceFileHandlers) wsCreateFile(ctx context.Context, msg *ws.Messag
 
 // wsDeleteFile handles workspace.file.delete action
 func (h *WorkspaceFileHandlers) wsDeleteFile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	sessionID, path, client, errResp := h.resolveSessionFileClient(ctx, msg)
+	sessionID, path, repo, client, errResp := h.resolveSessionFileClient(ctx, msg)
 	if errResp != nil {
 		return errResp, nil
 	}
 
-	response, err := client.DeleteFile(ctx, path)
+	response, err := client.DeleteFile(ctx, path, repo)
 	if err != nil {
 		h.logger.Error("failed to delete file", zap.Error(err), zap.String("session_id", sessionID), zap.String("path", path))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to delete file: %v", err), nil)
@@ -332,6 +333,7 @@ func (h *WorkspaceFileHandlers) wsRenameFile(ctx context.Context, msg *ws.Messag
 		SessionID string `json:"session_id"`
 		OldPath   string `json:"old_path"`
 		NewPath   string `json:"new_path"`
+		Repo      string `json:"repo,omitempty"`
 	}
 
 	if err := msg.ParsePayload(&req); err != nil {
@@ -361,7 +363,7 @@ func (h *WorkspaceFileHandlers) wsRenameFile(ctx context.Context, msg *ws.Messag
 	}
 
 	// Rename file via agentctl
-	response, err := client.RenameFile(ctx, req.OldPath, req.NewPath)
+	response, err := client.RenameFile(ctx, req.OldPath, req.NewPath, req.Repo)
 	if err != nil {
 		h.logger.Error("failed to rename file", zap.Error(err),
 			zap.String("session_id", req.SessionID),

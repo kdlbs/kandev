@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,11 +30,19 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 }
 
 // createTablesSQL holds the DDL for all GitHub integration tables.
+//
+// Multi-repo: both `github_pr_watches` and `github_task_prs` carry a
+// `repository_id` that names the per-task repository (when the task spans
+// multiple repos). The uniqueness constraints include `repository_id` so
+// each repo can have its own watch/PR for the same session/task. Existing
+// installs migrated from the single-repo schema get the column dropped to
+// `”` (empty) and the constraints rebuilt by `migratePRTablesForMultiRepo`.
 const createTablesSQL = `
 	CREATE TABLE IF NOT EXISTS github_pr_watches (
 		id TEXT PRIMARY KEY,
-		session_id TEXT NOT NULL UNIQUE,
+		session_id TEXT NOT NULL,
 		task_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL DEFAULT '',
 		owner TEXT NOT NULL,
 		repo TEXT NOT NULL,
 		pr_number INTEGER NOT NULL,
@@ -43,12 +52,14 @@ const createTablesSQL = `
 		last_check_status TEXT DEFAULT '',
 		last_review_state TEXT DEFAULT '',
 		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		updated_at DATETIME NOT NULL,
+		UNIQUE(session_id, repository_id)
 	);
 
 	CREATE TABLE IF NOT EXISTS github_task_prs (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL DEFAULT '',
 		owner TEXT NOT NULL,
 		repo TEXT NOT NULL,
 		pr_number INTEGER NOT NULL,
@@ -71,7 +82,7 @@ const createTablesSQL = `
 		closed_at DATETIME,
 		last_synced_at DATETIME,
 		updated_at DATETIME NOT NULL,
-		UNIQUE(task_id, pr_number)
+		UNIQUE(task_id, repository_id, pr_number)
 	);
 
 	CREATE TABLE IF NOT EXISTS github_review_watches (
@@ -152,7 +163,132 @@ func (s *Store) initSchema() error {
 	// Phase 4 (multi-repo): per-repo PR association on github_task_prs.
 	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE github_pr_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`)
+	if err := s.migratePRTablesForMultiRepo(); err != nil {
+		return fmt.Errorf("migrate PR tables for multi-repo: %w", err)
+	}
 	return nil
+}
+
+// migratePRTablesForMultiRepo rebuilds `github_pr_watches` and
+// `github_task_prs` to drop the legacy single-repo unique constraints
+// (`UNIQUE(session_id)` and `UNIQUE(task_id, pr_number)`) and replace them
+// with the multi-repo variants. SQLite can't ALTER TABLE DROP CONSTRAINT, so
+// each table is rebuilt via the recommended copy-and-rename pattern. The
+// migration is idempotent: it inspects `sqlite_master.sql` for the legacy
+// constraint string and only runs the rebuild when found.
+func (s *Store) migratePRTablesForMultiRepo() error {
+	if err := s.rebuildIfHasLegacyConstraint(
+		"github_pr_watches",
+		"session_id TEXT NOT NULL UNIQUE",
+		`CREATE TABLE github_pr_watches_new (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			task_id TEXT NOT NULL,
+			repository_id TEXT NOT NULL DEFAULT '',
+			owner TEXT NOT NULL,
+			repo TEXT NOT NULL,
+			pr_number INTEGER NOT NULL,
+			branch TEXT NOT NULL,
+			last_checked_at DATETIME,
+			last_comment_at DATETIME,
+			last_check_status TEXT DEFAULT '',
+			last_review_state TEXT DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			UNIQUE(session_id, repository_id)
+		)`,
+		`INSERT INTO github_pr_watches_new (
+			id, session_id, task_id, repository_id, owner, repo, pr_number, branch,
+			last_checked_at, last_comment_at, last_check_status, last_review_state,
+			created_at, updated_at
+		) SELECT
+			id, session_id, task_id, COALESCE(repository_id, ''), owner, repo, pr_number, branch,
+			last_checked_at, last_comment_at, last_check_status, last_review_state,
+			created_at, updated_at
+		FROM github_pr_watches`,
+	); err != nil {
+		return err
+	}
+	return s.rebuildIfHasLegacyConstraint(
+		"github_task_prs",
+		"UNIQUE(task_id, pr_number)",
+		`CREATE TABLE github_task_prs_new (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			repository_id TEXT NOT NULL DEFAULT '',
+			owner TEXT NOT NULL,
+			repo TEXT NOT NULL,
+			pr_number INTEGER NOT NULL,
+			pr_url TEXT NOT NULL,
+			pr_title TEXT NOT NULL,
+			head_branch TEXT NOT NULL,
+			base_branch TEXT NOT NULL,
+			author_login TEXT NOT NULL,
+			state TEXT NOT NULL DEFAULT 'open',
+			review_state TEXT NOT NULL DEFAULT '',
+			checks_state TEXT NOT NULL DEFAULT '',
+			mergeable_state TEXT NOT NULL DEFAULT '',
+			review_count INTEGER DEFAULT 0,
+			pending_review_count INTEGER DEFAULT 0,
+			comment_count INTEGER DEFAULT 0,
+			additions INTEGER DEFAULT 0,
+			deletions INTEGER DEFAULT 0,
+			created_at DATETIME NOT NULL,
+			merged_at DATETIME,
+			closed_at DATETIME,
+			last_synced_at DATETIME,
+			updated_at DATETIME NOT NULL,
+			UNIQUE(task_id, repository_id, pr_number)
+		)`,
+		`INSERT INTO github_task_prs_new (
+			id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title,
+			head_branch, base_branch, author_login, state, review_state, checks_state,
+			mergeable_state, review_count, pending_review_count, comment_count,
+			additions, deletions, created_at, merged_at, closed_at, last_synced_at, updated_at
+		) SELECT
+			id, task_id, COALESCE(repository_id, ''), owner, repo, pr_number, pr_url, pr_title,
+			head_branch, base_branch, author_login, state, review_state, checks_state,
+			mergeable_state, review_count, pending_review_count, comment_count,
+			additions, deletions, created_at, merged_at, closed_at, last_synced_at, updated_at
+		FROM github_task_prs`,
+	)
+}
+
+// rebuildIfHasLegacyConstraint checks the table's stored CREATE statement in
+// `sqlite_master` for the literal `legacyConstraint` substring; if present,
+// runs the table rebuild (create new, copy data, drop old, rename) inside a
+// transaction. No-op when the legacy substring is absent — fresh installs
+// already use the new schema and previously-migrated databases skip too.
+func (s *Store) rebuildIfHasLegacyConstraint(table, legacyConstraint, createNew, copyData string) error {
+	var existingSQL string
+	row := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`, table)
+	if err := row.Scan(&existingSQL); err != nil {
+		// Table missing entirely shouldn't happen after createTablesSQL ran;
+		// treat as no-op to keep the migration robust under unexpected drift.
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if !strings.Contains(existingSQL, legacyConstraint) {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, stmt := range []string{
+		createNew,
+		copyData,
+		"DROP TABLE " + table,
+		"ALTER TABLE " + table + "_new RENAME TO " + table,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("rebuild %s: %w", table, err)
+		}
+	}
+	return tx.Commit()
 }
 
 // --- PR Watch operations ---
@@ -172,17 +308,45 @@ func (s *Store) CreatePRWatch(ctx context.Context, w *PRWatch) error {
 	return err
 }
 
-// GetPRWatchBySession returns the PR watch for a session.
+// GetPRWatchBySession returns the first PR watch for a session. For
+// multi-repo sessions the result is non-deterministic across repos — use
+// GetPRWatchBySessionAndRepo or ListPRWatchesBySession instead.
 func (s *Store) GetPRWatchBySession(ctx context.Context, sessionID string) (*PRWatch, error) {
 	var w PRWatch
-	err := s.ro.GetContext(ctx, &w, `SELECT * FROM github_pr_watches WHERE session_id = ?`, sessionID)
+	err := s.ro.GetContext(ctx, &w,
+		`SELECT * FROM github_pr_watches WHERE session_id = ? LIMIT 1`, sessionID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	return &w, err
 }
 
-// GetPRWatchByTask returns the PR watch for a task (first match).
+// GetPRWatchBySessionAndRepo returns the PR watch for a (session, repository)
+// pair, or nil. Used by per-repo branch-switch / commit handlers so each
+// repo's watch is reset independently.
+func (s *Store) GetPRWatchBySessionAndRepo(ctx context.Context, sessionID, repositoryID string) (*PRWatch, error) {
+	var w PRWatch
+	err := s.ro.GetContext(ctx, &w,
+		`SELECT * FROM github_pr_watches WHERE session_id = ? AND repository_id = ? LIMIT 1`,
+		sessionID, repositoryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &w, err
+}
+
+// ListPRWatchesBySession returns every PR watch for a session (one per repo
+// in multi-repo workspaces). Empty slice when no watches exist.
+func (s *Store) ListPRWatchesBySession(ctx context.Context, sessionID string) ([]*PRWatch, error) {
+	var watches []*PRWatch
+	err := s.ro.SelectContext(ctx, &watches,
+		`SELECT * FROM github_pr_watches WHERE session_id = ? ORDER BY created_at ASC`, sessionID)
+	return watches, err
+}
+
+// GetPRWatchByTask returns the first PR watch for a task. For multi-repo
+// tasks the result is non-deterministic across repos — use
+// ListPRWatchesByTask when every repo's watch is needed.
 func (s *Store) GetPRWatchByTask(ctx context.Context, taskID string) (*PRWatch, error) {
 	var w PRWatch
 	err := s.ro.GetContext(ctx, &w, `SELECT * FROM github_pr_watches WHERE task_id = ? ORDER BY updated_at DESC LIMIT 1`, taskID)
@@ -190,6 +354,15 @@ func (s *Store) GetPRWatchByTask(ctx context.Context, taskID string) (*PRWatch, 
 		return nil, nil
 	}
 	return &w, err
+}
+
+// ListPRWatchesByTask returns every PR watch for a task (one per repo in
+// multi-repo workspaces).
+func (s *Store) ListPRWatchesByTask(ctx context.Context, taskID string) ([]*PRWatch, error) {
+	var watches []*PRWatch
+	err := s.ro.SelectContext(ctx, &watches,
+		`SELECT * FROM github_pr_watches WHERE task_id = ? ORDER BY created_at ASC`, taskID)
+	return watches, err
 }
 
 // ListActivePRWatches returns all active PR watches whose task is not archived.
@@ -389,6 +562,13 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Multi-repo: only delete the row for the same (task, repo) pair, leaving
+	// other repos' rows alone. Single-repo callers (RepositoryID == "")
+	// only delete legacy untagged rows so a multi-repo task's per-repo rows
+	// don't get wiped if a single-repo callsite slips in. The poller and
+	// service.AssociatePR* paths now always pass RepositoryID explicitly;
+	// any future caller that forgets does the safer thing (preserve tagged
+	// rows) instead of the old "nuke everything" behavior.
 	if tp.RepositoryID != "" {
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM github_task_prs WHERE task_id = ? AND repository_id = ?`,
@@ -397,7 +577,7 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR) error {
 		}
 	} else {
 		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM github_task_prs WHERE task_id = ?`, tp.TaskID); err != nil {
+			`DELETE FROM github_task_prs WHERE task_id = ? AND repository_id = ''`, tp.TaskID); err != nil {
 			return err
 		}
 	}

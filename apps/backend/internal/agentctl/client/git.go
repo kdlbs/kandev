@@ -121,11 +121,14 @@ func (c *Client) GitCommit(ctx context.Context, message string, stageAll bool, a
 }
 
 // GitRenameBranch renames the current branch to a new name.
-func (c *Client) GitRenameBranch(ctx context.Context, newName string) (*GitOperationResult, error) {
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) GitRenameBranch(ctx context.Context, newName, repo string) (*GitOperationResult, error) {
 	payload := struct {
 		NewName string `json:"new_name"`
+		Repo    string `json:"repo,omitempty"`
 	}{
 		NewName: newName,
+		Repo:    repo,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/rename-branch", payload)
 }
@@ -202,17 +205,20 @@ func (c *Client) GitReset(ctx context.Context, commitSHA, mode, repo string) (*G
 }
 
 // GitCreatePR creates a pull request using the gh CLI.
-func (c *Client) GitCreatePR(ctx context.Context, title, body, baseBranch string, draft bool) (*PRCreateResult, error) {
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) GitCreatePR(ctx context.Context, title, body, baseBranch string, draft bool, repo string) (*PRCreateResult, error) {
 	payload := struct {
 		Title      string `json:"title"`
 		Body       string `json:"body"`
 		BaseBranch string `json:"base_branch"`
 		Draft      bool   `json:"draft"`
+		Repo       string `json:"repo,omitempty"`
 	}{
 		Title:      title,
 		Body:       body,
 		BaseBranch: baseBranch,
 		Draft:      draft,
+		Repo:       repo,
 	}
 
 	reqBody, err := json.Marshal(payload)

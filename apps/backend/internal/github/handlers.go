@@ -216,9 +216,21 @@ func wsGetTaskPR(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *
 	}
 }
 
+// wsSyncTaskPR returns ALL PR rows for a task — multi-repo tasks have one
+// per repo. Single-repo callers can read `prs[0]` (or treat empty as "no
+// PR yet"); multi-repo callers iterate and call setTaskPR for each so the
+// per-repo PR icon stays in sync. The legacy single-PR shape would have
+// silently dropped every repo's PR except the most-recently-updated one.
 func wsSyncTaskPR(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return wsWithField("task_id", func(ctx context.Context, taskID string) (interface{}, error) {
-		return svc.TriggerPRSync(ctx, taskID)
+		prs, err := svc.TriggerPRSyncAll(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		// Return an envelope so the frontend always gets a deterministic
+		// shape even on empty results (`{prs: []}`); a bare `nil` would
+		// confuse the WS handler's success/error branching.
+		return map[string]interface{}{"prs": prs}, nil
 	})
 }
 

@@ -944,20 +944,27 @@ func (s *Server) resolvePerRepoBase(c *gin.Context, repo string) string {
 	return ""
 }
 
-// mergeCumulativeFiles copies per-repo files into the merged map under the
-// `<repo>/<path>` key and decorates each file payload with `repository_name`
-// + a `path` field carrying the repo-relative path. The composite key keeps
-// `README.md` in two repos from clashing; the frontend reads `path` and
-// `repository_name` off the payload so the file tree groups under the repo
-// without the prefix appearing in the displayed path.
+// mergeCumulativeFiles copies per-repo files into the merged map under a
+// `<repo> <path>` key (NUL-separated) and decorates each file payload
+// with `repository_name` + a `path` field carrying the repo-relative path.
+// The composite key keeps `README.md` in two repos from clashing in the map;
+// the frontend reads `path` and `repository_name` off the payload so the
+// file tree groups under the repo header without the prefix bleeding into
+// the displayed path. NUL is impossible in real paths, so the key is
+// always uniquely splittable and the displayed path is unaffected.
 func mergeCumulativeFiles(dst, src map[string]interface{}, repo string) {
 	for path, payload := range src {
-		if m, ok := payload.(map[string]interface{}); ok {
-			m["repository_name"] = repo
-			m["path"] = path
-			payload = m
+		m, ok := payload.(map[string]interface{})
+		if !ok {
+			// Defensive: only known shape from parseCommitDiff is map[string]interface{}.
+			// If a future change emits something else, route it through unchanged
+			// rather than silently dropping the path/repo metadata.
+			dst[fmt.Sprintf("%s\x00%s", repo, path)] = payload
+			continue
 		}
-		dst[fmt.Sprintf("%s/%s", repo, path)] = payload
+		m["repository_name"] = repo
+		m["path"] = path
+		dst[fmt.Sprintf("%s\x00%s", repo, path)] = m
 	}
 }
 

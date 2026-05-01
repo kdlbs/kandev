@@ -231,7 +231,11 @@ func (s *Server) handleFileSearch(c *gin.Context) {
 	c.JSON(200, types.FileSearchResponse{Files: files})
 }
 
-// handleFileCreate handles file create requests via HTTP POST
+// handleFileCreate handles file create requests via HTTP POST.
+// Optional `Repo` body field scopes the create to a per-repo subdirectory
+// for multi-repo task workspaces; without it a UI-driven create on a
+// multi-repo task lands in the bare task root (one level above any actual
+// repo) instead of inside the intended repo.
 func (s *Server) handleFileCreate(c *gin.Context) {
 	var req streams.FileCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -244,9 +248,15 @@ func (s *Server) handleFileCreate(c *gin.Context) {
 		return
 	}
 
-	s.logger.Info("handleFileCreate: creating file", zap.String("path", req.Path))
+	scopedPath, joinErr := s.procMgr.JoinRepoPath(req.Repo, req.Path)
+	if joinErr != nil {
+		c.JSON(400, streams.FileCreateResponse{Path: req.Path, Error: joinErr.Error()})
+		return
+	}
 
-	err := s.procMgr.GetWorkspaceTracker().CreateFile(req.Path)
+	s.logger.Info("handleFileCreate: creating file", zap.String("path", req.Path), zap.String("repo", req.Repo))
+
+	err := s.procMgr.GetWorkspaceTracker().CreateFile(scopedPath)
 	if err != nil {
 		c.JSON(400, streams.FileCreateResponse{
 			Path:    req.Path,
@@ -264,7 +274,9 @@ func (s *Server) handleFileCreate(c *gin.Context) {
 	})
 }
 
-// handleFileDelete handles file delete requests via HTTP DELETE
+// handleFileDelete handles file delete requests via HTTP DELETE.
+// Optional `repo` query param scopes the delete to a per-repo subdirectory
+// for multi-repo task workspaces.
 func (s *Server) handleFileDelete(c *gin.Context) {
 	path := c.Query("path")
 	if path == "" {
@@ -272,7 +284,13 @@ func (s *Server) handleFileDelete(c *gin.Context) {
 		return
 	}
 
-	err := s.procMgr.GetWorkspaceTracker().DeleteFile(path)
+	scopedPath, joinErr := s.procMgr.JoinRepoPath(c.Query("repo"), path)
+	if joinErr != nil {
+		c.JSON(400, streams.FileDeleteResponse{Path: path, Error: joinErr.Error()})
+		return
+	}
+
+	err := s.procMgr.GetWorkspaceTracker().DeleteFile(scopedPath)
 	if err != nil {
 		c.JSON(400, streams.FileDeleteResponse{
 			Path:    path,
@@ -288,7 +306,10 @@ func (s *Server) handleFileDelete(c *gin.Context) {
 	})
 }
 
-// handleFileRename handles file/directory rename requests via HTTP POST
+// handleFileRename handles file/directory rename requests via HTTP POST.
+// Optional `Repo` body field scopes BOTH old_path and new_path to a per-repo
+// subdirectory; cross-repo renames aren't supported (the rename collapses
+// to a same-repo move).
 func (s *Server) handleFileRename(c *gin.Context) {
 	var req streams.FileRenameRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -305,7 +326,18 @@ func (s *Server) handleFileRename(c *gin.Context) {
 		return
 	}
 
-	err := s.procMgr.GetWorkspaceTracker().RenameFile(req.OldPath, req.NewPath)
+	scopedOld, oldErr := s.procMgr.JoinRepoPath(req.Repo, req.OldPath)
+	if oldErr != nil {
+		c.JSON(400, streams.FileRenameResponse{OldPath: req.OldPath, NewPath: req.NewPath, Error: oldErr.Error()})
+		return
+	}
+	scopedNew, newErr := s.procMgr.JoinRepoPath(req.Repo, req.NewPath)
+	if newErr != nil {
+		c.JSON(400, streams.FileRenameResponse{OldPath: req.OldPath, NewPath: req.NewPath, Error: newErr.Error()})
+		return
+	}
+
+	err := s.procMgr.GetWorkspaceTracker().RenameFile(scopedOld, scopedNew)
 	if err != nil {
 		c.JSON(400, streams.FileRenameResponse{
 			OldPath: req.OldPath,

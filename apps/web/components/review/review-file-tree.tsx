@@ -13,7 +13,7 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { cn } from "@kandev/ui/lib/utils";
 import { FileIcon } from "@/components/ui/file-icon";
 import type { ReviewFile, FileTreeNode } from "./types";
-import { buildFileTree } from "./types";
+import { buildFileTree, reviewFileKey } from "./types";
 
 type ReviewFileTreeProps = {
   files: ReviewFile[];
@@ -107,10 +107,13 @@ function FileNode({
   depth,
 }: Omit<TreeNodeProps, "node"> & { node: FileTreeNode }) {
   const file = node.file!;
-  const isReviewed = reviewedFiles.has(file.path);
-  const isStale = staleFiles.has(file.path);
-  const commentCount = commentCountByFile[file.path] ?? 0;
-  const isSelected = selectedFile === file.path;
+  // Composite key from reviewFileKey() so two same-name files in
+  // different repos don't share reviewed/stale/comment-count slots.
+  const key = reviewFileKey(file);
+  const isReviewed = reviewedFiles.has(key);
+  const isStale = staleFiles.has(key);
+  const commentCount = commentCountByFile[key] ?? 0;
+  const isSelected = selectedFile === key;
   return (
     <div
       className={cn(
@@ -118,12 +121,12 @@ function FileNode({
         isSelected ? "bg-accent/50" : "hover:bg-muted/50",
       )}
       style={{ paddingLeft: `${depth * 12 + 8}px` }}
-      onClick={() => onSelectFile(file.path)}
+      onClick={() => onSelectFile(key)}
     >
       <Checkbox
         checked={isReviewed && !isStale}
         onCheckedChange={(checked) => {
-          onToggleReviewed(file.path, checked === true);
+          onToggleReviewed(key, checked === true);
         }}
         onClick={(e) => e.stopPropagation()}
         className="h-3.5 w-3.5"

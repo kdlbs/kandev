@@ -19,12 +19,15 @@ const (
 )
 
 // TaskBranchInfo describes a task+session that may need a PR watch.
+// RepositoryID scopes multi-repo tasks: each repo is a separate watch row.
+// Empty for legacy single-repo tasks.
 type TaskBranchInfo struct {
-	TaskID    string
-	SessionID string
-	Owner     string
-	Repo      string
-	Branch    string
+	TaskID       string
+	SessionID    string
+	RepositoryID string
+	Owner        string
+	Repo         string
+	Branch       string
 }
 
 // TaskBranchProvider lists tasks that should have PR watches and resolves branches.
@@ -202,7 +205,7 @@ func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
 		return
 	}
 
-	if _, assocErr := p.service.AssociatePRWithTask(ctx, watch.TaskID, pr); assocErr != nil {
+	if _, assocErr := p.service.AssociatePRWithTask(ctx, watch.TaskID, watch.RepositoryID, pr); assocErr != nil {
 		p.logger.Error("failed to associate detected PR with task",
 			zap.String("task_id", watch.TaskID),
 			zap.Int("pr_number", pr.Number),
@@ -258,7 +261,7 @@ func (p *Poller) reconcileWatches(ctx context.Context) {
 	}
 	for _, task := range tasks {
 		if _, ensureErr := p.service.EnsurePRWatch(
-			ctx, task.SessionID, task.TaskID, task.Owner, task.Repo, task.Branch,
+			ctx, task.SessionID, task.TaskID, task.RepositoryID, task.Owner, task.Repo, task.Branch,
 		); ensureErr != nil {
 			p.logger.Error("failed to ensure PR watch",
 				zap.String("session_id", task.SessionID), zap.Error(ensureErr))

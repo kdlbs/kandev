@@ -301,35 +301,57 @@ func (s *Service) SubmitReview(ctx context.Context, owner, repo string, number i
 
 // --- PR Watch operations ---
 
-// CreatePRWatch creates a new PR watch for a session.
-func (s *Service) CreatePRWatch(ctx context.Context, sessionID, taskID, owner, repo string, prNumber int, branch string) (*PRWatch, error) {
-	existing, err := s.store.GetPRWatchBySession(ctx, sessionID)
+// CreatePRWatch creates a new PR watch for a (session, repository) pair.
+// `repositoryID` may be empty for legacy single-repo callers; multi-repo
+// callers must pass the per-task repository_id so each repo gets its own
+// watch row.
+func (s *Service) CreatePRWatch(ctx context.Context, sessionID, taskID, repositoryID, owner, repo string, prNumber int, branch string) (*PRWatch, error) {
+	existing, err := s.store.GetPRWatchBySessionAndRepo(ctx, sessionID, repositoryID)
 	if err != nil {
 		return nil, err
 	}
 	if existing != nil {
-		return existing, nil // already watching
+		return existing, nil // already watching this (session, repo)
 	}
 	w := &PRWatch{
-		SessionID: sessionID,
-		TaskID:    taskID,
-		Owner:     owner,
-		Repo:      repo,
-		PRNumber:  prNumber,
-		Branch:    branch,
+		SessionID:    sessionID,
+		TaskID:       taskID,
+		RepositoryID: repositoryID,
+		Owner:        owner,
+		Repo:         repo,
+		PRNumber:     prNumber,
+		Branch:       branch,
 	}
 	if err := s.store.CreatePRWatch(ctx, w); err != nil {
 		return nil, fmt.Errorf("create PR watch: %w", err)
 	}
 	s.logger.Info("created PR watch",
 		zap.String("session_id", sessionID),
+		zap.String("repository_id", repositoryID),
 		zap.Int("pr_number", prNumber))
 	return w, nil
 }
 
-// GetPRWatchBySession returns the PR watch for a session.
+// GetPRWatchBySession returns the first PR watch for a session. Multi-repo
+// callers should prefer GetPRWatchBySessionAndRepo to avoid landing on the
+// wrong repo's watch.
 func (s *Service) GetPRWatchBySession(ctx context.Context, sessionID string) (*PRWatch, error) {
 	return s.store.GetPRWatchBySession(ctx, sessionID)
+}
+
+// GetPRWatchBySessionAndRepo returns the PR watch for a (session, repo) pair.
+func (s *Service) GetPRWatchBySessionAndRepo(ctx context.Context, sessionID, repositoryID string) (*PRWatch, error) {
+	return s.store.GetPRWatchBySessionAndRepo(ctx, sessionID, repositoryID)
+}
+
+// ListPRWatchesBySession returns every PR watch for a session.
+func (s *Service) ListPRWatchesBySession(ctx context.Context, sessionID string) ([]*PRWatch, error) {
+	return s.store.ListPRWatchesBySession(ctx, sessionID)
+}
+
+// ListPRWatchesByTask returns every PR watch for a task.
+func (s *Service) ListPRWatchesByTask(ctx context.Context, taskID string) ([]*PRWatch, error) {
+	return s.store.ListPRWatchesByTask(ctx, taskID)
 }
 
 // ListActivePRWatches returns all active PR watches.
@@ -387,10 +409,14 @@ func (s *Service) CheckPRWatch(ctx context.Context, watch *PRWatch) (*PRStatus, 
 	return status, hasNew, nil
 }
 
-// EnsurePRWatch creates a PRWatch with pr_number=0 for a session if one doesn't already exist.
-// The poller will detect the PR by searching for the branch on GitHub.
-func (s *Service) EnsurePRWatch(ctx context.Context, sessionID, taskID, owner, repo, branch string) (*PRWatch, error) {
-	existing, err := s.store.GetPRWatchBySession(ctx, sessionID)
+// EnsurePRWatch creates a PRWatch with pr_number=0 for a (session, repo) pair
+// if one doesn't already exist. The poller will detect the PR by searching
+// for the branch on GitHub. `repositoryID` is empty for legacy single-repo
+// callers; multi-repo callers MUST pass the per-task repository_id so each
+// repo gets its own watch (the table's UNIQUE(session_id, repository_id) used
+// to be UNIQUE(session_id), which silently dropped second-repo watches).
+func (s *Service) EnsurePRWatch(ctx context.Context, sessionID, taskID, repositoryID, owner, repo, branch string) (*PRWatch, error) {
+	existing, err := s.store.GetPRWatchBySessionAndRepo(ctx, sessionID, repositoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -398,27 +424,36 @@ func (s *Service) EnsurePRWatch(ctx context.Context, sessionID, taskID, owner, r
 		return existing, nil
 	}
 	w := &PRWatch{
-		SessionID: sessionID,
-		TaskID:    taskID,
-		Owner:     owner,
-		Repo:      repo,
-		PRNumber:  0,
-		Branch:    branch,
+		SessionID:    sessionID,
+		TaskID:       taskID,
+		RepositoryID: repositoryID,
+		Owner:        owner,
+		Repo:         repo,
+		PRNumber:     0,
+		Branch:       branch,
 	}
 	if err := s.store.CreatePRWatch(ctx, w); err != nil {
 		return nil, fmt.Errorf("ensure PR watch: %w", err)
 	}
 	s.logger.Info("created PR watch for session (will search for PR)",
 		zap.String("session_id", sessionID),
+		zap.String("repository_id", repositoryID),
 		zap.String("branch", branch))
 	return w, nil
 }
 
 // --- Task-PR association ---
 
-// AssociatePRWithTask creates a task-PR association.
-func (s *Service) AssociatePRWithTask(ctx context.Context, taskID string, pr *PR) (*TaskPR, error) {
-	existing, err := s.store.GetTaskPR(ctx, taskID)
+// AssociatePRWithTask creates a task-PR association scoped to a specific
+// repository. `repositoryID` is the per-task repository_id (from
+// task_repositories); empty preserves legacy single-repo behavior. Multi-repo
+// callers MUST pass it — empty causes ReplaceTaskPR to wipe the entire task's
+// PR rows (legacy "delete all" branch), which is what older code relied on.
+func (s *Service) AssociatePRWithTask(ctx context.Context, taskID, repositoryID string, pr *PR) (*TaskPR, error) {
+	// Check for an existing PR for this exact (task, repo). Multi-repo callers
+	// must scope by repository_id so the same PR number in two repos doesn't
+	// short-circuit the second association.
+	existing, err := s.store.GetTaskPRByRepository(ctx, taskID, repositoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -426,32 +461,34 @@ func (s *Service) AssociatePRWithTask(ctx context.Context, taskID string, pr *PR
 		return existing, nil
 	}
 	tp := &TaskPR{
-		TaskID:      taskID,
-		Owner:       pr.RepoOwner,
-		Repo:        pr.RepoName,
-		PRNumber:    pr.Number,
-		PRURL:       pr.HTMLURL,
-		PRTitle:     pr.Title,
-		HeadBranch:  pr.HeadBranch,
-		BaseBranch:  pr.BaseBranch,
-		AuthorLogin: pr.AuthorLogin,
-		State:       pr.State,
-		Additions:   pr.Additions,
-		Deletions:   pr.Deletions,
-		CreatedAt:   pr.CreatedAt,
-		MergedAt:    pr.MergedAt,
-		ClosedAt:    pr.ClosedAt,
+		TaskID:       taskID,
+		RepositoryID: repositoryID,
+		Owner:        pr.RepoOwner,
+		Repo:         pr.RepoName,
+		PRNumber:     pr.Number,
+		PRURL:        pr.HTMLURL,
+		PRTitle:      pr.Title,
+		HeadBranch:   pr.HeadBranch,
+		BaseBranch:   pr.BaseBranch,
+		AuthorLogin:  pr.AuthorLogin,
+		State:        pr.State,
+		Additions:    pr.Additions,
+		Deletions:    pr.Deletions,
+		CreatedAt:    pr.CreatedAt,
+		MergedAt:     pr.MergedAt,
+		ClosedAt:     pr.ClosedAt,
 	}
-	// ReplaceTaskPR atomically deletes any existing association for the task
-	// and inserts the new row inside a single transaction. This preserves the
-	// effective 1:1 task→PR mapping and prevents a window where the task has
-	// no associated PR or concurrent calls produce duplicate rows.
+	// ReplaceTaskPR atomically deletes any existing association for the
+	// (task, repository) pair and inserts the new row inside one transaction.
+	// Scoping by repository_id keeps multi-repo tasks intact; legacy callers
+	// (repositoryID == "") still get the "delete all" semantics.
 	if err := s.store.ReplaceTaskPR(ctx, tp); err != nil {
 		return nil, fmt.Errorf("replace task PR: %w", err)
 	}
 	if existing != nil {
 		s.logger.Info("replaced stale task PR association",
 			zap.String("task_id", taskID),
+			zap.String("repository_id", repositoryID),
 			zap.Int("old_pr_number", existing.PRNumber),
 			zap.Int("new_pr_number", pr.Number))
 	}
@@ -466,13 +503,18 @@ func (s *Service) AssociatePRWithTask(ctx context.Context, taskID string, pr *PR
 
 	s.logger.Info("associated PR with task",
 		zap.String("task_id", taskID),
+		zap.String("repository_id", repositoryID),
 		zap.Int("pr_number", pr.Number))
 	return tp, nil
 }
 
-// AssociatePRByURL parses a GitHub PR URL, fetches the PR data, creates a PR watch,
-// and associates it with the given task. Called after user creates a PR from the UI.
-func (s *Service) AssociatePRByURL(ctx context.Context, sessionID, taskID, prURL, branch string) {
+// AssociatePRByURL parses a GitHub PR URL, fetches the PR data, creates a PR
+// watch, and associates it with the given task. Called after the user
+// creates a PR from the UI. `repositoryID` scopes the watch + association to
+// a specific per-task repository (multi-repo tasks); empty preserves the
+// legacy single-repo behavior. Without this, the second repo's UI-initiated
+// PR would overwrite the first's TaskPR row.
+func (s *Service) AssociatePRByURL(ctx context.Context, sessionID, taskID, repositoryID, prURL, branch string) {
 	if s.client == nil {
 		return
 	}
@@ -493,13 +535,13 @@ func (s *Service) AssociatePRByURL(ctx context.Context, sessionID, taskID, prURL
 	if branch == "" {
 		branch = pr.HeadBranch
 	}
-	if _, watchErr := s.CreatePRWatch(ctx, sessionID, taskID, owner, repo, prNumber, branch); watchErr != nil {
+	if _, watchErr := s.CreatePRWatch(ctx, sessionID, taskID, repositoryID, owner, repo, prNumber, branch); watchErr != nil {
 		s.logger.Error("failed to create PR watch after PR creation",
 			zap.String("session_id", sessionID), zap.Error(watchErr))
 	}
 
 	// Associate PR with task (persists + publishes WS event)
-	if _, assocErr := s.AssociatePRWithTask(ctx, taskID, pr); assocErr != nil {
+	if _, assocErr := s.AssociatePRWithTask(ctx, taskID, repositoryID, pr); assocErr != nil {
 		s.logger.Error("failed to associate PR with task after creation",
 			zap.String("task_id", taskID), zap.Error(assocErr))
 	}
@@ -602,14 +644,35 @@ func (s *Service) ListWorkspaceTaskPRs(ctx context.Context, workspaceID string) 
 	return result, nil
 }
 
-// SyncTaskPR updates a TaskPR record with the latest PR status.
+// findTaskPRForStatus locates the TaskPR row matching the (task, owner, repo,
+// pr_number) tuple from a poll result. Multi-repo tasks can have multiple
+// rows for the same task — narrowing by (owner, repo, pr_number) ensures the
+// caller updates the right one. Returns nil (no error) when no row exists,
+// matching the prior GetTaskPR semantics.
+func (s *Service) findTaskPRForStatus(ctx context.Context, taskID string, pr *PR) (*TaskPR, error) {
+	rows, err := s.store.ListTaskPRsByTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	for _, tp := range rows {
+		if tp.Owner == pr.RepoOwner && tp.Repo == pr.RepoName && tp.PRNumber == pr.Number {
+			return tp, nil
+		}
+	}
+	return nil, nil
+}
+
+// SyncTaskPR updates a TaskPR record with the latest PR status. Multi-repo:
+// the row is found by (task_id, owner, repo, pr_number) since the same
+// task can have several PRs; the legacy GetTaskPR(taskID) "first match"
+// would cross repos and silently update the wrong row.
 // It only publishes a github.task_pr.updated event when data actually changed,
 // preventing feedback loops with frontend sync handlers.
 func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatus) error {
 	if status == nil || status.PR == nil {
 		return fmt.Errorf("sync task PR: missing PR data for task %s", taskID)
 	}
-	tp, err := s.store.GetTaskPR(ctx, taskID)
+	tp, err := s.findTaskPRForStatus(ctx, taskID, status.PR)
 	if err != nil || tp == nil {
 		return err
 	}
@@ -760,10 +823,10 @@ func (s *Service) GetPRStatusesBatch(ctx context.Context, refs []PRRef) (map[str
 	return result, nil
 }
 
-// TriggerPRSync performs an immediate PR status sync for a task.
-// If the watch has a PR number, it fetches the latest status from GitHub
-// and syncs it to the TaskPR record. If still searching (pr_number=0),
-// it attempts to find the PR by branch.
+// TriggerPRSync performs an immediate PR status sync for a task. Single-repo
+// callers see the same single-PR contract as before. Multi-repo callers get
+// the primary repo's PR back; they should use TriggerPRSyncAll to refresh
+// every repo's PR in one round-trip.
 func (s *Service) TriggerPRSync(ctx context.Context, taskID string) (*TaskPR, error) {
 	watch, err := s.store.GetPRWatchByTask(ctx, taskID)
 	if err != nil {
@@ -781,6 +844,51 @@ func (s *Service) TriggerPRSync(ctx context.Context, taskID string) (*TaskPR, er
 	return s.triggerPRStatusSync(ctx, watch, taskID)
 }
 
+// TriggerPRSyncAll performs an immediate PR status sync for every PR watch
+// associated with the task and returns every resulting TaskPR. For
+// multi-repo tasks this is the right entry point — TriggerPRSync only
+// touches the most recently updated watch and silently leaves the other
+// repos' PRs stale. Returns an empty slice (not nil) when the task has no
+// watches.
+func (s *Service) TriggerPRSyncAll(ctx context.Context, taskID string) ([]*TaskPR, error) {
+	watches, err := s.store.ListPRWatchesByTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list PR watches: %w", err)
+	}
+	if len(watches) == 0 {
+		// No watches — fall back to whatever TaskPRs already exist (e.g.
+		// PRs imported via task-create-from-PR-URL where the watch is
+		// optional). Empty slice if none.
+		existing, listErr := s.store.ListTaskPRsByTask(ctx, taskID)
+		if listErr != nil {
+			return nil, fmt.Errorf("list task PRs: %w", listErr)
+		}
+		return existing, nil
+	}
+	results := make([]*TaskPR, 0, len(watches))
+	for _, w := range watches {
+		var tp *TaskPR
+		var syncErr error
+		if w.PRNumber == 0 {
+			tp, syncErr = s.triggerPRDetection(ctx, w, taskID)
+		} else {
+			tp, syncErr = s.triggerPRStatusSync(ctx, w, taskID)
+		}
+		if syncErr != nil {
+			s.logger.Warn("per-repo PR sync failed",
+				zap.String("task_id", taskID),
+				zap.String("repository_id", w.RepositoryID),
+				zap.Int("pr_number", w.PRNumber),
+				zap.Error(syncErr))
+			continue
+		}
+		if tp != nil {
+			results = append(results, tp)
+		}
+	}
+	return results, nil
+}
+
 func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID string) (*TaskPR, error) {
 	if s.client == nil {
 		return nil, nil
@@ -794,7 +902,7 @@ func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID
 			zap.String("watch_id", watch.ID), zap.Int("pr_number", pr.Number), zap.Error(err))
 		return nil, fmt.Errorf("update PR watch: %w", err)
 	}
-	if _, assocErr := s.AssociatePRWithTask(ctx, taskID, pr); assocErr != nil {
+	if _, assocErr := s.AssociatePRWithTask(ctx, taskID, watch.RepositoryID, pr); assocErr != nil {
 		s.logger.Error("failed to associate PR with task during sync",
 			zap.String("task_id", taskID), zap.Int("pr_number", pr.Number), zap.Error(assocErr))
 		return nil, fmt.Errorf("associate PR: %w", assocErr)
@@ -805,8 +913,23 @@ func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID
 }
 
 func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskID string) (*TaskPR, error) {
-	// Freshness check: skip GitHub API if recently synced
-	if tp, _ := s.store.GetTaskPR(ctx, taskID); tp != nil && tp.LastSyncedAt != nil {
+	// Freshness check: skip GitHub API if recently synced. Look up by the
+	// watch's own (task, repo) — the legacy GetTaskPR(ctx, taskID) returned
+	// "first match" which for multi-repo tasks would mistakenly hit the
+	// other repo's row and skip the sync that this watch actually needs.
+	loadTaskPR := func(c context.Context) (*TaskPR, error) {
+		tp, err := s.store.GetTaskPRByRepository(c, taskID, watch.RepositoryID)
+		if err != nil {
+			return nil, err
+		}
+		if tp != nil {
+			return tp, nil
+		}
+		// Fall back to the legacy untagged row for single-repo tasks that
+		// haven't been re-associated under the multi-repo schema yet.
+		return s.store.GetTaskPR(c, taskID)
+	}
+	if tp, _ := loadTaskPR(ctx); tp != nil && tp.LastSyncedAt != nil {
 		if time.Since(*tp.LastSyncedAt) < prSyncFreshnessWindow {
 			return tp, nil
 		}
@@ -822,12 +945,12 @@ func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskI
 			return nil, checkErr
 		}
 		if status == nil {
-			return s.store.GetTaskPR(bgCtx, taskID)
+			return loadTaskPR(bgCtx)
 		}
 		if syncErr := s.SyncTaskPR(bgCtx, taskID, status); syncErr != nil {
 			return nil, syncErr
 		}
-		return s.store.GetTaskPR(bgCtx, taskID)
+		return loadTaskPR(bgCtx)
 	})
 	if err != nil {
 		return nil, err

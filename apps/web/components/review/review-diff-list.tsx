@@ -1,43 +1,22 @@
 "use client";
 
 import { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
-import {
-  IconAlertTriangle,
-  IconArrowBackUp,
-  IconChevronDown,
-  IconChevronRight,
-  IconCopy,
-  IconFold,
-  IconFoldDown,
-  IconLayoutColumns,
-  IconLayoutRows,
-  IconPencil,
-  IconTextWrap,
-  IconEye,
-} from "@tabler/icons-react";
+import { IconAlertTriangle, IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Checkbox } from "@kandev/ui/checkbox";
-import { Button } from "@kandev/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { FileDiffViewer } from "@/components/diff";
 import type { RevertBlockInfo } from "@/components/diff";
-import { FileActionsDropdown } from "@/components/editors/file-actions-dropdown";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent, updateFileContent } from "@/lib/ws/workspace-files";
 import { generateUnifiedDiff, calculateHash } from "@/lib/utils/file-diff";
-import { useGlobalViewMode } from "@/hooks/use-global-view-mode";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
 import type { DiffComment } from "@/lib/diff/types";
-import { diffSkipReasonLabel } from "./types";
+import { diffSkipReasonLabel, reviewFileKey } from "./types";
 import type { ReviewFile } from "./types";
 import { RepoGroupHeader } from "./review-diff-list-groups";
+import { FileDiffToolbar } from "./review-diff-toolbar";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
-
-function isMarkdownPath(filePath: string): boolean {
-  const ext = filePath.split(".").pop()?.toLowerCase();
-  return ext === "md" || ext === "mdx";
-}
 
 type ReviewDiffListProps = {
   files: ReviewFile[];
@@ -69,8 +48,14 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   fileRefs,
 }: ReviewDiffListProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  // Find index of selected file - we need to force-load all files up to it
-  const selectedIndex = selectedFile ? files.findIndex((f) => f.path === selectedFile) : -1;
+  // All in-memory state (selectedFile, reviewedFiles, staleFiles, fileRefs)
+  // is keyed by `reviewFileKey(file)` so two files at the same path in
+  // different repos (e.g. `kandev/README.md` + `lvc/README.md`) get
+  // distinct rows. Without this every multi-repo review with same-named
+  // files would mark them all reviewed when one is checked.
+  const selectedIndex = selectedFile
+    ? files.findIndex((f) => reviewFileKey(f) === selectedFile)
+    : -1;
   const groups = useMemo(() => groupByRepositoryName(files, (f) => f.repository_name), [files]);
   const showRepoHeaders = groups.length > 1 || (groups[0]?.repositoryName ?? "") !== "";
   return (
@@ -84,27 +69,32 @@ export const ReviewDiffList = memo(function ReviewDiffList({
           {showRepoHeaders && (
             <RepoGroupHeader name={group.repositoryName} fileCount={group.items.length} />
           )}
-          {group.items.map((file) => (
-            <FileDiffSection
-              key={`${group.repositoryName}:${file.path}`}
-              file={file}
-              isReviewed={reviewedFiles.has(file.path) && !staleFiles.has(file.path)}
-              isStale={staleFiles.has(file.path)}
-              sessionId={sessionId}
-              autoMarkOnScroll={autoMarkOnScroll}
-              wordWrap={wordWrap}
-              isSelected={selectedFile === file.path}
-              forceLoad={
-                selectedIndex >= 0 && files.findIndex((f) => f.path === file.path) <= selectedIndex
-              }
-              onToggleReviewed={onToggleReviewed}
-              onDiscard={onDiscard}
-              onOpenFile={onOpenFile}
-              onPreviewMarkdown={onPreviewMarkdown}
-              sectionRef={fileRefs.get(file.path)}
-              scrollContainer={scrollContainerRef}
-            />
-          ))}
+          {group.items.map((file) => {
+            const key = reviewFileKey(file);
+            return (
+              <FileDiffSection
+                key={key}
+                file={file}
+                fileKey={key}
+                isReviewed={reviewedFiles.has(key) && !staleFiles.has(key)}
+                isStale={staleFiles.has(key)}
+                sessionId={sessionId}
+                autoMarkOnScroll={autoMarkOnScroll}
+                wordWrap={wordWrap}
+                isSelected={selectedFile === key}
+                forceLoad={
+                  selectedIndex >= 0 &&
+                  files.findIndex((f) => reviewFileKey(f) === key) <= selectedIndex
+                }
+                onToggleReviewed={onToggleReviewed}
+                onDiscard={onDiscard}
+                onOpenFile={onOpenFile}
+                onPreviewMarkdown={onPreviewMarkdown}
+                sectionRef={fileRefs.get(key)}
+                scrollContainer={scrollContainerRef}
+              />
+            );
+          })}
         </div>
       ))}
     </div>
@@ -116,6 +106,10 @@ export const ReviewDiffList = memo(function ReviewDiffList({
 
 type FileDiffSectionProps = {
   file: ReviewFile;
+  /** Composite per-file key from `reviewFileKey(file)` — used as the arg
+   *  to `onToggleReviewed` / `onDiscard` so callers can disambiguate
+   *  same-named files in different repos. */
+  fileKey: string;
   isReviewed: boolean;
   isStale: boolean;
   sessionId: string;
@@ -123,8 +117,8 @@ type FileDiffSectionProps = {
   wordWrap: boolean;
   isSelected?: boolean;
   forceLoad?: boolean;
-  onToggleReviewed: (path: string, reviewed: boolean) => void;
-  onDiscard: (path: string) => void;
+  onToggleReviewed: (key: string, reviewed: boolean) => void;
+  onDiscard: (key: string) => void;
   onOpenFile?: (filePath: string) => void;
   onPreviewMarkdown?: (filePath: string) => void;
   sectionRef?: React.RefObject<HTMLDivElement | null>;
@@ -156,8 +150,9 @@ type AutoMarkArgs = {
   autoMarkOnScroll: boolean;
   isReviewed: boolean;
   isStale: boolean;
-  filePath: string;
-  onToggleReviewed: (path: string, reviewed: boolean) => void;
+  /** Composite per-file key (matches what onToggleReviewed expects). */
+  fileKey: string;
+  onToggleReviewed: (key: string, reviewed: boolean) => void;
   scrollContainer: React.RefObject<HTMLDivElement | null>;
 };
 
@@ -165,7 +160,7 @@ function useAutoMarkOnScroll({
   autoMarkOnScroll,
   isReviewed,
   isStale,
-  filePath,
+  fileKey,
   onToggleReviewed,
   scrollContainer,
 }: AutoMarkArgs) {
@@ -187,141 +182,16 @@ function useAutoMarkOnScroll({
           !autoMarkedRef.current
         ) {
           autoMarkedRef.current = true;
-          console.debug("[review] auto-mark reviewed:", filePath);
-          onToggleReviewed(filePath, true);
+          console.debug("[review] auto-mark reviewed:", fileKey);
+          onToggleReviewed(fileKey, true);
         }
       },
       { threshold: 0, root },
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [autoMarkOnScroll, filePath, isReviewed, isStale, onToggleReviewed, scrollContainer]);
+  }, [autoMarkOnScroll, fileKey, isReviewed, isStale, onToggleReviewed, scrollContainer]);
   return scrollSentinelRef;
-}
-
-const iconBtn = "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100";
-const iconBtnActive = "h-6 w-6 p-0 cursor-pointer opacity-100 bg-muted";
-
-type FileDiffToolbarProps = {
-  diff: string;
-  filePath: string;
-  sessionId: string;
-  source: string;
-  wordWrap: boolean;
-  expandUnchanged: boolean;
-  onDiscard: () => void;
-  onOpenFile?: (filePath: string) => void;
-  onPreviewMarkdown?: (filePath: string) => void;
-  onToggleExpandUnchanged: () => void;
-  onToggleWordWrap: () => void;
-};
-
-function ToolbarIconBtn({
-  onClick,
-  tooltip,
-  active,
-  children,
-  className,
-}: {
-  onClick: () => void;
-  tooltip: string;
-  active?: boolean;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          aria-label={tooltip}
-          aria-pressed={active}
-          variant="ghost"
-          size="sm"
-          className={className ?? (active ? iconBtnActive : iconBtn)}
-          onClick={onClick}
-        >
-          {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{tooltip}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function FileDiffToolbar(props: FileDiffToolbarProps) {
-  const {
-    diff,
-    filePath,
-    sessionId,
-    source,
-    wordWrap,
-    expandUnchanged,
-    onDiscard,
-    onOpenFile,
-    onPreviewMarkdown,
-    onToggleExpandUnchanged,
-    onToggleWordWrap,
-  } = props;
-  const [globalViewMode, setGlobalViewMode] = useGlobalViewMode();
-  const handleCopyDiff = useCallback(() => {
-    navigator.clipboard.writeText(diff || "");
-  }, [diff]);
-  const handleToggleViewMode = useCallback(
-    () => setGlobalViewMode(globalViewMode === "split" ? "unified" : "split"),
-    [globalViewMode, setGlobalViewMode],
-  );
-  return (
-    <div className="flex items-center gap-0.5">
-      <ToolbarIconBtn onClick={handleCopyDiff} tooltip="Copy diff">
-        <IconCopy className="h-3.5 w-3.5" />
-      </ToolbarIconBtn>
-      <ToolbarIconBtn
-        onClick={onToggleExpandUnchanged}
-        tooltip={expandUnchanged ? "Collapse unchanged" : "Expand all"}
-        active={expandUnchanged}
-      >
-        {expandUnchanged ? (
-          <IconFold className="h-3.5 w-3.5" />
-        ) : (
-          <IconFoldDown className="h-3.5 w-3.5" />
-        )}
-      </ToolbarIconBtn>
-      <ToolbarIconBtn onClick={onToggleWordWrap} tooltip="Toggle word wrap" active={wordWrap}>
-        <IconTextWrap className="h-3.5 w-3.5" />
-      </ToolbarIconBtn>
-      <ToolbarIconBtn
-        onClick={handleToggleViewMode}
-        tooltip={globalViewMode === "split" ? "Switch to unified view" : "Switch to split view"}
-      >
-        {globalViewMode === "split" ? (
-          <IconLayoutRows className="h-3.5 w-3.5" />
-        ) : (
-          <IconLayoutColumns className="h-3.5 w-3.5" />
-        )}
-      </ToolbarIconBtn>
-      {onPreviewMarkdown && isMarkdownPath(filePath) && (
-        <ToolbarIconBtn onClick={() => onPreviewMarkdown(filePath)} tooltip="Preview markdown">
-          <IconEye className="h-3.5 w-3.5" />
-        </ToolbarIconBtn>
-      )}
-      {onOpenFile && (
-        <ToolbarIconBtn onClick={() => onOpenFile(filePath)} tooltip="Edit">
-          <IconPencil className="h-3.5 w-3.5" />
-        </ToolbarIconBtn>
-      )}
-      <FileActionsDropdown filePath={filePath} sessionId={sessionId} size="xs" />
-      {source === "uncommitted" && (
-        <ToolbarIconBtn
-          onClick={onDiscard}
-          tooltip="Revert changes"
-          className="h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100 hover:text-destructive"
-        >
-          <IconArrowBackUp className="h-3.5 w-3.5" />
-        </ToolbarIconBtn>
-      )}
-    </div>
-  );
 }
 
 type FileDiffHeaderProps = {
@@ -535,6 +405,7 @@ function renderDiffContent(opts: {
 
 function FileDiffSection({
   file,
+  fileKey,
   isReviewed,
   isStale,
   sessionId,
@@ -563,23 +434,26 @@ function FileDiffSection({
   // Force load when visible via intersection observer, or forceLoad is true
   const shouldRenderContent = isVisible || !!forceLoad;
   useScrollIntoViewOnSelect(isSelected, sectionRef, setCollapsed);
+  // Auto-mark sends the composite key (matches the dialog's reviewed-set
+  // shape) so cross-repo same-named files don't all get marked when one
+  // scrolls past.
   const scrollSentinelRef = useAutoMarkOnScroll({
     autoMarkOnScroll,
     isReviewed,
     isStale,
-    filePath: file.path,
+    fileKey,
     onToggleReviewed,
     scrollContainer,
   });
   const handleCheckboxChange = useCallback(
     (checked: boolean | "indeterminate") => {
-      onToggleReviewed(file.path, checked === true);
+      onToggleReviewed(fileKey, checked === true);
     },
-    [file.path, onToggleReviewed],
+    [fileKey, onToggleReviewed],
   );
   const handleDiscard = useCallback(() => {
-    onDiscard(file.path);
-  }, [file.path, onDiscard]);
+    onDiscard(fileKey);
+  }, [fileKey, onDiscard]);
 
   const handleRevertBlock = useCallback(
     (filePath: string, info: RevertBlockInfo) =>

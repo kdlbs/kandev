@@ -15,9 +15,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// PRCreatedCallback is called after a PR is successfully created.
+// PRCreatedCallback is called after a PR is successfully created. `repo` is
+// the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+// The callback uses it to scope the resulting TaskPR / PRWatch rows to the
+// owning repository so the second repo's PR doesn't overwrite the first.
 // Parameters: ctx, sessionID, taskID, prURL, branch.
-type PRCreatedCallback func(ctx context.Context, sessionID, taskID, prURL, branch string)
+type PRCreatedCallback func(ctx context.Context, sessionID, taskID, prURL, branch, repo string)
 
 // GitOperationFailedCallback is called when a git operation fails.
 // Parameters: ctx, sessionID, taskID, operation name, error output.
@@ -169,10 +172,12 @@ type GitCommitRequest struct {
 	Repo string `json:"repo,omitempty"`
 }
 
-// GitRenameBranchRequest for worktree.rename_branch action
+// GitRenameBranchRequest for worktree.rename_branch action.
+// Repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo.
 type GitRenameBranchRequest struct {
 	SessionID string `json:"session_id"`
 	NewName   string `json:"new_name"`
+	Repo      string `json:"repo,omitempty"`
 }
 
 // GitStageRequest for worktree.stage action
@@ -196,13 +201,17 @@ type GitDiscardRequest struct {
 	Repo      string   `json:"repo,omitempty"` // Multi-repo subpath; empty for single-repo
 }
 
-// GitCreatePRRequest for worktree.create_pr action
+// GitCreatePRRequest for worktree.create_pr action.
+// Repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo
+// workspaces. Without it, agentctl falls back to the workspace root which
+// for multi-repo task workspaces isn't a git repo, so PR creation fails.
 type GitCreatePRRequest struct {
 	SessionID  string `json:"session_id"`
 	Title      string `json:"title"`
 	Body       string `json:"body"`
 	BaseBranch string `json:"base_branch"`
 	Draft      bool   `json:"draft"`
+	Repo       string `json:"repo,omitempty"`
 }
 
 // GitRevertCommitRequest for worktree.revert_commit action
@@ -407,7 +416,7 @@ func (h *GitHandlers) wsRenameBranch(ctx context.Context, msg *ws.Message) (*ws.
 		return nil, err
 	}
 
-	result, err := client.GitRenameBranch(ctx, req.NewName)
+	result, err := client.GitRenameBranch(ctx, req.NewName, req.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("rename branch failed: %w", err)
 	}
@@ -544,12 +553,14 @@ func (h *GitHandlers) wsCreatePR(ctx context.Context, msg *ws.Message) (*ws.Mess
 		return nil, err
 	}
 
-	result, err := client.GitCreatePR(ctx, req.Title, req.Body, req.BaseBranch, req.Draft)
+	result, err := client.GitCreatePR(ctx, req.Title, req.Body, req.BaseBranch, req.Draft, req.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("create PR failed: %w", err)
 	}
 
-	// On success, notify callback to associate PR with task.
+	// On success, notify callback to associate PR with task. The repo subpath
+	// flows through so the orchestrator can scope the resulting TaskPR /
+	// PRWatch rows to the per-task repository_id.
 	// Use a timeout-bound context so a stuck callback doesn't leak the goroutine.
 	if result.Success && result.PRURL != "" && h.onPRCreated != nil {
 		execution, ok := h.lifecycleMgr.GetExecutionBySessionID(req.SessionID)
@@ -557,10 +568,11 @@ func (h *GitHandlers) wsCreatePR(ctx context.Context, msg *ws.Message) (*ws.Mess
 			sessionID := req.SessionID
 			taskID := execution.TaskID
 			prURL := result.PRURL
+			repo := req.Repo
 			go func() {
 				callbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
-				h.onPRCreated(callbackCtx, sessionID, taskID, prURL, "")
+				h.onPRCreated(callbackCtx, sessionID, taskID, prURL, "", repo)
 			}()
 		}
 	}

@@ -429,6 +429,52 @@ func registerRoutes(p routeParams) {
 	}
 }
 
+// resolvePrimaryTaskRepositoryID returns the primary (lowest-position)
+// task_repositories.repository_id for a task, or "" if none / on error.
+// Used by PR-import callbacks where the PR is associated with the task's
+// primary repo (the one the task was created against).
+func resolvePrimaryTaskRepositoryID(ctx context.Context, taskRepo *sqliterepo.Repository, taskID string, log *logger.Logger) string {
+	repo, err := taskRepo.GetPrimaryTaskRepository(ctx, taskID)
+	if err != nil {
+		log.Warn("primary task repository lookup failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		return ""
+	}
+	if repo == nil {
+		return ""
+	}
+	return repo.RepositoryID
+}
+
+// resolveRepositoryIDForSubpath maps a multi-repo subpath name (e.g.
+// "kandev") to its task_repositories.repository_id by joining with the
+// repositories table on Name. Empty subpath falls back to the primary
+// repository so single-repo tasks Just Work. Returns "" if no match — the
+// caller will then write a legacy single-repo PR row.
+func resolveRepositoryIDForSubpath(ctx context.Context, taskRepo *sqliterepo.Repository, taskID, subpath string, log *logger.Logger) string {
+	if subpath == "" {
+		return resolvePrimaryTaskRepositoryID(ctx, taskRepo, taskID, log)
+	}
+	repos, err := taskRepo.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		log.Warn("task repositories lookup failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		return ""
+	}
+	for _, link := range repos {
+		repo, err := taskRepo.GetRepository(ctx, link.RepositoryID)
+		if err != nil || repo == nil {
+			continue
+		}
+		if repo.Name == subpath {
+			return link.RepositoryID
+		}
+	}
+	log.Warn("no task repository matches subpath",
+		zap.String("task_id", taskID), zap.String("subpath", subpath))
+	return ""
+}
+
 // registerTaskRoutes registers all task-related HTTP and WebSocket routes.
 func registerTaskRoutes(p routeParams, planService *taskservice.PlanService) {
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
@@ -437,7 +483,11 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService) {
 	if p.services.GitHub != nil {
 		ghSvc := p.services.GitHub
 		taskH.SetOnTaskCreatedWithPR(func(ctx context.Context, taskID, sessionID, prURL, branch string) {
-			ghSvc.AssociatePRByURL(ctx, sessionID, taskID, prURL, branch)
+			// Task-create-from-PR runs once per task and the PR maps to the
+			// primary repository (first task_repository row). Resolve to that
+			// repository_id so the resulting TaskPR/PRWatch are scoped per-repo.
+			repositoryID := resolvePrimaryTaskRepositoryID(ctx, p.taskRepo, taskID, p.log)
+			ghSvc.AssociatePRByURL(ctx, sessionID, taskID, repositoryID, prURL, branch)
 		})
 	}
 	taskhandlers.RegisterRepositoryRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)

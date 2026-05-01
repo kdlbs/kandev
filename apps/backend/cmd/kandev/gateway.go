@@ -143,8 +143,13 @@ func provideGateway(
 
 		gitHandlers := agenthandlers.NewGitHandlers(lifecycleMgr, &sessionReaderAdapter{repo: taskRepo, logger: log}, log)
 		if githubSvc != nil {
-			gitHandlers.SetOnPRCreated(func(ctx context.Context, sessionID, taskID, prURL, branch string) {
-				githubSvc.AssociatePRByURL(ctx, sessionID, taskID, prURL, branch)
+			gitHandlers.SetOnPRCreated(func(ctx context.Context, sessionID, taskID, prURL, branch, repo string) {
+				// Resolve the multi-repo subpath to a per-task repository_id so the
+				// resulting TaskPR / PRWatch rows are scoped per-repo. Empty `repo`
+				// (single-repo task) yields empty repositoryID and preserves legacy
+				// 1:1 task→PR semantics.
+				repositoryID := resolveRepositoryIDForSubpath(ctx, taskRepo, taskID, repo, log)
+				githubSvc.AssociatePRByURL(ctx, sessionID, taskID, repositoryID, prURL, branch)
 			})
 		}
 		gitHandlers.SetOnGitOperationFailed(func(ctx context.Context, sessionID, taskID, operation, errorOutput string) {

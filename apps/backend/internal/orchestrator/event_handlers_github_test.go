@@ -49,7 +49,7 @@ func (m *mockGitHubService) Client() github.Client { return m.client }
 func (m *mockGitHubService) GetTaskPR(_ context.Context, _ string) (*github.TaskPR, error) {
 	return m.taskPR, m.taskPRErr
 }
-func (m *mockGitHubService) EnsurePRWatch(_ context.Context, _, _, _, _, branch string) (*github.PRWatch, error) {
+func (m *mockGitHubService) EnsurePRWatch(_ context.Context, _, _, _, _, _, branch string) (*github.PRWatch, error) {
 	m.ensureWatchCalls++
 	m.ensureWatchBranch = branch
 	return &github.PRWatch{}, nil
@@ -57,12 +57,15 @@ func (m *mockGitHubService) EnsurePRWatch(_ context.Context, _, _, _, _, branch 
 func (m *mockGitHubService) GetPRWatchBySession(_ context.Context, _ string) (*github.PRWatch, error) {
 	return m.prWatch, nil
 }
-func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, _, _, _ string, _ int, branch string) (*github.PRWatch, error) {
+func (m *mockGitHubService) GetPRWatchBySessionAndRepo(_ context.Context, _, _ string) (*github.PRWatch, error) {
+	return m.prWatch, nil
+}
+func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, _, _, _, _ string, _ int, branch string) (*github.PRWatch, error) {
 	m.createWatchCalls++
 	m.createWatchBranch = branch
 	return &github.PRWatch{}, nil
 }
-func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, _ string, _ *github.PR) (*github.TaskPR, error) {
+func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, _, _ string, _ *github.PR) (*github.TaskPR, error) {
 	m.associateCalls++
 	return &github.TaskPR{}, nil
 }

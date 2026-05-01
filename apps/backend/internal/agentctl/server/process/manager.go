@@ -349,11 +349,17 @@ func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
 	if mode == PollModePaused {
 		return
 	}
-	// Refresh in background — RefreshGitStatus blocks on git commands which can
-	// take seconds on large repos; the HTTP caller shouldn't wait.
+	// Snapshot the tracker slice before launching the goroutine so a
+	// concurrent Stop()/teardown that mutates m.repoTrackers can't race or
+	// nil-deref the iteration. Refresh in background — RefreshGitStatus
+	// blocks on git commands which can take seconds on large repos; the
+	// HTTP caller shouldn't wait.
+	root := m.workspaceTracker
+	trackers := make([]*WorkspaceTracker, len(m.repoTrackers))
+	copy(trackers, m.repoTrackers)
 	go func() {
-		m.workspaceTracker.RefreshGitStatus(ctx)
-		for _, t := range m.repoTrackers {
+		root.RefreshGitStatus(ctx)
+		for _, t := range trackers {
 			t.RefreshGitStatus(ctx)
 		}
 	}()
