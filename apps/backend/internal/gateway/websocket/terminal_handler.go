@@ -246,81 +246,68 @@ func (h *TerminalHandler) shouldUseWorkspaceShell(ctx context.Context, sessionID
 	return h.lifecycleMgr.ShouldUseContainerShell(ctx, sessionID)
 }
 
-func (h *TerminalHandler) waitForRemoteExecutionWithTimeout(
+func (h *TerminalHandler) waitForRemoteExecutionReadyWithTimeout(
 	ctx context.Context,
 	sessionID string,
 	timeout time.Duration,
 ) (*lifecycle.AgentExecution, bool) {
-	// Fast path: execution already exists.
-	if execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID); exists {
-		return execution, true
-	}
+	deadline := time.Now().Add(timeout)
 
-	h.logger.Info("waiting for execution to become available",
+	h.logger.Info("waiting for remote execution to become ready",
 		zap.String("session_id", sessionID),
 		zap.Duration("timeout", timeout))
 
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
 	for {
-		select {
-		case <-ctx.Done():
-			return nil, false
-		case <-timer.C:
-			h.logger.Warn("timed out waiting for execution",
+		if execution, ok := h.remoteExecutionWithClientReady(ctx, sessionID, deadline); ok {
+			return execution, true
+		}
+
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			h.logger.Warn("timed out waiting for remote execution readiness",
 				zap.String("session_id", sessionID),
 				zap.Duration("timeout", timeout))
 			return nil, false
-		case <-ticker.C:
-			if execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID); exists {
-				h.logger.Info("execution became available",
-					zap.String("session_id", sessionID),
-					zap.String("execution_id", execution.ID))
-				return execution, true
-			}
+		}
+
+		wait := pollInterval
+		if remaining < wait {
+			wait = remaining
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, false
+		case <-timer.C:
 		}
 	}
 }
 
-func (h *TerminalHandler) waitForRemoteExecutionClientWithTimeout(
+func (h *TerminalHandler) remoteExecutionWithClientReady(
 	ctx context.Context,
 	sessionID string,
-	timeout time.Duration,
+	deadline time.Time,
 ) (*lifecycle.AgentExecution, bool) {
-	if execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID); exists && execution.GetAgentCtlClient() != nil {
-		return execution, true
+	execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
+	if !exists || execution.GetAgentCtlClient() == nil {
+		return nil, false
 	}
-
-	h.logger.Info("waiting for remote execution client to become available",
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return nil, false
+	}
+	if err := execution.GetAgentCtlClient().WaitForReady(ctx, remaining); err != nil {
+		h.logger.Debug("remote execution agentctl client not ready",
+			zap.String("session_id", sessionID),
+			zap.String("execution_id", execution.ID),
+			zap.Error(err))
+		return nil, false
+	}
+	h.logger.Info("remote execution became ready",
 		zap.String("session_id", sessionID),
-		zap.Duration("timeout", timeout))
-
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, false
-		case <-timer.C:
-			h.logger.Warn("timed out waiting for remote execution client",
-				zap.String("session_id", sessionID),
-				zap.Duration("timeout", timeout))
-			return nil, false
-		case <-ticker.C:
-			if execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID); exists && execution.GetAgentCtlClient() != nil {
-				h.logger.Info("remote execution client became available",
-					zap.String("session_id", sessionID),
-					zap.String("execution_id", execution.ID))
-				return execution, true
-			}
-		}
-	}
+		zap.String("execution_id", execution.ID))
+	return execution, true
 }
 
 func (h *TerminalHandler) handleEnvironmentUserShellWS(c *gin.Context, environmentID, terminalID string) {
@@ -334,7 +321,7 @@ func (h *TerminalHandler) handleEnvironmentUserShellWS(c *gin.Context, environme
 		return
 	}
 	if h.shouldUseWorkspaceShell(c.Request.Context(), execution.SessionID) {
-		remoteExecution, ok := h.waitForRemoteExecutionClientWithTimeout(
+		remoteExecution, ok := h.waitForRemoteExecutionReadyWithTimeout(
 			c.Request.Context(), execution.SessionID, passthroughReadyTimeout,
 		)
 		if !ok {

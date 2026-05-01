@@ -62,7 +62,16 @@ func newTestTerminalHandler(t *testing.T) (*TerminalHandler, *lifecycle.Executio
 	return handler, mgr.ExecutionStoreForTesting()
 }
 
-func TestWaitForRemoteExecutionWithTimeout_FastPath(t *testing.T) {
+func TestWaitForRemoteExecutionReadyWithTimeout_Timeout(t *testing.T) {
+	handler, _ := newTestTerminalHandler(t)
+
+	_, ok := handler.waitForRemoteExecutionReadyWithTimeout(context.Background(), "session-missing", 600*time.Millisecond)
+	if ok {
+		t.Fatal("expected timeout, got execution")
+	}
+}
+
+func TestWaitForRemoteExecutionReadyWithTimeout_NoClient(t *testing.T) {
 	handler, store := newTestTerminalHandler(t)
 
 	store.Add(&lifecycle.AgentExecution{
@@ -71,53 +80,19 @@ func TestWaitForRemoteExecutionWithTimeout_FastPath(t *testing.T) {
 		Status:    v1.AgentStatusRunning,
 	})
 
-	got, ok := handler.waitForRemoteExecutionWithTimeout(context.Background(), "session-1", 1*time.Second)
-	if !ok {
-		t.Fatal("expected fast path to find execution")
-	}
-	if got.ID != "exec-1" {
-		t.Errorf("expected exec-1, got %s", got.ID)
-	}
-}
-
-func TestWaitForRemoteExecutionWithTimeout_PollSuccess(t *testing.T) {
-	handler, store := newTestTerminalHandler(t)
-
-	// Add execution after a short delay (simulates async workspace setup)
-	go func() {
-		time.Sleep(200 * time.Millisecond)
-		store.Add(&lifecycle.AgentExecution{
-			ID:        "exec-delayed",
-			SessionID: "session-1",
-			Status:    v1.AgentStatusRunning,
-		})
-	}()
-
-	got, ok := handler.waitForRemoteExecutionWithTimeout(context.Background(), "session-1", 5*time.Second)
-	if !ok {
-		t.Fatal("expected polling to find execution")
-	}
-	if got.ID != "exec-delayed" {
-		t.Errorf("expected exec-delayed, got %s", got.ID)
-	}
-}
-
-func TestWaitForRemoteExecutionWithTimeout_Timeout(t *testing.T) {
-	handler, _ := newTestTerminalHandler(t)
-
-	_, ok := handler.waitForRemoteExecutionWithTimeout(context.Background(), "session-missing", 600*time.Millisecond)
+	_, ok := handler.waitForRemoteExecutionReadyWithTimeout(context.Background(), "session-1", 600*time.Millisecond)
 	if ok {
-		t.Fatal("expected timeout, got execution")
+		t.Fatal("expected timeout without agentctl client")
 	}
 }
 
-func TestWaitForRemoteExecutionWithTimeout_ContextCancelled(t *testing.T) {
+func TestWaitForRemoteExecutionReadyWithTimeout_ContextCancelled(t *testing.T) {
 	handler, _ := newTestTerminalHandler(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, ok := handler.waitForRemoteExecutionWithTimeout(ctx, "session-1", 5*time.Second)
+	_, ok := handler.waitForRemoteExecutionReadyWithTimeout(ctx, "session-1", 5*time.Second)
 	if ok {
 		t.Fatal("expected context cancellation to return false")
 	}
