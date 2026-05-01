@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState } from "react";
-import { IconCheck, IconChevronDown } from "@tabler/icons-react";
+import { IconCheck, IconChevronDown, IconLoader2 } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@kandev/ui/button";
@@ -48,6 +48,8 @@ interface ComboboxProps {
   filter?: ComboboxFilter;
   /** Optional node rendered to the right of the dropdown label (e.g. refresh button). */
   headerAction?: React.ReactNode;
+  /** When true, swap the trigger chevron for a spinner to indicate loading. */
+  loading?: boolean;
 }
 
 function TriggerLabel({
@@ -117,6 +119,7 @@ export const Combobox = memo(function Combobox({
   plainTrigger = false,
   filter,
   headerAction,
+  loading = false,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
   // Track the highlighted item. Defaults to the selected value so the current
@@ -149,7 +152,11 @@ export const Combobox = memo(function Combobox({
               placeholder={placeholder}
             />
           </div>
-          <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          {loading ? (
+            <IconLoader2 className="ml-2 h-4 w-4 shrink-0 animate-spin opacity-50" />
+          ) : (
+            <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent

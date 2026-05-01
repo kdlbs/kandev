@@ -87,6 +87,7 @@ type BranchSelectorProps = {
   onRefresh?: () => void;
   refreshing?: boolean;
   fetchedAt?: string;
+  loading?: boolean;
 };
 
 export const BranchSelector = memo(function BranchSelector({
@@ -100,6 +101,7 @@ export const BranchSelector = memo(function BranchSelector({
   onRefresh,
   refreshing,
   fetchedAt,
+  loading,
 }: BranchSelectorProps) {
   const headerAction = onRefresh ? (
     <BranchRefreshButton onRefresh={onRefresh} refreshing={refreshing} fetchedAt={fetchedAt} />
@@ -118,6 +120,7 @@ export const BranchSelector = memo(function BranchSelector({
       testId="branch-selector"
       filter={scoreBranch}
       headerAction={headerAction}
+      loading={loading}
     />
   );
 });

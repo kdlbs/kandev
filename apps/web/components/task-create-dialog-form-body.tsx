@@ -57,6 +57,7 @@ type CreateEditSelectorsProps = {
     onRefresh?: () => void;
     refreshing?: boolean;
     fetchedAt?: string;
+    loading?: boolean;
   }>;
   AgentSelectorComponent: React.ComponentType<{
     options: SelectorOption[];
@@ -192,6 +193,7 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
             onRefresh={!isLocalWithoutGitHubUrl ? onRefreshBranches : undefined}
             refreshing={branchesLoading}
             fetchedAt={branchesFetchedAt}
+            loading={branchesLoading || localBranchesLoading}
           />
         </div>
         {isLocalWithoutGitHubUrl && (
