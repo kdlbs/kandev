@@ -40,26 +40,59 @@ export function getSvgDimensions(container: HTMLElement): { w: number; h: number
 const SPECIAL_CHARS_RE = /[$#&/\\<>{}]/;
 
 /**
+ * Bracket-pass trigger: parens are mermaid grammar metachars (stadium-shape
+ * opener) and break parsing when they appear inside `[...]` labels, so they
+ * force quoting in bracket labels even though they're legal in standalone
+ * `(...)` stadium nodes.
+ */
+const BRACKET_TRIGGER_RE = /[$#&/\\<>{}()]/;
+
+/** Index ranges of every top-level `"..."` span (start = opening `"`, end = closing `"`). */
+function findQuotedRanges(s: string): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] === '"' && s[i - 1] !== "\\") {
+      const start = i;
+      i++;
+      while (i < s.length && !(s[i] === '"' && s[i - 1] !== "\\")) i++;
+      out.push([start, i]);
+    }
+    i++;
+  }
+  return out;
+}
+
+const inAnyRange = (offset: number, ranges: Array<[number, number]>): boolean =>
+  ranges.some(([a, b]) => offset >= a && offset <= b);
+
+/**
  * Preprocesses mermaid code to quote text containing special characters.
  * Mermaid requires quotes around text with special chars like $, /, etc.
  *
  * Handles:
- * - Node labels: A[text] -> A["text"] if text contains special chars
+ * - Node labels: A[text] -> A["text"] if text contains special chars or parens
  * - Edge labels: -->|text| -> -->|"text"| if text contains special chars
- * - Subgraph titles: subgraph text -> subgraph "text" if text contains special chars
+ * - Stadium nodes: (text) -> ("text") if text contains special chars
+ *
+ * Skips any region already inside a user-supplied `"..."` label so we never
+ * inject nested quotes into pre-quoted content.
  */
 export function sanitizeMermaidCode(code: string): string {
-  // Quote node labels: [text] or (text) or {text} or ([text]) or [[text]] etc.
-  // Match brackets that aren't already quoted
-  let result = code.replace(/(\[+)([^\]"]+?)(\]+)/g, (match, open, text, close) => {
-    if (SPECIAL_CHARS_RE.test(text) && !text.startsWith('"')) {
+  // Quote node labels: [text] or [[text]] etc. Match brackets that aren't already quoted.
+  let quoted = findQuotedRanges(code);
+  let result = code.replace(/(\[+)([^\]"]+?)(\]+)/g, (match, open, text, close, offset) => {
+    if (inAnyRange(offset, quoted)) return match;
+    if (BRACKET_TRIGGER_RE.test(text) && !text.startsWith('"')) {
       return `${open}"${text}"${close}`;
     }
     return match;
   });
 
   // Quote edge labels: |text|
-  result = result.replace(/\|([^|"]+?)\|/g, (match, text) => {
+  quoted = findQuotedRanges(result);
+  result = result.replace(/\|([^|"]+?)\|/g, (match, text, offset) => {
+    if (inAnyRange(offset, quoted)) return match;
     if (SPECIAL_CHARS_RE.test(text) && !text.startsWith('"')) {
       return `|"${text}"|`;
     }
@@ -67,7 +100,9 @@ export function sanitizeMermaidCode(code: string): string {
   });
 
   // Quote parentheses labels: (text) for stadium/circle nodes
-  result = result.replace(/(\(+)([^)"]+?)(\)+)/g, (match, open, text, close) => {
+  quoted = findQuotedRanges(result);
+  result = result.replace(/(\(+)([^)"]+?)(\)+)/g, (match, open, text, close, offset) => {
+    if (inAnyRange(offset, quoted)) return match;
     // Skip if it looks like a subgraph or keyword
     if (/^(subgraph|end|graph|flowchart|sequenceDiagram)\b/.test(text.trim())) {
       return match;
