@@ -283,6 +283,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		InstanceID:          executionID,
 		TaskID:              taskID,
 		SessionID:           info.SessionID,
+		TaskEnvironmentID:   info.TaskEnvironmentID,
 		AgentProfileID:      info.AgentProfileID,
 		WorkspacePath:       info.WorkspacePath,
 		Protocol:            string(agentConfig.Runtime().Protocol),

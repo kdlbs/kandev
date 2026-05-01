@@ -67,12 +67,12 @@ export function PanelPortalHost({ renderPanel }: PanelPortalHostProps) {
  * Also updates the stored `api` and `params` on every mount, so the portal
  * content can read the latest dockview state.
  *
- * @param sessionId — when provided, tags the portal as session-scoped so it
- *   gets cleaned up on session switch via `releaseBySession()`.
+ * @param envId — when provided, tags the portal as env-scoped so it
+ *   gets cleaned up on env switch via `releaseByEnv()`.
  */
 export function usePortalSlot(
   props: IDockviewPanelProps,
-  sessionId?: string,
+  envId?: string,
 ): React.RefObject<HTMLDivElement | null> {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const panelId = props.api.id;
@@ -83,7 +83,7 @@ export function usePortalSlot(
     const container = containerRef.current;
     if (!container) return;
 
-    const entry = panelPortalManager.acquire(panelId, component, params, props.api, sessionId);
+    const entry = panelPortalManager.acquire(panelId, component, params, props.api, envId);
 
     // Reparent the portal element into this panel's DOM slot.
     container.appendChild(entry.element);
@@ -95,11 +95,11 @@ export function usePortalSlot(
         container.removeChild(entry.element);
       }
     };
-    // sessionId in deps: when session changes, session-scoped panels re-acquire
-    // fresh portals (old ones were released by releaseBySession in the store action).
-    // Global panels pass sessionId=undefined so this is a no-op for them.
+    // envId in deps: when env changes, env-scoped panels re-acquire fresh
+    // portals (old ones were released by releaseByEnv in the store action).
+    // Global panels pass envId=undefined so this is a no-op for them.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panelId, sessionId]);
+  }, [panelId, envId]);
 
   // Forward dockview's param updates into the portal manager so preview-tab
   // content (file-editor, diff-viewer, commit-detail) re-renders when the

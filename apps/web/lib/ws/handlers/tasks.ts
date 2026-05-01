@@ -162,7 +162,14 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       if (task?.primarySessionId && !sessionIds.includes(task.primarySessionId)) {
         sessionIds.push(task.primarySessionId);
       }
-      cleanupTaskStorage(deletedId, sessionIds);
+      const envIds = Array.from(
+        new Set(
+          sessionIds
+            .map((sid) => currentState.environmentIdBySessionId[sid])
+            .filter((eid): eid is string => Boolean(eid)),
+        ),
+      );
+      cleanupTaskStorage(deletedId, sessionIds, envIds);
       for (const sid of sessionIds) {
         useContextFilesStore.getState().clearSession(sid);
       }

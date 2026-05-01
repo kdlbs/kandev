@@ -3,7 +3,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { getRootSplitview } from "@/lib/state/dockview-layout-builders";
-import { setSessionLayout } from "@/lib/local-storage";
+import { setEnvLayout } from "@/lib/local-storage";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
 import { stopUserShell } from "@/lib/api/domains/user-shell-api";
@@ -54,7 +54,7 @@ export function setupGroupTracking(api: DockviewReadyEvent["api"]): () => void {
 export function setupLayoutPersistence(
   api: DockviewReadyEvent["api"],
   saveTimerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>,
-  sessionIdRef: React.MutableRefObject<string | null>,
+  envIdRef: React.MutableRefObject<string | null>,
 ): void {
   api.onDidLayoutChange(() => {
     if (useDockviewStore.getState().isRestoringLayout) return;
@@ -63,10 +63,10 @@ export function setupLayoutPersistence(
     saveTimerRef.current = setTimeout(() => {
       try {
         const json = api.toJSON();
-        const sid = sessionIdRef.current;
+        const envId = envIdRef.current;
         localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
-        if (sid) {
-          setSessionLayout(sid, json);
+        if (envId) {
+          setEnvLayout(envId, json);
         }
       } catch {
         // Ignore serialization errors
@@ -102,13 +102,25 @@ export function setupPortalCleanup(
       });
     }
     const entry = panelPortalManager.get(panel.id);
-    // vscode is session-scoped so entry.sessionId is always set by PortalSlot.
-    if (entry?.component === "vscode" && entry.sessionId) stopVscode(entry.sessionId);
-    // terminal is global (no entry.sessionId) — fall back to the active session.
+    // vscode + terminal stop APIs are keyed by sessionId on the wire. The
+    // portal entry now stores the env it belongs to (or undefined for global
+    // panels like terminal), so resolve to a session in that env — falling
+    // back to the active session — for the API call.
+    const sessionForApi = (() => {
+      const state = appStore.getState();
+      const active = state.tasks.activeSessionId;
+      if (!entry?.envId) return active;
+      // Find any session in the entry's env (active session preferred).
+      if (active && state.environmentIdBySessionId[active] === entry.envId) return active;
+      const match = Object.entries(state.environmentIdBySessionId).find(
+        ([, eid]) => eid === entry.envId,
+      );
+      return match?.[0] ?? active;
+    })();
+    if (entry?.component === "vscode" && sessionForApi) stopVscode(sessionForApi);
     if (entry?.component === "terminal") {
-      const terminalSessionId = entry.sessionId ?? appStore.getState().tasks.activeSessionId;
       const terminalId = entry.params.terminalId as string | undefined;
-      if (terminalId && terminalSessionId) stopUserShell(terminalSessionId, terminalId);
+      if (terminalId && sessionForApi) stopUserShell(sessionForApi, terminalId);
     }
     panelPortalManager.release(panel.id);
   });

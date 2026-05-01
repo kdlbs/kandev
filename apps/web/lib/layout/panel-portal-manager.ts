@@ -13,25 +13,26 @@
  *  – The actual React component tree is rendered into the portal element via
  *    `createPortal`, so component state, effects, and DOM survive layout switches.
  *
- * ## Session scoping
+ * ## Env scoping
  *
- * Portals are either **global** or **session-scoped**:
+ * Portals are either **global** or **env-scoped**:
  *
- * - **Global** (`sessionId` is `undefined`) — the portal persists across session
+ * - **Global** (`envId` is `undefined`) — the portal persists across env
  *   switches. Used for panels that read `activeSessionId` reactively from the
  *   store and automatically show the correct data for whichever session is active.
  *   Examples: sidebar, chat, terminal, changes, files, plan.
  *   Note: terminal, changes, and files use `useEnvironmentSessionId()` to stay
  *   stable across same-environment session switches.
  *
- * - **Session-scoped** (`sessionId` is set) — the portal is bound to the session
- *   that created it and is destroyed via `releaseBySession()` when the user
- *   switches away. Used for panels whose content is intrinsically tied to a
- *   specific session's runtime state (container processes, worktree files, etc.)
- *   and cannot simply re-read a store selector to switch context.
- *   Examples: file-editor, browser, vscode, commit-detail, diff-viewer, pr-detail.
+ * - **Env-scoped** (`envId` is set) — the portal is bound to the task
+ *   environment that created it and is destroyed via `releaseByEnv()` when the
+ *   user switches away to a different env. Used for panels whose content is
+ *   intrinsically tied to a specific env's runtime state (container processes,
+ *   worktree files, etc.) and cannot simply re-read a store selector to switch
+ *   context. Examples: file-editor, browser, vscode, commit-detail, diff-viewer,
+ *   pr-detail.
  *
- * See `SESSION_SCOPED_COMPONENTS` in `dockview-desktop-layout.tsx` for the
+ * See `ENV_SCOPED_COMPONENTS` in `dockview-desktop-layout.tsx` for the
  * authoritative list and per-component rationale.
  */
 
@@ -46,8 +47,8 @@ export type PortalEntry = {
   params: Record<string, unknown>;
   /** Latest dockview panel API handle — updated on each remount. */
   api: DockviewPanelApi | null;
-  /** Session ID this portal is scoped to (undefined = global, persists across sessions). */
-  sessionId?: string;
+  /** Task env ID this portal is scoped to (undefined = global, persists across envs). */
+  envId?: string;
 };
 
 type Listener = () => void;
@@ -83,14 +84,14 @@ export class PanelPortalManager {
     component: string,
     params: Record<string, unknown>,
     api: DockviewPanelApi,
-    sessionId?: string,
+    envId?: string,
   ): PortalEntry {
     let entry = this.entries.get(panelId);
     if (!entry) {
       const el = document.createElement("div");
       el.style.display = "contents";
       el.dataset.portalPanel = panelId;
-      entry = { element: el, component, params, api, sessionId };
+      entry = { element: el, component, params, api, envId };
       this.entries.set(panelId, entry);
       this.version++;
       this.notify();
@@ -114,11 +115,11 @@ export class PanelPortalManager {
     this.notify();
   }
 
-  /** Release all portals scoped to a specific session. */
-  releaseBySession(sessionId: string): void {
+  /** Release all portals scoped to a specific task env. */
+  releaseByEnv(envId: string): void {
     const toRemove: string[] = [];
     for (const [panelId, entry] of this.entries) {
-      if (entry.sessionId === sessionId) {
+      if (entry.envId === envId) {
         toRemove.push(panelId);
       }
     }
@@ -135,7 +136,7 @@ export class PanelPortalManager {
 
   /**
    * Release portals whose panel no longer exists in dockview.
-   * Call after fast-path session switches where `isRestoringLayout` blocked
+   * Call after fast-path env switches where `isRestoringLayout` blocked
    * the normal `onDidRemovePanel` cleanup.
    */
   reconcile(livePanelIds: Set<string>): void {

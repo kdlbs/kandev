@@ -9,23 +9,19 @@ import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
 
 /**
  * Sync `activeSessionId` in the store when the user clicks a session tab.
- * This ensures global panels (changes, files, plan) switch context.
+ * Layouts are env-keyed, so switching between sessions of the same task is
+ * a no-op at the layout level — the env switch action short-circuits when
+ * old==new env. No manual skip flag needed.
  */
 export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: StoreApi<AppState>) {
   return api.onDidActivePanelChange((panel) => {
     if (!panel) return;
-    // Ignore panel activations during layout operations (e.g. drag-to-split,
-    // layout restore) to avoid cascading layout switches.
     if (useDockviewStore.getState().isRestoringLayout) return;
-    // Parse sessionId from panel ID (format: "session:{sessionId}")
     if (!panel.id.startsWith("session:")) return;
     const sid = panel.id.slice("session:".length);
     if (sid && sid !== appStore.getState().tasks.activeSessionId) {
       const taskId = appStore.getState().tasks.activeTaskId;
       if (taskId) {
-        // Skip the next layout switch for this session — clicking a tab
-        // just switches context, the layout stays intact.
-        useDockviewStore.setState({ _skipLayoutSwitchForSession: sid });
         appStore.getState().setActiveSession(taskId, sid);
       }
     }

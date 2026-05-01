@@ -181,15 +181,18 @@ type mockRepository struct {
 	repositories     map[string]*models.Repository
 	executors        map[string]*models.Executor
 	executorsRunning map[string]*models.ExecutorRunning
+	taskEnvironments map[string]*models.TaskEnvironment
 
 	// Optional hook to inject behavior into GetTaskSession (e.g. simulate a
 	// transient DB error); if nil, the default map lookup is used.
 	getTaskSessionFunc func(ctx context.Context, id string) (*models.TaskSession, error)
 
 	// Track calls for verification
-	createTaskSessionCalls []*models.TaskSession
-	updateTaskSessionCalls []*models.TaskSession
-	setSessionPrimaryCalls []string
+	createTaskSessionCalls     []*models.TaskSession
+	updateTaskSessionCalls     []*models.TaskSession
+	setSessionPrimaryCalls     []string
+	createTaskEnvironmentCalls []*models.TaskEnvironment
+	updateTaskEnvironmentCalls []*models.TaskEnvironment
 }
 
 func newMockRepository() *mockRepository {
@@ -200,6 +203,7 @@ func newMockRepository() *mockRepository {
 		repositories:     make(map[string]*models.Repository),
 		executors:        make(map[string]*models.Executor),
 		executorsRunning: make(map[string]*models.ExecutorRunning),
+		taskEnvironments: make(map[string]*models.TaskEnvironment),
 	}
 }
 
@@ -609,12 +613,16 @@ func (m *mockRepository) ListEnvironments(ctx context.Context) ([]*models.Enviro
 
 // Task environment operations
 func (m *mockRepository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
-	return nil, nil
+	return m.taskEnvironments[taskID], nil
 }
 func (m *mockRepository) CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
+	m.createTaskEnvironmentCalls = append(m.createTaskEnvironmentCalls, env)
+	m.taskEnvironments[env.TaskID] = env
 	return nil
 }
 func (m *mockRepository) UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
+	m.updateTaskEnvironmentCalls = append(m.updateTaskEnvironmentCalls, env)
+	m.taskEnvironments[env.TaskID] = env
 	return nil
 }
 

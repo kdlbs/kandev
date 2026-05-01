@@ -38,6 +38,64 @@ func TestErrSessionWorkspaceNotReady_UnrelatedError(t *testing.T) {
 	}
 }
 
+func TestResolveScopeKey(t *testing.T) {
+	t.Run("returns TaskEnvironmentID when execution carries it", func(t *testing.T) {
+		store := NewExecutionStore()
+		store.Add(&AgentExecution{
+			ID:                "exec-1",
+			SessionID:         "session-A",
+			TaskID:            "task-1",
+			TaskEnvironmentID: "env-1",
+			Status:            v1.AgentStatusRunning,
+		})
+		mgr := &Manager{executionStore: store, logger: newTestLogger()}
+
+		if got := mgr.ResolveScopeKey("session-A"); got != "env-1" {
+			t.Errorf("ResolveScopeKey = %q, want %q", got, "env-1")
+		}
+	})
+
+	t.Run("falls back to sessionID when no execution", func(t *testing.T) {
+		mgr := &Manager{executionStore: NewExecutionStore(), logger: newTestLogger()}
+
+		if got := mgr.ResolveScopeKey("session-X"); got != "session-X" {
+			t.Errorf("ResolveScopeKey fallback = %q, want %q", got, "session-X")
+		}
+	})
+
+	t.Run("falls back to sessionID when execution has empty env", func(t *testing.T) {
+		store := NewExecutionStore()
+		store.Add(&AgentExecution{
+			ID:        "exec-2",
+			SessionID: "session-B",
+			TaskID:    "task-2",
+			Status:    v1.AgentStatusRunning,
+		})
+		mgr := &Manager{executionStore: store, logger: newTestLogger()}
+
+		if got := mgr.ResolveScopeKey("session-B"); got != "session-B" {
+			t.Errorf("ResolveScopeKey legacy = %q, want %q", got, "session-B")
+		}
+	})
+
+	t.Run("two sessions sharing env resolve to the same scope", func(t *testing.T) {
+		store := NewExecutionStore()
+		store.Add(&AgentExecution{
+			ID: "exec-A", SessionID: "sess-A", TaskID: "task-1",
+			TaskEnvironmentID: "env-shared", Status: v1.AgentStatusRunning,
+		})
+		store.Add(&AgentExecution{
+			ID: "exec-B", SessionID: "sess-B", TaskID: "task-1",
+			TaskEnvironmentID: "env-shared", Status: v1.AgentStatusRunning,
+		})
+		mgr := &Manager{executionStore: store, logger: newTestLogger()}
+
+		if mgr.ResolveScopeKey("sess-A") != mgr.ResolveScopeKey("sess-B") {
+			t.Error("sessions in the same env must resolve to the same scope key")
+		}
+	})
+}
+
 func TestGetOrEnsureExecution(t *testing.T) {
 	t.Run("returns existing execution from store", func(t *testing.T) {
 		store := NewExecutionStore()

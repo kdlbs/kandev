@@ -283,7 +283,8 @@ func (h *TerminalHandler) handleRemoteUserShellWS(c *gin.Context, sessionID, ter
 	// scripts and dev_script) would open empty in containerized sessions.
 	if initialCommand == "" {
 		if runner := h.lifecycleMgr.GetInteractiveRunner(); runner != nil {
-			initialCommand = runner.LookupShellInitialCommand(sessionID, terminalID)
+			scopeID := scopeIDForExecution(execution, sessionID)
+			initialCommand = runner.LookupShellInitialCommand(scopeID, terminalID)
 		}
 	}
 
@@ -876,6 +877,20 @@ func (h *TerminalHandler) resolveWorkingDir(ctx context.Context, sessionID strin
 	return execution.WorkspacePath, nil
 }
 
+func (h *TerminalHandler) resolveScopeID(ctx context.Context, sessionID string) (string, error) {
+	if _, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, sessionID); err != nil {
+		return "", fmt.Errorf("failed to ensure execution for scope: %w", err)
+	}
+	return h.lifecycleMgr.ResolveScopeKey(sessionID), nil
+}
+
+func scopeIDForExecution(execution *lifecycle.AgentExecution, sessionID string) string {
+	if execution != nil && execution.TaskEnvironmentID != "" {
+		return execution.TaskEnvironmentID
+	}
+	return sessionID
+}
+
 // resolveShellLabel returns the label and initial command for a user shell, derived
 // from either a script ID lookup or a plain label query parameter.
 // Returns an HTTP error string (non-empty) when the script lookup fails.
@@ -903,10 +918,10 @@ func (h *TerminalHandler) startUserShellProcess(
 	sessionID string,
 	terminalID string,
 	interactiveRunner *process.InteractiveRunner,
-) (processID string, httpStatus int, errMsg string) {
+) (processID string, scopeID string, httpStatus int, errMsg string) {
 	label, initialCommand, httpErr := h.resolveShellLabel(c)
 	if httpErr != "" {
-		return "", http.StatusBadRequest, httpErr
+		return "", "", http.StatusBadRequest, httpErr
 	}
 
 	h.logger.Info("handleUserShellWS: starting user shell handling",
@@ -915,13 +930,21 @@ func (h *TerminalHandler) startUserShellProcess(
 		zap.String("label", label),
 		zap.String("initial_command", initialCommand))
 
+	scopeID, err := h.resolveScopeID(c.Request.Context(), sessionID)
+	if err != nil {
+		h.logger.Warn("handleUserShellWS: scope not ready",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return "", "", http.StatusServiceUnavailable, err.Error()
+	}
+
 	preferredShell := h.resolvePreferredShell(c.Request.Context())
 	workingDir, err := h.resolveWorkingDir(c.Request.Context(), sessionID)
 	if err != nil {
 		h.logger.Warn("handleUserShellWS: workspace path not ready",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return "", http.StatusServiceUnavailable, err.Error()
+		return "", "", http.StatusServiceUnavailable, err.Error()
 	}
 
 	opts := &process.UserShellOptions{Label: label, InitialCommand: initialCommand}
@@ -935,14 +958,14 @@ func (h *TerminalHandler) startUserShellProcess(
 		zap.String("initial_command", opts.InitialCommand))
 
 	info, err := interactiveRunner.StartUserShell(
-		c.Request.Context(), sessionID, terminalID, workingDir, preferredShell, opts,
+		c.Request.Context(), scopeID, sessionID, terminalID, workingDir, preferredShell, opts,
 	)
 	if err != nil {
 		h.logger.Error("failed to start user shell",
 			zap.String("session_id", sessionID),
 			zap.String("terminal_id", terminalID),
 			zap.Error(err))
-		return "", http.StatusServiceUnavailable, err.Error()
+		return "", "", http.StatusServiceUnavailable, err.Error()
 	}
 
 	h.logger.Info("handleUserShellWS: user shell started successfully",
@@ -950,7 +973,7 @@ func (h *TerminalHandler) startUserShellProcess(
 		zap.String("terminal_id", terminalID),
 		zap.String("process_id", info.ID))
 
-	return info.ID, 0, ""
+	return info.ID, scopeID, 0, ""
 }
 
 // handleUserShellWS handles WebSocket connections for user shell terminals.
@@ -961,7 +984,7 @@ func (h *TerminalHandler) handleUserShellWS(
 	terminalID string,
 	interactiveRunner *process.InteractiveRunner,
 ) {
-	processID, httpStatus, errMsg := h.startUserShellProcess(c, sessionID, terminalID, interactiveRunner)
+	processID, scopeID, httpStatus, errMsg := h.startUserShellProcess(c, sessionID, terminalID, interactiveRunner)
 	if errMsg != "" {
 		c.JSON(httpStatus, gin.H{"error": errMsg})
 		return
@@ -982,13 +1005,14 @@ func (h *TerminalHandler) handleUserShellWS(
 		zap.String("process_id", processID))
 
 	wsw := newWsWriter(conn)
-	h.runUserShellBridge(conn, sessionID, terminalID, processID, interactiveRunner, wsw)
+	h.runUserShellBridge(conn, sessionID, scopeID, terminalID, processID, interactiveRunner, wsw)
 }
 
 // runUserShellBridge handles WebSocket I/O for user shell terminals.
 func (h *TerminalHandler) runUserShellBridge(
 	conn *gorillaws.Conn,
 	sessionID string,
+	scopeID string,
 	terminalID string,
 	processID string,
 	interactiveRunner *process.InteractiveRunner,
@@ -1001,7 +1025,7 @@ func (h *TerminalHandler) runUserShellBridge(
 		// Clean up WebSocket resources but DON'T stop the process
 		// The process should only be stopped via explicit user_shell.stop message from frontend
 		// This allows reconnection after React remounts or temporary disconnects
-		interactiveRunner.ClearUserShellDirectOutput(sessionID, terminalID)
+		interactiveRunner.ClearUserShellDirectOutput(scopeID, terminalID)
 
 		_ = wsw.Close()
 		_ = conn.Close()
@@ -1034,14 +1058,14 @@ func (h *TerminalHandler) runUserShellBridge(
 
 		if isResizeCommand(data) {
 			directOutputSet = h.handleUserShellResizeCommand(
-				data[1:], sessionID, terminalID, processID,
+				data[1:], sessionID, scopeID, terminalID, processID,
 				interactiveRunner, wsw, directOutputSet, &ptyWriter,
 			)
 			continue
 		}
 
 		directOutputSet = h.handleUserShellInput(
-			data, sessionID, terminalID, processID,
+			data, sessionID, scopeID, terminalID, processID,
 			interactiveRunner, wsw, &ptyWriter, directOutputSet,
 		)
 	}
@@ -1052,6 +1076,7 @@ func (h *TerminalHandler) runUserShellBridge(
 func (h *TerminalHandler) handleUserShellResizeCommand(
 	payload []byte,
 	sessionID string,
+	scopeID string,
 	terminalID string,
 	processID string,
 	interactiveRunner *process.InteractiveRunner,
@@ -1061,11 +1086,11 @@ func (h *TerminalHandler) handleUserShellResizeCommand(
 ) bool {
 	// Set up PTY access BEFORE handling resize if not already done
 	if !directOutputSet {
-		if h.setupUserShellPtyAccess(sessionID, terminalID, processID, interactiveRunner, wsw, ptyWriter) {
+		if h.setupUserShellPtyAccess(sessionID, scopeID, terminalID, processID, interactiveRunner, wsw, ptyWriter) {
 			directOutputSet = true
 		}
 	}
-	h.handleUserShellResize(payload, sessionID, terminalID, interactiveRunner)
+	h.handleUserShellResize(payload, sessionID, scopeID, terminalID, interactiveRunner)
 	return directOutputSet
 }
 
@@ -1074,6 +1099,7 @@ func (h *TerminalHandler) handleUserShellResizeCommand(
 func (h *TerminalHandler) handleUserShellInput(
 	data []byte,
 	sessionID string,
+	scopeID string,
 	terminalID string,
 	processID string,
 	interactiveRunner *process.InteractiveRunner,
@@ -1082,9 +1108,9 @@ func (h *TerminalHandler) handleUserShellInput(
 	directOutputSet bool,
 ) bool {
 	if *ptyWriter != nil {
-		return h.writeToReadyUserShellPty(data, sessionID, terminalID, processID, interactiveRunner, wsw, ptyWriter, directOutputSet)
+		return h.writeToReadyUserShellPty(data, sessionID, scopeID, terminalID, processID, interactiveRunner, wsw, ptyWriter, directOutputSet)
 	}
-	return h.writeToUnreadyUserShellPty(data, sessionID, terminalID, processID, interactiveRunner, wsw, ptyWriter, directOutputSet)
+	return h.writeToUnreadyUserShellPty(data, sessionID, scopeID, terminalID, processID, interactiveRunner, wsw, ptyWriter, directOutputSet)
 }
 
 // writeToReadyUserShellPty writes input to an established user shell PTY.
@@ -1092,6 +1118,7 @@ func (h *TerminalHandler) handleUserShellInput(
 func (h *TerminalHandler) writeToReadyUserShellPty(
 	data []byte,
 	sessionID string,
+	scopeID string,
 	terminalID string,
 	processID string,
 	interactiveRunner *process.InteractiveRunner,
@@ -1105,7 +1132,7 @@ func (h *TerminalHandler) writeToReadyUserShellPty(
 			zap.String("terminal_id", terminalID),
 			zap.Error(err))
 		// Try to re-establish PTY access
-		if h.setupUserShellPtyAccess(sessionID, terminalID, processID, interactiveRunner, wsw, ptyWriter) {
+		if h.setupUserShellPtyAccess(sessionID, scopeID, terminalID, processID, interactiveRunner, wsw, ptyWriter) {
 			directOutputSet = true
 			if _, err := (*ptyWriter).Write(data); err != nil {
 				h.logger.Debug("PTY write error after reconnect",
@@ -1123,6 +1150,7 @@ func (h *TerminalHandler) writeToReadyUserShellPty(
 func (h *TerminalHandler) writeToUnreadyUserShellPty(
 	data []byte,
 	sessionID string,
+	scopeID string,
 	terminalID string,
 	processID string,
 	interactiveRunner *process.InteractiveRunner,
@@ -1130,7 +1158,7 @@ func (h *TerminalHandler) writeToUnreadyUserShellPty(
 	ptyWriter *io.Writer,
 	directOutputSet bool,
 ) bool {
-	if h.setupUserShellPtyAccess(sessionID, terminalID, processID, interactiveRunner, wsw, ptyWriter) {
+	if h.setupUserShellPtyAccess(sessionID, scopeID, terminalID, processID, interactiveRunner, wsw, ptyWriter) {
 		directOutputSet = true
 		if _, err := (*ptyWriter).Write(data); err != nil {
 			h.logger.Debug("PTY write error after setup",
@@ -1150,6 +1178,7 @@ func (h *TerminalHandler) writeToUnreadyUserShellPty(
 // setupUserShellPtyAccess sets up PTY access for a user shell terminal.
 func (h *TerminalHandler) setupUserShellPtyAccess(
 	sessionID string,
+	scopeID string,
 	terminalID string,
 	processID string,
 	interactiveRunner *process.InteractiveRunner,
@@ -1157,7 +1186,7 @@ func (h *TerminalHandler) setupUserShellPtyAccess(
 	ptyWriter *io.Writer,
 ) bool {
 	getWriter := func() (io.Writer, error) {
-		writer, _, err := interactiveRunner.GetUserShellPtyWriter(sessionID, terminalID)
+		writer, _, err := interactiveRunner.GetUserShellPtyWriter(scopeID, terminalID)
 		return writer, err
 	}
 	return h.setupPtyAccessCommon(sessionID, processID, interactiveRunner, wsw, ptyWriter, getWriter)
@@ -1248,6 +1277,7 @@ func (h *TerminalHandler) setupPtyAccessCommon(
 func (h *TerminalHandler) handleUserShellResize(
 	data []byte,
 	sessionID string,
+	scopeID string,
 	terminalID string,
 	interactiveRunner *process.InteractiveRunner,
 ) {
@@ -1269,8 +1299,7 @@ func (h *TerminalHandler) handleUserShellResize(
 		return
 	}
 
-	// Resize the user shell PTY
-	if err := interactiveRunner.ResizeUserShell(sessionID, terminalID, resize.Cols, resize.Rows); err != nil {
+	if err := interactiveRunner.ResizeUserShell(scopeID, terminalID, resize.Cols, resize.Rows); err != nil {
 		h.logger.Warn("failed to resize user shell PTY",
 			zap.String("session_id", sessionID),
 			zap.String("terminal_id", terminalID),

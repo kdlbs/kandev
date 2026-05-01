@@ -3,6 +3,7 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import { IconMinus } from "@tabler/icons-react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { PassthroughTerminal } from "./passthrough-terminal";
 import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
@@ -13,11 +14,11 @@ const DEFAULT_HEIGHT = 300;
 const STORAGE_KEY_HEIGHT = "bottom-terminal-height";
 const STORAGE_KEY_OPEN = "bottom-terminal-open";
 
-type Props = {
-  sessionId: string | null;
-};
-
-export function BottomTerminalPanel({ sessionId }: Props) {
+export function BottomTerminalPanel() {
+  // Pin to a stable sessionId across same-task session switches so the bottom
+  // terminal doesn't reconnect / land on a different shell. Matches the
+  // dockview terminal panel's behavior in `terminal-panel.tsx`.
+  const sessionId = useEnvironmentSessionId();
   const visible = useAppStore((s) => s.bottomTerminal.isOpen);
   const pendingCommand = useAppStore((s) => s.bottomTerminal.pendingCommand);
   const storeApi = useAppStoreApi();

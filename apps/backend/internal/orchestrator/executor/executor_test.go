@@ -160,6 +160,7 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 	repo.sessions[session.ID] = session
 
 	launchCalled := false
+	launchedEnvID := ""
 	agentManager := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			launchCalled = true
@@ -169,6 +170,10 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 			if req.TaskID != "task-123" {
 				t.Errorf("Expected task ID task-123, got %s", req.TaskID)
 			}
+			if req.TaskEnvironmentID == "" {
+				t.Error("Expected non-empty task environment ID")
+			}
+			launchedEnvID = req.TaskEnvironmentID
 			return &LaunchAgentResponse{
 				AgentExecutionID: "exec-123",
 				ContainerID:      "container-123",
@@ -204,6 +209,35 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 	if execution.SessionState != v1.TaskSessionStateStarting {
 		t.Errorf("Expected session state STARTING, got %s", execution.SessionState)
 	}
+	if session.TaskEnvironmentID != launchedEnvID {
+		t.Errorf("Expected session TaskEnvironmentID %q, got %q", launchedEnvID, session.TaskEnvironmentID)
+	}
+	if len(repo.createTaskEnvironmentCalls) != 1 {
+		t.Fatalf("Expected 1 CreateTaskEnvironment call, got %d", len(repo.createTaskEnvironmentCalls))
+	}
+	if repo.createTaskEnvironmentCalls[0].ID != launchedEnvID {
+		t.Errorf("Expected persisted task environment ID %q, got %q", launchedEnvID, repo.createTaskEnvironmentCalls[0].ID)
+	}
+}
+
+func TestAssignLaunchTaskEnvironmentID(t *testing.T) {
+	t.Run("reuses existing task environment", func(t *testing.T) {
+		session := &models.TaskSession{ID: "session-1"}
+		assignLaunchTaskEnvironmentID(session, &models.TaskEnvironment{ID: "env-existing"})
+
+		if session.TaskEnvironmentID != "env-existing" {
+			t.Errorf("TaskEnvironmentID = %q, want env-existing", session.TaskEnvironmentID)
+		}
+	})
+
+	t.Run("allocates id for new task environment", func(t *testing.T) {
+		session := &models.TaskSession{ID: "session-1"}
+		assignLaunchTaskEnvironmentID(session, nil)
+
+		if session.TaskEnvironmentID == "" {
+			t.Fatal("expected non-empty TaskEnvironmentID")
+		}
+	})
 }
 
 func TestLaunchPreparedSession_SessionNotBelongsToTask(t *testing.T) {
