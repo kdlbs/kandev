@@ -71,6 +71,21 @@ function makeId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function reorderViewsById(
+  views: SidebarView[],
+  activeViewId: string,
+  overViewId: string,
+): SidebarView[] | null {
+  if (activeViewId === overViewId) return null;
+  const oldIndex = views.findIndex((v) => v.id === activeViewId);
+  const newIndex = views.findIndex((v) => v.id === overViewId);
+  if (oldIndex === -1 || newIndex === -1) return null;
+  const next = [...views];
+  const [moved] = next.splice(oldIndex, 1);
+  next.splice(newIndex, 0, moved);
+  return next;
+}
+
 export const defaultUIState: UISliceState = {
   previewPanel: {
     openBySessionId: {},
@@ -371,6 +386,12 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => UISlice) {
         const next = name.trim();
         if (!next || next === view.name) return false;
         view.name = next;
+      }),
+    reorderSidebarViews: (activeViewId: string, overViewId: string) =>
+      mv((s) => {
+        const reordered = reorderViewsById(s.views, activeViewId, overViewId);
+        if (!reordered) return false;
+        s.views = reordered;
       }),
   };
 }

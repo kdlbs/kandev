@@ -165,6 +165,7 @@ export type UISliceActions = {
   deleteSidebarView: (viewId: string) => void;
   renameSidebarView: (viewId: string, name: string) => void;
   duplicateSidebarView: (viewId: string, name: string) => void;
+  reorderSidebarViews: (activeViewId: string, overViewId: string) => void;
   toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) => void;
   toggleSubtaskCollapsed: (parentTaskId: string) => void;
   clearSidebarSyncError: () => void;

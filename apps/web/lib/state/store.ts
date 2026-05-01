@@ -475,6 +475,7 @@ export type AppState = {
   deleteSidebarView: UIA["deleteSidebarView"];
   renameSidebarView: UIA["renameSidebarView"];
   duplicateSidebarView: UIA["duplicateSidebarView"];
+  reorderSidebarViews: UIA["reorderSidebarViews"];
   toggleSidebarGroupCollapsed: UIA["toggleSidebarGroupCollapsed"];
   toggleSubtaskCollapsed: UIA["toggleSubtaskCollapsed"];
   clearSidebarSyncError: UIA["clearSidebarSyncError"];
