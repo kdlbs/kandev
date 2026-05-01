@@ -79,3 +79,57 @@ func TestHandleGetTaskConversation_SessionMustBelongToTask(t *testing.T) {
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
+
+func TestHandleGetTaskConversation_NegativeLimit(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	task, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPGetTaskConversation, map[string]interface{}{
+		"task_id": task.ID,
+		"limit":   -1,
+	})
+
+	resp, err := h.handleGetTaskConversation(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+func TestHandleGetTaskConversation_FilteredPageStillReturnsCursor(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	task, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	_, err := svc.CreateMessage(context.Background(), &service.CreateMessageRequest{
+		TaskSessionID: sess.ID,
+		TaskID:        task.ID,
+		AuthorType:    "agent",
+		Type:          "tool_call",
+		Content:       "tool call 1",
+	})
+	require.NoError(t, err)
+	_, err = svc.CreateMessage(context.Background(), &service.CreateMessageRequest{
+		TaskSessionID: sess.ID,
+		TaskID:        task.ID,
+		AuthorType:    "agent",
+		Type:          "tool_call",
+		Content:       "tool call 2",
+	})
+	require.NoError(t, err)
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPGetTaskConversation, map[string]interface{}{
+		"task_id":       task.ID,
+		"limit":         1,
+		"message_types": []string{"message"},
+	})
+
+	resp, err := h.handleGetTaskConversation(context.Background(), msg)
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, float64(0), payload["total"])
+	assert.Equal(t, true, payload["has_more"])
+	assert.NotEmpty(t, payload["cursor"])
+}

@@ -284,7 +284,7 @@ func (s *Server) registerTools() {
 		s.registerConfigExecutorTools()
 		count += 5
 		s.registerConfigTaskTools()
-		count += 5
+		count += 6
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -302,12 +302,12 @@ func (s *Server) registerTools() {
 		s.registerConfigExecutorTools()
 		count += 5
 		s.registerConfigTaskTools()
-		count += 5
+		count += 6
 		s.registerCreateTaskTool()
 		count++
 	default: // ModeTask
 		s.registerKanbanTools()
-		count += 10
+		count += 11
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++

@@ -662,7 +662,7 @@ func (h *Handlers) handleGetTaskConversation(ctx context.Context, msg *ws.Messag
 
 	messages, hasMore, err := h.taskSvc.ListMessagesPaginated(ctx, service.ListMessagesRequest{
 		TaskSessionID: session.ID,
-		Limit:         req.Limit,
+		Limit:         conversationLimit(req.Limit),
 		Before:        req.Before,
 		After:         req.After,
 		Sort:          req.Sort,
@@ -673,7 +673,7 @@ func (h *Handlers) handleGetTaskConversation(ctx context.Context, msg *ws.Messag
 	}
 
 	result := filterAndConvertMessages(messages, req.Types)
-	cursor := conversationCursor(result)
+	cursor := conversationCursor(messages)
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"task_id":    req.TaskID,
@@ -708,6 +708,9 @@ func parseTaskConversationRequest(msg *ws.Message) (*taskConversationRequest, *w
 	}
 	if req.Sort != "" && req.Sort != "asc" && req.Sort != "desc" {
 		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, "sort must be asc or desc")
+	}
+	if req.Limit < 0 {
+		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, "limit must be non-negative")
 	}
 	return &req, nil
 }
@@ -756,7 +759,14 @@ func filterAndConvertMessages(messages []*models.Message, types []string) []*v1.
 	return result
 }
 
-func conversationCursor(messages []*v1.Message) string {
+func conversationLimit(requested int) int {
+	if requested > 0 {
+		return requested
+	}
+	return service.DefaultMessagesPageSize
+}
+
+func conversationCursor(messages []*models.Message) string {
 	if len(messages) == 0 {
 		return ""
 	}
