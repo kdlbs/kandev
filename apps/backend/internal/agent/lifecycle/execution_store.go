@@ -97,6 +97,19 @@ func (s *ExecutionStore) GetBySessionID(sessionID string) (*AgentExecution, bool
 	return execution, exists
 }
 
+// GetByTaskEnvironmentID returns any execution associated with a task environment ID.
+func (s *ExecutionStore) GetByTaskEnvironmentID(taskEnvironmentID string) (*AgentExecution, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, execution := range s.executions {
+		if execution.TaskEnvironmentID == taskEnvironmentID {
+			return execution, true
+		}
+	}
+	return nil, false
+}
+
 // GetByContainerID returns the agent execution associated with a container ID.
 func (s *ExecutionStore) GetByContainerID(containerID string) (*AgentExecution, bool) {
 	s.mu.RLock()

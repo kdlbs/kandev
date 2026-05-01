@@ -287,6 +287,30 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	return info, nil
 }
 
+// GetWorkspaceInfoForEnvironment returns workspace information for a task environment.
+func (s *Service) GetWorkspaceInfoForEnvironment(ctx context.Context, taskEnvironmentID string) (*lifecycle.WorkspaceInfo, error) {
+	if taskEnvironmentID == "" {
+		return nil, fmt.Errorf("task_environment_id is required")
+	}
+	env, err := s.taskEnvironments.GetTaskEnvironment(ctx, taskEnvironmentID)
+	if err != nil {
+		return nil, err
+	}
+	if env == nil {
+		return nil, fmt.Errorf("task environment %s not found", taskEnvironmentID)
+	}
+	sessions, err := s.sessions.ListTaskSessions(ctx, env.TaskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list sessions for task environment %s: %w", taskEnvironmentID, err)
+	}
+	for _, session := range sessions {
+		if session.TaskEnvironmentID == taskEnvironmentID {
+			return s.GetWorkspaceInfoForSession(ctx, env.TaskID, session.ID)
+		}
+	}
+	return nil, fmt.Errorf("task environment %s has no linked task session", taskEnvironmentID)
+}
+
 func isExecutorRunningNotFoundError(err error) bool {
 	if err == nil {
 		return false

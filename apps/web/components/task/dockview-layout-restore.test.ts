@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { sanitizeLayout } from "./dockview-layout-restore";
 
-const VALID_COMPONENTS = new Set<string>(["chat", "files", "shell", "git"]);
+const VALID_COMPONENTS = new Set<string>(["chat", "files", "shell", "git", "terminal"]);
 
 /**
  * Build a minimal valid SerializedDockview-shaped object — matches what
@@ -136,5 +136,19 @@ describe("sanitizeLayout - size validation", () => {
     const result = sanitizeLayout(layout, VALID_COMPONENTS);
     expect(result).not.toBeNull();
     expect(Object.keys(result.panels)).not.toContain("unknown");
+  });
+
+  it("drops legacy sessionId params from terminal panels", () => {
+    const layout = buildLayout();
+    layout.grid.root.data[2].data.views.push("terminal");
+    (layout.panels as Record<string, unknown>).terminal = {
+      id: "terminal",
+      contentComponent: "terminal",
+      params: { sessionId: "session-1", terminalId: "shell-1" },
+    };
+
+    const result = sanitizeLayout(layout, VALID_COMPONENTS);
+
+    expect(result.panels.terminal.params).toEqual({ terminalId: "shell-1" });
   });
 });

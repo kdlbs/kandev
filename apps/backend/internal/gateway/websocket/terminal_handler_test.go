@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestCheckWebSocketOrigin(t *testing.T) {
@@ -141,6 +143,28 @@ func TestStripTerminalResponses(t *testing.T) {
 			got := stripTerminalResponses(tt.input)
 			if !bytes.Equal(got, tt.want) {
 				t.Errorf("stripTerminalResponses(%q)\n got: %q\nwant: %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseTerminalRoute(t *testing.T) {
+	tests := []struct {
+		name     string
+		target   string
+		wantKind string
+		wantID   string
+	}{
+		{name: "environment route", target: "/environment/env-1", wantKind: terminalRouteEnvironment, wantID: "env-1"},
+		{name: "session route", target: "/session/session-1", wantKind: terminalRouteSession, wantID: "session-1"},
+		{name: "legacy route", target: "/session-legacy", wantKind: terminalRouteLegacy, wantID: "session-legacy"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseTerminalRoute(&gin.Context{Params: gin.Params{{Key: "target", Value: tt.target}}})
+			if got.kind != tt.wantKind || got.id != tt.wantID {
+				t.Fatalf("parseTerminalRoute() = {%q %q}, want {%q %q}",
+					got.kind, got.id, tt.wantKind, tt.wantID)
 			}
 		})
 	}

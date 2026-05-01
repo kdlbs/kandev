@@ -375,6 +375,8 @@ type WorkspaceInfo struct {
 type WorkspaceInfoProvider interface {
 	// GetWorkspaceInfoForSession returns workspace info for a specific task session
 	GetWorkspaceInfoForSession(ctx context.Context, taskID, sessionID string) (*WorkspaceInfo, error)
+	// GetWorkspaceInfoForEnvironment returns workspace info for a task environment.
+	GetWorkspaceInfoForEnvironment(ctx context.Context, taskEnvironmentID string) (*WorkspaceInfo, error)
 }
 
 // RecoveredExecution contains info about an execution recovered from a runtime.

@@ -6,24 +6,38 @@ import { getEnvLayout, getEnvMaximizeState } from "@/lib/local-storage";
 
 const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
 
+// Boundary shim for layouts saved before shell terminals were environment-routed.
+// TerminalPanel resolves the current environment at render time, so stale
+// session-shaped params should be dropped during restore.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeTerminalPanel(panel: any): any {
+  if (panel?.contentComponent !== "terminal" || !panel.params?.sessionId) return panel;
+  const params = { ...panel.params };
+  delete params.sessionId;
+  return { ...panel, params };
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function sanitizeLayout(layout: any, validComponents: Set<string>): any {
   if (!isLayoutShapeHealthy(layout)) return null;
 
   const invalidIds = new Set<string>();
+  let normalizedPanel = false;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const validPanels: Record<string, any> = {};
   for (const [id, panel] of Object.entries(layout.panels)) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const comp = (panel as any).contentComponent;
     if (comp && (validComponents.has(comp) || id.startsWith("session:"))) {
-      validPanels[id] = panel;
+      const nextPanel = normalizeTerminalPanel(panel);
+      validPanels[id] = nextPanel;
+      normalizedPanel ||= nextPanel !== panel;
     } else {
       invalidIds.add(id);
     }
   }
 
-  if (invalidIds.size === 0) return layout;
+  if (invalidIds.size === 0) return normalizedPanel ? { ...layout, panels: validPanels } : layout;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function cleanNode(node: any): any {

@@ -10,7 +10,8 @@ export function reconnectDelayMs(attempt: number): number {
 }
 
 type ConnectWebSocketFn = (opts: {
-  sessionId: string;
+  sessionId?: string;
+  environmentId?: string;
   wsBaseUrl: string;
   mode: "agent" | "shell";
   terminalId: string | undefined;
@@ -26,7 +27,8 @@ type ConnectWebSocketFn = (opts: {
 }) => void;
 
 export type ReconnectLoopOptions = {
-  sessionId: string;
+  sessionId?: string;
+  environmentId?: string;
   wsBaseUrl: string;
   mode: "agent" | "shell";
   terminalId: string | undefined;
@@ -41,6 +43,7 @@ export type ReconnectLoopOptions = {
 
 export function startReconnectLoop({
   sessionId,
+  environmentId,
   wsBaseUrl,
   mode,
   terminalId,
@@ -65,6 +68,7 @@ export function startReconnectLoop({
       if (!isMounted) return;
       connectWebSocket({
         sessionId,
+        environmentId,
         wsBaseUrl,
         mode,
         terminalId,

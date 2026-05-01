@@ -152,25 +152,30 @@ function buildTerminalShellProcessActions(set: ImmerSet) {
 }
 
 function buildUserShellActions(set: ImmerSet) {
+  const getEnvKey = (draft: SessionRuntimeSliceState, sessionId: string) =>
+    draft.environmentIdBySessionId[sessionId];
   return {
     setUserShells: (
       sessionId: string,
       shells: Parameters<SessionRuntimeSlice["setUserShells"]>[1],
     ) =>
       set((draft) => {
-        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        const envKey = getEnvKey(draft, sessionId);
+        if (!envKey) return;
         draft.userShells.byEnvironmentId[envKey] = shells;
         draft.userShells.loaded[envKey] = true;
         draft.userShells.loading[envKey] = false;
       }),
     setUserShellsLoading: (sessionId: string, loading: boolean) =>
       set((draft) => {
-        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        const envKey = getEnvKey(draft, sessionId);
+        if (!envKey) return;
         draft.userShells.loading[envKey] = loading;
       }),
     addUserShell: (sessionId: string, shell: Parameters<SessionRuntimeSlice["addUserShell"]>[1]) =>
       set((draft) => {
-        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        const envKey = getEnvKey(draft, sessionId);
+        if (!envKey) return;
         const existing = draft.userShells.byEnvironmentId[envKey] || [];
         if (!existing.some((s) => s.terminalId === shell.terminalId)) {
           draft.userShells.byEnvironmentId[envKey] = [...existing, shell];
@@ -178,7 +183,8 @@ function buildUserShellActions(set: ImmerSet) {
       }),
     removeUserShell: (sessionId: string, terminalId: string) =>
       set((draft) => {
-        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        const envKey = getEnvKey(draft, sessionId);
+        if (!envKey) return;
         const existing = draft.userShells.byEnvironmentId[envKey] || [];
         draft.userShells.byEnvironmentId[envKey] = existing.filter(
           (s) => s.terminalId !== terminalId,

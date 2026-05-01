@@ -112,7 +112,6 @@ func isResizeCommand(data []byte) bool {
 
 const (
 	passthroughReadyTimeout = 30 * time.Second
-	shellExecutionTimeout   = 15 * time.Second
 	pollInterval            = 500 * time.Millisecond
 )
 
@@ -155,33 +154,86 @@ func (w *wsWriter) Close() error {
 	return nil
 }
 
-// HandleTerminalWS handles WebSocket connections at /terminal/:sessionId
-// This creates a binary WebSocket bridge between xterm.js and the PTY.
-// Query parameter "mode" determines the type of terminal:
-// - "agent": Agent passthrough terminal (CLI passthrough mode)
-// - "shell": Independent user shell terminal (requires terminalId query param)
+type terminalRoute struct {
+	kind string
+	id   string
+}
+
+const (
+	terminalRouteEnvironment = "environment"
+	terminalRouteSession     = "session"
+	terminalRouteLegacy      = "legacy"
+)
+
+func parseTerminalRoute(c *gin.Context) terminalRoute {
+	target := strings.Trim(c.Param("target"), "/")
+	if target == "" {
+		if sessionID := c.Param("sessionId"); sessionID != "" {
+			return terminalRoute{kind: terminalRouteLegacy, id: sessionID}
+		}
+		return terminalRoute{}
+	}
+	if id, ok := strings.CutPrefix(target, "environment/"); ok {
+		return terminalRoute{kind: terminalRouteEnvironment, id: id}
+	}
+	if id, ok := strings.CutPrefix(target, "session/"); ok {
+		return terminalRoute{kind: terminalRouteSession, id: id}
+	}
+	return terminalRoute{kind: terminalRouteLegacy, id: target}
+}
+
+// HandleTerminalWS handles terminal WebSocket connections.
+// Explicit routes:
+// - /terminal/session/:sessionId?mode=agent for agent passthrough terminals
+// - /terminal/environment/:environmentId?terminalId=... for user shell terminals
+// Legacy /terminal/:sessionId is accepted only as a boundary shim.
 func (h *TerminalHandler) HandleTerminalWS(c *gin.Context) {
-	sessionID := c.Param("sessionId")
-	if sessionID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sessionId is required"})
+	route := parseTerminalRoute(c)
+	if route.id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "terminal target is required"})
 		return
 	}
 
-	// Route based on explicit mode parameter
+	switch route.kind {
+	case terminalRouteEnvironment:
+		h.handleEnvironmentTerminalRoute(c, route.id)
+	case terminalRouteSession:
+		h.handleSessionTerminalRoute(c, route.id)
+	case terminalRouteLegacy:
+		h.handleLegacyTerminalRoute(c, route.id)
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid terminal route"})
+	}
+}
+
+func (h *TerminalHandler) handleSessionTerminalRoute(c *gin.Context, sessionID string) {
+	mode := c.Query("mode")
+	if mode != "" && mode != "agent" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session terminal route only supports agent mode"})
+		return
+	}
+	h.handleAgentTerminalRoute(c, sessionID)
+}
+
+func (h *TerminalHandler) handleEnvironmentTerminalRoute(c *gin.Context, environmentID string) {
+	mode := c.Query("mode")
+	if mode != "" && mode != "shell" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "environment terminal route only supports shell mode"})
+		return
+	}
+	terminalID := c.Query("terminalId")
+	if terminalID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "terminalId required for shell mode"})
+		return
+	}
+	h.handleEnvironmentUserShellWS(c, environmentID, terminalID)
+}
+
+func (h *TerminalHandler) handleLegacyTerminalRoute(c *gin.Context, sessionID string) {
 	mode := c.Query("mode")
 	switch mode {
 	case "agent":
-		interactiveRunner := h.lifecycleMgr.GetInteractiveRunner()
-		if interactiveRunner == nil {
-			h.logger.Error("interactive runner not available")
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "interactive runner not available"})
-			return
-		}
-		h.logger.Info("terminal WebSocket connection request",
-			zap.String("session_id", sessionID),
-			zap.String("mode", "agent"),
-			zap.String("remote_addr", c.Request.RemoteAddr))
-		h.handleAgentPassthroughWS(c, sessionID, interactiveRunner)
+		h.handleAgentTerminalRoute(c, sessionID)
 
 	case "shell":
 		terminalID := c.Query("terminalId")
@@ -189,40 +241,42 @@ func (h *TerminalHandler) HandleTerminalWS(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "terminalId required for shell mode"})
 			return
 		}
-		if h.shouldUseWorkspaceShell(c.Request.Context(), sessionID) {
-			h.handleRemoteUserShellWS(c, sessionID, terminalID)
+		// Compatibility shim for old clients that still send /terminal/:sessionId.
+		// The session is only a lookup handle; the shell itself is routed by env.
+		environmentID, err := h.lifecycleMgr.ResolveTaskEnvironmentID(c.Request.Context(), sessionID)
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 			return
 		}
-		interactiveRunner := h.lifecycleMgr.GetInteractiveRunner()
-		if interactiveRunner == nil {
-			h.logger.Error("interactive runner not available")
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "interactive runner not available"})
-			return
-		}
-		h.logger.Info("terminal WebSocket connection request",
-			zap.String("session_id", sessionID),
-			zap.String("mode", "shell"),
-			zap.String("terminal_id", terminalID),
-			zap.String("remote_addr", c.Request.RemoteAddr))
-		h.handleUserShellWS(c, sessionID, terminalID, interactiveRunner)
+		h.handleEnvironmentUserShellWS(c, environmentID, terminalID)
 
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": "mode query param required: agent or shell"})
 	}
 }
 
+func (h *TerminalHandler) handleAgentTerminalRoute(c *gin.Context, sessionID string) {
+	if sessionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sessionId is required"})
+		return
+	}
+	interactiveRunner := h.lifecycleMgr.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		h.logger.Error("interactive runner not available")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "interactive runner not available"})
+		return
+	}
+	h.logger.Info("terminal WebSocket connection request",
+		zap.String("session_id", sessionID),
+		zap.String("mode", "agent"),
+		zap.String("remote_addr", c.Request.RemoteAddr))
+	h.handleAgentPassthroughWS(c, sessionID, interactiveRunner)
+}
+
 func (h *TerminalHandler) shouldUseWorkspaceShell(ctx context.Context, sessionID string) bool {
 	// Delegates to lifecycle manager which checks both in-memory execution
 	// and database records for containerized/remote executors.
 	return h.lifecycleMgr.ShouldUseContainerShell(ctx, sessionID)
-}
-
-// waitForRemoteExecution polls the lifecycle manager for the session's execution,
-// waiting up to 30 seconds for it to become available. After a backend restart the
-// resume flow recreates the execution asynchronously; this bridges the gap so the
-// terminal doesn't fall back to a local shell.
-func (h *TerminalHandler) waitForRemoteExecution(ctx context.Context, sessionID string) (*lifecycle.AgentExecution, bool) {
-	return h.waitForRemoteExecutionWithTimeout(ctx, sessionID, 30*time.Second)
 }
 
 func (h *TerminalHandler) waitForRemoteExecutionWithTimeout(
@@ -264,9 +318,51 @@ func (h *TerminalHandler) waitForRemoteExecutionWithTimeout(
 	}
 }
 
-func (h *TerminalHandler) handleRemoteUserShellWS(c *gin.Context, sessionID, terminalID string) {
-	execution, exists := h.waitForRemoteExecution(c.Request.Context(), sessionID)
-	if !exists || execution.GetAgentCtlClient() == nil {
+func (h *TerminalHandler) handleEnvironmentUserShellWS(c *gin.Context, environmentID, terminalID string) {
+	execution, err := h.lifecycleMgr.GetOrEnsureExecutionForEnvironment(c.Request.Context(), environmentID)
+	if err != nil {
+		h.logger.Warn("environment terminal execution not ready",
+			zap.String("task_environment_id", environmentID),
+			zap.String("terminal_id", terminalID),
+			zap.Error(err))
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	if execution.TaskEnvironmentID == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "execution has no task environment ID"})
+		return
+	}
+	if execution.TaskEnvironmentID != environmentID {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "execution task environment mismatch"})
+		return
+	}
+	if h.shouldUseWorkspaceShell(c.Request.Context(), execution.SessionID) {
+		h.handleRemoteUserShellWS(c, execution, environmentID, terminalID)
+		return
+	}
+	interactiveRunner := h.lifecycleMgr.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		h.logger.Error("interactive runner not available")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "interactive runner not available"})
+		return
+	}
+	h.logger.Info("terminal WebSocket connection request",
+		zap.String("task_environment_id", environmentID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("mode", "shell"),
+		zap.String("terminal_id", terminalID),
+		zap.String("remote_addr", c.Request.RemoteAddr))
+	h.handleUserShellWS(c, execution, environmentID, terminalID, interactiveRunner)
+}
+
+func (h *TerminalHandler) handleRemoteUserShellWS(
+	c *gin.Context,
+	execution *lifecycle.AgentExecution,
+	scopeID string,
+	terminalID string,
+) {
+	sessionID := execution.SessionID
+	if execution.GetAgentCtlClient() == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "remote execution not available"})
 		return
 	}
@@ -277,13 +373,10 @@ func (h *TerminalHandler) handleRemoteUserShellWS(c *gin.Context, sessionID, ter
 		c.JSON(http.StatusBadRequest, gin.H{"error": httpErr})
 		return
 	}
-	// The per-terminal WS URL only carries terminalId, so fall back to the
-	// command pre-registered by wsUserShellCreate when the URL didn't include
-	// scriptId or label-derived command. Without this, script terminals (custom
-	// scripts and dev_script) would open empty in containerized sessions.
+	// The per-terminal WS URL carries only env + terminalId, so recover the
+	// command pre-registered by wsUserShellCreate for script/dev terminals.
 	if initialCommand == "" {
 		if runner := h.lifecycleMgr.GetInteractiveRunner(); runner != nil {
-			scopeID := scopeIDForExecution(execution, sessionID)
 			initialCommand = runner.LookupShellInitialCommand(scopeID, terminalID)
 		}
 	}
@@ -326,6 +419,7 @@ func (h *TerminalHandler) handleRemoteUserShellWS(c *gin.Context, sessionID, ter
 	}()
 
 	h.logger.Info("remote terminal shell WebSocket connected",
+		zap.String("task_environment_id", scopeID),
 		zap.String("session_id", sessionID),
 		zap.String("terminal_id", terminalID))
 
@@ -850,45 +944,18 @@ func (h *TerminalHandler) resolvePreferredShell(ctx context.Context) string {
 	return shell
 }
 
-// resolveWorkingDir returns the workspace path for the given session.
-// It waits briefly for execution/workspace readiness to avoid launching shells in the wrong cwd.
-func (h *TerminalHandler) resolveWorkingDir(ctx context.Context, sessionID string) (string, error) {
-	execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
-	if exists && execution.WorkspacePath != "" {
-		h.logger.Info("handleUserShellWS: got working directory from execution",
-			zap.String("working_dir", execution.WorkspacePath))
-		return execution.WorkspacePath, nil
-	}
-
-	h.logger.Info("handleUserShellWS: waiting for execution workspace path",
-		zap.String("session_id", sessionID),
-		zap.Duration("timeout", shellExecutionTimeout))
-
-	execution, exists = h.waitForRemoteExecutionWithTimeout(ctx, sessionID, shellExecutionTimeout)
-	if !exists || execution == nil {
-		return "", fmt.Errorf("session %s execution is not ready yet", sessionID)
+// resolveWorkingDir returns the workspace path from the environment execution.
+func (h *TerminalHandler) resolveWorkingDir(execution *lifecycle.AgentExecution) (string, error) {
+	if execution == nil {
+		return "", fmt.Errorf("environment execution is not ready")
 	}
 	if execution.WorkspacePath == "" {
-		return "", fmt.Errorf("%w: session %s has no workspace path configured", lifecycle.ErrSessionWorkspaceNotReady, sessionID)
+		return "", fmt.Errorf("%w: task environment %s has no workspace path configured",
+			lifecycle.ErrSessionWorkspaceNotReady, execution.TaskEnvironmentID)
 	}
-
-	h.logger.Info("handleUserShellWS: got working directory after wait",
+	h.logger.Info("handleUserShellWS: got working directory from environment execution",
 		zap.String("working_dir", execution.WorkspacePath))
 	return execution.WorkspacePath, nil
-}
-
-func (h *TerminalHandler) resolveScopeID(ctx context.Context, sessionID string) (string, error) {
-	if _, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, sessionID); err != nil {
-		return "", fmt.Errorf("failed to ensure execution for scope: %w", err)
-	}
-	return h.lifecycleMgr.ResolveScopeKey(sessionID), nil
-}
-
-func scopeIDForExecution(execution *lifecycle.AgentExecution, sessionID string) string {
-	if execution != nil && execution.TaskEnvironmentID != "" {
-		return execution.TaskEnvironmentID
-	}
-	return sessionID
 }
 
 // resolveShellLabel returns the label and initial command for a user shell, derived
@@ -915,10 +982,12 @@ func (h *TerminalHandler) resolveShellLabel(c *gin.Context) (label, initialComma
 // user shell process. Returns the process ID on success, or an HTTP status + message on failure.
 func (h *TerminalHandler) startUserShellProcess(
 	c *gin.Context,
-	sessionID string,
+	execution *lifecycle.AgentExecution,
+	scopeID string,
 	terminalID string,
 	interactiveRunner *process.InteractiveRunner,
-) (processID string, scopeID string, httpStatus int, errMsg string) {
+) (string, string, int, string) {
+	sessionID := execution.SessionID
 	label, initialCommand, httpErr := h.resolveShellLabel(c)
 	if httpErr != "" {
 		return "", "", http.StatusBadRequest, httpErr
@@ -930,16 +999,8 @@ func (h *TerminalHandler) startUserShellProcess(
 		zap.String("label", label),
 		zap.String("initial_command", initialCommand))
 
-	scopeID, err := h.resolveScopeID(c.Request.Context(), sessionID)
-	if err != nil {
-		h.logger.Warn("handleUserShellWS: scope not ready",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		return "", "", http.StatusServiceUnavailable, err.Error()
-	}
-
 	preferredShell := h.resolvePreferredShell(c.Request.Context())
-	workingDir, err := h.resolveWorkingDir(c.Request.Context(), sessionID)
+	workingDir, err := h.resolveWorkingDir(execution)
 	if err != nil {
 		h.logger.Warn("handleUserShellWS: workspace path not ready",
 			zap.String("session_id", sessionID),
@@ -980,11 +1041,15 @@ func (h *TerminalHandler) startUserShellProcess(
 // Each terminal tab gets its own independent shell process.
 func (h *TerminalHandler) handleUserShellWS(
 	c *gin.Context,
-	sessionID string,
+	execution *lifecycle.AgentExecution,
+	scopeID string,
 	terminalID string,
 	interactiveRunner *process.InteractiveRunner,
 ) {
-	processID, scopeID, httpStatus, errMsg := h.startUserShellProcess(c, sessionID, terminalID, interactiveRunner)
+	sessionID := execution.SessionID
+	processID, scopeID, httpStatus, errMsg := h.startUserShellProcess(
+		c, execution, scopeID, terminalID, interactiveRunner,
+	)
 	if errMsg != "" {
 		c.JSON(httpStatus, gin.H{"error": errMsg})
 		return

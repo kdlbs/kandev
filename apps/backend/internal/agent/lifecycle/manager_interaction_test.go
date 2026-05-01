@@ -517,8 +517,9 @@ func TestIsAgentRunningForSession(t *testing.T) {
 // --- IsRemoteSession tests ---
 
 type mockWorkspaceInfoProvider struct {
-	infos map[string]*WorkspaceInfo
-	err   error
+	infos    map[string]*WorkspaceInfo
+	envInfos map[string]*WorkspaceInfo
+	err      error
 }
 
 func (m *mockWorkspaceInfoProvider) GetWorkspaceInfoForSession(_ context.Context, _, sessionID string) (*WorkspaceInfo, error) {
@@ -526,6 +527,21 @@ func (m *mockWorkspaceInfoProvider) GetWorkspaceInfoForSession(_ context.Context
 		return nil, m.err
 	}
 	return m.infos[sessionID], nil
+}
+
+func (m *mockWorkspaceInfoProvider) GetWorkspaceInfoForEnvironment(_ context.Context, taskEnvironmentID string) (*WorkspaceInfo, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.envInfos != nil {
+		return m.envInfos[taskEnvironmentID], nil
+	}
+	for _, info := range m.infos {
+		if info.TaskEnvironmentID == taskEnvironmentID {
+			return info, nil
+		}
+	}
+	return nil, nil
 }
 
 func TestIsRemoteSession(t *testing.T) {
