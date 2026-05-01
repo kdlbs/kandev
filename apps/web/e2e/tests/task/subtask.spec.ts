@@ -70,8 +70,14 @@ test.describe("Subtask basics", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
     // Open the Task split-button chevron and click "New Subtask"
+    const primary = testPage.getByTestId("new-task-primary");
     const chevron = testPage.getByTestId("new-task-chevron");
+    await expect(primary).toBeVisible({ timeout: 5_000 });
     await expect(chevron).toBeVisible({ timeout: 5_000 });
+    await expect(primary).toHaveCSS("border-top-right-radius", "0px");
+    await expect(primary).toHaveCSS("border-bottom-right-radius", "0px");
+    await expect(chevron).toHaveCSS("border-top-left-radius", "0px");
+    await expect(chevron).toHaveCSS("border-bottom-left-radius", "0px");
     await chevron.click();
     await testPage.getByTestId("new-subtask-button").click();
 
