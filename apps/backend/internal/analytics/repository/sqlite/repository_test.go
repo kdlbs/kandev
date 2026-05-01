@@ -370,7 +370,7 @@ func TestGetTaskStats_ExcludesEphemeralTasks(t *testing.T) {
 	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-regular', 'ws-1', 'board-1', '', 'Regular', 0, ?, ?)`, nowStr, nowStr)
 	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-ephemeral', 'ws-1', 'board-1', '', 'Quick Chat', 1, ?, ?)`, nowStr, nowStr)
 
-	results, err := repo.GetTaskStats(ctx, "ws-1", nil)
+	results, err := repo.GetTaskStats(ctx, "ws-1", nil, 100)
 	if err != nil {
 		t.Fatalf("GetTaskStats failed: %v", err)
 	}
@@ -402,7 +402,7 @@ func TestGetTaskStats_IncludesActiveAndElapsedDurations(t *testing.T) {
 	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-1', 'sess-1', 'task-1', '2026-01-01T10:00:00Z', '2026-01-01T10:10:00Z', ?, ?)`, nowStr, nowStr)
 	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-2', 'sess-1', 'task-1', '2026-01-01T11:10:00Z', '2026-01-01T11:20:00Z', ?, ?)`, nowStr, nowStr)
 
-	results, err := repo.GetTaskStats(ctx, "ws-1", nil)
+	results, err := repo.GetTaskStats(ctx, "ws-1", nil, 100)
 	if err != nil {
 		t.Fatalf("GetTaskStats failed: %v", err)
 	}

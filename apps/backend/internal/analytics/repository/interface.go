@@ -9,7 +9,7 @@ import (
 
 // Repository defines the interface for analytics/statistics operations.
 type Repository interface {
-	GetTaskStats(ctx context.Context, workspaceID string, start *time.Time) ([]*models.TaskStats, error)
+	GetTaskStats(ctx context.Context, workspaceID string, start *time.Time, limit int) ([]*models.TaskStats, error)
 	GetGlobalStats(ctx context.Context, workspaceID string, start *time.Time) (*models.GlobalStats, error)
 	GetDailyActivity(ctx context.Context, workspaceID string, days int) ([]*models.DailyActivity, error)
 	GetCompletedTaskActivity(ctx context.Context, workspaceID string, days int) ([]*models.CompletedTaskActivity, error)
