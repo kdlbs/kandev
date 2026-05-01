@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -293,6 +294,43 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	}
 
 	return info, nil
+}
+
+// GetWorkspaceInfoForEnvironment returns workspace information for a task environment.
+func (s *Service) GetWorkspaceInfoForEnvironment(ctx context.Context, taskEnvironmentID string) (*lifecycle.WorkspaceInfo, error) {
+	if taskEnvironmentID == "" {
+		return nil, fmt.Errorf("task_environment_id is required")
+	}
+	env, err := s.taskEnvironments.GetTaskEnvironment(ctx, taskEnvironmentID)
+	if err != nil {
+		return nil, err
+	}
+	if env == nil {
+		return nil, fmt.Errorf("task environment %s not found", taskEnvironmentID)
+	}
+	sessions, err := s.sessions.ListTaskSessions(ctx, env.TaskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list sessions for task environment %s: %w", taskEnvironmentID, err)
+	}
+	matching := make([]*models.TaskSession, 0, len(sessions))
+	for _, session := range sessions {
+		if session.TaskEnvironmentID == taskEnvironmentID {
+			matching = append(matching, session)
+		}
+	}
+	if len(matching) > 0 {
+		sort.SliceStable(matching, func(i, j int) bool {
+			if !matching[i].StartedAt.Equal(matching[j].StartedAt) {
+				return matching[i].StartedAt.After(matching[j].StartedAt)
+			}
+			if !matching[i].UpdatedAt.Equal(matching[j].UpdatedAt) {
+				return matching[i].UpdatedAt.After(matching[j].UpdatedAt)
+			}
+			return matching[i].ID > matching[j].ID
+		})
+		return s.GetWorkspaceInfoForSession(ctx, env.TaskID, matching[0].ID)
+	}
+	return nil, fmt.Errorf("task environment %s has no linked task session", taskEnvironmentID)
 }
 
 func isExecutorRunningNotFoundError(err error) bool {

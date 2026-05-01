@@ -21,8 +21,11 @@ import { Task } from "./kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
 import { PREVIEW_PANEL } from "@/lib/settings/constants";
 import { linkToTask } from "@/lib/links";
-import { launchSession } from "@/lib/services/session-launch-service";
-import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import {
+  useEnsureTaskSession,
+  type UseEnsureTaskSessionResult,
+} from "@/hooks/domains/session/use-ensure-task-session";
 
 type KanbanWithPreviewProps = {
   initialTaskId?: string;
@@ -122,10 +125,17 @@ function useSessionSelectionReset(
 function useSelectedTask(
   selectedTaskId: string | null | undefined,
   kanbanTasks: KanbanState["tasks"],
+  snapshots: Record<string, { tasks: KanbanState["tasks"] }>,
 ) {
   return useMemo(() => {
-    if (!selectedTaskId || kanbanTasks.length === 0) return null;
-    const task = kanbanTasks.find((t: KanbanState["tasks"][number]) => t.id === selectedTaskId);
+    if (!selectedTaskId) return null;
+    // The active workflow's tasks live in `kanban.tasks`, but cards from other
+    // workflows can also appear in the board (multi-workflow swimlane view via
+    // `kanbanMulti.snapshots`). Fall back to those so cross-workflow previews
+    // are not auto-closed by the "task no longer exists" guard below.
+    const task =
+      kanbanTasks.find((t: KanbanState["tasks"][number]) => t.id === selectedTaskId) ??
+      findTaskInSnapshots(selectedTaskId, snapshots);
     if (!task) return null;
     return {
       id: task.id,
@@ -137,7 +147,7 @@ function useSelectedTask(
       repositoryId: task.repositoryId,
       primarySessionId: task.primarySessionId,
     };
-  }, [selectedTaskId, kanbanTasks]);
+  }, [selectedTaskId, kanbanTasks, snapshots]);
 }
 
 export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWithPreviewProps) {
@@ -146,6 +156,8 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
 
   // Get tasks from the kanban store
   const kanbanTasks = useAppStore((state) => state.kanban.tasks);
+  const kanbanMultiSnapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const setKanbanPreviewedTaskId = useAppStore((state) => state.setKanbanPreviewedTaskId);
 
   const { selectedTaskId, isOpen, previewWidthPx, open, close, updatePreviewWidth } =
     useKanbanPreview({
@@ -155,9 +167,18 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
       },
     });
 
+  // Mirror the previewed task id into the store so kanban cards can highlight
+  // the currently-previewed card without prop-drilling through swimlanes.
+  useEffect(() => {
+    setKanbanPreviewedTaskId(isOpen ? (selectedTaskId ?? null) : null);
+  }, [isOpen, selectedTaskId, setKanbanPreviewedTaskId]);
+  useEffect(() => {
+    return () => setKanbanPreviewedTaskId(null);
+  }, [setKanbanPreviewedTaskId]);
+
   // Use custom hooks for layout and session management
   const { containerRef, shouldFloat, kanbanWidth } = useKanbanLayout(isOpen, previewWidthPx);
-  const { sessionId: selectedTaskSessionId, isLoading } = useTaskSession(selectedTaskId ?? null);
+  const { sessionId: selectedTaskSessionId } = useTaskSession(selectedTaskId ?? null);
 
   // User-selected tab overrides the default primary session pick.
   // Reset when the selected task changes.
@@ -169,27 +190,20 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   // Track resize state
   const isResizingRef = useRef(false);
 
-  const selectedTask = useSelectedTask(selectedTaskId, kanbanTasks);
+  const selectedTask = useSelectedTask(selectedTaskId, kanbanTasks, kanbanMultiSnapshots);
 
-  // Close panel if selected task no longer exists
+  // Close panel if selected task no longer exists in either the active
+  // workflow's tasks or any loaded multi-workflow snapshot.
   useEffect(() => {
     if (isOpen && selectedTaskId && !selectedTask) {
       close();
     }
   }, [isOpen, selectedTaskId, selectedTask, close]);
 
-  // Prepare workspace when preview opens for a task with no session
-  const preparedTaskRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!isOpen || !selectedTaskId || isLoading || selectedTaskSessionId) return;
-    if (preparedTaskRef.current === selectedTaskId) return;
-    preparedTaskRef.current = selectedTaskId;
-
-    const { request } = buildPrepareRequest(selectedTaskId);
-    launchSession(request).catch(() => {
-      // Prepare failed silently — user can still start agent manually
-    });
-  }, [isOpen, selectedTaskId, selectedTaskSessionId, isLoading]);
+  // Auto-start a session when the preview opens on a task with no session,
+  // mirroring the full task page so the preview doesn't dead-end on
+  // "No agents yet." The hook no-ops when no agent profile resolves.
+  const ensureSession = useEnsureTaskSession(selectedTask, { enabled: isOpen });
 
   const handleNavigateToTask = useCallback(
     (task: Task) => {
@@ -236,6 +250,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
           previewWidthPx={previewWidthPx}
           selectedTask={selectedTask}
           activeSessionId={activeSessionId}
+          ensureSession={ensureSession}
           onPreviewTask={handlePreviewTaskWithData}
           onNavigateToTask={handleNavigateToTask}
           onClose={close}
@@ -249,6 +264,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
           isOpen={isOpen}
           selectedTask={selectedTask}
           activeSessionId={activeSessionId}
+          ensureSession={ensureSession}
           onPreviewTask={handlePreviewTaskWithData}
           onNavigateToTask={handleNavigateToTask}
           onClose={close}
@@ -277,6 +293,7 @@ type PreviewLayoutProps = {
   previewWidthPx: number;
   selectedTask: Task | null;
   activeSessionId: string | null;
+  ensureSession: UseEnsureTaskSessionResult;
   onPreviewTask: (task: Task) => void;
   onNavigateToTask: (task: Task) => void;
   onClose: () => void;
@@ -289,6 +306,7 @@ function FloatingPreviewLayout({
   previewWidthPx,
   selectedTask,
   activeSessionId,
+  ensureSession,
   onPreviewTask,
   onNavigateToTask,
   onClose,
@@ -317,6 +335,7 @@ function FloatingPreviewLayout({
           <TaskPreviewPanel
             task={selectedTask}
             sessionId={activeSessionId}
+            ensureSession={ensureSession}
             onClose={onClose}
             onMaximize={(task) => onNavigateToTask(task)}
             onSessionChange={onSessionChange}
@@ -333,6 +352,7 @@ function InlinePreviewLayout({
   isOpen,
   selectedTask,
   activeSessionId,
+  ensureSession,
   onPreviewTask,
   onNavigateToTask,
   onClose,
@@ -354,6 +374,7 @@ function InlinePreviewLayout({
             <TaskPreviewPanel
               task={selectedTask}
               sessionId={activeSessionId}
+              ensureSession={ensureSession}
               onClose={onClose}
               onMaximize={(task) => onNavigateToTask(task)}
               onSessionChange={onSessionChange}

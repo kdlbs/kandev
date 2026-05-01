@@ -238,8 +238,7 @@ export type UserShellInfo = {
 };
 
 export type UserShellsState = {
-  /** User shells keyed by environmentId (shared across sessions in the same environment).
-   *  Falls back to sessionId when no environment mapping exists. */
+  /** User shells keyed by environmentId (shared across sessions in the same environment). */
   byEnvironmentId: Record<string, UserShellInfo[]>;
   /** Keyed by environmentId (same key strategy as byEnvironmentId). */
   loading: Record<string, boolean>;

@@ -53,6 +53,8 @@ type CreateWorkflowRequest struct {
 	Name               string  `json:"name"`
 	Description        string  `json:"description"`
 	WorkflowTemplateID *string `json:"workflow_template_id,omitempty"`
+	// Hidden marks the workflow as system-only; excluded from management UI and pickers.
+	Hidden bool `json:"hidden,omitempty"`
 }
 
 // UpdateWorkflowRequest contains the data for updating a workflow

@@ -196,6 +196,72 @@ func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 	}
 }
 
+func (s *Server) getTaskConversationHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString("task_id")
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		payload := buildTaskConversationPayload(req, taskID)
+
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskConversation, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func buildTaskConversationPayload(req mcp.CallToolRequest, taskID string) map[string]interface{} {
+	payload := map[string]interface{}{"task_id": taskID}
+	copyOptionalStringArg(payload, req, "session_id")
+	copyOptionalStringArg(payload, req, "before")
+	copyOptionalStringArg(payload, req, "after")
+	copyOptionalStringArg(payload, req, "sort")
+	copyOptionalLimitArg(payload, req)
+	copyOptionalMessageTypesArg(payload, req)
+	return payload
+}
+
+func copyOptionalStringArg(payload map[string]interface{}, req mcp.CallToolRequest, key string) {
+	if value := req.GetString(key, ""); value != "" {
+		payload[key] = value
+	}
+}
+
+func copyOptionalLimitArg(payload map[string]interface{}, req mcp.CallToolRequest) {
+	args := req.GetArguments()
+	if raw := args["limit"]; raw != nil {
+		if limit, ok := raw.(float64); ok {
+			payload["limit"] = int(limit)
+		}
+	}
+}
+
+func copyOptionalMessageTypesArg(payload map[string]interface{}, req mcp.CallToolRequest) {
+	args := req.GetArguments()
+	raw := args["message_types"]
+	if raw == nil {
+		return
+	}
+	items, ok := raw.([]interface{})
+	if !ok {
+		return
+	}
+	types := make([]string, 0, len(items))
+	for _, item := range items {
+		value, ok := item.(string)
+		if !ok || value == "" {
+			continue
+		}
+		types = append(types, value)
+	}
+	if len(types) > 0 {
+		payload["message_types"] = types
+	}
+}
+
 func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		prompt, err := req.RequireString("prompt")

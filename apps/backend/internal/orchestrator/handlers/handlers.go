@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"context"
+	"strings"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -40,6 +41,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskSessionPrepare, h.wsPrepareTaskSession)
 	d.RegisterFunc(ws.ActionAgentCancel, h.wsCancelAgent)
 	d.RegisterFunc(ws.ActionSessionLaunch, h.wsLaunchSession)
+	d.RegisterFunc(ws.ActionSessionEnsure, h.wsEnsureSession)
 	d.RegisterFunc(ws.ActionSessionRecover, h.wsRecoverSession)
 	d.RegisterFunc(ws.ActionSessionResetContext, h.wsResetContext)
 	d.RegisterFunc(ws.ActionSessionStop, h.wsStopSession)
@@ -115,6 +117,35 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 			zap.String("intent", string(orchestrator.ResolveIntent(&req))),
 			zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to launch session: "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+type wsEnsureSessionRequest struct {
+	TaskID string `json:"task_id"`
+}
+
+func (h *Handlers) wsEnsureSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsEnsureSessionRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+
+	resp, err := h.service.EnsureSession(ctx, req.TaskID)
+	if err != nil {
+		h.logger.Error("failed to ensure session",
+			zap.String("task_id", req.TaskID),
+			zap.Error(err))
+		// Mirror httpEnsureTaskSession's NotFound mapping so the frontend can
+		// distinguish unknown task ids from real server errors. EnsureSession
+		// wraps the repo error as "task not found: %w".
+		if strings.Contains(err.Error(), "task not found") {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to ensure session: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }

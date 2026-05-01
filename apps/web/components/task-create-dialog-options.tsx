@@ -89,9 +89,13 @@ export function useBranchOptions(branchOptionsRaw: Branch[]) {
         branchObj.type === "remote" && branchObj.remote
           ? `${branchObj.remote}/${branchObj.name}`
           : branchObj.name;
+      // Keywords give the scorer extra surfaces to match against: the leaf
+      // branch name, every path segment, and (for remotes) the remote name.
+      const keywords = buildBranchKeywords(branchObj.name, branchObj.remote);
       return {
         value: displayName,
         label: displayName,
+        keywords,
         renderLabel: () => (
           <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
             <span className="flex min-w-0 items-center gap-1.5">
@@ -108,6 +112,20 @@ export function useBranchOptions(branchOptionsRaw: Branch[]) {
       };
     });
   }, [branchOptionsRaw]);
+}
+
+const BRANCH_SEGMENT_RE = /[/_.\-\s]+/;
+
+function buildBranchKeywords(name: string, remote?: string): string[] {
+  const out = new Set<string>();
+  out.add(name);
+  const leafIdx = name.lastIndexOf("/");
+  if (leafIdx >= 0) out.add(name.slice(leafIdx + 1));
+  for (const seg of name.split(BRANCH_SEGMENT_RE)) {
+    if (seg) out.add(seg);
+  }
+  if (remote) out.add(remote);
+  return Array.from(out);
 }
 
 export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): OptionItem[] {

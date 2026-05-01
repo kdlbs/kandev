@@ -71,6 +71,24 @@ interface TaskCreateDialogProps {
   initialValues?: TaskCreateDialogInitialValues;
   taskId?: string | null;
   parentTaskId?: string;
+  /**
+   * Pin specific form fields to their initial values (used by feature wrappers
+   * like Improve Kandev that fix the repo + branch + workflow). The current
+   * implementation just passes the locks through; the chip row's first repo
+   * is overwritten on each open. The flags are kept for forward compat with
+   * locking the editor UI itself in a future pass.
+   */
+  lockedFields?: { repository?: boolean; branch?: boolean; workflow?: boolean };
+  /** Optional submit hook used by Improve Kandev to wrap the description. */
+  transformDescriptionBeforeSubmit?: (description: string) => Promise<string> | string;
+  /** Optional override for the description placeholder. */
+  descriptionPlaceholder?: string;
+  /** Optional render slot above the description editor. */
+  aboveDescriptionSlot?: React.ReactNode;
+  /** Optional render slot inside the dialog (between body and footer). */
+  extraFormSlot?: React.ReactNode;
+  /** Optional render slot at the bottom of the dialog footer area. */
+  bottomSlot?: React.ReactNode;
 }
 
 type DialogFormBodyProps = {

@@ -73,6 +73,14 @@ var (
 	flagVersion  = flag.Bool("version", false, "Show version information")
 )
 
+// Build-time variables injected via -ldflags "-X main.Version=... -X main.Commit=... -X main.BuildTime=..."
+// (see apps/backend/Makefile). Defaults apply when running un-stamped builds (e.g. `go run`).
+var (
+	Version   = "dev"
+	Commit    = "unknown"
+	BuildTime = "unknown"
+)
+
 func init() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: kandev [options]\n\n")
@@ -103,7 +111,7 @@ func realMain() int {
 	}
 
 	if *flagVersion {
-		fmt.Println("kandev version 0.1.0")
+		fmt.Printf("kandev version %s (commit %s, built %s)\n", Version, Commit, BuildTime)
 		return 0
 	}
 
@@ -352,7 +360,7 @@ func startAgentInfrastructure(
 	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, repos, services,
-		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, addCleanup, runCleanups)
+		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, addCleanup, runCleanups)
 }
 
 // startGatewayAndServe sets up the WebSocket gateway, HTTP routes, starts the server,
@@ -369,6 +377,7 @@ func startGatewayAndServe(
 	agentRegistry *registry.Registry,
 	orchestratorSvc *orchestrator.Service,
 	msgCreator *messageCreatorAdapter,
+	repoCloner *repoclone.Cloner,
 	addCleanup func(func() error),
 	runCleanups func(),
 ) bool {
@@ -437,7 +446,7 @@ func startGatewayAndServe(
 	// HTTP SERVER
 	// ============================================
 	server := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
-		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr, addCleanup)
+		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr, addCleanup, repoCloner)
 
 	port := cfg.Server.Port
 	if port == 0 {
@@ -476,6 +485,7 @@ func buildHTTPServer(
 	agentRegistry *registry.Registry,
 	hostUtilityMgr *hostutility.Manager,
 	addCleanup func(func() error),
+	repoCloner *repoclone.Cloner,
 ) *http.Server {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -512,6 +522,8 @@ func buildHTTPServer(
 		secretStore:             repos.Secrets,
 		mcpConfigSvc:            mcpconfig.NewService(repos.AgentSettings),
 		addCleanup:              addCleanup,
+		repoCloner:              repoCloner,
+		version:                 Version,
 		webInternalURL:          cfg.Server.WebInternalURL,
 		pprofEnabled:            cfg.Debug.PprofEnabled,
 		httpPort:                port,

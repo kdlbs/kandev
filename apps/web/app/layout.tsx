@@ -13,6 +13,7 @@ import { QuickChatProvider } from "@/components/quick-chat/quick-chat-provider";
 import { ConfigChatProvider } from "@/components/config-chat/config-chat-provider";
 import { SessionFailureToastBridge } from "@/components/session-failure-toast-bridge";
 import { SidebarViewsSyncBridge } from "@/components/sidebar-views-sync-bridge";
+import { LogBufferBridge } from "@/components/log-buffer-bridge";
 
 export const metadata: Metadata = {
   title: "KanDev - AI Kanban",
@@ -63,6 +64,7 @@ export default function RootLayout({
                 <ToastProvider>
                   <SessionFailureToastBridge />
                   <SidebarViewsSyncBridge />
+                  <LogBufferBridge />
                   <CommandRegistryProvider>
                     <WebSocketConnector />
                     <GlobalCommands />

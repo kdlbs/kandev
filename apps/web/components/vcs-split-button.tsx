@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback } from "react";
+import { memo, useCallback, type ComponentProps, type ReactNode } from "react";
 import {
   IconGitCommit,
   IconGitPullRequest,
@@ -24,14 +24,13 @@ import {
   DropdownMenuSubContent,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { cn } from "@kandev/ui/lib/utils";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
 import { MultiRepoVcsButton } from "@/components/vcs-multi-repo-menu";
-
-import type { ReactNode } from "react";
 
 const DEFAULT_BASE_BRANCH = "origin/main";
 
@@ -76,7 +75,7 @@ function buildPrConfig(aheadCount: number, openPRDialog: () => void): PrimaryBut
   return {
     icon: <IconGitPullRequest className="h-4 w-4" />,
     label: "Create PR",
-    badge: aheadCount > 0 ? aheadCount : null,
+    badge: null,
     tooltip: `Create PR (${aheadCount} commit${aheadCount !== 1 ? "s" : ""} ahead)`,
     onClick: openPRDialog,
   };
@@ -86,7 +85,7 @@ function buildPushConfig(aheadCount: number, handlePush: () => void): PrimaryBut
   return {
     icon: <IconCloudUpload className="h-4 w-4" />,
     label: "Push",
-    badge: aheadCount > 0 ? aheadCount : null,
+    badge: null,
     tooltip: `Push ${aheadCount} commit${aheadCount !== 1 ? "s" : ""} to remote`,
     onClick: handlePush,
   };
@@ -133,6 +132,49 @@ function buildPrimaryButtonConfig({
   if (primaryAction === "pr") return buildPrConfig(aheadCount, openPRDialog);
   if (primaryAction === "rebase") return buildRebaseConfig(behindCount, baseBranch, handleRebase);
   return buildCommitConfig(uncommittedFileCount, openCommitDialog);
+}
+
+type DivergenceTone = "ahead" | "behind";
+
+const divergenceToneClass: Record<DivergenceTone, string> = {
+  ahead: "border-emerald-500/40 bg-emerald-500/10 text-emerald-500",
+  behind: "border-yellow-500/40 bg-yellow-500/10 text-yellow-500",
+};
+
+function DivergencePill({
+  tone,
+  value,
+  label,
+}: {
+  tone: DivergenceTone;
+  value: number;
+  label: string;
+}) {
+  if (value <= 0) return null;
+
+  return (
+    <span
+      aria-label={`${value} ${label}`}
+      className={cn(
+        "inline-flex h-5 items-center rounded-md border px-1.5 text-[11px] font-semibold leading-none tabular-nums",
+        divergenceToneClass[tone],
+      )}
+    >
+      {tone === "ahead" ? "↑" : "↓"}
+      {value}
+    </span>
+  );
+}
+
+function GitDivergencePills({ ahead, behind }: { ahead: number; behind: number }) {
+  if (ahead <= 0 && behind <= 0) return null;
+
+  return (
+    <span className="ml-1 inline-flex items-center gap-1">
+      <DivergencePill tone="ahead" value={ahead} label="commits ahead" />
+      <DivergencePill tone="behind" value={behind} label="commits behind" />
+    </span>
+  );
 }
 
 type VcsDropdownItemsProps = {
@@ -227,6 +269,8 @@ function VcsDropdownItems({
 type VcsSplitButtonProps = {
   sessionId: string | null;
   baseBranch?: string;
+  buttonSize?: ComponentProps<typeof Button>["size"];
+  className?: string;
 };
 
 function useGitActions(git: ReturnType<typeof useSessionGit>, baseBranch?: string) {
@@ -273,6 +317,8 @@ function useGitActions(git: ReturnType<typeof useSessionGit>, baseBranch?: strin
 const VcsSplitButton = memo(function VcsSplitButton({
   sessionId,
   baseBranch,
+  buttonSize = "sm",
+  className,
 }: VcsSplitButtonProps) {
   const git = useSessionGit(sessionId);
   const { openCommitDialog, openPRDialog } = useVcsDialogs();
@@ -311,6 +357,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
     handlePush: () => handlePush(false),
     handleRebase,
   });
+  const showDivergencePills = primaryAction !== "commit";
 
   if (isMultiRepo) {
     return (
@@ -345,6 +392,9 @@ const VcsSplitButton = memo(function VcsSplitButton({
       hasMatchingUpstream={hasMatchingUpstream}
       behindCount={behindCount}
       aheadCount={aheadCount}
+      buttonSize={buttonSize}
+      className={className}
+      showDivergencePills={showDivergencePills}
       onPR={() => openPRDialog()}
       onPull={() => handlePull()}
       onPush={(force) => handlePush(force)}
@@ -368,6 +418,9 @@ function SingleRepoVcsButton({
   onPush,
   onRebase,
   onMerge,
+  className,
+  buttonSize = "sm",
+  showDivergencePills = false,
 }: {
   primaryButtonConfig: PrimaryButtonConfig;
   primaryAction: "commit" | "push" | "pr" | "rebase";
@@ -382,15 +435,18 @@ function SingleRepoVcsButton({
   onPush: (force: boolean) => void;
   onRebase: () => void;
   onMerge: () => void;
+  className?: string;
+  buttonSize?: ComponentProps<typeof Button>["size"];
+  showDivergencePills?: boolean;
 }) {
   return (
-    <div className="inline-flex rounded-md border border-border overflow-hidden">
+    <div className={cn("inline-flex", className)}>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            size="sm"
+            size={buttonSize}
             variant="outline"
-            className="rounded-none border-0 cursor-pointer"
+            className="rounded-r-none border-r-0 cursor-pointer"
             onClick={primaryButtonConfig.onClick}
             disabled={isDisabled}
             data-testid={`vcs-primary-${primaryAction}`}
@@ -402,6 +458,7 @@ function SingleRepoVcsButton({
                 {primaryButtonConfig.badge}
               </span>
             )}
+            {showDivergencePills && <GitDivergencePills ahead={aheadCount} behind={behindCount} />}
           </Button>
         </TooltipTrigger>
         <TooltipContent>{primaryButtonConfig.tooltip}</TooltipContent>
@@ -409,9 +466,10 @@ function SingleRepoVcsButton({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
-            size="sm"
+            size={buttonSize}
             variant="outline"
-            className="rounded-none border-0 border-l px-2 cursor-pointer"
+            className="-ml-px rounded-l-none px-2 cursor-pointer"
+            aria-label="Open VCS options"
             disabled={isDisabled}
           >
             {isGitLoading ? (

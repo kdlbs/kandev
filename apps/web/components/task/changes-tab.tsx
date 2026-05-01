@@ -118,7 +118,7 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
 
   return (
     <ContextMenu>
-      <ContextMenuTrigger className="flex h-full items-center">
+      <ContextMenuTrigger className="flex h-full items-center cursor-pointer">
         <div className={cn("relative", isFlashing && "animate-changes-flash")}>
           <DockviewDefaultTab {...props} />
           {badgeCount > 0 && (

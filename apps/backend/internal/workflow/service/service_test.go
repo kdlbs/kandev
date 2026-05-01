@@ -50,12 +50,16 @@ type mockWorkflowProvider struct {
 	workflows []*taskmodels.Workflow
 }
 
-func (m *mockWorkflowProvider) ListWorkflows(_ context.Context, workspaceID string) ([]*taskmodels.Workflow, error) {
+func (m *mockWorkflowProvider) ListWorkflows(_ context.Context, workspaceID string, includeHidden bool) ([]*taskmodels.Workflow, error) {
 	var result []*taskmodels.Workflow
 	for _, wf := range m.workflows {
-		if wf.WorkspaceID == workspaceID {
-			result = append(result, wf)
+		if wf.WorkspaceID != workspaceID {
+			continue
 		}
+		if !includeHidden && wf.Hidden {
+			continue
+		}
+		result = append(result, wf)
 	}
 	return result, nil
 }

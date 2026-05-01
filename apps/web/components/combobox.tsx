@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState } from "react";
-import { IconCheck, IconChevronDown } from "@tabler/icons-react";
+import { IconCheck, IconChevronDown, IconLoader2 } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@kandev/ui/button";
@@ -20,12 +20,17 @@ export type ComboboxOption = {
   value: string;
   label: string;
   description?: string;
+  keywords?: string[];
   renderLabel?: () => React.ReactNode;
   /** When true the option renders dimmed and isn't selectable. */
   disabled?: boolean;
   /** Tooltip shown on hover when disabled is true. */
   disabledReason?: string;
 };
+
+// Custom filter compatible with cmdk's `<Command filter>` prop.
+// Returns a number in [0, 1]; >0 means the option is included, sorted desc.
+export type ComboboxFilter = (value: string, search: string, keywords?: string[]) => number;
 
 interface ComboboxProps {
   options: ComboboxOption[];
@@ -44,6 +49,12 @@ interface ComboboxProps {
   popoverAlign?: "start" | "center" | "end";
   /** When true, the trigger always renders the plain label text instead of renderLabel. */
   plainTrigger?: boolean;
+  /** Optional custom filter; defaults to cmdk's built-in command-score. */
+  filter?: ComboboxFilter;
+  /** Optional node rendered to the right of the dropdown label (e.g. refresh button). */
+  headerAction?: React.ReactNode;
+  /** When true, swap the trigger chevron for a spinner to indicate loading. */
+  loading?: boolean;
 }
 
 function TriggerLabel({
@@ -107,7 +118,7 @@ function OptionsList({
           <CommandItem
             key={option.value}
             value={option.value}
-            keywords={[option.label, option.description ?? ""]}
+            keywords={option.keywords ?? [option.label, option.description ?? ""]}
             onSelect={() => onSelect(option.value)}
             className="relative pr-7"
           >
@@ -143,6 +154,9 @@ export const Combobox = memo(function Combobox({
   popoverSide,
   popoverAlign = "start",
   plainTrigger = false,
+  filter,
+  headerAction,
+  loading = false,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
   // Track the highlighted item. Defaults to the selected value so the current
@@ -175,7 +189,11 @@ export const Combobox = memo(function Combobox({
               placeholder={placeholder}
             />
           </div>
-          <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          {loading ? (
+            <IconLoader2 className="ml-2 h-4 w-4 shrink-0 animate-spin opacity-50" />
+          ) : (
+            <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -187,10 +205,11 @@ export const Combobox = memo(function Combobox({
         align={popoverAlign}
         portal={false}
       >
-        <Command value={highlighted} onValueChange={setHighlighted}>
-          {dropdownLabel ? (
-            <div className="text-muted-foreground px-2 py-1.5 text-xs border-b">
-              {dropdownLabel}
+        <Command value={highlighted} onValueChange={setHighlighted} filter={filter}>
+          {dropdownLabel || headerAction ? (
+            <div className="text-muted-foreground flex items-center justify-between gap-2 px-2 py-1 text-xs border-b">
+              <span>{dropdownLabel}</span>
+              {headerAction}
             </div>
           ) : null}
           {showSearch && <CommandInput placeholder={searchPlaceholder} className="h-9" />}

@@ -166,7 +166,8 @@ function useWatchFormData(workspaceId: string) {
   useSettingsData(true);
   useWorkflows(workspaceId, true);
 
-  const workflows = useAppStore((state) => state.workflows.items);
+  const allWorkflows = useAppStore((state) => state.workflows.items);
+  const workflows = useMemo(() => allWorkflows.filter((w) => !w.hidden), [allWorkflows]);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const executors = useAppStore((state) => state.executors.items);
   const allExecutorProfiles = useMemo(

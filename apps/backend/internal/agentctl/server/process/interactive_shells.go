@@ -43,8 +43,7 @@ type UserShellInfo struct {
 // The entry is registered atomically to prevent races with ListUserShells.
 //
 // `scopeID` groups shells. Callers should pass `taskEnvironmentID` so sessions
-// in the same task share one shell list. Falls back to sessionID is preserved
-// at the caller boundary (lifecycle.Manager.ResolveScopeKey).
+// in the same task share one shell list.
 func (r *InteractiveRunner) CreateUserShell(scopeID string) CreateUserShellResult {
 	r.userShellsMu.Lock()
 	defer r.userShellsMu.Unlock()

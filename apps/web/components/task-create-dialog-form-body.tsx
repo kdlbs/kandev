@@ -203,7 +203,13 @@ export const SessionSelectors = memo(function SessionSelectors({
 type WorkflowSectionProps = {
   isCreateMode: boolean;
   isTaskStarted: boolean;
-  workflows: Array<{ id: string; name: string; agent_profile_id?: string; [key: string]: unknown }>;
+  workflows: Array<{
+    id: string;
+    name: string;
+    agent_profile_id?: string;
+    hidden?: boolean;
+    [key: string]: unknown;
+  }>;
   snapshots: Record<string, WorkflowSnapshotData>;
   effectiveWorkflowId: string | null;
   onWorkflowChange: (value: string) => void;
@@ -213,13 +219,17 @@ type WorkflowSectionProps = {
 export const WorkflowSection = memo(function WorkflowSection({
   isCreateMode,
   isTaskStarted,
-  workflows,
+  workflows: allWorkflows,
   snapshots,
   effectiveWorkflowId,
   onWorkflowChange,
   agentProfiles,
 }: WorkflowSectionProps) {
   const [lastUsedWorkflowId, setLastUsedWorkflowId] = useState<string | null>(null);
+
+  // Hidden workflows (e.g. improve-kandev) are excluded from the picker; they
+  // remain reachable via their dedicated entry point.
+  const workflows = allWorkflows.filter((w) => !w.hidden);
 
   const handleWorkflowChange = useCallback(
     (workflowId: string) => {
@@ -231,8 +241,21 @@ export const WorkflowSection = memo(function WorkflowSection({
 
   if (!isCreateMode || isTaskStarted) return null;
 
-  // Single workflow — show agent override info if any overrides exist
-  if (workflows.length <= 1) {
+  if (!effectiveWorkflowId || workflows.length > 1) {
+    return (
+      <WorkflowSelectorRow
+        workflows={workflows}
+        snapshots={snapshots}
+        selectedWorkflowId={effectiveWorkflowId ?? null}
+        onWorkflowChange={handleWorkflowChange}
+        lastUsedWorkflowId={lastUsedWorkflowId}
+        agentProfiles={agentProfiles}
+      />
+    );
+  }
+
+  // Single selected workflow — show agent override info if any overrides exist
+  if (workflows.length === 1) {
     const singleWorkflow = workflows[0];
     if (!singleWorkflow) return null;
     const snapshot = snapshots[singleWorkflow.id];
@@ -269,16 +292,7 @@ export const WorkflowSection = memo(function WorkflowSection({
     );
   }
 
-  return (
-    <WorkflowSelectorRow
-      workflows={workflows}
-      snapshots={snapshots}
-      selectedWorkflowId={effectiveWorkflowId ?? null}
-      onWorkflowChange={handleWorkflowChange}
-      lastUsedWorkflowId={lastUsedWorkflowId}
-      agentProfiles={agentProfiles}
-    />
-  );
+  return null;
 });
 
 export type DialogPromptSectionProps = {
@@ -293,6 +307,12 @@ export type DialogPromptSectionProps = {
   workspaceId?: string | null;
   onJiraImport?: (ticket: JiraTicket) => void;
   onLinearImport?: (issue: LinearIssue) => void;
+  /** Extension slot rendered below the description textarea (e.g. log-capture toggle). */
+  extraFormSlot?: React.ReactNode;
+  /** Optional override for the description textarea placeholder. */
+  descriptionPlaceholder?: string;
+  /** Optional slot rendered above the description textarea (e.g. a tab toggle). */
+  aboveDescriptionSlot?: React.ReactNode;
 };
 
 // importBindings collapses the optional Jira/Linear import callbacks into the
@@ -321,11 +341,18 @@ export function DialogPromptSection({
   workspaceId,
   onJiraImport,
   onLinearImport,
+  extraFormSlot,
+  descriptionPlaceholder,
+  aboveDescriptionSlot,
 }: DialogPromptSectionProps) {
   const importsEnabled = !isSessionMode && !isTaskStarted;
   const ws = workspaceId ?? null;
+  const placeholder = isPassthroughProfile
+    ? "Passthrough mode — prompt not supported"
+    : descriptionPlaceholder;
   return (
     <>
+      {aboveDescriptionSlot}
       <TaskFormInputs
         key={fs.openCycle}
         isSessionMode={isSessionMode}
@@ -335,13 +362,14 @@ export function DialogPromptSection({
         onKeyDown={handleKeyDown}
         descriptionValueRef={fs.descriptionInputRef}
         disabled={isTaskStarted || isPassthroughProfile}
-        placeholder={isPassthroughProfile ? "Passthrough mode — prompt not supported" : undefined}
+        placeholder={placeholder}
         onEnhancePrompt={enhance?.onEnhance}
         isEnhancingPrompt={enhance?.isLoading}
         isUtilityConfigured={enhance?.isConfigured}
         jiraImport={importBindings(importsEnabled, ws, isPassthroughProfile, onJiraImport)}
         linearImport={importBindings(importsEnabled, ws, isPassthroughProfile, onLinearImport)}
       />
+      {extraFormSlot}
       {isPassthroughProfile && hasDescription && (
         <p className="text-xs text-amber-500">Prompt ignored — passthrough mode active</p>
       )}

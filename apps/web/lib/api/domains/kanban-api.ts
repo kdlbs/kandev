@@ -10,11 +10,18 @@ import type {
 } from "@/lib/types/http";
 
 // Workflow operations
-export async function listWorkflows(workspaceId: string, options?: ApiRequestOptions) {
-  const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
+export async function listWorkflows(
+  workspaceId: string,
+  options?: ApiRequestOptions & { includeHidden?: boolean },
+) {
+  const { includeHidden, ...requestOptions } = options ?? {};
+  const baseUrl = requestOptions.baseUrl ?? getBackendConfig().apiBaseUrl;
   const url = new URL(`${baseUrl}/api/v1/workflows`);
   url.searchParams.set("workspace_id", workspaceId);
-  return fetchJson<ListWorkflowsResponse>(url.toString(), options);
+  if (includeHidden) {
+    url.searchParams.set("include_hidden", "true");
+  }
+  return fetchJson<ListWorkflowsResponse>(url.toString(), requestOptions);
 }
 
 export async function fetchWorkflowSnapshot(workflowId: string, options?: ApiRequestOptions) {

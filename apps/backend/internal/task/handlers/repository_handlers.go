@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -48,6 +49,7 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/workspaces/:id/repositories/local-status", h.httpLocalRepositoryStatus)
 	api.GET("/workspaces/:id/repositories/validate", h.httpValidateRepositoryPath)
 	api.GET("/repositories/:id", h.httpGetRepository)
+	api.GET("/repositories/:id/branches", h.httpListRepositoryBranches)
 	api.PATCH("/repositories/:id", h.httpUpdateRepository)
 	api.DELETE("/repositories/:id", h.httpDeleteRepository)
 	api.GET("/repositories/:id/scripts", h.httpListRepositoryScripts)
@@ -283,6 +285,78 @@ func (h *RepositoryHandlers) httpGetRepository(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, dto.FromRepository(repository))
+}
+
+func (h *RepositoryHandlers) httpListRepositoryBranches(c *gin.Context) {
+	repoID := c.Param("id")
+	ctx := c.Request.Context()
+
+	repo, err := h.service.GetRepository(ctx, repoID)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "repository not found")
+		return
+	}
+
+	var fetchedAt, fetchError string
+	if c.Query("refresh") == queryValueTrue {
+		fetchedAt, fetchError = h.refreshBranchesAtPath(ctx, repoID, repo.LocalPath)
+	}
+
+	// Use the unified branch lister (HEAD's API) with empty repoID + path.
+	branches, err := h.service.ListBranches(ctx, "", repo.LocalPath)
+	if err != nil {
+		if errors.Is(err, service.ErrPathNotAllowed) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "repository path is not allowed"})
+			return
+		}
+		h.logger.Error("failed to list repository branches", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list repository branches"})
+		return
+	}
+	current := h.currentBranchAtPath(ctx, repo.LocalPath)
+	dtoBranches := make([]dto.BranchDTO, len(branches))
+	for i, branch := range branches {
+		dtoBranches[i] = dto.FromBranch(branch)
+	}
+	c.JSON(http.StatusOK, dto.RepositoryBranchesResponse{
+		Branches:      dtoBranches,
+		Total:         len(dtoBranches),
+		CurrentBranch: current,
+		FetchedAt:     fetchedAt,
+		FetchError:    fetchError,
+	})
+}
+
+// refreshBranchesAtPath runs `git fetch` for the already-resolved repository
+// path and returns the timestamp + error string suitable for the response
+// body. Failures are best-effort: the branches are still returned so a
+// transient network error doesn't blank the dropdown.
+func (h *RepositoryHandlers) refreshBranchesAtPath(ctx context.Context, repoID, localPath string) (fetchedAt, fetchError string) {
+	res, err := h.service.RefreshBranchesAtPath(ctx, localPath)
+	if err != nil {
+		h.logger.Warn("branch refresh failed", zap.String("repo_id", repoID), zap.Error(err))
+		return "", err.Error()
+	}
+	if !res.FetchedAt.IsZero() {
+		fetchedAt = res.FetchedAt.UTC().Format(time.RFC3339)
+	}
+	if res.Err != nil {
+		fetchError = res.Err.Error()
+	}
+	return fetchedAt, fetchError
+}
+
+// currentBranchAtPath is best-effort; failures (empty path, detached HEAD,
+// IO error) return an empty string so the branches response still ships.
+func (h *RepositoryHandlers) currentBranchAtPath(ctx context.Context, localPath string) string {
+	if localPath == "" {
+		return ""
+	}
+	branch, err := h.service.LocalRepositoryCurrentBranch(ctx, localPath)
+	if err != nil {
+		return ""
+	}
+	return branch
 }
 
 type httpUpdateRepositoryRequest struct {

@@ -94,6 +94,7 @@ export const defaultUIState: UISliceState = {
   bottomTerminal: { isOpen: false, pendingCommand: null },
   sidebarViews: loadSidebarState(),
   collapsedSubtaskParents: [],
+  kanbanPreviewedTaskId: null,
 };
 
 type ImmerSet = Parameters<typeof createUISlice>[0];
@@ -513,6 +514,11 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
     set((draft) => {
       draft.documentPanel.activeDocumentBySessionId[sessionId] = doc;
       setLocalStorage(`active-document-${sessionId}`, doc as ActiveDocument | null);
+    }),
+  setKanbanPreviewedTaskId: (taskId) =>
+    set((draft) => {
+      if (draft.kanbanPreviewedTaskId === taskId) return;
+      draft.kanbanPreviewedTaskId = taskId;
     }),
   openQuickChat: (sessionId, workspaceId, agentProfileId) =>
     set((draft) => {

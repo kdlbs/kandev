@@ -40,6 +40,9 @@ func (h *TaskHandlers) SetOnTaskCreatedWithPR(fn func(ctx context.Context, taskI
 type OrchestratorStarter interface {
 	// LaunchSession is the unified entry point for all session operations.
 	LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)
+	// EnsureSession returns the task's existing primary/newest session if any,
+	// otherwise resolves the agent profile server-side and creates one.
+	EnsureSession(ctx context.Context, taskID string) (*orchestrator.EnsureSessionResponse, error)
 }
 
 func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
@@ -66,6 +69,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/tasks/:id", h.httpGetTask)
 	api.GET("/task-sessions/:id", h.httpGetTaskSession)
 	api.GET("/tasks/:id/sessions", h.httpListTaskSessions)
+	api.POST("/tasks/:id/sessions/ensure", h.httpEnsureTaskSession)
 	api.GET("/tasks/:id/environment", h.httpGetTaskEnvironment)
 	api.GET("/task-sessions/:id/turns", h.httpListSessionTurns)
 	api.POST("/tasks", h.httpCreateTask)

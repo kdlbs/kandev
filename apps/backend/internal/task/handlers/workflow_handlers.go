@@ -70,8 +70,8 @@ func (h *WorkflowHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionWorkflowReorder, h.wsReorderWorkflows)
 }
 
-func (h *WorkflowHandlers) listWorkflows(ctx context.Context, workspaceID string) (dto.ListWorkflowsResponse, error) {
-	workflows, err := h.service.ListWorkflows(ctx, workspaceID)
+func (h *WorkflowHandlers) listWorkflows(ctx context.Context, workspaceID string, includeHidden bool) (dto.ListWorkflowsResponse, error) {
+	workflows, err := h.service.ListWorkflows(ctx, workspaceID, includeHidden)
 	if err != nil {
 		return dto.ListWorkflowsResponse{}, err
 	}
@@ -85,11 +85,20 @@ func (h *WorkflowHandlers) listWorkflows(ctx context.Context, workspaceID string
 	return result, nil
 }
 
+func parseIncludeHidden(s string) bool {
+	v, err := strconv.ParseBool(s)
+	if err != nil {
+		return false
+	}
+	return v
+}
+
 // HTTP handlers
 
 func (h *WorkflowHandlers) httpListWorkflows(c *gin.Context) {
 	workspaceID := c.Query("workspace_id")
-	resp, err := h.listWorkflows(c.Request.Context(), workspaceID)
+	includeHidden := parseIncludeHidden(c.Query("include_hidden"))
+	resp, err := h.listWorkflows(c.Request.Context(), workspaceID, includeHidden)
 	if err != nil {
 		h.logger.Error("failed to list workflows", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list workflows"})
@@ -100,7 +109,8 @@ func (h *WorkflowHandlers) httpListWorkflows(c *gin.Context) {
 
 func (h *WorkflowHandlers) httpListWorkflowsByWorkspace(c *gin.Context) {
 	workspaceID := c.Param("id")
-	resp, err := h.listWorkflows(c.Request.Context(), workspaceID)
+	includeHidden := parseIncludeHidden(c.Query("include_hidden"))
+	resp, err := h.listWorkflows(c.Request.Context(), workspaceID, includeHidden)
 	if err != nil {
 		h.logger.Error("failed to list workflows", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list workflows"})
@@ -228,7 +238,7 @@ func (h *WorkflowHandlers) httpGetWorkspaceSnapshot(c *gin.Context) {
 
 	workflowID := c.Query("workflow_id")
 	if workflowID == "" {
-		workflows, err := h.service.ListWorkflows(c.Request.Context(), workspaceID)
+		workflows, err := h.service.ListWorkflows(c.Request.Context(), workspaceID, false)
 		if err != nil {
 			handleNotFound(c, h.logger, err, "workflow not found")
 			return
@@ -295,14 +305,15 @@ func applyTaskLimit(c *gin.Context, tasks []*models.Task) []*models.Task {
 
 func (h *WorkflowHandlers) wsListWorkflows(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		WorkspaceID string `json:"workspace_id,omitempty"`
+		WorkspaceID   string `json:"workspace_id,omitempty"`
+		IncludeHidden bool   `json:"include_hidden,omitempty"`
 	}
 	if msg.Payload != nil {
 		if err := msg.ParsePayload(&req); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 		}
 	}
-	workflows, err := h.service.ListWorkflows(ctx, req.WorkspaceID)
+	workflows, err := h.service.ListWorkflows(ctx, req.WorkspaceID, req.IncludeHidden)
 	if err != nil {
 		h.logger.Error("failed to list workflows", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list workflows", nil)

@@ -209,6 +209,23 @@ func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 	})
 }
 
+// httpEnsureTaskSession returns the task's existing primary/newest session if any,
+// otherwise resolves the agent profile server-side and creates one (prepare or
+// start, depending on the workflow step). Idempotent under concurrent calls.
+func (h *TaskHandlers) httpEnsureTaskSession(c *gin.Context) {
+	taskID := c.Param("id")
+	if taskID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "task id is required"})
+		return
+	}
+	resp, err := h.orchestrator.EnsureSession(c.Request.Context(), taskID)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task not found")
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
 func (h *TaskHandlers) httpGetTaskSession(c *gin.Context) {
 	session, err := h.service.GetTaskSession(c.Request.Context(), c.Param("id"))
 	if err != nil {

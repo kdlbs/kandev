@@ -22,25 +22,30 @@ import {
   useSendInput,
   useFitAndResize,
 } from "./use-passthrough-terminal";
+import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useTerminalSearch } from "./use-terminal-search";
 import { TerminalSearchBar } from "./terminal-search-bar";
 import { usePanelSearch } from "@/hooks/use-panel-search";
 
 type BaseProps = {
-  sessionId?: string | null;
   autoFocus?: boolean;
   pendingCommand?: string | null;
   onCommandSent?: () => void;
 };
-type AgentTerminalProps = BaseProps & { mode: "agent"; label?: string };
-type ShellTerminalProps = BaseProps & { mode: "shell"; terminalId: string; label?: string };
+type AgentTerminalProps = BaseProps & { mode: "agent"; sessionId?: string | null; label?: string };
+type ShellTerminalProps = BaseProps & {
+  mode: "shell";
+  environmentId: string | null | undefined;
+  terminalId: string;
+  label?: string;
+};
 type PassthroughTerminalProps = AgentTerminalProps | ShellTerminalProps;
 
 /**
  * PassthroughTerminal provides direct terminal interaction with an agent CLI.
  *
  * Design: Dedicated Binary WebSocket + AttachAddon
- * - Uses a dedicated WebSocket connection to /terminal/:sessionId
+ * - Uses dedicated WebSocket routes for session-scoped agent terminals and env-scoped shells
  * - Raw binary frames bypass JSON encoding/decoding latency
  * - AttachAddon (official xterm.js addon) handles the bridging
  * - Unicode11Addon enables proper unicode character support
@@ -93,13 +98,15 @@ function useWsBaseUrl() {
 
 // eslint-disable-next-line max-lines-per-function -- wires many hooks + refs; each block is already its own hook
 export function PassthroughTerminal(props: PassthroughTerminalProps) {
-  const { sessionId: propSessionId, mode, label, autoFocus, pendingCommand, onCommandSent } = props;
+  const { mode, label, autoFocus, pendingCommand, onCommandSent } = props;
   const terminalId = mode === "shell" ? props.terminalId : undefined;
+  const environmentId = mode === "shell" ? props.environmentId : undefined;
   const refs = useTerminalRefs();
   const { terminalRef, xtermRef, fitAddonRef, wsRef, attachAddonRef } = refs;
 
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const sessionId = propSessionId ?? storeSessionId;
+  const environmentSessionId = useEnvironmentSessionId();
+  const sessionId = mode === "agent" ? (props.sessionId ?? storeSessionId) : environmentSessionId;
 
   const { session } = useSession(sessionId);
   const agentctlStatus = useSessionAgentctl(sessionId);
@@ -109,20 +116,21 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   // spamming reconnects burns cycles and confuses the loading state.
   // Don't require isActive — restored workspaces (terminal-state sessions)
   // have agentctl running but the session state stays COMPLETED/CANCELLED.
-  const canConnect = Boolean(sessionId && agentctlStatus.isReady);
+  const connectionID = mode === "agent" ? sessionId : environmentId;
+  const canConnect = Boolean(connectionID && sessionId && agentctlStatus.isReady);
   const wsBaseUrl = useWsBaseUrl();
 
   const [isTerminalReady, setIsTerminalReady] = useState(false);
   const onTerminalReady = useCallback(() => setIsTerminalReady(true), []);
 
-  // Track which session has an active WebSocket connection. The loading overlay
-  // resets on session switches without needing a separate setState effect.
-  const [connectedSessionId, setConnectedSessionId] = useState<string | null>(null);
-  const isConnected = sessionId != null && connectedSessionId === sessionId;
+  // Track which terminal target has an active WebSocket connection. The loading
+  // overlay resets on target switches without needing a separate setState effect.
+  const [connectedTargetId, setConnectedTargetId] = useState<string | null>(null);
+  const isConnected = connectionID != null && connectedTargetId === connectionID;
   const onConnected = useCallback(() => {
-    setConnectedSessionId(sessionId ?? null);
+    setConnectedTargetId(connectionID ?? null);
     if (autoFocus) refs.xtermRef.current?.textarea?.focus({ preventScroll: true });
-  }, [sessionId, autoFocus, refs.xtermRef]);
+  }, [connectionID, autoFocus, refs.xtermRef]);
 
   const linkHandler = useTerminalLinkHandler();
   const terminalFontFamily = useAppStore((s) => s.userSettings.terminalFontFamily);
@@ -171,6 +179,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   useWebSocketConnection({
     taskId,
     sessionId,
+    environmentId,
     canConnect,
     isTerminalReady,
     fitAndResize,

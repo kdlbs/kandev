@@ -367,7 +367,7 @@ func TestHandleCreateTask_AutoResolvesWorkspaceAndWorkflow(t *testing.T) {
 	require.NoError(t, wsErr)
 	require.Len(t, workspaces, 1, "should have exactly 1 default workspace")
 
-	workflows, wfErr := svc.ListWorkflows(ctx, workspaces[0].ID)
+	workflows, wfErr := svc.ListWorkflows(ctx, workspaces[0].ID, false)
 	require.NoError(t, wfErr)
 	require.Len(t, workflows, 1, "should have exactly 1 default workflow")
 

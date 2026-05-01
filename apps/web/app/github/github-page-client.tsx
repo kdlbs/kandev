@@ -64,7 +64,7 @@ function NotAuthenticatedNotice() {
       <AlertDescription>
         GitHub is not connected. Configure GitHub authentication (gh CLI or a Personal Access Token)
         in{" "}
-        <Link href="/settings" className="underline font-medium">
+        <Link href="/settings" className="underline font-medium cursor-pointer">
           Settings → GitHub
         </Link>{" "}
         to see your pull requests and issues.

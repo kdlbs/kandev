@@ -168,6 +168,12 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 		return "", err
 	}
 
+	// Notify the frontend that a new CREATED session exists. The start path
+	// transitions through updateTaskSessionState which broadcasts; the prepare
+	// path writes the row directly, so without this the per-task session list
+	// stays empty until a manual reload.
+	s.publishSessionCreatedEvent(ctx, taskID, sessionID, workflowStepID)
+
 	if launchWorkspace {
 		// Launch workspace infrastructure (agentctl) in the background so the WS response
 		// returns the session ID immediately. The frontend navigates to the session page

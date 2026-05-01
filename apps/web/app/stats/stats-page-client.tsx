@@ -7,6 +7,7 @@ import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import type { StatsResponse } from "@/lib/types/http";
 import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { IconChartBar } from "@tabler/icons-react";
 import {
   OverviewCards,
   WorkloadSection,
@@ -80,7 +81,7 @@ function getRangeLabel(range: RangeKey): string {
 function StatsEmptyState({ message }: { message: string }) {
   return (
     <div className="h-screen w-full flex flex-col bg-background">
-      <PageTopbar title="Statistics" />
+      <PageTopbar title="Statistics" icon={<IconChartBar className="h-4 w-4" />} />
       <div className="flex-1 flex items-center justify-center">
         <p className="text-muted-foreground">{message}</p>
       </div>
@@ -100,6 +101,7 @@ function StatsHeader({ global, range, copied, onRangeChange, onCopy }: StatsHead
   return (
     <PageTopbar
       title="Statistics"
+      icon={<IconChartBar className="h-4 w-4" />}
       subtitle={`${global.total_tasks} tasks · ${global.total_sessions} sessions · ${formatDuration(global.total_duration_ms)}`}
       actions={
         <>
@@ -322,7 +324,7 @@ export function StatsPageClient({ stats, error, workspaceId, activeRange }: Stat
   if (error)
     return (
       <div className="h-screen w-full flex flex-col bg-background">
-        <PageTopbar title="Statistics" />
+        <PageTopbar title="Statistics" icon={<IconChartBar className="h-4 w-4" />} />
         <div className="flex-1 flex items-center justify-center">
           <p className="text-destructive">Error loading stats: {error}</p>
         </div>

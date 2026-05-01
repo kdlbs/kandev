@@ -165,6 +165,8 @@ func (r *Repository) runMigrations() error {
 	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
 	// Add task_dir_name column to task_environments for multi-repo task root layout (ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE task_environments ADD COLUMN task_dir_name TEXT DEFAULT ''`)
+	// Add hidden flag to workflows for system-only flows excluded from management UI (ignore error if already exists)
+	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
 	return nil
 }
 
@@ -558,6 +560,7 @@ func (r *Repository) initInfraSchema() error {
 		workflow_template_id TEXT DEFAULT '',
 		name TEXT NOT NULL,
 		description TEXT DEFAULT '',
+		hidden INTEGER NOT NULL DEFAULT 0,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);

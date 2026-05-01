@@ -9,10 +9,9 @@ type StoreSlice = {
 /**
  * Return a sessionId that only changes when the underlying environment changes.
  *
- * Many backend endpoints (terminal WS, file tree, agentctl) are routed by
- * sessionId but resolve to a shared per-environment resource.  This hook
- * keeps the returned sessionId stable across same-environment tab switches
- * so downstream components don't needlessly reconnect or re-fetch.
+ * Some workspace readiness APIs still need a session lookup handle. This hook
+ * keeps that handle stable across same-environment tab switches so downstream
+ * components don't needlessly reconnect or re-fetch.
  */
 export function useEnvironmentSessionId(): string | null {
   const cacheRef = useRef({ envId: null as string | null, sessionId: null as string | null });
@@ -24,4 +23,12 @@ export function useEnvironmentSessionId(): string | null {
     return sid;
   }, []);
   return useAppStore(selector);
+}
+
+/** Return the active task environment ID without falling back to session ID. */
+export function useEnvironmentId(): string | null {
+  return useAppStore((state: StoreSlice) => {
+    const sid = state.tasks.activeSessionId;
+    return sid ? (state.environmentIdBySessionId[sid] ?? null) : null;
+  });
 }

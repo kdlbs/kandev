@@ -67,11 +67,11 @@ function StartTaskSplitButton({
 
   return (
     <div className="flex flex-col w-full sm:w-auto gap-2 sm:gap-0">
-      <div className="flex w-full sm:inline-flex sm:w-auto rounded-md border border-border overflow-hidden sm:h-7 h-10">
+      <div className="flex w-full sm:inline-flex sm:w-auto sm:h-7 h-10">
         <Button
           type="submit"
           variant="default"
-          className="rounded-none border-0 cursor-pointer gap-1.5 h-full flex-1"
+          className="h-full flex-1 cursor-pointer gap-1.5 sm:rounded-r-none sm:border-r-0"
           disabled={disabled}
           data-testid="submit-start-agent"
         >
@@ -87,7 +87,7 @@ function StartTaskSplitButton({
             <Button
               type="button"
               variant="default"
-              className="rounded-none border-0 border-l border-primary-foreground/20 px-2 cursor-pointer h-full hidden sm:flex"
+              className="-ml-px h-full hidden rounded-l-none border-l border-primary-foreground/20 px-2 cursor-pointer sm:flex"
               disabled={disabled}
               data-testid="submit-start-agent-chevron"
             >
