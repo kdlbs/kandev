@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -544,11 +545,29 @@ type createInstanceExecutor struct {
 	MockExecutor
 	client      *agentctl.Client
 	createCount atomic.Int32
+	stopCount   atomic.Int32
 	delay       time.Duration
+	// Barrier-based deterministic synchronization for race tests.
+	// Set entered (buffered 1) to receive a signal when CreateInstance begins.
+	// Set barrier (unbuffered, closed to release) to block until the test is ready.
+	entered chan struct{}
+	barrier chan struct{}
 }
 
 func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
-	if e.delay > 0 {
+	if e.entered != nil {
+		select {
+		case e.entered <- struct{}{}:
+		default:
+		}
+	}
+	if e.barrier != nil {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-e.barrier:
+		}
+	} else if e.delay > 0 {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -564,6 +583,11 @@ func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *Execut
 		Client:        e.client,
 		WorkspacePath: req.WorkspacePath,
 	}, nil
+}
+
+func (e *createInstanceExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
+	e.stopCount.Add(1)
+	return nil
 }
 
 func newEnvironmentExecutionTestManager(t *testing.T, provider WorkspaceInfoProvider) (*Manager, *createInstanceExecutor) {
@@ -698,7 +722,11 @@ func TestGetOrEnsureExecution_DedupAcrossEnvAndSessionPaths(t *testing.T) {
 			},
 		},
 	})
-	backend.delay = 50 * time.Millisecond
+	// Use a barrier channel so that the test is deterministic: CreateInstance
+	// blocks until we explicitly release it, giving the env-path goroutine
+	// time to join the same singleflight flight before we let it complete.
+	backend.entered = make(chan struct{}, 1)
+	backend.barrier = make(chan struct{})
 
 	type result struct {
 		exec *AgentExecution
@@ -714,6 +742,12 @@ func TestGetOrEnsureExecution_DedupAcrossEnvAndSessionPaths(t *testing.T) {
 		exec, err := mgr.GetOrEnsureExecutionForEnvironment(context.Background(), "env-1")
 		results <- result{exec, err}
 	}()
+
+	// Wait for the singleflight winner to enter CreateInstance, then yield so
+	// the other goroutine can join the same flight before we release the barrier.
+	<-backend.entered
+	runtime.Gosched()
+	close(backend.barrier)
 
 	r1 := <-results
 	r2 := <-results

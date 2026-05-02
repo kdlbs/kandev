@@ -87,6 +87,7 @@ func (m *Manager) Start(ctx context.Context) error {
 				if execution.agentctl != nil {
 					execution.agentctl.Close()
 				}
+				execution.EndSessionSpan()
 				initSpan.End()
 				continue
 			}

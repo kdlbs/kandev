@@ -153,6 +153,9 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workspace info for session %s: %w", sessionID, err)
 	}
+	if info == nil {
+		return nil, fmt.Errorf("session %s not found", sessionID)
+	}
 
 	// Resolve taskID from provider when caller doesn't have it (e.g., GetOrEnsureExecution)
 	if taskID == "" {
