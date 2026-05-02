@@ -143,12 +143,15 @@ function getEntrySignature(entry: RecentTaskEntry): string {
 function useRecordActiveTask(context: RecentTaskBuildContext) {
   const lastTaskIdRef = useRef<string | null>(null);
   const lastSignatureRef = useRef<string | null>(null);
+  const lastEntryRef = useRef<RecentTaskEntry | undefined>(undefined);
 
   useEffect(() => {
     if (!context.activeTaskId) return;
 
-    const previous = getRecentTasks().find((entry) => entry.taskId === context.activeTaskId);
     const isNewVisit = lastTaskIdRef.current !== context.activeTaskId;
+    const previous = isNewVisit
+      ? getRecentTasks().find((entry) => entry.taskId === context.activeTaskId)
+      : lastEntryRef.current;
     const visitedAt = isNewVisit ? new Date().toISOString() : undefined;
     const entry = buildRecentTaskEntry(context.activeTaskId, context, previous, visitedAt);
     const signature = getEntrySignature(entry);
@@ -157,6 +160,7 @@ function useRecordActiveTask(context: RecentTaskBuildContext) {
 
     lastTaskIdRef.current = context.activeTaskId;
     lastSignatureRef.current = signature;
+    lastEntryRef.current = entry;
     upsertRecentTask(entry);
   }, [context]);
 }
