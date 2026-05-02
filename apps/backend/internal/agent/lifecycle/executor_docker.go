@@ -216,20 +216,23 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 		return nil, fmt.Errorf("failed to get IP for container %s: %w", containerName, err)
 	}
 
+	controlHost, controlPort := resolveDockerEndpoint(ctx, dockerClient, containerName, AgentCtlPort, containerIP, r.logger)
+
 	// Check if agentctl is healthy
-	ctl := agentctl.NewControlClient(containerIP, AgentCtlPort, r.logger)
+	ctl := agentctl.NewControlClient(controlHost, controlPort, r.logger)
 	if err := ctl.Health(ctx); err != nil {
 		return nil, fmt.Errorf("agentctl not healthy in container %s: %w", containerName, err)
 	}
 
 	// Check if the previous instance is still alive
-	instancePort, reusingProcess, err := r.findExistingInstance(ctx, ctl, containerIP, prevID)
+	instancePort, reusingProcess, err := r.findExistingInstance(ctx, dockerClient, ctl, containerName, containerIP, prevID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find instance in container %s: %w", containerName, err)
 	}
+	instanceHost, resolvedInstancePort := resolveDockerEndpoint(ctx, dockerClient, containerName, instancePort, containerIP, r.logger)
 
 	// Create client pointing to the instance port
-	client := agentctl.NewClient(containerIP, instancePort, r.logger,
+	client := agentctl.NewClient(instanceHost, resolvedInstancePort, r.logger,
 		agentctl.WithExecutionID(req.InstanceID),
 		agentctl.WithSessionID(req.SessionID))
 
@@ -248,7 +251,10 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 		zap.String("container_name", containerName),
 		zap.String("container_id", info.ID),
 		zap.String("container_ip", containerIP),
-		zap.Int("instance_port", instancePort),
+		zap.String("control_host", controlHost),
+		zap.Int("control_port", controlPort),
+		zap.String("instance_host", instanceHost),
+		zap.Int("instance_port", resolvedInstancePort),
 		zap.Bool("reusing_process", reusingProcess))
 
 	return &ExecutorInstance{
@@ -266,12 +272,20 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 
 // findExistingInstance checks if a previous instance is still running in the container.
 // Returns the instance port and whether the agent subprocess is also running.
-func (r *DockerExecutor) findExistingInstance(ctx context.Context, ctl *agentctl.ControlClient, containerIP, prevExecutionID string) (int, bool, error) {
+func (r *DockerExecutor) findExistingInstance(
+	ctx context.Context,
+	dockerClient *docker.Client,
+	ctl *agentctl.ControlClient,
+	containerID string,
+	containerIP string,
+	prevExecutionID string,
+) (int, bool, error) {
 	// Try to get the existing instance by its ID
 	instance, err := ctl.GetInstance(ctx, prevExecutionID)
 	if err == nil && instance != nil && instance.Port > 0 {
 		// Instance exists, check if agent subprocess is running
-		client := agentctl.NewClient(containerIP, instance.Port, r.logger)
+		instanceHost, instancePort := resolveDockerEndpoint(ctx, dockerClient, containerID, instance.Port, containerIP, r.logger)
+		client := agentctl.NewClient(instanceHost, instancePort, r.logger)
 		status, statusErr := client.GetStatus(ctx)
 		processRunning := statusErr == nil && status != nil && status.IsAgentRunning()
 		return instance.Port, processRunning, nil
@@ -288,6 +302,26 @@ func (r *DockerExecutor) findExistingInstance(ctx context.Context, ctl *agentctl
 		return 0, false, fmt.Errorf("failed to create new instance: %w", createErr)
 	}
 	return resp.Port, false, nil
+}
+
+func resolveDockerEndpoint(
+	ctx context.Context,
+	dockerClient *docker.Client,
+	containerID string,
+	containerPort int,
+	fallbackHost string,
+	log *logger.Logger,
+) (string, int) {
+	host, port, err := dockerClient.GetContainerHostPort(ctx, containerID, containerPort)
+	if err == nil {
+		return host, port
+	}
+	log.Warn("failed to resolve published Docker port, falling back to container IP",
+		zap.String("container_id", containerID),
+		zap.Int("container_port", containerPort),
+		zap.String("fallback_host", fallbackHost),
+		zap.Error(err))
+	return fallbackHost, containerPort
 }
 
 func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {

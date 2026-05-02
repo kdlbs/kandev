@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -125,4 +126,47 @@ func TestBuildContainerConfig_ImageTagOverrideWins(t *testing.T) {
 	if got.Image != "kandev/agent:custom" {
 		t.Errorf("Image = %q, want kandev/agent:custom (profile override must win over rt.Image)", got.Image)
 	}
+}
+
+func TestBuildContainerConfig_PublishesAgentctlPorts(t *testing.T) {
+	cm := newCMTest(t)
+	cfg := ContainerConfig{
+		AgentConfig: newConfigStubAgent(),
+		InstanceID:  "0123456789abcdef",
+		TaskID:      "task-1",
+	}
+
+	got, err := cm.buildContainerConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+
+	if len(got.PortBindings) == 0 {
+		t.Fatal("expected agentctl ports to be published")
+	}
+	assertHasPortBinding(t, got.PortBindings, AgentCtlPort)
+	assertHasPortBinding(t, got.PortBindings, dockerAgentctlInstancePortBase)
+	assertHasPortBinding(t, got.PortBindings, dockerAgentctlInstancePortMax)
+	assertEnvContains(t, got.Env, "AGENTCTL_INSTANCE_PORT_BASE=41001")
+	assertEnvContains(t, got.Env, "AGENTCTL_INSTANCE_PORT_MAX=41100")
+}
+
+func assertHasPortBinding(t *testing.T, bindings []docker.PortBindingConfig, port int) {
+	t.Helper()
+	for _, binding := range bindings {
+		if binding.ContainerPort == port && binding.HostIP == "127.0.0.1" && binding.HostPort == "0" {
+			return
+		}
+	}
+	t.Fatalf("missing published port binding for %d/tcp: %#v", port, bindings)
+}
+
+func assertEnvContains(t *testing.T, env []string, want string) {
+	t.Helper()
+	for _, item := range env {
+		if item == want {
+			return
+		}
+	}
+	t.Fatalf("missing env %q in %#v", want, env)
 }

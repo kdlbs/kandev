@@ -19,6 +19,11 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+const (
+	dockerAgentctlInstancePortBase = 41001
+	dockerAgentctlInstancePortMax  = 41100
+)
+
 // ContainerConfig holds configuration for launching a Docker container
 type ContainerConfig struct {
 	AgentConfig      agents.Agent
@@ -86,24 +91,24 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 	}
 	config.BootstrapNonce = nonce
 
-	containerID, containerIP, err := cm.createAndStartContainer(ctx, config)
+	containerID, containerIP, controlHost, controlPort, err := cm.createAndStartContainer(ctx, config)
 	if err != nil {
 		return nil, err
 	}
 
 	// Create ControlClient (no auth token yet — handshake hasn't happened)
-	ctl := agentctl.NewControlClient(containerIP, AgentCtlPort, cm.logger)
+	ctl := agentctl.NewControlClient(controlHost, controlPort, cm.logger)
 
 	// Wait for agentctl to be healthy
 	if err := cm.waitForHealth(ctx, ctl); err != nil {
-		_ = cm.dockerClient.RemoveContainer(ctx, containerID, true)
+		cm.removeContainerBestEffort(containerID)
 		return nil, fmt.Errorf("agentctl health check failed: %w", err)
 	}
 
 	// Perform handshake: nonce → token
 	authToken, err := ctl.Handshake(ctx, nonce)
 	if err != nil {
-		_ = cm.dockerClient.RemoveContainer(ctx, containerID, true)
+		cm.removeContainerBestEffort(containerID)
 		return nil, fmt.Errorf("agentctl handshake failed: %w", err)
 	}
 
@@ -128,20 +133,20 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 // createAndStartContainer builds, creates, and starts a Docker container.
 func (cm *ContainerManager) createAndStartContainer(
 	ctx context.Context, config ContainerConfig,
-) (string, string, error) {
+) (string, string, string, int, error) {
 	containerCfg, err := cm.buildContainerConfig(config)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to build container config: %w", err)
+		return "", "", "", 0, fmt.Errorf("failed to build container config: %w", err)
 	}
 
 	containerID, err := cm.dockerClient.CreateContainer(ctx, containerCfg)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to create container: %w", err)
+		return "", "", "", 0, fmt.Errorf("failed to create container: %w", err)
 	}
 
 	if err := cm.dockerClient.StartContainer(ctx, containerID); err != nil {
-		_ = cm.dockerClient.RemoveContainer(ctx, containerID, true)
-		return "", "", fmt.Errorf("failed to start container: %w", err)
+		cm.removeContainerBestEffort(containerID)
+		return "", "", "", 0, fmt.Errorf("failed to start container: %w", err)
 	}
 
 	containerIP, err := cm.dockerClient.GetContainerIP(ctx, containerID)
@@ -151,7 +156,8 @@ func (cm *ContainerManager) createAndStartContainer(
 		containerIP = "127.0.0.1"
 	}
 
-	return containerID, containerIP, nil
+	controlHost, controlPort := cm.resolveContainerEndpoint(ctx, containerID, AgentCtlPort, containerIP)
+	return containerID, containerIP, controlHost, controlPort, nil
 }
 
 // createInstanceAndClient creates an agent instance in the container and returns the client.
@@ -189,18 +195,46 @@ func (cm *ContainerManager) createInstanceAndClient(
 
 	resp, err := ctl.CreateInstance(ctx, createReq)
 	if err != nil {
-		_ = cm.dockerClient.RemoveContainer(ctx, containerID, true)
+		cm.removeContainerBestEffort(containerID)
 		return nil, fmt.Errorf("failed to create instance in container: %w", err)
 	}
 
+	instanceHost, instancePort := cm.resolveContainerEndpoint(ctx, containerID, resp.Port, containerIP)
+
 	// ControlClient already has the auth token set via Handshake —
 	// read it back for the per-instance Client.
-	client := agentctl.NewClient(containerIP, resp.Port, cm.logger,
+	client := agentctl.NewClient(instanceHost, instancePort, cm.logger,
 		agentctl.WithExecutionID(config.InstanceID),
 		agentctl.WithSessionID(config.SessionID),
 		agentctl.WithAuthToken(ctl.AuthToken()))
 
 	return client, nil
+}
+
+func (cm *ContainerManager) resolveContainerEndpoint(ctx context.Context, containerID string, containerPort int, fallbackHost string) (string, int) {
+	host, port, err := cm.dockerClient.GetContainerHostPort(ctx, containerID, containerPort)
+	if err == nil {
+		return host, port
+	}
+	cm.logger.Warn("failed to resolve published Docker port, falling back to container IP",
+		zap.String("container_id", containerID),
+		zap.Int("container_port", containerPort),
+		zap.String("fallback_host", fallbackHost),
+		zap.Error(err))
+	return fallbackHost, containerPort
+}
+
+func (cm *ContainerManager) removeContainerBestEffort(containerID string) {
+	if containerID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := cm.dockerClient.RemoveContainer(ctx, containerID, true); err != nil {
+		cm.logger.Warn("failed to remove container after launch failure",
+			zap.String("container_id", containerID),
+			zap.Error(err))
+	}
 }
 
 // waitForHealth waits for agentctl to be healthy with retries.
@@ -371,16 +405,17 @@ exec /usr/local/bin/agentctl`,
 	}
 
 	containerCfg := docker.ContainerConfig{
-		Name:        containerName,
-		Image:       imageName,
-		Entrypoint:  bootstrap,
-		Cmd:         nil,
-		Env:         env,
-		WorkingDir:  cm.expandMountSource(rt.WorkingDir, containerWorkspacePath),
-		Mounts:      mounts,
-		NetworkMode: cm.networkName,
-		Memory:      memoryBytes,
-		CPUQuota:    cpuQuota,
+		Name:         containerName,
+		Image:        imageName,
+		Entrypoint:   bootstrap,
+		Cmd:          nil,
+		Env:          env,
+		WorkingDir:   cm.expandMountSource(rt.WorkingDir, containerWorkspacePath),
+		Mounts:       mounts,
+		PortBindings: dockerAgentctlPortBindings(),
+		NetworkMode:  cm.networkName,
+		Memory:       memoryBytes,
+		CPUQuota:     cpuQuota,
 		Labels: map[string]string{
 			"kandev.managed":     "true",
 			"kandev.instance_id": config.InstanceID,
@@ -395,6 +430,23 @@ exec /usr/local/bin/agentctl`,
 	}
 
 	return containerCfg, nil
+}
+
+func dockerAgentctlPortBindings() []docker.PortBindingConfig {
+	bindings := make([]docker.PortBindingConfig, 0, 1+dockerAgentctlInstancePortMax-dockerAgentctlInstancePortBase+1)
+	bindings = append(bindings, newDockerPortBinding(AgentCtlPort))
+	for port := dockerAgentctlInstancePortBase; port <= dockerAgentctlInstancePortMax; port++ {
+		bindings = append(bindings, newDockerPortBinding(port))
+	}
+	return bindings
+}
+
+func newDockerPortBinding(containerPort int) docker.PortBindingConfig {
+	return docker.PortBindingConfig{
+		ContainerPort: containerPort,
+		HostIP:        "127.0.0.1",
+		HostPort:      "0",
+	}
 }
 
 // expandMounts expands mount templates with actual paths
@@ -507,6 +559,12 @@ func (cm *ContainerManager) buildEnvVars(config ContainerConfig) []string {
 	if config.ProfileInfo != nil && config.ProfileInfo.ProfileID != "" {
 		env = append(env, fmt.Sprintf("KANDEV_AGENT_PROFILE_ID=%s", config.ProfileInfo.ProfileID))
 	}
+
+	env = append(env,
+		fmt.Sprintf("AGENTCTL_PORT=%d", AgentCtlPort),
+		fmt.Sprintf("AGENTCTL_INSTANCE_PORT_BASE=%d", dockerAgentctlInstancePortBase),
+		fmt.Sprintf("AGENTCTL_INSTANCE_PORT_MAX=%d", dockerAgentctlInstancePortMax),
+	)
 
 	// Inject bootstrap nonce for agentctl handshake (NOT the auth token)
 	if config.BootstrapNonce != "" {
