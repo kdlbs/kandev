@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -125,6 +126,34 @@ func TestHealTaskEnvironmentWorkspacePaths_LeavesPopulatedAlone(t *testing.T) {
 	}
 	if got.WorkspacePath != "/home/user/.kandev/tasks/foo_abc" {
 		t.Errorf("workspace_path = %q, must not be overwritten", got.WorkspacePath)
+	}
+}
+
+// TestHealTaskEnvironmentWorkspacePaths_TaskDirMode — task-dir-mode envs
+// place the worktree at <root>/.kandev/tasks/<name>/<repo>; workspace_path
+// must be the per-task root (Dir of worktree_path), not the repo subdir.
+// The naive heal would have stamped worktree_path here and corrupted the
+// row in a different way.
+func TestHealTaskEnvironmentWorkspacePaths_TaskDirMode(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	insertTask(t, repo.db, "task-T")
+	insertEnv(t, repo.db, &models.TaskEnvironment{
+		ID:           "env-T",
+		TaskID:       "task-T",
+		ExecutorType: "worktree",
+		WorktreePath: "/home/u/.kandev/tasks/fix-something_abc/kandev",
+	})
+
+	if err := repo.healTaskEnvironmentWorkspacePaths(); err != nil {
+		t.Fatalf("heal: %v", err)
+	}
+
+	got, err := repo.GetTaskEnvironment(context.Background(), "env-T")
+	if err != nil {
+		t.Fatalf("get env: %v", err)
+	}
+	if got.WorkspacePath != "/home/u/.kandev/tasks/fix-something_abc" {
+		t.Errorf("workspace_path = %q, want task root (parent of worktree_path)", got.WorkspacePath)
 	}
 }
 
@@ -268,9 +297,10 @@ func TestEnsureTaskEnvironmentTaskUniqueIndex_BlocksFutureDuplicates(t *testing.
 	if err == nil {
 		t.Fatal("expected unique-constraint error inserting second env for same task_id")
 	}
-	// sql driver returns a sqlite-specific error; just confirm it's a real DB error.
-	if _, ok := err.(interface{ Error() string }); !ok {
-		t.Fatalf("unexpected error type: %T", err)
+	// Confirm it's specifically a UNIQUE constraint failure, not some other DB
+	// error masquerading as success.
+	if !strings.Contains(err.Error(), "UNIQUE") {
+		t.Fatalf("expected UNIQUE constraint error, got: %v", err)
 	}
 	// Belt-and-suspenders: make sure the second row didn't sneak in.
 	var n int

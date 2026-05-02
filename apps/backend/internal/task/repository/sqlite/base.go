@@ -368,17 +368,78 @@ func (r *Repository) findOrphanedTasks() ([]backfillRow, error) {
 // trigger ErrSessionWorkspaceNotReady forever in GetOrEnsureExecutionForEnvironment
 // and leave shell terminals stuck on "Connecting terminal...".
 //
+// Two worktree layouts produce two different workspace_path values, mirroring
+// the create branch in orchestrator/executor/executor_execute.go's
+// computeWorkspacePath:
+//
+//   - Plain worktree (.../.kandev/worktrees/<name>) — workspace_path = worktree_path
+//   - Task-dir mode (.../.kandev/tasks/<name>/<repo>) — workspace_path = Dir(worktree_path)
+//
+// The pattern lookup is hardcoded to the kandev path layout — anything that
+// doesn't match either pattern falls back to worktree_path (the common-case
+// plain-worktree assumption) and is logged for manual review.
+//
 // Idempotent — only touches rows where workspace_path is empty.
 func (r *Repository) healTaskEnvironmentWorkspacePaths() error {
-	_, err := r.db.Exec(`
-		UPDATE task_environments
-		   SET workspace_path = worktree_path,
-		       updated_at = datetime('now')
+	rows, err := r.db.Query(`
+		SELECT id, worktree_path
+		  FROM task_environments
 		 WHERE executor_type = 'worktree'
 		   AND COALESCE(workspace_path, '') = ''
 		   AND COALESCE(worktree_path, '') != ''
 	`)
-	return err
+	if err != nil {
+		return fmt.Errorf("heal workspace_path: query: %w", err)
+	}
+	type healRow struct{ id, worktreePath string }
+	var pending []healRow
+	for rows.Next() {
+		var hr healRow
+		if err := rows.Scan(&hr.id, &hr.worktreePath); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("heal workspace_path: scan: %w", err)
+		}
+		pending = append(pending, hr)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("heal workspace_path: rows: %w", err)
+	}
+	_ = rows.Close()
+	if len(pending) == 0 {
+		return nil
+	}
+
+	for _, hr := range pending {
+		ws := healedWorkspacePath(hr.worktreePath)
+		if _, err := r.db.Exec(
+			`UPDATE task_environments SET workspace_path = ?, updated_at = datetime('now') WHERE id = ?`,
+			ws, hr.id,
+		); err != nil {
+			return fmt.Errorf("heal workspace_path: update %s: %w", hr.id, err)
+		}
+	}
+	return nil
+}
+
+// healedWorkspacePath derives workspace_path from worktree_path using the
+// kandev layout rules. Mirrors computeWorkspacePath in the orchestrator so
+// the heal lands the same value the create branch would.
+func healedWorkspacePath(worktreePath string) string {
+	if worktreePath == "" {
+		return ""
+	}
+	// Task-dir mode places the worktree at <root>/.kandev/tasks/<name>/<repo>.
+	// The workspace is the per-task root one level up from the repo subdir.
+	// Detect via the segment .kandev/tasks/ in the path.
+	if strings.Contains(worktreePath, "/.kandev/tasks/") {
+		parent := worktreePath[:strings.LastIndex(worktreePath, "/")]
+		if parent != "" {
+			return parent
+		}
+	}
+	// Plain worktree mode: workspace_path == worktree_path.
+	return worktreePath
 }
 
 // healDuplicateTaskEnvironments collapses rows where a single task has more

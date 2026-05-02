@@ -90,16 +90,22 @@ const sessionIDPayloadKey = "session_id"
 // don't sit forever on "Connecting terminal..." waiting for events that have
 // already fired.
 //
-// Emits one of session.agentctl_ready / starting / error based on a bounded
-// Health() probe of the agentctl client, or no message at all when the
-// session has no live execution (the lazy create-on-terminal-connect path
-// will publish events normally in that case).
+// Non-blocking by design — sendSessionData runs in the WS read loop, so a
+// network probe here would delay every subscribe/focus ACK by its timeout.
+// Instead, treat the workspace stream's presence as the cached readiness
+// signal: streamManager only attaches it AFTER waitForAgentctlReady's Health
+// check succeeds. If the stream is wired we emit `agentctl_ready`; otherwise
+// `agentctl_starting`. The subsequent waitForAgentctlReady event (or its
+// error) will correct the status if the snapshot picked the wrong one.
+//
+// Emits no message when the session has no live execution — the lazy
+// create-on-terminal-connect path publishes events normally in that case.
 func appendAgentctlStatusMessage(
-	ctx context.Context,
+	_ context.Context,
 	lifecycleMgr *lifecycle.Manager,
 	sessionID string,
 	result []*ws.Message,
-	log *logger.Logger,
+	_ *logger.Logger,
 ) []*ws.Message {
 	if lifecycleMgr == nil {
 		return result
@@ -114,18 +120,8 @@ func appendAgentctlStatusMessage(
 		"agent_execution_id": execution.ID,
 	}
 	action := ws.ActionSessionAgentctlStarting
-
-	client := execution.GetAgentCtlClient()
-	if client != nil {
-		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
-		if err := client.Health(probeCtx); err == nil {
-			action = ws.ActionSessionAgentctlReady
-		} else {
-			log.Debug("agentctl health probe failed during subscribe snapshot",
-				zap.String(sessionIDPayloadKey, sessionID),
-				zap.Error(err))
-		}
+	if execution.GetWorkspaceStream() != nil {
+		action = ws.ActionSessionAgentctlReady
 	}
 
 	notification, err := ws.NewNotification(action, payload)
