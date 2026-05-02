@@ -22,7 +22,7 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
             title={title}
             backHref={backHref}
             backLabel={backLabel}
-            className="h-16"
+            className="h-16 border-b-0"
             leading={<SidebarTrigger size="lg" className="md:hidden h-10 w-10 cursor-pointer" />}
           />
           <div className="flex min-w-0 flex-1 flex-col gap-4 p-4 pt-0 mb-20">{children}</div>
