@@ -482,10 +482,11 @@ export function useWebSocketConnection({
       isTerminalReady,
       hasTerminal: !!xtermRef.current,
     });
-    // Agent mode requires taskId (it's the route segment for the WS); shell
-    // mode routes by env id alone — taskId is only used for logging there.
-    const taskGateOk = mode === "agent" ? !!taskId : true;
-    if (!taskGateOk || !connectionKey || !canConnect || !isTerminalReady) {
+    // Agent mode routes by sessionId (carried via connectionKey); shell mode
+    // routes by env id (also carried via connectionKey). taskId is only used
+    // for logging — gating on it would force the WS to wait for useSession()
+    // hydration after refresh, which doesn't guard any real precondition.
+    if (!connectionKey || !canConnect || !isTerminalReady) {
       log("WebSocket effect: early return", {
         taskId,
         connectionKey,
