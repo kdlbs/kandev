@@ -177,6 +177,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
     isLocalExecutor,
   } = props;
   const showTaskName = (isCreateMode || isEditMode) && !isTaskStarted;
+  const taskNameAutoFocus = !isEditMode && !fs.useGitHubUrl;
   return (
     <>
       <RepoChipsRow
@@ -197,7 +198,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         <InlineTaskName
           value={fs.taskName}
           onChange={onTaskNameChange}
-          autoFocus={!isEditMode && !fs.useGitHubUrl}
+          autoFocus={taskNameAutoFocus}
         />
       )}
       <DialogPromptSection
@@ -215,6 +216,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         descriptionPlaceholder={props.descriptionPlaceholder}
         aboveDescriptionSlot={props.aboveDescriptionSlot}
         extraFormSlot={props.extraFormSlot}
+        autoFocusDescription={!isTaskStarted && !(showTaskName && taskNameAutoFocus)}
       />
       <CreateModeSelectors
         isTaskStarted={isTaskStarted}

@@ -313,6 +313,12 @@ export type DialogPromptSectionProps = {
   descriptionPlaceholder?: string;
   /** Optional slot rendered above the description textarea (e.g. a tab toggle). */
   aboveDescriptionSlot?: React.ReactNode;
+  /**
+   * Whether the description textarea should grab focus on mount. Defaults to
+   * `!isTaskStarted`. Callers that render a task-name input above the
+   * description should pass `false` so the name field wins focus.
+   */
+  autoFocusDescription?: boolean;
 };
 
 // importBindings collapses the optional Jira/Linear import callbacks into the
@@ -344,19 +350,21 @@ export function DialogPromptSection({
   extraFormSlot,
   descriptionPlaceholder,
   aboveDescriptionSlot,
+  autoFocusDescription,
 }: DialogPromptSectionProps) {
   const importsEnabled = !isSessionMode && !isTaskStarted;
   const ws = workspaceId ?? null;
   const placeholder = isPassthroughProfile
     ? "Passthrough mode — prompt not supported"
     : descriptionPlaceholder;
+  const shouldAutoFocus = autoFocusDescription ?? !isTaskStarted;
   return (
     <>
       {aboveDescriptionSlot}
       <TaskFormInputs
         key={fs.openCycle}
         isSessionMode={isSessionMode}
-        autoFocus={!isTaskStarted}
+        autoFocus={shouldAutoFocus}
         initialDescription={initialDescription}
         onDescriptionChange={fs.setHasDescription}
         onKeyDown={handleKeyDown}
