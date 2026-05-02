@@ -436,7 +436,7 @@ func TestDetectPushAndAssociatePR(t *testing.T) {
 		ghSvc := &mockGitHubService{client: mockClient}
 		svc.SetGitHubService(ghSvc)
 
-		svc.detectPushAndAssociatePR(ctx, "s1", "t1", "feature-branch")
+		svc.detectPushAndAssociatePR(ctx, "s1", "t1", "", "feature-branch")
 
 		if ghSvc.associateCalls != 1 {
 			t.Errorf("expected 1 AssociatePRWithTask call, got %d", ghSvc.associateCalls)
@@ -457,7 +457,7 @@ func TestDetectPushAndAssociatePR(t *testing.T) {
 		}
 		svc.SetGitHubService(ghSvc)
 
-		svc.detectPushAndAssociatePR(ctx, "s1", "t1", "feature-branch")
+		svc.detectPushAndAssociatePR(ctx, "s1", "t1", "", "feature-branch")
 
 		if ghSvc.associateCalls != 0 {
 			t.Errorf("expected no AssociatePRWithTask calls when PR already found, got %d", ghSvc.associateCalls)
@@ -478,7 +478,7 @@ func TestDetectPushAndAssociatePR(t *testing.T) {
 		}
 		svc.SetGitHubService(ghSvc)
 
-		svc.detectPushAndAssociatePR(ctx, "s1", "t1", "feature-branch")
+		svc.detectPushAndAssociatePR(ctx, "s1", "t1", "", "feature-branch")
 
 		if ghSvc.associateCalls != 1 {
 			t.Errorf("expected 1 AssociatePRWithTask call when pr_number=0, got %d", ghSvc.associateCalls)
@@ -514,7 +514,7 @@ func TestDetectPushAndAssociatePR(t *testing.T) {
 		svc.SetGitHubService(ghSvc)
 
 		// Agent pushed from "new-branch" (different from watch's "old-branch")
-		svc.detectPushAndAssociatePR(ctx, "s1", "t1", "new-branch")
+		svc.detectPushAndAssociatePR(ctx, "s1", "t1", "", "new-branch")
 
 		if ghSvc.updateBranchCalls != 1 {
 			t.Errorf("expected 1 UpdatePRWatchBranch call, got %d", ghSvc.updateBranchCalls)
@@ -540,7 +540,7 @@ func TestDetectPushAndAssociatePR(t *testing.T) {
 		}
 		svc.SetGitHubService(ghSvc)
 
-		svc.detectPushAndAssociatePR(ctx, "s1", "t1", "feature-branch")
+		svc.detectPushAndAssociatePR(ctx, "s1", "t1", "", "feature-branch")
 
 		if ghSvc.updateBranchCalls != 0 {
 			t.Errorf("expected no UpdatePRWatchBranch calls when branch matches, got %d", ghSvc.updateBranchCalls)

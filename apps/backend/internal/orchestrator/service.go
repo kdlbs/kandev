@@ -230,7 +230,12 @@ type Service struct {
 	// Clarification canceller — cancels pending clarifications when agent's turn completes
 	clarificationCanceller ClarificationCanceller
 
-	// Push tracker: sessionID -> last known ahead count
+	// Push tracker: "<sessionID>|<repository_name>" -> last known ahead count.
+	// The repository_name segment is required for multi-repo: each repo emits
+	// its own git status events, and keying by sessionID alone made events
+	// from different repos overwrite each other's ahead counts (so only one
+	// push got detected per session). Single-repo / repo-less sessions key
+	// against an empty repository_name.
 	pushTracker sync.Map
 
 	// gitSnapshotCache throttles per-session writes of the live git status

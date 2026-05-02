@@ -372,12 +372,16 @@ func (s *Service) resolveReviewRepository(ctx context.Context, workspaceID strin
 // detectPushAndAssociatePR checks if a push happened and looks for a PR on
 // that branch. If no PR is found immediately, retries after a delay to handle
 // the case where the user creates the PR on GitHub shortly after pushing.
-// The pushTracker entry for this session is always removed when the function returns
-// to prevent unbounded growth of the tracker map.
+// The pushTracker entry is keyed per (session, repository_name) and removed
+// on return to prevent unbounded growth of the tracker map.
+//
+// Multi-repo: repositoryName scopes the lookup so each repo's push is detected
+// and associated independently. Empty repositoryName falls back to the
+// session's primary repo (legacy single-repo path).
 func (s *Service) detectPushAndAssociatePR(
-	ctx context.Context, sessionID, taskID, branch string,
+	ctx context.Context, sessionID, taskID, repositoryName, branch string,
 ) {
-	defer s.pushTracker.Delete(sessionID)
+	defer s.pushTracker.Delete(pushTrackerKey(sessionID, repositoryName))
 
 	if s.githubService == nil {
 		return
@@ -387,22 +391,22 @@ func (s *Service) detectPushAndAssociatePR(
 		return
 	}
 
-	// Check if we already have a watch for this session.
+	owner, repoName, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
+	if owner == "" || repoName == "" {
+		return
+	}
+
+	// Check if we already have a watch for this (session, repo).
 	// If the watch already has a PR number, the PR was found — nothing to do.
 	// If the watch has pr_number=0, it's still searching — do an immediate
 	// search (faster than waiting for the 1-minute poller) and update the
 	// watch branch if the agent pushed from a different branch.
-	existing, err := s.githubService.GetPRWatchBySession(ctx, sessionID)
+	existing, err := s.githubService.GetPRWatchBySessionAndRepo(ctx, sessionID, repositoryID)
 	if err == nil && existing != nil {
 		if existing.PRNumber > 0 {
 			return // PR already found and being monitored
 		}
 		s.searchPRForExistingWatch(ctx, client, existing, sessionID, taskID, branch)
-		return
-	}
-
-	owner, repoName := s.resolveSessionRepo(ctx, sessionID)
-	if owner == "" || repoName == "" {
 		return
 	}
 
@@ -416,7 +420,7 @@ func (s *Service) detectPushAndAssociatePR(
 			case <-time.After(delay):
 			}
 			// Re-check if a watch was created in the meantime (e.g. by CreatePR callback)
-			if ex, err := s.githubService.GetPRWatchBySession(ctx, sessionID); err == nil && ex != nil {
+			if ex, err := s.githubService.GetPRWatchBySessionAndRepo(ctx, sessionID, repositoryID); err == nil && ex != nil {
 				return
 			}
 		}
@@ -425,21 +429,64 @@ func (s *Service) detectPushAndAssociatePR(
 			s.logger.Debug("no PR found for branch (will retry)",
 				zap.String("branch", branch),
 				zap.String("session_id", sessionID),
+				zap.String("repository_name", repositoryName),
 				zap.Duration("delay", delay))
 			continue
 		}
 		s.logger.Info("PR found after push, associating with task",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", taskID),
+			zap.String("repository_name", repositoryName),
 			zap.Int("pr_number", foundPR.Number),
 			zap.String("branch", branch))
-		s.associatePRFromPush(ctx, sessionID, taskID, owner, repoName, branch, foundPR)
+		s.associatePRFromPushScoped(ctx, sessionID, taskID, owner, repoName, repositoryID, branch, foundPR)
 		return
 	}
 	s.logger.Warn("exhausted all retries, no PR found after push",
 		zap.String("session_id", sessionID),
 		zap.String("task_id", taskID),
+		zap.String("repository_name", repositoryName),
 		zap.String("branch", branch))
+}
+
+// resolvePushRepo returns (owner, name, repository_id) for the per-repo push
+// detection. Multi-repo path: looks up the task_repository whose repository's
+// Name matches `repositoryName`. Empty name falls back to the session's
+// primary repo (legacy single-repo behaviour).
+func (s *Service) resolvePushRepo(
+	ctx context.Context, sessionID, taskID, repositoryName string,
+) (owner, repo, repositoryID string) {
+	if repositoryName == "" {
+		o, r := s.resolveSessionRepo(ctx, sessionID)
+		return o, r, s.resolvePrimaryTaskRepositoryID(ctx, taskID)
+	}
+	store, ok := s.repo.(repoStore)
+	if !ok {
+		return "", "", ""
+	}
+	links, err := store.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return "", "", ""
+	}
+	for _, link := range links {
+		repoObj, err := store.GetRepository(ctx, link.RepositoryID)
+		if err != nil || repoObj == nil {
+			continue
+		}
+		if repoObj.Name != repositoryName {
+			continue
+		}
+		if repoObj.ProviderOwner == "" && repoObj.LocalPath != "" {
+			if p, o, n := service.ResolveGitRemoteProvider(repoObj.LocalPath); o != "" {
+				repoObj.Provider = p
+				repoObj.ProviderOwner = o
+				repoObj.ProviderName = n
+				go s.backfillRepoProvider(store, repoObj)
+			}
+		}
+		return repoObj.ProviderOwner, repoObj.ProviderName, link.RepositoryID
+	}
+	return "", "", ""
 }
 
 // searchPRForExistingWatch handles the case where a PR watch exists with pr_number=0
@@ -630,30 +677,32 @@ func (s *Service) resolveTaskRepo(ctx context.Context, taskID string) (string, s
 	return repoObj.ProviderOwner, repoObj.ProviderName
 }
 
-// associatePRFromPush creates the PR watch and task-PR association after push
-// detection. Resolves the per-task repository_id from the primary
-// task_repository so the resulting watch + TaskPR rows are scoped per-repo.
-// (The orchestrator's push-detection path is single-repo today; multi-repo
-// per-event scoping arrives via the git event's repository_name in a
-// follow-up.)
-func (s *Service) associatePRFromPush(
-	ctx context.Context, sessionID, taskID, owner, repoName, branch string, pr *github.PR,
+// associatePRFromPushScoped creates the PR watch and task-PR association
+// after push detection, scoped to a specific repository_id. Multi-repo callers
+// pass the per-repo id resolved from the git event's repository_name; the
+// legacy single-repo path passes the primary task_repository id.
+func (s *Service) associatePRFromPushScoped(
+	ctx context.Context, sessionID, taskID, owner, repoName, repositoryID, branch string, pr *github.PR,
 ) {
-	repositoryID := s.resolvePrimaryTaskRepositoryID(ctx, taskID)
 	if _, watchErr := s.githubService.CreatePRWatch(
 		ctx, sessionID, taskID, repositoryID, owner, repoName, pr.Number, branch,
 	); watchErr != nil {
 		s.logger.Error("failed to create PR watch on push detection",
-			zap.String("session_id", sessionID), zap.Error(watchErr))
+			zap.String("session_id", sessionID),
+			zap.String("repository_id", repositoryID),
+			zap.Error(watchErr))
 	}
 
 	if _, assocErr := s.githubService.AssociatePRWithTask(ctx, taskID, repositoryID, pr); assocErr != nil {
 		s.logger.Error("failed to associate PR with task on push detection",
-			zap.String("task_id", taskID), zap.Error(assocErr))
+			zap.String("task_id", taskID),
+			zap.String("repository_id", repositoryID),
+			zap.Error(assocErr))
 	}
 
 	s.logger.Info("auto-detected PR from push",
 		zap.String("session_id", sessionID),
+		zap.String("repository_id", repositoryID),
 		zap.Int("pr_number", pr.Number),
 		zap.String("branch", branch))
 }
@@ -702,7 +751,7 @@ func (s *Service) CheckSessionPR(ctx context.Context, taskID, sessionID string) 
 	}
 
 	// Found a PR — associate it with the task
-	s.associatePRFromPush(ctx, sessionID, taskID, owner, repoName, branch, pr)
+	s.associatePRFromPushScoped(ctx, sessionID, taskID, owner, repoName, repositoryID, branch, pr)
 	return true, nil
 }
 

@@ -207,10 +207,16 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 
 // trackPushAndAssociatePR detects git pushes by tracking the "ahead" count.
 // When ahead transitions from >0 to 0 with a remote branch set, a push occurred.
+//
+// Multi-repo: keyed per (session, repository_name) so each repo's transitions
+// are tracked independently. Without this, agentctl's per-repo status events
+// race-overwrote each other's ahead counts and only one repo's push got
+// detected — the other repo's PR would never be associated with the task.
 func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitEventData) {
-	prevAheadVal, loaded := s.pushTracker.Swap(data.SessionID, data.Status.Ahead)
+	key := pushTrackerKey(data.SessionID, data.Status.RepositoryName)
+	prevAheadVal, loaded := s.pushTracker.Swap(key, data.Status.Ahead)
 	if !loaded {
-		return // first status update for this session, skip
+		return // first status update for this (session, repo), skip
 	}
 	prevAhead, ok := prevAheadVal.(int)
 	if !ok || prevAhead <= 0 {
@@ -221,14 +227,23 @@ func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitE
 		s.logger.Info("git push detected, starting PR association",
 			zap.String("session_id", data.SessionID),
 			zap.String("task_id", data.TaskID),
+			zap.String("repository_name", data.Status.RepositoryName),
 			zap.String("branch", data.Status.Branch))
 		go s.detectPushAndAssociatePR(
 			context.Background(),
 			data.SessionID,
 			data.TaskID,
+			data.Status.RepositoryName,
 			data.Status.Branch,
 		)
 	}
+}
+
+// pushTrackerKey builds the per-(session, repo) key used by pushTracker.
+// Empty repository_name (single-repo / repo-less sessions) keeps the legacy
+// single-key behaviour.
+func pushTrackerKey(sessionID, repositoryName string) string {
+	return sessionID + "|" + repositoryName
 }
 
 // syncPRWatchBranch updates the PR watch branch if the live git branch
