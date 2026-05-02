@@ -454,6 +454,8 @@ test.describe("PR external detection", () => {
     await session.clickTab("Changes");
 
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
+    await session.expandPRChangesSection();
+    await session.expandCommitsSection();
     await expect(session.prFilesSection().getByText("feature.ts")).toBeVisible();
     await expect(session.prFilesSection().getByText("index.ts")).toBeVisible();
 

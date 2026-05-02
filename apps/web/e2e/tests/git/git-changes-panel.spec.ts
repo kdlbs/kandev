@@ -328,6 +328,7 @@ test.describe("Git Changes Panel", () => {
 
     // The commit should appear in the commits section
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
     await expect(testPage.getByText("Add feature module")).toBeVisible({ timeout: 15_000 });
     // Verify the short SHA is displayed
     await expect(testPage.getByText(sha.slice(0, 7))).toBeVisible({ timeout: 5_000 });
@@ -372,6 +373,7 @@ test.describe("Git Changes Panel", () => {
 
     // Wait for the commit to appear
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
     const commitRow = testPage.getByTestId(`commit-row-${sha.slice(0, 7)}`);
     await expect(commitRow).toBeVisible({ timeout: 10_000 });
 
@@ -444,6 +446,7 @@ test.describe("Git Changes Panel", () => {
 
     // Wait for the specific commit to appear by SHA
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
     const commitRow = testPage.getByTestId(`commit-row-${sha.slice(0, 7)}`);
     await expect(commitRow).toBeVisible({ timeout: 10_000 });
 
@@ -516,6 +519,7 @@ test.describe("Git Changes Panel", () => {
 
     // Wait for both commits to appear
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
     await expect(session.changes.getByText("First commit")).toBeVisible({ timeout: 10_000 });
     await expect(session.changes.getByText("Second commit")).toBeVisible({ timeout: 10_000 });
 
@@ -614,6 +618,7 @@ test.describe("Git Changes Panel", () => {
 
     // Wait for the commit to appear
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
     const commitRow = testPage.getByTestId(`commit-row-${sha.slice(0, 7)}`);
     await expect(commitRow).toBeVisible({ timeout: 10_000 });
 
@@ -686,6 +691,8 @@ test.describe("Git Changes Panel", () => {
 
     // The commit should appear in the UI via WebSocket update (when git status polls)
     // Note: The polling interval may mean we need to wait a bit
+    await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 30_000 });
+    await session.expandCommitsSection();
     await expect(session.changes.getByText("External commit from another user")).toBeVisible({
       timeout: 30_000,
     });
@@ -734,6 +741,7 @@ test.describe("Git Changes Panel", () => {
 
     // Wait for the commit to appear
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
     await expect(session.changes.getByText("Commit that should persist")).toBeVisible({
       timeout: 10_000,
     });
@@ -751,6 +759,7 @@ test.describe("Git Changes Panel", () => {
 
     // The commit MUST still be visible after refresh
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
     await expect(session.changes.getByText("Commit that should persist")).toBeVisible({
       timeout: 15_000,
     });
@@ -815,6 +824,7 @@ test.describe("Git Changes Panel", () => {
 
     // Wait for all commits to appear
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
     await expect(session.changes.getByText("First persistent commit")).toBeVisible({
       timeout: 10_000,
     });
@@ -840,6 +850,7 @@ test.describe("Git Changes Panel", () => {
 
     // ALL commits MUST still be visible after refresh
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
     await expect(session.changes.getByText("First persistent commit")).toBeVisible({
       timeout: 15_000,
     });
@@ -940,6 +951,7 @@ test.describe("Git Changes Panel", () => {
 
       // After rebase, the feature commit should still be visible
       await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+      await session.expandCommitsSection();
       await expect(session.changes.getByText("Feature commit before rebase")).toBeVisible({
         timeout: 15_000,
       });
@@ -1000,6 +1012,7 @@ test.describe("Git Changes Panel", () => {
 
     // Verify both commits are visible before squash
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
     await expect(session.changes.getByText("First commit to squash")).toBeVisible({
       timeout: 10_000,
     });
@@ -1076,6 +1089,7 @@ test.describe("Git Changes Panel", () => {
 
     // Wait for commits to appear
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
 
     // Wait for both commits to be visible
     await expect(session.changes.getByText("Add first line")).toBeVisible({ timeout: 10_000 });
@@ -1143,13 +1157,18 @@ test.describe("Git Changes Panel", () => {
     await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
 
-    // Verify the unstaged file is visible
+    // Verify the unstaged file is visible (unstaged section is expanded by default)
     await expect(session.changes.getByText("collapse-unstaged.txt")).toBeVisible({
       timeout: 5_000,
     });
 
-    // Verify the commit is visible
-    await expect(session.changes.getByText("Collapse test commit")).toBeVisible({ timeout: 5_000 });
+    // Commits section is collapsed by default, so the commit text is not in the DOM
+    const commitsToggle = testPage.getByTestId("commits-section-collapse-toggle");
+    await expect(commitsToggle).toBeVisible({ timeout: 5_000 });
+    await expect(commitsToggle).toHaveAttribute("aria-expanded", "false");
+    await expect(session.changes.getByText("Collapse test commit")).not.toBeVisible({
+      timeout: 2_000,
+    });
 
     // --- Collapse the unstaged section ---
     const unstagedToggle = testPage.getByTestId("unstaged-files-section-collapse-toggle");
@@ -1167,33 +1186,24 @@ test.describe("Git Changes Panel", () => {
     await expect(unstagedToggle).toBeVisible();
     await expect(unstagedToggle).toContainText("Unstaged");
 
-    // --- Collapse the commits section ---
-    const commitsToggle = testPage.getByTestId("commits-section-collapse-toggle");
-    await expect(commitsToggle).toBeVisible({ timeout: 5_000 });
-    await expect(commitsToggle).toHaveAttribute("aria-expanded", "true");
-    await commitsToggle.click();
-
-    // The commit should now be hidden and toggle reflects collapsed state
-    await expect(session.changes.getByText("Collapse test commit")).not.toBeVisible({
-      timeout: 5_000,
-    });
-    await expect(commitsToggle).toHaveAttribute("aria-expanded", "false");
-
     // --- Expand the unstaged section back ---
     await unstagedToggle.click();
-
-    // The unstaged file should be visible again
     await expect(session.changes.getByText("collapse-unstaged.txt")).toBeVisible({
       timeout: 5_000,
     });
     await expect(unstagedToggle).toHaveAttribute("aria-expanded", "true");
 
-    // --- Expand the commits section back ---
+    // --- Expand the commits section ---
     await commitsToggle.click();
-
-    // The commit should be visible again
     await expect(session.changes.getByText("Collapse test commit")).toBeVisible({ timeout: 5_000 });
     await expect(commitsToggle).toHaveAttribute("aria-expanded", "true");
+
+    // --- Collapse the commits section back ---
+    await commitsToggle.click();
+    await expect(session.changes.getByText("Collapse test commit")).not.toBeVisible({
+      timeout: 5_000,
+    });
+    await expect(commitsToggle).toHaveAttribute("aria-expanded", "false");
 
     // Clean up
     git.deleteFile("collapse-unstaged.txt");
@@ -1246,6 +1256,7 @@ test.describe("Git Changes Panel", () => {
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
     await expect(session.changes.getByText("Commit in PR")).toBeVisible({ timeout: 10_000 });
 
     // Mock a PR that contains the same commit
@@ -1277,6 +1288,7 @@ test.describe("Git Changes Panel", () => {
 
     // Unified commits section should show the commit as pushed (git-commit icon, not arrow-up)
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
     await expect(session.changes.getByText("Commit in PR")).toBeVisible({ timeout: 10_000 });
     const commitsList = testPage.getByTestId("commits-list");
     await expect(commitsList.locator('[data-testid^="commit-row-"]')).toHaveCount(1, {
@@ -1364,6 +1376,7 @@ test.describe("Git Changes Panel", () => {
     // Unified commits section should show at least the two commits we created.
     // Other tests in the same worker may have left additional commits in the shared e2e-repo.
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
     const commitsList = testPage.getByTestId("commits-list");
     await expect(commitsList.locator('[data-testid^="commit-row-"]').first()).toBeVisible({
       timeout: 5_000,

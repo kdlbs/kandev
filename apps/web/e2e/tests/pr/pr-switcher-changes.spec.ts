@@ -190,6 +190,8 @@ test.describe("PR switcher changes panel", () => {
 
     // --- Verify Task A PR data ---
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
+    await session.expandPRChangesSection();
+    await session.expandCommitsSection();
     await expect(session.prFilesSection().getByText("auth.go")).toBeVisible();
     await expect(session.prFilesSection().getByText("auth_test.go")).toBeVisible();
 
@@ -203,6 +205,8 @@ test.describe("PR switcher changes panel", () => {
 
     // Wait for PR data to load for Task B
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
+    await session.expandPRChangesSection();
+    await session.expandCommitsSection();
     await expect(session.prFilesSection().getByText("dashboard.tsx")).toBeVisible();
     await expect(session.prFilesSection().getByText("api.ts")).toBeVisible();
     await expect(session.prFilesSection().getByText("styles.css")).toBeVisible();
@@ -229,6 +233,8 @@ test.describe("PR switcher changes panel", () => {
     await session.clickTab("Changes");
 
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
+    await session.expandPRChangesSection();
+    await session.expandCommitsSection();
     await expect(session.prFilesSection().getByText("auth.go")).toBeVisible();
     await expect(session.prFilesSection().getByText("auth_test.go")).toBeVisible();
     await expect(session.commitsSection().getByText("fix auth token expiry")).toBeVisible();

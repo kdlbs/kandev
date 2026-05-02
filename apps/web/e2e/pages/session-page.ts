@@ -418,6 +418,26 @@ export class SessionPage {
     return this.changes.getByTestId("commits-section");
   }
 
+  /** Expand a collapsible section in the changes panel if currently collapsed. */
+  async expandChangesSection(testId: string): Promise<void> {
+    const toggle = this.changes.getByTestId(`${testId}-collapse-toggle`);
+    await expect(toggle).toBeVisible({ timeout: 15_000 });
+    if ((await toggle.getAttribute("aria-expanded")) === "false") {
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    }
+  }
+
+  /** Expand the commits section (collapsed by default in the changes panel). */
+  async expandCommitsSection(): Promise<void> {
+    await this.expandChangesSection("commits-section");
+  }
+
+  /** Expand the PR Changes section (collapsed by default in the changes panel). */
+  async expandPRChangesSection(): Promise<void> {
+    await this.expandChangesSection("pr-changes-section");
+  }
+
   /**
    * Types a message into the TipTap chat input and sends it.
    * Default submit key is Cmd+Enter (chatSubmitKey = "cmd_enter").

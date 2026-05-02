@@ -30,6 +30,7 @@ import { FileListSection, CommitsSection } from "./changes-panel-timeline";
 const REPO_HEADER_TID = "changes-repo-header";
 const COMMIT_ROW_TID = "commit-row";
 const COMMITS_SECTION_TOGGLE_TID = "commits-section-collapse-toggle";
+const ARIA_EXPANDED = "aria-expanded";
 
 afterEach(cleanup);
 
@@ -142,11 +143,11 @@ describe("FileListSection — multi-repo grouping", () => {
 
     // frontend's two rows hidden, backend's one row still visible
     expect(screen.getAllByTestId("file-row")).toHaveLength(1);
-    expect(frontendHeader.getAttribute("aria-expanded")).toBe("false");
+    expect(frontendHeader.getAttribute(ARIA_EXPANDED)).toBe("false");
 
     fireEvent.click(frontendHeader);
     expect(screen.getAllByTestId("file-row")).toHaveLength(3);
-    expect(frontendHeader.getAttribute("aria-expanded")).toBe("true");
+    expect(frontendHeader.getAttribute(ARIA_EXPANDED)).toBe("true");
   });
 });
 
@@ -164,13 +165,17 @@ describe("CommitsSection", () => {
     };
   }
 
-  it("renders the commits section header with a collapse toggle", () => {
+  it("renders the commits section header collapsed by default", () => {
     render(<CommitsSection commits={[commit("abc123", "first")]} isLast />);
-    // Section is expanded by default — file changes and commit history are
-    // both first-class signals in the changes panel.
-    expect(screen.getByTestId(COMMIT_ROW_TID)).toBeTruthy();
+    // Commits section is collapsed by default; the toggle reflects that and
+    // the commit rows are not in the DOM until the user expands the section.
     const toggle = screen.getByTestId(COMMITS_SECTION_TOGGLE_TID);
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle.getAttribute(ARIA_EXPANDED)).toBe("false");
+    expect(screen.queryByTestId(COMMIT_ROW_TID)).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute(ARIA_EXPANDED)).toBe("true");
+    expect(screen.getByTestId(COMMIT_ROW_TID)).toBeTruthy();
   });
 
   it("groups commits per repo when 2+ repos are present", () => {
@@ -184,6 +189,7 @@ describe("CommitsSection", () => {
         isLast
       />,
     );
+    fireEvent.click(screen.getByTestId(COMMITS_SECTION_TOGGLE_TID));
     const headers = screen.getAllByTestId("commits-repo-header");
     expect(headers).toHaveLength(2);
     expect(headers[0].textContent).toContain("frontend");
@@ -199,6 +205,7 @@ describe("CommitsSection", () => {
     // repository_name; the header still renders so the per-repo Push / PR
     // buttons live in a consistent place across single-repo and multi-repo.
     render(<CommitsSection commits={[commit("c1", "msg"), commit("c2", "msg")]} isLast />);
+    fireEvent.click(screen.getByTestId(COMMITS_SECTION_TOGGLE_TID));
     expect(screen.getAllByTestId("commits-repo-header")).toHaveLength(1);
     expect(screen.getAllByTestId(COMMIT_ROW_TID)).toHaveLength(2);
   });
@@ -221,6 +228,7 @@ describe("CommitsSection", () => {
         onRevertCommit={() => undefined}
       />,
     );
+    fireEvent.click(screen.getByTestId(COMMITS_SECTION_TOGGLE_TID));
     const rows = screen.getAllByTestId(COMMIT_ROW_TID);
     const latestByShas = rows
       .filter((r) => r.getAttribute("data-is-latest") === "true")

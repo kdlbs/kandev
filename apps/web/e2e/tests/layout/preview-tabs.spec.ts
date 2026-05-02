@@ -289,6 +289,7 @@ test.describe.skip("Editor preview tabs", () => {
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
 
     const short1 = sha1.slice(0, 7);
     const short2 = sha2.slice(0, 7);
