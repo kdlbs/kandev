@@ -439,6 +439,15 @@ export class SessionPage {
   }
 
   /**
+   * Wait until the shell terminal panel's "Connecting terminal..." overlay
+   * disappears — i.e. the WebSocket actually opened for that env terminal.
+   * Use this to detect the "terminal hangs forever on Connecting" bug.
+   */
+  async expectTerminalConnected(timeout = 15_000): Promise<void> {
+    await this.terminal.getByTestId("passthrough-loading").waitFor({ state: "hidden", timeout });
+  }
+
+  /**
    * Wait for the terminal shell to be connected (buffer has content from
    * the prompt), then type a command and press Enter.
    */
