@@ -361,38 +361,43 @@ func TestGetOrEnsureExecutionForEnvironment(t *testing.T) {
 				},
 			},
 		})
-		backend.delay = 50 * time.Millisecond
+		backend.entered = make(chan struct{}, 1)
+		backend.barrier = make(chan struct{})
 
-		var wg sync.WaitGroup
-		errs := make(chan error, 2)
-		ids := make(chan string, 2)
+		type result struct {
+			id  string
+			err error
+		}
+		results := make(chan result, 2)
 		for range 2 {
-			wg.Add(1)
 			go func() {
-				defer wg.Done()
 				execution, err := mgr.GetOrEnsureExecutionForEnvironment(context.Background(), "env-new")
 				if err != nil {
-					errs <- err
+					results <- result{"", err}
 					return
 				}
-				ids <- execution.ID
+				results <- result{execution.ID, nil}
 			}()
 		}
-		wg.Wait()
-		close(errs)
-		close(ids)
 
-		for err := range errs {
-			t.Fatalf("GetOrEnsureExecutionForEnvironment returned error: %v", err)
+		select {
+		case <-backend.entered:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for CreateInstance to start")
 		}
+		runtime.Gosched()
+		close(backend.barrier)
+
 		var firstID string
-		for id := range ids {
-			if firstID == "" {
-				firstID = id
-				continue
+		for range 2 {
+			r := <-results
+			if r.err != nil {
+				t.Fatalf("GetOrEnsureExecutionForEnvironment returned error: %v", r.err)
 			}
-			if id != firstID {
-				t.Errorf("execution ID = %q, want %q", id, firstID)
+			if firstID == "" {
+				firstID = r.id
+			} else if r.id != firstID {
+				t.Errorf("execution ID = %q, want %q (singleflight must return same execution)", r.id, firstID)
 			}
 		}
 		if backend.createCount.Load() != 1 {
