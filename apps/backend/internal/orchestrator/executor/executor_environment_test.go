@@ -44,6 +44,37 @@ func TestApplyExistingEnvironment_WorktreeReuse(t *testing.T) {
 	}
 }
 
+func TestApplyExistingEnvironment_SkipsReuseOnExecutorTypeMismatch(t *testing.T) {
+	// Switching the task's executor profile to a different type must invalidate
+	// reuse: stale PreviousExecutionID/ContainerID/sprite_name from the old
+	// backend would otherwise leak into the new launch and overwrite the
+	// persisted env with mixed resource IDs on the next save.
+	e := newEnvTestExecutor(t)
+	req := &LaunchAgentRequest{
+		TaskID:       "task-1",
+		ExecutorType: "local_docker",
+		UseWorktree:  true,
+	}
+	env := &models.TaskEnvironment{
+		ExecutorType:     "sprites",
+		ContainerID:      "container-abc",
+		WorktreeID:       "wt-1",
+		AgentExecutionID: "exec-123",
+	}
+
+	e.applyExistingEnvironment(req, env)
+
+	if req.WorktreeID != "" {
+		t.Errorf("expected WorktreeID to be empty on executor mismatch, got %q", req.WorktreeID)
+	}
+	if req.PreviousExecutionID != "" {
+		t.Errorf("expected PreviousExecutionID empty on mismatch, got %q", req.PreviousExecutionID)
+	}
+	if req.Metadata != nil {
+		t.Errorf("expected nil metadata on mismatch, got %v", req.Metadata)
+	}
+}
+
 func TestApplyExistingEnvironment_WorktreeSkippedWhenNotRequested(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1", UseWorktree: false}
