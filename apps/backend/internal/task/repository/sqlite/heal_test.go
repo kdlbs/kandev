@@ -368,5 +368,125 @@ func TestUpdateTaskEnvironment_RejectsClearingWorkspaceForWorktree(t *testing.T)
 	}
 }
 
+// insertSessionWithEnvID writes a task_sessions row directly. Bypasses
+// CreateTaskSession so tests can seed legacy rows with empty/null
+// task_environment_id (the very rows the heal step is supposed to repair).
+func insertSessionWithEnvID(t *testing.T, db *sqlx.DB, sessionID, taskID, envID string) {
+	t.Helper()
+	now := time.Now().UTC()
+	_, err := db.Exec(`
+		INSERT INTO task_sessions (
+			id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
+			repository_id, base_branch, base_commit_sha,
+			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
+			state, error_message, metadata, started_at, completed_at, updated_at,
+			is_primary, review_status, is_passthrough, task_environment_id
+		) VALUES (?, ?, '', '', '', '', '', '', '', '', '',
+		          '{}', '{}', '{}', '{}',
+		          'created', '', '{}', ?, NULL, ?,
+		          0, '', 0, ?)
+	`, sessionID, taskID, now, now, envID)
+	if err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+}
+
+// TestHealSessionTaskEnvironmentIDs_LinksOrphans seeds a task with an existing
+// env and a session whose task_environment_id is empty. Asserts the heal step
+// links the session to the env. This is the exact bug that caused
+// `+ → Terminal` to silently fail with "session has no task environment ID".
+func TestHealSessionTaskEnvironmentIDs_LinksOrphans(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	insertTask(t, repo.db, "task-J")
+	insertEnv(t, repo.db, &models.TaskEnvironment{
+		ID: "env-J", TaskID: "task-J", ExecutorType: "worktree",
+		WorktreePath: "/j", WorkspacePath: "/j",
+	})
+	insertSessionWithEnvID(t, repo.db, "sess-J-orphan", "task-J", "")
+
+	if err := repo.healSessionTaskEnvironmentIDs(); err != nil {
+		t.Fatalf("heal: %v", err)
+	}
+
+	var got string
+	if err := repo.db.QueryRow(`SELECT task_environment_id FROM task_sessions WHERE id='sess-J-orphan'`).Scan(&got); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if got != "env-J" {
+		t.Errorf("session task_environment_id = %q, want env-J", got)
+	}
+}
+
+// TestHealSessionTaskEnvironmentIDs_LeavesLinkedAlone — sessions already
+// pointing at an env must not be touched.
+func TestHealSessionTaskEnvironmentIDs_LeavesLinkedAlone(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	insertTask(t, repo.db, "task-K")
+	insertEnv(t, repo.db, &models.TaskEnvironment{
+		ID: "env-K", TaskID: "task-K", ExecutorType: "worktree",
+		WorktreePath: "/k", WorkspacePath: "/k",
+	})
+	insertSessionWithEnvID(t, repo.db, "sess-K-linked", "task-K", "env-K")
+
+	if err := repo.healSessionTaskEnvironmentIDs(); err != nil {
+		t.Fatalf("heal: %v", err)
+	}
+
+	var got string
+	if err := repo.db.QueryRow(`SELECT task_environment_id FROM task_sessions WHERE id='sess-K-linked'`).Scan(&got); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if got != "env-K" {
+		t.Errorf("session task_environment_id = %q, want env-K untouched", got)
+	}
+}
+
+// TestHealSessionTaskEnvironmentIDs_NoEnvSkips — a session whose task has no
+// env row at all is left alone (the backfillTaskEnvironments pass earlier in
+// the boot sequence is responsible for creating one; this heal only links).
+func TestHealSessionTaskEnvironmentIDs_NoEnvSkips(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	insertTask(t, repo.db, "task-L")
+	insertSessionWithEnvID(t, repo.db, "sess-L-orphan", "task-L", "")
+
+	if err := repo.healSessionTaskEnvironmentIDs(); err != nil {
+		t.Fatalf("heal: %v", err)
+	}
+
+	var got string
+	if err := repo.db.QueryRow(`SELECT task_environment_id FROM task_sessions WHERE id='sess-L-orphan'`).Scan(&got); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if got != "" {
+		t.Errorf("session task_environment_id = %q, want empty (no env to link to)", got)
+	}
+}
+
+// TestHealSessionTaskEnvironmentIDs_Idempotent — running twice produces the
+// same result. The heal must be a no-op once the data is consistent.
+func TestHealSessionTaskEnvironmentIDs_Idempotent(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	insertTask(t, repo.db, "task-M")
+	insertEnv(t, repo.db, &models.TaskEnvironment{
+		ID: "env-M", TaskID: "task-M", ExecutorType: "worktree",
+		WorktreePath: "/m", WorkspacePath: "/m",
+	})
+	insertSessionWithEnvID(t, repo.db, "sess-M", "task-M", "")
+
+	for i := 0; i < 2; i++ {
+		if err := repo.healSessionTaskEnvironmentIDs(); err != nil {
+			t.Fatalf("heal pass %d: %v", i, err)
+		}
+	}
+
+	var got string
+	if err := repo.db.QueryRow(`SELECT task_environment_id FROM task_sessions WHERE id='sess-M'`).Scan(&got); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if got != "env-M" {
+		t.Errorf("session task_environment_id = %q, want env-M after idempotent heal", got)
+	}
+}
+
 // silences "imported and not used" if some future refactor drops a use.
 var _ = sql.ErrNoRows

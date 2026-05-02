@@ -118,6 +118,9 @@ func (r *Repository) initSchema() error {
 	if err := r.ensureTaskEnvironmentTaskUniqueIndex(); err != nil {
 		return err
 	}
+	if err := r.healSessionTaskEnvironmentIDs(); err != nil {
+		return err
+	}
 	if err := r.ensureWorkspaceIndexes(); err != nil {
 		return err
 	}
@@ -529,6 +532,32 @@ func (r *Repository) ensureTaskEnvironmentTaskUniqueIndex() error {
 		    ON task_environments(task_id)
 	`)
 	return err
+}
+
+// healSessionTaskEnvironmentIDs backfills task_sessions.task_environment_id
+// for any session whose task already has a task_environments row. Sessions
+// created via paths that don't write the FK leave shell ops broken because
+// every user-shell RPC is env-keyed and the frontend can't resolve session→env
+// without this column. Idempotent: rows that already point at the env are
+// untouched.
+//
+// Must run AFTER backfillTaskEnvironments + healDuplicateTaskEnvironments +
+// ensureTaskEnvironmentTaskUniqueIndex so each task has exactly one env to
+// link to.
+func (r *Repository) healSessionTaskEnvironmentIDs() error {
+	if _, err := r.db.Exec(`
+		UPDATE task_sessions
+		   SET task_environment_id = (
+		         SELECT te.id FROM task_environments te WHERE te.task_id = task_sessions.task_id
+		       )
+		 WHERE (task_environment_id = '' OR task_environment_id IS NULL)
+		   AND EXISTS (
+		         SELECT 1 FROM task_environments te WHERE te.task_id = task_sessions.task_id
+		       )
+	`); err != nil {
+		return fmt.Errorf("heal session env id: update: %w", err)
+	}
+	return nil
 }
 
 // backfillSingleTask creates a task_environment and links sessions for one orphaned task.
