@@ -1,0 +1,2 @@
+Multi-repo integration test marker file.
+Generated 2026-05-02.
