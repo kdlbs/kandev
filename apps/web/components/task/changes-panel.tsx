@@ -18,11 +18,12 @@ import {
   PRFilesSection,
 } from "./changes-panel-timeline";
 import type { PRChangedFile } from "./changes-panel-timeline";
+import type { PRDiffFile } from "@/lib/types/github";
 import { useChangesGitHandlers, useChangesDialogHandlers } from "./changes-panel-hooks";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
 import { useBaseBranchByRepo } from "@/hooks/domains/session/use-base-branch-by-repo";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
-import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
+import { useActiveTaskPRsWithFiles } from "@/hooks/domains/github/use-active-task-pr-files";
 import { usePRCommits } from "@/hooks/domains/github/use-pr-commits";
 import {
   type ChangedFile,
@@ -319,6 +320,7 @@ function ChangesPanelTimeline(props: TimelineProps) {
             files={props.prFiles}
             isLast={!showCommitsList}
             onOpenDiff={props.onOpenDiffFile}
+            repoDisplayName={props.repoDisplayName}
           />
         </div>
       )}
@@ -336,6 +338,7 @@ function ChangesPanelTimeline(props: TimelineProps) {
             files={props.prFiles}
             isLast={!showCommitsList}
             onOpenDiff={props.onOpenDiffFile}
+            repoDisplayName={props.repoDisplayName}
           />
         </div>
       )}
@@ -416,23 +419,52 @@ function usePerRepoCallbacks(
 }
 
 function useChangesPanelPRData() {
+  // Multi-repo tasks have one TaskPR per repo; fan out file fetches per PR
+  // and stamp each file with its repository_name so PRFilesSection can
+  // group by repo. Commits stay scoped to the primary PR for now — the
+  // commits section already groups by repo from the workspace git status,
+  // not from the PR itself.
+  const { prs, filesByPRKey } = useActiveTaskPRsWithFiles();
+  // Subscribe to the slice (stable ref between hydrations), then build the
+  // id -> name lookup with useMemo so the dependency in the next useMemo is
+  // stable and we don't re-create the merged file list on every render.
+  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
+  const repoNameById = useMemo<Record<string, string>>(() => {
+    const out: Record<string, string> = {};
+    for (const list of Object.values(reposByWorkspace)) {
+      for (const r of list as Array<{ id: string; name: string }>) {
+        out[r.id] = r.name;
+      }
+    }
+    return out;
+  }, [reposByWorkspace]);
   const taskPR = useActiveTaskPR();
   const refreshKey = taskPR?.last_synced_at ?? null;
-  const { files: prDiffFiles } = usePRDiff(
-    taskPR?.owner ?? null,
-    taskPR?.repo ?? null,
-    taskPR?.pr_number ?? null,
-    refreshKey,
-  );
   const { commits: prCommitsList } = usePRCommits(
     taskPR?.owner ?? null,
     taskPR?.repo ?? null,
     taskPR?.pr_number ?? null,
     refreshKey,
   );
-  const hasPRFiles = prDiffFiles.length > 0;
+  const { prFiles, prDiffFiles } = useMemo(() => {
+    const merged: PRChangedFile[] = [];
+    const flat: PRDiffFile[] = [];
+    for (const pr of prs) {
+      const key = `${pr.owner}/${pr.repo}/${pr.pr_number}/${pr.last_synced_at ?? ""}`;
+      const files = filesByPRKey[key] ?? [];
+      const repoName = pr.repository_id ? (repoNameById[pr.repository_id] ?? "") : "";
+      // Single-PR tasks fall back to "" so the section header alone shows;
+      // multi-PR tasks always tag with the resolved repo name (or the
+      // owner/repo if the workspace lookup failed for some reason — better
+      // than leaving the row in a phantom "untagged" group).
+      const stamp = prs.length > 1 ? repoName || `${pr.owner}/${pr.repo}` : "";
+      merged.push(...mapPRFilesToChangedFiles(files, stamp));
+      flat.push(...files);
+    }
+    return { prFiles: merged, prDiffFiles: flat };
+  }, [prs, filesByPRKey, repoNameById]);
+  const hasPRFiles = prFiles.length > 0;
   const hasPRCommits = prCommitsList.length > 0;
-  const prFiles = useMemo(() => mapPRFilesToChangedFiles(prDiffFiles), [prDiffFiles]);
   return { prDiffFiles, prCommitsList, hasPRFiles, hasPRCommits, prFiles };
 }
 

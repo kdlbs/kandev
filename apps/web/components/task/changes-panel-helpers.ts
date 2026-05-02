@@ -97,7 +97,10 @@ export function computeStagedStats(stagedFiles: FileInfo[]) {
   return { stagedFileCount: stagedFiles.length, stagedAdditions: adds, stagedDeletions: dels };
 }
 
-export function mapPRFilesToChangedFiles(files: PRDiffFile[]): PRChangedFile[] {
+export function mapPRFilesToChangedFiles(
+  files: PRDiffFile[],
+  repositoryName?: string,
+): PRChangedFile[] {
   return files.map((file) => {
     let status: FileInfo["status"];
     switch (file.status) {
@@ -119,6 +122,7 @@ export function mapPRFilesToChangedFiles(files: PRDiffFile[]): PRChangedFile[] {
       plus: file.additions,
       minus: file.deletions,
       oldPath: file.old_path,
+      repository_name: repositoryName ?? "",
     };
   });
 }

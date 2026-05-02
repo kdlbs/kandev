@@ -20,12 +20,11 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { FileInfo } from "@/lib/state/store";
-import { LineStat } from "@/components/diff-stat";
-import { FileStatusIcon } from "./file-status-icon";
 import { FileRow, BulkActionBar } from "./changes-panel-file-row";
 import { type CommitItem } from "./commit-row";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import { CommitsRepoGroup, RepoGroupItem } from "./changes-panel-repo-groups";
+import { PRFilesGroupedList } from "./changes-panel-pr-files";
 
 // --- Timeline visual components ---
 
@@ -517,15 +516,29 @@ export type PRChangedFile = {
   plus: number | undefined;
   minus: number | undefined;
   oldPath: string | undefined;
+  /**
+   * The repository the file belongs to. Empty string for single-repo tasks
+   * (the section header alone is enough). Multi-repo tasks stamp this so
+   * `PRFilesSection` can group rows under per-repo subheaders, mirroring
+   * how the Commits and Changes sections render.
+   */
+  repository_name?: string;
 };
 
 type PRFilesSectionProps = {
   files: PRChangedFile[];
   isLast: boolean;
   onOpenDiff: (path: string) => void;
+  /** Maps a repository_name to a human-readable label (used for the per-repo header). */
+  repoDisplayName?: (repositoryName: string) => string | undefined;
 };
 
-export function PRFilesSection({ files, isLast, onOpenDiff }: PRFilesSectionProps) {
+export function PRFilesSection({
+  files,
+  isLast,
+  onOpenDiff,
+  repoDisplayName,
+}: PRFilesSectionProps) {
   return (
     <TimelineSection
       dotColor={DOT_COLORS.pr}
@@ -535,48 +548,13 @@ export function PRFilesSection({ files, isLast, onOpenDiff }: PRFilesSectionProp
       data-testid="pr-changes-section"
     >
       {files.length > 0 && (
-        <ul className="space-y-0.5">
-          {files.map((file) => (
-            <PRFileRow key={file.path} file={file} onOpenDiff={onOpenDiff} />
-          ))}
-        </ul>
+        <PRFilesGroupedList
+          files={files}
+          onOpenDiff={onOpenDiff}
+          repoDisplayName={repoDisplayName}
+        />
       )}
     </TimelineSection>
-  );
-}
-
-function PRFileRow({
-  file,
-  onOpenDiff,
-}: {
-  file: PRChangedFile;
-  onOpenDiff: (path: string) => void;
-}) {
-  const lastSlash = file.path.lastIndexOf("/");
-  const folder = lastSlash === -1 ? "" : file.path.slice(0, lastSlash);
-  const name = lastSlash === -1 ? file.path : file.path.slice(lastSlash + 1);
-
-  return (
-    <li
-      className="group flex items-center justify-between gap-2 text-sm rounded-md px-1 py-0.5 -mx-1 hover:bg-muted/60 cursor-pointer"
-      onClick={() => onOpenDiff(file.path)}
-    >
-      <div className="flex items-center gap-2 min-w-0">
-        <div className="flex-shrink-0 flex items-center justify-center size-4">
-          <IconGitPullRequest className="h-3 w-3 text-purple-500" />
-        </div>
-        <button type="button" className="min-w-0 text-left cursor-pointer" title={file.path}>
-          <p className="flex text-foreground text-xs min-w-0">
-            {folder && <span className="text-foreground/60 truncate shrink">{folder}/</span>}
-            <span className="font-medium text-foreground whitespace-nowrap shrink-0">{name}</span>
-          </p>
-        </button>
-      </div>
-      <div className="flex items-center gap-2">
-        <LineStat added={file.plus} removed={file.minus} />
-        <FileStatusIcon status={file.status} />
-      </div>
-    </li>
   );
 }
 
