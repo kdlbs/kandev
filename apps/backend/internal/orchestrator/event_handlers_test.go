@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -144,6 +145,12 @@ type mockAgentManager struct {
 
 	// Optional override for GetExecutionIDForSession
 	getExecutionIDForSessionFunc func(context.Context, string) (string, error)
+
+	// CancelAgent tracking. cancelAgentCalls counts every invocation; if
+	// cancelAgentBlock is non-nil, CancelAgent blocks on it before returning,
+	// letting tests stage concurrent cancel calls deterministically.
+	cancelAgentCalls atomic.Int32
+	cancelAgentBlock chan struct{}
 }
 
 type stopAgentCall struct {
@@ -201,7 +208,13 @@ func (m *mockAgentManager) PromptAgent(_ context.Context, executionID string, pr
 	}
 	return &executor.PromptResult{}, nil
 }
-func (m *mockAgentManager) CancelAgent(_ context.Context, _ string) error { return nil }
+func (m *mockAgentManager) CancelAgent(_ context.Context, _ string) error {
+	m.cancelAgentCalls.Add(1)
+	if m.cancelAgentBlock != nil {
+		<-m.cancelAgentBlock
+	}
+	return nil
+}
 func (m *mockAgentManager) RespondToPermissionBySessionID(_ context.Context, _, _, _ string, _ bool) error {
 	return nil
 }

@@ -1832,6 +1832,20 @@ func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID,
 func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	s.logger.Debug("cancelling agent turn", zap.String("session_id", sessionID))
 
+	// Deduplicate concurrent retries. The UI's cancel button has no in-flight
+	// disable, so impatient users click it multiple times while the agent is
+	// still tearing down the turn (e.g. unwinding a Claude Monitor tool can take
+	// several seconds). Without this guard each click produces a duplicate
+	// "Turn cancelled by user" message and races on turn cleanup — the second
+	// call's getActiveTurnID lazily starts a phantom turn after the first call
+	// already closed the real one.
+	if _, busy := s.cancelInFlight.LoadOrStore(sessionID, struct{}{}); busy {
+		s.logger.Debug("cancel already in flight; skipping duplicate",
+			zap.String("session_id", sessionID))
+		return nil
+	}
+	defer s.cancelInFlight.Delete(sessionID)
+
 	// Fetch session for state updates and message creation
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
