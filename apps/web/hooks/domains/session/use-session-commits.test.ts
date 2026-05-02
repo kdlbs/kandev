@@ -82,6 +82,30 @@ describe("useSessionCommits", () => {
     });
   });
 
+  it("keeps loading:true while a retry is scheduled", async () => {
+    mockRequest.mockResolvedValueOnce({ commits: [], ready: false }).mockResolvedValueOnce({
+      commits: [{ commit_sha: "abc" }],
+    });
+
+    renderHook(() => useSessionCommits("sess-1"));
+
+    // First request resolves with ready:false — the hook should set loading
+    // to true at the start, then leave it as-is (no setLoading(false) call)
+    // until the retry path eventually succeeds.
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockSetSessionCommitsLoading).toHaveBeenCalledWith("sess-1", true));
+    // Critical: setLoading(false) must NOT have been called yet — flipping
+    // it during the retry window leaves consumers seeing { loading: false,
+    // commits: [] } which is the "loaded but empty" lie this hook avoids.
+    expect(
+      mockSetSessionCommitsLoading.mock.calls.filter(([, value]) => value === false),
+    ).toHaveLength(0);
+
+    // Once the retry succeeds, loading flips to false on the success path.
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(2), { timeout: 4000 });
+    await waitFor(() => expect(mockSetSessionCommitsLoading).toHaveBeenCalledWith("sess-1", false));
+  });
+
   it("does not retry when ready is true (default success path)", async () => {
     mockRequest.mockResolvedValueOnce({
       commits: [{ commit_sha: "abc" }],

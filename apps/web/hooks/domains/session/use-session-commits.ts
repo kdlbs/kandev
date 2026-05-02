@@ -73,7 +73,13 @@ export function useSessionCommits(sessionId: string | null) {
     } catch (error) {
       console.error("Failed to fetch session commits:", error);
     } finally {
-      setSessionCommitsLoading(sessionId, false);
+      // Keep loading:true while a retry is scheduled — the operation isn't
+      // really finished, and flipping the flag here would let consumers see
+      // `{ loading: false, commits: [] }` for the whole retry window, which is
+      // the same misleading state this hook is designed to avoid.
+      if (!retryTimerRef.current) {
+        setSessionCommitsLoading(sessionId, false);
+      }
     }
   }, [sessionId, setSessionCommits, setSessionCommitsLoading]);
 
@@ -95,7 +101,9 @@ export function useSessionCommits(sessionId: string | null) {
     prevCommitsRef.current = commits;
   }, [sessionId, commits, fetchCommits, connectionStatus]);
 
-  // Cancel any in-flight retry on unmount or when the session changes.
+  // Cancel any in-flight retry on unmount, when the session changes, or when
+  // the WS disconnects — a retry firing against a disconnected client would
+  // either throw inside fetchCommits or hit getWebSocketClient()===null.
   useEffect(() => {
     return () => {
       if (retryTimerRef.current) {
@@ -103,7 +111,7 @@ export function useSessionCommits(sessionId: string | null) {
         retryTimerRef.current = null;
       }
     };
-  }, [sessionId]);
+  }, [sessionId, connectionStatus]);
 
   return {
     commits: commits ?? [],
