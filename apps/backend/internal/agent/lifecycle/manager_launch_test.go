@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -249,7 +250,11 @@ func TestLaunch_RaceRollback(t *testing.T) {
 
 	// Wait for CreateInstance to begin (the goroutine is now past the step-3
 	// pre-check and inside the race window).
-	<-entered
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for CreateInstance to start")
+	}
 
 	// Inject a conflicting execution for the same session.
 	_ = mgr.executionStore.Add(&AgentExecution{

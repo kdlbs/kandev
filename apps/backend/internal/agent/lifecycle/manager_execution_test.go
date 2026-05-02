@@ -745,7 +745,11 @@ func TestGetOrEnsureExecution_DedupAcrossEnvAndSessionPaths(t *testing.T) {
 
 	// Wait for the singleflight winner to enter CreateInstance, then yield so
 	// the other goroutine can join the same flight before we release the barrier.
-	<-backend.entered
+	select {
+	case <-backend.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for CreateInstance to start")
+	}
 	runtime.Gosched()
 	close(backend.barrier)
 
