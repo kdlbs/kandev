@@ -13,8 +13,7 @@ import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import { linkToTask } from "@/lib/links";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
-import { useAppStore } from "@/components/state-provider";
-import { hasPendingClarification } from "@/lib/utils/pending-clarification";
+import { useTaskPendingClarification } from "@/hooks/use-task-pending-clarification";
 
 type StepPhase = "past" | "current" | "future";
 
@@ -102,11 +101,7 @@ export function Graph2StepNode({
 }: Graph2StepNodeProps) {
   const router = useRouter();
   const [isHovered, setIsHovered] = useState(false);
-  const hasPendingClarificationRequest = useAppStore((state) =>
-    task.primarySessionId
-      ? hasPendingClarification(state.messages.bySession[task.primarySessionId])
-      : false,
-  );
+  const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId);
 
   if (phase === "past") return <PastNode step={step} />;
   if (phase === "future") return <FutureNode step={step} />;

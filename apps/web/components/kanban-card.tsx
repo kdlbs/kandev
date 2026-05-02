@@ -34,7 +34,7 @@ import { useAppStore } from "@/components/state-provider";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
-import { hasPendingClarification } from "@/lib/utils/pending-clarification";
+import { useTaskPendingClarification } from "@/hooks/use-task-pending-clarification";
 
 export interface Task {
   id: string;
@@ -250,11 +250,7 @@ function KanbanCardActions({
 >) {
   const [menuOpen, setMenuOpen] = useState(false);
   const effectiveMenuOpen = menuOpen || Boolean(isDeleting) || Boolean(isArchiving);
-  const hasPendingClarificationRequest = useAppStore((state) =>
-    task.primarySessionId
-      ? hasPendingClarification(state.messages.bySession[task.primarySessionId])
-      : false,
-  );
+  const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId);
   const showQuestionIcon = shouldUseQuestionTaskIcon(task.state, hasPendingClarificationRequest);
   const statusIcon = getTaskStateIcon(task.state, "h-4 w-4", hasPendingClarificationRequest);
   const hasKnownSession =
