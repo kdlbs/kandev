@@ -62,6 +62,7 @@ export function useTaskSubmitHandlers({
   freshBranchEnabled,
   isLocalExecutor,
   repositoryLocalPath,
+  transformDescriptionBeforeSubmit,
 }: SubmitHandlersDeps) {
   const router = useRouter();
   const { toast } = useToast();
@@ -447,9 +448,12 @@ export function useTaskSubmitHandlers({
     setIsCreatingTask(true);
     try {
       if (trimmedDescription || isPassthroughProfile) {
+        const finalDescription = transformDescriptionBeforeSubmit
+          ? await transformDescriptionBeforeSubmit(trimmedDescription)
+          : trimmedDescription;
         await performCreate({
           trimmedTitle,
-          trimmedDescription,
+          trimmedDescription: finalDescription,
           consented: consent,
           withAgent: true,
           attachments,
@@ -473,6 +477,7 @@ export function useTaskSubmitHandlers({
     ensureFreshBranchConsent,
     performCreate,
     handleCreatePlanMode,
+    transformDescriptionBeforeSubmit,
     toast,
     descriptionInputRef,
     setIsCreatingTask,

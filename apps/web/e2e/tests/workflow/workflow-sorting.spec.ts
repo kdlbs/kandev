@@ -4,22 +4,27 @@ import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 test.describe("Workflow sorting", () => {
   test("API reorder persists workflow order", async ({ apiClient, seedData }) => {
     const { workspaceId } = seedData;
+    await apiClient.e2eReset(workspaceId, [seedData.workflowId]);
 
     // Create additional workflows
     const wfB = await apiClient.createWorkflow(workspaceId, "Workflow B", "simple");
     const wfC = await apiClient.createWorkflow(workspaceId, "Workflow C", "simple");
+    const expectedNames = ["E2E Workflow", "Workflow B", "Workflow C"];
+    const workflowNames = new Set(expectedNames);
 
     // Verify initial order: sorted by sort_order ASC (0, 1, 2)
     const before = await apiClient.listWorkflows(workspaceId);
-    const namesBefore = before.workflows.map((w) => w.name);
-    expect(namesBefore).toEqual(["E2E Workflow", "Workflow B", "Workflow C"]);
+    const namesBefore = before.workflows
+      .map((w) => w.name)
+      .filter((name) => workflowNames.has(name));
+    expect(namesBefore).toEqual(expectedNames);
 
     // Reorder: C, E2E, B
     await apiClient.reorderWorkflows(workspaceId, [wfC.id, seedData.workflowId, wfB.id]);
 
     // Verify new order persists
     const after = await apiClient.listWorkflows(workspaceId);
-    const namesAfter = after.workflows.map((w) => w.name);
+    const namesAfter = after.workflows.map((w) => w.name).filter((name) => workflowNames.has(name));
     expect(namesAfter).toEqual(["Workflow C", "E2E Workflow", "Workflow B"]);
   });
 
@@ -42,7 +47,10 @@ test.describe("Workflow sorting", () => {
 
     // Verify order matches API reorder
     const order = await page.getWorkflowOrder();
-    expect(order).toEqual(["Extra Workflow", "E2E Workflow"]);
+    expect(order.filter((name) => name === "Extra Workflow" || name === "E2E Workflow")).toEqual([
+      "Extra Workflow",
+      "E2E Workflow",
+    ]);
   });
 
   test("settings page shows drag handles for workflows", async ({

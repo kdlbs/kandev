@@ -93,7 +93,7 @@ func TestSQLiteRepository_ListWorkflows(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-1", Name: "Workflow 2"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-3", WorkspaceID: "ws-2", Name: "Workflow 3"})
 
-	workflows, err := repo.ListWorkflows(ctx, "ws-1")
+	workflows, err := repo.ListWorkflows(ctx, "ws-1", false)
 	if err != nil {
 		t.Fatalf("failed to list workflows: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestSQLiteRepository_WorkflowSortOrder(t *testing.T) {
 	}
 
 	// Verify ListWorkflows returns in sort_order
-	workflows, _ := repo.ListWorkflows(ctx, "ws-1")
+	workflows, _ := repo.ListWorkflows(ctx, "ws-1", false)
 	if len(workflows) != 3 {
 		t.Fatalf("expected 3 workflows, got %d", len(workflows))
 	}
@@ -160,7 +160,7 @@ func TestSQLiteRepository_ReorderWorkflows(t *testing.T) {
 		t.Fatalf("failed to reorder workflows: %v", err)
 	}
 
-	workflows, _ := repo.ListWorkflows(ctx, "ws-1")
+	workflows, _ := repo.ListWorkflows(ctx, "ws-1", false)
 	if len(workflows) != 3 {
 		t.Fatalf("expected 3 workflows, got %d", len(workflows))
 	}
@@ -266,7 +266,7 @@ func TestSQLiteRepository_WorkflowAgentProfileID(t *testing.T) {
 		Name:           "Another Workflow",
 		AgentProfileID: "profile-789",
 	})
-	workflows, err := repo.ListWorkflows(ctx, "ws-1")
+	workflows, err := repo.ListWorkflows(ctx, "ws-1", false)
 	if err != nil {
 		t.Fatalf("failed to list workflows: %v", err)
 	}

@@ -55,7 +55,7 @@ export function NewTaskDropdown({
               <Button
                 size="sm"
                 variant="outline"
-                className="h-6 px-1 rounded-l-none cursor-pointer"
+                className="-ml-px h-6 rounded-l-none px-1 cursor-pointer"
                 data-testid="new-task-chevron"
               >
                 <IconChevronDown className="h-3 w-3" />

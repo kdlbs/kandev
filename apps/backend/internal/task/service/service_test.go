@@ -98,18 +98,19 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Repos
 	eventBus := NewMockEventBus()
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	svc := NewService(Repos{
-		Workspaces:   repo,
-		Tasks:        repo,
-		TaskRepos:    repo,
-		Workflows:    repo,
-		Messages:     repo,
-		Turns:        repo,
-		Sessions:     repo,
-		GitSnapshots: repo,
-		RepoEntities: repo,
-		Executors:    repo,
-		Environments: repo,
-		Reviews:      repo,
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		Workflows:        repo,
+		Messages:         repo,
+		Turns:            repo,
+		Sessions:         repo,
+		GitSnapshots:     repo,
+		RepoEntities:     repo,
+		Executors:        repo,
+		Environments:     repo,
+		TaskEnvironments: repo,
+		Reviews:          repo,
 	}, eventBus, log, RepositoryDiscoveryConfig{})
 	return svc, eventBus, repo
 }
@@ -464,7 +465,7 @@ func TestService_ListWorkflows(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow 1"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-1", Name: "Workflow 2"})
 
-	workflows, err := svc.ListWorkflows(ctx, "ws-1")
+	workflows, err := svc.ListWorkflows(ctx, "ws-1", false)
 	if err != nil {
 		t.Fatalf("failed to list workflows: %v", err)
 	}

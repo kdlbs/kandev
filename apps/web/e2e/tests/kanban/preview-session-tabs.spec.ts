@@ -145,3 +145,138 @@ test.describe("Preview session tabs", () => {
     await expect(previewPanel.getByRole("button", { name: "+" })).toHaveCount(0);
   });
 });
+
+/**
+ * Verifies the lazy-workspace-setup behavior: opening the kanban preview for
+ * a task with no sessions auto-launches one (using the workspace default agent
+ * profile) so the user lands on a usable agent tab instead of the
+ * "No agents yet." dead-end.
+ */
+test.describe("Preview auto-prepare", () => {
+  test("auto-starts a session when previewing a task with no sessions", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    // 1. Make sure the workspace has a default agent profile so the preview
+    //    can resolve one to start. The seed creates an agent profile but
+    //    doesn't necessarily wire it as the workspace default.
+    await apiClient.updateWorkspace(seedData.workspaceId, {
+      default_agent_profile_id: seedData.agentProfileId,
+    });
+
+    // 2. Create a task with NO agent — it lands on the kanban with 0 sessions.
+    const task = await apiClient.createTask(seedData.workspaceId, "Auto Prepare Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    // Sanity-check the precondition: the freshly created task must have no
+    // sessions. Otherwise the "auto-prepare" path is never exercised.
+    const before = await apiClient.listTaskSessions(task.id);
+    expect(before.sessions ?? []).toHaveLength(0);
+
+    // 3. Enable preview-on-click and open the kanban.
+    await apiClient.saveUserSettings({ enable_preview_on_click: true });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const card = kanban.taskCard(task.id);
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await card.click();
+
+    // 4. Preview panel renders. The empty "No agents yet." state must NOT
+    //    appear at any point — the user should see "Preparing workspace…"
+    //    bridging the gap and then the session tab.
+    const previewPanel = testPage.getByTestId("task-preview-panel");
+    await expect(previewPanel).toBeVisible({ timeout: 10_000 });
+    await expect(previewPanel.getByTestId("preview-empty-state")).toHaveCount(0);
+
+    // 5. Eventually a session tab appears for the auto-started session.
+    const sessionTab = previewPanel.locator('[data-testid^="preview-session-tab-"]');
+    await expect(sessionTab.first()).toBeVisible({ timeout: 30_000 });
+
+    // 6. The auto-launched session is reflected in the backend.
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.length;
+        },
+        { timeout: 30_000, message: "Waiting for auto-prepared session to be created" },
+      )
+      .toBeGreaterThan(0);
+  });
+
+  // Regression test for the snapshot/PR-review case: tasks that don't carry
+  // their own metadata.agent_profile_id used to dead-end on "No agents yet."
+  // The resolver now also walks the workflow step → workflow chain, so a step
+  // with its own agent_profile_id is enough to auto-start even when the task
+  // and workspace have nothing set.
+  test("auto-starts using the workflow step's agent_profile_id when task has none", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    // 1. Create a second agent profile distinct from the seeded one so we can
+    //    prove the resolver picked the step's profile (not the workspace
+    //    default that the previous test in this file may have left set).
+    const { agents } = await apiClient.listAgents();
+    const stepProfile = await apiClient.createAgentProfile(agents[0].id, "Step Profile", {
+      model: "mock-fast",
+    });
+
+    // 2. Pin that profile on the start step. The workspace default is left
+    //    alone — whether or not it is set, the step value must win.
+    await apiClient.updateWorkflowStep(seedData.startStepId, {
+      agent_profile_id: stepProfile.id,
+    });
+
+    // 3. Task with NO agent and NO metadata override — the only place a
+    //    profile can come from is the step.
+    const task = await apiClient.createTask(seedData.workspaceId, "Step Profile Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    const before = await apiClient.listTaskSessions(task.id);
+    expect(before.sessions ?? []).toHaveLength(0);
+
+    await apiClient.saveUserSettings({ enable_preview_on_click: true });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const card = kanban.taskCard(task.id);
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await card.click();
+
+    // 4. Preview panel opens and skips the empty state.
+    const previewPanel = testPage.getByTestId("task-preview-panel");
+    await expect(previewPanel).toBeVisible({ timeout: 10_000 });
+    await expect(previewPanel.getByTestId("preview-empty-state")).toHaveCount(0);
+
+    // 5. A session tab appears for the auto-started session.
+    const sessionTab = previewPanel.locator('[data-testid^="preview-session-tab-"]');
+    await expect(sessionTab.first()).toBeVisible({ timeout: 30_000 });
+
+    // 6. The auto-launched session uses the STEP's profile, not the workspace
+    //    default — this is the regression-bait assertion that proves the
+    //    backend session.ensure resolution chain (task metadata → step → workflow
+    //    → workspace default) honors the step override.
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions[0]?.agent_profile_id ?? null;
+        },
+        { timeout: 30_000, message: "Waiting for session created with step's profile" },
+      )
+      .toBe(stepProfile.id);
+  });
+});

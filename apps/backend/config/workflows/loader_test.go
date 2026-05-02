@@ -114,11 +114,12 @@ func TestLoadTemplates_ExpectedTemplateIDs(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		"simple":       false,
-		"standard":     false,
-		"architecture": false,
-		"pr-review":    false,
-		"feature-dev":  false,
+		"simple":         false,
+		"standard":       false,
+		"architecture":   false,
+		"pr-review":      false,
+		"feature-dev":    false,
+		"improve-kandev": false,
 	}
 
 	for _, tmpl := range templates {
@@ -130,6 +131,30 @@ func TestLoadTemplates_ExpectedTemplateIDs(t *testing.T) {
 	for id, found := range expected {
 		if !found {
 			t.Errorf("expected template %q not found", id)
+		}
+	}
+}
+
+// TestLoadTemplates_HiddenFlag verifies that the YAML loader propagates
+// the `hidden` field into WorkflowTemplate.Hidden. Only improve-kandev
+// is expected to be hidden; all user-facing templates must be visible.
+func TestLoadTemplates_HiddenFlag(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+
+	hiddenByID := map[string]bool{}
+	for _, tmpl := range templates {
+		hiddenByID[tmpl.ID] = tmpl.Hidden
+	}
+
+	if !hiddenByID["improve-kandev"] {
+		t.Errorf("expected template %q to be hidden", "improve-kandev")
+	}
+	for _, id := range []string{"simple", "standard", "architecture", "pr-review", "feature-dev"} {
+		if hiddenByID[id] {
+			t.Errorf("template %q must not be hidden", id)
 		}
 	}
 }

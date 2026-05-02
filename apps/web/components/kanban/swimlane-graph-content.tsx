@@ -18,7 +18,7 @@ import { Badge } from "@kandev/ui/badge";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import { needsAction } from "@/lib/utils/needs-action";
 import { useTaskActions } from "@/hooks/use-task-actions";
-import { useAppStoreApi } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
@@ -71,6 +71,7 @@ function DraggableTaskChip({
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
   });
+  const isPreviewed = useAppStore((state) => state.kanbanPreviewedTaskId === task.id);
   const statusIcon = getTaskStateIcon(task.state, "h-3 w-3");
 
   return (
@@ -86,6 +87,7 @@ function DraggableTaskChip({
         "border border-border/50",
         needsAction(task) && "border-l-2 border-l-amber-500",
         isDragging && "opacity-30",
+        isPreviewed && "ring-2 ring-primary border-primary",
       )}
       style={transform ? { transform: `translate(${transform.x}px, ${transform.y}px)` } : undefined}
     >

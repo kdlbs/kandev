@@ -72,7 +72,7 @@ func (g *Gateway) SetupRoutes(router *gin.Engine) {
 
 	// Add dedicated terminal WebSocket route if terminal handler is configured
 	if g.TerminalHandler != nil {
-		router.GET("/terminal/:sessionId", g.TerminalHandler.HandleTerminalWS)
+		router.GET("/terminal/*target", g.TerminalHandler.HandleTerminalWS)
 	}
 
 	// Add LSP routes if LSP handler is configured

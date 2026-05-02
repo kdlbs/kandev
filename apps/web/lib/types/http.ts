@@ -143,6 +143,7 @@ export type Workflow = {
   workflow_template_id?: string | null;
   agent_profile_id?: string;
   sort_order?: number;
+  hidden?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -495,6 +496,12 @@ export type RepositoryBranchesResponse = {
   branches: Branch[];
   total: number;
   current_branch?: string;
+  // RFC3339 timestamp of the most recent `git fetch` for this repository,
+  // when refresh was requested. Empty if no refresh has been performed.
+  fetched_at?: string;
+  // Human-readable error from the last fetch attempt for this request, if
+  // one was attempted and failed. Empty otherwise.
+  fetch_error?: string;
 };
 
 export type LocalRepositoryStatusResponse = {

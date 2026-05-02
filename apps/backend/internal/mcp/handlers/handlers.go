@@ -148,13 +148,14 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
+	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
 	d.RegisterFunc(ws.ActionMCPAskUserQuestion, h.handleAskUserQuestion)
 	d.RegisterFunc(ws.ActionMCPCreateTaskPlan, h.handleCreateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPGetTaskPlan, h.handleGetTaskPlan)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPDeleteTaskPlan, h.handleDeleteTaskPlan)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 13
+	count := 14
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
@@ -273,7 +274,7 @@ func (h *Handlers) handleDeleteByField(
 func (h *Handlers) handleListWorkflows(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return h.handleListByField(ctx, msg, "workspace_id", "failed to list workflows", "Failed to list workflows",
 		func(ctx context.Context, workspaceID string) (any, error) {
-			workflows, err := h.taskSvc.ListWorkflows(ctx, workspaceID)
+			workflows, err := h.taskSvc.ListWorkflows(ctx, workspaceID, false)
 			if err != nil {
 				return nil, err
 			}
@@ -374,7 +375,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	if req.WorkflowID == "" && h.taskSvc != nil {
-		if workflows, wfErr := h.taskSvc.ListWorkflows(ctx, req.WorkspaceID); wfErr != nil {
+		if workflows, wfErr := h.taskSvc.ListWorkflows(ctx, req.WorkspaceID, false); wfErr != nil {
 			h.logger.Warn("failed to auto-resolve workflow", zap.String("workspace_id", req.WorkspaceID), zap.Error(wfErr))
 		} else if len(workflows) == 1 {
 			req.WorkflowID = workflows[0].ID
@@ -644,6 +645,132 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		"session_id": session.ID,
 		"status":     status,
 	})
+}
+
+// handleGetTaskConversation returns paginated conversation history for a task.
+// If session_id is omitted, it uses the task's primary session.
+func (h *Handlers) handleGetTaskConversation(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	req, errResp := parseTaskConversationRequest(msg)
+	if errResp != nil {
+		return errResp, nil
+	}
+
+	session, errResp := h.resolveConversationSession(ctx, msg, req.TaskID, req.SessionID)
+	if errResp != nil {
+		return errResp, nil
+	}
+
+	messages, hasMore, err := h.taskSvc.ListMessagesPaginated(ctx, service.ListMessagesRequest{
+		TaskSessionID: session.ID,
+		Limit:         conversationLimit(req.Limit),
+		Before:        req.Before,
+		After:         req.After,
+		Sort:          req.Sort,
+	})
+	if err != nil {
+		h.logger.Error("failed to list task conversation", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task conversation", nil)
+	}
+
+	result := filterAndConvertMessages(messages, req.Types)
+	cursor := conversationCursor(messages)
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"task_id":    req.TaskID,
+		"session_id": session.ID,
+		"messages":   result,
+		"total":      len(result),
+		"has_more":   hasMore,
+		"cursor":     cursor,
+	})
+}
+
+type taskConversationRequest struct {
+	TaskID    string   `json:"task_id"`
+	SessionID string   `json:"session_id"`
+	Limit     int      `json:"limit"`
+	Before    string   `json:"before"`
+	After     string   `json:"after"`
+	Sort      string   `json:"sort"`
+	Types     []string `json:"message_types"`
+}
+
+func parseTaskConversationRequest(msg *ws.Message) (*taskConversationRequest, *ws.Message) {
+	var req taskConversationRequest
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error())
+	}
+	if req.TaskID == "" {
+		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required")
+	}
+	if req.Before != "" && req.After != "" {
+		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, "only one of before or after can be set")
+	}
+	if req.Sort != "" && req.Sort != "asc" && req.Sort != "desc" {
+		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, "sort must be asc or desc")
+	}
+	if req.Limit < 0 {
+		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, "limit must be non-negative")
+	}
+	return &req, nil
+}
+
+func (h *Handlers) resolveConversationSession(ctx context.Context, msg *ws.Message, taskID, sessionID string) (*models.TaskSession, *ws.Message) {
+	if sessionID != "" {
+		session, err := h.taskSvc.GetTaskSession(ctx, sessionID)
+		if err != nil || session == nil {
+			return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found")
+		}
+		if session.TaskID != taskID {
+			return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id does not belong to task_id")
+		}
+		return session, nil
+	}
+	session, err := h.taskSvc.GetPrimarySession(ctx, taskID)
+	if err != nil || session == nil {
+		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task has no session")
+	}
+	return session, nil
+}
+
+func wsError(id, action, code, message string) *ws.Message {
+	resp, _ := ws.NewError(id, action, code, message, nil)
+	return resp
+}
+
+func filterAndConvertMessages(messages []*models.Message, types []string) []*v1.Message {
+	filterTypes := make(map[string]struct{}, len(types))
+	for _, mt := range types {
+		if mt == "" {
+			continue
+		}
+		filterTypes[mt] = struct{}{}
+	}
+
+	result := make([]*v1.Message, 0, len(messages))
+	for _, message := range messages {
+		if len(filterTypes) > 0 {
+			if _, ok := filterTypes[string(message.Type)]; !ok {
+				continue
+			}
+		}
+		result = append(result, message.ToAPI())
+	}
+	return result
+}
+
+func conversationLimit(requested int) int {
+	if requested > 0 {
+		return requested
+	}
+	return service.DefaultMessagesPageSize
+}
+
+func conversationCursor(messages []*models.Message) string {
+	if len(messages) == 0 {
+		return ""
+	}
+	return messages[len(messages)-1].ID
 }
 
 // dispatchTaskMessage routes a message to the right delivery path based on session state.

@@ -151,14 +151,20 @@ export default async function Page({ searchParams }: PageProps) {
     listWorkspaceTaskPRs(activeWorkspaceId, { cache: "no-store" }).catch(() => {});
 
     const [workflowList, repositoriesResponse, quickChatResponse] = await Promise.all([
-      listWorkflows(activeWorkspaceId, { cache: "no-store" }),
+      listWorkflows(activeWorkspaceId, { cache: "no-store", includeHidden: true }),
       listRepositories(activeWorkspaceId, undefined, { cache: "no-store" }).catch(() => ({
         repositories: [],
       })),
       listQuickChatSessions(activeWorkspaceId, { cache: "no-store" }).catch(() => ({ tasks: [] })),
     ]);
 
-    const workflowId = resolveActiveId(workflowList.workflows, workflowIdParam, settingsWorkflowId);
+    // Active workflow defaults to the first non-hidden workflow when no preference is set,
+    // so hidden workflows (e.g., improve-kandev) never auto-select on load.
+    const workflowId = resolveActiveId(
+      workflowList.workflows.filter((w) => !w.hidden),
+      workflowIdParam,
+      settingsWorkflowId,
+    );
 
     // Map quick chat tasks to sessions
     const quickChatSessions = quickChatResponse.tasks
@@ -181,6 +187,7 @@ export default async function Page({ searchParams }: PageProps) {
           id: w.id,
           workspaceId: w.workspace_id,
           name: w.name,
+          hidden: w.hidden,
         })),
         activeId: workflowId,
       },

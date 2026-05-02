@@ -37,9 +37,14 @@ export async function listRepositories(
   return fetchJson<ListRepositoriesResponse>(url, options);
 }
 
-export async function listRepositoryBranches(repositoryId: string, options?: ApiRequestOptions) {
+export async function listRepositoryBranches(
+  repositoryId: string,
+  params?: { refresh?: boolean },
+  options?: ApiRequestOptions,
+) {
+  const qs = params?.refresh ? "?refresh=true" : "";
   return fetchJson<RepositoryBranchesResponse>(
-    `/api/v1/repositories/${repositoryId}/branches`,
+    `/api/v1/repositories/${repositoryId}/branches${qs}`,
     options,
   );
 }

@@ -34,22 +34,10 @@ export type DialogHeaderContentProps = {
   githubUrlError: string | null;
   onToggleGitHubUrl: () => void;
   onGitHubUrlChange: (v: string) => void;
+  repositoryLocked?: boolean;
 };
 
-function RepoSourceInput({
-  useGitHubUrl,
-  githubUrl,
-  githubUrlError,
-  onGitHubUrlChange,
-  isTaskStarted,
-  headerRepositoryOptions,
-  repositoryId,
-  discoveredRepoPath,
-  onRepositoryChange,
-  workspaceId,
-  repositoriesLoading,
-  discoverReposLoading,
-}: Pick<
+type RepoSourceInputProps = Pick<
   DialogHeaderContentProps,
   | "useGitHubUrl"
   | "githubUrl"
@@ -63,50 +51,78 @@ function RepoSourceInput({
   | "workspaceId"
   | "repositoriesLoading"
   | "discoverReposLoading"
+  | "repositoryLocked"
+>;
+
+function GhUrlInput({
+  githubUrl,
+  githubUrlError,
+  onGitHubUrlChange,
+  isTaskStarted,
+}: Pick<
+  RepoSourceInputProps,
+  "githubUrl" | "githubUrlError" | "onGitHubUrlChange" | "isTaskStarted"
 >): React.ReactNode {
-  if (useGitHubUrl) {
-    return (
-      <div className="relative">
-        <input
-          type="text"
-          value={githubUrl}
-          onChange={(e) => onGitHubUrlChange(e.target.value)}
-          placeholder="github.com/owner/repo"
-          data-testid="github-url-input"
-          aria-label="GitHub repository URL"
-          aria-invalid={!!githubUrlError}
-          aria-describedby={githubUrlError ? "github-url-error" : undefined}
-          size={Math.max((githubUrl || "").length + 1, "github.com/owner/repo".length)}
-          className={`bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 h-7 rounded-md px-2 hover:bg-muted focus:bg-muted transition-colors placeholder:text-muted-foreground ${githubUrlError ? "text-destructive" : ""}`}
-          disabled={isTaskStarted}
-          autoFocus
-        />
-        {githubUrlError && (
-          <div
-            id="github-url-error"
-            role="alert"
-            className="absolute left-0 top-full mt-1 z-50 rounded-md border bg-popover px-2 py-1 text-[11px] text-destructive shadow-md whitespace-nowrap"
-            data-testid="github-url-error"
-          >
-            {githubUrlError}
-          </div>
-        )}
-      </div>
-    );
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={githubUrl}
+        onChange={(e) => onGitHubUrlChange(e.target.value)}
+        placeholder="github.com/owner/repo"
+        data-testid="github-url-input"
+        aria-label="GitHub repository URL"
+        aria-invalid={!!githubUrlError}
+        aria-describedby={githubUrlError ? "github-url-error" : undefined}
+        size={Math.max((githubUrl || "").length + 1, "github.com/owner/repo".length)}
+        className={`bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 h-7 rounded-md px-2 hover:bg-muted focus:bg-muted transition-colors placeholder:text-muted-foreground ${githubUrlError ? "text-destructive" : ""}`}
+        disabled={isTaskStarted}
+        autoFocus
+      />
+      {githubUrlError && (
+        <div
+          id="github-url-error"
+          role="alert"
+          className="absolute left-0 top-full mt-1 z-50 rounded-md border bg-popover px-2 py-1 text-[11px] text-destructive shadow-md whitespace-nowrap"
+          data-testid="github-url-error"
+        >
+          {githubUrlError}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function resolveSelectorPlaceholder(p: RepoSourceInputProps): string {
+  if (p.repositoryLocked && !(p.repositoryId || p.discoveredRepoPath)) {
+    return "Preparing kandev repository...";
   }
+  return getRepositoryPlaceholder(p.workspaceId, p.repositoriesLoading, p.discoverReposLoading);
+}
+
+function RepoSourceInput(p: RepoSourceInputProps): React.ReactNode {
+  // When the dialog locks the repository (e.g. Improve Kandev pinning kdlbs/kandev),
+  // never expose the editable GitHub URL input — even if useGitHubUrl is on.
+  if (p.useGitHubUrl && !p.repositoryLocked) return <GhUrlInput {...p} />;
+  const isDisabled =
+    p.repositoryLocked ||
+    p.isTaskStarted ||
+    !p.workspaceId ||
+    p.repositoriesLoading ||
+    p.discoverReposLoading;
+  const emptyMessage =
+    p.repositoriesLoading || p.discoverReposLoading
+      ? "Loading repositories..."
+      : "No repositories found.";
   return (
     <RepositorySelector
-      options={headerRepositoryOptions}
-      value={repositoryId || discoveredRepoPath}
-      onValueChange={onRepositoryChange}
-      placeholder={getRepositoryPlaceholder(workspaceId, repositoriesLoading, discoverReposLoading)}
+      options={p.headerRepositoryOptions}
+      value={p.repositoryId || p.discoveredRepoPath}
+      onValueChange={p.onRepositoryChange}
+      placeholder={resolveSelectorPlaceholder(p)}
       searchPlaceholder="Search repositories..."
-      emptyMessage={
-        repositoriesLoading || discoverReposLoading
-          ? "Loading repositories..."
-          : "No repositories found."
-      }
-      disabled={isTaskStarted || !workspaceId || repositoriesLoading || discoverReposLoading}
+      emptyMessage={emptyMessage}
+      disabled={isDisabled}
       triggerClassName="w-auto text-sm"
     />
   );
@@ -114,7 +130,7 @@ function RepoSourceInput({
 
 export function DialogHeaderContent(props: DialogHeaderContentProps) {
   const { isCreateMode, isEditMode, isTaskStarted, sessionRepoName, initialTitle } = props;
-  const { taskName, onTaskNameChange, useGitHubUrl, onToggleGitHubUrl } = props;
+  const { taskName, onTaskNameChange, useGitHubUrl, onToggleGitHubUrl, repositoryLocked } = props;
 
   if (isCreateMode || isEditMode) {
     return (
@@ -130,7 +146,7 @@ export function DialogHeaderContent(props: DialogHeaderContentProps) {
             />
           </div>
         </DialogTitle>
-        {!isTaskStarted && (
+        {!isTaskStarted && !repositoryLocked && (
           <div className="flex items-center gap-2 pl-2">
             <button
               type="button"

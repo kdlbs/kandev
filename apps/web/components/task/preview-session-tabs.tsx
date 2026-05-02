@@ -2,12 +2,14 @@
 
 import { useCallback, useMemo } from "react";
 import { IconLoader2 } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
 import { AgentLogo } from "@/components/agent-logo";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
+import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { TaskSession, TaskSessionState } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -25,6 +27,7 @@ const LABEL_SEPARATOR = " \u2022 ";
 type PreviewSessionTabsProps = {
   taskId: string;
   sessionId: string | null;
+  ensureSession?: UseEnsureTaskSessionResult;
   onSessionChange?: (sessionId: string | null) => void;
 };
 
@@ -37,6 +40,7 @@ type PreviewSessionTabsProps = {
 export function PreviewSessionTabs({
   taskId,
   sessionId,
+  ensureSession,
   onSessionChange,
 }: PreviewSessionTabsProps) {
   const { sessions, isLoaded } = useTaskSessions(taskId);
@@ -83,17 +87,17 @@ export function PreviewSessionTabs({
   );
 
   if (!isLoaded && sortedSessions.length === 0) {
-    return <PreviewLoadingState />;
+    return <PreviewLoadingState label="Loading agents…" />;
   }
 
   if (sortedSessions.length === 0) {
-    return (
-      <div className="flex h-full flex-col">
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-          No agents yet.
-        </div>
-      </div>
-    );
+    if (ensureSession?.status === "preparing") {
+      return <PreviewLoadingState label="Preparing workspace…" />;
+    }
+    if (ensureSession?.status === "error") {
+      return <PreviewEnsureError onRetry={ensureSession.retry} />;
+    }
+    return <PreviewEmptyState />;
   }
 
   return (
@@ -178,10 +182,41 @@ function RunningSpinner() {
   return <IconLoader2 className="h-3 w-3 shrink-0 text-blue-500 animate-spin" />;
 }
 
-function PreviewLoadingState() {
+function PreviewLoadingState({ label }: { label: string }) {
   return (
-    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-      Loading agents…
+    <div
+      className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground"
+      data-testid="preview-loading-state"
+    >
+      <IconLoader2 className="h-4 w-4 animate-spin" />
+      {label}
+    </div>
+  );
+}
+
+function PreviewEmptyState() {
+  return (
+    <div className="flex h-full flex-col">
+      <div
+        className="flex flex-1 items-center justify-center text-sm text-muted-foreground"
+        data-testid="preview-empty-state"
+      >
+        No agents yet.
+      </div>
+    </div>
+  );
+}
+
+function PreviewEnsureError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div
+      className="flex h-full flex-col items-center justify-center gap-3 text-sm"
+      data-testid="preview-ensure-error"
+    >
+      <span className="text-muted-foreground">Failed to prepare workspace.</span>
+      <Button variant="outline" size="sm" className="cursor-pointer" onClick={onRetry}>
+        Retry
+      </Button>
     </div>
   );
 }

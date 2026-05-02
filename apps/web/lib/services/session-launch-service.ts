@@ -51,3 +51,33 @@ export async function launchSession(
   const effectiveTimeout = timeout ?? (request.intent === "resume" ? 30_000 : 15_000);
   return client.request<LaunchSessionResponse>("session.launch", request, effectiveTimeout);
 }
+
+export type EnsureSessionResponse = {
+  success: boolean;
+  task_id: string;
+  session_id?: string;
+  state: string;
+  agent_profile_id?: string;
+  source: "existing_primary" | "existing_newest" | "created_prepare" | "created_start";
+  newly_created: boolean;
+};
+
+/**
+ * Server-authoritative idempotent ensure: returns the task's existing primary
+ * (or newest) session, otherwise creates one with the agent profile resolved
+ * server-side from task metadata, workflow step, workflow, or workspace
+ * default. Safe for preview mode — the backend chooses prepare vs start based
+ * on the workflow step's auto_start_agent action.
+ */
+export async function ensureTaskSession(
+  taskId: string,
+  timeout?: number,
+): Promise<EnsureSessionResponse> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error("WebSocket client not available");
+  return client.request<EnsureSessionResponse>(
+    "session.ensure",
+    { task_id: taskId },
+    timeout ?? 15_000,
+  );
+}

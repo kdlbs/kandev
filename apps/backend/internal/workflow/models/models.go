@@ -83,13 +83,17 @@ const (
 
 // WorkflowTemplate represents a pre-defined workflow type that workflows can adopt
 type WorkflowTemplate struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	Description string           `json:"description"`
-	IsSystem    bool             `json:"is_system"`
-	Steps       []StepDefinition `json:"steps"` // JSON stored
-	CreatedAt   time.Time        `json:"created_at"`
-	UpdatedAt   time.Time        `json:"updated_at"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	IsSystem    bool   `json:"is_system"`
+	// Hidden marks templates that produce hidden workflow instances
+	// (excluded from management UI and pickers). Used by system-only flows.
+	// Not persisted to DB; sourced from the embedded YAML at load time.
+	Hidden    bool             `json:"hidden,omitempty"`
+	Steps     []StepDefinition `json:"steps"` // JSON stored
+	CreatedAt time.Time        `json:"created_at"`
+	UpdatedAt time.Time        `json:"updated_at"`
 }
 
 // StepDefinition represents a step in a workflow template (stored as JSON in WorkflowTemplate)

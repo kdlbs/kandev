@@ -117,6 +117,8 @@ export type UISliceState = {
   sidebarViews: SidebarSliceState;
   /** Parent task IDs whose subtasks are collapsed in the sidebar. Tab-scoped (sessionStorage). */
   collapsedSubtaskParents: string[];
+  /** Task ID currently shown in the kanban preview side-panel, or null if closed. */
+  kanbanPreviewedTaskId: string | null;
 };
 
 export type UISliceActions = {
@@ -167,6 +169,7 @@ export type UISliceActions = {
   toggleSubtaskCollapsed: (parentTaskId: string) => void;
   clearSidebarSyncError: () => void;
   migrateLocalViewsToBackend: () => void;
+  setKanbanPreviewedTaskId: (taskId: string | null) => void;
 };
 
 export type { SidebarView, SidebarViewDraft };

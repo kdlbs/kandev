@@ -49,6 +49,52 @@ func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*
 	return v.(*AgentExecution), nil
 }
 
+// GetOrEnsureExecutionForEnvironment returns an execution for a task environment,
+// creating one on-demand from the workspace info provider when needed.
+func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEnvironmentID string) (*AgentExecution, error) {
+	if taskEnvironmentID == "" {
+		return nil, fmt.Errorf("task_environment_id is required")
+	}
+
+	if execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID); exists {
+		return execution, nil
+	}
+
+	groupKey := "env:" + taskEnvironmentID
+	v, err, _ := m.ensureExecutionGroup.Do(groupKey, func() (interface{}, error) {
+		if execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID); exists {
+			return execution, nil
+		}
+		if m.workspaceInfoProvider == nil {
+			return nil, fmt.Errorf("workspace info provider not configured")
+		}
+		info, err := m.workspaceInfoProvider.GetWorkspaceInfoForEnvironment(ctx, taskEnvironmentID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get workspace info for environment %s: %w", taskEnvironmentID, err)
+		}
+		if info == nil {
+			return nil, fmt.Errorf("task environment %s not found", taskEnvironmentID)
+		}
+		if info.TaskEnvironmentID == "" {
+			return nil, fmt.Errorf("task environment %s has no task_environment_id", taskEnvironmentID)
+		}
+		if info.TaskEnvironmentID != taskEnvironmentID {
+			return nil, fmt.Errorf("workspace info resolved environment %s, want %s", info.TaskEnvironmentID, taskEnvironmentID)
+		}
+		if info.WorkspacePath == "" {
+			return nil, fmt.Errorf("%w: task environment %s has no workspace path yet", ErrSessionWorkspaceNotReady, taskEnvironmentID)
+		}
+		if info.SessionID == "" {
+			return nil, fmt.Errorf("task environment %s has no task session", taskEnvironmentID)
+		}
+		return m.createExecution(ctx, info.TaskID, info)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*AgentExecution), nil
+}
+
 // EnsureWorkspaceExecutionForSession ensures an agentctl execution exists for a specific task session.
 // This is used when the frontend provides a session ID (e.g., from URL path /task/[id]/[sessionId]).
 // If an execution already exists for the session, it returns it. Otherwise, it creates a new execution

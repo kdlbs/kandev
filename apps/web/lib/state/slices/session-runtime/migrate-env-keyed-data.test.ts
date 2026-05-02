@@ -24,6 +24,16 @@ function makeCombinedStore() {
 }
 
 describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
+  it("does not create user shell state under a session fallback key", () => {
+    const store = makeStore();
+
+    store.getState().setUserShells("sess-missing-env", [{ terminalId: "t1" } as never]);
+
+    const state = store.getState();
+    expect(state.userShells.byEnvironmentId["sess-missing-env"]).toBeUndefined();
+    expect(state.userShells.loaded["sess-missing-env"]).toBeUndefined();
+  });
+
   it("migrates data from sessionId key to environmentId key", () => {
     const store = makeStore();
 
@@ -90,7 +100,9 @@ describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
 
     // Only put data in shell outputs and userShells, leave others empty
     store.getState().appendShellOutput("sess-3", "output");
-    store.getState().setUserShells("sess-3", [{ terminalId: "t1" } as never]);
+    store.setState((draft) => {
+      draft.userShells.byEnvironmentId["sess-3"] = [{ terminalId: "t1" } as never];
+    });
 
     store.getState().registerSessionEnvironment("sess-3", "env-3");
 

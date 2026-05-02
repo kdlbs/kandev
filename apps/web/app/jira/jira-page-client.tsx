@@ -43,7 +43,7 @@ function NotConfiguredNotice({ workspaceId }: { workspaceId?: string }) {
           Jira is not configured for this workspace.{" "}
           <Link
             href={workspaceId ? `/settings/workspace/${workspaceId}/jira` : "/settings"}
-            className="underline font-medium"
+            className="underline font-medium cursor-pointer"
           >
             Configure Jira
           </Link>{" "}

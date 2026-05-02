@@ -284,7 +284,7 @@ func (s *Server) registerTools() {
 		s.registerConfigExecutorTools()
 		count += 5
 		s.registerConfigTaskTools()
-		count += 5
+		count += 6
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -302,12 +302,12 @@ func (s *Server) registerTools() {
 		s.registerConfigExecutorTools()
 		count += 5
 		s.registerConfigTaskTools()
-		count += 5
+		count += 6
 		s.registerCreateTaskTool()
 		count++
 	default: // ModeTask
 		s.registerKanbanTools()
-		count += 10
+		count += 11
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -407,6 +407,19 @@ Returns the dispatch status: "queued", "sent", or "started".`),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The message to deliver to the task's agent")),
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_task_conversation_kandev",
+			mcp.WithDescription("Get conversation history for a task. If session_id is omitted, the primary session is used."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
+			mcp.WithString("session_id", mcp.Description("Optional session ID (must belong to task_id)")),
+			mcp.WithNumber("limit", mcp.Description("Optional page size (defaults to backend setting, max backend-capped)")),
+			mcp.WithString("before", mcp.Description("Optional cursor message ID to fetch messages before this ID")),
+			mcp.WithString("after", mcp.Description("Optional cursor message ID to fetch messages after this ID")),
+			mcp.WithString("sort", mcp.Description("Optional sort order: asc or desc")),
+			mcp.WithArray("message_types", mcp.Description("Optional message type filters (e.g. message, tool_call, error)"), mcp.Items(map[string]any{"type": "string"})),
+		),
+		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
 	)
 }
 

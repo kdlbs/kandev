@@ -1,0 +1,138 @@
+id: improve-kandev
+name: Improve Kandev
+description: >-
+  Hidden three-step workflow for filing improvements to kandev.
+  The agent implements the change, the user tests it in a secondary
+  kandev instance, then the agent opens a pull request to kdlbs/kandev.
+hidden: true
+
+steps:
+  - id: improve
+    name: Improve
+    position: 0
+    color: bg-purple-500
+    is_start_step: true
+    show_in_command_panel: false
+    allow_manual_move: true
+    prompt: |
+      [IMPROVE PHASE]
+      Implement the requested change to kandev using TDD.
+
+      {{task_prompt}}
+
+      If the task description references a context bundle (paths to
+      metadata.json, backend.log, frontend.log in a temp directory),
+      read those files for additional debugging context before starting.
+
+      STEP 0: CREATE A TASK LIST
+      Track the substeps below using your todo tool. Mark each in_progress
+      when you start and completed when you finish.
+
+      STEP 1: UNDERSTAND THE REPORT
+      Re-read the title and description carefully. If anything is unclear
+      or ambiguous, use the ask_user_question_kandev tool before coding.
+
+      STEP 2: EXPLORE THE CODEBASE
+      - Find similar features and understand how they are implemented.
+      - Identify the architecture and patterns in the relevant area.
+      - Read AGENTS.md for repo-specific conventions.
+
+      STEP 3: IMPLEMENT WITH TDD
+      For each behavior:
+      1. Write a failing test that asserts the expected behavior.
+      2. Run the test — confirm it fails with the expected assertion.
+      3. Write the minimum code to make it pass.
+      4. Run the test — confirm it passes.
+      5. Refactor while keeping tests green.
+      Add an E2E test (Playwright) when the change touches a user-facing flow.
+
+      STEP 4: VERIFY
+      Run `make fmt` first, then `make typecheck test lint` per AGENTS.md.
+
+      STEP 5: COMMIT
+      Stage and commit your changes with a Conventional Commits message
+      (e.g. `fix:`, `feat:`). Use explicit paths in `git add`.
+
+      When the implementation is complete and verified, stop and tell the
+      user. The user will move the task to the next step (Test) when ready.
+    events:
+      on_enter:
+        - type: auto_start_agent
+
+  - id: test
+    name: Test
+    position: 1
+    color: bg-blue-500
+    show_in_command_panel: false
+    allow_manual_move: true
+    prompt: |
+      [TEST PHASE]
+      Help the user verify the implemented change in a secondary kandev
+      instance running side-by-side with the primary one.
+
+      STEP 1: PREPARE
+      Run `make install` to install dependencies if needed.
+
+      STEP 2: START THE SECONDARY INSTANCE
+      Run `make dev` with auto-port assignment so the new instance does not
+      collide with the primary one. Capture the assigned URLs (web app,
+      backend API) from stdout.
+
+      STEP 3: REPORT
+      Tell the user exactly:
+      - Which URL to open to test the change.
+      - What to look for / how to reproduce the bug or exercise the feature.
+      - Any login or setup steps needed.
+
+      Wait for the user to confirm the change works. If the user reports
+      issues, take notes and ask the user to move the task back to Improve.
+      When the user is satisfied, they will move the task to PR.
+    events:
+      on_enter:
+        - type: auto_start_agent
+
+  - id: pr
+    name: PR
+    position: 2
+    color: bg-green-500
+    show_in_command_panel: false
+    allow_manual_move: true
+    prompt: |
+      [PR PHASE]
+      Open a pull request against `main` in `kdlbs/kandev` for the change
+      implemented and verified in the previous steps.
+
+      STEP 1: PRE-FLIGHT
+      - Run `gh auth status` to confirm GitHub CLI is authenticated.
+      - Confirm your changes are committed (`git status`).
+
+      STEP 2: ENSURE A FORK EXISTS AND WIRE REMOTES
+      The local clone's `origin` initially points at `kdlbs/kandev`, which
+      most contributors cannot push to. Run:
+
+          gh repo fork --remote --remote-name=origin
+
+      `gh` will fork `kdlbs/kandev` to your account if a fork does not
+      already exist, rename the existing `origin` remote to `upstream`,
+      and point `origin` at `<your-login>/kandev`. The command is a no-op
+      on subsequent runs, so it is safe to re-run.
+
+      Verify with `git remote -v`: `origin` must point at your fork and
+      `upstream` at `kdlbs/kandev`. Skip this step only if you confirmed
+      via `gh api repos/kdlbs/kandev --jq .permissions.push` that you
+      already have push access to the upstream repo.
+
+      STEP 3: INVOKE THE PR SKILL
+      Use the `pr` skill (see `.claude/skills/pr/SKILL.md`):
+      - Push the current branch to `origin` (your fork, after step 2).
+      - Open a pull request against `main` in `kdlbs/kandev` with a clear
+        title and description summarising the change and how it was tested.
+        `gh pr create` auto-detects the cross-fork setup.
+      - Reference the original task title in the PR description.
+
+      STEP 4: REPORT
+      Tell the user the PR URL. Stop and wait — the user takes it from here
+      (review, merge, follow-ups).
+    events:
+      on_enter:
+        - type: auto_start_agent

@@ -634,19 +634,30 @@ func (m *Manager) GetExecutionBySessionID(sessionID string) (*AgentExecution, bo
 	return m.executionStore.GetBySessionID(sessionID)
 }
 
-// ResolveScopeKey returns a stable scope key for env-keyed resources (user
-// shells, etc.) given a sessionID. Returns the session's TaskEnvironmentID
-// when an active execution carries it, otherwise falls back to the sessionID
-// itself so callers always get a non-empty key.
-//
-// This is the seam that makes terminals task-keyed: two sessions in the
-// same task share an env, so they resolve to the same scope key and the
-// runner returns one shared shell list instead of duplicating per-session.
-func (m *Manager) ResolveScopeKey(sessionID string) string {
-	if exec, ok := m.executionStore.GetBySessionID(sessionID); ok && exec.TaskEnvironmentID != "" {
-		return exec.TaskEnvironmentID
+// ResolveTaskEnvironmentID returns the task environment ID for a session.
+// User shell resources must be environment-scoped; missing mappings are
+// lifecycle errors and must not be converted into session-scoped shell state.
+func (m *Manager) ResolveTaskEnvironmentID(ctx context.Context, sessionID string) (string, error) {
+	if sessionID == "" {
+		return "", fmt.Errorf("session_id is required")
 	}
-	return sessionID
+	if exec, ok := m.executionStore.GetBySessionID(sessionID); ok {
+		if exec.TaskEnvironmentID != "" {
+			return exec.TaskEnvironmentID, nil
+		}
+		return "", fmt.Errorf("session %s has no task environment ID", sessionID)
+	}
+	if m.workspaceInfoProvider == nil {
+		return "", fmt.Errorf("workspace info provider not configured")
+	}
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, "", sessionID)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve task environment for session %s: %w", sessionID, err)
+	}
+	if info == nil || info.TaskEnvironmentID == "" {
+		return "", fmt.Errorf("session %s has no task environment ID", sessionID)
+	}
+	return info.TaskEnvironmentID, nil
 }
 
 // IsRemoteSession checks whether a session is associated with a remote executor

@@ -382,7 +382,7 @@ func (m *mockRepository) UpdateWorkflow(ctx context.Context, workflow *models.Wo
 	return nil
 }
 func (m *mockRepository) DeleteWorkflow(ctx context.Context, id string) error { return nil }
-func (m *mockRepository) ListWorkflows(ctx context.Context, workspaceID string) ([]*models.Workflow, error) {
+func (m *mockRepository) ListWorkflows(ctx context.Context, workspaceID string, includeHidden bool) ([]*models.Workflow, error) {
 	return nil, nil
 }
 func (m *mockRepository) ReorderWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) error {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { TaskTopBar } from "@/components/task/task-top-bar";
 import { TaskLayout } from "@/components/task/task-layout";
 import { DebugOverlay } from "@/components/debug-overlay";
@@ -15,7 +15,7 @@ import { useSessionResumption } from "@/hooks/domains/session/use-session-resump
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
 import { useTaskFocus } from "@/hooks/domains/session/use-task-focus";
 import { useAppStore } from "@/components/state-provider";
-import { useTaskSessions } from "@/hooks/use-task-sessions";
+import { useEnsureTaskSession } from "@/hooks/domains/session/use-ensure-task-session";
 import { fetchTask } from "@/lib/api";
 import { useTasks } from "@/hooks/use-tasks";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -29,12 +29,6 @@ import {
   buildArchivedValue,
   resolveTaskProps,
 } from "@/components/task/task-page-content-helpers";
-
-// Stable empty array used as the fallback in useAppStore selectors that return
-// arrays — avoids creating a new reference on every call, which would cause
-// React's useSyncExternalStore (getServerSnapshot) to throw an infinite-loop
-// error during SSR / hydration.
-const EMPTY_SESSIONS: never[] = [];
 
 type TaskPageContentProps = {
   task: Task | null;
@@ -492,40 +486,6 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
   return { task, kanbanTask };
 }
 
-function useAutoStartSession(
-  task: Task | null,
-  handleStartAgent: (
-    agentProfileId: string,
-    opts?: { prompt?: string; autoStart?: boolean },
-  ) => Promise<void>,
-) {
-  const { isLoaded } = useTaskSessions(task?.id ?? null);
-  const sessions = useAppStore((state) =>
-    task?.id ? (state.taskSessionsByTask.itemsByTaskId[task.id] ?? EMPTY_SESSIONS) : EMPTY_SESSIONS,
-  );
-  const workspaceDefaultProfileId = useAppStore((state) => {
-    const activeId = state.workspaces.activeId;
-    if (!activeId) return null;
-    return state.workspaces.items.find((w) => w.id === activeId)?.default_agent_profile_id ?? null;
-  });
-  const taskMetaProfileId = (task?.metadata as Record<string, unknown> | null)?.agent_profile_id;
-  const agentProfileId =
-    typeof taskMetaProfileId === "string" ? taskMetaProfileId : (workspaceDefaultProfileId ?? null);
-  const startedRef = useRef(false);
-
-  useEffect(() => {
-    if (!task?.id) return;
-    if (!isLoaded) return;
-    if (sessions.length > 0) return;
-    if (!agentProfileId) return;
-    if (startedRef.current) return;
-    startedRef.current = true;
-    handleStartAgent(agentProfileId, { autoStart: true }).catch(() => {
-      startedRef.current = false;
-    });
-  }, [task?.id, isLoaded, sessions.length, agentProfileId, handleStartAgent]);
-}
-
 function useTaskPageData(
   initialTask: Task | null,
   fallbackTaskId: string | null | undefined,
@@ -548,7 +508,7 @@ function useTaskPageData(
   const { task } = useTaskDetails(activeTaskId, initialTask);
 
   const agent = useSessionAgent(task);
-  useAutoStartSession(task, agent.handleStartAgent);
+  useEnsureTaskSession(task);
   const initialSessionId = sessionId ?? agent.taskSessionId ?? null;
   const effectiveSessionId = validatedActiveSessionId ?? initialSessionId;
 

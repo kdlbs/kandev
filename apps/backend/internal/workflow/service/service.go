@@ -16,7 +16,7 @@ import (
 
 // WorkflowProvider gives the workflow service access to workflows owned by the task domain.
 type WorkflowProvider interface {
-	ListWorkflows(ctx context.Context, workspaceID string) ([]*taskmodels.Workflow, error)
+	ListWorkflows(ctx context.Context, workspaceID string, includeHidden bool) ([]*taskmodels.Workflow, error)
 	GetWorkflow(ctx context.Context, id string) (*taskmodels.Workflow, error)
 	CreateWorkflow(ctx context.Context, workspaceID, name, description string) (*taskmodels.Workflow, error)
 	UpdateWorkflow(ctx context.Context, workflow *taskmodels.Workflow) error
@@ -395,7 +395,7 @@ func (s *Service) ExportWorkflow(ctx context.Context, workflowID string) (*model
 
 // ExportWorkflows exports all workflows for a workspace.
 func (s *Service) ExportWorkflows(ctx context.Context, workspaceID string) (*models.WorkflowExport, error) {
-	workflows, err := s.workflowProvider.ListWorkflows(ctx, workspaceID)
+	workflows, err := s.workflowProvider.ListWorkflows(ctx, workspaceID, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list workflows: %w", err)
 	}
@@ -416,7 +416,7 @@ func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, expor
 		return nil, fmt.Errorf("invalid export data: %w", err)
 	}
 
-	existing, err := s.workflowProvider.ListWorkflows(ctx, workspaceID)
+	existing, err := s.workflowProvider.ListWorkflows(ctx, workspaceID, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list existing workflows: %w", err)
 	}

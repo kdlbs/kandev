@@ -171,9 +171,12 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
   const { store, loadTaskSessionsForTask, setActiveSession, setActiveTask, onOpenChange } = opts;
   store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: true } }));
   try {
-    const workflowsResponse = await listWorkflows(newWorkspaceId, { cache: "no-store" });
+    const workflowsResponse = await listWorkflows(newWorkspaceId, {
+      cache: "no-store",
+      includeHidden: true,
+    });
     const newWorkspaceWorkflows = workflowsResponse.workflows ?? [];
-    const firstWorkflow = newWorkspaceWorkflows[0];
+    const firstWorkflow = newWorkspaceWorkflows.find((w) => !w.hidden);
     if (!firstWorkflow) {
       store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
       return;
@@ -191,6 +194,7 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
             id: w.id,
             workspaceId: w.workspace_id,
             name: w.name,
+            hidden: w.hidden,
           })),
         ],
         activeId: firstWorkflow.id,

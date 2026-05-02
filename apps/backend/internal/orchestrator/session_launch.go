@@ -79,11 +79,6 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	intent := ResolveIntent(req)
 	req.Prompt = strings.TrimSpace(req.Prompt)
 
-	s.logger.Debug("LaunchSession",
-		zap.String("task_id", req.TaskID),
-		zap.String("intent", string(intent)),
-		zap.String("session_id", req.SessionID))
-
 	switch intent {
 	case IntentPrepare:
 		return s.launchPrepare(ctx, req)

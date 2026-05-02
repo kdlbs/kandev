@@ -36,6 +36,7 @@ import (
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/health"
+	"github.com/kandev/kandev/internal/improvekandev"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
@@ -45,6 +46,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
@@ -339,6 +341,8 @@ type routeParams struct {
 	secretStore             secrets.SecretStore
 	mcpConfigSvc            *mcpconfig.Service
 	addCleanup              func(func() error)
+	repoCloner              *repoclone.Cloner
+	version                 string
 	webInternalURL          string
 	pprofEnabled            bool
 	httpPort                int
@@ -491,6 +495,15 @@ func registerSecondaryRoutes(
 	p.log.Debug("Registered Docker management handlers (HTTP)")
 
 	registerHealthRoutes(p)
+
+	if p.repoCloner != nil {
+		ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, p.version, p.log)
+		improvekandev.RegisterRoutes(p.router, ikHandler)
+		improvekandev.CleanupStaleBundles(func(path string, err error) {
+			p.log.Warn("Improve Kandev: failed to clean stale bundle", zap.String("path", path), zap.Error(err))
+		})
+		p.log.Debug("Registered Improve Kandev handlers (HTTP)")
+	}
 
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService)
 

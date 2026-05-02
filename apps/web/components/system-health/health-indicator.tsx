@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import type { ComponentProps } from "react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
@@ -17,15 +18,20 @@ import type { HealthIssue } from "@/lib/types/health";
 type HealthIndicatorButtonProps = {
   hasIssues: boolean;
   onClick: () => void;
+  size?: ComponentProps<typeof Button>["size"];
 };
 
-export function HealthIndicatorButton({ hasIssues, onClick }: HealthIndicatorButtonProps) {
+export function HealthIndicatorButton({
+  hasIssues,
+  onClick,
+  size = "icon",
+}: HealthIndicatorButtonProps) {
   if (!hasIssues) return null;
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="outline" size="icon" onClick={onClick} className="cursor-pointer relative">
+        <Button variant="outline" size={size} onClick={onClick} className="cursor-pointer relative">
           <IconAlertTriangle className="h-4 w-4 text-amber-500" />
           <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-amber-500 border-2 border-background" />
           <span className="sr-only">Setup Issues</span>

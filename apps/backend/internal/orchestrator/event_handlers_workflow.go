@@ -1482,6 +1482,46 @@ func (s *Service) publishSessionWaitingEvent(ctx context.Context, taskID, sessio
 	))
 }
 
+// publishSessionCreatedEvent publishes a session state change event for CREATED.
+// PrepareTaskSession only writes the row to the DB without going through
+// updateTaskSessionState, so without this the frontend's per-task session list
+// stays empty until a manual reload (e.g. the kanban preview "No agents yet"
+// staleness bug). Mirrors publishSessionWaitingEvent's payload shape so the
+// existing session.state_changed handler can upsert the new session into the
+// store.
+func (s *Service) publishSessionCreatedEvent(ctx context.Context, taskID, sessionID, stepID string) {
+	if s.eventBus == nil {
+		return
+	}
+	eventData := map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"new_state":  string(models.TaskSessionStateCreated),
+	}
+	if stepID != "" {
+		eventData["workflow_step_id"] = stepID
+	}
+	if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && session != nil {
+		if session.AgentProfileID != "" {
+			eventData["agent_profile_id"] = session.AgentProfileID
+		}
+		if len(session.AgentProfileSnapshot) > 0 {
+			eventData["agent_profile_snapshot"] = session.AgentProfileSnapshot
+		}
+		if session.TaskEnvironmentID != "" {
+			eventData["task_environment_id"] = session.TaskEnvironmentID
+		}
+		if len(session.Metadata) > 0 {
+			eventData["session_metadata"] = session.Metadata
+		}
+	}
+	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
+		events.TaskSessionStateChanged,
+		"orchestrator",
+		eventData,
+	))
+}
+
 // resolveTurnStartTargetStep resolves the target step ID for an on_turn_start transition action.
 // Returns the step ID and true if resolved; empty string and false if not resolvable.
 func (s *Service) resolveTurnStartTargetStep(ctx context.Context, currentStep *wfmodels.WorkflowStep, action *wfmodels.OnTurnStartAction) (string, bool) {

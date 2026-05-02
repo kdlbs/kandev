@@ -2,12 +2,14 @@
 
 import { IconArrowsMaximize, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import type { Task } from "./kanban-card";
 import { PreviewSessionTabs } from "./task/preview-session-tabs";
 
 interface TaskPreviewPanelProps {
   task: Task | null;
   sessionId?: string | null;
+  ensureSession?: UseEnsureTaskSessionResult;
   onClose: () => void;
   onMaximize?: (task: Task) => void;
   onSessionChange?: (sessionId: string | null) => void;
@@ -16,6 +18,7 @@ interface TaskPreviewPanelProps {
 export function TaskPreviewPanel({
   task,
   sessionId = null,
+  ensureSession,
   onClose,
   onMaximize,
   onSessionChange,
@@ -54,6 +57,7 @@ export function TaskPreviewPanel({
           <PreviewSessionTabs
             taskId={task.id}
             sessionId={sessionId}
+            ensureSession={ensureSession}
             onSessionChange={onSessionChange}
           />
         ) : (

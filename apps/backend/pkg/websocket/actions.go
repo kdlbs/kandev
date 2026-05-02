@@ -80,6 +80,7 @@ const (
 
 	// Unified session launch
 	ActionSessionLaunch       = "session.launch"
+	ActionSessionEnsure       = "session.ensure"
 	ActionSessionRecover      = "session.recover"
 	ActionSessionResetContext = "session.reset_context"
 	ActionSessionStop         = "session.stop"
@@ -346,11 +347,12 @@ const (
 	ActionMCPUpdateExecutorProfile = "mcp.update_executor_profile"
 	ActionMCPDeleteExecutorProfile = "mcp.delete_executor_profile"
 
-	ActionMCPMoveTask        = "mcp.move_task"
-	ActionMCPDeleteTask      = "mcp.delete_task"
-	ActionMCPArchiveTask     = "mcp.archive_task"
-	ActionMCPUpdateTaskState = "mcp.update_task_state"
-	ActionMCPMessageTask     = "mcp.message_task"
+	ActionMCPMoveTask            = "mcp.move_task"
+	ActionMCPDeleteTask          = "mcp.delete_task"
+	ActionMCPArchiveTask         = "mcp.archive_task"
+	ActionMCPUpdateTaskState     = "mcp.update_task_state"
+	ActionMCPMessageTask         = "mcp.message_task"
+	ActionMCPGetTaskConversation = "mcp.get_task_conversation"
 )
 
 // GitHub integration actions

@@ -23,16 +23,18 @@ import type {
   DialogComputedValues,
   DialogComputedArgs,
 } from "@/components/task-create-dialog-types";
+import { computePassthroughProfile } from "@/components/task-create-dialog-helpers";
 import {
-  computePassthroughProfile,
-  computeEffectiveStepId,
-} from "@/components/task-create-dialog-helpers";
+  computeDialogDefaultStepId,
+  computeSingleWorkflowFallbackId,
+} from "@/components/task-create-dialog-defaults";
 
 export type {
   StepType,
   TaskCreateDialogInitialValues,
 } from "@/components/task-create-dialog-types";
 export { autoSelectBranch } from "@/components/task-create-dialog-helpers";
+export { useLockedFieldSync } from "@/components/task-create-dialog-locked-fields";
 
 type FormResetters = {
   setTaskName: (v: string) => void;
@@ -428,8 +430,14 @@ export function useDialogComputed({
   executors,
   repositories,
   workflows,
+  snapshots,
 }: DialogComputedArgs): DialogComputedValues {
-  const effectiveWorkflowId = fs.selectedWorkflowId ?? workflowId;
+  const singleWorkflowId = computeSingleWorkflowFallbackId(
+    fs.selectedWorkflowId,
+    workflowId,
+    workflows,
+  );
+  const effectiveWorkflowId = fs.selectedWorkflowId ?? workflowId ?? singleWorkflowId;
   // Compute workflow agent lock directly from data — avoids effect timing issues.
   const workflowAgentProfileId = (() => {
     const wfId = effectiveWorkflowId;
@@ -445,12 +453,14 @@ export function useDialogComputed({
     () => computePassthroughProfile(effectiveAgentProfileId, agentProfiles),
     [effectiveAgentProfileId, agentProfiles],
   );
-  const effectiveDefaultStepId = computeEffectiveStepId(
-    fs.selectedWorkflowId,
+  const effectiveDefaultStepId = computeDialogDefaultStepId({
+    selectedWorkflowId: fs.selectedWorkflowId,
     workflowId,
-    fs.fetchedSteps,
+    fetchedSteps: fs.fetchedSteps,
     defaultStepId,
-  );
+    effectiveWorkflowId,
+    snapshots,
+  });
   const workspaceDefaults = workspaceId
     ? workspaces.find((ws: Workspace) => ws.id === workspaceId)
     : null;
@@ -532,10 +542,13 @@ export function useTaskCreateDialogData(
 
   useSettingsData(open);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, open);
-  const { branches, isLoading: branchesLoading } = useRepositoryBranches(
-    fs.repositoryId || null,
-    Boolean(open && fs.repositoryId),
-  );
+  const {
+    branches,
+    isLoading: branchesLoading,
+    refresh: refreshBranches,
+    fetchedAt: branchesFetchedAt,
+    fetchError: branchesFetchError,
+  } = useRepositoryBranches(fs.repositoryId || null, Boolean(open && fs.repositoryId));
   const computed = useDialogComputed({
     fs,
     open,
@@ -549,6 +562,7 @@ export function useTaskCreateDialogData(
     executors,
     repositories,
     workflows,
+    snapshots,
   });
   return {
     workflows,
@@ -560,6 +574,9 @@ export function useTaskCreateDialogData(
     repositoriesLoading,
     branches,
     branchesLoading,
+    refreshBranches,
+    branchesFetchedAt,
+    branchesFetchError,
     computed,
   };
 }
