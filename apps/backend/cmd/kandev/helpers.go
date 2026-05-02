@@ -73,6 +73,7 @@ func buildSessionDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lif
 
 		var result []*ws.Message
 		result = appendSessionStateMessage(sessionID, session, result)
+		result = appendAgentctlStatusMessage(ctx, lifecycleMgr, sessionID, result, log)
 		result = appendLiveGitStatusMessage(ctx, taskRepo, lifecycleMgr, sessionID, session, result, log)
 		result = appendContextWindowMessage(sessionID, session, result)
 		result = appendAvailableCommandsMessage(sessionID, session, lifecycleMgr, result)
@@ -82,8 +83,60 @@ func buildSessionDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lif
 	}
 }
 
+const sessionIDPayloadKey = "session_id"
+
+// appendAgentctlStatusMessage snapshots the current agentctl readiness for a
+// session so late-subscribing clients (page reload, task switch, WS reconnect)
+// don't sit forever on "Connecting terminal..." waiting for events that have
+// already fired.
+//
+// Non-blocking by design — sendSessionData runs in the WS read loop, so a
+// network probe here would delay every subscribe/focus ACK by its timeout.
+// Instead, treat the workspace stream's presence as the cached readiness
+// signal: streamManager only attaches it AFTER waitForAgentctlReady's Health
+// check succeeds. If the stream is wired we emit `agentctl_ready`; otherwise
+// `agentctl_starting`. The subsequent waitForAgentctlReady event (or its
+// error) will correct the status if the snapshot picked the wrong one.
+//
+// Emits no message when the session has no live execution — the lazy
+// create-on-terminal-connect path publishes events normally in that case.
+func appendAgentctlStatusMessage(
+	_ context.Context,
+	lifecycleMgr *lifecycle.Manager,
+	sessionID string,
+	result []*ws.Message,
+	_ *logger.Logger,
+) []*ws.Message {
+	if lifecycleMgr == nil {
+		return result
+	}
+	execution, ok := lifecycleMgr.GetExecutionBySessionID(sessionID)
+	if !ok {
+		return result
+	}
+
+	payload := map[string]interface{}{
+		sessionIDPayloadKey:  sessionID,
+		"agent_execution_id": execution.ID,
+	}
+	action := ws.ActionSessionAgentctlStarting
+	if execution.GetWorkspaceStream() != nil {
+		action = ws.ActionSessionAgentctlReady
+	}
+
+	notification, err := ws.NewNotification(action, payload)
+	if err != nil {
+		return result
+	}
+	return append(result, notification)
+}
+
 // appendSessionStateMessage always sends the current session state so clients
 // that subscribe after a state change still receive the authoritative state.
+//
+// Includes task_environment_id when present so late-subscribing clients
+// (page reload, task switch, WS reconnect) can seed environmentIdBySessionId
+// — without it, env-routed shell terminals stall on "Connecting terminal...".
 func appendSessionStateMessage(sessionID string, session *models.TaskSession, result []*ws.Message) []*ws.Message {
 	payload := map[string]interface{}{
 		"session_id": sessionID,
@@ -95,6 +148,9 @@ func appendSessionStateMessage(sessionID string, session *models.TaskSession, re
 	}
 	if session.Metadata != nil {
 		payload["session_metadata"] = session.Metadata
+	}
+	if session.TaskEnvironmentID != "" {
+		payload["task_environment_id"] = session.TaskEnvironmentID
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionStateChanged, payload)
 	if err == nil {

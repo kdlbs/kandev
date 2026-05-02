@@ -99,7 +99,14 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 		if execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID); exists {
 			return execution, nil
 		}
-		return m.createExecution(ctx, info.TaskID, info)
+		// createExecution publishes AgentctlStarting before spawning the
+		// waitForAgentctlReady goroutine, so frontend gates flip out of
+		// `undefined` even on this lazy-create path.
+		execution, err := m.createExecution(ctx, info.TaskID, info)
+		if err != nil {
+			return nil, err
+		}
+		return execution, nil
 	})
 	if err != nil {
 		return nil, err
@@ -172,16 +179,13 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 		zap.String("workspace_path", info.WorkspacePath),
 		zap.String("acp_session_id", info.ACPSessionID))
 
+	// createExecution publishes AgentctlStarting before spawning the
+	// waitForAgentctlReady goroutine, so workspace-only executions also
+	// notify the frontend without racing the readiness event.
 	execution, err := m.createExecution(ctx, taskID, info)
 	if err != nil {
 		return nil, err
 	}
-
-	// Notify subscribers that agentctl is starting. createExecution already
-	// spawns waitForAgentctlReady which publishes AgentctlReady/AgentctlError,
-	// but AgentctlStarting is only published in the Launch path — add it here
-	// so workspace-only executions also notify the frontend.
-	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlStarting, execution, "")
 
 	// For workspace-only executions (no agent), wait for agentctl to be ready
 	// then connect the workspace stream so process output can be received.
@@ -421,6 +425,11 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	m.persistAuthToken(ctx, runtimeInstance, execution)
 	go m.pollOneRemoteStatus(context.Background(), execution)
 
+	// Publish Starting BEFORE spawning waitForAgentctlReady so subscribers
+	// always observe Starting → Ready/Error in order. Doing it after the go
+	// call would race: if Health succeeds before this line runs, Ready could
+	// be published first and the frontend gate would briefly flicker.
+	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlStarting, execution, "")
 	go m.waitForAgentctlReady(execution)
 
 	m.logger.Info("execution created",

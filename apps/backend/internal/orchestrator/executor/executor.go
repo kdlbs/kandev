@@ -397,9 +397,24 @@ type Executor struct {
 	// arrive simultaneously (e.g., from frontend auto-resume).
 	sessionLocks sync.Map // map[string]*sync.Mutex
 
+	// Per-task locks for env persistence — concurrent launches for the same
+	// task race in persistTaskEnvironment (each sees existingEnv == nil and
+	// each calls CreateTaskEnvironment). The unique index on
+	// task_environments(task_id) catches the second insert, but this lock
+	// closes the window before the constraint trips so the first launch
+	// succeeds and the second reuses its env.
+	taskEnvLocks sync.Map // map[string]*sync.Mutex
+
 	// Optional cloner for provider-backed repos without a local path.
 	repoCloner  RepoCloner
 	repoUpdater RepoUpdater
+}
+
+// taskEnvLock returns the per-task mutex for env persistence, creating one on
+// demand. Mirrors the sessionLocks pattern.
+func (e *Executor) taskEnvLock(taskID string) *sync.Mutex {
+	mu, _ := e.taskEnvLocks.LoadOrStore(taskID, &sync.Mutex{})
+	return mu.(*sync.Mutex)
 }
 
 // RepoCloner clones remote repositories to local disk.

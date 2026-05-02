@@ -96,6 +96,29 @@ function useWsBaseUrl() {
   }, []);
 }
 
+/**
+ * Decide whether the WS effect should attempt to open a terminal connection.
+ *
+ * Agent terminals require agentctl readiness — the agent process must be
+ * subscribed before passthrough I/O is meaningful.
+ *
+ * Shell terminals route by env on the backend (PR #758); the env handler
+ * lazy-creates the execution and waits for remote readiness server-side,
+ * so gating the client on `agentctlStatus.isReady` here just deadlocks when
+ * the ready event fired before the client subscribed (page reload, task
+ * switch, WS reconnect). Only require the routing keys.
+ */
+function computeCanConnect(
+  mode: "agent" | "shell",
+  connectionID: string | null | undefined,
+  sessionId: string | null | undefined,
+  isAgentctlReady: boolean,
+): boolean {
+  if (!connectionID || !sessionId) return false;
+  if (mode === "agent") return isAgentctlReady;
+  return true;
+}
+
 // eslint-disable-next-line max-lines-per-function -- wires many hooks + refs; each block is already its own hook
 export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const { mode, label, autoFocus, pendingCommand, onCommandSent } = props;
@@ -111,13 +134,8 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const { session } = useSession(sessionId);
   const agentctlStatus = useSessionAgentctl(sessionId);
   const taskId = session?.task_id ?? null;
-  // Gate WS connection on agentctl readiness. During a long prepare script
-  // the backend terminal endpoint isn't accepting connections yet, and
-  // spamming reconnects burns cycles and confuses the loading state.
-  // Don't require isActive — restored workspaces (terminal-state sessions)
-  // have agentctl running but the session state stays COMPLETED/CANCELLED.
   const connectionID = mode === "agent" ? sessionId : environmentId;
-  const canConnect = Boolean(connectionID && sessionId && agentctlStatus.isReady);
+  const canConnect = computeCanConnect(mode, connectionID, sessionId, agentctlStatus.isReady);
   const wsBaseUrl = useWsBaseUrl();
 
   const [isTerminalReady, setIsTerminalReady] = useState(false);

@@ -816,8 +816,31 @@ func (e *Executor) injectHandoverIfNeeded(ctx context.Context, taskID, currentSe
 	return sysprompt.InjectSessionHandover(previousCount, planSection, prompt)
 }
 
+// computeWorkspacePath derives the env's workspace_path from the launch
+// request and response. Used for both create and update branches of
+// persistTaskEnvironment so the rule lives in exactly one place — without
+// this, the update branch silently leaves workspace_path empty, which
+// produces ErrSessionWorkspaceNotReady forever in the env terminal handler.
+func computeWorkspacePath(req *LaunchAgentRequest, resp *LaunchAgentResponse) string {
+	workspacePath := resp.WorktreePath
+	if workspacePath == "" {
+		workspacePath = req.RepositoryPath
+	}
+	// Task directory mode: WorkspacePath = task root, WorktreePath = repo subdir.
+	if req.TaskDirName != "" && resp.WorktreePath != "" {
+		workspacePath = filepath.Dir(resp.WorktreePath)
+	}
+	return workspacePath
+}
+
 // persistTaskEnvironment creates or updates the task environment record after a successful launch.
 // It also links the session to the environment via TaskEnvironmentID.
+//
+// Serialised per-task: concurrent launches for the same task previously raced
+// here (each saw existingEnv == nil, each created a new row, both succeeded
+// before the unique index existed). Hold the per-task lock and re-fetch the
+// existing env inside the critical section so siblings reuse the row the
+// first one persisted.
 func (e *Executor) persistTaskEnvironment(
 	ctx context.Context,
 	taskID string,
@@ -827,10 +850,43 @@ func (e *Executor) persistTaskEnvironment(
 	resp *LaunchAgentResponse,
 	execCfg executorConfig,
 ) {
+	mu := e.taskEnvLock(taskID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Re-fetch under the lock — a sibling launch for the same task may have
+	// just created the env and released the lock. Without this we'd still
+	// see existingEnv == nil from the original call and try to create a
+	// duplicate.
+	if existingEnv == nil {
+		if fresh, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID); err == nil && fresh != nil {
+			existingEnv = fresh
+		}
+	}
+
+	workspacePath := computeWorkspacePath(req, resp)
+
 	if existingEnv != nil {
-		// Update the existing environment with new execution info
 		existingEnv.AgentExecutionID = resp.AgentExecutionID
 		existingEnv.Status = models.TaskEnvironmentStatusReady
+		// Refresh worktree + workspace fields. The original update branch only
+		// touched AgentExecutionID/Status, so envs created with empty paths
+		// (e.g. before the worktree resolved) stayed permanently broken.
+		if resp.WorktreeID != "" {
+			existingEnv.WorktreeID = resp.WorktreeID
+		}
+		if resp.WorktreePath != "" {
+			existingEnv.WorktreePath = resp.WorktreePath
+		}
+		if resp.WorktreeBranch != "" {
+			existingEnv.WorktreeBranch = resp.WorktreeBranch
+		}
+		if workspacePath != "" {
+			existingEnv.WorkspacePath = workspacePath
+		}
+		if resp.ContainerID != "" {
+			existingEnv.ContainerID = resp.ContainerID
+		}
 		if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
 			e.logger.Warn("failed to update task environment",
 				zap.String("task_id", taskID),
@@ -841,15 +897,6 @@ func (e *Executor) persistTaskEnvironment(
 		return
 	}
 
-	// Create a new task environment
-	workspacePath := resp.WorktreePath
-	if workspacePath == "" {
-		workspacePath = req.RepositoryPath
-	}
-	// Task directory mode: WorkspacePath = task root, WorktreePath = repo subdir
-	if req.TaskDirName != "" && resp.WorktreePath != "" {
-		workspacePath = filepath.Dir(resp.WorktreePath)
-	}
 	env := &models.TaskEnvironment{
 		ID:                session.TaskEnvironmentID,
 		TaskID:            taskID,

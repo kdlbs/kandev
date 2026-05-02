@@ -16,6 +16,13 @@ func (r *Repository) CreateTaskEnvironment(ctx context.Context, env *models.Task
 	if env.ID == "" {
 		env.ID = uuid.New().String()
 	}
+	// Worktree-mode envs must always carry workspace_path. Without it,
+	// GetOrEnsureExecutionForEnvironment returns ErrSessionWorkspaceNotReady
+	// forever and the env terminal handler 503s. Reject at the boundary
+	// instead of letting a corrupt row land.
+	if env.ExecutorType == string(models.ExecutorTypeWorktree) && env.WorkspacePath == "" {
+		return fmt.Errorf("create task environment: worktree-mode env requires workspace_path (task=%s)", env.TaskID)
+	}
 	now := time.Now().UTC()
 	env.CreatedAt = now
 	env.UpdatedAt = now
@@ -98,6 +105,12 @@ func (r *Repository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID stri
 
 // UpdateTaskEnvironment updates an existing task environment.
 func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
+	// Refuse to clear workspace_path on a worktree-mode env. Same rationale
+	// as CreateTaskEnvironment: empty workspace_path produces permanent 503
+	// on shell terminal connect.
+	if env.ExecutorType == string(models.ExecutorTypeWorktree) && env.WorkspacePath == "" {
+		return fmt.Errorf("update task environment: worktree-mode env requires workspace_path (id=%s)", env.ID)
+	}
 	env.UpdatedAt = time.Now().UTC()
 
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
