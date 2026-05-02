@@ -39,6 +39,24 @@ export function getTextContent(children: ReactNode): string {
   return "";
 }
 
+type MarkdownCodeNode = {
+  type?: string;
+};
+
+type MarkdownCodeProps = {
+  className?: string;
+  children?: ReactNode;
+  node?: MarkdownCodeNode;
+};
+
+function isBlockCode(
+  node: MarkdownCodeNode | undefined,
+  hasLanguage: boolean,
+  content: string,
+): boolean {
+  return node?.type === "code" || hasLanguage || content.includes("\n");
+}
+
 /**
  * Shared markdown component overrides for ReactMarkdown.
  * Element styles (headings, lists, inline code, etc.) are handled by
@@ -46,15 +64,15 @@ export function getTextContent(children: ReactNode): string {
  * (code routing, link target, table overflow wrapper) remain here.
  */
 export const markdownComponents = {
-  code: ({ className, children }: { className?: string; children?: ReactNode }) => {
+  code: ({ className, children, node }: MarkdownCodeProps) => {
     const content = getTextContent(children).replace(/\n$/, "");
     const lang = className?.replace("language-", "") ?? null;
-    if (isMermaidContent(lang, content)) {
+    const hasLanguage = className?.startsWith("language-") ?? false;
+    const isBlock = isBlockCode(node, hasLanguage, content);
+    if (isBlock && isMermaidContent(lang, content)) {
       return <MermaidBlock code={content} />;
     }
-    const hasLanguage = className?.startsWith("language-");
-    const hasNewlines = content.includes("\n");
-    if (hasLanguage || hasNewlines) {
+    if (isBlock) {
       return <CodeBlock className={className}>{content}</CodeBlock>;
     }
     return <InlineCode>{content}</InlineCode>;
