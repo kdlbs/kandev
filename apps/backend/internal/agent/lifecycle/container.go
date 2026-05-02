@@ -47,17 +47,23 @@ type ContainerManager struct {
 	// resolveAgentctlBinary returns the host path to a linux/amd64 agentctl
 	// binary. Indirected so tests can inject a stub.
 	resolveAgentctlBinary func() (string, error)
+	// resolveMockAgentBinary returns the host path to a linux/amd64 mock-agent
+	// binary. When it returns "" without error, no mock-agent mount is added
+	// (production case). Used by Docker E2E tests.
+	resolveMockAgentBinary func() (string, error)
 }
 
 // NewContainerManager creates a new ContainerManager
 func NewContainerManager(dockerClient *docker.Client, networkName string, log *logger.Logger) *ContainerManager {
 	resolver := NewAgentctlResolver(log)
+	mockResolver := NewMockAgentResolver(log)
 	return &ContainerManager{
-		dockerClient:          dockerClient,
-		commandBuilder:        NewCommandBuilder(),
-		logger:                log.WithFields(zap.String("component", "container-manager")),
-		networkName:           networkName,
-		resolveAgentctlBinary: resolver.ResolveLinuxBinary,
+		dockerClient:           dockerClient,
+		commandBuilder:         NewCommandBuilder(),
+		logger:                 log.WithFields(zap.String("component", "container-manager")),
+		networkName:            networkName,
+		resolveAgentctlBinary:  resolver.ResolveLinuxBinary,
+		resolveMockAgentBinary: mockResolver.ResolveLinuxBinary,
 	}
 }
 
@@ -303,6 +309,23 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 			Target:   "/usr/local/bin/agentctl",
 			ReadOnly: true,
 		})
+	}
+
+	// Optionally mount a host mock-agent binary for Docker E2E tests. Production
+	// builds run real agents installed in the image; this mount only fires when
+	// KANDEV_MOCK_AGENT_LINUX_BINARY is set or the binary is sitting in build/.
+	if cm.resolveMockAgentBinary != nil {
+		mockPath, err := cm.resolveMockAgentBinary()
+		if err != nil {
+			return docker.ContainerConfig{}, fmt.Errorf("mock-agent binary lookup: %w", err)
+		}
+		if mockPath != "" {
+			mounts = append(mounts, docker.MountConfig{
+				Source:   mockPath,
+				Target:   "/usr/local/bin/mock-agent",
+				ReadOnly: true,
+			})
+		}
 	}
 
 	// Build environment variables

@@ -226,12 +226,6 @@ function NewSessionForm({
   const [isCreating, setIsCreating] = useState(false);
   const [contextValue, setContextValue] = useState("blank");
   const [selectedProfileId, setSelectedProfileId] = useState(initialProfileId ?? defaultProfileId);
-  useEnforceCompatibleProfile(
-    Boolean(executorProfile),
-    compatibleAgentProfiles,
-    selectedProfileId,
-    setSelectedProfileId,
-  );
   const [hasPrompt, setHasPrompt] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const {
@@ -251,6 +245,12 @@ function NewSessionForm({
     [attachments, handleRemoveAttachment],
   );
   const compatibleAgentProfiles = useCompatibleAgentProfiles(agentProfiles, executorProfile);
+  useEnforceCompatibleProfile(
+    Boolean(executorProfile),
+    compatibleAgentProfiles,
+    selectedProfileId,
+    setSelectedProfileId,
+  );
   const profileOptions = useAgentProfileOptions(compatibleAgentProfiles);
   const sessionOptions = useSessionOptions(taskId);
   const isUtilityConfigured = useIsUtilityConfigured();

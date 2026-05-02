@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -125,25 +126,37 @@ func shouldUseWorktree(executorType string) bool {
 	return models.ExecutorType(executorType) == models.ExecutorTypeWorktree
 }
 
-// repositoryCloneURL builds an HTTPS clone URL from the repository's provider info.
-// Returns an empty string if the repository has no provider owner/name or if the
-// provider is not recognized.
+const providerGitHub = "github"
+
+// repositoryCloneURL builds a clone URL for the repository. It prefers the
+// provider info when present (HTTPS GitHub/GitLab/Bitbucket URL); otherwise
+// it inspects the local checkout's `origin` remote. The latter lets local-only
+// repos with a real remote (or a file:// remote, used by Docker E2E tests)
+// participate in remote executors that clone inside the container/sandbox.
 func repositoryCloneURL(repo *models.Repository) string {
-	if repo.ProviderOwner == "" || repo.ProviderName == "" {
+	if repo.ProviderOwner != "" && repo.ProviderName != "" {
+		var host string
+		switch strings.ToLower(repo.Provider) {
+		case providerGitHub, "":
+			host = "github.com"
+		case "gitlab":
+			host = "gitlab.com"
+		case "bitbucket":
+			host = "bitbucket.org"
+		default:
+			return ""
+		}
+		return fmt.Sprintf("https://%s/%s/%s.git", host, repo.ProviderOwner, repo.ProviderName)
+	}
+	if repo.LocalPath == "" {
 		return ""
 	}
-	var host string
-	switch strings.ToLower(repo.Provider) {
-	case "github", "":
-		host = "github.com"
-	case "gitlab":
-		host = "gitlab.com"
-	case "bitbucket":
-		host = "bitbucket.org"
-	default:
+	cmd := exec.Command("git", "-C", repo.LocalPath, "remote", "get-url", "origin")
+	out, err := cmd.Output()
+	if err != nil {
 		return ""
 	}
-	return fmt.Sprintf("https://%s/%s/%s.git", host, repo.ProviderOwner, repo.ProviderName)
+	return strings.TrimSpace(string(out))
 }
 
 // getSessionLock returns a per-session mutex, creating one if it doesn't exist.

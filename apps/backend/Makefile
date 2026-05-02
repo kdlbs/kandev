@@ -25,7 +25,7 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || powershell -c
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl build-agentctl-linux build-acpdbg acpdbg build-mock-agent build-preview clean run dev start-debug test test-e2e test-sprites-e2e lint fmt vet help
+.PHONY: all build build-all build-agentctl build-agentctl-linux build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview clean run dev start-debug test test-e2e test-sprites-e2e lint fmt vet help
 
 ## Default target
 all: build
@@ -74,6 +74,12 @@ build-agentctl-linux:
 	@echo "Building agentctl for linux/amd64..."
 	@$(MKDIR) $(BUILD_DIR)
 	GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-amd64 ./cmd/agentctl
+
+## Build mock-agent for linux/amd64 (used by Docker E2E tests)
+build-mock-agent-linux:
+	@echo "Building mock-agent for linux/amd64..."
+	@$(MKDIR) $(BUILD_DIR)
+	GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent-linux-amd64 ./cmd/mock-agent
 
 
 ## Clean build artifacts

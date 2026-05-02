@@ -22,8 +22,9 @@ function parseJSON<T>(raw: string | undefined, fallback: T): T {
  * For remote executors (Docker/Sprites), the executor profile must carry either:
  *   - a non-env auth method ID for the agent's spec in `remote_credentials`, or
  *   - a non-null secret keyed by an env method ID in `remote_auth_secrets`.
- * Agents without a remote-auth spec (Copilot/Amp/OpenCode/TUI/mock) cannot
- * carry credentials on remote executors → blocked.
+ * Agents without a remote-auth spec (Copilot/Amp/OpenCode/TUI) cannot
+ * carry credentials on remote executors → blocked. A spec with zero methods
+ * means "no credentials needed" (mock-agent for tests) → allowed.
  *
  * Spec IDs are registry-type strings ("claude-acp", "codex-acp", …) which the
  * frontend exposes as `AgentProfileOption.agent_name`. `agent_id` is a DB UUID
@@ -38,6 +39,7 @@ export function isAgentConfiguredOnExecutor(
 
   const spec = authSpecs.find((s) => s.id === agent.agent_name);
   if (!spec) return false;
+  if (spec.methods.length === 0) return true;
 
   const credentials = new Set(parseJSON<string[]>(executorProfile.config?.remote_credentials, []));
   if (spec.methods.some((m) => m.type !== "env" && credentials.has(m.method_id))) return true;
