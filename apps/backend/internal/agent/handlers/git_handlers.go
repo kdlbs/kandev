@@ -247,7 +247,7 @@ func (h *GitHandlers) wsPull(ctx context.Context, msg *ws.Message) (*ws.Message,
 		return nil, fmt.Errorf("session_id is required")
 	}
 
-	client, err := h.getAgentCtlClient(req.SessionID)
+	client, err := h.getAgentCtlClient(ctx, req.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +272,7 @@ func (h *GitHandlers) wsPush(ctx context.Context, msg *ws.Message) (*ws.Message,
 		return nil, fmt.Errorf("session_id is required")
 	}
 
-	client, err := h.getAgentCtlClient(req.SessionID)
+	client, err := h.getAgentCtlClient(ctx, req.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -300,7 +300,7 @@ func (h *GitHandlers) wsRebase(ctx context.Context, msg *ws.Message) (*ws.Messag
 		return nil, fmt.Errorf("base_branch is required")
 	}
 
-	client, err := h.getAgentCtlClient(req.SessionID)
+	client, err := h.getAgentCtlClient(ctx, req.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -328,7 +328,7 @@ func (h *GitHandlers) wsMerge(ctx context.Context, msg *ws.Message) (*ws.Message
 		return nil, fmt.Errorf("base_branch is required")
 	}
 
-	client, err := h.getAgentCtlClient(req.SessionID)
+	client, err := h.getAgentCtlClient(ctx, req.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +356,7 @@ func (h *GitHandlers) wsAbort(ctx context.Context, msg *ws.Message) (*ws.Message
 		return nil, fmt.Errorf("operation must be 'merge' or 'rebase'")
 	}
 
-	client, err := h.getAgentCtlClient(req.SessionID)
+	client, err := h.getAgentCtlClient(ctx, req.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -383,7 +383,7 @@ func (h *GitHandlers) wsCommit(ctx context.Context, msg *ws.Message) (*ws.Messag
 		return nil, fmt.Errorf("message is required")
 	}
 
-	client, err := h.getAgentCtlClient(req.SessionID)
+	client, err := h.getAgentCtlClient(ctx, req.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -411,7 +411,7 @@ func (h *GitHandlers) wsRenameBranch(ctx context.Context, msg *ws.Message) (*ws.
 		return nil, fmt.Errorf("new_name is required")
 	}
 
-	client, err := h.getAgentCtlClient(req.SessionID)
+	client, err := h.getAgentCtlClient(ctx, req.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -445,7 +445,7 @@ func (h *GitHandlers) wsReset(ctx context.Context, msg *ws.Message) (*ws.Message
 		return nil, fmt.Errorf("invalid reset mode: %s (must be soft, mixed, or hard)", req.Mode)
 	}
 
-	client, err := h.getAgentCtlClient(req.SessionID)
+	client, err := h.getAgentCtlClient(ctx, req.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -469,7 +469,7 @@ func (h *GitHandlers) wsStage(ctx context.Context, msg *ws.Message) (*ws.Message
 		return nil, fmt.Errorf("session_id is required")
 	}
 
-	client, err := h.getAgentCtlClient(req.SessionID)
+	client, err := h.getAgentCtlClient(ctx, req.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -493,7 +493,7 @@ func (h *GitHandlers) wsUnstage(ctx context.Context, msg *ws.Message) (*ws.Messa
 		return nil, fmt.Errorf("session_id is required")
 	}
 
-	client, err := h.getAgentCtlClient(req.SessionID)
+	client, err := h.getAgentCtlClient(ctx, req.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -521,7 +521,7 @@ func (h *GitHandlers) wsDiscard(ctx context.Context, msg *ws.Message) (*ws.Messa
 		return nil, fmt.Errorf("paths are required")
 	}
 
-	client, err := h.getAgentCtlClient(req.SessionID)
+	client, err := h.getAgentCtlClient(ctx, req.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -548,7 +548,7 @@ func (h *GitHandlers) wsCreatePR(ctx context.Context, msg *ws.Message) (*ws.Mess
 		return nil, fmt.Errorf("title is required")
 	}
 
-	client, err := h.getAgentCtlClient(req.SessionID)
+	client, err := h.getAgentCtlClient(ctx, req.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -594,7 +594,7 @@ func (h *GitHandlers) wsRevertCommit(ctx context.Context, msg *ws.Message) (*ws.
 		return nil, fmt.Errorf("commit_sha is required")
 	}
 
-	client, err := h.getAgentCtlClient(req.SessionID)
+	client, err := h.getAgentCtlClient(ctx, req.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -622,7 +622,7 @@ func (h *GitHandlers) wsCommitDiff(ctx context.Context, msg *ws.Message) (*ws.Me
 		return nil, fmt.Errorf("commit_sha is required")
 	}
 
-	client, err := h.getAgentCtlClient(req.SessionID)
+	client, err := h.getAgentCtlClient(ctx, req.SessionID)
 	if err != nil {
 		if isSessionNotReadyError(err) {
 			return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
@@ -652,11 +652,13 @@ func isSessionNotReadyError(err error) bool {
 		strings.Contains(msg, "agent client not available for session")
 }
 
-// getAgentCtlClient gets the agentctl client for a session
-func (h *GitHandlers) getAgentCtlClient(sessionID string) (*client.Client, error) {
-	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
-	if !ok {
-		return nil, fmt.Errorf("no agent running for session %s", sessionID)
+// getAgentCtlClient gets the agentctl client for a session.
+// Uses GetOrEnsureExecution so git operations survive backend restarts —
+// they're workspace-oriented and don't require a running agent process.
+func (h *GitHandlers) getAgentCtlClient(ctx context.Context, sessionID string) (*client.Client, error) {
+	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("no agent running for session %s: %w", sessionID, err)
 	}
 
 	c := execution.GetAgentCtlClient()

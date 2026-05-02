@@ -130,10 +130,10 @@ func (h *ShellHandlers) wsShellSubscribe(ctx context.Context, msg *ws.Message) (
 		return nil, fmt.Errorf("session_id is required")
 	}
 
-	// Verify the agent execution exists for this session
-	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(req.SessionID)
-	if !ok {
-		return nil, fmt.Errorf("no agent running for session %s", req.SessionID)
+	// Get or create execution on-demand (survives backend restart)
+	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, req.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("no agent running for session %s: %w", req.SessionID, err)
 	}
 
 	// Get buffered output to include in response
@@ -164,7 +164,10 @@ func (h *ShellHandlers) wsShellInput(ctx context.Context, msg *ws.Message) (*ws.
 		return nil, fmt.Errorf("session_id is required")
 	}
 
-	// Get the agent execution for this session
+	// Get the agent execution for this session.
+	// Use GetExecutionBySessionID (not GetOrEnsureExecution): writing input
+	// requires the workspace stream to already be live, and the 5s wait below
+	// is too short to absorb a cold-start of agentctl.
 	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(req.SessionID)
 	if !ok {
 		return nil, fmt.Errorf("no agent running for session %s", req.SessionID)
