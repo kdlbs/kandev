@@ -84,6 +84,7 @@ function SiteFields({ form, loading, update }: FieldsRowProps) {
         <Label htmlFor="jira-site">Site URL</Label>
         <Input
           id="jira-site"
+          data-testid="jira-site-input"
           placeholder="https://acme.atlassian.net"
           value={form.siteUrl}
           onChange={(e) => update("siteUrl", e.target.value)}
@@ -94,6 +95,7 @@ function SiteFields({ form, loading, update }: FieldsRowProps) {
         <Label htmlFor="jira-project">Default project key (optional)</Label>
         <Input
           id="jira-project"
+          data-testid="jira-project-input"
           placeholder="PROJ"
           value={form.defaultProjectKey}
           onChange={(e) => update("defaultProjectKey", e.target.value.toUpperCase())}
@@ -129,6 +131,7 @@ function AuthFields({ form, loading, update }: FieldsRowProps) {
         </Label>
         <Input
           id="jira-email"
+          data-testid="jira-email-input"
           type="email"
           placeholder="you@example.com"
           value={form.email}
@@ -222,6 +225,7 @@ function SecretField({
       </Label>
       <Input
         id="jira-secret"
+        data-testid="jira-secret-input"
         type="password"
         placeholder={secretPlaceholder(isApiToken, hasSavedSecret)}
         value={form.secret}
@@ -304,10 +308,17 @@ function ActionBar({
         disabled={testing || loading || disableTest}
         className="cursor-pointer"
         title={disableTest ? "Paste a token to test the connection" : undefined}
+        data-testid="jira-test-button"
       >
         {testing ? "Testing..." : "Test connection"}
       </Button>
-      <Button type="button" onClick={onSave} disabled={disableSave} className="cursor-pointer">
+      <Button
+        type="button"
+        onClick={onSave}
+        disabled={disableSave}
+        className="cursor-pointer"
+        data-testid="jira-save-button"
+      >
         {saveLabel(saving, hasConfig)}
       </Button>
       {hasConfig && (
@@ -316,6 +327,7 @@ function ActionBar({
           variant="destructive"
           onClick={onDelete}
           className="ml-auto cursor-pointer"
+          data-testid="jira-delete-button"
         >
           Remove configuration
         </Button>

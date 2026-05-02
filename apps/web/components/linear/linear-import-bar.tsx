@@ -23,6 +23,7 @@ export function LinearImportBar({ workspaceId, disabled, onImport }: LinearImpor
       triggerIcon={<IconHexagon className="h-4 w-4" />}
       triggerAriaLabel="Import from Linear"
       triggerDisabled={disabled}
+      testIdPrefix="linear-import"
       tooltip="Import from Linear issue URL or identifier"
       align="start"
       headline="Import Linear issue"

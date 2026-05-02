@@ -30,6 +30,16 @@ type Service struct {
 	clientFn  ClientFactory
 	cache     map[string]Client // workspaceID → client, cleared on config change.
 	probeHook func(workspaceID string)
+	// mockClient is non-nil only when Provide built the service with a MockClient
+	// (KANDEV_MOCK_LINEAR=true). Exposed via MockClient() so the e2e control
+	// routes can drive the same instance the clientFn returns.
+	mockClient *MockClient
+}
+
+// MockClient returns the shared mock client when the service was built in mock
+// mode, or nil for production builds.
+func (s *Service) MockClient() *MockClient {
+	return s.mockClient
 }
 
 // ClientFactory builds a Client for the given config + secret. Overridable so
