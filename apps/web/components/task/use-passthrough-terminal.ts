@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { AttachAddon } from "@xterm/addon-attach";
@@ -470,10 +470,17 @@ export function useWebSocketConnection({
   attachAddonRef,
   onConnected,
 }: WebSocketConnectionOptions) {
+  const taskIdRef = useRef(taskId);
+
+  useEffect(() => {
+    taskIdRef.current = taskId;
+  }, [taskId]);
+
   useEffect(() => {
     const connectionKey = mode === "agent" ? sessionId : environmentId;
+    const taskIdForLog = taskIdRef.current;
     log("WebSocket effect:", {
-      taskId,
+      taskId: taskIdForLog,
       sessionId,
       environmentId,
       mode,
@@ -488,7 +495,7 @@ export function useWebSocketConnection({
     // hydration after refresh, which doesn't guard any real precondition.
     if (!connectionKey || !canConnect || !isTerminalReady) {
       log("WebSocket effect: early return", {
-        taskId,
+        taskId: taskIdForLog,
         connectionKey,
         canConnect,
         isTerminalReady,
@@ -543,7 +550,6 @@ export function useWebSocketConnection({
       }
     };
   }, [
-    taskId,
     sessionId,
     environmentId,
     canConnect,
