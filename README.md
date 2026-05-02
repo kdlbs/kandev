@@ -37,6 +37,7 @@ Open source, multi-provider, no telemetry, not tied to any cloud.
 - **Sub-tasks** - Agents can spawn sub-tasks that resume from the parent task's session. Useful for splitting a task that has grown too big, or producing several PRs from the same starting point.
 - **CLI passthrough** - Drop into raw agent CLI mode for direct terminal interaction with any supported agent, leverage the full power of their TUIs
 - **Workspace isolation** - Git worktrees prevent concurrent agents from conflicting
+- **Multi-repository tasks** - Span a single task across multiple repositories, with one worktree per repo, per-repo branches, per-repo PRs, and per-repo grouping in the Changes panel and review dialog
 - **Flexible runtimes** - Run agents as local processes, in isolated Docker containers or in remote executors like sprites.dev
 - **Session management** - Resume and review agent conversations
 - **Stats** - Track your productivity with stats on the completed tasks, agent turns, etc
