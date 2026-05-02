@@ -99,7 +99,16 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 		if execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID); exists {
 			return execution, nil
 		}
-		return m.createExecution(ctx, info.TaskID, info)
+		execution, err := m.createExecution(ctx, info.TaskID, info)
+		if err != nil {
+			return nil, err
+		}
+		// Notify subscribers that agentctl is starting. createExecution spawns
+		// waitForAgentctlReady which publishes Ready/Error, but Starting is
+		// only published in the Launch path — emit it here so frontend gates
+		// flip out of `undefined` while we wait.
+		m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlStarting, execution, "")
+		return execution, nil
 	})
 	if err != nil {
 		return nil, err
