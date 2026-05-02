@@ -39,22 +39,13 @@ export function getTextContent(children: ReactNode): string {
   return "";
 }
 
-type MarkdownCodeNode = {
-  type?: string;
-};
-
 type MarkdownCodeProps = {
   className?: string;
   children?: ReactNode;
-  node?: MarkdownCodeNode;
 };
 
-function isBlockCode(
-  node: MarkdownCodeNode | undefined,
-  hasLanguage: boolean,
-  content: string,
-): boolean {
-  return node?.type === "code" || hasLanguage || content.includes("\n");
+function isBlockCode(rawContent: string, hasLanguage: boolean): boolean {
+  return hasLanguage || rawContent.endsWith("\n") || rawContent.includes("\n");
 }
 
 /**
@@ -64,11 +55,12 @@ function isBlockCode(
  * (code routing, link target, table overflow wrapper) remain here.
  */
 export const markdownComponents = {
-  code: ({ className, children, node }: MarkdownCodeProps) => {
-    const content = getTextContent(children).replace(/\n$/, "");
+  code: ({ className, children }: MarkdownCodeProps) => {
+    const rawContent = getTextContent(children);
+    const content = rawContent.replace(/\n$/, "");
     const lang = className?.replace("language-", "") ?? null;
     const hasLanguage = className?.startsWith("language-") ?? false;
-    const isBlock = isBlockCode(node, hasLanguage, content);
+    const isBlock = isBlockCode(rawContent, hasLanguage);
     if (isBlock && isMermaidContent(lang, content)) {
       return <MermaidBlock code={content} />;
     }

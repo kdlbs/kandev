@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -8,7 +9,7 @@ vi.mock("@/components/shared/mermaid-block", () => ({
 }));
 
 vi.mock("@/components/task/chat/messages/code-block", () => ({
-  CodeBlock: ({ children, className }: { children: React.ReactNode; className?: string }) => (
+  CodeBlock: ({ children, className }: { children: ReactNode; className?: string }) => (
     <pre data-kind="block" className={className}>
       <code>{children}</code>
     </pre>
@@ -16,9 +17,7 @@ vi.mock("@/components/task/chat/messages/code-block", () => ({
 }));
 
 vi.mock("@/components/task/chat/messages/inline-code", () => ({
-  InlineCode: ({ children }: { children: React.ReactNode }) => (
-    <code data-kind="inline">{children}</code>
-  ),
+  InlineCode: ({ children }: { children: ReactNode }) => <code data-kind="inline">{children}</code>,
 }));
 
 function renderMarkdown(source: string): string {
@@ -43,5 +42,14 @@ describe("markdownComponents", () => {
 
     expect(html).toContain('data-kind="mermaid"');
     expect(html).toContain("graph LR");
+  });
+
+  it("renders non-mermaid fenced code as a code block", () => {
+    const html = renderMarkdown("```ts\nconst source = 'kanban';\n```");
+
+    expect(html).toContain('data-kind="block"');
+    expect(html).toContain("language-ts");
+    expect(html).toContain("const source");
+    expect(html).not.toContain('data-kind="mermaid"');
   });
 });
