@@ -180,3 +180,46 @@ func TestBackfillTaskPRsRepositoryID_SkipsWhenTaskRepositoriesAbsent(t *testing.
 		t.Fatalf("backfill on store without task_repositories: %v", err)
 	}
 }
+
+// Covers the UPDATE path: a legacy row with repository_id=” and NO per-repo
+// counterpart should get its repository_id stamped from task_repositories,
+// not deleted. This is the most common case in real upgrades — a task that
+// has only ever had one PR (so no duplicate to dedup) but pre-dates the
+// per-repo schema.
+func TestBackfillTaskPRsRepositoryID_BackfillsOrphanRow(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := store.db.Exec(`CREATE TABLE task_repositories (
+		id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL, position INTEGER DEFAULT 0
+	)`); err != nil {
+		t.Fatalf("create task_repositories: %v", err)
+	}
+	if _, err := store.db.Exec(
+		`INSERT INTO task_repositories VALUES ('r1','task-y','repo-abc',0)`,
+	); err != nil {
+		t.Fatalf("seed task_repositories: %v", err)
+	}
+
+	// Orphan legacy row: no per-repo counterpart, so the dedup DELETE leaves
+	// it alone and the UPDATE has to do the healing.
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		ID: "legacy2", TaskID: "task-y", RepositoryID: "",
+		Owner: "o", Repo: "r", PRNumber: 1, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create legacy: %v", err)
+	}
+
+	if err := store.backfillTaskPRsRepositoryID(); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+
+	all, _ := store.ListTaskPRsByTask(ctx, "task-y")
+	if len(all) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(all))
+	}
+	if all[0].RepositoryID != "repo-abc" {
+		t.Errorf("expected backfilled repository_id='repo-abc', got %q", all[0].RepositoryID)
+	}
+}
