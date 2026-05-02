@@ -19,7 +19,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { startProcess } from "@/lib/api";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
@@ -66,7 +66,7 @@ function useLeftHeaderState(
     if (!activeSessionId) return false;
     return state.taskSessions.items[activeSessionId]?.is_passthrough === true;
   });
-  const pr = useActiveTaskPR();
+  const { prs } = useTaskPR(taskId);
   const hasChanges = Boolean(
     containerApi.getPanel("changes") ?? containerApi.getPanel("diff-files"),
   );
@@ -77,7 +77,7 @@ function useLeftHeaderState(
     activeSessionId,
     taskId,
     isPassthrough,
-    pr,
+    prs,
     hasChanges,
     hasFiles,
   };

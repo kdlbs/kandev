@@ -12,6 +12,7 @@ import {
 } from "@tabler/icons-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@kandev/ui/dropdown-menu";
 import { prPanelLabel } from "@/components/github/pr-utils";
+import { prTaskKey } from "@/components/github/pr-detail-panel";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { TaskPR } from "@/lib/types/github";
 import { RepositoryScriptsMenuItems } from "./repository-scripts-menu";
@@ -22,7 +23,8 @@ type AddPanelMenuState = {
   isPassthrough: boolean;
   hasChanges: boolean;
   hasFiles: boolean;
-  pr: TaskPR | null;
+  /** All PRs linked to the task; multi-repo tasks render one menu item per PR. */
+  prs: TaskPR[];
 };
 
 type AddPanelMenuItemsProps = {
@@ -101,12 +103,18 @@ export function AddPanelMenuItems({
           Files
         </DropdownMenuItem>
       )}
-      {state.pr && (
-        <DropdownMenuItem onClick={() => addPRPanel()} className={MENU_ITEM_CLASS}>
+      {state.prs.map((pr) => (
+        <DropdownMenuItem
+          key={pr.id}
+          onClick={() => addPRPanel(prTaskKey(pr))}
+          className={MENU_ITEM_CLASS}
+        >
           <IconGitPullRequest className={MENU_ICON_CLASS} />
-          {prPanelLabel(state.pr.pr_number)}
+          {state.prs.length > 1
+            ? `${prPanelLabel(pr.pr_number)} — ${pr.repo}`
+            : prPanelLabel(pr.pr_number)}
         </DropdownMenuItem>
-      )}
+      ))}
       <RepositoryScriptsMenuItems onRunScript={onRunScript} onRunDevScript={onRunDevScript} />
     </>
   );
