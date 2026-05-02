@@ -83,8 +83,13 @@ func (p *Poller) Start(ctx context.Context) {
 	go p.issueWatchLoop(issueCtx)
 }
 
-// Stop cancels both loops and waits for them to drain.
+// Stop cancels both loops and waits for them to drain. A nil receiver is a
+// no-op so callers using the `defer p.Stop()` pattern alongside a possibly-
+// nil `NewPoller(svc, log)` don't have to nil-check.
 func (p *Poller) Stop() {
+	if p == nil {
+		return
+	}
 	p.mu.Lock()
 	if !p.started {
 		p.mu.Unlock()

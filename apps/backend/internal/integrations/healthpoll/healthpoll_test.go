@@ -6,16 +6,15 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
 type fakeProber struct {
-	mu        sync.Mutex
-	listFn    func(ctx context.Context) ([]string, error)
-	probed    []string
-	probedAll chan struct{}
+	mu     sync.Mutex
+	listFn func(ctx context.Context) ([]string, error)
+	probed []string
 }
 
 func (f *fakeProber) ListConfiguredWorkspaces(ctx context.Context) ([]string, error) {
@@ -28,14 +27,7 @@ func (f *fakeProber) ListConfiguredWorkspaces(ctx context.Context) ([]string, er
 func (f *fakeProber) RecordAuthHealth(_ context.Context, workspaceID string) {
 	f.mu.Lock()
 	f.probed = append(f.probed, workspaceID)
-	ch := f.probedAll
 	f.mu.Unlock()
-	if ch != nil {
-		select {
-		case ch <- struct{}{}:
-		default:
-		}
-	}
 }
 
 func TestProbeAll_RecordsEachWorkspace(t *testing.T) {
@@ -92,56 +84,56 @@ func TestProbeAll_StopsWhenContextCancelled(t *testing.T) {
 }
 
 func TestStart_RunsImmediateProbe(t *testing.T) {
-	p := &fakeProber{
-		listFn: func(_ context.Context) ([]string, error) {
-			return []string{"ws-1"}, nil
-		},
-		probedAll: make(chan struct{}, 1),
-	}
-	poller := New("test", p, logger.Default())
+	synctest.Test(t, func(t *testing.T) {
+		p := &fakeProber{
+			listFn: func(_ context.Context) ([]string, error) {
+				return []string{"ws-1"}, nil
+			},
+		}
+		poller := New("test", p, logger.Default())
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	poller.Start(ctx)
-	defer poller.Stop()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		poller.Start(ctx)
+		defer poller.Stop()
 
-	select {
-	case <-p.probedAll:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Start did not run an immediate probe within 2s")
-	}
+		// synctest.Wait advances fake time until the spawned goroutine
+		// finishes its immediate-on-Start probe and parks on the ticker.
+		synctest.Wait()
+
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if len(p.probed) == 0 {
+			t.Error("Start did not run an immediate probe")
+		}
+	})
 }
 
 func TestStart_IsIdempotent(t *testing.T) {
-	var calls int32
-	probed := make(chan struct{}, 1)
-	p := &fakeProber{
-		listFn: func(_ context.Context) ([]string, error) {
-			atomic.AddInt32(&calls, 1)
-			select {
-			case probed <- struct{}{}:
-			default:
-			}
-			return []string{"ws-1"}, nil
-		},
-	}
-	poller := New("test", p, logger.Default())
+	synctest.Test(t, func(t *testing.T) {
+		var calls int32
+		p := &fakeProber{
+			listFn: func(_ context.Context) ([]string, error) {
+				atomic.AddInt32(&calls, 1)
+				return []string{"ws-1"}, nil
+			},
+		}
+		poller := New("test", p, logger.Default())
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	poller.Start(ctx)
-	poller.Start(ctx) // second call must be a no-op
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		poller.Start(ctx)
+		poller.Start(ctx) // second call must be a no-op
 
-	select {
-	case <-probed:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first probe did not land within 2s")
-	}
-	poller.Stop()
+		// Wait for the immediate-on-Start probe pass to finish. If the
+		// second Start spawned a parallel loop we'd see two list calls.
+		synctest.Wait()
+		poller.Stop()
 
-	if got := atomic.LoadInt32(&calls); got != 1 {
-		t.Errorf("expected exactly 1 list call from initial probe, got %d", got)
-	}
+		if got := atomic.LoadInt32(&calls); got != 1 {
+			t.Errorf("expected exactly 1 list call from initial probe, got %d", got)
+		}
+	})
 }
 
 func TestStop_BeforeStart_IsNoOp(t *testing.T) {
