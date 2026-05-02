@@ -182,6 +182,7 @@ export function CommitsSection({
       label="Commits"
       count={commits.length}
       isLast={isLast}
+      defaultCollapsed
       data-testid="commits-section"
     >
       <ul data-testid="commits-list" className="space-y-0.5">
@@ -545,6 +546,7 @@ export function PRFilesSection({
       label="PR Changes"
       count={files.length}
       isLast={isLast}
+      defaultCollapsed
       data-testid="pr-changes-section"
     >
       {files.length > 0 && (
