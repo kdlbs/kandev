@@ -13,6 +13,7 @@ import {
   type ContainerLiveStatus,
   type TaskEnvironment,
 } from "@/lib/api/domains/task-environment-api";
+import { ApiError } from "@/lib/api/client";
 import { TaskResetEnvConfirmDialog } from "./task-reset-env-confirm-dialog";
 
 type ExecutorSettingsButtonProps = {
@@ -22,60 +23,95 @@ type ExecutorSettingsButtonProps = {
 
 const POLL_INTERVAL_MS = 3000;
 
-export function ExecutorSettingsButton({ taskId, disabled }: ExecutorSettingsButtonProps) {
-  const [open, setOpen] = useState(false);
+/**
+ * Owns the env+container fetch/poll lifecycle and the reset action so the
+ * popover component stays small. Polls only while `active` is true (the
+ * popover is open) to avoid hammering /environment/live when nobody is
+ * watching.
+ */
+function useTaskEnvironment(taskId: string | null | undefined, active: boolean) {
   const [env, setEnv] = useState<TaskEnvironment | null>(null);
   const [container, setContainer] = useState<ContainerLiveStatus | null>(null);
   const [loading, setLoading] = useState(false);
-  const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const inFlight = useRef(false);
+  // hasLoadedRef tracks "have we ever fetched successfully" so the spinner
+  // only shows on the first open. Keeping it in a ref instead of state means
+  // `loadEnv` doesn't depend on `env` — without that, every successful fetch
+  // creates a new `env` reference, forces a new `loadEnv` identity, and the
+  // polling effect's cleanup+rerun fires immediately, turning the 3-second
+  // poll into a tight loop.
+  const hasLoadedRef = useRef(false);
 
   const loadEnv = useCallback(async () => {
     if (!taskId || inFlight.current) return;
     inFlight.current = true;
-    setLoading((prev) => prev || env == null);
+    setLoading((prev) => prev || !hasLoadedRef.current);
     try {
       const data = await fetchTaskEnvironmentLive(taskId);
+      hasLoadedRef.current = true;
       setEnv(data.environment);
       setContainer(data.container ?? null);
-    } catch {
-      setEnv(null);
-      setContainer(null);
+    } catch (err) {
+      // Only treat 404 as "no environment yet" — a transient 500 / auth /
+      // network error should leave the last-known view in place rather than
+      // erase a valid environment and disable the Reset action.
+      if (err instanceof ApiError && err.status === 404) {
+        hasLoadedRef.current = true;
+        setEnv(null);
+        setContainer(null);
+      }
     } finally {
       inFlight.current = false;
       setLoading(false);
     }
-  }, [taskId, env]);
+  }, [taskId]);
 
   useEffect(() => {
-    if (!open || !taskId) return;
+    if (!active || !taskId) return;
     void loadEnv();
-    const interval = window.setInterval(() => {
-      void loadEnv();
-    }, POLL_INTERVAL_MS);
+    const interval = window.setInterval(() => void loadEnv(), POLL_INTERVAL_MS);
     return () => window.clearInterval(interval);
-  }, [open, taskId, loadEnv]);
+  }, [active, taskId, loadEnv]);
 
-  const handleReset = useCallback(
+  const reset = useCallback(
     async ({ pushBranch }: { pushBranch: boolean }) => {
-      if (!taskId) return;
+      if (!taskId) return false;
       setIsResetting(true);
       try {
         await resetTaskEnvironment(taskId, { push_branch: pushBranch });
         toast.success("Environment reset");
         setEnv(null);
         setContainer(null);
-        setResetDialogOpen(false);
-        setOpen(false);
+        return true;
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error";
         toast.error(`Reset failed: ${msg}`);
+        return false;
       } finally {
         setIsResetting(false);
       }
     },
     [taskId],
+  );
+
+  return { env, container, loading, isResetting, reset };
+}
+
+export function ExecutorSettingsButton({ taskId, disabled }: ExecutorSettingsButtonProps) {
+  const [open, setOpen] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const { env, container, loading, isResetting, reset } = useTaskEnvironment(taskId, open);
+
+  const handleReset = useCallback(
+    async (opts: { pushBranch: boolean }) => {
+      const ok = await reset(opts);
+      if (ok) {
+        setResetDialogOpen(false);
+        setOpen(false);
+      }
+    },
+    [reset],
   );
 
   if (!taskId) return null;
@@ -271,7 +307,9 @@ function Field({ label, value, copy }: { label: string; value: string; copy?: bo
             className="cursor-pointer text-muted-foreground hover:text-foreground"
             aria-label={`Copy ${label}`}
             onClick={() => {
-              void navigator.clipboard.writeText(value).then(() => toast.success(`${label} copied`));
+              void navigator.clipboard
+                .writeText(value)
+                .then(() => toast.success(`${label} copied`));
             }}
           >
             <IconCopy className="h-3 w-3" />
@@ -297,9 +335,12 @@ function buildFields(env: TaskEnvironment, container: ContainerLiveStatus | null
   if (env.container_id) {
     const short = env.container_id.slice(0, 12);
     rows.push({ label: "Container", value: short, copy: true });
+    // Use `sh` rather than `bash` — user-built images may only ship
+    // /bin/sh (busybox/alpine/etc.), and the bootstrap entrypoint already
+    // assumes sh-only.
     rows.push({
       label: "Shell",
-      value: `docker exec -it ${short} bash`,
+      value: `docker exec -it ${short} sh`,
       copy: true,
     });
     if (container?.started_at && container.state === "running") {

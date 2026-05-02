@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -59,8 +60,13 @@ type resetEnvironmentRequest struct {
 func (h *TaskHandlers) httpResetTaskEnvironment(c *gin.Context) {
 	taskID := c.Param("id")
 	var body resetEnvironmentRequest
-	// Body is optional; ignore bind errors so an empty POST works.
-	_ = c.ShouldBindJSON(&body)
+	// The body is optional (an empty POST is valid: defaults to push_branch=false),
+	// but a malformed JSON payload should be rejected loudly rather than silently
+	// proceeding with a destructive reset.
+	if err := c.ShouldBindJSON(&body); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body: " + err.Error()})
+		return
+	}
 
 	err := h.service.ResetTaskEnvironment(c.Request.Context(), taskID, service.ResetOptions{
 		PushBranch: body.PushBranch,

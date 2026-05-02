@@ -148,12 +148,15 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 		return ErrNoEnvironment
 	}
 
+	// Fail closed: if the running-session check itself errors (DB hiccup,
+	// locked table) we cannot prove the task is idle and must abort rather
+	// than risk destroying a container or sandbox while an agent is still
+	// writing to it.
 	running, err := s.checkAnySessionRunning(ctx, taskID)
 	if err != nil {
-		s.logger.Warn("failed to check running sessions before reset, continuing",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-	} else if running {
+		return fmt.Errorf("check running sessions before reset: %w", err)
+	}
+	if running {
 		return ErrSessionRunning
 	}
 
@@ -189,31 +192,33 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 }
 
 // teardownEnvironmentResources destroys runtime resources (container/sandbox/worktree)
-// recorded on a TaskEnvironment. On any failure, the caller should preserve the row.
+// recorded on a TaskEnvironment. Best-effort per resource: every resource is
+// attempted even when an earlier one fails, and all failures are joined into a
+// single error so a stuck container can't permanently orphan the worktree.
+// On any error, the caller should preserve the row so the user can retry.
 func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.TaskEnvironment) error {
+	if env.ContainerID == "" && env.SandboxID == "" && env.WorktreeID == "" {
+		return nil
+	}
+	if s.envDestroyer == nil {
+		return fmt.Errorf("environment destroyer not configured; cannot tear down resources")
+	}
+
+	var errs []error
 	if env.ContainerID != "" {
-		if s.envDestroyer == nil {
-			return fmt.Errorf("environment destroyer not configured; cannot remove container")
-		}
 		if err := s.envDestroyer.DestroyContainer(ctx, env.ContainerID); err != nil {
-			return fmt.Errorf("destroy container %s: %w", env.ContainerID, err)
+			errs = append(errs, fmt.Errorf("destroy container %s: %w", env.ContainerID, err))
 		}
 	}
 	if env.SandboxID != "" {
-		if s.envDestroyer == nil {
-			return fmt.Errorf("environment destroyer not configured; cannot destroy sandbox")
-		}
 		if err := s.envDestroyer.DestroySandbox(ctx, env.SandboxID, env.AgentExecutionID); err != nil {
-			return fmt.Errorf("destroy sandbox %s: %w", env.SandboxID, err)
+			errs = append(errs, fmt.Errorf("destroy sandbox %s: %w", env.SandboxID, err))
 		}
 	}
 	if env.WorktreeID != "" {
-		if s.envDestroyer == nil {
-			return fmt.Errorf("environment destroyer not configured; cannot remove worktree")
-		}
 		if err := s.envDestroyer.DestroyWorktree(ctx, env.WorktreeID); err != nil {
-			return fmt.Errorf("destroy worktree %s: %w", env.WorktreeID, err)
+			errs = append(errs, fmt.Errorf("destroy worktree %s: %w", env.WorktreeID, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }

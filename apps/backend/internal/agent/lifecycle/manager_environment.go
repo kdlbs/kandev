@@ -12,8 +12,8 @@ import (
 // suitable for surfacing in the Executor Settings popover.
 type ContainerLiveStatus struct {
 	ContainerID string     `json:"container_id"`
-	State       string     `json:"state"`        // running, exited, paused, restarting, removing, dead, created
-	Status      string     `json:"status"`       // human-readable, e.g. "Up 5 minutes"
+	State       string     `json:"state"`  // running, exited, paused, restarting, removing, dead, created
+	Status      string     `json:"status"` // human-readable, e.g. "Up 5 minutes"
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	FinishedAt  *time.Time `json:"finished_at,omitempty"`
 	ExitCode    int        `json:"exit_code,omitempty"`
@@ -36,6 +36,13 @@ func (m *Manager) DestroyContainer(ctx context.Context, containerID string) erro
 	if !ok {
 		return fmt.Errorf("docker backend has unexpected type %T", backend)
 	}
+	// Force lazy initialization here. After a backend restart this method
+	// can be the first caller to touch Docker, and a missing daemon should
+	// surface as a clear "docker unavailable" error rather than a generic
+	// "container manager not initialized".
+	if _, _, err := dockerExec.ensureClient(); err != nil {
+		return fmt.Errorf("initialize docker backend: %w", err)
+	}
 	cm := dockerExec.ContainerMgr()
 	if cm == nil {
 		return fmt.Errorf("docker container manager not initialized")
@@ -56,6 +63,9 @@ func (m *Manager) GetContainerLiveStatus(ctx context.Context, containerID string
 	dockerExec, ok := backend.(*DockerExecutor)
 	if !ok {
 		return nil, fmt.Errorf("docker backend has unexpected type %T", backend)
+	}
+	if _, _, err := dockerExec.ensureClient(); err != nil {
+		return nil, fmt.Errorf("initialize docker backend: %w", err)
 	}
 	cm := dockerExec.ContainerMgr()
 	if cm == nil {

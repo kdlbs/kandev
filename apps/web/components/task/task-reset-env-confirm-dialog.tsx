@@ -49,8 +49,8 @@ export function TaskResetEnvConfirmDialog({
           <AlertDialogDescription asChild>
             <div className="space-y-2">
               <p>
-                This tears down the current container, sandbox, and/or worktree for this task so
-                the next session starts with a fresh environment.
+                This tears down the current container, sandbox, and/or worktree for this task so the
+                next session starts with a fresh environment.
               </p>
               <p className="text-destructive">
                 Any uncommitted or unpushed changes in the workspace will be lost.
@@ -92,7 +92,13 @@ export function TaskResetEnvConfirmDialog({
             disabled={isResetting || !acknowledged}
             className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
             data-testid="reset-env-confirm"
-            onClick={() => {
+            onClick={(e) => {
+              // Radix's AlertDialogAction auto-closes the dialog on click,
+              // which would dismiss it before the async reset completes — the
+              // user never sees the loading spinner, and the dialog closes
+              // even on failure. Block the auto-close so the parent owns the
+              // close decision via `onOpenChange` after the promise settles.
+              e.preventDefault();
               if (isResetting || !acknowledged) return;
               onConfirm({ pushBranch });
             }}

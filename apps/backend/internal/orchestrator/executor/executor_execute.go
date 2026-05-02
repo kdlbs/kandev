@@ -423,8 +423,14 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 
 	// Resolve the env ID before LaunchAgent so the in-memory AgentExecution
 	// is env-scoped from the first shell/layout request, not only after DB
-	// persistence succeeds.
-	existingEnv, _ := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
+	// persistence succeeds. GetTaskEnvironmentByTaskID returns (nil, nil)
+	// when no row exists; a real DB error must propagate so the launch
+	// fails closed instead of silently launching a fresh environment that
+	// orphans the existing container/sandbox/worktree.
+	existingEnv, err := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
+	if err != nil {
+		return nil, fmt.Errorf("lookup existing task environment: %w", err)
+	}
 	assignLaunchTaskEnvironmentID(session, existingEnv)
 
 	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, primaryRepo, allRepos)
@@ -1078,8 +1084,21 @@ func (e *Executor) persistTaskEnvironmentRepos(ctx context.Context, envID string
 // applyExistingEnvironment propagates worktree, container, and sandbox IDs from
 // an existing TaskEnvironment into the launch request so that executor backends
 // can reuse the existing execution environment.
+//
+// Reuse is gated on the env's executor_type matching the launch request: if
+// the user switched the task's executor profile to a different type, we must
+// NOT pass stale `PreviousExecutionID`/container_id/sprite_name to the wrong
+// backend (it would either fail loudly or, worse, overwrite the persisted env
+// with mixed resource IDs on the next save).
 func (e *Executor) applyExistingEnvironment(req *LaunchAgentRequest, env *models.TaskEnvironment) {
 	if env == nil {
+		return
+	}
+	if env.ExecutorType != "" && env.ExecutorType != req.ExecutorType {
+		e.logger.Info("skipping task environment reuse: executor type changed",
+			zap.String("task_id", req.TaskID),
+			zap.String("env_executor_type", env.ExecutorType),
+			zap.String("req_executor_type", req.ExecutorType))
 		return
 	}
 

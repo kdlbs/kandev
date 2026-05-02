@@ -181,8 +181,10 @@ test.describe("Executor reuse", () => {
 
     // Click Reset → confirmation dialog
     await testPage.getByTestId("executor-settings-reset").click();
-    const ackCheckbox = testPage.getByRole("checkbox").last();
-    await ackCheckbox.click();
+    // Pick the acknowledgement checkbox by its label rather than position so
+    // adding another checkbox to the dialog (e.g. push-before-reset) doesn't
+    // silently make this test click the wrong control.
+    await testPage.getByLabel("I understand any uncommitted changes will be lost.").click();
     await testPage.getByTestId("reset-env-confirm").click();
 
     // Poll environment until gone

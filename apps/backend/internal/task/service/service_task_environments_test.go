@@ -163,6 +163,56 @@ func TestResetTaskEnvironment_ContainerDestroyFailurePreservesRow(t *testing.T) 
 	}
 }
 
+func TestResetTaskEnvironment_RunningCheckErrorFailsClosed(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID:          "env-1",
+		TaskID:      "task-1",
+		ContainerID: "container-abc",
+	}}
+	destroyer := &stubDestroyer{}
+	svc := newResetTestService(t, repo)
+	svc.SetSessionRunningChecker(&stubRunningChecker{err: errors.New("db locked")})
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.ResetTaskEnvironment(context.Background(), "task-1", ResetOptions{})
+	if err == nil {
+		t.Fatal("expected error when running-session check fails")
+	}
+	if len(destroyer.containerCalls) != 0 {
+		t.Errorf("expected teardown to be skipped when guard errors, got %v", destroyer.containerCalls)
+	}
+	if repo.deleted {
+		t.Error("expected environment row to be preserved when guard errors")
+	}
+}
+
+func TestResetTaskEnvironment_TeardownIsBestEffortAcrossResources(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID:          "env-1",
+		TaskID:      "task-1",
+		ContainerID: "container-abc",
+		WorktreeID:  "wt-1",
+	}}
+	destroyer := &stubDestroyer{containerErr: errors.New("docker unreachable")}
+	svc := newResetTestService(t, repo)
+	svc.SetSessionRunningChecker(&stubRunningChecker{running: false})
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.ResetTaskEnvironment(context.Background(), "task-1", ResetOptions{})
+	if err == nil {
+		t.Fatal("expected joined error when container destroy fails")
+	}
+	if len(destroyer.containerCalls) != 1 {
+		t.Errorf("expected container destroy attempted, got %v", destroyer.containerCalls)
+	}
+	if len(destroyer.worktreeCalls) != 1 {
+		t.Errorf("expected worktree destroy attempted even when container failed, got %v", destroyer.worktreeCalls)
+	}
+	if repo.deleted {
+		t.Error("expected environment row to be preserved when any destroy fails")
+	}
+}
+
 func TestResetTaskEnvironment_PushBranchFailureAbortsResetBeforeTeardown(t *testing.T) {
 	repo := &stubEnvRepo{env: &models.TaskEnvironment{
 		ID:           "env-1",

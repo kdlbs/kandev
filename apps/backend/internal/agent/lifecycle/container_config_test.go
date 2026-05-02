@@ -68,11 +68,17 @@ func TestBuildContainerConfig_ExpandsWorkingDirPlaceholder(t *testing.T) {
 	}
 }
 
-func TestBuildContainerConfig_ExpandsWorkingDirWithProvidedWorkspace(t *testing.T) {
+func TestBuildContainerConfig_WorkingDirIsAlwaysContainerPath(t *testing.T) {
+	// Regression: WorkingDir is the container-side path, not the host path.
+	// In host bind-mount mode, WorkspacePath holds the host path; the bind
+	// mount target is the in-container /workspace, so WorkingDir must point
+	// at the container target — otherwise Docker happily starts the
+	// container in /host/path/to/repo (which doesn't exist inside) and the
+	// agent runs in an unrelated directory.
 	cm := newCMTest(t)
 	cfg := ContainerConfig{
 		AgentConfig:   newConfigStubAgent(),
-		WorkspacePath: "/host/path/to/repo", // pre-clone-inside-container mount mode
+		WorkspacePath: "/host/path/to/repo",
 		InstanceID:    "0123456789abcdef",
 		TaskID:        "task-1",
 	}
@@ -81,8 +87,8 @@ func TestBuildContainerConfig_ExpandsWorkingDirWithProvidedWorkspace(t *testing.
 	if err != nil {
 		t.Fatalf("buildContainerConfig: %v", err)
 	}
-	if got.WorkingDir != "/host/path/to/repo" {
-		t.Errorf("WorkingDir = %q, want /host/path/to/repo", got.WorkingDir)
+	if got.WorkingDir != "/workspace" {
+		t.Errorf("WorkingDir = %q, want /workspace (container-side path)", got.WorkingDir)
 	}
 }
 

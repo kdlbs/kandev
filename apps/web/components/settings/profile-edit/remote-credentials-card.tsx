@@ -278,7 +278,15 @@ function initialChoice(opts: InitialChoiceOpts): AuthChoice {
   if (opts.ghTokenMethod && opts.selectedIds.has(opts.ghTokenMethod.method_id))
     return "gh_cli_token";
   if (opts.fileMethod && opts.selectedIds.has(opts.fileMethod.method_id)) return "files";
-  if (opts.envSecretId && opts.envMethod) return "env";
+  // Treat env as selected either when the user just clicked the radio (its
+  // method id is in selectedIds, no secret picked yet) or when a secret is
+  // already persisted. Without the selectedIds branch, first-time env setup
+  // for an agent that exposes both `files` and `env` methods is broken: the
+  // radio click never updates state, `choice` re-derives to "none", the env
+  // option deselects, and the secret dropdown disappears before the user can
+  // pick anything.
+  if (opts.envMethod && (opts.selectedIds.has(opts.envMethod.method_id) || opts.envSecretId))
+    return "env";
   return "none";
 }
 
@@ -323,8 +331,14 @@ function AuthSection({
     if (ghTokenMethod) {
       onCredentialToggle(ghTokenMethod.method_id, value === "gh_cli_token");
     }
-    if (value !== "env" && envMethod) {
-      onMethodSecretChange(envMethod.method_id, null);
+    if (envMethod) {
+      // Track env in selectedIds the same way `files`/`gh_cli_token` are
+      // tracked, so `initialChoice` stays "env" while the user is still
+      // picking a secret. Switching away clears the secret too.
+      onCredentialToggle(envMethod.method_id, value === "env");
+      if (value !== "env") {
+        onMethodSecretChange(envMethod.method_id, null);
+      }
     }
   };
 

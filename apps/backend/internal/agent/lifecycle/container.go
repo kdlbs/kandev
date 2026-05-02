@@ -274,15 +274,19 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	// via its HTTP API (CreateInstance). The container only needs to launch
 	// agentctl as its main process — see the Entrypoint setup below.
 
-	// Resolve the in-container workspace path. Clone-inside-container mode leaves
-	// config.WorkspacePath empty (no host bind mount); the entrypoint clones into
-	// /workspace, so use that for both mount expansion and the container WorkingDir.
-	workspacePath := config.WorkspacePath
-	if workspacePath == "" {
-		workspacePath = "/workspace"
-	}
+	// Two paths through here use different "workspace" strings:
+	//   - Mount sources expand against the HOST workspace path (config.WorkspacePath
+	//     when set, otherwise no host mount in clone-inside-container mode).
+	//   - WorkingDir is an in-container path; it must always be the container-side
+	//     mount target. Both modes converge on /workspace (the bind-mount target
+	//     in host mode, the clone destination in clone-inside mode), so we hard-
+	//     code it here. Without this distinction, host-bind setups would set
+	//     WorkingDir to the host path, and Docker would happily start the
+	//     container in an unrelated directory.
+	const containerWorkspacePath = "/workspace"
 
-	// Expand mounts
+	// Expand mounts using the host path so {workspace} substitutions in mount
+	// sources resolve to a real on-disk location.
 	mounts := cm.expandMounts(rt.Mounts, config.WorkspacePath, ag)
 
 	// Add main repo .git directory mount for worktrees
@@ -357,7 +361,11 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	bootstrap := []string{
 		"sh", "-c",
 		`if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then
-  (eval "$KANDEV_PREPARE_SCRIPT") || echo "[kandev-bootstrap] prepare script failed; starting agentctl anyway" >&2
+  (eval "$KANDEV_PREPARE_SCRIPT")
+  prep_rc=$?
+  if [ "$prep_rc" -ne 0 ]; then
+    echo "[kandev-bootstrap] prepare script failed (exit $prep_rc); starting agentctl anyway so the host can connect and the user can debug via Executor Settings" >&2
+  fi
 fi
 exec /usr/local/bin/agentctl`,
 	}
@@ -368,7 +376,7 @@ exec /usr/local/bin/agentctl`,
 		Entrypoint:  bootstrap,
 		Cmd:         nil,
 		Env:         env,
-		WorkingDir:  cm.expandMountSource(rt.WorkingDir, workspacePath),
+		WorkingDir:  cm.expandMountSource(rt.WorkingDir, containerWorkspacePath),
 		Mounts:      mounts,
 		NetworkMode: cm.networkName,
 		Memory:      memoryBytes,

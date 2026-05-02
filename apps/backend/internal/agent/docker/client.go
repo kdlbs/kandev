@@ -528,9 +528,12 @@ func (c *Client) CreateContainerInteractive(ctx context.Context, cfg ContainerCo
 		})
 	}
 
-	// Container configuration with stdin attached
+	// Container configuration with stdin attached. Mirror CreateContainer's
+	// handling of ContainerConfig fields — including Entrypoint — so the same
+	// config struct produces consistent container behavior on both paths.
 	containerCfg := &container.Config{
 		Image:        cfg.Image,
+		Entrypoint:   cfg.Entrypoint,
 		Cmd:          cfg.Cmd,
 		Env:          cfg.Env,
 		WorkingDir:   cfg.WorkingDir,

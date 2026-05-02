@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -141,6 +143,12 @@ func (a *environmentDestroyerAdapter) GetContainerLiveStatus(ctx context.Context
 	return out, nil
 }
 
+// pushBranchTimeout caps how long we'll wait for `git push` before treating
+// the call as hung. Reset is invoked from the request thread; without a bound
+// a stalled remote (auth prompt, packet loss, slow proxy) would block the
+// entire HTTP handler indefinitely.
+const pushBranchTimeout = 30 * time.Second
+
 func (a *environmentDestroyerAdapter) PushEnvironmentBranch(ctx context.Context, env *models.TaskEnvironment) error {
 	// For host-side worktrees we can push directly. Container/sandbox workspaces
 	// would require an active agentctl client — not wired yet, surface a clear
@@ -148,16 +156,26 @@ func (a *environmentDestroyerAdapter) PushEnvironmentBranch(ctx context.Context,
 	if env.WorktreePath == "" {
 		return fmt.Errorf("push-before-reset is not supported for this environment type; please push manually first")
 	}
+	pushCtx, cancel := context.WithTimeout(ctx, pushBranchTimeout)
+	defer cancel()
+
 	branch := strings.TrimSpace(env.WorktreeBranch)
 	var cmd *exec.Cmd
 	if branch == "" {
-		cmd = exec.CommandContext(ctx, "git", "push")
+		cmd = exec.CommandContext(pushCtx, "git", "push")
 	} else {
-		cmd = exec.CommandContext(ctx, "git", "push", "origin", branch)
+		cmd = exec.CommandContext(pushCtx, "git", "push", "origin", branch)
 	}
 	cmd.Dir = env.WorktreePath
+	// Disable interactive credential prompts — without this, a missing
+	// credential helper can hang waiting on stdin even with the timeout above
+	// (signal delivery is gated behind the prompt read).
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if errors.Is(pushCtx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("git push timed out after %s in %s (branch %q); push manually and retry", pushBranchTimeout, env.WorktreePath, branch)
+		}
 		return fmt.Errorf("git push failed: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
