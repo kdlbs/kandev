@@ -1,0 +1,3 @@
+Random content for integration testing.
+ID: kandev-test-1
+Token: 2e9f1a4b-6c8d-0e3f
