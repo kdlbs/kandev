@@ -30,7 +30,7 @@ function handleTerminalToggle(
   e: KeyboardEvent,
   api: DockviewApi,
   previousPanelIdRef: React.MutableRefObject<string | null>,
-  getSessionId: () => string | null,
+  getEnvironmentId: () => string | null,
 ) {
   e.preventDefault();
   e.stopPropagation();
@@ -56,12 +56,12 @@ function handleTerminalToggle(
     return;
   }
 
-  const sessionId = getSessionId();
-  if (!sessionId) return;
+  const environmentId = getEnvironmentId();
+  if (!environmentId) return;
 
-  createUserShell(sessionId)
+  createUserShell(environmentId)
     .then((result) => {
-      useDockviewStore.getState().addTerminalPanel(result.terminalId);
+      useDockviewStore.getState().addTerminalPanel(result.terminalId, undefined, environmentId);
     })
     .catch((err) => {
       console.warn("Failed to create terminal shell:", err);
@@ -168,12 +168,11 @@ export function useEditorKeybinds() {
       const isTerminalToggle = e.ctrlKey && !e.metaKey && !e.shiftKey && e.code === "Backquote";
 
       if (isTerminalToggle) {
-        handleTerminalToggle(
-          e,
-          api,
-          previousPanelIdRef,
-          () => appStore.getState().tasks.activeSessionId,
-        );
+        handleTerminalToggle(e, api, previousPanelIdRef, () => {
+          const state = appStore.getState();
+          const sid = state.tasks.activeSessionId;
+          return sid ? (state.environmentIdBySessionId[sid] ?? null) : null;
+        });
         return;
       }
 

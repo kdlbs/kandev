@@ -24,14 +24,23 @@ function makeCombinedStore() {
 }
 
 describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
-  it("does not create user shell state under a session fallback key", () => {
+  it("setUserShells writes directly under the environmentId key (no session translation)", () => {
     const store = makeStore();
 
-    store.getState().setUserShells("sess-missing-env", [{ terminalId: "t1" } as never]);
+    store.getState().setUserShells("env-1", [{ terminalId: "t1" } as never]);
 
     const state = store.getState();
-    expect(state.userShells.byEnvironmentId["sess-missing-env"]).toBeUndefined();
-    expect(state.userShells.loaded["sess-missing-env"]).toBeUndefined();
+    expect(state.userShells.byEnvironmentId["env-1"]).toEqual([{ terminalId: "t1" }]);
+    expect(state.userShells.loaded["env-1"]).toBe(true);
+  });
+
+  it("setUserShells with empty environmentId is a no-op", () => {
+    const store = makeStore();
+
+    store.getState().setUserShells("", [{ terminalId: "t1" } as never]);
+
+    const state = store.getState();
+    expect(state.userShells.byEnvironmentId[""]).toBeUndefined();
   });
 
   it("migrates data from sessionId key to environmentId key", () => {

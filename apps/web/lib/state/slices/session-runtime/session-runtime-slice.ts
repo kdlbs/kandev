@@ -152,41 +152,38 @@ function buildTerminalShellProcessActions(set: ImmerSet) {
 }
 
 function buildUserShellActions(set: ImmerSet) {
-  const getEnvKey = (draft: SessionRuntimeSliceState, sessionId: string) =>
-    draft.environmentIdBySessionId[sessionId];
   return {
     setUserShells: (
-      sessionId: string,
+      environmentId: string,
       shells: Parameters<SessionRuntimeSlice["setUserShells"]>[1],
     ) =>
       set((draft) => {
-        const envKey = getEnvKey(draft, sessionId);
-        if (!envKey) return;
-        draft.userShells.byEnvironmentId[envKey] = shells;
-        draft.userShells.loaded[envKey] = true;
-        draft.userShells.loading[envKey] = false;
+        if (!environmentId) return;
+        draft.userShells.byEnvironmentId[environmentId] = shells;
+        draft.userShells.loaded[environmentId] = true;
+        draft.userShells.loading[environmentId] = false;
       }),
-    setUserShellsLoading: (sessionId: string, loading: boolean) =>
+    setUserShellsLoading: (environmentId: string, loading: boolean) =>
       set((draft) => {
-        const envKey = getEnvKey(draft, sessionId);
-        if (!envKey) return;
-        draft.userShells.loading[envKey] = loading;
+        if (!environmentId) return;
+        draft.userShells.loading[environmentId] = loading;
       }),
-    addUserShell: (sessionId: string, shell: Parameters<SessionRuntimeSlice["addUserShell"]>[1]) =>
+    addUserShell: (
+      environmentId: string,
+      shell: Parameters<SessionRuntimeSlice["addUserShell"]>[1],
+    ) =>
       set((draft) => {
-        const envKey = getEnvKey(draft, sessionId);
-        if (!envKey) return;
-        const existing = draft.userShells.byEnvironmentId[envKey] || [];
+        if (!environmentId) return;
+        const existing = draft.userShells.byEnvironmentId[environmentId] || [];
         if (!existing.some((s) => s.terminalId === shell.terminalId)) {
-          draft.userShells.byEnvironmentId[envKey] = [...existing, shell];
+          draft.userShells.byEnvironmentId[environmentId] = [...existing, shell];
         }
       }),
-    removeUserShell: (sessionId: string, terminalId: string) =>
+    removeUserShell: (environmentId: string, terminalId: string) =>
       set((draft) => {
-        const envKey = getEnvKey(draft, sessionId);
-        if (!envKey) return;
-        const existing = draft.userShells.byEnvironmentId[envKey] || [];
-        draft.userShells.byEnvironmentId[envKey] = existing.filter(
+        if (!environmentId) return;
+        const existing = draft.userShells.byEnvironmentId[environmentId] || [];
+        draft.userShells.byEnvironmentId[environmentId] = existing.filter(
           (s) => s.terminalId !== terminalId,
         );
       }),

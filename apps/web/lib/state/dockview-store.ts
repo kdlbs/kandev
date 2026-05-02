@@ -115,7 +115,7 @@ type DockviewStore = {
   addPlanPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
   /** Open a PR detail panel. prKey (owner/repo/pr_number) gives multi-repo tasks one tab per PR. */
   addPRPanel: (prKey?: string) => void;
-  addTerminalPanel: (terminalId?: string, groupId?: string) => void;
+  addTerminalPanel: (terminalId?: string, groupId?: string, environmentId?: string) => void;
   selectedDiff: { path: string; content?: string } | null;
   setSelectedDiff: (diff: { path: string; content?: string } | null) => void;
   activeGroupId: string | null;

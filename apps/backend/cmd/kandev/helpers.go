@@ -613,11 +613,13 @@ func registerSecondaryRoutes(
 
 	if p.services.Jira != nil {
 		jira.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Jira, p.log)
+		jira.RegisterMockRoutes(p.router, p.services.Jira, p.log)
 		p.log.Debug("Registered JIRA handlers (HTTP + WebSocket)")
 	}
 
 	if p.services.Linear != nil {
 		linear.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Linear, p.log)
+		linear.RegisterMockRoutes(p.router, p.services.Linear, p.log)
 		p.log.Debug("Registered Linear handlers (HTTP + WebSocket)")
 	}
 

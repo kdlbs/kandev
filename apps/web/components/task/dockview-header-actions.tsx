@@ -19,6 +19,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { startProcess } from "@/lib/api";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
@@ -86,45 +87,46 @@ function useLeftHeaderState(
 export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   const { group, containerApi } = props;
   const state = useLeftHeaderState(group.id, containerApi);
+  const environmentId = useEnvironmentId();
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
   const devScript = useActiveSessionDevScript();
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
 
   const handleAddTerminal = useCallback(async () => {
-    if (!state.activeSessionId) return;
+    if (!environmentId) return;
     try {
-      const result = await createUserShell(state.activeSessionId);
-      addTerminalPanel(result.terminalId, group.id);
+      const result = await createUserShell(environmentId);
+      addTerminalPanel(result.terminalId, group.id, environmentId);
     } catch (error) {
       console.error("Failed to create terminal:", error);
     }
-  }, [state.activeSessionId, addTerminalPanel, group.id]);
+  }, [environmentId, addTerminalPanel, group.id]);
 
   const handleRunScript = useCallback(
     async (scriptId: string) => {
-      if (!state.activeSessionId) return;
+      if (!environmentId) return;
       try {
-        const result = await createUserShell(state.activeSessionId, { scriptId });
-        addTerminalPanel(result.terminalId, group.id);
+        const result = await createUserShell(environmentId, { scriptId });
+        addTerminalPanel(result.terminalId, group.id, environmentId);
       } catch (error) {
         console.error("Failed to run script:", error);
       }
     },
-    [state.activeSessionId, addTerminalPanel, group.id],
+    [environmentId, addTerminalPanel, group.id],
   );
 
   const handleRunDevScript = useCallback(async () => {
-    if (!state.activeSessionId || !devScript) return;
+    if (!environmentId || !devScript) return;
     try {
-      const result = await createUserShell(state.activeSessionId, {
+      const result = await createUserShell(environmentId, {
         command: devScript,
         label: "Dev Server",
       });
-      addTerminalPanel(result.terminalId, group.id);
+      addTerminalPanel(result.terminalId, group.id, environmentId);
     } catch (error) {
       console.error("Failed to start dev script:", error);
     }
-  }, [state.activeSessionId, devScript, addTerminalPanel, group.id]);
+  }, [environmentId, devScript, addTerminalPanel, group.id]);
 
   if (state.isSidebarGroup) return null;
 
@@ -378,7 +380,7 @@ function CenterRightActions() {
 }
 
 function TerminalGroupRightActions() {
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const environmentId = useEnvironmentId();
   const repositoryId = useAppStore((state) => {
     const sessionId = state.tasks.activeSessionId;
     if (!sessionId) return null;
@@ -394,11 +396,11 @@ function TerminalGroupRightActions() {
     <>
       <TerminalScriptsDropdown
         scripts={scripts}
-        activeSessionId={activeSessionId}
+        environmentId={environmentId}
         rightBottomGroupId={rightBottomGroupId}
       />
       <TerminalDevPreviewButton
-        activeSessionId={activeSessionId}
+        environmentId={environmentId}
         rightBottomGroupId={rightBottomGroupId}
         visible={hasDevScript}
       />
@@ -408,28 +410,28 @@ function TerminalGroupRightActions() {
 
 type TerminalScriptsDropdownProps = {
   scripts: ReturnType<typeof useRepositoryScripts>["scripts"];
-  activeSessionId: string | null;
+  environmentId: string | null;
   rightBottomGroupId: string | null;
 };
 
 function TerminalScriptsDropdown({
   scripts,
-  activeSessionId,
+  environmentId,
   rightBottomGroupId,
 }: TerminalScriptsDropdownProps) {
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
 
   const handleRunScript = useCallback(
     async (scriptId: string) => {
-      if (!activeSessionId) return;
+      if (!environmentId) return;
       try {
-        const result = await createUserShell(activeSessionId, { scriptId });
-        addTerminalPanel(result.terminalId, rightBottomGroupId ?? undefined);
+        const result = await createUserShell(environmentId, { scriptId });
+        addTerminalPanel(result.terminalId, rightBottomGroupId ?? undefined, environmentId);
       } catch (error) {
         console.error("Failed to run script:", error);
       }
     },
-    [activeSessionId, addTerminalPanel, rightBottomGroupId],
+    [environmentId, addTerminalPanel, rightBottomGroupId],
   );
 
   if (scripts.length === 0) return null;
@@ -467,23 +469,24 @@ function TerminalScriptsDropdown({
 }
 
 type TerminalDevPreviewButtonProps = {
-  activeSessionId: string | null;
+  environmentId: string | null;
   rightBottomGroupId: string | null;
   visible: boolean;
 };
 
 function TerminalDevPreviewButton({
-  activeSessionId,
+  environmentId,
   rightBottomGroupId,
   visible,
 }: TerminalDevPreviewButtonProps) {
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
   const upsertProcessStatus = useAppStore((state) => state.upsertProcessStatus);
   const setActiveProcess = useAppStore((state) => state.setActiveProcess);
 
   const handleStartPreview = useCallback(async () => {
-    if (!activeSessionId) return;
+    if (!activeSessionId || !environmentId) return;
     addBrowserPanel();
     try {
       const resp = await startProcess(activeSessionId, { kind: "dev" });
@@ -495,13 +498,14 @@ function TerminalDevPreviewButton({
       // Process may already be running
     }
     try {
-      const shell = await createUserShell(activeSessionId);
-      addTerminalPanel(shell.terminalId, rightBottomGroupId ?? undefined);
+      const shell = await createUserShell(environmentId);
+      addTerminalPanel(shell.terminalId, rightBottomGroupId ?? undefined, environmentId);
     } catch {
       // Terminal creation is best-effort
     }
   }, [
     activeSessionId,
+    environmentId,
     addBrowserPanel,
     upsertProcessStatus,
     setActiveProcess,

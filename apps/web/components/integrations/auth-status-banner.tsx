@@ -42,7 +42,7 @@ export function IntegrationAuthStatusBanner({ health }: { health: IntegrationAut
   if (!health) return null;
   if (!health.checkedAt) {
     return (
-      <Alert>
+      <Alert data-testid="integration-auth-status-banner" data-state="waiting">
         <AlertDescription className="text-sm">
           Waiting for the next backend health check…
         </AlertDescription>
@@ -51,7 +51,11 @@ export function IntegrationAuthStatusBanner({ health }: { health: IntegrationAut
   }
   if (health.ok) {
     return (
-      <Alert className="border-green-500/40 bg-green-500/10 dark:border-green-400/30 dark:bg-green-400/10">
+      <Alert
+        data-testid="integration-auth-status-banner"
+        data-state="ok"
+        className="border-green-500/40 bg-green-500/10 dark:border-green-400/30 dark:bg-green-400/10"
+      >
         <IconCheck className="h-4 w-4 text-green-600 dark:text-green-400" />
         <AlertDescription className="text-sm font-medium">
           Authenticated
@@ -61,7 +65,7 @@ export function IntegrationAuthStatusBanner({ health }: { health: IntegrationAut
     );
   }
   return (
-    <Alert variant="destructive">
+    <Alert data-testid="integration-auth-status-banner" data-state="failed" variant="destructive">
       <IconAlertTriangle className="h-4 w-4" />
       <AlertDescription className="text-sm">
         Authentication failed: {health.error || "unknown error"}

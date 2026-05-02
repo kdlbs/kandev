@@ -102,15 +102,12 @@ export function setupPortalCleanup(
       });
     }
     const entry = panelPortalManager.get(panel.id);
-    // vscode + terminal stop APIs are keyed by sessionId on the wire. The
-    // portal entry now stores the env it belongs to (or undefined for global
-    // panels like terminal), so resolve to a session in that env — falling
-    // back to the active session — for the API call.
+    // vscode is session-scoped; resolve to a session in the entry's env (or
+    // the active session) for the stop call.
     const sessionForApi = (() => {
       const state = appStore.getState();
       const active = state.tasks.activeSessionId;
       if (!entry?.envId) return active;
-      // Find any session in the entry's env (active session preferred).
       if (active && state.environmentIdBySessionId[active] === entry.envId) return active;
       const match = Object.entries(state.environmentIdBySessionId).find(
         ([, eid]) => eid === entry.envId,
@@ -120,7 +117,16 @@ export function setupPortalCleanup(
     if (entry?.component === "vscode" && sessionForApi) stopVscode(sessionForApi);
     if (entry?.component === "terminal") {
       const terminalId = entry.params.terminalId as string | undefined;
-      if (terminalId && sessionForApi) stopUserShell(sessionForApi, terminalId);
+      // Prefer the env id stamped into params at creation time — this
+      // survives task switches that happen between open and close. Fall
+      // back to the active session's env for legacy panels created before
+      // the param was added (e.g. layouts persisted from older releases).
+      const stampedEnv = entry.params.environmentId as string | undefined;
+      const state = appStore.getState();
+      const active = state.tasks.activeSessionId;
+      const fallbackEnv = active ? (state.environmentIdBySessionId[active] ?? null) : null;
+      const envForTerminal = stampedEnv || fallbackEnv;
+      if (terminalId && envForTerminal) stopUserShell(envForTerminal, terminalId);
     }
     panelPortalManager.release(panel.id);
   });

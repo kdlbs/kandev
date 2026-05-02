@@ -13,7 +13,7 @@ import {
 import { Button } from "@kandev/ui/button";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { PANEL_REGISTRY } from "@/lib/state/layout-manager";
-import { useAppStore } from "@/components/state-provider";
+import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
 
 type PanelOption = {
@@ -34,7 +34,7 @@ const PANEL_OPTIONS: PanelOption[] = [
 ];
 
 export function DockviewWatermark({ containerApi, group }: IWatermarkPanelProps) {
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const environmentId = useEnvironmentId();
 
   const handleAdd = useCallback(
     async (option: PanelOption) => {
@@ -42,9 +42,9 @@ export function DockviewWatermark({ containerApi, group }: IWatermarkPanelProps)
 
       if (option.id === "terminal") {
         let terminalId = `terminal-${Date.now()}`;
-        if (activeSessionId) {
+        if (environmentId) {
           try {
-            const result = await createUserShell(activeSessionId);
+            const result = await createUserShell(environmentId);
             terminalId = result.terminalId;
           } catch {
             // Fall back to default terminal ID
@@ -54,7 +54,9 @@ export function DockviewWatermark({ containerApi, group }: IWatermarkPanelProps)
           id: terminalId,
           component: "terminal",
           title: "Terminal",
-          params: { terminalId },
+          // environmentId is stamped into params so cleanup can call
+          // stopUserShell with the correct env even after task switches.
+          params: { terminalId, environmentId: environmentId ?? undefined },
           ...(groupId ? { position: { referenceGroup: groupId } } : {}),
         });
         return;
@@ -92,7 +94,7 @@ export function DockviewWatermark({ containerApi, group }: IWatermarkPanelProps)
         ...(groupId ? { position: { referenceGroup: groupId } } : {}),
       });
     },
-    [containerApi, group, activeSessionId],
+    [containerApi, group, environmentId],
   );
 
   // Check which singletons already exist so we can hide them

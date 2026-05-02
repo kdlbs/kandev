@@ -20,7 +20,17 @@ export type SeedData = {
 };
 
 export const test = backendFixture.extend<
-  { testPage: Page; prCapture: PrAssetCapture },
+  {
+    testPage: Page;
+    prCapture: PrAssetCapture;
+    /**
+     * Auto fixture that resets integration mock state and any persisted
+     * Jira/Linear configs at the top of every test. Auto fixtures run
+     * automatically — unlike a top-level `test.beforeEach` registered in this
+     * module, which Playwright only fires for tests defined in the same file.
+     */
+    integrationCleanup: void;
+  },
   { apiClient: ApiClient; seedData: SeedData }
 >({
   // Worker-scoped API client
@@ -116,6 +126,23 @@ export const test = backendFixture.extend<
     await use(capture);
     capture.flush();
   },
+
+  integrationCleanup: [
+    async ({ apiClient, seedData }, use) => {
+      await apiClient
+        .rawRequest("DELETE", `/api/v1/jira/config?workspace_id=${seedData.workspaceId}`)
+        .catch(() => undefined);
+      await apiClient
+        .rawRequest("DELETE", `/api/v1/linear/config?workspace_id=${seedData.workspaceId}`)
+        .catch(() => undefined);
+      await Promise.all([
+        apiClient.mockJiraReset().catch(() => undefined),
+        apiClient.mockLinearReset().catch(() => undefined),
+      ]);
+      await use();
+    },
+    { auto: true },
+  ],
 });
 
 export { expect } from "@playwright/test";

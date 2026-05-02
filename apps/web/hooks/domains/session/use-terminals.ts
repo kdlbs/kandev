@@ -22,7 +22,10 @@ export type Terminal = {
 };
 
 interface UseTerminalsOptions {
+  /** Session id used for tab-UI persistence (active-tab keying is per-session UX). */
   sessionId: string | null;
+  /** Task environment id — the actual scope of the shell list. Required for create/list/stop. */
+  environmentId: string | null;
   initialTerminals?: Terminal[];
 }
 
@@ -103,6 +106,7 @@ function syncDevTerminal(prev: Terminal[], previewOpen: boolean): Terminal[] {
 
 type TerminalSyncOptions = {
   sessionId: string | null;
+  environmentId: string | null;
   userShells: Array<{ terminalId: string; label: string; closable: boolean }>;
   userShellsLoaded: boolean;
   previewOpen: boolean;
@@ -112,32 +116,33 @@ type TerminalSyncOptions = {
 
 function useTerminalSync({
   sessionId,
+  environmentId,
   userShells,
   userShellsLoaded,
   previewOpen,
   setTerminals,
   setRightPanelActiveTab,
 }: TerminalSyncOptions) {
-  const prevSessionIdRef = useRef(sessionId);
+  const prevEnvIdRef = useRef(environmentId);
   const tabRestoredRef = useRef(false);
 
   useEffect(() => {
-    if (prevSessionIdRef.current === sessionId) return;
-    prevSessionIdRef.current = sessionId;
+    if (prevEnvIdRef.current === environmentId) return;
+    prevEnvIdRef.current = environmentId;
     tabRestoredRef.current = false;
     setTerminals([]);
     if (sessionId) setRightPanelActiveTab(sessionId, "");
-  }, [sessionId, setRightPanelActiveTab, setTerminals]);
+  }, [environmentId, sessionId, setRightPanelActiveTab, setTerminals]);
 
   useEffect(() => {
-    if (!sessionId || !userShellsLoaded) return;
+    if (!environmentId || !userShellsLoaded) return;
     setTerminals((prev) => buildTerminalsFromShells(prev, userShells));
-  }, [sessionId, userShells, userShellsLoaded, setTerminals]);
+  }, [environmentId, userShells, userShellsLoaded, setTerminals]);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!environmentId) return;
     setTerminals((prev) => syncDevTerminal(prev, previewOpen));
-  }, [previewOpen, sessionId, setTerminals]);
+  }, [previewOpen, environmentId, setTerminals]);
 
   return tabRestoredRef;
 }
@@ -196,6 +201,7 @@ function useTerminalStore(sessionId: string | null, devProcessId: string | undef
 
 type TerminalActionsOptions = {
   sessionId: string | null;
+  environmentId: string | null;
   activeTab: string | undefined;
   terminals: Terminal[];
   devProcessId: string | undefined;
@@ -207,6 +213,7 @@ type TerminalActionsOptions = {
 
 function useTerminalActions({
   sessionId,
+  environmentId,
   activeTab,
   terminals,
   devProcessId,
@@ -218,18 +225,18 @@ function useTerminalActions({
   const [isStoppingDev, setIsStoppingDev] = useState(false);
 
   const addTerminal = useCallback(async () => {
-    if (!sessionId) return;
+    if (!environmentId) return;
     try {
-      const result = await createUserShell(sessionId);
+      const result = await createUserShell(environmentId);
       setTerminals((prev) => [
         ...prev,
         { id: result.terminalId, type: "shell", label: result.label, closable: result.closable },
       ]);
-      setRightPanelActiveTab(sessionId, result.terminalId);
+      if (sessionId) setRightPanelActiveTab(sessionId, result.terminalId);
     } catch (error) {
       console.error("Failed to create user shell:", error);
     }
-  }, [sessionId, setRightPanelActiveTab, setTerminals]);
+  }, [environmentId, sessionId, setRightPanelActiveTab, setTerminals]);
 
   const removeTerminal = useCallback(
     (id: string) => {
@@ -270,19 +277,19 @@ function useTerminalActions({
 
   const handleRunCommand = useCallback(
     async (script: RepositoryScript) => {
-      if (!sessionId) return;
+      if (!environmentId) return;
       try {
-        const result = await createUserShell(sessionId, { scriptId: script.id });
+        const result = await createUserShell(environmentId, { scriptId: script.id });
         setTerminals((prev) => [
           ...prev,
           { id: result.terminalId, type: "script", label: result.label, closable: result.closable },
         ]);
-        setRightPanelActiveTab(sessionId, result.terminalId);
+        if (sessionId) setRightPanelActiveTab(sessionId, result.terminalId);
       } catch (error) {
         console.error("Failed to create script terminal:", error);
       }
     },
-    [sessionId, setRightPanelActiveTab, setTerminals],
+    [environmentId, sessionId, setRightPanelActiveTab, setTerminals],
   );
 
   const handleCloseTab = useCallback(
@@ -290,13 +297,13 @@ function useTerminalActions({
       event.preventDefault();
       event.stopPropagation();
       removeTerminal(terminalId);
-      if (sessionId) {
-        stopUserShell(sessionId, terminalId).catch((error) => {
+      if (environmentId) {
+        stopUserShell(environmentId, terminalId).catch((error) => {
           console.error("Failed to stop terminal:", error);
         });
       }
     },
-    [sessionId, removeTerminal],
+    [environmentId, removeTerminal],
   );
 
   return {
@@ -311,6 +318,7 @@ function useTerminalActions({
 
 export function useTerminals({
   sessionId,
+  environmentId,
   initialTerminals,
 }: UseTerminalsOptions): UseTerminalsReturn {
   const [terminals, setTerminals] = useState<Terminal[]>(() => initialTerminals ?? []);
@@ -330,10 +338,11 @@ export function useTerminals({
     setPreviewStage,
   } = useTerminalStore(sessionId, devProcessId);
 
-  const { shells: userShells, isLoaded: userShellsLoaded } = useUserShells(sessionId);
+  const { shells: userShells, isLoaded: userShellsLoaded } = useUserShells(environmentId);
 
   const tabRestoredRef = useTerminalSync({
     sessionId,
+    environmentId,
     userShells,
     userShellsLoaded,
     previewOpen,
@@ -352,6 +361,7 @@ export function useTerminals({
     handleCloseTab,
   } = useTerminalActions({
     sessionId,
+    environmentId,
     activeTab,
     terminals,
     devProcessId,

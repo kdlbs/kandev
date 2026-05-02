@@ -242,6 +242,8 @@ exec git "$@"
         KANDEV_DATABASE_PATH: dbPath,
         KANDEV_MOCK_AGENT: "only",
         KANDEV_MOCK_GITHUB: "true",
+        KANDEV_MOCK_JIRA: "true",
+        KANDEV_MOCK_LINEAR: "true",
         KANDEV_DOCKER_ENABLED: "false",
         KANDEV_WORKTREE_ENABLED: "true",
         KANDEV_WORKTREE_BASEPATH: worktreeBase,

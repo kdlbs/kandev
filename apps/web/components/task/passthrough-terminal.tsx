@@ -102,11 +102,9 @@ function useWsBaseUrl() {
  * Agent terminals require agentctl readiness — the agent process must be
  * subscribed before passthrough I/O is meaningful.
  *
- * Shell terminals route by env on the backend (PR #758); the env handler
- * lazy-creates the execution and waits for remote readiness server-side,
- * so gating the client on `agentctlStatus.isReady` here just deadlocks when
- * the ready event fired before the client subscribed (page reload, task
- * switch, WS reconnect). Only require the routing keys.
+ * Shell terminals route by env on the backend; the env handler lazy-creates
+ * the execution and waits for remote readiness server-side, so the client
+ * only needs the env id. No session involvement.
  */
 function computeCanConnect(
   mode: "agent" | "shell",
@@ -114,8 +112,8 @@ function computeCanConnect(
   sessionId: string | null | undefined,
   isAgentctlReady: boolean,
 ): boolean {
-  if (!connectionID || !sessionId) return false;
-  if (mode === "agent") return isAgentctlReady;
+  if (!connectionID) return false;
+  if (mode === "agent") return Boolean(sessionId) && isAgentctlReady;
   return true;
 }
 
