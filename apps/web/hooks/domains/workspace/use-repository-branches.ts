@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { listBranches } from "@/lib/api";
+import { listBranches, listRepositoryBranches } from "@/lib/api";
 import type { Branch } from "@/lib/types/http";
 
 const EMPTY_BRANCHES: Branch[] = [];
@@ -29,10 +29,18 @@ function cacheKeyFor(source: BranchSource | null): string {
  * one cache, one backend endpoint — the source shape decides which query
  * param goes on the wire and which key the cache uses.
  */
-export function useBranches(
-  source: BranchSource | null,
-  enabled = true,
-): { branches: Branch[]; isLoading: boolean } {
+export type UseBranchesResult = {
+  branches: Branch[];
+  isLoading: boolean;
+  /**
+   * Force-refreshes the branch list with a `git fetch` first. Only available
+   * for id-based sources (workspace-imported repos); on-machine path sources
+   * resolve to `undefined` since the refresh endpoint takes a repository id.
+   */
+  refresh?: () => Promise<void>;
+};
+
+export function useBranches(source: BranchSource | null, enabled = true): UseBranchesResult {
   const key = cacheKeyFor(source);
   const branches = useAppStore((state) =>
     key ? (state.repositoryBranches.itemsByRepositoryId[key] ?? EMPTY_BRANCHES) : EMPTY_BRANCHES,
@@ -68,5 +76,25 @@ export function useBranches(
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key encodes source identity; listing every field re-fires on every render
   }, [enabled, isLoaded, key, setRepositoryBranches, setRepositoryBranchesLoading]);
 
-  return { branches, isLoading };
+  const refresh = useCallback(async () => {
+    if (!source || source.kind !== "id") return;
+    setRepositoryBranchesLoading(key, true);
+    try {
+      const response = await listRepositoryBranches(source.repositoryId, { refresh: true });
+      setRepositoryBranches(key, response.branches);
+    } catch {
+      // Refresh failures leave the existing branch list in place; the user
+      // can retry manually. Errors are surfaced via the BranchRefreshButton's
+      // tooltip when wired with `fetchError`, but the hook does not own
+      // error state today.
+    } finally {
+      setRepositoryBranchesLoading(key, false);
+    }
+  }, [source, key, setRepositoryBranches, setRepositoryBranchesLoading]);
+
+  return {
+    branches,
+    isLoading,
+    refresh: source?.kind === "id" ? refresh : undefined,
+  };
 }

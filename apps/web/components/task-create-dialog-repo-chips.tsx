@@ -16,6 +16,7 @@ import { useBranches, type BranchSource } from "@/hooks/domains/workspace/use-re
 import type { Branch, LocalRepository, Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
 import { autoSelectBranch } from "@/components/task-create-dialog-helpers";
+import { BranchRefreshButton } from "@/components/branch-refresh-button";
 
 /**
  * Chip row for the task-create dialog. Renders one chip per row in
@@ -53,6 +54,13 @@ type RepoChipsRowProps = {
   freshBranchAvailable?: boolean;
   freshBranchEnabled?: boolean;
   onToggleFreshBranch?: (enabled: boolean) => void;
+  /**
+   * Lock branch pills when the task runs on the local executor — the user's
+   * actual checkout dictates the branch, and changing it would mutate their
+   * working tree. Fresh-branch mode unlocks it (we're explicitly forking a
+   * new branch from a chosen base).
+   */
+  isLocalExecutor?: boolean;
 };
 
 export function RepoChipsRow({
@@ -67,7 +75,9 @@ export function RepoChipsRow({
   freshBranchAvailable,
   freshBranchEnabled,
   onToggleFreshBranch,
+  isLocalExecutor,
 }: RepoChipsRowProps) {
+  const branchLocked = !!isLocalExecutor && !freshBranchEnabled;
   // No early returns above hooks. URL mode and started-state checks happen below.
   const usedIds = useMemo(() => collectUsedRepoIds(fs.repositories), [fs.repositories]);
   if (isTaskStarted) return null;
@@ -86,40 +96,22 @@ export function RepoChipsRow({
           githubUrl={fs.githubUrl}
           githubUrlError={fs.githubUrlError}
           githubBranch={fs.githubBranch}
+          githubBranches={fs.githubBranches}
+          githubBranchesLoading={fs.githubBranchesLoading}
           onGitHubUrlChange={onGitHubUrlChange}
+          onGitHubBranchChange={fs.setGitHubBranch}
         />
       ) : (
-        <>
-          {fs.repositories.map((row) => (
-            <RepoChip
-              key={row.key}
-              row={row}
-              workspaceId={workspaceId}
-              repositories={repositories}
-              discoveredRepositories={fs.discoveredRepositories}
-              excludedRepoIds={collectUsedRepoIds(fs.repositories, row.key)}
-              onRepositoryChange={(value) => onRowRepositoryChange(row.key, value)}
-              onBranchChange={(value) => onRowBranchChange(row.key, value)}
-              onRemove={() => fs.removeRepository(row.key)}
-            />
-          ))}
-          <button
-            type="button"
-            onClick={fs.addRepository}
-            disabled={!canAddMore}
-            title={addHint}
-            aria-label="Add repository"
-            data-testid="add-repository"
-            className={cn(
-              "h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground",
-              canAddMore
-                ? "hover:bg-muted hover:text-foreground cursor-pointer"
-                : "opacity-40 cursor-not-allowed",
-            )}
-          >
-            <IconPlus className="h-3.5 w-3.5" />
-          </button>
-        </>
+        <ChipsList
+          fs={fs}
+          repositories={repositories}
+          workspaceId={workspaceId}
+          branchLocked={branchLocked}
+          canAddMore={canAddMore}
+          addHint={addHint}
+          onRowRepositoryChange={onRowRepositoryChange}
+          onRowBranchChange={onRowBranchChange}
+        />
       )}
       {freshBranchAvailable && onToggleFreshBranch && (
         <button
@@ -157,6 +149,67 @@ export function RepoChipsRow({
   );
 }
 
+/**
+ * Renders the list of repo chips plus the trailing "+ add repository"
+ * button. Extracted from RepoChipsRow so the parent stays under the
+ * function-length cap; logic is unchanged.
+ */
+function ChipsList({
+  fs,
+  repositories,
+  workspaceId,
+  branchLocked,
+  canAddMore,
+  addHint,
+  onRowRepositoryChange,
+  onRowBranchChange,
+}: {
+  fs: DialogFormState;
+  repositories: Repository[];
+  workspaceId: string | null;
+  branchLocked: boolean;
+  canAddMore: boolean;
+  addHint?: string;
+  onRowRepositoryChange: (key: string, value: string) => void;
+  onRowBranchChange: (key: string, value: string) => void;
+}) {
+  return (
+    <>
+      {fs.repositories.map((row) => (
+        <RepoChip
+          key={row.key}
+          row={row}
+          workspaceId={workspaceId}
+          repositories={repositories}
+          discoveredRepositories={fs.discoveredRepositories}
+          excludedRepoIds={collectUsedRepoIds(fs.repositories, row.key)}
+          branchLocked={branchLocked}
+          branchOverride={branchLocked ? fs.currentLocalBranch : undefined}
+          onRepositoryChange={(value) => onRowRepositoryChange(row.key, value)}
+          onBranchChange={(value) => onRowBranchChange(row.key, value)}
+          onRemove={() => fs.removeRepository(row.key)}
+        />
+      ))}
+      <button
+        type="button"
+        onClick={fs.addRepository}
+        disabled={!canAddMore}
+        title={addHint}
+        aria-label="Add repository"
+        data-testid="add-repository"
+        className={cn(
+          "h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground",
+          canAddMore
+            ? "hover:bg-muted hover:text-foreground cursor-pointer"
+            : "opacity-40 cursor-not-allowed",
+        )}
+      >
+        <IconPlus className="h-3.5 w-3.5" />
+      </button>
+    </>
+  );
+}
+
 /** Build the set of repo identifiers (workspace id or path) currently in use. */
 function collectUsedRepoIds(rows: TaskRepoRow[], exceptKey?: string): Set<string> {
   const ids = new Set<string>();
@@ -176,6 +229,19 @@ type RepoChipProps = {
   discoveredRepositories: LocalRepository[];
   /** Repo IDs/paths to filter out of the dropdown (already in use elsewhere). */
   excludedRepoIds: Set<string>;
+  /**
+   * Lock the branch pill regardless of branch availability. Used for the
+   * local executor where the user's actual checkout dictates the branch
+   * (and changing it would mutate their working tree). Fresh-branch mode
+   * unlocks it because we're explicitly creating a new branch from a base.
+   */
+  branchLocked?: boolean;
+  /**
+   * Optional display override for the branch value. Used when the chip
+   * is `branchLocked` so we surface the repo's actual current branch
+   * instead of whatever the user picked under a different executor.
+   */
+  branchOverride?: string;
   onRepositoryChange: (value: string) => void;
   onBranchChange: (value: string) => void;
   onRemove: () => void;
@@ -232,7 +298,11 @@ function useRepoChipData({
     }
     return null;
   }, [workspaceId, row.repositoryId, row.localPath]);
-  const { branches, isLoading: branchesLoading } = useBranches(branchSource, !!branchSource);
+  const {
+    branches,
+    isLoading: branchesLoading,
+    refresh: refreshBranches,
+  } = useBranches(branchSource, !!branchSource);
 
   // Once branches load for this row, pre-fill the branch pill with the user's
   // last-used branch (when present) or main/master/origin/main/origin/master.
@@ -254,7 +324,7 @@ function useRepoChipData({
     [filteredRepos, filteredDiscovered],
   );
   const branchOptions: PillOption[] = useMemo(() => branches.map(branchToOption), [branches]);
-  return { repoOptions, branchOptions, branchesLoading };
+  return { repoOptions, branchOptions, branchesLoading, refreshBranches };
 }
 
 function RepoChip({
@@ -263,11 +333,13 @@ function RepoChip({
   repositories,
   discoveredRepositories,
   excludedRepoIds,
+  branchLocked,
+  branchOverride,
   onRepositoryChange,
   onBranchChange,
   onRemove,
 }: RepoChipProps) {
-  const { repoOptions, branchOptions, branchesLoading } = useRepoChipData({
+  const { repoOptions, branchOptions, branchesLoading, refreshBranches } = useRepoChipData({
     row,
     workspaceId,
     repositories,
@@ -307,14 +379,16 @@ function RepoChip({
       />
       <Pill
         icon={<IconGitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />}
-        value={row.branch}
+        value={branchOverride ?? row.branch}
         placeholder={branchPlaceholder}
         options={branchOptions}
         onSelect={onBranchChange}
-        disabled={!hasRepo || branchesLoading || branchOptions.length === 0}
+        disabled={branchLocked || !hasRepo || branchesLoading || branchOptions.length === 0}
         searchPlaceholder="Search branches..."
         emptyMessage="No branches"
         testId="branch-chip-trigger"
+        onRefresh={refreshBranches}
+        refreshing={branchesLoading}
       />
       <button
         type="button"
@@ -372,6 +446,8 @@ function Pill({
   searchPlaceholder,
   emptyMessage,
   testId,
+  onRefresh,
+  refreshing,
 }: {
   icon: React.ReactNode;
   value: string;
@@ -382,6 +458,10 @@ function Pill({
   searchPlaceholder: string;
   emptyMessage: string;
   testId?: string;
+  /** Optional refresh action rendered next to the search input. */
+  onRefresh?: () => void;
+  /** Show the refresh icon as spinning + disabled while a refresh is in flight. */
+  refreshing?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const hasValue = !!value;
@@ -407,7 +487,10 @@ function Pill({
       </PopoverTrigger>
       <PopoverContent className="w-64 p-0" align="start" portal={false}>
         <Command>
-          <CommandInput placeholder={searchPlaceholder} className="h-9" />
+          <div className="flex items-center gap-1 px-2 pt-1">
+            <CommandInput placeholder={searchPlaceholder} className="h-9 flex-1" />
+            {onRefresh && <BranchRefreshButton onRefresh={onRefresh} refreshing={refreshing} />}
+          </div>
           <CommandList>
             <CommandEmpty>{emptyMessage}</CommandEmpty>
             <CommandGroup>
@@ -436,13 +519,32 @@ function GitHubUrlSection({
   githubUrl,
   githubUrlError,
   githubBranch,
+  githubBranches,
+  githubBranchesLoading,
   onGitHubUrlChange,
+  onGitHubBranchChange,
 }: {
   githubUrl: string;
   githubUrlError: string | null;
   githubBranch: string;
+  githubBranches: Branch[];
+  githubBranchesLoading: boolean;
   onGitHubUrlChange?: (value: string) => void;
+  onGitHubBranchChange: (value: string) => void;
 }) {
+  // URL mode is always remote-clone-based, so the branch is freely
+  // selectable regardless of executor type. Local executor's "branch is
+  // dictated by the user's checkout" rule does not apply here — there is
+  // no pre-existing local checkout for an arbitrary GitHub URL.
+  const branchOptions: PillOption[] = useMemo(
+    () => githubBranches.map(branchToOption),
+    [githubBranches],
+  );
+  const branchPlaceholder = computeBranchPlaceholder(
+    !!githubUrl.trim(),
+    githubBranchesLoading,
+    branchOptions.length,
+  );
   return (
     <>
       <GitHubUrlPill
@@ -450,16 +552,17 @@ function GitHubUrlSection({
         githubUrlError={githubUrlError}
         onGitHubUrlChange={onGitHubUrlChange}
       />
-      {githubBranch && (
-        <span
-          className="inline-flex items-center gap-1 h-7 rounded-md px-2 text-xs bg-muted/30 border border-border/60 text-muted-foreground"
-          data-testid="github-url-branch-pill"
-          title={`Branch: ${githubBranch}`}
-        >
-          <IconGitBranch className="h-3 w-3" />
-          <span className="truncate max-w-[200px]">{githubBranch}</span>
-        </span>
-      )}
+      <Pill
+        icon={<IconGitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />}
+        value={githubBranch}
+        placeholder={branchPlaceholder}
+        options={branchOptions}
+        onSelect={onGitHubBranchChange}
+        disabled={!githubUrl.trim() || githubBranchesLoading || branchOptions.length === 0}
+        searchPlaceholder="Search branches..."
+        emptyMessage="No branches"
+        testId="branch-chip-trigger"
+      />
     </>
   );
 }

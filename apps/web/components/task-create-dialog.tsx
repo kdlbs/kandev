@@ -132,6 +132,12 @@ type DialogFormBodyProps = {
   repositories: Repository[];
   /** Computed in the parent: single-row + local executor + not URL mode. */
   freshBranchAvailable: boolean;
+  /**
+   * True when the selected executor profile runs locally on the host. Used
+   * to lock the per-row branch pill (the user's checkout dictates the
+   * branch for local execution; fresh-branch mode unlocks it).
+   */
+  isLocalExecutor: boolean;
 };
 
 function CreateModeBody(props: DialogFormBodyProps) {
@@ -160,6 +166,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
     workflowAgentLocked,
     repositories,
     freshBranchAvailable,
+    isLocalExecutor,
   } = props;
   const showTaskName = (isCreateMode || isEditMode) && !isTaskStarted;
   return (
@@ -176,6 +183,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         freshBranchAvailable={freshBranchAvailable}
         freshBranchEnabled={fs.freshBranchEnabled}
         onToggleFreshBranch={onToggleFreshBranch}
+        isLocalExecutor={isLocalExecutor}
       />
       {showTaskName && (
         <InlineTaskName
@@ -522,6 +530,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             workflowAgentLocked={computed.workflowAgentLocked}
             repositories={repositories}
             freshBranchAvailable={freshBranchAvailable}
+            isLocalExecutor={computed.isLocalExecutor}
           />
           <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
             <TaskCreateDialogFooter

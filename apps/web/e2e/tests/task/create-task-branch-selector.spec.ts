@@ -43,7 +43,7 @@ test.describe("Branch selector behavior with executor types", () => {
       await testPage.getByRole("option", { name: /E2E Local Profile/i }).click();
 
       // Branch selector should be disabled when local executor is selected
-      const branchSelector = testPage.getByTestId("branch-selector");
+      const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
       await expect(branchSelector).toBeDisabled({ timeout: 5_000 });
     } finally {
       await apiClient.deleteExecutorProfile(profile.id).catch(() => {});
@@ -85,7 +85,7 @@ test.describe("Branch selector behavior with executor types", () => {
       await executorSelector.click();
       await testPage.getByRole("option", { name: /^E2E Local Local$/i }).click();
 
-      const branchSelector = testPage.getByTestId("branch-selector");
+      const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
       await expect(branchSelector).toBeDisabled({ timeout: 5_000 });
 
       // Switch to worktree executor -> branch should be enabled
@@ -162,7 +162,7 @@ test.describe("Branch selector behavior with executor types", () => {
       await testPage.getByRole("option", { name: /E2E Local GitHub URL/i }).click();
 
       // Branch selector should NOT be disabled (GitHub URL mode overrides)
-      const branchSelector = testPage.getByTestId("branch-selector");
+      const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
       await expect(branchSelector).toBeEnabled({ timeout: 10_000 });
     } finally {
       await apiClient.deleteExecutorProfile(profile.id).catch(() => {});
@@ -228,7 +228,7 @@ test.describe("Fresh-branch flow", () => {
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
     await testPage.getByTestId("task-title-input").fill("Fresh Branch Test");
     await testPage.getByTestId("task-description-input").fill("testing fresh branch");
-    await testPage.getByTestId("repository-selector").click();
+    await testPage.getByTestId("repo-chip-trigger").first().click();
     await testPage
       .getByRole("option", { name: new RegExp(`^${escapeRe(repoName)}\\b`, "i") })
       .first()
@@ -256,7 +256,7 @@ test.describe("Fresh-branch flow", () => {
       const toggle = testPage.getByTestId("fresh-branch-toggle");
       await expect(toggle).toBeVisible();
       await expect(toggle).toHaveAttribute("aria-pressed", "false");
-      const branchSelector = testPage.getByTestId("branch-selector");
+      const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
       await expect(branchSelector).toBeDisabled({ timeout: 5_000 });
       // Placeholder should show actual current branch (main), not the generic copy.
       await expect(branchSelector).toContainText("main", { timeout: 5_000 });
@@ -279,7 +279,7 @@ test.describe("Fresh-branch flow", () => {
     try {
       await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName);
       await testPage.getByTestId("fresh-branch-toggle").click();
-      const branchSelector = testPage.getByTestId("branch-selector");
+      const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
       await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
       // Pick the develop base branch so the new branch will fork from it.
       await branchSelector.click();
@@ -481,7 +481,7 @@ test.describe("Fresh-branch flow", () => {
       await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
       await testPage.getByTestId("task-title-input").fill("Switcheroo");
       await testPage.getByTestId("task-description-input").fill("repro the leftover-branch bug");
-      await testPage.getByTestId("repository-selector").click();
+      await testPage.getByTestId("repo-chip-trigger").first().click();
       await testPage
         .getByRole("option", { name: new RegExp(`^${setup.repoName}\\b`, "i") })
         .first()
@@ -495,7 +495,7 @@ test.describe("Fresh-branch flow", () => {
         .filter({ hasText: /worktree/i })
         .first()
         .click();
-      const branchSelector = testPage.getByTestId("branch-selector");
+      const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
       await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
       await branchSelector.click();
       await testPage
@@ -563,7 +563,7 @@ test.describe("Branch refresh + filter", () => {
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
     await testPage.getByTestId("task-title-input").fill("Refresh button test");
     await testPage.getByTestId("task-description-input").fill("triggers git fetch");
-    await testPage.getByTestId("repository-selector").click();
+    await testPage.getByTestId("repo-chip-trigger").first().click();
     await testPage
       .getByRole("option", { name: new RegExp(`^${escapeRe(seededRepoName)}\\b`, "i") })
       .first()
@@ -572,7 +572,7 @@ test.describe("Branch refresh + filter", () => {
     await testPage.getByTestId("executor-profile-selector").click();
     await testPage.getByRole("option", { name: worktreeProfileName }).click();
 
-    const branchSelector = testPage.getByTestId("branch-selector");
+    const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
     await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
     await branchSelector.click();
 
@@ -634,7 +634,7 @@ test.describe("Branch refresh + filter", () => {
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
     await testPage.getByTestId("task-title-input").fill("Filter ranking test");
     await testPage.getByTestId("task-description-input").fill("exact match wins");
-    await testPage.getByTestId("repository-selector").click();
+    await testPage.getByTestId("repo-chip-trigger").first().click();
     await testPage
       .getByRole("option", { name: new RegExp(`^${repoName}\\b`, "i") })
       .first()
@@ -642,7 +642,7 @@ test.describe("Branch refresh + filter", () => {
     await testPage.getByTestId("executor-profile-selector").click();
     await testPage.getByRole("option", { name: worktreeProfileName }).click();
 
-    const branchSelector = testPage.getByTestId("branch-selector");
+    const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
     await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
     await branchSelector.click();
 
