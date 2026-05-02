@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -16,9 +17,18 @@ import (
 	"go.uber.org/zap"
 )
 
+// errTaskEnvIDRequired is the canonical error string for missing
+// task_environment_id on user-shell RPCs.
+const errTaskEnvIDRequired = "task_environment_id is required"
+
 // ShellHandlers provides WebSocket handlers for shell terminal operations.
-// Shell output is streamed via the lifecycle manager and event bus.
-// This handler provides shell.status, shell.subscribe (for buffer), and shell.input.
+//
+// User-shell ops (user_shell.list/create/stop) are env-keyed: they take
+// task_environment_id directly. Sessions in the same task share one env and
+// therefore one shell list — there's no per-session shell state.
+//
+// Agent passthrough ops (shell.status/subscribe/input) stay session-keyed —
+// they target the agent's own PTY, which is intrinsically session-scoped.
 type ShellHandlers struct {
 	lifecycleMgr  *lifecycle.Manager
 	scriptService scripts.ScriptService
@@ -32,14 +42,6 @@ func NewShellHandlers(lifecycleMgr *lifecycle.Manager, scriptService scripts.Scr
 		scriptService: scriptService,
 		logger:        log.WithFields(zap.String("component", "shell_handlers")),
 	}
-}
-
-func (h *ShellHandlers) resolveScopeID(ctx context.Context, sessionID string) (string, error) {
-	envID, err := h.lifecycleMgr.ResolveTaskEnvironmentID(ctx, sessionID)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve task environment for shell scope: %w", err)
-	}
-	return envID, nil
 }
 
 // RegisterHandlers registers shell handlers with the WebSocket dispatcher
@@ -196,20 +198,21 @@ func (h *ShellHandlers) wsShellInput(ctx context.Context, msg *ws.Message) (*ws.
 	})
 }
 
-// UserShellListRequest for user_shell.list action
+// UserShellListRequest for user_shell.list action.
+// User shells are env-scoped — sessions in the same task share one shell list.
 type UserShellListRequest struct {
-	SessionID string `json:"session_id"`
+	TaskEnvironmentID string `json:"task_environment_id"`
 }
 
-// wsUserShellList returns all running user shells for a session
-func (h *ShellHandlers) wsUserShellList(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+// wsUserShellList returns all running user shells for a task environment
+func (h *ShellHandlers) wsUserShellList(_ context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req UserShellListRequest
 	if err := msg.ParsePayload(&req); err != nil {
 		return nil, fmt.Errorf("invalid payload: %w", err)
 	}
 
-	if req.SessionID == "" {
-		return nil, fmt.Errorf("session_id is required")
+	if req.TaskEnvironmentID == "" {
+		return nil, errors.New(errTaskEnvIDRequired)
 	}
 
 	interactiveRunner := h.lifecycleMgr.GetInteractiveRunner()
@@ -219,15 +222,10 @@ func (h *ShellHandlers) wsUserShellList(ctx context.Context, msg *ws.Message) (*
 		})
 	}
 
-	scopeID, err := h.resolveScopeID(ctx, req.SessionID)
-	if err != nil {
-		return nil, err
-	}
-	shells := interactiveRunner.ListUserShells(scopeID)
+	shells := interactiveRunner.ListUserShells(req.TaskEnvironmentID)
 
 	h.logger.Debug("listing user shells",
-		zap.String("session_id", req.SessionID),
-		zap.String("scope_id", scopeID),
+		zap.String("task_environment_id", req.TaskEnvironmentID),
 		zap.Int("count", len(shells)))
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
@@ -239,11 +237,13 @@ func (h *ShellHandlers) wsUserShellList(ctx context.Context, msg *ws.Message) (*
 // Exactly one of (ScriptID) or (Command) may be set; if both are empty the
 // handler creates a plain shell. When Command is set, Label is used as the
 // terminal label (defaults to "Script" when omitted).
+//
+// User shells are env-scoped — TaskEnvironmentID is required.
 type UserShellCreateRequest struct {
-	SessionID string `json:"session_id"`
-	ScriptID  string `json:"script_id,omitempty"`
-	Command   string `json:"command,omitempty"`
-	Label     string `json:"label,omitempty"`
+	TaskEnvironmentID string `json:"task_environment_id"`
+	ScriptID          string `json:"script_id,omitempty"`
+	Command           string `json:"command,omitempty"`
+	Label             string `json:"label,omitempty"`
 }
 
 // wsUserShellCreate creates a new user shell terminal and returns the assigned ID and label.
@@ -252,8 +252,8 @@ func (h *ShellHandlers) wsUserShellCreate(ctx context.Context, msg *ws.Message) 
 	if err := msg.ParsePayload(&req); err != nil {
 		return nil, fmt.Errorf("invalid payload: %w", err)
 	}
-	if req.SessionID == "" {
-		return nil, fmt.Errorf("session_id is required")
+	if req.TaskEnvironmentID == "" {
+		return nil, errors.New(errTaskEnvIDRequired)
 	}
 
 	interactiveRunner := h.lifecycleMgr.GetInteractiveRunner()
@@ -266,17 +266,13 @@ func (h *ShellHandlers) wsUserShellCreate(ctx context.Context, msg *ws.Message) 
 		return nil, err
 	}
 
-	scopeID, err := h.resolveScopeID(ctx, req.SessionID)
-	if err != nil {
-		return nil, err
-	}
+	scopeID := req.TaskEnvironmentID
 
 	if command != "" {
 		terminalID := "script-" + uuid.New().String()
 		interactiveRunner.RegisterScriptShell(scopeID, terminalID, label, command)
 		h.logger.Info("created script terminal",
-			zap.String("session_id", req.SessionID),
-			zap.String("scope_id", scopeID),
+			zap.String("task_environment_id", scopeID),
 			zap.String("terminal_id", terminalID),
 			zap.String("label", label),
 			zap.String("initial_command", command))
@@ -290,8 +286,7 @@ func (h *ShellHandlers) wsUserShellCreate(ctx context.Context, msg *ws.Message) 
 
 	result := interactiveRunner.CreateUserShell(scopeID)
 	h.logger.Info("created user shell",
-		zap.String("session_id", req.SessionID),
-		zap.String("scope_id", scopeID),
+		zap.String("task_environment_id", scopeID),
 		zap.String("terminal_id", result.TerminalID),
 		zap.String("label", result.Label),
 		zap.Bool("closable", result.Closable))
@@ -330,10 +325,11 @@ func (h *ShellHandlers) resolveShellScript(
 	return "", "", nil
 }
 
-// UserShellStopRequest for user_shell.stop action
+// UserShellStopRequest for user_shell.stop action.
+// User shells are env-scoped — TaskEnvironmentID is required.
 type UserShellStopRequest struct {
-	SessionID  string `json:"session_id"`
-	TerminalID string `json:"terminal_id"`
+	TaskEnvironmentID string `json:"task_environment_id"`
+	TerminalID        string `json:"terminal_id"`
 }
 
 // wsUserShellStop stops a user shell terminal process
@@ -343,8 +339,8 @@ func (h *ShellHandlers) wsUserShellStop(ctx context.Context, msg *ws.Message) (*
 		return nil, fmt.Errorf("invalid payload: %w", err)
 	}
 
-	if req.SessionID == "" {
-		return nil, fmt.Errorf("session_id is required")
+	if req.TaskEnvironmentID == "" {
+		return nil, errors.New(errTaskEnvIDRequired)
 	}
 	if req.TerminalID == "" {
 		return nil, fmt.Errorf("terminal_id is required")
@@ -356,20 +352,16 @@ func (h *ShellHandlers) wsUserShellStop(ctx context.Context, msg *ws.Message) (*
 		return nil, fmt.Errorf("interactive runner not available")
 	}
 
-	scopeID, err := h.resolveScopeID(ctx, req.SessionID)
-	if err != nil {
-		return nil, err
-	}
-	if err := interactiveRunner.StopUserShell(ctx, scopeID, req.TerminalID); err != nil {
+	if err := interactiveRunner.StopUserShell(ctx, req.TaskEnvironmentID, req.TerminalID); err != nil {
 		h.logger.Warn("failed to stop user shell",
-			zap.String("session_id", req.SessionID),
+			zap.String("task_environment_id", req.TaskEnvironmentID),
 			zap.String("terminal_id", req.TerminalID),
 			zap.Error(err))
 		// Don't return error - shell may already be stopped
 	}
 
 	h.logger.Info("user shell stopped",
-		zap.String("session_id", req.SessionID),
+		zap.String("task_environment_id", req.TaskEnvironmentID),
 		zap.String("terminal_id", req.TerminalID))
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
@@ -382,14 +374,14 @@ func (h *ShellHandlers) wsUserShellStop(ctx context.Context, msg *ws.Message) (*
 func RegisterShellRoutes(router *gin.Engine, lifecycleMgr *lifecycle.Manager, log *logger.Logger) {
 	handlers := NewShellHandlers(lifecycleMgr, nil, log)
 	api := router.Group("/api/v1")
-	api.GET("/sessions/:id/terminals", handlers.httpListTerminals)
+	api.GET("/environments/:id/terminals", handlers.httpListTerminals)
 }
 
-// httpListTerminals returns all terminals for a session (for SSR).
+// httpListTerminals returns all terminals for a task environment (for SSR).
 func (h *ShellHandlers) httpListTerminals(c *gin.Context) {
-	sessionID := c.Param("id")
-	if sessionID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id is required"})
+	environmentID := c.Param("id")
+	if environmentID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": errTaskEnvIDRequired})
 		return
 	}
 
@@ -400,16 +392,10 @@ func (h *ShellHandlers) httpListTerminals(c *gin.Context) {
 		return
 	}
 
-	scopeID, err := h.resolveScopeID(c.Request.Context(), sessionID)
-	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
-		return
-	}
-	shells := interactiveRunner.ListUserShells(scopeID)
+	shells := interactiveRunner.ListUserShells(environmentID)
 
 	h.logger.Debug("listing terminals via HTTP",
-		zap.String("session_id", sessionID),
-		zap.String("scope_id", scopeID),
+		zap.String("task_environment_id", environmentID),
 		zap.Int("count", len(shells)))
 
 	// Transform to response format

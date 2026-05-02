@@ -329,18 +329,18 @@ func TestWsUserShellList_InvalidPayload(t *testing.T) {
 	}
 }
 
-func TestWsUserShellList_MissingSessionID(t *testing.T) {
+func TestWsUserShellList_MissingTaskEnvironmentID(t *testing.T) {
 	log := newTestLogger()
 	handlers := NewShellHandlers(nil, nil, log)
 
-	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellList, UserShellListRequest{SessionID: ""})
+	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellList, UserShellListRequest{TaskEnvironmentID: ""})
 
 	_, err := handlers.wsUserShellList(context.Background(), msg)
 	if err == nil {
-		t.Error("expected error for missing session_id")
+		t.Error("expected error for missing task_environment_id")
 	}
-	if err.Error() != "session_id is required" {
-		t.Errorf("expected 'session_id is required', got: %v", err)
+	if err.Error() != "task_environment_id is required" {
+		t.Errorf("expected 'task_environment_id is required', got: %v", err)
 	}
 }
 
@@ -349,7 +349,7 @@ func TestWsUserShellList_NoInteractiveRunner(t *testing.T) {
 	mgr := newTestManager()
 	handlers := NewShellHandlers(mgr, nil, log)
 
-	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellList, UserShellListRequest{SessionID: "session-1"})
+	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellList, UserShellListRequest{TaskEnvironmentID: "env-1"})
 
 	resp, err := handlers.wsUserShellList(context.Background(), msg)
 	if err != nil {
@@ -391,18 +391,18 @@ func TestWsUserShellCreate_InvalidPayload(t *testing.T) {
 	}
 }
 
-func TestWsUserShellCreate_MissingSessionID(t *testing.T) {
+func TestWsUserShellCreate_MissingTaskEnvironmentID(t *testing.T) {
 	log := newTestLogger()
 	handlers := NewShellHandlers(nil, nil, log)
 
-	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellCreate, UserShellCreateRequest{SessionID: ""})
+	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellCreate, UserShellCreateRequest{TaskEnvironmentID: ""})
 
 	_, err := handlers.wsUserShellCreate(context.Background(), msg)
 	if err == nil {
-		t.Error("expected error for missing session_id")
+		t.Error("expected error for missing task_environment_id")
 	}
-	if err.Error() != "session_id is required" {
-		t.Errorf("expected 'session_id is required', got: %v", err)
+	if err.Error() != "task_environment_id is required" {
+		t.Errorf("expected 'task_environment_id is required', got: %v", err)
 	}
 }
 
@@ -411,7 +411,7 @@ func TestWsUserShellCreate_NoInteractiveRunner(t *testing.T) {
 	mgr := newTestManager()
 	handlers := NewShellHandlers(mgr, nil, log)
 
-	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellCreate, UserShellCreateRequest{SessionID: "session-1"})
+	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellCreate, UserShellCreateRequest{TaskEnvironmentID: "env-1"})
 
 	_, err := handlers.wsUserShellCreate(context.Background(), msg)
 	if err == nil {
@@ -429,8 +429,8 @@ func TestWsUserShellCreate_ScriptID_NoScriptService(t *testing.T) {
 	handlers := NewShellHandlers(mgr, nil, log)
 
 	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellCreate, UserShellCreateRequest{
-		SessionID: "session-1",
-		ScriptID:  "script-123",
+		TaskEnvironmentID: "env-1",
+		ScriptID:          "script-123",
 	})
 
 	// This will fail because interactive runner is nil (checked before script service),
@@ -447,7 +447,7 @@ func TestResolveShellScript(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("plain shell when no script_id and no command", func(t *testing.T) {
-		label, cmd, err := h.resolveShellScript(ctx, &UserShellCreateRequest{SessionID: "s1"})
+		label, cmd, err := h.resolveShellScript(ctx, &UserShellCreateRequest{TaskEnvironmentID: "env-1"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -458,9 +458,9 @@ func TestResolveShellScript(t *testing.T) {
 
 	t.Run("inline command with explicit label", func(t *testing.T) {
 		label, cmd, err := h.resolveShellScript(ctx, &UserShellCreateRequest{
-			SessionID: "s1",
-			Command:   "echo hi",
-			Label:     "Dev Server",
+			TaskEnvironmentID: "env-1",
+			Command:           "echo hi",
+			Label:             "Dev Server",
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -475,8 +475,8 @@ func TestResolveShellScript(t *testing.T) {
 
 	t.Run("inline command defaults label to Script", func(t *testing.T) {
 		label, cmd, err := h.resolveShellScript(ctx, &UserShellCreateRequest{
-			SessionID: "s1",
-			Command:   "ls",
+			TaskEnvironmentID: "env-1",
+			Command:           "ls",
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -491,8 +491,8 @@ func TestResolveShellScript(t *testing.T) {
 
 	t.Run("script_id without script service errors", func(t *testing.T) {
 		_, _, err := h.resolveShellScript(ctx, &UserShellCreateRequest{
-			SessionID: "s1",
-			ScriptID:  "abc",
+			TaskEnvironmentID: "env-1",
+			ScriptID:          "abc",
 		})
 		if err == nil {
 			t.Fatal("expected error when script service is nil")
@@ -516,18 +516,18 @@ func TestWsUserShellStop_InvalidPayload(t *testing.T) {
 	}
 }
 
-func TestWsUserShellStop_MissingSessionID(t *testing.T) {
+func TestWsUserShellStop_MissingTaskEnvironmentID(t *testing.T) {
 	log := newTestLogger()
 	handlers := NewShellHandlers(nil, nil, log)
 
-	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellStop, UserShellStopRequest{SessionID: "", TerminalID: "term-1"})
+	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellStop, UserShellStopRequest{TaskEnvironmentID: "", TerminalID: "term-1"})
 
 	_, err := handlers.wsUserShellStop(context.Background(), msg)
 	if err == nil {
-		t.Error("expected error for missing session_id")
+		t.Error("expected error for missing task_environment_id")
 	}
-	if err.Error() != "session_id is required" {
-		t.Errorf("expected 'session_id is required', got: %v", err)
+	if err.Error() != "task_environment_id is required" {
+		t.Errorf("expected 'task_environment_id is required', got: %v", err)
 	}
 }
 
@@ -535,7 +535,7 @@ func TestWsUserShellStop_MissingTerminalID(t *testing.T) {
 	log := newTestLogger()
 	handlers := NewShellHandlers(nil, nil, log)
 
-	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellStop, UserShellStopRequest{SessionID: "session-1", TerminalID: ""})
+	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellStop, UserShellStopRequest{TaskEnvironmentID: "env-1", TerminalID: ""})
 
 	_, err := handlers.wsUserShellStop(context.Background(), msg)
 	if err == nil {
@@ -552,8 +552,8 @@ func TestWsUserShellStop_NoInteractiveRunner(t *testing.T) {
 	handlers := NewShellHandlers(mgr, nil, log)
 
 	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellStop, UserShellStopRequest{
-		SessionID:  "session-1",
-		TerminalID: "term-1",
+		TaskEnvironmentID: "env-1",
+		TerminalID:        "term-1",
 	})
 
 	_, err := handlers.wsUserShellStop(context.Background(), msg)
