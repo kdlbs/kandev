@@ -80,14 +80,16 @@ function recordUserShellCreatePayloads(page: Page): {
 
 test.describe("Terminal new tab — env-keyed user shell RPCs", () => {
   /**
-   * Repro of the user-reported bug: clicking the right-panel "+" button to
-   * add a second terminal silently failed because the WS RPC was keyed by
-   * session_id and the session lacked a task_environment_id link.
+   * Repro of the user-reported bug: clicking "+ → Terminal" silently failed
+   * because user_shell.create was keyed by session_id and the session
+   * lacked a task_environment_id link. After the fix, the RPC carries
+   * task_environment_id directly and the heal pass guarantees the env
+   * mapping exists.
    *
-   * After the fix, the RPC carries task_environment_id directly and the heal
-   * pass guarantees the env mapping exists.
+   * The dockview "+" menu is the only "+" path in the desktop layout — the
+   * mobile right-panel "+" button isn't rendered at desktop viewports.
    */
-  test("right-panel '+' button adds a second terminal tab", async ({
+  test("dockview '+ → Terminal' creates a Terminal 2 tab", async ({
     testPage,
     apiClient,
     seedData,
@@ -95,65 +97,34 @@ test.describe("Terminal new tab — env-keyed user shell RPCs", () => {
     test.setTimeout(60_000);
     const recorder = recordUserShellCreatePayloads(testPage);
 
-    await createTaskAndWaitForDone(apiClient, seedData, "New Tab Right Panel");
-    const session = await navigateToTaskViaKanban(testPage, "New Tab Right Panel");
+    await createTaskAndWaitForDone(apiClient, seedData, "New Tab Dockview Menu");
+    const session = await navigateToTaskViaKanban(testPage, "New Tab Dockview Menu");
 
     // Base terminal must be connected before we add tabs.
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 
-    // Right-panel SessionTabs uses `addButtonLabel="+"` → button text is "+".
-    const addButton = testPage.locator(`button:has-text("+")`).first();
-    await addButton.click();
+    // Open the dockview "+" menu (every group has one — the chat/center
+    // group's is reliably present and not behind any conditional).
+    await session.addPanelButton().click();
+    const terminalItem = testPage.getByRole("menuitem", { name: "Terminal" });
+    await expect(terminalItem).toBeVisible({ timeout: 5_000 });
+    await terminalItem.click();
 
-    // The new tab is labeled "Terminal 2" by the backend (first plain shell
-    // is "Terminal" and not closable; subsequent ones are "Terminal N").
-    const newTab = testPage.locator(`button[role="tab"]:has-text("Terminal 2")`);
-    await expect(newTab).toBeVisible({ timeout: 15_000 });
+    // Backend assigns "Terminal 2" to the second plain shell on the env
+    // (the first is "Terminal" and not closable). Asserting the label
+    // proves both that a new panel was added AND that it's reusing the
+    // same env scope (otherwise it'd also be "Terminal").
+    await expect(testPage.locator(".dv-default-tab:has-text('Terminal 2')")).toBeVisible({
+      timeout: 15_000,
+    });
 
     // Regression guard: the WS payload must be env-keyed.
     await expect.poll(() => recorder.collected().length, { timeout: 5_000 }).toBeGreaterThan(0);
     for (const payload of recorder.collected()) {
       expect(payload).toHaveProperty("task_environment_id");
       expect(payload).not.toHaveProperty("session_id");
-      expect(payload.task_environment_id).toMatch(/.+/); // non-empty
-    }
-  });
-
-  /**
-   * The dockview group "+" dropdown also creates a new terminal panel.
-   * Different code path (dockview-header-actions.tsx → addTerminalPanel)
-   * but same env-keyed RPC underneath.
-   */
-  test("dockview '+' menu adds a Terminal panel", async ({ testPage, apiClient, seedData }) => {
-    test.setTimeout(60_000);
-    const recorder = recordUserShellCreatePayloads(testPage);
-
-    await createTaskAndWaitForDone(apiClient, seedData, "New Tab Dockview Menu");
-    const session = await navigateToTaskViaKanban(testPage, "New Tab Dockview Menu");
-
-    await session.clickTab("Terminal");
-    await session.expectTerminalConnected();
-
-    // Open the dockview "+" menu (every group has one — the chat/center group's
-    // is reliably present and not behind any conditional).
-    await session.addPanelButton().click();
-    const terminalItem = testPage.getByRole("menuitem", { name: "Terminal" });
-    await expect(terminalItem).toBeVisible({ timeout: 5_000 });
-    await terminalItem.click();
-
-    // Two terminal panels are now in the dockview tree.
-    await expect
-      .poll(() => testPage.locator(".dv-default-tab:has-text('Terminal')").count(), {
-        timeout: 10_000,
-      })
-      .toBeGreaterThanOrEqual(2);
-
-    // Regression guard for env-keyed RPC.
-    await expect.poll(() => recorder.collected().length, { timeout: 5_000 }).toBeGreaterThan(0);
-    for (const payload of recorder.collected()) {
-      expect(payload).toHaveProperty("task_environment_id");
-      expect(payload).not.toHaveProperty("session_id");
+      expect(payload.task_environment_id).toMatch(/.+/);
     }
   });
 
