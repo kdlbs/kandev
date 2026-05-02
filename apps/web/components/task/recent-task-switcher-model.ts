@@ -273,9 +273,13 @@ function resolveWorkspaceId(
   taskId: string,
   ctx: RecentTaskBuildContext,
   previous: RecentTaskEntry | undefined,
+  repositoryById: Map<string, Repository>,
 ): string | null {
   return (
-    previous?.workspaceId ?? ctx.activeWorkspaceId ?? findWorkspaceIdForTask(taskId, ctx) ?? null
+    previous?.workspaceId ??
+    ctx.activeWorkspaceId ??
+    findWorkspaceIdForTask(taskId, ctx, repositoryById) ??
+    null
   );
 }
 
@@ -284,8 +288,11 @@ function getDisplayItemForEntry(
   ctx: RecentTaskBuildContext,
   previous: RecentTaskEntry | undefined,
   visitedAt: string | undefined,
+  maps?: RecentTaskDisplayMaps,
 ): RecentTaskDisplayItem | undefined {
-  return buildRecentTaskDisplayItems([fallbackRecentEntry(taskId, previous, visitedAt)], ctx)[0];
+  const entry = fallbackRecentEntry(taskId, previous, visitedAt);
+  if (maps) return buildDisplayItem(entry, ctx, maps);
+  return buildRecentTaskDisplayItems([entry], ctx)[0];
 }
 
 function buildEntryCore(
@@ -321,20 +328,28 @@ export function buildRecentTaskEntry(
   previous?: RecentTaskEntry,
   visitedAt?: string,
 ): RecentTaskEntry {
-  const displayItem = getDisplayItemForEntry(taskId, ctx, previous, visitedAt);
+  const maps = {
+    stepTitleById: buildStepTitleMap(ctx),
+    repositoryById: buildRepositoryMap(ctx),
+  };
+  const displayItem = getDisplayItemForEntry(taskId, ctx, previous, visitedAt, maps);
 
   return {
     ...buildEntryCore(taskId, displayItem, previous, visitedAt),
     ...buildEntryMetadata(displayItem, previous),
-    workspaceId: resolveWorkspaceId(taskId, ctx, previous),
+    workspaceId: resolveWorkspaceId(taskId, ctx, previous, maps.repositoryById),
   };
 }
 
-function findWorkspaceIdForTask(taskId: string, ctx: RecentTaskBuildContext): string | undefined {
+function findWorkspaceIdForTask(
+  taskId: string,
+  ctx: RecentTaskBuildContext,
+  repositoryById: Map<string, Repository>,
+): string | undefined {
   const live = findLiveTask(taskId, ctx);
   const repositoryId = live?.task.repositoryId;
   if (!repositoryId) return undefined;
-  const repository = buildRepositoryMap(ctx).get(repositoryId);
+  const repository = repositoryById.get(repositoryId);
   return repository?.workspace_id;
 }
 

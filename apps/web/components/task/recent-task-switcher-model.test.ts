@@ -6,6 +6,7 @@ import {
   buildRecentTaskEntry,
   getInitialSelectionIndex,
   getNextSelectionIndex,
+  getPreviousSelectionIndex,
   getTaskStatusBadge,
   type RecentTaskBuildContext,
 } from "./recent-task-switcher-model";
@@ -130,6 +131,13 @@ describe("recent task switcher model", () => {
     expect(getNextSelectionIndex(2, 3)).toBe(0);
     expect(getNextSelectionIndex(-1, 3)).toBe(0);
     expect(getNextSelectionIndex(0, 0)).toBe(-1);
+  });
+
+  it("cycles backward through items and handles empty lists", () => {
+    expect(getPreviousSelectionIndex(1, 3)).toBe(0);
+    expect(getPreviousSelectionIndex(0, 3)).toBe(2);
+    expect(getPreviousSelectionIndex(-1, 3)).toBe(2);
+    expect(getPreviousSelectionIndex(0, 0)).toBe(-1);
   });
 
   it("maps task and session states to compact status badges", () => {
