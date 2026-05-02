@@ -123,3 +123,60 @@ func TestTaskPR_ReplaceTaskPR_ScopedByRepository(t *testing.T) {
 		t.Errorf("expected repo-b unchanged at 2, got %d", bySpec["repo-b"])
 	}
 }
+
+// Regression: a task that pre-dated the multi-repo schema kept a row with
+// repository_id=”, then a later sync inserted a NEW row under the resolved
+// repository_id — leaving two rows for the same PR and "+2" badges on the
+// kanban card. backfillTaskPRsRepositoryID must dedup the legacy row.
+func TestBackfillTaskPRsRepositoryID_DedupsLegacyEmptyRow(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Insert a legacy row (repository_id = '') and a per-repo row for the
+	// same (task, owner, repo, pr_number). The unique index is
+	// (task_id, repository_id, pr_number), so both rows can coexist.
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		ID: "legacy", TaskID: "task-x", RepositoryID: "",
+		Owner: "kdlbs", Repo: "kandev", PRNumber: 767, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("create legacy: %v", err)
+	}
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		ID: "scoped", TaskID: "task-x", RepositoryID: "repo-1",
+		Owner: "kdlbs", Repo: "kandev", PRNumber: 767, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("create scoped: %v", err)
+	}
+
+	if err := store.backfillTaskPRsRepositoryID(); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+
+	all, _ := store.ListTaskPRsByTask(ctx, "task-x")
+	if len(all) != 1 {
+		t.Fatalf("expected 1 PR after dedup, got %d", len(all))
+	}
+	if all[0].RepositoryID != "repo-1" {
+		t.Errorf("expected scoped row to win, got repository_id=%q", all[0].RepositoryID)
+	}
+
+	// Idempotent: second pass is a no-op.
+	if err := store.backfillTaskPRsRepositoryID(); err != nil {
+		t.Fatalf("second backfill: %v", err)
+	}
+	all2, _ := store.ListTaskPRsByTask(ctx, "task-x")
+	if len(all2) != 1 {
+		t.Errorf("idempotent expected 1 PR, got %d", len(all2))
+	}
+}
+
+// When task_repositories does not exist (e.g. github-store unit tests that
+// init only this package's schema), backfill must skip the cross-package
+// UPDATE rather than erroring out.
+func TestBackfillTaskPRsRepositoryID_SkipsWhenTaskRepositoriesAbsent(t *testing.T) {
+	store := newTestStore(t)
+	if err := store.backfillTaskPRsRepositoryID(); err != nil {
+		t.Fatalf("backfill on store without task_repositories: %v", err)
+	}
+}

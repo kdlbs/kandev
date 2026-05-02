@@ -166,7 +166,80 @@ func (s *Store) initSchema() error {
 	if err := s.migratePRTablesForMultiRepo(); err != nil {
 		return fmt.Errorf("migrate PR tables for multi-repo: %w", err)
 	}
+	if err := s.backfillTaskPRsRepositoryID(); err != nil {
+		return fmt.Errorf("backfill github_task_prs.repository_id: %w", err)
+	}
 	return nil
+}
+
+// backfillTaskPRsRepositoryID heals github_task_prs rows that pre-date the
+// per-repo schema (i.e. have repository_id = ”). Two passes:
+//
+//  1. Dedup: for each (task_id, owner, repo, pr_number) tuple, if a legacy
+//     row (repository_id = ”) AND a newer per-repo row coexist, drop the
+//     legacy one. This happens when an old single-repo install upgraded and
+//     a subsequent sync inserted a new row under the resolved repository_id
+//     instead of updating the legacy row, leaving two entries for one PR
+//     (and so two badges on the kanban card).
+//
+//  2. Backfill: for any remaining empty-repo rows, look up the task's
+//     primary repository (from `task_repositories` ordered by position) and
+//     stamp its id. Skipped silently when the task has zero per-repo rows
+//     (e.g. quick-chat tasks) — the row keeps its empty repository_id.
+//
+// Idempotent: re-running on a healed db is a no-op.
+func (s *Store) backfillTaskPRsRepositoryID() error {
+	if _, err := s.db.Exec(`
+		DELETE FROM github_task_prs
+		WHERE repository_id = ''
+		  AND EXISTS (
+		    SELECT 1 FROM github_task_prs other
+		    WHERE other.task_id = github_task_prs.task_id
+		      AND other.owner   = github_task_prs.owner
+		      AND other.repo    = github_task_prs.repo
+		      AND other.pr_number = github_task_prs.pr_number
+		      AND other.repository_id != ''
+		  )
+	`); err != nil {
+		return fmt.Errorf("dedup legacy task PR rows: %w", err)
+	}
+	// `task_repositories` lives in the task package's schema, not ours.
+	// Skip the backfill when it doesn't exist (e.g. github-store unit tests
+	// that init only this package's schema). The dedup pass above is the
+	// load-bearing fix for the "two PRs on a single-repo task" symptom; the
+	// backfill is a courtesy that converts orphan legacy rows in real
+	// deployments.
+	if !s.tableExists("task_repositories") {
+		return nil
+	}
+	_, err := s.db.Exec(`
+		UPDATE github_task_prs
+		SET repository_id = (
+		  SELECT tr.repository_id
+		  FROM task_repositories tr
+		  WHERE tr.task_id = github_task_prs.task_id
+		  ORDER BY tr.position
+		  LIMIT 1
+		)
+		WHERE repository_id = ''
+		  AND EXISTS (
+		    SELECT 1 FROM task_repositories tr
+		    WHERE tr.task_id = github_task_prs.task_id
+		  )
+	`)
+	if err != nil {
+		return fmt.Errorf("backfill task PR repository_id: %w", err)
+	}
+	return nil
+}
+
+// tableExists returns true when the named table is present in sqlite_master.
+// Used by the multi-repo backfill to skip cross-package healing in unit
+// tests that don't bring up the task schema.
+func (s *Store) tableExists(name string) bool {
+	var n int
+	err := s.db.QueryRow(`SELECT 1 FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&n)
+	return err == nil
 }
 
 // migratePRTablesForMultiRepo rebuilds `github_pr_watches` and
