@@ -249,9 +249,11 @@ export const InlineTaskName = memo(function InlineTaskName({
   autoFocus,
 }: InlineTaskNameProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const hasFocusedRef = useRef(false);
 
   useEffect(() => {
-    if (autoFocus && inputRef.current) {
+    if (autoFocus && !hasFocusedRef.current && inputRef.current) {
+      hasFocusedRef.current = true;
       inputRef.current.focus();
       inputRef.current.select();
     }
