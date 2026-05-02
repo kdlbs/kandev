@@ -28,6 +28,12 @@ type mockGitHubService struct {
 	createWatchBranch   string
 	updatedBranch       string
 	updatedPRNumber     int
+	// repository_id captured by the most recent CreatePRWatch /
+	// AssociatePRWithTask call. Used by the multi-repo push tests to assert
+	// the per-repo scoping (an empty value indicates the legacy single-repo
+	// path landed on primary by accident).
+	lastCreateWatchRepositoryID string
+	lastAssociateRepositoryID   string
 
 	// Review PR reservation tracking.
 	reserveCalls   int
@@ -60,13 +66,15 @@ func (m *mockGitHubService) GetPRWatchBySession(_ context.Context, _ string) (*g
 func (m *mockGitHubService) GetPRWatchBySessionAndRepo(_ context.Context, _, _ string) (*github.PRWatch, error) {
 	return m.prWatch, nil
 }
-func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, _, _, _, _ string, _ int, branch string) (*github.PRWatch, error) {
+func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, _, repositoryID, _, _ string, _ int, branch string) (*github.PRWatch, error) {
 	m.createWatchCalls++
 	m.createWatchBranch = branch
+	m.lastCreateWatchRepositoryID = repositoryID
 	return &github.PRWatch{}, nil
 }
-func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, _, _ string, _ *github.PR) (*github.TaskPR, error) {
+func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, _, repositoryID string, _ *github.PR) (*github.TaskPR, error) {
 	m.associateCalls++
+	m.lastAssociateRepositoryID = repositoryID
 	return &github.TaskPR{}, nil
 }
 func (m *mockGitHubService) UpdatePRWatchBranchIfSearching(_ context.Context, _, branch string) error {
@@ -544,6 +552,109 @@ func TestDetectPushAndAssociatePR(t *testing.T) {
 
 		if ghSvc.updateBranchCalls != 0 {
 			t.Errorf("expected no UpdatePRWatchBranch calls when branch matches, got %d", ghSvc.updateBranchCalls)
+		}
+	})
+
+	// Multi-repo: when the push event carries a repository_name, the resolver
+	// must look up that specific task_repository (not the primary one) and
+	// associate the PR under its repository_id. Without this, a multi-repo
+	// task only ever gets one PR detected — the second repo's push silently
+	// drops or lands under the wrong repository_id.
+	t.Run("resolvePushRepo multi-repo: scopes to the named repository", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		// Two repos linked to the task; agent pushes to the secondary one.
+		primary := &models.Repository{
+			ID: "repo-front", WorkspaceID: "ws1", Name: "frontend",
+			SourceType: "provider", Provider: "github",
+			ProviderOwner: "myorg", ProviderName: "frontend",
+			CreatedAt: now, UpdatedAt: now,
+		}
+		secondary := &models.Repository{
+			ID: "repo-back", WorkspaceID: "ws1", Name: "backend",
+			SourceType: "provider", Provider: "github",
+			ProviderOwner: "myorg", ProviderName: "backend",
+			CreatedAt: now, UpdatedAt: now,
+		}
+		if err := repo.CreateRepository(ctx, primary); err != nil {
+			t.Fatalf("create primary: %v", err)
+		}
+		if err := repo.CreateRepository(ctx, secondary); err != nil {
+			t.Fatalf("create secondary: %v", err)
+		}
+		if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+			ID: "tr-1", TaskID: "t1", RepositoryID: "repo-front", Position: 0, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("link primary: %v", err)
+		}
+		if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+			ID: "tr-2", TaskID: "t1", RepositoryID: "repo-back", Position: 1, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("link secondary: %v", err)
+		}
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		mockClient := github.NewMockClient()
+		mockClient.AddPR(&github.PR{
+			Number: 99, Title: "Backend PR",
+			HTMLURL:     "https://github.com/myorg/backend/pull/99",
+			AuthorLogin: "alice",
+			RepoOwner:   "myorg", RepoName: "backend",
+			HeadBranch: "feature-x", BaseBranch: "main",
+		})
+		ghSvc := &mockGitHubService{client: mockClient}
+		svc.SetGitHubService(ghSvc)
+
+		// Push event came from the "backend" repo subdir — must associate
+		// under repo-back, NOT repo-front.
+		svc.detectPushAndAssociatePR(ctx, "s1", "t1", "backend", "feature-x")
+
+		if ghSvc.associateCalls != 1 {
+			t.Fatalf("expected 1 AssociatePRWithTask call, got %d", ghSvc.associateCalls)
+		}
+		if ghSvc.lastAssociateRepositoryID != "repo-back" {
+			t.Errorf("expected association under repo-back, got %q", ghSvc.lastAssociateRepositoryID)
+		}
+		if ghSvc.createWatchCalls != 1 {
+			t.Errorf("expected 1 CreatePRWatch call, got %d", ghSvc.createWatchCalls)
+		}
+		if ghSvc.lastCreateWatchRepositoryID != "repo-back" {
+			t.Errorf("expected watch under repo-back, got %q", ghSvc.lastCreateWatchRepositoryID)
+		}
+	})
+
+	// Symmetric guard: an unknown repository_name (not linked to the task)
+	// must not fall back to the primary — silently mis-associating a PR is
+	// worse than dropping the event.
+	t.Run("resolvePushRepo multi-repo: drops events for unknown repository_name", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		if err := repo.CreateRepository(ctx, &models.Repository{
+			ID: "repo-front", WorkspaceID: "ws1", Name: "frontend",
+			SourceType: "provider", Provider: "github",
+			ProviderOwner: "myorg", ProviderName: "frontend",
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+			ID: "tr-1", TaskID: "t1", RepositoryID: "repo-front", Position: 0, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("link: %v", err)
+		}
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		ghSvc := &mockGitHubService{client: github.NewMockClient()}
+		svc.SetGitHubService(ghSvc)
+
+		svc.detectPushAndAssociatePR(ctx, "s1", "t1", "ghost-repo", "feature-x")
+
+		if ghSvc.associateCalls != 0 {
+			t.Errorf("expected 0 AssociatePRWithTask calls for unknown repo, got %d", ghSvc.associateCalls)
+		}
+		if ghSvc.createWatchCalls != 0 {
+			t.Errorf("expected 0 CreatePRWatch calls for unknown repo, got %d", ghSvc.createWatchCalls)
 		}
 	})
 }
