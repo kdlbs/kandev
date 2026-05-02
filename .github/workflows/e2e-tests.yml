@@ -225,6 +225,17 @@ jobs:
         if: always()
         run: docker ps -aq --filter label=kandev.managed=true | xargs -r docker rm -f
 
+      # Named with the same `blob-report-*` prefix the merge job globs for
+      # so the docker results land in the unified HTML report alongside the
+      # sharded chromium/mobile-chrome runs.
+      - name: Upload Docker blob report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blob-report-docker
+          path: apps/web/e2e/blob-report/
+          retention-days: 3
+
       - name: Upload Docker E2E results
         if: failure()
         uses: actions/upload-artifact@v4
@@ -235,7 +246,7 @@ jobs:
 
   e2e-report:
     name: Merge E2E Reports
-    needs: e2e
+    needs: [e2e, e2e-docker]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
