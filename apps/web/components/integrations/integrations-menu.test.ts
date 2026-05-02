@@ -16,11 +16,11 @@ vi.mock("@/hooks/domains/github/use-github-status", () => ({
   useGitHubStatus: useGitHubStatusMock,
 }));
 
-vi.mock("@/components/jira/my-jira/use-jira-availability", () => ({
+vi.mock("@/hooks/domains/jira/use-jira-availability", () => ({
   useJiraAvailable: useJiraAvailableMock,
 }));
 
-vi.mock("@/components/linear/use-linear-availability", () => ({
+vi.mock("@/hooks/domains/linear/use-linear-availability", () => ({
   useLinearAvailable: useLinearAvailableMock,
 }));
 

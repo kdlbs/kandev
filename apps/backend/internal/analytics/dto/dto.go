@@ -90,6 +90,7 @@ type GitStatsDTO struct {
 type StatsResponse struct {
 	Global            GlobalStatsDTO             `json:"global"`
 	TaskStats         []TaskStatsDTO             `json:"task_stats"`
+	TaskStatsHasMore  bool                       `json:"task_stats_has_more"`
 	DailyActivity     []DailyActivityDTO         `json:"daily_activity"`
 	CompletedActivity []CompletedTaskActivityDTO `json:"completed_activity"`
 	AgentUsage        []AgentUsageDTO            `json:"agent_usage"`

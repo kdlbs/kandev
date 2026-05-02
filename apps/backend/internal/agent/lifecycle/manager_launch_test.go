@@ -4,12 +4,15 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // resumeTestAgent is a minimal agent with a BuildCommand that respects the
@@ -202,4 +205,76 @@ func TestLaunchResolveWorkspacePath_NonEphemeralSkipsQuickChatDir(t *testing.T) 
 
 	workspacePath, _, _, _ := mgr.launchResolveWorkspacePath(context.Background(), req)
 	require.Empty(t, workspacePath, "non-ephemeral task without repo should NOT get a quick-chat workspace")
+}
+
+// TestLaunch_RaceRollback exercises the race window between the step-3 duplicate
+// session pre-check and the step-8 executionStore.Add in Launch. A barrier inside
+// CreateInstance keeps the goroutine in the race window; the test injects a
+// conflicting execution into the store and then releases the barrier. Launch must
+// roll back the runtime instance it created (StopInstance called once) and return
+// a "race resolved during register" error instead of leaking an orphaned subprocess.
+func TestLaunch_RaceRollback(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	execRegistry := NewExecutorRegistry(log)
+
+	entered := make(chan struct{}, 1)
+	barrier := make(chan struct{})
+	backend := &createInstanceExecutor{
+		MockExecutor: MockExecutor{name: executor.NameStandalone},
+		client:       (*agentctl.Client)(nil),
+		entered:      entered,
+		barrier:      barrier,
+	}
+	execRegistry.Register(backend)
+
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	mgr.dataDir = t.TempDir()
+	t.Cleanup(func() { close(mgr.stopCh) })
+
+	req := &LaunchRequest{
+		TaskID:         "task-1",
+		SessionID:      "session-race",
+		AgentProfileID: "profile-1",
+		IsEphemeral:    true, // gives Launch a workspace path without a real repo
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := mgr.Launch(context.Background(), req)
+		errCh <- err
+	}()
+
+	// Wait for CreateInstance to begin (the goroutine is now past the step-3
+	// pre-check and inside the race window).
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for CreateInstance to start")
+	}
+
+	// Inject a conflicting execution for the same session.
+	_ = mgr.executionStore.Add(&AgentExecution{
+		ID:        "exec-injected",
+		SessionID: "session-race",
+		TaskID:    "task-1",
+	})
+
+	// Release CreateInstance — Launch will now proceed to Add and discover
+	// the conflict, triggering rollbackRacedExecution.
+	close(barrier)
+
+	err := <-errCh
+	if err == nil {
+		t.Fatal("expected error from race rollback, got nil")
+	}
+	if !strings.Contains(err.Error(), "race resolved during register") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+	if got := backend.stopCount.Load(); got != 1 {
+		t.Errorf("StopInstance called %d times, want 1 (runtime instance must be stopped on rollback)", got)
+	}
 }

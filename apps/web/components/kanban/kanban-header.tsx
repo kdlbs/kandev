@@ -190,8 +190,8 @@ function HomeLeftActions({ workspaceId }: { workspaceId?: string }) {
           Stats
         </Link>
       </Button>
-      <IntegrationsMenu workspaceId={workspaceId} />
       <ImproveKandevTopbarButton workspaceId={workspaceId} />
+      <IntegrationsMenu workspaceId={workspaceId} />
     </>
   );
 }
@@ -199,8 +199,8 @@ function HomeLeftActions({ workspaceId }: { workspaceId?: string }) {
 function WorkspaceLeftActions({ workspaceId }: { workspaceId?: string }) {
   return (
     <>
-      <IntegrationsMenu workspaceId={workspaceId} />
       <ImproveKandevTopbarButton workspaceId={workspaceId} />
+      <IntegrationsMenu workspaceId={workspaceId} />
     </>
   );
 }

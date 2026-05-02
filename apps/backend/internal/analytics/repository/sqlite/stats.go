@@ -33,11 +33,19 @@ func parseTimeString(s string) time.Time {
 	return time.Time{}
 }
 
-// GetTaskStats retrieves aggregated statistics for all tasks in a workspace
-func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string, start *time.Time) ([]*models.TaskStats, error) {
+// GetTaskStats retrieves aggregated statistics for tasks in a workspace.
+func (r *Repository) GetTaskStats(
+	ctx context.Context,
+	workspaceID string,
+	start *time.Time,
+	limit int,
+) ([]*models.TaskStats, error) {
 	var startArg any
 	if start != nil {
 		startArg = start.UTC().Format(time.RFC3339)
+	}
+	if limit <= 0 {
+		limit = 200
 	}
 
 	drv := r.ro.DriverName()
@@ -81,6 +89,7 @@ func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string, start
 		) turn_stats ON turn_stats.task_id = t.id
 		WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR t.created_at >= ?)
 		ORDER BY t.updated_at DESC
+		LIMIT ?
 	`, dur, dialect.DurationMs(
 		drv,
 		"MAX(CASE WHEN turn.completed_at IS NOT NULL THEN turn.completed_at END)",
@@ -89,7 +98,7 @@ func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string, start
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query),
 		startArg, startArg, startArg, startArg,
-		workspaceID, startArg, startArg,
+		workspaceID, startArg, startArg, limit,
 	)
 	if err != nil {
 		return nil, err

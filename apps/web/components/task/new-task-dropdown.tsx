@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { IconPlus, IconSubtask, IconChevronDown } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { ButtonGroup } from "@kandev/ui/button-group";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,12 +40,13 @@ export function NewTaskDropdown({
 
   return (
     <>
-      <div className="flex items-center">
+      <ButtonGroup>
         <Button
           size="sm"
           variant="outline"
-          className={`h-6 gap-1 cursor-pointer ${activeTaskId ? "rounded-r-none border-r-0" : ""}`}
+          className="h-6 gap-1 cursor-pointer"
           onClick={() => setShowTaskDialog(true)}
+          data-testid="new-task-primary"
         >
           <IconPlus className="h-3.5 w-3.5" />
           Task
@@ -55,7 +57,7 @@ export function NewTaskDropdown({
               <Button
                 size="sm"
                 variant="outline"
-                className="-ml-px h-6 rounded-l-none px-1 cursor-pointer"
+                className="h-6 px-1 cursor-pointer"
                 data-testid="new-task-chevron"
               >
                 <IconChevronDown className="h-3 w-3" />
@@ -73,7 +75,7 @@ export function NewTaskDropdown({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-      </div>
+      </ButtonGroup>
       <TaskCreateDialog
         open={showTaskDialog}
         onOpenChange={setShowTaskDialog}

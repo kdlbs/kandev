@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"strings"
 
 	"go.uber.org/zap"
 
@@ -15,6 +14,7 @@ import (
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/integrations/secretadapter"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
@@ -84,30 +84,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		buildAgentProfileMatcher(repos),
 	)
 
-	// Initialize GitHub service
-	secretsAdapter := &githubSecretAdapter{store: repos.Secrets}
-	githubSvc, _, err := github.Provide(dbPool.Writer(), dbPool.Reader(), secretsAdapter, eventBus, log)
-	if err != nil {
-		log.Warn("GitHub service initialization failed (non-fatal)", zap.Error(err))
-	}
-	if githubSvc != nil {
-		// Wire secret manager for token configuration
-		githubSvc.SetSecretManager(secretsAdapter)
-	}
-
-	// Initialize JIRA service
-	jiraSecrets := &jiraSecretAdapter{store: repos.Secrets}
-	jiraSvc, _, jiraErr := jira.Provide(dbPool.Writer(), dbPool.Reader(), jiraSecrets, eventBus, log)
-	if jiraErr != nil {
-		log.Warn("JIRA service initialization failed (non-fatal)", zap.Error(jiraErr))
-	}
-
-	// Initialize Linear service
-	linearSecrets := &linearSecretAdapter{store: repos.Secrets}
-	linearSvc, _, linearErr := linear.Provide(dbPool.Writer(), dbPool.Reader(), linearSecrets, log)
-	if linearErr != nil {
-		log.Warn("Linear service initialization failed (non-fatal)", zap.Error(linearErr))
-	}
+	githubSvc := initGitHubService(dbPool, eventBus, repos.Secrets, log)
+	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
+	linearSvc := initLinearService(dbPool, repos.Secrets, log)
 
 	return &Services{
 		Task:     taskSvc,
@@ -232,95 +211,41 @@ func (a *githubSecretAdapter) Delete(ctx context.Context, id string) error {
 	return a.store.Delete(ctx, id)
 }
 
-// jiraSecretAdapter adapts secrets.SecretStore to jira.SecretStore. JIRA stores
-// tokens keyed by "jira:{workspaceID}:token"; this adapter translates the
-// upsert-style API the JIRA service expects onto the Create/Update methods the
-// secret store exposes.
-type jiraSecretAdapter struct {
-	store secrets.SecretStore
-}
-
-func (a *jiraSecretAdapter) Reveal(ctx context.Context, id string) (string, error) {
-	return a.store.Reveal(ctx, id)
-}
-
-func (a *jiraSecretAdapter) Set(ctx context.Context, id, name, value string) error {
-	// Try update first; on "not found", fall through to create. The secrets
-	// layer only exposes error strings (not typed errors), so we detect the
-	// missing row via Exists which inspects the "secret not found:" prefix.
-	// Treating every Get error as "not found" would turn a transient DB error
-	// on an existing row into a constraint-violation Create that masks the
-	// real cause.
-	exists, err := a.Exists(ctx, id)
+// initGitHubService wires up the GitHub integration. Failures are non-fatal:
+// the rest of the backend still boots without GitHub configured.
+func initGitHubService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *github.Service {
+	adapter := &githubSecretAdapter{store: secretsStore}
+	svc, _, err := github.Provide(dbPool.Writer(), dbPool.Reader(), adapter, eventBus, log)
 	if err != nil {
-		return err
+		log.Warn("GitHub service initialization failed (non-fatal)", zap.Error(err))
 	}
-	if exists {
-		return a.store.Update(ctx, id, &secrets.UpdateSecretRequest{Value: &value})
+	if svc != nil {
+		// GitHub takes both a SecretProvider (read-only) and a SecretManager
+		// (mutating) — same adapter satisfies both interfaces, but the
+		// service needs the mutating one wired explicitly.
+		svc.SetSecretManager(adapter)
 	}
-	return a.store.Create(ctx, &secrets.SecretWithValue{
-		Secret: secrets.Secret{ID: id, Name: name},
-		Value:  value,
-	})
+	return svc
 }
 
-func (a *jiraSecretAdapter) Delete(ctx context.Context, id string) error {
-	return a.store.Delete(ctx, id)
-}
-
-func (a *jiraSecretAdapter) Exists(ctx context.Context, id string) (bool, error) {
-	_, err := a.store.Get(ctx, id)
+// initJiraService wires up the Jira integration. Failures are non-fatal.
+func initJiraService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *jira.Service {
+	svc, _, err := jira.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
 	if err != nil {
-		// The secrets layer reports "not found" via a fmt.Errorf string with
-		// the "secret not found:" prefix; treat that as the absence case and
-		// surface anything else (DB outage, decoding failure) so the caller
-		// can log it instead of silently reporting "not configured".
-		if strings.HasPrefix(err.Error(), "secret not found:") {
-			return false, nil
-		}
-		return false, err
+		log.Warn("JIRA service initialization failed (non-fatal)", zap.Error(err))
 	}
-	return true, nil
+	return svc
 }
 
-// linearSecretAdapter adapts secrets.SecretStore to linear.SecretStore. Linear
-// stores its API key keyed by "linear:{workspaceID}:token". The adapter mirrors
-// the upsert-onto-create/update translation that jiraSecretAdapter does.
-type linearSecretAdapter struct {
-	store secrets.SecretStore
-}
-
-func (a *linearSecretAdapter) Reveal(ctx context.Context, id string) (string, error) {
-	return a.store.Reveal(ctx, id)
-}
-
-func (a *linearSecretAdapter) Set(ctx context.Context, id, name, value string) error {
-	exists, err := a.Exists(ctx, id)
+// initLinearService wires up the Linear integration. Failures are non-fatal.
+// Linear doesn't publish events today so it doesn't take an eventBus —
+// adding one would be speculative until a feature actually needs it.
+func initLinearService(dbPool *db.Pool, secretsStore secrets.SecretStore, log *logger.Logger) *linear.Service {
+	svc, _, err := linear.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), log)
 	if err != nil {
-		return err
+		log.Warn("Linear service initialization failed (non-fatal)", zap.Error(err))
 	}
-	if exists {
-		return a.store.Update(ctx, id, &secrets.UpdateSecretRequest{Value: &value})
-	}
-	return a.store.Create(ctx, &secrets.SecretWithValue{
-		Secret: secrets.Secret{ID: id, Name: name},
-		Value:  value,
-	})
-}
-
-func (a *linearSecretAdapter) Delete(ctx context.Context, id string) error {
-	return a.store.Delete(ctx, id)
-}
-
-func (a *linearSecretAdapter) Exists(ctx context.Context, id string) (bool, error) {
-	_, err := a.store.Get(ctx, id)
-	if err != nil {
-		if strings.HasPrefix(err.Error(), "secret not found:") {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
+	return svc
 }
 
 // workflowProviderAdapter adapts task service to workflow service's WorkflowProvider interface.

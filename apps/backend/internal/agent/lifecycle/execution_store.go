@@ -4,6 +4,7 @@ package lifecycle
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -11,6 +12,14 @@ import (
 
 // ErrExecutionNotFound is returned when an execution doesn't exist in the store.
 var ErrExecutionNotFound = errors.New("execution not found")
+
+// ErrExecutionAlreadyExistsForSession is returned by Add when the session
+// already maps to a different execution. The previous behavior was to silently
+// overwrite the bySession index, which orphaned the prior execution: the
+// agentctl/subprocess kept running but was unreachable via GetBySessionID, so
+// nothing ever cleaned it up. Callers must Remove the prior execution before
+// adding a replacement.
+var ErrExecutionAlreadyExistsForSession = errors.New("execution already exists for session")
 
 // ExecutionStore provides thread-safe storage and retrieval of agent executions.
 // It maintains three indexes for efficient lookup by execution ID, session ID, and container ID.
@@ -33,13 +42,25 @@ func NewExecutionStore() *ExecutionStore {
 // Add adds an agent execution to all tracking maps.
 // The execution must have a valid ID. SessionID and ContainerID are optional
 // but will be indexed if present.
-func (s *ExecutionStore) Add(execution *AgentExecution) {
+//
+// Returns ErrExecutionAlreadyExistsForSession if the session is already mapped
+// to a different execution. Callers must explicitly Remove the prior execution
+// before adding a replacement — otherwise the prior subprocess is orphaned.
+func (s *ExecutionStore) Add(execution *AgentExecution) error {
 	if execution == nil || execution.ID == "" {
-		return
+		return fmt.Errorf("execution and execution.ID are required")
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if execution.SessionID != "" {
+		if existingID, exists := s.bySession[execution.SessionID]; exists && existingID != execution.ID {
+			return fmt.Errorf("%w: session=%s existing=%s new=%s",
+				ErrExecutionAlreadyExistsForSession,
+				execution.SessionID, existingID, execution.ID)
+		}
+	}
 
 	s.executions[execution.ID] = execution
 
@@ -50,6 +71,7 @@ func (s *ExecutionStore) Add(execution *AgentExecution) {
 	if execution.ContainerID != "" {
 		s.byContainer[execution.ContainerID] = execution.ID
 	}
+	return nil
 }
 
 // Remove removes an agent execution from all tracking maps.

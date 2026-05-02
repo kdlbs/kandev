@@ -13,10 +13,12 @@ import (
 	"github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 // allTimeActivityDays is the number of days shown in the daily activity heatmap for the "all" range.
 const allTimeActivityDays = 365
+const taskStatsLimit = 200
 
 type StatsHandlers struct {
 	repo   repository.Repository
@@ -84,6 +86,7 @@ func (h *StatsHandlers) httpGetStats(c *gin.Context) {
 			AvgDurationMsPerTask: raw.globalStats.AvgDurationMsPerTask,
 		},
 		TaskStats:         taskStatsToDTOs(raw.taskStats),
+		TaskStatsHasMore:  raw.globalStats.TotalTasks > len(raw.taskStats),
 		DailyActivity:     dailyActivityToDTOs(raw.dailyActivity),
 		CompletedActivity: completedActivityToDTOs(raw.completedActivity),
 		AgentUsage:        agentUsageToDTOs(raw.agentUsage),
@@ -100,34 +103,77 @@ func (h *StatsHandlers) httpGetStats(c *gin.Context) {
 }
 
 func (h *StatsHandlers) fetchStats(ctx context.Context, workspaceID string, start *time.Time, days int) (*rawStats, error) {
-	globalStats, err := h.repo.GetGlobalStats(ctx, workspaceID, start)
-	if err != nil {
-		return nil, fmt.Errorf("global stats: %w", err)
+	var (
+		globalStats       *models.GlobalStats
+		taskStats         []*models.TaskStats
+		dailyActivity     []*models.DailyActivity
+		completedActivity []*models.CompletedTaskActivity
+		agentUsage        []*models.AgentUsage
+		repoStats         []*models.RepositoryStats
+		gitStats          *models.GitStats
+	)
+
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.Go(func() error {
+		result, err := h.repo.GetGlobalStats(groupCtx, workspaceID, start)
+		if err != nil {
+			return fmt.Errorf("global stats: %w", err)
+		}
+		globalStats = result
+		return nil
+	})
+	group.Go(func() error {
+		result, err := h.repo.GetTaskStats(groupCtx, workspaceID, start, taskStatsLimit)
+		if err != nil {
+			return fmt.Errorf("task stats: %w", err)
+		}
+		taskStats = result
+		return nil
+	})
+	group.Go(func() error {
+		result, err := h.repo.GetDailyActivity(groupCtx, workspaceID, days)
+		if err != nil {
+			return fmt.Errorf("daily activity: %w", err)
+		}
+		dailyActivity = result
+		return nil
+	})
+	group.Go(func() error {
+		result, err := h.repo.GetCompletedTaskActivity(groupCtx, workspaceID, days)
+		if err != nil {
+			return fmt.Errorf("completed activity: %w", err)
+		}
+		completedActivity = result
+		return nil
+	})
+	group.Go(func() error {
+		result, err := h.repo.GetAgentUsage(groupCtx, workspaceID, 5, start)
+		if err != nil {
+			return fmt.Errorf("agent usage: %w", err)
+		}
+		agentUsage = result
+		return nil
+	})
+	group.Go(func() error {
+		result, err := h.repo.GetRepositoryStats(groupCtx, workspaceID, start)
+		if err != nil {
+			return fmt.Errorf("repository stats: %w", err)
+		}
+		repoStats = result
+		return nil
+	})
+	group.Go(func() error {
+		result, err := h.repo.GetGitStats(groupCtx, workspaceID, start)
+		if err != nil {
+			return fmt.Errorf("git stats: %w", err)
+		}
+		gitStats = result
+		return nil
+	})
+	if err := group.Wait(); err != nil {
+		return nil, err
 	}
-	taskStats, err := h.repo.GetTaskStats(ctx, workspaceID, start)
-	if err != nil {
-		return nil, fmt.Errorf("task stats: %w", err)
-	}
-	dailyActivity, err := h.repo.GetDailyActivity(ctx, workspaceID, days)
-	if err != nil {
-		return nil, fmt.Errorf("daily activity: %w", err)
-	}
-	completedActivity, err := h.repo.GetCompletedTaskActivity(ctx, workspaceID, days)
-	if err != nil {
-		return nil, fmt.Errorf("completed activity: %w", err)
-	}
-	agentUsage, err := h.repo.GetAgentUsage(ctx, workspaceID, 5, start)
-	if err != nil {
-		return nil, fmt.Errorf("agent usage: %w", err)
-	}
-	repoStats, err := h.repo.GetRepositoryStats(ctx, workspaceID, start)
-	if err != nil {
-		return nil, fmt.Errorf("repository stats: %w", err)
-	}
-	gitStats, err := h.repo.GetGitStats(ctx, workspaceID, start)
-	if err != nil {
-		return nil, fmt.Errorf("git stats: %w", err)
-	}
+
 	return &rawStats{
 		globalStats:       globalStats,
 		taskStats:         taskStats,

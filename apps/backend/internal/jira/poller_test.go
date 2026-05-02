@@ -3,17 +3,17 @@ package jira
 import (
 	"context"
 	"errors"
-	"sync/atomic"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-// pollerFixture wires a Service with an in-memory store and fake client/secret
-// store, then drives the Poller's probe step directly. We don't run the
-// timer-driven loop because the unit value of testing the loop is mostly that
-// it ticks on a context — which is just stdlib behavior.
+// pollerFixture wires a Service against a real in-memory store and fake
+// client/secret store. Loop semantics are tested in
+// internal/integrations/healthpoll; the cases here exercise the jira-specific
+// integration of the loop with Service.RecordAuthHealth (error preservation,
+// LastCheckedAt) and the Start/Stop wiring.
 type pollerFixture struct {
 	store   *Store
 	secrets *fakeSecretStore
@@ -37,9 +37,9 @@ func newPollerFixture(t *testing.T) *pollerFixture {
 }
 
 // saveConfig persists a workspace config directly via the store + secret
-// fakes. We deliberately avoid Service.SetConfig here because it now fires an
+// fakes. We deliberately avoid Service.SetConfig here because it fires an
 // async auth probe in a goroutine — fine for production but it would race
-// against the deterministic `probeAll` calls these tests make.
+// against the deterministic RecordAuthHealth calls these tests make.
 func (f *pollerFixture) saveConfig(t *testing.T, workspaceID, secret string) {
 	t.Helper()
 	ctx := context.Background()
@@ -57,14 +57,14 @@ func (f *pollerFixture) saveConfig(t *testing.T, workspaceID, secret string) {
 	}
 }
 
-func TestPoller_ProbeAll_RecordsSuccess(t *testing.T) {
+func TestService_RecordAuthHealth_RecordsSuccess(t *testing.T) {
 	f := newPollerFixture(t)
 	f.saveConfig(t, "ws-1", "tok")
 	f.client.testAuthFn = func() (*TestConnectionResult, error) {
 		return &TestConnectionResult{OK: true, DisplayName: "Alice"}, nil
 	}
 
-	f.poller.probeAll(context.Background())
+	f.svc.RecordAuthHealth(context.Background(), "ws-1")
 
 	cfg, _ := f.store.GetConfig(context.Background(), "ws-1")
 	if cfg == nil {
@@ -81,7 +81,7 @@ func TestPoller_ProbeAll_RecordsSuccess(t *testing.T) {
 	}
 }
 
-func TestPoller_ProbeAll_RecordsFailure(t *testing.T) {
+func TestService_RecordAuthHealth_RecordsFailure(t *testing.T) {
 	f := newPollerFixture(t)
 	f.saveConfig(t, "ws-1", "tok")
 	f.client.testAuthFn = func() (*TestConnectionResult, error) {
@@ -90,7 +90,7 @@ func TestPoller_ProbeAll_RecordsFailure(t *testing.T) {
 		return &TestConnectionResult{OK: false, Error: "step-up auth required"}, nil
 	}
 
-	f.poller.probeAll(context.Background())
+	f.svc.RecordAuthHealth(context.Background(), "ws-1")
 
 	cfg, _ := f.store.GetConfig(context.Background(), "ws-1")
 	if cfg.LastOk {
@@ -101,14 +101,14 @@ func TestPoller_ProbeAll_RecordsFailure(t *testing.T) {
 	}
 }
 
-func TestPoller_ProbeAll_ClientError(t *testing.T) {
+func TestService_RecordAuthHealth_ClientError(t *testing.T) {
 	f := newPollerFixture(t)
 	f.saveConfig(t, "ws-1", "tok")
 	f.client.testAuthFn = func() (*TestConnectionResult, error) {
 		return nil, errors.New("network timeout")
 	}
 
-	f.poller.probeAll(context.Background())
+	f.svc.RecordAuthHealth(context.Background(), "ws-1")
 
 	cfg, _ := f.store.GetConfig(context.Background(), "ws-1")
 	if cfg.LastOk {
@@ -119,90 +119,34 @@ func TestPoller_ProbeAll_ClientError(t *testing.T) {
 	}
 }
 
-func TestPoller_ProbeAll_NoWorkspaces(t *testing.T) {
-	f := newPollerFixture(t)
-	// Should be a clean no-op when nothing is configured.
-	f.poller.probeAll(context.Background())
-}
-
-func TestPoller_ProbeAll_MultipleWorkspaces(t *testing.T) {
-	f := newPollerFixture(t)
-	f.saveConfig(t, "ws-a", "tok-a")
-	f.saveConfig(t, "ws-b", "tok-b")
-	calls := 0
-	f.client.testAuthFn = func() (*TestConnectionResult, error) {
-		calls++
-		return &TestConnectionResult{OK: true}, nil
-	}
-
-	f.poller.probeAll(context.Background())
-
-	if calls != 2 {
-		t.Errorf("expected 2 probe calls, got %d", calls)
-	}
-	for _, id := range []string{"ws-a", "ws-b"} {
-		cfg, _ := f.store.GetConfig(context.Background(), id)
-		if !cfg.LastOk || cfg.LastCheckedAt == nil {
-			t.Errorf("workspace %s missing health update: %+v", id, cfg)
+func TestPoller_Start_ProbesEachConfiguredWorkspace(t *testing.T) {
+	// Smoke test: confirms the prober adapter actually wires
+	// Service.Store().ListConfiguredWorkspaces → Service.RecordAuthHealth
+	// when the loop is started, end-to-end. Wrapped in synctest so the
+	// goroutine the poller spawns runs deterministically against fake time
+	// instead of relying on a wall-clock deadline.
+	synctest.Test(t, func(t *testing.T) {
+		f := newPollerFixture(t)
+		f.saveConfig(t, "ws-a", "tok-a")
+		f.saveConfig(t, "ws-b", "tok-b")
+		probed := map[string]bool{}
+		f.client.testAuthFn = func() (*TestConnectionResult, error) {
+			return &TestConnectionResult{OK: true}, nil
 		}
-	}
-}
+		f.svc.SetProbeHook(func(workspaceID string) {
+			probed[workspaceID] = true
+		})
 
-func TestPoller_StartStop(t *testing.T) {
-	f := newPollerFixture(t)
-	f.saveConfig(t, "ws-1", "tok")
-	probed := make(chan struct{}, 1)
-	f.client.testAuthFn = func() (*TestConnectionResult, error) {
-		select {
-		case probed <- struct{}{}:
-		default:
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		f.poller.Start(ctx)
+		defer f.poller.Stop()
+
+		// Wait for the immediate-on-Start probe pass to finish.
+		synctest.Wait()
+
+		if !probed["ws-a"] || !probed["ws-b"] {
+			t.Errorf("expected both ws-a and ws-b probed, got %v", probed)
 		}
-		return &TestConnectionResult{OK: true}, nil
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	f.poller.Start(ctx)
-	defer f.poller.Stop()
-
-	// The loop runs an initial probe immediately on Start; the fake client
-	// signals on `probed` so we wait without polling.
-	select {
-	case <-probed:
-	case <-time.After(2 * time.Second):
-		t.Fatal("poller did not record an initial probe within 2s")
-	}
-}
-
-func TestPoller_StartIsIdempotent(t *testing.T) {
-	f := newPollerFixture(t)
-	f.saveConfig(t, "ws-1", "tok")
-	var calls int32
-	probed := make(chan struct{}, 1)
-	f.client.testAuthFn = func() (*TestConnectionResult, error) {
-		atomic.AddInt32(&calls, 1)
-		select {
-		case probed <- struct{}{}:
-		default:
-		}
-		return &TestConnectionResult{OK: true}, nil
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	f.poller.Start(ctx)
-	f.poller.Start(ctx) // second call must be a no-op (no second goroutine).
-
-	// Wait for the first probe to land. If the second Start spawned a parallel
-	// loop we'd see two probes back-to-back.
-	select {
-	case <-probed:
-	case <-time.After(2 * time.Second):
-		t.Fatal("poller did not run an initial probe within 2s")
-	}
-	f.poller.Stop()
-
-	if got := atomic.LoadInt32(&calls); got != 1 {
-		t.Errorf("expected exactly 1 probe call from the initial run, got %d", got)
-	}
+	})
 }

@@ -11,8 +11,8 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { IconBrandGithub, IconHexagon, IconPlugConnected, IconTicket } from "@tabler/icons-react";
-import { useJiraAvailable } from "@/components/jira/my-jira/use-jira-availability";
-import { useLinearAvailable } from "@/components/linear/use-linear-availability";
+import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
+import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import type { GitHubStatus } from "@/lib/types/github";
 

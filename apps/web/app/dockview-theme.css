@@ -179,7 +179,6 @@
 
 .dockview-theme-kandev .dv-left-actions-container button,
 .dockview-theme-kandev .dv-right-actions-container button {
-  border-radius: 5px;
   cursor: pointer;
 }
 

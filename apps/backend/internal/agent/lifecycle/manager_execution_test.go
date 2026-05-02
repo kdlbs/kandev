@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -360,38 +361,43 @@ func TestGetOrEnsureExecutionForEnvironment(t *testing.T) {
 				},
 			},
 		})
-		backend.delay = 50 * time.Millisecond
+		backend.entered = make(chan struct{}, 1)
+		backend.barrier = make(chan struct{})
 
-		var wg sync.WaitGroup
-		errs := make(chan error, 2)
-		ids := make(chan string, 2)
+		type result struct {
+			id  string
+			err error
+		}
+		results := make(chan result, 2)
 		for range 2 {
-			wg.Add(1)
 			go func() {
-				defer wg.Done()
 				execution, err := mgr.GetOrEnsureExecutionForEnvironment(context.Background(), "env-new")
 				if err != nil {
-					errs <- err
+					results <- result{"", err}
 					return
 				}
-				ids <- execution.ID
+				results <- result{execution.ID, nil}
 			}()
 		}
-		wg.Wait()
-		close(errs)
-		close(ids)
 
-		for err := range errs {
-			t.Fatalf("GetOrEnsureExecutionForEnvironment returned error: %v", err)
+		select {
+		case <-backend.entered:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for CreateInstance to start")
 		}
+		runtime.Gosched()
+		close(backend.barrier)
+
 		var firstID string
-		for id := range ids {
-			if firstID == "" {
-				firstID = id
-				continue
+		for range 2 {
+			r := <-results
+			if r.err != nil {
+				t.Fatalf("GetOrEnsureExecutionForEnvironment returned error: %v", r.err)
 			}
-			if id != firstID {
-				t.Errorf("execution ID = %q, want %q", id, firstID)
+			if firstID == "" {
+				firstID = r.id
+			} else if r.id != firstID {
+				t.Errorf("execution ID = %q, want %q (singleflight must return same execution)", r.id, firstID)
 			}
 		}
 		if backend.createCount.Load() != 1 {
@@ -544,11 +550,29 @@ type createInstanceExecutor struct {
 	MockExecutor
 	client      *agentctl.Client
 	createCount atomic.Int32
+	stopCount   atomic.Int32
 	delay       time.Duration
+	// Barrier-based deterministic synchronization for race tests.
+	// Set entered (buffered 1) to receive a signal when CreateInstance begins.
+	// Set barrier (unbuffered, closed to release) to block until the test is ready.
+	entered chan struct{}
+	barrier chan struct{}
 }
 
 func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
-	if e.delay > 0 {
+	if e.entered != nil {
+		select {
+		case e.entered <- struct{}{}:
+		default:
+		}
+	}
+	if e.barrier != nil {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-e.barrier:
+		}
+	} else if e.delay > 0 {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -564,6 +588,11 @@ func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *Execut
 		Client:        e.client,
 		WorkspacePath: req.WorkspacePath,
 	}, nil
+}
+
+func (e *createInstanceExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
+	e.stopCount.Add(1)
+	return nil
 }
 
 func newEnvironmentExecutionTestManager(t *testing.T, provider WorkspaceInfoProvider) (*Manager, *createInstanceExecutor) {
@@ -664,4 +693,81 @@ func (p *slowWorkspaceInfoProvider) GetWorkspaceInfoForEnvironment(_ context.Con
 		return nil, p.err
 	}
 	return p.info, nil
+}
+
+// TestGetOrEnsureExecution_DedupAcrossEnvAndSessionPaths is the regression
+// test for the orphaned-claude-acp leak introduced by PR #758, which
+// keyed GetOrEnsureExecutionForEnvironment by `"env:" + envID` instead of
+// the sessionID. Two concurrent paths for the same session each saw
+// "no execution exists" for their own key, both called createExecution,
+// and ExecutionStore.Add silently overwrote the bySession index — orphaning
+// the first execution's claude-agent-acp subprocess.
+//
+// After the fix, both paths share the sessionID-keyed singleflight bucket,
+// so concurrent callers must observe the same execution and CreateInstance
+// must be invoked exactly once.
+func TestGetOrEnsureExecution_DedupAcrossEnvAndSessionPaths(t *testing.T) {
+	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			"session-1": {
+				TaskID:            "task-1",
+				SessionID:         "session-1",
+				TaskEnvironmentID: "env-1",
+				WorkspacePath:     "/workspace/task-1",
+				AgentID:           "auggie",
+			},
+		},
+		envInfos: map[string]*WorkspaceInfo{
+			"env-1": {
+				TaskID:            "task-1",
+				SessionID:         "session-1",
+				TaskEnvironmentID: "env-1",
+				WorkspacePath:     "/workspace/task-1",
+				AgentID:           "auggie",
+			},
+		},
+	})
+	// Use a barrier channel so that the test is deterministic: CreateInstance
+	// blocks until we explicitly release it, giving the env-path goroutine
+	// time to join the same singleflight flight before we let it complete.
+	backend.entered = make(chan struct{}, 1)
+	backend.barrier = make(chan struct{})
+
+	type result struct {
+		exec *AgentExecution
+		err  error
+	}
+	results := make(chan result, 2)
+
+	go func() {
+		exec, err := mgr.GetOrEnsureExecution(context.Background(), "session-1")
+		results <- result{exec, err}
+	}()
+	go func() {
+		exec, err := mgr.GetOrEnsureExecutionForEnvironment(context.Background(), "env-1")
+		results <- result{exec, err}
+	}()
+
+	// Wait for the singleflight winner to enter CreateInstance, then yield so
+	// the other goroutine can join the same flight before we release the barrier.
+	select {
+	case <-backend.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for CreateInstance to start")
+	}
+	runtime.Gosched()
+	close(backend.barrier)
+
+	r1 := <-results
+	r2 := <-results
+	if r1.err != nil || r2.err != nil {
+		t.Fatalf("unexpected errors: %v / %v", r1.err, r2.err)
+	}
+	if r1.exec.ID != r2.exec.ID {
+		t.Errorf("execution IDs differ: session-path=%s env-path=%s — duplicate executions created (the leak bug)",
+			r1.exec.ID, r2.exec.ID)
+	}
+	if got := backend.createCount.Load(); got != 1 {
+		t.Errorf("CreateInstance called %d times, want 1 (singleflight should deduplicate)", got)
+	}
 }

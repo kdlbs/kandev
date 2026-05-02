@@ -33,8 +33,8 @@ import { JiraTicketButton, extractJiraKey } from "@/components/jira/jira-ticket-
 import { JiraLinkButton } from "@/components/jira/jira-link-button";
 import { LinearIssueButton, extractLinearKey } from "@/components/linear/linear-issue-button";
 import { LinearLinkButton } from "@/components/linear/linear-link-button";
-import { useJiraAvailable } from "@/components/jira/my-jira/use-jira-availability";
-import { useLinearAvailable } from "@/components/linear/use-linear-availability";
+import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
+import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";

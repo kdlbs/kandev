@@ -17,7 +17,7 @@ import {
 } from "@kandev/ui/pagination";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { PageTopbar } from "@/components/page-topbar";
-import { useLinearAvailable } from "@/components/linear/use-linear-availability";
+import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
 import {
   formatRelative,
   LinearErrorMessage,

@@ -2,7 +2,7 @@ package executor
 
 import "testing"
 
-// Pinpointed tests for resolveTaskEnvWorkspacePath. The persisted workspace_path
+// Pinpointed tests for computeWorkspacePath. The persisted workspace_path
 // becomes agentctl's WorkDir on cold start (GetOrEnsureExecution); pointing it
 // at the wrong directory disables the per-repo tracker fan-out and silently
 // drops the Changes panel back to single-repo mode.
@@ -19,7 +19,7 @@ func TestResolveTaskEnvWorkspacePath(t *testing.T) {
 				{WorktreePath: "/tmp/tasks/do-nothing_mvo/thm"},
 			},
 		}
-		if got := resolveTaskEnvWorkspacePath(req, resp); got != "/tmp/tasks/do-nothing_mvo" {
+		if got := computeWorkspacePath(req, resp); got != "/tmp/tasks/do-nothing_mvo" {
 			t.Fatalf("multi-repo: want /tmp/tasks/do-nothing_mvo, got %q", got)
 		}
 	})
@@ -29,7 +29,7 @@ func TestResolveTaskEnvWorkspacePath(t *testing.T) {
 		resp := &LaunchAgentResponse{
 			WorktreePath: "/tmp/tasks/fix-thing_abc/kandev",
 		}
-		if got := resolveTaskEnvWorkspacePath(req, resp); got != "/tmp/tasks/fix-thing_abc" {
+		if got := computeWorkspacePath(req, resp); got != "/tmp/tasks/fix-thing_abc" {
 			t.Fatalf("single-repo: want /tmp/tasks/fix-thing_abc, got %q", got)
 		}
 	})
@@ -37,7 +37,7 @@ func TestResolveTaskEnvWorkspacePath(t *testing.T) {
 	t.Run("non-task-dir mode passes worktree path through", func(t *testing.T) {
 		req := &LaunchAgentRequest{} // TaskDirName empty
 		resp := &LaunchAgentResponse{WorktreePath: "/legacy/worktrees/xyz"}
-		if got := resolveTaskEnvWorkspacePath(req, resp); got != "/legacy/worktrees/xyz" {
+		if got := computeWorkspacePath(req, resp); got != "/legacy/worktrees/xyz" {
 			t.Fatalf("non-task-dir: want /legacy/worktrees/xyz, got %q", got)
 		}
 	})
@@ -45,7 +45,7 @@ func TestResolveTaskEnvWorkspacePath(t *testing.T) {
 	t.Run("no worktree falls back to repository path", func(t *testing.T) {
 		req := &LaunchAgentRequest{RepositoryPath: "/repos/myrepo"}
 		resp := &LaunchAgentResponse{} // no WorktreePath
-		if got := resolveTaskEnvWorkspacePath(req, resp); got != "/repos/myrepo" {
+		if got := computeWorkspacePath(req, resp); got != "/repos/myrepo" {
 			t.Fatalf("fallback: want /repos/myrepo, got %q", got)
 		}
 	})

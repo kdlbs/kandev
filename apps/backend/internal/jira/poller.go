@@ -8,14 +8,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/integrations/healthpoll"
 )
-
-// defaultAuthPollInterval is how often the auth-health poller probes each
-// configured workspace. 90s is a compromise: short enough to keep
-// session-cookie auth warm (Atlassian idle-times sessions out after a few
-// minutes) and to surface expirations promptly in the UI, long enough that we
-// don't hammer Atlassian when many workspaces are configured.
-const defaultAuthPollInterval = 90 * time.Second
 
 // defaultIssuePollTickInterval is how often the issue-watch loop wakes up to
 // look at every enabled watcher. The actual JQL is only re-run for a watcher
@@ -27,30 +21,35 @@ const defaultIssuePollTickInterval = 60 * time.Second
 
 // Poller drives two background loops sharing a single Service:
 //   - auth health: probes stored credentials so the UI can show connect status.
+//     Delegated to internal/integrations/healthpoll for the loop semantics.
 //   - issue watches: runs each enabled watcher's JQL and emits NewJiraIssueEvent
-//     for every matching ticket the orchestrator hasn't yet seen.
+//     for every matching ticket the orchestrator hasn't yet seen. Jira-specific
+//     and stays local.
 //
 // Both loops are cancelled together via Stop.
 type Poller struct {
 	service       *Service
 	logger        *logger.Logger
-	authInterval  time.Duration
+	auth          *healthpoll.Poller
 	issueInterval time.Duration
 	issueTickHook func() // tests use this to observe each issue-watch tick.
 
 	// mu guards started/cancel/wg against concurrent Start/Stop calls.
-	mu      sync.Mutex
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	started bool
+	mu              sync.Mutex
+	cancelIssueLoop context.CancelFunc
+	wg              sync.WaitGroup
+	started         bool
 }
 
 // NewPoller returns a poller using the default cadences.
 func NewPoller(svc *Service, log *logger.Logger) *Poller {
+	if svc == nil {
+		return nil
+	}
 	return &Poller{
 		service:       svc,
 		logger:        log,
-		authInterval:  defaultAuthPollInterval,
+		auth:          healthpoll.New("jira", svcProber{svc}, log),
 		issueInterval: defaultIssuePollTickInterval,
 	}
 }
@@ -65,55 +64,47 @@ func (p *Poller) SetIssueTickHook(fn func()) {
 }
 
 // Start launches both background loops. Calling Start more than once without
-// Stop is a no-op.
+// Stop is a no-op. A nil receiver is also a no-op so callers don't have to
+// nil-check around `NewPoller(nil, log).Start(ctx)` patterns.
 func (p *Poller) Start(ctx context.Context) {
+	if p == nil {
+		return
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.started || p.service == nil {
 		return
 	}
 	p.started = true
-	ctx, p.cancel = context.WithCancel(ctx)
-	p.wg.Add(2)
-	go p.loop(ctx)
-	go p.issueWatchLoop(ctx)
-	p.logger.Info("Jira poller started")
+	issueCtx, cancel := context.WithCancel(ctx)
+	p.cancelIssueLoop = cancel
+	p.auth.Start(ctx)
+	p.wg.Add(1)
+	go p.issueWatchLoop(issueCtx)
 }
 
-// Stop cancels the loop and waits for it to drain.
+// Stop cancels both loops and waits for them to drain. A nil receiver is a
+// no-op so callers using the `defer p.Stop()` pattern alongside a possibly-
+// nil `NewPoller(svc, log)` don't have to nil-check.
 func (p *Poller) Stop() {
+	if p == nil {
+		return
+	}
 	p.mu.Lock()
 	if !p.started {
 		p.mu.Unlock()
 		return
 	}
-	cancel := p.cancel
+	cancel := p.cancelIssueLoop
 	p.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
+	p.auth.Stop()
 	p.wg.Wait()
 	p.mu.Lock()
 	p.started = false
 	p.mu.Unlock()
-	p.logger.Info("Jira poller stopped")
-}
-
-func (p *Poller) loop(ctx context.Context) {
-	defer p.wg.Done()
-	// Run an initial probe immediately so the UI gets a status without waiting
-	// the full interval after backend startup.
-	p.probeAll(ctx)
-	ticker := time.NewTicker(p.authInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			p.probeAll(ctx)
-		}
-	}
 }
 
 // issueWatchLoop drives the periodic JQL-poll → publish-event flow. Unlike
@@ -191,16 +182,14 @@ func (p *Poller) fireIssueTickHook() {
 	}
 }
 
-func (p *Poller) probeAll(ctx context.Context) {
-	ids, err := p.service.Store().ListConfiguredWorkspaces(ctx)
-	if err != nil {
-		p.logger.Warn("jira poller: list workspaces failed", zap.Error(err))
-		return
-	}
-	for _, id := range ids {
-		if ctx.Err() != nil {
-			return
-		}
-		p.service.RecordAuthHealth(ctx, id)
-	}
+// svcProber adapts *Service to healthpoll.Prober without leaking the shared
+// interface into Service's public API.
+type svcProber struct{ svc *Service }
+
+func (s svcProber) ListConfiguredWorkspaces(ctx context.Context) ([]string, error) {
+	return s.svc.Store().ListConfiguredWorkspaces(ctx)
+}
+
+func (s svcProber) RecordAuthHealth(ctx context.Context, workspaceID string) {
+	s.svc.RecordAuthHealth(ctx, workspaceID)
 }

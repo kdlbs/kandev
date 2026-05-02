@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { formatDistanceToNow } from "date-fns";
-import { IconTicket, IconCode, IconCheck, IconAlertTriangle } from "@tabler/icons-react";
+import { IconTicket, IconCode } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
@@ -15,7 +14,12 @@ import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { TaskPresetsSection } from "@/components/jira/task-presets-section";
 import { JiraIssueWatchersSection } from "@/components/jira/jira-issue-watchers-section";
-import { useJiraEnabled } from "@/components/jira/my-jira/use-jira-enabled";
+import { useJiraEnabled } from "@/hooks/domains/jira/use-jira-enabled";
+import {
+  IntegrationAuthStatusBanner,
+  type IntegrationAuthHealth,
+} from "@/components/integrations/auth-status-banner";
+import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   getJiraConfig,
   setJiraConfig,
@@ -23,10 +27,6 @@ import {
   testJiraConnection,
 } from "@/lib/api/domains/jira-api";
 import type { JiraAuthMethod, JiraConfig, TestJiraConnectionResult } from "@/lib/types/jira";
-
-// How often to re-fetch the config so the auth-health indicator picks up new
-// probe results from the backend poller (which runs every 90s).
-const STATUS_REFRESH_MS = 90_000;
 
 // Session cookies are HttpOnly so document.cookie can't read them, but
 // DevTools → Application → Cookies surfaces them in plain text. Users copy
@@ -262,13 +262,7 @@ function TestResultAlert({ result }: { result: TestJiraConnectionResult | null }
   );
 }
 
-type AuthHealth = {
-  ok: boolean;
-  error: string;
-  checkedAt: Date | null;
-};
-
-function configToHealth(config: JiraConfig | null): AuthHealth | null {
+function configToHealth(config: JiraConfig | null): IntegrationAuthHealth | null {
   if (!config?.hasSecret) return null;
   if (!config.lastCheckedAt) return { ok: false, error: "", checkedAt: null };
   return {
@@ -276,59 +270,6 @@ function configToHealth(config: JiraConfig | null): AuthHealth | null {
     error: config.lastError ?? "",
     checkedAt: new Date(config.lastCheckedAt),
   };
-}
-
-// Re-render every 30s so "checked 1 minute ago" doesn't sit stale on a long-
-// open settings tab.
-function useTick(intervalMs: number) {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((n) => n + 1), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-}
-
-function LastCheckedLabel({ checkedAt }: { checkedAt: Date | null }) {
-  useTick(30_000);
-  if (!checkedAt) return null;
-  return (
-    <span className="text-xs text-muted-foreground ml-2">
-      · checked {formatDistanceToNow(checkedAt, { addSuffix: true })}
-    </span>
-  );
-}
-
-function AuthStatusBanner({ health }: { health: AuthHealth | null }) {
-  if (!health) return null;
-  if (!health.checkedAt) {
-    return (
-      <Alert>
-        <AlertDescription className="text-sm">
-          Waiting for the next backend health check…
-        </AlertDescription>
-      </Alert>
-    );
-  }
-  if (health.ok) {
-    return (
-      <Alert className="border-green-500/40 bg-green-500/10 dark:border-green-400/30 dark:bg-green-400/10">
-        <IconCheck className="h-4 w-4 text-green-600 dark:text-green-400" />
-        <AlertDescription className="text-sm font-medium">
-          Authenticated
-          <LastCheckedLabel checkedAt={health.checkedAt} />
-        </AlertDescription>
-      </Alert>
-    );
-  }
-  return (
-    <Alert variant="destructive">
-      <IconAlertTriangle className="h-4 w-4" />
-      <AlertDescription className="text-sm">
-        Authentication failed: {health.error || "unknown error"}
-        <LastCheckedLabel checkedAt={health.checkedAt} />
-      </AlertDescription>
-    </Alert>
-  );
 }
 
 type ActionBarProps = {
@@ -424,7 +365,7 @@ function useJiraSettings(workspaceId: string) {
         .catch(() => {
           /* transient failures are fine — next tick retries */
         });
-    }, STATUS_REFRESH_MS);
+    }, INTEGRATION_STATUS_REFRESH_MS);
     return () => clearInterval(id);
   }, [workspaceId]);
 
@@ -536,7 +477,7 @@ export function JiraSettings({ workspaceId }: JiraSettingsProps) {
       >
         <Card>
           <CardContent className="space-y-4 pt-6">
-            <AuthStatusBanner health={s.health} />
+            <IntegrationAuthStatusBanner health={s.health} />
             <SiteFields form={s.form} loading={s.loading} update={s.update} />
             <AuthFields form={s.form} loading={s.loading} update={s.update} />
             <SecretField

@@ -30,7 +30,7 @@ export class SidebarFilterPopoverPage {
   }
 
   async selectViewByName(name: string): Promise<void> {
-    await this.chipRow.locator(`[data-testid='sidebar-view-chip']`, { hasText: name }).click();
+    await this.chipByName(name).click();
   }
 
   async expectActiveViewChip(name: string): Promise<void> {
@@ -38,6 +38,49 @@ export class SidebarFilterPopoverPage {
       .locator(`[data-testid='sidebar-view-chip'][data-active='true']`)
       .first();
     await expect(chip).toContainText(name);
+  }
+
+  chipByName(name: string): Locator {
+    return this.chipRow.getByTestId("sidebar-view-chip").filter({ hasText: name }).first();
+  }
+
+  async expectChipOrder(names: string[]): Promise<void> {
+    await expect
+      .poll(async () => {
+        const texts = await this.chipRow.getByTestId("sidebar-view-chip").allTextContents();
+        return texts.map((text) => text.trim());
+      })
+      .toEqual(names);
+  }
+
+  async dragViewBefore(sourceName: string, targetName: string): Promise<void> {
+    const source = this.chipByName(sourceName);
+    const target = this.chipByName(targetName);
+    await source.scrollIntoViewIfNeeded();
+    await target.scrollIntoViewIfNeeded();
+    await expect(source).toBeVisible();
+
+    const sourceBox = await source.boundingBox();
+    const targetBox = await target.boundingBox();
+    if (!sourceBox || !targetBox) throw new Error("Missing sidebar view chip drag geometry");
+    const targetLeftHalfX = targetBox.x + targetBox.width * 0.25;
+
+    await this.page.mouse.move(
+      sourceBox.x + sourceBox.width / 2,
+      sourceBox.y + sourceBox.height / 2,
+    );
+    await this.page.mouse.down();
+    // Move far enough to exceed the 8px PointerSensor activation threshold,
+    // then slide toward the target.
+    await this.page.mouse.move(
+      sourceBox.x + sourceBox.width / 2 - 16,
+      sourceBox.y + sourceBox.height / 2,
+      { steps: 4 },
+    );
+    await this.page.mouse.move(targetLeftHalfX, targetBox.y + targetBox.height / 2, {
+      steps: 20,
+    });
+    await this.page.mouse.up();
   }
 
   async addFilterRow(): Promise<void> {

@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -559,8 +560,18 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	execution.AgentCommand = cmds.initial
 	execution.ContinueCommand = cmds.continue_
 
-	// 8. Track the execution
-	m.executionStore.Add(execution)
+	// 8. Track the execution. If we lost a session-conflict race (another path
+	// added an execution for this session between our check at step 3 and now),
+	// roll back the runtime instance we just spawned and surface the same
+	// "already running" error the step-3 check would have produced — otherwise
+	// the runtime + agent subprocess would be orphaned.
+	if addErr := m.executionStore.Add(execution); addErr != nil {
+		if errors.Is(addErr, ErrExecutionAlreadyExistsForSession) {
+			m.rollbackRacedExecution(ctx, rt, execInstance, execution)
+			return nil, fmt.Errorf("session %q already has an agent running (race resolved during register)", req.SessionID)
+		}
+		return nil, fmt.Errorf("failed to register execution: %w", addErr)
+	}
 	go m.pollOneRemoteStatus(context.Background(), execution)
 
 	// 9. Publish agent.started event

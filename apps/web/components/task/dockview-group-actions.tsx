@@ -19,7 +19,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 
 const ACTION_BTN =
-  "h-5 w-5 inline-flex items-center justify-center text-muted-foreground/50 hover:text-foreground transition-colors cursor-pointer";
+  "h-5 w-5 inline-flex items-center justify-center rounded-[5px] text-muted-foreground/50 hover:text-foreground transition-colors cursor-pointer";
 
 /** Width thresholds for collapsing split/close into a dropdown. Hysteresis avoids toggle flicker. */
 const COLLAPSE_WIDTH = 320;
