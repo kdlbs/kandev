@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
+import { removeRecentTask } from "@/lib/recent-tasks";
 import type { AppState } from "@/lib/state/store";
 import { registerTasksHandlers } from "./tasks";
+
+vi.mock("@/lib/recent-tasks", () => ({
+  removeRecentTask: vi.fn(),
+}));
 
 type Listener = (state: AppState) => void;
 
@@ -15,6 +20,8 @@ function makeStore(initial: Partial<AppState> = {}) {
     kanban: { workflowId: "wf1", steps: [], tasks: [] },
     kanbanMulti: { snapshots: {}, isLoading: false },
     tasks: { activeTaskId: null, activeSessionId: null, pinnedSessionId: null },
+    taskSessionsByTask: { itemsByTaskId: {}, loadedByTaskId: {}, loadingByTaskId: {} },
+    environmentIdBySessionId: {},
     setActiveSession: vi.fn((taskId: string, sessionId: string | null) => {
       state = {
         ...state,
@@ -78,12 +85,22 @@ function makeMessage(payload: Record<string, unknown>) {
   } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.updated"]>>[0];
 }
 
+function makeDeletedMessage(payload: Record<string, unknown>) {
+  return {
+    id: "msg-1",
+    type: "notification" as const,
+    action: "task.deleted" as const,
+    payload,
+  } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.deleted"]>>[0];
+}
+
 describe("task.updated primary-session focus follow", () => {
   let store: ReturnType<typeof makeStore>;
   let setActiveSessionAuto: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     setActiveSessionAuto = vi.fn();
+    vi.mocked(removeRecentTask).mockClear();
   });
 
   it("follows focus to the new primary when the user is on the previous primary", () => {
@@ -175,5 +192,29 @@ describe("task.updated primary-session focus follow", () => {
     handlers["task.updated"]!(makeMessage(makeTask("t1", "sess-new")));
 
     expect(setActiveSessionAuto).not.toHaveBeenCalled();
+  });
+});
+
+describe("task.deleted cleanup", () => {
+  it("removes the deleted task from recent task history", () => {
+    const store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
+      } as unknown as AppState["kanban"],
+      environmentIdBySessionId: {},
+    });
+
+    const handlers = registerTasksHandlers(store);
+    handlers["task.deleted"]!(
+      makeDeletedMessage({
+        task_id: "t1",
+        workflow_id: "wf1",
+      }),
+    );
+
+    expect(removeRecentTask).toHaveBeenCalledTimes(1);
+    expect(removeRecentTask).toHaveBeenCalledWith("t1");
   });
 });
