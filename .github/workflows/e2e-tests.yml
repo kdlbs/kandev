@@ -60,6 +60,12 @@ jobs:
       - name: Build backend and web
         run: make build-backend build-web
 
+      # Linux/amd64 helper binaries (agentctl + mock-agent) bind-mounted into
+      # containers by the Docker E2E project. Cheap to build (~1s each) so we
+      # always do it; the regular E2E job ignores them.
+      - name: Build Docker E2E helper binaries
+        run: make build-backend-linux-helpers
+
       - name: Upload backend build
         uses: actions/upload-artifact@v4
         with:
@@ -130,9 +136,13 @@ jobs:
         working-directory: apps/web
         run: tar -xf next-build.tar && rm next-build.tar
 
+      # Pinned to chromium + mobile-chrome so the dedicated `e2e-docker` job
+      # below owns the real-Docker project. Without --project the docker spec
+      # would run here too, fail seeding (KANDEV_DOCKER_ENABLED is off), and
+      # spam every shard.
       - name: Run E2E tests (shard ${{ matrix.shard }}/10)
         working-directory: apps/web
-        run: npx playwright test --config e2e/playwright.config.ts --shard=${{ matrix.shard }}/10
+        run: npx playwright test --config e2e/playwright.config.ts --project=chromium --project=mobile-chrome --shard=${{ matrix.shard }}/10
 
       - name: Upload blob report
         if: always()
@@ -147,6 +157,79 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ matrix.shard }}
+          path: apps/web/e2e/test-results/
+          retention-days: 7
+
+  # Real-Docker E2E: exercises the local_docker executor end-to-end. ubuntu-latest
+  # ships with Docker preinstalled, so no service container is required. The
+  # spec count is small (currently 1 active + 2 fixme) so we don't shard.
+  # Cleans up any leftover kandev-managed containers at the end so a leaky
+  # process doesn't poison the next run on the same self-hosted runner.
+  e2e-docker:
+    name: E2E Docker
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify Docker is available
+        run: docker info
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        working-directory: apps
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: apps/web
+        run: npx playwright install chromium --with-deps
+
+      - name: Download backend build
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-backend-build
+          path: apps/backend/bin/
+
+      - name: Make backend binaries executable
+        run: chmod +x apps/backend/bin/*
+
+      - name: Download web build
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-web-build
+          path: apps/web/
+
+      - name: Extract web build
+        working-directory: apps/web
+        run: tar -xf next-build.tar && rm next-build.tar
+
+      - name: Run Docker E2E tests
+        working-directory: apps/web
+        env:
+          KANDEV_E2E_DOCKER: "1"
+        run: npx playwright test --config e2e/playwright.config.ts --project=docker
+
+      - name: Cleanup leftover kandev containers
+        if: always()
+        run: docker ps -aq --filter label=kandev.managed=true | xargs -r docker rm -f
+
+      - name: Upload Docker E2E results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-e2e-test-results
           path: apps/web/e2e/test-results/
           retention-days: 7
 
