@@ -28,7 +28,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { useArchivedTaskState } from "./task-archived-context";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
-import { hasPendingClarification } from "@/lib/utils/pending-clarification";
+import { hasPendingClarificationForSession } from "@/lib/utils/pending-clarification";
 
 /**
  * Stabilize a derived array of primary session IDs so the reference only
@@ -116,14 +116,6 @@ function toIssueInfo(
     : undefined;
 }
 
-function hasPendingClarificationForTask(
-  task: { primarySessionId?: string | null },
-  messagesBySession: Record<string, Message[]>,
-): boolean {
-  if (!task.primarySessionId) return false;
-  return hasPendingClarification(messagesBySession[task.primarySessionId]);
-}
-
 /** Map a kanban task to a sidebar item with session info and repository metadata. */
 function toSidebarItem(
   task: KanbanState["tasks"][number] & { _workflowId: string },
@@ -140,9 +132,9 @@ function toSidebarItem(
   const repoSlug = task.repositoryId ? ctx.repositorySlugById.get(task.repositoryId) : undefined;
   // Sidebar shows just one slot; pick the primary PR (first by created_at).
   const pr = ctx.taskPRsByTaskId[task.id]?.[0];
-  const hasPendingClarificationRequest = hasPendingClarificationForTask(
-    task,
+  const hasPendingClarificationRequest = hasPendingClarificationForSession(
     ctx.messagesBySession,
+    task.primarySessionId,
   );
 
   const diffStats = resolveDiffStats(

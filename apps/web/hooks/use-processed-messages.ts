@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { Message, ClarificationRequestMetadata, MessageType } from "@/lib/types/http";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
+import { findPendingClarification } from "@/lib/utils/pending-clarification";
 
 const ACTIVITY_MESSAGE_TYPES: Set<MessageType> = new Set([
   "thinking",
@@ -98,17 +99,6 @@ function buildSubagentChildIds(childrenByParentToolCallId: Map<string, Message[]
     for (const child of children) set.add(child.id);
   }
   return set;
-}
-
-function findPendingClarification(messages: Message[]): Message | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (message.type === "clarification_request") {
-      const metadata = message.metadata as ClarificationRequestMetadata | undefined;
-      if (!metadata?.status || metadata.status === "pending") return message;
-    }
-  }
-  return null;
 }
 
 function isRecoveryMessage(message: Message): boolean {

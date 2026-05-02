@@ -42,4 +42,23 @@ describe("hasPendingClarification", () => {
       ]),
     ).toBe(false);
   });
+
+  it("treats rejected and expired clarifications as not pending", () => {
+    expect(
+      hasPendingClarification([
+        message({
+          type: "clarification_request",
+          metadata: { status: "rejected" },
+        }),
+      ]),
+    ).toBe(false);
+    expect(
+      hasPendingClarification([
+        message({
+          type: "clarification_request",
+          metadata: { status: "expired" },
+        }),
+      ]),
+    ).toBe(false);
+  });
 });

@@ -17,3 +17,11 @@ export function findPendingClarification(messages?: readonly Message[] | null): 
 export function hasPendingClarification(messages?: readonly Message[] | null): boolean {
   return findPendingClarification(messages) !== null;
 }
+
+export function hasPendingClarificationForSession(
+  messagesBySession: Record<string, readonly Message[] | undefined>,
+  sessionId?: string | null,
+): boolean {
+  if (!sessionId) return false;
+  return hasPendingClarification(messagesBySession[sessionId]);
+}
