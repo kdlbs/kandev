@@ -75,7 +75,6 @@ export function useActiveTaskPRsWithFiles(): {
   useEffect(() => {
     const client = getWebSocketClient();
     if (!client) return;
-    let cancelled = false;
     for (const pr of prs) {
       const key = fetchKey(pr);
       if (fetchedRef.current.has(key) || inFlightRef.current.has(key)) continue;
@@ -89,19 +88,21 @@ export function useActiveTaskPRsWithFiles(): {
         .then((response) => {
           inFlightRef.current.delete(key);
           fetchedRef.current.add(key);
-          if (cancelled) return;
           setFilesByPRKey((prev) => ({ ...prev, [key]: response?.files ?? [] }));
         })
         .catch(() => {
           inFlightRef.current.delete(key);
           fetchedRef.current.add(key);
-          if (cancelled) return;
           setFilesByPRKey((prev) => ({ ...prev, [key]: [] }));
         });
     }
-    return () => {
-      cancelled = true;
-    };
+    // No cleanup-time cancellation: the per-key dedup via inFlightRef +
+    // fetchedRef already prevents duplicate requests, and the response
+    // handlers use functional setState so they're safe to land after the
+    // effect re-runs. Adding `cancelled = true` here used to drop responses
+    // from the previous effect instance — and since the next effect's
+    // early-continue saw the key still in inFlightRef, no fresh request
+    // was issued either, leaving files permanently empty.
   }, [prs]);
 
   return { prs, filesByPRKey };
