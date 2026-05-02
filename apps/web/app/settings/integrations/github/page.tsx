@@ -1,5 +1,5 @@
 import { GitHubIntegrationPage } from "@/components/github/github-settings";
-import { StateProvider } from "@/components/state-provider";
+import { StateHydrator } from "@/components/state-hydrator";
 import { fetchGitHubStatus } from "@/lib/api/domains/github-api";
 
 export default async function IntegrationsGitHubPage() {
@@ -14,8 +14,9 @@ export default async function IntegrationsGitHubPage() {
       }
     : {};
   return (
-    <StateProvider initialState={initialState}>
+    <>
+      <StateHydrator initialState={initialState} />
       <GitHubIntegrationPage />
-    </StateProvider>
+    </>
   );
 }
