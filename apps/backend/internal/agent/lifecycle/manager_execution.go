@@ -35,13 +35,11 @@ func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*
 		return execution, nil
 	}
 
-	// Slow path: create on-demand, deduplicated by singleflight
+	// Slow path: create on-demand, deduplicated by sessionID-keyed singleflight.
+	// Use ensureWorkspaceExecutionLocked (not EnsureWorkspaceExecutionForSession)
+	// to avoid recursing into the same singleflight slot we already hold.
 	v, err, _ := m.ensureExecutionGroup.Do(sessionID, func() (interface{}, error) {
-		// Double-check after acquiring singleflight slot
-		if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
-			return execution, nil
-		}
-		return m.EnsureWorkspaceExecutionForSession(ctx, "", sessionID)
+		return m.ensureWorkspaceExecutionLocked(ctx, "", sessionID)
 	})
 	if err != nil {
 		return nil, err
@@ -51,6 +49,14 @@ func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*
 
 // GetOrEnsureExecutionForEnvironment returns an execution for a task environment,
 // creating one on-demand from the workspace info provider when needed.
+//
+// Important: this MUST share the session-keyed singleflight bucket with
+// GetOrEnsureExecution(sessionID) and EnsureWorkspaceExecutionForSession.
+// A previous version keyed by `"env:" + envID`, which let a concurrent
+// session-keyed call race past it (each path observed "no execution" for its
+// own key, both called createExecution, both ExecutionStore.Add, the second
+// silently overwrote the bySession index, and the first execution's
+// agent subprocess was orphaned). See `ErrExecutionAlreadyExistsForSession`.
 func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEnvironmentID string) (*AgentExecution, error) {
 	if taskEnvironmentID == "" {
 		return nil, fmt.Errorf("task_environment_id is required")
@@ -60,32 +66,38 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 		return execution, nil
 	}
 
-	groupKey := "env:" + taskEnvironmentID
-	v, err, _ := m.ensureExecutionGroup.Do(groupKey, func() (interface{}, error) {
-		if execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID); exists {
+	if m.workspaceInfoProvider == nil {
+		return nil, fmt.Errorf("workspace info provider not configured")
+	}
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForEnvironment(ctx, taskEnvironmentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workspace info for environment %s: %w", taskEnvironmentID, err)
+	}
+	if info == nil {
+		return nil, fmt.Errorf("task environment %s not found", taskEnvironmentID)
+	}
+	if info.TaskEnvironmentID == "" {
+		return nil, fmt.Errorf("task environment %s has no task_environment_id", taskEnvironmentID)
+	}
+	if info.TaskEnvironmentID != taskEnvironmentID {
+		return nil, fmt.Errorf("workspace info resolved environment %s, want %s", info.TaskEnvironmentID, taskEnvironmentID)
+	}
+	if info.WorkspacePath == "" {
+		return nil, fmt.Errorf("%w: task environment %s has no workspace path yet", ErrSessionWorkspaceNotReady, taskEnvironmentID)
+	}
+	if info.SessionID == "" {
+		return nil, fmt.Errorf("task environment %s has no task session", taskEnvironmentID)
+	}
+
+	// Share the sessionID-keyed bucket so we deduplicate against any concurrent
+	// GetOrEnsureExecution(sessionID) / EnsureWorkspaceExecutionForSession for
+	// the same session.
+	v, err, _ := m.ensureExecutionGroup.Do(info.SessionID, func() (interface{}, error) {
+		if execution, exists := m.executionStore.GetBySessionID(info.SessionID); exists {
 			return execution, nil
 		}
-		if m.workspaceInfoProvider == nil {
-			return nil, fmt.Errorf("workspace info provider not configured")
-		}
-		info, err := m.workspaceInfoProvider.GetWorkspaceInfoForEnvironment(ctx, taskEnvironmentID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get workspace info for environment %s: %w", taskEnvironmentID, err)
-		}
-		if info == nil {
-			return nil, fmt.Errorf("task environment %s not found", taskEnvironmentID)
-		}
-		if info.TaskEnvironmentID == "" {
-			return nil, fmt.Errorf("task environment %s has no task_environment_id", taskEnvironmentID)
-		}
-		if info.TaskEnvironmentID != taskEnvironmentID {
-			return nil, fmt.Errorf("workspace info resolved environment %s, want %s", info.TaskEnvironmentID, taskEnvironmentID)
-		}
-		if info.WorkspacePath == "" {
-			return nil, fmt.Errorf("%w: task environment %s has no workspace path yet", ErrSessionWorkspaceNotReady, taskEnvironmentID)
-		}
-		if info.SessionID == "" {
-			return nil, fmt.Errorf("task environment %s has no task session", taskEnvironmentID)
+		if execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID); exists {
+			return execution, nil
 		}
 		return m.createExecution(ctx, info.TaskID, info)
 	})
@@ -99,13 +111,40 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 // This is used when the frontend provides a session ID (e.g., from URL path /task/[id]/[sessionId]).
 // If an execution already exists for the session, it returns it. Otherwise, it creates a new execution
 // using the session's workspace configuration from the database.
+//
+// Concurrent calls (including from GetOrEnsureExecution and
+// GetOrEnsureExecutionForEnvironment) are deduplicated via the same
+// sessionID-keyed singleflight bucket so they cannot race past their
+// individual check-then-act guards and create duplicate executions.
 func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) (*AgentExecution, error) {
-	// Check if execution already exists
+	if sessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+
+	// Fast path: execution already in memory
 	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
 		return execution, nil
 	}
 
-	// Need to create a new execution - get workspace info for the specific session
+	v, err, _ := m.ensureExecutionGroup.Do(sessionID, func() (interface{}, error) {
+		return m.ensureWorkspaceExecutionLocked(ctx, taskID, sessionID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*AgentExecution), nil
+}
+
+// ensureWorkspaceExecutionLocked is the body of EnsureWorkspaceExecutionForSession
+// run inside the sessionID-keyed singleflight bucket. Callers other than
+// EnsureWorkspaceExecutionForSession must already hold the singleflight slot.
+func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, sessionID string) (*AgentExecution, error) {
+	// Double-check after acquiring the slot — a peer in the same group may have
+	// finished while we were waiting.
+	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
+		return execution, nil
+	}
+
 	if m.workspaceInfoProvider == nil {
 		return nil, fmt.Errorf("workspace info provider not configured")
 	}
@@ -113,6 +152,9 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, taskID, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workspace info for session %s: %w", sessionID, err)
+	}
+	if info == nil {
+		return nil, fmt.Errorf("session %s not found", sessionID)
 	}
 
 	// Resolve taskID from provider when caller doesn't have it (e.g., GetOrEnsureExecution)
@@ -346,9 +388,6 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	execution := runtimeInstance.ToAgentExecution(req)
 	execution.RuntimeName = string(rt.Name())
 
-	// Persist agentctl auth token from handshake (Docker/remote executors)
-	m.persistAuthToken(ctx, runtimeInstance, execution)
-
 	// Set the ACP session ID for session resumption
 	if info.ACPSessionID != "" {
 		execution.ACPSessionID = info.ACPSessionID
@@ -363,7 +402,23 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		execution.agentctl.SetTraceContext(execution.SessionTraceContext())
 	}
 
-	m.executionStore.Add(execution)
+	if addErr := m.executionStore.Add(execution); addErr != nil {
+		// Lost a race: another path created an execution for this session
+		// between our check and our Add. Roll back the runtime instance we
+		// just spawned (otherwise its subprocess is orphaned) and return the
+		// winner so the caller observes a single execution per session.
+		if errors.Is(addErr, ErrExecutionAlreadyExistsForSession) {
+			m.rollbackRacedExecution(ctx, rt, runtimeInstance, execution)
+			if existing, ok := m.executionStore.GetBySessionID(info.SessionID); ok {
+				return existing, nil
+			}
+		}
+		return nil, fmt.Errorf("failed to register execution: %w", addErr)
+	}
+
+	// Persist agentctl auth token only after the execution is tracked, so a
+	// race-lost rollback never leaves an orphaned secret in the store.
+	m.persistAuthToken(ctx, runtimeInstance, execution)
 	go m.pollOneRemoteStatus(context.Background(), execution)
 
 	go m.waitForAgentctlReady(execution)
@@ -375,6 +430,27 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		zap.String("runtime", execution.RuntimeName))
 
 	return execution, nil
+}
+
+// rollbackRacedExecution tears down an execution that lost a session-conflict
+// race in the store. Without this the runtime instance (agentctl + agent
+// subprocess if any) keeps running with no tracking entry, and no cleanup path
+// will ever find it.
+func (m *Manager) rollbackRacedExecution(ctx context.Context, rt ExecutorBackend, runtimeInstance *ExecutorInstance, execution *AgentExecution) {
+	m.logger.Warn("rolling back duplicate execution after session-conflict race",
+		zap.String("execution_id", execution.ID),
+		zap.String("session_id", execution.SessionID))
+	if rt != nil && runtimeInstance != nil {
+		if stopErr := rt.StopInstance(ctx, runtimeInstance, false); stopErr != nil {
+			m.logger.Warn("failed to stop raced runtime instance during rollback",
+				zap.String("execution_id", execution.ID),
+				zap.Error(stopErr))
+		}
+	}
+	if execution.agentctl != nil {
+		execution.agentctl.Close()
+	}
+	execution.EndSessionSpan()
 }
 
 // MetadataKeyAuthTokenSecret is the metadata key for the encrypted agentctl auth token secret ID.

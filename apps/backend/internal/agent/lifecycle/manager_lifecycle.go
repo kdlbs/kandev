@@ -76,7 +76,21 @@ func (m *Manager) Start(ctx context.Context) error {
 				execution.SessionTraceContext(), execution.TaskID, execution.SessionID, execution.ID,
 			)
 
-			m.executionStore.Add(execution)
+			if err := m.executionStore.Add(execution); err != nil {
+				// Should not happen at startup — duplicate sessions in the recovery
+				// list signal a DB consistency issue, not a normal race. Log loudly
+				// and skip; the first one to land wins.
+				m.logger.Error("skipping duplicate execution during recovery",
+					zap.String("execution_id", execution.ID),
+					zap.String("session_id", execution.SessionID),
+					zap.Error(err))
+				if execution.agentctl != nil {
+					execution.agentctl.Close()
+				}
+				execution.EndSessionSpan()
+				initSpan.End()
+				continue
+			}
 
 			// Reconnect to workspace streams (shell, git, file changes) in background
 			// This is needed so shell.input, git status, etc. work after backend restart
