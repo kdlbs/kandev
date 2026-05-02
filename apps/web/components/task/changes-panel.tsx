@@ -438,6 +438,17 @@ function useChangesPanelPRData() {
     }
     return out;
   }, [reposByWorkspace]);
+  // Tag PR files with their repo whenever the TASK is multi-repo, not just
+  // when there are 2+ PRs. A multi-repo task with one PR (e.g. one repo
+  // doesn't have a branch yet) still benefits from the per-repo header so
+  // the user can tell which repo's files are being shown — the COMMITS and
+  // STAGED sections already do this.
+  const taskHasMultipleRepos = useAppStore((s) => {
+    const taskId = s.tasks.activeTaskId;
+    if (!taskId) return false;
+    const task = s.kanban.tasks.find((t: { id: string }) => t.id === taskId);
+    return (task?.repositories?.length ?? 0) > 1;
+  });
   const taskPR = useActiveTaskPR();
   const refreshKey = taskPR?.last_synced_at ?? null;
   const { commits: prCommitsList } = usePRCommits(
@@ -453,16 +464,17 @@ function useChangesPanelPRData() {
       const key = `${pr.owner}/${pr.repo}/${pr.pr_number}/${pr.last_synced_at ?? ""}`;
       const files = filesByPRKey[key] ?? [];
       const repoName = pr.repository_id ? (repoNameById[pr.repository_id] ?? "") : "";
-      // Single-PR tasks fall back to "" so the section header alone shows;
-      // multi-PR tasks always tag with the resolved repo name (or the
-      // owner/repo if the workspace lookup failed for some reason — better
-      // than leaving the row in a phantom "untagged" group).
-      const stamp = prs.length > 1 ? repoName || `${pr.owner}/${pr.repo}` : "";
+      // Single-repo tasks render flat (the section header is enough);
+      // multi-repo tasks always tag with the resolved repo name so the
+      // PRFilesGroupedList renders one sub-header per repo, even when only
+      // one repo has a PR yet. Falls back to owner/repo if the workspace
+      // lookup misses, so the row never lands in an untagged phantom group.
+      const stamp = taskHasMultipleRepos ? repoName || `${pr.owner}/${pr.repo}` : "";
       merged.push(...mapPRFilesToChangedFiles(files, stamp));
       flat.push(...files);
     }
     return { prFiles: merged, prDiffFiles: flat };
-  }, [prs, filesByPRKey, repoNameById]);
+  }, [prs, filesByPRKey, repoNameById, taskHasMultipleRepos]);
   const hasPRFiles = prFiles.length > 0;
   const hasPRCommits = prCommitsList.length > 0;
   return { prDiffFiles, prCommitsList, hasPRFiles, hasPRCommits, prFiles };
