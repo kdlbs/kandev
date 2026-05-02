@@ -425,14 +425,19 @@ export function buildExtraPanelActions(get: StoreGet) {
         opts?.quiet ?? false,
       );
     },
-    addPRPanel: () => {
+    addPRPanel: (prKey?: string) => {
       const { api, centerGroupId } = get();
       if (!api) return;
+      // Multi-repo: each TaskPR opens in its own panel keyed by
+      // owner/repo/pr_number so multiple PRs can be tabbed side-by-side.
+      // Legacy single-repo callers (no key) get the historical panel id.
+      const id = prKey ? `pr-detail|${prKey}` : "pr-detail";
       focusOrAddPanel(api, {
-        id: "pr-detail",
+        id,
         component: "pr-detail",
         title: "Pull Request",
         position: { referenceGroup: centerGroupId },
+        params: prKey ? { prKey } : undefined,
       });
     },
     addTerminalPanel: (terminalId?: string, groupId?: string) => {

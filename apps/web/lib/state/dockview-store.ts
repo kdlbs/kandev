@@ -113,7 +113,8 @@ type DockviewStore = {
   addVscodePanel: () => void;
   openInternalVscode: (goto_: { file: string; line: number; col: number } | null) => void;
   addPlanPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
-  addPRPanel: () => void;
+  /** Open a PR detail panel. prKey (owner/repo/pr_number) gives multi-repo tasks one tab per PR. */
+  addPRPanel: (prKey?: string) => void;
   addTerminalPanel: (terminalId?: string, groupId?: string) => void;
   selectedDiff: { path: string; content?: string } | null;
   setSelectedDiff: (diff: { path: string; content?: string } | null) => void;

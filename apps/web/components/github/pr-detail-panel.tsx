@@ -17,7 +17,7 @@ import { Separator } from "@kandev/ui/separator";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
-import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { useActiveTaskPR, useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { prPanelLabel } from "@/components/github/pr-utils";
 import { usePRFeedback } from "@/hooks/domains/github/use-pr-feedback";
 import { useCommentsStore } from "@/lib/state/slices/comments";
@@ -41,11 +41,20 @@ import { CommentsSection } from "./pr-comments-section";
 
 type PRDetailPanelProps = {
   panelId: string;
+  /** Per-PR params; multi-repo panels carry prKey="<owner>/<repo>/<pr_number>". */
+  params?: { prKey?: string };
 };
 
-export function PRDetailPanelComponent({ panelId }: PRDetailPanelProps) {
-  const pr = useActiveTaskPR();
+export function PRDetailPanelComponent({ panelId, params }: PRDetailPanelProps) {
+  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const { prs } = useTaskPR(activeTaskId);
+  const activePR = useActiveTaskPR();
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
+
+  // Multi-repo: when the panel was opened with a prKey, render the matching
+  // TaskPR. Falls back to the active (primary) PR for legacy single-repo
+  // panels that pre-date the prKey param.
+  const pr = (params?.prKey ? prs.find((p) => prTaskKey(p) === params.prKey) : null) ?? activePR;
 
   useEffect(() => {
     const title = pr ? prPanelLabel(pr.pr_number) : "Pull Request";
@@ -65,6 +74,11 @@ export function PRDetailPanelComponent({ panelId }: PRDetailPanelProps) {
       <PRDetailContent taskPR={pr} sessionId={sessionId} />
     </div>
   );
+}
+
+/** Stable per-PR key used by addPRPanel and the multi-PR topbar buttons. */
+export function prTaskKey(pr: TaskPR): string {
+  return `${pr.owner}/${pr.repo}/${pr.pr_number}`;
 }
 
 // --- Add PR feedback as chat context ---

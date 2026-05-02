@@ -5,8 +5,9 @@ import { IconGitPullRequest, IconCheck, IconX, IconClock } from "@tabler/icons-r
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useDockviewStore } from "@/lib/state/dockview-store";
-import { useActiveTaskPR, useTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { getPRStatusColor, isPRReadyToMerge } from "@/components/github/pr-task-icon";
+import { prTaskKey } from "@/components/github/pr-detail-panel";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
@@ -36,31 +37,42 @@ function PRStatusIcon({ pr }: { pr: TaskPR }) {
 
 export const PRTopbarButton = memo(function PRTopbarButton() {
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
-  // useTaskPR fetches if not in store; useActiveTaskPR just reads
-  useTaskPR(activeTaskId);
-  const pr = useActiveTaskPR();
+  // useTaskPR fetches if not in store and returns the full per-task list so
+  // multi-repo tasks render one button per PR (each opens its own panel).
+  const { prs } = useTaskPR(activeTaskId);
+
+  if (prs.length === 0) return null;
+
+  return (
+    <div className="inline-flex items-center gap-1">
+      {prs.map((pr) => (
+        <PRButton key={pr.id} pr={pr} />
+      ))}
+    </div>
+  );
+});
+
+function PRButton({ pr }: { pr: TaskPR }) {
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
-
-  if (!pr) return null;
-
+  const tooltip = `${pr.owner}/${pr.repo} #${pr.pr_number} — ${pr.pr_title}`;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
-          data-testid="pr-topbar-button"
+          data-testid={`pr-topbar-button-${pr.pr_number}`}
           data-pr-state={pr.state}
           data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
           size="sm"
           variant="outline"
           className="cursor-pointer gap-1.5 px-2"
-          onClick={addPRPanel}
+          onClick={() => addPRPanel(prTaskKey(pr))}
         >
           <IconGitPullRequest className={`h-4 w-4 ${getPRStatusColor(pr)}`} />
           <span className="text-xs font-medium">#{pr.pr_number}</span>
           <PRStatusIcon pr={pr} />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{pr.pr_title}</TooltipContent>
+      <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>
   );
-});
+}

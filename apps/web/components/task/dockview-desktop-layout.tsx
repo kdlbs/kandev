@@ -385,7 +385,7 @@ function renderPanel(
     case "plan":
       return <PlanContent />;
     case "pr-detail":
-      return <PRDetailPanelComponent panelId={panelId} />;
+      return <PRDetailPanelComponent panelId={panelId} params={params} />;
     default:
       return <div className="p-4 text-muted-foreground">Unknown panel: {component}</div>;
   }
