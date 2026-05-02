@@ -109,6 +109,15 @@ func (r *Repository) initSchema() error {
 	if err := r.backfillTaskEnvironments(); err != nil {
 		return err
 	}
+	if err := r.healTaskEnvironmentWorkspacePaths(); err != nil {
+		return err
+	}
+	if err := r.healDuplicateTaskEnvironments(); err != nil {
+		return err
+	}
+	if err := r.ensureTaskEnvironmentTaskUniqueIndex(); err != nil {
+		return err
+	}
 	if err := r.ensureWorkspaceIndexes(); err != nil {
 		return err
 	}
@@ -352,6 +361,113 @@ func (r *Repository) findOrphanedTasks() ([]backfillRow, error) {
 		return nil, fmt.Errorf("backfill: rows: %w", err)
 	}
 	return orphaned, nil
+}
+
+// healTaskEnvironmentWorkspacePaths backfills workspace_path on worktree-mode
+// envs that have a worktree_path set but an empty workspace_path. Such rows
+// trigger ErrSessionWorkspaceNotReady forever in GetOrEnsureExecutionForEnvironment
+// and leave shell terminals stuck on "Connecting terminal...".
+//
+// Idempotent — only touches rows where workspace_path is empty.
+func (r *Repository) healTaskEnvironmentWorkspacePaths() error {
+	_, err := r.db.Exec(`
+		UPDATE task_environments
+		   SET workspace_path = worktree_path,
+		       updated_at = datetime('now')
+		 WHERE executor_type = 'worktree'
+		   AND COALESCE(workspace_path, '') = ''
+		   AND COALESCE(worktree_path, '') != ''
+	`)
+	return err
+}
+
+// healDuplicateTaskEnvironments collapses rows where a single task has more
+// than one task_environments row (race in lazy create). Keeps the most recently
+// updated row and re-points any sessions still referring to the loser.
+//
+// Runs before ensureTaskEnvironmentTaskUniqueIndex so the unique constraint
+// can be added cleanly. Idempotent — a no-op once the data is healed.
+func (r *Repository) healDuplicateTaskEnvironments() error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("heal duplicate envs: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	rows, err := tx.Query(`
+		SELECT task_id
+		  FROM task_environments
+		 GROUP BY task_id
+		HAVING COUNT(*) > 1
+	`)
+	if err != nil {
+		return fmt.Errorf("heal duplicate envs: list duplicates: %w", err)
+	}
+	var taskIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("heal duplicate envs: scan: %w", err)
+		}
+		taskIDs = append(taskIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("heal duplicate envs: rows: %w", err)
+	}
+	_ = rows.Close()
+
+	for _, taskID := range taskIDs {
+		if err := healDuplicateTaskEnvForTask(tx, taskID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// healDuplicateTaskEnvForTask keeps the most recently updated env for a task,
+// re-points sessions on the loser rows to the winner, then deletes losers.
+func healDuplicateTaskEnvForTask(tx *sql.Tx, taskID string) error {
+	var winnerID string
+	if err := tx.QueryRow(`
+		SELECT id FROM task_environments
+		 WHERE task_id = ?
+		 ORDER BY updated_at DESC, created_at DESC
+		 LIMIT 1
+	`, taskID).Scan(&winnerID); err != nil {
+		return fmt.Errorf("heal duplicate envs: find winner for task %s: %w", taskID, err)
+	}
+
+	if _, err := tx.Exec(`
+		UPDATE task_sessions
+		   SET task_environment_id = ?
+		 WHERE task_id = ?
+		   AND task_environment_id != ?
+	`, winnerID, taskID, winnerID); err != nil {
+		return fmt.Errorf("heal duplicate envs: relink sessions for task %s: %w", taskID, err)
+	}
+
+	if _, err := tx.Exec(`
+		DELETE FROM task_environments
+		 WHERE task_id = ?
+		   AND id != ?
+	`, taskID, winnerID); err != nil {
+		return fmt.Errorf("heal duplicate envs: delete losers for task %s: %w", taskID, err)
+	}
+	return nil
+}
+
+// ensureTaskEnvironmentTaskUniqueIndex adds a UNIQUE index on
+// task_environments(task_id) so that a future race in env creation fails loud
+// instead of silently producing two rows for the same task. Must run AFTER
+// healDuplicateTaskEnvironments, which collapses any pre-existing duplicates.
+func (r *Repository) ensureTaskEnvironmentTaskUniqueIndex() error {
+	_, err := r.db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_environments_task_id
+		    ON task_environments(task_id)
+	`)
+	return err
 }
 
 // backfillSingleTask creates a task_environment and links sessions for one orphaned task.
