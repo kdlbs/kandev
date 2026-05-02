@@ -45,7 +45,7 @@ type MarkdownCodeProps = {
 };
 
 function isBlockCode(rawContent: string, hasLanguage: boolean): boolean {
-  return hasLanguage || rawContent.endsWith("\n") || rawContent.includes("\n");
+  return hasLanguage || rawContent.includes("\n");
 }
 
 /**
