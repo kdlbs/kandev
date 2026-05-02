@@ -22,7 +22,6 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
-import { GitAheadBehindBadges } from "@/components/task/git-ahead-behind-badges";
 import { EditorsMenu } from "@/components/task/editors-menu";
 import { BranchPathPopover } from "@/components/task/branch-path-popover";
 import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
@@ -128,7 +127,6 @@ const TaskTopBar = memo(function TaskTopBar({
   const git = useSessionGit(activeSessionId);
   // Prefer live git status branch (updates after rename), fallback to session worktree branch
   const displayBranch = git.branch || worktreeBranch || baseBranch;
-  const isMultiRepo = git.repoNames.filter((r) => r !== "").length > 1;
 
   // Callback for renaming branch
   const handleRenameBranch = useCallback(
@@ -184,8 +182,6 @@ const TaskTopBar = memo(function TaskTopBar({
         taskId={taskId}
         activeSessionId={activeSessionId}
         baseBranch={baseBranch}
-        gitStatus={git}
-        isMultiRepo={isMultiRepo}
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}
@@ -434,9 +430,6 @@ function AttentionStatusGroup({
   isRemoteExecutor,
   isAgentctlReady,
   taskTitle,
-  gitStatus,
-  baseBranch,
-  isMultiRepo,
 }: {
   taskId?: string | null;
   activeSessionId?: string | null;
@@ -445,17 +438,9 @@ function AttentionStatusGroup({
   isRemoteExecutor?: boolean;
   isAgentctlReady?: boolean;
   taskTitle?: string;
-  gitStatus: { ahead: number; behind: number };
-  baseBranch?: string;
-  isMultiRepo: boolean;
 }) {
   return (
     <TopbarCluster label="Task status and attention" className="[&_button]:h-8 [&_button]:text-xs">
-      <GitAheadBehindBadges
-        gitStatus={gitStatus}
-        baseBranch={baseBranch}
-        isMultiRepo={isMultiRepo}
-      />
       <DocumentControls activeSessionId={activeSessionId ?? null} />
       {!isArchived && (
         <>
@@ -510,8 +495,6 @@ function TopBarRight({
   taskId,
   activeSessionId,
   baseBranch,
-  gitStatus,
-  isMultiRepo,
   showDebugOverlay,
   onToggleDebugOverlay,
   isArchived,
@@ -523,8 +506,6 @@ function TopBarRight({
   taskId?: string | null;
   activeSessionId?: string | null;
   baseBranch?: string;
-  gitStatus: { ahead: number; behind: number };
-  isMultiRepo: boolean;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
@@ -579,9 +560,6 @@ function TopBarRight({
         isRemoteExecutor={isRemoteExecutor}
         isAgentctlReady={isAgentctlReady}
         taskTitle={taskTitle}
-        gitStatus={gitStatus}
-        baseBranch={baseBranch}
-        isMultiRepo={isMultiRepo}
       />
     ),
   });
