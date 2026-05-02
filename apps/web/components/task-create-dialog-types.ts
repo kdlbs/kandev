@@ -85,6 +85,10 @@ export type DialogComputedValues = {
   workflowAgentProfileId: string;
   /** User selection if any, else the workflow override; what footer/submit/passthrough should consult */
   effectiveAgentProfileId: string;
+  /** Display name of the currently selected executor profile (null if none). */
+  selectedExecutorProfileName: string | null;
+  /** True when an executor profile is selected and no agent profile is compatible with it. */
+  noCompatibleAgent: boolean;
 };
 
 export type DialogComputedArgs = {

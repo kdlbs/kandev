@@ -574,6 +574,8 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
               workspaceId={workspaceId}
               effectiveWorkflowId={computed.effectiveWorkflowId ?? null}
               executorHint={computed.executorHint}
+              noCompatibleAgent={computed.noCompatibleAgent}
+              executorProfileName={computed.selectedExecutorProfileName}
               onCancel={handleCancel}
               onUpdateWithoutAgent={handleUpdateWithoutAgent}
               onCreateWithoutAgent={handleCreateWithoutAgent}

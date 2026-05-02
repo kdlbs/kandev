@@ -41,6 +41,8 @@ import {
   computeDialogDefaultStepId,
   computeSingleWorkflowFallbackId,
 } from "@/components/task-create-dialog-defaults";
+import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
+import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
 
 export type {
   StepType,
@@ -486,7 +488,6 @@ export function useDialogComputed({
   // pill loads branches per-repo). Keep the computed value but always feed it
   // the URL branches when in URL mode.
   const branchOptions = useBranchOptions(fs.useGitHubUrl ? fs.githubBranches : []);
-  const agentProfileOptions = useAgentProfileOptions(agentProfiles);
   const allExecutorProfiles = useMemo<ExecutorProfile[]>(() => {
     return executors.flatMap((executor) =>
       (executor.profiles ?? []).map((p) => ({
@@ -502,9 +503,13 @@ export function useDialogComputed({
   // keep the full executor catalogue.
   const selectedRepoCount = fs.repositories.filter((r) => r.repositoryId || r.localPath).length;
   const isMultiRepoSelection = selectedRepoCount > 1;
-  const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles, {
-    disabledReasonFor: isMultiRepoSelection ? nonWorktreeDisabledReason : undefined,
-  });
+  const exec = useExecutorProfileCompat(
+    allExecutorProfiles,
+    fs.executorProfileId,
+    agentProfiles,
+    isMultiRepoSelection ? nonWorktreeDisabledReason : undefined,
+  );
+  const agentProfileOptions = useAgentProfileOptions(exec.compatibleAgentProfiles);
   const executorHint = useExecutorHint(executors, fs.executorId, selectedRepoCount);
   const isLocalExecutor = useIsLocalExecutor(executors, fs.executorId);
   const { headerRepositoryOptions } = useRepositoryOptions(repositories, fs.discoveredRepositories);
@@ -524,7 +529,7 @@ export function useDialogComputed({
     hasRepositorySelection,
     branchOptions,
     agentProfileOptions,
-    executorProfileOptions,
+    executorProfileOptions: exec.executorProfileOptions,
     executorHint,
     isLocalExecutor,
     headerRepositoryOptions,
@@ -533,6 +538,36 @@ export function useDialogComputed({
     workflowAgentLocked,
     workflowAgentProfileId,
     effectiveAgentProfileId,
+    selectedExecutorProfileName: exec.selectedExecutorProfile?.name ?? null,
+    noCompatibleAgent: exec.noCompatibleAgent,
+  };
+}
+
+function useExecutorProfileCompat(
+  allExecutorProfiles: ExecutorProfile[],
+  selectedProfileId: string,
+  agentProfiles: DialogComputedArgs["agentProfiles"],
+  disabledReasonFor?: (profile: ExecutorProfile) => string | null,
+) {
+  const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles, {
+    disabledReasonFor,
+  });
+  const selectedExecutorProfile = useMemo(
+    () => allExecutorProfiles.find((p) => p.id === selectedProfileId) ?? null,
+    [allExecutorProfiles, selectedProfileId],
+  );
+  const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
+  const compatibleAgentProfiles = useMemo(() => {
+    if (!selectedExecutorProfile || !authLoaded) return agentProfiles;
+    return agentProfiles.filter((ap) =>
+      isAgentConfiguredOnExecutor(ap, selectedExecutorProfile, authSpecs),
+    );
+  }, [agentProfiles, selectedExecutorProfile, authSpecs, authLoaded]);
+  return {
+    selectedExecutorProfile,
+    compatibleAgentProfiles,
+    executorProfileOptions,
+    noCompatibleAgent: Boolean(selectedExecutorProfile) && compatibleAgentProfiles.length === 0,
   };
 }
 
