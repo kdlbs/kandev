@@ -95,7 +95,11 @@ test.describe("Jira settings", () => {
       secret: "api-token-value",
     });
     await settings.saveButton.click();
-    await expect(settings.statusBanner).toBeVisible();
+    // Wait for the post-save probe to land BEFORE forcing the failure: the
+    // probe goroutine could otherwise overwrite our forced lastOk=false back
+    // to true a few ms after the mockJiraSetAuthHealth call, flipping the
+    // banner to "ok" right when the assertion expects "failed".
+    await apiClient.waitForIntegrationAuthHealthy("jira", seedData.workspaceId);
 
     await apiClient.mockJiraSetAuthHealth({
       workspaceId: seedData.workspaceId,

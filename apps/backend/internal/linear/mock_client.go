@@ -11,18 +11,22 @@ import (
 // routes mounted in mock mode. Per-workspace isolation isn't needed for the
 // scenarios these tests cover.
 type MockClient struct {
-	mu            sync.RWMutex
-	authResult    *TestConnectionResult
-	teams         []LinearTeam
-	statesByTeam  map[string][]LinearWorkflowState
-	issues        map[string]*LinearIssue // identifier (e.g. ENG-12) → issue
+	mu           sync.RWMutex
+	authResult   *TestConnectionResult
+	teams        []LinearTeam
+	statesByTeam map[string][]LinearWorkflowState
+	issues       map[string]*LinearIssue // identifier (e.g. ENG-12) → issue
+	// issueOrder preserves insertion order so SearchIssues returns a stable
+	// sequence — Go map range is randomised, which would make any future test
+	// that asserts on result position intermittently flaky.
+	issueOrder    []string
 	getError      *APIError
 	setStateCalls []setStateCall
 }
 
 type setStateCall struct {
-	IssueID string `json:"issueId"`
-	StateID string `json:"stateId"`
+	IssueID string
+	StateID string
 }
 
 // NewMockClient seeds a default-success TestAuth so a fresh config flips to
@@ -96,9 +100,13 @@ func (m *MockClient) ListTeams(context.Context) ([]LinearTeam, error) {
 func (m *MockClient) SearchIssues(_ context.Context, _ SearchFilter, _ string, maxResults int) (*SearchResult, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := make([]LinearIssue, 0, len(m.issues))
-	for _, i := range m.issues {
-		out = append(out, *i)
+	out := make([]LinearIssue, 0, len(m.issueOrder))
+	for _, id := range m.issueOrder {
+		issue, ok := m.issues[id]
+		if !ok {
+			continue
+		}
+		out = append(out, *issue)
 		if maxResults > 0 && len(out) >= maxResults {
 			break
 		}
@@ -109,7 +117,8 @@ func (m *MockClient) SearchIssues(_ context.Context, _ SearchFilter, _ string, m
 // --- Setters used by MockController ---
 
 // SetAuthResult overrides the result returned by TestAuth (and the auth-health
-// probe). Pass nil to revert to the default success.
+// probe). Pass nil to simulate an unconfigured auth state (returns OK=false);
+// call Reset to restore the default success.
 func (m *MockClient) SetAuthResult(r *TestConnectionResult) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -139,6 +148,9 @@ func (m *MockClient) AddIssue(issue *LinearIssue) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cp := *issue
+	if _, exists := m.issues[issue.Identifier]; !exists {
+		m.issueOrder = append(m.issueOrder, issue.Identifier)
+	}
 	m.issues[issue.Identifier] = &cp
 }
 
@@ -173,6 +185,7 @@ func (m *MockClient) Reset() {
 	m.teams = nil
 	m.statesByTeam = make(map[string][]LinearWorkflowState)
 	m.issues = make(map[string]*LinearIssue)
+	m.issueOrder = nil
 	m.getError = nil
 	m.setStateCalls = nil
 }

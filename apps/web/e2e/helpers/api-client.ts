@@ -803,8 +803,8 @@ export class ApiClient {
     secret: string;
   }): Promise<unknown> {
     return this.request("POST", "/api/v1/jira/config", {
-      authMethod: "api_token",
       ...payload,
+      authMethod: payload.authMethod ?? "api_token",
     });
   }
 
@@ -814,9 +814,9 @@ export class ApiClient {
     defaultTeamKey?: string;
   }): Promise<unknown> {
     return this.request("POST", "/api/v1/linear/config", {
-      authMethod: "api_key",
       defaultTeamKey: "",
       ...payload,
+      authMethod: "api_key",
     });
   }
 

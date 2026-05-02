@@ -77,7 +77,10 @@ test.describe("Linear settings", () => {
     await settings.goto(seedData.workspaceId);
     await settings.secretInput.fill("lin_api_xxx");
     await settings.saveButton.click();
-    await expect(settings.statusBanner).toBeVisible();
+    // Wait for the post-save probe to land BEFORE forcing the failure: the
+    // probe goroutine could otherwise overwrite our forced lastOk=false back
+    // to true a few ms after the mockLinearSetAuthHealth call.
+    await apiClient.waitForIntegrationAuthHealthy("linear", seedData.workspaceId);
 
     await apiClient.mockLinearSetAuthHealth({
       workspaceId: seedData.workspaceId,

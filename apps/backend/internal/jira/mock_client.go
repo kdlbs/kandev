@@ -23,8 +23,8 @@ type MockClient struct {
 }
 
 type doneTransitionCall struct {
-	TicketKey    string `json:"ticketKey"`
-	TransitionID string `json:"transitionId"`
+	TicketKey    string
+	TransitionID string
 }
 
 // NewMockClient returns a MockClient with TestAuth set to a successful result
@@ -93,13 +93,15 @@ func (m *MockClient) ListProjects(context.Context) ([]JiraProject, error) {
 	return out, nil
 }
 
+// SearchTickets returns the tickets seeded via SetSearchHits. When jql is
+// empty (or no seeded ticket key appears literally in the query) the full
+// seeded set is returned — tests are expected to seed exactly the result
+// they want to assert on. To narrow the response, mention a seeded key in
+// the JQL (e.g. `key = PROJ-12`) and only matching tickets are returned.
 func (m *MockClient) SearchTickets(_ context.Context, jql, _ string, maxResults int) (*SearchResult, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	hits := m.searchHits
-	if jql != "" {
-		hits = filterByJQL(hits, jql)
-	}
+	hits := filterByJQL(m.searchHits, jql)
 	if maxResults > 0 && len(hits) > maxResults {
 		hits = hits[:maxResults]
 	}
@@ -108,27 +110,33 @@ func (m *MockClient) SearchTickets(_ context.Context, jql, _ string, maxResults 
 	return &SearchResult{Tickets: out, MaxResults: maxResults, IsLast: true}, nil
 }
 
-// filterByJQL is the cheapest possible JQL imitation: if the query mentions a
-// key like "PROJ-12", restrict to tickets with that key. Otherwise return
-// everything. Real JQL parsing is out of scope — tests should seed exactly
-// what they expect to see and rely on this naive filter only as a smoke check.
+// filterByJQL is a stand-in for real JQL parsing. An empty query passes every
+// hit through; a non-empty query that mentions a seeded ticket key restricts
+// to that key; a non-empty query that mentions no seeded key returns every
+// hit (so tests don't have to construct a parseable JQL string just to fetch
+// what they seeded).
 func filterByJQL(hits []JiraTicket, jql string) []JiraTicket {
-	out := make([]JiraTicket, 0, len(hits))
-	for _, t := range hits {
-		if t.Key != "" && strings.Contains(jql, t.Key) {
-			out = append(out, t)
-		}
-	}
-	if len(out) == 0 {
+	if jql == "" {
 		return hits
 	}
-	return out
+	matched := make([]JiraTicket, 0, len(hits))
+	for _, t := range hits {
+		if t.Key != "" && strings.Contains(jql, t.Key) {
+			matched = append(matched, t)
+		}
+	}
+	if len(matched) == 0 {
+		return hits
+	}
+	return matched
 }
 
 // --- Setters used by MockController ---
 
 // SetAuthResult overrides the result returned by TestAuth (and consequently
-// the auth-health probe). Pass nil to revert to the default success.
+// the auth-health probe). Pass nil to simulate an unconfigured auth state
+// (returns OK=false with "mock: no auth result configured"); call Reset to
+// restore the default success.
 func (m *MockClient) SetAuthResult(r *TestConnectionResult) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
