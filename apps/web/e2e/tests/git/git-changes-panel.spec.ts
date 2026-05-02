@@ -521,11 +521,15 @@ test.describe("Git Changes Panel", () => {
 
     // Verify both commits appear
     const commitsList = testPage.getByTestId("commits-list");
-    await expect(commitsList.locator("li")).toHaveCount(2, { timeout: 5_000 });
+    await expect(commitsList.locator('[data-testid^="commit-row-"]')).toHaveCount(2, {
+      timeout: 5_000,
+    });
 
     // Find the first commit row (it's the second in the list, older commit)
     // The list shows newest first, so "Second commit" is at index 0, "First commit" at index 1
-    const firstCommitRow = commitsList.locator("li").filter({ hasText: "First commit" });
+    const firstCommitRow = commitsList
+      .locator('[data-testid^="commit-row-"]')
+      .filter({ hasText: "First commit" });
     await expect(firstCommitRow).toBeVisible({ timeout: 5_000 });
 
     // Get the SHA from the commit row to use in the confirmation
@@ -1275,7 +1279,9 @@ test.describe("Git Changes Panel", () => {
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
     await expect(session.changes.getByText("Commit in PR")).toBeVisible({ timeout: 10_000 });
     const commitsList = testPage.getByTestId("commits-list");
-    await expect(commitsList.locator("li")).toHaveCount(1, { timeout: 5_000 });
+    await expect(commitsList.locator('[data-testid^="commit-row-"]')).toHaveCount(1, {
+      timeout: 5_000,
+    });
     // Pushed commits use IconGitCommit (tabler-icon-git-commit), not IconArrowUp
     await expect(commitsList.locator(".tabler-icon-git-commit")).toBeVisible({ timeout: 5_000 });
     await expect(commitsList.locator(".tabler-icon-arrow-up")).not.toBeVisible();
@@ -1359,16 +1365,23 @@ test.describe("Git Changes Panel", () => {
     // Other tests in the same worker may have left additional commits in the shared e2e-repo.
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
     const commitsList = testPage.getByTestId("commits-list");
-    await expect(commitsList.locator("li").first()).toBeVisible({ timeout: 5_000 });
+    await expect(commitsList.locator('[data-testid^="commit-row-"]').first()).toBeVisible({
+      timeout: 5_000,
+    });
 
-    // Unpushed commit should have arrow-up icon (emerald)
-    const unpushedRow = commitsList.locator("li", { hasText: "Unpushed commit" });
+    // Unpushed commit should have arrow-up icon (emerald). Scope to the
+    // commit-row testid so we don't match the parent repo-group <li> too
+    // (which also contains the same text since it wraps the commits).
+    const unpushedRow = commitsList
+      .locator('[data-testid^="commit-row-"]', { hasText: "Unpushed commit" })
+      .first();
     await expect(unpushedRow).toBeVisible({ timeout: 10_000 });
     await expect(unpushedRow.locator(".tabler-icon-arrow-up")).toBeVisible({ timeout: 5_000 });
 
     // Pushed commit should have git-commit icon (muted)
     const pushedRow = commitsList
-      .locator(`li:has-text("Pushed commit"):not(:has-text("Unpushed"))`)
+      .locator('[data-testid^="commit-row-"]', { hasText: "Pushed commit" })
+      .filter({ hasNotText: "Unpushed" })
       .first();
     await expect(pushedRow).toBeVisible({ timeout: 10_000 });
     await expect(pushedRow.locator(".tabler-icon-git-commit")).toBeVisible({ timeout: 5_000 });

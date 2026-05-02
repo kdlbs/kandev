@@ -183,9 +183,6 @@ export function CommitsSection({
       label="Commits"
       count={commits.length}
       isLast={isLast}
-      // User preference: commits panel starts collapsed — the file changes are
-      // the primary signal; commit history is reference info you expand on demand.
-      defaultCollapsed
       data-testid="commits-section"
     >
       <ul data-testid="commits-list" className="space-y-0.5">

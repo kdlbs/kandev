@@ -123,7 +123,7 @@ type DialogFormBodyProps = {
   onAgentProfileChange: (v: string) => void;
   onExecutorProfileChange: (v: string) => void;
   onWorkflowChange: (v: string) => void;
-  onToggleGitHubUrl: () => void;
+  onToggleGitHubUrl?: () => void;
   onGitHubUrlChange: (v: string) => void;
   onToggleFreshBranch: (enabled: boolean) => void;
   enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
@@ -138,6 +138,14 @@ type DialogFormBodyProps = {
    * branch for local execution; fresh-branch mode unlocks it).
    */
   isLocalExecutor: boolean;
+  /** Optional render slot above the description editor. */
+  aboveDescriptionSlot?: React.ReactNode;
+  /** Optional render slot inside the dialog body (rendered above the chip row). */
+  extraFormSlot?: React.ReactNode;
+  /** Optional render slot at the bottom of the dialog body (above the footer). */
+  bottomSlot?: React.ReactNode;
+  /** Optional override for the description placeholder. */
+  descriptionPlaceholder?: string;
 };
 
 function CreateModeBody(props: DialogFormBodyProps) {
@@ -204,6 +212,9 @@ function CreateModeBody(props: DialogFormBodyProps) {
         workspaceId={workspaceId}
         onJiraImport={onJiraImport}
         onLinearImport={onLinearImport}
+        descriptionPlaceholder={props.descriptionPlaceholder}
+        aboveDescriptionSlot={props.aboveDescriptionSlot}
+        extraFormSlot={props.extraFormSlot}
       />
       <CreateModeSelectors
         isTaskStarted={isTaskStarted}
@@ -218,6 +229,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         onExecutorProfileChange={onExecutorProfileChange}
         workflowAgentLocked={workflowAgentLocked}
       />
+      {props.bottomSlot}
     </>
   );
 }
@@ -523,7 +535,9 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             onAgentProfileChange={handlers.handleAgentProfileChange}
             onExecutorProfileChange={handlers.handleExecutorProfileChange}
             onWorkflowChange={handlers.handleWorkflowChange}
-            onToggleGitHubUrl={handlers.handleToggleGitHubUrl}
+            onToggleGitHubUrl={
+              props.lockedFields?.repository ? undefined : handlers.handleToggleGitHubUrl
+            }
             onGitHubUrlChange={handlers.handleGitHubUrlChange}
             onToggleFreshBranch={handlers.handleToggleFreshBranch}
             enhance={setup.enhance}
@@ -531,6 +545,10 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             repositories={repositories}
             freshBranchAvailable={freshBranchAvailable}
             isLocalExecutor={computed.isLocalExecutor}
+            extraFormSlot={props.extraFormSlot}
+            aboveDescriptionSlot={props.aboveDescriptionSlot}
+            bottomSlot={props.bottomSlot}
+            descriptionPlaceholder={props.descriptionPlaceholder}
           />
           <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
             <TaskCreateDialogFooter

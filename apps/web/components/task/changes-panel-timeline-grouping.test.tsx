@@ -164,12 +164,13 @@ describe("CommitsSection", () => {
     };
   }
 
-  it("starts collapsed by default — commits are reference info, not the primary signal", () => {
+  it("renders the commits section header with a collapse toggle", () => {
     render(<CommitsSection commits={[commit("abc123", "first")]} isLast />);
-    // Header is rendered, but commit rows are hidden until the user expands.
-    expect(screen.queryByTestId(COMMIT_ROW_TID)).toBeNull();
+    // Section is expanded by default — file changes and commit history are
+    // both first-class signals in the changes panel.
+    expect(screen.getByTestId(COMMIT_ROW_TID)).toBeTruthy();
     const toggle = screen.getByTestId(COMMITS_SECTION_TOGGLE_TID);
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("groups commits per repo when 2+ repos are present", () => {
@@ -183,9 +184,6 @@ describe("CommitsSection", () => {
         isLast
       />,
     );
-    // Expand the section first so the inner repo headers and commit rows render.
-    fireEvent.click(screen.getByTestId(COMMITS_SECTION_TOGGLE_TID));
-
     const headers = screen.getAllByTestId("commits-repo-header");
     expect(headers).toHaveLength(2);
     expect(headers[0].textContent).toContain("frontend");
@@ -201,7 +199,6 @@ describe("CommitsSection", () => {
     // repository_name; the header still renders so the per-repo Push / PR
     // buttons live in a consistent place across single-repo and multi-repo.
     render(<CommitsSection commits={[commit("c1", "msg"), commit("c2", "msg")]} isLast />);
-    fireEvent.click(screen.getByTestId(COMMITS_SECTION_TOGGLE_TID));
     expect(screen.getAllByTestId("commits-repo-header")).toHaveLength(1);
     expect(screen.getAllByTestId(COMMIT_ROW_TID)).toHaveLength(2);
   });
@@ -224,7 +221,6 @@ describe("CommitsSection", () => {
         onRevertCommit={() => undefined}
       />,
     );
-    fireEvent.click(screen.getByTestId(COMMITS_SECTION_TOGGLE_TID));
     const rows = screen.getAllByTestId(COMMIT_ROW_TID);
     const latestByShas = rows
       .filter((r) => r.getAttribute("data-is-latest") === "true")
