@@ -25,9 +25,10 @@ test.describe("Task creation", () => {
     const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
     await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
 
-    // Verify the pre-seeded selections are displayed in the dialog selectors
-    await expect(testPage.getByTestId("repository-selector")).toContainText("E2E Repo");
-    await expect(testPage.getByTestId("branch-selector")).toContainText("main");
+    // Verify the pre-seeded selections are displayed in the dialog selectors.
+    // The dialog uses chip-style repo/branch pills since the multi-repo refactor.
+    await expect(testPage.getByTestId("repo-chip-trigger").first()).toContainText("E2E Repo");
+    await expect(testPage.getByTestId("branch-chip-trigger").first()).toContainText("main");
     // Agent profile name varies — just verify it's not the empty placeholder
     await expect(testPage.getByTestId("agent-profile-selector")).not.toContainText(
       "Select agent...",
@@ -62,8 +63,8 @@ test.describe("Task creation", () => {
     await expect(startBtn2).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
 
     // The same repo, branch, and agent profile should still be selected
-    await expect(testPage.getByTestId("repository-selector")).toContainText("E2E Repo");
-    await expect(testPage.getByTestId("branch-selector")).toContainText("main");
+    await expect(testPage.getByTestId("repo-chip-trigger").first()).toContainText("E2E Repo");
+    await expect(testPage.getByTestId("branch-chip-trigger").first()).toContainText("main");
     await expect(testPage.getByTestId("agent-profile-selector")).not.toContainText(
       "Select agent...",
     );

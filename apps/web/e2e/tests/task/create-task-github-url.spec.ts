@@ -904,7 +904,7 @@ test.describe("Task creation from GitHub URL", () => {
     // Toggle to GitHub URL mode
     await toggleBtn.click();
     await expect(testPage.getByTestId("github-url-input")).toBeVisible();
-    await expect(toggleBtn).toHaveText("or select a repository");
+    await expect(toggleBtn).toHaveText("use a workspace repository");
 
     // Toggle back to repository selector
     await toggleBtn.click();
