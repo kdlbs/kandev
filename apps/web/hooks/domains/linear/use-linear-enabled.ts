@@ -7,9 +7,5 @@ const LEGACY_KEY_PREFIX = "kandev:linear:enabled:";
 const SYNC_EVENT = "kandev:linear:enabled-changed";
 
 export function useLinearEnabled() {
-  return useIntegrationEnabled({
-    storageKey: STORAGE_KEY,
-    legacyKeyPrefix: LEGACY_KEY_PREFIX,
-    syncEvent: SYNC_EVENT,
-  });
+  return useIntegrationEnabled(STORAGE_KEY, LEGACY_KEY_PREFIX, SYNC_EVENT);
 }

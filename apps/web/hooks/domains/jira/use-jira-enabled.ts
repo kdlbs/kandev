@@ -7,9 +7,5 @@ const LEGACY_KEY_PREFIX = "kandev:jira:enabled:";
 const SYNC_EVENT = "kandev:jira:enabled-changed";
 
 export function useJiraEnabled() {
-  return useIntegrationEnabled({
-    storageKey: STORAGE_KEY,
-    legacyKeyPrefix: LEGACY_KEY_PREFIX,
-    syncEvent: SYNC_EVENT,
-  });
+  return useIntegrationEnabled(STORAGE_KEY, LEGACY_KEY_PREFIX, SYNC_EVENT);
 }

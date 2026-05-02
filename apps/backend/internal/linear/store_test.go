@@ -212,3 +212,46 @@ func TestStore_MigrateLegacyPerWorkspaceTable(t *testing.T) {
 		t.Errorf("expected newest row promoted, got %+v", cfg)
 	}
 }
+
+// Covers the sql.ErrNoRows branch: a user who installed a previous version,
+// never configured Linear, and then upgrades hits this path.
+func TestStore_MigrateLegacyPerWorkspaceTable_EmptyTable(t *testing.T) {
+	raw, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := db.Exec(`
+		CREATE TABLE linear_configs (
+			workspace_id TEXT PRIMARY KEY,
+			auth_method TEXT NOT NULL,
+			default_team_key TEXT NOT NULL DEFAULT '',
+			org_slug TEXT NOT NULL DEFAULT '',
+			last_checked_at DATETIME,
+			last_ok INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`); err != nil {
+		t.Fatalf("legacy schema: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("NewStore on empty legacy table: %v", err)
+	}
+	if got := store.MigratedFromWorkspace(); got != "" {
+		t.Errorf("expected empty MigratedFromWorkspace, got %q", got)
+	}
+	cfg, err := store.GetConfig(context.Background())
+	if err != nil {
+		t.Fatalf("get singleton: %v", err)
+	}
+	if cfg != nil {
+		t.Errorf("expected nil cfg on empty legacy table, got %+v", cfg)
+	}
+}

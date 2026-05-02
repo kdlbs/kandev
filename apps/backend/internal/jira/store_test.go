@@ -227,3 +227,108 @@ func TestStore_MigrateLegacyPerWorkspaceTable(t *testing.T) {
 		t.Errorf("expected newest row promoted, got SiteURL=%q", cfg.SiteURL)
 	}
 }
+
+// Covers the sql.ErrNoRows branch: a user who installed a previous version,
+// never configured Jira, and then upgrades hits this path. The legacy table
+// exists but contains zero rows.
+func TestStore_MigrateLegacyPerWorkspaceTable_EmptyTable(t *testing.T) {
+	raw, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := db.Exec(`
+		CREATE TABLE jira_configs (
+			workspace_id TEXT PRIMARY KEY,
+			site_url TEXT NOT NULL,
+			email TEXT NOT NULL DEFAULT '',
+			auth_method TEXT NOT NULL,
+			default_project_key TEXT NOT NULL DEFAULT '',
+			last_checked_at DATETIME,
+			last_ok INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`); err != nil {
+		t.Fatalf("legacy schema: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("NewStore on empty legacy table: %v", err)
+	}
+	if got := store.MigratedFromWorkspace(); got != "" {
+		t.Errorf("expected empty MigratedFromWorkspace, got %q", got)
+	}
+	cfg, err := store.GetConfig(context.Background())
+	if err != nil {
+		t.Fatalf("get singleton: %v", err)
+	}
+	if cfg != nil {
+		t.Errorf("expected nil cfg on empty legacy table, got %+v", cfg)
+	}
+}
+
+// Covers the original-schema upgrade path: the legacy table exists with
+// `workspace_id` but lacks the auth-health columns added in a later release.
+// The migration must select only guaranteed-present columns and fall back to
+// defaults for the missing ones, otherwise startup crashes with "no such column".
+func TestStore_MigrateLegacyPerWorkspaceTable_PreHealthColumns(t *testing.T) {
+	raw, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	// Original schema: no last_checked_at / last_ok / last_error.
+	if _, err := db.Exec(`
+		CREATE TABLE jira_configs (
+			workspace_id TEXT PRIMARY KEY,
+			site_url TEXT NOT NULL,
+			email TEXT NOT NULL DEFAULT '',
+			auth_method TEXT NOT NULL,
+			default_project_key TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`); err != nil {
+		t.Fatalf("legacy schema: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := db.Exec(`INSERT INTO jira_configs
+		(workspace_id, site_url, email, auth_method, default_project_key, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"ws-1", "https://acme.atlassian.net", "u@example.com", AuthMethodAPIToken, "PROJ", now, now); err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("NewStore on pre-health-columns schema: %v", err)
+	}
+	if got := store.MigratedFromWorkspace(); got != "ws-1" {
+		t.Errorf("expected migration source ws-1, got %q", got)
+	}
+	cfg, err := store.GetConfig(context.Background())
+	if err != nil {
+		t.Fatalf("get singleton: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected singleton row after migration")
+	}
+	if cfg.SiteURL != "https://acme.atlassian.net" {
+		t.Errorf("expected SiteURL preserved, got %q", cfg.SiteURL)
+	}
+	if cfg.LastOk {
+		t.Error("expected LastOk=false (default) after migrating from pre-health schema")
+	}
+	if cfg.LastCheckedAt != nil {
+		t.Errorf("expected LastCheckedAt=nil (default), got %v", cfg.LastCheckedAt)
+	}
+}

@@ -124,16 +124,24 @@ func (s *Store) migrateLegacyPerWorkspaceTable() error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// `last_checked_at`, `last_ok`, and `last_error` were added to the legacy
+	// schema in a later release via ALTER TABLE. A deployment that upgrades
+	// from the original schema would have a `workspace_id` column but not
+	// these — selecting them unconditionally would crash startup. Build the
+	// SELECT against only columns present in this database.
+	healthCols := healthColumnsPresent(cols)
+	selectCols := "workspace_id, site_url, email, auth_method, default_project_key"
+	if healthCols {
+		selectCols += ", last_checked_at, last_ok, last_error"
+	} else {
+		selectCols += ", NULL AS last_checked_at, 0 AS last_ok, '' AS last_error"
+	}
+	selectCols += ", created_at, updated_at"
 	var sourceWorkspace, siteURL, email, authMethod, defaultProjectKey, lastError sql.NullString
 	var lastCheckedAt sql.NullTime
 	var lastOk sql.NullInt64
 	var createdAt, updatedAt sql.NullTime
-	row := tx.QueryRow(`
-		SELECT workspace_id, site_url, email, auth_method, default_project_key,
-			last_checked_at, last_ok, last_error, created_at, updated_at
-		FROM jira_configs
-		ORDER BY updated_at DESC
-		LIMIT 1`)
+	row := tx.QueryRow(`SELECT ` + selectCols + ` FROM jira_configs ORDER BY updated_at DESC LIMIT 1`)
 	switch err := row.Scan(&sourceWorkspace, &siteURL, &email, &authMethod, &defaultProjectKey,
 		&lastCheckedAt, &lastOk, &lastError, &createdAt, &updatedAt); {
 	case errors.Is(err, sql.ErrNoRows):
@@ -177,6 +185,19 @@ func (s *Store) migrateLegacyPerWorkspaceTable() error {
 	}
 	s.migratedFromWorkspace = sourceWorkspace.String
 	return nil
+}
+
+// healthColumnsPresent reports whether the legacy jira_configs table has the
+// auth-health columns that were added in a later release. When all three are
+// missing we fall back to NULL/zero defaults rather than crashing on the
+// SELECT.
+func healthColumnsPresent(cols map[string]struct{}) bool {
+	for _, name := range []string{"last_checked_at", "last_ok", "last_error"} {
+		if _, ok := cols[name]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func nullableTime(t sql.NullTime) interface{} {
