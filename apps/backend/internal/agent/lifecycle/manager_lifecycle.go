@@ -84,6 +84,9 @@ func (m *Manager) Start(ctx context.Context) error {
 					zap.String("execution_id", execution.ID),
 					zap.String("session_id", execution.SessionID),
 					zap.Error(err))
+				if execution.agentctl != nil {
+					execution.agentctl.Close()
+				}
 				initSpan.End()
 				continue
 			}

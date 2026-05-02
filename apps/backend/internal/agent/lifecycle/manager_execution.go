@@ -385,9 +385,6 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	execution := runtimeInstance.ToAgentExecution(req)
 	execution.RuntimeName = string(rt.Name())
 
-	// Persist agentctl auth token from handshake (Docker/remote executors)
-	m.persistAuthToken(ctx, runtimeInstance, execution)
-
 	// Set the ACP session ID for session resumption
 	if info.ACPSessionID != "" {
 		execution.ACPSessionID = info.ACPSessionID
@@ -415,6 +412,10 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		}
 		return nil, fmt.Errorf("failed to register execution: %w", addErr)
 	}
+
+	// Persist agentctl auth token only after the execution is tracked, so a
+	// race-lost rollback never leaves an orphaned secret in the store.
+	m.persistAuthToken(ctx, runtimeInstance, execution)
 	go m.pollOneRemoteStatus(context.Background(), execution)
 
 	go m.waitForAgentctlReady(execution)
