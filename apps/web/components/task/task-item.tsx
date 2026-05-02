@@ -7,6 +7,7 @@ import {
   IconCircleDashed,
   IconDots,
   IconGitPullRequest,
+  IconMessageQuestion,
 } from "@tabler/icons-react";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { IssueTaskIcon } from "@/components/github/issue-task-icon";
@@ -14,6 +15,7 @@ import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
 import { DEBUG_UI } from "@/lib/config";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
+import { shouldUseQuestionTaskIcon } from "@/lib/ui/state-icons";
 import type { SessionPollMode } from "@/lib/state/slices/session-runtime/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
@@ -41,6 +43,7 @@ type TaskItemProps = {
   isDeleting?: boolean;
   taskId?: string;
   primarySessionId?: string | null;
+  hasPendingClarification?: boolean;
   parentTaskTitle?: string;
   isSubTask?: boolean;
   /** Number of subtasks under this parent task. Only set for parent rows. */
@@ -89,11 +92,21 @@ function TaskStateIcon({
   sessionState,
   state,
   isInProgress,
+  hasPendingClarification,
 }: {
   sessionState?: TaskSessionState;
   state?: TaskState;
   isInProgress: boolean;
+  hasPendingClarification?: boolean;
 }) {
+  if (shouldUseQuestionTaskIcon(state, hasPendingClarification)) {
+    return (
+      <IconMessageQuestion
+        data-testid="task-state-waiting-for-input"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500"
+      />
+    );
+  }
   if (isInProgress) {
     return (
       <IconCircleDashed
@@ -275,6 +288,7 @@ export const TaskItem = memo(function TaskItem({
   isDeleting,
   taskId,
   primarySessionId,
+  hasPendingClarification,
   isSubTask,
   subtaskCount,
   subtasksCollapsed,
@@ -313,7 +327,12 @@ export const TaskItem = memo(function TaskItem({
           ↳
         </span>
       )}
-      <TaskStateIcon sessionState={sessionState} state={state} isInProgress={isInProgress} />
+      <TaskStateIcon
+        sessionState={sessionState}
+        state={state}
+        isInProgress={isInProgress}
+        hasPendingClarification={hasPendingClarification}
+      />
       <TaskItemContent
         title={title}
         taskId={taskId}

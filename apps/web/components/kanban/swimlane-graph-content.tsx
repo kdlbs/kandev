@@ -23,6 +23,7 @@ import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import { useTaskPendingClarification } from "@/hooks/use-task-pending-clarification";
 
 export type SwimlaneGraphContentProps = {
   workflowId: string;
@@ -72,7 +73,8 @@ function DraggableTaskChip({
     id: task.id,
   });
   const isPreviewed = useAppStore((state) => state.kanbanPreviewedTaskId === task.id);
-  const statusIcon = getTaskStateIcon(task.state, "h-3 w-3");
+  const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId);
+  const statusIcon = getTaskStateIcon(task.state, "h-3 w-3", hasPendingClarificationRequest);
 
   return (
     <button
@@ -98,7 +100,8 @@ function DraggableTaskChip({
 }
 
 function TaskChipPreview({ task }: { task: Task }) {
-  const statusIcon = getTaskStateIcon(task.state, "h-3 w-3");
+  const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId);
+  const statusIcon = getTaskStateIcon(task.state, "h-3 w-3", hasPendingClarificationRequest);
   return (
     <div
       className={cn(

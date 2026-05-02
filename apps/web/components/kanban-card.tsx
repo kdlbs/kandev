@@ -28,12 +28,13 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import type { TaskState, Repository } from "@/lib/types/http";
 import { cn, getRepositoryDisplayName } from "@/lib/utils";
-import { getTaskStateIcon } from "@/lib/ui/state-icons";
+import { getTaskStateIcon, shouldUseQuestionTaskIcon } from "@/lib/ui/state-icons";
 import { needsAction } from "@/lib/utils/needs-action";
 import { useAppStore } from "@/components/state-provider";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
+import { useTaskPendingClarification } from "@/hooks/use-task-pending-clarification";
 
 export interface Task {
   id: string;
@@ -249,13 +250,16 @@ function KanbanCardActions({
 >) {
   const [menuOpen, setMenuOpen] = useState(false);
   const effectiveMenuOpen = menuOpen || Boolean(isDeleting) || Boolean(isArchiving);
-  const statusIcon = getTaskStateIcon(task.state, "h-4 w-4");
+  const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId);
+  const showQuestionIcon = shouldUseQuestionTaskIcon(task.state, hasPendingClarificationRequest);
+  const statusIcon = getTaskStateIcon(task.state, "h-4 w-4", hasPendingClarificationRequest);
   const hasKnownSession =
     Boolean(task.primarySessionId) || Boolean(task.sessionCount && task.sessionCount > 0);
 
   return (
     <div className="flex items-center gap-2">
-      {(task.state === "IN_PROGRESS" || task.state === "SCHEDULING") && statusIcon}
+      {(task.state === "IN_PROGRESS" || task.state === "SCHEDULING" || showQuestionIcon) &&
+        statusIcon}
       {showMaximizeButton && onOpenFullPage && hasKnownSession && (
         <button
           type="button"
