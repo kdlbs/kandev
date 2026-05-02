@@ -9,7 +9,8 @@ export type ConfigurableShortcutId =
   | "COMMAND_PANEL"
   | "NEW_TASK"
   | "FOCUS_INPUT"
-  | "TOGGLE_PLAN_MODE";
+  | "TOGGLE_PLAN_MODE"
+  | "TASK_SWITCHER";
 
 export type StoredShortcutOverrides = Record<
   string,
@@ -29,6 +30,7 @@ export const CONFIGURABLE_SHORTCUTS: Record<
   NEW_TASK: { label: "New Task", default: SHORTCUTS.NEW_TASK },
   FOCUS_INPUT: { label: "Focus Chat Input", default: SHORTCUTS.FOCUS_INPUT },
   TOGGLE_PLAN_MODE: { label: "Toggle Plan Mode", default: SHORTCUTS.TOGGLE_PLAN_MODE },
+  TASK_SWITCHER: { label: "Recent Task Switcher", default: SHORTCUTS.TASK_SWITCHER },
 };
 
 export function getShortcut(

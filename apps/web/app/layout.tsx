@@ -8,6 +8,7 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { CommandRegistryProvider } from "@/lib/commands/command-registry";
 import { CommandPanel } from "@/components/command-panel";
 import { GlobalCommands } from "@/components/global-commands";
+import { RecentTaskSwitcher } from "@/components/task/recent-task-switcher";
 import { DiffWorkerPoolProvider } from "@/components/diff-worker-pool-provider";
 import { QuickChatProvider } from "@/components/quick-chat/quick-chat-provider";
 import { ConfigChatProvider } from "@/components/config-chat/config-chat-provider";
@@ -69,6 +70,7 @@ export default function RootLayout({
                     <WebSocketConnector />
                     <GlobalCommands />
                     <CommandPanel />
+                    <RecentTaskSwitcher />
                     <ConfigChatProvider>
                       <QuickChatProvider>{children}</QuickChatProvider>
                     </ConfigChatProvider>

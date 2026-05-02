@@ -96,6 +96,15 @@ describe("SHORTCUTS", () => {
     });
   });
 
+  describe("TASK_SWITCHER", () => {
+    it("uses Space with ctrlOrCmd modifier", () => {
+      const shortcut = SHORTCUTS.TASK_SWITCHER as KeyboardShortcut;
+      expect(shortcut.key).toBe(" ");
+      expect(shortcut.modifiers?.ctrlOrCmd).toBe(true);
+      expect(shortcut.modifiers?.shift).toBeUndefined();
+    });
+  });
+
   it("has correct type", () => {
     // TypeScript ensures these are readonly at compile time
     const shortcuts: typeof SHORTCUTS = SHORTCUTS;

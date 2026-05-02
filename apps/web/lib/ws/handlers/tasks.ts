@@ -3,6 +3,7 @@ import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import { cleanupTaskStorage } from "@/lib/local-storage";
+import { removeRecentTask } from "@/lib/recent-tasks";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { toKanbanTask, type TaskLike } from "@/lib/kanban/map-task";
 
@@ -153,6 +154,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
     "task.deleted": (message) => {
       const deletedId = message.payload.task_id;
       const wfId = message.payload.workflow_id;
+      removeRecentTask(deletedId);
 
       const currentState = store.getState();
       const sessionIds = (currentState.taskSessionsByTask.itemsByTaskId[deletedId] ?? []).map(

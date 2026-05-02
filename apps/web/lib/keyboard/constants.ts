@@ -141,6 +141,10 @@ export const SHORTCUTS = {
     key: KEYS.Q,
     modifiers: { ctrlOrCmd: true, shift: true },
   },
+  TASK_SWITCHER: {
+    key: KEYS.SPACE,
+    modifiers: { ctrlOrCmd: true },
+  },
   BOTTOM_TERMINAL: {
     key: KEYS.J,
     modifiers: { ctrlOrCmd: true },

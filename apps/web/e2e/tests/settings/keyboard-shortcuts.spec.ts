@@ -18,6 +18,7 @@ test.describe("Keyboard Shortcuts Settings", () => {
     await expect(testPage.getByTestId("shortcut-recorder-NEW_TASK")).toBeVisible();
     await expect(testPage.getByTestId("shortcut-recorder-FOCUS_INPUT")).toBeVisible();
     await expect(testPage.getByTestId("shortcut-recorder-TOGGLE_PLAN_MODE")).toBeVisible();
+    await expect(testPage.getByTestId("shortcut-recorder-TASK_SWITCHER")).toBeVisible();
   });
 
   test("can record a new shortcut and persist it", async ({ testPage, apiClient, seedData }) => {
@@ -107,5 +108,31 @@ test.describe("Keyboard Shortcuts Settings", () => {
     // Close the dialog
     await testPage.keyboard.press("Escape");
     await expect(dialog).not.toBeVisible({ timeout: 3_000 });
+  });
+
+  test("customized task switcher shortcut opens the recent task switcher", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      keyboard_shortcuts: {
+        TASK_SWITCHER: { key: "y", modifiers: { ctrlOrCmd: true, shift: true } },
+      },
+    });
+
+    await testPage.goto("/");
+    await testPage.waitForLoadState("networkidle");
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await testPage.keyboard.down(modifier);
+    await testPage.keyboard.down("Shift");
+    await testPage.keyboard.press("y");
+
+    await expect(testPage.getByTestId("recent-task-switcher")).toBeVisible({ timeout: 5_000 });
+    await testPage.keyboard.up(modifier);
+    await testPage.keyboard.up("Shift");
+    await expect(testPage.getByTestId("recent-task-switcher")).not.toBeVisible({ timeout: 5_000 });
   });
 });

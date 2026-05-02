@@ -19,7 +19,8 @@ describe("CONFIGURABLE_SHORTCUTS", () => {
     expect(ids).toContain("NEW_TASK");
     expect(ids).toContain("FOCUS_INPUT");
     expect(ids).toContain("TOGGLE_PLAN_MODE");
-    expect(ids).toHaveLength(9);
+    expect(ids).toContain("TASK_SWITCHER");
+    expect(ids).toHaveLength(10);
   });
 
   it("each entry has a label and default matching SHORTCUTS", () => {
@@ -40,6 +41,9 @@ describe("CONFIGURABLE_SHORTCUTS", () => {
 
     expect(CONFIGURABLE_SHORTCUTS.TOGGLE_PLAN_MODE.label).toBe("Toggle Plan Mode");
     expect(CONFIGURABLE_SHORTCUTS.TOGGLE_PLAN_MODE.default).toBe(SHORTCUTS.TOGGLE_PLAN_MODE);
+
+    expect(CONFIGURABLE_SHORTCUTS.TASK_SWITCHER.label).toBe("Recent Task Switcher");
+    expect(CONFIGURABLE_SHORTCUTS.TASK_SWITCHER.default).toBe(SHORTCUTS.TASK_SWITCHER);
   });
 });
 
@@ -80,5 +84,6 @@ describe("resolveAllShortcuts", () => {
     expect(result.TOGGLE_SIDEBAR).toEqual(override);
     expect(result.BOTTOM_TERMINAL).toBe(SHORTCUTS.BOTTOM_TERMINAL);
     expect(result.SEARCH).toBe(SHORTCUTS.SEARCH);
+    expect(result.TASK_SWITCHER).toBe(SHORTCUTS.TASK_SWITCHER);
   });
 });
