@@ -71,6 +71,7 @@ function SecretField({
       </Label>
       <Input
         id="linear-secret"
+        data-testid="linear-secret-input"
         type="password"
         placeholder={hasSavedSecret ? "••••••••" : "lin_api_..."}
         value={form.secret}
@@ -172,10 +173,17 @@ function ActionBar({
         disabled={testing || loading || disableTest}
         className="cursor-pointer"
         title={disableTest ? "Paste an API key to test the connection" : undefined}
+        data-testid="linear-test-button"
       >
         {testing ? "Testing..." : "Test connection"}
       </Button>
-      <Button type="button" onClick={onSave} disabled={disableSave} className="cursor-pointer">
+      <Button
+        type="button"
+        onClick={onSave}
+        disabled={disableSave}
+        className="cursor-pointer"
+        data-testid="linear-save-button"
+      >
         {saveLabel(saving, hasConfig)}
       </Button>
       {hasConfig && (
@@ -184,6 +192,7 @@ function ActionBar({
           variant="destructive"
           onClick={onDelete}
           className="ml-auto cursor-pointer"
+          data-testid="linear-delete-button"
         >
           Remove configuration
         </Button>

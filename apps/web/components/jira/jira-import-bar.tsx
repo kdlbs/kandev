@@ -23,6 +23,7 @@ export function JiraImportBar({ workspaceId, disabled, onImport }: JiraImportBar
       triggerIcon={<IconTicket className="h-4 w-4" />}
       triggerAriaLabel="Import from Jira"
       triggerDisabled={disabled}
+      testIdPrefix="jira-import"
       tooltip="Import from Jira ticket URL or key"
       align="start"
       headline="Import Jira ticket"

@@ -791,4 +791,201 @@ export class ApiClient {
   async triggerReviewWatch(watchId: string): Promise<{ new_prs: number; cleaned?: number }> {
     return this.request("POST", `/api/v1/github/watches/review/${watchId}/trigger`, undefined);
   }
+
+  // --- Integration config seeding (real API, not mock) ---
+
+  async setJiraConfig(payload: {
+    workspaceId: string;
+    siteUrl: string;
+    email: string;
+    authMethod?: "api_token" | "session_cookie";
+    defaultProjectKey?: string;
+    secret: string;
+  }): Promise<unknown> {
+    return this.request("POST", "/api/v1/jira/config", {
+      authMethod: "api_token",
+      ...payload,
+    });
+  }
+
+  async setLinearConfig(payload: {
+    workspaceId: string;
+    secret: string;
+    defaultTeamKey?: string;
+  }): Promise<unknown> {
+    return this.request("POST", "/api/v1/linear/config", {
+      authMethod: "api_key",
+      defaultTeamKey: "",
+      ...payload,
+    });
+  }
+
+  /**
+   * Poll until the integration config reports `lastOk: true`. SetConfig kicks
+   * off an async auth-health probe in a goroutine, so the row's `lastOk` flips
+   * shortly after — but with no synchronous signal. Tests that gate UI on
+   * `useJiraAvailable` / `useLinearAvailable` need to await this before
+   * navigating, otherwise the import bar can race the first render.
+   */
+  async waitForIntegrationAuthHealthy(
+    integration: "jira" | "linear",
+    workspaceId: string,
+    timeoutMs = 5_000,
+  ): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const res = await this.rawRequest(
+        "GET",
+        `/api/v1/${integration}/config?workspace_id=${workspaceId}`,
+      );
+      if (res.ok && res.status === 200) {
+        const cfg = (await res.json()) as { hasSecret?: boolean; lastOk?: boolean };
+        if (cfg.hasSecret && cfg.lastOk) return;
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error(`${integration} config never reported lastOk: true within ${timeoutMs}ms`);
+  }
+
+  // --- Jira Mock Control ---
+
+  async mockJiraReset(): Promise<void> {
+    await this.request("DELETE", "/api/v1/jira/mock/reset");
+  }
+
+  async mockJiraSetAuthResult(result: {
+    ok: boolean;
+    accountId?: string;
+    displayName?: string;
+    email?: string;
+    error?: string;
+  }): Promise<void> {
+    await this.request("PUT", "/api/v1/jira/mock/auth-result", result);
+  }
+
+  async mockJiraSetAuthHealth(args: {
+    workspaceId: string;
+    ok: boolean;
+    error?: string;
+  }): Promise<void> {
+    await this.request("PUT", "/api/v1/jira/mock/auth-health", args);
+  }
+
+  async mockJiraSetProjects(projects: MockJiraProject[]): Promise<void> {
+    await this.request("POST", "/api/v1/jira/mock/projects", { projects });
+  }
+
+  async mockJiraAddTickets(tickets: MockJiraTicket[]): Promise<void> {
+    await this.request("POST", "/api/v1/jira/mock/tickets", { tickets });
+  }
+
+  async mockJiraAddTransitions(
+    ticketKey: string,
+    transitions: MockJiraTransition[],
+  ): Promise<void> {
+    await this.request("POST", "/api/v1/jira/mock/transitions", {
+      ticketKey,
+      transitions,
+    });
+  }
+
+  async mockJiraSetSearchHits(tickets: MockJiraTicket[]): Promise<void> {
+    await this.request("POST", "/api/v1/jira/mock/search-hits", { tickets });
+  }
+
+  async mockJiraSetGetTicketError(args: { statusCode: number; message: string }): Promise<void> {
+    await this.request("PUT", "/api/v1/jira/mock/get-ticket-error", args);
+  }
+
+  // --- Linear Mock Control ---
+
+  async mockLinearReset(): Promise<void> {
+    await this.request("DELETE", "/api/v1/linear/mock/reset");
+  }
+
+  async mockLinearSetAuthResult(result: {
+    ok: boolean;
+    userId?: string;
+    displayName?: string;
+    email?: string;
+    orgSlug?: string;
+    orgName?: string;
+    error?: string;
+  }): Promise<void> {
+    await this.request("PUT", "/api/v1/linear/mock/auth-result", result);
+  }
+
+  async mockLinearSetAuthHealth(args: {
+    workspaceId: string;
+    ok: boolean;
+    error?: string;
+    orgSlug?: string;
+  }): Promise<void> {
+    await this.request("PUT", "/api/v1/linear/mock/auth-health", args);
+  }
+
+  async mockLinearSetTeams(teams: MockLinearTeam[]): Promise<void> {
+    await this.request("POST", "/api/v1/linear/mock/teams", { teams });
+  }
+
+  async mockLinearSetStates(teamKey: string, states: MockLinearState[]): Promise<void> {
+    await this.request("POST", "/api/v1/linear/mock/states", { teamKey, states });
+  }
+
+  async mockLinearAddIssues(issues: MockLinearIssue[]): Promise<void> {
+    await this.request("POST", "/api/v1/linear/mock/issues", { issues });
+  }
+
+  async mockLinearSetGetIssueError(args: { statusCode: number; message: string }): Promise<void> {
+    await this.request("PUT", "/api/v1/linear/mock/get-issue-error", args);
+  }
 }
+
+// --- Jira / Linear mock payload types ---
+
+export type MockJiraProject = { id: string; key: string; name: string };
+
+export type MockJiraTransition = {
+  id: string;
+  name: string;
+  toStatusId: string;
+  toStatusName: string;
+};
+
+export type MockJiraTicket = {
+  key: string;
+  summary?: string;
+  description?: string;
+  statusId?: string;
+  statusName?: string;
+  statusCategory?: string;
+  projectKey?: string;
+  issueType?: string;
+  url?: string;
+  transitions?: MockJiraTransition[];
+};
+
+export type MockLinearTeam = { id: string; key: string; name: string };
+
+export type MockLinearState = {
+  id: string;
+  name: string;
+  type: string;
+  color?: string;
+  position?: number;
+};
+
+export type MockLinearIssue = {
+  id: string;
+  identifier: string;
+  title?: string;
+  description?: string;
+  stateId?: string;
+  stateName?: string;
+  stateType?: string;
+  stateCategory?: string;
+  teamId?: string;
+  teamKey?: string;
+  priority?: number;
+  url?: string;
+};

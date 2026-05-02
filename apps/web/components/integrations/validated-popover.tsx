@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
@@ -31,6 +31,10 @@ export type ValidatedPopoverProps<T> = {
   triggerLabel?: string; // Required for "outline-with-label", ignored for "ghost-icon".
   triggerAriaLabel?: string; // Used for "ghost-icon" since there's no visible label.
   triggerDisabled?: boolean;
+  // testIdPrefix scopes the data-testid attributes on trigger / input / submit
+  // / error so callers can target the right popover when more than one is
+  // mounted on the same page (e.g. a Jira import bar next to a Linear one).
+  testIdPrefix?: string;
   tooltip: string;
   // PopoverContent layout.
   align?: "start" | "end";
@@ -50,16 +54,32 @@ export type ValidatedPopoverProps<T> = {
   submittingLabel: string; // e.g. "Linking...", "Loading..."
 };
 
+type TriggerButtonProps = Pick<
+  ValidatedPopoverProps<unknown>,
+  | "triggerStyle"
+  | "triggerIcon"
+  | "triggerLabel"
+  | "triggerAriaLabel"
+  | "triggerDisabled"
+  | "testIdPrefix"
+> &
+  ButtonHTMLAttributes<HTMLButtonElement>;
+
+// TriggerButton forwards every prop the parent injects (notably radix Slot's
+// onClick / onPointerDown / aria-expanded / data-state from PopoverTrigger and
+// TooltipTrigger asChild) onto the inner Button. Forgetting `...rest` here
+// silently drops radix's open-toggle handler, which makes the popover
+// unclickable while leaving the tooltip working — easy to miss in dev.
 function TriggerButton({
   triggerStyle,
   triggerIcon,
   triggerLabel,
   triggerAriaLabel,
   triggerDisabled,
-}: Pick<
-  ValidatedPopoverProps<unknown>,
-  "triggerStyle" | "triggerIcon" | "triggerLabel" | "triggerAriaLabel" | "triggerDisabled"
->) {
+  testIdPrefix,
+  ...rest
+}: TriggerButtonProps) {
+  const triggerTestId = testIdPrefix ? `${testIdPrefix}-trigger` : undefined;
   if (triggerStyle === "outline-with-label") {
     return (
       <Button
@@ -68,6 +88,8 @@ function TriggerButton({
         variant="outline"
         disabled={triggerDisabled}
         className="cursor-pointer px-2 gap-1"
+        data-testid={triggerTestId}
+        {...rest}
       >
         {triggerIcon}
         <span className="text-xs font-medium">{triggerLabel}</span>
@@ -82,9 +104,78 @@ function TriggerButton({
       disabled={triggerDisabled}
       aria-label={triggerAriaLabel}
       className="h-7 w-7 cursor-pointer hover:bg-muted/40 text-slate-400"
+      data-testid={triggerTestId}
+      {...rest}
     >
       {triggerIcon}
     </Button>
+  );
+}
+
+type PopoverBodyProps = {
+  headline: string;
+  placeholder: string;
+  value: string;
+  onChange: (next: string) => void;
+  onSubmit: () => void | Promise<void>;
+  loading: boolean;
+  error: string | null;
+  submitLabel: string;
+  submittingLabel: string;
+  testIdPrefix?: string;
+};
+
+function PopoverBody({
+  headline,
+  placeholder,
+  value,
+  onChange,
+  onSubmit,
+  loading,
+  error,
+  submitLabel,
+  submittingLabel,
+  testIdPrefix,
+}: PopoverBodyProps) {
+  return (
+    <div className="space-y-2">
+      <div className="text-xs font-medium">{headline}</div>
+      <Input
+        autoFocus
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="h-8 text-xs"
+        data-testid={testIdPrefix ? `${testIdPrefix}-input` : undefined}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            void onSubmit();
+          }
+        }}
+      />
+      {error && (
+        <p
+          className="text-[11px] text-destructive"
+          role="alert"
+          data-testid={testIdPrefix ? `${testIdPrefix}-error` : undefined}
+        >
+          {error}
+        </p>
+      )}
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => void onSubmit()}
+          disabled={loading || !value.trim()}
+          className="h-7 cursor-pointer"
+          data-testid={testIdPrefix ? `${testIdPrefix}-submit` : undefined}
+        >
+          {loading ? submittingLabel : submitLabel}
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -100,6 +191,7 @@ export function ValidatedPopover<T>(props: ValidatedPopoverProps<T>) {
     onSuccess,
     submitLabel,
     submittingLabel,
+    testIdPrefix,
   } = props;
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
@@ -150,44 +242,31 @@ export function ValidatedPopover<T>(props: ValidatedPopoverProps<T>) {
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
-            <TriggerButton {...props} />
+            <TriggerButton
+              triggerStyle={props.triggerStyle}
+              triggerIcon={props.triggerIcon}
+              triggerLabel={props.triggerLabel}
+              triggerAriaLabel={props.triggerAriaLabel}
+              triggerDisabled={props.triggerDisabled}
+              testIdPrefix={props.testIdPrefix}
+            />
           </PopoverTrigger>
         </TooltipTrigger>
         <TooltipContent>{tooltip}</TooltipContent>
       </Tooltip>
       <PopoverContent align={align ?? "end"} className="w-80 p-3">
-        <div className="space-y-2">
-          <div className="text-xs font-medium">{headline}</div>
-          <Input
-            autoFocus
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder={placeholder}
-            className="h-8 text-xs"
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void submit();
-              }
-            }}
-          />
-          {error && (
-            <p className="text-[11px] text-destructive" role="alert">
-              {error}
-            </p>
-          )}
-          <div className="flex justify-end">
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => void submit()}
-              disabled={loading || !value.trim()}
-              className="h-7 cursor-pointer"
-            >
-              {loading ? submittingLabel : submitLabel}
-            </Button>
-          </div>
-        </div>
+        <PopoverBody
+          headline={headline}
+          placeholder={placeholder}
+          value={value}
+          onChange={setValue}
+          onSubmit={submit}
+          loading={loading}
+          error={error}
+          submitLabel={submitLabel}
+          submittingLabel={submittingLabel}
+          testIdPrefix={testIdPrefix}
+        />
       </PopoverContent>
     </Popover>
   );

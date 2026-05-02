@@ -336,6 +336,7 @@ Jira and Linear are the model: per-workspace credentials, a 90s auth-health poll
 - Use `internal/integrations/secretadapter` instead of writing your own upsert wrapper around `secrets.SecretStore`. The adapter satisfies any per-integration `SecretStore` interface shaped as `{Reveal, Set, Delete, Exists}`.
 - Use `internal/integrations/healthpoll` for the auth-health loop. Implement the `Prober` interface (`ListConfiguredWorkspaces` + `RecordAuthHealth`) on a small adapter and let `healthpoll.New("name", prober, log)` own Start/Stop/ticker. Keep integration-specific loops (JQL polling, webhook reconciliation, etc.) separate, like jira's issue-watch loop.
 - Wire the service via a per-domain `init<Name>Service(...)` helper in `cmd/kandev/services.go`, not inline in `provideServices`.
+- Ship a `mock_client.go` + `mock_controller.go` next to the real client. `Provide` branches on `KANDEV_MOCK_<NAME>=true` and returns the in-memory client; `RegisterMockRoutes(router, svc, log)` mounts `/api/v1/<name>/mock/*` only when the service was built with the mock. The e2e backend fixture sets the env var so Playwright tests drive the mock via `apiClient.mock<Name>*()` helpers — see jira/linear for the layout.
 
 **Frontend**:
 - Hooks live under `hooks/domains/<name>/`, **not** `components/<name>/`.
@@ -357,4 +358,4 @@ This file is read by AI coding agents (Claude Code via `CLAUDE.md` symlink, Code
 
 ---
 
-**Last Updated**: 2026-05-01
+**Last Updated**: 2026-05-02
