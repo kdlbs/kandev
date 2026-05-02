@@ -72,9 +72,12 @@ test.describe("Changes panel focus behavior", () => {
     git.stageAll();
     git.commit("test commit");
 
-    // Wait for the changes panel to show the commit
+    // Wait for the changes panel to show the commit. The commits section
+    // collapses by default, so expand it before asserting on the message.
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
+    await expect(session.changes.getByTestId("commits-section")).toBeVisible({ timeout: 10_000 });
+    await session.changes.getByTestId("commits-section-collapse-toggle").click();
     await expect(session.changes.getByText("test commit")).toBeVisible({ timeout: 10_000 });
 
     // Switch back to chat tab — this is the tab that should be active after refresh

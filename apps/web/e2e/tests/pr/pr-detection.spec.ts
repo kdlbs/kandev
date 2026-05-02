@@ -458,6 +458,8 @@ test.describe("PR external detection", () => {
     await expect(session.prFilesSection().getByText("index.ts")).toBeVisible();
 
     await expect(session.commitsSection()).toBeVisible();
+    // Commits section starts collapsed; expand to assert on the message.
+    await session.commitsSection().getByTestId("commits-section-collapse-toggle").click();
     await expect(session.commitsSection().getByText("implement feature X")).toBeVisible();
   });
 });

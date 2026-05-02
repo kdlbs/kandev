@@ -82,9 +82,10 @@ export function RepoChipsRow({
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="repo-chips-row">
       {fs.useGitHubUrl ? (
-        <GitHubUrlPill
+        <GitHubUrlSection
           githubUrl={fs.githubUrl}
           githubUrlError={fs.githubUrlError}
+          githubBranch={fs.githubBranch}
           onGitHubUrlChange={onGitHubUrlChange}
         />
       ) : (
@@ -428,6 +429,38 @@ function Pill({
         </Command>
       </PopoverContent>
     </Popover>
+  );
+}
+
+function GitHubUrlSection({
+  githubUrl,
+  githubUrlError,
+  githubBranch,
+  onGitHubUrlChange,
+}: {
+  githubUrl: string;
+  githubUrlError: string | null;
+  githubBranch: string;
+  onGitHubUrlChange?: (value: string) => void;
+}) {
+  return (
+    <>
+      <GitHubUrlPill
+        githubUrl={githubUrl}
+        githubUrlError={githubUrlError}
+        onGitHubUrlChange={onGitHubUrlChange}
+      />
+      {githubBranch && (
+        <span
+          className="inline-flex items-center gap-1 h-7 rounded-md px-2 text-xs bg-muted/30 border border-border/60 text-muted-foreground"
+          data-testid="github-url-branch-pill"
+          title={`Branch: ${githubBranch}`}
+        >
+          <IconGitBranch className="h-3 w-3" />
+          <span className="truncate max-w-[200px]">{githubBranch}</span>
+        </span>
+      )}
+    </>
   );
 }
 

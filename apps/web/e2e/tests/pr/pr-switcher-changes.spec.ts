@@ -194,6 +194,8 @@ test.describe("PR switcher changes panel", () => {
     await expect(session.prFilesSection().getByText("auth_test.go")).toBeVisible();
 
     await expect(session.commitsSection()).toBeVisible();
+    // Commits section starts collapsed; expand to assert on commit messages.
+    await session.commitsSection().getByTestId("commits-section-collapse-toggle").click();
     await expect(session.commitsSection().getByText("fix auth token expiry")).toBeVisible();
 
     // --- Switch to Task B ---
@@ -211,6 +213,7 @@ test.describe("PR switcher changes panel", () => {
     await expect(session.prFilesSection().getByText("auth.go")).not.toBeVisible();
 
     await expect(session.commitsSection()).toBeVisible();
+    await session.commitsSection().getByTestId("commits-section-collapse-toggle").click();
     await expect(session.commitsSection().getByText("add dashboard component")).toBeVisible();
     await expect(session.commitsSection().getByText("add api client")).toBeVisible();
 
@@ -231,6 +234,7 @@ test.describe("PR switcher changes panel", () => {
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
     await expect(session.prFilesSection().getByText("auth.go")).toBeVisible();
     await expect(session.prFilesSection().getByText("auth_test.go")).toBeVisible();
+    await session.commitsSection().getByTestId("commits-section-collapse-toggle").click();
     await expect(session.commitsSection().getByText("fix auth token expiry")).toBeVisible();
   });
 });

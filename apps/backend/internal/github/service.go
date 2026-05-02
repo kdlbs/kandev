@@ -633,7 +633,7 @@ func (s *Service) ListWorkspaceTaskPRs(ctx context.Context, workspaceID string) 
 					defer func() { <-sem }()
 					syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 					defer cancel()
-					if _, syncErr := s.TriggerPRSync(syncCtx, id); syncErr != nil {
+					if _, syncErr := s.TriggerPRSyncAll(syncCtx, id); syncErr != nil {
 						s.logger.Debug("background PR sync failed", zap.String("task_id", id), zap.Error(syncErr))
 					}
 				}(taskID)

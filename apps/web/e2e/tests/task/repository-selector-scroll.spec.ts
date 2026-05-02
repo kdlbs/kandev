@@ -44,8 +44,10 @@ test.describe("repository selector scroll inside dialog", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
 
-    // Open the repository selector popover.
-    await testPage.getByTestId("repository-selector").click();
+    // Open the repository selector popover via the chip-row trigger
+    // (the dialog now uses the multi-repo chip layout, not the legacy
+    // single repository-selector combobox).
+    await testPage.getByTestId("repo-chip-trigger").first().click();
 
     // The popover's cmdk list must live inside the dialog DOM (not portaled
     // to body), otherwise react-remove-scroll eats wheel events.
