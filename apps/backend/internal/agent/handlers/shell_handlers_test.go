@@ -242,6 +242,23 @@ func TestWsShellStatus_NoClientAvailable(t *testing.T) {
 	}
 }
 
+func TestWsShellSubscribe_NoInstanceFound(t *testing.T) {
+	log := newTestLogger()
+	mgr := newTestManager()
+	handlers := NewShellHandlers(mgr, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionShellSubscribe, ShellSubscribeRequest{SessionID: "session-1"})
+
+	_, err := handlers.wsShellSubscribe(context.Background(), msg)
+	if err == nil {
+		t.Fatal("expected error for non-existent session")
+	}
+	expectedPrefix := "no agent running for session session-1"
+	if !strings.HasPrefix(err.Error(), expectedPrefix) {
+		t.Errorf("expected prefix '%s', got: %v", expectedPrefix, err)
+	}
+}
+
 func TestWsShellInput_NoInstanceFound(t *testing.T) {
 	log := newTestLogger()
 	mgr := newTestManager()
