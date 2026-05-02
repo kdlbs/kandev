@@ -72,7 +72,8 @@ function PRSingleButton({ pr }: { pr: TaskPR }) {
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
-          data-testid={`pr-topbar-button-${pr.pr_number}`}
+          data-testid="pr-topbar-button"
+          data-pr-number={pr.pr_number}
           data-pr-state={pr.state}
           data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
           size="sm"
