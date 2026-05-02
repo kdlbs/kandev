@@ -326,11 +326,11 @@ export type SessionRuntimeSliceActions = {
   setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;
   // Session todos actions
   setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
-  // User shells actions
-  setUserShells: (sessionId: string, shells: UserShellInfo[]) => void;
-  setUserShellsLoading: (sessionId: string, loading: boolean) => void;
-  addUserShell: (sessionId: string, shell: UserShellInfo) => void;
-  removeUserShell: (sessionId: string, terminalId: string) => void;
+  // User shells actions — env-scoped (sessions in the same task share one shell list)
+  setUserShells: (environmentId: string, shells: UserShellInfo[]) => void;
+  setUserShellsLoading: (environmentId: string, loading: boolean) => void;
+  addUserShell: (environmentId: string, shell: UserShellInfo) => void;
+  removeUserShell: (environmentId: string, terminalId: string) => void;
   setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
 };
 

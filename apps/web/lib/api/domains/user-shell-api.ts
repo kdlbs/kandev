@@ -14,12 +14,14 @@ export type TerminalInfo = {
 };
 
 /**
- * Fetch terminals for a session via HTTP (for SSR).
+ * Fetch terminals for a task environment via HTTP (for SSR).
  * This endpoint auto-creates the first "Terminal" if none exist.
+ *
+ * User shells are env-scoped — sessions in the same task share one shell list.
  */
-export async function fetchTerminals(sessionId: string): Promise<TerminalInfo[]> {
+export async function fetchTerminals(environmentId: string): Promise<TerminalInfo[]> {
   const { apiBaseUrl } = getBackendConfig();
-  const url = `${apiBaseUrl}/api/v1/sessions/${sessionId}/terminals`;
+  const url = `${apiBaseUrl}/api/v1/environments/${environmentId}/terminals`;
   try {
     const response = await fetch(url);
     if (!response.ok) {
@@ -59,9 +61,11 @@ export type CreateUserShellOptions = {
  * Create a new user shell terminal.
  * Backend assigns the terminal ID, label, and closable status.
  * First terminal is "Terminal" and not closable, subsequent are "Terminal 2", etc. and closable.
+ *
+ * User shells are env-scoped — pass the task environment ID, not a session ID.
  */
 export async function createUserShell(
-  sessionId: string,
+  environmentId: string,
   options?: CreateUserShellOptions,
 ): Promise<CreateUserShellResult> {
   const client = getWebSocketClient();
@@ -69,7 +73,7 @@ export async function createUserShell(
     throw new Error("WebSocket client not available");
   }
 
-  const payload: Record<string, string> = { session_id: sessionId };
+  const payload: Record<string, string> = { task_environment_id: environmentId };
   if (options?.scriptId) payload.script_id = options.scriptId;
   if (options?.command) payload.command = options.command;
   if (options?.label) payload.label = options.label;
@@ -93,7 +97,7 @@ export async function createUserShell(
  * Stop a user shell terminal process.
  * This is called when closing a terminal tab to clean up the backend process.
  */
-export async function stopUserShell(sessionId: string, terminalId: string): Promise<void> {
+export async function stopUserShell(environmentId: string, terminalId: string): Promise<void> {
   const client = getWebSocketClient();
   if (!client) {
     // WebSocket not available, silently fail (best-effort cleanup)
@@ -102,7 +106,7 @@ export async function stopUserShell(sessionId: string, terminalId: string): Prom
 
   try {
     await client.request("user_shell.stop", {
-      session_id: sessionId,
+      task_environment_id: environmentId,
       terminal_id: terminalId,
     });
   } catch (error) {

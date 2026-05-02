@@ -14,21 +14,19 @@ interface UseUserShellsReturn {
 const EMPTY_SHELLS: UserShellInfo[] = [];
 
 /**
- * Hook to fetch and manage user shell terminals for a session.
+ * Hook to fetch and manage user shell terminals for a task environment.
+ *
+ * User shells are env-scoped — sessions in the same task share one shell list.
+ * Pass the environment id directly; do not pass a session id.
  *
  * Follows the data fetching pattern:
  * 1. Read from store first
  * 2. Fetch from backend if not loaded
  * 3. Track loading/loaded state
  */
-export function useUserShells(sessionId: string | null): UseUserShellsReturn {
+export function useUserShells(environmentId: string | null): UseUserShellsReturn {
   const store = useAppStoreApi();
-  const environmentId = useAppStore((state) =>
-    sessionId ? (state.environmentIdBySessionId[sessionId] ?? null) : null,
-  );
 
-  // Read from store by explicit environment ID. Missing env means lifecycle data
-  // is incomplete; do not synthesize a session-scoped shell list.
   const shells = useAppStore((state) => {
     if (!environmentId) return EMPTY_SHELLS;
     return state.userShells.byEnvironmentId[environmentId] ?? EMPTY_SHELLS;
@@ -43,48 +41,31 @@ export function useUserShells(sessionId: string | null): UseUserShellsReturn {
   });
   const connectionStatus = useAppStore((state) => state.connection.status);
 
-  // Guard refs to prevent duplicate fetches
-  const lastFetchedSessionIdRef = useRef<string | null>(null);
-  const prevSessionIdRef = useRef<string | null>(null);
+  // Guard ref to prevent duplicate fetches per env
+  const lastFetchedEnvIdRef = useRef<string | null>(null);
 
-  // Reset refs when session clears
+  // Reset ref when environmentId clears
   useEffect(() => {
-    if (!sessionId) {
-      lastFetchedSessionIdRef.current = null;
+    if (!environmentId) {
+      lastFetchedEnvIdRef.current = null;
     }
-  }, [sessionId]);
+  }, [environmentId]);
 
   // Fetch user shells from backend
   useEffect(() => {
-    if (!sessionId || !environmentId) return;
+    if (!environmentId) return;
     if (connectionStatus !== "connected") return;
-
-    // Detect session change to force refetch
-    const sessionChanged =
-      prevSessionIdRef.current !== null && prevSessionIdRef.current !== sessionId;
-    prevSessionIdRef.current = sessionId;
-
-    // If session changed, reset fetch guard
-    if (sessionChanged) {
-      lastFetchedSessionIdRef.current = null;
-    }
-
-    // Check if already loaded (unless session just changed)
-    if (isLoaded && !sessionChanged) {
-      lastFetchedSessionIdRef.current = sessionId;
+    if (isLoaded) {
+      lastFetchedEnvIdRef.current = environmentId;
       return;
     }
-
-    // Don't fetch again if already fetched for this session
-    if (lastFetchedSessionIdRef.current === sessionId) {
-      return;
-    }
+    if (lastFetchedEnvIdRef.current === environmentId) return;
 
     const fetchShells = async () => {
       const client = getWebSocketClient();
       if (!client) return;
 
-      store.getState().setUserShellsLoading(sessionId, true);
+      store.getState().setUserShellsLoading(environmentId, true);
 
       try {
         const response = await client.request<{
@@ -96,9 +77,8 @@ export function useUserShells(sessionId: string | null): UseUserShellsReturn {
             closable: boolean;
             initial_command?: string;
           }>;
-        }>("user_shell.list", { session_id: sessionId }, 10000);
+        }>("user_shell.list", { task_environment_id: environmentId }, 10000);
 
-        // Transform backend format (snake_case) to frontend format (camelCase)
         const shells: UserShellInfo[] = (response.shells ?? []).map((s) => ({
           terminalId: s.terminal_id,
           processId: s.process_id,
@@ -108,29 +88,27 @@ export function useUserShells(sessionId: string | null): UseUserShellsReturn {
           initialCommand: s.initial_command,
         }));
 
-        store.getState().setUserShells(sessionId, shells);
-        lastFetchedSessionIdRef.current = sessionId;
+        store.getState().setUserShells(environmentId, shells);
+        lastFetchedEnvIdRef.current = environmentId;
       } catch (error) {
         console.error("Failed to fetch user shells:", error);
-        // Set empty shells on error so we don't keep retrying
-        store.getState().setUserShells(sessionId, []);
-        lastFetchedSessionIdRef.current = sessionId;
+        store.getState().setUserShells(environmentId, []);
+        lastFetchedEnvIdRef.current = environmentId;
       }
     };
 
     fetchShells();
-  }, [sessionId, environmentId, connectionStatus, isLoaded, store]);
+  }, [environmentId, connectionStatus, isLoaded, store]);
 
-  // Actions
   const addShell = (shell: UserShellInfo) => {
-    if (sessionId) {
-      store.getState().addUserShell(sessionId, shell);
+    if (environmentId) {
+      store.getState().addUserShell(environmentId, shell);
     }
   };
 
   const removeShell = (terminalId: string) => {
-    if (sessionId) {
-      store.getState().removeUserShell(sessionId, terminalId);
+    if (environmentId) {
+      store.getState().removeUserShell(environmentId, terminalId);
     }
   };
 
