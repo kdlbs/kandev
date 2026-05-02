@@ -305,6 +305,66 @@ func TestPromptTask_ResetInProgressReturnsSentinelError(t *testing.T) {
 	}
 }
 
+// --- CancelAgent ---
+
+// TestCancelAgent_DeduplicatesConcurrentCalls covers the impatient-user case:
+// the UI's cancel button has no in-flight disable, so users click it multiple
+// times while the agent is still tearing down a slow turn (e.g. a Claude
+// Monitor tool). Without dedupe each click reaches the lifecycle layer and
+// emits its own "Turn cancelled by user" message; phantom turns are also
+// lazily started to host those messages. We assert that only one cancel makes
+// it through to agentManager.CancelAgent while one is already in flight.
+func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{
+		isAgentRunning:     true,
+		cancelAgentBlock:   make(chan struct{}),
+		cancelAgentEntered: make(chan struct{}, 1),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+
+	// First call goes async and parks inside agentManager.CancelAgent.
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- svc.CancelAgent(context.Background(), "session1")
+	}()
+
+	// Wait for the first call to actually enter agentManager.CancelAgent so
+	// the dedupe guard is set before the duplicate calls fire. Channel sync
+	// (over sleep-based polling) is the project convention for tests that
+	// don't depend on real subprocess timing.
+	<-agentMgr.cancelAgentEntered
+
+	// Fire several duplicates while the first is still parked. Each must be
+	// short-circuited by the dedupe guard and return immediately.
+	const duplicates = 5
+	for i := 0; i < duplicates; i++ {
+		if err := svc.CancelAgent(context.Background(), "session1"); err != nil {
+			t.Fatalf("duplicate cancel %d returned error: %v", i, err)
+		}
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
+		t.Fatalf("expected exactly 1 agentManager.CancelAgent call while first is in flight, got %d", got)
+	}
+
+	// Release the first call. After it returns, the guard clears and a fresh
+	// cancel is allowed through.
+	close(agentMgr.cancelAgentBlock)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first CancelAgent returned error: %v", err)
+	}
+
+	agentMgr.cancelAgentBlock = nil // unblock subsequent calls
+	if err := svc.CancelAgent(context.Background(), "session1"); err != nil {
+		t.Fatalf("post-release CancelAgent returned error: %v", err)
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 2 {
+		t.Fatalf("expected 2 agentManager.CancelAgent calls after release, got %d", got)
+	}
+}
+
 // --- StartCreatedSession ---
 
 func TestStartCreatedSession_WrongTask(t *testing.T) {

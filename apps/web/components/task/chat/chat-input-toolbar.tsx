@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useRef, useState, type ReactNode } from "react";
 import {
   IconArrowUp,
   IconChevronsLeft,
@@ -46,7 +46,7 @@ export type ChatInputToolbarProps = {
   hasContent?: boolean;
   isDisabled: boolean;
   isSending: boolean;
-  onCancel: () => void;
+  onCancel: () => void | Promise<void>;
   onSubmit: () => void;
   submitKey?: "enter" | "cmd_enter";
   contextCount?: number;
@@ -79,7 +79,7 @@ type SubmitButtonProps = {
   isDisabled: boolean;
   isSending: boolean;
   planModeEnabled: boolean;
-  onCancel: () => void;
+  onCancel: () => void | Promise<void>;
   onSubmit: () => void;
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
 };
@@ -103,6 +103,32 @@ function SubmitButton({
   // When agent is busy and there's nothing to send, show only the cancel button.
   // When there's content to queue, show both cancel and send buttons side-by-side.
   const showSendButton = !isAgentBusy || hasContent;
+  // Track cancel-in-flight locally so impatient retries are blocked at the
+  // button itself: cancelling a long-running tool (e.g. Claude Monitor) can
+  // take several seconds, and without this the user clicks repeatedly and
+  // each click hits the backend.
+  const [isCancelling, setIsCancelling] = useState(false);
+  // Re-entrancy guard via ref: `disabled={isCancelling}` already blocks DOM
+  // clicks, but the ref makes the guard effective for any programmatic caller
+  // and keeps `isCancelling` out of the useCallback deps so the handler
+  // identity is stable across the false→true→false flips.
+  const cancellingRef = useRef(false);
+  const handleCancelClick = useCallback(async () => {
+    if (cancellingRef.current) return;
+    cancellingRef.current = true;
+    setIsCancelling(true);
+    try {
+      await onCancel();
+    } catch (error) {
+      // Parent handlers normally swallow errors, but a rejected onCancel
+      // must not propagate as an unhandled rejection — and the button must
+      // re-enable so the user can retry.
+      console.error("Failed to cancel agent turn:", error);
+    } finally {
+      cancellingRef.current = false;
+      setIsCancelling(false);
+    }
+  }, [onCancel]);
   return (
     <div className="flex items-center gap-1">
       {isAgentBusy && (
@@ -112,14 +138,19 @@ function SubmitButton({
               type="button"
               variant="secondary"
               size="icon"
-              className="h-7 w-7 rounded-full cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20"
-              onClick={onCancel}
+              className="h-7 w-7 rounded-full cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:cursor-not-allowed disabled:opacity-70"
+              onClick={handleCancelClick}
+              disabled={isCancelling}
               data-testid="cancel-agent-button"
             >
-              <IconPlayerPauseFilled className="h-3.5 w-3.5" />
+              {isCancelling ? (
+                <GridSpinner className="text-destructive" />
+              ) : (
+                <IconPlayerPauseFilled className="h-3.5 w-3.5" />
+              )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Cancel agent</TooltipContent>
+          <TooltipContent>{isCancelling ? "Cancelling..." : "Cancel agent"}</TooltipContent>
         </Tooltip>
       )}
       {showSendButton && (

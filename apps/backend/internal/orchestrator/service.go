@@ -262,6 +262,15 @@ type Service struct {
 	// activity before triggering fallback resume.
 	clarificationWatchdogTimeout time.Duration
 
+	// cancelInFlight tracks sessionIDs whose CancelAgent call is currently in
+	// progress. Used to deduplicate impatient retries from the UI: while the
+	// first cancel is still propagating through the agent (which can take several
+	// seconds when a long-running tool like Claude's Monitor is being torn down),
+	// the user often clicks the button repeatedly. Without this guard each click
+	// would create another "Turn cancelled by user" message and lazily start a
+	// phantom turn just to host it.
+	cancelInFlight sync.Map
+
 	// Service state
 	mu        sync.RWMutex
 	running   bool
