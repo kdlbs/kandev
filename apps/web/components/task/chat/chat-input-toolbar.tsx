@@ -108,8 +108,14 @@ function SubmitButton({
   // take several seconds, and without this the user clicks repeatedly and
   // each click hits the backend.
   const [isCancelling, setIsCancelling] = useState(false);
+  // Re-entrancy guard via ref: `disabled={isCancelling}` already blocks DOM
+  // clicks, but the ref makes the guard effective for any programmatic caller
+  // and keeps `isCancelling` out of the useCallback deps so the handler
+  // identity is stable across the false→true→false flips.
+  const cancellingRef = useRef(false);
   const handleCancelClick = useCallback(async () => {
-    if (isCancelling) return;
+    if (cancellingRef.current) return;
+    cancellingRef.current = true;
     setIsCancelling(true);
     try {
       await onCancel();
@@ -119,9 +125,10 @@ function SubmitButton({
       // re-enable so the user can retry.
       console.error("Failed to cancel agent turn:", error);
     } finally {
+      cancellingRef.current = false;
       setIsCancelling(false);
     }
-  }, [isCancelling, onCancel]);
+  }, [onCancel]);
   return (
     <div className="flex items-center gap-1">
       {isAgentBusy && (

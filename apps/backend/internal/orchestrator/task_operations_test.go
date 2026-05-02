@@ -317,8 +317,9 @@ func TestPromptTask_ResetInProgressReturnsSentinelError(t *testing.T) {
 func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	repo := setupTestRepo(t)
 	agentMgr := &mockAgentManager{
-		isAgentRunning:   true,
-		cancelAgentBlock: make(chan struct{}),
+		isAgentRunning:     true,
+		cancelAgentBlock:   make(chan struct{}),
+		cancelAgentEntered: make(chan struct{}, 1),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 
@@ -331,14 +332,10 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	}()
 
 	// Wait for the first call to actually enter agentManager.CancelAgent so
-	// the dedupe guard is set before the duplicate calls fire.
-	deadline := time.Now().Add(2 * time.Second)
-	for agentMgr.cancelAgentCalls.Load() == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("first CancelAgent never reached agentManager")
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
+	// the dedupe guard is set before the duplicate calls fire. Channel sync
+	// (over sleep-based polling) is the project convention for tests that
+	// don't depend on real subprocess timing.
+	<-agentMgr.cancelAgentEntered
 
 	// Fire several duplicates while the first is still parked. Each must be
 	// short-circuited by the dedupe guard and return immediately.
