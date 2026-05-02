@@ -579,30 +579,143 @@ func (s *Service) backfillRepoProvider(store repoStore, repo *models.Repository)
 	}
 }
 
-// ensureSessionPRWatch creates a PRWatch (pr_number=0) for a session's branch
-// so the poller will search for a PR on GitHub. Runs as a background goroutine.
-func (s *Service) ensureSessionPRWatch(ctx context.Context, taskID, sessionID, branch string) {
-	branch = s.resolvePRWatchBranch(ctx, taskID, sessionID, branch)
-	if s.githubService == nil || branch == "" {
+// ensureSessionPRWatch creates one PRWatch (pr_number=0) per repository in
+// the task so the poller will search GitHub for each repo's PR. Runs as a
+// background goroutine.
+//
+// Multi-repo: each repository gets its own watch row because the table is
+// keyed UNIQUE(session_id, repository_id). Without this, only the primary
+// repo's PR was ever discovered — secondary repos in a multi-repo task
+// silently dropped their associations.
+//
+// `fallbackBranch` is used only when a task_repository has no checkout_branch
+// AND the session worktree for that repo has no branch (rare; ensures
+// backwards compatibility with single-repo callers that pass the resolved
+// branch directly).
+func (s *Service) ensureSessionPRWatch(ctx context.Context, taskID, sessionID, fallbackBranch string) {
+	if s.githubService == nil {
 		return
 	}
-
-	owner, repoName := s.resolveTaskRepo(ctx, taskID)
-	if owner == "" || repoName == "" {
-		return
+	targets := s.resolveSessionWatchTargets(ctx, taskID, sessionID, fallbackBranch)
+	for _, t := range targets {
+		if _, err := s.githubService.EnsurePRWatch(
+			ctx, sessionID, taskID, t.RepositoryID, t.Owner, t.Repo, t.Branch,
+		); err != nil {
+			s.logger.Warn("failed to ensure PR watch for session",
+				zap.String("session_id", sessionID),
+				zap.String("repository_id", t.RepositoryID),
+				zap.String("branch", t.Branch),
+				zap.Error(err))
+		}
 	}
+}
 
-	// Resolve to the primary task_repository so the watch is correctly scoped
-	// per-repo. Multi-repo sessions will get one watch per repo by extending
-	// this loop in a follow-up; today the orchestrator only ensures a watch
-	// for the primary repo (matches the legacy single-repo behavior).
-	repositoryID := s.resolvePrimaryTaskRepositoryID(ctx, taskID)
-	if _, err := s.githubService.EnsurePRWatch(ctx, sessionID, taskID, repositoryID, owner, repoName, branch); err != nil {
-		s.logger.Warn("failed to ensure PR watch for session",
-			zap.String("session_id", sessionID),
-			zap.String("branch", branch),
-			zap.Error(err))
+// sessionWatchTarget describes one (session, repo) pair that should have a
+// PR watch. Built by walking the task's repositories and matching each to
+// the session's worktree (branch) and the repo (owner/name).
+type sessionWatchTarget struct {
+	RepositoryID string
+	Owner        string
+	Repo         string
+	Branch       string
+}
+
+// resolveSessionWatchTargets walks the task's repositories and produces one
+// target per repo whose owner/name and branch resolve. Skips repos for which
+// any of those fields are empty — they can't be searched on GitHub.
+//
+// Branch resolution per repo (matches the legacy single-repo
+// resolvePRWatchBranch priority so PR-review-style synthetic worktree
+// branches don't override the task's real branch):
+//
+//  1. task_repository.checkout_branch (set at task creation — authoritative)
+//  2. caller's fallbackBranch, but only for the primary repo (legacy signature)
+//  3. session worktree's branch (last-resort guess from the worktree)
+//
+// Applying the fallback to non-primary repos would assign every repo the same
+// branch and corrupt cross-repo watches.
+func (s *Service) resolveSessionWatchTargets(
+	ctx context.Context, taskID, sessionID, fallbackBranch string,
+) []sessionWatchTarget {
+	store, ok := s.repo.(repoStore)
+	if !ok {
+		return nil
 	}
+	taskRepos, err := store.ListTaskRepositories(ctx, taskID)
+	if err != nil || len(taskRepos) == 0 {
+		return nil
+	}
+	branchByRepo := s.branchByRepoForSession(ctx, sessionID)
+
+	var targets []sessionWatchTarget
+	for _, tr := range taskRepos {
+		owner, repoName := s.resolveRepoOwnerName(ctx, store, tr.RepositoryID)
+		if owner == "" || repoName == "" {
+			continue
+		}
+		branch := strings.TrimSpace(tr.CheckoutBranch)
+		if branch == "" && tr.Position == 0 {
+			branch = fallbackBranch
+		}
+		if branch == "" {
+			branch = branchByRepo[tr.RepositoryID]
+		}
+		if branch == "" {
+			continue
+		}
+		targets = append(targets, sessionWatchTarget{
+			RepositoryID: tr.RepositoryID,
+			Owner:        owner,
+			Repo:         repoName,
+			Branch:       branch,
+		})
+	}
+	return targets
+}
+
+// branchByRepoForSession returns repository_id → worktree_branch for every
+// worktree on the session. Empty map if the session can't be loaded — caller
+// falls back to the task_repository's configured branch.
+func (s *Service) branchByRepoForSession(ctx context.Context, sessionID string) map[string]string {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return nil
+	}
+	out := make(map[string]string, len(session.Worktrees))
+	for _, wt := range session.Worktrees {
+		if wt.WorktreeBranch == "" || wt.RepositoryID == "" {
+			continue
+		}
+		out[wt.RepositoryID] = wt.WorktreeBranch
+	}
+	return out
+}
+
+// resolveRepoOwnerName returns (owner, name) for a repository, backfilling
+// provider info from the local git remote when missing. Mirrors what
+// resolveTaskRepo does for the primary repo, but works against any repo id.
+func (s *Service) resolveRepoOwnerName(
+	ctx context.Context, store repoStore, repositoryID string,
+) (string, string) {
+	if repositoryID == "" {
+		return "", ""
+	}
+	repoObj, err := store.GetRepository(ctx, repositoryID)
+	if err != nil || repoObj == nil {
+		return "", ""
+	}
+	if repoObj.ProviderOwner == "" && repoObj.LocalPath != "" {
+		if p, o, n := service.ResolveGitRemoteProvider(repoObj.LocalPath); o != "" {
+			repoObj.Provider = p
+			repoObj.ProviderOwner = o
+			repoObj.ProviderName = n
+			go s.backfillRepoProvider(store, repoObj)
+		}
+	}
+	if repoObj.Provider != "github" {
+		return "", ""
+	}
+	return repoObj.ProviderOwner, repoObj.ProviderName
 }
 
 // resolvePrimaryTaskRepositoryID returns the primary task_repository's
@@ -776,8 +889,10 @@ func (s *Service) ResolveBranchForSession(ctx context.Context, taskID, sessionID
 	return s.resolvePRWatchBranch(ctx, taskID, sessionID, "")
 }
 
-// buildTaskBranchList queries sessions with branches, filters out those with
-// existing PR watches, and resolves GitHub owner/repo for the remainder.
+// buildTaskBranchList walks sessions × their repositories and emits one
+// TaskBranchInfo per (session, repository) that doesn't already have a PR
+// watch. Multi-repo: previously dedup was keyed by sessionID, which silently
+// dropped non-primary repos as soon as the primary one got a watch.
 func (s *Service) buildTaskBranchList(ctx context.Context, store repoStore) ([]github.TaskBranchInfo, error) {
 	sessions, err := store.ListSessionsWithBranches(ctx)
 	if err != nil {
@@ -788,39 +903,35 @@ func (s *Service) buildTaskBranchList(ctx context.Context, store repoStore) ([]g
 	}
 
 	// Batch fetch existing watches to avoid N+1 queries.
-	watchedSessions := s.buildWatchedSessionSet(ctx)
+	watchedKeys := s.buildWatchedSessionRepoSet(ctx)
 
 	var result []github.TaskBranchInfo
 	for _, sess := range sessions {
-		if watchedSessions[sess.SessionID] {
-			continue
+		// Pass sess.Branch as fallback for the primary repo (legacy callers
+		// stored the worktree branch on SessionBranchInfo); per-repo branches
+		// come from session.Worktrees inside resolveSessionWatchTargets.
+		targets := s.resolveSessionWatchTargets(ctx, sess.TaskID, sess.SessionID, sess.Branch)
+		for _, t := range targets {
+			if watchedKeys[watchedSessionRepoKey(sess.SessionID, t.RepositoryID)] {
+				continue
+			}
+			result = append(result, github.TaskBranchInfo{
+				TaskID:       sess.TaskID,
+				SessionID:    sess.SessionID,
+				RepositoryID: t.RepositoryID,
+				Owner:        t.Owner,
+				Repo:         t.Repo,
+				Branch:       t.Branch,
+			})
 		}
-		owner, repo := s.resolveTaskRepo(ctx, sess.TaskID)
-		if owner == "" || repo == "" {
-			continue
-		}
-		branch := s.resolvePRWatchBranch(ctx, sess.TaskID, sess.SessionID, sess.Branch)
-		if branch == "" {
-			continue
-		}
-		// Resolve to the primary task_repository so the watch row is scoped
-		// per-repo (the new (session_id, repository_id) UNIQUE constraint).
-		// Multi-repo tasks: this still only ensures the primary repo's watch
-		// — extending to one watch per repo is a follow-up.
-		result = append(result, github.TaskBranchInfo{
-			TaskID:       sess.TaskID,
-			SessionID:    sess.SessionID,
-			RepositoryID: s.resolvePrimaryTaskRepositoryID(ctx, sess.TaskID),
-			Owner:        owner,
-			Repo:         repo,
-			Branch:       branch,
-		})
 	}
 	return result, nil
 }
 
-// buildWatchedSessionSet returns a set of session IDs that already have PR watches.
-func (s *Service) buildWatchedSessionSet(ctx context.Context) map[string]bool {
+// buildWatchedSessionRepoSet returns the set of (session_id, repository_id)
+// pairs that already have a PR watch row. Replaces the older session-only set
+// which collapsed multi-repo sessions into one bucket.
+func (s *Service) buildWatchedSessionRepoSet(ctx context.Context) map[string]bool {
 	watches, err := s.githubService.ListActivePRWatches(ctx)
 	if err != nil {
 		s.logger.Debug("failed to list PR watches for reconciliation", zap.Error(err))
@@ -828,9 +939,14 @@ func (s *Service) buildWatchedSessionSet(ctx context.Context) map[string]bool {
 	}
 	set := make(map[string]bool, len(watches))
 	for _, w := range watches {
-		set[w.SessionID] = true
+		set[watchedSessionRepoKey(w.SessionID, w.RepositoryID)] = true
 	}
 	return set
+}
+
+// watchedSessionRepoKey builds the per-(session, repo) dedup key.
+func watchedSessionRepoKey(sessionID, repositoryID string) string {
+	return sessionID + "|" + repositoryID
 }
 
 // subscribeGitHubEvents subscribes to GitHub-related events on the event bus.
