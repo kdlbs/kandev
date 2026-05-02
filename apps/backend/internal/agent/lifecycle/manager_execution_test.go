@@ -665,3 +665,66 @@ func (p *slowWorkspaceInfoProvider) GetWorkspaceInfoForEnvironment(_ context.Con
 	}
 	return p.info, nil
 }
+
+// TestGetOrEnsureExecution_DedupAcrossEnvAndSessionPaths is the regression
+// test for the orphaned-claude-acp leak introduced by PR #758, which
+// keyed GetOrEnsureExecutionForEnvironment by `"env:" + envID` instead of
+// the sessionID. Two concurrent paths for the same session each saw
+// "no execution exists" for their own key, both called createExecution,
+// and ExecutionStore.Add silently overwrote the bySession index — orphaning
+// the first execution's claude-agent-acp subprocess.
+//
+// After the fix, both paths share the sessionID-keyed singleflight bucket,
+// so concurrent callers must observe the same execution and CreateInstance
+// must be invoked exactly once.
+func TestGetOrEnsureExecution_DedupAcrossEnvAndSessionPaths(t *testing.T) {
+	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			"session-1": {
+				TaskID:            "task-1",
+				SessionID:         "session-1",
+				TaskEnvironmentID: "env-1",
+				WorkspacePath:     "/workspace/task-1",
+				AgentID:           "auggie",
+			},
+		},
+		envInfos: map[string]*WorkspaceInfo{
+			"env-1": {
+				TaskID:            "task-1",
+				SessionID:         "session-1",
+				TaskEnvironmentID: "env-1",
+				WorkspacePath:     "/workspace/task-1",
+				AgentID:           "auggie",
+			},
+		},
+	})
+	backend.delay = 50 * time.Millisecond
+
+	type result struct {
+		exec *AgentExecution
+		err  error
+	}
+	results := make(chan result, 2)
+
+	go func() {
+		exec, err := mgr.GetOrEnsureExecution(context.Background(), "session-1")
+		results <- result{exec, err}
+	}()
+	go func() {
+		exec, err := mgr.GetOrEnsureExecutionForEnvironment(context.Background(), "env-1")
+		results <- result{exec, err}
+	}()
+
+	r1 := <-results
+	r2 := <-results
+	if r1.err != nil || r2.err != nil {
+		t.Fatalf("unexpected errors: %v / %v", r1.err, r2.err)
+	}
+	if r1.exec.ID != r2.exec.ID {
+		t.Errorf("execution IDs differ: session-path=%s env-path=%s — duplicate executions created (the leak bug)",
+			r1.exec.ID, r2.exec.ID)
+	}
+	if got := backend.createCount.Load(); got != 1 {
+		t.Errorf("CreateInstance called %d times, want 1 (singleflight should deduplicate)", got)
+	}
+}
