@@ -962,9 +962,17 @@ func mergeCumulativeFiles(dst, src map[string]interface{}, repo string) {
 			dst[fmt.Sprintf("%s\x00%s", repo, path)] = payload
 			continue
 		}
-		m["repository_name"] = repo
-		m["path"] = path
-		dst[fmt.Sprintf("%s\x00%s", repo, path)] = m
+		// Shallow-copy the per-file map before stamping repository_name +
+		// path so the caller's source map isn't mutated. Earlier code wrote
+		// directly to `m`, which permanently rewrote the per-repo result
+		// before it could be reused (e.g. emitted to a second consumer).
+		copied := make(map[string]interface{}, len(m)+2)
+		for k, v := range m {
+			copied[k] = v
+		}
+		copied["repository_name"] = repo
+		copied["path"] = path
+		dst[fmt.Sprintf("%s\x00%s", repo, path)] = copied
 	}
 }
 

@@ -576,7 +576,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	// per repo. The legacy single-repo top-level fields above stay populated
 	// (mirroring the primary) for downstream code that has not been migrated.
 	if len(allRepos) > 1 {
-		req.Repositories = buildRepoSpecs(allRepos, execConfig)
+		req.Repositories = buildRepoSpecs(allRepos)
 	}
 
 	// Activate config-mode MCP tools when config_mode is set in session metadata.
@@ -600,7 +600,7 @@ func (e *Executor) applyContainerCredentials(ctx context.Context, req *LaunchAge
 
 // buildRepoSpecs converts resolved repoInfos into per-repo launch specs for
 // the lifecycle layer. Used only when the task has more than one repository.
-func buildRepoSpecs(allRepos []*repoInfo, execCfg executorConfig) []RepoSpec {
+func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 	out := make([]RepoSpec, 0, len(allRepos))
 	for _, info := range allRepos {
 		spec := RepoSpec{
@@ -623,7 +623,6 @@ func buildRepoSpecs(allRepos []*repoInfo, execCfg executorConfig) []RepoSpec {
 				spec.RepositoryURL = u
 			}
 		}
-		_ = execCfg // execCfg currently unused per-repo; reserved for future per-repo config.
 		out = append(out, spec)
 	}
 	return out

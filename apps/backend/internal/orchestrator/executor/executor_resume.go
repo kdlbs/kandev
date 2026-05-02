@@ -673,7 +673,7 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 			return repositoryID, allErr
 		}
 		if len(allRepos) > 1 {
-			req.Repositories = buildRepoSpecs(allRepos, executorConfig{})
+			req.Repositories = buildRepoSpecs(allRepos)
 			// Stamp the per-repo TaskDirName so the preparer reuses the same
 			// task root that the original launch created.
 			if env, _ := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID); env != nil && env.TaskDirName != "" {
