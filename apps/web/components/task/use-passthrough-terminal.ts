@@ -482,7 +482,10 @@ export function useWebSocketConnection({
       isTerminalReady,
       hasTerminal: !!xtermRef.current,
     });
-    if (!taskId || !connectionKey || !canConnect || !isTerminalReady) {
+    // Agent mode requires taskId (it's the route segment for the WS); shell
+    // mode routes by env id alone — taskId is only used for logging there.
+    const taskGateOk = mode === "agent" ? !!taskId : true;
+    if (!taskGateOk || !connectionKey || !canConnect || !isTerminalReady) {
       log("WebSocket effect: early return", {
         taskId,
         connectionKey,

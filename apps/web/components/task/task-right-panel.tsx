@@ -273,7 +273,7 @@ const TaskRightPanel = memo(function TaskRightPanel({
   );
   const closeLayoutPreview = useLayoutStore((state) => state.closePreview);
 
-  // Use the terminals hook
+  // Use the terminals hook — env-keyed for shell ops, session-keyed for tab UX
   const {
     terminals,
     activeTab,
@@ -285,7 +285,7 @@ const TaskRightPanel = memo(function TaskRightPanel({
     isStoppingDev,
     devProcessId,
     devOutput,
-  } = useTerminals({ sessionId, initialTerminals });
+  } = useTerminals({ sessionId, environmentId, initialTerminals });
 
   // Wrap handleCloseDevTab to also close the layout preview
   const handleCloseDevTab = useCallback(

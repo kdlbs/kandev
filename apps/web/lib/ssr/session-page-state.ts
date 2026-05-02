@@ -311,6 +311,13 @@ async function fetchSessionDataFromTask(
   sessionId: string,
   allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
 ): Promise<FetchedSessionData> {
+  // User shells are env-scoped — look up this session's task_environment_id
+  // from the already-fetched session list. Sessions w/o env (legacy) skip
+  // the terminal SSR fetch; the boot-time heal pass + WS-driven user_shell.list
+  // will populate it once the env mapping lands.
+  const sessionEnvId =
+    allSessionsResponse.sessions?.find((s) => s.id === sessionId)?.task_environment_id ?? "";
+
   const [
     snapshot,
     agents,
@@ -333,7 +340,7 @@ async function fetchSessionDataFromTask(
     })),
     listSessionTurns(sessionId, { cache: "no-store" }).catch(() => ({ turns: [], total: 0 })),
     fetchUserSettings({ cache: "no-store" }).catch(() => null),
-    fetchTerminals(sessionId).catch(() => []),
+    sessionEnvId ? fetchTerminals(sessionEnvId).catch(() => []) : Promise.resolve([]),
     listTaskSessionMessages(sessionId, { limit: 50, sort: "desc" }, { cache: "no-store" }).catch(
       () => null as ListMessagesResponse | null,
     ),
