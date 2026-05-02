@@ -169,6 +169,9 @@ func (s *Store) initSchema() error {
 	if err := s.backfillTaskPRsRepositoryID(); err != nil {
 		return fmt.Errorf("backfill github_task_prs.repository_id: %w", err)
 	}
+	if err := s.backfillPRWatchesRepositoryID(); err != nil {
+		return fmt.Errorf("backfill github_pr_watches.repository_id: %w", err)
+	}
 	return nil
 }
 
@@ -229,6 +232,60 @@ func (s *Store) backfillTaskPRsRepositoryID() error {
 	`)
 	if err != nil {
 		return fmt.Errorf("backfill task PR repository_id: %w", err)
+	}
+	return nil
+}
+
+// backfillPRWatchesRepositoryID heals github_pr_watches rows that pre-date
+// the per-repo schema (repository_id = ”). Same two-pass shape as
+// backfillTaskPRsRepositoryID — without this the orchestrator's reconciler
+// (which keys its existence-check by (session_id, repository_id)) would see
+// the legacy `(sess, ”)` row as foreign and insert a SECOND watch row
+// under the resolved repository_id. Two watches → two AssociatePRWithTask
+// calls when the user opens a PR → two github_task_prs rows for the same
+// PR, which is the "PR appears twice on a single-repo task" symptom we hit
+// after the multi-repo rollout.
+//
+//  1. Dedup: drop legacy `”` rows whose session already has a non-empty
+//     row — the reconciler-inserted row supersedes the legacy one.
+//
+//  2. Backfill: stamp the remaining `”` rows with the task's primary
+//     repository_id from `task_repositories`. Skipped silently when the
+//     table is absent (unit tests that init only this package's schema).
+//
+// Idempotent: re-running on a healed db is a no-op.
+func (s *Store) backfillPRWatchesRepositoryID() error {
+	if _, err := s.db.Exec(`
+		DELETE FROM github_pr_watches
+		WHERE repository_id = ''
+		  AND EXISTS (
+		    SELECT 1 FROM github_pr_watches other
+		    WHERE other.session_id = github_pr_watches.session_id
+		      AND other.repository_id != ''
+		  )
+	`); err != nil {
+		return fmt.Errorf("dedup legacy PR watch rows: %w", err)
+	}
+	if !s.tableExists("task_repositories") {
+		return nil
+	}
+	_, err := s.db.Exec(`
+		UPDATE github_pr_watches
+		SET repository_id = (
+		  SELECT tr.repository_id
+		  FROM task_repositories tr
+		  WHERE tr.task_id = github_pr_watches.task_id
+		  ORDER BY tr.position
+		  LIMIT 1
+		)
+		WHERE repository_id = ''
+		  AND EXISTS (
+		    SELECT 1 FROM task_repositories tr
+		    WHERE tr.task_id = github_pr_watches.task_id
+		  )
+	`)
+	if err != nil {
+		return fmt.Errorf("backfill PR watch repository_id: %w", err)
 	}
 	return nil
 }

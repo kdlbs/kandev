@@ -181,6 +181,114 @@ func TestBackfillTaskPRsRepositoryID_SkipsWhenTaskRepositoriesAbsent(t *testing.
 	}
 }
 
+// Regression: a single-repo task created before the multi-repo migration
+// kept its github_pr_watches row with repository_id=”. The orchestrator's
+// reconciler then created a SECOND watch row with the resolved
+// repository_id (because (session_id, ”) != (session_id, 'X') in its dedup
+// set). Both watches polled independently, so when the user opened a PR
+// each one called AssociatePRWithTask with its own RepositoryID — leaving
+// two github_task_prs rows for the same PR and a "+2" badge on the kanban
+// card. backfillPRWatchesRepositoryID must dedup the legacy row so the
+// reconciler's existence-check finds it under the resolved repository_id.
+func TestBackfillPRWatchesRepositoryID_DedupsLegacyEmptyRow(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Legacy watch row (repository_id='') and the per-repo row that the
+	// reconciler inserted post-migration. Both reference the same session.
+	if err := store.CreatePRWatch(ctx, &PRWatch{
+		ID: "legacy-w", SessionID: "sess-1", TaskID: "task-w", RepositoryID: "",
+		Owner: "kdlbs", Repo: "kandev", PRNumber: 0, Branch: "feat/x",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create legacy watch: %v", err)
+	}
+	if err := store.CreatePRWatch(ctx, &PRWatch{
+		ID: "scoped-w", SessionID: "sess-1", TaskID: "task-w", RepositoryID: "repo-1",
+		Owner: "kdlbs", Repo: "kandev", PRNumber: 0, Branch: "feat/x",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create scoped watch: %v", err)
+	}
+
+	if err := store.backfillPRWatchesRepositoryID(); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+
+	all, err := store.ListPRWatchesBySession(ctx, "sess-1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("expected 1 watch after dedup, got %d", len(all))
+	}
+	if all[0].RepositoryID != "repo-1" {
+		t.Errorf("expected scoped row to win, got repository_id=%q", all[0].RepositoryID)
+	}
+
+	// Idempotent: second pass is a no-op.
+	if err := store.backfillPRWatchesRepositoryID(); err != nil {
+		t.Fatalf("second backfill: %v", err)
+	}
+	all2, _ := store.ListPRWatchesBySession(ctx, "sess-1")
+	if len(all2) != 1 {
+		t.Errorf("idempotent expected 1 watch, got %d", len(all2))
+	}
+}
+
+// When task_repositories does not exist, the watch backfill must skip the
+// cross-package UPDATE rather than erroring out — same contract as the
+// task-PR backfill.
+func TestBackfillPRWatchesRepositoryID_SkipsWhenTaskRepositoriesAbsent(t *testing.T) {
+	store := newTestStore(t)
+	if err := store.backfillPRWatchesRepositoryID(); err != nil {
+		t.Fatalf("backfill on store without task_repositories: %v", err)
+	}
+}
+
+// The orphan case — a single-repo task whose pre-migration watch never had a
+// per-repo counterpart. The dedup pass leaves it alone; the UPDATE has to
+// stamp its repository_id from task_repositories. This is what stops the
+// reconciler from inserting a duplicate watch on the next poll tick.
+func TestBackfillPRWatchesRepositoryID_BackfillsOrphanRow(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := store.db.Exec(`CREATE TABLE task_repositories (
+		id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL, position INTEGER DEFAULT 0
+	)`); err != nil {
+		t.Fatalf("create task_repositories: %v", err)
+	}
+	if _, err := store.db.Exec(
+		`INSERT INTO task_repositories VALUES ('r1','task-z','repo-abc',0)`,
+	); err != nil {
+		t.Fatalf("seed task_repositories: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if err := store.CreatePRWatch(ctx, &PRWatch{
+		ID: "legacy-orphan", SessionID: "sess-2", TaskID: "task-z", RepositoryID: "",
+		Owner: "o", Repo: "r", PRNumber: 0, Branch: "feat/y",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create legacy: %v", err)
+	}
+
+	if err := store.backfillPRWatchesRepositoryID(); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+
+	all, _ := store.ListPRWatchesBySession(ctx, "sess-2")
+	if len(all) != 1 {
+		t.Fatalf("expected 1 watch, got %d", len(all))
+	}
+	if all[0].RepositoryID != "repo-abc" {
+		t.Errorf("expected backfilled repository_id='repo-abc', got %q", all[0].RepositoryID)
+	}
+}
+
 // Covers the UPDATE path: a legacy row with repository_id=” and NO per-repo
 // counterpart should get its repository_id stamped from task_repositories,
 // not deleted. This is the most common case in real upgrades — a task that
