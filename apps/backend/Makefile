@@ -52,8 +52,11 @@ build-acpdbg:
 	@$(MKDIR) $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/acpdbg ./cmd/acpdbg
 
-## Build the unified kandev binary
-build: build-agentctl build-mock-agent build-acpdbg
+## Build the unified kandev binary. Always includes the linux/amd64 agentctl
+## variant because remote executors (local Docker, remote Docker, Sprites)
+## bind-mount it into containers — without it, the first Docker session on a
+## non-Linux host fails with "agentctl linux binary not found".
+build: build-agentctl build-agentctl-linux build-mock-agent build-acpdbg
 	@echo "Building $(BINARY_NAME)..."
 	@$(MKDIR) $(BUILD_DIR)
 	CGO_ENABLED=1 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/kandev
