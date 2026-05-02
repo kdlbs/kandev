@@ -1032,6 +1032,10 @@ test.describe("Git Changes Panel", () => {
       timeout: 5_000,
     });
 
+    // CommitsSection unmounts mid-transition (when no commits and no staged
+    // files exist briefly), so it re-mounts collapsed by default — re-expand.
+    await session.expandCommitsSection();
+
     // The squashed commit should appear
     await expect(session.changes.getByText("Squashed commit")).toBeVisible({ timeout: 10_000 });
   });

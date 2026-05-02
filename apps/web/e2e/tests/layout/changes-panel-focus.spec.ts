@@ -75,6 +75,7 @@ test.describe("Changes panel focus behavior", () => {
     // Wait for the changes panel to show the commit
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
+    await session.expandCommitsSection();
     await expect(session.changes.getByText("test commit")).toBeVisible({ timeout: 10_000 });
 
     // Switch back to chat tab — this is the tab that should be active after refresh
