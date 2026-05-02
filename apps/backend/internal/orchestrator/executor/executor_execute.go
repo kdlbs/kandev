@@ -339,7 +339,22 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	executorID := opts.ExecutorID
 	prompt := opts.Prompt
 	startAgent := opts.StartAgent
-	// Fetch the session to get its configuration
+	// Serialise concurrent launches for the same session. Two callers reach
+	// this path on every task: PrepareTaskSession spawns a background launch
+	// (workspace only) the moment a session is created, and StartTaskWithSession
+	// is called when the agent is actually started (auto-start, user click).
+	// Without this lock both run env-prep + executionStore.Add in parallel and
+	// the second one fails at register with "already has an agent running
+	// (race resolved during register)" — visible in the UI as
+	// "Environment setup failed". Multi-repo amplifies this because the
+	// per-repo prep runs sequentially, widening the race window.
+	sessionLock := e.getSessionLock(sessionID)
+	sessionLock.Lock()
+	defer sessionLock.Unlock()
+
+	// Re-fetch the session under the lock so the fast-path check below sees
+	// any AgentExecutionID the previous holder just persisted. Without the
+	// re-fetch we'd hold a stale snapshot and run a second full launch.
 	session, err := e.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		e.logger.Error("failed to get session for launch",
