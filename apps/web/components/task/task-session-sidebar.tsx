@@ -116,6 +116,14 @@ function toIssueInfo(
     : undefined;
 }
 
+function hasPendingClarificationForTask(
+  task: { primarySessionId?: string | null },
+  messagesBySession: Record<string, Message[]>,
+): boolean {
+  if (!task.primarySessionId) return false;
+  return hasPendingClarification(messagesBySession[task.primarySessionId]);
+}
+
 /** Map a kanban task to a sidebar item with session info and repository metadata. */
 function toSidebarItem(
   task: KanbanState["tasks"][number] & { _workflowId: string },
@@ -132,9 +140,10 @@ function toSidebarItem(
   const repoSlug = task.repositoryId ? ctx.repositorySlugById.get(task.repositoryId) : undefined;
   // Sidebar shows just one slot; pick the primary PR (first by created_at).
   const pr = ctx.taskPRsByTaskId[task.id]?.[0];
-  const hasPendingClarificationRequest = task.primarySessionId
-    ? hasPendingClarification(ctx.messagesBySession[task.primarySessionId])
-    : false;
+  const hasPendingClarificationRequest = hasPendingClarificationForTask(
+    task,
+    ctx.messagesBySession,
+  );
 
   const diffStats = resolveDiffStats(
     sessionInfo.diffStats,
