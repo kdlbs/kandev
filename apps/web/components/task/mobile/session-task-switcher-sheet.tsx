@@ -19,6 +19,7 @@ import { useTasks } from "@/hooks/use-tasks";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
+import { hasPendingClarification } from "@/lib/utils/pending-clarification";
 import type {
   TaskState,
   TaskSessionState,
@@ -85,6 +86,7 @@ function useSheetData(workspaceId: string | null, workflowId: string | null) {
   const sessionsByTaskId = useAppStore((state) => state.taskSessionsByTask.itemsByTaskId);
   const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
   const envIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
+  const messagesBySession = useAppStore((state) => state.messages.bySession);
   const { tasks } = useTasks(workflowId);
   const steps = useAppStore((state) => state.kanban.steps);
   const workspaces = useAppStore((state) => state.workspaces.items);
@@ -123,6 +125,9 @@ function useSheetData(workspaceId: string | null, workflowId: string | null) {
         remoteExecutorType: task.primaryExecutorType ?? undefined,
         remoteExecutorName: task.primaryExecutorName ?? undefined,
         primarySessionId: task.primarySessionId ?? null,
+        hasPendingClarification: task.primarySessionId
+          ? hasPendingClarification(messagesBySession[task.primarySessionId])
+          : false,
       };
     });
   }, [
@@ -132,6 +137,7 @@ function useSheetData(workspaceId: string | null, workflowId: string | null) {
     sessionsByTaskId,
     gitStatusByEnvId,
     envIdBySessionId,
+    messagesBySession,
   ]);
 
   const dialogSteps = useMemo(

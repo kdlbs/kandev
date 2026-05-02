@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, memo } from "react";
-import type { TaskState, TaskSession, TaskSessionState, Repository } from "@/lib/types/http";
+import type {
+  Message,
+  TaskState,
+  TaskSession,
+  TaskSessionState,
+  Repository,
+} from "@/lib/types/http";
 import type { TaskPR } from "@/lib/types/github";
 import type { KanbanState } from "@/lib/state/slices";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
@@ -22,6 +28,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { useArchivedTaskState } from "./task-archived-context";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
+import { hasPendingClarification } from "@/lib/utils/pending-clarification";
 
 /**
  * Stabilize a derived array of primary session IDs so the reference only
@@ -95,6 +102,7 @@ type SidebarCtx = {
   envIdBySessionId: Record<string, string>;
   repositorySlugById: Map<string, string | undefined>;
   taskPRsByTaskId: Record<string, TaskPR[] | undefined>;
+  messagesBySession: Record<string, Message[]>;
   titleById: Map<string, string>;
   workflowNameById: Map<string, string>;
   stepTitleById: Map<string, string>;
@@ -124,6 +132,9 @@ function toSidebarItem(
   const repoSlug = task.repositoryId ? ctx.repositorySlugById.get(task.repositoryId) : undefined;
   // Sidebar shows just one slot; pick the primary PR (first by created_at).
   const pr = ctx.taskPRsByTaskId[task.id]?.[0];
+  const hasPendingClarificationRequest = task.primarySessionId
+    ? hasPendingClarification(ctx.messagesBySession[task.primarySessionId])
+    : false;
 
   const diffStats = resolveDiffStats(
     sessionInfo.diffStats,
@@ -150,6 +161,7 @@ function toSidebarItem(
     remoteExecutorType: task.primaryExecutorType ?? undefined,
     remoteExecutorName: task.primaryExecutorName ?? undefined,
     primarySessionId: task.primarySessionId ?? null,
+    hasPendingClarification: hasPendingClarificationRequest,
     updatedAt: sessionInfo.updatedAt ?? task.updatedAt ?? task.createdAt,
     createdAt: task.createdAt,
     isArchived: false as boolean,
@@ -187,6 +199,7 @@ function buildArchivedItem(s: ReturnType<typeof useArchivedTaskState>): SidebarI
     remoteExecutorType: undefined,
     remoteExecutorName: undefined,
     primarySessionId: null,
+    hasPendingClarification: false,
     updatedAt: s.archivedTaskUpdatedAt,
     createdAt: undefined,
     isArchived: true,
@@ -210,6 +223,7 @@ function useSidebarData(workspaceId: string | null) {
   const isMultiLoading = useAppStore((state) => state.kanbanMulti.isLoading);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const taskPRsByTaskId = useAppStore((state) => state.taskPRs.byTaskId);
+  const messagesBySession = useAppStore((state) => state.messages.bySession);
   const archivedState = useArchivedTaskState();
 
   const selectedTaskId = useMemo(() => {
@@ -253,6 +267,7 @@ function useSidebarData(workspaceId: string | null) {
       envIdBySessionId,
       repositorySlugById,
       taskPRsByTaskId,
+      messagesBySession,
       titleById,
       workflowNameById,
       stepTitleById,
@@ -276,6 +291,7 @@ function useSidebarData(workspaceId: string | null) {
     gitStatusByEnvId,
     envIdBySessionId,
     taskPRsByTaskId,
+    messagesBySession,
     archivedState,
   ]);
 
