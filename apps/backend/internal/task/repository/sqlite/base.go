@@ -545,10 +545,14 @@ func (r *Repository) ensureTaskEnvironmentTaskUniqueIndex() error {
 // ensureTaskEnvironmentTaskUniqueIndex so each task has exactly one env to
 // link to.
 func (r *Repository) healSessionTaskEnvironmentIDs() error {
+	// LIMIT 1 is defensive — the unique index added by
+	// ensureTaskEnvironmentTaskUniqueIndex guarantees ≤1 row per task at
+	// runtime, but the SQL reads as non-deterministic in isolation. Belt
+	// and suspenders.
 	if _, err := r.db.Exec(`
 		UPDATE task_sessions
 		   SET task_environment_id = (
-		         SELECT te.id FROM task_environments te WHERE te.task_id = task_sessions.task_id
+		         SELECT te.id FROM task_environments te WHERE te.task_id = task_sessions.task_id LIMIT 1
 		       )
 		 WHERE (task_environment_id = '' OR task_environment_id IS NULL)
 		   AND EXISTS (

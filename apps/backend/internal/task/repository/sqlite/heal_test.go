@@ -391,6 +391,29 @@ func insertSessionWithEnvID(t *testing.T, db *sqlx.DB, sessionID, taskID, envID 
 	}
 }
 
+// insertSessionWithNullEnvID writes a task_sessions row with task_environment_id
+// stored as SQL NULL (not the empty string). Some legacy paths produced NULL
+// rather than ”, so the heal must cover both predicates.
+func insertSessionWithNullEnvID(t *testing.T, db *sqlx.DB, sessionID, taskID string) {
+	t.Helper()
+	now := time.Now().UTC()
+	_, err := db.Exec(`
+		INSERT INTO task_sessions (
+			id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
+			repository_id, base_branch, base_commit_sha,
+			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
+			state, error_message, metadata, started_at, completed_at, updated_at,
+			is_primary, review_status, is_passthrough, task_environment_id
+		) VALUES (?, ?, '', '', '', '', '', '', '', '', '',
+		          '{}', '{}', '{}', '{}',
+		          'created', '', '{}', ?, NULL, ?,
+		          0, '', 0, NULL)
+	`, sessionID, taskID, now, now)
+	if err != nil {
+		t.Fatalf("insert session with null env: %v", err)
+	}
+}
+
 // TestHealSessionTaskEnvironmentIDs_LinksOrphans seeds a task with an existing
 // env and a session whose task_environment_id is empty. Asserts the heal step
 // links the session to the env. This is the exact bug that caused
@@ -459,6 +482,31 @@ func TestHealSessionTaskEnvironmentIDs_NoEnvSkips(t *testing.T) {
 	}
 	if got != "" {
 		t.Errorf("session task_environment_id = %q, want empty (no env to link to)", got)
+	}
+}
+
+// TestHealSessionTaskEnvironmentIDs_LinksNullOrphans — sessions whose
+// task_environment_id is SQL NULL (not the empty string) must also be
+// healed. The WHERE clause covers both predicates; both must be tested.
+func TestHealSessionTaskEnvironmentIDs_LinksNullOrphans(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	insertTask(t, repo.db, "task-N")
+	insertEnv(t, repo.db, &models.TaskEnvironment{
+		ID: "env-N", TaskID: "task-N", ExecutorType: "worktree",
+		WorktreePath: "/n", WorkspacePath: "/n",
+	})
+	insertSessionWithNullEnvID(t, repo.db, "sess-N-null", "task-N")
+
+	if err := repo.healSessionTaskEnvironmentIDs(); err != nil {
+		t.Fatalf("heal: %v", err)
+	}
+
+	var got string
+	if err := repo.db.QueryRow(`SELECT task_environment_id FROM task_sessions WHERE id='sess-N-null'`).Scan(&got); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if got != "env-N" {
+		t.Errorf("session task_environment_id = %q, want env-N (healed from NULL)", got)
 	}
 }
 
