@@ -26,13 +26,24 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: /mobile-.*\.spec\.ts/,
+      testIgnore: [/mobile-.*\.spec\.ts/, /docker\/.*\.spec\.ts/],
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "mobile-chrome",
       testMatch: /mobile-.*\.spec\.ts/,
       use: { ...devices["Pixel 5"] },
+    },
+    {
+      // Real-Docker E2E. Opt-in: run with `playwright test --project=docker`.
+      // Spawns the backend with KANDEV_E2E_DOCKER=1, builds the
+      // kandev-agent:e2e image, and skips entirely on hosts without a Docker
+      // daemon. Container-bound tests are slow (~10-30s each) so they live
+      // in their own project to keep the default CI fast.
+      name: "docker",
+      testMatch: /docker\/.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+      timeout: 180_000,
     },
   ],
 
