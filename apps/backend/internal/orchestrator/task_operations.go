@@ -1308,6 +1308,9 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	if s.gitSnapshotCache != nil {
 		s.gitSnapshotCache.forget(sessionID)
 	}
+	// Same reasoning for the push-detection tracker. Multi-repo sessions
+	// accumulate one entry per repo; pushTrackerForget walks them all.
+	s.pushTrackerForget(sessionID)
 
 	// Auto-promote another session if we deleted the primary
 	if wasPrimary {

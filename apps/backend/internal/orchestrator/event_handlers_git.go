@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -206,37 +207,69 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 }
 
 // trackPushAndAssociatePR detects git pushes by tracking the "ahead" count.
-// When ahead transitions from >0 to 0 with a remote branch set, a push occurred.
+// Two cases trigger detection:
 //
-// Multi-repo: keyed per (session, repository_name) so each repo's transitions
-// are tracked independently. Without this, agentctl's per-repo status events
-// race-overwrote each other's ahead counts and only one repo's push got
-// detected — the other repo's PR would never be associated with the task.
+//  1. Transition: ahead went from >0 to 0 with a remote branch set — the
+//     normal in-session push, observed across two status events.
+//  2. First-observation sync: the very first status event for this
+//     (session, repo) already shows ahead=0 with a remote branch. This means
+//     a push happened before agentctl's poller saw the ahead>0 phase (the
+//     poll cadence missed it, or the session resumed after a restart). For a
+//     fresh task branch, RemoteBranch is only populated after `git push -u`,
+//     so seeing it pre-synced is itself a push signal.
+//
+// Without (2), multi-repo tasks routinely lose PR associations for any repo
+// whose first poll happens to land after the push completes — the
+// transition never gets observed and the watch never gets created.
+//
+// Multi-repo: keyed per (session, repository_name) so each repo's
+// transitions are tracked independently. Without this, agentctl's per-repo
+// status events race-overwrote each other's ahead counts and only one
+// repo's push got detected.
 func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitEventData) {
 	key := pushTrackerKey(data.SessionID, data.Status.RepositoryName)
 	prevAheadVal, loaded := s.pushTracker.Swap(key, data.Status.Ahead)
-	if !loaded {
-		return // first status update for this (session, repo), skip
-	}
-	prevAhead, ok := prevAheadVal.(int)
-	if !ok || prevAhead <= 0 {
+	prevAhead, _ := prevAheadVal.(int)
+	if !shouldFirePushDetection(loaded, prevAhead, data.Status) {
 		return
 	}
-	// Push detected: ahead went from >0 to 0
-	if data.Status.Ahead == 0 && data.Status.RemoteBranch != "" {
-		s.logger.Info("git push detected, starting PR association",
-			zap.String("session_id", data.SessionID),
-			zap.String("task_id", data.TaskID),
-			zap.String("repository_name", data.Status.RepositoryName),
-			zap.String("branch", data.Status.Branch))
-		go s.detectPushAndAssociatePR(
-			context.Background(),
-			data.SessionID,
-			data.TaskID,
-			data.Status.RepositoryName,
-			data.Status.Branch,
-		)
+	s.logger.Info("git push detected, starting PR association",
+		zap.String("session_id", data.SessionID),
+		zap.String("task_id", data.TaskID),
+		zap.String("repository_name", data.Status.RepositoryName),
+		zap.String("branch", data.Status.Branch),
+		zap.Bool("first_observation", !loaded))
+	go s.detectPushAndAssociatePR(
+		context.Background(),
+		data.SessionID,
+		data.TaskID,
+		data.Status.RepositoryName,
+		data.Status.Branch,
+	)
+}
+
+// shouldFirePushDetection decides whether to kick off PR association for one
+// status event. It fires in two cases (see trackPushAndAssociatePR doc):
+//
+//   - Transition: the previous observation had ahead>0 and this one has ahead=0
+//     with a remote branch set.
+//   - First observation: no previous entry, this one has ahead=0 with a
+//     remote branch set — meaning a push happened before agentctl's poller
+//     observed the ahead>0 phase.
+//
+// Pulled out as a pure function so the decision logic can be tested without
+// spawning the goroutine that calls the GitHub API.
+func shouldFirePushDetection(loaded bool, prevAhead int, status *lifecycle.GitStatusData) bool {
+	if status == nil {
+		return false
 	}
+	if status.RemoteBranch == "" || status.Ahead != 0 {
+		return false
+	}
+	if !loaded {
+		return true
+	}
+	return prevAhead > 0
 }
 
 // pushTrackerKey builds the per-(session, repo) key used by pushTracker.
@@ -244,6 +277,21 @@ func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitE
 // single-key behaviour.
 func pushTrackerKey(sessionID, repositoryName string) string {
 	return sessionID + "|" + repositoryName
+}
+
+// pushTrackerForget drops every pushTracker entry belonging to a session. The
+// tracker is keyed (session|repo); a single session can have N entries (one
+// per repo in a multi-repo task). Called when the session is deleted so its
+// tracker rows don't linger for the lifetime of the process.
+func (s *Service) pushTrackerForget(sessionID string) {
+	prefix := sessionID + "|"
+	s.pushTracker.Range(func(k, _ any) bool {
+		key, ok := k.(string)
+		if ok && strings.HasPrefix(key, prefix) {
+			s.pushTracker.Delete(key)
+		}
+		return true
+	})
 }
 
 // syncPRWatchBranch updates the PR watch branch if the live git branch

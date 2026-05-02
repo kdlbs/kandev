@@ -372,8 +372,12 @@ func (s *Service) resolveReviewRepository(ctx context.Context, workspaceID strin
 // detectPushAndAssociatePR checks if a push happened and looks for a PR on
 // that branch. If no PR is found immediately, retries after a delay to handle
 // the case where the user creates the PR on GitHub shortly after pushing.
-// The pushTracker entry is keyed per (session, repository_name) and removed
-// on return to prevent unbounded growth of the tracker map.
+//
+// The pushTracker entry is intentionally NOT deleted on return: leaving the
+// stored ahead=0 in place causes subsequent status events to fall into the
+// `prevAhead <= 0` skip in trackPushAndAssociatePR, which prevents repeated
+// firing on every status event for a synced branch. The tracker is cleaned
+// up at session-deletion time via pushTrackerForget.
 //
 // Multi-repo: repositoryName scopes the lookup so each repo's push is detected
 // and associated independently. Empty repositoryName falls back to the
@@ -381,8 +385,6 @@ func (s *Service) resolveReviewRepository(ctx context.Context, workspaceID strin
 func (s *Service) detectPushAndAssociatePR(
 	ctx context.Context, sessionID, taskID, repositoryName, branch string,
 ) {
-	defer s.pushTracker.Delete(pushTrackerKey(sessionID, repositoryName))
-
 	if s.githubService == nil {
 		return
 	}
