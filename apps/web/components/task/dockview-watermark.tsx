@@ -54,7 +54,9 @@ export function DockviewWatermark({ containerApi, group }: IWatermarkPanelProps)
           id: terminalId,
           component: "terminal",
           title: "Terminal",
-          params: { terminalId },
+          // environmentId is stamped into params so cleanup can call
+          // stopUserShell with the correct env even after task switches.
+          params: { terminalId, environmentId: environmentId ?? undefined },
           ...(groupId ? { position: { referenceGroup: groupId } } : {}),
         });
         return;

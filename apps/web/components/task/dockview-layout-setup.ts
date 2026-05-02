@@ -117,11 +117,15 @@ export function setupPortalCleanup(
     if (entry?.component === "vscode" && sessionForApi) stopVscode(sessionForApi);
     if (entry?.component === "terminal") {
       const terminalId = entry.params.terminalId as string | undefined;
-      // Terminal panels are global (no env tag) — derive env from the active
-      // session. Drop the call if no env can be resolved (cleanup is best-effort).
+      // Prefer the env id stamped into params at creation time — this
+      // survives task switches that happen between open and close. Fall
+      // back to the active session's env for legacy panels created before
+      // the param was added (e.g. layouts persisted from older releases).
+      const stampedEnv = entry.params.environmentId as string | undefined;
       const state = appStore.getState();
       const active = state.tasks.activeSessionId;
-      const envForTerminal = active ? (state.environmentIdBySessionId[active] ?? null) : null;
+      const fallbackEnv = active ? (state.environmentIdBySessionId[active] ?? null) : null;
+      const envForTerminal = stampedEnv || fallbackEnv;
       if (terminalId && envForTerminal) stopUserShell(envForTerminal, terminalId);
     }
     panelPortalManager.release(panel.id);

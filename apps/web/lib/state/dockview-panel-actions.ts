@@ -431,15 +431,18 @@ export function buildExtraPanelActions(get: StoreGet) {
         position: { referenceGroup: centerGroupId },
       });
     },
-    addTerminalPanel: (terminalId?: string, groupId?: string) => {
+    addTerminalPanel: (terminalId?: string, groupId?: string, environmentId?: string) => {
       const { api, rightBottomGroupId } = get();
       if (!api) return;
       const id = terminalId ?? `terminal-${Date.now()}`;
+      // Stamp the env id into the panel's params so cleanup
+      // (dockview-layout-setup.onDidRemovePanel) can call stopUserShell with
+      // the correct env even when the user has switched tasks since open.
       addSimplePanel(api, groupId ?? rightBottomGroupId, {
         id,
         component: "terminal",
         title: "Terminal",
-        params: { terminalId: id },
+        params: { terminalId: id, environmentId },
       });
     },
   };

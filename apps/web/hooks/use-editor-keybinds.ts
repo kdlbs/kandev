@@ -61,7 +61,7 @@ function handleTerminalToggle(
 
   createUserShell(environmentId)
     .then((result) => {
-      useDockviewStore.getState().addTerminalPanel(result.terminalId);
+      useDockviewStore.getState().addTerminalPanel(result.terminalId, undefined, environmentId);
     })
     .catch((err) => {
       console.warn("Failed to create terminal shell:", err);

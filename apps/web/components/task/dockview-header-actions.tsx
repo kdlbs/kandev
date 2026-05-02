@@ -96,7 +96,7 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
     if (!environmentId) return;
     try {
       const result = await createUserShell(environmentId);
-      addTerminalPanel(result.terminalId, group.id);
+      addTerminalPanel(result.terminalId, group.id, environmentId);
     } catch (error) {
       console.error("Failed to create terminal:", error);
     }
@@ -107,7 +107,7 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
       if (!environmentId) return;
       try {
         const result = await createUserShell(environmentId, { scriptId });
-        addTerminalPanel(result.terminalId, group.id);
+        addTerminalPanel(result.terminalId, group.id, environmentId);
       } catch (error) {
         console.error("Failed to run script:", error);
       }
@@ -122,7 +122,7 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
         command: devScript,
         label: "Dev Server",
       });
-      addTerminalPanel(result.terminalId, group.id);
+      addTerminalPanel(result.terminalId, group.id, environmentId);
     } catch (error) {
       console.error("Failed to start dev script:", error);
     }
@@ -426,7 +426,7 @@ function TerminalScriptsDropdown({
       if (!environmentId) return;
       try {
         const result = await createUserShell(environmentId, { scriptId });
-        addTerminalPanel(result.terminalId, rightBottomGroupId ?? undefined);
+        addTerminalPanel(result.terminalId, rightBottomGroupId ?? undefined, environmentId);
       } catch (error) {
         console.error("Failed to run script:", error);
       }
@@ -499,7 +499,7 @@ function TerminalDevPreviewButton({
     }
     try {
       const shell = await createUserShell(environmentId);
-      addTerminalPanel(shell.terminalId, rightBottomGroupId ?? undefined);
+      addTerminalPanel(shell.terminalId, rightBottomGroupId ?? undefined, environmentId);
     } catch {
       // Terminal creation is best-effort
     }
