@@ -103,19 +103,9 @@ func TestWriteClientError_GenericError_Returns500(t *testing.T) {
 	}
 }
 
-func TestHTTPGetConfig_RequiresWorkspaceID(t *testing.T) {
-	_, router, _ := newTestController(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/config", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", w.Code)
-	}
-}
-
 func TestHTTPGetConfig_NoConfig_Returns204(t *testing.T) {
 	_, router, _ := newTestController(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/config?workspace_id=missing", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/config", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusNoContent {
@@ -123,19 +113,13 @@ func TestHTTPGetConfig_NoConfig_Returns204(t *testing.T) {
 	}
 }
 
-func TestHTTPListStates_RequiresBothParams(t *testing.T) {
+func TestHTTPListStates_RequiresTeamKey(t *testing.T) {
 	_, router, _ := newTestController(t)
-	for _, url := range []string{
-		"/api/v1/linear/states",
-		"/api/v1/linear/states?workspace_id=ws-1",
-		"/api/v1/linear/states?team_key=ENG",
-	} {
-		req := httptest.NewRequest(http.MethodGet, url, nil)
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("%s: status = %d, want 400", url, w.Code)
-		}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/states", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
 	}
 }
 
@@ -143,12 +127,11 @@ func TestHTTPListStates_RoutesThroughService(t *testing.T) {
 	ctrl, router, client := newTestController(t)
 	ctx := context.Background()
 	if err := ctrl.service.store.UpsertConfig(ctx, &LinearConfig{
-		WorkspaceID: "ws-1",
-		AuthMethod:  AuthMethodAPIKey,
+		AuthMethod: AuthMethodAPIKey,
 	}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if err := ctrl.service.secrets.Set(ctx, SecretKeyForWorkspace("ws-1"), "linear", "tok"); err != nil {
+	if err := ctrl.service.secrets.Set(ctx, SecretKey, "linear", "tok"); err != nil {
 		t.Fatalf("set secret: %v", err)
 	}
 	var seenTeam string
@@ -156,7 +139,7 @@ func TestHTTPListStates_RoutesThroughService(t *testing.T) {
 		seenTeam = teamKey
 		return []LinearWorkflowState{{ID: "s1", Name: "In Progress"}}, nil
 	}
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/states?workspace_id=ws-1&team_key=ENG", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/states?team_key=ENG", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {

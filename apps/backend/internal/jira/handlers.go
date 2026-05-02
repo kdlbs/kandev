@@ -13,6 +13,10 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
+// errMsgWorkspaceIDRequired is the response body returned when a watcher
+// handler is invoked without the workspace_id query parameter.
+const errMsgWorkspaceIDRequired = "workspace_id required"
+
 // RegisterRoutes wires the Jira HTTP and WebSocket handlers.
 func RegisterRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *Service, log *logger.Logger) {
 	ctrl := &Controller{service: svc, logger: log}
@@ -48,12 +52,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 // --- HTTP handlers ---
 
 func (c *Controller) httpGetConfig(ctx *gin.Context) {
-	workspaceID := ctx.Query("workspace_id")
-	if workspaceID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
-		return
-	}
-	cfg, err := c.service.GetConfig(ctx.Request.Context(), workspaceID)
+	cfg, err := c.service.GetConfig(ctx.Request.Context())
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -84,12 +83,7 @@ func (c *Controller) httpSetConfig(ctx *gin.Context) {
 }
 
 func (c *Controller) httpDeleteConfig(ctx *gin.Context) {
-	workspaceID := ctx.Query("workspace_id")
-	if workspaceID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
-		return
-	}
-	if err := c.service.DeleteConfig(ctx.Request.Context(), workspaceID); err != nil {
+	if err := c.service.DeleteConfig(ctx.Request.Context()); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -111,12 +105,7 @@ func (c *Controller) httpTestConfig(ctx *gin.Context) {
 }
 
 func (c *Controller) httpListProjects(ctx *gin.Context) {
-	workspaceID := ctx.Query("workspace_id")
-	if workspaceID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
-		return
-	}
-	projects, err := c.service.ListProjects(ctx.Request.Context(), workspaceID)
+	projects, err := c.service.ListProjects(ctx.Request.Context())
 	if err != nil {
 		c.writeClientError(ctx, err)
 		return
@@ -125,15 +114,10 @@ func (c *Controller) httpListProjects(ctx *gin.Context) {
 }
 
 func (c *Controller) httpSearchTickets(ctx *gin.Context) {
-	workspaceID := ctx.Query("workspace_id")
-	if workspaceID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
-		return
-	}
 	jql := ctx.Query("jql")
 	pageToken := ctx.Query("page_token")
 	maxResults, _ := strconv.Atoi(ctx.Query("max_results"))
-	result, err := c.service.SearchTickets(ctx.Request.Context(), workspaceID, jql, pageToken, maxResults)
+	result, err := c.service.SearchTickets(ctx.Request.Context(), jql, pageToken, maxResults)
 	if err != nil {
 		c.writeClientError(ctx, err)
 		return
@@ -142,13 +126,8 @@ func (c *Controller) httpSearchTickets(ctx *gin.Context) {
 }
 
 func (c *Controller) httpGetTicket(ctx *gin.Context) {
-	workspaceID := ctx.Query("workspace_id")
-	if workspaceID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
-		return
-	}
 	key := ctx.Param("key")
-	ticket, err := c.service.GetTicket(ctx.Request.Context(), workspaceID, key)
+	ticket, err := c.service.GetTicket(ctx.Request.Context(), key)
 	if err != nil {
 		c.writeClientError(ctx, err)
 		return
@@ -157,11 +136,6 @@ func (c *Controller) httpGetTicket(ctx *gin.Context) {
 }
 
 func (c *Controller) httpDoTransition(ctx *gin.Context) {
-	workspaceID := ctx.Query("workspace_id")
-	if workspaceID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
-		return
-	}
 	key := ctx.Param("key")
 	var req struct {
 		TransitionID string `json:"transitionId"`
@@ -170,7 +144,7 @@ func (c *Controller) httpDoTransition(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "transitionId required"})
 		return
 	}
-	if err := c.service.DoTransition(ctx.Request.Context(), workspaceID, key, req.TransitionID); err != nil {
+	if err := c.service.DoTransition(ctx.Request.Context(), key, req.TransitionID); err != nil {
 		c.writeClientError(ctx, err)
 		return
 	}
@@ -182,7 +156,7 @@ func (c *Controller) httpDoTransition(ctx *gin.Context) {
 func (c *Controller) httpListIssueWatches(ctx *gin.Context) {
 	workspaceID := ctx.Query("workspace_id")
 	if workspaceID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": errMsgWorkspaceIDRequired})
 		return
 	}
 	watches, err := c.service.ListIssueWatches(ctx.Request.Context(), workspaceID)
@@ -304,9 +278,9 @@ func (c *Controller) writeIssueWatchError(ctx *gin.Context, err error) {
 	c.writeClientError(ctx, err)
 }
 
-// errCodeJiraNotConfigured is the wire-level code surfaced to the UI when the
-// workspace has no saved Jira credentials. The same string is used by both the
-// HTTP and WebSocket layers so the frontend can branch on a single value.
+// errCodeJiraNotConfigured is the wire-level code surfaced to the UI when
+// Jira has no saved credentials. The same string is used by both the HTTP
+// and WebSocket layers so the frontend can branch on a single value.
 const errCodeJiraNotConfigured = "JIRA_NOT_CONFIGURED"
 
 // writeClientError maps service-level errors to HTTP responses. ErrNotConfigured
@@ -315,7 +289,7 @@ const errCodeJiraNotConfigured = "JIRA_NOT_CONFIGURED"
 func (c *Controller) writeClientError(ctx *gin.Context, err error) {
 	if errors.Is(err, ErrNotConfigured) {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"error": "Jira is not configured for this workspace",
+			"error": "Jira is not configured",
 			"code":  errCodeJiraNotConfigured,
 		})
 		return
@@ -370,13 +344,7 @@ func wsFail(msg *ws.Message, err error) (*ws.Message, error) {
 
 func wsGetConfig(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-		var p struct {
-			WorkspaceID string `json:"workspaceId"`
-		}
-		if err := msg.ParsePayload(&p); err != nil || p.WorkspaceID == "" {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspaceId required", nil)
-		}
-		cfg, err := svc.GetConfig(ctx, p.WorkspaceID)
+		cfg, err := svc.GetConfig(ctx)
 		if err != nil {
 			return wsFail(msg, err)
 		}
@@ -403,13 +371,7 @@ func wsSetConfig(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.M
 
 func wsDeleteConfig(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-		var p struct {
-			WorkspaceID string `json:"workspaceId"`
-		}
-		if err := msg.ParsePayload(&p); err != nil || p.WorkspaceID == "" {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspaceId required", nil)
-		}
-		if err := svc.DeleteConfig(ctx, p.WorkspaceID); err != nil {
+		if err := svc.DeleteConfig(ctx); err != nil {
 			return wsFail(msg, err)
 		}
 		return wsReply(msg, gin.H{"deleted": true})
@@ -433,16 +395,15 @@ func wsTestConfig(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.
 func wsGetTicket(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 		var p struct {
-			WorkspaceID string `json:"workspaceId"`
-			TicketKey   string `json:"ticketKey"`
+			TicketKey string `json:"ticketKey"`
 		}
 		if err := msg.ParsePayload(&p); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload", nil)
 		}
-		if p.WorkspaceID == "" || p.TicketKey == "" {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspaceId and ticketKey required", nil)
+		if p.TicketKey == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "ticketKey required", nil)
 		}
-		ticket, err := svc.GetTicket(ctx, p.WorkspaceID, p.TicketKey)
+		ticket, err := svc.GetTicket(ctx, p.TicketKey)
 		if err != nil {
 			return wsFail(msg, err)
 		}
@@ -453,17 +414,16 @@ func wsGetTicket(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.M
 func wsDoTransition(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 		var p struct {
-			WorkspaceID  string `json:"workspaceId"`
 			TicketKey    string `json:"ticketKey"`
 			TransitionID string `json:"transitionId"`
 		}
 		if err := msg.ParsePayload(&p); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload", nil)
 		}
-		if p.WorkspaceID == "" || p.TicketKey == "" || p.TransitionID == "" {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspaceId, ticketKey, transitionId required", nil)
+		if p.TicketKey == "" || p.TransitionID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "ticketKey and transitionId required", nil)
 		}
-		if err := svc.DoTransition(ctx, p.WorkspaceID, p.TicketKey, p.TransitionID); err != nil {
+		if err := svc.DoTransition(ctx, p.TicketKey, p.TransitionID); err != nil {
 			return wsFail(msg, err)
 		}
 		return wsReply(msg, gin.H{"transitioned": true})
@@ -472,13 +432,7 @@ func wsDoTransition(svc *Service) func(ctx context.Context, msg *ws.Message) (*w
 
 func wsListProjects(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-		var p struct {
-			WorkspaceID string `json:"workspaceId"`
-		}
-		if err := msg.ParsePayload(&p); err != nil || p.WorkspaceID == "" {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspaceId required", nil)
-		}
-		projects, err := svc.ListProjects(ctx, p.WorkspaceID)
+		projects, err := svc.ListProjects(ctx)
 		if err != nil {
 			return wsFail(msg, err)
 		}

@@ -112,7 +112,7 @@ type svcFixture struct {
 	secrets    *fakeSecretStore
 	client     *fakeClient
 	factoryHit atomic.Int32
-	probed     chan string
+	probed     chan struct{}
 }
 
 func newSvcFixture(t *testing.T) *svcFixture {
@@ -121,15 +121,15 @@ func newSvcFixture(t *testing.T) *svcFixture {
 		store:   newTestStore(t),
 		secrets: newFakeSecretStore(),
 		client:  &fakeClient{},
-		probed:  make(chan string, 8),
+		probed:  make(chan struct{}, 8),
 	}
 	f.svc = NewService(f.store, f.secrets, func(_ *LinearConfig, _ string) Client {
 		f.factoryHit.Add(1)
 		return f.client
 	}, logger.Default())
-	f.svc.SetProbeHook(func(workspaceID string) {
+	f.svc.SetProbeHook(func() {
 		select {
-		case f.probed <- workspaceID:
+		case f.probed <- struct{}{}:
 		default:
 		}
 	})
@@ -137,23 +137,18 @@ func newSvcFixture(t *testing.T) *svcFixture {
 }
 
 // waitForAuthProbe blocks until the async probe has fired.
-func waitForAuthProbe(t *testing.T, f *svcFixture, workspaceID string) *LinearConfig {
+func waitForAuthProbe(t *testing.T, f *svcFixture) *LinearConfig {
 	t.Helper()
-	for {
-		select {
-		case got := <-f.probed:
-			if got != workspaceID {
-				continue
-			}
-			cfg, err := f.svc.GetConfig(context.Background(), workspaceID)
-			if err != nil {
-				t.Fatalf("get config after probe: %v", err)
-			}
-			return cfg
-		case <-time.After(2 * time.Second):
-			t.Fatalf("async probe hook did not fire for %q within 2s", workspaceID)
-			return nil
+	select {
+	case <-f.probed:
+		cfg, err := f.svc.GetConfig(context.Background())
+		if err != nil {
+			t.Fatalf("get config after probe: %v", err)
 		}
+		return cfg
+	case <-time.After(2 * time.Second):
+		t.Fatalf("async probe hook did not fire within 2s")
+		return nil
 	}
 }
 
@@ -162,7 +157,6 @@ func TestService_SetConfig_UpsertsAndStoresSecret(t *testing.T) {
 	ctx := context.Background()
 
 	cfg, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		WorkspaceID:    "ws-1",
 		AuthMethod:     AuthMethodAPIKey,
 		DefaultTeamKey: "ENG",
 		Secret:         "lin_api_xyz",
@@ -176,7 +170,7 @@ func TestService_SetConfig_UpsertsAndStoresSecret(t *testing.T) {
 	if !cfg.HasSecret {
 		t.Error("expected HasSecret=true")
 	}
-	if got, _ := f.secrets.Reveal(ctx, SecretKeyForWorkspace("ws-1")); got != "lin_api_xyz" {
+	if got, _ := f.secrets.Reveal(ctx, SecretKey); got != "lin_api_xyz" {
 		t.Errorf("secret stored = %q", got)
 	}
 }
@@ -187,11 +181,11 @@ func TestService_SetConfig_ProbesAuthImmediately(t *testing.T) {
 		return &TestConnectionResult{OK: true, DisplayName: "Alice", OrgSlug: "acme"}, nil
 	}
 	if _, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
-		WorkspaceID: "ws-1", AuthMethod: AuthMethodAPIKey, Secret: "tok",
+		AuthMethod: AuthMethodAPIKey, Secret: "tok",
 	}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	cfg := waitForAuthProbe(t, f, "ws-1")
+	cfg := waitForAuthProbe(t, f)
 	if !cfg.LastOk {
 		t.Errorf("expected LastOk=true after async probe, got %+v", cfg)
 	}
@@ -206,11 +200,11 @@ func TestService_SetConfig_PersistsProbeFailure(t *testing.T) {
 		return &TestConnectionResult{OK: false, Error: "401 unauthorized"}, nil
 	}
 	if _, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
-		WorkspaceID: "ws-1", AuthMethod: AuthMethodAPIKey, Secret: "bad",
+		AuthMethod: AuthMethodAPIKey, Secret: "bad",
 	}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	cfg := waitForAuthProbe(t, f, "ws-1")
+	cfg := waitForAuthProbe(t, f)
 	if cfg.LastOk {
 		t.Error("expected LastOk=false after failed probe")
 	}
@@ -223,16 +217,16 @@ func TestService_SetConfig_EmptySecret_KeepsExisting(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		WorkspaceID: "ws-1", AuthMethod: AuthMethodAPIKey, Secret: "first",
+		AuthMethod: AuthMethodAPIKey, Secret: "first",
 	}); err != nil {
 		t.Fatalf("initial: %v", err)
 	}
 	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		WorkspaceID: "ws-1", AuthMethod: AuthMethodAPIKey, DefaultTeamKey: "MOB",
+		AuthMethod: AuthMethodAPIKey, DefaultTeamKey: "MOB",
 	}); err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if got, _ := f.secrets.Reveal(ctx, SecretKeyForWorkspace("ws-1")); got != "first" {
+	if got, _ := f.secrets.Reveal(ctx, SecretKey); got != "first" {
 		t.Errorf("secret should be preserved, got %q", got)
 	}
 }
@@ -241,24 +235,24 @@ func TestService_SetConfig_InvalidatesClientCache(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 	_, _ = f.svc.SetConfig(ctx, &SetConfigRequest{
-		WorkspaceID: "ws-1", AuthMethod: AuthMethodAPIKey, Secret: "t",
+		AuthMethod: AuthMethodAPIKey, Secret: "t",
 	})
-	waitForAuthProbe(t, f, "ws-1")
-	if _, err := f.svc.GetIssue(ctx, "ws-1", "A-1"); err != nil {
+	waitForAuthProbe(t, f)
+	if _, err := f.svc.GetIssue(ctx, "A-1"); err != nil {
 		t.Fatalf("get1: %v", err)
 	}
 	hits := f.factoryHit.Load()
-	if _, err := f.svc.GetIssue(ctx, "ws-1", "A-2"); err != nil {
+	if _, err := f.svc.GetIssue(ctx, "A-2"); err != nil {
 		t.Fatalf("get2: %v", err)
 	}
 	if got := f.factoryHit.Load(); got != hits {
 		t.Errorf("factory should be cached, hits %d→%d", hits, got)
 	}
 	_, _ = f.svc.SetConfig(ctx, &SetConfigRequest{
-		WorkspaceID: "ws-1", AuthMethod: AuthMethodAPIKey, Secret: "t2",
+		AuthMethod: AuthMethodAPIKey, Secret: "t2",
 	})
-	waitForAuthProbe(t, f, "ws-1")
-	if _, err := f.svc.GetIssue(ctx, "ws-1", "A-3"); err != nil {
+	waitForAuthProbe(t, f)
+	if _, err := f.svc.GetIssue(ctx, "A-3"); err != nil {
 		t.Fatalf("get3: %v", err)
 	}
 	if got := f.factoryHit.Load(); got <= hits {
@@ -266,22 +260,12 @@ func TestService_SetConfig_InvalidatesClientCache(t *testing.T) {
 	}
 }
 
-func TestService_Validation(t *testing.T) {
+func TestService_Validation_RejectsBadAuth(t *testing.T) {
 	f := newSvcFixture(t)
-	ctx := context.Background()
-	cases := []struct {
-		name string
-		req  SetConfigRequest
-	}{
-		{"missing ws", SetConfigRequest{AuthMethod: AuthMethodAPIKey}},
-		{"bad auth", SetConfigRequest{WorkspaceID: "w", AuthMethod: "bogus"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, err := f.svc.SetConfig(ctx, &tc.req); err == nil {
-				t.Error("expected validation error")
-			}
-		})
+	if _, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
+		AuthMethod: "bogus",
+	}); err == nil {
+		t.Error("expected validation error for unknown auth method")
 	}
 }
 
@@ -289,7 +273,7 @@ func TestService_Validation_DefaultsAuthMethod(t *testing.T) {
 	f := newSvcFixture(t)
 	// Empty AuthMethod is filled with AuthMethodAPIKey rather than rejected.
 	if _, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
-		WorkspaceID: "ws-1", Secret: "tok",
+		Secret: "tok",
 	}); err != nil {
 		t.Fatalf("expected default auth method, got error: %v", err)
 	}
@@ -303,7 +287,7 @@ func TestService_TestConnection_InlineSecret(t *testing.T) {
 		return &TestConnectionResult{OK: true, DisplayName: "Alice"}, nil
 	}
 	res, err := f.svc.TestConnection(context.Background(), &SetConfigRequest{
-		WorkspaceID: "ws-1", AuthMethod: AuthMethodAPIKey, Secret: "inline",
+		AuthMethod: AuthMethodAPIKey, Secret: "inline",
 	})
 	if err != nil || !called {
 		t.Fatalf("called=%v err=%v", called, err)
@@ -316,7 +300,7 @@ func TestService_TestConnection_InlineSecret(t *testing.T) {
 func TestService_TestConnection_NoStoredSecret_ReturnsFailure(t *testing.T) {
 	f := newSvcFixture(t)
 	res, err := f.svc.TestConnection(context.Background(), &SetConfigRequest{
-		WorkspaceID: "ws-nope", AuthMethod: AuthMethodAPIKey,
+		AuthMethod: AuthMethodAPIKey,
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -328,7 +312,7 @@ func TestService_TestConnection_NoStoredSecret_ReturnsFailure(t *testing.T) {
 
 func TestService_GetIssue_NotConfigured(t *testing.T) {
 	f := newSvcFixture(t)
-	_, err := f.svc.GetIssue(context.Background(), "missing", "ENG-1")
+	_, err := f.svc.GetIssue(context.Background(), "ENG-1")
 	if !errors.Is(err, ErrNotConfigured) {
 		t.Errorf("expected ErrNotConfigured, got %v", err)
 	}
@@ -338,16 +322,16 @@ func TestService_DeleteConfig_RemovesSecretAndCache(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 	_, _ = f.svc.SetConfig(ctx, &SetConfigRequest{
-		WorkspaceID: "ws-1", AuthMethod: AuthMethodAPIKey, Secret: "t",
+		AuthMethod: AuthMethodAPIKey, Secret: "t",
 	})
-	waitForAuthProbe(t, f, "ws-1")
-	if err := f.svc.DeleteConfig(ctx, "ws-1"); err != nil {
+	waitForAuthProbe(t, f)
+	if err := f.svc.DeleteConfig(ctx); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if exists, _ := f.secrets.Exists(ctx, SecretKeyForWorkspace("ws-1")); exists {
+	if exists, _ := f.secrets.Exists(ctx, SecretKey); exists {
 		t.Error("expected secret removed")
 	}
-	cfg, _ := f.svc.GetConfig(ctx, "ws-1")
+	cfg, _ := f.svc.GetConfig(ctx)
 	if cfg != nil {
 		t.Errorf("expected config gone, got %+v", cfg)
 	}
@@ -357,10 +341,10 @@ func TestService_SetIssueState_Forwards(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 	_, _ = f.svc.SetConfig(ctx, &SetConfigRequest{
-		WorkspaceID: "ws-1", AuthMethod: AuthMethodAPIKey, Secret: "t",
+		AuthMethod: AuthMethodAPIKey, Secret: "t",
 	})
-	waitForAuthProbe(t, f, "ws-1")
-	if err := f.svc.SetIssueState(ctx, "ws-1", "ENG-1", "state-id"); err != nil {
+	waitForAuthProbe(t, f)
+	if err := f.svc.SetIssueState(ctx, "ENG-1", "state-id"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 	if len(f.client.transitionLog) != 1 || f.client.transitionLog[0] != "ENG-1:state-id" {

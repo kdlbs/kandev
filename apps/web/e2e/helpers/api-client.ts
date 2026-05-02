@@ -795,7 +795,6 @@ export class ApiClient {
   // --- Integration config seeding (real API, not mock) ---
 
   async setJiraConfig(payload: {
-    workspaceId: string;
     siteUrl: string;
     email: string;
     authMethod?: "api_token" | "session_cookie";
@@ -808,11 +807,7 @@ export class ApiClient {
     });
   }
 
-  async setLinearConfig(payload: {
-    workspaceId: string;
-    secret: string;
-    defaultTeamKey?: string;
-  }): Promise<unknown> {
+  async setLinearConfig(payload: { secret: string; defaultTeamKey?: string }): Promise<unknown> {
     return this.request("POST", "/api/v1/linear/config", {
       defaultTeamKey: "",
       ...payload,
@@ -829,15 +824,11 @@ export class ApiClient {
    */
   async waitForIntegrationAuthHealthy(
     integration: "jira" | "linear",
-    workspaceId: string,
     timeoutMs = 5_000,
   ): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const res = await this.rawRequest(
-        "GET",
-        `/api/v1/${integration}/config?workspace_id=${workspaceId}`,
-      );
+      const res = await this.rawRequest("GET", `/api/v1/${integration}/config`);
       if (res.ok && res.status === 200) {
         const cfg = (await res.json()) as { hasSecret?: boolean; lastOk?: boolean };
         if (cfg.hasSecret && cfg.lastOk) return;
@@ -863,11 +854,7 @@ export class ApiClient {
     await this.request("PUT", "/api/v1/jira/mock/auth-result", result);
   }
 
-  async mockJiraSetAuthHealth(args: {
-    workspaceId: string;
-    ok: boolean;
-    error?: string;
-  }): Promise<void> {
+  async mockJiraSetAuthHealth(args: { ok: boolean; error?: string }): Promise<void> {
     await this.request("PUT", "/api/v1/jira/mock/auth-health", args);
   }
 
@@ -916,7 +903,6 @@ export class ApiClient {
   }
 
   async mockLinearSetAuthHealth(args: {
-    workspaceId: string;
     ok: boolean;
     error?: string;
     orgSlug?: string;

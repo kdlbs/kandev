@@ -4,10 +4,9 @@ import { LinearSettingsPage } from "../../pages/linear-settings-page";
 test.describe("Linear settings", () => {
   test("empty workspace shows form with disabled save/test until secret is filled", async ({
     testPage,
-    seedData,
   }) => {
     const settings = new LinearSettingsPage(testPage);
-    await settings.goto(seedData.workspaceId);
+    await settings.goto();
 
     await expect(settings.secretInput).toHaveValue("");
     await expect(settings.statusBanner).toHaveCount(0);
@@ -21,7 +20,6 @@ test.describe("Linear settings", () => {
 
   test("saving the config persists across reload and shows the auth banner", async ({
     testPage,
-    seedData,
     apiClient,
   }) => {
     // Seed a single team so the dropdown post-save can populate without an
@@ -30,13 +28,13 @@ test.describe("Linear settings", () => {
     await apiClient.mockLinearSetTeams([{ id: "team-1", key: "ENG", name: "Engineering" }]);
 
     const settings = new LinearSettingsPage(testPage);
-    await settings.goto(seedData.workspaceId);
+    await settings.goto();
 
     await settings.secretInput.fill("lin_api_xxx");
     await settings.saveButton.click();
     await expect(settings.saveButton).toHaveText(/Update/i);
     // Wait for the async post-save probe to write lastOk=true before reloading.
-    await apiClient.waitForIntegrationAuthHealthy("linear", seedData.workspaceId);
+    await apiClient.waitForIntegrationAuthHealthy("linear");
 
     await testPage.reload();
     await settings.secretInput.waitFor();
@@ -45,13 +43,9 @@ test.describe("Linear settings", () => {
     await expect(testPage.getByText(/leave blank to keep the current value/i)).toBeVisible();
   });
 
-  test("test connection surfaces inline success and failure", async ({
-    testPage,
-    seedData,
-    apiClient,
-  }) => {
+  test("test connection surfaces inline success and failure", async ({ testPage, apiClient }) => {
     const settings = new LinearSettingsPage(testPage);
-    await settings.goto(seedData.workspaceId);
+    await settings.goto();
 
     await apiClient.mockLinearSetAuthResult({
       ok: true,
@@ -70,20 +64,18 @@ test.describe("Linear settings", () => {
 
   test("seeded auth-health failure renders the failed banner on load", async ({
     testPage,
-    seedData,
     apiClient,
   }) => {
     const settings = new LinearSettingsPage(testPage);
-    await settings.goto(seedData.workspaceId);
+    await settings.goto();
     await settings.secretInput.fill("lin_api_xxx");
     await settings.saveButton.click();
     // Wait for the post-save probe to land BEFORE forcing the failure: the
     // probe goroutine could otherwise overwrite our forced lastOk=false back
     // to true a few ms after the mockLinearSetAuthHealth call.
-    await apiClient.waitForIntegrationAuthHealthy("linear", seedData.workspaceId);
+    await apiClient.waitForIntegrationAuthHealthy("linear");
 
     await apiClient.mockLinearSetAuthHealth({
-      workspaceId: seedData.workspaceId,
       ok: false,
       error: "rate limited",
     });
@@ -93,9 +85,9 @@ test.describe("Linear settings", () => {
     await expect(settings.statusBanner).toContainText(/rate limited/i);
   });
 
-  test("delete clears the saved configuration", async ({ testPage, seedData }) => {
+  test("delete clears the saved configuration", async ({ testPage }) => {
     const settings = new LinearSettingsPage(testPage);
-    await settings.goto(seedData.workspaceId);
+    await settings.goto();
     await settings.secretInput.fill("lin_api_xxx");
     await settings.saveButton.click();
     await expect(settings.deleteButton).toBeVisible();

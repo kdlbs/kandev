@@ -19,6 +19,7 @@ import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
+import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   getJiraConfig,
@@ -336,11 +337,7 @@ function ActionBar({
   );
 }
 
-type JiraSettingsProps = {
-  workspaceId: string;
-};
-
-function useJiraSettings(workspaceId: string) {
+function useJiraSettings() {
   const { toast } = useToast();
   const [config, setConfig] = useState<JiraConfig | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -353,7 +350,7 @@ function useJiraSettings(workspaceId: string) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const cfg = await getJiraConfig(workspaceId);
+      const cfg = await getJiraConfig();
       setConfig(cfg);
       setForm(configToForm(cfg));
     } catch (err) {
@@ -361,7 +358,7 @@ function useJiraSettings(workspaceId: string) {
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, toast]);
+  }, [toast]);
 
   useEffect(() => {
     void load();
@@ -372,14 +369,14 @@ function useJiraSettings(workspaceId: string) {
   // config rather than the loud full `load()` to avoid flashing the form.
   useEffect(() => {
     const id = setInterval(() => {
-      getJiraConfig(workspaceId)
+      getJiraConfig()
         .then((cfg) => setConfig(cfg))
         .catch(() => {
           /* transient failures are fine — next tick retries */
         });
     }, INTEGRATION_STATUS_REFRESH_MS);
     return () => clearInterval(id);
-  }, [workspaceId]);
+  }, []);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -391,20 +388,19 @@ function useJiraSettings(workspaceId: string) {
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await testJiraConnection({ workspaceId, ...form });
+      const res = await testJiraConnection({ ...form });
       setTestResult(res);
     } catch (err) {
       setTestResult({ ok: false, error: String(err) });
     } finally {
       setTesting(false);
     }
-  }, [workspaceId, form]);
+  }, [form]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
       const saved = await setJiraConfig({
-        workspaceId,
         siteUrl: form.siteUrl,
         email: form.email,
         authMethod: form.authMethod,
@@ -422,12 +418,12 @@ function useJiraSettings(workspaceId: string) {
     } finally {
       setSaving(false);
     }
-  }, [workspaceId, form, toast]);
+  }, [form, toast]);
 
   const handleDelete = useCallback(async () => {
-    if (!confirm("Remove Jira configuration for this workspace?")) return;
+    if (!confirm("Remove Jira configuration?")) return;
     try {
-      await deleteJiraConfig(workspaceId);
+      await deleteJiraConfig();
       setConfig(null);
       setForm(emptyForm);
       setTestResult(null);
@@ -435,7 +431,7 @@ function useJiraSettings(workspaceId: string) {
     } catch (err) {
       toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
     }
-  }, [workspaceId, toast]);
+  }, [toast]);
 
   return {
     config,
@@ -452,8 +448,8 @@ function useJiraSettings(workspaceId: string) {
   };
 }
 
-function EnabledPill({ workspaceId }: { workspaceId: string }) {
-  const { enabled, setEnabled } = useJiraEnabled(workspaceId);
+function EnabledPill() {
+  const { enabled, setEnabled } = useJiraEnabled();
   return (
     <div className="flex items-center gap-2 rounded-full border bg-muted/30 px-3 py-1">
       <Switch
@@ -469,8 +465,10 @@ function EnabledPill({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-export function JiraSettings({ workspaceId }: JiraSettingsProps) {
-  const s = useJiraSettings(workspaceId);
+// JiraConnectionSection holds the install-wide credentials form. Watchers and
+// task presets live elsewhere because they scope per workspace.
+export function JiraConnectionSection() {
+  const s = useJiraSettings();
   const missingSecret = !s.config?.hasSecret && !s.form.secret;
   const disableSave =
     s.saving ||
@@ -480,42 +478,54 @@ export function JiraSettings({ workspaceId }: JiraSettingsProps) {
   const disableTest = missingSecret;
 
   return (
+    <SettingsSection
+      icon={<IconTicket className="h-5 w-5" />}
+      title="Jira integration"
+      description="Connect Kandev to an Atlassian Cloud site. Credentials are stored encrypted server-side and shared across all workspaces."
+      action={<EnabledPill />}
+    >
+      <Card>
+        <CardContent className="space-y-4 pt-6">
+          <IntegrationAuthStatusBanner health={s.health} />
+          <SiteFields form={s.form} loading={s.loading} update={s.update} />
+          <AuthFields form={s.form} loading={s.loading} update={s.update} />
+          <SecretField
+            form={s.form}
+            loading={s.loading}
+            update={s.update}
+            hasSavedSecret={!!s.config?.hasSecret}
+            secretExpiresAt={s.config?.secretExpiresAt ?? null}
+          />
+          <TestResultAlert result={s.testResult} />
+          <Separator />
+          <ActionBar
+            saving={s.saving}
+            testing={s.testing}
+            loading={s.loading}
+            hasConfig={!!s.config}
+            disableSave={disableSave}
+            disableTest={disableTest}
+            onTest={s.handleTest}
+            onSave={s.handleSave}
+            onDelete={s.handleDelete}
+          />
+        </CardContent>
+      </Card>
+    </SettingsSection>
+  );
+}
+
+// JiraIntegrationPage is the install-wide settings surface mounted at
+// /settings/integrations/jira. It composes the global connection form with
+// per-workspace watcher management (re-keyed when the workspace switcher
+// changes selection) and the global task-prompt presets.
+export function JiraIntegrationPage() {
+  return (
     <div className="space-y-8">
-      <SettingsSection
-        icon={<IconTicket className="h-5 w-5" />}
-        title="Jira integration"
-        description="Connect this workspace to an Atlassian Cloud site. Credentials are stored encrypted server-side."
-        action={<EnabledPill workspaceId={workspaceId} />}
-      >
-        <Card>
-          <CardContent className="space-y-4 pt-6">
-            <IntegrationAuthStatusBanner health={s.health} />
-            <SiteFields form={s.form} loading={s.loading} update={s.update} />
-            <AuthFields form={s.form} loading={s.loading} update={s.update} />
-            <SecretField
-              form={s.form}
-              loading={s.loading}
-              update={s.update}
-              hasSavedSecret={!!s.config?.hasSecret}
-              secretExpiresAt={s.config?.secretExpiresAt ?? null}
-            />
-            <TestResultAlert result={s.testResult} />
-            <Separator />
-            <ActionBar
-              saving={s.saving}
-              testing={s.testing}
-              loading={s.loading}
-              hasConfig={!!s.config}
-              disableSave={disableSave}
-              disableTest={disableTest}
-              onTest={s.handleTest}
-              onSave={s.handleSave}
-              onDelete={s.handleDelete}
-            />
-          </CardContent>
-        </Card>
-      </SettingsSection>
-      {s.config?.hasSecret && <JiraIssueWatchersSection workspaceId={workspaceId} />}
+      <JiraConnectionSection />
+      <WorkspaceScopedSection label="Watchers for">
+        {(workspaceId) => <JiraIssueWatchersSection key={workspaceId} workspaceId={workspaceId} />}
+      </WorkspaceScopedSection>
       <TaskPresetsSection />
     </div>
   );

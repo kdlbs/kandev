@@ -2,14 +2,13 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 
 test.describe("Jira import bar", () => {
-  test.beforeEach(async ({ apiClient, seedData }) => {
+  test.beforeEach(async ({ apiClient }) => {
     await apiClient.setJiraConfig({
-      workspaceId: seedData.workspaceId,
       siteUrl: "https://acme.atlassian.net",
       email: "alice@example.com",
       secret: "api-token-value",
     });
-    await apiClient.waitForIntegrationAuthHealthy("jira", seedData.workspaceId);
+    await apiClient.waitForIntegrationAuthHealthy("jira");
   });
 
   test("pasting a known ticket key fills the title and description", async ({

@@ -2,12 +2,11 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 
 test.describe("Linear import bar", () => {
-  test.beforeEach(async ({ apiClient, seedData }) => {
+  test.beforeEach(async ({ apiClient }) => {
     await apiClient.setLinearConfig({
-      workspaceId: seedData.workspaceId,
       secret: "lin_api_xxx",
     });
-    await apiClient.waitForIntegrationAuthHealthy("linear", seedData.workspaceId);
+    await apiClient.waitForIntegrationAuthHealthy("linear");
   });
 
   test("pasting a known identifier fills the title and description", async ({

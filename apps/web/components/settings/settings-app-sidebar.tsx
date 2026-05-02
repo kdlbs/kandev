@@ -108,9 +108,6 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
             const workspacePath = `/settings/workspace/${workspace.id}`;
             const workflowsPath = `${workspacePath}/workflows`;
             const repositoriesPath = `${workspacePath}/repositories`;
-            const githubPath = `${workspacePath}/github`;
-            const jiraPath = `${workspacePath}/jira`;
-            const linearPath = `${workspacePath}/linear`;
 
             return (
               <SidebarMenuSubItem key={workspace.id}>
@@ -140,36 +137,42 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
                       </Link>
                     </SidebarMenuSubButton>
                   </SidebarMenuSubItem>
-                  <SidebarMenuSubItem>
-                    <SidebarMenuSubButton asChild size="sm" isActive={pathname === githubPath}>
-                      <Link href={githubPath}>
-                        <IconBrandGithub className="h-3.5 w-3.5" />
-                        <span>GitHub</span>
-                      </Link>
-                    </SidebarMenuSubButton>
-                  </SidebarMenuSubItem>
-                  <SidebarMenuSubItem>
-                    <SidebarMenuSubButton asChild size="sm" isActive={pathname === jiraPath}>
-                      <Link href={jiraPath}>
-                        <IconTicket className="h-3.5 w-3.5" />
-                        <span>Jira</span>
-                      </Link>
-                    </SidebarMenuSubButton>
-                  </SidebarMenuSubItem>
-                  <SidebarMenuSubItem>
-                    <SidebarMenuSubButton asChild size="sm" isActive={pathname === linearPath}>
-                      <Link href={linearPath}>
-                        <IconHexagon className="h-3.5 w-3.5" />
-                        <span>Linear</span>
-                      </Link>
-                    </SidebarMenuSubButton>
-                  </SidebarMenuSubItem>
                 </SidebarMenuSub>
               </SidebarMenuSubItem>
             );
           })}
         </SidebarMenuSub>
       )}
+    </SidebarMenuItem>
+  );
+}
+
+function IntegrationsSidebarSection({ pathname }: { pathname: string }) {
+  const items: Array<{ href: string; label: string; Icon: typeof IconBrandGithub }> = [
+    { href: "/settings/integrations/github", label: "GitHub", Icon: IconBrandGithub },
+    { href: "/settings/integrations/jira", label: "Jira", Icon: IconTicket },
+    { href: "/settings/integrations/linear", label: "Linear", Icon: IconHexagon },
+  ];
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild tooltip="Integrations">
+        <Link href="/settings/integrations">
+          <IconPlugConnected className="h-4 w-4" />
+          <span>Integrations</span>
+        </Link>
+      </SidebarMenuButton>
+      <SidebarMenuSub className="ml-3 mt-1">
+        {items.map(({ href, label, Icon }) => (
+          <SidebarMenuSubItem key={href}>
+            <SidebarMenuSubButton asChild size="sm" isActive={pathname === href}>
+              <Link href={href}>
+                <Icon className="h-3.5 w-3.5" />
+                <span>{label}</span>
+              </Link>
+            </SidebarMenuSubButton>
+          </SidebarMenuSubItem>
+        ))}
+      </SidebarMenuSub>
     </SidebarMenuItem>
   );
 }
@@ -313,6 +316,7 @@ export function SettingsAppSidebar() {
               <SidebarMenu>
                 <GeneralSidebarSection pathname={pathname} />
                 <WorkspacesSidebarSection pathname={pathname} workspaces={workspaces} />
+                <IntegrationsSidebarSection pathname={pathname} />
                 <AgentsSidebarSection pathname={pathname} agents={agents} />
 
                 {/* Prompts */}

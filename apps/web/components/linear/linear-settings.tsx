@@ -201,25 +201,14 @@ function ActionBar({
   );
 }
 
-type LinearSettingsProps = {
-  workspaceId: string;
-};
-
 type SettingsActionsArgs = {
-  workspaceId: string;
   form: FormState;
   setConfig: (cfg: LinearConfig | null) => void;
   setForm: (form: FormState) => void;
   setTestResult: (r: TestLinearConnectionResult | null) => void;
 };
 
-function useSettingsActions({
-  workspaceId,
-  form,
-  setConfig,
-  setForm,
-  setTestResult,
-}: SettingsActionsArgs) {
+function useSettingsActions({ form, setConfig, setForm, setTestResult }: SettingsActionsArgs) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -229,7 +218,6 @@ function useSettingsActions({
     setTestResult(null);
     try {
       const res = await testLinearConnection({
-        workspaceId,
         authMethod: "api_key",
         secret: form.secret || undefined,
       });
@@ -239,13 +227,12 @@ function useSettingsActions({
     } finally {
       setTesting(false);
     }
-  }, [workspaceId, form, setTestResult]);
+  }, [form, setTestResult]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
       const saved = await setLinearConfig({
-        workspaceId,
         authMethod: "api_key",
         defaultTeamKey: form.defaultTeamKey,
         secret: form.secret || undefined,
@@ -259,12 +246,12 @@ function useSettingsActions({
     } finally {
       setSaving(false);
     }
-  }, [workspaceId, form, toast, setConfig, setForm, setTestResult]);
+  }, [form, toast, setConfig, setForm, setTestResult]);
 
   const handleDelete = useCallback(async () => {
-    if (!confirm("Remove Linear configuration for this workspace?")) return;
+    if (!confirm("Remove Linear configuration?")) return;
     try {
-      await deleteLinearConfig(workspaceId);
+      await deleteLinearConfig();
       setConfig(null);
       setForm(emptyForm);
       setTestResult(null);
@@ -272,16 +259,12 @@ function useSettingsActions({
     } catch (err) {
       toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
     }
-  }, [workspaceId, toast, setConfig, setForm, setTestResult]);
+  }, [toast, setConfig, setForm, setTestResult]);
 
   return { saving, testing, handleTest, handleSave, handleDelete };
 }
 
-function useTeamsLoader(
-  workspaceId: string,
-  hasSecret: boolean | undefined,
-  lastOk: boolean | undefined,
-) {
+function useTeamsLoader(hasSecret: boolean | undefined, lastOk: boolean | undefined) {
   // `teams === null` means "no fetch attempt yet", so the dropdown can show a
   // "Loading…" placeholder without us calling setState synchronously inside
   // the effect (which the lint rule forbids). Once a fetch settles we always
@@ -294,7 +277,7 @@ function useTeamsLoader(
   useEffect(() => {
     if (!hasSecret) return;
     let cancelled = false;
-    listLinearTeams(workspaceId)
+    listLinearTeams()
       .then((res) => {
         if (!cancelled) setTeams(res.teams ?? []);
       })
@@ -304,23 +287,23 @@ function useTeamsLoader(
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, hasSecret, lastOk]);
+  }, [hasSecret, lastOk]);
   return { teams: teams ?? [], loadingTeams: teams === null && !!hasSecret };
 }
 
-function useLinearSettings(workspaceId: string) {
+function useLinearSettings() {
   const { toast } = useToast();
   const [config, setConfig] = useState<LinearConfig | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [testResult, setTestResult] = useState<TestLinearConnectionResult | null>(null);
   const health = configToHealth(config);
-  const { teams, loadingTeams } = useTeamsLoader(workspaceId, config?.hasSecret, config?.lastOk);
+  const { teams, loadingTeams } = useTeamsLoader(config?.hasSecret, config?.lastOk);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const cfg = await getLinearConfig(workspaceId);
+      const cfg = await getLinearConfig();
       setConfig(cfg);
       setForm(configToForm(cfg));
     } catch (err) {
@@ -328,7 +311,7 @@ function useLinearSettings(workspaceId: string) {
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, toast]);
+  }, [toast]);
 
   useEffect(() => {
     void load();
@@ -337,14 +320,14 @@ function useLinearSettings(workspaceId: string) {
   // Background refresh so the auth-health banner picks up new probe results.
   useEffect(() => {
     const id = setInterval(() => {
-      getLinearConfig(workspaceId)
+      getLinearConfig()
         .then((cfg) => setConfig(cfg))
         .catch(() => {
           /* transient failures are fine — next tick retries */
         });
     }, INTEGRATION_STATUS_REFRESH_MS);
     return () => clearInterval(id);
-  }, [workspaceId]);
+  }, []);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -353,7 +336,6 @@ function useLinearSettings(workspaceId: string) {
   );
 
   const { saving, testing, handleTest, handleSave, handleDelete } = useSettingsActions({
-    workspaceId,
     form,
     setConfig,
     setForm,
@@ -377,8 +359,8 @@ function useLinearSettings(workspaceId: string) {
   };
 }
 
-function EnabledPill({ workspaceId }: { workspaceId: string }) {
-  const { enabled, setEnabled } = useLinearEnabled(workspaceId);
+function EnabledPill() {
+  const { enabled, setEnabled } = useLinearEnabled();
   return (
     <div className="flex items-center gap-2 rounded-full border bg-muted/30 px-3 py-1">
       <Switch
@@ -394,53 +376,62 @@ function EnabledPill({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-export function LinearSettings({ workspaceId }: LinearSettingsProps) {
-  const s = useLinearSettings(workspaceId);
+// LinearConnectionSection holds the install-wide credentials form. Linear has
+// no per-workspace state to surface here today, so the page composes only this
+// section.
+export function LinearConnectionSection() {
+  const s = useLinearSettings();
   const missingSecret = !s.config?.hasSecret && !s.form.secret;
   const disableSave = s.saving || missingSecret;
   const disableTest = missingSecret;
 
   return (
+    <SettingsSection
+      icon={<IconHexagon className="h-5 w-5" />}
+      title="Linear integration"
+      description="Connect Kandev to Linear with a personal API key. Credentials are stored encrypted server-side and shared across all workspaces."
+      action={<EnabledPill />}
+    >
+      <Card>
+        <CardContent className="space-y-4 pt-6">
+          <IntegrationAuthStatusBanner health={s.health} />
+          <SecretField
+            form={s.form}
+            loading={s.loading}
+            update={s.update}
+            hasSavedSecret={!!s.config?.hasSecret}
+          />
+          <TeamSelector
+            form={s.form}
+            loading={s.loading}
+            update={s.update}
+            hasSavedSecret={!!s.config?.hasSecret}
+            teams={s.teams}
+            loadingTeams={s.loadingTeams}
+          />
+          <TestResultAlert result={s.testResult} />
+          <Separator />
+          <ActionBar
+            saving={s.saving}
+            testing={s.testing}
+            loading={s.loading}
+            hasConfig={!!s.config}
+            disableSave={disableSave}
+            disableTest={disableTest}
+            onTest={s.handleTest}
+            onSave={s.handleSave}
+            onDelete={s.handleDelete}
+          />
+        </CardContent>
+      </Card>
+    </SettingsSection>
+  );
+}
+
+export function LinearIntegrationPage() {
+  return (
     <div className="space-y-8">
-      <SettingsSection
-        icon={<IconHexagon className="h-5 w-5" />}
-        title="Linear integration"
-        description="Connect this workspace to Linear with a personal API key. Credentials are stored encrypted server-side."
-        action={<EnabledPill workspaceId={workspaceId} />}
-      >
-        <Card>
-          <CardContent className="space-y-4 pt-6">
-            <IntegrationAuthStatusBanner health={s.health} />
-            <SecretField
-              form={s.form}
-              loading={s.loading}
-              update={s.update}
-              hasSavedSecret={!!s.config?.hasSecret}
-            />
-            <TeamSelector
-              form={s.form}
-              loading={s.loading}
-              update={s.update}
-              hasSavedSecret={!!s.config?.hasSecret}
-              teams={s.teams}
-              loadingTeams={s.loadingTeams}
-            />
-            <TestResultAlert result={s.testResult} />
-            <Separator />
-            <ActionBar
-              saving={s.saving}
-              testing={s.testing}
-              loading={s.loading}
-              hasConfig={!!s.config}
-              disableSave={disableSave}
-              disableTest={disableTest}
-              onTest={s.handleTest}
-              onSave={s.handleSave}
-              onDelete={s.handleDelete}
-            />
-          </CardContent>
-        </Card>
-      </SettingsSection>
+      <LinearConnectionSection />
     </div>
   );
 }

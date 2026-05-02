@@ -14,7 +14,7 @@ type JiraImportBarProps = {
 };
 
 export function JiraImportBar({ workspaceId, disabled, onImport }: JiraImportBarProps) {
-  const available = useJiraAvailable(workspaceId);
+  const available = useJiraAvailable();
   if (!available || !workspaceId) return null;
 
   return (
@@ -30,7 +30,7 @@ export function JiraImportBar({ workspaceId, disabled, onImport }: JiraImportBar
       placeholder="PROJ-123 or paste ticket URL"
       extractKey={(raw) => raw.toUpperCase().match(JIRA_KEY_RE)?.[0] ?? null}
       validationHint="Paste a Jira ticket URL or key (PROJ-123)"
-      fetch={(key) => getJiraTicket(workspaceId, key)}
+      fetch={(key) => getJiraTicket(key)}
       onSuccess={(_key, ticket) => onImport(ticket)}
       submitLabel="Import"
       submittingLabel="Loading..."

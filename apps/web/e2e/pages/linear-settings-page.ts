@@ -15,8 +15,8 @@ export class LinearSettingsPage {
     this.statusBanner = page.getByTestId("integration-auth-status-banner");
   }
 
-  async goto(workspaceId: string) {
-    await this.page.goto(`/settings/workspace/${workspaceId}/linear`);
+  async goto() {
+    await this.page.goto(`/settings/integrations/linear`);
     await this.secretInput.waitFor({ state: "visible" });
   }
 }

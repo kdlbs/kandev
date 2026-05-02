@@ -32,7 +32,6 @@ func TestStore_UpsertGetDelete(t *testing.T) {
 	ctx := context.Background()
 
 	cfg := &LinearConfig{
-		WorkspaceID:    "ws-1",
 		AuthMethod:     AuthMethodAPIKey,
 		DefaultTeamKey: "ENG",
 	}
@@ -40,7 +39,7 @@ func TestStore_UpsertGetDelete(t *testing.T) {
 		t.Fatalf("upsert: %v", err)
 	}
 
-	got, err := store.GetConfig(ctx, "ws-1")
+	got, err := store.GetConfig(ctx)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -58,15 +57,15 @@ func TestStore_UpsertGetDelete(t *testing.T) {
 	if err := store.UpsertConfig(ctx, cfg); err != nil {
 		t.Fatalf("update upsert: %v", err)
 	}
-	got2, _ := store.GetConfig(ctx, "ws-1")
+	got2, _ := store.GetConfig(ctx)
 	if got2.DefaultTeamKey != "MOB" {
 		t.Errorf("expected team update, got %q", got2.DefaultTeamKey)
 	}
 
-	if err := store.DeleteConfig(ctx, "ws-1"); err != nil {
+	if err := store.DeleteConfig(ctx); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	gone, err := store.GetConfig(ctx, "ws-1")
+	gone, err := store.GetConfig(ctx)
 	if err != nil {
 		t.Fatalf("get after delete: %v", err)
 	}
@@ -77,7 +76,7 @@ func TestStore_UpsertGetDelete(t *testing.T) {
 
 func TestStore_GetConfig_Missing(t *testing.T) {
 	store := newTestStore(t)
-	cfg, err := store.GetConfig(context.Background(), "does-not-exist")
+	cfg, err := store.GetConfig(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -86,25 +85,27 @@ func TestStore_GetConfig_Missing(t *testing.T) {
 	}
 }
 
-func TestStore_ListConfiguredWorkspaces(t *testing.T) {
+func TestStore_HasConfig(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	mustUpsert := func(id string) {
-		if err := store.UpsertConfig(ctx, &LinearConfig{
-			WorkspaceID: id,
-			AuthMethod:  AuthMethodAPIKey,
-		}); err != nil {
-			t.Fatalf("upsert %s: %v", id, err)
-		}
-	}
-	mustUpsert("ws-b")
-	mustUpsert("ws-a")
-	ids, err := store.ListConfiguredWorkspaces(ctx)
+	has, err := store.HasConfig(ctx)
 	if err != nil {
-		t.Fatalf("list: %v", err)
+		t.Fatalf("has-config: %v", err)
 	}
-	if len(ids) != 2 || ids[0] != "ws-a" || ids[1] != "ws-b" {
-		t.Errorf("expected sorted [ws-a ws-b], got %v", ids)
+	if has {
+		t.Errorf("expected HasConfig=false on empty store")
+	}
+	if err := store.UpsertConfig(ctx, &LinearConfig{
+		AuthMethod: AuthMethodAPIKey,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	has, err = store.HasConfig(ctx)
+	if err != nil {
+		t.Fatalf("has-config after upsert: %v", err)
+	}
+	if !has {
+		t.Errorf("expected HasConfig=true after upsert")
 	}
 }
 
@@ -112,22 +113,21 @@ func TestStore_UpdateAuthHealth(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	if err := store.UpsertConfig(ctx, &LinearConfig{
-		WorkspaceID: "ws-1",
-		AuthMethod:  AuthMethodAPIKey,
+		AuthMethod: AuthMethodAPIKey,
 	}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 
-	cfg, _ := store.GetConfig(ctx, "ws-1")
+	cfg, _ := store.GetConfig(ctx)
 	if cfg.LastCheckedAt != nil {
 		t.Errorf("expected nil last_checked_at on fresh row, got %v", cfg.LastCheckedAt)
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
-	if err := store.UpdateAuthHealth(ctx, "ws-1", true, "", "acme", now); err != nil {
+	if err := store.UpdateAuthHealth(ctx, true, "", "acme", now); err != nil {
 		t.Fatalf("update ok: %v", err)
 	}
-	cfg, _ = store.GetConfig(ctx, "ws-1")
+	cfg, _ = store.GetConfig(ctx)
 	if !cfg.LastOk {
 		t.Error("expected last_ok=true after successful probe")
 	}
@@ -140,10 +140,10 @@ func TestStore_UpdateAuthHealth(t *testing.T) {
 
 	// Empty orgSlug should leave the existing slug intact.
 	failAt := now.Add(time.Minute)
-	if err := store.UpdateAuthHealth(ctx, "ws-1", false, "401 unauthorized", "", failAt); err != nil {
+	if err := store.UpdateAuthHealth(ctx, false, "401 unauthorized", "", failAt); err != nil {
 		t.Fatalf("update fail: %v", err)
 	}
-	cfg, _ = store.GetConfig(ctx, "ws-1")
+	cfg, _ = store.GetConfig(ctx)
 	if cfg.LastOk {
 		t.Error("expected last_ok=false after failure")
 	}
@@ -153,9 +153,62 @@ func TestStore_UpdateAuthHealth(t *testing.T) {
 	if cfg.OrgSlug != "acme" {
 		t.Errorf("orgSlug should be preserved across failed probe, got %q", cfg.OrgSlug)
 	}
+}
 
-	// Update for missing workspace must not error.
-	if err := store.UpdateAuthHealth(ctx, "missing", true, "", "x", now); err != nil {
-		t.Errorf("expected no-op for missing row, got %v", err)
+func TestStore_MigrateLegacyPerWorkspaceTable(t *testing.T) {
+	raw, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := db.Exec(`
+		CREATE TABLE linear_configs (
+			workspace_id TEXT PRIMARY KEY,
+			auth_method TEXT NOT NULL,
+			default_team_key TEXT NOT NULL DEFAULT '',
+			org_slug TEXT NOT NULL DEFAULT '',
+			last_checked_at DATETIME,
+			last_ok INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`); err != nil {
+		t.Fatalf("legacy schema: %v", err)
+	}
+	older := time.Now().UTC().Add(-time.Hour)
+	newer := time.Now().UTC()
+	if _, err := db.Exec(`INSERT INTO linear_configs
+		(workspace_id, auth_method, default_team_key, org_slug, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		"ws-old", AuthMethodAPIKey, "OLD", "old-slug", older, older); err != nil {
+		t.Fatalf("seed old row: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO linear_configs
+		(workspace_id, auth_method, default_team_key, org_slug, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		"ws-new", AuthMethodAPIKey, "NEW", "new-slug", newer, newer); err != nil {
+		t.Fatalf("seed new row: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if got := store.MigratedFromWorkspace(); got != "ws-new" {
+		t.Errorf("expected migration source ws-new, got %q", got)
+	}
+	cfg, err := store.GetConfig(context.Background())
+	if err != nil {
+		t.Fatalf("get singleton: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected singleton row after migration")
+	}
+	if cfg.DefaultTeamKey != "NEW" || cfg.OrgSlug != "new-slug" {
+		t.Errorf("expected newest row promoted, got %+v", cfg)
 	}
 }

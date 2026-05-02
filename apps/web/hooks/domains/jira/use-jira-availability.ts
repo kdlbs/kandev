@@ -7,13 +7,15 @@ import {
 } from "../integrations/use-integration-availability";
 import { useJiraEnabled } from "./use-jira-enabled";
 
-export function useJiraAuthed(workspaceId: string | undefined): boolean {
-  return useIntegrationAuthed(workspaceId, getJiraConfig);
+const fetchJiraConfig = () => getJiraConfig();
+
+export function useJiraAuthed(): boolean {
+  return useIntegrationAuthed(fetchJiraConfig);
 }
 
-export function useJiraAvailable(workspaceId: string | null | undefined): boolean {
-  return useIntegrationAvailable(workspaceId, {
+export function useJiraAvailable(): boolean {
+  return useIntegrationAvailable({
     useEnabled: useJiraEnabled,
-    fetchConfig: getJiraConfig,
+    fetchConfig: fetchJiraConfig,
   });
 }

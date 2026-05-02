@@ -7,13 +7,15 @@ import {
 } from "../integrations/use-integration-availability";
 import { useLinearEnabled } from "./use-linear-enabled";
 
-export function useLinearAuthed(workspaceId: string | undefined): boolean {
-  return useIntegrationAuthed(workspaceId, getLinearConfig);
+const fetchLinearConfig = () => getLinearConfig();
+
+export function useLinearAuthed(): boolean {
+  return useIntegrationAuthed(fetchLinearConfig);
 }
 
-export function useLinearAvailable(workspaceId: string | null | undefined): boolean {
-  return useIntegrationAvailable(workspaceId, {
+export function useLinearAvailable(): boolean {
+  return useIntegrationAvailable({
     useEnabled: useLinearEnabled,
-    fetchConfig: getLinearConfig,
+    fetchConfig: fetchLinearConfig,
   });
 }

@@ -376,10 +376,7 @@ export function MobileMenuSheet({
             onTogglePreviewOnClick={onTogglePreviewOnClick}
           />
 
-          <MobileIntegrationsSection
-            workspaceId={workspaceId}
-            onNavigate={() => onOpenChange(false)}
-          />
+          <MobileIntegrationsSection onNavigate={() => onOpenChange(false)} />
 
           <MobileUtilityActions
             showReleaseNotesButton={showReleaseNotesButton}

@@ -32,7 +32,6 @@ func TestStore_UpsertGetDelete(t *testing.T) {
 	ctx := context.Background()
 
 	cfg := &JiraConfig{
-		WorkspaceID:       "ws-1",
 		SiteURL:           "https://acme.atlassian.net",
 		Email:             "user@example.com",
 		AuthMethod:        AuthMethodAPIToken,
@@ -42,7 +41,7 @@ func TestStore_UpsertGetDelete(t *testing.T) {
 		t.Fatalf("upsert: %v", err)
 	}
 
-	got, err := store.GetConfig(ctx, "ws-1")
+	got, err := store.GetConfig(ctx)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -61,15 +60,15 @@ func TestStore_UpsertGetDelete(t *testing.T) {
 	if err := store.UpsertConfig(ctx, cfg); err != nil {
 		t.Fatalf("update upsert: %v", err)
 	}
-	got2, _ := store.GetConfig(ctx, "ws-1")
+	got2, _ := store.GetConfig(ctx)
 	if got2.Email != "other@example.com" {
 		t.Errorf("expected email update, got %q", got2.Email)
 	}
 
-	if err := store.DeleteConfig(ctx, "ws-1"); err != nil {
+	if err := store.DeleteConfig(ctx); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	gone, err := store.GetConfig(ctx, "ws-1")
+	gone, err := store.GetConfig(ctx)
 	if err != nil {
 		t.Fatalf("get after delete: %v", err)
 	}
@@ -80,7 +79,7 @@ func TestStore_UpsertGetDelete(t *testing.T) {
 
 func TestStore_GetConfig_Missing(t *testing.T) {
 	store := newTestStore(t)
-	cfg, err := store.GetConfig(context.Background(), "does-not-exist")
+	cfg, err := store.GetConfig(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -89,27 +88,29 @@ func TestStore_GetConfig_Missing(t *testing.T) {
 	}
 }
 
-func TestStore_ListConfiguredWorkspaces(t *testing.T) {
+func TestStore_HasConfig(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	mustUpsert := func(id string) {
-		if err := store.UpsertConfig(ctx, &JiraConfig{
-			WorkspaceID: id,
-			SiteURL:     "https://" + id + ".atlassian.net",
-			Email:       id + "@example.com",
-			AuthMethod:  AuthMethodAPIToken,
-		}); err != nil {
-			t.Fatalf("upsert %s: %v", id, err)
-		}
-	}
-	mustUpsert("ws-b")
-	mustUpsert("ws-a")
-	ids, err := store.ListConfiguredWorkspaces(ctx)
+	has, err := store.HasConfig(ctx)
 	if err != nil {
-		t.Fatalf("list: %v", err)
+		t.Fatalf("has-config: %v", err)
 	}
-	if len(ids) != 2 || ids[0] != "ws-a" || ids[1] != "ws-b" {
-		t.Errorf("expected sorted [ws-a ws-b], got %v", ids)
+	if has {
+		t.Errorf("expected HasConfig=false on empty store, got true")
+	}
+	if err := store.UpsertConfig(ctx, &JiraConfig{
+		SiteURL:    "https://acme.atlassian.net",
+		Email:      "user@example.com",
+		AuthMethod: AuthMethodAPIToken,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	has, err = store.HasConfig(ctx)
+	if err != nil {
+		t.Fatalf("has-config after upsert: %v", err)
+	}
+	if !has {
+		t.Errorf("expected HasConfig=true after upsert")
 	}
 }
 
@@ -117,16 +118,15 @@ func TestStore_UpdateAuthHealth(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	if err := store.UpsertConfig(ctx, &JiraConfig{
-		WorkspaceID: "ws-1",
-		SiteURL:     "https://acme.atlassian.net",
-		Email:       "u@example.com",
-		AuthMethod:  AuthMethodAPIToken,
+		SiteURL:    "https://acme.atlassian.net",
+		Email:      "u@example.com",
+		AuthMethod: AuthMethodAPIToken,
 	}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 
 	// Initial state: no health recorded yet.
-	cfg, _ := store.GetConfig(ctx, "ws-1")
+	cfg, _ := store.GetConfig(ctx)
 	if cfg.LastCheckedAt != nil {
 		t.Errorf("expected nil last_checked_at on fresh row, got %v", cfg.LastCheckedAt)
 	}
@@ -136,10 +136,10 @@ func TestStore_UpdateAuthHealth(t *testing.T) {
 
 	// Record success.
 	now := time.Now().UTC().Truncate(time.Second)
-	if err := store.UpdateAuthHealth(ctx, "ws-1", true, "", now); err != nil {
+	if err := store.UpdateAuthHealth(ctx, true, "", now); err != nil {
 		t.Fatalf("update ok: %v", err)
 	}
-	cfg, _ = store.GetConfig(ctx, "ws-1")
+	cfg, _ = store.GetConfig(ctx)
 	if !cfg.LastOk {
 		t.Error("expected last_ok=true after successful probe")
 	}
@@ -152,10 +152,10 @@ func TestStore_UpdateAuthHealth(t *testing.T) {
 
 	// Record failure — error string is preserved, ok flips back to false.
 	failAt := now.Add(time.Minute)
-	if err := store.UpdateAuthHealth(ctx, "ws-1", false, "step-up required", failAt); err != nil {
+	if err := store.UpdateAuthHealth(ctx, false, "step-up required", failAt); err != nil {
 		t.Fatalf("update fail: %v", err)
 	}
-	cfg, _ = store.GetConfig(ctx, "ws-1")
+	cfg, _ = store.GetConfig(ctx)
 	if cfg.LastOk {
 		t.Error("expected last_ok=false after failure")
 	}
@@ -165,10 +165,65 @@ func TestStore_UpdateAuthHealth(t *testing.T) {
 	if cfg.LastCheckedAt == nil || !cfg.LastCheckedAt.Equal(failAt) {
 		t.Errorf("expected last_checked_at=%v, got %v", failAt, cfg.LastCheckedAt)
 	}
+}
 
-	// Updating health for a non-existent workspace must not error (silent
-	// no-op — the row may have been deleted between probe and persist).
-	if err := store.UpdateAuthHealth(ctx, "missing", true, "", now); err != nil {
-		t.Errorf("expected no-op for missing row, got %v", err)
+func TestStore_MigrateLegacyPerWorkspaceTable(t *testing.T) {
+	raw, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	// Build the legacy schema and seed two per-workspace rows; the most
+	// recently-updated row should win the singleton slot.
+	if _, err := db.Exec(`
+		CREATE TABLE jira_configs (
+			workspace_id TEXT PRIMARY KEY,
+			site_url TEXT NOT NULL,
+			email TEXT NOT NULL DEFAULT '',
+			auth_method TEXT NOT NULL,
+			default_project_key TEXT NOT NULL DEFAULT '',
+			last_checked_at DATETIME,
+			last_ok INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`); err != nil {
+		t.Fatalf("legacy schema: %v", err)
+	}
+	older := time.Now().UTC().Add(-time.Hour)
+	newer := time.Now().UTC()
+	if _, err := db.Exec(`INSERT INTO jira_configs
+		(workspace_id, site_url, email, auth_method, default_project_key, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"ws-old", "https://old.atlassian.net", "old@example.com", AuthMethodAPIToken, "OLD", older, older); err != nil {
+		t.Fatalf("seed old row: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO jira_configs
+		(workspace_id, site_url, email, auth_method, default_project_key, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"ws-new", "https://new.atlassian.net", "new@example.com", AuthMethodAPIToken, "NEW", newer, newer); err != nil {
+		t.Fatalf("seed new row: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if got := store.MigratedFromWorkspace(); got != "ws-new" {
+		t.Errorf("expected migration source ws-new, got %q", got)
+	}
+	cfg, err := store.GetConfig(context.Background())
+	if err != nil {
+		t.Fatalf("get singleton: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected singleton row after migration")
+	}
+	if cfg.SiteURL != "https://new.atlassian.net" {
+		t.Errorf("expected newest row promoted, got SiteURL=%q", cfg.SiteURL)
 	}
 }

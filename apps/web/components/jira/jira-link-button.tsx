@@ -19,7 +19,7 @@ type JiraLinkButtonProps = {
 // prepending the ticket key to its title ("PROJ-123: ..."). The existing
 // JiraTicketButton picks up the key automatically once the title is updated.
 export function JiraLinkButton({ taskId, workspaceId, taskTitle }: JiraLinkButtonProps) {
-  const available = useJiraAvailable(workspaceId);
+  const available = useJiraAvailable();
 
   const buildLinkedTitle = useCallback(
     (key: string) => {
@@ -49,7 +49,7 @@ export function JiraLinkButton({ taskId, workspaceId, taskTitle }: JiraLinkButto
       // an unhandled rejection that leaves the user thinking the link
       // succeeded.
       fetch={async (key) => {
-        const ticket = await getJiraTicket(workspaceId, key);
+        const ticket = await getJiraTicket(key);
         await updateTask(taskId, { title: buildLinkedTitle(key) });
         return ticket;
       }}

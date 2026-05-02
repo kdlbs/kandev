@@ -49,7 +49,7 @@ func (r *recordingSubscriber) snapshot() []*NewJiraIssueEvent {
 func TestPoller_CheckIssueWatches_PublishesNewTicketsOnly(t *testing.T) {
 	f := newPollerFixture(t)
 	ctx := context.Background()
-	f.saveConfig(t, "ws-1", "tok")
+	f.saveConfig(t, "tok")
 
 	eb := bus.NewMemoryEventBus(logger.Default())
 	defer eb.Close()
@@ -108,7 +108,7 @@ func TestPoller_CheckIssueWatches_PublishesNewTicketsOnly(t *testing.T) {
 func TestPoller_CheckIssueWatches_SkipsDisabled(t *testing.T) {
 	f := newPollerFixture(t)
 	ctx := context.Background()
-	f.saveConfig(t, "ws-1", "tok")
+	f.saveConfig(t, "tok")
 
 	eb := bus.NewMemoryEventBus(logger.Default())
 	defer eb.Close()
@@ -183,7 +183,7 @@ func TestIsIssueWatchDue(t *testing.T) {
 func TestPoller_CheckIssueWatches_RespectsPerWatchInterval(t *testing.T) {
 	f := newPollerFixture(t)
 	ctx := context.Background()
-	f.saveConfig(t, "ws-1", "tok")
+	f.saveConfig(t, "tok")
 
 	eb := bus.NewMemoryEventBus(logger.Default())
 	defer eb.Close()

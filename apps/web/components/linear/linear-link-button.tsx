@@ -18,7 +18,7 @@ type LinearLinkButtonProps = {
 // LinearLinkButton attaches a Linear issue to an existing task by prepending
 // the identifier to its title ("ENG-123: ...").
 export function LinearLinkButton({ taskId, workspaceId, taskTitle }: LinearLinkButtonProps) {
-  const available = useLinearAvailable(workspaceId);
+  const available = useLinearAvailable();
 
   const buildLinkedTitle = useCallback(
     (key: string) => {
@@ -44,7 +44,7 @@ export function LinearLinkButton({ taskId, workspaceId, taskTitle }: LinearLinkB
       // a failure on either surfaces as the popover's inline error instead of
       // an unhandled rejection.
       fetch={async (key) => {
-        const issue = await getLinearIssue(workspaceId, key);
+        const issue = await getLinearIssue(key);
         await updateTask(taskId, { title: buildLinkedTitle(key) });
         return issue;
       }}

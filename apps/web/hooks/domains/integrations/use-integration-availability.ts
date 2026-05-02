@@ -13,24 +13,15 @@ export type IntegrationConfigStatus = {
   lastOk?: boolean;
 };
 
-// Reads the backend-recorded auth health for a workspace. Returns true only
-// when a config exists, has a secret, and the most recent probe succeeded.
-// Pass `undefined` to short-circuit (no fetch, no interval).
-//
-// State is tagged with the workspace it was probed for so a workspace switch
-// invalidates stale results synchronously at read time — no reset needed,
-// which keeps the 90s poll tick from flickering the UI between request
-// dispatch and response.
-type AuthState = { workspaceId: string | undefined; authed: boolean };
-
+// Reads the backend-recorded auth health for the install-wide integration.
+// Returns true only when a config exists, has a secret, and the most recent
+// probe succeeded.
 export function useIntegrationAuthed(
-  workspaceId: string | undefined,
-  fetchConfig: (workspaceId: string) => Promise<IntegrationConfigStatus | null>,
+  fetchConfig: () => Promise<IntegrationConfigStatus | null>,
   refreshMs: number = INTEGRATION_STATUS_REFRESH_MS,
 ): boolean {
-  const [state, setState] = useState<AuthState>({ workspaceId: undefined, authed: false });
+  const [authed, setAuthed] = useState(false);
   useEffect(() => {
-    if (!workspaceId) return;
     let cancelled = false;
     // Monotonic request id: if a slow earlier probe finishes after a newer
     // one we ignore it, otherwise an old "auth ok" could clobber a fresh
@@ -40,12 +31,12 @@ export function useIntegrationAuthed(
     async function refresh() {
       const current = ++requestId;
       try {
-        const cfg = await fetchConfig(workspaceId!);
+        const cfg = await fetchConfig();
         if (cancelled || current !== requestId) return;
-        setState({ workspaceId, authed: !!cfg?.hasSecret && !!cfg.lastOk });
+        setAuthed(!!cfg?.hasSecret && !!cfg.lastOk);
       } catch {
         if (cancelled || current !== requestId) return;
-        setState({ workspaceId, authed: false });
+        setAuthed(false);
       }
     }
     void refresh();
@@ -54,27 +45,27 @@ export function useIntegrationAuthed(
       cancelled = true;
       clearInterval(id);
     };
-  }, [workspaceId, fetchConfig, refreshMs]);
-  return state.workspaceId === workspaceId && state.authed;
+  }, [fetchConfig, refreshMs]);
+  return authed;
 }
 
 export type IntegrationAvailabilityOptions = {
-  // Workspace-scoped enabled toggle that has settled. `loaded` gates the
+  // Install-wide enabled toggle that has settled. `loaded` gates the
   // probe so we don't waste a fetch on the first render when the toggle is
   // off.
-  useEnabled: (workspaceId: string | undefined) => { enabled: boolean; loaded: boolean };
-  fetchConfig: (workspaceId: string) => Promise<IntegrationConfigStatus | null>;
+  useEnabled: () => { enabled: boolean; loaded: boolean };
+  fetchConfig: () => Promise<IntegrationConfigStatus | null>;
   refreshMs?: number;
 };
 
-// Combined check for showing an integration's UI: the workspace toggle is on
-// AND the backend reports a configured, healthy connection.
-export function useIntegrationAvailable(
-  workspaceId: string | null | undefined,
-  { useEnabled, fetchConfig, refreshMs }: IntegrationAvailabilityOptions,
-): boolean {
-  const ws = workspaceId ?? undefined;
-  const { enabled, loaded } = useEnabled(ws);
-  const authed = useIntegrationAuthed(enabled && loaded ? ws : undefined, fetchConfig, refreshMs);
+// Combined check for showing an integration's UI: the user toggle is on AND
+// the backend reports a configured, healthy connection.
+export function useIntegrationAvailable({
+  useEnabled,
+  fetchConfig,
+  refreshMs,
+}: IntegrationAvailabilityOptions): boolean {
+  const { enabled } = useEnabled();
+  const authed = useIntegrationAuthed(fetchConfig, refreshMs);
   return enabled && authed;
 }

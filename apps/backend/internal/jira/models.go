@@ -1,6 +1,7 @@
-// Package jira implements the Jira/Atlassian Cloud integration: workspace-scoped
-// configuration storage, a REST client for tickets and transitions, and the HTTP
-// and WebSocket handlers that expose these capabilities to the frontend.
+// Package jira implements the Jira/Atlassian Cloud integration: a single
+// install-wide configuration plus per-workspace JQL issue watchers, a REST
+// client for tickets and transitions, and the HTTP and WebSocket handlers that
+// expose these capabilities to the frontend.
 package jira
 
 import "time"
@@ -11,11 +12,10 @@ const (
 	AuthMethodSessionCookie = "session_cookie"
 )
 
-// JiraConfig is the workspace-scoped configuration for the Jira integration.
-// The secret value (API token or session cookie) is stored separately in the
-// encrypted secret store under the key returned by SecretKeyForWorkspace.
+// JiraConfig is the install-wide configuration for the Jira integration. The
+// secret value (API token or session cookie) is stored separately in the
+// encrypted secret store under SecretKey.
 type JiraConfig struct {
-	WorkspaceID       string `json:"workspaceId" db:"workspace_id"`
 	SiteURL           string `json:"siteUrl" db:"site_url"`
 	Email             string `json:"email" db:"email"`
 	AuthMethod        string `json:"authMethod" db:"auth_method"`
@@ -35,11 +35,10 @@ type JiraConfig struct {
 	UpdatedAt     time.Time  `json:"updatedAt" db:"updated_at"`
 }
 
-// SetConfigRequest is the payload sent by the UI to create or update the
-// workspace's Jira configuration. When Secret is empty on update, the existing
-// secret is retained; when non-empty it replaces the stored value.
+// SetConfigRequest is the payload sent by the UI to create or update the Jira
+// configuration. When Secret is empty on update, the existing secret is
+// retained; when non-empty it replaces the stored value.
 type SetConfigRequest struct {
-	WorkspaceID       string `json:"workspaceId"`
 	SiteURL           string `json:"siteUrl"`
 	Email             string `json:"email"`
 	AuthMethod        string `json:"authMethod"`
@@ -113,9 +112,14 @@ type SearchResult struct {
 	NextPageToken string       `json:"nextPageToken,omitempty"`
 }
 
-// SecretKeyForWorkspace returns the secret-store key used for the Jira token of
-// a given workspace. Centralised so that the service and the store agree.
-func SecretKeyForWorkspace(workspaceID string) string {
+// SecretKey is the secret-store key used for the install-wide Jira token.
+// Centralised so that the service, store and provider migration agree.
+const SecretKey = "jira:singleton:token"
+
+// LegacySecretKeyForWorkspace returns the pre-singleton per-workspace secret
+// key. Only used by the one-shot startup migration in provider.go to copy an
+// existing token over to SecretKey.
+func LegacySecretKeyForWorkspace(workspaceID string) string {
 	return "jira:" + workspaceID + ":token"
 }
 

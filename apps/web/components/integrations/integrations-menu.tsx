@@ -16,11 +16,7 @@ import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availabili
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import type { GitHubStatus } from "@/lib/types/github";
 
-type IntegrationsProps = {
-  workspaceId?: string;
-};
-
-type MobileIntegrationsSectionProps = IntegrationsProps & {
+type MobileIntegrationsSectionProps = {
   onNavigate: () => void;
 };
 
@@ -74,10 +70,10 @@ export function getGitHubIntegrationStatus(status: GitHubStatus | null, loading:
   return { ready: false, label: getStatusLabel(loading) };
 }
 
-function useConfiguredIntegrationLinks(workspaceId: string | undefined): IntegrationLink[] {
+function useConfiguredIntegrationLinks(): IntegrationLink[] {
   const { status, loading } = useGitHubStatus();
-  const jiraAvailable = useJiraAvailable(workspaceId);
-  const linearAvailable = useLinearAvailable(workspaceId);
+  const jiraAvailable = useJiraAvailable();
+  const linearAvailable = useLinearAvailable();
   const githubStatus = getGitHubIntegrationStatus(status, loading);
 
   return getAvailableIntegrationLinks({
@@ -87,8 +83,8 @@ function useConfiguredIntegrationLinks(workspaceId: string | undefined): Integra
   });
 }
 
-export function IntegrationsMenu({ workspaceId }: IntegrationsProps) {
-  const links = useConfiguredIntegrationLinks(workspaceId);
+export function IntegrationsMenu() {
+  const links = useConfiguredIntegrationLinks();
   const [open, setOpen] = useState(false);
   const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -158,11 +154,8 @@ export function IntegrationsMenu({ workspaceId }: IntegrationsProps) {
   );
 }
 
-export function MobileIntegrationsSection({
-  workspaceId,
-  onNavigate,
-}: MobileIntegrationsSectionProps) {
-  const links = useConfiguredIntegrationLinks(workspaceId);
+export function MobileIntegrationsSection({ onNavigate }: MobileIntegrationsSectionProps) {
+  const links = useConfiguredIntegrationLinks();
 
   if (links.length === 0) return null;
 

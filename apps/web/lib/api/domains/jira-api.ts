@@ -13,14 +13,8 @@ import type {
 
 // getJiraConfig returns null when the backend responds 204 (no config yet).
 // fetchJson already maps 204 → undefined; we narrow it to null for callers.
-export async function getJiraConfig(
-  workspaceId: string,
-  options?: ApiRequestOptions,
-): Promise<JiraConfig | null> {
-  const res = await fetchJson<JiraConfig | undefined>(
-    `/api/v1/jira/config?workspace_id=${encodeURIComponent(workspaceId)}`,
-    options,
-  );
+export async function getJiraConfig(options?: ApiRequestOptions): Promise<JiraConfig | null> {
+  const res = await fetchJson<JiraConfig | undefined>(`/api/v1/jira/config`, options);
   return res ?? null;
 }
 
@@ -31,11 +25,11 @@ export async function setJiraConfig(payload: SetJiraConfigRequest, options?: Api
   });
 }
 
-export async function deleteJiraConfig(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ deleted: boolean }>(
-    `/api/v1/jira/config?workspace_id=${encodeURIComponent(workspaceId)}`,
-    { ...options, init: { ...(options?.init ?? {}), method: "DELETE" } },
-  );
+export async function deleteJiraConfig(options?: ApiRequestOptions) {
+  return fetchJson<{ deleted: boolean }>(`/api/v1/jira/config`, {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "DELETE" },
+  });
 }
 
 export async function testJiraConnection(
@@ -48,44 +42,33 @@ export async function testJiraConnection(
   });
 }
 
-export async function listJiraProjects(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ projects: JiraProject[] }>(
-    `/api/v1/jira/projects?workspace_id=${encodeURIComponent(workspaceId)}`,
-    options,
-  );
+export async function listJiraProjects(options?: ApiRequestOptions) {
+  return fetchJson<{ projects: JiraProject[] }>(`/api/v1/jira/projects`, options);
 }
 
-export async function getJiraTicket(
-  workspaceId: string,
-  ticketKey: string,
-  options?: ApiRequestOptions,
-) {
-  return fetchJson<JiraTicket>(
-    `/api/v1/jira/tickets/${encodeURIComponent(ticketKey)}?workspace_id=${encodeURIComponent(workspaceId)}`,
-    options,
-  );
+export async function getJiraTicket(ticketKey: string, options?: ApiRequestOptions) {
+  return fetchJson<JiraTicket>(`/api/v1/jira/tickets/${encodeURIComponent(ticketKey)}`, options);
 }
 
 export async function searchJiraTickets(
-  workspaceId: string,
   params: { jql?: string; pageToken?: string; maxResults?: number },
   options?: ApiRequestOptions,
 ) {
-  const search = new URLSearchParams({ workspace_id: workspaceId });
+  const search = new URLSearchParams();
   if (params.jql) search.set("jql", params.jql);
   if (params.pageToken) search.set("page_token", params.pageToken);
   if (params.maxResults) search.set("max_results", String(params.maxResults));
-  return fetchJson<JiraSearchResult>(`/api/v1/jira/tickets?${search.toString()}`, options);
+  const qs = search.toString();
+  return fetchJson<JiraSearchResult>(`/api/v1/jira/tickets${qs ? `?${qs}` : ""}`, options);
 }
 
 export async function transitionJiraTicket(
-  workspaceId: string,
   ticketKey: string,
   transitionId: string,
   options?: ApiRequestOptions,
 ) {
   return fetchJson<{ transitioned: boolean }>(
-    `/api/v1/jira/tickets/${encodeURIComponent(ticketKey)}/transitions?workspace_id=${encodeURIComponent(workspaceId)}`,
+    `/api/v1/jira/tickets/${encodeURIComponent(ticketKey)}/transitions`,
     {
       ...options,
       init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ transitionId }) },

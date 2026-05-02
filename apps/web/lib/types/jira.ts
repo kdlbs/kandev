@@ -1,7 +1,6 @@
 export type JiraAuthMethod = "api_token" | "session_cookie";
 
 export interface JiraConfig {
-  workspaceId: string;
   siteUrl: string;
   email: string;
   authMethod: JiraAuthMethod;
@@ -20,7 +19,6 @@ export interface JiraConfig {
 }
 
 export interface SetJiraConfigRequest {
-  workspaceId: string;
   siteUrl: string;
   email: string;
   authMethod: JiraAuthMethod;

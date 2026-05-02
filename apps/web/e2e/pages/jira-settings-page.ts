@@ -21,8 +21,8 @@ export class JiraSettingsPage {
     this.statusBanner = page.getByTestId("integration-auth-status-banner");
   }
 
-  async goto(workspaceId: string) {
-    await this.page.goto(`/settings/workspace/${workspaceId}/jira`);
+  async goto() {
+    await this.page.goto(`/settings/integrations/jira`);
     await this.siteInput.waitFor({ state: "visible" });
   }
 

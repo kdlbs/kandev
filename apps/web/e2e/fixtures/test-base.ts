@@ -128,13 +128,9 @@ export const test = backendFixture.extend<
   },
 
   integrationCleanup: [
-    async ({ apiClient, seedData }, use) => {
-      await apiClient
-        .rawRequest("DELETE", `/api/v1/jira/config?workspace_id=${seedData.workspaceId}`)
-        .catch(() => undefined);
-      await apiClient
-        .rawRequest("DELETE", `/api/v1/linear/config?workspace_id=${seedData.workspaceId}`)
-        .catch(() => undefined);
+    async ({ apiClient }, use) => {
+      await apiClient.rawRequest("DELETE", `/api/v1/jira/config`).catch(() => undefined);
+      await apiClient.rawRequest("DELETE", `/api/v1/linear/config`).catch(() => undefined);
       await Promise.all([
         apiClient.mockJiraReset().catch(() => undefined),
         apiClient.mockLinearReset().catch(() => undefined),

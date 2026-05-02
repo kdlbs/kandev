@@ -18,11 +18,8 @@ import { DefaultQueriesSection } from "./default-queries-section";
 import { PRStatsPanel } from "./pr-stats";
 import { useReviewWatches } from "@/hooks/domains/github/use-review-watches";
 import { useIssueWatches } from "@/hooks/domains/github/use-issue-watches";
+import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import type { ReviewWatch, IssueWatch } from "@/lib/types/github";
-
-type GitHubSettingsProps = {
-  workspaceId: string;
-};
 
 function useWatchActions(workspaceId: string | null) {
   const { items: watches, create, update, remove, trigger } = useReviewWatches(workspaceId);
@@ -132,41 +129,53 @@ function useIssueWatchActions(workspaceId: string | null) {
   return { watches, create, update, handleDelete, handleTrigger, handleToggleEnabled };
 }
 
-export function GitHubSettings({ workspaceId }: GitHubSettingsProps) {
+export function GitHubConnectionSection() {
+  return (
+    <>
+      <div>
+        <h2 className="text-2xl font-bold flex items-center gap-2">
+          <IconBrandGithub className="h-6 w-6" />
+          GitHub Integration
+        </h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Connect Kandev to GitHub. Authentication is shared across all workspaces; PR/issue
+          watchers and presets are configured per workspace.
+        </p>
+      </div>
+      <Separator />
+      <SettingsSection title="Connection Status" description="GitHub authentication status">
+        <Card>
+          <CardContent className="py-3">
+            <GitHubStatusCard />
+          </CardContent>
+        </Card>
+      </SettingsSection>
+    </>
+  );
+}
+
+function GitHubWorkspaceSettings({ workspaceId }: { workspaceId: string }) {
+  return (
+    <div className="space-y-8">
+      <ReviewWatchSection workspaceId={workspaceId} />
+      <IssueWatchSection workspaceId={workspaceId} />
+      <ActionPresetsSection workspaceId={workspaceId} />
+      <SettingsSection title="PR Analytics" description="Pull request activity for this workspace.">
+        <PRStatsPanel workspaceId={workspaceId} />
+      </SettingsSection>
+    </div>
+  );
+}
+
+export function GitHubIntegrationPage() {
   return (
     <TooltipProvider>
       <div className="space-y-8">
-        <div>
-          <h2 className="text-2xl font-bold flex items-center gap-2">
-            <IconBrandGithub className="h-6 w-6" />
-            GitHub Integration
-          </h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Configure GitHub PR monitoring, issue tracking, and review queue automation.
-          </p>
-        </div>
-
-        <Separator />
-
-        <SettingsSection title="Connection Status" description="GitHub authentication status">
-          <Card>
-            <CardContent className="py-3">
-              <GitHubStatusCard />
-            </CardContent>
-          </Card>
-        </SettingsSection>
-
-        <ReviewWatchSection workspaceId={workspaceId} />
-        <IssueWatchSection workspaceId={workspaceId} />
-        <ActionPresetsSection workspaceId={workspaceId} />
+        <GitHubConnectionSection />
+        <WorkspaceScopedSection label="Watchers and presets for">
+          {(ws) => <GitHubWorkspaceSettings key={ws} workspaceId={ws} />}
+        </WorkspaceScopedSection>
         <DefaultQueriesSection />
-
-        <SettingsSection
-          title="PR Analytics"
-          description="Pull request activity for this workspace."
-        >
-          <PRStatsPanel workspaceId={workspaceId} />
-        </SettingsSection>
       </div>
     </TooltipProvider>
   );

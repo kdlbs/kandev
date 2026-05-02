@@ -67,7 +67,7 @@ export function LinearIssueDialog({
         <DialogTitle className="sr-only">{dialogTitle(issue, identifier)}</DialogTitle>
         {errorOnly ? (
           <div className="flex-1 flex items-center justify-center px-8 py-16">
-            <LinearErrorMessage error={state.error ?? ""} workspaceId={workspaceId} />
+            <LinearErrorMessage error={state.error ?? ""} />
           </div>
         ) : (
           <>
@@ -80,7 +80,6 @@ export function LinearIssueDialog({
               issue={issue}
               state={state}
               identifier={effectiveIdentifier(issue, identifier)}
-              workspaceId={workspaceId}
             />
             {showFooter && <IssueFooter onStart={handleStart} />}
           </>
@@ -105,18 +104,16 @@ function DialogBody({
   issue,
   state,
   identifier,
-  workspaceId,
 }: {
   issue: LinearIssue | null;
   state: IssueState;
   identifier: string;
-  workspaceId: string | null | undefined;
 }) {
   return (
     <div className="flex-1 overflow-y-auto">
       {state.error && issue && (
         <div className="px-8 pt-4">
-          <LinearErrorMessage error={state.error} workspaceId={workspaceId} compact />
+          <LinearErrorMessage error={state.error} compact />
         </div>
       )}
       {!issue && state.loading && (

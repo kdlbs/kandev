@@ -94,7 +94,6 @@ type TopBarLeftProps = {
   remoteCreatedAt?: string | null;
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
-  workspaceId?: string | null;
   onRenameBranch?: (newName: string) => Promise<void>;
 };
 
@@ -164,7 +163,6 @@ const TaskTopBar = memo(function TaskTopBar({
         remoteCreatedAt={remoteCreatedAt}
         remoteCheckedAt={remoteCheckedAt}
         remoteStatusError={remoteStatusError}
-        workspaceId={workspaceId}
         onRenameBranch={activeSessionId ? handleRenameBranch : undefined}
       />
       <div className="min-w-0 justify-self-center overflow-hidden">
@@ -238,8 +236,8 @@ function IssueTrackerButtons({
   workspaceId: string | null | undefined;
   taskTitle: string | null | undefined;
 }) {
-  const jiraAvailable = useJiraAvailable(workspaceId);
-  const linearAvailable = useLinearAvailable(workspaceId);
+  const jiraAvailable = useJiraAvailable();
+  const linearAvailable = useLinearAvailable();
   const jiraKey = extractJiraKey(taskTitle);
   const linearKey = extractLinearKey(taskTitle);
 
@@ -274,7 +272,6 @@ function TopBarLeft({
   remoteCreatedAt,
   remoteCheckedAt,
   remoteStatusError,
-  workspaceId,
   onRenameBranch,
 }: TopBarLeftProps) {
   const extraRepoCount = (repositoryCount ?? 0) - 1;
@@ -309,7 +306,7 @@ function TopBarLeft({
         </BreadcrumbList>
       </Breadcrumb>
 
-      <IntegrationsMenu workspaceId={workspaceId ?? undefined} />
+      <IntegrationsMenu />
 
       <div className="shrink-0 @max-[1352px]/topbar:hidden">
         <BranchPathPopover

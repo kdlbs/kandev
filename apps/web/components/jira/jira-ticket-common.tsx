@@ -93,14 +93,14 @@ export function useTicketState(
     setLoading(true);
     setError(null);
     try {
-      const t = await getJiraTicket(workspaceId, ticketKey);
+      const t = await getJiraTicket(ticketKey);
       setTicket(t);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, ticketKey]);
+  }, [ticketKey]);
 
   useEffect(() => {
     if (!enabled || !workspaceId || !ticketKey) return;
@@ -110,7 +110,7 @@ export function useTicketState(
       setLoading(true);
       setError(null);
       try {
-        const t = await getJiraTicket(workspaceId, ticketKey);
+        const t = await getJiraTicket(ticketKey);
         if (!cancelled) setTicket(t);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -129,7 +129,7 @@ export function useTicketState(
       setPendingTransition(transitionId);
       setError(null);
       try {
-        await transitionJiraTicket(workspaceId, ticketKey, transitionId);
+        await transitionJiraTicket(ticketKey, transitionId);
         await load();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -137,7 +137,7 @@ export function useTicketState(
         setPendingTransition(null);
       }
     },
-    [workspaceId, ticketKey, load],
+    [ticketKey, load],
   );
 
   return { ticket, loading, error, pendingTransition, load, handleTransition };
@@ -156,17 +156,16 @@ export { cleanIntegrationErrorMessage as cleanJiraErrorMessage } from "@/compone
 
 type JiraErrorMessageProps = {
   error: string;
-  workspaceId?: string | null;
   /** Inline variant for cases where a ticket is already rendered above. */
   compact?: boolean;
 };
 
-export function JiraErrorMessage({ error, workspaceId, compact }: JiraErrorMessageProps) {
+export function JiraErrorMessage({ error, compact }: JiraErrorMessageProps) {
   return (
     <IntegrationAuthErrorMessage
       error={error}
       name="Jira"
-      reconnectHref={workspaceId ? `/settings/workspace/${workspaceId}/jira` : "/settings"}
+      reconnectHref="/settings/integrations/jira"
       isAuthError={isJiraAuthError}
       authErrorBody="Your Jira session expired or needs step-up authentication. Reconnect to view this ticket."
       compact={compact}

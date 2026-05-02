@@ -35,16 +35,13 @@ type JiraPageClientProps = {
   steps: WorkflowStep[];
 };
 
-function NotConfiguredNotice({ workspaceId }: { workspaceId?: string }) {
+function NotConfiguredNotice() {
   return (
     <div className="p-6 max-w-2xl">
       <Alert>
         <AlertDescription>
-          Jira is not configured for this workspace.{" "}
-          <Link
-            href={workspaceId ? `/settings/workspace/${workspaceId}/jira` : "/settings"}
-            className="underline font-medium cursor-pointer"
-          >
+          Jira is not configured.{" "}
+          <Link href="/settings/integrations/jira" className="underline font-medium cursor-pointer">
             Configure Jira
           </Link>{" "}
           to see your tickets here.
@@ -54,10 +51,10 @@ function NotConfiguredNotice({ workspaceId }: { workspaceId?: string }) {
   );
 }
 
-async function loadUserProjects(workspaceId: string): Promise<JiraProject[]> {
+async function loadUserProjects(): Promise<JiraProject[]> {
   const [{ projects: all }, search] = await Promise.all([
-    listJiraProjects(workspaceId),
-    searchJiraTickets(workspaceId, {
+    listJiraProjects(),
+    searchJiraTickets({
       jql: "(assignee = currentUser() OR reporter = currentUser()) ORDER BY updated DESC",
       maxResults: 100,
     }),
@@ -79,13 +76,13 @@ function useJiraPageData(workspaceId?: string) {
         return;
       }
       try {
-        const cfg = await getJiraConfig(workspaceId);
+        const cfg = await getJiraConfig();
         if (cancelled) return;
         const ok = !!cfg && cfg.hasSecret;
         setConfigured(ok);
         if (ok) {
           try {
-            const list = await loadUserProjects(workspaceId);
+            const list = await loadUserProjects();
             if (!cancelled) setProjects(list);
           } catch {
             // Non-fatal: pill will just show empty list. Users can still filter by other dims.
@@ -108,7 +105,6 @@ function TicketResults({
   items,
   loading,
   error,
-  workspaceId,
   presets,
   onStartTask,
   onOpen,
@@ -116,7 +112,6 @@ function TicketResults({
   items: JiraTicket[];
   loading: boolean;
   error: string | null;
-  workspaceId: string | null | undefined;
   presets: JiraTaskPreset[];
   onStartTask: (ticket: JiraTicket, preset: JiraTaskPreset) => void;
   onOpen: (ticket: JiraTicket) => void;
@@ -124,7 +119,7 @@ function TicketResults({
   if (error) {
     return (
       <div className="flex justify-center py-16">
-        <JiraErrorMessage error={error} workspaceId={workspaceId} />
+        <JiraErrorMessage error={error} />
       </div>
     );
   }
@@ -204,7 +199,6 @@ function AuthenticatedView({
           items={search.items}
           loading={search.loading}
           error={search.error}
-          workspaceId={workspaceId}
           presets={presets}
           onStartTask={onStartTask}
           onOpen={onOpenTicket}
@@ -301,7 +295,7 @@ export function JiraPageClient({ workspaceId, workflows, steps }: JiraPageClient
         icon={<IconTicket className="h-4 w-4" />}
       />
       {!loaded && <div className="p-6 text-sm text-muted-foreground">Checking Jira status…</div>}
-      {loaded && !configured && <NotConfiguredNotice workspaceId={workspaceId} />}
+      {loaded && !configured && <NotConfiguredNotice />}
       {loaded && configured && (
         <AuthenticatedView
           workspaceId={workspaceId}

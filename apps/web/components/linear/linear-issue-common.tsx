@@ -96,14 +96,14 @@ export function useIssueState(
     setLoading(true);
     setError(null);
     try {
-      const i = await getLinearIssue(workspaceId, identifier);
+      const i = await getLinearIssue(identifier);
       setIssue(i);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, identifier]);
+  }, [identifier]);
 
   useEffect(() => {
     if (!enabled || !workspaceId || !identifier) return;
@@ -113,7 +113,7 @@ export function useIssueState(
       setLoading(true);
       setError(null);
       try {
-        const i = await getLinearIssue(workspaceId, identifier);
+        const i = await getLinearIssue(identifier);
         if (!cancelled) setIssue(i);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -133,7 +133,7 @@ export function useIssueState(
       setPendingState(stateId);
       setError(null);
       try {
-        await setLinearIssueState(workspaceId, issue.id, stateId);
+        await setLinearIssueState(issue.id, stateId);
         await load();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -141,7 +141,7 @@ export function useIssueState(
         setPendingState(null);
       }
     },
-    [workspaceId, issue, load],
+    [issue, load],
   );
 
   return { issue, loading, error, pendingState, load, handleStateChange };
@@ -159,16 +159,15 @@ export { cleanIntegrationErrorMessage as cleanLinearErrorMessage } from "@/compo
 
 type LinearErrorMessageProps = {
   error: string;
-  workspaceId?: string | null;
   compact?: boolean;
 };
 
-export function LinearErrorMessage({ error, workspaceId, compact }: LinearErrorMessageProps) {
+export function LinearErrorMessage({ error, compact }: LinearErrorMessageProps) {
   return (
     <IntegrationAuthErrorMessage
       error={error}
       name="Linear"
-      reconnectHref={workspaceId ? `/settings/workspace/${workspaceId}/linear` : "/settings"}
+      reconnectHref="/settings/integrations/linear"
       isAuthError={isLinearAuthError}
       authErrorBody="Your Linear API key is invalid or has been revoked. Reconnect to view this issue."
       compact={compact}

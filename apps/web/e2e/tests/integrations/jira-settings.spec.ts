@@ -4,10 +4,9 @@ import { JiraSettingsPage } from "../../pages/jira-settings-page";
 test.describe("Jira settings", () => {
   test("empty workspace shows form with disabled save/test until secret is filled", async ({
     testPage,
-    seedData,
   }) => {
     const settings = new JiraSettingsPage(testPage);
-    await settings.goto(seedData.workspaceId);
+    await settings.goto();
 
     await expect(settings.siteInput).toHaveValue("");
     await expect(settings.secretInput).toHaveValue("");
@@ -26,11 +25,10 @@ test.describe("Jira settings", () => {
 
   test("saving the config persists across reload and shows the auth banner", async ({
     testPage,
-    seedData,
     apiClient,
   }) => {
     const settings = new JiraSettingsPage(testPage);
-    await settings.goto(seedData.workspaceId);
+    await settings.goto();
 
     await settings.fillForm({
       siteUrl: "https://acme.atlassian.net",
@@ -44,7 +42,7 @@ test.describe("Jira settings", () => {
     await expect(settings.saveButton).toHaveText(/Update/i);
     // The post-save probe runs async; await it before reloading so the new
     // banner state is in the DB by the time the page re-fetches the config.
-    await apiClient.waitForIntegrationAuthHealthy("jira", seedData.workspaceId);
+    await apiClient.waitForIntegrationAuthHealthy("jira");
 
     await testPage.reload();
     await settings.siteInput.waitFor();
@@ -54,13 +52,9 @@ test.describe("Jira settings", () => {
     await expect(settings.statusBanner).toHaveAttribute("data-state", "ok");
   });
 
-  test("test connection surfaces inline success and failure", async ({
-    testPage,
-    seedData,
-    apiClient,
-  }) => {
+  test("test connection surfaces inline success and failure", async ({ testPage, apiClient }) => {
     const settings = new JiraSettingsPage(testPage);
-    await settings.goto(seedData.workspaceId);
+    await settings.goto();
 
     await apiClient.mockJiraSetAuthResult({
       ok: true,
@@ -82,13 +76,12 @@ test.describe("Jira settings", () => {
 
   test("seeded auth-health failure renders the failed banner on load", async ({
     testPage,
-    seedData,
     apiClient,
   }) => {
     const settings = new JiraSettingsPage(testPage);
     // Save first so a config row exists, then simulate the poller writing
     // a failure status onto it.
-    await settings.goto(seedData.workspaceId);
+    await settings.goto();
     await settings.fillForm({
       siteUrl: "https://acme.atlassian.net",
       email: "alice@example.com",
@@ -99,10 +92,9 @@ test.describe("Jira settings", () => {
     // probe goroutine could otherwise overwrite our forced lastOk=false back
     // to true a few ms after the mockJiraSetAuthHealth call, flipping the
     // banner to "ok" right when the assertion expects "failed".
-    await apiClient.waitForIntegrationAuthHealthy("jira", seedData.workspaceId);
+    await apiClient.waitForIntegrationAuthHealthy("jira");
 
     await apiClient.mockJiraSetAuthHealth({
-      workspaceId: seedData.workspaceId,
       ok: false,
       error: "session expired",
     });
@@ -112,9 +104,9 @@ test.describe("Jira settings", () => {
     await expect(settings.statusBanner).toContainText(/session expired/i);
   });
 
-  test("delete clears the saved configuration", async ({ testPage, seedData }) => {
+  test("delete clears the saved configuration", async ({ testPage }) => {
     const settings = new JiraSettingsPage(testPage);
-    await settings.goto(seedData.workspaceId);
+    await settings.goto();
     await settings.fillForm({
       siteUrl: "https://acme.atlassian.net",
       email: "alice@example.com",

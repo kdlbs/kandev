@@ -105,7 +105,7 @@ type svcFixture struct {
 	// atomic so the async probe goroutine spawned by SetConfig can call
 	// clientFor (and the injected factory) without racing the test thread.
 	factoryHit atomic.Int32
-	probed     chan string
+	probed     chan struct{}
 }
 
 func newSvcFixture(t *testing.T) *svcFixture {
@@ -114,15 +114,15 @@ func newSvcFixture(t *testing.T) *svcFixture {
 		store:   newTestStore(t),
 		secrets: newFakeSecretStore(),
 		client:  &fakeClient{},
-		probed:  make(chan string, 8),
+		probed:  make(chan struct{}, 8),
 	}
 	f.svc = NewService(f.store, f.secrets, func(_ *JiraConfig, _ string) Client {
 		f.factoryHit.Add(1)
 		return f.client
 	}, logger.Default())
-	f.svc.SetProbeHook(func(workspaceID string) {
+	f.svc.SetProbeHook(func() {
 		select {
-		case f.probed <- workspaceID:
+		case f.probed <- struct{}{}:
 		default:
 		}
 	})
@@ -134,11 +134,10 @@ func TestService_SetConfig_UpsertsAndStoresSecret(t *testing.T) {
 	ctx := context.Background()
 
 	cfg, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		WorkspaceID: "ws-1",
-		SiteURL:     "https://acme.atlassian.net/",
-		Email:       "u@example.com",
-		AuthMethod:  AuthMethodAPIToken,
-		Secret:      "tok1",
+		SiteURL:    "https://acme.atlassian.net/",
+		Email:      "u@example.com",
+		AuthMethod: AuthMethodAPIToken,
+		Secret:     "tok1",
 	})
 	if err != nil {
 		t.Fatalf("set: %v", err)
@@ -149,7 +148,7 @@ func TestService_SetConfig_UpsertsAndStoresSecret(t *testing.T) {
 	if !cfg.HasSecret {
 		t.Error("expected HasSecret=true")
 	}
-	if got, _ := f.secrets.Reveal(ctx, SecretKeyForWorkspace("ws-1")); got != "tok1" {
+	if got, _ := f.secrets.Reveal(ctx, SecretKey); got != "tok1" {
 		t.Errorf("secret stored = %q", got)
 	}
 }
@@ -160,12 +159,12 @@ func TestService_SetConfig_ProbesAuthImmediately(t *testing.T) {
 		return &TestConnectionResult{OK: true, DisplayName: "Alice"}, nil
 	}
 	if _, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
-		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "e",
+		SiteURL: "https://a.net", Email: "e",
 		AuthMethod: AuthMethodAPIToken, Secret: "tok",
 	}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	cfg := waitForAuthProbe(t, f, "ws-1")
+	cfg := waitForAuthProbe(t, f)
 	if !cfg.LastOk {
 		t.Errorf("expected LastOk=true after async probe, got %+v", cfg)
 	}
@@ -180,12 +179,12 @@ func TestService_SetConfig_PersistsProbeFailure(t *testing.T) {
 		return &TestConnectionResult{OK: false, Error: "401 unauthorized"}, nil
 	}
 	if _, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
-		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "e",
+		SiteURL: "https://a.net", Email: "e",
 		AuthMethod: AuthMethodAPIToken, Secret: "bad",
 	}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	cfg := waitForAuthProbe(t, f, "ws-1")
+	cfg := waitForAuthProbe(t, f)
 	if cfg.LastOk {
 		t.Error("expected LastOk=false after failed probe")
 	}
@@ -197,23 +196,18 @@ func TestService_SetConfig_PersistsProbeFailure(t *testing.T) {
 // waitForAuthProbe blocks until the async probe spawned by SetConfig has
 // completed (signaled via the fixture's probeHook), then returns the persisted
 // config. A 2s ceiling guards against bugs that prevent the hook from firing.
-func waitForAuthProbe(t *testing.T, f *svcFixture, workspaceID string) *JiraConfig {
+func waitForAuthProbe(t *testing.T, f *svcFixture) *JiraConfig {
 	t.Helper()
-	for {
-		select {
-		case got := <-f.probed:
-			if got != workspaceID {
-				continue
-			}
-			cfg, err := f.svc.GetConfig(context.Background(), workspaceID)
-			if err != nil {
-				t.Fatalf("get config after probe: %v", err)
-			}
-			return cfg
-		case <-time.After(2 * time.Second):
-			t.Fatalf("async probe hook did not fire for %q within 2s", workspaceID)
-			return nil
+	select {
+	case <-f.probed:
+		cfg, err := f.svc.GetConfig(context.Background())
+		if err != nil {
+			t.Fatalf("get config after probe: %v", err)
 		}
+		return cfg
+	case <-time.After(2 * time.Second):
+		t.Fatalf("async probe hook did not fire within 2s")
+		return nil
 	}
 }
 
@@ -221,20 +215,20 @@ func TestService_SetConfig_EmptySecret_KeepsExisting(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 	_, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "e",
+		SiteURL: "https://a.net", Email: "e",
 		AuthMethod: AuthMethodAPIToken, Secret: "first",
 	})
 	if err != nil {
 		t.Fatalf("initial: %v", err)
 	}
 	_, err = f.svc.SetConfig(ctx, &SetConfigRequest{
-		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "new@x",
+		SiteURL: "https://a.net", Email: "new@x",
 		AuthMethod: AuthMethodAPIToken, Secret: "",
 	})
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if got, _ := f.secrets.Reveal(ctx, SecretKeyForWorkspace("ws-1")); got != "first" {
+	if got, _ := f.secrets.Reveal(ctx, SecretKey); got != "first" {
 		t.Errorf("secret should be preserved, got %q", got)
 	}
 }
@@ -243,18 +237,18 @@ func TestService_SetConfig_InvalidatesClientCache(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 	_, _ = f.svc.SetConfig(ctx, &SetConfigRequest{
-		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "e",
+		SiteURL: "https://a.net", Email: "e",
 		AuthMethod: AuthMethodAPIToken, Secret: "t",
 	})
 	// SetConfig spawns an async probe that also builds the client; wait for it
 	// so the rest of the test sees a stable factoryHit count.
-	waitForAuthProbe(t, f, "ws-1")
-	if _, err := f.svc.GetTicket(ctx, "ws-1", "A-1"); err != nil {
+	waitForAuthProbe(t, f)
+	if _, err := f.svc.GetTicket(ctx, "A-1"); err != nil {
 		t.Fatalf("get1: %v", err)
 	}
 	hits := f.factoryHit.Load()
 	// Second call reuses cached client.
-	if _, err := f.svc.GetTicket(ctx, "ws-1", "A-2"); err != nil {
+	if _, err := f.svc.GetTicket(ctx, "A-2"); err != nil {
 		t.Fatalf("get2: %v", err)
 	}
 	if got := f.factoryHit.Load(); got != hits {
@@ -264,11 +258,11 @@ func TestService_SetConfig_InvalidatesClientCache(t *testing.T) {
 	// SetConfig to finish before sampling factoryHit so the second probe can't
 	// race with the GetTicket assertion.
 	_, _ = f.svc.SetConfig(ctx, &SetConfigRequest{
-		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "e",
+		SiteURL: "https://a.net", Email: "e",
 		AuthMethod: AuthMethodAPIToken, Secret: "t2",
 	})
-	waitForAuthProbe(t, f, "ws-1")
-	if _, err := f.svc.GetTicket(ctx, "ws-1", "A-3"); err != nil {
+	waitForAuthProbe(t, f)
+	if _, err := f.svc.GetTicket(ctx, "A-3"); err != nil {
 		t.Fatalf("get3: %v", err)
 	}
 	if got := f.factoryHit.Load(); got <= hits {
@@ -283,10 +277,9 @@ func TestService_Validation(t *testing.T) {
 		name string
 		req  SetConfigRequest
 	}{
-		{"missing ws", SetConfigRequest{SiteURL: "x", AuthMethod: AuthMethodAPIToken, Email: "e"}},
-		{"missing site", SetConfigRequest{WorkspaceID: "w", AuthMethod: AuthMethodAPIToken, Email: "e"}},
-		{"missing email api_token", SetConfigRequest{WorkspaceID: "w", SiteURL: "x", AuthMethod: AuthMethodAPIToken}},
-		{"bad auth", SetConfigRequest{WorkspaceID: "w", SiteURL: "x", AuthMethod: "bogus"}},
+		{"missing site", SetConfigRequest{AuthMethod: AuthMethodAPIToken, Email: "e"}},
+		{"missing email api_token", SetConfigRequest{SiteURL: "x", AuthMethod: AuthMethodAPIToken}},
+		{"bad auth", SetConfigRequest{SiteURL: "x", AuthMethod: "bogus"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -305,7 +298,7 @@ func TestService_TestConnection_InlineSecret(t *testing.T) {
 		return &TestConnectionResult{OK: true, DisplayName: "Alice"}, nil
 	}
 	res, err := f.svc.TestConnection(context.Background(), &SetConfigRequest{
-		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "e",
+		SiteURL: "https://a.net", Email: "e",
 		AuthMethod: AuthMethodAPIToken, Secret: "inline",
 	})
 	if err != nil || !called {
@@ -319,7 +312,7 @@ func TestService_TestConnection_InlineSecret(t *testing.T) {
 func TestService_TestConnection_NoStoredSecret_ReturnsFailure(t *testing.T) {
 	f := newSvcFixture(t)
 	res, err := f.svc.TestConnection(context.Background(), &SetConfigRequest{
-		WorkspaceID: "ws-nope", SiteURL: "https://a.net", Email: "e",
+		SiteURL: "https://a.net", Email: "e",
 		AuthMethod: AuthMethodAPIToken,
 	})
 	if err != nil {
@@ -334,24 +327,24 @@ func TestService_DeleteConfig_RemovesSecret(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 	_, _ = f.svc.SetConfig(ctx, &SetConfigRequest{
-		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "e",
+		SiteURL: "https://a.net", Email: "e",
 		AuthMethod: AuthMethodAPIToken, Secret: "t",
 	})
-	if err := f.svc.DeleteConfig(ctx, "ws-1"); err != nil {
+	if err := f.svc.DeleteConfig(ctx); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if exists, _ := f.secrets.Exists(ctx, SecretKeyForWorkspace("ws-1")); exists {
+	if exists, _ := f.secrets.Exists(ctx, SecretKey); exists {
 		t.Error("secret should be removed")
 	}
-	cfg, _ := f.svc.GetConfig(ctx, "ws-1")
+	cfg, _ := f.svc.GetConfig(ctx)
 	if cfg != nil {
 		t.Errorf("expected config gone, got %+v", cfg)
 	}
 }
 
-func TestService_GetTicket_UnconfiguredWorkspace(t *testing.T) {
+func TestService_GetTicket_Unconfigured(t *testing.T) {
 	f := newSvcFixture(t)
-	_, err := f.svc.GetTicket(context.Background(), "ws-nope", "X-1")
+	_, err := f.svc.GetTicket(context.Background(), "X-1")
 	if !errors.Is(err, ErrNotConfigured) {
 		t.Errorf("expected ErrNotConfigured, got %v", err)
 	}
@@ -361,12 +354,12 @@ func TestService_GetTicket_RevealError_NotConfusedWithUnconfigured(t *testing.T)
 	f := newSvcFixture(t)
 	ctx := context.Background()
 	if err := f.store.UpsertConfig(ctx, &JiraConfig{
-		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "e",
+		SiteURL: "https://a.net", Email: "e",
 		AuthMethod: AuthMethodAPIToken,
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
-	_, err := f.svc.GetTicket(ctx, "ws-1", "X-1")
+	_, err := f.svc.GetTicket(ctx, "X-1")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -379,10 +372,10 @@ func TestService_DoTransition_PassThrough(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 	_, _ = f.svc.SetConfig(ctx, &SetConfigRequest{
-		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "e",
+		SiteURL: "https://a.net", Email: "e",
 		AuthMethod: AuthMethodAPIToken, Secret: "t",
 	})
-	if err := f.svc.DoTransition(ctx, "ws-1", "PROJ-9", "31"); err != nil {
+	if err := f.svc.DoTransition(ctx, "PROJ-9", "31"); err != nil {
 		t.Fatalf("transition: %v", err)
 	}
 	if len(f.client.transitionLog) != 1 || f.client.transitionLog[0] != "PROJ-9:31" {

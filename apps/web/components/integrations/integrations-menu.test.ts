@@ -116,7 +116,7 @@ describe("IntegrationsMenu", () => {
   it("opens configured integration links on hover", async () => {
     mockAvailability({ githubReady: true, jiraAvailable: true, linearAvailable: false });
 
-    render(createElement(IntegrationsMenu, { workspaceId: "workspace-1" }));
+    render(createElement(IntegrationsMenu, {}));
 
     const trigger = screen.getByRole("button", { name: "Integrations" });
     expect(screen.queryByText("GitHub")).toBeNull();
@@ -131,7 +131,7 @@ describe("IntegrationsMenu", () => {
   it("does not render when no integrations are configured", () => {
     mockAvailability({ githubReady: false, jiraAvailable: false, linearAvailable: false });
 
-    render(createElement(IntegrationsMenu, { workspaceId: "workspace-1" }));
+    render(createElement(IntegrationsMenu, {}));
 
     expect(screen.queryByRole("button", { name: "Integrations" })).toBeNull();
   });

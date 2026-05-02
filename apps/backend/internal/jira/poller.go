@@ -186,10 +186,10 @@ func (p *Poller) fireIssueTickHook() {
 // interface into Service's public API.
 type svcProber struct{ svc *Service }
 
-func (s svcProber) ListConfiguredWorkspaces(ctx context.Context) ([]string, error) {
-	return s.svc.Store().ListConfiguredWorkspaces(ctx)
+func (s svcProber) HasConfig(ctx context.Context) (bool, error) {
+	return s.svc.Store().HasConfig(ctx)
 }
 
-func (s svcProber) RecordAuthHealth(ctx context.Context, workspaceID string) {
-	s.svc.RecordAuthHealth(ctx, workspaceID)
+func (s svcProber) RecordAuthHealth(ctx context.Context) {
+	s.svc.RecordAuthHealth(ctx)
 }

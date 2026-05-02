@@ -41,7 +41,7 @@ export function useJiraSearch(workspaceId: string | null | undefined, jql: strin
       setLoading(true);
       setError(null);
       try {
-        const res = await searchJiraTickets(workspaceId, {
+        const res = await searchJiraTickets({
           jql,
           pageToken: token,
           maxResults: PAGE_SIZE,

@@ -148,7 +148,7 @@ func TestService_CheckIssueWatch_FiltersAlreadySeen(t *testing.T) {
 
 	// Configure JIRA so clientFor succeeds.
 	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "e",
+		SiteURL: "https://a.net", Email: "e",
 		AuthMethod: AuthMethodAPIToken, Secret: "tok",
 	}); err != nil {
 		t.Fatalf("set config: %v", err)
@@ -198,7 +198,7 @@ func TestService_CheckIssueWatch_StampsLastPolledOnError(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "e",
+		SiteURL: "https://a.net", Email: "e",
 		AuthMethod: AuthMethodAPIToken, Secret: "tok",
 	}); err != nil {
 		t.Fatalf("set config: %v", err)

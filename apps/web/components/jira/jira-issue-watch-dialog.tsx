@@ -146,29 +146,21 @@ function SelectField(props: {
   );
 }
 
-function JQLField({
-  workspaceId,
-  jql,
-  onChange,
-}: {
-  workspaceId: string;
-  jql: string;
-  onChange: (v: string) => void;
-}) {
+function JQLField({ jql, onChange }: { jql: string; onChange: (v: string) => void }) {
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [testing, setTesting] = useState(false);
   const handleTest = useCallback(async () => {
     setTesting(true);
     setResult(null);
     try {
-      const res = await searchJiraTickets(workspaceId, { jql, maxResults: 5 });
+      const res = await searchJiraTickets({ jql, maxResults: 5 });
       setResult({ ok: true, message: `Matched ${res.tickets.length} ticket(s) in this page.` });
     } catch (err) {
       setResult({ ok: false, message: `JQL error: ${String(err)}` });
     } finally {
       setTesting(false);
     }
-  }, [workspaceId, jql]);
+  }, [jql]);
 
   return (
     <div className="space-y-1.5">
@@ -375,11 +367,7 @@ export function JiraIssueWatchDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-5">
-          <JQLField
-            workspaceId={workspaceId}
-            jql={form.jql}
-            onChange={(v) => setForm((p) => ({ ...p, jql: v }))}
-          />
+          <JQLField jql={form.jql} onChange={(v) => setForm((p) => ({ ...p, jql: v }))} />
           <AutomationFields form={form} setForm={setForm} workspaceId={workspaceId} />
           <PromptField
             value={form.prompt}

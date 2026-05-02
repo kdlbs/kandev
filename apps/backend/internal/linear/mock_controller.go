@@ -49,16 +49,15 @@ func (c *MockController) setAuthResult(ctx *gin.Context) {
 
 func (c *MockController) setAuthHealth(ctx *gin.Context) {
 	var req struct {
-		WorkspaceID string `json:"workspaceId"`
-		OK          bool   `json:"ok"`
-		Error       string `json:"error"`
-		OrgSlug     string `json:"orgSlug"`
+		OK      bool   `json:"ok"`
+		Error   string `json:"error"`
+		OrgSlug string `json:"orgSlug"`
 	}
-	if err := ctx.ShouldBindJSON(&req); err != nil || req.WorkspaceID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspaceId required"})
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	if err := c.store.UpdateAuthHealth(ctx.Request.Context(), req.WorkspaceID, req.OK, req.Error, req.OrgSlug, time.Now().UTC()); err != nil {
+	if err := c.store.UpdateAuthHealth(ctx.Request.Context(), req.OK, req.Error, req.OrgSlug, time.Now().UTC()); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

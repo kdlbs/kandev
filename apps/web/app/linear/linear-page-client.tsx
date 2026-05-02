@@ -37,14 +37,14 @@ type LinearPageClientProps = {
   steps: WorkflowStep[];
 };
 
-function NotConfiguredNotice({ workspaceId }: { workspaceId?: string }) {
+function NotConfiguredNotice() {
   return (
     <div className="p-6 max-w-2xl">
       <Alert>
         <AlertDescription>
-          Linear is not configured for this workspace.{" "}
+          Linear is not configured.{" "}
           <Link
-            href={workspaceId ? `/settings/workspace/${workspaceId}/linear` : "/settings"}
+            href="/settings/integrations/linear"
             className="underline font-medium cursor-pointer"
           >
             Configure Linear
@@ -69,13 +69,13 @@ function useLinearPageData(workspaceId?: string) {
         return;
       }
       try {
-        const cfg = await getLinearConfig(workspaceId);
+        const cfg = await getLinearConfig();
         if (cancelled) return;
         const ok = !!cfg && cfg.hasSecret;
         setConfigured(ok);
         if (ok) {
           try {
-            const list = await listLinearTeams(workspaceId);
+            const list = await listLinearTeams();
             if (!cancelled) setTeams(list.teams ?? []);
           } catch {
             // Non-fatal: team filter just stays empty.
@@ -125,14 +125,14 @@ function useIssueSearch(
 
   const fetchPage = useCallback(
     (p: number) =>
-      searchLinearIssues(workspaceId!, {
+      searchLinearIssues({
         query: query || undefined,
         teamKey: teamKey || undefined,
         assigned: assigned || undefined,
         pageToken: tokensRef.current[p - 1] || undefined,
         maxResults: PAGE_SIZE,
       }),
-    [workspaceId, query, teamKey, assigned],
+    [query, teamKey, assigned],
   );
 
   const run = useCallback(
@@ -386,14 +386,14 @@ function PageShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function DisabledNotice({ workspaceId }: { workspaceId: string }) {
+function DisabledNotice() {
   return (
     <div className="p-6 max-w-2xl">
       <Alert>
         <AlertDescription>
-          Linear integration is disabled for this workspace.{" "}
+          Linear integration is disabled.{" "}
           <Link
-            href={`/settings/workspace/${workspaceId}/linear`}
+            href="/settings/integrations/linear"
             className="underline font-medium cursor-pointer"
           >
             Re-enable it in settings
@@ -408,13 +408,11 @@ function DisabledNotice({ workspaceId }: { workspaceId: string }) {
 function ResultsArea({
   search,
   empty,
-  workspaceId,
   onOpen,
   onStartTask,
 }: {
   search: SearchState;
   empty: boolean;
-  workspaceId: string;
   onOpen: (issue: LinearIssue) => void;
   onStartTask: (issue: LinearIssue) => void;
 }) {
@@ -422,7 +420,7 @@ function ResultsArea({
     <div className="flex-1 overflow-y-auto px-6 py-3">
       {search.error && !search.loading && (
         <div className="py-8 flex justify-center">
-          <LinearErrorMessage error={search.error} workspaceId={workspaceId} />
+          <LinearErrorMessage error={search.error} />
         </div>
       )}
       {!search.error && empty && (
@@ -441,7 +439,7 @@ function ResultsArea({
 }
 
 export function LinearPageClient({ workspaceId, workflows, steps }: LinearPageClientProps) {
-  const available = useLinearAvailable(workspaceId);
+  const available = useLinearAvailable();
   const { loaded, configured, teams } = useLinearPageData(workspaceId);
 
   const [query, setQuery] = useState("");
@@ -467,14 +465,14 @@ export function LinearPageClient({ workspaceId, workflows, steps }: LinearPageCl
   if (loaded && !configured) {
     return (
       <PageShell>
-        <NotConfiguredNotice workspaceId={workspaceId} />
+        <NotConfiguredNotice />
       </PageShell>
     );
   }
   if (!available && loaded && configured) {
     return (
       <PageShell>
-        <DisabledNotice workspaceId={workspaceId} />
+        <DisabledNotice />
       </PageShell>
     );
   }
@@ -493,7 +491,6 @@ export function LinearPageClient({ workspaceId, workflows, steps }: LinearPageCl
       <ResultsArea
         search={search}
         empty={empty}
-        workspaceId={workspaceId}
         onOpen={setOpenIssue}
         onStartTask={setLaunchIssue}
       />

@@ -68,7 +68,7 @@ export function JiraTicketDialog({
         <DialogTitle className="sr-only">{dialogTitle(ticket, ticketKey)}</DialogTitle>
         {errorOnly ? (
           <div className="flex-1 flex items-center justify-center px-8 py-16">
-            <JiraErrorMessage error={state.error ?? ""} workspaceId={workspaceId} />
+            <JiraErrorMessage error={state.error ?? ""} />
           </div>
         ) : (
           <>
@@ -81,7 +81,6 @@ export function JiraTicketDialog({
               ticket={ticket}
               state={state}
               ticketKey={effectiveTicketKey(ticket, ticketKey)}
-              workspaceId={workspaceId}
             />
             {showFooter && (
               <TicketFooter ticket={ticket} presets={presets} onStartTask={onStartTask} />
@@ -97,18 +96,16 @@ function DialogBody({
   ticket,
   state,
   ticketKey,
-  workspaceId,
 }: {
   ticket: JiraTicket | null;
   state: TicketState;
   ticketKey: string;
-  workspaceId: string | null | undefined;
 }) {
   return (
     <div className="flex-1 overflow-y-auto">
       {state.error && ticket && (
         <div className="px-8 pt-4">
-          <JiraErrorMessage error={state.error} workspaceId={workspaceId} compact />
+          <JiraErrorMessage error={state.error} compact />
         </div>
       )}
       {!ticket && state.loading && (

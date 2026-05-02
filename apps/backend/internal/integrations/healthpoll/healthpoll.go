@@ -28,15 +28,15 @@ const DefaultInterval = 90 * time.Second
 // itself is single-threaded but Start may be invoked while a previous Stop is
 // still draining.
 type Prober interface {
-	// ListConfiguredWorkspaces returns the IDs of every workspace that has
-	// credentials stored for this integration.
-	ListConfiguredWorkspaces(ctx context.Context) ([]string, error)
+	// HasConfig reports whether the integration has stored credentials worth
+	// probing. The loop skips RecordAuthHealth when it returns false.
+	HasConfig(ctx context.Context) (bool, error)
 
-	// RecordAuthHealth probes one workspace's credentials and persists the
-	// result on the integration's config row. Errors are intentionally not
-	// returned: this is a best-effort health signal, never the source of
-	// truth for callers, so the implementation handles its own logging.
-	RecordAuthHealth(ctx context.Context, workspaceID string)
+	// RecordAuthHealth probes the stored credentials and persists the result
+	// on the integration's config row. Errors are intentionally not returned:
+	// this is a best-effort health signal, never the source of truth for
+	// callers, so the implementation handles its own logging.
+	RecordAuthHealth(ctx context.Context)
 }
 
 // Poller drives Prober.RecordAuthHealth on a fixed cadence.
@@ -116,18 +116,19 @@ func (p *Poller) loop(ctx context.Context) {
 	}
 }
 
-// probeAll runs one probe pass across every configured workspace. Used by the
-// loop and by in-package tests that want to drive a probe deterministically.
+// probeAll runs one probe pass when the integration is configured. Used by
+// the loop and by in-package tests that want to drive a probe deterministically.
 func (p *Poller) probeAll(ctx context.Context) {
-	ids, err := p.prober.ListConfiguredWorkspaces(ctx)
+	configured, err := p.prober.HasConfig(ctx)
 	if err != nil {
-		p.logger.Warn(p.name+" poller: list workspaces failed", zap.Error(err))
+		p.logger.Warn(p.name+" poller: has-config check failed", zap.Error(err))
 		return
 	}
-	for _, id := range ids {
-		if ctx.Err() != nil {
-			return
-		}
-		p.prober.RecordAuthHealth(ctx, id)
+	if !configured {
+		return
 	}
+	if ctx.Err() != nil {
+		return
+	}
+	p.prober.RecordAuthHealth(ctx)
 }

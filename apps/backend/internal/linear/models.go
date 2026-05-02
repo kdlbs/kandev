@@ -1,7 +1,6 @@
-// Package linear implements the Linear integration: workspace-scoped
-// configuration storage, a GraphQL client for issues and workflow states, and
-// the HTTP and WebSocket handlers that expose these capabilities to the
-// frontend.
+// Package linear implements the Linear integration: a single install-wide
+// configuration, a GraphQL client for issues and workflow states, and the HTTP
+// and WebSocket handlers that expose these capabilities to the frontend.
 package linear
 
 import "time"
@@ -12,11 +11,10 @@ import "time"
 // and leaves room for OAuth in the future.
 const AuthMethodAPIKey = "api_key"
 
-// LinearConfig is the workspace-scoped configuration for the Linear
-// integration. The API key is stored separately in the encrypted secret store
-// under the key returned by SecretKeyForWorkspace.
+// LinearConfig is the install-wide configuration for the Linear integration.
+// The API key is stored separately in the encrypted secret store under
+// SecretKey.
 type LinearConfig struct {
-	WorkspaceID    string `json:"workspaceId" db:"workspace_id"`
 	AuthMethod     string `json:"authMethod" db:"auth_method"`
 	DefaultTeamKey string `json:"defaultTeamKey" db:"default_team_key"`
 	HasSecret      bool   `json:"hasSecret" db:"-"`
@@ -35,10 +33,9 @@ type LinearConfig struct {
 }
 
 // SetConfigRequest is the payload sent by the UI to create or update the
-// workspace's Linear configuration. When Secret is empty on update, the
-// existing secret is retained; when non-empty it replaces the stored value.
+// Linear configuration. When Secret is empty on update, the existing secret
+// is retained; when non-empty it replaces the stored value.
 type SetConfigRequest struct {
-	WorkspaceID    string `json:"workspaceId"`
 	AuthMethod     string `json:"authMethod"`
 	DefaultTeamKey string `json:"defaultTeamKey"`
 	Secret         string `json:"secret"`
@@ -128,8 +125,13 @@ type SearchResult struct {
 	NextPageToken string        `json:"nextPageToken,omitempty"`
 }
 
-// SecretKeyForWorkspace returns the secret-store key used for the Linear API
-// key of a given workspace. Centralised so the service and store agree.
-func SecretKeyForWorkspace(workspaceID string) string {
+// SecretKey is the secret-store key used for the install-wide Linear API key.
+// Centralised so the service, store and provider migration agree.
+const SecretKey = "linear:singleton:token"
+
+// LegacySecretKeyForWorkspace returns the pre-singleton per-workspace secret
+// key. Only used by the one-shot startup migration in provider.go to copy an
+// existing token over to SecretKey.
+func LegacySecretKeyForWorkspace(workspaceID string) string {
 	return "linear:" + workspaceID + ":token"
 }

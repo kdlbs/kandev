@@ -36,33 +36,31 @@ func newPollerFixture(t *testing.T) *pollerFixture {
 	return f
 }
 
-// saveConfig persists a workspace config directly via the store + secret
+// saveConfig persists the singleton config directly via the store + secret
 // fakes — bypassing Service.SetConfig avoids racing against its async probe.
-func (f *pollerFixture) saveConfig(t *testing.T, workspaceID, secret string) {
+func (f *pollerFixture) saveConfig(t *testing.T, secret string) {
 	t.Helper()
 	ctx := context.Background()
 	if err := f.store.UpsertConfig(ctx, &LinearConfig{
-		WorkspaceID: workspaceID,
-		AuthMethod:  AuthMethodAPIKey,
+		AuthMethod: AuthMethodAPIKey,
 	}); err != nil {
-		t.Fatalf("save config %s: %v", workspaceID, err)
+		t.Fatalf("save config: %v", err)
 	}
-	if err := f.secrets.Set(ctx, SecretKeyForWorkspace(workspaceID),
-		"linear", secret); err != nil {
-		t.Fatalf("save secret %s: %v", workspaceID, err)
+	if err := f.secrets.Set(ctx, SecretKey, "linear", secret); err != nil {
+		t.Fatalf("save secret: %v", err)
 	}
 }
 
 func TestService_RecordAuthHealth_RecordsSuccess(t *testing.T) {
 	f := newPollerFixture(t)
-	f.saveConfig(t, "ws-1", "tok")
+	f.saveConfig(t, "tok")
 	f.client.testAuthFn = func() (*TestConnectionResult, error) {
 		return &TestConnectionResult{OK: true, OrgSlug: "acme"}, nil
 	}
 
-	f.svc.RecordAuthHealth(context.Background(), "ws-1")
+	f.svc.RecordAuthHealth(context.Background())
 
-	cfg, _ := f.store.GetConfig(context.Background(), "ws-1")
+	cfg, _ := f.store.GetConfig(context.Background())
 	if cfg == nil {
 		t.Fatal("config disappeared")
 	}
@@ -76,14 +74,14 @@ func TestService_RecordAuthHealth_RecordsSuccess(t *testing.T) {
 
 func TestService_RecordAuthHealth_RecordsFailure(t *testing.T) {
 	f := newPollerFixture(t)
-	f.saveConfig(t, "ws-1", "tok")
+	f.saveConfig(t, "tok")
 	f.client.testAuthFn = func() (*TestConnectionResult, error) {
 		return &TestConnectionResult{OK: false, Error: "401 unauthorized"}, nil
 	}
 
-	f.svc.RecordAuthHealth(context.Background(), "ws-1")
+	f.svc.RecordAuthHealth(context.Background())
 
-	cfg, _ := f.store.GetConfig(context.Background(), "ws-1")
+	cfg, _ := f.store.GetConfig(context.Background())
 	if cfg.LastOk {
 		t.Error("expected LastOk=false after failed probe")
 	}
@@ -94,35 +92,33 @@ func TestService_RecordAuthHealth_RecordsFailure(t *testing.T) {
 
 func TestService_RecordAuthHealth_ClientError(t *testing.T) {
 	f := newPollerFixture(t)
-	f.saveConfig(t, "ws-1", "tok")
+	f.saveConfig(t, "tok")
 	f.client.testAuthFn = func() (*TestConnectionResult, error) {
 		return nil, errors.New("network timeout")
 	}
 
-	f.svc.RecordAuthHealth(context.Background(), "ws-1")
+	f.svc.RecordAuthHealth(context.Background())
 
-	cfg, _ := f.store.GetConfig(context.Background(), "ws-1")
+	cfg, _ := f.store.GetConfig(context.Background())
 	if cfg.LastOk {
 		t.Error("expected LastOk=false on client error")
 	}
 }
 
-func TestPoller_Start_ProbesEachConfiguredWorkspace(t *testing.T) {
-	// Smoke test: confirms the prober adapter actually wires
-	// Service.Store().ListConfiguredWorkspaces → Service.RecordAuthHealth
-	// when the loop is started, end-to-end. Wrapped in synctest so the
-	// goroutine the poller spawns runs deterministically against fake time
-	// instead of relying on a wall-clock deadline.
+func TestPoller_Start_ProbesWhenConfigured(t *testing.T) {
+	// Smoke test: confirms the prober adapter wires HasConfig →
+	// Service.RecordAuthHealth when the loop is started, end-to-end. Wrapped
+	// in synctest so the goroutine the poller spawns runs deterministically
+	// against fake time instead of relying on a wall-clock deadline.
 	synctest.Test(t, func(t *testing.T) {
 		f := newPollerFixture(t)
-		f.saveConfig(t, "ws-a", "tok-a")
-		f.saveConfig(t, "ws-b", "tok-b")
-		probed := map[string]bool{}
+		f.saveConfig(t, "tok")
+		var probed bool
 		f.client.testAuthFn = func() (*TestConnectionResult, error) {
 			return &TestConnectionResult{OK: true}, nil
 		}
-		f.svc.SetProbeHook(func(workspaceID string) {
-			probed[workspaceID] = true
+		f.svc.SetProbeHook(func() {
+			probed = true
 		})
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -133,8 +129,8 @@ func TestPoller_Start_ProbesEachConfiguredWorkspace(t *testing.T) {
 		// Wait for the immediate-on-Start probe pass to finish.
 		synctest.Wait()
 
-		if !probed["ws-a"] || !probed["ws-b"] {
-			t.Errorf("expected both ws-a and ws-b probed, got %v", probed)
+		if !probed {
+			t.Errorf("expected probe to fire when configured")
 		}
 	})
 }

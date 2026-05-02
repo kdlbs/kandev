@@ -12,29 +12,27 @@ import (
 )
 
 type fakeProber struct {
-	mu     sync.Mutex
-	listFn func(ctx context.Context) ([]string, error)
-	probed []string
+	mu          sync.Mutex
+	hasFn       func(ctx context.Context) (bool, error)
+	probedCount int
 }
 
-func (f *fakeProber) ListConfiguredWorkspaces(ctx context.Context) ([]string, error) {
-	if f.listFn != nil {
-		return f.listFn(ctx)
+func (f *fakeProber) HasConfig(ctx context.Context) (bool, error) {
+	if f.hasFn != nil {
+		return f.hasFn(ctx)
 	}
-	return nil, nil
+	return false, nil
 }
 
-func (f *fakeProber) RecordAuthHealth(_ context.Context, workspaceID string) {
+func (f *fakeProber) RecordAuthHealth(_ context.Context) {
 	f.mu.Lock()
-	f.probed = append(f.probed, workspaceID)
+	f.probedCount++
 	f.mu.Unlock()
 }
 
-func TestProbeAll_RecordsEachWorkspace(t *testing.T) {
+func TestProbeAll_RecordsWhenConfigured(t *testing.T) {
 	p := &fakeProber{
-		listFn: func(_ context.Context) ([]string, error) {
-			return []string{"ws-a", "ws-b"}, nil
-		},
+		hasFn: func(_ context.Context) (bool, error) { return true, nil },
 	}
 	poller := New("test", p, logger.Default())
 
@@ -42,16 +40,29 @@ func TestProbeAll_RecordsEachWorkspace(t *testing.T) {
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if len(p.probed) != 2 || p.probed[0] != "ws-a" || p.probed[1] != "ws-b" {
-		t.Errorf("expected [ws-a ws-b], got %v", p.probed)
+	if p.probedCount != 1 {
+		t.Errorf("expected 1 probe, got %d", p.probedCount)
 	}
 }
 
-func TestProbeAll_ListError_DoesNotPanic(t *testing.T) {
+func TestProbeAll_SkipsWhenNotConfigured(t *testing.T) {
 	p := &fakeProber{
-		listFn: func(_ context.Context) ([]string, error) {
-			return nil, errors.New("db down")
-		},
+		hasFn: func(_ context.Context) (bool, error) { return false, nil },
+	}
+	poller := New("test", p, logger.Default())
+
+	poller.probeAll(context.Background())
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.probedCount != 0 {
+		t.Errorf("expected no probe when not configured, got %d", p.probedCount)
+	}
+}
+
+func TestProbeAll_HasConfigError_DoesNotPanic(t *testing.T) {
+	p := &fakeProber{
+		hasFn: func(_ context.Context) (bool, error) { return false, errors.New("db down") },
 	}
 	poller := New("test", p, logger.Default())
 
@@ -59,16 +70,14 @@ func TestProbeAll_ListError_DoesNotPanic(t *testing.T) {
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if len(p.probed) != 0 {
-		t.Errorf("no probes should run on list error, got %v", p.probed)
+	if p.probedCount != 0 {
+		t.Errorf("no probe should run on has-config error, got %d", p.probedCount)
 	}
 }
 
 func TestProbeAll_StopsWhenContextCancelled(t *testing.T) {
 	p := &fakeProber{
-		listFn: func(_ context.Context) ([]string, error) {
-			return []string{"ws-a", "ws-b", "ws-c"}, nil
-		},
+		hasFn: func(_ context.Context) (bool, error) { return true, nil },
 	}
 	poller := New("test", p, logger.Default())
 
@@ -78,17 +87,15 @@ func TestProbeAll_StopsWhenContextCancelled(t *testing.T) {
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if len(p.probed) != 0 {
-		t.Errorf("expected no probes after cancel, got %v", p.probed)
+	if p.probedCount != 0 {
+		t.Errorf("expected no probe after cancel, got %d", p.probedCount)
 	}
 }
 
 func TestStart_RunsImmediateProbe(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		p := &fakeProber{
-			listFn: func(_ context.Context) ([]string, error) {
-				return []string{"ws-1"}, nil
-			},
+			hasFn: func(_ context.Context) (bool, error) { return true, nil },
 		}
 		poller := New("test", p, logger.Default())
 
@@ -103,7 +110,7 @@ func TestStart_RunsImmediateProbe(t *testing.T) {
 
 		p.mu.Lock()
 		defer p.mu.Unlock()
-		if len(p.probed) == 0 {
+		if p.probedCount == 0 {
 			t.Error("Start did not run an immediate probe")
 		}
 	})
@@ -113,9 +120,9 @@ func TestStart_IsIdempotent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var calls int32
 		p := &fakeProber{
-			listFn: func(_ context.Context) ([]string, error) {
+			hasFn: func(_ context.Context) (bool, error) {
 				atomic.AddInt32(&calls, 1)
-				return []string{"ws-1"}, nil
+				return true, nil
 			},
 		}
 		poller := New("test", p, logger.Default())
@@ -126,12 +133,12 @@ func TestStart_IsIdempotent(t *testing.T) {
 		poller.Start(ctx) // second call must be a no-op
 
 		// Wait for the immediate-on-Start probe pass to finish. If the
-		// second Start spawned a parallel loop we'd see two list calls.
+		// second Start spawned a parallel loop we'd see two has-config calls.
 		synctest.Wait()
 		poller.Stop()
 
 		if got := atomic.LoadInt32(&calls); got != 1 {
-			t.Errorf("expected exactly 1 list call from initial probe, got %d", got)
+			t.Errorf("expected exactly 1 has-config call from initial probe, got %d", got)
 		}
 	})
 }
