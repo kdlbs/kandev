@@ -378,7 +378,12 @@ describe("RepoChipsRow", () => {
 describe("computeBranchPrefix", () => {
   it("returns empty when no branch is picked yet", () => {
     expect(
-      computeBranchPrefix({ isLocalExecutor: true, rowBranch: "", currentLocalBranch: "main" }),
+      computeBranchPrefix({
+        isLocalExecutor: true,
+        rowBranch: "",
+        currentLocalBranch: "main",
+        freshBranchEnabled: false,
+      }),
     ).toBe("");
   });
 
@@ -388,6 +393,7 @@ describe("computeBranchPrefix", () => {
         isLocalExecutor: true,
         rowBranch: "main",
         currentLocalBranch: "main",
+        freshBranchEnabled: false,
       }),
     ).toBe("current: ");
   });
@@ -398,6 +404,7 @@ describe("computeBranchPrefix", () => {
         isLocalExecutor: true,
         rowBranch: "develop",
         currentLocalBranch: "main",
+        freshBranchEnabled: false,
       }),
     ).toBe("will switch to: ");
   });
@@ -412,6 +419,7 @@ describe("computeBranchPrefix", () => {
         isLocalExecutor: true,
         rowBranch: "main",
         currentLocalBranch: "",
+        freshBranchEnabled: false,
       }),
     ).toBe("will switch to: ");
   });
@@ -422,6 +430,7 @@ describe("computeBranchPrefix", () => {
         isLocalExecutor: false,
         rowBranch: "main",
         currentLocalBranch: "main",
+        freshBranchEnabled: false,
       }),
     ).toBe("from: ");
     expect(
@@ -429,6 +438,28 @@ describe("computeBranchPrefix", () => {
         isLocalExecutor: false,
         rowBranch: "develop",
         currentLocalBranch: "",
+        freshBranchEnabled: false,
+      }),
+    ).toBe("from: ");
+  });
+
+  it("returns 'from: ' when fork-a-new-branch is enabled, even on local executor", () => {
+    // Fork mode means we're creating a new branch off this base — the row.branch
+    // is a base, not a switch target. Same semantics as worktree.
+    expect(
+      computeBranchPrefix({
+        isLocalExecutor: true,
+        rowBranch: "main",
+        currentLocalBranch: "main",
+        freshBranchEnabled: true,
+      }),
+    ).toBe("from: ");
+    expect(
+      computeBranchPrefix({
+        isLocalExecutor: true,
+        rowBranch: "develop",
+        currentLocalBranch: "main",
+        freshBranchEnabled: true,
       }),
     ).toBe("from: ");
   });

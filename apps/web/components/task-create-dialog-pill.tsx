@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -133,7 +133,27 @@ export function Pill({
   tooltip,
   prefix,
 }: PillProps) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
+  // Tracks the brief window after the popover closes during which the cursor
+  // is still hovering the trigger. Without this, Radix's Tooltip becomes
+  // uncontrolled the moment `open` flips to false and pops back open from the
+  // lingering hover. Holding `open={false}` for ~200ms lets the user move
+  // away naturally and prevents the tooltip from racing back in.
+  const [suppressTooltip, setSuppressTooltip] = useState(false);
+  const suppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setOpen = useCallback((next: boolean) => {
+    setOpenState((prev) => {
+      if (prev && !next) {
+        if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
+        setSuppressTooltip(true);
+        suppressTimerRef.current = setTimeout(() => {
+          setSuppressTooltip(false);
+          suppressTimerRef.current = null;
+        }, 200);
+      }
+      return next;
+    });
+  }, []);
   const hasValue = !!value;
   // Prefix only renders alongside a real value; an empty chip with placeholder
   // ("branch") doesn't need "current: " in front of it.
@@ -193,9 +213,13 @@ export function Pill({
 
   if (!tooltip) return popover;
 
-  // Suppress the hover tooltip while the popover is open so they don't stack.
+  // Suppress the hover tooltip while the popover is open so they don't stack,
+  // and for a brief window after it closes so a lingering hover doesn't pop
+  // the tooltip back in (which Radix would otherwise do the moment we flip
+  // from controlled-closed back to uncontrolled).
+  const tooltipOpen = open || suppressTooltip ? false : undefined;
   return (
-    <Tooltip open={open ? false : undefined}>
+    <Tooltip open={tooltipOpen}>
       {popover}
       <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>

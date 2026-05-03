@@ -18,6 +18,33 @@ import {
 } from "@/components/task-create-dialog-pill";
 import { GitHubUrlSection } from "@/components/task-create-dialog-github-url";
 
+function runAutoselect({
+  branches,
+  preferredDefaultBranch,
+  preferredDefaultBranchLoading,
+  onBranchChange,
+}: {
+  branches: Array<{ name: string; type: "local" | "remote"; remote?: string }>;
+  preferredDefaultBranch: string | undefined;
+  preferredDefaultBranchLoading: boolean;
+  onBranchChange: (value: string) => void;
+}) {
+  if (preferredDefaultBranchLoading) return;
+  // Local-executor flow: preferredDefaultBranch is the workspace's current
+  // ref (branch name OR detached-HEAD short SHA). Seed row.branch with it
+  // unconditionally so the chip displays "current: <ref>". When the ref is a
+  // SHA (detached HEAD) it won't appear in the branches list, but falling
+  // through to autoSelectBranch would pick main/master and surface "will
+  // switch to: master", which contradicts what the user actually has checked
+  // out. Sending the SHA back on submit is a no-op because the backend's
+  // skip-when-equal check compares against the same SHA.
+  if (preferredDefaultBranch) {
+    onBranchChange(preferredDefaultBranch);
+    return;
+  }
+  autoSelectBranch(branches, onBranchChange);
+}
+
 /**
  * Chip row for the task-create dialog. Renders one chip per row in
  * `fs.repositories`, plus a trailing "+" to add another. Each chip is two
@@ -197,6 +224,7 @@ function ChipsList({
             isLocalExecutor,
             rowBranch: row.branch,
             currentLocalBranch: fs.currentLocalBranch,
+            freshBranchEnabled: !!fs.freshBranchEnabled,
           })}
           onRepositoryChange={(value) => onRowRepositoryChange(row.key, value)}
           onBranchChange={(value) => onRowBranchChange(row.key, value)}
@@ -245,7 +273,11 @@ function FreshBranchToggle({
           onClick={() => onToggle(!enabled)}
           data-testid="fresh-branch-toggle"
           aria-pressed={enabled}
-          aria-label={enabled ? "Fork a new branch" : "Use current branch"}
+          aria-label={
+            enabled
+              ? "Fork a new branch from a base (turn off to use current checkout)"
+              : "Fork a new branch from a base instead of using current checkout"
+          }
           className={cn(
             "inline-flex h-7 w-7 items-center justify-center rounded-md border border-input cursor-pointer transition-colors",
             enabled
@@ -256,10 +288,10 @@ function FreshBranchToggle({
           <IconGitFork className="h-3.5 w-3.5" />
         </button>
       </TooltipTrigger>
-      <TooltipContent>
+      <TooltipContent className="max-w-xs">
         {enabled
-          ? "Forking a new branch from the selected base. Click to use the existing branch instead."
-          : "Use the existing branch. Click to fork a new branch from a base instead."}
+          ? "Fork mode: a new branch will be created from the selected base before the agent runs. Click to turn off and use your repository's current checkout instead."
+          : "By default the local executor uses your repository's current checkout. Click to fork a new branch from a base instead, leaving your working tree untouched."}
       </TooltipContent>
     </Tooltip>
   );
@@ -403,18 +435,12 @@ function useRepoChipData({
   // so the current-branch preference gets first crack at row.branch.
   useEffect(() => {
     if (!branchSource || branchesLoading || branches.length === 0 || row.branch) return;
-    if (preferredDefaultBranchLoading) return;
-    if (
-      preferredDefaultBranch &&
-      branches.some((b) => {
-        const displayName = b.type === "remote" && b.remote ? `${b.remote}/${b.name}` : b.name;
-        return displayName === preferredDefaultBranch || b.name === preferredDefaultBranch;
-      })
-    ) {
-      onBranchChange(preferredDefaultBranch);
-      return;
-    }
-    autoSelectBranch(branches, onBranchChange);
+    runAutoselect({
+      branches,
+      preferredDefaultBranch,
+      preferredDefaultBranchLoading: !!preferredDefaultBranchLoading,
+      onBranchChange,
+    });
   }, [
     branchSource,
     branchesLoading,
@@ -531,7 +557,7 @@ function RepoChip({
         searchPlaceholder="Search branches..."
         emptyMessage="No branches"
         testId="branch-chip-trigger"
-        tooltip="Base branch"
+        tooltip={computeBranchTooltip(branchPrefix)}
         onRefresh={refreshBranches}
         refreshing={branchesLoading}
         filter={scoreBranch}
@@ -570,17 +596,42 @@ export function computeBranchPrefix({
   isLocalExecutor,
   rowBranch,
   currentLocalBranch,
+  freshBranchEnabled,
 }: {
   isLocalExecutor: boolean;
   rowBranch: string;
   currentLocalBranch: string;
+  freshBranchEnabled: boolean;
 }): string {
   if (!rowBranch) return "";
+  // Fork mode forks a new branch from the picked base, regardless of executor.
+  if (freshBranchEnabled) return "from: ";
   if (isLocalExecutor) {
     if (currentLocalBranch && rowBranch === currentLocalBranch) return "current: ";
     return "will switch to: ";
   }
   return "from: ";
+}
+
+/**
+ * Branch chip hover tooltip, picked to match whatever prefix the chip is
+ * currently showing so the explanation lines up with the qualifier text.
+ *   "current: "        → no git ops will run; agent uses your existing checkout
+ *   "will switch to: " → backend runs `git checkout` before the agent starts
+ *   "from: "           → a new branch / worktree is forked off this base
+ *   ""                 → no branch picked yet; generic hint
+ */
+export function computeBranchTooltip(branchPrefix: string | undefined): string {
+  if (branchPrefix === "current: ") {
+    return "Your repository's current checkout. The agent runs against it as-is, no git operations.";
+  }
+  if (branchPrefix === "will switch to: ") {
+    return "The backend will run `git checkout` to switch your repository to this branch before the agent starts.";
+  }
+  if (branchPrefix === "from: ") {
+    return "Base branch. A new branch (or worktree) is forked from here and the agent runs there.";
+  }
+  return "Branch the agent will run against.";
 }
 
 function computeBranchDisabledReason({
