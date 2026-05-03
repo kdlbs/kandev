@@ -73,10 +73,8 @@ const (
 	ActionTaskPlanRevisionGet   = "task.plan.revision.get"
 	ActionTaskPlanRevert        = "task.plan.revert"
 
-	ActionTaskSessionList    = "task.session.list"
-	ActionTaskSessionResume  = "task.session.resume"
-	ActionTaskSessionStatus  = "task.session.status"
-	ActionTaskSessionPrepare = "task.session.prepare"
+	ActionTaskSessionList   = "task.session.list"
+	ActionTaskSessionStatus = "task.session.status"
 
 	// Unified session launch
 	ActionSessionLaunch       = "session.launch"
@@ -104,15 +102,9 @@ const (
 	ActionAgentResize = "agent.resize" // Resize agent PTY (passthrough mode)
 
 	// Orchestrator actions
-	ActionOrchestratorStatus   = "orchestrator.status"
-	ActionOrchestratorQueue    = "orchestrator.queue"
-	ActionOrchestratorTrigger  = "orchestrator.trigger"
-	ActionOrchestratorStart    = "orchestrator.start"
-	ActionOrchestratorStop     = "orchestrator.stop"
-	ActionOrchestratorPause    = "orchestrator.pause"
-	ActionOrchestratorResume   = "orchestrator.resume"
-	ActionOrchestratorPrompt   = "orchestrator.prompt"
-	ActionOrchestratorComplete = "orchestrator.complete"
+	ActionOrchestratorStatus = "orchestrator.status"
+	ActionOrchestratorQueue  = "orchestrator.queue"
+	ActionOrchestratorStop   = "orchestrator.stop"
 
 	// Message Queue actions
 	ActionMessageQueueAdd           = "message.queue.add"

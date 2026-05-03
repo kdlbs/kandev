@@ -27,59 +27,6 @@ type QueueResponse struct {
 	Total int             `json:"total"`
 }
 
-// TriggerTaskRequest is the payload for orchestrator.trigger
-type TriggerTaskRequest struct {
-	TaskID string `json:"task_id"`
-}
-
-// TriggerTaskResponse is the response for orchestrator.trigger
-type TriggerTaskResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	TaskID  string `json:"task_id"`
-}
-
-// StartTaskRequest is the payload for orchestrator.start
-// If SessionID is provided, the existing session is resumed and prompted with workflow step config.
-// If SessionID is not provided, a new session is created (requires AgentProfileID).
-type StartTaskRequest struct {
-	TaskID         string `json:"task_id"`
-	SessionID      string `json:"session_id,omitempty"`       // If provided, resume this existing session instead of creating new
-	AgentProfileID string `json:"agent_profile_id,omitempty"` // Required when creating new session (SessionID not provided)
-	ExecutorID     string `json:"executor_id,omitempty"`      // Executor to use (determines runtime: local, worktree, local_docker, etc.)
-	Priority       int    `json:"priority,omitempty"`
-	Prompt         string `json:"prompt,omitempty"`           // Initial prompt to send to the agent
-	WorkflowStepID string `json:"workflow_step_id,omitempty"` // If provided, prompt prefix/suffix and plan mode are applied from the step
-}
-
-// StartTaskResponse is the response for orchestrator.start
-type StartTaskResponse struct {
-	Success          bool    `json:"success"`
-	TaskID           string  `json:"task_id"`
-	AgentExecutionID string  `json:"agent_execution_id"`
-	TaskSessionID    string  `json:"session_id,omitempty"`
-	State            string  `json:"state"`
-	WorktreePath     *string `json:"worktree_path,omitempty"`
-	WorktreeBranch   *string `json:"worktree_branch,omitempty"`
-}
-
-// ResumeTaskSessionRequest is the payload for task.session.resume
-type ResumeTaskSessionRequest struct {
-	TaskID        string `json:"task_id"`
-	TaskSessionID string `json:"session_id"`
-}
-
-// ResumeTaskSessionResponse is the response for task.session.resume
-type ResumeTaskSessionResponse struct {
-	Success          bool    `json:"success"`
-	TaskID           string  `json:"task_id"`
-	AgentExecutionID string  `json:"agent_execution_id"`
-	TaskSessionID    string  `json:"session_id,omitempty"`
-	State            string  `json:"state"`
-	WorktreePath     *string `json:"worktree_path,omitempty"`
-	WorktreeBranch   *string `json:"worktree_branch,omitempty"`
-}
-
 // TaskSessionStatusRequest is the payload for task.session.status
 type TaskSessionStatusRequest struct {
 	TaskID        string `json:"task_id"`
@@ -134,32 +81,6 @@ type StopTaskRequest struct {
 // SuccessResponse is a generic success response
 type SuccessResponse struct {
 	Success bool `json:"success"`
-}
-
-// PromptTaskRequest is the payload for orchestrator.prompt
-type PromptTaskRequest struct {
-	TaskID        string `json:"task_id"`
-	TaskSessionID string `json:"session_id"`
-	Prompt        string `json:"prompt"`
-	Model         string `json:"model,omitempty"`     // Optional: switch to this model before processing prompt
-	PlanMode      bool   `json:"plan_mode,omitempty"` // Optional: enable plan mode (analyze before executing)
-}
-
-// PromptTaskResponse is the response for orchestrator.prompt
-type PromptTaskResponse struct {
-	Success    bool   `json:"success"`
-	StopReason string `json:"stop_reason"`
-}
-
-// CompleteTaskRequest is the payload for orchestrator.complete
-type CompleteTaskRequest struct {
-	TaskID string `json:"task_id"`
-}
-
-// CompleteTaskResponse is the response for orchestrator.complete
-type CompleteTaskResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
 }
 
 // PermissionRespondRequest is the payload for permission.respond
