@@ -165,7 +165,8 @@ func (m *mockSessionLauncher) StartCreatedSession(context.Context, string, strin
 func (m *mockSessionLauncher) ResumeTaskSession(context.Context, string, string) (*executor.TaskExecution, error) {
 	return nil, nil
 }
-func (m *mockSessionLauncher) GetMessageQueue() *messagequeue.Service { return nil }
+func (m *mockSessionLauncher) GetMessageQueue() *messagequeue.Service                  { return nil }
+func (m *mockSessionLauncher) StopSession(context.Context, string, string, bool) error { return nil }
 
 func TestAutoStartTask_DefaultsToWorktreeExecutor(t *testing.T) {
 	launcher := newMockSessionLauncher()

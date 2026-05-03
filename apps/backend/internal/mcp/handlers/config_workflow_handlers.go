@@ -213,6 +213,41 @@ func (h *Handlers) handleReorderWorkflowSteps(ctx context.Context, msg *ws.Messa
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
 }
 
+func (h *Handlers) handleGetWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return h.handleListByField(ctx, msg, "workflow_id", "failed to get workflow", "Failed to get workflow",
+		func(ctx context.Context, workflowID string) (any, error) {
+			return h.taskSvc.GetWorkflow(ctx, workflowID)
+		})
+}
+
+func (h *Handlers) handleReorderWorkflows(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		WorkspaceID string   `json:"workspace_id"`
+		WorkflowIDs []string `json:"workflow_ids"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.WorkspaceID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
+	}
+	if len(req.WorkflowIDs) == 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_ids is required", nil)
+	}
+	if err := h.taskSvc.ReorderWorkflows(ctx, req.WorkspaceID, req.WorkflowIDs); err != nil {
+		h.logger.Error("failed to reorder workflows", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to reorder workflows", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+}
+
+func (h *Handlers) handleGetWorkflowStep(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return h.handleListByField(ctx, msg, "step_id", "failed to get workflow step", "Failed to get workflow step",
+		func(ctx context.Context, stepID string) (any, error) {
+			return h.workflowCtrl.GetStep(ctx, stepID)
+		})
+}
+
 // publishWorkflowStepEvent publishes a workflow step event to the event bus.
 func (h *Handlers) publishWorkflowStepEvent(ctx context.Context, eventType string, step *wfmodels.WorkflowStep) {
 	if h.eventBus == nil || step == nil {

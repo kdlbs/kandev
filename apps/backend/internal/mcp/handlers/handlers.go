@@ -65,6 +65,7 @@ type SessionLauncher interface {
 	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error)
 	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error)
 	ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error)
+	StopSession(ctx context.Context, sessionID, reason string, force bool) error
 	GetMessageQueue() *messagequeue.Service
 }
 
@@ -157,7 +158,27 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPDeleteTaskPlan, h.handleDeleteTaskPlan)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 15
+	d.RegisterFunc(ws.ActionMCPGetTask, h.handleGetTask)
+	d.RegisterFunc(ws.ActionMCPListTasksByWorkspace, h.handleListTasksByWorkspace)
+	d.RegisterFunc(ws.ActionMCPBulkMoveTasks, h.handleBulkMoveTasks)
+	d.RegisterFunc(ws.ActionMCPGetWorkflow, h.handleGetWorkflow)
+	d.RegisterFunc(ws.ActionMCPReorderWorkflows, h.handleReorderWorkflows)
+	d.RegisterFunc(ws.ActionMCPGetWorkflowStep, h.handleGetWorkflowStep)
+	d.RegisterFunc(ws.ActionMCPGetWorkspace, h.handleGetWorkspace)
+	d.RegisterFunc(ws.ActionMCPCreateWorkspace, h.handleCreateWorkspace)
+	d.RegisterFunc(ws.ActionMCPUpdateWorkspace, h.handleUpdateWorkspace)
+	d.RegisterFunc(ws.ActionMCPDeleteWorkspace, h.handleDeleteWorkspace)
+	d.RegisterFunc(ws.ActionMCPListRepositories, h.handleListRepositories)
+	d.RegisterFunc(ws.ActionMCPCreateRepository, h.handleCreateRepository)
+	d.RegisterFunc(ws.ActionMCPDeleteRepository, h.handleDeleteRepository)
+	d.RegisterFunc(ws.ActionMCPLaunchSession, h.handleLaunchSession)
+	d.RegisterFunc(ws.ActionMCPStopSession, h.handleStopSession)
+	d.RegisterFunc(ws.ActionMCPGetTaskSessions, h.handleGetTaskSessions)
+	d.RegisterFunc(ws.ActionMCPMoveTask, h.handleMoveTask)
+	d.RegisterFunc(ws.ActionMCPDeleteTask, h.handleDeleteTask)
+	d.RegisterFunc(ws.ActionMCPArchiveTask, h.handleArchiveTask)
+	d.RegisterFunc(ws.ActionMCPUpdateTaskState, h.handleUpdateTaskState)
+	count := 35
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
@@ -190,12 +211,6 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		count += 2
 	}
 	if h.taskSvc != nil {
-		d.RegisterFunc(ws.ActionMCPMoveTask, h.handleMoveTask)
-		d.RegisterFunc(ws.ActionMCPDeleteTask, h.handleDeleteTask)
-		d.RegisterFunc(ws.ActionMCPArchiveTask, h.handleArchiveTask)
-		d.RegisterFunc(ws.ActionMCPUpdateTaskState, h.handleUpdateTaskState)
-		count += 4
-
 		// Executor mutation handlers (config-mode only)
 		if h.workflowSvc != nil {
 			d.RegisterFunc(ws.ActionMCPCreateExecutorProfile, h.handleCreateExecutorProfile)

@@ -285,6 +285,14 @@ func (s *Server) registerTools() {
 		count += 5
 		s.registerConfigTaskTools()
 		count += 6
+		s.registerExtendedTaskTools()
+		count += 6
+		s.registerWorkspaceTools()
+		count += 4
+		s.registerRepositoryTools()
+		count += 3
+		s.registerSessionTools()
+		count += 3
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -303,11 +311,27 @@ func (s *Server) registerTools() {
 		count += 5
 		s.registerConfigTaskTools()
 		count += 6
+		s.registerExtendedTaskTools()
+		count += 6
+		s.registerWorkspaceTools()
+		count += 4
+		s.registerRepositoryTools()
+		count += 3
+		s.registerSessionTools()
+		count += 3
 		s.registerCreateTaskTool()
 		count++
 	default: // ModeTask
 		s.registerKanbanTools()
-		count += 11
+		count += 14
+		s.registerExtendedTaskTools()
+		count += 6
+		s.registerWorkspaceTools()
+		count += 4
+		s.registerRepositoryTools()
+		count += 3
+		s.registerSessionTools()
+		count += 3
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -420,6 +444,28 @@ Returns the dispatch status: "queued", "sent", or "started".`),
 			mcp.WithArray("message_types", mcp.Description("Optional message type filters (e.g. message, tool_call, error)"), mcp.Items(map[string]any{"type": "string"})),
 		),
 		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("delete_task_kandev",
+			mcp.WithDescription("Delete a task permanently."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete")),
+		),
+		s.wrapHandler("delete_task_kandev", s.deleteTaskHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("archive_task_kandev",
+			mcp.WithDescription("Archive a task."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to archive")),
+		),
+		s.wrapHandler("archive_task_kandev", s.archiveTaskHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("update_task_state_kandev",
+			mcp.WithDescription("Update the state of a task."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
+			mcp.WithString("state", mcp.Required(), mcp.Description("New state: open, in_progress, complete, blocked, cancelled")),
+		),
+		s.wrapHandler("update_task_state_kandev", s.updateTaskStateHandler()),
 	)
 }
 
