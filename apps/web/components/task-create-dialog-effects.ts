@@ -163,10 +163,16 @@ export function useCurrentLocalBranchEffect(
   workspaceId: string | null,
   repositories: Repository[],
 ) {
-  const { repositories: rows, useGitHubUrl, setCurrentLocalBranch } = fs;
+  const {
+    repositories: rows,
+    useGitHubUrl,
+    setCurrentLocalBranch,
+    setCurrentLocalBranchLoading,
+  } = fs;
   useEffect(() => {
     if (!open || !workspaceId || useGitHubUrl || rows.length !== 1) {
       setCurrentLocalBranch("");
+      setCurrentLocalBranchLoading(false);
       return;
     }
     const row = rows[0];
@@ -177,20 +183,41 @@ export function useCurrentLocalBranchEffect(
     }
     if (!path) {
       setCurrentLocalBranch("");
+      setCurrentLocalBranchLoading(false);
       return;
     }
     let cancelled = false;
+    setCurrentLocalBranchLoading(true);
     getLocalRepositoryStatusAction(workspaceId, path)
       .then((r) => {
-        if (!cancelled) setCurrentLocalBranch(r.current_branch ?? "");
+        if (cancelled) return;
+        const branch = r.current_branch ?? "";
+        if (!branch) {
+          // Backend silently returns "" for detached HEAD or path-allowlist
+          // misses. Surface for debugging without blocking the UI.
+          console.warn("[task-create] local repo status returned no current branch", { path });
+        }
+        setCurrentLocalBranch(branch);
+        setCurrentLocalBranchLoading(false);
       })
-      .catch(() => {
-        if (!cancelled) setCurrentLocalBranch("");
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn("[task-create] failed to load local repo status", { path, err });
+        setCurrentLocalBranch("");
+        setCurrentLocalBranchLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [open, workspaceId, useGitHubUrl, rows, repositories, setCurrentLocalBranch]);
+  }, [
+    open,
+    workspaceId,
+    useGitHubUrl,
+    rows,
+    repositories,
+    setCurrentLocalBranch,
+    setCurrentLocalBranchLoading,
+  ]);
 }
 
 export function useDefaultSelectionsEffect(

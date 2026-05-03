@@ -172,6 +172,7 @@ function ChipsList({
           excludedRepoIds={collectUsedRepoIds(fs.repositories, row.key)}
           branchLocked={branchLocked}
           branchOverride={branchLocked ? fs.currentLocalBranch : undefined}
+          branchOverrideLoading={branchLocked ? fs.currentLocalBranchLoading : false}
           onRepositoryChange={(value) => onRowRepositoryChange(row.key, value)}
           onBranchChange={(value) => onRowBranchChange(row.key, value)}
           onRemove={() => fs.removeRepository(row.key)}
@@ -277,6 +278,13 @@ type RepoChipProps = {
    * instead of whatever the user picked under a different executor.
    */
   branchOverride?: string;
+  /**
+   * True while resolving the locked branch from disk. Lets the chip render
+   * a "Loading branch…" placeholder instead of the generic "branch" stub —
+   * which would otherwise lie to the user about an unset state in the brief
+   * window between dialog open and the local-status fetch resolving.
+   */
+  branchOverrideLoading?: boolean;
   onRepositoryChange: (value: string) => void;
   onBranchChange: (value: string) => void;
   onRemove: () => void;
@@ -386,6 +394,7 @@ function RepoChip({
   excludedRepoIds,
   branchLocked,
   branchOverride,
+  branchOverrideLoading,
   onRepositoryChange,
   onBranchChange,
   onRemove,
@@ -403,11 +412,14 @@ function RepoChip({
     repositories,
     discoveredRepositories,
   );
-  const branchValue = branchOverride ?? row.branch;
+  // Show empty (so the placeholder renders) while the locked-branch fetch is
+  // in flight; otherwise the chip would briefly display row.branch before the
+  // override lands and snap to a different value.
+  const branchValue = branchOverrideLoading ? "" : (branchOverride ?? row.branch);
   const hasRepo = !!(row.repositoryId || row.localPath);
   const branchPlaceholder = computeBranchPlaceholder(
     hasRepo,
-    branchesLoading,
+    branchesLoading || !!branchOverrideLoading,
     branchOptions.length,
   );
 

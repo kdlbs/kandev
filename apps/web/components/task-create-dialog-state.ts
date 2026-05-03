@@ -240,11 +240,14 @@ function useWorkflowAgentProfileState() {
 function useFreshBranchState() {
   const [freshBranchEnabled, setFreshBranchEnabled] = useState(false);
   const [currentLocalBranch, setCurrentLocalBranch] = useState("");
+  const [currentLocalBranchLoading, setCurrentLocalBranchLoading] = useState(false);
   return {
     freshBranchEnabled,
     setFreshBranchEnabled,
     currentLocalBranch,
     setCurrentLocalBranch,
+    currentLocalBranchLoading,
+    setCurrentLocalBranchLoading,
   };
 }
 
@@ -505,7 +508,13 @@ export function useDialogComputed({
   const executorHint = useExecutorHint(executors, fs.executorId, selectedRepoCount);
   const isLocalExecutor = useIsLocalExecutor(executors, fs.executorId);
   const { headerRepositoryOptions } = useRepositoryOptions(repositories, fs.discoveredRepositories);
-  const agentProfilesLoading = open && !settingsData.agentsLoaded;
+  // Treat the dialog as still loading agents until BOTH the agent profiles
+  // (DB rows) AND the host-utility capability probe have resolved. The
+  // backend reconciler renames profiles ("Claude" → "Claude Sonnet 4.6") only
+  // after the probe lands, so showing the selector before then surfaces stale
+  // labels missing the model badge.
+  const agentProfilesLoading =
+    open && (!settingsData.agentsLoaded || !settingsData.capabilitiesLoaded);
   const executorsLoading = open && !settingsData.executorsLoaded;
   return {
     isPassthroughProfile,
@@ -556,6 +565,7 @@ export function useTaskCreateDialogData(
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const executors = useAppStore((state) => state.executors.items);
   const settingsData = useAppStore((state) => state.settingsData);
+  const availableAgentsLoaded = useAppStore((state) => state.availableAgents.loaded);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
 
   useSettingsData(open);
@@ -570,7 +580,11 @@ export function useTaskCreateDialogData(
     workspaceId,
     workflowId,
     defaultStepId,
-    settingsData,
+    settingsData: {
+      agentsLoaded: settingsData.agentsLoaded,
+      executorsLoaded: settingsData.executorsLoaded,
+      capabilitiesLoaded: availableAgentsLoaded,
+    },
     agentProfiles,
     workspaces,
     executors,
