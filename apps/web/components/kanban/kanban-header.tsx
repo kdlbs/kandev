@@ -318,6 +318,7 @@ function DesktopHeader({
   toggleValue,
   handleViewChange,
   showReleaseNotesButton,
+  releaseNotesHasUnseen,
   onOpenReleaseNotes,
   showHealthIndicator,
   onOpenHealthDialog,
@@ -332,6 +333,7 @@ function DesktopHeader({
   toggleValue: string;
   handleViewChange: (value: string) => void;
   showReleaseNotesButton: boolean;
+  releaseNotesHasUnseen: boolean;
   onOpenReleaseNotes: () => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
@@ -390,7 +392,11 @@ function DesktopHeader({
             size="icon-lg"
           />
           {showReleaseNotesButton && (
-            <ReleaseNotesButton hasUnseen onClick={onOpenReleaseNotes} size="icon-lg" />
+            <ReleaseNotesButton
+              hasUnseen={releaseNotesHasUnseen}
+              onClick={onOpenReleaseNotes}
+              size="icon-lg"
+            />
           )}
           <SettingsTopbarButton size="icon-lg" />
         </>
@@ -440,6 +446,7 @@ export function KanbanHeader({
 
   const indicatorProps = {
     showReleaseNotesButton: releaseNotes.showTopbarButton,
+    releaseNotesHasUnseen: releaseNotes.hasUnseen,
     onOpenReleaseNotes: releaseNotes.openDialog,
     showHealthIndicator: healthIndicator.hasIssues,
     onOpenHealthDialog: healthIndicator.openDialog,

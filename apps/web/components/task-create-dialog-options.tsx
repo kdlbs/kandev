@@ -16,6 +16,7 @@ import { formatUserHomePath, truncateRepoPath } from "@/lib/utils";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { getCapabilityWarning } from "@/lib/capability-warning";
+import { buildBranchKeywords } from "./task-create-dialog-pill";
 
 type OptionItem = {
   value: string;
@@ -112,20 +113,6 @@ export function useBranchOptions(branchOptionsRaw: Branch[]) {
       };
     });
   }, [branchOptionsRaw]);
-}
-
-const BRANCH_SEGMENT_RE = /[/_.\-\s]+/;
-
-function buildBranchKeywords(name: string, remote?: string): string[] {
-  const out = new Set<string>();
-  out.add(name);
-  const leafIdx = name.lastIndexOf("/");
-  if (leafIdx >= 0) out.add(name.slice(leafIdx + 1));
-  for (const seg of name.split(BRANCH_SEGMENT_RE)) {
-    if (seg) out.add(seg);
-  }
-  if (remote) out.add(remote);
-  return Array.from(out);
 }
 
 export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): OptionItem[] {

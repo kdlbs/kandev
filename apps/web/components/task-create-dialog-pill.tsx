@@ -207,7 +207,7 @@ export function sortBranches(branches: Branch[]): Branch[] {
 
 const BRANCH_SEGMENT_RE = /[/_.\-\s]+/;
 
-function buildBranchKeywords(name: string, remote?: string): string[] {
+export function buildBranchKeywords(name: string, remote?: string): string[] {
   const out = new Set<string>();
   out.add(name);
   const leafIdx = name.lastIndexOf("/");
