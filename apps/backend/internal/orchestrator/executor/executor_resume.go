@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -477,10 +478,21 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 
 	execConfig := e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
 
+	existingEnv, err := e.resolveResumeTaskEnvironment(ctx, task.ID, session)
+	if err != nil {
+		return nil, "", execConfig, nil, err
+	}
+	if session.TaskEnvironmentID != "" {
+		req.TaskEnvironmentID = session.TaskEnvironmentID
+	}
+
 	repositoryID, err := e.applyResumeRepoConfig(ctx, task, session, req)
 	if err != nil {
 		return nil, "", execConfig, nil, err
 	}
+
+	e.applyExistingEnvironment(req, existingEnv)
+	e.applyExistingEnvironmentRuntimeMetadata(ctx, req, existingEnv)
 
 	// Activate config-mode MCP tools when config_mode is set in session metadata.
 	if isConfigModeSession(session) {
@@ -490,6 +502,20 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 	existingRunning := e.applyRunningRecordToResumeRequest(ctx, req, task, session, startAgent)
 
 	return req, repositoryID, execConfig, existingRunning, nil
+}
+
+func (e *Executor) resolveResumeTaskEnvironment(ctx context.Context, taskID string, session *models.TaskSession) (*models.TaskEnvironment, error) {
+	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("lookup existing task environment: %w", err)
+	}
+	if env == nil {
+		return nil, nil
+	}
+	if session.TaskEnvironmentID != env.ID {
+		session.TaskEnvironmentID = env.ID
+	}
+	return env, nil
 }
 
 // applyExecutorConfigToResumeRequest resolves executor config and applies it to the

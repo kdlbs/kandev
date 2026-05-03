@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 func newEnvTestExecutor(t *testing.T) *Executor {
@@ -151,6 +152,84 @@ func TestApplyExistingEnvironmentRuntimeMetadata_CarriesPersistentSecrets(t *tes
 	}
 	if req.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] != "secret-nonce" {
 		t.Fatalf("bootstrap nonce secret missing: %v", req.Metadata)
+	}
+	if _, ok := req.Metadata["task_description"]; ok {
+		t.Fatalf("launch-only metadata should be filtered out: %v", req.Metadata)
+	}
+}
+
+func TestBuildResumeRequest_ReusesTaskEnvironmentRuntimeMetadata(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{}
+	exec := newTestExecutor(t, agentManager, repo)
+	now := time.Now().UTC()
+	task := &v1.Task{
+		ID:          "task-1",
+		WorkspaceID: "workspace-1",
+		Title:       "Task 1",
+	}
+	session := &models.TaskSession{
+		ID:                "session-new",
+		TaskID:            "task-1",
+		AgentProfileID:    "profile-1",
+		ExecutorID:        models.ExecutorIDLocalDocker,
+		TaskEnvironmentID: "env-1",
+		State:             models.TaskSessionStateWaitingForInput,
+		StartedAt:         now,
+		UpdatedAt:         now,
+	}
+	repo.executors[models.ExecutorIDLocalDocker] = &models.Executor{
+		ID:        models.ExecutorIDLocalDocker,
+		Type:      models.ExecutorTypeLocalDocker,
+		Status:    models.ExecutorStatusActive,
+		Resumable: true,
+	}
+	repo.taskEnvironments["env-1"] = &models.TaskEnvironment{
+		ID:               "env-1",
+		TaskID:           "task-1",
+		ExecutorType:     string(models.ExecutorTypeLocalDocker),
+		AgentExecutionID: "exec-old",
+		ContainerID:      "container-old",
+		Status:           models.TaskEnvironmentStatusReady,
+	}
+	repo.sessions["session-old"] = &models.TaskSession{
+		ID:                "session-old",
+		TaskID:            "task-1",
+		TaskEnvironmentID: "env-1",
+		StartedAt:         now.Add(-time.Minute),
+		UpdatedAt:         now.Add(-time.Minute),
+	}
+	repo.executorsRunning["session-old"] = &models.ExecutorRunning{
+		SessionID:        "session-old",
+		TaskID:           "task-1",
+		AgentExecutionID: "exec-old",
+		ContainerID:      "container-old",
+		Runtime:          string(models.ExecutorTypeLocalDocker),
+		Metadata: map[string]interface{}{
+			lifecycle.MetadataKeyAuthTokenSecret: "secret-token",
+			"task_description":                   "drop me",
+		},
+	}
+
+	req, _, _, running, err := exec.buildResumeRequest(context.Background(), task, session, true)
+	if err != nil {
+		t.Fatalf("buildResumeRequest returned error: %v", err)
+	}
+
+	if running != nil {
+		t.Fatalf("current session should not have an ExecutorRunning row")
+	}
+	if req.TaskEnvironmentID != "env-1" {
+		t.Fatalf("TaskEnvironmentID = %q, want env-1", req.TaskEnvironmentID)
+	}
+	if req.PreviousExecutionID != "exec-old" {
+		t.Fatalf("PreviousExecutionID = %q, want latest environment execution exec-old", req.PreviousExecutionID)
+	}
+	if req.Metadata[lifecycle.MetadataKeyContainerID] != "container-old" {
+		t.Fatalf("container metadata = %v, want container-old", req.Metadata[lifecycle.MetadataKeyContainerID])
+	}
+	if req.Metadata[lifecycle.MetadataKeyAuthTokenSecret] != "secret-token" {
+		t.Fatalf("auth token secret missing: %v", req.Metadata)
 	}
 	if _, ok := req.Metadata["task_description"]; ok {
 		t.Fatalf("launch-only metadata should be filtered out: %v", req.Metadata)

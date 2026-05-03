@@ -169,6 +169,17 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 		taskID = info.TaskID
 	}
 
+	if info.TaskEnvironmentID != "" {
+		if execution, exists := m.executionStore.GetByTaskEnvironmentID(info.TaskEnvironmentID); exists {
+			m.logger.Info("reusing existing execution for task environment",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("task_environment_id", info.TaskEnvironmentID),
+				zap.String("execution_id", execution.ID))
+			return execution, nil
+		}
+	}
+
 	if info.WorkspacePath == "" {
 		return nil, fmt.Errorf("%w: session %s has no workspace path yet", ErrSessionWorkspaceNotReady, sessionID)
 	}

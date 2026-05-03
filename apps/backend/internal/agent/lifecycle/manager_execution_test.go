@@ -544,6 +544,52 @@ func TestEnsureWorkspaceExecutionForSession_EmptyTaskID(t *testing.T) {
 	})
 }
 
+func TestEnsureWorkspaceExecutionForSession_ReusesExistingTaskEnvironmentExecution(t *testing.T) {
+	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			"session-1": {
+				TaskID:            "task-1",
+				SessionID:         "session-1",
+				TaskEnvironmentID: "env-1",
+				WorkspacePath:     "/workspace/task-1",
+				AgentID:           "auggie",
+			},
+			"session-2": {
+				TaskID:            "task-1",
+				SessionID:         "session-2",
+				TaskEnvironmentID: "env-1",
+				WorkspacePath:     "/workspace/task-1",
+				AgentID:           "auggie",
+			},
+		},
+	})
+	existing := &AgentExecution{
+		ID:                "exec-existing",
+		SessionID:         "session-1",
+		TaskID:            "task-1",
+		TaskEnvironmentID: "env-1",
+		Status:            v1.AgentStatusRunning,
+		agentctl:          newReadyAgentctlClient(t, newTestLogger()),
+	}
+	if err := mgr.executionStore.Add(existing); err != nil {
+		t.Fatalf("add existing execution: %v", err)
+	}
+
+	got, err := mgr.EnsureWorkspaceExecutionForSession(context.Background(), "task-1", "session-2")
+	if err != nil {
+		t.Fatalf("EnsureWorkspaceExecutionForSession returned error: %v", err)
+	}
+	if got.ID != existing.ID {
+		t.Fatalf("execution ID = %q, want existing environment execution %q", got.ID, existing.ID)
+	}
+	if got.SessionID != "session-1" {
+		t.Fatalf("execution session ID = %q, want original owner session", got.SessionID)
+	}
+	if backend.createCount.Load() != 0 {
+		t.Fatalf("CreateInstance calls = %d, want 0", backend.createCount.Load())
+	}
+}
+
 // --- test helpers ---
 
 type createInstanceExecutor struct {
