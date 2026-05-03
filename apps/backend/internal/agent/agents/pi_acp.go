@@ -85,6 +85,10 @@ func (a *PiACP) Runtime() *RuntimeConfig {
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
 		Protocol:       agent.ProtocolACP,
 		SessionConfig: SessionConfig{
+			// TODO: set SessionDirTemplate once the Pi session dir is
+			// confirmed. Without it, the Docker runtime skips mounting the
+			// session dir, so NativeSessionResume has no persistence across
+			// container restarts.
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
 		},

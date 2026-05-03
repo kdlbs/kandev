@@ -87,6 +87,12 @@ func (a *KiroACP) Runtime() *RuntimeConfig {
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
 		Protocol:       agent.ProtocolACP,
 		SessionConfig: SessionConfig{
+			// TODO: set SessionDirTemplate once the Kiro session dir is
+			// confirmed (likely "{home}/.kiro"). Without it, the Docker
+			// runtime skips mounting the session dir, so NativeSessionResume
+			// has no persistence across container restarts. ACP-native
+			// session/load still works in standalone mode where the host
+			// home dir is the working filesystem.
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
 		},
