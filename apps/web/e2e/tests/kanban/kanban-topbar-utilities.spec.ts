@@ -32,6 +32,9 @@ test.describe("Kanban topbar utilities", () => {
   });
 
   test("system health button is visible when there are issues", async ({ testPage, backend }) => {
+    // Lock to desktop width — on mobile the health button lives inside the closed hamburger sheet.
+    await testPage.setViewportSize({ width: 1280, height: 800 });
+
     await testPage.route(`${backend.baseUrl}/api/v1/system/health`, (route) =>
       route.fulfill({
         status: 200,
