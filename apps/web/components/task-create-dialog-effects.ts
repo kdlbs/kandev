@@ -191,18 +191,11 @@ export function useCurrentLocalBranchEffect(
     getLocalRepositoryStatusAction(workspaceId, path)
       .then((r) => {
         if (cancelled) return;
-        const branch = r.current_branch ?? "";
-        if (!branch) {
-          // Backend silently returns "" for detached HEAD or path-allowlist
-          // misses. Surface for debugging without blocking the UI.
-          console.warn("[task-create] local repo status returned no current branch", { path });
-        }
-        setCurrentLocalBranch(branch);
+        setCurrentLocalBranch(r.current_branch ?? "");
         setCurrentLocalBranchLoading(false);
       })
-      .catch((err) => {
+      .catch(() => {
         if (cancelled) return;
-        console.warn("[task-create] failed to load local repo status", { path, err });
         setCurrentLocalBranch("");
         setCurrentLocalBranchLoading(false);
       });
