@@ -52,6 +52,22 @@ importers:
       vitest:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.28)(happy-dom@20.8.9)(lightningcss@1.30.2)
+    optionalDependencies:
+      '@kdlbs/runtime-darwin-arm64':
+        specifier: 0.0.0-bootstrap
+        version: 0.0.0-bootstrap
+      '@kdlbs/runtime-darwin-x64':
+        specifier: 0.0.0-bootstrap
+        version: 0.0.0-bootstrap
+      '@kdlbs/runtime-linux-arm64':
+        specifier: 0.0.0-bootstrap
+        version: 0.0.0-bootstrap
+      '@kdlbs/runtime-linux-x64':
+        specifier: 0.0.0-bootstrap
+        version: 0.0.0-bootstrap
+      '@kdlbs/runtime-win32-x64':
+        specifier: 0.0.0-bootstrap
+        version: 0.0.0-bootstrap
 
   packages/theme:
     dependencies:
@@ -1635,6 +1651,31 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@kdlbs/runtime-darwin-arm64@0.0.0-bootstrap':
+    resolution: {integrity: sha512-i3H7KOcw5m1KEhXhTSa9+jNBlAh0Vc8NVkiGL9BpKB5n/COrhBol7YcN1WNkxs/6WdpD9LFo2My+51wODrC9tQ==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@kdlbs/runtime-darwin-x64@0.0.0-bootstrap':
+    resolution: {integrity: sha512-ia8qU58B1pWr2AM9/qsPP514L6SftSYYmbFG49kcWNZMpRhosdbKNm1GfDce4yE+MKeOpmLmjPu/pR7ZnyMJpg==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@kdlbs/runtime-linux-arm64@0.0.0-bootstrap':
+    resolution: {integrity: sha512-m3UUB0GYOKNVwgW8wwdsjV6dFFmTYxI9vmLMtvgWz01GW1y+Ms5YSRhb0RT5NRMvYpn7xDntlJCjtPATE+RZ7A==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@kdlbs/runtime-linux-x64@0.0.0-bootstrap':
+    resolution: {integrity: sha512-XpcVCGngqq9wsZR2OASQwCiylTFUVD7iDoqeeWUuzZZ1wRxdGqYNV31xrEciq+96O/pI+dn5zWgbMYQEXc309w==}
+    cpu: [x64]
+    os: [linux]
+
+  '@kdlbs/runtime-win32-x64@0.0.0-bootstrap':
+    resolution: {integrity: sha512-x/KRLCugV2eOLCJQWTUmBGU08rz7ep83GdTNZLeyQ3UmOKErVARk5eC9lWNO8LnlQr8LbahK9KdRW6Jhieee2A==}
+    cpu: [x64]
+    os: [win32]
 
   '@lezer/common@1.5.0':
     resolution: {integrity: sha512-PNGcolp9hr4PJdXR4ix7XtixDrClScvtSCYW3rQG106oVMOOI+jFb+0+J3mbeL/53g1Zd6s0kJzaw6Ri68GmAA==}
@@ -8098,6 +8139,21 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@kdlbs/runtime-darwin-arm64@0.0.0-bootstrap':
+    optional: true
+
+  '@kdlbs/runtime-darwin-x64@0.0.0-bootstrap':
+    optional: true
+
+  '@kdlbs/runtime-linux-arm64@0.0.0-bootstrap':
+    optional: true
+
+  '@kdlbs/runtime-linux-x64@0.0.0-bootstrap':
+    optional: true
+
+  '@kdlbs/runtime-win32-x64@0.0.0-bootstrap':
+    optional: true
 
   '@lezer/common@1.5.0': {}
 

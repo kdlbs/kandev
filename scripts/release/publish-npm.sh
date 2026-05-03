@@ -104,6 +104,27 @@ for pkg in "${RUNTIME_PACKAGES[@]}"; do
   fi
 done
 
+# -- Pin optionalDependencies before publishing main kandev ------------------
+#
+# In committed source, optionalDependencies reference 0.0.0-bootstrap so the
+# lockfile resolves during normal development. For the published kandev@VERSION
+# package, we want optionalDependencies to point at @kdlbs/runtime-*@VERSION
+# so users get matching runtime bundles. The runtime packages were just
+# published above, so this version exists on npm now.
+log "Pinning optionalDependencies to $VERSION before publishing main package..."
+node -e "
+  const fs = require('fs');
+  const path = '$ROOT_DIR/apps/cli/package.json';
+  const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+  if (pkg.optionalDependencies) {
+    for (const k of Object.keys(pkg.optionalDependencies)) {
+      pkg.optionalDependencies[k] = '$VERSION';
+    }
+  }
+  fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+"
+log_ok "optionalDependencies pinned to $VERSION"
+
 # -- Publish main kandev package ----------------------------------------------
 
 echo

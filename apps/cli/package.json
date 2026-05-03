@@ -17,11 +17,11 @@
     "npm": ">=7"
   },
   "optionalDependencies": {
-    "@kdlbs/runtime-linux-x64": "0.16.0",
-    "@kdlbs/runtime-linux-arm64": "0.16.0",
-    "@kdlbs/runtime-darwin-x64": "0.16.0",
-    "@kdlbs/runtime-darwin-arm64": "0.16.0",
-    "@kdlbs/runtime-win32-x64": "0.16.0"
+    "@kdlbs/runtime-linux-x64": "0.0.0-bootstrap",
+    "@kdlbs/runtime-linux-arm64": "0.0.0-bootstrap",
+    "@kdlbs/runtime-darwin-x64": "0.0.0-bootstrap",
+    "@kdlbs/runtime-darwin-arm64": "0.0.0-bootstrap",
+    "@kdlbs/runtime-win32-x64": "0.0.0-bootstrap"
   },
   "dependencies": {
     "tar": "^7.5.11",

@@ -139,23 +139,16 @@ jobs:
             exit 1
           fi
 
-      - name: Bump version + optionalDependencies
+      - name: Bump version
         env:
           NEXT: ${{ steps.compute.outputs.version }}
         run: |
           set -euo pipefail
+          # Bump only the main version. optionalDependencies stay pinned to
+          # 0.0.0-bootstrap in the committed source — the publish-npm step
+          # rewrites them to the real version in-flight before publishing,
+          # once the matching @kdlbs/runtime-* tarballs actually exist on npm.
           (cd apps/cli && npm version --no-git-tag-version "$NEXT")
-          node -e "
-            const fs = require('fs');
-            const path = 'apps/cli/package.json';
-            const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
-            if (pkg.optionalDependencies) {
-              for (const k of Object.keys(pkg.optionalDependencies)) {
-                pkg.optionalDependencies[k] = '$NEXT';
-              }
-            }
-            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
-          "
           pnpm -C apps install --no-frozen-lockfile
 
       - name: Generate CHANGELOG
