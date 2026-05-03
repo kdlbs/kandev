@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { Repository, Executor } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { DEFAULT_LOCAL_EXECUTOR_TYPE } from "@/lib/utils";
@@ -462,13 +462,36 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
 
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {
   const { open, workspaceId, workflowId, repositories, repositoriesLoading } = args;
-  const { agentProfiles, executors, workspaceDefaults, toast, workflows } = args;
+  const { agentProfiles, executors, workspaceDefaults, toast, workflows, isLocalExecutor } = args;
   useWorkflowStepsEffect(fs, workflowId);
   useWorkflowAgentProfileEffect(fs, workflows, agentProfiles);
   useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories);
   useDiscoverReposEffect(fs, open, workspaceId, repositoriesLoading, toast);
   useBranchAutoSelectEffect(fs);
   useCurrentLocalBranchEffect(fs, open, workspaceId, repositories);
+  useResetBranchOnLocalSwitchEffect(fs, isLocalExecutor);
   useDefaultSelectionsEffect(fs, open, { agentProfiles, executors, workspaceDefaults }, workflows);
   useGitHubUrlBranchesEffect(fs, open);
+}
+
+// Reset row.branch on every "switch to local executor" transition so the
+// chip's autoselect effect can re-fire and prefer the workspace's current
+// branch (preferredDefaultBranch). Without this, a branch the user picked
+// under worktree mode (say "develop") would persist on the row, the chip
+// would show "develop" after switching to local, and submit would carry
+// "develop" → backend `git checkout develop` against the user's working
+// tree. With the reset, switching to local always defaults to "current
+// branch on disk" and the user has to opt back into a different branch
+// explicitly.
+function useResetBranchOnLocalSwitchEffect(fs: DialogFormState, isLocalExecutor: boolean) {
+  const { repositories: rows, updateRepository } = fs;
+  const wasLocalRef = useRef(isLocalExecutor);
+  useEffect(() => {
+    const prev = wasLocalRef.current;
+    wasLocalRef.current = isLocalExecutor;
+    if (!isLocalExecutor || prev) return; // only fire on false → true transition
+    for (const row of rows) {
+      if (row.branch) updateRepository(row.key, { branch: "" });
+    }
+  }, [isLocalExecutor, rows, updateRepository]);
 }

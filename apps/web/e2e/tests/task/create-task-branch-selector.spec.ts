@@ -12,11 +12,17 @@ function escapeRe(s: string) {
 test.describe("Branch selector behavior with executor types", () => {
   test.describe.configure({ retries: 1 });
 
-  test("branch selector is disabled for local executor with local repo", async ({
+  test("branch selector is editable for local executor (user can switch existing branches)", async ({
     testPage,
     apiClient,
   }) => {
-    // Find the system "local" executor and create a profile on it
+    // Local executor task creation now allows the user to switch to a
+    // different existing branch from the chip directly (the chip is no longer
+    // locked when local executor is selected). The backend's LocalPreparer
+    // skips git ops when the picked branch matches the workspace's current
+    // branch and runs `git checkout <branch>` only when the user explicitly
+    // picks something different. Creating a NEW branch from a base remains a
+    // separate flow gated by the "Fork a new branch" toggle.
     const { executors } = await apiClient.listExecutors();
     const localExec = executors.find((e) => e.type === "local");
     if (!localExec) {
@@ -33,28 +39,28 @@ test.describe("Branch selector behavior with executor types", () => {
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
 
-      // Fill title + description
       await testPage.getByTestId("task-title-input").fill("Branch Selector Test");
-      await testPage.getByTestId("task-description-input").fill("testing branch selector disable");
+      await testPage
+        .getByTestId("task-description-input")
+        .fill("local exec branch chip is editable");
 
-      // Select the local executor profile
       const executorSelector = testPage.getByTestId("executor-profile-selector");
       await executorSelector.click();
       await testPage.getByRole("option", { name: /E2E Local Profile/i }).click();
 
-      // Branch selector should be disabled when local executor is selected
       const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
-      await expect(branchSelector).toBeDisabled({ timeout: 5_000 });
+      await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
     } finally {
       await apiClient.deleteExecutorProfile(profile.id).catch(() => {});
     }
   });
 
-  test("branch selector re-enables when switching from local to worktree executor", async ({
+  test("branch selector stays editable when switching from local to worktree executor", async ({
     testPage,
     apiClient,
   }) => {
-    // Find executors
+    // Both executors allow branch picking now; the test verifies neither side
+    // disables the chip and the user can complete a pick on each.
     const { executors } = await apiClient.listExecutors();
     const localExec = executors.find((e) => e.type === "local");
     const worktreeExec = executors.find((e) => e.type === "worktree");
@@ -80,15 +86,13 @@ test.describe("Branch selector behavior with executor types", () => {
       await testPage.getByTestId("task-title-input").fill("Switch Executor Test");
       await testPage.getByTestId("task-description-input").fill("testing executor switch");
 
-      // Select local executor -> branch should be disabled
       const executorSelector = testPage.getByTestId("executor-profile-selector");
       await executorSelector.click();
       await testPage.getByRole("option", { name: /^E2E Local Local$/i }).click();
 
       const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
-      await expect(branchSelector).toBeDisabled({ timeout: 5_000 });
+      await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
 
-      // Switch to worktree executor -> branch should be enabled
       await executorSelector.click();
       await testPage.getByRole("option", { name: worktreeProfile.name }).click();
 
@@ -240,12 +244,16 @@ test.describe("Fresh-branch flow", () => {
       .click();
   }
 
-  test("toggle off (default) — branch selector disabled, placeholder shows current branch", async ({
+  test("toggle off (default) — branch selector editable, defaults to current branch", async ({
     testPage,
     apiClient,
     backend,
     seedData,
   }) => {
+    // The fresh-branch toggle is OFF by default. The branch chip is now
+    // editable for local executor and seeds with the workspace's actual
+    // current branch (main) — the user can keep it (no git ops on submit)
+    // or pick a different existing branch (triggers `git checkout` server-side).
     const setup = await setupLocalRepo(apiClient, backend.tmpDir, seedData.workspaceId, "default");
     if (!setup) {
       test.skip(true, "No local executor available");
@@ -257,8 +265,7 @@ test.describe("Fresh-branch flow", () => {
       await expect(toggle).toBeVisible();
       await expect(toggle).toHaveAttribute("aria-pressed", "false");
       const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
-      await expect(branchSelector).toBeDisabled({ timeout: 5_000 });
-      // Placeholder should show actual current branch (main), not the generic copy.
+      await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
       await expect(branchSelector).toContainText("main", { timeout: 5_000 });
     } finally {
       await apiClient.deleteExecutorProfile(setup.profileId).catch(() => {});
@@ -463,12 +470,23 @@ test.describe("Fresh-branch flow", () => {
     await expect(testPage.getByTestId("fresh-branch-toggle")).toHaveCount(0);
   });
 
-  test("switching worktree → local resets the disabled selector to current branch", async ({
+  test("switching worktree → local resets the chip to the workspace's current branch", async ({
     testPage,
     apiClient,
     backend,
     seedData,
   }) => {
+    // Regression for the "leftover branch" hazard: under the old chip-locked
+    // model, picking "develop" on the worktree executor and switching to
+    // local would leave row.branch="develop" but display the locked override
+    // ("main"). Submit then sent develop and the backend ran `git checkout
+    // develop` against the user's working tree.
+    //
+    // Now the chip is editable for local mode AND switching to local
+    // explicitly resets row.branch (useResetBranchOnLocalSwitchEffect) so
+    // autoselect re-fires and prefers the workspace's current branch. The
+    // displayed value matches the submitted value matches the user's
+    // current state — no hidden destructive checkout.
     const setup = await setupLocalRepo(apiClient, backend.tmpDir, seedData.workspaceId, "switch");
     if (!setup) {
       test.skip(true, "No local executor available");
@@ -487,7 +505,6 @@ test.describe("Fresh-branch flow", () => {
         .first()
         .click();
 
-      // Pick the worktree executor first and select the develop branch.
       const executorSelector = testPage.getByTestId("executor-profile-selector");
       await executorSelector.click();
       await testPage
@@ -504,14 +521,12 @@ test.describe("Fresh-branch flow", () => {
         .click();
       await expect(branchSelector).toContainText("develop");
 
-      // Switch back to local — disabled selector must show the actual current branch (main),
-      // not the develop selection that came from the worktree executor.
       await executorSelector.click();
       await testPage
         .getByRole("option", { name: new RegExp(`^${setup.profileName}\\b`, "i") })
         .first()
         .click();
-      await expect(branchSelector).toBeDisabled({ timeout: 5_000 });
+      await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
       await expect(branchSelector).toContainText("main", { timeout: 5_000 });
     } finally {
       await apiClient.deleteExecutorProfile(setup.profileId).catch(() => {});

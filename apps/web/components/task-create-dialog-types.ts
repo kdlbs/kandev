@@ -117,6 +117,14 @@ export type TaskCreateEffectsArgs = {
   workspaceDefaults: Workspace | null | undefined;
   toast: ReturnType<typeof useToast>["toast"];
   workflows: Array<{ id: string; agent_profile_id?: string }>;
+  /**
+   * True when the currently-selected executor is the local-host one (no
+   * worktree, no container). Drives the "reset row.branch on local switch"
+   * effect so toggling worktree → local restores the chip default to the
+   * workspace's current branch instead of leaving a stale pick from the
+   * worktree run that would trigger a destructive `git checkout` on submit.
+   */
+  isLocalExecutor: boolean;
 };
 
 import type { FileAttachment } from "@/components/task/chat/file-attachment";

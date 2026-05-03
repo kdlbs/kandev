@@ -444,6 +444,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     workspaceDefaults: computed.workspaceDefaults,
     toast,
     workflows,
+    isLocalExecutor: computed.isLocalExecutor,
   });
   const handlers = useDialogHandlers(fs, repositories);
   const submitHandlers = useSubmitHandlersWiring({
