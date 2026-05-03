@@ -366,9 +366,7 @@ test.describe("Session resume (multi-session)", () => {
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
           if (sessions.length !== 2) return false;
-          return sessions.every((s) =>
-            ["WAITING_FOR_INPUT", "COMPLETED"].includes(s.state),
-          );
+          return sessions.every((s) => ["WAITING_FOR_INPUT", "COMPLETED"].includes(s.state));
         },
         { timeout: 60_000, message: "Waiting for both sessions to finish first turn" },
       )
@@ -395,11 +393,12 @@ test.describe("Session resume (multi-session)", () => {
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
           if (sessions.length !== 2) return false;
-          return sessions.every((s) =>
-            ["WAITING_FOR_INPUT", "COMPLETED"].includes(s.state),
-          );
+          return sessions.every((s) => ["WAITING_FOR_INPUT", "COMPLETED"].includes(s.state));
         },
-        { timeout: 60_000, message: "Waiting for both sessions to settle into idle state post-restart" },
+        {
+          timeout: 60_000,
+          message: "Waiting for both sessions to settle into idle state post-restart",
+        },
       )
       .toBe(true);
   });
