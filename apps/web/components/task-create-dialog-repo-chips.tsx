@@ -87,7 +87,7 @@ export function RepoChipsRow({
   // pick from discovered on-machine paths.
   const hasDiscovered = fs.discoveredRepositories.length > 0;
   const canAddMore = remainingCount > 0 || hasDiscovered;
-  const addHint = canAddMore ? undefined : "All workspace repositories are already added";
+  const addHint = computeAddHint(canAddMore, repositories.length);
 
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="repo-chips-row">
@@ -111,33 +111,14 @@ export function RepoChipsRow({
           addHint={addHint}
           onRowRepositoryChange={onRowRepositoryChange}
           onRowBranchChange={onRowBranchChange}
+          freshBranchToggle={
+            // Multi-repo runs use worktrees, so the existing-vs-fork choice
+            // is irrelevant — only surface the toggle for single-repo flows.
+            freshBranchAvailable && onToggleFreshBranch && fs.repositories.length === 1 ? (
+              <FreshBranchToggle enabled={!!freshBranchEnabled} onToggle={onToggleFreshBranch} />
+            ) : null
+          }
         />
-      )}
-      {freshBranchAvailable && onToggleFreshBranch && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={() => onToggleFreshBranch(!freshBranchEnabled)}
-              data-testid="fresh-branch-toggle"
-              aria-pressed={!!freshBranchEnabled}
-              aria-label={freshBranchEnabled ? "Fork a new branch" : "Use current branch"}
-              className={cn(
-                "inline-flex h-7 w-7 items-center justify-center rounded-md border border-input cursor-pointer transition-colors",
-                freshBranchEnabled
-                  ? "bg-muted text-foreground"
-                  : "bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted/60",
-              )}
-            >
-              <IconGitFork className="h-3.5 w-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {freshBranchEnabled
-              ? "Forking a new branch from the selected base. Click to use the existing branch instead."
-              : "Use the existing branch. Click to fork a new branch from a base instead."}
-          </TooltipContent>
-        </Tooltip>
       )}
       {onToggleGitHubUrl && (
         <button
@@ -165,6 +146,7 @@ function ChipsList({
   branchLocked,
   canAddMore,
   addHint,
+  freshBranchToggle,
   onRowRepositoryChange,
   onRowBranchChange,
 }: {
@@ -174,6 +156,7 @@ function ChipsList({
   branchLocked: boolean;
   canAddMore: boolean;
   addHint?: string;
+  freshBranchToggle?: React.ReactNode;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
 }) {
@@ -194,6 +177,7 @@ function ChipsList({
           onRemove={() => fs.removeRepository(row.key)}
         />
       ))}
+      {freshBranchToggle}
       <Tooltip>
         <TooltipTrigger asChild>
           <span className="inline-flex">
@@ -218,6 +202,47 @@ function ChipsList({
       </Tooltip>
     </>
   );
+}
+
+function FreshBranchToggle({
+  enabled,
+  onToggle,
+}: {
+  enabled: boolean;
+  onToggle: (enabled: boolean) => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={() => onToggle(!enabled)}
+          data-testid="fresh-branch-toggle"
+          aria-pressed={enabled}
+          aria-label={enabled ? "Fork a new branch" : "Use current branch"}
+          className={cn(
+            "inline-flex h-7 w-7 items-center justify-center rounded-md border border-input cursor-pointer transition-colors",
+            enabled
+              ? "bg-muted text-foreground"
+              : "bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted/60",
+          )}
+        >
+          <IconGitFork className="h-3.5 w-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>
+        {enabled
+          ? "Forking a new branch from the selected base. Click to use the existing branch instead."
+          : "Use the existing branch. Click to fork a new branch from a base instead."}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function computeAddHint(canAddMore: boolean, workspaceRepoCount: number): string | undefined {
+  if (canAddMore) return undefined;
+  if (workspaceRepoCount === 0) return "No repositories available in this workspace";
+  return "All workspace repositories are already added";
 }
 
 /** Build the set of repo identifiers (workspace id or path) currently in use. */

@@ -56,7 +56,7 @@ const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
   { value: "list", icon: IconList, label: "List" },
 ];
 
-const WORKBENCH_TOPBAR_CLASSNAME = "h-10 border-b-0 px-3 py-1";
+const WORKBENCH_TOPBAR_CLASSNAME = "h-12 border-b-0 px-3 py-2";
 const DESKTOP_HEADER_NARROW_PX = 1100;
 
 function getWorkspaceLabel(
