@@ -284,16 +284,17 @@ func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID
 // repository and worktree config from the existing session.
 func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Task, session *models.TaskSession, sessionID, newModel, prompt, acpSessionID string, execConfig executorConfig, running *models.ExecutorRunning) (*LaunchAgentRequest, error) {
 	req := &LaunchAgentRequest{
-		TaskID:          task.ID,
-		SessionID:       sessionID,
-		TaskTitle:       task.Title,
-		AgentProfileID:  session.AgentProfileID,
-		TaskDescription: prompt,
-		ModelOverride:   newModel,
-		ACPSessionID:    acpSessionID,
-		ExecutorType:    execConfig.ExecutorType,
-		Metadata:        execConfig.Metadata,
-		IsEphemeral:     task.IsEphemeral,
+		TaskID:            task.ID,
+		SessionID:         sessionID,
+		TaskTitle:         task.Title,
+		AgentProfileID:    session.AgentProfileID,
+		TaskDescription:   prompt,
+		ModelOverride:     newModel,
+		ACPSessionID:      acpSessionID,
+		ExecutorType:      execConfig.ExecutorType,
+		Metadata:          execConfig.Metadata,
+		IsEphemeral:       task.IsEphemeral,
+		TaskEnvironmentID: session.TaskEnvironmentID,
 	}
 
 	// Activate config-mode MCP tools when config_mode is set in session metadata.

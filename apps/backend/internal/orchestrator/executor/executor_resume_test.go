@@ -229,6 +229,44 @@ func TestResumeSession_CancelledStateForceCleansUpStaleState(t *testing.T) {
 	}
 }
 
+// TestResumeSession_PropagatesTaskEnvironmentID is a regression test for a
+// post-restart bug where `buildResumeRequest` did not copy
+// `session.TaskEnvironmentID` onto the LaunchAgentRequest. The lifecycle's
+// in-memory ExecutionStore indexes executions by TaskEnvironmentID for the
+// shell terminal lookup (`GetByTaskEnvironmentID`); a request without the env
+// ID produced an execution tagged with TaskEnvironmentID="" so the shell
+// terminal handler hit the "task environment ... has no workspace path yet"
+// 503 fallback and stayed stuck on "Connecting terminal..." after restart.
+func TestResumeSession_PropagatesTaskEnvironmentID(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.sessions["sess-1"].TaskEnvironmentID = "env-1"
+
+	var capturedReq *LaunchAgentRequest
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			capturedReq = req
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-new",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+		isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool { return false },
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
+		t.Fatalf("expected resume success, got: %v", err)
+	}
+	if capturedReq == nil {
+		t.Fatal("expected LaunchAgent to be called with a request")
+	}
+	if capturedReq.TaskEnvironmentID != "env-1" {
+		t.Errorf("TaskEnvironmentID = %q, want %q — without this the lifecycle execution is indexed under empty env_id and GetByTaskEnvironmentID never finds it",
+			capturedReq.TaskEnvironmentID, "env-1")
+	}
+}
+
 // TestResumeSession_TerminalStateSkipsLivenessProbeOnFallback covers the
 // residual path where the preemptive CleanupStaleExecutionBySessionID is not
 // enough (e.g. the first LaunchAgent still returns "already has an agent running"
