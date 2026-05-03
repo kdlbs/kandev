@@ -380,7 +380,11 @@ function RepoChip({
   );
   const branchValue = branchOverride ?? row.branch;
   const hasRepo = !!(row.repositoryId || row.localPath);
-  const branchPlaceholder = computeBranchPlaceholder(hasRepo, branchesLoading, branchOptions.length);
+  const branchPlaceholder = computeBranchPlaceholder(
+    hasRepo,
+    branchesLoading,
+    branchOptions.length,
+  );
 
   return (
     <span
