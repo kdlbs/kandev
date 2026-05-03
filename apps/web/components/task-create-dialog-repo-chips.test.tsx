@@ -139,6 +139,51 @@ describe("RepoChipsRow", () => {
     expect(screen.queryByTestId("repo-chips-row")).toBeNull();
   });
 
+  it("locked branch chip shows the resolved current branch when not loading", () => {
+    mockBranches.value = {
+      branches: [{ name: "feature/x", type: "local" } as Branch],
+      isLoading: false,
+    };
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({
+          repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })],
+          currentLocalBranch: "feature/x",
+          currentLocalBranchLoading: false,
+        })}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+        isLocalExecutor
+      />,
+    );
+    expect(screen.getByText("feature/x")).toBeTruthy();
+  });
+
+  it("locked branch chip shows the loading placeholder while resolving", () => {
+    mockBranches.value = { branches: [], isLoading: false };
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({
+          repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })],
+          currentLocalBranch: "",
+          currentLocalBranchLoading: true,
+        })}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+        isLocalExecutor
+      />,
+    );
+    // Without the loading state we'd render the generic "branch" placeholder;
+    // computeBranchPlaceholder switches to "loading…" when branchOverrideLoading is true.
+    expect(screen.getByText(/loading…/i)).toBeTruthy();
+  });
+
   it("disables Add when no more repositories are available", () => {
     renderInProvider(
       <RepoChipsRow

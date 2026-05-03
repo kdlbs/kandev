@@ -93,7 +93,11 @@ export type DialogComputedArgs = {
   workspaceId: string | null;
   workflowId: string | null;
   defaultStepId: string | null;
-  settingsData: { agentsLoaded: boolean; executorsLoaded: boolean };
+  settingsData: {
+    agentsLoaded: boolean;
+    executorsLoaded: boolean;
+    capabilitiesLoaded: boolean;
+  };
   agentProfiles: AgentProfileOption[];
   workspaces: Workspace[];
   executors: Executor[];
@@ -193,6 +197,9 @@ export type DialogFormState = {
   /** Currently checked-out branch in the selected local repo (for the disabled selector placeholder) */
   currentLocalBranch: string;
   setCurrentLocalBranch: (v: string) => void;
+  /** True while resolving currentLocalBranch — distinguishes "still loading" from "no branch on disk" */
+  currentLocalBranchLoading: boolean;
+  setCurrentLocalBranchLoading: (v: boolean) => void;
 };
 
 export type SubmitHandlersDeps = {
