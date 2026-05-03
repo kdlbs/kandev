@@ -54,6 +54,7 @@ log_ok "All 5 platform assets present in GitHub release $TAG"
 # -- Download release assets for packaging ------------------------------------
 
 WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "$WORK_DIR"' EXIT
 ASSETS_DIR="$WORK_DIR/assets"
 mkdir -p "$ASSETS_DIR"
 
@@ -155,17 +156,13 @@ echo
 echo "$(bold "Publishing kandev@$VERSION...")"
 (
   cd "$ROOT_DIR/apps/cli"
-  # Build before publishing
-  pnpm build
+  # `prepublishOnly` (in package.json) runs `pnpm build` automatically.
   npm publish --access public --provenance
 )
 log_ok "kandev@$VERSION published"
 
-# -- Cleanup ------------------------------------------------------------------
-
-rm -rf "$WORK_DIR"
-
 # -- Report -------------------------------------------------------------------
+# (WORK_DIR cleanup happens via the EXIT trap above.)
 
 echo
 echo "$(green "$(bold "All npm packages published successfully!")")"

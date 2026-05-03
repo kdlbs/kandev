@@ -66,13 +66,6 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Install git-cliff
-        run: |
-          curl -sSL "https://github.com/orhun/git-cliff/releases/download/v2.6.1/git-cliff-2.6.1-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar -xz -C /tmp
-          sudo mv /tmp/git-cliff-2.6.1/git-cliff /usr/local/bin/
-          git-cliff --version
-
       - name: Configure git identity
         run: |
           git config user.email "release-bot@kandev"
@@ -155,9 +148,12 @@ jobs:
           pnpm -C apps install --no-frozen-lockfile
 
       - name: Generate CHANGELOG
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --tag ${{ steps.compute.outputs.tag }}
         env:
-          TAG: ${{ steps.compute.outputs.tag }}
-        run: git-cliff --tag "$TAG" -o CHANGELOG.md
+          OUTPUT: CHANGELOG.md
 
       - name: Create release PR + merge + tag (or dry-run)
         if: ${{ !inputs.dry_run }}
