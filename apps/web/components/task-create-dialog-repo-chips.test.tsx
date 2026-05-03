@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { computeBranchPrefix } from "./task-create-dialog-repo-chips";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import type { Branch, Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "./task-create-dialog-types";
@@ -371,5 +372,64 @@ describe("RepoChipsRow", () => {
     expect(screen.getByText("origin/main")).toBeTruthy();
     // Reset for sibling tests.
     mockBranches.value = { branches: [], isLoading: false };
+  });
+});
+
+describe("computeBranchPrefix", () => {
+  it("returns empty when no branch is picked yet", () => {
+    expect(
+      computeBranchPrefix({ isLocalExecutor: true, rowBranch: "", currentLocalBranch: "main" }),
+    ).toBe("");
+  });
+
+  it("returns 'current: ' for local executor when row branch matches workspace current", () => {
+    expect(
+      computeBranchPrefix({
+        isLocalExecutor: true,
+        rowBranch: "main",
+        currentLocalBranch: "main",
+      }),
+    ).toBe("current: ");
+  });
+
+  it("returns 'will switch to: ' for local executor when row branch differs from current", () => {
+    expect(
+      computeBranchPrefix({
+        isLocalExecutor: true,
+        rowBranch: "develop",
+        currentLocalBranch: "main",
+      }),
+    ).toBe("will switch to: ");
+  });
+
+  it("treats unknown current branch as 'will switch to' on local executor", () => {
+    // Detached HEAD or local-status fetch error returns "" for currentLocalBranch.
+    // Without a known baseline we can't claim the picked branch is "current",
+    // so fall through to the destructive label — the user picked something
+    // explicit and the backend will checkout to it.
+    expect(
+      computeBranchPrefix({
+        isLocalExecutor: true,
+        rowBranch: "main",
+        currentLocalBranch: "",
+      }),
+    ).toBe("will switch to: ");
+  });
+
+  it("returns 'from: ' for non-local executors regardless of current branch", () => {
+    expect(
+      computeBranchPrefix({
+        isLocalExecutor: false,
+        rowBranch: "main",
+        currentLocalBranch: "main",
+      }),
+    ).toBe("from: ");
+    expect(
+      computeBranchPrefix({
+        isLocalExecutor: false,
+        rowBranch: "develop",
+        currentLocalBranch: "",
+      }),
+    ).toBe("from: ");
   });
 });

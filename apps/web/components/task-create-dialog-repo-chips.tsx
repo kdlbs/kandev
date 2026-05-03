@@ -193,6 +193,11 @@ function ChipsList({
           // autoselect path.
           preferredDefaultBranch={isLocalExecutor ? fs.currentLocalBranch : undefined}
           preferredDefaultBranchLoading={isLocalExecutor ? fs.currentLocalBranchLoading : false}
+          branchPrefix={computeBranchPrefix({
+            isLocalExecutor,
+            rowBranch: row.branch,
+            currentLocalBranch: fs.currentLocalBranch,
+          })}
           onRepositoryChange={(value) => onRowRepositoryChange(row.key, value)}
           onBranchChange={(value) => onRowBranchChange(row.key, value)}
           onRemove={() => fs.removeRepository(row.key)}
@@ -307,6 +312,15 @@ type RepoChipProps = {
    * state in the window between dialog open and local-status resolving.
    */
   preferredDefaultBranchLoading?: boolean;
+  /**
+   * Muted text shown before the branch value to qualify intent:
+   *   - "current: "        — local exec, picked branch == workspace current
+   *   - "will switch to: " — local exec, picked branch != workspace current
+   *   - "from: "           — worktree / non-local exec (picked branch is the base)
+   * Empty when there's no branch value yet (chip shows the "branch"
+   * placeholder unprefixed).
+   */
+  branchPrefix?: string;
   onRepositoryChange: (value: string) => void;
   onBranchChange: (value: string) => void;
   onRemove: () => void;
@@ -432,6 +446,7 @@ function RepoChip({
   branchLocked,
   preferredDefaultBranch,
   preferredDefaultBranchLoading,
+  branchPrefix,
   onRepositoryChange,
   onBranchChange,
   onRemove,
@@ -483,6 +498,7 @@ function RepoChip({
         icon={<IconGitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />}
         value={branchValue}
         placeholder={branchPlaceholder}
+        prefix={branchPrefix}
         options={branchOptions}
         onSelect={onBranchChange}
         disabled={branchLocked || !hasRepo || branchesLoading || branchOptions.length === 0}
@@ -517,6 +533,34 @@ function RepoChip({
       </Tooltip>
     </span>
   );
+}
+
+/**
+ * Decide the muted text shown before the branch value to qualify intent.
+ * Local executor: "current: " when the user kept the workspace's current
+ * branch, "will switch to: " when they picked something different — surfaces
+ * the destructive `git checkout` decision the backend will make on submit.
+ * Non-local executors: "from: " — the picked branch is the base for the new
+ * worktree branch, not a switch target.
+ *
+ * Returns "" when there's no value yet, so the chip's placeholder ("branch")
+ * doesn't get a misleading prefix.
+ */
+export function computeBranchPrefix({
+  isLocalExecutor,
+  rowBranch,
+  currentLocalBranch,
+}: {
+  isLocalExecutor: boolean;
+  rowBranch: string;
+  currentLocalBranch: string;
+}): string {
+  if (!rowBranch) return "";
+  if (isLocalExecutor) {
+    if (currentLocalBranch && rowBranch === currentLocalBranch) return "current: ";
+    return "will switch to: ";
+  }
+  return "from: ";
 }
 
 function computeBranchDisabledReason({
