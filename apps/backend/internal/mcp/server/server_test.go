@@ -88,12 +88,16 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "stop_session_kandev")
 	assert.Contains(t, tools, "get_task_sessions_kandev")
 
-	// Task mode should NOT have config/mutation tools
-	assert.NotContains(t, tools, "create_workflow_kandev")
-	assert.NotContains(t, tools, "update_workflow_kandev")
-	assert.NotContains(t, tools, "delete_workflow_kandev")
-	assert.NotContains(t, tools, "create_workflow_step_kandev")
-	assert.NotContains(t, tools, "update_workflow_step_kandev")
+	// Task mode should have workflow mutation tools
+	assert.Contains(t, tools, "create_workflow_kandev")
+	assert.Contains(t, tools, "update_workflow_kandev")
+	assert.Contains(t, tools, "delete_workflow_kandev")
+	assert.Contains(t, tools, "create_workflow_step_kandev")
+	assert.Contains(t, tools, "update_workflow_step_kandev")
+	assert.Contains(t, tools, "delete_workflow_step_kandev")
+	assert.Contains(t, tools, "reorder_workflow_steps_kandev")
+
+	// Task mode should NOT have agent/mcp/executor mutation tools
 	assert.NotContains(t, tools, "update_agent_kandev")
 	assert.NotContains(t, tools, "create_agent_profile_kandev")
 	assert.NotContains(t, tools, "delete_agent_profile_kandev")
@@ -105,8 +109,6 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "create_executor_profile_kandev")
 	assert.NotContains(t, tools, "update_executor_profile_kandev")
 	assert.NotContains(t, tools, "delete_executor_profile_kandev")
-	assert.NotContains(t, tools, "delete_workflow_step_kandev")
-	assert.NotContains(t, tools, "reorder_workflow_steps_kandev")
 }
 
 func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
@@ -185,7 +187,7 @@ func TestServerModeDefault_DefaultsToTask(t *testing.T) {
 	tools := getRegisteredToolNames(s)
 	assert.Contains(t, tools, "create_task_kandev")
 	assert.Contains(t, tools, "create_task_plan_kandev")
-	assert.NotContains(t, tools, "create_workflow_step_kandev")
+	assert.Contains(t, tools, "create_workflow_step_kandev")
 }
 
 func TestServerModeConfig_DisableAskQuestion(t *testing.T) {
@@ -223,8 +225,8 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	tools := getRegisteredToolNames(s)
-	// 14 kanban + 6 extended + 4 workspace + 3 repository + 3 session + 1 interaction + 4 plan = 35
-	assert.Equal(t, 35, len(tools))
+	// 14 kanban + 6 extended + 4 workspace + 3 repository + 3 session + 7 workflow mutation + 1 interaction + 4 plan = 42
+	assert.Equal(t, 42, len(tools))
 }
 
 func TestServerModeConfig_ToolCount(t *testing.T) {

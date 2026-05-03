@@ -178,19 +178,16 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPDeleteTask, h.handleDeleteTask)
 	d.RegisterFunc(ws.ActionMCPArchiveTask, h.handleArchiveTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskState, h.handleUpdateTaskState)
-	count := 35
+	d.RegisterFunc(ws.ActionMCPCreateWorkflow, h.handleCreateWorkflow)
+	d.RegisterFunc(ws.ActionMCPUpdateWorkflow, h.handleUpdateWorkflow)
+	d.RegisterFunc(ws.ActionMCPDeleteWorkflow, h.handleDeleteWorkflow)
+	d.RegisterFunc(ws.ActionMCPCreateWorkflowStep, h.handleCreateWorkflowStep)
+	d.RegisterFunc(ws.ActionMCPUpdateWorkflowStep, h.handleUpdateWorkflowStep)
+	d.RegisterFunc(ws.ActionMCPDeleteWorkflowStep, h.handleDeleteWorkflowStep)
+	d.RegisterFunc(ws.ActionMCPReorderWorkflowStep, h.handleReorderWorkflowSteps)
+	count := 42
 
 	// Config-mode handlers (registered when config deps are set)
-	if h.workflowSvc != nil {
-		d.RegisterFunc(ws.ActionMCPCreateWorkflow, h.handleCreateWorkflow)
-		d.RegisterFunc(ws.ActionMCPUpdateWorkflow, h.handleUpdateWorkflow)
-		d.RegisterFunc(ws.ActionMCPDeleteWorkflow, h.handleDeleteWorkflow)
-		d.RegisterFunc(ws.ActionMCPCreateWorkflowStep, h.handleCreateWorkflowStep)
-		d.RegisterFunc(ws.ActionMCPUpdateWorkflowStep, h.handleUpdateWorkflowStep)
-		d.RegisterFunc(ws.ActionMCPDeleteWorkflowStep, h.handleDeleteWorkflowStep)
-		d.RegisterFunc(ws.ActionMCPReorderWorkflowStep, h.handleReorderWorkflowSteps)
-		count += 7
-	}
 	if h.agentSettingsCtrl != nil {
 		d.RegisterFunc(ws.ActionMCPListAgents, h.handleListAgents)
 		d.RegisterFunc(ws.ActionMCPUpdateAgent, h.handleUpdateAgent)
