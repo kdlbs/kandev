@@ -29,13 +29,21 @@ echo "  esbuild bundle complete"
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR/bin" "$OUT_DIR/dist"
 
-cp "$CLI_DIR/bin/cli.js" "$OUT_DIR/bin/cli.js"
+# Write a bin/cli.js that points at the bundled dist (for Homebrew/manual installs
+# where there is no node_modules to resolve the unbundled dist/cli.js's deps).
+# The npm package's bin/cli.js is different — it requires the unbundled dist/cli.js
+# because tree-kill etc. are installed normally via npm.
+cat > "$OUT_DIR/bin/cli.js" <<'EOF'
+#!/usr/bin/env node
+
+require("../dist/cli.bundle.js");
+EOF
 chmod +x "$OUT_DIR/bin/cli.js"
 
 cp "$CLI_DIR/dist/cli.bundle.js" "$OUT_DIR/dist/cli.bundle.js"
 cp "$CLI_DIR/package.json" "$OUT_DIR/package.json"
 
 echo "CLI artifacts packaged at $OUT_DIR"
-echo "  bin/cli.js (entrypoint, chmod +x)"
-echo "  dist/cli.bundle.js (self-contained bundle)"
+echo "  bin/cli.js (entrypoint, requires dist/cli.bundle.js, chmod +x)"
+echo "  dist/cli.bundle.js (self-contained bundle, deps inlined)"
 echo "  package.json"
