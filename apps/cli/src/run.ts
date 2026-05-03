@@ -17,11 +17,12 @@ import { getBinaryName, getPlatformDir } from "./platform";
 import { sortVersionsDesc } from "./version";
 import { pickAvailablePort } from "./ports";
 import { createProcessSupervisor } from "./process";
+import { resolveRuntime } from "./runtime";
 import { attachBackendExitHandler, logStartupInfo } from "./shared";
 import { launchWebApp, openBrowser } from "./web";
 
 export type RunOptions = {
-  version?: string;
+  runtimeVersion?: string;
   backendPort?: number;
   webPort?: number;
   /** Show info logs from backend + web */
@@ -30,14 +31,13 @@ export type RunOptions = {
   debug?: boolean;
 };
 
-type PreparedRelease = {
+type PreparedBundle = {
   bundleDir: string;
   backendBin: string;
   backendUrl: string;
   backendEnv: NodeJS.ProcessEnv;
   webEnv: NodeJS.ProcessEnv;
   releaseTag: string;
-  requestedVersion?: string;
   webPort: number;
   agentctlPort: number;
   dbPath: string;
@@ -109,60 +109,69 @@ export function cleanOldReleases(currentTag: string) {
   }
 }
 
-async function prepareReleaseBundle({
-  version,
+/**
+ * Download a specific release version into the local cache.
+ * Only used when --runtime-version is given explicitly.
+ */
+async function downloadRuntimeVersion(runtimeVersion: string): Promise<string> {
+  const platformDir = getPlatformDir();
+  const release = await getRelease(runtimeVersion);
+  const tag = release.tag_name;
+  const assetName = `kandev-${platformDir}.tar.gz`;
+  const cacheDir = path.join(CACHE_DIR, tag, platformDir);
+
+  const archivePath = await ensureAsset(tag, assetName, cacheDir, (downloaded, total) => {
+    const percent = total ? Math.round((downloaded / total) * 100) : 0;
+    const mb = (downloaded / (1024 * 1024)).toFixed(1);
+    const totalMb = total ? (total / (1024 * 1024)).toFixed(1) : "?";
+    process.stderr.write(`\r   Downloading: ${mb}MB / ${totalMb}MB (${percent}%)`);
+  });
+  process.stderr.write("\n");
+
+  ensureExtracted(archivePath, cacheDir);
+  cleanOldReleases(tag);
+  return tag;
+}
+
+async function prepareBundleForLaunch({
+  runtimeVersion,
   backendPort,
   webPort,
   verbose = false,
   debug = false,
-}: RunOptions): Promise<PreparedRelease> {
-  const platformDir = getPlatformDir();
-  let tag: string;
-  let cacheDir: string;
+}: RunOptions): Promise<PreparedBundle> {
+  let bundleDir: string;
+  let releaseTag: string;
 
-  try {
-    const release = await getRelease(version);
-    tag = release.tag_name;
-    const assetName = `kandev-${platformDir}.tar.gz`;
-    cacheDir = path.join(CACHE_DIR, tag, platformDir);
-
-    const archivePath = await ensureAsset(tag, assetName, cacheDir, (downloaded, total) => {
-      const percent = total ? Math.round((downloaded / total) * 100) : 0;
-      const mb = (downloaded / (1024 * 1024)).toFixed(1);
-      const totalMb = total ? (total / (1024 * 1024)).toFixed(1) : "?";
-      process.stderr.write(`\r   Downloading: ${mb}MB / ${totalMb}MB (${percent}%)`);
-    });
-    process.stderr.write("\n");
-
-    ensureExtracted(archivePath, cacheDir);
-    cleanOldReleases(tag);
-  } catch (err) {
-    // GitHub unreachable — try to launch from cache.
-    const cached = findCachedRelease(platformDir, version);
-    if (!cached) {
-      const target = version ? `version ${version}` : "latest version";
-      const reason = err instanceof Error ? err.message : String(err);
-      throw new Error(
-        `Failed to fetch ${target} and no cached release found.\n` +
-          `  Reason: ${reason}\n` +
-          `  Run kandev once while online to cache a release for offline use.`,
-      );
+  if (runtimeVersion) {
+    // Explicit version: ensure it is in the cache (downloading if needed), then resolve.
+    const platformDir = getPlatformDir();
+    const cached = findCachedRelease(platformDir, runtimeVersion);
+    let tag: string;
+    if (cached) {
+      tag = cached.tag;
+      bundleDir = findBundleRoot(cached.cacheDir);
+    } else {
+      try {
+        tag = await downloadRuntimeVersion(runtimeVersion);
+        const cacheDir = path.join(CACHE_DIR, tag, platformDir);
+        bundleDir = findBundleRoot(cacheDir);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          `Failed to fetch runtime version ${runtimeVersion}.\n` +
+            `  Reason: ${reason}\n` +
+            `  Run kandev once while online to cache a release for offline use.`,
+        );
+      }
     }
-    tag = cached.tag;
-    cacheDir = cached.cacheDir;
-    process.stderr.write(`[kandev] GitHub unreachable — using cached release ${tag}\n`);
-  }
-
-  const bundleDir = findBundleRoot(cacheDir);
-
-  const backendBin = path.join(bundleDir, "bin", getBinaryName("kandev"));
-  if (!fs.existsSync(backendBin)) {
-    throw new Error(`Backend binary not found at ${backendBin}`);
-  }
-
-  const agentctlBin = path.join(bundleDir, "bin", getBinaryName("agentctl"));
-  if (!fs.existsSync(agentctlBin)) {
-    throw new Error(`agentctl binary not found at ${agentctlBin}`);
+    releaseTag = tag;
+  } else {
+    // Default path: resolve from KANDEV_BUNDLE_DIR or installed npm runtime package.
+    const resolved = resolveRuntime();
+    bundleDir = resolved.bundleDir;
+    // Use KANDEV_VERSION if set (e.g. by Homebrew wrapper), otherwise show source.
+    releaseTag = process.env.KANDEV_VERSION ?? `(${resolved.source})`;
   }
 
   const actualBackendPort = backendPort ?? (await pickAvailablePort(DEFAULT_BACKEND_PORT));
@@ -176,10 +185,8 @@ async function prepareReleaseBundle({
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const dbPath = path.join(DATA_DIR, "kandev.db");
 
-  // Note: Release mode doesn't configure MCP server ports as it uses
-  // the bundled configuration. Only backend and agentctl ports are set.
-  // Log level defaults to warn for clean output and can be overridden
-  // via KANDEV_LOG_LEVEL or --verbose/--debug flags.
+  const backendBin = path.join(bundleDir, "bin", getBinaryName("kandev"));
+
   const backendEnv: NodeJS.ProcessEnv = {
     ...process.env,
     KANDEV_SERVER_PORT: String(actualBackendPort),
@@ -194,8 +201,6 @@ async function prepareReleaseBundle({
     ...process.env,
     KANDEV_API_BASE_URL: backendUrl,
     PORT: String(actualWebPort),
-    // Ensure Next.js standalone server binds to 127.0.0.1 so localhost health checks work.
-    // Without this, HOSTNAME from the host environment can cause binding issues.
     HOSTNAME: "127.0.0.1",
   };
   (webEnv as Record<string, string>).NODE_ENV = "production";
@@ -206,8 +211,7 @@ async function prepareReleaseBundle({
     backendUrl,
     backendEnv,
     webEnv,
-    releaseTag: tag,
-    requestedVersion: version,
+    releaseTag,
     webPort: actualWebPort,
     agentctlPort,
     dbPath,
@@ -235,17 +239,14 @@ export function attachRingBuffer(
   return () => buf;
 }
 
-function launchReleaseApps(prepared: PreparedRelease): {
+function launchBundle(prepared: PreparedBundle): {
   supervisor: ReturnType<typeof createProcessSupervisor>;
   backendProc: ReturnType<typeof spawn>;
   webServerPath: string;
   dumpBackendLogs: () => void;
 } {
-  const releaseSource = prepared.requestedVersion
-    ? `(requested: ${prepared.requestedVersion})`
-    : "(github latest)";
   logStartupInfo({
-    header: `release: ${prepared.releaseTag} ${releaseSource}`,
+    header: `release: ${prepared.releaseTag}`,
     ports: {
       backendPort: Number(prepared.backendEnv.KANDEV_SERVER_PORT),
       webPort: prepared.webPort,
@@ -259,10 +260,6 @@ function launchReleaseApps(prepared: PreparedRelease): {
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();
 
-  // Start backend: ignore stdin, always show stderr immediately.
-  // In verbose/debug mode stream stdout live; otherwise capture it into a ring
-  // buffer so we can dump the last few KB if the healthcheck fails (users were
-  // previously seeing opaque "timed out" errors with no backend context).
   const backendProc = spawn(prepared.backendBin, [], {
     cwd: path.dirname(prepared.backendBin),
     env: prepared.backendEnv,
@@ -293,14 +290,20 @@ function launchReleaseApps(prepared: PreparedRelease): {
 }
 
 export async function runRelease({
-  version,
+  runtimeVersion,
   backendPort,
   webPort,
   verbose = false,
   debug = false,
 }: RunOptions): Promise<void> {
-  const prepared = await prepareReleaseBundle({ version, backendPort, webPort, verbose, debug });
-  const { supervisor, backendProc, webServerPath, dumpBackendLogs } = launchReleaseApps(prepared);
+  const prepared = await prepareBundleForLaunch({
+    runtimeVersion,
+    backendPort,
+    webPort,
+    verbose,
+    debug,
+  });
+  const { supervisor, backendProc, webServerPath, dumpBackendLogs } = launchBundle(prepared);
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);
   console.log("[kandev] starting backend...");
   await waitForHealth(prepared.backendUrl, backendProc, healthTimeoutMs, dumpBackendLogs);

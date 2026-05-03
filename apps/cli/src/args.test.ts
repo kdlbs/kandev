@@ -66,8 +66,18 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["--port="])).toThrow(/--port value must be an integer/);
   });
 
-  it("throws ParseError on empty --version=", () => {
-    expect(() => parseArgs(["--version="])).toThrow(/--version requires a value/);
+  it("sets showVersion for --version and -V flags", () => {
+    expect(parseArgs(["--version"]).options.showVersion).toBe(true);
+    expect(parseArgs(["-V"]).options.showVersion).toBe(true);
+  });
+
+  it("parses --runtime-version as runtimeVersion", () => {
+    expect(parseArgs(["--runtime-version", "v0.16.0"]).options.runtimeVersion).toBe("v0.16.0");
+    expect(parseArgs(["--runtime-version=v0.16.0"]).options.runtimeVersion).toBe("v0.16.0");
+  });
+
+  it("throws ParseError on empty --runtime-version=", () => {
+    expect(() => parseArgs(["--runtime-version="])).toThrow(/--runtime-version requires a value/);
   });
 });
 
