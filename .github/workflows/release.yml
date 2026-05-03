@@ -66,6 +66,23 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Install git-cliff
+        env:
+          # Pinned to v2.6.1. To bump, also update the sha512 below — fetch the
+          # new one from:
+          # https://github.com/orhun/git-cliff/releases/download/<tag>/<asset>.sha512
+          CLIFF_VERSION: "2.6.1"
+          CLIFF_ASSET: "git-cliff-2.6.1-x86_64-unknown-linux-gnu.tar.gz"
+          CLIFF_SHA512: "b1e7a6b70fc794accdccd9717eff5a8bf8b507f0308da44d837d935be31b18b19db3758d1a9bb4975fbca7d01ddaae251229a753ae2cd2ecc24845cfc50d067f"
+        run: |
+          set -euo pipefail
+          curl -sSL "https://github.com/orhun/git-cliff/releases/download/v${CLIFF_VERSION}/${CLIFF_ASSET}" -o /tmp/git-cliff.tar.gz
+          echo "${CLIFF_SHA512}  /tmp/git-cliff.tar.gz" | sha512sum -c -
+          tar -xz -C /tmp -f /tmp/git-cliff.tar.gz
+          sudo mv "/tmp/git-cliff-${CLIFF_VERSION}/git-cliff" /usr/local/bin/
+          rm -rf /tmp/git-cliff.tar.gz "/tmp/git-cliff-${CLIFF_VERSION}"
+          git-cliff --version
+
       - name: Configure git identity
         run: |
           git config user.email "release-bot@kandev"
@@ -148,12 +165,9 @@ jobs:
           pnpm -C apps install --no-frozen-lockfile
 
       - name: Generate CHANGELOG
-        uses: orhun/git-cliff-action@v4
-        with:
-          config: cliff.toml
-          args: --tag ${{ steps.compute.outputs.tag }}
         env:
-          OUTPUT: CHANGELOG.md
+          TAG: ${{ steps.compute.outputs.tag }}
+        run: git-cliff --tag "$TAG" -o CHANGELOG.md
 
       - name: Create release PR + merge + tag (or dry-run)
         if: ${{ !inputs.dry_run }}
