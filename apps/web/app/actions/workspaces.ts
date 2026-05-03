@@ -172,9 +172,13 @@ export async function getLocalRepositoryStatusAction(
   path: string,
 ): Promise<LocalRepositoryStatusResponse> {
   const params = `?path=${encodeURIComponent(path)}`;
-  return fetchJson<LocalRepositoryStatusResponse>(
-    `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/repositories/local-status${params}`,
-  );
+  try {
+    return await fetchJson<LocalRepositoryStatusResponse>(
+      `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/repositories/local-status${params}`,
+    );
+  } catch {
+    return { current_branch: "", dirty_files: [] };
+  }
 }
 
 export async function discoverRepositoriesAction(
