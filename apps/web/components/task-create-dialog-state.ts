@@ -497,12 +497,12 @@ export function useDialogComputed({
   // Sprites / standalone don't yet know how to provision N sibling repos. Gate
   // non-worktree options only when 2+ repos are selected; single-repo tasks
   // keep the full executor catalogue.
-  const isMultiRepoSelection =
-    fs.repositories.filter((r) => r.repositoryId || r.localPath).length > 1;
+  const selectedRepoCount = fs.repositories.filter((r) => r.repositoryId || r.localPath).length;
+  const isMultiRepoSelection = selectedRepoCount > 1;
   const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles, {
     disabledReasonFor: isMultiRepoSelection ? nonWorktreeDisabledReason : undefined,
   });
-  const executorHint = useExecutorHint(executors, fs.executorId);
+  const executorHint = useExecutorHint(executors, fs.executorId, selectedRepoCount);
   const isLocalExecutor = useIsLocalExecutor(executors, fs.executorId);
   const { headerRepositoryOptions } = useRepositoryOptions(repositories, fs.discoveredRepositories);
   const agentProfilesLoading = open && !settingsData.agentsLoaded;

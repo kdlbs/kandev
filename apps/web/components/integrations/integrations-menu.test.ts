@@ -5,8 +5,10 @@ import {
   getAvailableIntegrationLinks,
   getGitHubIntegrationStatus,
   IntegrationsMenu,
+  IntegrationsTopbarLinks,
 } from "./integrations-menu";
 import type { GitHubStatus } from "@/lib/types/github";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 
 const useGitHubStatusMock = vi.hoisted(() => vi.fn());
 const useJiraAvailableMock = vi.hoisted(() => vi.fn());
@@ -134,5 +136,31 @@ describe("IntegrationsMenu", () => {
     render(createElement(IntegrationsMenu, {}));
 
     expect(screen.queryByRole("button", { name: "Integrations" })).toBeNull();
+  });
+});
+
+function renderWithTooltip(component: Parameters<typeof render>[0]) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TooltipProvider requires children in its type but createElement passes them as 3rd arg
+  return render(createElement(TooltipProvider, {} as any, component));
+}
+
+describe("IntegrationsTopbarLinks", () => {
+  it("renders an icon link for each configured integration", () => {
+    mockAvailability({ githubReady: true, jiraAvailable: false, linearAvailable: true });
+
+    renderWithTooltip(createElement(IntegrationsTopbarLinks, {}));
+
+    const githubLink = screen.getByRole("link", { name: "GitHub" });
+    const linearLink = screen.getByRole("link", { name: "Linear" });
+    expect(githubLink.getAttribute("href")).toBe("/github");
+    expect(linearLink.getAttribute("href")).toBe("/linear");
+    expect(screen.queryByRole("link", { name: "Jira" })).toBeNull();
+  });
+
+  it("renders nothing when no integrations are configured", () => {
+    mockAvailability({ githubReady: false, jiraAvailable: false, linearAvailable: false });
+
+    const { container } = renderWithTooltip(createElement(IntegrationsTopbarLinks, {}));
+    expect(container.firstChild).toBeNull();
   });
 });

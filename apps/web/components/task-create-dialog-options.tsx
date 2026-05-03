@@ -193,14 +193,22 @@ export function useIsLocalExecutor(executors: Executor[], executorId: string): b
   }, [executors, executorId]);
 }
 
-export function useExecutorHint(executors: Executor[], executorId: string): string | null {
+export function useExecutorHint(
+  executors: Executor[],
+  executorId: string,
+  repoCount: number,
+): string | null {
   return useMemo(() => {
     const selectedExecutor = executors.find((e: Executor) => e.id === executorId);
-    if (selectedExecutor?.type === "worktree")
+    if (selectedExecutor?.type === "worktree") {
+      if (repoCount > 1) {
+        return "A git worktree will be created for each repository in a parent folder. The agent runs in that parent folder so it can see every worktree side by side.";
+      }
       return "A git worktree will be created from the base branch.";
+    }
     if (selectedExecutor?.type === "local") return "The agent will run directly on the repository.";
     return null;
-  }, [executors, executorId]);
+  }, [executors, executorId, repoCount]);
 }
 
 export type ExecutorProfileOptionItem = OptionItem & {

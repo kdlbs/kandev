@@ -10,6 +10,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconBrandGithub, IconHexagon, IconPlugConnected, IconTicket } from "@tabler/icons-react";
 import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
@@ -151,6 +152,31 @@ export function IntegrationsMenu() {
         })}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+export function IntegrationsTopbarLinks() {
+  const links = useConfiguredIntegrationLinks();
+  if (links.length === 0) return null;
+
+  return (
+    <>
+      {links.map((link) => {
+        const Icon = INTEGRATION_ICONS[link.id];
+        return (
+          <Tooltip key={link.id}>
+            <TooltipTrigger asChild>
+              <Button asChild variant="outline" size="icon-lg" className="cursor-pointer">
+                <Link href={link.href} aria-label={link.label}>
+                  <Icon className="h-4 w-4" />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{link.label}</TooltipContent>
+          </Tooltip>
+        );
+      })}
+    </>
   );
 }
 

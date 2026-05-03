@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import type { Branch, Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "./task-create-dialog-types";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 
 // One mocked branches hook now — id-based and path-based rows go through
 // the same loader. Tests can override the return value when they need
@@ -66,10 +67,14 @@ function makeFs(overrides: Partial<DialogFormState>): DialogFormState {
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- noop for test-only callback signature
 const NOOP = (_key: string, _value: string) => undefined;
 
+function renderInProvider(ui: Parameters<typeof render>[0]) {
+  return render(<TooltipProvider>{ui}</TooltipProvider>);
+}
+
 // eslint-disable-next-line max-lines-per-function -- test describe block, splitting hurts readability
 describe("RepoChipsRow", () => {
   it("renders one chip per row plus an Add button", () => {
-    render(
+    renderInProvider(
       <RepoChipsRow
         fs={makeFs({ repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })] })}
         repositories={[makeRepo(REPO_FRONT_ID, "frontend"), makeRepo(REPO_BACK_ID, "backend")]}
@@ -84,7 +89,7 @@ describe("RepoChipsRow", () => {
   });
 
   it("renders one chip per row across multiple repos", () => {
-    render(
+    renderInProvider(
       <RepoChipsRow
         fs={makeFs({
           repositories: [
@@ -103,7 +108,7 @@ describe("RepoChipsRow", () => {
   });
 
   it("renders the GitHub URL input in URL mode (chips suppressed)", () => {
-    render(
+    renderInProvider(
       <RepoChipsRow
         fs={makeFs({ useGitHubUrl: true, githubUrl: "" })}
         repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
@@ -121,7 +126,7 @@ describe("RepoChipsRow", () => {
   });
 
   it("hides the chip row when the task is already started", () => {
-    render(
+    renderInProvider(
       <RepoChipsRow
         fs={makeFs({ repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })] })}
         repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
@@ -135,7 +140,7 @@ describe("RepoChipsRow", () => {
   });
 
   it("disables Add when no more repositories are available", () => {
-    render(
+    renderInProvider(
       <RepoChipsRow
         fs={makeFs({
           repositories: [
@@ -156,7 +161,7 @@ describe("RepoChipsRow", () => {
 
   it("calls fs.addRepository when the + button is clicked", () => {
     const fs = makeFs({ repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })] });
-    render(
+    renderInProvider(
       <RepoChipsRow
         fs={fs}
         repositories={[makeRepo(REPO_FRONT_ID, "frontend"), makeRepo(REPO_BACK_ID, "backend")]}
@@ -177,7 +182,7 @@ describe("RepoChipsRow", () => {
         row({ key: "r1", repositoryId: REPO_BACK_ID, branch: "develop" }),
       ],
     });
-    render(
+    renderInProvider(
       <RepoChipsRow
         fs={fs}
         repositories={[makeRepo(REPO_FRONT_ID, "frontend"), makeRepo(REPO_BACK_ID, "backend")]}
@@ -195,7 +200,7 @@ describe("RepoChipsRow", () => {
   // dropdown alongside workspace repos. A previous rewrite passed [] for
   // discovered repos and lost them.
   it("includes discovered (on-machine) repos in the picker dropdown", () => {
-    render(
+    renderInProvider(
       <RepoChipsRow
         fs={makeFs({
           repositories: [row({ key: "r0" })],
@@ -224,7 +229,7 @@ describe("RepoChipsRow", () => {
   // a workspace `repository_id`, causing FK failures on submit.
   it("calls onRowRepositoryChange with the discovered path when picked", () => {
     const onRowRepositoryChange = vi.fn();
-    render(
+    renderInProvider(
       <RepoChipsRow
         fs={makeFs({
           repositories: [row({ key: "r0" })],
@@ -249,7 +254,7 @@ describe("RepoChipsRow", () => {
   // build a `kind: "path"` source for discovered rows so the unified hook
   // hits the path-based query param instead of trying an id lookup.
   it("discovered rows build a path-source for the branch loader", () => {
-    render(
+    renderInProvider(
       <RepoChipsRow
         fs={makeFs({
           repositories: [row({ key: "r0", localPath: "/home/me/projects/proj" })],
@@ -269,7 +274,7 @@ describe("RepoChipsRow", () => {
   });
 
   it("workspace rows build an id-source for the branch loader", () => {
-    render(
+    renderInProvider(
       <RepoChipsRow
         fs={makeFs({ repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })] })}
         repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
@@ -297,7 +302,7 @@ describe("RepoChipsRow", () => {
         { name: "main", type: "remote", remote: "origin" },
       ] as unknown as Branch[],
     };
-    render(
+    renderInProvider(
       <RepoChipsRow
         fs={makeFs({ repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })] })}
         repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}

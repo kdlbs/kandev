@@ -41,7 +41,7 @@ function QueuedMessageOverlay({
 }: QueuedOverlayProps) {
   if (!isQueued || !queuedMessage || isArchived) return null;
   return (
-    <div className="flex-shrink-0 border-t border-blue-400/30 bg-card px-3 py-1">
+    <div className="flex-shrink-0 bg-card px-3 pt-1.5">
       <QueuedMessageIndicator
         ref={indicatorRef}
         content={queuedMessage.content}
