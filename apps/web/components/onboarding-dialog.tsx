@@ -152,18 +152,51 @@ function useOnboardingResources(open: boolean) {
 
   useEffect(() => {
     if (!open) return;
-    Promise.all([listAvailableAgents({ cache: "no-store" }), listAgentsAction()])
-      .then(([availRes, savedRes]) => {
-        setAvailableAgents(availRes.agents ?? []);
-        setTools(availRes.tools ?? []);
-        setAgentSettings(buildAgentSettings(availRes.agents ?? [], savedRes.agents ?? []));
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    // Poll while any agent is still in the "probing" state — the host-utility
+    // probes async at boot and the dialog can open before they all resolve.
+    // Without re-polling, agents that flip status mid-session stay stuck on
+    // the initial badge in the UI.
+    const pollOnce = (firstRun: boolean) => {
+      Promise.all([
+        listAvailableAgents({ cache: "no-store" }),
+        firstRun ? listAgentsAction() : Promise.resolve(null),
+      ])
+        .then(([availRes, savedRes]) => {
+          if (cancelled) return;
+          const agents = availRes.agents ?? [];
+          setAvailableAgents(agents);
+          setTools(availRes.tools ?? []);
+          if (savedRes) {
+            setAgentSettings(buildAgentSettings(agents, savedRes.agents ?? []));
+          }
+          const stillProbing = agents.some((a) => a.model_config.status === "probing");
+          if (stillProbing) {
+            timeoutId = setTimeout(() => pollOnce(false), 2000);
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (firstRun && !cancelled) setLoadingAgents(false);
+        });
+    };
+
+    pollOnce(true);
+    listWorkflowTemplates()
+      .then((res) => {
+        if (!cancelled) setTemplates(res.templates ?? []);
       })
       .catch(() => {})
-      .finally(() => setLoadingAgents(false));
-    listWorkflowTemplates()
-      .then((res) => setTemplates(res.templates ?? []))
-      .catch(() => {})
-      .finally(() => setLoadingTemplates(false));
+      .finally(() => {
+        if (!cancelled) setLoadingTemplates(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, [open]);
 
   return {
