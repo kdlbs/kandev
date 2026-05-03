@@ -413,6 +413,11 @@ function resolveSingleRowLocalPath(fs: DialogFormState, repositories: Repository
   return "";
 }
 
+function hasAllBranchesSelected(fs: DialogFormState): boolean {
+  if (fs.useGitHubUrl) return !!fs.githubBranch;
+  return fs.repositories.length > 0 && fs.repositories.every((r) => !!r.branch);
+}
+
 function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
   const { open, mode = "create", workspaceId, workflowId, defaultStepId } = props;
   const { editingTask, initialValues } = props;
@@ -565,11 +570,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
               hasTitle={fs.hasTitle}
               hasDescription={fs.hasDescription}
               hasRepositorySelection={computed.hasRepositorySelection}
-              hasAllBranches={
-                fs.useGitHubUrl
-                  ? !!fs.githubBranch
-                  : fs.repositories.length > 0 && fs.repositories.every((r) => !!r.branch)
-              }
+              hasAllBranches={hasAllBranchesSelected(fs)}
               agentProfileId={computed.effectiveAgentProfileId}
               workspaceId={workspaceId}
               effectiveWorkflowId={computed.effectiveWorkflowId ?? null}

@@ -16,6 +16,8 @@ func TestShouldPersistMetadataKey(t *testing.T) {
 		{name: "exact match is_remote", key: MetadataKeyIsRemote, want: true},
 		{name: "exact match cleanup_script", key: MetadataKeyCleanupScript, want: true},
 		{name: "exact match executor_profile_id", key: "executor_profile_id", want: true},
+		{name: "exact match image_tag_override", key: MetadataKeyImageTagOverride, want: true},
+		{name: "exact match container_id", key: MetadataKeyContainerID, want: true},
 		{name: "prefix env_secret_id_", key: "env_secret_id_SPRITES_API_TOKEN", want: true},
 		{name: "prefix env_secret_id_ another key", key: "env_secret_id_OPENAI_KEY", want: true},
 		{name: "not persistent task_description", key: "task_description", want: false},

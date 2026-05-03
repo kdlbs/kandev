@@ -73,6 +73,7 @@ const (
 	MetadataKeyGitUserName      = "git_user_name"
 	MetadataKeyGitUserEmail     = "git_user_email"
 	MetadataKeyImageTagOverride = "image_tag_override"
+	MetadataKeyContainerID      = "container_id"
 )
 
 // persistentMetadataKeys lists metadata keys carried forward from a previous
@@ -101,6 +102,8 @@ var persistentMetadataKeys = map[string]bool{
 	"executor_mcp_policy":          true,
 	"sprites_network_policy_rules": true,
 	"executor_profile_id":          true,
+	MetadataKeyImageTagOverride:    true,
+	MetadataKeyContainerID:         true,
 }
 
 // persistentMetadataPrefixes lists key prefixes that should persist.
@@ -180,6 +183,8 @@ type ExecutorCreateRequest struct {
 	AgentConfig         agents.Agent // Agent type info needed by runtimes
 	PreviousExecutionID string       // Non-empty when reconnecting to a previous execution
 	McpMode             string       // MCP tool mode: "task" (default) or "config"
+	AuthToken           string       // Previously handshaken agentctl token for reconnects
+	BootstrapNonce      string       // Stored nonce for re-handshake after container restart
 
 	// OnProgress is an optional callback for streaming preparation progress.
 	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can
@@ -217,6 +222,11 @@ type ExecutorInstance struct {
 	// Empty for standalone (launcher-owned token wired via cfg.Agent.StandaloneAuthToken)
 	// and Sprites (no agentctl auth).
 	AuthToken string
+
+	// BootstrapNonce is the one-time nonce injected into Docker container env.
+	// It is persisted so a restarted container can complete a fresh handshake
+	// against the newly started agentctl process.
+	BootstrapNonce string
 }
 
 // ToAgentExecution converts a ExecutorInstance to an AgentExecution.

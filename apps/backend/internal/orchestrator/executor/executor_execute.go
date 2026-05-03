@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -450,6 +451,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 
 	// Check for an existing task environment to reuse worktree, container, or sandbox
 	e.applyExistingEnvironment(req, existingEnv)
+	e.applyExistingEnvironmentRuntimeMetadata(ctx, req, existingEnv)
 
 	e.logger.Info("launching agent for prepared session",
 		zap.String("task_id", task.ID),
@@ -1116,13 +1118,82 @@ func (e *Executor) applyExistingEnvironment(req *LaunchAgentRequest, env *models
 			req.Metadata = make(map[string]interface{})
 		}
 		if env.ContainerID != "" {
-			req.Metadata["container_id"] = env.ContainerID
+			req.Metadata[lifecycle.MetadataKeyContainerID] = env.ContainerID
 		}
 		if env.SandboxID != "" {
 			// Sprites executor reads "sprite_name" from metadata for reconnection
 			req.Metadata["sprite_name"] = env.SandboxID
 		}
 	}
+}
+
+func (e *Executor) applyExistingEnvironmentRuntimeMetadata(ctx context.Context, req *LaunchAgentRequest, env *models.TaskEnvironment) {
+	if env == nil || env.ID == "" {
+		return
+	}
+	running := e.latestExecutorRunningForEnvironment(ctx, req.TaskID, env.ID)
+	if running == nil {
+		return
+	}
+	applyExecutorRunningMetadata(req, running)
+}
+
+func (e *Executor) latestExecutorRunningForEnvironment(ctx context.Context, taskID, envID string) *models.ExecutorRunning {
+	sessions, err := e.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		e.logger.Warn("failed to list sessions for task environment metadata reuse",
+			zap.String("task_id", taskID),
+			zap.String("task_environment_id", envID),
+			zap.Error(err))
+		return nil
+	}
+	sort.SliceStable(sessions, func(i, j int) bool {
+		if !sessions[i].StartedAt.Equal(sessions[j].StartedAt) {
+			return sessions[i].StartedAt.After(sessions[j].StartedAt)
+		}
+		if !sessions[i].UpdatedAt.Equal(sessions[j].UpdatedAt) {
+			return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)
+		}
+		return sessions[i].ID > sessions[j].ID
+	})
+
+	for _, s := range sessions {
+		if s.TaskEnvironmentID != envID {
+			continue
+		}
+		running, runErr := e.repo.GetExecutorRunningBySessionID(ctx, s.ID)
+		if runErr != nil || running == nil {
+			continue
+		}
+		return running
+	}
+	return nil
+}
+
+func applyExecutorRunningMetadata(req *LaunchAgentRequest, running *models.ExecutorRunning) {
+	if running.AgentExecutionID != "" && req.PreviousExecutionID == "" {
+		req.PreviousExecutionID = running.AgentExecutionID
+	}
+	var metadata map[string]interface{}
+	if running.ContainerID != "" {
+		metadata = ensureLaunchMetadata(req)
+		metadata[lifecycle.MetadataKeyContainerID] = running.ContainerID
+	}
+	for k, v := range running.Metadata {
+		if metadata == nil {
+			metadata = ensureLaunchMetadata(req)
+		}
+		if _, exists := metadata[k]; !exists && lifecycle.ShouldPersistMetadataKey(k) {
+			metadata[k] = v
+		}
+	}
+}
+
+func ensureLaunchMetadata(req *LaunchAgentRequest) map[string]interface{} {
+	if req.Metadata == nil {
+		req.Metadata = make(map[string]interface{})
+	}
+	return req.Metadata
 }
 
 // extractSandboxID extracts the sandbox identifier from launch response metadata.

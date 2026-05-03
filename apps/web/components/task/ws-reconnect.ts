@@ -38,6 +38,7 @@ export type ReconnectLoopOptions = {
   wsRef: React.MutableRefObject<WebSocket | null>;
   attachAddonRef: React.MutableRefObject<AttachAddon | null>;
   onConnected: () => void;
+  onDisconnected?: () => void;
   connectWebSocket: ConnectWebSocketFn;
 };
 
@@ -53,6 +54,7 @@ export function startReconnectLoop({
   wsRef,
   attachAddonRef,
   onConnected,
+  onDisconnected,
   connectWebSocket,
 }: ReconnectLoopOptions): () => void {
   let isMounted = true;
@@ -91,6 +93,7 @@ export function startReconnectLoop({
         },
         onSocketClose: (event) => {
           if (!isMounted) return;
+          onDisconnected?.();
           if (stableOpenTimeout) {
             clearTimeout(stableOpenTimeout);
             stableOpenTimeout = null;

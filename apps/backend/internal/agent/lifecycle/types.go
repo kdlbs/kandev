@@ -157,6 +157,15 @@ func (ae *AgentExecution) SetWorkspaceStream(ws *agentctl.WorkspaceStream) {
 	ae.workspaceStream = ws
 }
 
+// ClearWorkspaceStream clears the workspace stream if it is still the active stream.
+func (ae *AgentExecution) ClearWorkspaceStream(ws *agentctl.WorkspaceStream) {
+	ae.workspaceStreamMu.Lock()
+	defer ae.workspaceStreamMu.Unlock()
+	if ae.workspaceStream == ws {
+		ae.workspaceStream = nil
+	}
+}
+
 // GetWorkspaceStream returns the unified workspace stream for this execution
 func (ae *AgentExecution) GetWorkspaceStream() *agentctl.WorkspaceStream {
 	ae.workspaceStreamMu.RLock()

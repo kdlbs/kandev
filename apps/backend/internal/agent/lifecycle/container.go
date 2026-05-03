@@ -74,9 +74,10 @@ func NewContainerManager(dockerClient *docker.Client, networkName string, log *l
 
 // LaunchResult holds the result of a successful container launch.
 type LaunchResult struct {
-	ContainerID string
-	Client      *agentctl.Client
-	AuthToken   string // auth token retrieved via handshake (for encrypted storage)
+	ContainerID    string
+	Client         *agentctl.Client
+	AuthToken      string // auth token retrieved via handshake (for encrypted storage)
+	BootstrapNonce string // nonce injected into container env for future restart handshakes
 }
 
 // LaunchContainer creates and starts a Docker container for an agent.
@@ -124,9 +125,10 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 		zap.String("instance_id", config.InstanceID))
 
 	return &LaunchResult{
-		ContainerID: containerID,
-		Client:      client,
-		AuthToken:   authToken,
+		ContainerID:    containerID,
+		Client:         client,
+		AuthToken:      authToken,
+		BootstrapNonce: nonce,
 	}, nil
 }
 

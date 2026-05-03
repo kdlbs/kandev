@@ -112,6 +112,7 @@ func isResizeCommand(data []byte) bool {
 
 const (
 	passthroughReadyTimeout = 30 * time.Second
+	remoteReadyProbeTimeout = 500 * time.Millisecond
 	pollInterval            = 500 * time.Millisecond
 )
 
@@ -296,7 +297,14 @@ func (h *TerminalHandler) remoteExecutionWithClientReady(
 	if remaining <= 0 {
 		return nil, false
 	}
-	if err := execution.GetAgentCtlClient().WaitForReady(ctx, remaining); err != nil {
+
+	probeTimeout := remoteReadyProbeTimeout
+	if remaining < probeTimeout {
+		probeTimeout = remaining
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	if err := execution.GetAgentCtlClient().Health(probeCtx); err != nil {
 		h.logger.Debug("remote execution agentctl client not ready",
 			zap.String("session_id", sessionID),
 			zap.String("execution_id", execution.ID),

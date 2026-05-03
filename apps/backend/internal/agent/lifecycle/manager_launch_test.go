@@ -342,3 +342,43 @@ func TestLaunch_RaceRollback(t *testing.T) {
 		t.Errorf("StopInstance called %d times, want 1 (runtime instance must be stopped on rollback)", got)
 	}
 }
+
+func TestLaunch_PersistsDockerRuntimeSecrets(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	execRegistry := NewExecutorRegistry(log)
+	backend := &createInstanceExecutor{
+		MockExecutor: MockExecutor{name: executor.NameDocker},
+		client:       newReadyAgentctlClient(t, log),
+		authToken:    "agentctl-token",
+		nonce:        "bootstrap-nonce",
+	}
+	execRegistry.Register(backend)
+
+	store := newInMemorySecretStore()
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	mgr.SetSecretStore(store)
+	mgr.dataDir = t.TempDir()
+	t.Cleanup(func() { close(mgr.stopCh) })
+
+	execution, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+		ExecutorType:   "local_docker",
+		IsEphemeral:    true,
+	})
+	if err != nil {
+		t.Fatalf("Launch returned error: %v", err)
+	}
+
+	if got := mgr.revealRuntimeSecret(context.Background(), execution.Metadata, MetadataKeyAuthTokenSecret); got != "agentctl-token" {
+		t.Fatalf("revealed auth token = %q, want agentctl-token", got)
+	}
+	if got := mgr.revealRuntimeSecret(context.Background(), execution.Metadata, MetadataKeyBootstrapNonceSecret); got != "bootstrap-nonce" {
+		t.Fatalf("revealed bootstrap nonce = %q, want bootstrap-nonce", got)
+	}
+}

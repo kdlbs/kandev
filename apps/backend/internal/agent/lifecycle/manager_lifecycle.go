@@ -15,7 +15,11 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-const containerStateExited = "exited"
+const (
+	containerStateCreated = "created"
+	containerStateExited  = "exited"
+	containerStateRunning = "running"
+)
 
 // Start starts the lifecycle manager background tasks
 func (m *Manager) Start(ctx context.Context) error {

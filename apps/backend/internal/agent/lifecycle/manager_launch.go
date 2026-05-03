@@ -318,6 +318,8 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpServers:          mcpServers,
 		PreviousExecutionID: reqWithWorktree.PreviousExecutionID,
 		McpMode:             reqWithWorktree.McpMode,
+		AuthToken:           m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
+		BootstrapNonce:      m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
 		OnProgress:          m.newProgressCallback(reqWithWorktree.TaskID, reqWithWorktree.SessionID),
 	}
 
@@ -690,6 +692,8 @@ func (m *Manager) registerAndPublishExecution(
 		}
 		return fmt.Errorf("failed to register execution: %w", addErr)
 	}
+
+	m.persistRuntimeSecrets(ctx, execInstance, execution)
 
 	// Persist executors_running in lockstep with Add — see persistence.go for the
 	// invariant. Carries forward resume_token / metadata from a prior row so the

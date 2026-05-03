@@ -460,7 +460,15 @@ func (m *mockRepository) GetActiveTaskSessionByTaskID(ctx context.Context, taskI
 	return nil, nil
 }
 func (m *mockRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
-	return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sessions := make([]*models.TaskSession, 0)
+	for _, session := range m.sessions {
+		if session.TaskID == taskID {
+			sessions = append(sessions, session)
+		}
+	}
+	return sessions, nil
 }
 func (m *mockRepository) ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error) {
 	return nil, nil

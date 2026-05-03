@@ -19,6 +19,21 @@ type stubEnvRepo struct {
 func (s *stubEnvRepo) CreateTaskEnvironment(context.Context, *models.TaskEnvironment) error {
 	return nil
 }
+func (s *stubEnvRepo) CreateTaskEnvironmentRepo(context.Context, *models.TaskEnvironmentRepo) error {
+	return nil
+}
+func (s *stubEnvRepo) ListTaskEnvironmentRepos(context.Context, string) ([]*models.TaskEnvironmentRepo, error) {
+	return nil, nil
+}
+func (s *stubEnvRepo) UpdateTaskEnvironmentRepo(context.Context, *models.TaskEnvironmentRepo) error {
+	return nil
+}
+func (s *stubEnvRepo) DeleteTaskEnvironmentRepo(context.Context, string) error {
+	return nil
+}
+func (s *stubEnvRepo) DeleteTaskEnvironmentReposByEnv(context.Context, string) error {
+	return nil
+}
 func (s *stubEnvRepo) GetTaskEnvironment(context.Context, string) (*models.TaskEnvironment, error) {
 	return s.env, s.getErr
 }

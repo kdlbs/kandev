@@ -1,8 +1,11 @@
 package executor
 
 import (
+	"context"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -103,6 +106,54 @@ func TestApplyExistingEnvironment_ContainerReuse(t *testing.T) {
 	}
 	if req.Metadata["container_id"] != "container-abc" {
 		t.Errorf("expected metadata container_id=container-abc, got %v", req.Metadata["container_id"])
+	}
+}
+
+func TestApplyExistingEnvironmentRuntimeMetadata_CarriesPersistentSecrets(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+	repo := newMockRepository()
+	now := time.Now().UTC()
+	repo.sessions["session-old"] = &models.TaskSession{
+		ID:                "session-old",
+		TaskID:            "task-1",
+		TaskEnvironmentID: "env-1",
+		StartedAt:         now,
+		UpdatedAt:         now,
+	}
+	repo.executorsRunning["session-old"] = &models.ExecutorRunning{
+		SessionID:        "session-old",
+		AgentExecutionID: "exec-old",
+		ContainerID:      "container-old",
+		Metadata: map[string]interface{}{
+			lifecycle.MetadataKeyAuthTokenSecret:      "secret-token",
+			lifecycle.MetadataKeyBootstrapNonceSecret: "secret-nonce",
+			"task_description":                        "drop me",
+		},
+	}
+	e := &Executor{logger: log, repo: repo}
+	req := &LaunchAgentRequest{TaskID: "task-1"}
+
+	e.applyExistingEnvironmentRuntimeMetadata(context.Background(), req, &models.TaskEnvironment{
+		ID: "env-1",
+	})
+
+	if req.PreviousExecutionID != "exec-old" {
+		t.Fatalf("PreviousExecutionID = %q, want exec-old", req.PreviousExecutionID)
+	}
+	if req.Metadata[lifecycle.MetadataKeyContainerID] != "container-old" {
+		t.Fatalf("container metadata = %v, want container-old", req.Metadata[lifecycle.MetadataKeyContainerID])
+	}
+	if req.Metadata[lifecycle.MetadataKeyAuthTokenSecret] != "secret-token" {
+		t.Fatalf("auth token secret missing: %v", req.Metadata)
+	}
+	if req.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] != "secret-nonce" {
+		t.Fatalf("bootstrap nonce secret missing: %v", req.Metadata)
+	}
+	if _, ok := req.Metadata["task_description"]; ok {
+		t.Fatalf("launch-only metadata should be filtered out: %v", req.Metadata)
 	}
 }
 

@@ -143,3 +143,34 @@ func TestPersistAuthToken(t *testing.T) {
 		}
 	})
 }
+
+func TestPersistRuntimeSecrets(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	store := newInMemorySecretStore()
+	m := &Manager{logger: log, secretStore: store}
+
+	instance := &ExecutorInstance{
+		InstanceID:     "exec-123456789012",
+		AuthToken:      "agentctl-token",
+		BootstrapNonce: "bootstrap-nonce",
+	}
+	execution := &AgentExecution{Metadata: make(map[string]interface{})}
+
+	m.persistRuntimeSecrets(context.Background(), instance, execution)
+
+	authSecretID, ok := execution.Metadata[MetadataKeyAuthTokenSecret].(string)
+	if !ok || authSecretID == "" {
+		t.Fatalf("expected auth token secret ID, got %v", execution.Metadata[MetadataKeyAuthTokenSecret])
+	}
+	nonceSecretID, ok := execution.Metadata[MetadataKeyBootstrapNonceSecret].(string)
+	if !ok || nonceSecretID == "" {
+		t.Fatalf("expected bootstrap nonce secret ID, got %v", execution.Metadata[MetadataKeyBootstrapNonceSecret])
+	}
+
+	if got := m.revealRuntimeSecret(context.Background(), execution.Metadata, MetadataKeyAuthTokenSecret); got != "agentctl-token" {
+		t.Fatalf("revealed auth token = %q, want agentctl-token", got)
+	}
+	if got := m.revealRuntimeSecret(context.Background(), execution.Metadata, MetadataKeyBootstrapNonceSecret); got != "bootstrap-nonce" {
+		t.Fatalf("revealed bootstrap nonce = %q, want bootstrap-nonce", got)
+	}
+}

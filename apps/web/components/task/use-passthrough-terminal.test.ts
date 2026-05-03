@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildTerminalWsUrl } from "./use-passthrough-terminal";
-import { reconnectDelayMs } from "./ws-reconnect";
+import { reconnectDelayMs, startReconnectLoop } from "./ws-reconnect";
+import type { Terminal } from "@xterm/xterm";
 
 describe("reconnectDelayMs", () => {
   it("returns 300ms for attempt 0", () => {
@@ -43,5 +44,41 @@ describe("buildTerminalWsUrl", () => {
         sessionId: "session-1",
       }),
     ).toBe("ws://localhost:38429/terminal/session/session-1?mode=agent");
+  });
+});
+
+describe("startReconnectLoop", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("notifies disconnects so the terminal can show the reconnecting state", () => {
+    vi.useFakeTimers();
+
+    const onDisconnected = vi.fn();
+    const connectWebSocket = vi.fn(({ onSocketClose }) => {
+      onSocketClose({ code: 1006 } as CloseEvent);
+    });
+
+    const stop = startReconnectLoop({
+      environmentId: "env-1",
+      wsBaseUrl: "ws://localhost:38429",
+      mode: "shell",
+      terminalId: "shell-1",
+      label: undefined,
+      terminal: {} as Terminal,
+      fitAndResize: vi.fn(),
+      wsRef: { current: null },
+      attachAddonRef: { current: null },
+      onConnected: vi.fn(),
+      onDisconnected,
+      connectWebSocket,
+    });
+
+    vi.advanceTimersByTime(150);
+
+    expect(connectWebSocket).toHaveBeenCalledTimes(1);
+    expect(onDisconnected).toHaveBeenCalledTimes(1);
+    stop();
   });
 });

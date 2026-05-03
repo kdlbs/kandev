@@ -619,6 +619,10 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 			return "", ErrNoCloneURL
 		}
 		req.RepositoryURL = cloneURL
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
+		}
+		req.Metadata["repository_clone_url"] = cloneURL
 	}
 
 	if shouldUseWorktree(req.ExecutorType) && repositoryPath != "" {

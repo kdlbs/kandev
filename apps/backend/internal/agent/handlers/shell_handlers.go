@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -130,10 +131,9 @@ func (h *ShellHandlers) wsShellSubscribe(ctx context.Context, msg *ws.Message) (
 		return nil, fmt.Errorf("session_id is required")
 	}
 
-	// Get or create execution on-demand (survives backend restart)
-	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, req.SessionID)
+	execution, err := h.ensureShellExecution(ctx, req.SessionID)
 	if err != nil {
-		return nil, fmt.Errorf("no agent running for session %s: %w", req.SessionID, err)
+		return nil, err
 	}
 
 	// Get buffered output to include in response
@@ -164,13 +164,9 @@ func (h *ShellHandlers) wsShellInput(ctx context.Context, msg *ws.Message) (*ws.
 		return nil, fmt.Errorf("session_id is required")
 	}
 
-	// Get the agent execution for this session.
-	// Use GetExecutionBySessionID (not GetOrEnsureExecution): writing input
-	// requires the workspace stream to already be live, and the 5s wait below
-	// is too short to absorb a cold-start of agentctl.
-	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(req.SessionID)
-	if !ok {
-		return nil, fmt.Errorf("no agent running for session %s", req.SessionID)
+	execution, err := h.ensureShellExecution(ctx, req.SessionID)
+	if err != nil {
+		return nil, err
 	}
 
 	// Wait for the workspace stream to be ready with a timeout.
@@ -199,6 +195,27 @@ func (h *ShellHandlers) wsShellInput(ctx context.Context, msg *ws.Message) (*ws.
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success": true,
 	})
+}
+
+func (h *ShellHandlers) ensureShellExecution(ctx context.Context, sessionID string) (*lifecycle.AgentExecution, error) {
+	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, sessionID)
+	if err != nil {
+		h.logger.Debug("failed to ensure shell execution",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil, fmt.Errorf("no agent running for session %s", sessionID)
+	}
+	if execution.Status != v1.AgentStatusFailed {
+		return execution, nil
+	}
+	if err := h.lifecycleMgr.CleanupStaleExecutionBySessionID(ctx, sessionID); err != nil {
+		return nil, fmt.Errorf("cleanup stale execution for session %s: %w", sessionID, err)
+	}
+	execution, err = h.lifecycleMgr.GetOrEnsureExecution(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("recover execution for session %s: %w", sessionID, err)
+	}
+	return execution, nil
 }
 
 // UserShellListRequest for user_shell.list action.

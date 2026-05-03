@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/common/config"
@@ -441,6 +442,100 @@ func TestReconnectToContainer_ValidationErrors(t *testing.T) {
 			t.Fatal("expected error for empty execution ID")
 		}
 	})
+}
+
+func TestResolveReconnectContainerRef(t *testing.T) {
+	t.Run("uses stored container id before derived execution name", func(t *testing.T) {
+		req := &ExecutorCreateRequest{
+			PreviousExecutionID: "exec-previous",
+			Metadata: map[string]interface{}{
+				MetadataKeyContainerID: "container-real",
+			},
+		}
+		got, err := resolveReconnectContainerRef(req)
+		if err != nil {
+			t.Fatalf("resolveReconnectContainerRef returned error: %v", err)
+		}
+		if got != "container-real" {
+			t.Fatalf("expected stored container id, got %q", got)
+		}
+	})
+
+	t.Run("falls back to legacy name from previous execution id", func(t *testing.T) {
+		req := &ExecutorCreateRequest{PreviousExecutionID: "12345678-abcdef"}
+		got, err := resolveReconnectContainerRef(req)
+		if err != nil {
+			t.Fatalf("resolveReconnectContainerRef returned error: %v", err)
+		}
+		if got != "kandev-agent-12345678" {
+			t.Fatalf("expected derived container name, got %q", got)
+		}
+	})
+}
+
+func TestShouldStartExistingDockerContainer(t *testing.T) {
+	tests := []struct {
+		state string
+		want  bool
+	}{
+		{state: "created", want: true},
+		{state: "exited", want: true},
+		{state: "running", want: false},
+		{state: "paused", want: false},
+		{state: "dead", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.state, func(t *testing.T) {
+			if got := shouldStartExistingDockerContainer(tt.state); got != tt.want {
+				t.Fatalf("shouldStartExistingDockerContainer(%q) = %v, want %v", tt.state, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildReconnectCreateInstanceRequest(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		TaskID:    "task-1",
+		SessionID: "session-1",
+		AgentConfig: &testAgent{
+			id:      "codex",
+			enabled: true,
+			runtimeConfig: &agents.RuntimeConfig{
+				AssumeMcpSse: true,
+			},
+		},
+		Env: map[string]string{
+			"OPENAI_API_KEY": "token",
+		},
+		McpServers: []McpServerConfig{{Name: "test-mcp"}},
+		McpMode:    "config",
+	}
+
+	got := buildReconnectCreateInstanceRequest(req, "previous-exec")
+	if got.ID != "previous-exec" {
+		t.Fatalf("ID = %q, want previous-exec", got.ID)
+	}
+	if got.WorkspacePath != dockerWorkspacePath {
+		t.Fatalf("WorkspacePath = %q, want %q", got.WorkspacePath, dockerWorkspacePath)
+	}
+	if got.AgentType != "codex" {
+		t.Fatalf("AgentType = %q, want codex", got.AgentType)
+	}
+	if got.SessionID != "session-1" || got.TaskID != "task-1" {
+		t.Fatalf("task/session not propagated: task=%q session=%q", got.TaskID, got.SessionID)
+	}
+	if got.Env["OPENAI_API_KEY"] != "token" {
+		t.Fatalf("env not propagated: %v", got.Env)
+	}
+	if len(got.McpServers) != 1 || got.McpServers[0].Name != "test-mcp" {
+		t.Fatalf("mcp servers not propagated: %v", got.McpServers)
+	}
+	if !got.AssumeMcpSse {
+		t.Fatal("expected AssumeMcpSse to be propagated")
+	}
+	if got.McpMode != "config" {
+		t.Fatalf("McpMode = %q, want config", got.McpMode)
+	}
 }
 
 func TestResolvePrepareScript(t *testing.T) {

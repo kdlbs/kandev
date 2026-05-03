@@ -15,19 +15,26 @@ import {
 } from "@/lib/api/domains/task-environment-api";
 import { ApiError } from "@/lib/api/client";
 import { TaskResetEnvConfirmDialog } from "./task-reset-env-confirm-dialog";
+import {
+  getEnvironmentStatusSnapshot,
+  resolveExecutorEnvironmentStatus,
+  type StatusTone,
+  type EnvironmentStatusSnapshot,
+} from "./executor-environment-status";
 
 type ExecutorSettingsButtonProps = {
   taskId?: string | null;
   disabled?: boolean;
 };
 
-const POLL_INTERVAL_MS = 3000;
+const ACTIVE_POLL_INTERVAL_MS = 3000;
+const BACKGROUND_POLL_INTERVAL_MS = 7000;
 
 /**
  * Owns the env+container fetch/poll lifecycle and the reset action so the
- * popover component stays small. Polls only while `active` is true (the
- * popover is open) to avoid hammering /environment/live when nobody is
- * watching.
+ * popover component stays small. Polls more quickly while the popover is open
+ * and less frequently while closed so the toolbar icon can still reflect
+ * externally stopped/restarted containers.
  */
 function useTaskEnvironment(taskId: string | null | undefined, active: boolean) {
   const [env, setEnv] = useState<TaskEnvironment | null>(null);
@@ -35,6 +42,7 @@ function useTaskEnvironment(taskId: string | null | undefined, active: boolean) 
   const [loading, setLoading] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const inFlight = useRef(false);
+  const lastStatusRef = useRef<EnvironmentStatusSnapshot | null>(null);
   // hasLoadedRef tracks "have we ever fetched successfully" so the spinner
   // only shows on the first open. Keeping it in a ref instead of state means
   // `loadEnv` doesn't depend on `env` — without that, every successful fetch
@@ -43,34 +51,52 @@ function useTaskEnvironment(taskId: string | null | undefined, active: boolean) 
   // poll into a tight loop.
   const hasLoadedRef = useRef(false);
 
+  useEffect(() => {
+    hasLoadedRef.current = false;
+    lastStatusRef.current = null;
+    setEnv(null);
+    setContainer(null);
+    setLoading(false);
+  }, [taskId]);
+
+  const updateState = useCallback(
+    (nextEnv: TaskEnvironment | null, nextContainer: ContainerLiveStatus | null) => {
+      const nextStatus = getEnvironmentStatusSnapshot(nextEnv, nextContainer);
+      maybeNotifyEnvironmentStatus(lastStatusRef.current, nextStatus);
+      lastStatusRef.current = nextStatus;
+      setEnv(nextEnv);
+      setContainer(nextContainer);
+    },
+    [],
+  );
+
   const loadEnv = useCallback(async () => {
     if (!taskId || inFlight.current) return;
     inFlight.current = true;
-    setLoading((prev) => prev || !hasLoadedRef.current);
+    setLoading((prev) => prev || (active && !hasLoadedRef.current));
     try {
       const data = await fetchTaskEnvironmentLive(taskId);
       hasLoadedRef.current = true;
-      setEnv(data.environment);
-      setContainer(data.container ?? null);
+      updateState(data.environment, data.container ?? null);
     } catch (err) {
       // Only treat 404 as "no environment yet" — a transient 500 / auth /
       // network error should leave the last-known view in place rather than
       // erase a valid environment and disable the Reset action.
       if (err instanceof ApiError && err.status === 404) {
         hasLoadedRef.current = true;
-        setEnv(null);
-        setContainer(null);
+        updateState(null, null);
       }
     } finally {
       inFlight.current = false;
       setLoading(false);
     }
-  }, [taskId]);
+  }, [active, taskId, updateState]);
 
   useEffect(() => {
-    if (!active || !taskId) return;
+    if (!taskId) return;
     void loadEnv();
-    const interval = window.setInterval(() => void loadEnv(), POLL_INTERVAL_MS);
+    const intervalMs = active ? ACTIVE_POLL_INTERVAL_MS : BACKGROUND_POLL_INTERVAL_MS;
+    const interval = window.setInterval(() => void loadEnv(), intervalMs);
     return () => window.clearInterval(interval);
   }, [active, taskId, loadEnv]);
 
@@ -81,6 +107,7 @@ function useTaskEnvironment(taskId: string | null | undefined, active: boolean) 
       try {
         await resetTaskEnvironment(taskId, { push_branch: pushBranch });
         toast.success("Environment reset");
+        lastStatusRef.current = getEnvironmentStatusSnapshot(null, null);
         setEnv(null);
         setContainer(null);
         return true;
@@ -95,13 +122,18 @@ function useTaskEnvironment(taskId: string | null | undefined, active: boolean) 
     [taskId],
   );
 
-  return { env, container, loading, isResetting, reset };
+  const status = useMemo(
+    () => (env ? resolveExecutorEnvironmentStatus(env, container) : null),
+    [env, container],
+  );
+
+  return { env, container, loading, isResetting, reset, status };
 }
 
 export function ExecutorSettingsButton({ taskId, disabled }: ExecutorSettingsButtonProps) {
   const [open, setOpen] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
-  const { env, container, loading, isResetting, reset } = useTaskEnvironment(taskId, open);
+  const { env, container, loading, isResetting, reset, status } = useTaskEnvironment(taskId, open);
 
   const handleReset = useCallback(
     async (opts: { pushBranch: boolean }) => {
@@ -123,12 +155,15 @@ export function ExecutorSettingsButton({ taskId, disabled }: ExecutorSettingsBut
           <Button
             variant="outline"
             size="sm"
-            className="cursor-pointer px-2"
+            className="relative cursor-pointer px-2"
             disabled={disabled}
             data-testid="executor-settings-button"
-            aria-label="Executor settings"
+            aria-label={
+              status ? `Executor settings, environment ${status.label}` : "Executor settings"
+            }
           >
             <IconBox className="h-4 w-4" />
+            <ExecutorStatusDot status={status} loading={loading} />
           </Button>
         </PopoverTrigger>
         <PopoverContent
@@ -160,6 +195,41 @@ export function ExecutorSettingsButton({ taskId, disabled }: ExecutorSettingsBut
         onConfirm={handleReset}
       />
     </>
+  );
+}
+
+function maybeNotifyEnvironmentStatus(
+  prev: EnvironmentStatusSnapshot | null,
+  next: EnvironmentStatusSnapshot,
+) {
+  if (!prev || prev.key === next.key) return;
+  if (prev.tone === "running" && next.tone !== "running") {
+    toast.error("Executor environment stopped", {
+      description: `Current state: ${next.label}`,
+    });
+  } else if (prev.tone !== "running" && next.tone === "running") {
+    toast.success("Executor environment running");
+  }
+}
+
+function ExecutorStatusDot({
+  status,
+  loading,
+}: {
+  status: { label: string; tone: StatusTone } | null;
+  loading: boolean;
+}) {
+  const tone = status?.tone ?? "neutral";
+  const label = status?.label ?? "not created";
+  return (
+    <span
+      aria-hidden="true"
+      title={`Environment ${label}`}
+      data-testid="executor-status-indicator"
+      className={`absolute right-1 top-1 h-2.5 w-2.5 rounded-full border border-background ${DOT_CLASSES[tone]} ${
+        loading && !status ? "animate-pulse" : ""
+      }`}
+    />
   );
 }
 
@@ -211,7 +281,7 @@ function StatusBadge({
 }) {
   // For container-backed envs the live state is the source of truth; for the
   // others fall back to the recorded TaskEnvironment.status.
-  const { label, tone } = resolveStatus(env, container);
+  const { label, tone } = resolveExecutorEnvironmentStatus(env, container);
   const className = TONE_CLASSES[tone];
   return (
     <Badge variant="outline" className={`text-[10px] uppercase ${className}`}>
@@ -219,8 +289,6 @@ function StatusBadge({
     </Badge>
   );
 }
-
-type StatusTone = "running" | "stopped" | "warn" | "error" | "neutral";
 
 const TONE_CLASSES: Record<StatusTone, string> = {
   running: "border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-300",
@@ -230,50 +298,13 @@ const TONE_CLASSES: Record<StatusTone, string> = {
   neutral: "border-muted text-muted-foreground",
 };
 
-function resolveStatus(
-  env: TaskEnvironment,
-  container: ContainerLiveStatus | null,
-): { label: string; tone: StatusTone } {
-  if (container) {
-    return resolveContainerStatus(container);
-  }
-  return resolveEnvStatus(env.status);
-}
-
-const CONTAINER_STATUS_TONES: Record<string, StatusTone> = {
-  paused: "warn",
-  restarting: "warn",
-  dead: "error",
+const DOT_CLASSES: Record<StatusTone, string> = {
+  running: "bg-green-500",
+  stopped: "bg-zinc-500",
+  warn: "bg-amber-500",
+  error: "bg-red-500",
+  neutral: "bg-muted-foreground",
 };
-
-function resolveContainerStatus(container: ContainerLiveStatus): {
-  label: string;
-  tone: StatusTone;
-} {
-  if (container.missing) return { label: "missing", tone: "warn" };
-  if (container.state === "running") {
-    return { label: container.status || "running", tone: "running" };
-  }
-  if (container.state === "exited") {
-    return {
-      label: container.exit_code ? `exited (${container.exit_code})` : "exited",
-      tone: container.exit_code ? "error" : "stopped",
-    };
-  }
-  const tone = CONTAINER_STATUS_TONES[container.state] ?? "neutral";
-  return { label: container.state || "unknown", tone };
-}
-
-const ENV_STATUS_MAP: Record<string, { label: string; tone: StatusTone }> = {
-  ready: { label: "ready", tone: "running" },
-  creating: { label: "starting", tone: "warn" },
-  stopped: { label: "stopped", tone: "stopped" },
-  failed: { label: "failed", tone: "error" },
-};
-
-function resolveEnvStatus(status: string): { label: string; tone: StatusTone } {
-  return ENV_STATUS_MAP[status] ?? { label: status || "unknown", tone: "neutral" };
-}
 
 function EnvironmentFields({
   env,

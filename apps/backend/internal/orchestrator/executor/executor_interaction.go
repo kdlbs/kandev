@@ -335,6 +335,10 @@ func (e *Executor) applyRepositoryToSwitchRequest(ctx context.Context, req *Laun
 			return "", ErrNoCloneURL
 		}
 		req.RepositoryURL = cloneURL
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
+		}
+		req.Metadata["repository_clone_url"] = cloneURL
 	}
 	return repository.LocalPath, nil
 }

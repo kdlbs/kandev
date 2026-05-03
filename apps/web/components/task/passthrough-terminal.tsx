@@ -147,6 +147,10 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     setConnectedTargetId(connectionID ?? null);
     if (autoFocus) refs.xtermRef.current?.textarea?.focus({ preventScroll: true });
   }, [connectionID, autoFocus, refs.xtermRef]);
+  const onDisconnected = useCallback(() => {
+    const disconnectedTargetId = connectionID ?? null;
+    setConnectedTargetId((current) => (current === disconnectedTargetId ? null : current));
+  }, [connectionID]);
 
   const linkHandler = useTerminalLinkHandler();
   const terminalFontFamily = useAppStore((s) => s.userSettings.terminalFontFamily);
@@ -208,6 +212,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     wsRef,
     attachAddonRef,
     onConnected,
+    onDisconnected,
   });
 
   usePendingCommand(pendingCommand, isConnected, wsRef, onCommandSent);

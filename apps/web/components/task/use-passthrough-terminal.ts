@@ -324,6 +324,7 @@ export type WebSocketConnectionOptions = {
   wsRef: React.MutableRefObject<WebSocket | null>;
   attachAddonRef: React.MutableRefObject<AttachAddon | null>;
   onConnected: () => void;
+  onDisconnected?: () => void;
 };
 
 export function buildTerminalWsUrl(
@@ -348,6 +349,24 @@ export function buildTerminalWsUrl(
   }
   if (label) wsUrl += `&label=${encodeURIComponent(label)}`;
   return wsUrl;
+}
+
+function cleanupTerminalConnection(
+  attachAddonRef: React.MutableRefObject<AttachAddon | null>,
+  wsRef: React.MutableRefObject<WebSocket | null>,
+) {
+  if (attachAddonRef.current) {
+    attachAddonRef.current.dispose();
+    attachAddonRef.current = null;
+  }
+  if (!wsRef.current) return;
+  if (
+    wsRef.current.readyState === WebSocket.OPEN ||
+    wsRef.current.readyState === WebSocket.CLOSING
+  ) {
+    wsRef.current.close();
+  }
+  wsRef.current = null;
 }
 
 type ConnectWebSocketOptions = {
@@ -469,6 +488,7 @@ export function useWebSocketConnection({
   wsRef,
   attachAddonRef,
   onConnected,
+  onDisconnected,
 }: WebSocketConnectionOptions) {
   const taskIdRef = useRef(taskId);
 
@@ -527,27 +547,13 @@ export function useWebSocketConnection({
       wsRef,
       attachAddonRef,
       onConnected,
+      onDisconnected,
       connectWebSocket,
     });
     return () => {
       log("WebSocket cleanup");
       stopReconnectLoop();
-      if (attachAddonRef.current) {
-        attachAddonRef.current.dispose();
-        attachAddonRef.current = null;
-      }
-      if (wsRef.current) {
-        // Only close if the connection is actually open or has completed
-        // opening. Closing a CONNECTING WebSocket triggers a browser warning
-        // ("WebSocket is closed before the connection is established").
-        if (
-          wsRef.current.readyState === WebSocket.OPEN ||
-          wsRef.current.readyState === WebSocket.CLOSING
-        ) {
-          wsRef.current.close();
-        }
-        wsRef.current = null;
-      }
+      cleanupTerminalConnection(attachAddonRef, wsRef);
     };
   }, [
     sessionId,
@@ -564,6 +570,7 @@ export function useWebSocketConnection({
     wsRef,
     attachAddonRef,
     onConnected,
+    onDisconnected,
   ]);
 }
 

@@ -19,6 +19,7 @@ type UseChatInputContainerParams = {
   isMoving: boolean;
   isFailed: boolean;
   needsRecovery: boolean;
+  executorUnavailable: boolean;
   isAgentBusy: boolean;
   hasAgentCommands: boolean;
   placeholder: string | undefined;
@@ -57,6 +58,15 @@ function useInputHandle(
   );
 }
 
+function useSyncTipTapRef(
+  tiptapRef: React.RefObject<TipTapInputHandle | null>,
+  inputRef: React.RefObject<TipTapInputHandle | null>,
+) {
+  useEffect(() => {
+    tiptapRef.current = inputRef.current;
+  });
+}
+
 function getInputPlaceholder(
   placeholder: string | undefined,
   isAgentBusy: boolean,
@@ -76,6 +86,7 @@ function computeDerivedState(params: {
   isSending: boolean;
   isFailed: boolean;
   needsRecovery: boolean;
+  executorUnavailable: boolean;
   pendingClarification: Message | null | undefined;
   onClarificationResolved: (() => void) | undefined;
   pendingCommentsByFile: Record<string, DiffComment[]> | undefined;
@@ -90,7 +101,8 @@ function computeDerivedState(params: {
     params.isMoving ||
     params.isSending ||
     params.isFailed ||
-    params.needsRecovery;
+    params.needsRecovery ||
+    params.executorUnavailable;
   const hasClarification = !!(params.pendingClarification && params.onClarificationResolved);
   const hasPendingComments = !!(
     params.pendingCommentsByFile && Object.keys(params.pendingCommentsByFile).length > 0
@@ -122,6 +134,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     isMoving,
     isFailed,
     needsRecovery,
+    executorUnavailable,
     isAgentBusy,
     hasAgentCommands,
     placeholder,
@@ -156,9 +169,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     onSubmit,
   });
 
-  useEffect(() => {
-    tiptapRef.current = inputRef.current;
-  });
+  useSyncTipTapRef(tiptapRef, inputRef);
 
   useInputHandle(ref, inputRef);
 
@@ -192,6 +203,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     isSending,
     isFailed,
     needsRecovery,
+    executorUnavailable,
     pendingClarification,
     onClarificationResolved,
     pendingCommentsByFile,

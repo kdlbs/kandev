@@ -551,6 +551,8 @@ type createInstanceExecutor struct {
 	client      *agentctl.Client
 	createCount atomic.Int32
 	stopCount   atomic.Int32
+	authToken   string
+	nonce       string
 	delay       time.Duration
 	// Barrier-based deterministic synchronization for race tests.
 	// Set entered (buffered 1) to receive a signal when CreateInstance begins.
@@ -581,12 +583,14 @@ func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *Execut
 	}
 	e.createCount.Add(1)
 	return &ExecutorInstance{
-		InstanceID:    req.InstanceID,
-		TaskID:        req.TaskID,
-		SessionID:     req.SessionID,
-		RuntimeName:   string(e.Name()),
-		Client:        e.client,
-		WorkspacePath: req.WorkspacePath,
+		InstanceID:     req.InstanceID,
+		TaskID:         req.TaskID,
+		SessionID:      req.SessionID,
+		RuntimeName:    string(e.Name()),
+		Client:         e.client,
+		WorkspacePath:  req.WorkspacePath,
+		AuthToken:      e.authToken,
+		BootstrapNonce: e.nonce,
 	}, nil
 }
 
