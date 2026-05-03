@@ -139,11 +139,15 @@ describe("RepoChipsRow", () => {
     expect(screen.queryByTestId("repo-chips-row")).toBeNull();
   });
 
-  it("locked branch chip shows the resolved current branch when not loading", () => {
+  it("local-executor row autoselects the workspace's current branch when available", () => {
     mockBranches.value = {
-      branches: [{ name: "feature/x", type: "local" } as Branch],
+      branches: [
+        { name: "main", type: "local" } as Branch,
+        { name: "feature/x", type: "local" } as Branch,
+      ],
       isLoading: false,
     };
+    const onRowBranchChange = vi.fn();
     renderInProvider(
       <RepoChipsRow
         fs={makeFs({
@@ -155,14 +159,18 @@ describe("RepoChipsRow", () => {
         isTaskStarted={false}
         workspaceId="ws-1"
         onRowRepositoryChange={NOOP}
-        onRowBranchChange={NOOP}
+        onRowBranchChange={onRowBranchChange}
         isLocalExecutor
       />,
     );
-    expect(screen.getByText("feature/x")).toBeTruthy();
+    // The autoselect effect prefers preferredDefaultBranch (currentLocalBranch
+    // for local mode) over the last-used / main fallback. This is what surfaces
+    // the workspace's actual on-disk branch in the chip and ensures the submit
+    // payload always carries an explicit value (not "" → backend default).
+    expect(onRowBranchChange).toHaveBeenCalledWith("r0", "feature/x");
   });
 
-  it("locked branch chip shows the loading placeholder while resolving", () => {
+  it("local-executor row shows the loading placeholder while resolving the current branch", () => {
     mockBranches.value = { branches: [], isLoading: false };
     renderInProvider(
       <RepoChipsRow
@@ -179,8 +187,9 @@ describe("RepoChipsRow", () => {
         isLocalExecutor
       />,
     );
-    // Without the loading state we'd render the generic "branch" placeholder;
-    // computeBranchPlaceholder switches to "loading…" when branchOverrideLoading is true.
+    // The chip shouldn't lie about an unset state during the brief window
+    // before local-status resolves; preferredDefaultBranchLoading drives the
+    // "loading…" placeholder.
     expect(screen.getByText(/loading…/i)).toBeTruthy();
   });
 
