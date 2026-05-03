@@ -160,7 +160,6 @@ function useSessionTabActions(
       const sessions = state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
       const remaining = sessions
         .filter((s) => s.id !== sessionId)
-        .slice()
         .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
       if (remaining.length > 0) {
         state.setActiveSessionAuto(taskId, remaining[0].id);
