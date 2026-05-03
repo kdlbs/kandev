@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 
 	"go.uber.org/zap"
 
@@ -95,9 +96,12 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 // metadata.context_window via narrow CAS updates.
 //
 // Logs and continues on persistence failure rather than failing the launch —
-// the in-memory store already has the truth, and the row will be written
-// correctly on the next Upsert call (e.g., from storeResumeToken). The store
-// is the runtime authority; the row is its durable mirror.
+// the in-memory store already has the truth, and the row will be re-upserted
+// on the next launch through this same path. (storeResumeToken does NOT
+// re-create a missing row; it uses a narrow CAS UPDATE keyed on
+// agent_execution_id, so a failure here leaves resume_token persistence broken
+// until the next full launch.) The store is the runtime authority; the row is
+// its durable mirror.
 func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentExecution) {
 	if m.runningWriter == nil {
 		// Permitted in tests that don't exercise persistence; logged so a
@@ -139,11 +143,16 @@ func (m *Manager) deleteExecutorRunning(ctx context.Context, sessionID string) {
 		return
 	}
 	if err := m.runningWriter.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
-		// "not found" is expected for sessions that were never launched; log
-		// at debug. Other errors at warn so they show up in operations.
-		m.logger.Debug("delete executors_running on cleanup",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
+		// "not found" is expected for sessions that were never launched; everything
+		// else is a real I/O failure (write timeout, locked DB) and should surface.
+		if errors.Is(err, models.ErrExecutorRunningNotFound) {
+			m.logger.Debug("delete executors_running on cleanup: row not found",
+				zap.String("session_id", sessionID))
+		} else {
+			m.logger.Warn("delete executors_running on cleanup",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 	}
 }
 

@@ -145,7 +145,6 @@ type sessionExecutorStore interface {
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
 	UpdateTaskSessionWorktreeBranch(ctx context.Context, sessionID, branch string) error
-	ClearSessionExecutionID(ctx context.Context, id string) error
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
@@ -796,8 +795,16 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 		}
 	}
 
-	// Clear stale execution references (agent process is gone after restart)
-	_ = s.repo.ClearSessionExecutionID(ctx, sessionID)
+	// PRESERVE executors_running.agent_execution_id post-restart. The in-memory
+	// process is gone, but the stored ID still serves as a "this session was
+	// previously launched" marker that drives resume detection in
+	// applyRunningRecordToResumeRequest → isResumedSession → ResumePassthroughSession
+	// (which adds the --resume flag). Clearing it here makes the next launch take
+	// the fresh-start path and skip the resume CLI flag, so passthrough TUIs lose
+	// their conversation context after every backend restart. The stale ID is
+	// harmless: persistExecutorRunning UPSERTs it atomically alongside the
+	// in-memory Add on the next launch, closing the divergence window we set out
+	// to fix in this refactor.
 
 	// Ensure task is in REVIEW state (not stuck IN_PROGRESS)
 	if running.TaskID != "" {

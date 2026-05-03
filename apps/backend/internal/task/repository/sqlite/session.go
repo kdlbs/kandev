@@ -454,26 +454,6 @@ func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key s
 	return nil
 }
 
-// ClearSessionExecutionID clears the executors_running row's agent_execution_id
-// and container_id without removing the row itself. The post-restart reconcile
-// calls this to mark "previous in-memory execution is gone" while preserving
-// resume_token + worktree info for lazy resume on next user interaction.
-//
-// Idempotent: a missing row returns nil (the post-condition — no live execution
-// reference — is already satisfied).
-func (r *Repository) ClearSessionExecutionID(ctx context.Context, id string) error {
-	if id == "" {
-		return fmt.Errorf("session_id is required")
-	}
-	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE executors_running
-		   SET agent_execution_id = '', container_id = '', updated_at = ?
-		 WHERE session_id = ?
-	`), now, id)
-	return err
-}
-
 // UpdateTaskSessionBaseCommit updates the base_commit_sha for a session.
 // This is called after agent launch to capture the HEAD commit at session start.
 func (r *Repository) UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error {

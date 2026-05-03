@@ -524,7 +524,7 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 				lastMsgUUID = uuid
 			}
 		}
-		s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID, session)
+		s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID)
 	}
 
 	s.saveAgentTextIfPresent(ctx, payload)

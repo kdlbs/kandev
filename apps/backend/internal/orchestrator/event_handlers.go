@@ -59,9 +59,7 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 // The token is always stored when CAS succeeds. NativeSessionResume only gates ACP
 // session/load vs session/new in session.go — agents without native resume (e.g.,
 // Claude Code) use the token for their own --resume CLI flag instead.
-func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expectedExecID, acpSessionID, lastMessageUUID string, preloadedSession ...*models.TaskSession) {
-	_ = preloadedSession // session preload is no longer needed with narrow CAS update
-
+func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expectedExecID, acpSessionID, lastMessageUUID string) {
 	err := s.repo.UpdateResumeToken(ctx, sessionID, expectedExecID, acpSessionID, lastMessageUUID)
 	switch {
 	case err == nil:

@@ -169,34 +169,6 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 	return localPath, nil
 }
 
-// buildExecutorRunning constructs an ExecutorRunning record from the launch/resume response,
-// carrying forward resume token and metadata from the previous running record if available.
-func buildExecutorRunning(session *models.TaskSession, taskID string, resp *LaunchAgentResponse, execCfg executorConfig, existingRunning *models.ExecutorRunning) *models.ExecutorRunning {
-	running := &models.ExecutorRunning{
-		ID:               session.ID,
-		SessionID:        session.ID,
-		TaskID:           taskID,
-		ExecutorID:       session.ExecutorID,
-		Runtime:          execCfg.RuntimeName,
-		Status:           "starting",
-		Resumable:        execCfg.Resumable,
-		AgentExecutionID: resp.AgentExecutionID,
-		ContainerID:      resp.ContainerID,
-		WorktreeID:       resp.WorktreeID,
-		WorktreePath:     resp.WorktreePath,
-		WorktreeBranch:   resp.WorktreeBranch,
-		Metadata:         resp.Metadata,
-	}
-	if existingRunning != nil {
-		running.ResumeToken = existingRunning.ResumeToken
-		running.LastMessageUUID = existingRunning.LastMessageUUID
-		if running.Metadata == nil {
-			running.Metadata = lifecycle.FilterPersistentMetadata(existingRunning.Metadata)
-		}
-	}
-	return running
-}
-
 // persistLaunchState updates the session record after a successful agent launch.
 // The executors_running row is now written by the lifecycle manager itself in
 // lockstep with executionStore.Add (see lifecycle.persistExecutorRunning) — this
