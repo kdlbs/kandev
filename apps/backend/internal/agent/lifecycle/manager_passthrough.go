@@ -454,10 +454,15 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 		return err
 	}
 
-	// Build the resume command
+	// Skip the resume flag if a previous resume already fast-failed for this
+	// execution: re-attaching `-c` / `--resume` would just reproduce the same
+	// "No conversation found to continue" exit on every WS reconnect after
+	// backend restart. Once the sticky flag is set, every subsequent launch
+	// for this execution starts fresh.
+	useResume := !execution.passthroughResumeFailed
 	cmd := resolved.agent.BuildPassthroughCommand(agents.PassthroughOptions{
 		Model:            profileModel(resolved.profile),
-		Resume:           true,
+		Resume:           useResume,
 		PermissionValues: profilePermissionValues(resolved.profile),
 		CLIFlagTokens:    m.profileCLIFlagTokens(resolved.profile),
 	})
@@ -468,6 +473,7 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 	m.logger.Info("resuming passthrough session",
 		zap.String("session_id", sessionID),
 		zap.String("execution_id", execution.ID),
+		zap.Bool("use_resume", useResume),
 		zap.Strings("command", cmd.Args()))
 
 	interactiveRunner := m.GetInteractiveRunner()
@@ -489,9 +495,9 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 		return fmt.Errorf("failed to start passthrough session: %w", err)
 	}
 
-	execution.PassthroughProcessID = processInfo.ID
 	execution.PassthroughStartedAt = time.Now()
-	execution.passthroughLaunchUsedResume = true
+	execution.passthroughLaunchUsedResume = useResume
+	execution.PassthroughProcessID = processInfo.ID
 
 	m.logger.Info("passthrough session resumed",
 		zap.String("session_id", sessionID),
@@ -601,13 +607,15 @@ func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpd
 			// goroutine doesn't race the next launch's writes to those fields.
 			startedAt := execution.PassthroughStartedAt
 			usedResume := execution.passthroughLaunchUsedResume
-			// If the launch used resume flags, clear the resume intent
-			// synchronously so any concurrent Ensure call (e.g. a frontend WS
-			// reconnect that re-triggers the launch path) takes the fresh
+			// If the launch used resume flags, mark the resume as failed
+			// synchronously so any concurrent path that re-triggers a launch
+			// (StartAgentProcess via isResumedSession, or ResumePassthroughSession
+			// via the WS handler's EnsurePassthroughExecution) takes the fresh
 			// branch instead of thrashing on another resume attempt that will
 			// fast-fail in the same way. The goroutine below still handles the
 			// banner + relaunch for the actively-connected case.
 			if usedResume {
+				execution.passthroughResumeFailed = true
 				execution.isResumedSession = false
 				execution.passthroughLaunchUsedResume = false
 			}
