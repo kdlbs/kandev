@@ -1431,6 +1431,11 @@ func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
 // session/new was attempting to create a session, so no session ID exists
 // yet. Consumers that correlate events by session must treat
 // EventTypeAuthRequired as a connection-scoped (not session-scoped) signal.
+//
+// Returns false when no auth methods are cached. Without methods to choose
+// from, the frontend can't drive the picker — letting the error fall through
+// to the generic "failed to create session" path is more actionable than a
+// pseudo-auth-required signal with no options.
 func (a *Adapter) maybeEmitAuthRequired(err error) bool {
 	var reqErr *acp.RequestError
 	if !errors.As(err, &reqErr) || reqErr.Code != -32000 {
@@ -1440,6 +1445,10 @@ func (a *Adapter) maybeEmitAuthRequired(err error) bool {
 	a.mu.RLock()
 	methods := a.availableAuthMethods
 	a.mu.RUnlock()
+
+	if len(methods) == 0 {
+		return false
+	}
 
 	a.sendUpdate(AgentEvent{
 		Type:        streams.EventTypeAuthRequired,

@@ -72,3 +72,23 @@ func TestMaybeEmitAuthRequired_PlainErrorIsIgnored(t *testing.T) {
 		t.Fatalf("maybeEmitAuthRequired returned true for plain Go error")
 	}
 }
+
+// TestMaybeEmitAuthRequired_EmptyMethodsFallsThrough pins the contract that
+// an AuthenticationRequired error with no cached methods does NOT emit an
+// EventTypeAuthRequired event. Without methods to pick, the frontend can't
+// drive the picker — letting the error fall through to the generic "failed
+// to create session" path is more actionable than a pseudo-auth-required
+// signal with no options.
+func TestMaybeEmitAuthRequired_EmptyMethodsFallsThrough(t *testing.T) {
+	a := newTestAdapter()
+	// Leave a.availableAuthMethods empty (Initialize never populated it,
+	// or the agent didn't advertise any methods).
+
+	authErr := acp.NewAuthRequired(nil)
+	if a.maybeEmitAuthRequired(authErr) {
+		t.Fatalf("maybeEmitAuthRequired returned true with no cached methods; should fall through")
+	}
+	if events := drainEvents(a); len(events) != 0 {
+		t.Errorf("expected 0 events, got %d", len(events))
+	}
+}

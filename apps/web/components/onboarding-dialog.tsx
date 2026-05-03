@@ -158,7 +158,9 @@ function useOnboardingResources(open: boolean) {
     // Poll while any agent is still in the "probing" state — the host-utility
     // probes async at boot and the dialog can open before they all resolve.
     // Without re-polling, agents that flip status mid-session stay stuck on
-    // the initial badge in the UI.
+    // the initial badge in the UI. Re-poll on transient fetch errors too:
+    // a single 500 shouldn't strand the dialog on stale probing status.
+    let lastSawProbing = true;
     const pollOnce = (firstRun: boolean) => {
       Promise.all([
         listAvailableAgents({ cache: "no-store" }),
@@ -172,14 +174,18 @@ function useOnboardingResources(open: boolean) {
           if (savedRes) {
             setAgentSettings(buildAgentSettings(agents, savedRes.agents ?? []));
           }
-          const stillProbing = agents.some((a) => a.model_config.status === "probing");
-          if (stillProbing) {
+          lastSawProbing = agents.some((a) => a.model_config.status === "probing");
+        })
+        .catch(() => {
+          // Keep polling on transient errors — backend may be momentarily
+          // unreachable while still resolving probes.
+        })
+        .finally(() => {
+          if (cancelled) return;
+          if (firstRun) setLoadingAgents(false);
+          if (lastSawProbing) {
             timeoutId = setTimeout(() => pollOnce(false), 2000);
           }
-        })
-        .catch(() => {})
-        .finally(() => {
-          if (firstRun && !cancelled) setLoadingAgents(false);
         });
     };
 

@@ -10,81 +10,101 @@ import (
 	"github.com/kandev/kandev/pkg/agent"
 )
 
-// agentSpec captures the contract each newly-added ACP agent must honor.
-// Keeping these in a table-driven test pins ID, Display, command shape, and
-// protocol so that drift in any of those is loud.
-type agentSpec struct {
-	id          string
-	displayName string
-	wantArgv    []string
-	// wantInstalledBinary is the primary binary name used by IsInstalled's
-	// Detect strategy. Asserted by checking it appears in the script or
-	// (for npx-launched agents) is referenced by the InstallScript.
-	wantInstalledBinary string
-	wantInstallNpm      bool // true when InstallScript should start with "npm install -g"
+// acpAgentSpec captures the full contract each newly-added ACP agent must
+// honor. Pinning every command surface (BuildCommand, Runtime.Cmd,
+// InferenceConfig.Command, PassthroughCmd) keeps regressions like one path
+// drifting to npx while the rest stay native (or vice versa) loud rather
+// than silent.
+type acpAgentSpec struct {
+	id              string
+	displayName     string
+	detectBinary    string   // binary that IsInstalled's primary WithCommand checks for
+	expectedArgv    []string // BuildCommand and Runtime.Cmd
+	inferenceArgv   []string // InferenceConfig.Command
+	passthroughArgv []string // PassthroughCmd (zero-args allowed)
+	installViaNpm   bool     // InstallScript starts with "npm install -g"
 }
 
-func TestNewACPAgents_Contract(t *testing.T) {
-	cases := []struct {
-		new  func() Agent
-		spec agentSpec
-	}{
-		{func() Agent { return NewQwenACP() }, agentSpec{
-			id: "qwen-acp", displayName: "Qwen",
-			wantArgv:            []string{"npx", "-y", "@qwen-code/qwen-code", "--acp"},
-			wantInstalledBinary: "qwen", wantInstallNpm: true,
-		}},
-		{func() Agent { return NewIFlowACP() }, agentSpec{
-			id: "iflow-acp", displayName: "iFlow (beta)",
-			wantArgv:            []string{"npx", "-y", "@iflow-ai/iflow-cli", "--experimental-acp"},
-			wantInstalledBinary: "iflow", wantInstallNpm: true,
-		}},
-		{func() Agent { return NewDroidACP() }, agentSpec{
-			id: "droid-acp", displayName: "Droid",
-			wantArgv:            []string{"npx", "-y", "droid", "exec", "--output-format", "acp"},
-			wantInstalledBinary: "droid", wantInstallNpm: true,
-		}},
-		{func() Agent { return NewKilocodeACP() }, agentSpec{
-			id: "kilocode-acp", displayName: "Kilocode",
-			wantArgv:            []string{"npx", "-y", "@kilocode/cli", "acp"},
-			wantInstalledBinary: "kilo", wantInstallNpm: true,
-		}},
-		{func() Agent { return NewPiACP() }, agentSpec{
-			id: "pi-acp", displayName: "Pi",
-			wantArgv:            []string{"npx", "-y", "pi-acp"},
-			wantInstalledBinary: "pi-acp", wantInstallNpm: true,
-		}},
-		{func() Agent { return NewCursorACP() }, agentSpec{
-			id: "cursor-acp", displayName: "Cursor",
-			wantArgv:            []string{"cursor-agent", "acp"},
-			wantInstalledBinary: "cursor-agent", wantInstallNpm: false,
-		}},
-		{func() Agent { return NewKimiACP() }, agentSpec{
-			id: "kimi-acp", displayName: "Kimi",
-			wantArgv:            []string{"kimi", "acp"},
-			wantInstalledBinary: "kimi", wantInstallNpm: false,
-		}},
-		{func() Agent { return NewKiroACP() }, agentSpec{
-			id: "kiro-acp", displayName: "Kiro",
-			wantArgv:            []string{"kiro-cli-chat", "acp"},
-			wantInstalledBinary: "kiro-cli-chat", wantInstallNpm: false,
-		}},
-		{func() Agent { return NewQoderACP() }, agentSpec{
-			id: "qoder-acp", displayName: "Qoder",
-			wantArgv:            []string{"qodercli", "--acp"},
-			wantInstalledBinary: "qodercli", wantInstallNpm: false,
-		}},
-		{func() Agent { return NewTraeACP() }, agentSpec{
-			id: "trae-acp", displayName: "Trae",
-			wantArgv:            []string{"traecli", "acp", "serve"},
-			wantInstalledBinary: "traecli", wantInstallNpm: false,
-		}},
-	}
+var newACPAgentSpecs = []struct {
+	new  func() Agent
+	spec acpAgentSpec
+}{
+	{func() Agent { return NewQwenACP() }, acpAgentSpec{
+		id: "qwen-acp", displayName: "Qwen", detectBinary: "qwen",
+		expectedArgv:    []string{"npx", "-y", "@qwen-code/qwen-code", "--acp"},
+		inferenceArgv:   []string{"npx", "-y", "@qwen-code/qwen-code", "--acp"},
+		passthroughArgv: []string{"npx", "-y", "@qwen-code/qwen-code"},
+		installViaNpm:   true,
+	}},
+	{func() Agent { return NewIFlowACP() }, acpAgentSpec{
+		id: "iflow-acp", displayName: "iFlow (beta)", detectBinary: "iflow",
+		expectedArgv:    []string{"npx", "-y", "@iflow-ai/iflow-cli", "--experimental-acp"},
+		inferenceArgv:   []string{"npx", "-y", "@iflow-ai/iflow-cli", "--experimental-acp"},
+		passthroughArgv: []string{"npx", "-y", "@iflow-ai/iflow-cli"},
+		installViaNpm:   true,
+	}},
+	{func() Agent { return NewDroidACP() }, acpAgentSpec{
+		id: "droid-acp", displayName: "Droid", detectBinary: "droid",
+		expectedArgv:    []string{"npx", "-y", "droid", "exec", "--output-format", "acp"},
+		inferenceArgv:   []string{"npx", "-y", "droid", "exec", "--output-format", "acp"},
+		passthroughArgv: []string{"npx", "-y", "droid"},
+		installViaNpm:   true,
+	}},
+	{func() Agent { return NewKilocodeACP() }, acpAgentSpec{
+		id: "kilocode-acp", displayName: "Kilocode", detectBinary: "kilo",
+		expectedArgv:    []string{"npx", "-y", "@kilocode/cli", "acp"},
+		inferenceArgv:   []string{"npx", "-y", "@kilocode/cli", "acp"},
+		passthroughArgv: []string{"npx", "-y", "@kilocode/cli"},
+		installViaNpm:   true,
+	}},
+	{func() Agent { return NewPiACP() }, acpAgentSpec{
+		id: "pi-acp", displayName: "Pi", detectBinary: "pi-acp",
+		expectedArgv:    []string{"npx", "-y", "pi-acp"},
+		inferenceArgv:   []string{"npx", "-y", "pi-acp"},
+		passthroughArgv: []string{"npx", "-y", "pi-acp"},
+		installViaNpm:   true,
+	}},
+	{func() Agent { return NewCursorACP() }, acpAgentSpec{
+		id: "cursor-acp", displayName: "Cursor", detectBinary: "cursor-agent",
+		expectedArgv:    []string{"cursor-agent", "acp"},
+		inferenceArgv:   []string{"cursor-agent", "acp"},
+		passthroughArgv: []string{"cursor-agent"},
+		installViaNpm:   false,
+	}},
+	{func() Agent { return NewKimiACP() }, acpAgentSpec{
+		id: "kimi-acp", displayName: "Kimi", detectBinary: "kimi",
+		expectedArgv:    []string{"kimi", "acp"},
+		inferenceArgv:   []string{"kimi", "acp"},
+		passthroughArgv: []string{"kimi"},
+		installViaNpm:   false,
+	}},
+	{func() Agent { return NewKiroACP() }, acpAgentSpec{
+		id: "kiro-acp", displayName: "Kiro", detectBinary: "kiro-cli-chat",
+		expectedArgv:    []string{"kiro-cli-chat", "acp"},
+		inferenceArgv:   []string{"kiro-cli-chat", "acp"},
+		passthroughArgv: []string{"kiro-cli-chat"},
+		installViaNpm:   false,
+	}},
+	{func() Agent { return NewQoderACP() }, acpAgentSpec{
+		id: "qoder-acp", displayName: "Qoder", detectBinary: "qodercli",
+		expectedArgv:    []string{"qodercli", "--acp"},
+		inferenceArgv:   []string{"qodercli", "--acp"},
+		passthroughArgv: []string{"qodercli"},
+		installViaNpm:   false,
+	}},
+	{func() Agent { return NewTraeACP() }, acpAgentSpec{
+		id: "trae-acp", displayName: "Trae", detectBinary: "traecli",
+		expectedArgv:    []string{"traecli", "acp", "serve"},
+		inferenceArgv:   []string{"traecli", "acp", "serve"},
+		passthroughArgv: []string{"traecli"},
+		installViaNpm:   false,
+	}},
+}
 
-	for _, tc := range cases {
+func TestNewACPAgents_IDAndDisplay(t *testing.T) {
+	for _, tc := range newACPAgentSpecs {
 		t.Run(tc.spec.id, func(t *testing.T) {
 			ag := tc.new()
-
 			if got := ag.ID(); got != tc.spec.id {
 				t.Errorf("ID() = %q, want %q", got, tc.spec.id)
 			}
@@ -94,11 +114,19 @@ func TestNewACPAgents_Contract(t *testing.T) {
 			if !ag.Enabled() {
 				t.Errorf("Enabled() = false, want true")
 			}
+		})
+	}
+}
 
-			argv := ag.BuildCommand(CommandOptions{}).Args()
-			if !equalStringSlice(argv, tc.spec.wantArgv) {
-				t.Errorf("BuildCommand argv mismatch\n  got:  %#v\n  want: %#v", argv, tc.spec.wantArgv)
-			}
+// TestNewACPAgents_AllCommandSurfaces pins every launch path: BuildCommand,
+// Runtime.Cmd, InferenceConfig.Command, and PassthroughCmd. Without this the
+// PassthroughCmd field can drift independently of the others (see the
+// OpenCode npx regression in this PR's review history).
+func TestNewACPAgents_AllCommandSurfaces(t *testing.T) {
+	for _, tc := range newACPAgentSpecs {
+		t.Run(tc.spec.id, func(t *testing.T) {
+			ag := tc.new()
+			assertArgvEqual(t, "BuildCommand", ag.BuildCommand(CommandOptions{}).Args(), tc.spec.expectedArgv)
 
 			rt := ag.Runtime()
 			if rt == nil {
@@ -107,28 +135,47 @@ func TestNewACPAgents_Contract(t *testing.T) {
 			if rt.Protocol != agent.ProtocolACP {
 				t.Errorf("Runtime.Protocol = %q, want ACP", rt.Protocol)
 			}
-			if !equalStringSlice(rt.Cmd.Args(), tc.spec.wantArgv) {
-				t.Errorf("Runtime.Cmd argv mismatch\n  got:  %#v\n  want: %#v", rt.Cmd.Args(), tc.spec.wantArgv)
-			}
+			assertArgvEqual(t, "Runtime.Cmd", rt.Cmd.Args(), tc.spec.expectedArgv)
 
-			if got := ag.InstallScript(); tc.spec.wantInstallNpm {
-				if !strings.HasPrefix(got, "npm install -g ") {
-					t.Errorf("InstallScript() = %q, want npm install -g …", got)
-				}
-			} else {
-				if strings.HasPrefix(got, "npm install -g ") {
-					t.Errorf("InstallScript() should NOT use npm for native-binary agent: %q", got)
-				}
+			ia, ok := ag.(InferenceAgent)
+			if !ok {
+				t.Fatalf("%s does not implement InferenceAgent", tc.spec.id)
 			}
+			ic := ia.InferenceConfig()
+			if ic == nil || !ic.Supported {
+				t.Fatalf("InferenceConfig() = %+v, want Supported=true", ic)
+			}
+			assertArgvEqual(t, "InferenceConfig.Command", ic.Command.Args(), tc.spec.inferenceArgv)
 
-			// The detection binary should appear in either argv (native-binary
-			// agents) or InstallScript (npx-launched agents whose npm package
-			// installs that bin). One of the two must reference it; otherwise
-			// users land on a "not installed" agent with no actionable hint.
-			if !referencesBinary(argv, tc.spec.wantInstalledBinary) &&
-				!strings.Contains(ag.InstallScript(), tc.spec.wantInstalledBinary) {
+			pa, ok := ag.(PassthroughAgent)
+			if !ok {
+				t.Fatalf("%s does not implement PassthroughAgent", tc.spec.id)
+			}
+			assertArgvEqual(t, "PassthroughCmd", pa.PassthroughConfig().PassthroughCmd.Args(), tc.spec.passthroughArgv)
+		})
+	}
+}
+
+func TestNewACPAgents_InstallScript(t *testing.T) {
+	for _, tc := range newACPAgentSpecs {
+		t.Run(tc.spec.id, func(t *testing.T) {
+			ag := tc.new()
+			got := ag.InstallScript()
+			hasNpm := strings.HasPrefix(got, "npm install -g ")
+			if tc.spec.installViaNpm && !hasNpm {
+				t.Errorf("InstallScript() = %q, want npm install -g …", got)
+			}
+			if !tc.spec.installViaNpm && hasNpm {
+				t.Errorf("InstallScript() should NOT use npm for native-binary agent: %q", got)
+			}
+			// The detection binary must be referenced somewhere actionable —
+			// either argv (native binaries) or InstallScript (npm install -g
+			// <pkg> ships the bin), so users with "Available to Install"
+			// status see a hint that resolves to the right command.
+			argv := ag.BuildCommand(CommandOptions{}).Args()
+			if !slices.Contains(argv, tc.spec.detectBinary) && !strings.Contains(got, tc.spec.detectBinary) {
 				t.Errorf("detection binary %q not referenced in argv (%v) or InstallScript (%q)",
-					tc.spec.wantInstalledBinary, argv, ag.InstallScript())
+					tc.spec.detectBinary, argv, got)
 			}
 		})
 	}
@@ -140,29 +187,17 @@ func TestNewACPAgents_Contract(t *testing.T) {
 // probe the agent — claiming availability for an agent the user hasn't
 // actually installed triggers unwanted package downloads and produces
 // misleading auth_required/failed states for agents the user never asked
-// to use. Native-binary detection (WithCommand) is the only signal.
+// to use. The detection binary comes from the spec table so npx-launched
+// agents (whose argv[0] is "npx") are still verified against their real
+// detection target (qwen, iflow, droid, …).
 func TestNewACPAgents_DetectionRequiresGlobalBinary(t *testing.T) {
-	all := []Agent{
-		NewQwenACP(), NewIFlowACP(), NewDroidACP(), NewKilocodeACP(), NewPiACP(),
-		NewCursorACP(), NewKimiACP(), NewKiroACP(), NewQoderACP(), NewTraeACP(),
-	}
-	for _, ag := range all {
-		t.Run(ag.ID(), func(t *testing.T) {
-			argv := ag.BuildCommand(CommandOptions{}).Args()
-			if len(argv) == 0 {
-				t.Fatalf("empty argv")
-			}
-			// Discover the upstream binary name the agent's IsInstalled checks for.
-			// For npx-launched agents this is the agent's CLI name (qwen, droid, …);
-			// for native-binary agents this is argv[0] (cursor-agent, kimi, …).
-			binary := argv[0]
-			if binary == "npx" {
-				t.Skipf("npx-launched agent %q; binary name not derivable from argv alone", ag.ID())
-			}
+	for _, tc := range newACPAgentSpecs {
+		t.Run(tc.spec.id, func(t *testing.T) {
+			binary := tc.spec.detectBinary
 			if _, err := exec.LookPath(binary); err == nil {
 				t.Skipf("upstream binary %q is on PATH; can't verify availability requirement", binary)
 			}
-			result, err := ag.IsInstalled(context.Background())
+			result, err := tc.new().IsInstalled(context.Background())
 			if err != nil {
 				t.Fatalf("IsInstalled error: %v", err)
 			}
@@ -176,12 +211,9 @@ func TestNewACPAgents_DetectionRequiresGlobalBinary(t *testing.T) {
 // TestNewACPAgents_LogosNonEmpty guards against agents shipping with empty
 // embedded SVGs (which renders as a broken <img> in the UI).
 func TestNewACPAgents_LogosNonEmpty(t *testing.T) {
-	all := []Agent{
-		NewQwenACP(), NewIFlowACP(), NewDroidACP(), NewKilocodeACP(), NewPiACP(),
-		NewCursorACP(), NewKimiACP(), NewKiroACP(), NewQoderACP(), NewTraeACP(),
-	}
-	for _, ag := range all {
-		t.Run(ag.ID(), func(t *testing.T) {
+	for _, tc := range newACPAgentSpecs {
+		t.Run(tc.spec.id, func(t *testing.T) {
+			ag := tc.new()
 			if len(ag.Logo(LogoLight)) == 0 {
 				t.Errorf("Logo(LogoLight) is empty")
 			}
@@ -198,8 +230,9 @@ func TestNewACPAgents_DisplayOrderUnique(t *testing.T) {
 	all := []Agent{
 		NewClaudeACP(), NewCodexACP(), NewAuggie(), NewOpenCodeACP(),
 		NewGemini(), NewCopilotACP(), NewAmpACP(),
-		NewQwenACP(), NewIFlowACP(), NewDroidACP(), NewKilocodeACP(), NewPiACP(),
-		NewCursorACP(), NewKimiACP(), NewKiroACP(), NewQoderACP(), NewTraeACP(),
+	}
+	for _, tc := range newACPAgentSpecs {
+		all = append(all, tc.new())
 	}
 	seen := map[int]string{}
 	for _, ag := range all {
@@ -211,18 +244,9 @@ func TestNewACPAgents_DisplayOrderUnique(t *testing.T) {
 	}
 }
 
-func equalStringSlice(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
+func assertArgvEqual(t *testing.T, label string, got, want []string) {
+	t.Helper()
+	if !slices.Equal(got, want) {
+		t.Errorf("%s argv mismatch\n  got:  %#v\n  want: %#v", label, got, want)
 	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func referencesBinary(argv []string, bin string) bool {
-	return slices.Contains(argv, bin)
 }
