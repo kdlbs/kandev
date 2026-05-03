@@ -1,4 +1,4 @@
-//nolint:dupl // Native-binary ACP agents (Kiro, Qoder) follow the same minimal scaffold; differences are the binary name and subcommand.
+//nolint:dupl // Native-binary ACP agents (Cursor, Kimi, Kiro, Qoder, Trae) follow the same minimal scaffold; differences are the binary name and subcommand.
 package agents
 
 import (
