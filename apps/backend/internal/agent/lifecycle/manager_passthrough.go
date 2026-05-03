@@ -601,6 +601,16 @@ func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpd
 			// goroutine doesn't race the next launch's writes to those fields.
 			startedAt := execution.PassthroughStartedAt
 			usedResume := execution.passthroughLaunchUsedResume
+			// If the launch used resume flags, clear the resume intent
+			// synchronously so any concurrent Ensure call (e.g. a frontend WS
+			// reconnect that re-triggers the launch path) takes the fresh
+			// branch instead of thrashing on another resume attempt that will
+			// fast-fail in the same way. The goroutine below still handles the
+			// banner + relaunch for the actively-connected case.
+			if usedResume {
+				execution.isResumedSession = false
+				execution.passthroughLaunchUsedResume = false
+			}
 			go m.handlePassthroughExit(execution, status, startedAt, usedResume)
 		} else {
 			m.logger.Debug("process exited but not the passthrough process, skipping auto-restart",
@@ -727,10 +737,7 @@ func (m *Manager) attemptResumeFallback(execution *AgentExecution, runner *proce
 	ctx := context.Background()
 	pt, rt, cmd, err := m.freshPassthroughCommand(ctx, execution)
 	if err != nil {
-		m.logger.Error("passthrough resume fallback failed: could not build fresh command",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		m.notifyFastFailExit(runner, sessionID, uptime, exitCode, fastFailWindow)
+		m.notifyFallbackInfrastructureFailure(runner, sessionID, "build fresh command", err)
 		return
 	}
 
@@ -739,16 +746,13 @@ func (m *Manager) attemptResumeFallback(execution *AgentExecution, runner *proce
 
 	processInfo, err := runner.Start(ctx, startReq)
 	if err != nil {
-		m.logger.Error("passthrough resume fallback failed: could not start fresh process",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		m.notifyFastFailExit(runner, sessionID, uptime, exitCode, fastFailWindow)
+		m.notifyFallbackInfrastructureFailure(runner, sessionID, "start fresh process", err)
 		return
 	}
 
-	execution.PassthroughProcessID = processInfo.ID
 	execution.PassthroughStartedAt = time.Now()
 	execution.passthroughLaunchUsedResume = false
+	execution.PassthroughProcessID = processInfo.ID
 
 	if runner.ConnectSessionWebSocket(processInfo.ID) {
 		m.logger.Info("passthrough resume fallback succeeded",
@@ -815,6 +819,26 @@ func (m *Manager) attemptPassthroughRestart(execution *AgentExecution, runner *p
 		m.logger.Warn("passthrough session restarted but failed to reconnect WebSocket",
 			zap.String("session_id", sessionID),
 			zap.String("new_process_id", execution.PassthroughProcessID))
+	}
+}
+
+// notifyFallbackInfrastructureFailure surfaces an attemptResumeFallback
+// failure that originated from kandev's own machinery (could not build the
+// fresh command, could not start the new process) rather than from the
+// agent CLI itself. The existing fast-fail banner blames a "bad CLI flag,
+// missing binary, or auth failure" — wrong copy for these paths, which
+// the user can't fix by editing their profile.
+func (m *Manager) notifyFallbackInfrastructureFailure(runner *process.InteractiveRunner, sessionID, stage string, err error) {
+	m.logger.Error("passthrough resume fallback failed",
+		zap.String("session_id", sessionID),
+		zap.String("stage", stage),
+		zap.Error(err))
+	failMsg := fmt.Sprintf("\r\n\x1b[31m[Resume fallback failed: could not %s — %s. Please reconnect to retry.]\x1b[0m\r\n",
+		stage, err.Error())
+	if writeErr := runner.WriteToDirectOutputBySession(sessionID, []byte(failMsg)); writeErr != nil {
+		m.logger.Debug("failed to write resume-fallback infra-failure banner to terminal",
+			zap.String("session_id", sessionID),
+			zap.Error(writeErr))
 	}
 }
 

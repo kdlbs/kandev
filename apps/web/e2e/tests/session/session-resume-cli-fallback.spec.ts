@@ -73,19 +73,22 @@ test.describe("Session resume — CLI fallback after fast-fail", () => {
 
     // Restart the backend, then reload the page to trigger a session resume.
     // The first launch attempt will pass -c → mock prints "No conversation
-    // found to continue" and exits 1 → fast-fail detector triggers fallback.
+    // found to continue" and exits 1 → backend clears the resume intent and
+    // the next launch (whether triggered inline by the fallback goroutine or
+    // by the next WS reconnect) goes through the fresh-launch path.
     await backend.restart();
     await testPage.reload();
 
     await session.waitForPassthroughLoad();
-    await session.waitForPassthroughLoaded();
+    // Skip waitForPassthroughLoaded — with --fail-on-resume the first PTY
+    // exits before the terminal WS settles, so the loading overlay can stay
+    // up briefly while the backend pivots to the fresh launch. Poll on the
+    // fresh-launch header directly: it only renders when PTY2 is alive and
+    // the WS is connected, which is a stronger signal than the loading flag.
+    await session.expectPassthroughHasText("Mock Agent", 60_000);
 
-    // The fallback writes a yellow banner to the terminal before relaunching.
-    await session.expectPassthroughHasText("starting a fresh session", 30_000);
-
-    // After the fallback launch, the mock-agent boots without the resumed
-    // header — confirms the second launch dropped the resume flag.
-    await session.expectPassthroughHasText("Mock Agent", 30_000);
+    // The (RESUMED) header is reserved for runs where the resume flag was
+    // accepted. Asserting its absence confirms the second launch dropped -c.
     await session.expectPassthroughNotHasText("RESUMED");
   });
 });

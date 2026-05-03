@@ -283,6 +283,35 @@ func TestManager_HandlePassthroughExit_SkipsDuringShutdown(t *testing.T) {
 	})
 }
 
+// TestManager_HandlePassthroughExit_ResumeFallback_SkipsDuringShutdown is the
+// companion to TestManager_HandlePassthroughExit_SkipsDuringShutdown for the
+// new fast-fail-with-resume branch — verifies that the resume-fallback path
+// also short-circuits cleanly during graceful shutdown rather than racing the
+// teardown.
+func TestManager_HandlePassthroughExit_ResumeFallback_SkipsDuringShutdown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mgr := newTestManager()
+		if err := mgr.StopAllAgents(context.Background()); err != nil {
+			t.Fatalf("StopAllAgents returned error: %v", err)
+		}
+
+		execution := &AgentExecution{ID: "exec-1", SessionID: "sess-1"}
+		exitCode := 1
+		now := time.Now()
+		status := &agentctltypes.ProcessStatusUpdate{
+			SessionID: "sess-1",
+			ExitCode:  &exitCode,
+			Timestamp: now.Add(100 * time.Millisecond),
+		}
+
+		start := time.Now()
+		mgr.handlePassthroughExit(execution, status, now, true /* usedResume */)
+		if elapsed := time.Since(start); elapsed != 0 {
+			t.Errorf("handlePassthroughExit(usedResume=true) advanced fake time by %v — did not short-circuit during shutdown", elapsed)
+		}
+	})
+}
+
 // TestIsFastFailExit covers the predicate that decides whether a passthrough
 // exit looks like a launch failure (bad CLI flag, missing binary, auth
 // rejection) and should bypass the auto-restart loop.
