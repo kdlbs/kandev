@@ -9,6 +9,7 @@ import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import {
   updateExecutorProfile,
   deleteExecutorProfile,
+  removeDockerContainer,
   fetchLocalGitIdentity,
   listScriptPlaceholders,
 } from "@/lib/api/domains/settings-api";
@@ -33,6 +34,7 @@ import {
   DockerSections,
   SpritesSections,
 } from "@/components/settings/profile-edit/profile-runtime-sections";
+import { useDockerProfileContainers } from "@/components/settings/profile-edit/docker-sections";
 import {
   ProfileHeader,
   ProfileFormActions,
@@ -232,23 +234,27 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
     [executor.id, profile.id, executors, setExecutors],
   );
 
-  const remove = useCallback(async () => {
-    setDeleting(true);
-    try {
-      await deleteExecutorProfile(executor.id, profile.id);
-      setExecutors(
-        executors.map((e: Executor) =>
-          e.id === executor.id
-            ? { ...e, profiles: e.profiles?.filter((p) => p.id !== profile.id) }
-            : e,
-        ),
-      );
-      router.push(EXECUTORS_ROUTE);
-    } catch {
-      setDeleting(false);
-      setDeleteDialogOpen(false);
-    }
-  }, [executor.id, profile.id, executors, setExecutors, router]);
+  const remove = useCallback(
+    async (beforeDelete?: () => Promise<void>) => {
+      setDeleting(true);
+      try {
+        await beforeDelete?.();
+        await deleteExecutorProfile(executor.id, profile.id);
+        setExecutors(
+          executors.map((e: Executor) =>
+            e.id === executor.id
+              ? { ...e, profiles: e.profiles?.filter((p) => p.id !== profile.id) }
+              : e,
+          ),
+        );
+        router.push(EXECUTORS_ROUTE);
+      } catch {
+        setDeleting(false);
+        setDeleteDialogOpen(false);
+      }
+    },
+    [executor.id, profile.id, executors, setExecutors, router],
+  );
 
   return { saving, error, deleting, deleteDialogOpen, setDeleteDialogOpen, save, remove };
 }
@@ -483,6 +489,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
   const { items: secrets } = useSecrets();
   const persistence = useProfilePersistence(executor, profile);
   const form = useProfileFormState(executor, profile);
+  const relatedContainers = useDockerProfileContainers(profile.id, form.isDocker);
   const spritesTokenMissing = form.isSprites && !form.spritesSecretId;
 
   const handleSave = () => {
@@ -495,6 +502,18 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       cleanup_script: form.cleanupScript,
       env_vars: form.buildEnvVars(),
     });
+  };
+
+  const handleDelete = (options?: { removeRelatedDockerContainers?: boolean }) => {
+    const beforeDelete = options?.removeRelatedDockerContainers
+      ? async () => {
+          await Promise.all(
+            relatedContainers.containers.map((container) => removeDockerContainer(container.id)),
+          );
+          await relatedContainers.refresh();
+        }
+      : undefined;
+    void persistence.remove(beforeDelete);
   };
 
   return (
@@ -523,8 +542,9 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       <DeleteProfileDialog
         open={persistence.deleteDialogOpen}
         onOpenChange={persistence.setDeleteDialogOpen}
-        onDelete={persistence.remove}
+        onDelete={handleDelete}
         deleting={persistence.deleting}
+        relatedDockerContainerCount={form.isDocker ? relatedContainers.containers.length : 0}
       />
     </div>
   );

@@ -359,6 +359,7 @@ export type DockerContainer = {
   state: string;
   status: string;
   started_at?: string;
+  labels?: Record<string, string>;
 };
 
 export function buildDockerImageUrl(payload: {

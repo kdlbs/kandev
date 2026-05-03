@@ -6,6 +6,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import {
@@ -27,7 +28,10 @@ import {
   rowsToEnvVars,
 } from "@/components/settings/profile-edit/env-vars-card";
 import { ScriptCard } from "@/components/settings/profile-edit/script-card";
-import { DockerfileBuildCard } from "@/components/settings/profile-edit/docker-sections";
+import {
+  DockerfileBuildCard,
+  type DockerBuildSuccess,
+} from "@/components/settings/profile-edit/docker-sections";
 import { SpritesApiKeyCard } from "@/components/settings/profile-edit/sprites-api-key-card";
 import { NetworkPoliciesCard } from "@/components/settings/profile-edit/sprites-sections";
 import {
@@ -144,13 +148,20 @@ function CreateProfileHeader({
 function CreateFormActions({
   saving,
   saveDisabled,
+  disabledReason,
   onSave,
 }: {
   saving: boolean;
   saveDisabled: boolean;
+  disabledReason: string | null;
   onSave: () => void;
 }) {
   const router = useRouter();
+  const createButton = (
+    <Button onClick={onSave} disabled={saveDisabled} className="cursor-pointer">
+      {saving ? "Creating..." : "Create Profile"}
+    </Button>
+  );
   return (
     <div className="flex items-center justify-end gap-2">
       <Button
@@ -160,9 +171,18 @@ function CreateFormActions({
       >
         Cancel
       </Button>
-      <Button onClick={onSave} disabled={saveDisabled} className="cursor-pointer">
-        {saving ? "Creating..." : "Create Profile"}
-      </Button>
+      {disabledReason ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex" data-testid="create-profile-disabled-tooltip">
+              {createButton}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{disabledReason}</TooltipContent>
+        </Tooltip>
+      ) : (
+        createButton
+      )}
     </div>
   );
 }
@@ -327,7 +347,7 @@ function useCreateGitIdentityState(isRemote: boolean) {
 }
 
 function useCreateProfileFormState(executorType: string) {
-  const [name, setName] = useState("");
+  const [name, setName] = useState(() => (executorType === "local_docker" ? "Docker" : ""));
   const [mcpPolicy, setMcpPolicy] = useState("");
   const [prepareScript, setPrepareScript] = useState("");
   const [cleanupScript, setCleanupScript] = useState("");
@@ -337,6 +357,7 @@ function useCreateProfileFormState(executorType: string) {
   const remoteAuth = useCreateRemoteAuthState(executorType);
   const [dockerfile, setDockerfile] = useState("");
   const [imageTag, setImageTag] = useState("");
+  const [builtDockerImage, setBuiltDockerImage] = useState<DockerBuildSuccess | null>(null);
   const flags = useCreateRemoteFlags(executorType);
   const gitIdentity = useCreateGitIdentityState(flags.isRemote);
   const mcpPolicyError = useMemo(() => validateMcpPolicy(mcpPolicy), [mcpPolicy]);
@@ -356,6 +377,17 @@ function useCreateProfileFormState(executorType: string) {
     }
     return vars;
   }, [envVarRows, flags.isSprites, spritesSecretId]);
+
+  const recordDockerBuildSuccess = useCallback((result: DockerBuildSuccess) => {
+    setBuiltDockerImage(result);
+  }, []);
+
+  const dockerImageBuilt =
+    !flags.isDocker ||
+    (Boolean(dockerfile.trim()) &&
+      Boolean(imageTag.trim()) &&
+      builtDockerImage?.dockerfile === dockerfile &&
+      builtDockerImage?.imageTag === imageTag.trim());
 
   const prepareDesc = flags.isRemote
     ? "Runs inside the execution environment before the agent starts. Type {{ to see available placeholders."
@@ -390,6 +422,8 @@ function useCreateProfileFormState(executorType: string) {
     setDockerfile,
     imageTag,
     setImageTag,
+    recordDockerBuildSuccess,
+    dockerImageBuilt,
     gitUserName: gitIdentity.gitUserName,
     setGitUserName: gitIdentity.setGitUserName,
     gitUserEmail: gitIdentity.gitUserEmail,
@@ -415,6 +449,10 @@ function useCreateProfileSave(
 
   const handleSave = useCallback(async () => {
     if (!form.name.trim() || form.mcpPolicyError) return;
+    if (form.isDocker && !form.dockerImageBuilt) {
+      setError("Build this Docker image before creating the profile.");
+      return;
+    }
     if (form.isSprites && !form.spritesSecretId) {
       setError("Sprites API key is required.");
       return;
@@ -483,6 +521,7 @@ function CreateProfileSections({
           onDockerfileChange={form.setDockerfile}
           imageTag={form.imageTag}
           onImageTagChange={form.setImageTag}
+          onBuildSuccess={form.recordDockerBuildSuccess}
         />
       )}
       {form.isRemote && (
@@ -544,6 +583,23 @@ function CreateProfileSections({
   );
 }
 
+function getCreateDisabledReason(
+  form: ReturnType<typeof useCreateProfileFormState>,
+  spritesTokenMissing: boolean,
+  saving: boolean,
+) {
+  if (saving) return "Creating profile...";
+  if (!form.name.trim()) return "Enter a profile name.";
+  if (form.mcpPolicyError) return form.mcpPolicyError;
+  if (spritesTokenMissing) return "Add a Sprites API key before creating the profile.";
+  if (form.isDocker) {
+    if (!form.imageTag.trim()) return "Enter an image tag before creating the profile.";
+    if (!form.dockerfile.trim()) return "Add Dockerfile content before creating the profile.";
+    if (!form.dockerImageBuilt) return "Build this Docker image before creating the profile.";
+  }
+  return null;
+}
+
 function CreateProfileForm({
   executorType,
   typeInfo,
@@ -555,6 +611,7 @@ function CreateProfileForm({
   const form = useCreateProfileFormState(executorType);
   const { saving, error, handleSave } = useCreateProfileSave(form, typeInfo.executorId);
   const spritesTokenMissing = form.isSprites && !form.spritesSecretId;
+  const disabledReason = getCreateDisabledReason(form, spritesTokenMissing, saving);
 
   return (
     <div className="space-y-8">
@@ -570,9 +627,8 @@ function CreateProfileForm({
       {error && <p className="text-sm text-destructive">{error}</p>}
       <CreateFormActions
         saving={saving}
-        saveDisabled={
-          !form.name.trim() || Boolean(form.mcpPolicyError) || spritesTokenMissing || saving
-        }
+        saveDisabled={Boolean(disabledReason)}
+        disabledReason={disabledReason}
         onSave={handleSave}
       />
     </div>

@@ -20,12 +20,13 @@ type buildImageRequest struct {
 
 // containerResponse is the JSON representation of a container in list responses.
 type containerResponse struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Image     string    `json:"image"`
-	State     string    `json:"state"`
-	Status    string    `json:"status"`
-	StartedAt time.Time `json:"started_at"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Image     string            `json:"image"`
+	State     string            `json:"state"`
+	Status    string            `json:"status"`
+	StartedAt time.Time         `json:"started_at"`
+	Labels    map[string]string `json:"labels,omitempty"`
 }
 
 // stopContainerRequest is the optional JSON body for POST /api/v1/docker/containers/:id/stop.
@@ -130,20 +131,26 @@ func handleListContainers(clientProvider ClientProvider, log *logger.Logger) gin
 			return
 		}
 
-		resp := make([]containerResponse, len(containers))
-		for i, ctr := range containers {
-			resp[i] = containerResponse{
-				ID:        ctr.ID,
-				Name:      ctr.Name,
-				Image:     ctr.Image,
-				State:     ctr.State,
-				Status:    ctr.Status,
-				StartedAt: ctr.StartedAt,
-			}
-		}
+		resp := newContainerResponses(containers)
 
 		c.JSON(http.StatusOK, gin.H{"containers": resp})
 	}
+}
+
+func newContainerResponses(containers []ContainerInfo) []containerResponse {
+	resp := make([]containerResponse, len(containers))
+	for i, ctr := range containers {
+		resp[i] = containerResponse{
+			ID:        ctr.ID,
+			Name:      ctr.Name,
+			Image:     ctr.Image,
+			State:     ctr.State,
+			Status:    ctr.Status,
+			StartedAt: ctr.StartedAt,
+			Labels:    ctr.Labels,
+		}
+	}
+	return resp
 }
 
 // parseLabelsQuery extracts label filters from the "labels" query parameter.

@@ -254,3 +254,30 @@ func TestResetTaskEnvironment_PushBranchFailureAbortsResetBeforeTeardown(t *test
 		t.Error("expected environment row to be preserved when push fails")
 	}
 }
+
+func TestPerformTaskCleanup_TearsDownTaskEnvironmentAndDeletesRow(t *testing.T) {
+	env := &models.TaskEnvironment{
+		ID:          "env-1",
+		TaskID:      "task-1",
+		ContainerID: "container-abc",
+	}
+	repo := &stubEnvRepo{env: env}
+	destroyer := &stubDestroyer{}
+	svc := newResetTestService(t, repo)
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	errs := svc.performTaskCleanup(context.Background(), "task-1", nil, nil, taskEnvironmentCleanup{
+		env:       env,
+		deleteRow: true,
+	}, false)
+
+	if len(errs) != 0 {
+		t.Fatalf("unexpected cleanup errors: %v", errs)
+	}
+	if len(destroyer.containerCalls) != 1 || destroyer.containerCalls[0] != "container-abc" {
+		t.Fatalf("expected container teardown, got %v", destroyer.containerCalls)
+	}
+	if !repo.deleted {
+		t.Fatal("expected task environment row to be deleted")
+	}
+}

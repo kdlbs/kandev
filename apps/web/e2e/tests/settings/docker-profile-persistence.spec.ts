@@ -12,6 +12,129 @@ import { test, expect } from "../../fixtures/test-base";
  * editor would use — bypassing CodeMirror, which is awkward to drive.
  */
 test.describe("Docker executor profile persistence", () => {
+  test("new Docker profile defaults the name and requires a successful image build", async ({
+    testPage,
+    apiClient,
+  }) => {
+    test.setTimeout(60_000);
+    let createdProfileId: string | null = null;
+
+    await testPage.route("**/api/v1/docker/build", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/x-ndjson",
+        body: JSON.stringify({ stream: "Successfully built\n" }) + "\n",
+      });
+    });
+
+    try {
+      await testPage.goto("/settings/executors/new/local_docker");
+
+      await expect(testPage.locator("#profile-name")).toHaveValue("Docker", {
+        timeout: 10_000,
+      });
+
+      await testPage.getByRole("button", { name: "Use defaults" }).click();
+      const createButton = testPage.getByRole("button", { name: "Create Profile" });
+      await expect(createButton).toBeDisabled();
+
+      await testPage.getByTestId("create-profile-disabled-tooltip").hover();
+      await expect(
+        testPage.getByText("Build this Docker image before creating the profile."),
+      ).toBeVisible();
+
+      await testPage.getByRole("button", { name: "Build Image" }).click();
+      await expect(testPage.getByText("Success", { exact: true })).toBeVisible({
+        timeout: 10_000,
+      });
+
+      await expect(createButton).toBeEnabled();
+      await createButton.click();
+
+      await expect(testPage).toHaveURL(/\/settings\/executors\/[^/]+$/);
+      createdProfileId = testPage.url().split("/").pop() ?? null;
+      expect(createdProfileId).toBeTruthy();
+    } finally {
+      if (createdProfileId) {
+        await apiClient.deleteExecutorProfile(createdProfileId).catch(() => {});
+      }
+    }
+  });
+
+  test("profile page lists related Docker containers and can remove them during profile deletion", async ({
+    testPage,
+    apiClient,
+  }) => {
+    test.setTimeout(60_000);
+    const exec = await apiClient.createExecutor("e2e-docker-containers", "local_docker");
+    const profile = await apiClient.createExecutorProfile(exec.id, {
+      name: "containers",
+      config: {
+        image_tag: "kandev/e2e:test",
+        dockerfile: "FROM busybox\nWORKDIR /workspace\n",
+      },
+    });
+    const containers = [
+      {
+        id: "container-1",
+        name: "kandev-agent-test",
+        image: "kandev/e2e:test",
+        state: "running",
+        status: "Up 5 seconds",
+        labels: {
+          "kandev.executor_profile_id": profile.id,
+          "kandev.task_id": "task-abc123",
+          "kandev.task_environment_id": "env-123",
+        },
+      },
+    ];
+    let visibleContainers = [...containers];
+    const removed: string[] = [];
+
+    await testPage.route("**/api/v1/docker/containers?*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ containers: visibleContainers }),
+      });
+    });
+    await testPage.route("**/api/v1/docker/containers/container-1", async (route) => {
+      if (route.request().method() !== "DELETE") {
+        await route.fallback();
+        return;
+      }
+      removed.push("container-1");
+      visibleContainers = [];
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true }),
+      });
+    });
+
+    try {
+      await testPage.goto(`/settings/executors/${profile.id}`);
+
+      const row = testPage.getByTestId("docker-container-row-container-1");
+      await expect(row).toBeVisible({ timeout: 10_000 });
+      await expect(row.getByTestId("docker-container-task")).toContainText("task-abc123");
+      await expect(row.getByText("Up 5 seconds")).toBeVisible();
+
+      await testPage.getByRole("button", { name: "Delete Profile" }).click();
+      await expect(
+        testPage.getByText("1 related Docker container will also be removed."),
+      ).toBeVisible();
+      await expect(
+        testPage.getByRole("checkbox", { name: "Remove related Docker containers" }),
+      ).toBeChecked();
+      await testPage.getByRole("button", { name: "Delete" }).click();
+
+      await expect.poll(() => removed).toContain("container-1");
+    } finally {
+      await apiClient.deleteExecutor(exec.id).catch(() => {});
+    }
+  });
+
   test("Dockerfile content and image tag round-trip through Save", async ({
     testPage,
     apiClient,

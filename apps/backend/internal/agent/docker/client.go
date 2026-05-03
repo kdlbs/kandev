@@ -65,6 +65,7 @@ type ContainerInfo struct {
 	FinishedAt time.Time
 	ExitCode   int
 	Health     string
+	Labels     map[string]string
 }
 
 // Client wraps the Docker client.
@@ -345,6 +346,7 @@ func (c *Client) GetContainerInfo(ctx context.Context, containerID string) (*Con
 		State:    inspect.State.Status,
 		Status:   inspect.State.Status,
 		ExitCode: inspect.State.ExitCode,
+		Labels:   inspect.Config.Labels,
 	}
 
 	// Parse timestamps
@@ -544,6 +546,7 @@ func (c *Client) ListContainers(ctx context.Context, labels map[string]string) (
 			Image:  ctr.Image,
 			State:  ctr.State,
 			Status: ctr.Status,
+			Labels: ctr.Labels,
 		}
 		infos = append(infos, info)
 	}

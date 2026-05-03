@@ -40,7 +40,7 @@ func getMetadataBool(metadata map[string]interface{}, key string) bool {
 	case bool:
 		return raw
 	case string:
-		return strings.EqualFold(strings.TrimSpace(raw), "true")
+		return strings.EqualFold(strings.TrimSpace(raw), boolStringTrue)
 	default:
 		return false
 	}
@@ -147,15 +147,17 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 	// Convert ExecutorCreateRequest to ContainerConfig
 	// Note: WorkspacePath is empty to skip mounting - we clone inside container
 	containerCfg := ContainerConfig{
-		AgentConfig:      req.AgentConfig,
-		WorkspacePath:    "", // Empty = no workspace mount, we'll clone instead
-		TaskID:           req.TaskID,
-		SessionID:        req.SessionID,
-		InstanceID:       req.InstanceID,
-		Credentials:      req.Env, // Env contains credentials from the caller
-		McpServers:       req.McpServers,
-		PrepareScript:    prepareScript,
-		ImageTagOverride: getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
+		AgentConfig:       req.AgentConfig,
+		WorkspacePath:     "", // Empty = no workspace mount, we'll clone instead
+		TaskID:            req.TaskID,
+		TaskEnvironmentID: req.TaskEnvironmentID,
+		SessionID:         req.SessionID,
+		ExecutorProfileID: getMetadataString(req.Metadata, "executor_profile_id"),
+		InstanceID:        req.InstanceID,
+		Credentials:       req.Env, // Env contains credentials from the caller
+		McpServers:        req.McpServers,
+		PrepareScript:     prepareScript,
+		ImageTagOverride:  getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
 	}
 
 	// Use ContainerManager to launch container (includes nonce handshake)

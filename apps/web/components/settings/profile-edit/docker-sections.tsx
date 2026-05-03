@@ -36,7 +36,8 @@ RUN apt-get update \\
 WORKDIR /workspace
 `;
 
-type BuildStatus = "idle" | "building" | "success" | "failed";
+export type BuildStatus = "idle" | "building" | "success" | "failed";
+export type DockerBuildSuccess = { dockerfile: string; imageTag: string };
 
 /** Parse a Docker JSON stream line into a human-readable string. */
 function parseDockerLine(raw: string): string | null {
@@ -103,7 +104,7 @@ async function readDockerStream(
   return hasError;
 }
 
-function useBuildStream() {
+function useBuildStream(onBuildSuccess?: (result: DockerBuildSuccess) => void) {
   const [buildStatus, setBuildStatus] = useState<BuildStatus>("idle");
   const [buildLog, setBuildLog] = useState("");
 
@@ -130,14 +131,18 @@ function useBuildStream() {
           return;
         }
         const hasError = await readDockerStream(reader, appendLog);
-        setBuildStatus(hasError ? "failed" : "success");
+        const nextStatus = hasError ? "failed" : "success";
+        setBuildStatus(nextStatus);
+        if (nextStatus === "success") {
+          onBuildSuccess?.({ dockerfile, imageTag: tag.trim() });
+        }
       } catch (err) {
         setBuildStatus("failed");
         const msg = err instanceof Error ? err.message : "Unknown error";
         setBuildLog((prev) => prev + `\nBuild failed: ${msg}`);
       }
     },
-    [appendLog],
+    [appendLog, onBuildSuccess],
   );
 
   return { buildStatus, buildLog, runBuild };
@@ -148,6 +153,7 @@ type DockerfileBuildCardProps = {
   onDockerfileChange: (v: string) => void;
   imageTag: string;
   onImageTagChange: (v: string) => void;
+  onBuildSuccess?: (result: DockerBuildSuccess) => void;
 };
 
 export function DockerfileBuildCard({
@@ -155,8 +161,9 @@ export function DockerfileBuildCard({
   onDockerfileChange,
   imageTag,
   onImageTagChange,
+  onBuildSuccess,
 }: DockerfileBuildCardProps) {
-  const { buildStatus, buildLog, runBuild } = useBuildStream();
+  const { buildStatus, buildLog, runBuild } = useBuildStream(onBuildSuccess);
   const logRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
@@ -253,7 +260,41 @@ function ContainersEmptyState({ loading }: { loading: boolean }) {
       </div>
     );
   }
-  return <p className="py-4 text-sm text-muted-foreground">No running containers.</p>;
+  return <p className="py-4 text-sm text-muted-foreground">No Docker containers.</p>;
+}
+
+export function useDockerProfileContainers(profileId: string, enabled = true) {
+  const [containers, setContainers] = useState<DockerContainer[]>([]);
+  const [loading, setLoading] = useState(enabled);
+
+  const refresh = useCallback(async () => {
+    if (!enabled) {
+      setContainers([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await listDockerContainers({
+        labels: { "kandev.executor_profile_id": profileId },
+      });
+      setContainers(result.containers ?? []);
+    } catch {
+      setContainers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [enabled, profileId]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  return { containers, loading, refresh };
+}
+
+function containerTaskLabel(container: DockerContainer) {
+  return container.labels?.["kandev.task_id"] ?? "Untracked";
 }
 
 function ContainerRow({
@@ -269,9 +310,12 @@ function ContainerRow({
 }) {
   const isLoading = actionLoading === container.id;
   return (
-    <TableRow>
+    <TableRow data-testid={`docker-container-row-${container.id}`}>
       <TableCell className="font-mono text-sm">{container.name}</TableCell>
       <TableCell className="text-sm">{container.image}</TableCell>
+      <TableCell className="font-mono text-xs" data-testid="docker-container-task">
+        {containerTaskLabel(container)}
+      </TableCell>
       <TableCell>
         <Badge variant={container.state === "running" ? "default" : "secondary"}>
           {container.status}
@@ -312,25 +356,8 @@ function ContainerRow({
 }
 
 export function DockerContainersCard({ profileId }: { profileId: string }) {
-  const [containers, setContainers] = useState<DockerContainer[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { containers, loading, refresh } = useDockerProfileContainers(profileId);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await listDockerContainers({ labels: { "kandev.profile_id": profileId } });
-      setContainers(result.containers ?? []);
-    } catch {
-      setContainers([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [profileId]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
 
   const handleAction = useCallback(
     async (id: string, action: (id: string) => Promise<void>) => {
@@ -348,7 +375,7 @@ export function DockerContainersCard({ profileId }: { profileId: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Running Containers</CardTitle>
+        <CardTitle>Docker Containers</CardTitle>
         <CardDescription>Docker containers created by this profile.</CardDescription>
       </CardHeader>
       <CardContent>
@@ -360,6 +387,7 @@ export function DockerContainersCard({ profileId }: { profileId: string }) {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Image</TableHead>
+                <TableHead>Task</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="w-[100px]" />
               </TableRow>

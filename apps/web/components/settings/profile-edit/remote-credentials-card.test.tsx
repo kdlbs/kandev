@@ -69,6 +69,22 @@ afterEach(() => {
 });
 
 describe("RemoteCredentialsCard", () => {
+  it("does not crash when an auth spec has no methods", async () => {
+    vi.mocked(listRemoteCredentials).mockResolvedValueOnce({
+      auth_specs: [
+        {
+          id: "empty-agent",
+          display_name: "Empty Agent",
+          methods: null as never,
+        },
+      ],
+    });
+
+    renderRemoteCredentialsCard();
+
+    expect(await screen.findByText("Empty Agent")).toBeTruthy();
+  });
+
   it("allows selecting file auth even when local file detection reports missing files", async () => {
     const onChange = vi.fn();
     renderRemoteCredentialsCard(onChange);

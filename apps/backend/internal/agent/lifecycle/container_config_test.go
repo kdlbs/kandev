@@ -128,6 +128,32 @@ func TestBuildContainerConfig_ImageTagOverrideWins(t *testing.T) {
 	}
 }
 
+func TestBuildContainerConfig_LabelsExecutorProfileAndTaskEnvironment(t *testing.T) {
+	cm := newCMTest(t)
+	cfg := ContainerConfig{
+		AgentConfig:       newConfigStubAgent(),
+		InstanceID:        "0123456789abcdef",
+		TaskID:            "task-1",
+		SessionID:         "session-1",
+		TaskEnvironmentID: "env-1",
+		ExecutorProfileID: "profile-1",
+		ImageTagOverride:  "kandev/agent:custom",
+	}
+
+	got, err := cm.buildContainerConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+
+	assertLabel(t, got.Labels, "kandev.managed", boolStringTrue)
+	assertLabel(t, got.Labels, "kandev.task_id", "task-1")
+	assertLabel(t, got.Labels, "kandev.session_id", "session-1")
+	assertLabel(t, got.Labels, "kandev.task_environment_id", "env-1")
+	assertLabel(t, got.Labels, "kandev.executor_profile_id", "profile-1")
+	assertLabel(t, got.Labels, "kandev.profile_id", "profile-1")
+	assertLabel(t, got.Labels, "com.kandev.image", "kandev/agent:custom")
+}
+
 func TestBuildContainerConfig_PublishesAgentctlPorts(t *testing.T) {
 	cm := newCMTest(t)
 	cfg := ContainerConfig{
@@ -149,6 +175,13 @@ func TestBuildContainerConfig_PublishesAgentctlPorts(t *testing.T) {
 	assertHasPortBinding(t, got.PortBindings, dockerAgentctlInstancePortMax)
 	assertEnvContains(t, got.Env, "AGENTCTL_INSTANCE_PORT_BASE=41001")
 	assertEnvContains(t, got.Env, "AGENTCTL_INSTANCE_PORT_MAX=41100")
+}
+
+func assertLabel(t *testing.T, labels map[string]string, key, want string) {
+	t.Helper()
+	if labels[key] != want {
+		t.Fatalf("label %s = %q, want %q in %#v", key, labels[key], want, labels)
+	}
 }
 
 func assertHasPortBinding(t *testing.T, bindings []docker.PortBindingConfig, port int) {

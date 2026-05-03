@@ -28,6 +28,15 @@ function dockerState(containerID: string): string {
   return res.stdout.trim();
 }
 
+async function waitForDockerContainerRemoved(containerID: string, message: string): Promise<void> {
+  await expect
+    .poll(() => dockerInspectExists(containerID), {
+      timeout: 60_000,
+      message,
+    })
+    .toBe(false);
+}
+
 async function waitForLatestSessionDone(
   apiClient: import("../../helpers/api-client").ApiClient,
   taskId: string,
@@ -92,6 +101,62 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
     expect(env!.executor_type).toBe("local_docker");
     expect(env!.container_id, "task environment must record container_id").toBeTruthy();
     expect(dockerInspectExists(env!.container_id!), "container should exist on host").toBe(true);
+  });
+
+  test("archives a task and removes its Docker container", async ({ apiClient, seedData }) => {
+    test.setTimeout(180_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Docker Archive Cleanup",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.dockerExecutorProfileId,
+      },
+    );
+    await waitForLatestSessionDone(apiClient, task.id, 1, "Waiting for archive cleanup session");
+    const env = await apiClient.getTaskEnvironment(task.id);
+    expect(env?.container_id).toBeTruthy();
+    const containerID = env!.container_id!;
+
+    try {
+      await apiClient.archiveTask(task.id);
+      await waitForDockerContainerRemoved(containerID, "Archived task should remove container");
+    } finally {
+      dockerRemove(containerID);
+    }
+  });
+
+  test("deletes a task and removes its Docker container", async ({ apiClient, seedData }) => {
+    test.setTimeout(180_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Docker Delete Cleanup",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.dockerExecutorProfileId,
+      },
+    );
+    await waitForLatestSessionDone(apiClient, task.id, 1, "Waiting for delete cleanup session");
+    const env = await apiClient.getTaskEnvironment(task.id);
+    expect(env?.container_id).toBeTruthy();
+    const containerID = env!.container_id!;
+
+    try {
+      await apiClient.deleteTask(task.id);
+      await waitForDockerContainerRemoved(containerID, "Deleted task should remove container");
+    } finally {
+      dockerRemove(containerID);
+    }
   });
 
   test("restarts an externally stopped container and reuses the task environment", async ({

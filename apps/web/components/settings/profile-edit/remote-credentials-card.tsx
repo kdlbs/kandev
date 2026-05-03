@@ -117,7 +117,8 @@ export function RemoteCredentialsCard({
               />
             )}
             {authSpecs.map((spec) => {
-              const envMethod = spec.methods.find((m) => m.type === "env");
+              const methods = getSpecMethods(spec);
+              const envMethod = methods.find((m) => m.type === "env");
               return (
                 <AuthSection
                   key={spec.id}
@@ -137,6 +138,10 @@ export function RemoteCredentialsCard({
       </CardContent>
     </Card>
   );
+}
+
+function getSpecMethods(spec: RemoteAuthSpec): RemoteAuthMethod[] {
+  return Array.isArray(spec.methods) ? spec.methods : [];
 }
 
 function GitIdentityAccordionItem({
@@ -306,9 +311,10 @@ function AuthSection({
   onMethodSecretChange: (methodId: string, secretId: string | null) => void;
   secrets: SecretListItem[];
 }) {
-  const envMethod = spec.methods.find((m) => m.type === "env");
-  const fileMethod = spec.methods.find((m) => m.type === "files");
-  const ghTokenMethod = spec.methods.find((m) => m.type === "gh_cli_token");
+  const methods = getSpecMethods(spec);
+  const envMethod = methods.find((m) => m.type === "env");
+  const fileMethod = methods.find((m) => m.type === "files");
+  const ghTokenMethod = methods.find((m) => m.type === "gh_cli_token");
   const hasOnlyEnv = envMethod && !fileMethod && !ghTokenMethod;
 
   // `choice` is derived from props so the configured-status badge updates live
