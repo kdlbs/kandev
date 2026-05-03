@@ -90,9 +90,10 @@ describe("resolveRuntime", () => {
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
-    // Restore env
+    // Restore the original env exactly. Don't `delete process.env.KANDEV_BUNDLE_DIR`
+    // afterwards — if a developer had that env var set when the suite started,
+    // it's already in origEnv and should remain.
     process.env = { ...origEnv };
-    delete process.env.KANDEV_BUNDLE_DIR;
   });
 
   describe("KANDEV_BUNDLE_DIR (step 1)", () => {

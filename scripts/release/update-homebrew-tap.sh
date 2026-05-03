@@ -82,7 +82,8 @@ fetch_sha256() {
   local platform="$1"
   local sha_file="kandev-${platform}.tar.gz.sha256"
   local content
-  content="$(gh release download "$TAG" --pattern "$sha_file" --dir /tmp 2>/dev/null && cat "/tmp/$sha_file")" || {
+  # Download into WORK_DIR so the EXIT trap cleans it up automatically.
+  content="$(gh release download "$TAG" --pattern "$sha_file" --dir "$WORK_DIR" 2>/dev/null && cat "$WORK_DIR/$sha_file")" || {
     die "Failed to download $sha_file from release $TAG."
   }
   # sha256 files contain: <hash>  <filename> — extract just the hash
