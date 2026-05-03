@@ -103,6 +103,16 @@ func (s *Service) DeleteIssueWatch(ctx context.Context, id string) error {
 // CheckIssueWatch runs the watch's filter once and returns the issues that
 // haven't been turned into tasks yet. last_polled_at is stamped regardless of
 // whether the search succeeded — a failing search still counts as "we tried".
+//
+// Concurrency note: callers must tolerate being handed an issue that gets
+// stolen by a concurrent reserver. We query the seen-set and return unseen
+// identifiers, but we do NOT insert the dedup row here — that happens in the
+// orchestrator's ReserveIssueWatchTask via INSERT OR IGNORE. If the manual
+// /trigger endpoint and the poller tick fire for the same watch in quick
+// succession, both calls can see the same identifier as unseen before either
+// has reserved it. The duplicate publish is harmless (the second reserver
+// loses the race and bails) but the goroutine work is wasted. Same pattern as
+// the JIRA watcher.
 func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*LinearIssue, error) {
 	defer s.stampWatchLastPolled(w.ID)
 	client, err := s.clientFor(ctx)

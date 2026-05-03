@@ -332,7 +332,7 @@ Skills use `gh` CLI by default. If a `gh` command fails (not installed, not auth
 Jira and Linear are the model: per-workspace credentials, a 90s auth-health poller, a settings page with status banner + reconnect CTA, link/import buttons that gate on availability. New integrations should reuse the shared shapes rather than copying either.
 
 **Backend** (`apps/backend/internal/<name>/`):
-- Mirror the package layout: `service.go`, `store.go`, `client.go`, `provider.go`, `handlers.go`, `models.go`, `poller.go`. Expose `Provide(writer, reader *sqlx.DB, secrets SecretStore, log *logger.Logger) (*Service, func() error, error)` (add `eventBus bus.EventBus` only if the integration actually publishes events — Linear does not).
+- Mirror the package layout: `service.go`, `store.go`, `client.go`, `provider.go`, `handlers.go`, `models.go`, `poller.go`. Expose `Provide(writer, reader *sqlx.DB, secrets SecretStore, eventBus bus.EventBus, log *logger.Logger) (*Service, func() error, error)`. Pass `nil` for `eventBus` when the integration doesn't publish events; both Jira and Linear take and use it for issue-watch publishing.
 - Use `internal/integrations/secretadapter` instead of writing your own upsert wrapper around `secrets.SecretStore`. The adapter satisfies any per-integration `SecretStore` interface shaped as `{Reveal, Set, Delete, Exists}`.
 - Use `internal/integrations/healthpoll` for the auth-health loop. Implement the `Prober` interface (`ListConfiguredWorkspaces` + `RecordAuthHealth`) on a small adapter and let `healthpoll.New("name", prober, log)` own Start/Stop/ticker. Keep integration-specific loops (JQL polling, webhook reconciliation, etc.) separate, like jira's issue-watch loop.
 - Wire the service via a per-domain `init<Name>Service(...)` helper in `cmd/kandev/services.go`, not inline in `provideServices`.
@@ -347,7 +347,7 @@ Jira and Linear are the model: per-workspace credentials, a 90s auth-health poll
 
 **Where Jira and Linear deliberately diverge:**
 - Issue model: Jira uses transitions + JQL; Linear uses state IDs + structured filters. Don't merge these schemas — the upstream APIs are genuinely different.
-- Event publishing: only Jira accepts `eventBus` and emits `NewJiraIssueEvent` from its issue-watch loop. Linear has no equivalent feature today.
+- Watch filter persistence: Jira stores the JQL string verbatim; Linear stores the structured `SearchFilter` as JSON in `filter_json` (Linear has no JQL equivalent). The orchestrator emits `NewJiraIssueEvent` / `NewLinearIssueEvent` respectively and dedups by issue key (Jira) vs identifier (Linear).
 - Health column extras: Linear's `linear_configs` row carries an `org_slug` captured from successful probes; Jira's row does not.
 
 ---
@@ -358,4 +358,4 @@ This file is read by AI coding agents (Claude Code via `CLAUDE.md` symlink, Code
 
 ---
 
-**Last Updated**: 2026-05-02
+**Last Updated**: 2026-05-03

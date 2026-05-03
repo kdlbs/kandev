@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Button } from "@kandev/ui/button";
 import { Switch } from "@kandev/ui/switch";
 import { Label } from "@kandev/ui/label";
@@ -201,6 +201,11 @@ function StateMultiSelect({
 function useTeamsAndStates(teamKey: string) {
   const [teams, setTeams] = useState<LinearTeam[]>([]);
   const [statesByTeam, setStatesByTeam] = useState<Record<string, LinearWorkflowState[]>>({});
+  // Track which teams we've already kicked off a fetch for so the effect
+  // doesn't list `statesByTeam` as a dep (which would re-fire whenever any
+  // team's states load). A ref mutation isn't reactive, so the sole input
+  // that schedules a fetch is `teamKey`.
+  const fetchedTeams = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -217,10 +222,8 @@ function useTeamsAndStates(teamKey: string) {
   }, []);
 
   useEffect(() => {
-    // Skip when no team is selected or we already have a result for this team
-    // (incl. an empty-array fallback). Avoids setState-in-effect by writing
-    // only inside the promise callbacks.
-    if (!teamKey || statesByTeam[teamKey] !== undefined) return;
+    if (!teamKey || fetchedTeams.current.has(teamKey)) return;
+    fetchedTeams.current.add(teamKey);
     let cancelled = false;
     listLinearStates(teamKey)
       .then((res) => {
@@ -232,7 +235,7 @@ function useTeamsAndStates(teamKey: string) {
     return () => {
       cancelled = true;
     };
-  }, [teamKey, statesByTeam]);
+  }, [teamKey]);
 
   const states = teamKey ? (statesByTeam[teamKey] ?? []) : [];
   // "loading" = a team is selected but we haven't received a result yet.

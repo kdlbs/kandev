@@ -39,7 +39,7 @@ function summarizeFilter(filter: LinearSearchFilter | undefined): string {
   const parts: string[] = [];
   if (filter.teamKey) parts.push(`team:${filter.teamKey}`);
   if (filter.stateIds && filter.stateIds.length > 0) {
-    parts.push(`state:${filter.stateIds.length === 1 ? "1" : filter.stateIds.length} selected`);
+    parts.push(`state:${filter.stateIds.length} selected`);
   }
   if (filter.assigned) parts.push(`assigned:${filter.assigned}`);
   if (filter.query) parts.push(`q:"${filter.query}"`);
