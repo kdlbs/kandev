@@ -279,3 +279,89 @@ func (h *Handlers) handleUpdateTaskState(ctx context.Context, msg *ws.Message) (
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 }
+
+func (h *Handlers) handleGetTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return h.handleListByField(ctx, msg, "task_id", "failed to get task", "Failed to get task",
+		func(ctx context.Context, taskID string) (any, error) {
+			task, err := h.taskSvc.GetTask(ctx, taskID)
+			if err != nil {
+				return nil, err
+			}
+			return dto.FromTask(task), nil
+		})
+}
+
+func (h *Handlers) handleListTasksByWorkspace(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		WorkspaceID     string `json:"workspace_id"`
+		WorkflowID      string `json:"workflow_id"`
+		RepositoryID    string `json:"repository_id"`
+		Query           string `json:"query"`
+		Page            int    `json:"page"`
+		PageSize        int    `json:"page_size"`
+		IncludeArchived bool   `json:"include_archived"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.WorkspaceID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
+	}
+	page, pageSize := normalizePagination(req.Page, req.PageSize)
+
+	tasks, total, err := h.taskSvc.ListTasksByWorkspace(ctx, req.WorkspaceID, req.WorkflowID, req.RepositoryID, req.Query, page, pageSize, req.IncludeArchived, false, false, false)
+	if err != nil {
+		h.logger.Error("failed to list tasks by workspace", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list tasks by workspace", nil)
+	}
+	dtos := make([]dto.TaskDTO, 0, len(tasks))
+	for _, t := range tasks {
+		dtos = append(dtos, dto.FromTask(t))
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"tasks":     dtos,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	})
+}
+
+func (h *Handlers) handleBulkMoveTasks(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		SourceWorkflowID string `json:"source_workflow_id"`
+		SourceStepID     string `json:"source_step_id"`
+		TargetWorkflowID string `json:"target_workflow_id"`
+		TargetStepID     string `json:"target_step_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SourceWorkflowID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "source_workflow_id is required", nil)
+	}
+	if req.TargetWorkflowID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "target_workflow_id is required", nil)
+	}
+	if req.TargetStepID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "target_step_id is required", nil)
+	}
+
+	result, err := h.taskSvc.BulkMoveTasks(ctx, req.SourceWorkflowID, req.SourceStepID, req.TargetWorkflowID, req.TargetStepID)
+	if err != nil {
+		h.logger.Error("failed to bulk move tasks", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to bulk move tasks", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"moved_count": result.MovedCount,
+	})
+}
+
+func normalizePagination(page, pageSize int) (int, int) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 50
+	}
+	return page, pageSize
+}

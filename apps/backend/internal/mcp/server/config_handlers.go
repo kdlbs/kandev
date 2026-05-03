@@ -293,6 +293,173 @@ func (s *Server) registerConfigTaskTools() {
 	)
 }
 
+// --- Extended task tools (always available) ---
+
+func (s *Server) registerExtendedTaskTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_task_kandev",
+			mcp.WithDescription("Get a single task by ID."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
+		),
+		s.wrapHandler("get_task_kandev", s.getTaskHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_tasks_by_workspace_kandev",
+			mcp.WithDescription("List tasks across a workspace with optional filtering."),
+			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
+			mcp.WithString("workflow_id", mcp.Description("Optional workflow ID filter")),
+			mcp.WithString("repository_id", mcp.Description("Optional repository ID filter")),
+			mcp.WithString("query", mcp.Description("Optional search query")),
+			mcp.WithNumber("page", mcp.Description("Page number (default: 1)")),
+			mcp.WithNumber("page_size", mcp.Description("Page size (default: 50, max: 100)")),
+			mcp.WithBoolean("include_archived", mcp.Description("Include archived tasks")),
+		),
+		s.wrapHandler("list_tasks_by_workspace_kandev", s.listTasksByWorkspaceHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("bulk_move_tasks_kandev",
+			mcp.WithDescription("Move all tasks from a source workflow/step to a target workflow/step."),
+			mcp.WithString("source_workflow_id", mcp.Required(), mcp.Description("The source workflow ID")),
+			mcp.WithString("source_step_id", mcp.Description("Optional source step ID to filter tasks")),
+			mcp.WithString("target_workflow_id", mcp.Required(), mcp.Description("The target workflow ID")),
+			mcp.WithString("target_step_id", mcp.Required(), mcp.Description("The target workflow step ID")),
+		),
+		s.wrapHandler("bulk_move_tasks_kandev", s.bulkMoveTasksHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_workflow_kandev",
+			mcp.WithDescription("Get a single workflow by ID."),
+			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
+		),
+		s.wrapHandler("get_workflow_kandev", s.getWorkflowHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("reorder_workflows_kandev",
+			mcp.WithDescription("Reorder workflows in a workspace by providing the full ordered list of workflow IDs."),
+			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
+			mcp.WithArray("workflow_ids", mcp.Required(), mcp.Description("Ordered list of workflow IDs defining the new order")),
+		),
+		s.wrapHandler("reorder_workflows_kandev", s.reorderWorkflowsHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_workflow_step_kandev",
+			mcp.WithDescription("Get a single workflow step by ID."),
+			mcp.WithString("step_id", mcp.Required(), mcp.Description("The workflow step ID")),
+		),
+		s.wrapHandler("get_workflow_step_kandev", s.getWorkflowStepHandler()),
+	)
+}
+
+// --- Workspace tools (always available) ---
+
+func (s *Server) registerWorkspaceTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("create_workspace_kandev",
+			mcp.WithDescription("Create a new workspace."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Workspace name")),
+			mcp.WithString("description", mcp.Description("Workspace description")),
+			mcp.WithString("default_executor_id", mcp.Description("Default executor ID")),
+			mcp.WithString("default_agent_profile_id", mcp.Description("Default agent profile ID")),
+			mcp.WithString("default_config_agent_profile_id", mcp.Description("Default config agent profile ID")),
+		),
+		s.wrapHandler("create_workspace_kandev", s.createWorkspaceHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("update_workspace_kandev",
+			mcp.WithDescription("Update an existing workspace."),
+			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
+			mcp.WithString("name", mcp.Description("New workspace name")),
+			mcp.WithString("description", mcp.Description("New workspace description")),
+			mcp.WithString("default_executor_id", mcp.Description("New default executor ID")),
+			mcp.WithString("default_agent_profile_id", mcp.Description("New default agent profile ID")),
+			mcp.WithString("default_config_agent_profile_id", mcp.Description("New default config agent profile ID")),
+		),
+		s.wrapHandler("update_workspace_kandev", s.updateWorkspaceHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("delete_workspace_kandev",
+			mcp.WithDescription("Delete a workspace and all its data. This is destructive and cannot be undone."),
+			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID to delete")),
+		),
+		s.wrapHandler("delete_workspace_kandev", s.deleteWorkspaceHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_workspace_kandev",
+			mcp.WithDescription("Get a single workspace by ID."),
+			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
+		),
+		s.wrapHandler("get_workspace_kandev", s.getWorkspaceHandler()),
+	)
+}
+
+// --- Repository tools (always available) ---
+
+func (s *Server) registerRepositoryTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_repositories_kandev",
+			mcp.WithDescription("List all repositories in a workspace."),
+			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
+		),
+		s.wrapHandler("list_repositories_kandev", s.listRepositoriesHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("create_repository_kandev",
+			mcp.WithDescription("Create a new repository in a workspace."),
+			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Repository name")),
+			mcp.WithString("source_type", mcp.Description("Source type: local, github, gitlab")),
+			mcp.WithString("local_path", mcp.Description("Local path to the repository")),
+			mcp.WithString("provider", mcp.Description("Provider name (github, gitlab)")),
+			mcp.WithString("provider_owner", mcp.Description("Provider owner (username or org)")),
+			mcp.WithString("provider_name", mcp.Description("Provider repository name")),
+			mcp.WithString("default_branch", mcp.Description("Default branch (default: main)")),
+			mcp.WithString("worktree_branch_prefix", mcp.Description("Branch prefix for worktrees")),
+			mcp.WithString("setup_script", mcp.Description("Setup script")),
+			mcp.WithString("cleanup_script", mcp.Description("Cleanup script")),
+		),
+		s.wrapHandler("create_repository_kandev", s.createRepositoryHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("delete_repository_kandev",
+			mcp.WithDescription("Delete a repository from a workspace."),
+			mcp.WithString("repository_id", mcp.Required(), mcp.Description("The repository ID to delete")),
+		),
+		s.wrapHandler("delete_repository_kandev", s.deleteRepositoryHandler()),
+	)
+}
+
+// --- Session tools (always available) ---
+
+func (s *Server) registerSessionTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("launch_session_kandev",
+			mcp.WithDescription("Launch an agent session on a task."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
+			mcp.WithString("agent_profile_id", mcp.Description("Agent profile ID to use")),
+			mcp.WithString("executor_id", mcp.Description("Executor ID")),
+			mcp.WithString("executor_profile_id", mcp.Description("Executor profile ID")),
+			mcp.WithString("prompt", mcp.Description("Initial prompt for the session")),
+		),
+		s.wrapHandler("launch_session_kandev", s.launchSessionHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("stop_session_kandev",
+			mcp.WithDescription("Stop an active agent session."),
+			mcp.WithString("session_id", mcp.Required(), mcp.Description("The session ID to stop")),
+			mcp.WithString("reason", mcp.Description("Reason for stopping")),
+			mcp.WithBoolean("force", mcp.Description("Force stop without graceful shutdown")),
+		),
+		s.wrapHandler("stop_session_kandev", s.stopSessionHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_task_sessions_kandev",
+			mcp.WithDescription("List all sessions for a task."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
+		),
+		s.wrapHandler("get_task_sessions_kandev", s.getTaskSessionsHandler()),
+	)
+}
+
 // --- Handler implementations ---
 
 func (s *Server) createWorkflowHandler() server.ToolHandlerFunc {
@@ -699,6 +866,241 @@ func (s *Server) deleteExecutorProfileHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("profile_id is required"), nil
 		}
 		return s.forwardToBackend(ctx, ws.ActionMCPDeleteExecutorProfile, map[string]string{"profile_id": profileID})
+	}
+}
+
+// --- Extended task handler implementations ---
+
+func (s *Server) getTaskHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString("task_id")
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPGetTask, map[string]string{"task_id": taskID})
+	}
+}
+
+func (s *Server) listTasksByWorkspaceHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		workspaceID, err := req.RequireString("workspace_id")
+		if err != nil {
+			return mcp.NewToolResultError("workspace_id is required"), nil
+		}
+		payload := map[string]interface{}{"workspace_id": workspaceID}
+		args := req.GetArguments()
+		for _, key := range []string{"workflow_id", "repository_id", "query", "page", "page_size", "include_archived"} {
+			if args[key] != nil {
+				payload[key] = args[key]
+			}
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPListTasksByWorkspace, payload)
+	}
+}
+
+func (s *Server) bulkMoveTasksHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		sourceWorkflowID, err := req.RequireString("source_workflow_id")
+		if err != nil {
+			return mcp.NewToolResultError("source_workflow_id is required"), nil
+		}
+		targetWorkflowID, err := req.RequireString("target_workflow_id")
+		if err != nil {
+			return mcp.NewToolResultError("target_workflow_id is required"), nil
+		}
+		targetStepID, err := req.RequireString("target_step_id")
+		if err != nil {
+			return mcp.NewToolResultError("target_step_id is required"), nil
+		}
+		payload := map[string]interface{}{
+			"source_workflow_id": sourceWorkflowID,
+			"target_workflow_id": targetWorkflowID,
+			"target_step_id":     targetStepID,
+		}
+		if src := req.GetString("source_step_id", ""); src != "" {
+			payload["source_step_id"] = src
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPBulkMoveTasks, payload)
+	}
+}
+
+func (s *Server) getWorkflowHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		workflowID, err := req.RequireString("workflow_id")
+		if err != nil {
+			return mcp.NewToolResultError("workflow_id is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPGetWorkflow, map[string]string{"workflow_id": workflowID})
+	}
+}
+
+func (s *Server) reorderWorkflowsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		workspaceID, err := req.RequireString("workspace_id")
+		if err != nil {
+			return mcp.NewToolResultError("workspace_id is required"), nil
+		}
+		args := req.GetArguments()
+		workflowIDs := args["workflow_ids"]
+		if workflowIDs == nil {
+			return mcp.NewToolResultError("workflow_ids is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPReorderWorkflows, map[string]interface{}{
+			"workspace_id": workspaceID,
+			"workflow_ids": workflowIDs,
+		})
+	}
+}
+
+func (s *Server) getWorkflowStepHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		stepID, err := req.RequireString("step_id")
+		if err != nil {
+			return mcp.NewToolResultError("step_id is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPGetWorkflowStep, map[string]string{"step_id": stepID})
+	}
+}
+
+// --- Workspace handler implementations ---
+
+func (s *Server) createWorkspaceHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		name, err := req.RequireString("name")
+		if err != nil {
+			return mcp.NewToolResultError("name is required"), nil
+		}
+		payload := map[string]interface{}{"name": name}
+		for _, key := range []string{"description", "default_executor_id", "default_agent_profile_id", "default_config_agent_profile_id"} {
+			if v := req.GetString(key, ""); v != "" {
+				payload[key] = v
+			}
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPCreateWorkspace, payload)
+	}
+}
+
+func (s *Server) updateWorkspaceHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		workspaceID, err := req.RequireString("workspace_id")
+		if err != nil {
+			return mcp.NewToolResultError("workspace_id is required"), nil
+		}
+		payload := map[string]interface{}{"workspace_id": workspaceID}
+		for _, key := range []string{"name", "description", "default_executor_id", "default_agent_profile_id", "default_config_agent_profile_id"} {
+			if v := req.GetString(key, ""); v != "" {
+				payload[key] = v
+			}
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPUpdateWorkspace, payload)
+	}
+}
+
+func (s *Server) deleteWorkspaceHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		workspaceID, err := req.RequireString("workspace_id")
+		if err != nil {
+			return mcp.NewToolResultError("workspace_id is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPDeleteWorkspace, map[string]string{"workspace_id": workspaceID})
+	}
+}
+
+func (s *Server) getWorkspaceHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		workspaceID, err := req.RequireString("workspace_id")
+		if err != nil {
+			return mcp.NewToolResultError("workspace_id is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPGetWorkspace, map[string]string{"workspace_id": workspaceID})
+	}
+}
+
+// --- Repository handler implementations ---
+
+func (s *Server) listRepositoriesHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		workspaceID, err := req.RequireString("workspace_id")
+		if err != nil {
+			return mcp.NewToolResultError("workspace_id is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPListRepositories, map[string]string{"workspace_id": workspaceID})
+	}
+}
+
+func (s *Server) createRepositoryHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		workspaceID, err := req.RequireString("workspace_id")
+		if err != nil {
+			return mcp.NewToolResultError("workspace_id is required"), nil
+		}
+		name, err := req.RequireString("name")
+		if err != nil {
+			return mcp.NewToolResultError("name is required"), nil
+		}
+		payload := map[string]interface{}{"workspace_id": workspaceID, "name": name}
+		for _, key := range []string{"source_type", "local_path", "provider", "provider_owner", "provider_name", "default_branch", "worktree_branch_prefix", "setup_script", "cleanup_script"} {
+			if v := req.GetString(key, ""); v != "" {
+				payload[key] = v
+			}
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPCreateRepository, payload)
+	}
+}
+
+func (s *Server) deleteRepositoryHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		repositoryID, err := req.RequireString("repository_id")
+		if err != nil {
+			return mcp.NewToolResultError("repository_id is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPDeleteRepository, map[string]string{"repository_id": repositoryID})
+	}
+}
+
+// --- Session handler implementations ---
+
+func (s *Server) launchSessionHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString("task_id")
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		payload := map[string]interface{}{"task_id": taskID}
+		for _, key := range []string{"agent_profile_id", "executor_id", "executor_profile_id", "prompt"} {
+			if v := req.GetString(key, ""); v != "" {
+				payload[key] = v
+			}
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPLaunchSession, payload)
+	}
+}
+
+func (s *Server) stopSessionHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		sessionID, err := req.RequireString("session_id")
+		if err != nil {
+			return mcp.NewToolResultError("session_id is required"), nil
+		}
+		payload := map[string]interface{}{"session_id": sessionID}
+		args := req.GetArguments()
+		if reason := req.GetString("reason", ""); reason != "" {
+			payload["reason"] = reason
+		}
+		if args["force"] != nil {
+			payload["force"] = args["force"]
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPStopSession, payload)
+	}
+}
+
+func (s *Server) getTaskSessionsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString("task_id")
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPGetTaskSessions, map[string]string{"task_id": taskID})
 	}
 }
 

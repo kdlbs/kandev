@@ -59,6 +59,35 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "list_agents_kandev")
 	assert.Contains(t, tools, "list_executor_profiles_kandev")
 
+	// Task mode should have task lifecycle tools
+	assert.Contains(t, tools, "delete_task_kandev")
+	assert.Contains(t, tools, "archive_task_kandev")
+	assert.Contains(t, tools, "update_task_state_kandev")
+
+	// Task mode should have extended task tools
+	assert.Contains(t, tools, "get_task_kandev")
+	assert.Contains(t, tools, "list_tasks_by_workspace_kandev")
+	assert.Contains(t, tools, "bulk_move_tasks_kandev")
+	assert.Contains(t, tools, "get_workflow_kandev")
+	assert.Contains(t, tools, "reorder_workflows_kandev")
+	assert.Contains(t, tools, "get_workflow_step_kandev")
+
+	// Task mode should have workspace management tools
+	assert.Contains(t, tools, "create_workspace_kandev")
+	assert.Contains(t, tools, "update_workspace_kandev")
+	assert.Contains(t, tools, "delete_workspace_kandev")
+	assert.Contains(t, tools, "get_workspace_kandev")
+
+	// Task mode should have repository tools
+	assert.Contains(t, tools, "list_repositories_kandev")
+	assert.Contains(t, tools, "create_repository_kandev")
+	assert.Contains(t, tools, "delete_repository_kandev")
+
+	// Task mode should have session tools
+	assert.Contains(t, tools, "launch_session_kandev")
+	assert.Contains(t, tools, "stop_session_kandev")
+	assert.Contains(t, tools, "get_task_sessions_kandev")
+
 	// Task mode should NOT have config/mutation tools
 	assert.NotContains(t, tools, "create_workflow_kandev")
 	assert.NotContains(t, tools, "update_workflow_kandev")
@@ -72,13 +101,10 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "update_agent_profile_kandev")
 	assert.NotContains(t, tools, "get_mcp_config_kandev")
 	assert.NotContains(t, tools, "update_mcp_config_kandev")
-	assert.NotContains(t, tools, "delete_task_kandev")
-	assert.NotContains(t, tools, "archive_task_kandev")
 	assert.NotContains(t, tools, "list_executors_kandev")
 	assert.NotContains(t, tools, "create_executor_profile_kandev")
 	assert.NotContains(t, tools, "update_executor_profile_kandev")
 	assert.NotContains(t, tools, "delete_executor_profile_kandev")
-	assert.NotContains(t, tools, "update_task_state_kandev")
 	assert.NotContains(t, tools, "delete_workflow_step_kandev")
 	assert.NotContains(t, tools, "reorder_workflow_steps_kandev")
 }
@@ -196,8 +222,8 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	tools := getRegisteredToolNames(s)
-	// 11 kanban + 1 interaction + 4 plan = 16
-	assert.Equal(t, 16, len(tools))
+	// 14 kanban + 6 extended + 4 workspace + 3 repository + 3 session + 1 interaction + 4 plan = 35
+	assert.Equal(t, 35, len(tools))
 }
 
 func TestServerModeConfig_ToolCount(t *testing.T) {
@@ -207,8 +233,8 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
-	// 10 workflow + 4 agent + 4 mcp + 5 executor + 6 task + 1 interaction = 30
-	assert.Equal(t, 30, len(tools))
+	// 10 workflow + 4 agent + 4 mcp + 5 executor + 6 task + 6 extended + 4 workspace + 3 repository + 3 session + 1 interaction = 46
+	assert.Equal(t, 46, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
@@ -273,8 +299,8 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// 10 workflow + 4 agent + 4 mcp + 5 executor + 6 task + 1 create_task = 30
-	assert.Equal(t, 30, len(tools))
+	// 10 workflow + 4 agent + 4 mcp + 5 executor + 6 task + 6 extended + 4 workspace + 3 repository + 3 session + 1 create_task = 46
+	assert.Equal(t, 46, len(tools))
 }
 
 func TestNewExternal_Constructs(t *testing.T) {

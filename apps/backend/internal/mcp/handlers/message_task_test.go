@@ -79,7 +79,8 @@ func (f *fakeOrchestrator) ResumeTaskSession(_ context.Context, _, _ string) (*e
 	return &executor.TaskExecution{}, nil
 }
 
-func (f *fakeOrchestrator) GetMessageQueue() *messagequeue.Service { return f.queue }
+func (f *fakeOrchestrator) GetMessageQueue() *messagequeue.Service                  { return f.queue }
+func (f *fakeOrchestrator) StopSession(context.Context, string, string, bool) error { return nil }
 
 func newMessageTaskHandler(t *testing.T, svc *service.Service) (*Handlers, *fakeOrchestrator) {
 	t.Helper()

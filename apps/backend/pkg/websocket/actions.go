@@ -353,6 +353,30 @@ const (
 	ActionMCPUpdateTaskState     = "mcp.update_task_state"
 	ActionMCPMessageTask         = "mcp.message_task"
 	ActionMCPGetTaskConversation = "mcp.get_task_conversation"
+
+	// Extended MCP actions (always available)
+	ActionMCPGetTask              = "mcp.get_task"
+	ActionMCPListTasksByWorkspace = "mcp.list_tasks_by_workspace"
+	ActionMCPGetWorkflow          = "mcp.get_workflow"
+	ActionMCPReorderWorkflows     = "mcp.reorder_workflows"
+	ActionMCPGetWorkflowStep      = "mcp.get_workflow_step"
+	ActionMCPBulkMoveTasks        = "mcp.bulk_move_tasks"
+
+	// Workspace MCP actions (always available)
+	ActionMCPCreateWorkspace = "mcp.create_workspace"
+	ActionMCPUpdateWorkspace = "mcp.update_workspace"
+	ActionMCPDeleteWorkspace = "mcp.delete_workspace"
+	ActionMCPGetWorkspace    = "mcp.get_workspace"
+
+	// Repository MCP actions (always available)
+	ActionMCPListRepositories = "mcp.list_repositories"
+	ActionMCPCreateRepository = "mcp.create_repository"
+	ActionMCPDeleteRepository = "mcp.delete_repository"
+
+	// Session MCP actions (always available)
+	ActionMCPLaunchSession   = "mcp.launch_session"
+	ActionMCPStopSession     = "mcp.stop_session"
+	ActionMCPGetTaskSessions = "mcp.get_task_sessions"
 )
 
 // GitHub integration actions
