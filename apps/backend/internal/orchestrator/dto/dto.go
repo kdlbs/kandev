@@ -27,12 +27,6 @@ type QueueResponse struct {
 	Total int             `json:"total"`
 }
 
-// TaskSessionStatusRequest is the payload for task.session.status
-type TaskSessionStatusRequest struct {
-	TaskID        string `json:"task_id"`
-	TaskSessionID string `json:"session_id"`
-}
-
 // TaskSessionStatusResponse is the response for task.session.status
 type TaskSessionStatusResponse struct {
 	// Session metadata
@@ -71,24 +65,9 @@ type TaskSessionStatusResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
-// StopTaskRequest is the payload for orchestrator.stop
-type StopTaskRequest struct {
-	TaskID string `json:"task_id"`
-	Reason string `json:"reason,omitempty"`
-	Force  bool   `json:"force,omitempty"`
-}
-
 // SuccessResponse is a generic success response
 type SuccessResponse struct {
 	Success bool `json:"success"`
-}
-
-// PermissionRespondRequest is the payload for permission.respond
-type PermissionRespondRequest struct {
-	SessionID string `json:"session_id"`
-	PendingID string `json:"pending_id"`
-	OptionID  string `json:"option_id,omitempty"`
-	Cancelled bool   `json:"cancelled,omitempty"`
 }
 
 // PermissionRespondResponse is the response for permission.respond

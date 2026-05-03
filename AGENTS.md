@@ -162,7 +162,7 @@ Client (WS) → Orchestrator → Lifecycle Manager → ExecutorBackend (containe
 Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream updates (WS) ──────── agent subprocess
 ```
 
-1. Orchestrator receives `task.start` via WS
+1. Orchestrator receives `session.launch` via WS
 2. Lifecycle Manager creates executor instance (container or process)
 3. agentctl starts inside the instance, agent subprocess is configured and started
 4. Agent events stream back via WS through the chain
