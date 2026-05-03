@@ -21,7 +21,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { TaskSessionState } from "@/lib/types/http";
@@ -99,6 +99,7 @@ function useSessionTabActions(
 ) {
   const { toast, updateToast } = useToast();
   const removeTaskSession = useAppStore((state) => state.removeTaskSession);
+  const appStoreApi = useAppStoreApi();
 
   const wsAction = useCallback(
     async (action: string, label: string, payload: Record<string, unknown>, timeout = 15000) => {
@@ -139,10 +140,24 @@ function useSessionTabActions(
   const handleDelete = useCallback(async () => {
     if (!sessionId || !taskId) return;
     await wsAction("session.delete", "Deleting session", { session_id: sessionId });
+
+    // Switch the active session BEFORE removing from the store so
+    // useAutoSessionTab doesn't re-create this panel with the deleted session's ID.
+    const state = appStoreApi.getState();
+    if (state.tasks.activeSessionId === sessionId) {
+      const sessions = state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
+      const remaining = sessions.filter((s) => s.id !== sessionId);
+      if (remaining.length > 0) {
+        state.setActiveSessionAuto(taskId, remaining[remaining.length - 1].id);
+      } else {
+        state.clearActiveSession();
+      }
+    }
+
     removeTaskSession(taskId, sessionId);
     const panel = containerApi.getPanel(api.id);
     if (panel) containerApi.removePanel(panel);
-  }, [sessionId, taskId, wsAction, removeTaskSession, api.id, containerApi]);
+  }, [sessionId, taskId, wsAction, removeTaskSession, api.id, containerApi, appStoreApi]);
   const handleCloseOthers = useCallback(() => {
     const toClose = api.group.panels.filter((p) => p.id !== api.id);
     for (const panel of toClose) containerApi.removePanel(panel);
