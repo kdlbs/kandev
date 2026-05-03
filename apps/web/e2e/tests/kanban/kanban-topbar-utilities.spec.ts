@@ -3,6 +3,8 @@ import { KanbanPage } from "../../pages/kanban-page";
 
 test.describe("Kanban topbar utilities", () => {
   test("settings is reachable directly from the topbar (no dropdown)", async ({ testPage }) => {
+    // Lock to desktop width — on tablet/mobile Settings lives inside the hamburger sheet.
+    await testPage.setViewportSize({ width: 1280, height: 800 });
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 

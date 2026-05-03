@@ -267,7 +267,7 @@ export const InlineTaskName = memo(function InlineTaskName({
       onChange={(e) => onChange(e.target.value)}
       placeholder="Task name"
       data-testid="task-title-input"
-      className="w-full border border-input bg-input/20 dark:bg-input/30 text-sm font-medium rounded-md px-3 py-2 placeholder:text-muted-foreground/70 outline-none focus-visible:outline-none focus-visible:border-ring transition-colors"
+      className="w-full border border-input bg-input/20 dark:bg-input/30 text-sm font-medium rounded-md px-3 py-2 placeholder:text-muted-foreground/70 outline-none focus-visible:border-ring transition-colors"
     />
   );
 });
