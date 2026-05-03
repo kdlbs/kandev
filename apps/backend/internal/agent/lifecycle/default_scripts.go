@@ -45,6 +45,10 @@ set -eu
 # ---- Git identity (optional) ----
 {{git.identity_setup}}
 
+# Mounted local remotes and workspaces can be owned by a host UID that does
+# not match the container user.
+git config --global --add safe.directory '*'
+
 # ---- Configure git/gh for HTTPS auth ----
 git config --global url."https://github.com/".insteadOf "git@github.com:"
 git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
@@ -55,6 +59,10 @@ git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
 # ---- Clone repository ----
 git clone --depth=1 --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}
 cd {{workspace.path}}
+
+if [ -n "{{worktree.branch}}" ] && [ "{{worktree.branch}}" != "{{repository.branch}}" ]; then
+  git checkout -b "{{worktree.branch}}"
+fi
 
 # Strip embedded token from remote URL to avoid persisting credentials in .git/config
 git remote set-url origin "$(git remote get-url origin | sed 's|https://[^@]*@github.com/|https://github.com/|')" 2>/dev/null || true

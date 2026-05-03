@@ -169,9 +169,10 @@ test.describe("Docker executor profile persistence", () => {
 
       // Save the profile.
       await testPage.getByRole("button", { name: "Save Changes" }).click();
+      await expect(testPage.getByText("Profile saved")).toBeVisible({ timeout: 10_000 });
 
-      // Wait for Save to complete: button text reverts from "Saving...".
-      await expect(testPage.getByRole("button", { name: "Save Changes" })).toBeVisible({
+      // Wait for Save to complete: the stable status button returns to its ready label.
+      await expect(testPage.getByRole("button", { name: /Save Changes|Saved/ })).toBeVisible({
         timeout: 10_000,
       });
 

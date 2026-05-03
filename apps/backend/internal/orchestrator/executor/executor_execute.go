@@ -1125,6 +1125,20 @@ func (e *Executor) applyExistingEnvironment(req *LaunchAgentRequest, env *models
 			req.Metadata["sprite_name"] = env.SandboxID
 		}
 	}
+
+	if env.WorktreeBranch != "" && isDockerExecutorType(req.ExecutorType) {
+		metadata := ensureLaunchMetadata(req)
+		metadata[lifecycle.MetadataKeyWorktreeBranch] = env.WorktreeBranch
+	}
+}
+
+func isDockerExecutorType(executorType string) bool {
+	switch models.ExecutorType(executorType) {
+	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker:
+		return true
+	default:
+		return false
+	}
 }
 
 func (e *Executor) applyExistingEnvironmentRuntimeMetadata(ctx context.Context, req *LaunchAgentRequest, env *models.TaskEnvironment) {

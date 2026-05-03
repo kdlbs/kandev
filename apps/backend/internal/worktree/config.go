@@ -140,6 +140,25 @@ func NormalizeBranchPrefix(prefix string) string {
 	return trimmed
 }
 
+// TaskBranchName returns the standard per-task branch name used by isolated
+// executors. The random suffix keeps similarly titled tasks from colliding.
+func TaskBranchName(taskTitle, taskID, prefix string) string {
+	return TaskBranchNameWithSuffix(taskTitle, taskID, prefix, SmallSuffix(3))
+}
+
+// TaskBranchNameWithSuffix is the deterministic form of TaskBranchName used by
+// worktree naming, where the caller already generated the suffix.
+func TaskBranchNameWithSuffix(taskTitle, taskID, prefix, suffix string) string {
+	sanitized := SanitizeForBranch(taskTitle, 20)
+	if sanitized == "" {
+		sanitized = SanitizeForBranch(taskID, 20)
+	}
+	if sanitized == "" {
+		sanitized = "task"
+	}
+	return NormalizeBranchPrefix(prefix) + sanitized + "-" + suffix
+}
+
 // ValidateBranchPrefix ensures a prefix contains only safe branch characters.
 func ValidateBranchPrefix(prefix string) error {
 	trimmed := strings.TrimSpace(prefix)

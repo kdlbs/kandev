@@ -177,11 +177,38 @@ func TestBuildContainerConfig_PublishesAgentctlPorts(t *testing.T) {
 	assertEnvContains(t, got.Env, "AGENTCTL_INSTANCE_PORT_MAX=41100")
 }
 
+func TestBuildContainerConfig_MountsLocalClonePath(t *testing.T) {
+	cm := newCMTest(t)
+	cfg := ContainerConfig{
+		AgentConfig:    newConfigStubAgent(),
+		InstanceID:     "0123456789abcdef",
+		TaskID:         "task-1",
+		LocalClonePath: "/tmp/e2e-docker-remote.git",
+	}
+
+	got, err := cm.buildContainerConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+
+	assertHasMount(t, got.Mounts, "/tmp/e2e-docker-remote.git", "/tmp/e2e-docker-remote.git", true)
+}
+
 func assertLabel(t *testing.T, labels map[string]string, key, want string) {
 	t.Helper()
 	if labels[key] != want {
 		t.Fatalf("label %s = %q, want %q in %#v", key, labels[key], want, labels)
 	}
+}
+
+func assertHasMount(t *testing.T, mounts []docker.MountConfig, source, target string, readOnly bool) {
+	t.Helper()
+	for _, mount := range mounts {
+		if mount.Source == source && mount.Target == target && mount.ReadOnly == readOnly {
+			return
+		}
+	}
+	t.Fatalf("missing mount source=%q target=%q readOnly=%v in %#v", source, target, readOnly, mounts)
 }
 
 func assertHasPortBinding(t *testing.T, bindings []docker.PortBindingConfig, port int) {

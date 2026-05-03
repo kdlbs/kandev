@@ -43,6 +43,7 @@ type ContainerConfig struct {
 	McpMode           string
 	PrepareScript     string // Script to run inside container before agent starts (e.g., clone repo)
 	ImageTagOverride  string // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
+	LocalClonePath    string // Host path for file:// repository clone URLs; mounted read-only at the same path.
 	BootstrapNonce    string // one-time nonce for agentctl handshake (set internally)
 }
 
@@ -337,6 +338,16 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 		})
 		cm.logger.Debug("added main repo .git directory mount for worktree",
 			zap.String("path", config.MainRepoGitDir))
+	}
+
+	if config.LocalClonePath != "" {
+		mounts = append(mounts, docker.MountConfig{
+			Source:   config.LocalClonePath,
+			Target:   config.LocalClonePath,
+			ReadOnly: true,
+		})
+		cm.logger.Debug("added local clone source mount",
+			zap.String("path", config.LocalClonePath))
 	}
 
 	// Mount the host agentctl linux binary into the container so user-built

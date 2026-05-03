@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { test, expect } from "../../fixtures/docker-test-base";
+import { E2E_IMAGE_TAG } from "../../fixtures/docker-probe";
 import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
@@ -25,6 +26,37 @@ function dockerState(containerID: string): string {
     encoding: "utf8",
   });
   if (res.status !== 0) return "missing";
+  return res.stdout.trim();
+}
+
+function dockerCurrentBranch(containerID: string): string {
+  const res = spawnSync(
+    "docker",
+    ["exec", containerID, "git", "-C", "/workspace", "branch", "--show-current"],
+    {
+      encoding: "utf8",
+    },
+  );
+  if (res.status !== 0) {
+    const diag = spawnSync(
+      "docker",
+      [
+        "exec",
+        containerID,
+        "sh",
+        "-lc",
+        "ls -la /workspace; git -C /workspace status --short --branch",
+      ],
+      { encoding: "utf8" },
+    );
+    const logs = spawnSync("docker", ["logs", "--tail", "40", containerID], { encoding: "utf8" });
+    return [
+      `ERR status=${res.status} state=${dockerState(containerID)}`,
+      `stderr=${res.stderr.trim()}`,
+      `diag=${diag.stdout.trim()} ${diag.stderr.trim()}`,
+      `logs=${logs.stdout.trim()} ${logs.stderr.trim()}`,
+    ].join("\n");
+  }
   return res.stdout.trim();
 }
 
@@ -101,6 +133,65 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
     expect(env!.executor_type).toBe("local_docker");
     expect(env!.container_id, "task environment must record container_id").toBeTruthy();
     expect(dockerInspectExists(env!.container_id!), "container should exist on host").toBe(true);
+    expect(dockerCurrentBranch(env!.container_id!)).toMatch(/^feature\/docker-launch-[a-z0-9]{3}$/);
+  });
+
+  test("shows Docker container wait progress during slow bootstrap", async ({
+    apiClient,
+    seedData,
+    testPage,
+  }) => {
+    test.setTimeout(180_000);
+    const { executors } = await apiClient.listExecutors();
+    const dockerExec = executors.find((e) => e.type === "local_docker");
+    expect(dockerExec?.id).toBeTruthy();
+    const profile = await apiClient.createExecutorProfile(dockerExec!.id, {
+      name: "E2E Docker Slow",
+      config: { image_tag: E2E_IMAGE_TAG },
+      prepare_script: "sleep 20",
+      cleanup_script: "",
+      env_vars: [],
+    });
+    const persistedProfile = await apiClient.getExecutorProfile(dockerExec!.id, profile.id);
+    expect(persistedProfile.prepare_script).toBe("sleep 20");
+
+    try {
+      const task = await apiClient.createTask(seedData.workspaceId, "Docker Slow Progress", {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      });
+
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+
+      const launchPromise = apiClient.launchSession({
+        task_id: task.id,
+        agent_profile_id: seedData.agentProfileId,
+        executor_profile_id: profile.id,
+        workflow_step_id: seedData.startStepId,
+        prompt: "/e2e:simple-message",
+      });
+
+      const panel = testPage.getByTestId("prepare-progress-panel");
+      await expect(panel).toBeVisible({ timeout: 15_000 });
+      await expect(panel).toHaveAttribute("data-status", "preparing");
+      await expect(panel.getByTestId("prepare-progress-header-spinner")).toBeVisible();
+      await expect(panel).toContainText("Waiting for Docker container");
+
+      const launched = await launchPromise;
+      await waitForSessionDone(
+        apiClient,
+        task.id,
+        launched.session_id,
+        "Waiting for slow Docker session",
+      );
+      await expect(panel).toHaveAttribute("data-status", "completed", { timeout: 30_000 });
+    } finally {
+      await apiClient.deleteExecutorProfile(profile.id).catch(() => {});
+    }
   });
 
   test("archives a task and removes its Docker container", async ({ apiClient, seedData }) => {

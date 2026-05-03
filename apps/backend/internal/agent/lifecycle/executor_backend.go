@@ -104,6 +104,7 @@ var persistentMetadataKeys = map[string]bool{
 	"executor_profile_id":          true,
 	MetadataKeyImageTagOverride:    true,
 	MetadataKeyContainerID:         true,
+	MetadataKeyWorktreeBranch:      true,
 }
 
 // persistentMetadataPrefixes lists key prefixes that should persist.

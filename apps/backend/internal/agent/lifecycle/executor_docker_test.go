@@ -548,6 +548,7 @@ func TestResolvePrepareScript(t *testing.T) {
 				"repository_path":      "/tmp/repo",
 				"base_branch":          "main",
 				"repository_clone_url": "https://github.com/org/repo.git",
+				"worktree_branch":      "feature/task-abc",
 			},
 			Env: map[string]string{"GH_TOKEN": "ghp_test"},
 		}
@@ -559,9 +560,15 @@ func TestResolvePrepareScript(t *testing.T) {
 		if !strings.Contains(script, "git clone") {
 			t.Error("expected git clone in script")
 		}
+		if !strings.Contains(script, "git config --global --add safe.directory '*'") {
+			t.Error("expected default Docker prepare script to trust mounted local repositories")
+		}
 		// Should contain token stripping
 		if !strings.Contains(script, "git remote set-url") {
 			t.Error("expected token stripping after clone")
+		}
+		if !strings.Contains(script, "git checkout -b \"feature/task-abc\"") {
+			t.Fatalf("expected Docker prepare script to create task branch, got:\n%s", script)
 		}
 	})
 
@@ -576,4 +583,27 @@ func TestResolvePrepareScript(t *testing.T) {
 			t.Fatal("expected non-empty default script")
 		}
 	})
+}
+
+func TestLocalPathFromCloneURL(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "file URL", raw: "file:///tmp/e2e-docker-remote.git", want: "/tmp/e2e-docker-remote.git"},
+		{name: "escaped file URL", raw: "file:///tmp/repo%20remote.git", want: "/tmp/repo remote.git"},
+		{name: "localhost file URL", raw: "file://localhost/tmp/repo.git", want: "/tmp/repo.git"},
+		{name: "plain absolute path", raw: "/tmp/repo.git", want: "/tmp/repo.git"},
+		{name: "https URL", raw: "https://github.com/org/repo.git", want: ""},
+		{name: "remote file host", raw: "file://server/tmp/repo.git", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := localPathFromCloneURL(tt.raw); got != tt.want {
+				t.Fatalf("localPathFromCloneURL(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
 }

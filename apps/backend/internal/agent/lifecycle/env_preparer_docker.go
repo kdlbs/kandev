@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 // DockerPreparer prepares a Docker-based execution environment.
@@ -36,9 +37,17 @@ func (p *DockerPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, on
 	reportProgress(onProgress, step, 0, 1)
 
 	return &EnvPrepareResult{
-		Success:       true,
-		Steps:         steps,
-		WorkspacePath: req.WorkspacePath,
-		Duration:      time.Since(start),
+		Success:        true,
+		Steps:          steps,
+		WorkspacePath:  req.WorkspacePath,
+		Duration:       time.Since(start),
+		WorktreeBranch: dockerTaskBranch(req),
 	}, nil
+}
+
+func dockerTaskBranch(req *EnvPrepareRequest) string {
+	if req.WorktreeBranch != "" {
+		return req.WorktreeBranch
+	}
+	return worktree.TaskBranchName(req.TaskTitle, req.TaskID, req.WorktreeBranchPrefix)
 }

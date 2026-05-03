@@ -39,7 +39,10 @@ import {
   ProfileHeader,
   ProfileFormActions,
   DeleteProfileDialog,
+  upsertExecutorProfile,
+  type SaveStatus,
 } from "@/components/settings/profile-edit/profile-edit-page-chrome";
+import { useToast } from "@/components/toast-provider";
 import type { Executor, ExecutorProfile, ProfileEnvVar } from "@/lib/types/http";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 
@@ -198,9 +201,10 @@ export default function ProfileEditPage({ params }: { params: Promise<{ profileI
 
 function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
   const router = useRouter();
+  const { toast } = useToast();
   const executors = useAppStore((state) => state.executors.items);
   const setExecutors = useAppStore((state) => state.setExecutors);
-  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -214,24 +218,22 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
       cleanup_script: string;
       env_vars: ProfileEnvVar[];
     }) => {
-      setSaving(true);
+      setSaveStatus("loading");
       setError(null);
       try {
         const updated = await updateExecutorProfile(executor.id, profile.id, data);
-        setExecutors(
-          executors.map((e: Executor) =>
-            e.id === executor.id
-              ? { ...e, profiles: e.profiles?.map((p) => (p.id === updated.id ? updated : p)) }
-              : e,
-          ),
-        );
+        setSaveStatus("success");
+        toast({ title: "Profile saved", variant: "success" });
+        setExecutors(upsertExecutorProfile(executors, executor, updated));
+        window.setTimeout(() => setSaveStatus("idle"), 1500);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to save profile");
-      } finally {
-        setSaving(false);
+        const message = err instanceof Error ? err.message : "Failed to save profile";
+        setError(message);
+        setSaveStatus("error");
+        toast({ title: "Failed to save profile", description: message, variant: "error" });
       }
     },
-    [executor.id, profile.id, executors, setExecutors],
+    [executor, profile.id, executors, setExecutors, toast],
   );
 
   const remove = useCallback(
@@ -256,7 +258,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
     [executor.id, profile.id, executors, setExecutors, router],
   );
 
-  return { saving, error, deleting, deleteDialogOpen, setDeleteDialogOpen, save, remove };
+  return { saveStatus, error, deleting, deleteDialogOpen, setDeleteDialogOpen, save, remove };
 }
 
 function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
@@ -529,12 +531,12 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       )}
       {persistence.error && <p className="text-sm text-destructive">{persistence.error}</p>}
       <ProfileFormActions
-        saving={persistence.saving}
+        saveStatus={persistence.saveStatus}
         saveDisabled={
           !form.name.trim() ||
           Boolean(form.mcpPolicyError) ||
           spritesTokenMissing ||
-          persistence.saving
+          persistence.saveStatus === "loading"
         }
         onSave={handleSave}
         onDelete={() => persistence.setDeleteDialogOpen(true)}

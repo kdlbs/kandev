@@ -594,12 +594,13 @@ func TestEnsureWorkspaceExecutionForSession_ReusesExistingTaskEnvironmentExecuti
 
 type createInstanceExecutor struct {
 	MockExecutor
-	client      *agentctl.Client
-	createCount atomic.Int32
-	stopCount   atomic.Int32
-	authToken   string
-	nonce       string
-	delay       time.Duration
+	client       *agentctl.Client
+	createCount  atomic.Int32
+	stopCount    atomic.Int32
+	authToken    string
+	nonce        string
+	delay        time.Duration
+	progressStep string
 	// Barrier-based deterministic synchronization for race tests.
 	// Set entered (buffered 1) to receive a signal when CreateInstance begins.
 	// Set barrier (unbuffered, closed to release) to block until the test is ready.
@@ -608,6 +609,12 @@ type createInstanceExecutor struct {
 }
 
 func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	var progress *PrepareStep
+	if e.progressStep != "" && req.OnProgress != nil {
+		step := beginStep(e.progressStep)
+		progress = &step
+		reportProgress(req.OnProgress, step, 0, 1)
+	}
 	if e.entered != nil {
 		select {
 		case e.entered <- struct{}{}:
@@ -628,6 +635,10 @@ func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *Execut
 		}
 	}
 	e.createCount.Add(1)
+	if progress != nil {
+		completeStepSuccess(progress)
+		reportProgress(req.OnProgress, *progress, 0, 1)
+	}
 	return &ExecutorInstance{
 		InstanceID:     req.InstanceID,
 		TaskID:         req.TaskID,

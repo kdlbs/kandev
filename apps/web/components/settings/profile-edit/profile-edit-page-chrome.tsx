@@ -17,10 +17,40 @@ import {
   DialogTitle,
 } from "@kandev/ui/dialog";
 import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
-import type { Executor } from "@/lib/types/http";
+import { RequestIndicator } from "@/components/request-indicator";
+import type { Executor, ExecutorProfile } from "@/lib/types/http";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 const DefaultIcon = EXECUTOR_ICON_MAP.local;
+export type SaveStatus = "idle" | "loading" | "success" | "error";
+
+export function getSaveButtonLabel(status: SaveStatus) {
+  if (status === "success") return "Saved";
+  if (status === "loading") return "Saving";
+  return "Save Changes";
+}
+
+export function upsertExecutorProfile(
+  executors: Executor[],
+  executor: Executor,
+  updated: ExecutorProfile,
+) {
+  let foundExecutor = false;
+  const replaceProfile = (profiles: ExecutorProfile[] = []) => {
+    const foundProfile = profiles.some((p) => p.id === updated.id);
+    if (!foundProfile) return [...profiles, updated];
+    return profiles.map((p) => (p.id === updated.id ? updated : p));
+  };
+
+  const next = executors.map((item) => {
+    if (item.id !== executor.id) return item;
+    foundExecutor = true;
+    return { ...item, profiles: replaceProfile(item.profiles ?? executor.profiles ?? []) };
+  });
+
+  if (foundExecutor) return next;
+  return [...next, { ...executor, profiles: replaceProfile(executor.profiles ?? []) }];
+}
 
 function ExecutorTypeIcon({ type }: { type: string }) {
   const Icon = EXECUTOR_ICON_MAP[type] ?? DefaultIcon;
@@ -65,17 +95,18 @@ export function ProfileHeader({
 }
 
 export function ProfileFormActions({
-  saving,
+  saveStatus,
   saveDisabled,
   onSave,
   onDelete,
 }: {
-  saving: boolean;
+  saveStatus: SaveStatus;
   saveDisabled: boolean;
   onSave: () => void;
   onDelete: () => void;
 }) {
   const router = useRouter();
+  const saveLabel = getSaveButtonLabel(saveStatus);
   return (
     <div className="flex items-center justify-between">
       <Button variant="destructive" size="sm" onClick={onDelete} className="cursor-pointer">
@@ -90,8 +121,13 @@ export function ProfileFormActions({
         >
           Cancel
         </Button>
-        <Button onClick={onSave} disabled={saveDisabled} className="cursor-pointer">
-          {saving ? "Saving..." : "Save Changes"}
+        <Button onClick={onSave} disabled={saveDisabled} className="min-w-36 cursor-pointer">
+          {saveLabel}
+          {saveStatus !== "idle" && (
+            <span className="ml-2">
+              <RequestIndicator status={saveStatus} />
+            </span>
+          )}
         </Button>
       </div>
     </div>

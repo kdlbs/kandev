@@ -3,6 +3,8 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -120,17 +122,30 @@ func (r *DockerExecutor) HealthCheck(_ context.Context) error {
 	return nil
 }
 
-func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (instance *ExecutorInstance, err error) {
 	dockerClient, containerMgr, err := r.ensureClient()
 	if err != nil {
 		return nil, fmt.Errorf("docker unavailable: %w", err)
 	}
 
+	if req.OnProgress != nil {
+		step := beginStep("Waiting for Docker container")
+		reportProgress(req.OnProgress, step, 0, 1)
+		defer func() {
+			if err != nil {
+				completeStepError(&step, err.Error())
+			} else {
+				completeStepSuccess(&step)
+			}
+			reportProgress(req.OnProgress, step, 0, 1)
+		}()
+	}
+
 	// On resume, try to reconnect to the existing container
 	if req.PreviousExecutionID != "" {
-		instance, reconnectErr := r.reconnectToContainer(ctx, dockerClient, req)
+		reconnected, reconnectErr := r.reconnectToContainer(ctx, dockerClient, req)
 		if reconnectErr == nil {
-			return instance, nil
+			return reconnected, nil
 		}
 		r.logger.Info("could not reconnect to previous container, creating new one",
 			zap.String("previous_execution_id", req.PreviousExecutionID),
@@ -158,6 +173,7 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		McpServers:        req.McpServers,
 		PrepareScript:     prepareScript,
 		ImageTagOverride:  getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
+		LocalClonePath:    localCloneMountPath(req.Metadata),
 	}
 
 	// Use ContainerManager to launch container (includes nonce handshake)
@@ -511,6 +527,13 @@ func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) string
 		WithProvider(scriptengine.WorkspaceProvider(dockerWorkspacePath)).
 		WithProvider(scriptengine.GitIdentityProvider(req.Metadata)).
 		WithProvider(scriptengine.GitHubAuthProvider(req.Env)).
+		WithProvider(scriptengine.WorktreeProvider(
+			"",
+			dockerWorkspacePath,
+			getMetadataString(req.Metadata, MetadataKeyWorktreeID),
+			getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
+			getMetadataString(req.Metadata, MetadataKeyBaseBranch),
+		)).
 		WithProvider(scriptengine.RepositoryProvider(
 			req.Metadata,
 			req.Env,
@@ -528,6 +551,31 @@ func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) string
 		})
 
 	return resolver.Resolve(script)
+}
+
+func localCloneMountPath(metadata map[string]interface{}) string {
+	return localPathFromCloneURL(getMetadataString(metadata, "repository_clone_url"))
+}
+
+func localPathFromCloneURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	if filepath.IsAbs(raw) {
+		return raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "file" {
+		return ""
+	}
+	if parsed.Host != "" && parsed.Host != "localhost" {
+		return ""
+	}
+	path, err := url.PathUnescape(parsed.Path)
+	if err != nil || !filepath.IsAbs(path) {
+		return ""
+	}
+	return path
 }
 
 // injectTokenIntoURL adds a GitHub token to clone URLs for authentication.

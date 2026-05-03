@@ -227,10 +227,11 @@ exec git "$@"
         { mode: 0o755 },
       );
 
-      // Opt-in: Docker E2E project sets KANDEV_E2E_DOCKER=1 to enable real
+      // Opt-in: Docker E2E project or KANDEV_E2E_DOCKER=1 enables real
       // container execution. Default is off so the regular suite stays fast
       // and runs without a Docker daemon.
-      const dockerEnabled = process.env.KANDEV_E2E_DOCKER === "1";
+      const dockerEnabled =
+        workerInfo.project.name === "docker" || process.env.KANDEV_E2E_DOCKER === "1";
       const mockAgentLinuxBinary = path.join(BACKEND_DIR, "bin", "mock-agent-linux-amd64");
       const agentctlLinuxBinary = path.join(BACKEND_DIR, "bin", "agentctl-linux-amd64");
 

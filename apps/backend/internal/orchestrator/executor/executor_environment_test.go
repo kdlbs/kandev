@@ -110,6 +110,23 @@ func TestApplyExistingEnvironment_ContainerReuse(t *testing.T) {
 	}
 }
 
+func TestApplyExistingEnvironment_DockerBranchReuse(t *testing.T) {
+	e := newEnvTestExecutor(t)
+	req := &LaunchAgentRequest{TaskID: "task-1", ExecutorType: "local_docker"}
+	env := &models.TaskEnvironment{
+		ExecutorType:     "local_docker",
+		ContainerID:      "container-abc",
+		AgentExecutionID: "exec-123",
+		WorktreeBranch:   "feature/existing-task-abc",
+	}
+
+	e.applyExistingEnvironment(req, env)
+
+	if req.Metadata[lifecycle.MetadataKeyWorktreeBranch] != "feature/existing-task-abc" {
+		t.Fatalf("metadata worktree_branch = %v, want existing branch", req.Metadata[lifecycle.MetadataKeyWorktreeBranch])
+	}
+}
+
 func TestApplyExistingEnvironmentRuntimeMetadata_CarriesPersistentSecrets(t *testing.T) {
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	if err != nil {
