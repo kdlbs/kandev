@@ -105,7 +105,60 @@ describe("kanban.update handler — primarySessionId preservation", () => {
     expect(task).toBeDefined();
     expect(task?.primarySessionId).toBeUndefined();
   });
+});
 
+describe("kanban.update handler — explicit-null primary preservation", () => {
+  it("does not restore stale snapshot value when primarySessionId is explicitly cleared", () => {
+    // Repro for the multi-snapshot null-preservation bug: when task.updated
+    // clears primarySessionId to null in kanban.tasks, the multi-snapshot must
+    // accept the null rather than fall back to a stale value.
+    const store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [
+          {
+            id: "t1",
+            workflowStepId: "s1",
+            title: "T1",
+            position: 0,
+            primarySessionId: null,
+          },
+        ],
+      },
+      kanbanMulti: {
+        isLoading: false,
+        snapshots: {
+          wf1: {
+            workflowId: "wf1",
+            workflowName: "WF1",
+            steps: [],
+            tasks: [
+              {
+                id: "t1",
+                workflowStepId: "s1",
+                title: "T1",
+                position: 0,
+                primarySessionId: "stale-session",
+              },
+            ],
+          },
+        },
+      },
+    } as Partial<AppState>);
+
+    const handler = registerKanbanHandlers(store)["kanban.update"]!;
+    handler(
+      makeUpdateMessage("wf1", [{ id: "t1", workflowStepId: "s1", title: "T1", position: 0 }]),
+    );
+
+    const snapshot = store.getState().kanbanMulti.snapshots["wf1"];
+    const task = snapshot?.tasks.find((t) => t.id === "t1");
+    expect(task?.primarySessionId).toBeNull();
+  });
+});
+
+describe("kanban.update handler — multi-snapshot primary lookup", () => {
   it("preserves primarySessionId in kanbanMulti snapshot", () => {
     const store = makeStore({
       kanban: { workflowId: "wf1", steps: [], tasks: [] },

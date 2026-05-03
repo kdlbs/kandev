@@ -102,16 +102,23 @@ function useSessionTabActions(
   const appStoreApi = useAppStoreApi();
 
   const wsAction = useCallback(
-    async (action: string, label: string, payload: Record<string, unknown>, timeout = 15000) => {
+    async (
+      action: string,
+      label: string,
+      payload: Record<string, unknown>,
+      timeout = 15000,
+    ): Promise<boolean> => {
       const client = getWebSocketClient();
-      if (!client) return;
+      if (!client) return false;
       const toastId = toast({ title: `${label}...`, variant: "loading" });
       try {
         await client.request(action, payload, timeout);
         updateToast(toastId, { title: `${label} successful`, variant: "success" });
+        return true;
       } catch (error) {
         const msg = error instanceof Error ? error.message : "Unknown error";
         updateToast(toastId, { title: `${label} failed`, description: msg, variant: "error" });
+        return false;
       }
     },
     [toast, updateToast],
@@ -139,7 +146,10 @@ function useSessionTabActions(
   );
   const handleDelete = useCallback(async () => {
     if (!sessionId || !taskId) return;
-    await wsAction("session.delete", "Deleting session", { session_id: sessionId });
+    // Only mutate local state once the backend confirms the delete — otherwise
+    // a transient WS failure leaves the UI desynced from the server.
+    const ok = await wsAction("session.delete", "Deleting session", { session_id: sessionId });
+    if (!ok) return;
 
     // Switch the active session BEFORE removing from the store so
     // useAutoSessionTab doesn't re-create this panel with the deleted session's ID.

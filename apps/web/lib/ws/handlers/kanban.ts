@@ -54,15 +54,22 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
         const snapshot = state.kanbanMulti.snapshots[workflowId];
         if (snapshot) {
           const existingMultiById = new Map(snapshot.tasks.map((t) => [t.id, t]));
-          const multiTasks = tasks.map((t) => ({
-            ...t,
-            // t.primarySessionId comes from the main kanban lookup; fall back
-            // to the multi-snapshot's own value when the task is only tracked
-            // in the secondary workflow (not in kanban.tasks).
-            primarySessionId: t.primarySessionId ?? existingMultiById.get(t.id)?.primarySessionId,
-            primarySessionState:
-              t.primarySessionState ?? existingMultiById.get(t.id)?.primarySessionState,
-          }));
+          const multiTasks = tasks.map((t) => {
+            const fallback = existingMultiById.get(t.id);
+            // Fall back to the multi-snapshot's own value only when the main
+            // kanban lookup returned `undefined` (task absent from kanban.tasks).
+            // An explicit `null` means the primary was intentionally cleared
+            // and must NOT be replaced by a stale snapshot value.
+            return {
+              ...t,
+              primarySessionId:
+                t.primarySessionId === undefined ? fallback?.primarySessionId : t.primarySessionId,
+              primarySessionState:
+                t.primarySessionState === undefined
+                  ? fallback?.primarySessionState
+                  : t.primarySessionState,
+            };
+          });
           return {
             ...next,
             kanbanMulti: {
