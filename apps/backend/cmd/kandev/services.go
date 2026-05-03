@@ -86,7 +86,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 
 	githubSvc := initGitHubService(dbPool, eventBus, repos.Secrets, log)
 	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
-	linearSvc := initLinearService(dbPool, repos.Secrets, log)
+	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
 
 	return &Services{
 		Task:     taskSvc,
@@ -238,10 +238,8 @@ func initJiraService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secret
 }
 
 // initLinearService wires up the Linear integration. Failures are non-fatal.
-// Linear doesn't publish events today so it doesn't take an eventBus —
-// adding one would be speculative until a feature actually needs it.
-func initLinearService(dbPool *db.Pool, secretsStore secrets.SecretStore, log *logger.Logger) *linear.Service {
-	svc, _, err := linear.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), log)
+func initLinearService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *linear.Service {
+	svc, _, err := linear.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
 	if err != nil {
 		log.Warn("Linear service initialization failed (non-fatal)", zap.Error(err))
 	}

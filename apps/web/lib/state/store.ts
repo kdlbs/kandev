@@ -29,6 +29,7 @@ import {
   createUISlice,
   createGitHubSlice,
   createJiraSlice,
+  createLinearSlice,
   defaultKanbanState,
   defaultWorkspaceState,
   defaultSettingsState,
@@ -37,6 +38,7 @@ import {
   defaultUIState,
   defaultGitHubState,
   defaultJiraState,
+  defaultLinearState,
   type WorkspaceState,
   type WorkflowsState,
   type ExecutorsState,
@@ -139,8 +141,13 @@ export type {
   JiraSliceState,
   JiraSliceActions,
   JiraIssueWatchesState,
+  LinearSlice,
+  LinearSliceState,
+  LinearSliceActions,
+  LinearIssueWatchesState,
 } from "./slices";
 import type { JiraIssueWatch } from "@/lib/types/jira";
+import type { LinearIssueWatch } from "@/lib/types/linear";
 
 // Combined AppState type
 export type AppState = {
@@ -213,6 +220,9 @@ export type AppState = {
   // JIRA slice
   jiraIssueWatches: (typeof defaultJiraState)["jiraIssueWatches"];
 
+  // Linear slice
+  linearIssueWatches: (typeof defaultLinearState)["linearIssueWatches"];
+
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
   rightPanel: (typeof defaultUIState)["rightPanel"];
@@ -259,6 +269,14 @@ export type AppState = {
   updateJiraIssueWatch: (watch: JiraIssueWatch) => void;
   removeJiraIssueWatch: (id: string) => void;
   resetJiraIssueWatches: () => void;
+
+  // Linear actions
+  setLinearIssueWatches: (watches: LinearIssueWatch[]) => void;
+  setLinearIssueWatchesLoading: (loading: boolean) => void;
+  addLinearIssueWatch: (watch: LinearIssueWatch) => void;
+  updateLinearIssueWatch: (watch: LinearIssueWatch) => void;
+  removeLinearIssueWatch: (id: string) => void;
+  resetLinearIssueWatches: () => void;
 
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
@@ -505,6 +523,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createJiraSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createLinearSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createUISlice(set as any, get as any, api as any),
       // Override state with merged initial state
       kanban: merged.kanban,
@@ -557,6 +577,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       issueWatches: merged.issueWatches,
       actionPresets: merged.actionPresets,
       jiraIssueWatches: merged.jiraIssueWatches,
+      linearIssueWatches: merged.linearIssueWatches,
       previewPanel: merged.previewPanel,
       rightPanel: merged.rightPanel,
       diffs: merged.diffs,

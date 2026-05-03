@@ -1,13 +1,16 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
 import type {
+  CreateLinearIssueWatchInput,
   LinearConfig,
   LinearIssue,
+  LinearIssueWatch,
   LinearSearchFilter,
   LinearSearchResult,
   LinearTeam,
   LinearWorkflowState,
   SetLinearConfigRequest,
   TestLinearConnectionResult,
+  UpdateLinearIssueWatchInput,
 } from "@/lib/types/linear";
 
 // getLinearConfig returns null when the backend responds 204 (no config yet).
@@ -88,5 +91,67 @@ export async function setLinearIssueState(
         body: JSON.stringify({ stateId: stateID }),
       },
     },
+  );
+}
+
+// --- Issue watches ---
+
+// listLinearIssueWatches fetches watches across all workspaces when
+// workspaceId is omitted, or scoped to one workspace when provided.
+export async function listLinearIssueWatches(workspaceId?: string, options?: ApiRequestOptions) {
+  const path = workspaceId
+    ? `/api/v1/linear/watches/issue?workspace_id=${encodeURIComponent(workspaceId)}`
+    : `/api/v1/linear/watches/issue`;
+  const res = await fetchJson<{ watches: LinearIssueWatch[] }>(path, options);
+  return res.watches ?? [];
+}
+
+export async function createLinearIssueWatch(
+  payload: CreateLinearIssueWatchInput,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<LinearIssueWatch>(`/api/v1/linear/watches/issue`, {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
+  });
+}
+
+// All mutation/trigger endpoints require `workspace_id` so the backend can
+// reject cross-workspace IDOR.
+
+export async function updateLinearIssueWatch(
+  workspaceId: string,
+  id: string,
+  payload: UpdateLinearIssueWatchInput,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<LinearIssueWatch>(
+    `/api/v1/linear/watches/issue/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+    {
+      ...options,
+      init: { ...(options?.init ?? {}), method: "PATCH", body: JSON.stringify(payload) },
+    },
+  );
+}
+
+export async function deleteLinearIssueWatch(
+  workspaceId: string,
+  id: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ deleted: boolean }>(
+    `/api/v1/linear/watches/issue/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+    { ...options, init: { ...(options?.init ?? {}), method: "DELETE" } },
+  );
+}
+
+export async function triggerLinearIssueWatch(
+  workspaceId: string,
+  id: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ newIssues: number }>(
+    `/api/v1/linear/watches/issue/${encodeURIComponent(id)}/trigger?workspace_id=${encodeURIComponent(workspaceId)}`,
+    { ...options, init: { ...(options?.init ?? {}), method: "POST" } },
   );
 }

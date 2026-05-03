@@ -89,3 +89,49 @@ export interface LinearSearchResult {
   isLast: boolean;
   nextPageToken?: string;
 }
+
+/**
+ * A workspace-scoped Linear poller. The backend re-evaluates the structured
+ * filter on `pollIntervalSeconds` cadence and creates a Kandev task in the
+ * configured workflow step for each newly-matching issue.
+ */
+export interface LinearIssueWatch {
+  id: string;
+  workspaceId: string;
+  workflowId: string;
+  workflowStepId: string;
+  filter: LinearSearchFilter;
+  agentProfileId: string;
+  executorProfileId: string;
+  prompt: string;
+  enabled: boolean;
+  pollIntervalSeconds: number;
+  /** Last poll timestamp, or null when the watch has never run. */
+  lastPolledAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateLinearIssueWatchInput {
+  workspaceId: string;
+  workflowId: string;
+  workflowStepId: string;
+  filter: LinearSearchFilter;
+  agentProfileId?: string;
+  executorProfileId?: string;
+  prompt?: string;
+  pollIntervalSeconds?: number;
+  enabled?: boolean;
+}
+
+/** Patch shape: every field is optional so the UI can change one knob at a time. */
+export interface UpdateLinearIssueWatchInput {
+  workflowId?: string;
+  workflowStepId?: string;
+  filter?: LinearSearchFilter;
+  agentProfileId?: string;
+  executorProfileId?: string;
+  prompt?: string;
+  enabled?: boolean;
+  pollIntervalSeconds?: number;
+}
