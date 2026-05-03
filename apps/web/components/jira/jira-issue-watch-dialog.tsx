@@ -85,7 +85,7 @@ function formStateFromWatch(w: JiraIssueWatch): FormState {
     workflowStepId: w.workflowStepId,
     agentProfileId: w.agentProfileId,
     executorProfileId: w.executorProfileId,
-    prompt: w.prompt || DEFAULT_JIRA_ISSUE_WATCH_PROMPT,
+    prompt: w.prompt.trim() ? w.prompt : DEFAULT_JIRA_ISSUE_WATCH_PROMPT,
     enabled: w.enabled,
     pollInterval: w.pollIntervalSeconds,
   };
