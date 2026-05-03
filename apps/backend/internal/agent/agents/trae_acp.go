@@ -14,6 +14,8 @@ var traeACPLogoLight []byte
 //go:embed logos/trae_acp_dark.svg
 var traeACPLogoDark []byte
 
+const traeACPBin = "traecli"
+
 var (
 	_ Agent            = (*TraeACP)(nil)
 	_ PassthroughAgent = (*TraeACP)(nil)
@@ -33,7 +35,7 @@ func NewTraeACP() *TraeACP {
 				Supported:      true,
 				Label:          "CLI Passthrough",
 				Description:    "Show terminal directly instead of chat interface",
-				PassthroughCmd: NewCommand("traecli"),
+				PassthroughCmd: NewCommand(traeACPBin),
 				ModelFlag:      NewParam("--model", "{model}"),
 				IdleTimeout:    3 * time.Second,
 				BufferMaxBytes: DefaultBufferMaxBytes,
@@ -59,22 +61,25 @@ func (a *TraeACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *TraeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	result, err := Detect(ctx, WithCommand("traecli"))
+	result, err := Detect(ctx, WithCommand(traeACPBin))
 	if err != nil {
 		return result, err
 	}
 	result.SupportsMCP = true
+	result.Capabilities = DiscoveryCapabilities{
+		SupportsSessionResume: true,
+	}
 	return result, nil
 }
 
 func (a *TraeACP) BuildCommand(opts CommandOptions) Command {
-	return Cmd("traecli", "acp", "serve").Build()
+	return Cmd(traeACPBin, "acp", "serve").Build()
 }
 
 func (a *TraeACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd("traecli", "acp", "serve").Build(),
+		Cmd:            Cmd(traeACPBin, "acp", "serve").Build(),
 		WorkingDir:     "{workspace}",
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
@@ -99,6 +104,6 @@ func (a *TraeACP) PermissionSettings() map[string]PermissionSetting {
 func (a *TraeACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("traecli", "acp", "serve"),
+		Command:   NewCommand(traeACPBin, "acp", "serve"),
 	}
 }

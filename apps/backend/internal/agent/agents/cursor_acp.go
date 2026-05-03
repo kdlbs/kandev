@@ -14,6 +14,8 @@ var cursorACPLogoLight []byte
 //go:embed logos/cursor_acp_dark.svg
 var cursorACPLogoDark []byte
 
+const cursorACPBin = "cursor-agent"
+
 var (
 	_ Agent            = (*CursorACP)(nil)
 	_ PassthroughAgent = (*CursorACP)(nil)
@@ -35,7 +37,7 @@ func NewCursorACP() *CursorACP {
 				Supported:      true,
 				Label:          "CLI Passthrough",
 				Description:    "Show terminal directly instead of chat interface",
-				PassthroughCmd: NewCommand("cursor-agent"),
+				PassthroughCmd: NewCommand(cursorACPBin),
 				ModelFlag:      NewParam("--model", "{model}"),
 				IdleTimeout:    3 * time.Second,
 				BufferMaxBytes: DefaultBufferMaxBytes,
@@ -61,7 +63,7 @@ func (a *CursorACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *CursorACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	result, err := Detect(ctx, WithCommand("cursor-agent"))
+	result, err := Detect(ctx, WithCommand(cursorACPBin))
 	if err != nil {
 		return result, err
 	}
@@ -73,13 +75,13 @@ func (a *CursorACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *CursorACP) BuildCommand(opts CommandOptions) Command {
-	return Cmd("cursor-agent", "acp").Build()
+	return Cmd(cursorACPBin, "acp").Build()
 }
 
 func (a *CursorACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd("cursor-agent", "acp").Build(),
+		Cmd:            Cmd(cursorACPBin, "acp").Build(),
 		WorkingDir:     "{workspace}",
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
@@ -105,6 +107,6 @@ func (a *CursorACP) PermissionSettings() map[string]PermissionSetting {
 func (a *CursorACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("cursor-agent", "acp"),
+		Command:   NewCommand(cursorACPBin, "acp"),
 	}
 }

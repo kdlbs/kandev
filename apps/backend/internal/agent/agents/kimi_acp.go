@@ -14,6 +14,8 @@ var kimiACPLogoLight []byte
 //go:embed logos/kimi_acp_dark.svg
 var kimiACPLogoDark []byte
 
+const kimiACPBin = "kimi"
+
 var (
 	_ Agent            = (*KimiACP)(nil)
 	_ PassthroughAgent = (*KimiACP)(nil)
@@ -34,7 +36,7 @@ func NewKimiACP() *KimiACP {
 				Supported:      true,
 				Label:          "CLI Passthrough",
 				Description:    "Show terminal directly instead of chat interface",
-				PassthroughCmd: NewCommand("kimi"),
+				PassthroughCmd: NewCommand(kimiACPBin),
 				ModelFlag:      NewParam("--model", "{model}"),
 				IdleTimeout:    3 * time.Second,
 				BufferMaxBytes: DefaultBufferMaxBytes,
@@ -60,22 +62,25 @@ func (a *KimiACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *KimiACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	result, err := Detect(ctx, WithCommand("kimi"))
+	result, err := Detect(ctx, WithCommand(kimiACPBin))
 	if err != nil {
 		return result, err
 	}
 	result.SupportsMCP = true
+	result.Capabilities = DiscoveryCapabilities{
+		SupportsSessionResume: true,
+	}
 	return result, nil
 }
 
 func (a *KimiACP) BuildCommand(opts CommandOptions) Command {
-	return Cmd("kimi", "acp").Build()
+	return Cmd(kimiACPBin, "acp").Build()
 }
 
 func (a *KimiACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd("kimi", "acp").Build(),
+		Cmd:            Cmd(kimiACPBin, "acp").Build(),
 		WorkingDir:     "{workspace}",
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
@@ -101,6 +106,6 @@ func (a *KimiACP) PermissionSettings() map[string]PermissionSetting {
 func (a *KimiACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("kimi", "acp"),
+		Command:   NewCommand(kimiACPBin, "acp"),
 	}
 }

@@ -1426,6 +1426,11 @@ func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
 // AuthenticationRequired (-32000) failure, emits an EventTypeAuthRequired
 // carrying the cached auth methods so the frontend can drive the
 // authenticate → session/new retry. Returns true when the event was emitted.
+//
+// The emitted event has no SessionID by design: the failure occurred while
+// session/new was attempting to create a session, so no session ID exists
+// yet. Consumers that correlate events by session must treat
+// EventTypeAuthRequired as a connection-scoped (not session-scoped) signal.
 func (a *Adapter) maybeEmitAuthRequired(err error) bool {
 	var reqErr *acp.RequestError
 	if !errors.As(err, &reqErr) || reqErr.Code != -32000 {
@@ -1454,6 +1459,9 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 
 	if conn == nil {
 		return fmt.Errorf("adapter not initialized")
+	}
+	if sessionID == "" {
+		return fmt.Errorf("no active session: call NewSession before SetConfigOption")
 	}
 
 	_, err := conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{

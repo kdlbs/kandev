@@ -15,6 +15,8 @@ var kiroACPLogoLight []byte
 //go:embed logos/kiro_acp_dark.svg
 var kiroACPLogoDark []byte
 
+const kiroACPBin = "kiro-cli-chat"
+
 var (
 	_ Agent            = (*KiroACP)(nil)
 	_ PassthroughAgent = (*KiroACP)(nil)
@@ -35,7 +37,7 @@ func NewKiroACP() *KiroACP {
 				Supported:      true,
 				Label:          "CLI Passthrough",
 				Description:    "Show terminal directly instead of chat interface",
-				PassthroughCmd: NewCommand("kiro-cli-chat"),
+				PassthroughCmd: NewCommand(kiroACPBin),
 				ModelFlag:      NewParam("--model", "{model}"),
 				IdleTimeout:    3 * time.Second,
 				BufferMaxBytes: DefaultBufferMaxBytes,
@@ -61,22 +63,25 @@ func (a *KiroACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *KiroACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	result, err := Detect(ctx, WithCommand("kiro-cli-chat"))
+	result, err := Detect(ctx, WithCommand(kiroACPBin))
 	if err != nil {
 		return result, err
 	}
 	result.SupportsMCP = true
+	result.Capabilities = DiscoveryCapabilities{
+		SupportsSessionResume: true,
+	}
 	return result, nil
 }
 
 func (a *KiroACP) BuildCommand(opts CommandOptions) Command {
-	return Cmd("kiro-cli-chat", "acp").Build()
+	return Cmd(kiroACPBin, "acp").Build()
 }
 
 func (a *KiroACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd("kiro-cli-chat", "acp").Build(),
+		Cmd:            Cmd(kiroACPBin, "acp").Build(),
 		WorkingDir:     "{workspace}",
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
@@ -101,6 +106,6 @@ func (a *KiroACP) PermissionSettings() map[string]PermissionSetting {
 func (a *KiroACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("kiro-cli-chat", "acp"),
+		Command:   NewCommand(kiroACPBin, "acp"),
 	}
 }

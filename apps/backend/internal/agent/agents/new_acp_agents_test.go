@@ -136,12 +136,12 @@ func TestNewACPAgents_Contract(t *testing.T) {
 
 // TestNewACPAgents_NpxLaunchedAgentsHaveNpxFallback verifies that agents
 // launched via `npx -y <pkg>` report Available=true through the npx fallback
-// when node/npx is on PATH but the global binary isn't. Without this contract,
+// when npx is on PATH but the global binary isn't. Without this contract,
 // users with Node but no `npm install -g …` see these agents in "Available to
 // Install" even though `npx -y` would launch them just fine.
 func TestNewACPAgents_NpxLaunchedAgentsHaveNpxFallback(t *testing.T) {
-	if !nodeOrNpxOnPath() {
-		t.Skip("node/npx not on PATH; skipping npx-fallback contract")
+	if !npxOnPath() {
+		t.Skip("npx not on PATH; skipping npx-fallback contract")
 	}
 
 	npxAgents := []Agent{
@@ -158,10 +158,10 @@ func TestNewACPAgents_NpxLaunchedAgentsHaveNpxFallback(t *testing.T) {
 			if err != nil {
 				t.Fatalf("IsInstalled error: %v", err)
 			}
-			// node/npx is on PATH, so even if the agent's global binary isn't
+			// npx is on PATH, so even if the agent's global binary isn't
 			// installed, the fallback should make it Available.
 			if !result.Available {
-				t.Errorf("Available=false despite node/npx on PATH; agent should fall back to npx")
+				t.Errorf("Available=false despite npx on PATH; agent should fall back to npx")
 			}
 		})
 	}

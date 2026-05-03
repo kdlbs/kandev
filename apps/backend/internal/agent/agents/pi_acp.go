@@ -66,6 +66,9 @@ func (a *PiACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 		return result, err
 	}
 	result.SupportsMCP = true
+	result.Capabilities = DiscoveryCapabilities{
+		SupportsSessionResume: true,
+	}
 	return result, nil
 }
 

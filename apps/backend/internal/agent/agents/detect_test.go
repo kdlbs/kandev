@@ -7,14 +7,13 @@ import (
 	"testing"
 )
 
-// TestWithNpxRunnable_MatchesWhenNodeOnPath confirms the npx-fallback returns
-// available with the "npx <pkg>" tag whenever node/npx is on PATH. The
-// settings page renders this as "Detected at npx <pkg>", giving users a
-// truthful hint that the package isn't globally installed but launches via
-// npx -y.
-func TestWithNpxRunnable_MatchesWhenNodeOnPath(t *testing.T) {
-	if !nodeOrNpxOnPath() {
-		t.Skip("node/npx not on PATH; skipping fallback test")
+// TestWithNpxRunnable_MatchesWhenNpxOnPath confirms the npx-fallback returns
+// available with the "npx <pkg>" tag whenever npx is on PATH. The settings
+// page renders this as "Detected at npx <pkg>", giving users a truthful hint
+// that the package isn't globally installed but launches via npx -y.
+func TestWithNpxRunnable_MatchesWhenNpxOnPath(t *testing.T) {
+	if !npxOnPath() {
+		t.Skip("npx not on PATH; skipping fallback test")
 	}
 
 	found, matched, err := WithNpxRunnable("@example/pkg")(context.Background())
@@ -34,8 +33,8 @@ func TestWithNpxRunnable_MatchesWhenNodeOnPath(t *testing.T) {
 // install reports its real path. This is what makes the UI's "Detected at
 // /usr/local/bin/<bin>" hint accurate for users who actually installed.
 func TestDetect_PrefersGlobalBinaryOverNpxFallback(t *testing.T) {
-	if !nodeOrNpxOnPath() {
-		t.Skip("node/npx not on PATH; skipping ordering test")
+	if !npxOnPath() {
+		t.Skip("npx not on PATH; skipping ordering test")
 	}
 	// `ls` is guaranteed on PATH in any POSIX-ish CI/dev env.
 	if _, err := exec.LookPath("ls"); err != nil {
@@ -62,8 +61,8 @@ func TestDetect_PrefersGlobalBinaryOverNpxFallback(t *testing.T) {
 // return Available=true with the npx tag so the agent shows as "Installed"
 // on the settings page.
 func TestDetect_FallsBackToNpxWhenGlobalMissing(t *testing.T) {
-	if !nodeOrNpxOnPath() {
-		t.Skip("node/npx not on PATH; skipping fallback ordering test")
+	if !npxOnPath() {
+		t.Skip("npx not on PATH; skipping fallback ordering test")
 	}
 
 	result, err := Detect(context.Background(),
@@ -81,11 +80,7 @@ func TestDetect_FallsBackToNpxWhenGlobalMissing(t *testing.T) {
 	}
 }
 
-func nodeOrNpxOnPath() bool {
-	for _, cmd := range []string{"npx", "node"} {
-		if _, err := exec.LookPath(cmd); err == nil {
-			return true
-		}
-	}
-	return false
+func npxOnPath() bool {
+	_, err := exec.LookPath("npx")
+	return err == nil
 }

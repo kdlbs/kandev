@@ -15,6 +15,8 @@ var qoderACPLogoLight []byte
 //go:embed logos/qoder_acp_dark.svg
 var qoderACPLogoDark []byte
 
+const qoderACPBin = "qodercli"
+
 var (
 	_ Agent            = (*QoderACP)(nil)
 	_ PassthroughAgent = (*QoderACP)(nil)
@@ -34,7 +36,7 @@ func NewQoderACP() *QoderACP {
 				Supported:      true,
 				Label:          "CLI Passthrough",
 				Description:    "Show terminal directly instead of chat interface",
-				PassthroughCmd: NewCommand("qodercli"),
+				PassthroughCmd: NewCommand(qoderACPBin),
 				ModelFlag:      NewParam("--model", "{model}"),
 				IdleTimeout:    3 * time.Second,
 				BufferMaxBytes: DefaultBufferMaxBytes,
@@ -60,22 +62,25 @@ func (a *QoderACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *QoderACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	result, err := Detect(ctx, WithCommand("qodercli"))
+	result, err := Detect(ctx, WithCommand(qoderACPBin))
 	if err != nil {
 		return result, err
 	}
 	result.SupportsMCP = true
+	result.Capabilities = DiscoveryCapabilities{
+		SupportsSessionResume: true,
+	}
 	return result, nil
 }
 
 func (a *QoderACP) BuildCommand(opts CommandOptions) Command {
-	return Cmd("qodercli", "--acp").Build()
+	return Cmd(qoderACPBin, "--acp").Build()
 }
 
 func (a *QoderACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd("qodercli", "--acp").Build(),
+		Cmd:            Cmd(qoderACPBin, "--acp").Build(),
 		WorkingDir:     "{workspace}",
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
@@ -100,6 +105,6 @@ func (a *QoderACP) PermissionSettings() map[string]PermissionSetting {
 func (a *QoderACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("qodercli", "--acp"),
+		Command:   NewCommand(qoderACPBin, "--acp"),
 	}
 }

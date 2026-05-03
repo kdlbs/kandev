@@ -36,7 +36,7 @@ func NewOpenCodeACP() *OpenCodeACP {
 				Supported:      true,
 				Label:          "CLI Passthrough",
 				Description:    "Show terminal directly instead of chat interface",
-				PassthroughCmd: NewCommand("opencode"),
+				PassthroughCmd: NewCommand("npx", "-y", opencodeACPPkg),
 				ModelFlag:      NewParam("--model", "{model}"),
 				PromptFlag:     NewParam("--prompt", "{prompt}"),
 				IdleTimeout:    3 * time.Second,
