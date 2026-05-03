@@ -19,6 +19,13 @@ import { STORAGE_KEYS } from "@/lib/settings/constants";
 function clearFreshBranch(fs: DialogFormState) {
   fs.setFreshBranchEnabled(false);
   fs.setCurrentLocalBranch("");
+  // Set loading=true synchronously alongside the clear so the chip's
+  // autoselect effect (which runs bottom-up before useCurrentLocalBranchEffect
+  // can re-fire and set loading itself) sees the gate and skips. Otherwise
+  // the autoselect lands a last-used / preferred-default branch in row.branch
+  // before currentLocalBranch resolves, then the prefix logic computes
+  // "will switch to: master" instead of "current: master".
+  fs.setCurrentLocalBranchLoading(true);
 }
 
 function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) {

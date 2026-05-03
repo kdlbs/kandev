@@ -32,12 +32,13 @@ func (m *Manager) publishStreamingMessage(execution *AgentExecution, content str
 
 	// Create payload manually to include streaming-specific fields
 	payload := &AgentStreamEventPayload{
-		Type:      "agent/event",
-		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:   execution.ID,
-		TaskID:    execution.TaskID,
-		SessionID: execution.SessionID,
-		Data:      &event,
+		Type:        "agent/event",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:     execution.ID,
+		ExecutionID: execution.ID,
+		TaskID:      execution.TaskID,
+		SessionID:   execution.SessionID,
+		Data:        &event,
 	}
 
 	m.logger.Debug("publishing streaming message",
@@ -119,12 +120,13 @@ func (m *Manager) publishStreamingMessageFinal(execution *AgentExecution, messag
 	}
 
 	payload := &AgentStreamEventPayload{
-		Type:      "agent/event",
-		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:   execution.ID,
-		TaskID:    execution.TaskID,
-		SessionID: execution.SessionID,
-		Data:      &event,
+		Type:        "agent/event",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:     execution.ID,
+		ExecutionID: execution.ID,
+		TaskID:      execution.TaskID,
+		SessionID:   execution.SessionID,
+		Data:        &event,
 	}
 
 	m.logger.Debug("publishing final streaming message chunk",
@@ -160,12 +162,13 @@ func (m *Manager) publishStreamingThinking(execution *AgentExecution, content st
 
 	// Create payload manually to include streaming-specific fields
 	payload := &AgentStreamEventPayload{
-		Type:      "agent/event",
-		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:   execution.ID,
-		TaskID:    execution.TaskID,
-		SessionID: execution.SessionID,
-		Data:      &event,
+		Type:        "agent/event",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:     execution.ID,
+		ExecutionID: execution.ID,
+		TaskID:      execution.TaskID,
+		SessionID:   execution.SessionID,
+		Data:        &event,
 	}
 
 	// Publish the streaming event - orchestrator will handle create/append logic
@@ -184,12 +187,13 @@ func (m *Manager) publishStreamingThinkingFinal(execution *AgentExecution, think
 	}
 
 	payload := &AgentStreamEventPayload{
-		Type:      "agent/event",
-		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:   execution.ID,
-		TaskID:    execution.TaskID,
-		SessionID: execution.SessionID,
-		Data:      &event,
+		Type:        "agent/event",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:     execution.ID,
+		ExecutionID: execution.ID,
+		TaskID:      execution.TaskID,
+		SessionID:   execution.SessionID,
+		Data:        &event,
 	}
 
 	m.logger.Debug("publishing final streaming thinking chunk",

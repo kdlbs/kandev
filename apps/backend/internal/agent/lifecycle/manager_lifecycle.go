@@ -92,6 +92,12 @@ func (m *Manager) Start(ctx context.Context) error {
 				continue
 			}
 
+			// Reconcile the persistence row to match the recovered in-memory ID.
+			// If executors_running.agent_execution_id had drifted (e.g. from a
+			// prior bug or manual edit), the recovered runtime instance is the
+			// truth — overwrite the row to match. No-op if already in sync.
+			m.persistExecutorRunning(ctx, execution)
+
 			// Reconnect to workspace streams (shell, git, file changes) in background
 			// This is needed so shell.input, git status, etc. work after backend restart
 			go m.streamManager.ReconnectAll(execution)
@@ -304,6 +310,11 @@ func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionI
 
 	// Remove from execution store
 	m.executionStore.Remove(execution.ID)
+
+	// Delete the persistence row in lockstep with store removal so we never
+	// leave a phantom executors_running row pointing at a non-existent
+	// execution. Best-effort; "not found" is expected and silently swallowed.
+	m.deleteExecutorRunning(ctx, sessionID)
 
 	return nil
 }

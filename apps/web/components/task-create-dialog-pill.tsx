@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -49,6 +49,13 @@ type PillProps = {
   filter?: (value: string, search: string, keywords?: string[]) => number;
   /** Optional hover tooltip for truncated labels or extra context. */
   tooltip?: string;
+  /**
+   * Optional muted prefix shown before the value in the trigger button.
+   * Used by the branch chip to distinguish "current: <branch>" (no-op),
+   * "will switch to: <branch>" (destructive) and "from: <branch>" (worktree
+   * base) without depending on the user reading a tooltip.
+   */
+  prefix?: string;
 };
 
 /** Returns the active-state hover classes for the pill trigger button. */
@@ -91,6 +98,19 @@ function PillCommandList({
 }
 
 /**
+ * Builds the className for the pill trigger button. Extracted so the inline
+ * trigger JSX stays compact (the Pill function is right at the complexity cap).
+ */
+function pillTriggerClass(disabled: boolean, flat: boolean, hasValue: boolean): string {
+  return cn(
+    "h-7 inline-flex items-center gap-1.5 rounded-md px-2.5 text-xs",
+    flat ? "bg-transparent" : "border border-border/60 bg-muted/30",
+    disabled ? "opacity-50 cursor-not-allowed" : pillActiveClass(flat),
+    !hasValue && "text-muted-foreground",
+  );
+}
+
+/**
  * Compact pill trigger that opens a popover with a search list. Auto-widths
  * to its content (no `w-full`, no chevron) so multiple pills can sit on one
  * line without overlapping or stretching to fill the row.
@@ -111,23 +131,57 @@ export function Pill({
   flat = false,
   filter,
   tooltip,
+  prefix,
 }: PillProps) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
+  // Tracks the brief window after the popover closes during which the cursor
+  // is still hovering the trigger. Without this, Radix's Tooltip becomes
+  // uncontrolled the moment `open` flips to false and pops back open from the
+  // lingering hover. Holding `open={false}` for ~200ms lets the user move
+  // away naturally and prevents the tooltip from racing back in.
+  const [suppressTooltip, setSuppressTooltip] = useState(false);
+  const suppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setOpen = useCallback((next: boolean) => {
+    setOpenState((prev) => {
+      if (prev && !next) {
+        if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
+        setSuppressTooltip(true);
+        suppressTimerRef.current = setTimeout(() => {
+          setSuppressTooltip(false);
+          suppressTimerRef.current = null;
+        }, 200);
+      }
+      return next;
+    });
+  }, []);
+  // Clear the suppression timer if the component unmounts while it's still
+  // ticking, so the eventual `setSuppressTooltip(false)` doesn't fire on a
+  // dead component.
+  useEffect(
+    () => () => {
+      if (suppressTimerRef.current) {
+        clearTimeout(suppressTimerRef.current);
+        suppressTimerRef.current = null;
+      }
+    },
+    [],
+  );
   const hasValue = !!value;
+  // Prefix only renders alongside a real value; an empty chip with placeholder
+  // ("branch") doesn't need "current: " in front of it.
+  const showPrefix = !!prefix && hasValue;
   const triggerButton = (
     <button
       type="button"
       disabled={disabled}
       data-testid={testId}
-      className={cn(
-        "h-7 inline-flex items-center gap-1.5 rounded-md px-2.5 text-xs",
-        flat ? "bg-transparent" : "border border-border/60 bg-muted/30",
-        disabled ? "opacity-50 cursor-not-allowed" : pillActiveClass(flat),
-        !hasValue && "text-muted-foreground",
-      )}
+      className={pillTriggerClass(disabled, flat, hasValue)}
     >
       {icon}
-      <span className="truncate max-w-[160px]">{value || placeholder}</span>
+      <span className="truncate max-w-[240px]">
+        {showPrefix && <span className="text-muted-foreground">{prefix}</span>}
+        {value || placeholder}
+      </span>
     </button>
   );
 
@@ -171,9 +225,13 @@ export function Pill({
 
   if (!tooltip) return popover;
 
-  // Suppress the hover tooltip while the popover is open so they don't stack.
+  // Suppress the hover tooltip while the popover is open so they don't stack,
+  // and for a brief window after it closes so a lingering hover doesn't pop
+  // the tooltip back in (which Radix would otherwise do the moment we flip
+  // from controlled-closed back to uncontrolled).
+  const tooltipOpen = open || suppressTooltip ? false : undefined;
   return (
-    <Tooltip open={open ? false : undefined}>
+    <Tooltip open={tooltipOpen}>
       {popover}
       <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>

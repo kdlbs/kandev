@@ -368,6 +368,7 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 			// Set agent execution ID on the session
 			session, _ := repo.GetTaskSession(ctx, "s1")
 			session.AgentExecutionID = "exec-123"
+			seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-123")
 			_ = repo.UpdateTaskSession(ctx, session)
 			_ = repo.UpdateSessionMetadata(ctx, session.ID, map[string]interface{}{"acp_session_id": "old-acp"})
 
@@ -385,7 +386,7 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 				},
 			}
 
-			agentMgr := &mockAgentManager{}
+			agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 			svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
 			svc.handleTaskMovedWithSession(ctx, watcher.TaskMovedEventData{
 				TaskID:          "t1",

@@ -17,6 +17,38 @@ import {
   type PillOption,
 } from "@/components/task-create-dialog-pill";
 import { GitHubUrlSection } from "@/components/task-create-dialog-github-url";
+import {
+  computeBranchPrefix,
+  computeBranchTooltip,
+  computeBranchDisabledReason,
+} from "@/components/task-create-dialog-branch-utils";
+
+function runAutoselect({
+  branches,
+  preferredDefaultBranch,
+  preferredDefaultBranchLoading,
+  onBranchChange,
+}: {
+  branches: Array<{ name: string; type: "local" | "remote"; remote?: string }>;
+  preferredDefaultBranch: string | undefined;
+  preferredDefaultBranchLoading: boolean;
+  onBranchChange: (value: string) => void;
+}) {
+  if (preferredDefaultBranchLoading) return;
+  // Local-executor flow: preferredDefaultBranch is the workspace's current
+  // ref (branch name OR detached-HEAD short SHA). Seed row.branch with it
+  // unconditionally so the chip displays "current: <ref>". When the ref is a
+  // SHA (detached HEAD) it won't appear in the branches list, but falling
+  // through to autoSelectBranch would pick main/master and surface "will
+  // switch to: master", which contradicts what the user actually has checked
+  // out. Sending the SHA back on submit is a no-op because the backend's
+  // skip-when-equal check compares against the same SHA.
+  if (preferredDefaultBranch) {
+    onBranchChange(preferredDefaultBranch);
+    return;
+  }
+  autoSelectBranch(branches, onBranchChange);
+}
 
 /**
  * Chip row for the task-create dialog. Renders one chip per row in
@@ -55,10 +87,12 @@ type RepoChipsRowProps = {
   freshBranchEnabled?: boolean;
   onToggleFreshBranch?: (enabled: boolean) => void;
   /**
-   * Lock branch pills when the task runs on the local executor — the user's
-   * actual checkout dictates the branch, and changing it would mutate their
-   * working tree. Fresh-branch mode unlocks it (we're explicitly forking a
-   * new branch from a chosen base).
+   * When the task runs on the local executor, the chip seeds row.branch with
+   * the workspace's current branch (so the user sees what's on disk and the
+   * submit payload always carries an explicit value). The chip stays
+   * editable — picking a different existing branch triggers `git checkout`
+   * server-side; keeping the default skips git ops entirely. Fresh-branch
+   * mode is independent: it creates a new branch from a chosen base.
    */
   isLocalExecutor?: boolean;
 };
@@ -77,7 +111,18 @@ export function RepoChipsRow({
   onToggleFreshBranch,
   isLocalExecutor,
 }: RepoChipsRowProps) {
-  const branchLocked = !!isLocalExecutor && !freshBranchEnabled;
+  // Local executor branch behavior:
+  //   - chip is clickable (user can switch to any existing branch on disk)
+  //   - row.branch seeds from the workspace's current branch (currentLocalBranch)
+  //     via the autoselect path, so the chip displays the current branch by
+  //     default and the submit payload always carries an explicit value
+  //   - if user keeps the default, backend's "branch == current → skip" logic
+  //     runs (no git ops)
+  //   - if user picks a different existing branch, backend runs `git checkout`
+  //   - "Fork a new branch" toggle is a separate flow that creates a NEW branch
+  //     from the selected base
+  // Other executors: branch is fully editable (no special pre-fill).
+  const branchLocked = false;
   // No early returns above hooks. URL mode and started-state checks happen below.
   const usedIds = useMemo(() => collectUsedRepoIds(fs.repositories), [fs.repositories]);
   if (isTaskStarted) return null;
@@ -107,6 +152,7 @@ export function RepoChipsRow({
           repositories={repositories}
           workspaceId={workspaceId}
           branchLocked={branchLocked}
+          isLocalExecutor={!!isLocalExecutor}
           canAddMore={canAddMore}
           addHint={addHint}
           onRowRepositoryChange={onRowRepositoryChange}
@@ -144,6 +190,7 @@ function ChipsList({
   repositories,
   workspaceId,
   branchLocked,
+  isLocalExecutor,
   canAddMore,
   addHint,
   freshBranchToggle,
@@ -154,6 +201,7 @@ function ChipsList({
   repositories: Repository[];
   workspaceId: string | null;
   branchLocked: boolean;
+  isLocalExecutor: boolean;
   canAddMore: boolean;
   addHint?: string;
   freshBranchToggle?: React.ReactNode;
@@ -171,7 +219,18 @@ function ChipsList({
           discoveredRepositories={fs.discoveredRepositories}
           excludedRepoIds={collectUsedRepoIds(fs.repositories, row.key)}
           branchLocked={branchLocked}
-          branchOverride={branchLocked ? fs.currentLocalBranch : undefined}
+          // For local-executor rows, seed row.branch with the workspace's
+          // current branch via this prop. Non-local rows leave it undefined
+          // and fall back to the existing last-used / preferred-default
+          // autoselect path.
+          preferredDefaultBranch={isLocalExecutor ? fs.currentLocalBranch : undefined}
+          preferredDefaultBranchLoading={isLocalExecutor ? fs.currentLocalBranchLoading : false}
+          branchPrefix={computeBranchPrefix({
+            isLocalExecutor,
+            rowBranch: row.branch,
+            currentLocalBranch: fs.currentLocalBranch,
+            freshBranchEnabled: !!fs.freshBranchEnabled,
+          })}
           onRepositoryChange={(value) => onRowRepositoryChange(row.key, value)}
           onBranchChange={(value) => onRowBranchChange(row.key, value)}
           onRemove={() => fs.removeRepository(row.key)}
@@ -219,7 +278,11 @@ function FreshBranchToggle({
           onClick={() => onToggle(!enabled)}
           data-testid="fresh-branch-toggle"
           aria-pressed={enabled}
-          aria-label={enabled ? "Fork a new branch" : "Use current branch"}
+          aria-label={
+            enabled
+              ? "Fork a new branch from a base (turn off to use current checkout)"
+              : "Fork a new branch from a base instead of using current checkout"
+          }
           className={cn(
             "inline-flex h-7 w-7 items-center justify-center rounded-md border border-input cursor-pointer transition-colors",
             enabled
@@ -230,10 +293,10 @@ function FreshBranchToggle({
           <IconGitFork className="h-3.5 w-3.5" />
         </button>
       </TooltipTrigger>
-      <TooltipContent>
+      <TooltipContent className="max-w-xs">
         {enabled
-          ? "Forking a new branch from the selected base. Click to use the existing branch instead."
-          : "Use the existing branch. Click to fork a new branch from a base instead."}
+          ? "Fork mode: a new branch will be created from the selected base before the agent runs. Click to turn off and use your repository's current checkout instead."
+          : "By default the local executor uses your repository's current checkout. Click to fork a new branch from a base instead, leaving your working tree untouched."}
       </TooltipContent>
     </Tooltip>
   );
@@ -272,11 +335,32 @@ type RepoChipProps = {
    */
   branchLocked?: boolean;
   /**
-   * Optional display override for the branch value. Used when the chip
-   * is `branchLocked` so we surface the repo's actual current branch
-   * instead of whatever the user picked under a different executor.
+   * When set, seed row.branch with this value (for an empty row). Used by
+   * the local-executor flow to surface the workspace's current ref — either
+   * a branch name like "main" or, on detached HEAD, the short commit SHA
+   * returned by the backend. The chip displays it verbatim ("current: main"
+   * or "current: 4fbc5d7"); on submit the backend's skip-when-equal check
+   * matches the same SHA so it's a no-op.
+   *
+   * When unset, the chip falls back to the existing last-used / preferred-
+   * default autoselect (main / master / develop, etc.).
    */
-  branchOverride?: string;
+  preferredDefaultBranch?: string;
+  /**
+   * True while preferredDefaultBranch is being resolved. Renders a
+   * "Loading branch…" placeholder so the chip doesn't briefly show an empty
+   * state in the window between dialog open and local-status resolving.
+   */
+  preferredDefaultBranchLoading?: boolean;
+  /**
+   * Muted text shown before the branch value to qualify intent:
+   *   - "current: "        — local exec, picked branch == workspace current
+   *   - "will switch to: " — local exec, picked branch != workspace current
+   *   - "from: "           — worktree / non-local exec (picked branch is the base)
+   * Empty when there's no branch value yet (chip shows the "branch"
+   * placeholder unprefixed).
+   */
+  branchPrefix?: string;
   onRepositoryChange: (value: string) => void;
   onBranchChange: (value: string) => void;
   onRemove: () => void;
@@ -289,6 +373,8 @@ function useRepoChipData({
   discoveredRepositories,
   excludedRepoIds,
   onBranchChange,
+  preferredDefaultBranch,
+  preferredDefaultBranchLoading,
 }: Pick<
   RepoChipProps,
   | "row"
@@ -297,6 +383,8 @@ function useRepoChipData({
   | "discoveredRepositories"
   | "excludedRepoIds"
   | "onBranchChange"
+  | "preferredDefaultBranch"
+  | "preferredDefaultBranchLoading"
 >) {
   const filteredRepos = useMemo(
     () => repositories.filter((r) => !excludedRepoIds.has(r.id) || r.id === row.repositoryId),
@@ -339,13 +427,37 @@ function useRepoChipData({
     refresh: refreshBranches,
   } = useBranches(branchSource, !!branchSource);
 
-  // Once branches load for this row, pre-fill the branch pill with the user's
-  // last-used branch (when present) or main/master/origin/main/origin/master.
-  // Skipped if the user already picked a branch on this row.
+  // Once branches load for this row, pre-fill the branch pill. For
+  // local-executor rows we prefer the workspace's actual current branch
+  // (preferredDefaultBranch) so the chip shows what's on disk and the
+  // submit always carries an explicit branch. Otherwise fall back to the
+  // user's last-used branch / main / master / develop. Skipped if the user
+  // already picked a branch on this row.
+  //
+  // The `preferredDefaultBranchLoading` gate closes a race: without it,
+  // autoSelectBranch's last-used localStorage pick (e.g. "origin/master")
+  // would land in row.branch before currentLocalBranch resolved, then the
+  // row.branch guard above would short-circuit forever and the chip would
+  // render "will switch to: origin/master" even though the user just opened
+  // the dialog. With the gate, autoselect waits until local-status finishes
+  // so the current-branch preference gets first crack at row.branch.
   useEffect(() => {
     if (!branchSource || branchesLoading || branches.length === 0 || row.branch) return;
-    autoSelectBranch(branches, onBranchChange);
-  }, [branchSource, branchesLoading, branches, row.branch, onBranchChange]);
+    runAutoselect({
+      branches,
+      preferredDefaultBranch,
+      preferredDefaultBranchLoading: !!preferredDefaultBranchLoading,
+      onBranchChange,
+    });
+  }, [
+    branchSource,
+    branchesLoading,
+    branches,
+    row.branch,
+    onBranchChange,
+    preferredDefaultBranch,
+    preferredDefaultBranchLoading,
+  ]);
 
   const repoOptions: PillOption[] = useMemo(
     () => [
@@ -385,7 +497,9 @@ function RepoChip({
   discoveredRepositories,
   excludedRepoIds,
   branchLocked,
-  branchOverride,
+  preferredDefaultBranch,
+  preferredDefaultBranchLoading,
+  branchPrefix,
   onRepositoryChange,
   onBranchChange,
   onRemove,
@@ -397,17 +511,22 @@ function RepoChip({
     discoveredRepositories,
     excludedRepoIds,
     onBranchChange,
+    preferredDefaultBranch,
+    preferredDefaultBranchLoading,
   });
   const { repoLabel, repoTooltip } = computeRepoChipDisplay(
     row,
     repositories,
     discoveredRepositories,
   );
-  const branchValue = branchOverride ?? row.branch;
+  // Hide the value while the preferred-default-branch fetch is in flight to
+  // avoid the chip briefly rendering an empty placeholder before autoselect
+  // seeds row.branch with the workspace's current branch.
+  const branchValue = preferredDefaultBranchLoading ? "" : row.branch;
   const hasRepo = !!(row.repositoryId || row.localPath);
   const branchPlaceholder = computeBranchPlaceholder(
     hasRepo,
-    branchesLoading,
+    branchesLoading || !!preferredDefaultBranchLoading,
     branchOptions.length,
   );
 
@@ -433,6 +552,7 @@ function RepoChip({
         icon={<IconGitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />}
         value={branchValue}
         placeholder={branchPlaceholder}
+        prefix={branchPrefix}
         options={branchOptions}
         onSelect={onBranchChange}
         disabled={branchLocked || !hasRepo || branchesLoading || branchOptions.length === 0}
@@ -445,7 +565,7 @@ function RepoChip({
         searchPlaceholder="Search branches..."
         emptyMessage="No branches"
         testId="branch-chip-trigger"
-        tooltip="Base branch"
+        tooltip={computeBranchTooltip(branchPrefix)}
         onRefresh={refreshBranches}
         refreshing={branchesLoading}
         filter={scoreBranch}
@@ -467,26 +587,6 @@ function RepoChip({
       </Tooltip>
     </span>
   );
-}
-
-function computeBranchDisabledReason({
-  branchLocked,
-  hasRepo,
-  branchesLoading,
-  optionCount,
-}: {
-  branchLocked: boolean;
-  hasRepo: boolean;
-  branchesLoading: boolean;
-  optionCount: number;
-}): string | undefined {
-  if (branchLocked) {
-    return "The local executor uses your repository's current checkout, so the branch can't change here. Toggle 'Fork a new branch' to pick a different base.";
-  }
-  if (!hasRepo) return "Select a repository first.";
-  if (branchesLoading) return "Loading branches…";
-  if (optionCount === 0) return "No branches available for this repository.";
-  return undefined;
 }
 
 function normalizeRepoPath(path: string): string {

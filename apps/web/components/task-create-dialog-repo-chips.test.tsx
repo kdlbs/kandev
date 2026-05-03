@@ -139,6 +139,60 @@ describe("RepoChipsRow", () => {
     expect(screen.queryByTestId("repo-chips-row")).toBeNull();
   });
 
+  it("local-executor row autoselects the workspace's current branch when available", () => {
+    mockBranches.value = {
+      branches: [
+        { name: "main", type: "local" } as Branch,
+        { name: "feature/x", type: "local" } as Branch,
+      ],
+      isLoading: false,
+    };
+    const onRowBranchChange = vi.fn();
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({
+          repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })],
+          currentLocalBranch: "feature/x",
+          currentLocalBranchLoading: false,
+        })}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={onRowBranchChange}
+        isLocalExecutor
+      />,
+    );
+    // The autoselect effect prefers preferredDefaultBranch (currentLocalBranch
+    // for local mode) over the last-used / main fallback. This is what surfaces
+    // the workspace's actual on-disk branch in the chip and ensures the submit
+    // payload always carries an explicit value (not "" → backend default).
+    expect(onRowBranchChange).toHaveBeenCalledWith("r0", "feature/x");
+  });
+
+  it("local-executor row shows the loading placeholder while resolving the current branch", () => {
+    mockBranches.value = { branches: [], isLoading: false };
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({
+          repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })],
+          currentLocalBranch: "",
+          currentLocalBranchLoading: true,
+        })}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+        isLocalExecutor
+      />,
+    );
+    // The chip shouldn't lie about an unset state during the brief window
+    // before local-status resolves; preferredDefaultBranchLoading drives the
+    // "loading…" placeholder.
+    expect(screen.getByText(/loading…/i)).toBeTruthy();
+  });
+
   it("disables Add when no more repositories are available", () => {
     renderInProvider(
       <RepoChipsRow

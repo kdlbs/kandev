@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	promptcfg "github.com/kandev/kandev/config/prompts"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/jira"
@@ -162,12 +163,12 @@ func (s *Service) attachJiraIssueTaskID(ctx context.Context, evt *jira.NewJiraIs
 }
 
 // interpolateJiraPrompt replaces {{issue.*}} placeholders with ticket fields.
-// When the template is empty, the agent receives a minimal default that links
-// to the JIRA ticket — enough context to start without forcing every watch to
-// supply boilerplate.
+// When the template is empty, falls back to the embedded default in
+// config/prompts/jira-issue-watch-default.md — same pattern the GitHub
+// issue/PR watchers use so the default lives in one editable place.
 func interpolateJiraPrompt(template string, t *jira.JiraTicket) string {
 	if strings.TrimSpace(template) == "" {
-		template = "Investigate JIRA ticket {{issue.key}}: {{issue.summary}}\n\n{{issue.url}}"
+		template = promptcfg.Get("jira-issue-watch-default")
 	}
 	r := strings.NewReplacer(
 		"{{issue.key}}", t.Key,

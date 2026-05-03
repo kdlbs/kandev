@@ -494,10 +494,32 @@ func readGitCurrentBranch(repoPath string, allowedRoots []string) string {
 	}
 	trimmed := strings.TrimSpace(string(content))
 	ref, ok := strings.CutPrefix(trimmed, "ref: ")
-	if !ok {
-		return ""
+	if ok {
+		return strings.TrimPrefix(ref, "refs/heads/")
 	}
-	return strings.TrimPrefix(ref, "refs/heads/")
+	// Detached HEAD: HEAD is a raw commit SHA (no "ref: " prefix). Return the
+	// short form so the task-create dialog's locked branch chip surfaces a
+	// meaningful identifier ("a7f5558") instead of the empty placeholder.
+	// Validate it's a hex string of 40 chars to avoid leaking garbled HEAD content.
+	if isHexCommitSHA(trimmed) {
+		return trimmed[:7]
+	}
+	return ""
+}
+
+// isHexCommitSHA returns true if s is a 40-character lowercase hex string —
+// the format git writes to HEAD when detached. Anything else (truncated,
+// uppercase, with prefix) is treated as unparseable rather than echoed back.
+func isHexCommitSHA(s string) bool {
+	if len(s) != 40 {
+		return false
+	}
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // readGitDirtyFiles returns the list of dirty file paths in a repository, as

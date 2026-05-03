@@ -138,17 +138,81 @@ func TestLocalPreparer_NoCheckoutBranch(t *testing.T) {
 	}
 }
 
-func TestLocalPreparer_CheckoutBranchSuccess(t *testing.T) {
+// TestLocalPreparer_SkipsCheckoutWhenAlreadyOnBranch is the regression for
+// the local-mode bug where Prepare ran `git checkout main` even when the
+// workspace was already on `main`. The unconditional checkout failed on
+// dirty/unmerged worktrees ("you need to resolve your current index first")
+// and surfaced as "Failed to launch agent" for the user even though they
+// hadn't asked to switch branches. Local mode treats "request branch matches
+// current branch" as "use current state" and skips the git ops entirely.
+func TestLocalPreparer_SkipsCheckoutWhenAlreadyOnBranch(t *testing.T) {
 	isolateGitEnv(t)
 	log := newTestLocalLogger()
 	preparer := NewLocalPreparer(log)
 
 	repoDir := initGitRepo(t)
-	// Create a feature branch
+	env := newIsolatedGitEnv()
+
+	// Stage a dirty/unmerged index that would reject `git checkout` outright.
+	conflictFile := filepath.Join(repoDir, "package-lock.json")
+	if err := os.WriteFile(conflictFile, []byte("conflict\n"), 0o644); err != nil {
+		t.Fatalf("write conflict file: %v", err)
+	}
+	for _, args := range [][]string{
+		{"add", "package-lock.json"},
+		{"update-index", "--unresolve", "package-lock.json"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		cmd.Env = env
+		_ = cmd.Run() // best-effort — older git may not have --unresolve
+	}
+	startBranch := currentBranch(t, repoDir)
+
+	req := &EnvPrepareRequest{
+		TaskID:         "task-1",
+		RepositoryPath: repoDir,
+		BaseBranch:     "main", // matches current — should be a no-op
+	}
+
+	result, err := preparer.Prepare(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("Prepare() error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Prepare() failed: %s", result.ErrorMessage)
+	}
+	if len(result.Steps) != 2 {
+		t.Fatalf("expected 2 steps, got %d", len(result.Steps))
+	}
+	step := result.Steps[1]
+	if step.Name != "Checkout branch" {
+		t.Fatalf("expected step name 'Checkout branch', got %q", step.Name)
+	}
+	if step.Status != PrepareStepCompleted {
+		t.Fatalf("expected step completed, got %q", step.Status)
+	}
+	if !strings.Contains(step.Output, "skipping") {
+		t.Fatalf("expected output to indicate skip, got %q", step.Output)
+	}
+	if got := currentBranch(t, repoDir); got != startBranch {
+		t.Fatalf("local preparer modified branch: was %q, now %q", startBranch, got)
+	}
+}
+
+// TestLocalPreparer_ChecksOutDifferentBranch covers the explicit-switch case:
+// the user picked a different existing branch in the chip. The preparer must
+// switch the working tree to that branch so the agent runs against it.
+func TestLocalPreparer_ChecksOutDifferentBranch(t *testing.T) {
+	isolateGitEnv(t)
+	log := newTestLocalLogger()
+	preparer := NewLocalPreparer(log)
+
+	repoDir := initGitRepo(t)
 	env := newIsolatedGitEnv()
 	for _, args := range [][]string{
-		{"checkout", "-b", "feature/pr-branch"},
-		{"commit", "--allow-empty", "-m", "pr commit"},
+		{"checkout", "-b", "feature/existing"},
+		{"commit", "--allow-empty", "-m", "feature commit"},
 		{"checkout", "main"},
 	} {
 		cmd := exec.Command("git", args...)
@@ -162,7 +226,7 @@ func TestLocalPreparer_CheckoutBranchSuccess(t *testing.T) {
 	req := &EnvPrepareRequest{
 		TaskID:         "task-1",
 		RepositoryPath: repoDir,
-		CheckoutBranch: "feature/pr-branch",
+		BaseBranch:     "feature/existing",
 	}
 
 	result, err := preparer.Prepare(context.Background(), req, nil)
@@ -172,7 +236,6 @@ func TestLocalPreparer_CheckoutBranchSuccess(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("Prepare() failed: %s", result.ErrorMessage)
 	}
-	// 2 steps: validate workspace + checkout branch
 	if len(result.Steps) != 2 {
 		t.Fatalf("expected 2 steps, got %d", len(result.Steps))
 	}
@@ -182,256 +245,13 @@ func TestLocalPreparer_CheckoutBranchSuccess(t *testing.T) {
 	if result.Steps[1].Status != PrepareStepCompleted {
 		t.Fatalf("expected checkout step completed, got %q", result.Steps[1].Status)
 	}
-	// Branch should be feature/pr-branch
-	if branch := currentBranch(t, repoDir); branch != "feature/pr-branch" {
-		t.Fatalf("expected branch 'feature/pr-branch', got %q", branch)
+	if got := currentBranch(t, repoDir); got != "feature/existing" {
+		t.Fatalf("expected branch 'feature/existing', got %q", got)
 	}
 }
 
-func TestLocalPreparer_CheckoutBranchNotFound(t *testing.T) {
-	isolateGitEnv(t)
-	log := newTestLocalLogger()
-	preparer := NewLocalPreparer(log)
-
-	repoDir := initGitRepo(t)
-	req := &EnvPrepareRequest{
-		TaskID:         "task-1",
-		RepositoryPath: repoDir,
-		CheckoutBranch: "nonexistent-branch",
-	}
-
-	result, err := preparer.Prepare(context.Background(), req, nil)
-	if err == nil {
-		t.Fatal("Prepare() should fail when branch doesn't exist")
-	}
-	if result.Success {
-		t.Fatal("expected result.Success = false")
-	}
-	// 2 steps: validate (completed) + checkout (failed)
-	if len(result.Steps) != 2 {
-		t.Fatalf("expected 2 steps, got %d", len(result.Steps))
-	}
-	if result.Steps[1].Status != PrepareStepFailed {
-		t.Fatalf("expected checkout step failed, got %q", result.Steps[1].Status)
-	}
-	// Branch should still be main (checkout failed)
-	if branch := currentBranch(t, repoDir); branch != "main" {
-		t.Fatalf("expected branch 'main' after failed checkout, got %q", branch)
-	}
-}
-
-func TestLocalPreparer_CheckoutBranchWithSetupScript(t *testing.T) {
-	isolateGitEnv(t)
-	log := newTestLocalLogger()
-	preparer := NewLocalPreparer(log)
-
-	repoDir := initGitRepo(t)
-	env := newIsolatedGitEnv()
-	for _, args := range [][]string{
-		{"checkout", "-b", "feature/pr-branch"},
-		{"commit", "--allow-empty", "-m", "pr commit"},
-		{"checkout", "main"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = repoDir
-		cmd.Env = env
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v failed: %s", args, out)
-		}
-	}
-
-	markerFile := filepath.Join(repoDir, "setup-ran")
-	req := &EnvPrepareRequest{
-		TaskID:         "task-1",
-		RepositoryPath: repoDir,
-		CheckoutBranch: "feature/pr-branch",
-		SetupScript:    "touch " + markerFile,
-	}
-
-	result, err := preparer.Prepare(context.Background(), req, nil)
-	if err != nil {
-		t.Fatalf("Prepare() error: %v", err)
-	}
-	if !result.Success {
-		t.Fatalf("Prepare() failed: %s", result.ErrorMessage)
-	}
-	// 3 steps: validate + checkout + setup script
-	if len(result.Steps) != 3 {
-		t.Fatalf("expected 3 steps, got %d", len(result.Steps))
-	}
-	// Branch checked out before script runs
-	if branch := currentBranch(t, repoDir); branch != "feature/pr-branch" {
-		t.Fatalf("expected branch 'feature/pr-branch', got %q", branch)
-	}
-	// Script ran
-	if _, err := os.Stat(markerFile); os.IsNotExist(err) {
-		t.Fatal("setup script did not run")
-	}
-}
-
-func TestLocalPreparer_CheckoutWithDirtyWorkdir(t *testing.T) {
-	isolateGitEnv(t)
-	log := newTestLocalLogger()
-	preparer := NewLocalPreparer(log)
-
-	repoDir := initGitRepo(t)
-	env := newIsolatedGitEnv()
-	// Create feature branch
-	for _, args := range [][]string{
-		{"checkout", "-b", "feature/pr-branch"},
-		{"commit", "--allow-empty", "-m", "pr commit"},
-		{"checkout", "main"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = repoDir
-		cmd.Env = env
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v failed: %s", args, out)
-		}
-	}
-
-	// Create a dirty file that conflicts with checkout
-	dirtyFile := filepath.Join(repoDir, "dirty.txt")
-	if err := os.WriteFile(dirtyFile, []byte("dirty"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// Stage and modify to create a conflict scenario
-	addCmd := exec.Command("git", "add", "dirty.txt")
-	addCmd.Dir = repoDir
-	addCmd.Env = env
-	if out, err := addCmd.CombinedOutput(); err != nil {
-		t.Fatalf("git add failed: %s", out)
-	}
-
-	// Commit on main so both branches diverge on this file
-	commitCmd := exec.Command("git", "commit", "-m", "add dirty on main")
-	commitCmd.Dir = repoDir
-	commitCmd.Env = env
-	if out, err := commitCmd.CombinedOutput(); err != nil {
-		t.Fatalf("git commit failed: %s", out)
-	}
-
-	// Now modify the file to make checkout fail
-	if err := os.WriteFile(dirtyFile, []byte("modified"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	req := &EnvPrepareRequest{
-		TaskID:         "task-1",
-		RepositoryPath: repoDir,
-		CheckoutBranch: "feature/pr-branch",
-	}
-
-	result, err := preparer.Prepare(context.Background(), req, nil)
-	if err == nil {
-		t.Fatal("Prepare() should fail with dirty workdir")
-	}
-	if result.Success {
-		t.Fatal("expected result.Success = false")
-	}
-	// Should have 2 steps: validate (completed) + checkout (failed)
-	if len(result.Steps) != 2 {
-		t.Fatalf("expected 2 steps, got %d", len(result.Steps))
-	}
-	if result.Steps[1].Status != PrepareStepFailed {
-		t.Fatalf("expected checkout step failed, got %q", result.Steps[1].Status)
-	}
-	// Branch should still be main
-	if branch := currentBranch(t, repoDir); branch != "main" {
-		t.Fatalf("expected branch 'main' after failed checkout, got %q", branch)
-	}
-}
-
-func TestLocalPreparer_BaseBranchCheckout(t *testing.T) {
-	isolateGitEnv(t)
-	log := newTestLocalLogger()
-	preparer := NewLocalPreparer(log)
-
-	repoDir := initGitRepo(t)
-	env := newIsolatedGitEnv()
-	// Create a feature branch
-	for _, args := range [][]string{
-		{"checkout", "-b", "develop"},
-		{"commit", "--allow-empty", "-m", "develop commit"},
-		{"checkout", "main"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = repoDir
-		cmd.Env = env
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v failed: %s", args, out)
-		}
-	}
-
-	req := &EnvPrepareRequest{
-		TaskID:         "task-1",
-		RepositoryPath: repoDir,
-		BaseBranch:     "develop",
-	}
-
-	result, err := preparer.Prepare(context.Background(), req, nil)
-	if err != nil {
-		t.Fatalf("Prepare() error: %v", err)
-	}
-	if !result.Success {
-		t.Fatalf("Prepare() failed: %s", result.ErrorMessage)
-	}
-	// 2 steps: validate workspace + checkout branch
-	if len(result.Steps) != 2 {
-		t.Fatalf("expected 2 steps, got %d", len(result.Steps))
-	}
-	if result.Steps[1].Name != "Checkout branch" {
-		t.Fatalf("expected step name 'Checkout branch', got %q", result.Steps[1].Name)
-	}
-	// Branch should be develop
-	if branch := currentBranch(t, repoDir); branch != "develop" {
-		t.Fatalf("expected branch 'develop', got %q", branch)
-	}
-}
-
-// TestLocalPreparer_FreshBranchInputs covers the post-fresh-branch state: the
-// HTTP layer now persists the new branch name as the task's BaseBranch, so the
-// preparer must successfully checkout that branch even when it was just
-// created moments earlier. This is essentially the existing BaseBranch path —
-// the test exists to catch any regression that breaks resume after a fresh
-// checkout.
-func TestLocalPreparer_FreshBranchPersistedAsBaseBranch(t *testing.T) {
-	isolateGitEnv(t)
-	log := newTestLocalLogger()
-	preparer := NewLocalPreparer(log)
-
-	repoDir := initGitRepo(t)
-	env := newIsolatedGitEnv()
-	// Simulate fresh-branch having just created "feature/new" from main.
-	for _, args := range [][]string{
-		{"checkout", "-b", "feature/new"},
-		{"commit", "--allow-empty", "-m", "fresh"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = repoDir
-		cmd.Env = env
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v failed: %s", args, out)
-		}
-	}
-
-	req := &EnvPrepareRequest{
-		TaskID:         "task-1",
-		RepositoryPath: repoDir,
-		BaseBranch:     "feature/new",
-	}
-	result, err := preparer.Prepare(context.Background(), req, nil)
-	if err != nil {
-		t.Fatalf("Prepare() error: %v", err)
-	}
-	if !result.Success {
-		t.Fatalf("Prepare() failed: %s", result.ErrorMessage)
-	}
-	if branch := currentBranch(t, repoDir); branch != "feature/new" {
-		t.Fatalf("expected branch 'feature/new', got %q", branch)
-	}
-}
-
+// TestLocalPreparer_CheckoutBranchPriorityOverBaseBranch keeps the PR-watch
+// flow working: when both fields are set, CheckoutBranch (PR head) wins.
 func TestLocalPreparer_CheckoutBranchPriorityOverBaseBranch(t *testing.T) {
 	isolateGitEnv(t)
 	log := newTestLocalLogger()
@@ -439,7 +259,6 @@ func TestLocalPreparer_CheckoutBranchPriorityOverBaseBranch(t *testing.T) {
 
 	repoDir := initGitRepo(t)
 	env := newIsolatedGitEnv()
-	// Create two branches
 	for _, args := range [][]string{
 		{"checkout", "-b", "develop"},
 		{"commit", "--allow-empty", "-m", "develop commit"},
@@ -470,8 +289,79 @@ func TestLocalPreparer_CheckoutBranchPriorityOverBaseBranch(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("Prepare() failed: %s", result.ErrorMessage)
 	}
-	// CheckoutBranch should win over BaseBranch
-	if branch := currentBranch(t, repoDir); branch != "feature/pr-branch" {
-		t.Fatalf("expected branch 'feature/pr-branch' (CheckoutBranch priority), got %q", branch)
+	if got := currentBranch(t, repoDir); got != "feature/pr-branch" {
+		t.Fatalf("expected branch 'feature/pr-branch' (CheckoutBranch priority), got %q", got)
+	}
+}
+
+// TestLocalPreparer_CheckoutFailureSurfaces ensures actual checkout failures
+// (e.g. trying to switch branches with a dirty workdir) bubble up as a
+// failed step + non-nil error so the orchestrator marks the task FAILED.
+func TestLocalPreparer_CheckoutFailureSurfaces(t *testing.T) {
+	isolateGitEnv(t)
+	log := newTestLocalLogger()
+	preparer := NewLocalPreparer(log)
+
+	repoDir := initGitRepo(t)
+	req := &EnvPrepareRequest{
+		TaskID:         "task-1",
+		RepositoryPath: repoDir,
+		CheckoutBranch: "nonexistent-branch", // current is "main", so checkout fires and fails
+	}
+
+	result, err := preparer.Prepare(context.Background(), req, nil)
+	if err == nil {
+		t.Fatal("expected error for missing branch")
+	}
+	if result.Success {
+		t.Fatal("expected result.Success = false")
+	}
+	if len(result.Steps) != 2 {
+		t.Fatalf("expected 2 steps (validate + failed checkout), got %d", len(result.Steps))
+	}
+	if result.Steps[1].Status != PrepareStepFailed {
+		t.Fatalf("expected checkout step failed, got %q", result.Steps[1].Status)
+	}
+	if got := currentBranch(t, repoDir); got != "main" {
+		t.Fatalf("expected branch unchanged on failure, got %q", got)
+	}
+}
+
+func TestLocalPreparer_RunsSetupScriptWithoutCheckout(t *testing.T) {
+	isolateGitEnv(t)
+	log := newTestLocalLogger()
+	preparer := NewLocalPreparer(log)
+
+	repoDir := initGitRepo(t)
+	startBranch := currentBranch(t, repoDir)
+	markerFile := filepath.Join(repoDir, "setup-ran")
+	req := &EnvPrepareRequest{
+		TaskID:         "task-1",
+		RepositoryPath: repoDir,
+		// BaseBranch left empty — "use current" path, no checkout step at all.
+		SetupScript: "touch " + markerFile,
+	}
+
+	result, err := preparer.Prepare(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("Prepare() error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Prepare() failed: %s", result.ErrorMessage)
+	}
+	if len(result.Steps) != 2 {
+		t.Fatalf("expected 2 steps (validate + setup), got %d: %+v", len(result.Steps), result.Steps)
+	}
+	if result.Steps[0].Name != "Validate workspace" {
+		t.Fatalf("expected step 0 'Validate workspace', got %q", result.Steps[0].Name)
+	}
+	if result.Steps[1].Name == "Checkout branch" {
+		t.Fatal("expected no checkout step when BaseBranch is empty")
+	}
+	if _, err := os.Stat(markerFile); os.IsNotExist(err) {
+		t.Fatal("setup script did not run")
+	}
+	if got := currentBranch(t, repoDir); got != startBranch {
+		t.Fatalf("local preparer modified branch: was %q, now %q", startBranch, got)
 	}
 }

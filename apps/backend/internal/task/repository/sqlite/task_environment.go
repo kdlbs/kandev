@@ -37,14 +37,14 @@ func (r *Repository) CreateTaskEnvironment(ctx context.Context, env *models.Task
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_environments (
 			id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
-			agent_execution_id, control_port, status,
+			control_port, status,
 			worktree_id, worktree_path, worktree_branch, workspace_path,
 			container_id, sandbox_id, task_dir_name,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		env.ID, env.TaskID, env.RepositoryID, env.ExecutorType, env.ExecutorID, env.ExecutorProfileID,
-		env.AgentExecutionID, env.ControlPort, string(env.Status),
+		env.ControlPort, string(env.Status),
 		env.WorktreeID, env.WorktreePath, env.WorktreeBranch, env.WorkspacePath,
 		env.ContainerID, env.SandboxID, env.TaskDirName,
 		env.CreatedAt, env.UpdatedAt,
@@ -69,14 +69,14 @@ func (r *Repository) GetTaskEnvironment(ctx context.Context, id string) (*models
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
-			agent_execution_id, control_port, status,
+			control_port, status,
 			worktree_id, worktree_path, worktree_branch, workspace_path,
 			container_id, sandbox_id, COALESCE(task_dir_name, ''),
 			created_at, updated_at
 		FROM task_environments WHERE id = ?
 	`), id).Scan(
 		&env.ID, &env.TaskID, &env.RepositoryID, &env.ExecutorType, &env.ExecutorID, &env.ExecutorProfileID,
-		&env.AgentExecutionID, &env.ControlPort, &status,
+		&env.ControlPort, &status,
 		&env.WorktreeID, &env.WorktreePath, &env.WorktreeBranch, &env.WorkspacePath,
 		&env.ContainerID, &env.SandboxID, &env.TaskDirName,
 		&env.CreatedAt, &env.UpdatedAt,
@@ -105,14 +105,14 @@ func (r *Repository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID stri
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
-			agent_execution_id, control_port, status,
+			control_port, status,
 			worktree_id, worktree_path, worktree_branch, workspace_path,
 			container_id, sandbox_id, COALESCE(task_dir_name, ''),
 			created_at, updated_at
 		FROM task_environments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1
 	`), taskID).Scan(
 		&env.ID, &env.TaskID, &env.RepositoryID, &env.ExecutorType, &env.ExecutorID, &env.ExecutorProfileID,
-		&env.AgentExecutionID, &env.ControlPort, &status,
+		&env.ControlPort, &status,
 		&env.WorktreeID, &env.WorktreePath, &env.WorktreeBranch, &env.WorkspacePath,
 		&env.ContainerID, &env.SandboxID, &env.TaskDirName,
 		&env.CreatedAt, &env.UpdatedAt,
@@ -147,14 +147,14 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environments SET
 			repository_id = ?, executor_type = ?, executor_id = ?, executor_profile_id = ?,
-			agent_execution_id = ?, control_port = ?, status = ?,
+			control_port = ?, status = ?,
 			worktree_id = ?, worktree_path = ?, worktree_branch = ?, workspace_path = ?,
 			container_id = ?, sandbox_id = ?, task_dir_name = ?,
 			updated_at = ?
 		WHERE id = ?
 	`),
 		env.RepositoryID, env.ExecutorType, env.ExecutorID, env.ExecutorProfileID,
-		env.AgentExecutionID, env.ControlPort, string(env.Status),
+		env.ControlPort, string(env.Status),
 		env.WorktreeID, env.WorktreePath, env.WorktreeBranch, env.WorkspacePath,
 		env.ContainerID, env.SandboxID, env.TaskDirName,
 		env.UpdatedAt,

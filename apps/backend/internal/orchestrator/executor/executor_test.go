@@ -338,17 +338,25 @@ func TestLaunchPreparedSession_WorkspaceOnly(t *testing.T) {
 func TestLaunchPreparedSession_ExistingWorkspace_StartAgent(t *testing.T) {
 	repo := newMockRepository()
 
-	// Session already has an AgentExecutionID (workspace previously launched)
+	// Session has an existing executors_running row (workspace previously launched).
+	// Post-refactor, "is launched" is gauged by HasExecutorRunningRow rather than
+	// session.AgentExecutionID — the column was removed from task_sessions.
 	session := &models.TaskSession{
-		ID:               "session-123",
-		TaskID:           "task-123",
-		AgentProfileID:   "profile-123",
-		AgentExecutionID: "exec-existing",
-		State:            models.TaskSessionStateCreated,
-		StartedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
+		ID:             "session-123",
+		TaskID:         "task-123",
+		AgentProfileID: "profile-123",
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
 	}
 	repo.sessions[session.ID] = session
+	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
+		ID:               session.ID,
+		SessionID:        session.ID,
+		TaskID:           session.TaskID,
+		AgentExecutionID: "exec-existing",
+		Status:           "ready",
+	}
 
 	var startAgentCalled atomic.Bool
 	descriptionSet := ""
@@ -408,87 +416,38 @@ func TestLaunchPreparedSession_ExistingWorkspace_StartAgent(t *testing.T) {
 	}
 }
 
-func TestLaunchPreparedSession_StaleExecutionID_CorrectedFromLiveStore(t *testing.T) {
-	repo := newMockRepository()
-
-	// Session has a stale AgentExecutionID from a previous backend run.
-	// After restart, EnsureWorkspaceExecutionForSession created a new execution
-	// with a different ID, but the database still holds the old one.
-	session := &models.TaskSession{
-		ID:               "session-123",
-		TaskID:           "task-123",
-		AgentProfileID:   "profile-123",
-		AgentExecutionID: "stale-exec-id", // stale ID from DB
-		State:            models.TaskSessionStateCreated,
-		StartedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
-	}
-	repo.sessions[session.ID] = session
-
-	var startedWithID atomic.Value
-	agentManager := &mockAgentManager{
-		startAgentProcessFunc: func(ctx context.Context, id string) error {
-			startedWithID.Store(id)
-			return nil
-		},
-		// Simulate the live execution store having a different ID
-		getExecutionIDForSessionFunc: func(ctx context.Context, sessionID string) (string, error) {
-			if sessionID == "session-123" {
-				return "live-exec-id", nil
-			}
-			return "", fmt.Errorf("not found")
-		},
-	}
-
-	executor := newTestExecutor(t, agentManager, repo)
-
-	task := &v1.Task{
-		ID:          "task-123",
-		WorkspaceID: "workspace-123",
-		Title:       "Test Task",
-	}
-
-	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{AgentProfileID: "profile-123", Prompt: "do work", StartAgent: true})
-	if err != nil {
-		t.Fatalf("LaunchPreparedSession failed: %v", err)
-	}
-
-	// Should use the live execution ID, not the stale one
-	if execution.AgentExecutionID != "live-exec-id" {
-		t.Errorf("Expected live execution ID 'live-exec-id', got %s", execution.AgentExecutionID)
-	}
-
-	// Wait for async goroutine
-	time.Sleep(100 * time.Millisecond)
-
-	// StartAgentProcess should be called with the live ID
-	got, _ := startedWithID.Load().(string)
-	if got != "live-exec-id" {
-		t.Errorf("Expected StartAgentProcess called with 'live-exec-id', got %q", got)
-	}
-
-	// Database should be updated with the corrected ID
-	updatedSession := repo.sessions["session-123"]
-	if updatedSession.AgentExecutionID != "live-exec-id" {
-		t.Errorf("Expected DB AgentExecutionID to be corrected to 'live-exec-id', got %s", updatedSession.AgentExecutionID)
-	}
-}
+// TestLaunchPreparedSession_StaleExecutionID_CorrectedFromLiveStore was removed:
+// the "DB has stale ID, in-memory has live ID, correct DB to match" code path no
+// longer exists. With executors_running as the single source of truth and lifecycle-
+// owned writes, the divergence the test was guarding against is structurally
+// impossible. See persistence.go in the lifecycle package for the new ownership
+// model. Replaced by TestLaunch_RaceProducesSingleExecution and the recovery
+// reconciliation test in lifecycle/.
 
 func TestLaunchPreparedSession_StaleExecution_FallsThroughToLaunchAgent(t *testing.T) {
 	repo := newMockRepository()
 
-	// Session has an AgentExecutionID but no live execution exists in memory
-	// (e.g. backend restarted since workspace was prepared).
+	// Session has an executors_running row from a previous backend run, but no
+	// live execution in memory (e.g. backend restarted since workspace was
+	// prepared). HasExecutorRunningRow is true → fast path is tried;
+	// GetExecutionIDForSession returns empty → ErrStaleExecution → fall through
+	// to the full LaunchAgent path.
 	session := &models.TaskSession{
-		ID:               "session-123",
-		TaskID:           "task-123",
-		AgentProfileID:   "profile-123",
-		AgentExecutionID: "stale-exec-id",
-		State:            models.TaskSessionStateCreated,
-		StartedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
+		ID:             "session-123",
+		TaskID:         "task-123",
+		AgentProfileID: "profile-123",
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
 	}
 	repo.sessions[session.ID] = session
+	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
+		ID:               session.ID,
+		SessionID:        session.ID,
+		TaskID:           session.TaskID,
+		AgentExecutionID: "stale-exec-id",
+		Status:           "ready",
+	}
 
 	var launchCalled atomic.Bool
 	agentManager := &mockAgentManager{
@@ -498,6 +457,14 @@ func TestLaunchPreparedSession_StaleExecution_FallsThroughToLaunchAgent(t *testi
 		},
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			launchCalled.Store(true)
+			// Simulate the lifecycle manager's persistExecutorRunning by upserting the row.
+			repo.executorsRunning[req.SessionID] = &models.ExecutorRunning{
+				ID:               req.SessionID,
+				SessionID:        req.SessionID,
+				TaskID:           req.TaskID,
+				AgentExecutionID: "new-exec-id",
+				Status:           "starting",
+			}
 			return &LaunchAgentResponse{
 				AgentExecutionID: "new-exec-id",
 				Status:           v1.AgentStatusStarting,
@@ -522,21 +489,23 @@ func TestLaunchPreparedSession_StaleExecution_FallsThroughToLaunchAgent(t *testi
 		t.Fatalf("LaunchPreparedSession should fall through to LaunchAgent, got error: %v", err)
 	}
 
-	// Should have used LaunchAgent (full path) instead of failing
 	if !launchCalled.Load() {
 		t.Error("Expected LaunchAgent to be called after stale execution fallthrough")
 	}
 
-	// Should use the new execution ID
 	if execution.AgentExecutionID != "new-exec-id" {
 		t.Errorf("Expected new execution ID 'new-exec-id', got %s", execution.AgentExecutionID)
 	}
 
-	// DB should now hold the newly created execution ID, confirming the
-	// full LaunchAgent path ran and overwrote the stale value.
-	updatedSession := repo.sessions["session-123"]
-	if updatedSession.AgentExecutionID != "new-exec-id" {
-		t.Errorf("Expected DB AgentExecutionID to be 'new-exec-id', got %q", updatedSession.AgentExecutionID)
+	// executors_running should now hold the new ID (lifecycle manager owns this
+	// write; the test simulates that via launchAgentFunc above).
+	updatedRunning := repo.executorsRunning["session-123"]
+	if updatedRunning == nil || updatedRunning.AgentExecutionID != "new-exec-id" {
+		got := ""
+		if updatedRunning != nil {
+			got = updatedRunning.AgentExecutionID
+		}
+		t.Errorf("Expected executors_running.agent_execution_id to be 'new-exec-id', got %q", got)
 	}
 }
 
@@ -834,10 +803,17 @@ func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
 			atomic.AddInt64(&launchCount, 1)
 			entered <- struct{}{}
 			<-gate
-			// Simulate the first caller persisting the agent execution id —
-			// the second caller's re-fetch under the lock will see it and
-			// take the fast path instead of launching again.
-			repo.sessions[req.SessionID].AgentExecutionID = "exec-race"
+			// Simulate the lifecycle manager's persistExecutorRunning: the row
+			// must exist after the first launch so the second caller's
+			// HasExecutorRunningRow check returns true and routes to the
+			// fast path (startAgentOnExistingWorkspace) instead of launching again.
+			repo.executorsRunning[req.SessionID] = &models.ExecutorRunning{
+				ID:               req.SessionID,
+				SessionID:        req.SessionID,
+				TaskID:           req.TaskID,
+				AgentExecutionID: "exec-race",
+				Status:           "starting",
+			}
 			return &LaunchAgentResponse{AgentExecutionID: "exec-race", Status: v1.AgentStatusStarting}, nil
 		},
 		// Fast path lookup must succeed for the second caller; mirror what

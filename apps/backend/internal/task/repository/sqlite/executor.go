@@ -337,7 +337,76 @@ func (r *Repository) DeleteExecutorRunningBySessionID(ctx context.Context, sessi
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("executor running not found for session: %s", sessionID)
+		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
+	}
+	return nil
+}
+
+// HasExecutorRunningRow returns true if an executors_running row exists for sessionID.
+// Used as the canonical "session has been launched" check, replacing reads of the
+// (now removed) task_sessions.agent_execution_id != "" pattern.
+func (r *Repository) HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, fmt.Errorf("session_id is required")
+	}
+	var exists int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT 1 FROM executors_running WHERE session_id = ? LIMIT 1
+	`), sessionID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// UpdateResumeToken performs a CAS update of resume_token + last_message_uuid keyed on
+// the row's current agent_execution_id. If the row has rotated to a different execution
+// since expectedExecID was observed, the update affects 0 rows and returns
+// models.ErrExecutionRotated — the caller's write came from a defunct execution and
+// must be discarded.
+//
+// expectedExecID == "" means "match any agent_execution_id" (used during initial
+// row population when the caller doesn't know/care). Prefer passing the actual ID.
+func (r *Repository) UpdateResumeToken(ctx context.Context, sessionID, expectedExecID, resumeToken, lastMessageUUID string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	now := time.Now().UTC()
+	var (
+		result sql.Result
+		err    error
+	)
+	if expectedExecID == "" {
+		result, err = r.db.ExecContext(ctx, r.db.Rebind(`
+			UPDATE executors_running
+			   SET resume_token = ?, last_message_uuid = ?, updated_at = ?
+			 WHERE session_id = ?
+		`), resumeToken, lastMessageUUID, now, sessionID)
+	} else {
+		result, err = r.db.ExecContext(ctx, r.db.Rebind(`
+			UPDATE executors_running
+			   SET resume_token = ?, last_message_uuid = ?, updated_at = ?
+			 WHERE session_id = ?
+			   AND agent_execution_id = ?
+		`), resumeToken, lastMessageUUID, now, sessionID, expectedExecID)
+	}
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		// Distinguish "no row at all" from "row exists but rotated".
+		exists, hasErr := r.HasExecutorRunningRow(ctx, sessionID)
+		if hasErr != nil {
+			return hasErr
+		}
+		if !exists {
+			return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
+		}
+		return models.ErrExecutionRotated
 	}
 	return nil
 }

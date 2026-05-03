@@ -370,12 +370,14 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// Inject session handover context if there are previous sessions for this task.
 	prompt = e.injectHandoverIfNeeded(ctx, task.ID, sessionID, prompt)
 
-	// Fast path: workspace already launched (e.g., from PrepareSession with workspace).
+	// Fast path: workspace already launched (executors_running row exists).
 	// Only start the agent subprocess if requested; otherwise return early.
-	// If startAgentOnExistingWorkspace returns ErrStaleExecution, the in-memory execution
-	// was lost (e.g. backend restart). The session's AgentExecutionID has been cleared,
-	// so we fall through to the full LaunchAgent path below.
-	if session.AgentExecutionID != "" {
+	// If startAgentOnExistingWorkspace returns ErrStaleExecution, the in-memory
+	// execution was lost (e.g. backend restart). The full LaunchAgent path below
+	// will create a new execution and lifecycle.persistExecutorRunning will
+	// overwrite the stale row.
+	hasRunning, _ := e.repo.HasExecutorRunningRow(ctx, sessionID)
+	if hasRunning {
 		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode)
 		if !errors.Is(err, ErrStaleExecution) {
 			return result, err
@@ -679,41 +681,24 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 
 // startAgentOnExistingWorkspace handles the case where LaunchPreparedSession is called on a session
 // whose workspace (agentctl) was already launched. It optionally starts just the agent subprocess.
+//
+// The in-memory ExecutionStore is the single source of truth here: if no execution
+// exists for this session in the store, the workspace is gone (or was never
+// created in this process — e.g. after restart) and the caller must take the full
+// re-launch path. Pre-refactor this also consulted session.AgentExecutionID and
+// reconciled DB drift; that's now structurally impossible because executors_running
+// is owned by the lifecycle manager and writes are atomic with executionStore.Add.
 func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string) (*TaskExecution, error) {
-	// Resolve the actual execution ID from the in-memory store. After a backend
-	// restart, EnsureWorkspaceExecutionForSession may have created a new execution
-	// with a different ID than what the database still holds. Using the stale DB
-	// value would cause "execution not found" errors.
-	executionID := session.AgentExecutionID
-	liveID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
-	if err != nil {
+	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
+	if err != nil || executionID == "" {
 		// No execution exists in memory (e.g. backend restarted since workspace was prepared).
-		// Clear AgentExecutionID and return ErrStaleExecution so the caller falls through
-		// to the full LaunchAgent path, which creates a complete execution with agent
-		// commands, worktree, and all required configuration.
-		e.logger.Info("stale execution ID, clearing for full re-launch",
-			zap.String("session_id", session.ID),
-			zap.String("stale_execution_id", executionID))
-		session.AgentExecutionID = ""
-		if updateErr := e.repo.UpdateTaskSession(ctx, session); updateErr != nil {
-			e.logger.Warn("failed to clear stale execution ID",
-				zap.String("session_id", session.ID),
-				zap.Error(updateErr))
-		}
+		// Return ErrStaleExecution so the caller falls through to the full LaunchAgent path,
+		// which creates a complete execution with agent commands, worktree, and all required
+		// configuration. The lifecycle manager will overwrite any pre-existing executors_running
+		// row when it runs persistExecutorRunning, so we don't pre-clean here.
+		e.logger.Info("no in-memory execution for session, falling through to full re-launch",
+			zap.String("session_id", session.ID))
 		return nil, ErrStaleExecution
-	}
-	if liveID != "" && liveID != executionID {
-		e.logger.Info("correcting stale execution ID from DB with live in-memory value",
-			zap.String("session_id", session.ID),
-			zap.String("stale_id", executionID),
-			zap.String("live_id", liveID))
-		executionID = liveID
-		session.AgentExecutionID = liveID
-		if updateErr := e.repo.UpdateTaskSession(ctx, session); updateErr != nil {
-			e.logger.Warn("failed to persist corrected execution ID",
-				zap.String("session_id", session.ID),
-				zap.Error(updateErr))
-		}
 	}
 
 	if !startAgent {
@@ -942,7 +927,9 @@ func (e *Executor) persistTaskEnvironment(
 	workspacePath := computeWorkspacePath(req, resp)
 
 	if existingEnv != nil {
-		existingEnv.AgentExecutionID = resp.AgentExecutionID
+		// agent_execution_id is no longer stored on task_environments — the column
+		// is being dropped (executors_running is the single source of truth).
+		// Status, worktree, and container fields are still env-row-owned.
 		existingEnv.Status = models.TaskEnvironmentStatusReady
 		// Refresh worktree + workspace fields. The original update branch only
 		// touched AgentExecutionID/Status, so envs created with empty paths
@@ -981,14 +968,15 @@ func (e *Executor) persistTaskEnvironment(
 		ExecutorType:      req.ExecutorType,
 		ExecutorID:        execCfg.ExecutorID,
 		ExecutorProfileID: session.ExecutorProfileID,
-		AgentExecutionID:  resp.AgentExecutionID,
-		Status:            models.TaskEnvironmentStatusReady,
-		WorktreeID:        resp.WorktreeID,
-		WorktreePath:      resp.WorktreePath,
-		WorktreeBranch:    resp.WorktreeBranch,
-		WorkspacePath:     workspacePath,
-		ContainerID:       resp.ContainerID,
-		TaskDirName:       req.TaskDirName,
+		// AgentExecutionID is intentionally not set here — see executors_running
+		// for the active execution per session.
+		Status:         models.TaskEnvironmentStatusReady,
+		WorktreeID:     resp.WorktreeID,
+		WorktreePath:   resp.WorktreePath,
+		WorktreeBranch: resp.WorktreeBranch,
+		WorkspacePath:  workspacePath,
+		ContainerID:    resp.ContainerID,
+		TaskDirName:    req.TaskDirName,
 	}
 	// Embed per-repo rows in the same create transaction when multi-repo.
 	if len(resp.Worktrees) > 0 {
