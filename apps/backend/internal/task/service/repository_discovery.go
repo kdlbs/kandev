@@ -10,10 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"go.uber.org/zap"
-
-	"github.com/kandev/kandev/internal/common/logger"
 )
 
 type RepositoryDiscoveryConfig struct {
@@ -213,72 +209,18 @@ func (s *Service) LocalRepositoryCurrentBranch(ctx context.Context, path string)
 // local repository on disk. Used by the task-create dialog to preflight the
 // fresh-branch flow before committing to a destructive checkout.
 func (s *Service) LocalRepositoryStatus(ctx context.Context, path string) (LocalRepoStatus, error) {
-	roots := s.discoveryRoots()
-	s.logger.Info("DEBUG_BRANCH LocalRepositoryStatus entry",
-		zap.String("path", path),
-		zap.Strings("roots", roots))
 	absPath, err := s.resolveAllowedLocalPath(path)
 	if err != nil {
-		s.logger.Info("DEBUG_BRANCH resolveAllowedLocalPath failed",
-			zap.String("path", path), zap.Error(err))
 		return LocalRepoStatus{}, err
 	}
 	dirty, err := readGitDirtyFiles(ctx, absPath)
 	if err != nil {
-		s.logger.Info("DEBUG_BRANCH readGitDirtyFiles failed",
-			zap.String("absPath", absPath), zap.Error(err))
 		return LocalRepoStatus{}, err
 	}
-	branch := readGitCurrentBranchVerbose(absPath, roots, s.logger)
-	s.logger.Info("DEBUG_BRANCH LocalRepositoryStatus result",
-		zap.String("absPath", absPath),
-		zap.String("branch", branch),
-		zap.Int("dirty_count", len(dirty)))
 	return LocalRepoStatus{
-		CurrentBranch: branch,
+		CurrentBranch: readGitCurrentBranch(absPath, s.discoveryRoots()),
 		DirtyFiles:    dirty,
 	}, nil
-}
-
-// readGitCurrentBranchVerbose mirrors readGitCurrentBranch but logs which arm
-// returned the empty string. Used for the debug repro of the task-create dialog
-// "branch" placeholder; remove once the path-allowlist / detached-HEAD root
-// cause is identified.
-func readGitCurrentBranchVerbose(repoPath string, allowedRoots []string, log *logger.Logger) string {
-	if !filepath.IsAbs(repoPath) {
-		log.Info("DEBUG_BRANCH readGitCurrentBranch bail: not absolute", zap.String("repoPath", repoPath))
-		return ""
-	}
-	cleanRepo := filepath.Clean(repoPath)
-	gitDir, err := resolveGitDirWithin(cleanRepo, allowedRoots)
-	if err != nil {
-		log.Info("DEBUG_BRANCH readGitCurrentBranch bail: resolveGitDirWithin",
-			zap.String("cleanRepo", cleanRepo),
-			zap.Strings("allowedRoots", allowedRoots),
-			zap.Error(err))
-		return ""
-	}
-	headPath := filepath.Clean(filepath.Join(gitDir, gitHEAD))
-	log.Info("DEBUG_BRANCH readGitCurrentBranch resolved gitDir",
-		zap.String("gitDir", gitDir),
-		zap.String("headPath", headPath))
-	if !filepath.IsAbs(headPath) {
-		log.Info("DEBUG_BRANCH readGitCurrentBranch bail: headPath not abs", zap.String("headPath", headPath))
-		return ""
-	}
-	content, err := os.ReadFile(headPath)
-	if err != nil {
-		log.Info("DEBUG_BRANCH readGitCurrentBranch bail: ReadFile", zap.String("headPath", headPath), zap.Error(err))
-		return ""
-	}
-	trimmed := strings.TrimSpace(string(content))
-	log.Info("DEBUG_BRANCH readGitCurrentBranch HEAD content", zap.String("trimmed", trimmed))
-	ref, ok := strings.CutPrefix(trimmed, "ref: ")
-	if !ok {
-		log.Info("DEBUG_BRANCH readGitCurrentBranch bail: detached HEAD", zap.String("trimmed", trimmed))
-		return ""
-	}
-	return strings.TrimPrefix(ref, "refs/heads/")
 }
 
 func (s *Service) resolveAllowedLocalPath(repoPath string) (string, error) {
@@ -552,10 +494,32 @@ func readGitCurrentBranch(repoPath string, allowedRoots []string) string {
 	}
 	trimmed := strings.TrimSpace(string(content))
 	ref, ok := strings.CutPrefix(trimmed, "ref: ")
-	if !ok {
-		return ""
+	if ok {
+		return strings.TrimPrefix(ref, "refs/heads/")
 	}
-	return strings.TrimPrefix(ref, "refs/heads/")
+	// Detached HEAD: HEAD is a raw commit SHA (no "ref: " prefix). Return the
+	// short form so the task-create dialog's locked branch chip surfaces a
+	// meaningful identifier ("a7f5558") instead of the empty placeholder.
+	// Validate it's a hex string of 40 chars to avoid leaking garbled HEAD content.
+	if isHexCommitSHA(trimmed) {
+		return trimmed[:7]
+	}
+	return ""
+}
+
+// isHexCommitSHA returns true if s is a 40-character lowercase hex string —
+// the format git writes to HEAD when detached. Anything else (truncated,
+// uppercase, with prefix) is treated as unparseable rather than echoed back.
+func isHexCommitSHA(s string) bool {
+	if len(s) != 40 {
+		return false
+	}
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // readGitDirtyFiles returns the list of dirty file paths in a repository, as

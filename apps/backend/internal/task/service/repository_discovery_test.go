@@ -170,6 +170,44 @@ func TestReadGitDefaultBranch(t *testing.T) {
 	}
 }
 
+func TestReadGitCurrentBranchDetachedHead(t *testing.T) {
+	repoPath := canonicalTempDir(t)
+	gitDir := filepath.Join(repoPath, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("mkdir git: %v", err)
+	}
+	headPath := filepath.Join(gitDir, "HEAD")
+	roots := []string{filepath.Dir(repoPath)}
+
+	// Branch HEAD: returns the branch name.
+	if err := os.WriteFile(headPath, []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+	if got := readGitCurrentBranch(repoPath, roots); got != "main" {
+		t.Fatalf("ref HEAD: got %q, want %q", got, "main")
+	}
+
+	// Detached HEAD with a 40-char SHA returns the short (7-char) form. This
+	// is the regression: pre-fix it returned "" and the task-create dialog's
+	// locked branch chip fell back to the "branch" placeholder.
+	const sha = "a7f5558af69cd3cc2813536b775687b9bfaf65db"
+	if err := os.WriteFile(headPath, []byte(sha+"\n"), 0o644); err != nil {
+		t.Fatalf("write detached HEAD: %v", err)
+	}
+	if got := readGitCurrentBranch(repoPath, roots); got != "a7f5558" {
+		t.Fatalf("detached HEAD: got %q, want %q", got, "a7f5558")
+	}
+
+	// Garbled HEAD content (not a valid SHA): return empty rather than
+	// echo back arbitrary bytes.
+	if err := os.WriteFile(headPath, []byte("not-a-sha\n"), 0o644); err != nil {
+		t.Fatalf("write garbled HEAD: %v", err)
+	}
+	if got := readGitCurrentBranch(repoPath, roots); got != "" {
+		t.Fatalf("garbled HEAD: got %q, want empty", got)
+	}
+}
+
 func TestResolveGitDir(t *testing.T) {
 	repoPath := t.TempDir()
 	gitDir := filepath.Join(repoPath, ".git")
