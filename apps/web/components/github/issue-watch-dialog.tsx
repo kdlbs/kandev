@@ -20,7 +20,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kande
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
-import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
+import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
 import {
   ScriptEditor,
   computeEditorHeight,
@@ -63,8 +63,6 @@ type FormState = {
   pollInterval: number;
 };
 
-type WorkflowStepOption = { id: string; name: string };
-
 const DEFAULT_QUERY = "type:issue state:open";
 
 function makeDefaultForm(workspaceId: string): FormState {
@@ -100,32 +98,6 @@ function formStateFromWatch(watch: IssueWatch): FormState {
     enabled: watch.enabled,
     pollInterval: watch.poll_interval_seconds,
   };
-}
-
-function useWorkflowSteps(workflowId: string) {
-  const [steps, setSteps] = useState<WorkflowStepOption[]>([]);
-
-  useEffect(() => {
-    if (!workflowId) {
-      void Promise.resolve().then(() => setSteps([]));
-      return;
-    }
-    let cancelled = false;
-    listWorkflowSteps(workflowId)
-      .then((response) => {
-        if (cancelled) return;
-        const sorted = [...response.steps].sort((a, b) => a.position - b.position);
-        setSteps(sorted.map((s) => ({ id: s.id, name: s.name })));
-      })
-      .catch(() => {
-        if (!cancelled) setSteps([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workflowId]);
-
-  return steps;
 }
 
 function useWatchFormData(workspaceId: string) {
@@ -280,7 +252,7 @@ function IssueAutomationFields({
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
 }) {
   const { workflows, agentProfiles, allExecutorProfiles } = useWatchFormData(form.workspaceId);
-  const workflowSteps = useWorkflowSteps(form.workflowId);
+  const { steps: workflowSteps, loading: stepsLoading } = useWorkflowSteps(form.workflowId);
 
   return (
     <>
@@ -299,8 +271,9 @@ function IssueAutomationFields({
           description="Initial step for new tasks."
           value={form.workflowStepId}
           onChange={(v) => setForm((prev) => ({ ...prev, workflowStepId: v }))}
-          placeholder={form.workflowId ? "Select step" : "Select a workflow first"}
+          placeholder={stepPlaceholder(form.workflowId, stepsLoading, workflowSteps.length)}
           items={workflowSteps.map((s) => ({ id: s.id, label: s.name }))}
+          disabled={!form.workflowId || stepsLoading || workflowSteps.length === 0}
         />
       </div>
       <div className="grid grid-cols-2 gap-4">

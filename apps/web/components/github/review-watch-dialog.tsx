@@ -20,7 +20,11 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kande
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
-import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
+import {
+  useWorkflowSteps,
+  stepPlaceholder,
+  type WorkflowStepOption,
+} from "@/hooks/use-workflow-steps";
 import { DEFAULT_REVIEW_WATCH_PROMPT } from "@/components/github/review-watch-placeholders";
 import { ReviewWatchPromptField } from "@/components/github/review-watch-prompt-field";
 import { RepoFilterSelector } from "@/components/github/repo-filter-selector";
@@ -60,8 +64,6 @@ type FormState = {
   enabled: boolean;
   pollInterval: number;
 };
-
-type WorkflowStepOption = { id: string; name: string };
 
 function makeDefaultForm(workspaceId: string): FormState {
   return {
@@ -161,32 +163,6 @@ function WorkspacePicker({
 }
 
 // --- Hooks ---
-
-function useWorkflowSteps(workflowId: string) {
-  const [steps, setSteps] = useState<WorkflowStepOption[]>([]);
-
-  useEffect(() => {
-    if (!workflowId) {
-      void Promise.resolve().then(() => setSteps([]));
-      return;
-    }
-    let cancelled = false;
-    listWorkflowSteps(workflowId)
-      .then((response) => {
-        if (cancelled) return;
-        const sorted = [...response.steps].sort((a, b) => a.position - b.position);
-        setSteps(sorted.map((s) => ({ id: s.id, name: s.name })));
-      })
-      .catch(() => {
-        if (!cancelled) setSteps([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workflowId]);
-
-  return steps;
-}
 
 function useWatchFormData(workspaceId: string) {
   useSettingsData(true);
@@ -309,7 +285,7 @@ function WatchFormFields({
   onSelectedReposChange: (repos: RepoFilter[]) => void;
 }) {
   const { workflows, agentProfiles, allExecutorProfiles } = useWatchFormData(form.workspaceId);
-  const workflowSteps = useWorkflowSteps(form.workflowId);
+  const { steps: workflowSteps, loading: stepsLoading } = useWorkflowSteps(form.workflowId);
 
   const handleWorkflowChange = useCallback(
     (v: string) => {
@@ -351,6 +327,7 @@ function WatchFormFields({
         setForm={setForm}
         workflows={workflows}
         workflowSteps={workflowSteps}
+        stepsLoading={stepsLoading}
         onWorkflowChange={handleWorkflowChange}
       />
       <ProfileFields
@@ -374,12 +351,14 @@ function WorkflowFields({
   setForm,
   workflows,
   workflowSteps,
+  stepsLoading,
   onWorkflowChange,
 }: {
   form: FormState;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
   workflows: Array<{ id: string; name: string }>;
   workflowSteps: WorkflowStepOption[];
+  stepsLoading: boolean;
   onWorkflowChange: (v: string) => void;
 }) {
   return (
@@ -397,8 +376,9 @@ function WorkflowFields({
         description="Initial step for new tasks. Auto-start is set on the step."
         value={form.workflowStepId}
         onChange={(v) => setForm((prev) => ({ ...prev, workflowStepId: v }))}
-        placeholder={form.workflowId ? "Select step" : "Select a workflow first"}
+        placeholder={stepPlaceholder(form.workflowId, stepsLoading, workflowSteps.length)}
         items={workflowSteps.map((s) => ({ id: s.id, label: s.name }))}
+        disabled={!form.workflowId || stepsLoading || workflowSteps.length === 0}
       />
     </div>
   );

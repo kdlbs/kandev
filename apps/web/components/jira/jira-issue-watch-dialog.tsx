@@ -18,7 +18,7 @@ import { Textarea } from "@kandev/ui/textarea";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
-import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
+import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
 import { searchJiraTickets } from "@/lib/api/domains/jira-api";
 import type {
   CreateJiraIssueWatchInput,
@@ -80,33 +80,6 @@ function formStateFromWatch(w: JiraIssueWatch): FormState {
     enabled: w.enabled,
     pollInterval: w.pollIntervalSeconds,
   };
-}
-
-type StepOption = { id: string; name: string };
-
-function useWorkflowSteps(workflowId: string) {
-  const [steps, setSteps] = useState<StepOption[]>([]);
-  useEffect(() => {
-    if (!workflowId) {
-      // Defer to next tick so we don't sync-set state inside an effect body.
-      void Promise.resolve().then(() => setSteps([]));
-      return;
-    }
-    let cancelled = false;
-    listWorkflowSteps(workflowId)
-      .then((res) => {
-        if (cancelled) return;
-        const sorted = [...res.steps].sort((a, b) => a.position - b.position);
-        setSteps(sorted.map((s) => ({ id: s.id, name: s.name })));
-      })
-      .catch(() => {
-        if (!cancelled) setSteps([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workflowId]);
-  return steps;
 }
 
 function useFormData(workspaceId: string) {
@@ -261,7 +234,7 @@ function AutomationFields({
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
 }) {
   const { workflows, agentProfiles, allExecutorProfiles } = useFormData(form.workspaceId);
-  const steps = useWorkflowSteps(form.workflowId);
+  const { steps, loading: stepsLoading } = useWorkflowSteps(form.workflowId);
   return (
     <>
       <div className="grid grid-cols-2 gap-4">
@@ -278,8 +251,9 @@ function AutomationFields({
           description="Initial step for new tasks."
           value={form.workflowStepId}
           onChange={(v) => setForm((p) => ({ ...p, workflowStepId: v }))}
-          placeholder={form.workflowId ? "Select step" : "Select a workflow first"}
+          placeholder={stepPlaceholder(form.workflowId, stepsLoading, steps.length)}
           items={steps.map((s) => ({ id: s.id, label: s.name }))}
+          disabled={!form.workflowId || stepsLoading || steps.length === 0}
         />
       </div>
       <div className="grid grid-cols-2 gap-4">
