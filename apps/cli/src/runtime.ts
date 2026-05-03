@@ -45,13 +45,20 @@ export function resolveRuntime(runtimeVersion?: string): ResolvedRuntime {
 
   const platformDir = getPlatformDir();
   const packageName = PLATFORM_TO_NPM_PACKAGE[platformDir];
+  let pkgJsonPath: string | null = null;
   try {
-    const pkgJsonPath = require.resolve(`${packageName}/package.json`);
+    pkgJsonPath = require.resolve(`${packageName}/package.json`);
+  } catch {
+    // MODULE_NOT_FOUND — npm runtime package is not installed. Fall through
+    // to step 3 (cache fallback only if --runtime-version is set).
+  }
+  if (pkgJsonPath) {
+    // The package IS installed. If validateBundle throws here, the bundle is
+    // present but corrupt — surface the error rather than the generic
+    // "no runtime found" message below.
     const packageRoot = path.dirname(pkgJsonPath);
     validateBundle(packageRoot);
     return { bundleDir: packageRoot, source: "npm" };
-  } catch {
-    // Package not installed or invalid — fall through.
   }
 
   if (runtimeVersion) {

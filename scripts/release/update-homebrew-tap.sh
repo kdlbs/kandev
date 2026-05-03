@@ -137,7 +137,11 @@ class Kandev < Formula
     libexec.install Dir["*"]
     # cli/bin/cli.js has #!/usr/bin/env node shebang; write_env_script sets
     # KANDEV_BUNDLE_DIR so the CLI launcher finds bin/ and web/ in the Cellar.
-    bin.write_env_script libexec/"cli/bin/cli.js", KANDEV_BUNDLE_DIR: libexec.to_s
+    # KANDEV_VERSION is read by run.ts at startup so the version is shown in
+    # logs (otherwise the launcher prints "release: (env)").
+    bin.write_env_script libexec/"cli/bin/cli.js",
+      KANDEV_BUNDLE_DIR: libexec.to_s,
+      KANDEV_VERSION:    version.to_s
   end
 
   test do

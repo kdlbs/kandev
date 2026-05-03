@@ -83,6 +83,7 @@ RUNTIME_PACKAGES=(
 echo
 echo "$(bold "Publishing @kdlbs/runtime-* packages...")"
 FAILED_PACKAGES=()
+ALREADY_PUBLISHED=()
 
 for pkg in "${RUNTIME_PACKAGES[@]}"; do
   scope="${pkg%%/*}"   # @kdlbs
@@ -90,19 +91,42 @@ for pkg in "${RUNTIME_PACKAGES[@]}"; do
   pkg_dir="$NPM_PKG_DIR/${scope}/${name}"
 
   if [[ ! -d "$pkg_dir" ]]; then
-    echo "  $(red "missing") $pkg_dir" >&2
+    echo "  $(red "missing") $pkg_dir (package directory was not generated)" >&2
     FAILED_PACKAGES+=("$pkg")
     continue
   fi
 
   log "Publishing $pkg@$VERSION..."
-  if (cd "$pkg_dir" && npm publish --access public --provenance 2>&1); then
+  # Capture full npm output so we can show the real error on failure rather
+  # than just a generic warning. Distinguish "already published" (idempotent
+  # case — fine) from real failures (must abort).
+  if output="$(cd "$pkg_dir" && npm publish --access public --provenance 2>&1)"; then
     log_ok "$pkg@$VERSION published"
+  elif echo "$output" | grep -qE "EPUBLISHCONFLICT|cannot publish over the previously published versions|You cannot publish over"; then
+    echo "  $(yellow "skip") $pkg@$VERSION already published (treated as idempotent success)" >&2
+    ALREADY_PUBLISHED+=("$pkg")
   else
-    echo "  $(yellow "warn") Failed to publish $pkg@$VERSION (may already exist)" >&2
+    echo "  $(red "FAIL") Failed to publish $pkg@$VERSION:" >&2
+    echo "$output" | sed 's/^/      /' >&2
     FAILED_PACKAGES+=("$pkg")
   fi
 done
+
+# Abort before publishing main kandev if any runtime publish failed.
+# Otherwise users on those platforms would get "No Kandev runtime found"
+# after install, with kandev pointing at @kdlbs/runtime-*@VERSION that
+# doesn't exist on npm.
+if [[ "${#FAILED_PACKAGES[@]}" -gt 0 ]]; then
+  echo
+  echo "$(red "Error:") The following runtime packages failed to publish:" >&2
+  for pkg in "${FAILED_PACKAGES[@]}"; do
+    echo "  - $pkg" >&2
+  done
+  echo >&2
+  echo "Refusing to publish main kandev@$VERSION. Fix the runtime publish failures" >&2
+  echo "and re-run this script (already-published runtime packages will be skipped)." >&2
+  exit 1
+fi
 
 # -- Pin optionalDependencies before publishing main kandev ------------------
 #
@@ -144,12 +168,10 @@ rm -rf "$WORK_DIR"
 # -- Report -------------------------------------------------------------------
 
 echo
-if [[ "${#FAILED_PACKAGES[@]}" -gt 0 ]]; then
-  echo "$(yellow "Warning:") Some runtime packages failed to publish:"
-  for pkg in "${FAILED_PACKAGES[@]}"; do
-    echo "  - $pkg"
+echo "$(green "$(bold "All npm packages published successfully!")")"
+if [[ "${#ALREADY_PUBLISHED[@]}" -gt 0 ]]; then
+  echo "  $(yellow "note") The following runtime packages were already published at $VERSION:"
+  for pkg in "${ALREADY_PUBLISHED[@]}"; do
+    echo "    - $pkg"
   done
-  echo "  These may already exist at version $VERSION, or may need to be published manually."
-else
-  echo "$(green "$(bold "All npm packages published successfully!")")"
 fi

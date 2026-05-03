@@ -37,15 +37,18 @@ on:
         type: boolean
         default: false
 
+# Default to read-only at the workflow level. Each job opts into the writes
+# it actually needs.
 permissions:
-  contents: write
-  packages: write
-  pull-requests: write
+  contents: read
 
 jobs:
   prepare:
     name: Prepare release (bump version, PR, tag)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write       # push release branch + tag
+      pull-requests: write  # create + merge release PR
     outputs:
       version: ${{ steps.compute.outputs.version }}
       tag: ${{ steps.compute.outputs.tag }}
@@ -254,7 +257,7 @@ jobs:
 
   build-bundles:
     name: Build platform bundle (${{ matrix.platform }})
-    needs: [build-web, build-cli]
+    needs: [prepare, build-web, build-cli]
     if: ${{ !inputs.dry_run }}
     strategy:
       matrix:
@@ -345,6 +348,9 @@ jobs:
     needs: prepare
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write    # push to GHCR
     steps:
       - uses: actions/checkout@v4
         with:
@@ -386,6 +392,8 @@ jobs:
     needs: [prepare, build-bundles]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write    # softprops/action-gh-release creates the release
     steps:
       - uses: actions/checkout@v4
         with:

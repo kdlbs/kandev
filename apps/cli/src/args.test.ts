@@ -79,6 +79,17 @@ describe("parseArgs", () => {
   it("throws ParseError on empty --runtime-version=", () => {
     expect(() => parseArgs(["--runtime-version="])).toThrow(/--runtime-version requires a value/);
   });
+
+  it("throws ParseError when --runtime-version has no value", () => {
+    expect(() => parseArgs(["--runtime-version"])).toThrow(ParseError);
+    expect(() => parseArgs(["--runtime-version"])).toThrow(/--runtime-version requires a value/);
+  });
+
+  it("throws ParseError when the next token after --runtime-version is another flag", () => {
+    expect(() => parseArgs(["--runtime-version", "--debug"])).toThrow(
+      /--runtime-version requires a value/,
+    );
+  });
 });
 
 describe("resolvePorts", () => {

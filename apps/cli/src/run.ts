@@ -17,7 +17,7 @@ import { getBinaryName, getPlatformDir } from "./platform";
 import { sortVersionsDesc } from "./version";
 import { pickAvailablePort } from "./ports";
 import { createProcessSupervisor } from "./process";
-import { resolveRuntime } from "./runtime";
+import { resolveRuntime, validateBundle } from "./runtime";
 import { attachBackendExitHandler, logStartupInfo } from "./shared";
 import { launchWebApp, openBrowser } from "./web";
 
@@ -165,6 +165,8 @@ async function prepareBundleForLaunch({
         );
       }
     }
+    // Validate the resolved bundle has all required binaries before launching.
+    validateBundle(bundleDir);
     releaseTag = tag;
   } else {
     // Default path: resolve from KANDEV_BUNDLE_DIR or installed npm runtime package.
