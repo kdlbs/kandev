@@ -337,7 +337,7 @@ func (r *Repository) DeleteExecutorRunningBySessionID(ctx context.Context, sessi
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("executor running not found for session: %s", sessionID)
+		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
 	}
 	return nil
 }
