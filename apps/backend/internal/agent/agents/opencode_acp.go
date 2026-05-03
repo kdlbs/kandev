@@ -66,7 +66,7 @@ func (a *OpenCodeACP) Logo(v LogoVariant) []byte {
 func (a *OpenCodeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	// Check for the opencode CLI on PATH. Auth state is surfaced later by
 	// the ACP probe, not by scanning ~/.opencode.
-	result, err := Detect(ctx, WithCommand("opencode"))
+	result, err := Detect(ctx, WithCommand("opencode"), WithNpxRunnable(opencodeACPPkg))
 	if err != nil {
 		return result, err
 	}
@@ -78,13 +78,13 @@ func (a *OpenCodeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error)
 }
 
 func (a *OpenCodeACP) BuildCommand(opts CommandOptions) Command {
-	return Cmd("opencode", "acp").Build()
+	return Cmd("npx", "-y", opencodeACPPkg, "acp").Build()
 }
 
 func (a *OpenCodeACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd("opencode", "acp").Build(),
+		Cmd:            Cmd("npx", "-y", opencodeACPPkg, "acp").Build(),
 		WorkingDir:     "{workspace}",
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
@@ -111,6 +111,6 @@ func (a *OpenCodeACP) PermissionSettings() map[string]PermissionSetting {
 func (a *OpenCodeACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("opencode", "acp"),
+		Command:   NewCommand("npx", "-y", opencodeACPPkg, "acp"),
 	}
 }

@@ -106,6 +106,14 @@ type AuthenticatableAdapter interface {
 	Authenticate(ctx context.Context, methodID string) error
 }
 
+// ConfigOptionSettableAdapter is an optional interface implemented by adapters
+// that support setting an arbitrary session config option (ACP
+// session/set_config_option). Useful for agent-specific runtime knobs that
+// aren't covered by mode/model.
+type ConfigOptionSettableAdapter interface {
+	SetConfigOption(ctx context.Context, key, value string) error
+}
+
 // SessionResettableAdapter is an optional interface implemented by adapters that
 // can reset context by creating a new session on the same connection, without
 // restarting the agent subprocess. Only ACP adapters support this.

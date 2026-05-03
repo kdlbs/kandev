@@ -67,7 +67,7 @@ func (a *CopilotACP) Logo(v LogoVariant) []byte {
 func (a *CopilotACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	// Check for the copilot CLI on PATH. Auth state is surfaced later by
 	// the ACP probe, not by scanning ~/.copilot.
-	result, err := Detect(ctx, WithCommand("copilot"))
+	result, err := Detect(ctx, WithCommand("copilot"), WithNpxRunnable(copilotACPPkg))
 	if err != nil {
 		return result, err
 	}

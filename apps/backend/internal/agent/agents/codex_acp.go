@@ -65,7 +65,7 @@ func (a *CodexACP) Logo(v LogoVariant) []byte {
 func (a *CodexACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	// Check for the CLI binary on PATH. Auth state is surfaced later by the
 	// ACP probe (session/new returns auth_required if the user hasn't logged in).
-	result, err := Detect(ctx, WithCommand("codex-acp"), WithCommand("codex"))
+	result, err := Detect(ctx, WithCommand("codex-acp"), WithCommand("codex"), WithNpxRunnable(codexACPPkg))
 	if err != nil {
 		return result, err
 	}

@@ -40,6 +40,27 @@ func WithCommand(name string) DetectOption {
 	}
 }
 
+// WithNpxRunnable reports the agent as runnable via `npx -y <pkg>` whenever
+// node/npx is on PATH. MatchedPath is tagged "npx <pkg>" so the settings page
+// renders "Detected at npx <pkg>", giving users an honest hint that the
+// package isn't globally installed but will be fetched on launch.
+//
+// Use this AFTER a WithCommand check for the global binary — Detect is
+// first-match-wins, so the global install (if present) is preferred and
+// reports its real path.
+func WithNpxRunnable(pkg string) DetectOption {
+	return func(ctx context.Context) (bool, string, error) {
+		// Prefer npx since it's what we launch with; fall back to node in
+		// case a setup ships node without npx.
+		for _, cmd := range []string{"npx", "node"} {
+			if _, err := exec.LookPath(cmd); err == nil {
+				return true, "npx " + pkg, nil
+			}
+		}
+		return false, "", nil
+	}
+}
+
 // WithCommandOutput runs a command and checks stdout matches regex.
 func WithCommandOutput(pattern string, name string, args ...string) DetectOption {
 	return func(ctx context.Context) (bool, string, error) {

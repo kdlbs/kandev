@@ -51,6 +51,16 @@ func (r *Registry) LoadDefaults() {
 		agents.NewGemini(),
 		agents.NewOpenCodeACP(),
 		agents.NewAmpACP(),
+		agents.NewQwenACP(),
+		agents.NewIFlowACP(),
+		agents.NewDroidACP(),
+		agents.NewKilocodeACP(),
+		agents.NewPiACP(),
+		agents.NewCursorACP(),
+		agents.NewKimiACP(),
+		agents.NewKiroACP(),
+		agents.NewQoderACP(),
+		agents.NewTraeACP(),
 		agents.NewMockAgent(),
 	}
 

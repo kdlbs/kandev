@@ -63,7 +63,7 @@ func (a *Auggie) Logo(v LogoVariant) []byte {
 func (a *Auggie) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	// Check for the auggie CLI on PATH. Auth state is surfaced later by the
 	// ACP probe.
-	result, err := Detect(ctx, WithCommand("auggie"))
+	result, err := Detect(ctx, WithCommand("auggie"), WithNpxRunnable(auggiePkg))
 	if err != nil {
 		return result, err
 	}

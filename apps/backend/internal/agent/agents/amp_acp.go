@@ -65,7 +65,7 @@ func (a *AmpACP) Logo(v LogoVariant) []byte {
 func (a *AmpACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	// Check for the amp CLI on PATH. Auth state is surfaced later by the
 	// ACP probe, not by scanning ~/.amp.
-	result, err := Detect(ctx, WithCommand("amp-acp"), WithCommand("amp"))
+	result, err := Detect(ctx, WithCommand("amp-acp"), WithCommand("amp"), WithNpxRunnable(ampACPPkg))
 	if err != nil {
 		return result, err
 	}
