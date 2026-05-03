@@ -13,8 +13,11 @@ name: release
 #   7. publish-npm    — publish kandev@X.Y.Z + @kdlbs/runtime-*@X.Y.Z to npmjs
 #   8. update-homebrew-tap — push updated Formula/kandev.rb to kdlbs/homebrew-kandev
 #
+# npm publishing uses Trusted Publishers (OIDC) — no NPM_TOKEN required.
+# Each package (kandev + 5 @kdlbs/runtime-* packages) must have this workflow
+# configured as its trusted publisher on npmjs.com (Settings → Publishing access).
+#
 # Required secrets:
-#   NPM_TOKEN                — npm publish token with access to `kandev` and `@kdlbs/*`
 #   HOMEBREW_TAP_DEPLOY_KEY  — SSH private key for kdlbs/homebrew-kandev deploy key
 
 on:
@@ -443,6 +446,9 @@ jobs:
     needs: [prepare, publish-release]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write    # Required for OIDC trusted publishing
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -462,7 +468,6 @@ jobs:
 
       - name: Publish npm packages
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           bash scripts/release/publish-npm.sh \

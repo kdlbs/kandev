@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # Publish the main kandev npm package + all @kdlbs/runtime-* optional packages.
 #
+# Authentication: Trusted Publishers (OIDC). Each of the 6 packages must have
+# this workflow configured as its trusted publisher on npmjs.com. The npm CLI
+# auto-detects OIDC credentials from GitHub Actions and exchanges them for a
+# short-lived publish token. No NPM_TOKEN secret is needed.
+#
 # Prerequisites:
 #   - GitHub release assets for <tag> must already exist (verified before publishing).
-#   - Caller must be logged into npm with access to kandev and @kdlbs/* packages.
-#   - The @kdlbs npm org must exist with publish rights granted to the CI token.
+#   - Running inside GitHub Actions with `id-token: write` permission set on
+#     the publish-npm job. (npm publish from a local shell will fall back to
+#     classic auth — but tokens are not the recommended path going forward.)
 #
 # Usage:
 #   publish-npm.sh <version> <tag>
@@ -90,7 +96,7 @@ for pkg in "${RUNTIME_PACKAGES[@]}"; do
   fi
 
   log "Publishing $pkg@$VERSION..."
-  if (cd "$pkg_dir" && npm publish --access public 2>&1); then
+  if (cd "$pkg_dir" && npm publish --access public --provenance 2>&1); then
     log_ok "$pkg@$VERSION published"
   else
     echo "  $(yellow "warn") Failed to publish $pkg@$VERSION (may already exist)" >&2
@@ -106,7 +112,7 @@ echo "$(bold "Publishing kandev@$VERSION...")"
   cd "$ROOT_DIR/apps/cli"
   # Build before publishing
   pnpm build
-  npm publish --access public
+  npm publish --access public --provenance
 )
 log_ok "kandev@$VERSION published"
 
