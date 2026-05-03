@@ -334,6 +334,7 @@ function useRepoChipData({
   excludedRepoIds,
   onBranchChange,
   preferredDefaultBranch,
+  preferredDefaultBranchLoading,
 }: Pick<
   RepoChipProps,
   | "row"
@@ -343,6 +344,7 @@ function useRepoChipData({
   | "excludedRepoIds"
   | "onBranchChange"
   | "preferredDefaultBranch"
+  | "preferredDefaultBranchLoading"
 >) {
   const filteredRepos = useMemo(
     () => repositories.filter((r) => !excludedRepoIds.has(r.id) || r.id === row.repositoryId),
@@ -391,8 +393,17 @@ function useRepoChipData({
   // submit always carries an explicit branch. Otherwise fall back to the
   // user's last-used branch / main / master / develop. Skipped if the user
   // already picked a branch on this row.
+  //
+  // The `preferredDefaultBranchLoading` gate closes a race: without it,
+  // autoSelectBranch's last-used localStorage pick (e.g. "origin/master")
+  // would land in row.branch before currentLocalBranch resolved, then the
+  // row.branch guard above would short-circuit forever and the chip would
+  // render "will switch to: origin/master" even though the user just opened
+  // the dialog. With the gate, autoselect waits until local-status finishes
+  // so the current-branch preference gets first crack at row.branch.
   useEffect(() => {
     if (!branchSource || branchesLoading || branches.length === 0 || row.branch) return;
+    if (preferredDefaultBranchLoading) return;
     if (
       preferredDefaultBranch &&
       branches.some((b) => {
@@ -404,7 +415,15 @@ function useRepoChipData({
       return;
     }
     autoSelectBranch(branches, onBranchChange);
-  }, [branchSource, branchesLoading, branches, row.branch, onBranchChange, preferredDefaultBranch]);
+  }, [
+    branchSource,
+    branchesLoading,
+    branches,
+    row.branch,
+    onBranchChange,
+    preferredDefaultBranch,
+    preferredDefaultBranchLoading,
+  ]);
 
   const repoOptions: PillOption[] = useMemo(
     () => [
@@ -459,6 +478,7 @@ function RepoChip({
     excludedRepoIds,
     onBranchChange,
     preferredDefaultBranch,
+    preferredDefaultBranchLoading,
   });
   const { repoLabel, repoTooltip } = computeRepoChipDisplay(
     row,
