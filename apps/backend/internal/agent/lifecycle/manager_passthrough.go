@@ -313,6 +313,7 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 
 	execution.PassthroughProcessID = processInfo.ID
 	execution.PassthroughStartedAt = time.Now()
+	execution.passthroughLaunchUsedResume = false
 
 	m.logger.Info("passthrough session started",
 		zap.String("execution_id", execution.ID),
@@ -418,6 +419,7 @@ func (m *Manager) restartPassthroughProcess(ctx context.Context, execution *Agen
 	// 4. Update execution with new process ID
 	execution.PassthroughProcessID = processInfo.ID
 	execution.PassthroughStartedAt = time.Now()
+	execution.passthroughLaunchUsedResume = false
 
 	m.logger.Info("passthrough process restarted with fresh context",
 		zap.String("execution_id", execution.ID),
@@ -489,6 +491,7 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 
 	execution.PassthroughProcessID = processInfo.ID
 	execution.PassthroughStartedAt = time.Now()
+	execution.passthroughLaunchUsedResume = true
 
 	m.logger.Info("passthrough session resumed",
 		zap.String("session_id", sessionID),
@@ -594,10 +597,11 @@ func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpd
 	if status.Status == agentctltypes.ProcessStatusExited || status.Status == agentctltypes.ProcessStatusFailed {
 		// Only trigger auto-restart for the passthrough process, not for user shell terminals
 		if execution.PassthroughProcessID != "" && status.ProcessID == execution.PassthroughProcessID {
-			// Snapshot the start time synchronously so the goroutine doesn't
-			// race the next launch's write to execution.PassthroughStartedAt.
+			// Snapshot the start time and resume-launch flag synchronously so the
+			// goroutine doesn't race the next launch's writes to those fields.
 			startedAt := execution.PassthroughStartedAt
-			go m.handlePassthroughExit(execution, status, startedAt)
+			usedResume := execution.passthroughLaunchUsedResume
+			go m.handlePassthroughExit(execution, status, startedAt, usedResume)
 		} else {
 			m.logger.Debug("process exited but not the passthrough process, skipping auto-restart",
 				zap.String("session_id", status.SessionID),
@@ -609,10 +613,10 @@ func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpd
 
 // handlePassthroughExit handles auto-restart logic when a passthrough process exits.
 // This function is called asynchronously to allow the old process to be cleaned up first.
-// startedAt is the snapshot of execution.PassthroughStartedAt taken synchronously
-// at the call site — passed in rather than re-read here to avoid racing with
-// the next launch's write to that field.
-func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agentctltypes.ProcessStatusUpdate, startedAt time.Time) {
+// startedAt and usedResume are snapshots of the matching execution fields taken
+// synchronously at the call site — passed in rather than re-read here to avoid
+// racing with the next launch's writes to those fields.
+func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agentctltypes.ProcessStatusUpdate, startedAt time.Time, usedResume bool) {
 	const restartDelay = 500 * time.Millisecond
 	const cleanupDelay = 100 * time.Millisecond // Wait for old process cleanup
 	// fastFailWindow is short enough to catch launch-time failures (bad CLI
@@ -672,11 +676,90 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 	// auth failure). Restarting just thrashes — the next run hits the same
 	// failure at the same speed. Surface the failure to the user instead.
 	if isFastFailExit(startedAt, exitedAt, exitCode, fastFailWindow) {
-		m.notifyFastFailExit(interactiveRunner, sessionID, exitedAt.Sub(startedAt), exitCode, fastFailWindow)
+		uptime := exitedAt.Sub(startedAt)
+		// If the failed launch was a resume (e.g. `--resume <id>` or `-c`),
+		// the most likely cause is a stale conversation ID after a backend
+		// restart — "No conversation found to continue". Retry once with a
+		// fresh command (no resume flag) before giving up.
+		if usedResume {
+			m.attemptResumeFallback(execution, interactiveRunner, sessionID, exitCode, uptime, fastFailWindow)
+			return
+		}
+		m.notifyFastFailExit(interactiveRunner, sessionID, uptime, exitCode, fastFailWindow)
 		return
 	}
 
 	m.attemptPassthroughRestart(execution, interactiveRunner, sessionID, exitCode, restartDelay)
+}
+
+// attemptResumeFallback recovers from a fast-failed resume launch by relaunching
+// once with a fresh command (no resume flag). This handles the common case where
+// the local CLI's conversation history is gone after a backend restart and
+// `claude -c` / `claude --resume <id>` exits with "No conversation found to
+// continue". On a successful fallback the user keeps a working session; on
+// continued failure we surface the existing red banner so they can fix their
+// profile.
+func (m *Manager) attemptResumeFallback(execution *AgentExecution, runner *process.InteractiveRunner, sessionID string, exitCode int, uptime, fastFailWindow time.Duration) {
+	m.logger.Info("passthrough resume launch fast-failed, retrying without resume flag",
+		zap.String("session_id", sessionID),
+		zap.String("execution_id", execution.ID),
+		zap.Int("exit_code", exitCode),
+		zap.Duration("uptime", uptime))
+
+	if m.IsShuttingDown() {
+		m.logger.Debug("skipping passthrough resume fallback during shutdown",
+			zap.String("session_id", sessionID))
+		return
+	}
+	if !runner.HasActiveWebSocketBySession(sessionID) {
+		m.logger.Debug("no active WebSocket, skipping passthrough resume fallback",
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	banner := "\r\n\x1b[33m[No prior conversation to resume — starting a fresh session...]\x1b[0m\r\n"
+	if err := runner.WriteToDirectOutputBySession(sessionID, []byte(banner)); err != nil {
+		m.logger.Debug("failed to write resume-fallback banner to terminal",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+
+	ctx := context.Background()
+	pt, rt, cmd, err := m.freshPassthroughCommand(ctx, execution)
+	if err != nil {
+		m.logger.Error("passthrough resume fallback failed: could not build fresh command",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		m.notifyFastFailExit(runner, sessionID, uptime, exitCode, fastFailWindow)
+		return
+	}
+
+	env := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
+	startReq := buildInteractiveStartRequest(sessionID, execution, pt, env, cmd, true)
+
+	processInfo, err := runner.Start(ctx, startReq)
+	if err != nil {
+		m.logger.Error("passthrough resume fallback failed: could not start fresh process",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		m.notifyFastFailExit(runner, sessionID, uptime, exitCode, fastFailWindow)
+		return
+	}
+
+	execution.PassthroughProcessID = processInfo.ID
+	execution.PassthroughStartedAt = time.Now()
+	execution.passthroughLaunchUsedResume = false
+
+	if runner.ConnectSessionWebSocket(processInfo.ID) {
+		m.logger.Info("passthrough resume fallback succeeded",
+			zap.String("session_id", sessionID),
+			zap.String("execution_id", execution.ID),
+			zap.String("new_process_id", processInfo.ID))
+	} else {
+		m.logger.Warn("passthrough resume fallback started but failed to reconnect WebSocket",
+			zap.String("session_id", sessionID),
+			zap.String("new_process_id", processInfo.ID))
+	}
 }
 
 // attemptPassthroughRestart announces the restart on the terminal, waits the

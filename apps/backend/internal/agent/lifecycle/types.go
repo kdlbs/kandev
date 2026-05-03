@@ -61,6 +61,12 @@ type AgentExecution struct {
 	// Passthrough mode info (CLI passthrough without ACP)
 	PassthroughProcessID string    // Process ID in the interactive runner (empty if not in passthrough mode)
 	PassthroughStartedAt time.Time // When the current passthrough process was launched; used to detect fast-fail exits and skip auto-restart loops
+	// passthroughLaunchUsedResume is true if the current passthrough process was
+	// launched via ResumePassthroughSession (i.e. with --resume / -c). The fast-fail
+	// handler reads this to decide whether to retry once with a fresh command
+	// (no resume flag) — covers the "No conversation found to continue" case where
+	// the CLI's local conversation history is gone after a backend restart.
+	passthroughLaunchUsedResume bool
 
 	// isResumedSession is true when this execution was created as part of a session resume
 	// (e.g., after backend restart). Used by StartAgentProcess to route passthrough sessions

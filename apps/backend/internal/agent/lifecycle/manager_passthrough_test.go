@@ -276,7 +276,7 @@ func TestManager_HandlePassthroughExit_SkipsDuringShutdown(t *testing.T) {
 		status := &agentctltypes.ProcessStatusUpdate{SessionID: "sess-1"}
 
 		start := time.Now()
-		mgr.handlePassthroughExit(execution, status, start)
+		mgr.handlePassthroughExit(execution, status, start, false)
 		if elapsed := time.Since(start); elapsed != 0 {
 			t.Errorf("handlePassthroughExit advanced fake time by %v — did not short-circuit during shutdown", elapsed)
 		}
