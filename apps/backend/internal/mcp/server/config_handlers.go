@@ -51,16 +51,43 @@ func (s *Server) registerConfigWorkflowTools() {
 		),
 		s.wrapHandler("delete_workflow_kandev", s.deleteWorkflowHandler()),
 	)
-	s.registerConfigWorkflowStepTools()
+	s.registerWorkflowMutationTools()
 }
 
-func (s *Server) registerConfigWorkflowStepTools() {
+// registerWorkflowMutationTools registers workflow CRUD and step mutation tools.
+// Includes list_workflow_steps for config mode (task mode gets it from kanban tools too).
+func (s *Server) registerWorkflowMutationTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_workflow_steps_kandev",
 			mcp.WithDescription("List all workflow steps (columns) in a workflow."),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
 		),
 		s.wrapHandler("list_workflow_steps_kandev", s.listWorkflowStepsHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("create_workflow_kandev",
+			mcp.WithDescription("Create a new workflow in a workspace."),
+			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Workflow name")),
+			mcp.WithString("description", mcp.Description("Workflow description")),
+		),
+		s.wrapHandler("create_workflow_kandev", s.createWorkflowHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("update_workflow_kandev",
+			mcp.WithDescription("Update an existing workflow."),
+			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
+			mcp.WithString("name", mcp.Description("New workflow name")),
+			mcp.WithString("description", mcp.Description("New workflow description")),
+		),
+		s.wrapHandler("update_workflow_kandev", s.updateWorkflowHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("delete_workflow_kandev",
+			mcp.WithDescription("Delete a workflow and all its steps. This is destructive and cannot be undone."),
+			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID to delete")),
+		),
+		s.wrapHandler("delete_workflow_kandev", s.deleteWorkflowHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_workflow_step_kandev",

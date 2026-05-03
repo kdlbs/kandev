@@ -332,6 +332,8 @@ func (s *Server) registerTools() {
 		count += 3
 		s.registerSessionTools()
 		count += 3
+		s.registerWorkflowMutationTools()
+		count += 7
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++

@@ -102,6 +102,9 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 	if req.Name == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "name is required", nil)
 	}
+	if h.workflowCtrl == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "workflow controller not available", nil)
+	}
 
 	createReq := workflowctrl.CreateStepRequest{
 		WorkflowID:         req.WorkflowID,
@@ -144,6 +147,9 @@ func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message
 	if req.StepID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "step_id is required", nil)
 	}
+	if h.workflowCtrl == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "workflow controller not available", nil)
+	}
 
 	updateReq := workflowctrl.UpdateStepRequest{
 		ID:                    req.StepID,
@@ -174,6 +180,9 @@ func (h *Handlers) handleDeleteWorkflowStep(ctx context.Context, msg *ws.Message
 	if stepID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "step_id is required", nil)
 	}
+	if h.workflowCtrl == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "workflow controller not available", nil)
+	}
 
 	// Fetch step before deleting to get workflow_id for the event
 	stepResp, _ := h.workflowCtrl.GetStep(ctx, stepID)
@@ -201,6 +210,9 @@ func (h *Handlers) handleReorderWorkflowSteps(ctx context.Context, msg *ws.Messa
 	}
 	if len(req.StepIDs) == 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "step_ids is required", nil)
+	}
+	if h.workflowCtrl == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "workflow controller not available", nil)
 	}
 
 	if err := h.workflowCtrl.ReorderSteps(ctx, workflowctrl.ReorderStepsRequest{
