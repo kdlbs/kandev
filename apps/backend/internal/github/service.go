@@ -1048,6 +1048,11 @@ func (s *Service) ListReviewWatches(ctx context.Context, workspaceID string) ([]
 	return s.store.ListReviewWatches(ctx, workspaceID)
 }
 
+// ListAllReviewWatches returns every review watch across all workspaces.
+func (s *Service) ListAllReviewWatches(ctx context.Context) ([]*ReviewWatch, error) {
+	return s.store.ListAllReviewWatches(ctx)
+}
+
 // UpdateReviewWatch updates a review watch.
 func (s *Service) UpdateReviewWatch(ctx context.Context, id string, req *UpdateReviewWatchRequest) error {
 	rw, err := s.store.GetReviewWatch(ctx, id)
@@ -1739,6 +1744,11 @@ func (s *Service) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, er
 // ListIssueWatches returns all issue watches for a workspace.
 func (s *Service) ListIssueWatches(ctx context.Context, workspaceID string) ([]*IssueWatch, error) {
 	return s.store.ListIssueWatches(ctx, workspaceID)
+}
+
+// ListAllIssueWatches returns every issue watch across all workspaces.
+func (s *Service) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
+	return s.store.ListAllIssueWatches(ctx)
 }
 
 // UpdateIssueWatch updates an issue watch.

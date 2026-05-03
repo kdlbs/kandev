@@ -12,16 +12,18 @@ import { useAppStore } from "@/components/state-provider";
 import type { CreateJiraIssueWatchInput, UpdateJiraIssueWatchInput } from "@/lib/types/jira";
 
 /**
- * useJiraIssueWatches owns the JIRA-watcher list for a workspace: it fetches
- * once per workspace and exposes CRUD callbacks that mirror the GitHub
- * useIssueWatches hook so UI components can be ported with minimal friction.
+ * useJiraIssueWatches owns the JIRA-watcher list:
+ *   - workspaceId: string    → fetch and operate on watches in one workspace
+ *   - workspaceId: undefined → fetch every watch across all workspaces; the
+ *                              caller supplies workspaceId to update/remove/trigger
+ *                              calls per-row (those endpoints still validate it
+ *                              against the watch's stored workspace as an IDOR guard)
+ *   - workspaceId: null      → don't fetch
  *
- * The store's `loaded` flag is global, not workspace-scoped — so a `workspaceId`
- * change (workspace switch, navigating back to settings) needs to reset the
- * cached list before the fetch effect runs, otherwise the user sees the
- * previous workspace's watchers stale-rendered.
+ * Workspace changes reset the cached list so the user doesn't see the previous
+ * workspace's stale rows during the swap.
  */
-export function useJiraIssueWatches(workspaceId: string | null) {
+export function useJiraIssueWatches(workspaceId?: string | null) {
   const items = useAppStore((s) => s.jiraIssueWatches.items);
   const loaded = useAppStore((s) => s.jiraIssueWatches.loaded);
   const loading = useAppStore((s) => s.jiraIssueWatches.loading);
@@ -32,24 +34,24 @@ export function useJiraIssueWatches(workspaceId: string | null) {
   const updateWatch = useAppStore((s) => s.updateJiraIssueWatch);
   const removeWatch = useAppStore((s) => s.removeJiraIssueWatch);
 
-  const lastWorkspaceId = useRef<string | null>(null);
+  const lastScope = useRef<string | null | undefined>(undefined);
+  const scope: string | null = workspaceId ?? null;
 
   useEffect(() => {
-    if (!workspaceId) return;
-    // Workspace changed — invalidate the cached list AND clear `loaded` so
-    // the fetch effect below re-runs against the new workspace. Calling
-    // `setWatches([])` here would be wrong: that action keeps `loaded=true`,
-    // and the fetch effect would short-circuit on the stale guard.
-    if (lastWorkspaceId.current !== null && lastWorkspaceId.current !== workspaceId) {
+    if (workspaceId === null) return;
+    // Scope changed (workspace switch or all↔scoped flip) — invalidate so the
+    // fetch effect re-runs. setWatches([]) would keep loaded=true; resetWatches
+    // clears loaded so the fetch isn't short-circuited by the stale guard.
+    if (lastScope.current !== undefined && lastScope.current !== scope) {
       resetWatches();
     }
-    lastWorkspaceId.current = workspaceId;
-  }, [workspaceId, resetWatches]);
+    lastScope.current = scope;
+  }, [workspaceId, scope, resetWatches]);
 
   useEffect(() => {
-    if (!workspaceId || loaded || loading) return;
+    if (workspaceId === null || loaded || loading) return;
     setLoading(true);
-    listJiraIssueWatches(workspaceId, { cache: "no-store" })
+    listJiraIssueWatches(workspaceId ?? undefined, { cache: "no-store" })
       .then((res) => setWatches(res ?? []))
       .catch(() => setWatches([]))
       .finally(() => setLoading(false));
@@ -64,10 +66,14 @@ export function useJiraIssueWatches(workspaceId: string | null) {
     [addWatch],
   );
 
+  // Per-row mutations require the row's own workspace_id to satisfy the
+  // backend's IDOR guard. Callers pass it explicitly when the hook itself
+  // wasn't bound to a single workspace (the install-wide listing case).
   const update = useCallback(
-    async (id: string, req: UpdateJiraIssueWatchInput) => {
-      if (!workspaceId) throw new Error("workspaceId required");
-      const watch = await updateJiraIssueWatch(workspaceId, id, req);
+    async (id: string, req: UpdateJiraIssueWatchInput, rowWorkspaceId?: string) => {
+      const ws = rowWorkspaceId ?? workspaceId;
+      if (!ws) throw new Error("workspaceId required");
+      const watch = await updateJiraIssueWatch(ws, id, req);
       updateWatch(watch);
       return watch;
     },
@@ -75,18 +81,20 @@ export function useJiraIssueWatches(workspaceId: string | null) {
   );
 
   const remove = useCallback(
-    async (id: string) => {
-      if (!workspaceId) throw new Error("workspaceId required");
-      await deleteJiraIssueWatch(workspaceId, id);
+    async (id: string, rowWorkspaceId?: string) => {
+      const ws = rowWorkspaceId ?? workspaceId;
+      if (!ws) throw new Error("workspaceId required");
+      await deleteJiraIssueWatch(ws, id);
       removeWatch(id);
     },
     [workspaceId, removeWatch],
   );
 
   const trigger = useCallback(
-    async (id: string) => {
-      if (!workspaceId) throw new Error("workspaceId required");
-      return triggerJiraIssueWatch(workspaceId, id);
+    async (id: string, rowWorkspaceId?: string) => {
+      const ws = rowWorkspaceId ?? workspaceId;
+      if (!ws) throw new Error("workspaceId required");
+      return triggerJiraIssueWatch(ws, id);
     },
     [workspaceId],
   );

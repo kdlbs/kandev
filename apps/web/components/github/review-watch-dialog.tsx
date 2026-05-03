@@ -21,14 +21,8 @@ import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
-import {
-  ScriptEditor,
-  computeEditorHeight,
-} from "@/components/settings/profile-edit/script-editor";
-import {
-  REVIEW_WATCH_PLACEHOLDERS,
-  DEFAULT_REVIEW_WATCH_PROMPT,
-} from "@/components/github/review-watch-placeholders";
+import { DEFAULT_REVIEW_WATCH_PROMPT } from "@/components/github/review-watch-placeholders";
+import { ReviewWatchPromptField } from "@/components/github/review-watch-prompt-field";
 import { RepoFilterSelector } from "@/components/github/repo-filter-selector";
 import type {
   RepoFilter,
@@ -41,7 +35,9 @@ type ReviewWatchDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   watch: ReviewWatch | null;
-  workspaceId: string;
+  // Pre-binds the dialog to one workspace; omit on the install-wide settings
+  // page so the create flow shows a workspace picker.
+  workspaceId?: string;
   onCreate: (req: CreateReviewWatchRequest) => Promise<void>;
   onUpdate: (id: string, req: UpdateReviewWatchRequest) => Promise<void>;
 };
@@ -52,6 +48,7 @@ const QUERY_TEMPLATES = {
 } as const;
 
 type FormState = {
+  workspaceId: string;
   selectedRepos: RepoFilter[];
   allRepos: boolean;
   workflowId: string;
@@ -66,22 +63,26 @@ type FormState = {
 
 type WorkflowStepOption = { id: string; name: string };
 
-const defaultFormState: FormState = {
-  selectedRepos: [],
-  allRepos: false,
-  workflowId: "",
-  workflowStepId: "",
-  agentProfileId: "",
-  executorProfileId: "",
-  prompt: DEFAULT_REVIEW_WATCH_PROMPT,
-  customQuery: QUERY_TEMPLATES.meAndTeams,
-  enabled: true,
-  pollInterval: 300,
-};
+function makeDefaultForm(workspaceId: string): FormState {
+  return {
+    workspaceId,
+    selectedRepos: [],
+    allRepos: false,
+    workflowId: "",
+    workflowStepId: "",
+    agentProfileId: "",
+    executorProfileId: "",
+    prompt: DEFAULT_REVIEW_WATCH_PROMPT,
+    customQuery: QUERY_TEMPLATES.meAndTeams,
+    enabled: true,
+    pollInterval: 300,
+  };
+}
 
 function formStateFromWatch(watch: ReviewWatch): FormState {
   const hasRepos = watch.repos && watch.repos.length > 0;
   return {
+    workspaceId: watch.workspace_id,
     selectedRepos: hasRepos ? watch.repos : [],
     allRepos: !hasRepos,
     workflowId: watch.workflow_id,
@@ -104,6 +105,7 @@ type SelectFieldProps = {
   onChange: (value: string) => void;
   placeholder: string;
   items: Array<{ id: string; label: string }>;
+  disabled?: boolean;
 };
 
 function SelectField({
@@ -113,12 +115,13 @@ function SelectField({
   onChange,
   placeholder,
   items,
+  disabled,
 }: SelectFieldProps) {
   return (
     <div className="space-y-1.5">
       <Label>{label}</Label>
       {description && <p className="text-xs text-muted-foreground">{description}</p>}
-      <Select value={value || undefined} onValueChange={onChange}>
+      <Select value={value || undefined} onValueChange={onChange} disabled={disabled}>
         <SelectTrigger className="cursor-pointer">
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
@@ -131,6 +134,29 @@ function SelectField({
         </SelectContent>
       </Select>
     </div>
+  );
+}
+
+function WorkspacePicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  const workspaces = useAppStore((s) => s.workspaces.items);
+  return (
+    <SelectField
+      label="Workspace"
+      description="Tasks created by this watcher land in the selected workspace."
+      value={value}
+      onChange={onChange}
+      placeholder="Select workspace"
+      items={workspaces.map((w) => ({ id: w.id, label: w.name }))}
+      disabled={disabled}
+    />
   );
 }
 
@@ -272,17 +298,17 @@ function QueryField({
 function WatchFormFields({
   form,
   setForm,
-  workspaceId,
+  workspaceLocked,
   onAllReposChange,
   onSelectedReposChange,
 }: {
   form: FormState;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
-  workspaceId: string;
+  workspaceLocked: boolean;
   onAllReposChange: (checked: boolean) => void;
   onSelectedReposChange: (repos: RepoFilter[]) => void;
 }) {
-  const { workflows, agentProfiles, allExecutorProfiles } = useWatchFormData(workspaceId);
+  const { workflows, agentProfiles, allExecutorProfiles } = useWatchFormData(form.workspaceId);
   const workflowSteps = useWorkflowSteps(form.workflowId);
 
   const handleWorkflowChange = useCallback(
@@ -294,6 +320,23 @@ function WatchFormFields({
 
   return (
     <div className="space-y-5">
+      <WorkspacePicker
+        value={form.workspaceId}
+        onChange={(v) =>
+          setForm((prev) => ({
+            ...prev,
+            workspaceId: v,
+            // Switching workspace invalidates workflow/step refs since those
+            // are workspace-scoped IDs.
+            workflowId: "",
+            workflowStepId: "",
+            // Repo selections are tied to the workspace's repository list too.
+            selectedRepos: [],
+            allRepos: false,
+          }))
+        }
+        disabled={workspaceLocked}
+      />
       <SectionHeader>Filter</SectionHeader>
       <RepoFilterSelector
         allRepos={form.allRepos}
@@ -316,7 +359,10 @@ function WatchFormFields({
         agentProfiles={agentProfiles}
         executorProfiles={allExecutorProfiles}
       />
-      <PromptField form={form} setForm={setForm} />
+      <ReviewWatchPromptField
+        value={form.prompt}
+        onChange={(v) => setForm((prev) => ({ ...prev, prompt: v }))}
+      />
       <SectionHeader>Settings</SectionHeader>
       <SettingsFields form={form} setForm={setForm} />
     </div>
@@ -420,69 +466,6 @@ function ProfileFields({
   );
 }
 
-function PlaceholdersHelp() {
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground/50 hover:text-muted-foreground cursor-help shrink-0" />
-        </TooltipTrigger>
-        <TooltipContent className="max-w-xs" align="start">
-          <p className="text-xs font-medium mb-1">Available placeholders:</p>
-          <ul className="text-xs space-y-0.5">
-            {REVIEW_WATCH_PLACEHOLDERS.map((p) => (
-              <li key={p.key}>
-                <code className="text-[10px] bg-white/15 px-1 rounded">{`{{${p.key}}}`}</code>{" "}
-                <span className="opacity-70">{p.description}</span>
-              </li>
-            ))}
-          </ul>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
-
-function PromptField({
-  form,
-  setForm,
-}: {
-  form: FormState;
-  setForm: React.Dispatch<React.SetStateAction<FormState>>;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-1.5">
-        <Label>Task Prompt</Label>
-        <PlaceholdersHelp />
-      </div>
-      <p className="text-xs text-muted-foreground">
-        The prompt sent to the agent for each new PR. Type {"{{"} to insert placeholders.
-      </p>
-      <div className="rounded-md border border-border overflow-hidden">
-        <ScriptEditor
-          value={form.prompt}
-          onChange={(v) => setForm((prev) => ({ ...prev, prompt: v }))}
-          language="markdown"
-          height={computeEditorHeight(form.prompt)}
-          lineNumbers="off"
-          placeholders={REVIEW_WATCH_PLACEHOLDERS}
-        />
-      </div>
-      <p className="text-xs text-muted-foreground/70">
-        The workflow step prompt wraps this prompt. For example, if the step prompt is{" "}
-        <code className="text-[10px] bg-muted px-1 rounded">
-          {"Analyze the task: {{task_prompt}}"}
-        </code>
-        , the final prompt becomes{" "}
-        <code className="text-[10px] bg-muted px-1 rounded">
-          {"Analyze the task: Pull Request ready for review: https://..."}
-        </code>
-      </p>
-    </div>
-  );
-}
-
 function SettingsFields({
   form,
   setForm,
@@ -533,12 +516,19 @@ export function ReviewWatchDialog({
   onCreate,
   onUpdate,
 }: ReviewWatchDialogProps) {
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<FormState>(defaultFormState);
+  const [form, setForm] = useState<FormState>(() => makeDefaultForm(workspaceId ?? ""));
 
   useEffect(() => {
-    setForm(watch ? formStateFromWatch(watch) : defaultFormState);
-  }, [watch, open]);
+    if (watch) {
+      setForm(formStateFromWatch(watch));
+    } else {
+      setForm(makeDefaultForm(workspaceId ?? activeWorkspaceId ?? ""));
+    }
+  }, [watch, open, workspaceId, activeWorkspaceId]);
+
+  const workspaceLocked = !!watch || !!workspaceId;
 
   const handleSelectedReposChange = useCallback((repos: RepoFilter[]) => {
     setForm((prev) => ({ ...prev, selectedRepos: repos }));
@@ -570,7 +560,7 @@ export function ReviewWatchDialog({
       if (watch) {
         await onUpdate(watch.id, payload);
       } else {
-        await onCreate({ ...payload, workspace_id: workspaceId });
+        await onCreate({ ...payload, workspace_id: form.workspaceId });
       }
       onOpenChange(false);
     } catch {
@@ -578,9 +568,10 @@ export function ReviewWatchDialog({
     } finally {
       setSaving(false);
     }
-  }, [form, watch, workspaceId, onCreate, onUpdate, onOpenChange]);
+  }, [form, watch, onCreate, onUpdate, onOpenChange]);
 
   const canSave =
+    !!form.workspaceId &&
     form.customQuery.trim().length > 0 &&
     !!form.workflowId &&
     !!form.workflowStepId &&
@@ -598,7 +589,7 @@ export function ReviewWatchDialog({
         <WatchFormFields
           form={form}
           setForm={setForm}
-          workspaceId={workspaceId}
+          workspaceLocked={workspaceLocked}
           onAllReposChange={handleAllReposChange}
           onSelectedReposChange={handleSelectedReposChange}
         />

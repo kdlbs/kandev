@@ -807,6 +807,21 @@ func (s *Store) ListReviewWatches(ctx context.Context, workspaceID string) ([]*R
 	return watches, nil
 }
 
+// ListAllReviewWatches returns every review watch across all workspaces. Used
+// by the install-wide settings UI when no workspace filter is supplied.
+func (s *Store) ListAllReviewWatches(ctx context.Context) ([]*ReviewWatch, error) {
+	var watches []*ReviewWatch
+	err := s.ro.SelectContext(ctx, &watches,
+		`SELECT * FROM github_review_watches ORDER BY workspace_id, created_at`)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range watches {
+		hydrateReviewWatchRepos(w)
+	}
+	return watches, nil
+}
+
 // ListEnabledReviewWatches returns all enabled review watches.
 func (s *Store) ListEnabledReviewWatches(ctx context.Context) ([]*ReviewWatch, error) {
 	var watches []*ReviewWatch
@@ -1122,6 +1137,20 @@ func (s *Store) ListIssueWatches(ctx context.Context, workspaceID string) ([]*Is
 	var watches []*IssueWatch
 	err := s.ro.SelectContext(ctx, &watches,
 		`SELECT * FROM github_issue_watches WHERE workspace_id = ? ORDER BY created_at`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range watches {
+		hydrateIssueWatch(w)
+	}
+	return watches, nil
+}
+
+// ListAllIssueWatches returns every issue watch across all workspaces.
+func (s *Store) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
+	var watches []*IssueWatch
+	err := s.ro.SelectContext(ctx, &watches,
+		`SELECT * FROM github_issue_watches ORDER BY workspace_id, created_at`)
 	if err != nil {
 		return nil, err
 	}

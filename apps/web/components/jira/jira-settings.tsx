@@ -19,7 +19,6 @@ import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
-import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   getJiraConfig,
@@ -516,16 +515,15 @@ export function JiraConnectionSection() {
 }
 
 // JiraIntegrationPage is the install-wide settings surface mounted at
-// /settings/integrations/jira. It composes the global connection form with
-// per-workspace watcher management (re-keyed when the workspace switcher
-// changes selection) and the global task-prompt presets.
+// /settings/integrations/jira. The connection form and task-prompt presets
+// are global; the watchers section lists every watch across every workspace
+// in a single table, with workspace selection happening inside the create
+// dialog.
 export function JiraIntegrationPage() {
   return (
     <div className="space-y-8">
       <JiraConnectionSection />
-      <WorkspaceScopedSection label="Watchers for">
-        {(workspaceId) => <JiraIssueWatchersSection key={workspaceId} workspaceId={workspaceId} />}
-      </WorkspaceScopedSection>
+      <JiraIssueWatchersSection />
       <TaskPresetsSection />
     </div>
   );

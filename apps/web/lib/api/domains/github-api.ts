@@ -133,12 +133,12 @@ export async function deletePRWatch(id: string, options?: ApiRequestOptions) {
 }
 
 // Review watches
-export async function listReviewWatches(workspaceId: string, options?: ApiRequestOptions) {
-  const query = new URLSearchParams({ workspace_id: workspaceId });
-  return fetchJson<ReviewWatchesResponse>(
-    `/api/v1/github/watches/review?${query.toString()}`,
-    options,
-  );
+// Omit workspaceId to fetch every watch across all workspaces.
+export async function listReviewWatches(workspaceId?: string, options?: ApiRequestOptions) {
+  const path = workspaceId
+    ? `/api/v1/github/watches/review?workspace_id=${encodeURIComponent(workspaceId)}`
+    : `/api/v1/github/watches/review`;
+  return fetchJson<ReviewWatchesResponse>(path, options);
 }
 
 export async function createReviewWatch(
@@ -236,12 +236,12 @@ export async function fetchGitHubStats(
 }
 
 // Issue watches
-export async function listIssueWatches(workspaceId: string, options?: ApiRequestOptions) {
-  const query = new URLSearchParams({ workspace_id: workspaceId });
-  return fetchJson<IssueWatchesResponse>(
-    `/api/v1/github/watches/issue?${query.toString()}`,
-    options,
-  );
+// Omit workspaceId to fetch every watch across all workspaces.
+export async function listIssueWatches(workspaceId?: string, options?: ApiRequestOptions) {
+  const path = workspaceId
+    ? `/api/v1/github/watches/issue?workspace_id=${encodeURIComponent(workspaceId)}`
+    : `/api/v1/github/watches/issue`;
+  return fetchJson<IssueWatchesResponse>(path, options);
 }
 
 export async function createIssueWatch(

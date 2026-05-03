@@ -5,10 +5,15 @@ import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useAppStore } from "@/components/state-provider";
 import type { JiraIssueWatch } from "@/lib/types/jira";
 
 type JiraIssueWatchTableProps = {
   watches: JiraIssueWatch[];
+  // showWorkspace renders a Workspace column when the table aggregates rows
+  // from every workspace (install-wide settings page). Off for the legacy
+  // single-workspace surfaces.
+  showWorkspace?: boolean;
   onEdit: (watch: JiraIssueWatch) => void;
   onDelete: (id: string) => void;
   onTrigger: (id: string) => void;
@@ -99,11 +104,15 @@ function WatchActions({
 
 export function JiraIssueWatchTable({
   watches,
+  showWorkspace,
   onEdit,
   onDelete,
   onTrigger,
   onToggleEnabled,
 }: JiraIssueWatchTableProps) {
+  const workspaces = useAppStore((s) => s.workspaces.items);
+  const workspaceName = (id: string) => workspaces.find((w) => w.id === id)?.name ?? id;
+
   if (watches.length === 0) {
     return (
       <p className="text-sm text-muted-foreground py-4 text-center">
@@ -116,6 +125,7 @@ export function JiraIssueWatchTable({
     <Table>
       <TableHeader>
         <TableRow>
+          {showWorkspace && <TableHead>Workspace</TableHead>}
           <TableHead>JQL</TableHead>
           <TableHead>Interval</TableHead>
           <TableHead>Last Polled</TableHead>
@@ -126,6 +136,11 @@ export function JiraIssueWatchTable({
       <TableBody>
         {watches.map((watch) => (
           <TableRow key={watch.id} className="cursor-pointer" onClick={() => onEdit(watch)}>
+            {showWorkspace && (
+              <TableCell className="text-xs text-muted-foreground">
+                {workspaceName(watch.workspaceId)}
+              </TableCell>
+            )}
             <TableCell className="font-mono text-xs max-w-md truncate" title={watch.jql}>
               {watch.jql}
             </TableCell>

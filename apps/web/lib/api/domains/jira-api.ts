@@ -78,11 +78,13 @@ export async function transitionJiraTicket(
 
 // --- Issue watches ---
 
-export async function listJiraIssueWatches(workspaceId: string, options?: ApiRequestOptions) {
-  const res = await fetchJson<{ watches: JiraIssueWatch[] }>(
-    `/api/v1/jira/watches/issue?workspace_id=${encodeURIComponent(workspaceId)}`,
-    options,
-  );
+// listJiraIssueWatches fetches watches across all workspaces when workspaceId
+// is omitted, or scoped to one workspace when provided.
+export async function listJiraIssueWatches(workspaceId?: string, options?: ApiRequestOptions) {
+  const path = workspaceId
+    ? `/api/v1/jira/watches/issue?workspace_id=${encodeURIComponent(workspaceId)}`
+    : `/api/v1/jira/watches/issue`;
+  const res = await fetchJson<{ watches: JiraIssueWatch[] }>(path, options);
   return res.watches ?? [];
 }
 

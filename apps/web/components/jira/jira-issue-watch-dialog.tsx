@@ -30,12 +30,17 @@ type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   watch: JiraIssueWatch | null;
-  workspaceId: string;
+  // workspaceId pre-binds the dialog to one workspace (legacy single-workspace
+  // surfaces). Omit on the install-wide settings page so the create dialog
+  // shows a workspace picker; when editing existing watches, the form pulls
+  // workspaceId from the watch row regardless.
+  workspaceId?: string;
   onCreate: (req: CreateJiraIssueWatchInput) => Promise<unknown>;
   onUpdate: (id: string, req: UpdateJiraIssueWatchInput) => Promise<unknown>;
 };
 
 type FormState = {
+  workspaceId: string;
   jql: string;
   workflowId: string;
   workflowStepId: string;
@@ -49,19 +54,23 @@ type FormState = {
 const DEFAULT_JQL = `project = PROJ AND status = "Open" ORDER BY created DESC`;
 const DEFAULT_PROMPT = `Investigate JIRA ticket {{issue.key}}: {{issue.summary}}\n\n{{issue.url}}`;
 
-const emptyForm: FormState = {
-  jql: DEFAULT_JQL,
-  workflowId: "",
-  workflowStepId: "",
-  agentProfileId: "",
-  executorProfileId: "",
-  prompt: DEFAULT_PROMPT,
-  enabled: true,
-  pollInterval: 300,
-};
+function makeEmptyForm(workspaceId: string): FormState {
+  return {
+    workspaceId,
+    jql: DEFAULT_JQL,
+    workflowId: "",
+    workflowStepId: "",
+    agentProfileId: "",
+    executorProfileId: "",
+    prompt: DEFAULT_PROMPT,
+    enabled: true,
+    pollInterval: 300,
+  };
+}
 
 function formStateFromWatch(w: JiraIssueWatch): FormState {
   return {
+    workspaceId: w.workspaceId,
     jql: w.jql,
     workflowId: w.workflowId,
     workflowStepId: w.workflowStepId,
@@ -125,12 +134,17 @@ function SelectField(props: {
   onChange: (v: string) => void;
   placeholder: string;
   items: { id: string; label: string }[];
+  disabled?: boolean;
 }) {
   return (
     <div className="space-y-1.5">
       <Label>{props.label}</Label>
       {props.description && <p className="text-xs text-muted-foreground">{props.description}</p>}
-      <Select value={props.value || undefined} onValueChange={props.onChange}>
+      <Select
+        value={props.value || undefined}
+        onValueChange={props.onChange}
+        disabled={props.disabled}
+      >
         <SelectTrigger className="cursor-pointer">
           <SelectValue placeholder={props.placeholder} />
         </SelectTrigger>
@@ -216,16 +230,37 @@ function PromptField({ value, onChange }: { value: string; onChange: (v: string)
   );
 }
 
+function WorkspacePicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  const workspaces = useAppStore((s) => s.workspaces.items);
+  return (
+    <SelectField
+      label="Workspace"
+      description="Tasks created by this watcher land in the selected workspace."
+      value={value}
+      onChange={onChange}
+      placeholder="Select workspace"
+      items={workspaces.map((w) => ({ id: w.id, label: w.name }))}
+      disabled={disabled}
+    />
+  );
+}
+
 function AutomationFields({
   form,
   setForm,
-  workspaceId,
 }: {
   form: FormState;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
-  workspaceId: string;
 }) {
-  const { workflows, agentProfiles, allExecutorProfiles } = useFormData(workspaceId);
+  const { workflows, agentProfiles, allExecutorProfiles } = useFormData(form.workspaceId);
   const steps = useWorkflowSteps(form.workflowId);
   return (
     <>
@@ -319,15 +354,32 @@ export function JiraIssueWatchDialog({
   onCreate,
   onUpdate,
 }: Props) {
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<FormState>(emptyForm);
+  const [form, setForm] = useState<FormState>(() => makeEmptyForm(workspaceId ?? ""));
 
+  // Re-seed the form whenever the dialog opens or the bound watch changes.
+  // Default the workspace to: editing → the watch's workspace; creating →
+  // the explicit `workspaceId` prop, falling back to the user's currently
+  // active workspace so the picker isn't empty when nothing was preselected.
   useEffect(() => {
-    setForm(watch ? formStateFromWatch(watch) : emptyForm);
-  }, [watch, open]);
+    if (watch) {
+      setForm(formStateFromWatch(watch));
+    } else {
+      setForm(makeEmptyForm(workspaceId ?? activeWorkspaceId ?? ""));
+    }
+  }, [watch, open, workspaceId, activeWorkspaceId]);
+
+  // Workspace is locked when editing (changing it would orphan the workflow
+  // refs) or when the dialog was opened from a single-workspace surface.
+  const workspaceLocked = !!watch || !!workspaceId;
 
   const canSave =
-    !!form.jql.trim() && !!form.workflowId && !!form.workflowStepId && !!form.prompt.trim();
+    !!form.workspaceId &&
+    !!form.jql.trim() &&
+    !!form.workflowId &&
+    !!form.workflowStepId &&
+    !!form.prompt.trim();
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -345,7 +397,7 @@ export function JiraIssueWatchDialog({
       if (watch) {
         await onUpdate(watch.id, payload);
       } else {
-        await onCreate({ ...payload, workspaceId });
+        await onCreate({ ...payload, workspaceId: form.workspaceId });
       }
       onOpenChange(false);
     } catch {
@@ -353,7 +405,7 @@ export function JiraIssueWatchDialog({
     } finally {
       setSaving(false);
     }
-  }, [form, watch, workspaceId, onCreate, onUpdate, onOpenChange]);
+  }, [form, watch, onCreate, onUpdate, onOpenChange]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -367,8 +419,15 @@ export function JiraIssueWatchDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-5">
+          <WorkspacePicker
+            value={form.workspaceId}
+            onChange={(v) =>
+              setForm((p) => ({ ...p, workspaceId: v, workflowId: "", workflowStepId: "" }))
+            }
+            disabled={workspaceLocked}
+          />
           <JQLField jql={form.jql} onChange={(v) => setForm((p) => ({ ...p, jql: v }))} />
-          <AutomationFields form={form} setForm={setForm} workspaceId={workspaceId} />
+          <AutomationFields form={form} setForm={setForm} />
           <PromptField
             value={form.prompt}
             onChange={(v) => setForm((p) => ({ ...p, prompt: v }))}

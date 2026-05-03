@@ -153,13 +153,21 @@ func (c *Controller) httpDoTransition(ctx *gin.Context) {
 
 // --- Issue watch HTTP handlers ---
 
+// httpListIssueWatches returns watches scoped to one workspace when
+// `workspace_id` is supplied, or every watch across all workspaces when it
+// is absent. The integration settings page uses the unscoped form so the
+// table can render a Workspace column without requiring an upfront pick.
 func (c *Controller) httpListIssueWatches(ctx *gin.Context) {
 	workspaceID := ctx.Query("workspace_id")
+	var (
+		watches []*IssueWatch
+		err     error
+	)
 	if workspaceID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": errMsgWorkspaceIDRequired})
-		return
+		watches, err = c.service.ListAllIssueWatches(ctx.Request.Context())
+	} else {
+		watches, err = c.service.ListIssueWatches(ctx.Request.Context(), workspaceID)
 	}
-	watches, err := c.service.ListIssueWatches(ctx.Request.Context(), workspaceID)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

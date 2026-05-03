@@ -447,6 +447,11 @@ func (s *Service) ListIssueWatches(ctx context.Context, workspaceID string) ([]*
 	return s.store.ListIssueWatches(ctx, workspaceID)
 }
 
+// ListAllIssueWatches returns every watch across all workspaces.
+func (s *Service) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
+	return s.store.ListAllIssueWatches(ctx)
+}
+
 // GetIssueWatch returns a single watch by ID or ErrIssueWatchNotFound.
 func (s *Service) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, error) {
 	w, err := s.store.GetIssueWatch(ctx, id)

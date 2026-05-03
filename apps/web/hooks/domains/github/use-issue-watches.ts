@@ -12,7 +12,11 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import type { CreateIssueWatchRequest, UpdateIssueWatchRequest } from "@/lib/types/github";
 
-export function useIssueWatches(workspaceId: string | null) {
+// useIssueWatches has three modes:
+//   - workspaceId: string         → fetch watches scoped to one workspace
+//   - workspaceId: undefined      → fetch watches across all workspaces
+//   - workspaceId: null           → don't fetch (caller hasn't resolved a workspace yet)
+export function useIssueWatches(workspaceId?: string | null) {
   const items = useAppStore((state) => state.issueWatches.items);
   const loaded = useAppStore((state) => state.issueWatches.loaded);
   const loading = useAppStore((state) => state.issueWatches.loading);
@@ -23,9 +27,9 @@ export function useIssueWatches(workspaceId: string | null) {
   const removeWatch = useAppStore((state) => state.removeIssueWatch);
 
   useEffect(() => {
-    if (!workspaceId || loaded || loading) return;
+    if (workspaceId === null || loaded || loading) return;
     setIssueWatchesLoading(true);
-    listIssueWatches(workspaceId, { cache: "no-store" })
+    listIssueWatches(workspaceId ?? undefined, { cache: "no-store" })
       .then((response) => {
         setIssueWatches(response?.watches ?? []);
       })

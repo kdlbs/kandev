@@ -11,12 +11,10 @@ import { JiraIssueWatchTable } from "./jira-issue-watch-table";
 import { JiraIssueWatchDialog } from "./jira-issue-watch-dialog";
 import type { JiraIssueWatch } from "@/lib/types/jira";
 
-type Props = { workspaceId: string };
-
-// RawActions is the slice of useJiraIssueWatches that this component needs to
-// wrap with toasts. Pulled out so useToastedActions doesn't itself call the
-// hook a second time on the same workspace — the parent passes its callbacks
-// down, keeping a single fetch + single store subscription per render tree.
+// JiraIssueWatchersSection lists watches across every workspace in a single
+// flat table on the install-wide settings page. The dialog's create flow asks
+// the user to pick the workspace; per-row mutations forward each watch's
+// stored workspaceId so the backend's IDOR guard accepts them.
 type RawActions = {
   create: ReturnType<typeof useJiraIssueWatches>["create"];
   update: ReturnType<typeof useJiraIssueWatches>["update"];
@@ -25,8 +23,8 @@ type RawActions = {
 };
 
 // useToastedActions wraps the raw create/update/delete/trigger callbacks with
-// success/failure toasts. Kept separate so the section component stays under
-// the 100-line lint limit and the toast wiring is testable in isolation.
+// success/failure toasts. Per-row mutations need each watch's own workspaceId,
+// so the wrappers take the watch (not just an id) and pass it through.
 function useToastedActions({ create, update, remove, trigger }: RawActions) {
   const { toast } = useToast();
 
@@ -44,9 +42,9 @@ function useToastedActions({ create, update, remove, trigger }: RawActions) {
   );
 
   const wrappedUpdate = useCallback(
-    async (id: string, req: Parameters<typeof update>[1]) => {
+    async (id: string, req: Parameters<typeof update>[1], rowWorkspaceId: string) => {
       try {
-        await update(id, req);
+        await update(id, req, rowWorkspaceId);
         toast({ description: "Watcher updated", variant: "success" });
       } catch (err) {
         toast({ description: `Update failed: ${String(err)}`, variant: "error" });
@@ -57,10 +55,10 @@ function useToastedActions({ create, update, remove, trigger }: RawActions) {
   );
 
   const wrappedDelete = useCallback(
-    async (id: string) => {
+    async (w: JiraIssueWatch) => {
       if (!confirm("Delete this JIRA watcher?")) return;
       try {
-        await remove(id);
+        await remove(w.id, w.workspaceId);
         toast({ description: "Watcher deleted", variant: "success" });
       } catch (err) {
         toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
@@ -70,9 +68,9 @@ function useToastedActions({ create, update, remove, trigger }: RawActions) {
   );
 
   const wrappedTrigger = useCallback(
-    async (id: string) => {
+    async (w: JiraIssueWatch) => {
       try {
-        const res = await trigger(id);
+        const res = await trigger(w.id, w.workspaceId);
         const n = res?.newIssues ?? 0;
         const description =
           n > 0
@@ -89,7 +87,7 @@ function useToastedActions({ create, update, remove, trigger }: RawActions) {
   const toggleEnabled = useCallback(
     async (w: JiraIssueWatch) => {
       try {
-        await update(w.id, { enabled: !w.enabled });
+        await update(w.id, { enabled: !w.enabled }, w.workspaceId);
       } catch (err) {
         toast({ description: `Toggle failed: ${String(err)}`, variant: "error" });
       }
@@ -106,13 +104,9 @@ function useToastedActions({ create, update, remove, trigger }: RawActions) {
   };
 }
 
-/**
- * JiraIssueWatchersSection renders the "JIRA watchers" block on the JIRA
- * settings page: a table of configured watchers, a "+ New" button, and a
- * dialog for create/edit. Mirrors the GitHub issue-watch UI patterns.
- */
-export function JiraIssueWatchersSection({ workspaceId }: Props) {
-  const { items, loading, create, update, remove, trigger } = useJiraIssueWatches(workspaceId);
+export function JiraIssueWatchersSection() {
+  // Pass undefined to fetch every watch across every workspace.
+  const { items, loading, create, update, remove, trigger } = useJiraIssueWatches();
   const actions = useToastedActions({ create, update, remove, trigger });
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -126,6 +120,24 @@ export function JiraIssueWatchersSection({ workspaceId }: Props) {
     setEditing(w);
     setDialogOpen(true);
   }, []);
+
+  // Adapt the watch-aware actions back to id-keyed callbacks the table expects;
+  // the table looks up the watch by id when it needs to forward the per-row
+  // workspaceId to mutations.
+  const handleDelete = useCallback(
+    (id: string) => {
+      const w = items.find((item) => item.id === id);
+      if (w) actions.remove(w);
+    },
+    [items, actions],
+  );
+  const handleTrigger = useCallback(
+    (id: string) => {
+      const w = items.find((item) => item.id === id);
+      if (w) actions.trigger(w);
+    },
+    [items, actions],
+  );
 
   return (
     <SettingsSection
@@ -146,9 +158,10 @@ export function JiraIssueWatchersSection({ workspaceId }: Props) {
           ) : (
             <JiraIssueWatchTable
               watches={items}
+              showWorkspace
               onEdit={openEdit}
-              onDelete={actions.remove}
-              onTrigger={actions.trigger}
+              onDelete={handleDelete}
+              onTrigger={handleTrigger}
               onToggleEnabled={actions.toggleEnabled}
             />
           )}
@@ -158,9 +171,14 @@ export function JiraIssueWatchersSection({ workspaceId }: Props) {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         watch={editing}
-        workspaceId={workspaceId}
+        // No workspaceId — dialog shows a workspace picker for new watches and
+        // pulls workspaceId from the watch row when editing.
         onCreate={actions.create}
-        onUpdate={actions.update}
+        onUpdate={(id, req) => {
+          const w = editing;
+          if (!w) throw new Error("update without editing watch");
+          return actions.update(id, req, w.workspaceId);
+        }}
       />
     </SettingsSection>
   );

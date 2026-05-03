@@ -12,7 +12,11 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import type { CreateReviewWatchRequest, UpdateReviewWatchRequest } from "@/lib/types/github";
 
-export function useReviewWatches(workspaceId: string | null) {
+// useReviewWatches has three modes:
+//   - workspaceId: string         → fetch watches scoped to one workspace
+//   - workspaceId: undefined      → fetch watches across all workspaces
+//   - workspaceId: null           → don't fetch (caller hasn't resolved a workspace yet)
+export function useReviewWatches(workspaceId?: string | null) {
   const items = useAppStore((state) => state.reviewWatches.items);
   const loaded = useAppStore((state) => state.reviewWatches.loaded);
   const loading = useAppStore((state) => state.reviewWatches.loading);
@@ -23,9 +27,9 @@ export function useReviewWatches(workspaceId: string | null) {
   const removeWatch = useAppStore((state) => state.removeReviewWatch);
 
   useEffect(() => {
-    if (!workspaceId || loaded || loading) return;
+    if (workspaceId === null || loaded || loading) return;
     setReviewWatchesLoading(true);
-    listReviewWatches(workspaceId, { cache: "no-store" })
+    listReviewWatches(workspaceId ?? undefined, { cache: "no-store" })
       .then((response) => {
         setReviewWatches(response?.watches ?? []);
       })

@@ -357,6 +357,20 @@ func (s *Store) ListIssueWatches(ctx context.Context, workspaceID string) ([]*Is
 	return watches, nil
 }
 
+// ListAllIssueWatches returns every watch across all workspaces, in insertion
+// order. Used by the install-wide settings UI when no workspace filter is
+// supplied — the table renders a Workspace column so the user can manage
+// watches without first picking a workspace context.
+func (s *Store) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
+	var watches []*IssueWatch
+	err := s.ro.SelectContext(ctx, &watches,
+		`SELECT `+issueWatchColumns+` FROM jira_issue_watches ORDER BY workspace_id, created_at`)
+	if err != nil {
+		return nil, err
+	}
+	return watches, nil
+}
+
 // ListEnabledIssueWatches returns every enabled watch across all workspaces,
 // used by the poller to decide what to query each tick.
 func (s *Store) ListEnabledIssueWatches(ctx context.Context) ([]*IssueWatch, error) {

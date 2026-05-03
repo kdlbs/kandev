@@ -6,10 +6,14 @@ import { Badge } from "@kandev/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
+import { useAppStore } from "@/components/state-provider";
 import type { IssueWatch } from "@/lib/types/github";
 
 type IssueWatchTableProps = {
   watches: IssueWatch[];
+  // showWorkspace renders a Workspace column when the table aggregates rows
+  // from every workspace (install-wide settings page).
+  showWorkspace?: boolean;
   onEdit: (watch: IssueWatch) => void;
   onDelete: (id: string) => void;
   onTrigger: (id: string) => void;
@@ -109,11 +113,15 @@ function WatchActions({ watch, onToggleEnabled, onTrigger, onDelete }: WatchActi
 
 export function IssueWatchTable({
   watches,
+  showWorkspace,
   onEdit,
   onDelete,
   onTrigger,
   onToggleEnabled,
 }: IssueWatchTableProps) {
+  const workspaces = useAppStore((s) => s.workspaces.items);
+  const workspaceName = (id: string) => workspaces.find((w) => w.id === id)?.name ?? id;
+
   if (watches.length === 0) {
     return (
       <p className="text-sm text-muted-foreground py-4 text-center">
@@ -126,6 +134,7 @@ export function IssueWatchTable({
     <Table>
       <TableHeader>
         <TableRow>
+          {showWorkspace && <TableHead>Workspace</TableHead>}
           <TableHead>Repository</TableHead>
           <TableHead>Labels</TableHead>
           <TableHead>Interval</TableHead>
@@ -137,6 +146,11 @@ export function IssueWatchTable({
       <TableBody>
         {watches.map((watch) => (
           <TableRow key={watch.id} className="cursor-pointer" onClick={() => onEdit(watch)}>
+            {showWorkspace && (
+              <TableCell className="text-xs text-muted-foreground">
+                {workspaceName(watch.workspace_id)}
+              </TableCell>
+            )}
             <TableCell className="font-medium">{formatRepoNames(watch)}</TableCell>
             <TableCell className="text-xs text-muted-foreground">
               {formatLabels(watch) || "—"}
