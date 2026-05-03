@@ -28,4 +28,22 @@ test.describe("Kanban topbar utilities", () => {
     // The button only renders when there are issues; assert it stays hidden.
     await expect(testPage.getByRole("button", { name: "Setup Issues" })).toHaveCount(0);
   });
+
+  test("system health button is visible when there are issues", async ({ testPage, backend }) => {
+    await testPage.route(`${backend.baseUrl}/api/v1/system/health`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          healthy: false,
+          issues: [{ title: "DB offline", severity: "error" }],
+        }),
+      }),
+    );
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await expect(testPage.getByRole("button", { name: "Setup Issues" })).toBeVisible();
+  });
 });
