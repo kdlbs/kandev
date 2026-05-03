@@ -3,7 +3,7 @@ import type { GitHubSlice, GitHubSliceState } from "./types";
 
 export const defaultGitHubState: GitHubSliceState = {
   githubStatus: { status: null, loaded: false, loading: false },
-  taskPRs: { byTaskId: {}, loaded: false, loading: false },
+  taskPRs: { byTaskId: {} },
   prWatches: { items: [], loaded: false, loading: false },
   reviewWatches: { items: [], loaded: false, loading: false },
   issueWatches: { items: [], loaded: false, loading: false },
@@ -30,14 +30,11 @@ function createGitHubStatusActions(
   };
 }
 
-function createTaskPRActions(
-  set: ImmerSet,
-): Pick<GitHubSlice, "setTaskPRs" | "setTaskPR" | "removeTaskPR" | "setTaskPRsLoading"> {
+function createTaskPRActions(set: ImmerSet): Pick<GitHubSlice, "setTaskPRs" | "setTaskPR"> {
   return {
     setTaskPRs: (prs) =>
       set((draft) => {
         draft.taskPRs.byTaskId = prs;
-        draft.taskPRs.loaded = true;
       }),
     setTaskPR: (taskId, pr) =>
       set((draft) => {
@@ -50,14 +47,6 @@ function createTaskPRActions(
         if (idx >= 0) existing[idx] = pr;
         else existing.push(pr);
         draft.taskPRs.byTaskId[taskId] = existing;
-      }),
-    removeTaskPR: (taskId) =>
-      set((draft) => {
-        delete draft.taskPRs.byTaskId[taskId];
-      }),
-    setTaskPRsLoading: (loading) =>
-      set((draft) => {
-        draft.taskPRs.loading = loading;
       }),
   };
 }

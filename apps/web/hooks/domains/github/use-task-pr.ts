@@ -9,7 +9,6 @@ import type { TaskPR } from "@/lib/types/github";
 /** Fetch all PR associations for a workspace. */
 export function useWorkspacePRs(workspaceId: string | null) {
   const setTaskPRs = useAppStore((state) => state.setTaskPRs);
-  const setTaskPRsLoading = useAppStore((state) => state.setTaskPRsLoading);
   const fetchedRef = useRef<string | null>(null);
   const requestRef = useRef(0);
 
@@ -23,7 +22,6 @@ export function useWorkspacePRs(workspaceId: string | null) {
     const requestId = ++requestRef.current;
     fetchedRef.current = workspaceId;
 
-    setTaskPRsLoading(true);
     listWorkspaceTaskPRs(workspaceId, { cache: "no-store" })
       .then((response) => {
         if (requestRef.current !== requestId) return;
@@ -33,13 +31,8 @@ export function useWorkspacePRs(workspaceId: string | null) {
         if (requestRef.current === requestId) {
           fetchedRef.current = null; // allow retry on failure
         }
-      })
-      .finally(() => {
-        if (requestRef.current === requestId) {
-          setTaskPRsLoading(false);
-        }
       });
-  }, [workspaceId, setTaskPRs, setTaskPRsLoading]);
+  }, [workspaceId, setTaskPRs]);
 }
 
 const SYNC_RETRY_DELAY = 5_000; // 5 seconds
