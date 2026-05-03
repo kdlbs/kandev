@@ -20,7 +20,12 @@ export function useWorkflowSteps(workflowId: string): {
   loading: boolean;
 } {
   const [steps, setSteps] = useState<WorkflowStepOption[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Initialize loading to match the effect's behaviour on first render: if
+  // workflowId is truthy at mount we'll fetch immediately, so the dropdown
+  // should show "Loading steps…" rather than "No steps in this workflow"
+  // before the fetch lands. Only the setState-during-render guard below ever
+  // toggles loading back on for subsequent workflowId changes.
+  const [loading, setLoading] = useState(!!workflowId);
   const [prevWorkflowId, setPrevWorkflowId] = useState(workflowId);
 
   // setState-during-render is the React-blessed way to derive state from a

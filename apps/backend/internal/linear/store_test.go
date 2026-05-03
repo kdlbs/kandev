@@ -213,6 +213,68 @@ func TestStore_MigrateLegacyPerWorkspaceTable(t *testing.T) {
 	}
 }
 
+// Covers the original-schema upgrade path: the legacy table exists with
+// `workspace_id` but lacks the auth-health columns and `org_slug` added in
+// later releases. The migration must select only guaranteed-present columns
+// and fall back to defaults for the missing ones, otherwise startup crashes
+// with "no such column". Mirrors the Jira test.
+func TestStore_MigrateLegacyPerWorkspaceTable_PreHealthColumns(t *testing.T) {
+	raw, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	// Original schema: no org_slug / last_checked_at / last_ok / last_error.
+	if _, err := db.Exec(`
+		CREATE TABLE linear_configs (
+			workspace_id TEXT PRIMARY KEY,
+			auth_method TEXT NOT NULL,
+			default_team_key TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`); err != nil {
+		t.Fatalf("legacy schema: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := db.Exec(`INSERT INTO linear_configs
+		(workspace_id, auth_method, default_team_key, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)`,
+		"ws-1", AuthMethodAPIKey, "ENG", now, now); err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("NewStore on pre-health-columns schema: %v", err)
+	}
+	if got := store.MigratedFromWorkspace(); got != "ws-1" {
+		t.Errorf("expected migration source ws-1, got %q", got)
+	}
+	cfg, err := store.GetConfig(context.Background())
+	if err != nil {
+		t.Fatalf("get singleton: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected singleton row after migration")
+	}
+	if cfg.DefaultTeamKey != "ENG" {
+		t.Errorf("expected DefaultTeamKey preserved, got %q", cfg.DefaultTeamKey)
+	}
+	if cfg.OrgSlug != "" {
+		t.Errorf("expected OrgSlug='' (default) after migrating from pre-org-slug schema, got %q", cfg.OrgSlug)
+	}
+	if cfg.LastOk {
+		t.Error("expected LastOk=false (default) after migrating from pre-health schema")
+	}
+	if cfg.LastCheckedAt != nil {
+		t.Errorf("expected LastCheckedAt=nil (default), got %v", cfg.LastCheckedAt)
+	}
+}
+
 // Covers the sql.ErrNoRows branch: a user who installed a previous version,
 // never configured Linear, and then upgrades hits this path.
 func TestStore_MigrateLegacyPerWorkspaceTable_EmptyTable(t *testing.T) {

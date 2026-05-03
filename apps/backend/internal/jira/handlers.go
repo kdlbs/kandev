@@ -13,10 +13,6 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
-// errMsgWorkspaceIDRequired is the response body returned when a watcher
-// handler is invoked without the workspace_id query parameter.
-const errMsgWorkspaceIDRequired = "workspace_id required"
-
 // RegisterRoutes wires the Jira HTTP and WebSocket handlers.
 func RegisterRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *Service, log *logger.Logger) {
 	ctrl := &Controller{service: svc, logger: log}
