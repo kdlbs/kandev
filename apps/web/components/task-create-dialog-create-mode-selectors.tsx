@@ -22,6 +22,8 @@ type CreateModeSelectorsProps = {
   onAgentProfileChange: (v: string) => void;
   onExecutorProfileChange: (v: string) => void;
   workflowAgentLocked: boolean;
+  noCompatibleAgent: boolean;
+  executorProfileName: string | null;
 };
 
 /**
@@ -44,6 +46,8 @@ export function CreateModeSelectors(props: CreateModeSelectorsProps) {
       onExecutorProfileChange={props.onExecutorProfileChange}
       executorsLoading={props.executorsLoading}
       workflowAgentLocked={props.workflowAgentLocked}
+      noCompatibleAgent={props.noCompatibleAgent}
+      executorProfileName={props.executorProfileName}
       AgentSelectorComponent={AgentSelector}
       ExecutorProfileSelectorComponent={ExecutorProfileSelector}
     />

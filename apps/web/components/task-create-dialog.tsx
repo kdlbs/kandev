@@ -138,6 +138,8 @@ type DialogFormBodyProps = {
    * branch for local execution; fresh-branch mode unlocks it).
    */
   isLocalExecutor: boolean;
+  noCompatibleAgent: boolean;
+  executorProfileName: string | null;
   /** Optional render slot above the description editor. */
   aboveDescriptionSlot?: React.ReactNode;
   /** Optional render slot inside the dialog body (rendered above the chip row). */
@@ -230,6 +232,8 @@ function CreateModeBody(props: DialogFormBodyProps) {
         onAgentProfileChange={onAgentProfileChange}
         onExecutorProfileChange={onExecutorProfileChange}
         workflowAgentLocked={workflowAgentLocked}
+        noCompatibleAgent={props.noCompatibleAgent}
+        executorProfileName={props.executorProfileName}
       />
       {props.bottomSlot}
     </>
@@ -553,6 +557,8 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             repositories={repositories}
             freshBranchAvailable={freshBranchAvailable}
             isLocalExecutor={computed.isLocalExecutor}
+            noCompatibleAgent={computed.noCompatibleAgent}
+            executorProfileName={computed.selectedExecutorProfileName}
             extraFormSlot={props.extraFormSlot}
             aboveDescriptionSlot={props.aboveDescriptionSlot}
             bottomSlot={props.bottomSlot}

@@ -111,7 +111,7 @@ describe("computeDisabledReason (start-task)", () => {
       KIND_START,
     );
     expect(reason).toContain("Docker (sandbox)");
-    expect(reason).toContain("configured");
+    expect(reason).toContain("credentials");
   });
 });
 

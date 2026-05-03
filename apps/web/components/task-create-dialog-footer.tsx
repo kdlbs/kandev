@@ -270,7 +270,7 @@ export const REASON_DESCRIPTION = "Add a session description";
 
 function noCompatibleAgentReason(executorProfileName: string | null): string {
   const target = executorProfileName ? `“${executorProfileName}”` : "this executor";
-  return `No agent profile is configured for ${target}. Configure credentials in Settings → Executors.`;
+  return `No compatible agent profile is configured for ${target}. Configure agent credentials in Settings → Executors.`;
 }
 
 function baseReason(props: TaskCreateDialogFooterProps): string | null {

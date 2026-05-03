@@ -51,6 +51,8 @@ type CreateEditSelectorsProps = {
     triggerClassName?: string;
   }>;
   workflowAgentLocked: boolean;
+  noCompatibleAgent: boolean;
+  executorProfileName: string | null;
 };
 
 type AgentColumnProps = Pick<
@@ -63,7 +65,27 @@ type AgentColumnProps = Pick<
   | "isCreatingSession"
   | "AgentSelectorComponent"
   | "workflowAgentLocked"
+  | "noCompatibleAgent"
+  | "executorProfileName"
 >;
+
+function NoCompatibleAgentState({ executorProfileName }: { executorProfileName: string | null }) {
+  const target = executorProfileName ? `“${executorProfileName}”` : "this executor";
+  return (
+    <div
+      className="flex h-auto min-h-7 items-center justify-between gap-3 rounded-sm border border-input px-3 py-1.5 text-xs text-muted-foreground"
+      data-testid="agent-profile-empty-state"
+    >
+      <span>No compatible agent profiles for {target}.</span>
+      <Link
+        href="/settings/executors"
+        className="shrink-0 cursor-pointer text-primary hover:underline"
+      >
+        Configure credentials
+      </Link>
+    </div>
+  );
+}
 
 function AgentColumn({
   agentProfiles,
@@ -74,16 +96,24 @@ function AgentColumn({
   isCreatingSession,
   AgentSelectorComponent,
   workflowAgentLocked,
+  noCompatibleAgent,
+  executorProfileName,
 }: AgentColumnProps) {
   if (agentProfiles.length === 0 && !agentProfilesLoading) {
     return (
-      <div className="flex h-7 items-center justify-center gap-2 rounded-sm border border-input px-3 text-xs text-muted-foreground">
+      <div
+        className="flex h-7 items-center justify-center gap-2 rounded-sm border border-input px-3 text-xs text-muted-foreground"
+        data-testid="agent-profile-empty-state"
+      >
         <span>No agents found.</span>
         <Link href="/settings/agents" className="cursor-pointer text-primary hover:underline">
           Add agent
         </Link>
       </div>
     );
+  }
+  if (noCompatibleAgent && !agentProfilesLoading) {
+    return <NoCompatibleAgentState executorProfileName={executorProfileName} />;
   }
   const placeholder = agentProfilesLoading ? "Loading agents..." : "Select agent";
   return (
