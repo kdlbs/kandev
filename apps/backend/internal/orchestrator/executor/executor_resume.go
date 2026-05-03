@@ -477,13 +477,14 @@ func (e *Executor) validateAndLockResume(ctx context.Context, session *models.Ta
 // Returns the request, repository ID, executor config, existing ExecutorRunning record (may be nil), and error.
 func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, startAgent bool) (*LaunchAgentRequest, string, executorConfig, *models.ExecutorRunning, error) {
 	req := &LaunchAgentRequest{
-		TaskID:          task.ID,
-		SessionID:       session.ID,
-		TaskTitle:       task.Title,
-		AgentProfileID:  session.AgentProfileID,
-		TaskDescription: task.Description,
-		Priority:        task.Priority,
-		IsEphemeral:     task.IsEphemeral,
+		TaskID:            task.ID,
+		SessionID:         session.ID,
+		TaskTitle:         task.Title,
+		AgentProfileID:    session.AgentProfileID,
+		TaskDescription:   task.Description,
+		Priority:          task.Priority,
+		IsEphemeral:       task.IsEphemeral,
+		TaskEnvironmentID: session.TaskEnvironmentID,
 	}
 
 	metadata := map[string]interface{}{}
