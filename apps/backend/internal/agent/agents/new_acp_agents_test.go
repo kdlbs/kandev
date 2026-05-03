@@ -16,9 +16,14 @@ import (
 // drifting to npx while the rest stay native (or vice versa) loud rather
 // than silent.
 type acpAgentSpec struct {
-	id              string
-	displayName     string
-	detectBinary    string   // binary that IsInstalled's primary WithCommand checks for
+	id          string
+	displayName string
+	// detectBinaries lists every binary name IsInstalled accepts via
+	// WithCommand. Used by TestNewACPAgents_DetectionRequiresGlobalBinary
+	// to skip the test whenever ANY of these is on PATH — otherwise an
+	// agent with multiple WithCommand fallbacks (e.g. Pi accepts both
+	// `pi-acp` and `pi`) flakes when the secondary binary is present.
+	detectBinaries  []string
 	expectedArgv    []string // BuildCommand and Runtime.Cmd
 	inferenceArgv   []string // InferenceConfig.Command
 	passthroughArgv []string // PassthroughCmd (zero-args allowed)
@@ -30,70 +35,70 @@ var newACPAgentSpecs = []struct {
 	spec acpAgentSpec
 }{
 	{func() Agent { return NewQwenACP() }, acpAgentSpec{
-		id: "qwen-acp", displayName: "Qwen", detectBinary: "qwen",
+		id: "qwen-acp", displayName: "Qwen", detectBinaries: []string{"qwen"},
 		expectedArgv:    []string{"npx", "-y", "@qwen-code/qwen-code", "--acp"},
 		inferenceArgv:   []string{"npx", "-y", "@qwen-code/qwen-code", "--acp"},
 		passthroughArgv: []string{"npx", "-y", "@qwen-code/qwen-code"},
 		installViaNpm:   true,
 	}},
 	{func() Agent { return NewIFlowACP() }, acpAgentSpec{
-		id: "iflow-acp", displayName: "iFlow (beta)", detectBinary: "iflow",
+		id: "iflow-acp", displayName: "iFlow (beta)", detectBinaries: []string{"iflow"},
 		expectedArgv:    []string{"npx", "-y", "@iflow-ai/iflow-cli", "--experimental-acp"},
 		inferenceArgv:   []string{"npx", "-y", "@iflow-ai/iflow-cli", "--experimental-acp"},
 		passthroughArgv: []string{"npx", "-y", "@iflow-ai/iflow-cli"},
 		installViaNpm:   true,
 	}},
 	{func() Agent { return NewDroidACP() }, acpAgentSpec{
-		id: "droid-acp", displayName: "Droid", detectBinary: "droid",
+		id: "droid-acp", displayName: "Droid", detectBinaries: []string{"droid"},
 		expectedArgv:    []string{"npx", "-y", "droid", "exec", "--output-format", "acp"},
 		inferenceArgv:   []string{"npx", "-y", "droid", "exec", "--output-format", "acp"},
 		passthroughArgv: []string{"npx", "-y", "droid"},
 		installViaNpm:   true,
 	}},
 	{func() Agent { return NewKilocodeACP() }, acpAgentSpec{
-		id: "kilocode-acp", displayName: "Kilocode", detectBinary: "kilo",
+		id: "kilocode-acp", displayName: "Kilocode", detectBinaries: []string{"kilo", "kilocode"},
 		expectedArgv:    []string{"npx", "-y", "@kilocode/cli", "acp"},
 		inferenceArgv:   []string{"npx", "-y", "@kilocode/cli", "acp"},
 		passthroughArgv: []string{"npx", "-y", "@kilocode/cli"},
 		installViaNpm:   true,
 	}},
 	{func() Agent { return NewPiACP() }, acpAgentSpec{
-		id: "pi-acp", displayName: "Pi", detectBinary: "pi-acp",
+		id: "pi-acp", displayName: "Pi", detectBinaries: []string{"pi-acp", "pi"},
 		expectedArgv:    []string{"npx", "-y", "pi-acp"},
 		inferenceArgv:   []string{"npx", "-y", "pi-acp"},
 		passthroughArgv: []string{"npx", "-y", "pi-acp"},
 		installViaNpm:   true,
 	}},
 	{func() Agent { return NewCursorACP() }, acpAgentSpec{
-		id: "cursor-acp", displayName: "Cursor", detectBinary: "cursor-agent",
+		id: "cursor-acp", displayName: "Cursor", detectBinaries: []string{"cursor-agent"},
 		expectedArgv:    []string{"cursor-agent", "acp"},
 		inferenceArgv:   []string{"cursor-agent", "acp"},
 		passthroughArgv: []string{"cursor-agent"},
 		installViaNpm:   false,
 	}},
 	{func() Agent { return NewKimiACP() }, acpAgentSpec{
-		id: "kimi-acp", displayName: "Kimi", detectBinary: "kimi",
+		id: "kimi-acp", displayName: "Kimi", detectBinaries: []string{"kimi"},
 		expectedArgv:    []string{"kimi", "acp"},
 		inferenceArgv:   []string{"kimi", "acp"},
 		passthroughArgv: []string{"kimi"},
 		installViaNpm:   false,
 	}},
 	{func() Agent { return NewKiroACP() }, acpAgentSpec{
-		id: "kiro-acp", displayName: "Kiro", detectBinary: "kiro-cli-chat",
+		id: "kiro-acp", displayName: "Kiro", detectBinaries: []string{"kiro-cli-chat"},
 		expectedArgv:    []string{"kiro-cli-chat", "acp"},
 		inferenceArgv:   []string{"kiro-cli-chat", "acp"},
 		passthroughArgv: []string{"kiro-cli-chat"},
 		installViaNpm:   false,
 	}},
 	{func() Agent { return NewQoderACP() }, acpAgentSpec{
-		id: "qoder-acp", displayName: "Qoder", detectBinary: "qodercli",
+		id: "qoder-acp", displayName: "Qoder", detectBinaries: []string{"qodercli"},
 		expectedArgv:    []string{"qodercli", "--acp"},
 		inferenceArgv:   []string{"qodercli", "--acp"},
 		passthroughArgv: []string{"qodercli"},
 		installViaNpm:   false,
 	}},
 	{func() Agent { return NewTraeACP() }, acpAgentSpec{
-		id: "trae-acp", displayName: "Trae", detectBinary: "traecli",
+		id: "trae-acp", displayName: "Trae", detectBinaries: []string{"traecli"},
 		expectedArgv:    []string{"traecli", "acp", "serve"},
 		inferenceArgv:   []string{"traecli", "acp", "serve"},
 		passthroughArgv: []string{"traecli"},
@@ -168,14 +173,17 @@ func TestNewACPAgents_InstallScript(t *testing.T) {
 			if !tc.spec.installViaNpm && hasNpm {
 				t.Errorf("InstallScript() should NOT use npm for native-binary agent: %q", got)
 			}
-			// The detection binary must be referenced somewhere actionable —
-			// either argv (native binaries) or InstallScript (npm install -g
-			// <pkg> ships the bin), so users with "Available to Install"
-			// status see a hint that resolves to the right command.
+			// The primary detection binary must be referenced somewhere
+			// actionable — either argv (native binaries) or InstallScript
+			// (npm install -g <pkg> ships the bin), so users with "Available
+			// to Install" status see a hint that resolves to the right
+			// command. Only check the first detect binary; secondaries are
+			// fallbacks that may not appear in either surface.
+			primary := tc.spec.detectBinaries[0]
 			argv := ag.BuildCommand(CommandOptions{}).Args()
-			if !slices.Contains(argv, tc.spec.detectBinary) && !strings.Contains(got, tc.spec.detectBinary) {
+			if !slices.Contains(argv, primary) && !strings.Contains(got, primary) {
 				t.Errorf("detection binary %q not referenced in argv (%v) or InstallScript (%q)",
-					tc.spec.detectBinary, argv, got)
+					primary, argv, got)
 			}
 		})
 	}
@@ -187,22 +195,27 @@ func TestNewACPAgents_InstallScript(t *testing.T) {
 // probe the agent — claiming availability for an agent the user hasn't
 // actually installed triggers unwanted package downloads and produces
 // misleading auth_required/failed states for agents the user never asked
-// to use. The detection binary comes from the spec table so npx-launched
-// agents (whose argv[0] is "npx") are still verified against their real
-// detection target (qwen, iflow, droid, …).
+// to use. detectBinaries comes from the spec table so npx-launched agents
+// (whose argv[0] is "npx") are still verified against their real detection
+// targets (qwen, iflow, droid, …), and agents with multiple WithCommand
+// fallbacks (e.g. Pi accepts both `pi-acp` and `pi`) skip the test
+// whenever ANY of those is on PATH so the test doesn't flake on CI hosts
+// that happen to have a generic `pi` (Raspberry Pi tooling) installed.
 func TestNewACPAgents_DetectionRequiresGlobalBinary(t *testing.T) {
 	for _, tc := range newACPAgentSpecs {
 		t.Run(tc.spec.id, func(t *testing.T) {
-			binary := tc.spec.detectBinary
-			if _, err := exec.LookPath(binary); err == nil {
-				t.Skipf("upstream binary %q is on PATH; can't verify availability requirement", binary)
+			for _, binary := range tc.spec.detectBinaries {
+				if _, err := exec.LookPath(binary); err == nil {
+					t.Skipf("detection binary %q is on PATH; can't verify availability requirement", binary)
+				}
 			}
 			result, err := tc.new().IsInstalled(context.Background())
 			if err != nil {
 				t.Fatalf("IsInstalled error: %v", err)
 			}
 			if result.Available {
-				t.Errorf("Available=true without %q on PATH; detection should require the global binary so the host-utility manager doesn't spawn unwanted npx probes", binary)
+				t.Errorf("Available=true without any of %v on PATH; detection should require the global binary so the host-utility manager doesn't spawn unwanted npx probes",
+					tc.spec.detectBinaries)
 			}
 		})
 	}

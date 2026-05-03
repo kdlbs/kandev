@@ -61,6 +61,12 @@ func (a *PiACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *PiACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
+	// "pi" is short and could in theory collide with unrelated tooling, but
+	// the pi-mono coding agent (https://github.com/badlogic/pi-mono) ships
+	// its CLI as `pi`, and a kandev user with `pi` on PATH is overwhelmingly
+	// likely to be the pi coding-agent installation we're targeting.
+	// Checking `pi-acp` first lets a dedicated wrapper take precedence
+	// when both are present.
 	result, err := Detect(ctx, WithCommand("pi-acp"), WithCommand("pi"))
 	if err != nil {
 		return result, err
