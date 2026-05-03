@@ -143,12 +143,17 @@ function useSessionTabActions(
 
     // Switch the active session BEFORE removing from the store so
     // useAutoSessionTab doesn't re-create this panel with the deleted session's ID.
+    // Hand off to the most-recently-started remaining session — store ordering
+    // is unspecified, so sort explicitly rather than rely on array position.
     const state = appStoreApi.getState();
     if (state.tasks.activeSessionId === sessionId) {
       const sessions = state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
-      const remaining = sessions.filter((s) => s.id !== sessionId);
+      const remaining = sessions
+        .filter((s) => s.id !== sessionId)
+        .slice()
+        .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
       if (remaining.length > 0) {
-        state.setActiveSessionAuto(taskId, remaining[remaining.length - 1].id);
+        state.setActiveSessionAuto(taskId, remaining[0].id);
       } else {
         state.clearActiveSession();
       }

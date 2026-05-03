@@ -56,6 +56,9 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
           const existingMultiById = new Map(snapshot.tasks.map((t) => [t.id, t]));
           const multiTasks = tasks.map((t) => ({
             ...t,
+            // t.primarySessionId comes from the main kanban lookup; fall back
+            // to the multi-snapshot's own value when the task is only tracked
+            // in the secondary workflow (not in kanban.tasks).
             primarySessionId: t.primarySessionId ?? existingMultiById.get(t.id)?.primarySessionId,
             primarySessionState:
               t.primarySessionState ?? existingMultiById.get(t.id)?.primarySessionState,
