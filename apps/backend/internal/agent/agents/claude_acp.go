@@ -67,7 +67,7 @@ func (a *ClaudeACP) Logo(v LogoVariant) []byte {
 func (a *ClaudeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	// Check for the Claude Code CLI on PATH. Auth state is surfaced later by
 	// the ACP probe, not by the presence of ~/.claude.json.
-	result, err := Detect(ctx, WithCommand("claude"), WithNpxRunnable(claudeACPPkg))
+	result, err := Detect(ctx, WithCommand("claude"))
 	if err != nil {
 		return result, err
 	}

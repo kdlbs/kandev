@@ -64,7 +64,7 @@ func (a *Gemini) Logo(v LogoVariant) []byte {
 func (a *Gemini) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	// Check for the gemini CLI on PATH. Auth state is surfaced later by the
 	// ACP probe, not by scanning ~/.gemini.
-	result, err := Detect(ctx, WithCommand("gemini"), WithNpxRunnable(geminiPkg))
+	result, err := Detect(ctx, WithCommand("gemini"))
 	if err != nil {
 		return result, err
 	}

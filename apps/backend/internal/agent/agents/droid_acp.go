@@ -68,7 +68,7 @@ func (a *DroidACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *DroidACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	result, err := Detect(ctx, WithCommand("droid"), WithNpxRunnable(droidACPPkg))
+	result, err := Detect(ctx, WithCommand("droid"))
 	if err != nil {
 		return result, err
 	}

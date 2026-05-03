@@ -63,7 +63,7 @@ func (a *IFlowACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *IFlowACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	result, err := Detect(ctx, WithCommand("iflow"), WithNpxRunnable(iflowACPPkg))
+	result, err := Detect(ctx, WithCommand("iflow"))
 	if err != nil {
 		return result, err
 	}

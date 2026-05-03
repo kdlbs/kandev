@@ -61,7 +61,7 @@ func (a *PiACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *PiACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	result, err := Detect(ctx, WithCommand("pi-acp"), WithCommand("pi"), WithNpxRunnable(piACPPkg))
+	result, err := Detect(ctx, WithCommand("pi-acp"), WithCommand("pi"))
 	if err != nil {
 		return result, err
 	}

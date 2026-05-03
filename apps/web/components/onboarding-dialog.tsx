@@ -265,7 +265,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={() => {}}>
-      <DialogContent className="sm:max-w-[540px]" showCloseButton={false}>
+      <DialogContent className="sm:max-w-3xl" showCloseButton={false}>
         <DialogHeader>
           <DialogTitle className="text-center text-2xl">{STEP_TITLES[step]}</DialogTitle>
           <DialogDescription className="text-center">{STEP_DESCRIPTIONS[step]}</DialogDescription>

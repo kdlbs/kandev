@@ -61,7 +61,7 @@ func (a *QwenACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *QwenACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	result, err := Detect(ctx, WithCommand("qwen"), WithNpxRunnable(qwenACPPkg))
+	result, err := Detect(ctx, WithCommand("qwen"))
 	if err != nil {
 		return result, err
 	}

@@ -66,7 +66,7 @@ func (a *OpenCodeACP) Logo(v LogoVariant) []byte {
 func (a *OpenCodeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	// Check for the opencode CLI on PATH. Auth state is surfaced later by
 	// the ACP probe, not by scanning ~/.opencode.
-	result, err := Detect(ctx, WithCommand("opencode"), WithNpxRunnable(opencodeACPPkg))
+	result, err := Detect(ctx, WithCommand("opencode"))
 	if err != nil {
 		return result, err
 	}

@@ -61,7 +61,7 @@ func (a *KilocodeACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *KilocodeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	result, err := Detect(ctx, WithCommand("kilo"), WithCommand("kilocode"), WithNpxRunnable(kilocodeACPPkg))
+	result, err := Detect(ctx, WithCommand("kilo"), WithCommand("kilocode"))
 	if err != nil {
 		return result, err
 	}

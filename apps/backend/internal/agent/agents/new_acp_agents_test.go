@@ -134,66 +134,40 @@ func TestNewACPAgents_Contract(t *testing.T) {
 	}
 }
 
-// TestNewACPAgents_NpxLaunchedAgentsHaveNpxFallback verifies that agents
-// launched via `npx -y <pkg>` report Available=true through the npx fallback
-// when npx is on PATH but the global binary isn't. Without this contract,
-// users with Node but no `npm install -g …` see these agents in "Available to
-// Install" even though `npx -y` would launch them just fine.
-func TestNewACPAgents_NpxLaunchedAgentsHaveNpxFallback(t *testing.T) {
-	if !npxOnPath() {
-		t.Skip("npx not on PATH; skipping npx-fallback contract")
-	}
-
-	npxAgents := []Agent{
+// TestNewACPAgents_DetectionRequiresGlobalBinary pins the contract that
+// agents are not reported as available solely because npx is on PATH. The
+// host-utility manager treats Available=true as a green light to spawn and
+// probe the agent — claiming availability for an agent the user hasn't
+// actually installed triggers unwanted package downloads and produces
+// misleading auth_required/failed states for agents the user never asked
+// to use. Native-binary detection (WithCommand) is the only signal.
+func TestNewACPAgents_DetectionRequiresGlobalBinary(t *testing.T) {
+	all := []Agent{
 		NewQwenACP(), NewIFlowACP(), NewDroidACP(), NewKilocodeACP(), NewPiACP(),
-	}
-	for _, ag := range npxAgents {
-		t.Run(ag.ID(), func(t *testing.T) {
-			argv := ag.BuildCommand(CommandOptions{}).Args()
-			if len(argv) == 0 || argv[0] != "npx" {
-				t.Fatalf("expected npx-launched agent; argv=%v", argv)
-			}
-
-			result, err := ag.IsInstalled(context.Background())
-			if err != nil {
-				t.Fatalf("IsInstalled error: %v", err)
-			}
-			// npx is on PATH, so even if the agent's global binary isn't
-			// installed, the fallback should make it Available.
-			if !result.Available {
-				t.Errorf("Available=false despite npx on PATH; agent should fall back to npx")
-			}
-		})
-	}
-}
-
-// TestNewACPAgents_NativeBinaryAgentsHaveNoNpxFallback pins the inverse: the
-// agents that aren't on npm (Cursor, Kimi, Kiro, Qoder, Trae) must NOT
-// claim availability via npx — they need the upstream binary on PATH.
-func TestNewACPAgents_NativeBinaryAgentsHaveNoNpxFallback(t *testing.T) {
-	nativeAgents := []Agent{
 		NewCursorACP(), NewKimiACP(), NewKiroACP(), NewQoderACP(), NewTraeACP(),
 	}
-	for _, ag := range nativeAgents {
+	for _, ag := range all {
 		t.Run(ag.ID(), func(t *testing.T) {
 			argv := ag.BuildCommand(CommandOptions{}).Args()
-			if len(argv) == 0 || argv[0] == "npx" {
-				t.Fatalf("expected native-binary agent; argv=%v", argv)
+			if len(argv) == 0 {
+				t.Fatalf("empty argv")
 			}
-			// We can't directly assert "no npx fallback" without inspecting
-			// internals, so we assert the indirect contract: when the agent's
-			// binary isn't on PATH, the agent is NOT available. This would
-			// fail loudly if someone copy-pasted WithNpxRunnable into a
-			// native-binary agent's IsInstalled.
-			if _, err := exec.LookPath(argv[0]); err == nil {
-				t.Skipf("upstream binary %q is on PATH; can't verify fallback absence", argv[0])
+			// Discover the upstream binary name the agent's IsInstalled checks for.
+			// For npx-launched agents this is the agent's CLI name (qwen, droid, …);
+			// for native-binary agents this is argv[0] (cursor-agent, kimi, …).
+			binary := argv[0]
+			if binary == "npx" {
+				t.Skipf("npx-launched agent %q; binary name not derivable from argv alone", ag.ID())
+			}
+			if _, err := exec.LookPath(binary); err == nil {
+				t.Skipf("upstream binary %q is on PATH; can't verify availability requirement", binary)
 			}
 			result, err := ag.IsInstalled(context.Background())
 			if err != nil {
 				t.Fatalf("IsInstalled error: %v", err)
 			}
 			if result.Available {
-				t.Errorf("Available=true for native-binary agent without binary on PATH; should not have npx fallback")
+				t.Errorf("Available=true without %q on PATH; detection should require the global binary so the host-utility manager doesn't spawn unwanted npx probes", binary)
 			}
 		})
 	}
