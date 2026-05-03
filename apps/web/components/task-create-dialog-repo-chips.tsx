@@ -422,6 +422,8 @@ function RepoChip({
     branchesLoading || !!branchOverrideLoading,
     branchOptions.length,
   );
+  // prettier-ignore
+  console.log("[task-create] DEBUG_BRANCH chip render", { rowKey: row.key, rowRepositoryId: row.repositoryId, rowLocalPath: row.localPath, branchLocked, branchOverride, branchOverrideLoading, branchValue, branchPlaceholder, branchOptionsCount: branchOptions.length, branchesLoading });
 
   return (
     <span

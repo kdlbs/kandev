@@ -170,39 +170,49 @@ export function useCurrentLocalBranchEffect(
     setCurrentLocalBranchLoading,
   } = fs;
   useEffect(() => {
+    // prettier-ignore
+    console.log("[task-create] DEBUG_BRANCH effect entry", { open, workspaceId, useGitHubUrl, rowsLength: rows.length, firstRow: rows[0] ? { localPath: rows[0].localPath, repositoryId: rows[0].repositoryId, branch: rows[0].branch } : null, repositoriesLength: repositories.length });
     if (!open || !workspaceId || useGitHubUrl || rows.length !== 1) {
+      // prettier-ignore
+      console.log("[task-create] DEBUG_BRANCH bail: gate", { open, hasWorkspace: !!workspaceId, useGitHubUrl, rowsLength: rows.length });
       setCurrentLocalBranch("");
       setCurrentLocalBranchLoading(false);
       return;
     }
     const row = rows[0];
     let path = row.localPath ?? "";
+    let pathSource: "localPath" | "repository.local_path" | "" = path ? "localPath" : "";
     if (!path && row.repositoryId) {
       const repo = repositories.find((r: Repository) => r.id === row.repositoryId);
+      // prettier-ignore
+      console.log("[task-create] DEBUG_BRANCH path lookup", { repositoryId: row.repositoryId, foundRepo: !!repo, repoLocalPath: repo?.local_path });
       path = repo?.local_path ?? "";
+      pathSource = path ? "repository.local_path" : "";
     }
     if (!path) {
+      // prettier-ignore
+      console.log("[task-create] DEBUG_BRANCH bail: no path resolved", { rowLocalPath: row.localPath, rowRepositoryId: row.repositoryId, repositoriesLength: repositories.length });
       setCurrentLocalBranch("");
       setCurrentLocalBranchLoading(false);
       return;
     }
+    console.log("[task-create] DEBUG_BRANCH calling action", { workspaceId, path, pathSource });
     let cancelled = false;
     setCurrentLocalBranchLoading(true);
     getLocalRepositoryStatusAction(workspaceId, path)
       .then((r) => {
+        console.log("[task-create] DEBUG_BRANCH action resolved", { path, cancelled, response: r });
         if (cancelled) return;
         const branch = r.current_branch ?? "";
         if (!branch) {
-          // Backend silently returns "" for detached HEAD or path-allowlist
-          // misses. Surface for debugging without blocking the UI.
-          console.warn("[task-create] local repo status returned no current branch", { path });
+          console.log("[task-create] local repo status returned no current branch", { path });
         }
         setCurrentLocalBranch(branch);
         setCurrentLocalBranchLoading(false);
       })
       .catch((err) => {
+        console.log("[task-create] DEBUG_BRANCH action rejected", { path, err });
         if (cancelled) return;
-        console.warn("[task-create] failed to load local repo status", { path, err });
         setCurrentLocalBranch("");
         setCurrentLocalBranchLoading(false);
       });
