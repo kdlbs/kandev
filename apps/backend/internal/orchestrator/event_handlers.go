@@ -3,6 +3,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 
 	"go.uber.org/zap"
 
@@ -38,78 +39,62 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 	if data.SessionID == "" || data.ACPSessionID == "" {
 		return
 	}
-	s.storeResumeToken(ctx, data.TaskID, data.SessionID, data.ACPSessionID, "")
+	s.storeResumeToken(ctx, data.TaskID, data.SessionID, data.AgentExecutionID, data.ACPSessionID, "")
 }
 
 // storeResumeToken stores an agent's session ID as the resume token for session recovery.
-// This is called from handleACPSessionCreated, handleSessionStatusEvent, and handleCompleteStreamEvent.
-// The optional lastMessageUUID is persisted alongside the token for --resume-session-at support.
-// The token is always stored. NativeSessionResume only gates ACP session/load vs session/new
-// in session.go — agents without native resume (e.g., Claude Code) use the token for their
-// own --resume CLI flag instead.
-func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, acpSessionID, lastMessageUUID string, preloadedSession ...*models.TaskSession) {
-	var session *models.TaskSession
-	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
-		session = preloadedSession[0]
-	} else {
-		var err error
-		session, err = s.repo.GetTaskSession(ctx, sessionID)
-		if err != nil {
-			s.logger.Warn("failed to load task session for resume token storage",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			return
-		}
-	}
+// Called from handleACPSessionCreated, handleSessionStatusEvent, and handleCompleteStreamEvent.
+//
+// expectedExecID identifies the lifecycle execution that emitted the event. The repo
+// performs a CAS update keyed on agent_execution_id: if the row has rotated to a
+// different execution since this event was queued, the update is rejected with
+// models.ErrExecutionRotated and the stale token is silently dropped. This prevents
+// a previous execution's tail-end events (post model-switch / context-reset) from
+// overwriting the live execution's resume_token with a defunct ACP session ID.
+//
+// Pass expectedExecID="" only when the caller genuinely doesn't care which execution
+// the event came from (no callers should today; the parameter exists for forward
+// compatibility with paths that don't have an execution context).
+//
+// The token is always stored when CAS succeeds. NativeSessionResume only gates ACP
+// session/load vs session/new in session.go — agents without native resume (e.g.,
+// Claude Code) use the token for their own --resume CLI flag instead.
+func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expectedExecID, acpSessionID, lastMessageUUID string, preloadedSession ...*models.TaskSession) {
+	_ = preloadedSession // session preload is no longer needed with narrow CAS update
 
-	resumable := true
-	runtimeName := ""
-	if session.ExecutorID != "" {
-		if executor, err := s.repo.GetExecutor(ctx, session.ExecutorID); err == nil && executor != nil {
-			resumable = executor.Resumable
-			runtimeName = string(executor.Type)
-		}
-	}
-
-	// Preserve existing metadata (e.g., sprite_name) from previous upsert by persistLaunchState.
-	// Without this, the full ON CONFLICT DO UPDATE in UpsertExecutorRunning would wipe metadata.
-	var existingMetadata map[string]interface{}
-	if existing, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID); err == nil && existing != nil {
-		existingMetadata = existing.Metadata
-	}
-
-	running := &models.ExecutorRunning{
-		ID:               session.ID,
-		SessionID:        session.ID,
-		TaskID:           session.TaskID,
-		ExecutorID:       session.ExecutorID,
-		Runtime:          runtimeName,
-		Status:           "ready",
-		Resumable:        resumable,
-		ResumeToken:      acpSessionID,
-		LastMessageUUID:  lastMessageUUID,
-		AgentExecutionID: session.AgentExecutionID,
-		ContainerID:      session.ContainerID,
-		Metadata:         existingMetadata,
-	}
-	if len(session.Worktrees) > 0 {
-		running.WorktreeID = session.Worktrees[0].WorktreeID
-		running.WorktreePath = session.Worktrees[0].WorktreePath
-		running.WorktreeBranch = session.Worktrees[0].WorktreeBranch
-	}
-
-	if err := s.repo.UpsertExecutorRunning(ctx, running); err != nil {
+	err := s.repo.UpdateResumeToken(ctx, sessionID, expectedExecID, acpSessionID, lastMessageUUID)
+	switch {
+	case err == nil:
+		s.logger.Debug("stored resume token for session",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("expected_exec_id", expectedExecID),
+			zap.String("resume_token", acpSessionID),
+			zap.String("last_message_uuid", lastMessageUUID))
+	case errors.Is(err, models.ErrExecutionRotated):
+		// The row's agent_execution_id has rotated since the event was emitted —
+		// the token belongs to a defunct execution and must be dropped. The new
+		// execution will emit its own ACP session created event and a fresh
+		// storeResumeToken will succeed.
+		s.logger.Info("dropping resume token from rotated execution",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("expected_exec_id", expectedExecID))
+	case errors.Is(err, models.ErrExecutorRunningNotFound):
+		// No executors_running row for this session. With the lifecycle-manager-
+		// owned persistence model this should never happen for a live execution
+		// (the row is created in lockstep with the in-memory Add). Most likely
+		// causes: a session was torn down between event emission and handling,
+		// or a code path that emits ACP events without a registered execution.
+		// Logged loud; nothing to retry.
+		s.logger.Warn("no executors_running row when storing resume token",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("expected_exec_id", expectedExecID))
+	default:
 		s.logger.Warn("failed to persist resume token for session",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return
 	}
-
-	s.logger.Debug("stored resume token for session",
-		zap.String("task_id", taskID),
-		zap.String("session_id", sessionID),
-		zap.String("resume_token", acpSessionID),
-		zap.String("last_message_uuid", lastMessageUUID))
 }

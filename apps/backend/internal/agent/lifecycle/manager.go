@@ -98,6 +98,11 @@ type Manager struct {
 	// secretStore encrypts/decrypts runtime auth tokens (e.g., agentctl handshake tokens).
 	// Used to persist tokens across backend restarts for remote executor recovery.
 	secretStore secrets.SecretStore
+
+	// runningWriter persists the executors_running row in lockstep with executionStore.
+	// See SetExecutorRunningWriter and persistence.go. The lifecycle manager is the
+	// only component allowed to write the lifecycle-owned columns of this table.
+	runningWriter ExecutorRunningWriter
 }
 
 // NewManager creates a new lifecycle manager.

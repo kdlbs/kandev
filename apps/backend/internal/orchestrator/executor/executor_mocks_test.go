@@ -611,6 +611,13 @@ func (m *mockRepository) GetExecutorRunningBySessionID(ctx context.Context, sess
 func (m *mockRepository) DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error {
 	return nil
 }
+func (m *mockRepository) HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error) {
+	if m.executorsRunning != nil {
+		_, ok := m.executorsRunning[sessionID]
+		return ok, nil
+	}
+	return false, nil
+}
 
 // Environment operations
 func (m *mockRepository) CreateEnvironment(ctx context.Context, environment *models.Environment) error {

@@ -370,6 +370,7 @@ func TestProcessOnEnter(t *testing.T) {
 		session, _ := repo.GetTaskSession(ctx, "s1")
 		session.State = models.TaskSessionStateWaitingForInput
 		session.AgentExecutionID = "exec-1"
+		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-1")
 		_ = repo.UpdateTaskSession(ctx, session)
 
 		agentMgr := &mockAgentManager{isAgentRunning: true, promptDone: make(chan struct{})}
@@ -658,10 +659,11 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		// Set agent execution ID on the session
 		session, _ := repo.GetTaskSession(ctx, "s1")
 		session.AgentExecutionID = "exec-123"
+		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-123")
 		session.Metadata = map[string]interface{}{"acp_session_id": "old-acp-id"}
 		_ = repo.UpdateTaskSession(ctx, session)
 
-		agentMgr := &mockAgentManager{}
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 
 		step := &wfmodels.WorkflowStep{
@@ -697,7 +699,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 
-		agentMgr := &mockAgentManager{}
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 
 		step := &wfmodels.WorkflowStep{
@@ -725,6 +727,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		// Set agent execution ID on the session
 		session, _ := repo.GetTaskSession(ctx, "s1")
 		session.AgentExecutionID = "exec-456"
+		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-456")
 		_ = repo.UpdateTaskSession(ctx, session)
 
 		agentMgr := &mockAgentManager{isPassthrough: true}
@@ -757,6 +760,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 
 		session, _ := repo.GetTaskSession(ctx, "s1")
 		session.AgentExecutionID = "exec-789"
+		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-789")
 		_ = repo.UpdateTaskSession(ctx, session)
 
 		agentMgr := &mockAgentManager{restartProcessErr: errors.New("restart failed")}
@@ -796,10 +800,11 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 
 		session, _ := repo.GetTaskSession(ctx, "s1")
 		session.AgentExecutionID = "exec-abc"
+		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-abc")
 		session.Metadata = map[string]interface{}{"acp_session_id": "old-acp"}
 		_ = repo.UpdateTaskSession(ctx, session)
 
-		agentMgr := &mockAgentManager{}
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 
 		step := &wfmodels.WorkflowStep{
@@ -848,6 +853,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 
 		session, _ := repo.GetTaskSession(ctx, "s1")
 		session.AgentExecutionID = "exec-pt"
+		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-pt")
 		_ = repo.UpdateTaskSession(ctx, session)
 
 		agentMgr := &mockAgentManager{isPassthrough: true}

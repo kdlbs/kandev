@@ -197,11 +197,22 @@ func buildExecutorRunning(session *models.TaskSession, taskID string, resp *Laun
 	return running
 }
 
-// persistLaunchState updates the session and executor running records after a successful agent launch.
-// If existingRunning is provided, resume token and message UUID are carried forward without a DB read.
+// persistLaunchState updates the session record after a successful agent launch.
+// The executors_running row is now written by the lifecycle manager itself in
+// lockstep with executionStore.Add (see lifecycle.persistExecutorRunning) — this
+// function no longer touches it. The lifecycle manager also owns the columns that
+// used to live on task_sessions (agent_execution_id, container_id); the orchestrator
+// stops writing them so the only remaining source of truth is executors_running.
+//
+// What remains here: state transitions (e.g., STARTING) and prepare-result metadata
+// merge, both of which are session-row concerns the lifecycle manager doesn't know
+// about. The execCfg / existingRunning parameters are kept on the signature for
+// historical call shape but are no longer used.
 func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, now time.Time, execCfg executorConfig, existingRunning *models.ExecutorRunning) {
-	session.AgentExecutionID = resp.AgentExecutionID
-	session.ContainerID = resp.ContainerID
+	_ = resp            // executors_running fields are written by lifecycle manager
+	_ = execCfg         // ditto
+	_ = existingRunning // ditto
+
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
 	}
@@ -220,14 +231,6 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 
 	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
 		e.logger.Error("failed to update agent session after launch",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-	}
-
-	running := buildExecutorRunning(session, taskID, resp, execCfg, existingRunning)
-	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
-		e.logger.Warn("failed to persist executor runtime after launch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
@@ -685,10 +688,16 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 	return repositoryID, nil
 }
 
-// persistResumeState updates session and executor running records after a successful resume launch.
+// persistResumeState updates the session row after a successful resume launch.
+// Like persistLaunchState, executors_running is owned by the lifecycle manager
+// and not touched here — see lifecycle.persistExecutorRunning. The orchestrator's
+// only remaining responsibility is the session-row state machine (STARTING /
+// CompletedAt-clear).
 func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig, existingRunning *models.ExecutorRunning) {
-	session.AgentExecutionID = resp.AgentExecutionID
-	session.ContainerID = resp.ContainerID
+	_ = resp
+	_ = execCfg
+	_ = existingRunning
+
 	session.ErrorMessage = ""
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
@@ -697,14 +706,6 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 
 	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
 		e.logger.Error("failed to update task session for resume",
-			zap.String("task_id", taskID),
-			zap.String("session_id", session.ID),
-			zap.Error(err))
-	}
-
-	running := buildExecutorRunning(session, taskID, resp, execCfg, existingRunning)
-	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
-		e.logger.Warn("failed to persist executor runtime after resume",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.Error(err))

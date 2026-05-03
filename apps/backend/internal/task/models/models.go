@@ -12,6 +12,14 @@ import (
 // ErrExecutorRunningNotFound is returned when no executor running record exists for a session.
 var ErrExecutorRunningNotFound = errors.New("executor running not found")
 
+// ErrExecutionRotated is returned by CAS-style updates on executors_running when the
+// row's agent_execution_id has rotated since the caller observed it. Indicates the
+// caller's write target a now-defunct execution and should be discarded — typically
+// a stale resume-token event from an execution that was replaced (model switch,
+// context reset, fresh re-launch). Callers should not retry; the new execution
+// will produce its own events.
+var ErrExecutionRotated = errors.New("execution rotated; CAS write rejected")
+
 // ListMessagesOptions defines pagination options for listing messages
 type ListMessagesOptions struct {
 	Limit  int
@@ -543,15 +551,17 @@ const (
 // It owns the workspace (worktree/container/sandbox) and the agentctl control server.
 // Multiple sessions can share the same TaskEnvironment.
 type TaskEnvironment struct {
-	ID                string                `json:"id"`
-	TaskID            string                `json:"task_id"`
-	RepositoryID      string                `json:"repository_id"` // Deprecated: use Repos. Kept for dual-write/backwards compat.
-	ExecutorType      string                `json:"executor_type"`
-	ExecutorID        string                `json:"executor_id"`
-	ExecutorProfileID string                `json:"executor_profile_id"`
-	AgentExecutionID  string                `json:"agent_execution_id"` // agentctl execution handle
-	ControlPort       int                   `json:"control_port"`       // agentctl control port
-	Status            TaskEnvironmentStatus `json:"status"`
+	ID                string `json:"id"`
+	TaskID            string `json:"task_id"`
+	RepositoryID      string `json:"repository_id"` // Deprecated: use Repos. Kept for dual-write/backwards compat.
+	ExecutorType      string `json:"executor_type"`
+	ExecutorID        string `json:"executor_id"`
+	ExecutorProfileID string `json:"executor_profile_id"`
+	// AgentExecutionID was removed: executors_running owns the execution<->session
+	// mapping now. Read it via repo.GetExecutorRunningBySessionID(sessionID) when
+	// needed (the orchestrator does this in service_turns.go for WorkspaceInfo).
+	ControlPort int                   `json:"control_port"` // agentctl control port
+	Status      TaskEnvironmentStatus `json:"status"`
 
 	// Type-specific fields. The single worktree fields below are legacy: with
 	// multi-repo tasks, the per-repo worktrees live on Repos. WorkspacePath
@@ -618,9 +628,7 @@ func (te *TaskEnvironment) ToAPI() map[string]interface{} {
 		"created_at":          te.CreatedAt,
 		"updated_at":          te.UpdatedAt,
 	}
-	if te.AgentExecutionID != "" {
-		result["agent_execution_id"] = te.AgentExecutionID
-	}
+	// agent_execution_id is no longer carried on TaskEnvironment — see executors_running.
 	if te.ControlPort != 0 {
 		result["control_port"] = te.ControlPort
 	}

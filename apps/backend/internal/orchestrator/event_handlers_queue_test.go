@@ -15,13 +15,13 @@ func TestExecuteQueuedMessage_RequeuesWhenResetInProgress(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
 
 	session, err := repo.GetTaskSession(ctx, "s1")
 	if err != nil {
 		t.Fatalf("failed to get session: %v", err)
 	}
 	session.State = models.TaskSessionStateWaitingForInput
-	session.AgentExecutionID = "exec-1"
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to update session: %v", err)
 	}

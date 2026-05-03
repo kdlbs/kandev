@@ -170,6 +170,15 @@ type ExecutorRepository interface {
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
+	// HasExecutorRunningRow returns true if a row exists for the session.
+	// Used to decide "session has been launched at least once" without loading the full row.
+	HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
+	// UpdateResumeToken performs a CAS-style narrow update of resume_token + last_message_uuid
+	// scoped to the row's current agent_execution_id. If the row's agent_execution_id no longer
+	// matches expectedExecID (i.e. a new execution has taken over), returns models.ErrExecutionRotated
+	// and writes nothing. Use when persisting state from a specific execution that may have been
+	// replaced concurrently — typically resume tokens emitted by ACP session events.
+	UpdateResumeToken(ctx context.Context, sessionID, expectedExecID, resumeToken, lastMessageUUID string) error
 }
 
 // EnvironmentRepository handles environment CRUD.

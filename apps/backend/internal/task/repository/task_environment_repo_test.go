@@ -229,12 +229,12 @@ func TestTaskEnvironmentRepo_BackfillFromLegacyEnv(t *testing.T) {
 	if _, err := sqlxDB.Exec(`
 		INSERT INTO task_environments (
 			id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
-			agent_execution_id, control_port, status,
+			control_port, status,
 			worktree_id, worktree_path, worktree_branch, workspace_path,
 			container_id, sandbox_id, task_dir_name,
 			created_at, updated_at
 		) VALUES ('legacy-env', 'task-env-6', 'repo-legacy', 'local_pc', '', '',
-			'', 0, 'ready',
+			0, 'ready',
 			'wt-legacy', '/wt/legacy', 'main', '',
 			'', '', '',
 			datetime('now'), datetime('now'))

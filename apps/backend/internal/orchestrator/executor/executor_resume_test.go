@@ -213,11 +213,15 @@ func setupLiveResumeTestFixture(repo *mockRepository) {
 	}
 }
 
-// TestResumeSession_LiveAgentReturnsAlreadyRunning ensures that when LaunchAgent
-// reports "already has an agent running" and the lifecycle manager confirms the
-// agent is actually alive (via IsAgentRunningForSession), ResumeSession returns
-// ErrExecutionAlreadyRunning instead of killing the live subprocess.
-// Regression test for the resume race that killed active agents mid-stream.
+// TestResumeSession_LiveAgentReturnsAlreadyRunning ensures ResumeSession returns
+// ErrExecutionAlreadyRunning instead of killing the live agent subprocess when
+// a live agent is already registered for the session.
+//
+// Post-refactor, this is detected earlier than before: validateAndLockResume's
+// GetExecutionBySession now consults executors_running + IsAgentRunningForSession
+// directly, short-circuiting *before* LaunchAgent is called. Pre-refactor the
+// race only surfaced via LaunchAgent's "already has an agent running" error and
+// a follow-up probe — so this test asserts the new short-circuit path.
 func TestResumeSession_LiveAgentReturnsAlreadyRunning(t *testing.T) {
 	repo := newMockRepository()
 	setupLiveResumeTestFixture(repo)
@@ -240,11 +244,15 @@ func TestResumeSession_LiveAgentReturnsAlreadyRunning(t *testing.T) {
 	if agentMgr.cleanupStaleExecutionCallCount != 0 {
 		t.Errorf("expected no stale-cleanup call on live agent, got %d", agentMgr.cleanupStaleExecutionCallCount)
 	}
-	if agentMgr.launchAgentCallCount != 1 {
-		t.Errorf("expected LaunchAgent called once, got %d", agentMgr.launchAgentCallCount)
+	// LaunchAgent must NOT be called: validation short-circuits before reaching it.
+	// This is the regression guard — the pre-refactor LaunchAgent + probe path could
+	// race and kill a live agent if probe timing was wrong; the early short-circuit
+	// closes that window.
+	if agentMgr.launchAgentCallCount != 0 {
+		t.Errorf("expected LaunchAgent NOT called (early short-circuit), got %d", agentMgr.launchAgentCallCount)
 	}
-	if len(agentMgr.isAgentRunningForSessionCallArgs) != 1 || agentMgr.isAgentRunningForSessionCallArgs[0] != "sess-1" {
-		t.Errorf("expected IsAgentRunningForSession called once with sess-1, got %v", agentMgr.isAgentRunningForSessionCallArgs)
+	if len(agentMgr.isAgentRunningForSessionCallArgs) == 0 {
+		t.Errorf("expected IsAgentRunningForSession to be consulted at least once")
 	}
 }
 

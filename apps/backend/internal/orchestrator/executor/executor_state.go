@@ -12,7 +12,11 @@ import (
 	"go.uber.org/zap"
 )
 
-// GetExecutionBySession returns the execution state for a specific session
+// GetExecutionBySession returns the execution state for a specific session.
+// "Has been launched" is determined by whether an executors_running row exists
+// (the lifecycle manager creates it in lockstep with executionStore.Add); the
+// removed task_sessions.agent_execution_id column was a denormalized copy that
+// drifted from the in-memory store and produced the divergence bug.
 func (e *Executor) GetExecutionBySession(sessionID string) (*TaskExecution, bool) {
 	ctx := context.Background()
 	const startupGracePeriod = 30 * time.Second
@@ -22,7 +26,8 @@ func (e *Executor) GetExecutionBySession(sessionID string) (*TaskExecution, bool
 	if err != nil {
 		return nil, false
 	}
-	if session.AgentExecutionID == "" {
+	hasRunning, hasErr := e.repo.HasExecutorRunningRow(ctx, sessionID)
+	if hasErr != nil || !hasRunning {
 		return nil, false
 	}
 

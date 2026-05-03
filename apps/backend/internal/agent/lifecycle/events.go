@@ -105,10 +105,11 @@ func (p *EventPublisher) PublishACPSessionCreated(execution *AgentExecution, ses
 	}
 
 	payload := ACPSessionCreatedPayload{
-		TaskID:          execution.TaskID,
-		SessionID:       execution.SessionID,
-		AgentInstanceID: execution.ID,
-		ACPSessionID:    sessionID,
+		TaskID:           execution.TaskID,
+		SessionID:        execution.SessionID,
+		AgentInstanceID:  execution.ID,
+		AgentExecutionID: execution.ID,
+		ACPSessionID:     sessionID,
 	}
 
 	event := bus.NewEvent(events.AgentACPSessionCreated, "agent-manager", payload)
@@ -165,12 +166,13 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 	// session_id is the task session ID (execution.SessionID)
 	// acp_session_id in eventData is the internal agent protocol session
 	payload := AgentStreamEventPayload{
-		Type:      "agent/event",
-		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:   execution.ID,
-		TaskID:    execution.TaskID,
-		SessionID: execution.SessionID,
-		Data:      eventData,
+		Type:        "agent/event",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:     execution.ID,
+		ExecutionID: execution.ID,
+		TaskID:      execution.TaskID,
+		SessionID:   execution.SessionID,
+		Data:        eventData,
 	}
 
 	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", payload)
