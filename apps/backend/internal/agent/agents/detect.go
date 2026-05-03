@@ -52,6 +52,14 @@ func WithCommand(name string) DetectOption {
 // Use this AFTER a WithCommand check for the global binary — Detect is
 // first-match-wins, so the global install (if present) is preferred and
 // reports its real path.
+//
+// NOTE: not currently wired into any agent's IsInstalled. The host-utility
+// manager treats Available=true as a green light to spawn and probe the
+// agent at boot, so claiming availability via npx alone caused unwanted
+// downloads and misleading auth_required/failed states for agents the user
+// never installed. The helper is parked here until the host-utility manager
+// gains a "skip probe for npx-fallback detections" path; at that point this
+// can be re-wired into the npm-distributed agents' IsInstalled.
 func WithNpxRunnable(pkg string) DetectOption {
 	return func(ctx context.Context) (bool, string, error) {
 		if _, err := exec.LookPath("npx"); err == nil {

@@ -78,13 +78,13 @@ func (a *OpenCodeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error)
 }
 
 func (a *OpenCodeACP) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", opencodeACPPkg, "acp").Build()
+	return Cmd("opencode", "acp").Build()
 }
 
 func (a *OpenCodeACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd("npx", "-y", opencodeACPPkg, "acp").Build(),
+		Cmd:            Cmd("opencode", "acp").Build(),
 		WorkingDir:     "{workspace}",
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
@@ -111,6 +111,6 @@ func (a *OpenCodeACP) PermissionSettings() map[string]PermissionSetting {
 func (a *OpenCodeACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("npx", "-y", opencodeACPPkg, "acp"),
+		Command:   NewCommand("opencode", "acp"),
 	}
 }
