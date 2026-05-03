@@ -26,7 +26,6 @@ import { EditorsMenu } from "@/components/task/editors-menu";
 import { BranchPathPopover } from "@/components/task/branch-path-popover";
 import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
 import { DocumentControls } from "@/components/task/document/document-controls";
-import { VcsSplitButton } from "@/components/vcs-split-button";
 import { PRTopbarButton } from "@/components/github/pr-topbar-button";
 import { JiraTicketButton, extractJiraKey } from "@/components/jira/jira-ticket-button";
 import { JiraLinkButton } from "@/components/jira/jira-link-button";
@@ -179,7 +178,6 @@ const TaskTopBar = memo(function TaskTopBar({
       <TopBarRight
         taskId={taskId}
         activeSessionId={activeSessionId}
-        baseBranch={baseBranch}
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}
@@ -487,11 +485,10 @@ function TopbarToolsGroup({
   );
 }
 
-/** Right section: primary VCS action, status/attention, tools menu */
+/** Right section: status/attention, tools menu */
 function TopBarRight({
   taskId,
   activeSessionId,
-  baseBranch,
   showDebugOverlay,
   onToggleDebugOverlay,
   isArchived,
@@ -502,7 +499,6 @@ function TopBarRight({
 }: {
   taskId?: string | null;
   activeSessionId?: string | null;
-  baseBranch?: string;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
@@ -521,24 +517,6 @@ function TopBarRight({
       content: (
         <TopbarCluster label="Quick chat" className="[&_button]:h-8 [&_button]:text-xs">
           <QuickChatButton workspaceId={workspaceId} />
-        </TopbarCluster>
-      ),
-    });
-  }
-
-  if (!isArchived) {
-    items.push({
-      id: "vcs",
-      label: "Primary version control action",
-      priority: 100,
-      required: true,
-      content: (
-        <TopbarCluster label="Primary version control action">
-          <VcsSplitButton
-            sessionId={activeSessionId ?? null}
-            baseBranch={baseBranch}
-            buttonSize="lg"
-          />
         </TopbarCluster>
       ),
     });
