@@ -887,12 +887,16 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 		zap.String("session_id", sessionID),
 		zap.String("session_state", string(session.State)))
 
-	// If the session is in CREATED state with an existing workspace (AgentExecutionID set),
-	// the workspace was prepared but the agent was never started. Use LaunchPreparedSession
-	// which routes to startAgentOnExistingWorkspace to reuse the workspace rather than
-	// ResumeSession which tries a full LaunchAgent and conflicts with the existing execution.
-	if session.State == models.TaskSessionStateCreated && session.AgentExecutionID != "" {
-		return s.startAgentOnPreparedWorkspace(ctx, sessionID, session)
+	// If the session is in CREATED state with an existing workspace (executors_running
+	// row exists), the workspace was prepared but the agent was never started. Use
+	// LaunchPreparedSession which routes to startAgentOnExistingWorkspace to reuse
+	// the workspace rather than ResumeSession which tries a full LaunchAgent and
+	// conflicts with the existing execution.
+	if session.State == models.TaskSessionStateCreated {
+		hasRunning, _ := s.repo.HasExecutorRunningRow(ctx, sessionID)
+		if hasRunning {
+			return s.startAgentOnPreparedWorkspace(ctx, sessionID, session)
+		}
 	}
 
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
@@ -939,8 +943,7 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 // LaunchAgent and conflicts with the existing execution in the lifecycle manager's store.
 func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID string, session *models.TaskSession) error {
 	s.logger.Debug("session has prepared workspace but no agent, starting agent on existing workspace",
-		zap.String("session_id", sessionID),
-		zap.String("agent_execution_id", session.AgentExecutionID))
+		zap.String("session_id", sessionID))
 
 	// Boot ready is published as events.AgentBootReady by the lifecycle layer
 	// and routed to handleAgentBootReady, which flips the session to
@@ -1044,7 +1047,7 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 		s.logger.Info("healing stale STARTING session state from ready runtime status",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
-			zap.String("agent_execution_id", session.AgentExecutionID))
+			zap.String("agent_execution_id", running.AgentExecutionID))
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
 		refreshedSession, refreshErr := s.repo.GetTaskSession(ctx, sessionID)
 		if refreshErr == nil && refreshedSession != nil {
@@ -1204,9 +1207,9 @@ func shouldHealStuckStartingSession(session *models.TaskSession, running *models
 	if running.Status != "ready" {
 		return false
 	}
-	if session.AgentExecutionID != "" && running.AgentExecutionID != "" && session.AgentExecutionID != running.AgentExecutionID {
-		return false
-	}
+	// Pre-refactor this also checked session.AgentExecutionID vs running.AgentExecutionID
+	// to skip healing on a divergent row. With the executors_running table now the
+	// single source of truth, that comparison is structurally always equal — drop it.
 	return true
 }
 
@@ -1951,7 +1954,7 @@ func (s *Service) ResetAgentContext(ctx context.Context, sessionID string) error
 	if session.State != models.TaskSessionStateWaitingForInput {
 		return fmt.Errorf("agent must be idle to reset context, current state: %s", session.State)
 	}
-	if session.AgentExecutionID == "" {
+	if hasRunning, hasErr := s.repo.HasExecutorRunningRow(ctx, sessionID); hasErr != nil || !hasRunning {
 		return fmt.Errorf("no active agent execution for session %s", sessionID)
 	}
 

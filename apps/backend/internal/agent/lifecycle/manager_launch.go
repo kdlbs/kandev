@@ -471,8 +471,32 @@ func (m *Manager) launchApplyPrepareResult(
 	return nil
 }
 
-// Launch launches a new agent for a task
+// Launch launches a new agent for a task. Concurrent calls for the same
+// req.SessionID are collapsed via the same singleflight bucket used by
+// EnsureWorkspaceExecutionForSession and GetOrEnsureExecution — this closes
+// the check-then-act race that previously could spawn a runtime instance,
+// fail at executionStore.Add (race), and then have the orchestrator persist
+// the orphan execution_id to disk before rollback completed (the original
+// agent-execution-id divergence bug).
+//
+// If req.SessionID is empty (quick chat / pre-session contexts), no
+// deduplication key exists and we fall through to direct execution.
 func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
+	if req.SessionID == "" {
+		return m.launchInternal(ctx, req)
+	}
+	v, err, _ := m.ensureExecutionGroup.Do(req.SessionID, func() (interface{}, error) {
+		return m.launchInternal(ctx, req)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*AgentExecution), nil
+}
+
+// launchInternal is the body of Launch run inside the per-session singleflight
+// slot. Callers must not invoke this directly except via Launch.
+func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
 	m.logger.Debug("launching agent",
 		zap.String("task_id", req.TaskID),
 		zap.String("agent_profile_id", req.AgentProfileID),
@@ -544,43 +568,14 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		})
 	}
 
-	// Convert to AgentExecution and set the runtime name
-	execution := execInstance.ToAgentExecution(execReq)
-	execution.RuntimeName = string(rt.Name())
+	// Build the in-memory AgentExecution from the runtime instance. Extracted
+	// to keep launchInternal under the cyclomatic-complexity budget.
+	execution := m.buildExecutionFromInstance(req, execReq, execInstance, rt, profileInfo, agentConfig, prepResult)
 
-	if req.ACPSessionID != "" {
-		execution.ACPSessionID = req.ACPSessionID
+	// Track + persist + publish. Returns the rollback error if Add lost a race.
+	if err := m.registerAndPublishExecution(ctx, execution, rt, execInstance, req.SessionID); err != nil {
+		return nil, err
 	}
-	// Carry prepare result back to caller for synchronous persistence.
-	execution.PrepareResult = prepResult
-	if req.PreviousExecutionID != "" {
-		execution.isResumedSession = true
-	}
-	cmds := m.buildAgentCommand(req, profileInfo, agentConfig)
-	execution.AgentCommand = cmds.initial
-	execution.ContinueCommand = cmds.continue_
-
-	// 8. Track the execution. If we lost a session-conflict race (another path
-	// added an execution for this session between our check at step 3 and now),
-	// roll back the runtime instance we just spawned and surface the same
-	// "already running" error the step-3 check would have produced — otherwise
-	// the runtime + agent subprocess would be orphaned.
-	if addErr := m.executionStore.Add(execution); addErr != nil {
-		if errors.Is(addErr, ErrExecutionAlreadyExistsForSession) {
-			m.rollbackRacedExecution(ctx, rt, execInstance, execution)
-			return nil, fmt.Errorf("session %q already has an agent running (race resolved during register)", req.SessionID)
-		}
-		return nil, fmt.Errorf("failed to register execution: %w", addErr)
-	}
-	go m.pollOneRemoteStatus(context.Background(), execution)
-
-	// 9. Publish agent.started event
-	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStarted, execution)
-	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlStarting, execution, "")
-
-	// 10. Wait for agentctl to be ready (for shell/workspace access)
-	// NOTE: This does NOT start the agent process - call StartAgentProcess() explicitly
-	go m.waitForAgentctlReady(execution)
 
 	m.logger.Debug("agentctl execution created (agent not started)",
 		zap.String("execution_id", executionID),
@@ -588,6 +583,69 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		zap.String("runtime", execution.RuntimeName))
 
 	return execution, nil
+}
+
+// buildExecutionFromInstance turns the spawned ExecutorInstance + request shape
+// into an in-memory *AgentExecution ready for Add. Pulled out of launchInternal
+// to keep the orchestration loop's cyclomatic complexity within the linter budget.
+func (m *Manager) buildExecutionFromInstance(
+	req *LaunchRequest,
+	execReq *ExecutorCreateRequest,
+	execInstance *ExecutorInstance,
+	rt ExecutorBackend,
+	profileInfo *AgentProfileInfo,
+	agentConfig agents.Agent,
+	prepResult *EnvPrepareResult,
+) *AgentExecution {
+	execution := execInstance.ToAgentExecution(execReq)
+	execution.RuntimeName = string(rt.Name())
+	if req.ACPSessionID != "" {
+		execution.ACPSessionID = req.ACPSessionID
+	}
+	execution.PrepareResult = prepResult
+	if req.PreviousExecutionID != "" {
+		execution.isResumedSession = true
+	}
+	cmds := m.buildAgentCommand(req, profileInfo, agentConfig)
+	execution.AgentCommand = cmds.initial
+	execution.ContinueCommand = cmds.continue_
+	return execution
+}
+
+// registerAndPublishExecution does the post-spawn lockstep dance: track in the
+// in-memory store, persist the executors_running row, publish events, kick off
+// the readiness poll. On a session-conflict race during Add, rolls back the
+// runtime instance so we never leak a subprocess.
+func (m *Manager) registerAndPublishExecution(
+	ctx context.Context,
+	execution *AgentExecution,
+	rt ExecutorBackend,
+	execInstance *ExecutorInstance,
+	sessionID string,
+) error {
+	if addErr := m.executionStore.Add(execution); addErr != nil {
+		if errors.Is(addErr, ErrExecutionAlreadyExistsForSession) {
+			m.rollbackRacedExecution(ctx, rt, execInstance, execution)
+			return fmt.Errorf("session %q already has an agent running (race resolved during register)", sessionID)
+		}
+		return fmt.Errorf("failed to register execution: %w", addErr)
+	}
+
+	// Persist executors_running in lockstep with Add — see persistence.go for the
+	// invariant. Carries forward resume_token / metadata from a prior row so the
+	// lifecycle write doesn't clobber data the orchestrator's narrow CAS updates
+	// wrote earlier (e.g., context_window from a previous run).
+	m.persistExecutorRunning(ctx, execution)
+
+	go m.pollOneRemoteStatus(context.Background(), execution)
+
+	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStarted, execution)
+	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlStarting, execution, "")
+
+	// Wait for agentctl to be ready (for shell/workspace access).
+	// NOTE: This does NOT start the agent process — call StartAgentProcess() explicitly.
+	go m.waitForAgentctlReady(execution)
+	return nil
 }
 
 // SetExecutionDescription updates the task description stored in an execution's metadata.

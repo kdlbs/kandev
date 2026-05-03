@@ -204,8 +204,9 @@ func runWorkflowTestCase(t *testing.T, tc workflowTestCase) {
 	setSessionExecID(t, repo, "s1", "exec-1")
 
 	agentMgr := &mockAgentManager{
-		isPassthrough:     tc.IsPassthrough,
-		restartProcessErr: tc.ResetErr,
+		isPassthrough:          tc.IsPassthrough,
+		restartProcessErr:      tc.ResetErr,
+		repoForExecutionLookup: repo,
 	}
 	svc := createEngineService(t, repo, sg, agentMgr)
 
@@ -318,7 +319,10 @@ func createEngineService(t *testing.T, repo *sqliterepo.Repository, sg *mockStep
 	return svc
 }
 
-// setSessionExecID sets the AgentExecutionID on a session.
+// setSessionExecID seeds an executors_running row for a session with the given
+// execution ID. Pre-refactor this set session.AgentExecutionID directly on the
+// task_sessions row; that column is gone — see lifecycle/persistence.go for the
+// new ownership model.
 func setSessionExecID(t *testing.T, repo sessionExecutorStore, sessionID, execID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -326,9 +330,14 @@ func setSessionExecID(t *testing.T, repo sessionExecutorStore, sessionID, execID
 	if err != nil {
 		t.Fatalf("failed to get session %s: %v", sessionID, err)
 	}
-	session.AgentExecutionID = execID
-	if err := repo.UpdateTaskSession(ctx, session); err != nil {
-		t.Fatalf("failed to set exec ID on session %s: %v", sessionID, err)
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               sessionID,
+		SessionID:        sessionID,
+		TaskID:           session.TaskID,
+		AgentExecutionID: execID,
+		Status:           "ready",
+	}); err != nil {
+		t.Fatalf("failed to seed executors_running for session %s: %v", sessionID, err)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
@@ -171,6 +172,20 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateSessionsRemoveWorkflowStepID(); err != nil {
 		return err
 	}
+	// Backfill executors_running from task_sessions and drop the denormalized
+	// agent_execution_id / container_id columns. After this migration,
+	// executors_running is the single source of truth for "active execution per
+	// session" — see persistence.go in the lifecycle package for the new ownership
+	// model. Order matters: backfill must run BEFORE the column drop.
+	if err := r.backfillExecutorsRunningFromTaskSessions(); err != nil {
+		return err
+	}
+	if err := r.migrateSessionsRemoveAgentExecutionID(); err != nil {
+		return err
+	}
+	if err := r.migrateTaskEnvironmentsRemoveAgentExecutionID(); err != nil {
+		return err
+	}
 	// Add sort_order column to workflows for user-defined ordering (ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
 	// Add agent_profile_id column to workflows for per-workflow agent profile override (ignore error if already exists)
@@ -257,6 +272,153 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 	})
 }
 
+// backfillExecutorsRunningFromTaskSessions creates an executors_running row for
+// any session that has a non-empty task_sessions.agent_execution_id but no matching
+// executors_running row. This preserves the data we're about to drop from
+// task_sessions in the canonical executors_running table.
+//
+// Sessions with empty agent_execution_id are skipped intentionally — they were
+// never launched (e.g. CREATED state, PR-watcher review tasks), and the new
+// invariant says "executors_running row exists iff session was launched".
+//
+// Idempotent: rows that already exist on either side are left untouched.
+func (r *Repository) backfillExecutorsRunningFromTaskSessions() error {
+	// Check whether task_sessions still has the column. If migration already ran,
+	// the column is gone and there's nothing to backfill.
+	var tableSql string
+	if err := r.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='task_sessions'`).Scan(&tableSql); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("backfill executors_running: read schema: %w", err)
+	}
+	if !strings.Contains(tableSql, "agent_execution_id") {
+		return nil
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// SELECT … LEFT JOIN to find sessions with execution data but no executors_running row.
+	// Insert with the minimum field set; runtime/status are best-effort defaults
+	// (subsequent Launch / Resume will overwrite via the lifecycle manager's persistence).
+	if _, err := r.db.Exec(`
+		INSERT INTO executors_running (
+			id, session_id, task_id, executor_id, runtime, status, resumable,
+			resume_token, last_message_uuid, agent_execution_id, container_id,
+			agentctl_url, agentctl_port, pid, worktree_id, worktree_path, worktree_branch,
+			error_message, metadata, created_at, updated_at
+		)
+		-- executors_running.id mirrors session_id (both columns must hold the same UUID
+		-- so the row is self-referential by design — the dupword linter complaint is
+		-- a false positive on the SQL projection list).
+		SELECT
+			ts.id AS er_id,
+			ts.id AS er_session_id,
+			ts.task_id, ts.executor_id, '', 'unknown', 1,
+			'', '', ts.agent_execution_id, ts.container_id,
+			'', 0, 0, '', '', '',
+			'', '{}', ts.started_at, ?
+		FROM task_sessions ts
+		LEFT JOIN executors_running er ON er.session_id = ts.id
+		WHERE COALESCE(ts.agent_execution_id, '') != '' AND er.id IS NULL
+	`, now); err != nil {
+		return fmt.Errorf("backfill executors_running: %w", err)
+	}
+	return nil
+}
+
+// migrateSessionsRemoveAgentExecutionID drops the agent_execution_id and
+// container_id columns from task_sessions. After this migration, executors_running
+// is the single source of truth for both fields — no more denormalization.
+//
+// Must run after backfillExecutorsRunningFromTaskSessions so any data we're about
+// to drop is preserved on the executors_running side.
+//
+// The trigger phrase "agent_execution_id" detects when the migration hasn't yet
+// run (column still present); recreateTable is a no-op once the column is gone.
+func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
+	return r.recreateTable("task_sessions", "agent_execution_id", []string{
+		`CREATE TABLE task_sessions_new (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			agent_profile_id TEXT NOT NULL,
+			executor_id TEXT DEFAULT '',
+			executor_profile_id TEXT DEFAULT '',
+			environment_id TEXT DEFAULT '',
+			repository_id TEXT DEFAULT '',
+			base_branch TEXT DEFAULT '',
+			agent_profile_snapshot TEXT DEFAULT '{}',
+			executor_snapshot TEXT DEFAULT '{}',
+			environment_snapshot TEXT DEFAULT '{}',
+			repository_snapshot TEXT DEFAULT '{}',
+			state TEXT NOT NULL DEFAULT 'CREATED',
+			error_message TEXT DEFAULT '',
+			metadata TEXT DEFAULT '{}',
+			started_at TIMESTAMP NOT NULL,
+			completed_at TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL,
+			is_primary INTEGER DEFAULT 0,
+			is_passthrough INTEGER DEFAULT 0,
+			review_status TEXT DEFAULT '',
+			base_commit_sha TEXT DEFAULT '',
+			task_environment_id TEXT DEFAULT '',
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`,
+		`INSERT INTO task_sessions_new SELECT
+			id, task_id, agent_profile_id,
+			executor_id, executor_profile_id, environment_id, repository_id, base_branch,
+			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
+			state, error_message, metadata, started_at, completed_at, updated_at,
+			is_primary, is_passthrough, review_status,
+			COALESCE(base_commit_sha, ''), COALESCE(task_environment_id, '')
+		FROM task_sessions`,
+		`DROP TABLE task_sessions`,
+		`ALTER TABLE task_sessions_new RENAME TO task_sessions`,
+		`CREATE INDEX IF NOT EXISTS idx_task_sessions_task_id ON task_sessions(task_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_task_sessions_state ON task_sessions(state)`,
+		`CREATE INDEX IF NOT EXISTS idx_task_sessions_task_state ON task_sessions(task_id, state)`,
+	})
+}
+
+// migrateTaskEnvironmentsRemoveAgentExecutionID drops the agent_execution_id
+// column from task_environments. Like task_sessions, this column was a stale
+// denormalized copy that drifted from the in-memory store. The orchestrator
+// now reads execution state from executors_running only.
+func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
+	return r.recreateTable("task_environments", "agent_execution_id", []string{
+		`CREATE TABLE task_environments_new (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			repository_id TEXT DEFAULT '',
+			executor_type TEXT NOT NULL DEFAULT '',
+			executor_id TEXT DEFAULT '',
+			executor_profile_id TEXT DEFAULT '',
+			control_port INTEGER DEFAULT 0,
+			status TEXT NOT NULL DEFAULT 'creating',
+			worktree_id TEXT DEFAULT '',
+			worktree_path TEXT DEFAULT '',
+			worktree_branch TEXT DEFAULT '',
+			workspace_path TEXT DEFAULT '',
+			container_id TEXT DEFAULT '',
+			sandbox_id TEXT DEFAULT '',
+			task_dir_name TEXT DEFAULT '',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`,
+		`INSERT INTO task_environments_new SELECT
+			id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
+			control_port, status, worktree_id, worktree_path, worktree_branch,
+			workspace_path, container_id, sandbox_id,
+			COALESCE(task_dir_name, ''), created_at, updated_at
+		FROM task_environments`,
+		`DROP TABLE task_environments`,
+		`ALTER TABLE task_environments_new RENAME TO task_environments`,
+		`CREATE INDEX IF NOT EXISTS idx_task_environments_task_id ON task_environments(task_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_task_environments_status ON task_environments(status)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_environments_task_id ON task_environments(task_id)`,
+	})
+}
+
 // migrateSessionsRemoveWorkflowStepID removes the deprecated workflow_step_id column
 // from task_sessions. Workflow step is now tracked on the task, not the session.
 func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
@@ -338,16 +500,23 @@ func (r *Repository) backfillTaskEnvironments() error {
 }
 
 // findOrphanedTasks returns tasks that have sessions but no task_environments row.
+//
+// Pre-refactor this also read ts.container_id; that column was dropped from
+// task_sessions when executors_running became the source of truth. Historical
+// orphaned envs for already-launched sessions get container_id from the
+// executors_running row via the LEFT JOIN; sessions without a row have empty
+// container_id (they were never launched, so no container to track).
 func (r *Repository) findOrphanedTasks() ([]backfillRow, error) {
 	rows, err := r.db.Query(`
 		SELECT ts.task_id,
 		       COALESCE(ts.executor_id, ''),
 		       COALESCE(ts.executor_profile_id, ''),
 		       COALESCE(ts.repository_id, ''),
-		       COALESCE(ts.container_id, ''),
+		       COALESCE(er.container_id, ''),
 		       ts.started_at
 		FROM task_sessions ts
 		LEFT JOIN task_environments te ON te.task_id = ts.task_id
+		LEFT JOIN executors_running er ON er.session_id = ts.id
 		WHERE te.id IS NULL
 		GROUP BY ts.task_id
 	`)
@@ -589,14 +758,16 @@ func (r *Repository) backfillSingleTask(tx *sql.Tx, row backfillRow) error {
 		LIMIT 1
 	`, row.taskID).Scan(&wtID, &wtPath, &wtBranch)
 
-	// Insert task_environment with status "stopped" (historical, agentctl not running)
+	// Insert task_environment with status "stopped" (historical, agentctl not running).
+	// Pre-refactor this also wrote agent_execution_id; that column is gone from
+	// task_environments (executors_running is the only carrier of execution state now).
 	if _, err := tx.Exec(`
 		INSERT INTO task_environments (
 			id, task_id, repository_id, executor_type, executor_id,
-			executor_profile_id, agent_execution_id, control_port, status,
+			executor_profile_id, control_port, status,
 			worktree_id, worktree_path, worktree_branch, workspace_path,
 			container_id, sandbox_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, '', 0, 'stopped', ?, ?, ?, '', ?, '', ?, datetime('now'))
+		) VALUES (?, ?, ?, ?, ?, ?, 0, 'stopped', ?, ?, ?, '', ?, '', ?, datetime('now'))
 	`, envID, row.taskID, row.repositoryID, executorType, row.executorID,
 		row.executorProfileID, wtID, wtPath, wtBranch, row.containerID, row.startedAt); err != nil {
 		return fmt.Errorf("backfill: insert env for task %s: %w", row.taskID, err)

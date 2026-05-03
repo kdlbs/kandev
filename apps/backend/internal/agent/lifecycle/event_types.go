@@ -33,11 +33,17 @@ type AgentctlEventPayload struct {
 }
 
 // ACPSessionCreatedPayload is the payload when an ACP session is created.
+//
+// AgentInstanceID is the lifecycle execution ID, kept under its historical key
+// for backward compatibility. AgentExecutionID is the same value under the
+// canonical key the watcher / orchestrator uses, added so downstream code
+// (resume-token CAS) can rely on a single field name across event types.
 type ACPSessionCreatedPayload struct {
-	TaskID          string `json:"task_id"`
-	SessionID       string `json:"session_id"`
-	AgentInstanceID string `json:"agent_instance_id"`
-	ACPSessionID    string `json:"acp_session_id"`
+	TaskID           string `json:"task_id"`
+	SessionID        string `json:"session_id"`
+	AgentInstanceID  string `json:"agent_instance_id"`
+	AgentExecutionID string `json:"agent_execution_id"`
+	ACPSessionID     string `json:"acp_session_id"`
 }
 
 // PrepareProgressEventPayload is the payload for environment preparation progress events.
@@ -160,13 +166,19 @@ type AgentStreamEventData struct {
 }
 
 // AgentStreamEventPayload is the payload for agent stream events (WebSocket streaming).
+//
+// AgentID historically was populated with execution.ID, not the agent-type slug.
+// ExecutionID is the explicit, unambiguous version added so consumers can use it
+// for execution-scoped logic (e.g., resume-token CAS that must reject writes from
+// a defunct execution).
 type AgentStreamEventPayload struct {
-	Type      string                `json:"type"` // Always "agent/event"
-	Timestamp string                `json:"timestamp"`
-	AgentID   string                `json:"agent_id"`
-	TaskID    string                `json:"task_id"`
-	SessionID string                `json:"session_id"` // Task session ID
-	Data      *AgentStreamEventData `json:"data"`
+	Type        string                `json:"type"` // Always "agent/event"
+	Timestamp   string                `json:"timestamp"`
+	AgentID     string                `json:"agent_id"`     // Historical: execution.ID. Prefer ExecutionID.
+	ExecutionID string                `json:"execution_id"` // Lifecycle execution ID; stable across the payload's lifetime.
+	TaskID      string                `json:"task_id"`
+	SessionID   string                `json:"session_id"` // Task session ID
+	Data        *AgentStreamEventData `json:"data"`
 }
 
 // GitEventType discriminates the type of git event

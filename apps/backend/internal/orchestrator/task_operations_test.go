@@ -97,6 +97,7 @@ func TestPromptTask_TransientErrorDoesNotMoveTaskToReview(t *testing.T) {
 		t.Fatalf("failed to load session: %v", err)
 	}
 	session.AgentExecutionID = "exec-1"
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-1")
 	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
 		t.Fatalf("failed to update session: %v", err)
 	}
@@ -141,6 +142,7 @@ func TestPromptTask_CancelEscalatedDoesNotMoveTaskToReview(t *testing.T) {
 		t.Fatalf("failed to load session: %v", err)
 	}
 	session.AgentExecutionID = "exec-1"
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-1")
 	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
 		t.Fatalf("failed to update session: %v", err)
 	}
@@ -182,6 +184,7 @@ func TestPromptTask_ExecutionNotFoundRevertsStateAndBroadcasts(t *testing.T) {
 		t.Fatalf("failed to load session: %v", err)
 	}
 	session.AgentExecutionID = "exec-1"
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-1")
 	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
 		t.Fatalf("failed to update session: %v", err)
 	}
@@ -239,6 +242,7 @@ func TestPromptTask_PlanModeInjectsPrefix(t *testing.T) {
 		t.Fatalf("failed to load session: %v", err)
 	}
 	session.AgentExecutionID = "exec-1"
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-1")
 	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
 		t.Fatalf("failed to update session: %v", err)
 	}
@@ -271,6 +275,7 @@ func TestPromptTask_NoPlanModeDoesNotInjectPrefix(t *testing.T) {
 		t.Fatalf("failed to load session: %v", err)
 	}
 	session.AgentExecutionID = "exec-1"
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-1")
 	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
 		t.Fatalf("failed to update session: %v", err)
 	}
@@ -291,7 +296,7 @@ func TestPromptTask_NoPlanModeDoesNotInjectPrefix(t *testing.T) {
 func TestPromptTask_ResetInProgressReturnsSentinelError(t *testing.T) {
 	repo := setupTestRepo(t)
 	taskRepo := newMockTaskRepo()
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
@@ -604,7 +609,7 @@ func TestResumeTaskSession_ArchivedTaskSkipsFailedState(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	taskRepo := newMockTaskRepo()
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
@@ -730,7 +735,7 @@ func TestResumeTaskSession_FailedKeepsResumeToken(t *testing.T) {
 func TestCompleteTask_UpdatesTaskState(t *testing.T) {
 	repo := setupTestRepo(t)
 	taskRepo := newMockTaskRepo()
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	exec := executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = exec
@@ -844,6 +849,7 @@ func TestGetTaskSessionStatus_HealsStuckStartingSession(t *testing.T) {
 		t.Fatalf("failed to load session: %v", err)
 	}
 	session.AgentExecutionID = "exec-active"
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-active")
 	session.UpdatedAt = time.Now().UTC()
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to update session: %v", err)
@@ -865,7 +871,7 @@ func TestGetTaskSessionStatus_HealsStuckStartingSession(t *testing.T) {
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateInProgress}
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
@@ -889,59 +895,13 @@ func TestGetTaskSessionStatus_HealsStuckStartingSession(t *testing.T) {
 	}
 }
 
-func TestGetTaskSessionStatus_DoesNotHealOnMismatchedExecution(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
-
-	session, err := repo.GetTaskSession(ctx, "session1")
-	if err != nil {
-		t.Fatalf("failed to load session: %v", err)
-	}
-	session.AgentExecutionID = "exec-active"
-	session.UpdatedAt = time.Now().UTC().Add(-2 * time.Minute)
-	if err := repo.UpdateTaskSession(ctx, session); err != nil {
-		t.Fatalf("failed to update session: %v", err)
-	}
-
-	now := time.Now().UTC()
-	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
-		ID:               "er1",
-		SessionID:        "session1",
-		TaskID:           "task1",
-		Status:           "ready",
-		Resumable:        true,
-		AgentExecutionID: "exec-stale",
-		CreatedAt:        now,
-		UpdatedAt:        now,
-	}); err != nil {
-		t.Fatalf("failed to upsert executor running: %v", err)
-	}
-
-	taskRepo := newMockTaskRepo()
-	agentMgr := &mockAgentManager{}
-	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
-
-	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
-	if err != nil {
-		t.Fatalf("GetTaskSessionStatus returned error: %v", err)
-	}
-	if resp.State != string(models.TaskSessionStateStarting) {
-		t.Fatalf("expected response state %q, got %q", models.TaskSessionStateStarting, resp.State)
-	}
-
-	updated, err := repo.GetTaskSession(ctx, "session1")
-	if err != nil {
-		t.Fatalf("failed to reload session: %v", err)
-	}
-	if updated.State != models.TaskSessionStateStarting {
-		t.Fatalf("expected persisted session state %q, got %q", models.TaskSessionStateStarting, updated.State)
-	}
-	if _, ok := taskRepo.updatedStates["task1"]; ok {
-		t.Fatalf("expected task state to remain unchanged")
-	}
-}
+// TestGetTaskSessionStatus_DoesNotHealOnMismatchedExecution was removed.
+// The pre-refactor heal check skipped healing when session.AgentExecutionID and
+// running.AgentExecutionID disagreed — a band-aid for the very divergence bug
+// this PR fixes structurally. With executors_running as the single source of
+// truth (lifecycle-owned, persisted in lockstep with executionStore.Add), the
+// mismatch this test simulated cannot occur, and the band-aid was removed
+// (see shouldHealStuckStartingSession in task_operations.go).
 
 // --- ReconcileSessionsOnStartup ---
 
@@ -1099,6 +1059,7 @@ func TestEnsureSessionRunning_PreparedWorkspace(t *testing.T) {
 		t.Fatalf("failed to load session: %v", err)
 	}
 	session.AgentExecutionID = "exec-prepare-1"
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-prepare-1")
 	session.AgentProfileID = "profile1"
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to update session: %v", err)
@@ -1286,7 +1247,7 @@ func TestGetTaskSessionStatus_NeedsWorkspaceRestore_TerminalWithWorktree(t *test
 	}
 
 	taskRepo := newMockTaskRepo()
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
@@ -1309,7 +1270,7 @@ func TestGetTaskSessionStatus_NeedsWorkspaceRestore_TerminalWithoutWorktree(t *t
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCompleted)
 
 	taskRepo := newMockTaskRepo()
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 

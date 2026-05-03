@@ -93,7 +93,11 @@ export type DialogComputedArgs = {
   workspaceId: string | null;
   workflowId: string | null;
   defaultStepId: string | null;
-  settingsData: { agentsLoaded: boolean; executorsLoaded: boolean };
+  settingsData: {
+    agentsLoaded: boolean;
+    executorsLoaded: boolean;
+    capabilitiesLoaded: boolean;
+  };
   agentProfiles: AgentProfileOption[];
   workspaces: Workspace[];
   executors: Executor[];
@@ -113,6 +117,14 @@ export type TaskCreateEffectsArgs = {
   workspaceDefaults: Workspace | null | undefined;
   toast: ReturnType<typeof useToast>["toast"];
   workflows: Array<{ id: string; agent_profile_id?: string }>;
+  /**
+   * True when the currently-selected executor is the local-host one (no
+   * worktree, no container). Drives the "reset row.branch on local switch"
+   * effect so toggling worktree → local restores the chip default to the
+   * workspace's current branch instead of leaving a stale pick from the
+   * worktree run that would trigger a destructive `git checkout` on submit.
+   */
+  isLocalExecutor: boolean;
 };
 
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
@@ -193,6 +205,9 @@ export type DialogFormState = {
   /** Currently checked-out branch in the selected local repo (for the disabled selector placeholder) */
   currentLocalBranch: string;
   setCurrentLocalBranch: (v: string) => void;
+  /** True while resolving currentLocalBranch — distinguishes "still loading" from "no branch on disk" */
+  currentLocalBranchLoading: boolean;
+  setCurrentLocalBranchLoading: (v: boolean) => void;
 };
 
 export type SubmitHandlersDeps = {

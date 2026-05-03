@@ -41,7 +41,7 @@ func TestGetTaskSessionStatus_NoAutoResumeOnErrorRecovery(t *testing.T) {
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
@@ -90,7 +90,7 @@ func TestGetTaskSessionStatus_AutoResumesNormalWaitingSession(t *testing.T) {
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateInProgress}
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
@@ -144,7 +144,7 @@ func TestGetTaskSessionStatus_AutoResumesFailedSessionWithResumeToken(t *testing
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
@@ -204,7 +204,7 @@ func TestGetTaskSessionStatus_FailedSessionWithoutResumableFlagFallsBack(t *test
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
@@ -255,7 +255,7 @@ func TestGetTaskSessionStatus_CancelledSessionStaysWorkspaceRestore(t *testing.T
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
@@ -303,7 +303,7 @@ func TestGetTaskSessionStatus_NoAutoResumeWithResumeTokenOnError(t *testing.T) {
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 

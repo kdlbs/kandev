@@ -50,11 +50,11 @@ func insertEnv(t *testing.T, db *sqlx.DB, env *models.TaskEnvironment) {
 	_, err := db.Exec(`
 		INSERT INTO task_environments (
 			id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
-			agent_execution_id, control_port, status,
+			control_port, status,
 			worktree_id, worktree_path, worktree_branch, workspace_path,
 			container_id, sandbox_id,
 			created_at, updated_at
-		) VALUES (?, ?, '', ?, '', '', '', 0, ?, '', ?, '', ?, '', '', ?, ?)
+		) VALUES (?, ?, '', ?, '', '', 0, ?, '', ?, '', ?, '', '', ?, ?)
 	`, env.ID, env.TaskID, env.ExecutorType, string(env.Status),
 		env.WorktreePath, env.WorkspacePath, env.CreatedAt, env.UpdatedAt)
 	if err != nil {
@@ -284,14 +284,15 @@ func TestEnsureTaskEnvironmentTaskUniqueIndex_BlocksFutureDuplicates(t *testing.
 	})
 
 	// initSchema already added the unique index; a second insert for the same
-	// task must fail with a constraint error.
+	// task must fail with a constraint error. (agent_execution_id was dropped
+	// from task_environments — the column reference is gone here too.)
 	_, err := repo.db.Exec(`
 		INSERT INTO task_environments (
 			id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
-			agent_execution_id, control_port, status,
+			control_port, status,
 			worktree_id, worktree_path, worktree_branch, workspace_path,
 			container_id, sandbox_id, created_at, updated_at
-		) VALUES (?, 'task-F', '', 'worktree', '', '', '', 0, 'ready',
+		) VALUES (?, 'task-F', '', 'worktree', '', '', 0, 'ready',
 		          '', '/f2', '', '/f2', '', '', datetime('now'), datetime('now'))
 	`, "env-F2")
 	if err == nil {
@@ -376,12 +377,12 @@ func insertSessionWithEnvID(t *testing.T, db *sqlx.DB, sessionID, taskID, envID 
 	now := time.Now().UTC()
 	_, err := db.Exec(`
 		INSERT INTO task_sessions (
-			id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
+			id, task_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
 			repository_id, base_branch, base_commit_sha,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
 			is_primary, review_status, is_passthrough, task_environment_id
-		) VALUES (?, ?, '', '', '', '', '', '', '', '', '',
+		) VALUES (?, ?, '', '', '', '', '', '', '',
 		          '{}', '{}', '{}', '{}',
 		          'created', '', '{}', ?, NULL, ?,
 		          0, '', 0, ?)
@@ -399,12 +400,12 @@ func insertSessionWithNullEnvID(t *testing.T, db *sqlx.DB, sessionID, taskID str
 	now := time.Now().UTC()
 	_, err := db.Exec(`
 		INSERT INTO task_sessions (
-			id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
+			id, task_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
 			repository_id, base_branch, base_commit_sha,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
 			is_primary, review_status, is_passthrough, task_environment_id
-		) VALUES (?, ?, '', '', '', '', '', '', '', '', '',
+		) VALUES (?, ?, '', '', '', '', '', '', '',
 		          '{}', '{}', '{}', '{}',
 		          'created', '', '{}', ?, NULL, ?,
 		          0, '', 0, NULL)

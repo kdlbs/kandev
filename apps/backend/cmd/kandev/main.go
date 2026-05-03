@@ -298,6 +298,12 @@ func startAgentInfrastructure(
 	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
 	log.Info("Workspace info provider configured for session recovery")
 
+	// Persistence writer for executors_running. This makes the lifecycle manager
+	// the sole writer of agent_execution_id / container_id / runtime / status —
+	// the structural fix for the agent-execution-id divergence bug. Must be set
+	// before any Launch / EnsureWorkspaceExecutionForSession can run.
+	lifecycleMgr.SetExecutorRunningWriter(repos.Task)
+
 	// Configure quick-chat workspace cleanup
 	if homeDir := cfg.ResolvedHomeDir(); homeDir != "" {
 		quickChatDir := filepath.Join(homeDir, "quick-chat")
