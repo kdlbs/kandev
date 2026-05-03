@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -154,6 +154,18 @@ export function Pill({
       return next;
     });
   }, []);
+  // Clear the suppression timer if the component unmounts while it's still
+  // ticking, so the eventual `setSuppressTooltip(false)` doesn't fire on a
+  // dead component.
+  useEffect(
+    () => () => {
+      if (suppressTimerRef.current) {
+        clearTimeout(suppressTimerRef.current);
+        suppressTimerRef.current = null;
+      }
+    },
+    [],
+  );
   const hasValue = !!value;
   // Prefix only renders alongside a real value; an empty chip with placeholder
   // ("branch") doesn't need "current: " in front of it.
