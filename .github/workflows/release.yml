@@ -1,20 +1,217 @@
 name: release
 
+# Maintainer-only release workflow.
+# Trigger: GitHub Actions UI → "Run workflow" (workflow_dispatch).
+#
+# Flow (one click → everything below):
+#   1. prepare        — bump version, regen CHANGELOG, open + merge release PR, push tag vX.Y.Z
+#   2. build-web      — build Next.js standalone bundle
+#   3. build-cli      — build + esbuild-bundle CLI
+#   4. build-bundles  — assemble bin/ + web/ + cli/ tarballs for 5 platforms
+#   5. docker         — build & push multi-arch container image to GHCR
+#   6. publish-release — create GH release with .tar.gz + .sha256 assets + auto-generated notes
+#   7. publish-npm    — publish kandev@X.Y.Z + @kdlbs/runtime-*@X.Y.Z to npmjs
+#   8. update-homebrew-tap — push updated Formula/kandev.rb to kdlbs/homebrew-kandev
+#
+# Required secrets:
+#   NPM_TOKEN                — npm publish token with access to `kandev` and `@kdlbs/*`
+#   HOMEBREW_TAP_DEPLOY_KEY  — SSH private key for kdlbs/homebrew-kandev deploy key
+
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump"
+        required: true
+        type: choice
+        default: minor
+        options:
+          - patch
+          - minor
+          - major
+      dry_run:
+        description: "Dry run (no PR, tag, npm publish, or tap update)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
   packages: write
+  pull-requests: write
 
 jobs:
+  prepare:
+    name: Prepare release (bump version, PR, tag)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.compute.outputs.version }}
+      tag: ${{ steps.compute.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install git-cliff
+        run: |
+          curl -sSL "https://github.com/orhun/git-cliff/releases/download/v2.6.1/git-cliff-2.6.1-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C /tmp
+          sudo mv /tmp/git-cliff-2.6.1/git-cliff /usr/local/bin/
+          git-cliff --version
+
+      - name: Configure git identity
+        run: |
+          git config user.email "release-bot@kandev"
+          git config user.name "kandev release bot"
+
+      - name: Compute next version
+        id: compute
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          PKG_VERSION="$(node -p "require('./apps/cli/package.json').version")"
+
+          # Find latest git tag, normalizing legacy two-part tags (vM.m → M.m.0)
+          LATEST_TAG="$(git tag --list 'v*' | python3 -c "
+          import sys, re
+          best = (0, 0, 0)
+          for t in (l.strip() for l in sys.stdin if l.strip()):
+              s = t.lstrip('v')
+              m3 = re.match(r'^(\d+)\.(\d+)\.(\d+)$', s)
+              m2 = re.match(r'^(\d+)\.(\d+)$', s)
+              if m3:
+                  v = tuple(int(x) for x in m3.groups())
+              elif m2:
+                  v = (int(m2.group(1)), int(m2.group(2)), 0)
+              else:
+                  continue
+              if v > best:
+                  best = v
+          print(f'{best[0]}.{best[1]}.{best[2]}')
+          ")"
+
+          # Use the higher of package.json version and the latest tag as baseline
+          BASELINE="$(python3 -c "
+          a = '$PKG_VERSION'.split('.')
+          b = '$LATEST_TAG'.split('.')
+          ai = tuple(int(x) for x in a)
+          bi = tuple(int(x) for x in b)
+          print('$PKG_VERSION' if ai >= bi else '$LATEST_TAG')
+          ")"
+
+          IFS=. read -r MAJ MIN PAT <<<"$BASELINE"
+          case "$BUMP" in
+            patch) NEXT="${MAJ}.${MIN}.$((PAT + 1))" ;;
+            minor) NEXT="${MAJ}.$((MIN + 1)).0" ;;
+            major) NEXT="$((MAJ + 1)).0.0" ;;
+            *) echo "Invalid bump '$BUMP'" >&2; exit 1 ;;
+          esac
+
+          TAG="v${NEXT}"
+          echo "Current package.json version: $PKG_VERSION"
+          echo "Latest git tag (normalized):  $LATEST_TAG"
+          echo "Baseline:                     $BASELINE"
+          echo "Bump:                         $BUMP"
+          echo "Next version:                 $NEXT"
+          echo "Next tag:                     $TAG"
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          # Sanity: tag must not already exist
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists locally" >&2
+            exit 1
+          fi
+          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q .; then
+            echo "Tag $TAG already exists on origin" >&2
+            exit 1
+          fi
+
+      - name: Bump version + optionalDependencies
+        env:
+          NEXT: ${{ steps.compute.outputs.version }}
+        run: |
+          set -euo pipefail
+          (cd apps/cli && npm version --no-git-tag-version "$NEXT")
+          node -e "
+            const fs = require('fs');
+            const path = 'apps/cli/package.json';
+            const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+            if (pkg.optionalDependencies) {
+              for (const k of Object.keys(pkg.optionalDependencies)) {
+                pkg.optionalDependencies[k] = '$NEXT';
+              }
+            }
+            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+          "
+          pnpm -C apps install --no-frozen-lockfile
+
+      - name: Generate CHANGELOG
+        env:
+          TAG: ${{ steps.compute.outputs.tag }}
+        run: git-cliff --tag "$TAG" -o CHANGELOG.md
+
+      - name: Create release PR + merge + tag (or dry-run)
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT: ${{ steps.compute.outputs.version }}
+          TAG: ${{ steps.compute.outputs.tag }}
+        run: |
+          set -euo pipefail
+          BRANCH="release/$TAG"
+          MSG="release: $NEXT"
+
+          git checkout -b "$BRANCH"
+          git add apps/cli/package.json CHANGELOG.md apps/pnpm-lock.yaml || true
+          if git diff --cached --quiet; then
+            echo "No changes to commit; aborting." >&2
+            exit 1
+          fi
+          git commit -m "$MSG"
+          git push -u origin "$BRANCH"
+
+          PR_URL="$(gh pr create \
+            --title "$MSG" \
+            --body "Automated release: \`$NEXT\`" \
+            --head "$BRANCH" \
+            --base main)"
+          echo "PR: $PR_URL"
+
+          gh pr merge "$BRANCH" --squash --delete-branch --subject "$MSG" --body ""
+
+          # Pull the squashed commit into local main, then tag from it.
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+          git tag -a "$TAG" -m "release: $NEXT"
+          git push origin "$TAG"
+
+      - name: Dry-run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "DRY RUN: Would have created PR + tag ${{ steps.compute.outputs.tag }}"
+          echo "DRY RUN: Would have updated CHANGELOG.md"
+          echo "DRY RUN: Would have bumped apps/cli/package.json to ${{ steps.compute.outputs.version }}"
+
   build-web:
+    name: Build web standalone
+    needs: prepare
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
       - uses: pnpm/action-setup@v4
         with:
           version: "9"
@@ -25,7 +222,7 @@ jobs:
         run: pnpm -C apps install --frozen-lockfile
       - name: Build web (standalone)
         env:
-          KANDEV_VERSION: ${{ github.ref_name }}
+          KANDEV_VERSION: ${{ needs.prepare.outputs.tag }}
         run: pnpm -C apps --filter @kandev/web build
       - name: Package web bundle
         run: bash scripts/release/package-web.sh
@@ -35,8 +232,34 @@ jobs:
           path: dist/web
           include-hidden-files: true
 
+  build-cli:
+    name: Build & bundle CLI
+    needs: prepare
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Install dependencies
+        run: pnpm -C apps install --frozen-lockfile
+      - name: Build and bundle CLI
+        run: bash scripts/release/package-cli.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-bundle
+          path: dist/kandev/cli
+
   build-bundles:
-    needs: build-web
+    name: Build platform bundle (${{ matrix.platform }})
+    needs: [build-web, build-cli]
+    if: ${{ !inputs.dry_run }}
     strategy:
       matrix:
         include:
@@ -69,6 +292,8 @@ jobs:
       GOARCH: ${{ matrix.goarch }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: apps/backend/go.mod
@@ -77,6 +302,10 @@ jobs:
         with:
           name: web-bundle
           path: dist/web
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-bundle
+          path: dist/kandev/cli
 
       - name: Install cross-compilation tools
         if: matrix.cc
@@ -96,19 +325,19 @@ jobs:
 
       - name: Package bundle
         run: |
-          rm -rf dist/kandev
+          rm -rf dist/kandev/bin dist/kandev/web
           mkdir -p dist/kandev/bin
           EXT=${{ matrix.goos == 'windows' && '.exe' || '' }}
           cp apps/backend/bin/kandev${EXT} dist/kandev/bin/
           cp apps/backend/bin/agentctl${EXT} dist/kandev/bin/
           mkdir -p dist/kandev/web
           cp -R dist/web/. dist/kandev/web/
+          # cli/ was already placed by the build-cli job (downloaded above)
           cd dist
           tar -czf "kandev-${{ matrix.platform }}.tar.gz" kandev
           shasum -a 256 "kandev-${{ matrix.platform }}.tar.gz" > "kandev-${{ matrix.platform }}.tar.gz.sha256"
 
-      - name: Upload bundle artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: bundle-${{ matrix.platform }}
           path: |
@@ -116,9 +345,14 @@ jobs:
             dist/kandev-${{ matrix.platform }}.tar.gz.sha256
 
   docker:
+    name: Build & push container image
+    needs: prepare
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
 
       - name: Docker meta
         id: meta
@@ -126,10 +360,10 @@ jobs:
         with:
           images: ghcr.io/kdlbs/kandev
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ needs.prepare.outputs.version }}
+            type=raw,value=${{ needs.prepare.outputs.tag }}
             type=sha
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' && startsWith(github.ref_name, 'v') }}
+            type=raw,value=latest
 
       - uses: docker/setup-buildx-action@v3
 
@@ -152,11 +386,14 @@ jobs:
           cache-to: type=gha,mode=max
 
   publish-release:
-    needs: build-bundles
+    name: Publish GitHub release
+    needs: [prepare, build-bundles]
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.prepare.outputs.tag }}
           fetch-depth: 0
 
       - name: Generate release notes
@@ -167,8 +404,7 @@ jobs:
         env:
           OUTPUT: RELEASE_NOTES.md
 
-      - name: Download bundle artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           pattern: bundle-*
           path: dist/release-assets
@@ -192,10 +428,62 @@ jobs:
           done
           ls -lh dist/release-assets
 
-      - name: Publish release assets
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: ${{ needs.prepare.outputs.tag }}
           body_path: RELEASE_NOTES.md
           files: |
             dist/release-assets/kandev-*.tar.gz
             dist/release-assets/kandev-*.tar.gz.sha256
+
+  publish-npm:
+    name: Publish npm packages
+    needs: [prepare, publish-release]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: pnpm -C apps install --frozen-lockfile
+
+      - name: Publish npm packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash scripts/release/publish-npm.sh \
+            "${{ needs.prepare.outputs.version }}" \
+            "${{ needs.prepare.outputs.tag }}"
+
+  update-homebrew-tap:
+    name: Update Homebrew tap
+    needs: [prepare, publish-release]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Update Homebrew tap formula
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          bash scripts/release/update-homebrew-tap.sh \
+            "${{ needs.prepare.outputs.version }}" \
+            "${{ needs.prepare.outputs.tag }}"
