@@ -23,13 +23,14 @@ type AgentEventPayload struct {
 
 // AgentctlEventPayload is the payload for agentctl lifecycle events (starting, ready, error).
 type AgentctlEventPayload struct {
-	TaskID           string `json:"task_id"`
-	SessionID        string `json:"session_id"`
-	AgentExecutionID string `json:"agent_execution_id"`
-	ErrorMessage     string `json:"error_message,omitempty"`
-	WorktreeID       string `json:"worktree_id,omitempty"`
-	WorktreePath     string `json:"worktree_path,omitempty"`
-	WorktreeBranch   string `json:"worktree_branch,omitempty"`
+	TaskID            string `json:"task_id"`
+	SessionID         string `json:"session_id"`
+	TaskEnvironmentID string `json:"task_environment_id,omitempty"`
+	AgentExecutionID  string `json:"agent_execution_id"`
+	ErrorMessage      string `json:"error_message,omitempty"`
+	WorktreeID        string `json:"worktree_id,omitempty"`
+	WorktreePath      string `json:"worktree_path,omitempty"`
+	WorktreeBranch    string `json:"worktree_branch,omitempty"`
 }
 
 // ACPSessionCreatedPayload is the payload when an ACP session is created.
