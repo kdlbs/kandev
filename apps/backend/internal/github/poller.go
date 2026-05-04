@@ -178,8 +178,8 @@ func (p *Poller) tryBatchedPRWatchCheck(ctx context.Context, watches []*PRWatch)
 		return false
 	}
 	numbered, searching := splitPRWatches(watches)
-	statusByKey, branchOK := p.fetchBatchedStatuses(ctx, exec, numbered, searching)
-	if statusByKey == nil && !branchOK {
+	statusByKey, ok := p.fetchBatchedStatuses(ctx, exec, numbered, searching)
+	if !ok {
 		return false
 	}
 	for _, w := range numbered {
@@ -211,7 +211,9 @@ func (p *Poller) tryBatchedPRWatchCheck(ctx context.Context, watches []*PRWatch)
 // fetchBatchedStatuses runs both the numbered-PR query and the branch query
 // against GraphQL. The combined map keys numbered watches by
 // prStatusCacheKey and searching watches by graphqlBranchKey, so callers can
-// look up either kind in one place.
+// look up either kind in one place. Returns (nil, false) when any required
+// query failed so the caller falls back to per-watch checks rather than
+// silently absorbing the failure as "no result".
 func (p *Poller) fetchBatchedStatuses(
 	ctx context.Context, exec GraphQLExecutor, numbered, searching []*PRWatch,
 ) (map[string]*PRStatus, bool) {
@@ -239,7 +241,7 @@ func (p *Poller) fetchBatchedStatuses(
 		out, err := runBatchedBranchQuery(ctx, exec, refs)
 		if err != nil {
 			p.logger.Debug("batched branch query failed", zap.Error(err))
-			return combined, len(combined) > 0
+			return nil, false
 		}
 		for k, v := range out {
 			combined[k] = v

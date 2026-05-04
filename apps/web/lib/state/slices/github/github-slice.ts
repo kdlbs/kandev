@@ -157,9 +157,7 @@ function createActionPresetActions(
   };
 }
 
-function createRateLimitActions(
-  set: ImmerSet,
-): Pick<GitHubSlice, "applyGitHubRateLimitUpdate"> {
+function createRateLimitActions(set: ImmerSet): Pick<GitHubSlice, "applyGitHubRateLimitUpdate"> {
   return {
     applyGitHubRateLimitUpdate: (update) =>
       set((draft) => {

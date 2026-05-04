@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // stubGraphQLExecutor lets tests inspect/return canned responses without
@@ -98,6 +99,52 @@ func TestRunBatchedPRQuery_DecodesAliasesBackToRefs(t *testing.T) {
 	}
 }
 
+func TestRunBatchedPRQuery_DecodesMultipleReposIntoCorrectKeys(t *testing.T) {
+	// Two repos in one batch: octo/alpha#1 and octo/beta#9. The decoder sorts
+	// repo group keys; this test guards against future drift between
+	// buildBatchedPRQuery's sort and decodeBatchedPRChunk's sort by checking
+	// each PR lands in its correct key slot.
+	exec := &stubGraphQLExecutor{
+		response: `{
+			"data": {
+				"repo0": {
+					"pr0": {
+						"state": "OPEN", "title": "alpha PR", "url": "https://x/a/1",
+						"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+						"headRefName": "h1", "baseRefName": "main", "headRefOid": "aaa",
+						"author": {"login":"alice"}, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+						"reviews": {"nodes": []}, "reviewRequests": {"totalCount": 0},
+						"commits": {"nodes": []}
+					}
+				},
+				"repo1": {
+					"pr0": {
+						"state": "OPEN", "title": "beta PR", "url": "https://x/b/9",
+						"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+						"headRefName": "h2", "baseRefName": "main", "headRefOid": "bbb",
+						"author": {"login":"alice"}, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+						"reviews": {"nodes": []}, "reviewRequests": {"totalCount": 0},
+						"commits": {"nodes": []}
+					}
+				}
+			}
+		}`,
+	}
+	got, err := runBatchedPRQuery(context.Background(), exec, []graphQLPRRef{
+		{Owner: "octo", Repo: "alpha", Number: 1},
+		{Owner: "octo", Repo: "beta", Number: 9},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if s, ok := got[prStatusCacheKey("octo", "alpha", 1)]; !ok || s.PR == nil || s.PR.Title != "alpha PR" {
+		t.Errorf("alpha#1 not decoded into correct slot: %#v", s)
+	}
+	if s, ok := got[prStatusCacheKey("octo", "beta", 9)]; !ok || s.PR == nil || s.PR.Title != "beta PR" {
+		t.Errorf("beta#9 not decoded into correct slot: %#v", s)
+	}
+}
+
 func TestRunBatchedPRQuery_PropagatesError(t *testing.T) {
 	exec := &stubGraphQLExecutor{err: errors.New("graphql 500")}
 	_, err := runBatchedPRQuery(context.Background(), exec, []graphQLPRRef{{Owner: "o", Repo: "r", Number: 1}})
@@ -145,17 +192,46 @@ func TestRunBatchedBranchQuery_DecodesPRNode(t *testing.T) {
 }
 
 func TestSummarizeReviewState_PrefersChangesRequested(t *testing.T) {
-	type node = struct {
-		State string `json:"state"`
+	mk := func(login, state string, sec int) reviewNode {
+		var n reviewNode
+		n.Author.Login = login
+		n.State = state
+		n.SubmittedAt = time.Unix(int64(sec), 0).UTC()
+		return n
 	}
-	if got := summarizeReviewState([]node{{State: "APPROVED"}, {State: "CHANGES_REQUESTED"}}); got != "changes_requested" {
+	// Different reviewers: CHANGES_REQUESTED beats APPROVED.
+	if got := summarizeReviewState([]reviewNode{
+		mk("alice", "APPROVED", 1),
+		mk("bob", "CHANGES_REQUESTED", 2),
+	}); got != "changes_requested" {
 		t.Errorf("got %q", got)
 	}
-	if got := summarizeReviewState([]node{{State: "APPROVED"}, {State: "COMMENTED"}}); got != "approved" {
+	// Different reviewers: APPROVED + COMMENTED -> approved.
+	if got := summarizeReviewState([]reviewNode{
+		mk("alice", "APPROVED", 1),
+		mk("bob", "COMMENTED", 2),
+	}); got != "approved" {
 		t.Errorf("got %q", got)
 	}
-	if got := summarizeReviewState([]node{{State: "COMMENTED"}}); got != "" {
+	// Single COMMENTED -> empty.
+	if got := summarizeReviewState([]reviewNode{
+		mk("alice", "COMMENTED", 1),
+	}); got != "" {
 		t.Errorf("got %q", got)
+	}
+	// Same reviewer: CHANGES_REQUESTED then APPROVED -> approved (Greptile P1).
+	if got := summarizeReviewState([]reviewNode{
+		mk("alice", "CHANGES_REQUESTED", 1),
+		mk("alice", "APPROVED", 2),
+	}); got != "approved" {
+		t.Errorf("dedup: got %q, want approved", got)
+	}
+	// Same reviewer: APPROVED then CHANGES_REQUESTED -> changes_requested.
+	if got := summarizeReviewState([]reviewNode{
+		mk("alice", "APPROVED", 1),
+		mk("alice", "CHANGES_REQUESTED", 2),
+	}); got != "changes_requested" {
+		t.Errorf("dedup reverse: got %q, want changes_requested", got)
 	}
 }
 

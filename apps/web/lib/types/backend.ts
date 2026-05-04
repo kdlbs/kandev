@@ -605,10 +605,7 @@ export type BackendMessageMap = {
     QueueStatusChangedPayload
   >;
   "github.task_pr.updated": BackendMessage<"github.task_pr.updated", TaskPR>;
-  "github.rate_limit.updated": BackendMessage<
-    "github.rate_limit.updated",
-    GitHubRateLimitUpdate
-  >;
+  "github.rate_limit.updated": BackendMessage<"github.rate_limit.updated", GitHubRateLimitUpdate>;
 };
 
 // Workspace file types (extracted to reduce file size)

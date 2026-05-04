@@ -62,21 +62,23 @@ func (c *captureBus) Request(ctx context.Context, subject string, event *bus.Eve
 
 func (c *captureBus) Close()            { c.inner.Close() }
 func (c *captureBus) IsConnected() bool { return c.inner.IsConnected() }
-func (c *captureBus) waitFor(t *testing.T, count int, msg string) []*bus.Event {
+
+// captured returns a snapshot of events captured so far. MemoryEventBus
+// dispatches to subscribers synchronously, so callers can read this directly
+// after Record() / Publish() returns without polling.
+func (c *captureBus) captured() []*bus.Event {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]*bus.Event(nil), c.events...)
+}
+
+func (c *captureBus) requireCount(t *testing.T, count int, msg string) []*bus.Event {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		c.mu.Lock()
-		got := len(c.events)
-		evs := append([]*bus.Event(nil), c.events...)
-		c.mu.Unlock()
-		if got >= count {
-			return evs
-		}
-		time.Sleep(5 * time.Millisecond)
+	evs := c.captured()
+	if len(evs) != count {
+		t.Fatalf("%s: expected %d events, got %d", msg, count, len(evs))
 	}
-	t.Fatalf("%s: expected %d events, got %d", msg, count, len(c.events))
-	return nil
+	return evs
 }
 
 func TestParseRateHeaders_DecodesAllFields(t *testing.T) {
@@ -163,7 +165,7 @@ func TestRateTracker_RecordEmitsAndTracksExhaustion(t *testing.T) {
 		UpdatedAt: time.Now(),
 	})
 
-	evts := cb.waitFor(t, 3, "expected 3 events (initial, exhausted, recovered)")
+	evts := cb.requireCount(t, 3, "expected 3 events (initial, exhausted, recovered)")
 	// Last two events should carry transition strings.
 	gotTransitions := []string{}
 	for _, e := range evts {
@@ -185,21 +187,15 @@ func TestRateTracker_DebouncesNonTransitionUpdates(t *testing.T) {
 	now := time.Now()
 
 	// Two healthy snapshots within the debounce window -> only first emits.
+	// MemoryEventBus.Publish dispatches synchronously, so reads after Record
+	// see the final state without sleeping.
 	tr.Record(RateSnapshot{Resource: ResourceCore, Limit: 5000, Remaining: 4999, ResetAt: now.Add(time.Hour), UpdatedAt: now})
 	tr.Record(RateSnapshot{Resource: ResourceCore, Limit: 5000, Remaining: 4998, ResetAt: now.Add(time.Hour), UpdatedAt: now.Add(time.Second)})
-
-	// Allow async publish to flush.
-	time.Sleep(50 * time.Millisecond)
-	cb.mu.Lock()
-	count := len(cb.events)
-	cb.mu.Unlock()
-	if count != 1 {
-		t.Fatalf("expected 1 debounced event, got %d", count)
-	}
+	cb.requireCount(t, 1, "expected 1 debounced event")
 
 	// Outside the window -> emits again.
 	tr.Record(RateSnapshot{Resource: ResourceCore, Limit: 5000, Remaining: 4997, ResetAt: now.Add(time.Hour), UpdatedAt: now.Add(2 * rateUpdateDebounce)})
-	cb.waitFor(t, 2, "expected second event after debounce window")
+	cb.requireCount(t, 2, "expected second event after debounce window")
 }
 
 func TestRateTracker_MarkRateExhaustedSeedsUnknownLimit(t *testing.T) {

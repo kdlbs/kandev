@@ -28,6 +28,15 @@ const graphQLPRBatchAlias = "pr"
 // fields = ~500 nodes, leaving headroom.
 const graphQLBatchChunkSize = 50
 
+// reviewNode is one PR review entry from the batched GraphQL query.
+type reviewNode struct {
+	State  string `json:"state"`
+	Author struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	SubmittedAt time.Time `json:"submittedAt"`
+}
+
 // graphQLPRRef is one entry in a batched PR-status request.
 type graphQLPRRef struct {
 	Owner  string
@@ -80,9 +89,7 @@ type batchedPRResult struct {
 	MergedAt  string    `json:"mergedAt"`
 	ClosedAt  string    `json:"closedAt"`
 	Reviews   struct {
-		Nodes []struct {
-			State string `json:"state"`
-		} `json:"nodes"`
+		Nodes []reviewNode `json:"nodes"`
 	} `json:"reviews"`
 	ReviewRequests struct {
 		TotalCount int `json:"totalCount"`
@@ -162,7 +169,7 @@ func prFieldsBlock() string {
 	return `state title url isDraft mergeable mergeStateStatus ` +
 		`headRefName baseRefName headRefOid additions deletions ` +
 		`author { login } createdAt updatedAt mergedAt closedAt ` +
-		`reviews(last: 100) { nodes { state } } ` +
+		`reviews(last: 100) { nodes { state author { login } submittedAt } } ` +
 		`reviewRequests(first: 0) { totalCount } ` +
 		`commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`
 }
@@ -225,22 +232,48 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 }
 
 // summarizeReviewState collapses the review history to a single
-// "approved"/"changes_requested"/"pending"/"" value matching the existing
-// service-side summary. CHANGES_REQUESTED beats APPROVED beats COMMENTED.
-func summarizeReviewState(nodes []struct {
-	State string `json:"state"`
-}) string {
-	hasApproval := false
+// "approved"/"changes_requested"/"" value matching the existing
+// service-side summary. Per-reviewer dedup: each reviewer's most-recent
+// review wins, so a CHANGES_REQUESTED followed by an APPROVED from the
+// same author resolves to APPROVED. CHANGES_REQUESTED beats APPROVED across
+// distinct reviewers.
+func summarizeReviewState(nodes []reviewNode) string {
+	type latest struct {
+		state string
+		at    time.Time
+	}
+	byAuthor := map[string]latest{}
 	for _, n := range nodes {
-		switch strings.ToUpper(n.State) {
-		case "CHANGES_REQUESTED":
-			return "changes_requested"
-		case "APPROVED":
+		// Anonymous reviewers (deleted users) get a unique bucket so each
+		// review still counts independently.
+		key := n.Author.Login
+		if key == "" {
+			key = "<anon>:" + n.SubmittedAt.UTC().Format(time.RFC3339Nano)
+		}
+		state := strings.ToUpper(n.State)
+		// COMMENTED and PENDING are non-binding states and shouldn't replace
+		// a prior APPROVED / CHANGES_REQUESTED for the same reviewer.
+		if state != reviewStateApproved && state != reviewStateChangesRequested {
+			if _, ok := byAuthor[key]; ok {
+				continue
+			}
+		}
+		prev, ok := byAuthor[key]
+		if !ok || !n.SubmittedAt.Before(prev.at) {
+			byAuthor[key] = latest{state: state, at: n.SubmittedAt}
+		}
+	}
+	hasApproval := false
+	for _, l := range byAuthor {
+		switch l.state {
+		case reviewStateChangesRequested:
+			return computedReviewStateChangesRequested
+		case reviewStateApproved:
 			hasApproval = true
 		}
 	}
 	if hasApproval {
-		return "approved"
+		return computedReviewStateApproved
 	}
 	return ""
 }
@@ -273,15 +306,15 @@ func (c *PATClient) ExecuteGraphQL(ctx context.Context, query string, variables 
 	if err := json.Unmarshal(respBody, out); err != nil {
 		return fmt.Errorf("decode graphql response: %w", err)
 	}
-	c.recordGraphQLRateFromPayload(respBody)
+	recordGraphQLRateFromPayload(c.rateTracker, respBody)
 	return nil
 }
 
-// recordGraphQLRateFromPayload tries to extract the data.rateLimit object
-// from a GraphQL response and feed it to the tracker. The GraphQL rate-limit
-// is point-cost based and more accurate than the response headers.
-func (c *PATClient) recordGraphQLRateFromPayload(body []byte) {
-	if c.rateTracker == nil {
+// recordGraphQLRateFromPayload extracts data.rateLimit from a GraphQL
+// response body and feeds it to the tracker. The GraphQL rate-limit field is
+// point-cost based and more accurate than HTTP headers.
+func recordGraphQLRateFromPayload(tracker *RateTracker, body []byte) {
+	if tracker == nil {
 		return
 	}
 	var probe struct {
@@ -298,7 +331,7 @@ func (c *PATClient) recordGraphQLRateFromPayload(body []byte) {
 	if err := json.Unmarshal(raw, &rl); err != nil {
 		return
 	}
-	c.rateTracker.Record(RateSnapshot{
+	tracker.Record(RateSnapshot{
 		Resource:  ResourceGraphQL,
 		Limit:     rl.Limit,
 		Remaining: rl.Remaining,
@@ -322,38 +355,8 @@ func (c *GHClient) ExecuteGraphQL(ctx context.Context, query string, variables m
 	if err := json.Unmarshal([]byte(stdout), out); err != nil {
 		return fmt.Errorf("decode graphql response: %w", err)
 	}
-	c.recordGraphQLRateFromPayload([]byte(stdout))
+	recordGraphQLRateFromPayload(c.rateTracker, []byte(stdout))
 	return nil
-}
-
-// recordGraphQLRateFromPayload mirrors PATClient's helper for GHClient — the
-// gh CLI returns the same JSON shape, so the GraphQL rate-limit field works
-// identically.
-func (c *GHClient) recordGraphQLRateFromPayload(body []byte) {
-	if c.rateTracker == nil {
-		return
-	}
-	var probe struct {
-		Data map[string]json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(body, &probe); err != nil {
-		return
-	}
-	raw, ok := probe.Data["rateLimit"]
-	if !ok || len(raw) == 0 {
-		return
-	}
-	var rl graphQLRateLimit
-	if err := json.Unmarshal(raw, &rl); err != nil {
-		return
-	}
-	c.rateTracker.Record(RateSnapshot{
-		Resource:  ResourceGraphQL,
-		Limit:     rl.Limit,
-		Remaining: rl.Remaining,
-		ResetAt:   rl.ResetAt,
-		UpdatedAt: time.Now().UTC(),
-	})
 }
 
 // noopGraphQLExecutorErr is returned when the active client is the noop
