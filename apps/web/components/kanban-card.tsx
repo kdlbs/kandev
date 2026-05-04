@@ -126,7 +126,6 @@ function useKanbanCardMenus({
   };
 
   const menuBase = {
-    task,
     currentWorkflowId: moveTargets.currentWorkflowId,
     currentStepId: task.workflowStepId,
     workflows: moveTargets.workflowItems,

@@ -173,6 +173,28 @@ func TestService_MoveTaskMovedEventIncludesSourceWorkflow(t *testing.T) {
 	}
 }
 
+func TestService_BulkMoveTasksUpdatedEventIncludesSourceWorkflow(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	createMoveTask(t, ctx, repo, "task-bulk-cross-workflow", "wf-source", "step-source", nil)
+	eventBus.ClearEvents()
+
+	_, err := svc.BulkMoveTasks(ctx, "wf-source", "", "wf-target", "step-target")
+	if err != nil {
+		t.Fatalf("BulkMoveTasks: %v", err)
+	}
+
+	updatedEvent := findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskUpdated)
+	updatedData, ok := updatedEvent.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("updated event data type = %T, want map[string]interface{}", updatedEvent.Data)
+	}
+	if got := updatedData["old_workflow_id"]; got != "wf-source" {
+		t.Fatalf("old_workflow_id = %v, want wf-source", got)
+	}
+}
+
 func TestService_BulkMoveSelectedTasksValidatesBatchBeforeMoving(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

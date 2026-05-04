@@ -25,7 +25,7 @@ import {
   DropdownMenuSubTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
-import type { Task, WorkflowStep } from "@/components/kanban-card";
+import type { WorkflowStep } from "@/components/kanban-card";
 import {
   stepHasAutoStart,
   type TaskMoveStep,
@@ -68,7 +68,6 @@ export type KanbanCardMoveTargets = {
 };
 
 type BuildKanbanCardMenuEntriesArgs = {
-  task: Task;
   currentWorkflowId?: string | null;
   currentStepId?: string | null;
   workflows: TaskMoveWorkflow[];

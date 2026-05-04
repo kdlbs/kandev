@@ -459,6 +459,7 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 
 	now := time.Now().UTC()
 	for i, task := range tasks {
+		oldWorkflowID := task.WorkflowID
 		task.WorkflowID = targetWorkflowID
 		task.WorkflowStepID = targetStepID
 		task.Position = i
@@ -471,7 +472,7 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 			return nil, fmt.Errorf("failed to move task %s: %w", task.ID, err)
 		}
 
-		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, oldWorkflowID)
 	}
 
 	s.logger.Info("bulk moved tasks",

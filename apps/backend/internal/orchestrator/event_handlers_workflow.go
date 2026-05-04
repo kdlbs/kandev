@@ -255,6 +255,9 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		zap.Bool("trigger_on_enter", triggerOnEnter))
 
 	if triggerOnEnter {
+		// Automated transitions always clear review: the agent just completed
+		// a turn, so any pending review from a prior step is stale regardless
+		// of whether the new step has auto_start_agent.
 		s.finalizeStepEnter(ctx, taskID, sessionID, targetStep, task.Description, true)
 	} else {
 		// on_turn_start transitions: user is about to send a message, no on_enter needed.
