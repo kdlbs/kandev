@@ -35,6 +35,16 @@ function formatReset(snap: GitHubRateLimitSnapshot): string {
   return formatDistanceToNow(reset, { addSuffix: true });
 }
 
+// latestReset returns the snapshot whose reset_at is furthest in the future.
+// When multiple buckets are exhausted, background checks remain paused until
+// the last one recovers, so the alert must anchor on that bucket — anchoring
+// on snapshots[0] would understate the pause window.
+function latestReset(snaps: GitHubRateLimitSnapshot[]): GitHubRateLimitSnapshot {
+  return snaps.reduce((latest, s) =>
+    new Date(s.reset_at).getTime() > new Date(latest.reset_at).getTime() ? s : latest,
+  );
+}
+
 function snapshotsFromInfo(info: GitHubRateLimitInfo): GitHubRateLimitSnapshot[] {
   const out: GitHubRateLimitSnapshot[] = [];
   if (info.core) out.push(info.core);
@@ -58,7 +68,7 @@ export function GitHubRateLimitDisplay({ info }: { info?: GitHubRateLimitInfo })
           <AlertDescription className="text-sm">
             GitHub API rate limit exhausted on{" "}
             {exhausted.map((s) => RESOURCE_LABELS[s.resource] ?? s.resource).join(", ")}. Background
-            PR/issue checks are paused until the limit resets {formatReset(exhausted[0])}.
+            PR/issue checks are paused until the limit resets {formatReset(latestReset(exhausted))}.
           </AlertDescription>
         </Alert>
       )}

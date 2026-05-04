@@ -153,6 +153,32 @@ func TestRunBatchedPRQuery_PropagatesError(t *testing.T) {
 	}
 }
 
+func TestRunBatchedPRQuery_SurfacesGraphQLErrors(t *testing.T) {
+	exec := &stubGraphQLExecutor{
+		response: `{"data": {}, "errors": [{"message": "Field 'foo' doesn't exist on type 'Repository'"}]}`,
+	}
+	_, err := runBatchedPRQuery(context.Background(), exec, []graphQLPRRef{{Owner: "o", Repo: "r", Number: 1}})
+	if err == nil {
+		t.Fatalf("expected error from non-empty errors array")
+	}
+	if !strings.Contains(err.Error(), "Field 'foo'") {
+		t.Errorf("expected error to include first message, got: %v", err)
+	}
+}
+
+func TestRunBatchedBranchQuery_SurfacesGraphQLErrors(t *testing.T) {
+	exec := &stubGraphQLExecutor{
+		response: `{"data": {}, "errors": [{"message": "rate limited"}, {"message": "secondary"}]}`,
+	}
+	_, err := runBatchedBranchQuery(context.Background(), exec, []graphQLBranchRef{{Owner: "o", Repo: "r", Branch: "main"}})
+	if err == nil {
+		t.Fatalf("expected error from non-empty errors array")
+	}
+	if !strings.Contains(err.Error(), "rate limited") || !strings.Contains(err.Error(), "and 1 more") {
+		t.Errorf("expected error to include first message + count, got: %v", err)
+	}
+}
+
 func TestRunBatchedBranchQuery_DecodesPRNode(t *testing.T) {
 	exec := &stubGraphQLExecutor{
 		response: `{

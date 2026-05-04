@@ -112,6 +112,19 @@ type graphQLError struct {
 	Path    []string `json:"path"`
 }
 
+// graphQLErrorsToErr returns a non-nil error when the GraphQL response carries
+// a top-level "errors" array. The first message is included so logs are
+// actionable; the count is appended when there are multiple.
+func graphQLErrorsToErr(errs []graphQLError) error {
+	if len(errs) == 0 {
+		return nil
+	}
+	if len(errs) == 1 {
+		return fmt.Errorf("graphql error: %s", errs[0].Message)
+	}
+	return fmt.Errorf("graphql error: %s (and %d more)", errs[0].Message, len(errs)-1)
+}
+
 // graphQLRateLimit mirrors GitHub's top-level rateLimit field, the most
 // accurate source of GraphQL quota since limits are point-cost based.
 type graphQLRateLimit struct {
@@ -389,6 +402,13 @@ func runBatchedPRQuery(ctx context.Context, exec GraphQLExecutor, refs []graphQL
 		if err := exec.ExecuteGraphQL(ctx, query, vars, &resp); err != nil {
 			return nil, err
 		}
+		// GitHub returns HTTP 200 with a top-level "errors" array for partial
+		// auth failures, schema mismatches, or per-alias errors. Surface them
+		// as an error so the caller falls back to per-watch checks instead of
+		// silently absorbing the failure.
+		if err := graphQLErrorsToErr(resp.Errors); err != nil {
+			return nil, err
+		}
 		if err := decodeBatchedPRChunk(chunk, resp.Data, result); err != nil {
 			return nil, err
 		}
@@ -464,9 +484,13 @@ func runBatchedBranchQuery(ctx context.Context, exec GraphQLExecutor, refs []gra
 	for _, chunk := range chunkedRefs(refs) {
 		query, vars := buildBatchedBranchQuery(chunk)
 		var resp struct {
-			Data map[string]json.RawMessage `json:"data"`
+			Data   map[string]json.RawMessage `json:"data"`
+			Errors []graphQLError             `json:"errors"`
 		}
 		if err := exec.ExecuteGraphQL(ctx, query, vars, &resp); err != nil {
+			return nil, err
+		}
+		if err := graphQLErrorsToErr(resp.Errors); err != nil {
 			return nil, err
 		}
 		decodeBatchedBranchChunk(chunk, resp.Data, result)
