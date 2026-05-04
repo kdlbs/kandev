@@ -4,7 +4,7 @@ name: release
 # Trigger: GitHub Actions UI → "Run workflow" (workflow_dispatch).
 #
 # Flow (one click → everything below):
-#   1. prepare        — bump version, regen CHANGELOG, open + merge release PR, push tag vX.Y.Z
+#   1. prepare        — bump version, regen CHANGELOG, commit to main, push tag vX.Y.Z
 #   2. build-web      — build Next.js standalone bundle
 #   3. build-cli      — build + esbuild-bundle CLI
 #   4. build-bundles  — assemble bin/ + web/ + cli/ tarballs for 5 platforms
@@ -33,7 +33,7 @@ on:
           - minor
           - major
       dry_run:
-        description: "Dry run (no PR, tag, npm publish, or tap update)"
+        description: "Dry run (no commit, tag, npm publish, or tap update)"
         type: boolean
         default: false
 

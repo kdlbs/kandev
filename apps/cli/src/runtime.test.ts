@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import Module from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -111,6 +112,43 @@ describe("resolveRuntime", () => {
       const bundleDir = path.join(tmpDir, "empty-bundle");
       fs.mkdirSync(bundleDir);
       process.env.KANDEV_BUNDLE_DIR = bundleDir;
+
+      expect(() => resolveRuntime()).toThrow(/Backend binary not found/);
+    });
+  });
+
+  describe("installed npm runtime package (step 2)", () => {
+    // Step 2 normally relies on require.resolve('@kdlbs/runtime-darwin-arm64')
+    // succeeding because the npm package is installed alongside the kandev
+    // package. In this test environment that package isn't present, so we
+    // intercept Node's module resolver to point at a fake bundle inside tmpDir.
+    function mockResolve(target: string): void {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ModuleAny = Module as unknown as { _resolveFilename: any };
+      vi.spyOn(ModuleAny, "_resolveFilename").mockImplementationOnce(() => target);
+    }
+
+    it("resolves from the installed npm runtime package", () => {
+      const pkgRoot = path.join(tmpDir, "npm-runtime");
+      createFakeBundle(pkgRoot);
+      // require.resolve('<pkg>/package.json') normally returns the path to the
+      // package.json inside node_modules. Point it at our fake bundle instead.
+      const pkgJsonPath = path.join(pkgRoot, "package.json");
+      fs.writeFileSync(pkgJsonPath, "{}");
+      mockResolve(pkgJsonPath);
+
+      const result = resolveRuntime();
+      expect(result.source).toBe("npm");
+      expect(result.bundleDir).toBe(pkgRoot);
+    });
+
+    it("surfaces validateBundle errors when the npm package is installed but corrupt", () => {
+      const pkgRoot = path.join(tmpDir, "broken-npm-runtime");
+      fs.mkdirSync(pkgRoot);
+      // package.json present (so require.resolve succeeds), but no bin/ or web/
+      const pkgJsonPath = path.join(pkgRoot, "package.json");
+      fs.writeFileSync(pkgJsonPath, "{}");
+      mockResolve(pkgJsonPath);
 
       expect(() => resolveRuntime()).toThrow(/Backend binary not found/);
     });
