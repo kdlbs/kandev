@@ -58,6 +58,7 @@ function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSes
     worktree_branch: incoming.worktree_branch ?? existing.worktree_branch,
     repository_id: incoming.repository_id ?? existing.repository_id,
     base_branch: incoming.base_branch ?? existing.base_branch,
+    task_environment_id: incoming.task_environment_id ?? existing.task_environment_id,
   };
 }
 
@@ -321,10 +322,14 @@ function buildTaskSessionActions(set: ImmerSet) {
       sessions: Parameters<SessionSlice["setTaskSessionsForTask"]>[1],
     ) =>
       set((draft) => {
-        draft.taskSessionsByTask.itemsByTaskId[taskId] = sessions;
+        const merged = sessions.map((session) => {
+          const existing = draft.taskSessions.items[session.id];
+          return existing ? mergeTaskSession(existing, session) : session;
+        });
+        draft.taskSessionsByTask.itemsByTaskId[taskId] = merged;
         draft.taskSessionsByTask.loadingByTaskId[taskId] = false;
         draft.taskSessionsByTask.loadedByTaskId[taskId] = true;
-        for (const session of sessions) {
+        for (const session of merged) {
           draft.taskSessions.items[session.id] = session;
           syncEnvironmentMapping(draft, session.id, session.task_environment_id);
         }
