@@ -290,8 +290,17 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 
 // createInTaskDir creates a worktree inside the task directory structure:
 // ~/.kandev/tasks/{taskDirName}/{repoName}/
+//
+// RepoName is sanitized to a single path segment so display names like
+// "owner/repo" don't produce a nested subdirectory — that would push the
+// worktree one level below the task root and break agentctl's sibling-based
+// multi-repo detection.
 func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRef string) (*Worktree, error) {
-	worktreePath, err := m.config.TaskWorktreePath(req.TaskDirName, req.RepoName)
+	repoDir := SanitizeRepoDirName(req.RepoName)
+	if repoDir == "" {
+		return nil, ErrInvalidRepoName
+	}
+	worktreePath, err := m.config.TaskWorktreePath(req.TaskDirName, repoDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task worktree path: %w", err)
 	}

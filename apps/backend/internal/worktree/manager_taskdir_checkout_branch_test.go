@@ -3,6 +3,7 @@ package worktree
 import (
 	"context"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -107,5 +108,55 @@ func TestCreateInTaskDir_RemoteBaseRefDoesNotSetUpstream(t *testing.T) {
 	cmd.Dir = wt.Path
 	if out, err := cmd.CombinedOutput(); err == nil {
 		t.Fatalf("expected no upstream for new task branch, but got %q", strings.TrimSpace(string(out)))
+	}
+}
+
+// Org-prefixed RepoName ("owner/repo") used to nest the worktree one level
+// below the task root, breaking agentctl's sibling-based multi-repo detection.
+// The worktree directory must sit directly under the task root so two repos
+// (clean + org-prefixed) end up as siblings.
+func TestCreateInTaskDir_OrgPrefixedRepoNameLandsAsSibling(t *testing.T) {
+	cfg := newTestConfig(t)
+	store := newMockStore()
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	repoA := initGitRepoWithRemote(t)
+	repoB := initGitRepoWithRemote(t)
+	const taskDir = "test-task"
+
+	wtA, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID: "t-1", SessionID: "s-1", TaskTitle: "T",
+		RepositoryID:   "repo-a",
+		RepositoryPath: repoA,
+		BaseBranch:     "main",
+		TaskDirName:    taskDir,
+		RepoName:       "arthur",
+	})
+	if err != nil {
+		t.Fatalf("Create A: %v", err)
+	}
+
+	wtB, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID: "t-1", SessionID: "s-1", TaskTitle: "T",
+		RepositoryID:   "repo-b",
+		RepositoryPath: repoB,
+		BaseBranch:     "main",
+		TaskDirName:    taskDir,
+		RepoName:       "acme/widget-config",
+	})
+	if err != nil {
+		t.Fatalf("Create B: %v", err)
+	}
+
+	parentA := filepath.Dir(wtA.Path)
+	parentB := filepath.Dir(wtB.Path)
+	if parentA != parentB {
+		t.Fatalf("worktrees not siblings: A parent %q vs B parent %q", parentA, parentB)
+	}
+	if base := filepath.Base(wtB.Path); base != "acme-widget-config" {
+		t.Errorf("repo B dir = %q, want %q", base, "acme-widget-config")
 	}
 }

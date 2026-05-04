@@ -52,6 +52,11 @@ var (
 	// directory (~/.kandev/tasks/{taskDir}/{repo}/), so callers must populate
 	// both fields.
 	ErrTaskDirRequired = errors.New("worktree create requires TaskDirName and RepoName")
+
+	// ErrInvalidRepoName is returned when RepoName is set but contains no
+	// characters that survive sanitization (e.g. "!@#$%"), so it cannot be
+	// used as a directory segment.
+	ErrInvalidRepoName = errors.New("repo name has no usable characters after sanitization")
 )
 
 // containsAuthFailure checks if git output indicates an authentication failure.
