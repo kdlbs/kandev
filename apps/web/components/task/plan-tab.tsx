@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect } from "react";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import { useAppStore } from "@/components/state-provider";
+import { useToggleGroupMaximize } from "./use-tab-maximize";
 
 /**
  * Custom tab component for the Plan panel.
@@ -11,6 +12,7 @@ import { useAppStore } from "@/components/state-provider";
  */
 export function PlanTab(props: IDockviewPanelHeaderProps) {
   const { api } = props;
+  const toggleMaximize = useToggleGroupMaximize(api.group.id);
 
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const plan = useAppStore((s) => (activeTaskId ? s.taskPlans.byTaskId[activeTaskId] : null));
@@ -39,7 +41,7 @@ export function PlanTab(props: IDockviewPanelHeaderProps) {
   const hasUnseen = plan?.created_by === "agent" && lastSeen !== plan.updated_at;
 
   return (
-    <div data-testid="plan-tab" className="relative">
+    <div data-testid="plan-tab" className="relative select-none" onDoubleClick={toggleMaximize}>
       <DockviewDefaultTab {...props} />
       {hasUnseen && (
         <span

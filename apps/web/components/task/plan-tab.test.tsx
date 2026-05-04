@@ -27,6 +27,16 @@ vi.mock("dockview-react", () => ({
   DockviewDefaultTab: () => null,
 }));
 
+vi.mock("@/lib/state/dockview-store", () => ({
+  useDockviewStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({
+      preMaximizeLayout: null,
+      sidebarGroupId: "sidebar-group",
+      maximizeGroup: vi.fn(),
+      exitMaximizedLayout: vi.fn(),
+    }),
+}));
+
 import { PlanTab } from "./plan-tab";
 
 const TS = "2026-04-20T00:00:00Z";
@@ -46,12 +56,14 @@ function agentPlan(updated_at = TS): TaskPlan {
 
 type TabApi = {
   isActive: boolean;
+  group: { id: string };
   onDidActiveChange: (listener: (e: { isActive: boolean }) => void) => { dispose: () => void };
 };
 
 function makeApi(isActive: boolean): TabApi {
   return {
     isActive,
+    group: { id: "group-a" },
     onDidActiveChange: () => ({ dispose: () => {} }),
   };
 }

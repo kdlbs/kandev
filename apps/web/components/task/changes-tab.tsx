@@ -13,6 +13,7 @@ import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-sta
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { cn } from "@kandev/ui/lib/utils";
+import { useToggleGroupMaximize } from "./use-tab-maximize";
 
 /** Auto-activate the changes panel only when it lives in the right sidebar. */
 function autoActivateChangesPanel(): void {
@@ -35,6 +36,7 @@ function autoActivateChangesPanel(): void {
  */
 export function ChangesTab(props: IDockviewPanelHeaderProps) {
   const { api, containerApi } = props;
+  const toggleMaximize = useToggleGroupMaximize(api.group.id);
 
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
@@ -118,7 +120,10 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
 
   return (
     <ContextMenu>
-      <ContextMenuTrigger className="flex h-full items-center cursor-pointer">
+      <ContextMenuTrigger
+        className="flex h-full items-center cursor-pointer select-none"
+        onDoubleClick={toggleMaximize}
+      >
         <div className={cn("relative", isFlashing && "animate-changes-flash")}>
           <DockviewDefaultTab {...props} />
           {badgeCount > 0 && (

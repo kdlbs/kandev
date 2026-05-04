@@ -25,6 +25,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { TaskSessionState } from "@/lib/types/http";
+import { useToggleGroupMaximize } from "./use-tab-maximize";
 
 function isStoppable(s: TaskSessionState) {
   return s === "RUNNING" || s === "STARTING" || s === "WAITING_FOR_INPUT";
@@ -283,6 +284,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   const { isPrimary, sessionState, taskId, agentLabel, agentName, sessionNumber, sessionCount } =
     useSessionTabState(sessionId);
   const actions = useSessionTabActions(sessionId, taskId, api, containerApi);
+  const toggleMaximize = useToggleGroupMaximize(api.group.id);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [isActive, setIsActive] = useState(api.isActive);
 
@@ -301,8 +303,9 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
     <>
       <ContextMenu>
         <ContextMenuTrigger
-          className="flex h-full items-center cursor-pointer"
+          className="flex h-full items-center cursor-pointer select-none"
           data-testid={sessionId ? `session-tab-${sessionId}` : undefined}
+          onDoubleClick={toggleMaximize}
         >
           <div className="flex items-center">
             {isPrimary && showMultiSessionBadges && (

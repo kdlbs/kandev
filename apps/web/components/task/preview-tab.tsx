@@ -12,6 +12,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { PreviewType } from "@/lib/state/dockview-panel-actions";
+import { useToggleGroupMaximize } from "./use-tab-maximize";
 
 /**
  * Middle-click to close any tab (preview or pinned).
@@ -61,11 +62,16 @@ function PreviewTab(props: IDockviewPanelHeaderProps & { type: PreviewType }) {
   const promote = useDockviewStore((s) => s.promotePreviewToPinned);
   const onMouseDown = useMiddleClickClose(api, containerApi);
   const { handleClose, handleCloseOthers } = useTabContextActions(api, containerApi);
+  const toggleMaximize = useToggleGroupMaximize(api.group.id);
   const isPromoted = (props.params as Record<string, unknown> | undefined)?.promoted === true;
 
   const onDoubleClick = useCallback(() => {
-    if (!isPromoted) promote(type);
-  }, [promote, type, isPromoted]);
+    if (!isPromoted) {
+      promote(type);
+      return;
+    }
+    toggleMaximize();
+  }, [promote, type, isPromoted, toggleMaximize]);
 
   const handleKeepOpen = useCallback(() => {
     promote(type);
@@ -75,7 +81,10 @@ function PreviewTab(props: IDockviewPanelHeaderProps & { type: PreviewType }) {
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
-          className={cn("flex h-full items-center cursor-pointer", !isPromoted && "italic")}
+          className={cn(
+            "flex h-full items-center cursor-pointer select-none",
+            !isPromoted && "italic",
+          )}
           onMouseDown={onMouseDown}
           onDoubleClick={onDoubleClick}
           title={isPromoted ? undefined : "Double-click to keep this tab open"}
@@ -122,11 +131,16 @@ export function PinnedDefaultTab(props: IDockviewPanelHeaderProps) {
   const { api, containerApi } = props;
   const onMouseDown = useMiddleClickClose(api, containerApi);
   const { handleClose, handleCloseOthers } = useTabContextActions(api, containerApi);
+  const toggleMaximize = useToggleGroupMaximize(api.group.id);
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div className="flex h-full items-center cursor-pointer" onMouseDown={onMouseDown}>
+        <div
+          className="flex h-full items-center cursor-pointer select-none"
+          onMouseDown={onMouseDown}
+          onDoubleClick={toggleMaximize}
+        >
           <DockviewDefaultTab {...props} />
         </div>
       </ContextMenuTrigger>
