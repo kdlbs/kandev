@@ -382,10 +382,13 @@ type TaskStateChangeFunc func(ctx context.Context, taskID string, state v1.TaskS
 type SessionStateChangeFunc func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error
 
 // AgentStartFailedFunc is called when the agent process fails to start.
-// It receives the task/session/execution IDs and the error. If the callback
-// returns true, it has handled the failure (e.g., as a recoverable auth error)
-// and the executor should skip its default FAILED state updates.
-type AgentStartFailedFunc func(ctx context.Context, taskID, sessionID, agentExecutionID string, err error) (handled bool)
+// It receives the task/session/execution IDs and the error. fromResume is true
+// when the failure occurred during a background session resume (rather than a
+// user-initiated start), letting the orchestrator suppress user-facing toasts
+// for transient bootstrap errors. If the callback returns true, it has handled
+// the failure (e.g., as a recoverable auth error) and the executor should skip
+// its default FAILED state updates.
+type AgentStartFailedFunc func(ctx context.Context, taskID, sessionID, agentExecutionID string, err error, fromResume bool) (handled bool)
 
 // LaunchFailedFunc is called when session launch fails before the agent starts.
 // Useful for creating user-facing status messages tied to launch errors.

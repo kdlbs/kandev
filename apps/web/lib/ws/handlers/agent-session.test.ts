@@ -90,7 +90,10 @@ describe("session.state_changed handler", () => {
     expect(store.getState().setSessionFailureNotification).not.toHaveBeenCalled();
   });
 
-  it("sets failure notification for unknown session (first event)", () => {
+  it("does not set failure notification for unknown session (snapshot replay)", () => {
+    // When a session is replayed on reconnect/page-load, it lands in the FE
+    // store for the first time already in FAILED state. This is not a real
+    // transition we just observed, so no toast should fire.
     store = makeStore();
     handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
 
@@ -103,11 +106,7 @@ describe("session.state_changed handler", () => {
       }),
     );
 
-    expect(store.getState().setSessionFailureNotification).toHaveBeenCalledWith({
-      sessionId: "s-new",
-      taskId: "t-1",
-      message: "timeout",
-    });
+    expect(store.getState().setSessionFailureNotification).not.toHaveBeenCalled();
   });
 
   it("respects suppress_toast flag", () => {

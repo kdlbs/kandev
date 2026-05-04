@@ -200,7 +200,24 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready
 	// Ensure we signal ready even on failure (so callers don't hang)
 	defer signalReady()
 
+	// Idempotency guard: if a workspace stream is already attached, another
+	// goroutine has connected it (e.g. workspace-only ensure followed by full
+	// launch promotion). Treat as success and exit cleanly.
+	if execution.GetWorkspaceStream() != nil {
+		sm.logger.Debug("workspace stream already attached, skipping connect",
+			zap.String("instance_id", execution.ID))
+		return
+	}
+
 	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Re-check before each retry in case another goroutine connected meanwhile.
+		if execution.GetWorkspaceStream() != nil {
+			sm.logger.Debug("workspace stream attached during retry, exiting",
+				zap.String("instance_id", execution.ID),
+				zap.Int("attempt", attempt))
+			return
+		}
+
 		callbacks := sm.buildWorkspaceCallbacks(execution)
 
 		ws, err := execution.agentctl.StreamWorkspace(ctx, callbacks)

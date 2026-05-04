@@ -633,11 +633,12 @@ func TestRunAgentProcessAsync_CleansUpOnStartFailure(t *testing.T) {
 		return repo.UpdateTaskState(ctx, taskID, state)
 	})
 
-	// Use runAgentProcessAsync with a no-op onSuccess that should never be called
+	// Use runAgentProcessAsync with a no-op onSuccess that should never be called.
+	// escalateTaskOnFailure=true mirrors the fresh-start path.
 	exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456", func(ctx context.Context) {
 		t.Error("onSuccess should not be called when StartAgentProcess fails")
 		close(done)
-	})
+	}, true, false)
 
 	// Wait for the async goroutine to finish
 	deadline := time.After(5 * time.Second)
@@ -666,6 +667,133 @@ verified:
 	session := repo.sessions["session-123"]
 	if session.State != models.TaskSessionStateFailed {
 		t.Errorf("expected session state FAILED, got %s", session.State)
+	}
+}
+
+// runAgentProcessAsyncFailureFixture builds an Executor configured to fail
+// StartAgentProcess, with task/session-state-change recorders for assertions.
+type runAgentProcessAsyncFailureFixture struct {
+	exec              *Executor
+	taskStateUpdates  *atomicSlice
+	sessionFailedSeen *atomic.Bool
+	startFailedCalls  *atomic.Int32
+	lastFromResume    *atomic.Bool
+	stopCalled        *atomic.Bool
+}
+
+func newRunAgentProcessAsyncFailureFixture(t *testing.T) *runAgentProcessAsyncFailureFixture {
+	t.Helper()
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	stopCalled := &atomic.Bool{}
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+			return fmt.Errorf("ACP initialize handshake failed: context deadline exceeded")
+		},
+		stopAgentFunc: func(ctx context.Context, agentExecutionID string, force bool) error {
+			stopCalled.Store(true)
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	taskUpdates := &atomicSlice{}
+	sessionFailed := &atomic.Bool{}
+	startFailedCalls := &atomic.Int32{}
+	lastFromResume := &atomic.Bool{}
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		taskUpdates.append(string(state))
+		return nil
+	})
+	exec.SetOnSessionStateChange(func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error {
+		if state == models.TaskSessionStateFailed {
+			sessionFailed.Store(true)
+		}
+		return repo.UpdateTaskSessionState(ctx, sessionID, state, errorMessage)
+	})
+	exec.SetOnAgentStartFailed(func(ctx context.Context, taskID, sessionID, agentExecutionID string, err error, fromResume bool) bool {
+		startFailedCalls.Add(1)
+		lastFromResume.Store(fromResume)
+		return false
+	})
+	return &runAgentProcessAsyncFailureFixture{
+		exec: exec, taskStateUpdates: taskUpdates, sessionFailedSeen: sessionFailed,
+		startFailedCalls: startFailedCalls, lastFromResume: lastFromResume, stopCalled: stopCalled,
+	}
+}
+
+func TestRunAgentProcessAsync_ResumeDoesNotEscalateTaskState(t *testing.T) {
+	f := newRunAgentProcessAsyncFailureFixture(t)
+	f.exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456",
+		func(ctx context.Context) { t.Error("onSuccess should not run on failure") },
+		false, true) // resume path: no escalation, fromResume=true
+	waitFor(t, func() bool { return f.stopCalled.Load() }, 5*time.Second, "StopAgent called")
+	if !f.sessionFailedSeen.Load() {
+		t.Error("expected session state FAILED")
+	}
+	if got := f.taskStateUpdates.snapshot(); len(got) != 0 {
+		t.Errorf("expected no task state updates on resume failure, got %v", got)
+	}
+	if f.startFailedCalls.Load() != 1 {
+		t.Errorf("expected onAgentStartFailed called once, got %d", f.startFailedCalls.Load())
+	}
+	if !f.lastFromResume.Load() {
+		t.Error("expected fromResume=true to be propagated to onAgentStartFailed")
+	}
+}
+
+func TestRunAgentProcessAsync_FreshStartEscalatesTaskState(t *testing.T) {
+	f := newRunAgentProcessAsyncFailureFixture(t)
+	f.exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456",
+		func(ctx context.Context) { t.Error("onSuccess should not run on failure") },
+		true, false) // fresh-start path: escalate, fromResume=false
+	waitFor(t, func() bool { return f.stopCalled.Load() }, 5*time.Second, "StopAgent called")
+	if !f.sessionFailedSeen.Load() {
+		t.Error("expected session state FAILED")
+	}
+	got := f.taskStateUpdates.snapshot()
+	if len(got) != 1 || got[0] != string(v1.TaskStateFailed) {
+		t.Errorf("expected fresh-start failure to set task state FAILED, got %v", got)
+	}
+	if f.lastFromResume.Load() {
+		t.Error("expected fromResume=false on fresh-start path")
+	}
+}
+
+// atomicSlice is a tiny thread-safe slice used by the fixture above.
+type atomicSlice struct {
+	mu   sync.Mutex
+	vals []string
+}
+
+func (a *atomicSlice) append(v string) {
+	a.mu.Lock()
+	a.vals = append(a.vals, v)
+	a.mu.Unlock()
+}
+func (a *atomicSlice) snapshot() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]string, len(a.vals))
+	copy(out, a.vals)
+	return out
+}
+
+func waitFor(t *testing.T, cond func() bool, timeout time.Duration, what string) {
+	t.Helper()
+	deadline := time.After(timeout)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for %s", what)
+		case <-tick.C:
+			if cond() {
+				return
+			}
+		}
 	}
 }
 

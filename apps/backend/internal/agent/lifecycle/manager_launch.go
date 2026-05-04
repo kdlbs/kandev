@@ -491,7 +491,61 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	if err != nil {
 		return nil, err
 	}
-	return v.(*AgentExecution), nil
+	execution := v.(*AgentExecution)
+	// If this Launch call joined a workspace-only ensure peer's singleflight
+	// slot (EnsureWorkspaceExecutionForSession / GetOrEnsureExecution), the
+	// returned execution has no AgentCommand and the orchestrator's subsequent
+	// StartAgentProcess() would fail with "no agent command configured".
+	// Promote it in place so the agent subprocess can start against the
+	// existing agentctl instance.
+	if execution.AgentCommand == "" {
+		if err := m.promoteWorkspaceExecution(ctx, execution, req); err != nil {
+			return nil, err
+		}
+	}
+	return execution, nil
+}
+
+// promoteWorkspaceExecution populates the agent command fields on a
+// workspace-only execution so a subsequent StartAgentProcess() can configure
+// and start the agent subprocess. Concurrent promoters serialize through a
+// dedicated singleflight key so they don't race on the shared AgentExecution
+// pointer.
+func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *AgentExecution, req *LaunchRequest) error {
+	_, err, _ := m.ensureExecutionGroup.Do("promote:"+req.SessionID, func() (interface{}, error) {
+		// Re-check after acquiring the slot — a peer Launch may have already
+		// promoted while we were waiting.
+		if execution.AgentCommand != "" {
+			return nil, nil
+		}
+		agentTypeName, profileInfo, err := m.resolveAgentProfile(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		agentConfig, ok := m.registry.Get(agentTypeName)
+		if !ok {
+			return nil, fmt.Errorf("agent type %q not found in registry", agentTypeName)
+		}
+		if !agentConfig.Enabled() {
+			return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
+		}
+		cmds := m.buildAgentCommand(req, profileInfo, agentConfig)
+		execution.AgentCommand = cmds.initial
+		execution.ContinueCommand = cmds.continue_
+		if req.ACPSessionID != "" && execution.ACPSessionID == "" {
+			execution.ACPSessionID = req.ACPSessionID
+		}
+		if req.PreviousExecutionID != "" {
+			execution.isResumedSession = true
+		}
+		m.logger.Info("promoted workspace-only execution to agent execution",
+			zap.String("execution_id", execution.ID),
+			zap.String("session_id", req.SessionID),
+			zap.String("agent_profile_id", req.AgentProfileID),
+			zap.Bool("resume", req.ACPSessionID != ""))
+		return nil, nil
+	})
+	return err
 }
 
 // launchInternal is the body of Launch run inside the per-session singleflight
@@ -517,9 +571,15 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
 	}
 
-	// 3. Check if session already has an agent running
+	// 3. Check if session already has an agent running. A workspace-only
+	// execution created by EnsureWorkspaceExecutionForSession /
+	// GetOrEnsureExecution has no AgentCommand — return it so the outer Launch
+	// can promote it instead of erroring as if a real agent were running.
 	if req.SessionID != "" {
 		if existingExecution, exists := m.executionStore.GetBySessionID(req.SessionID); exists {
+			if existingExecution.AgentCommand == "" {
+				return existingExecution, nil
+			}
 			return nil, fmt.Errorf("session %q already has an agent running (execution: %s)", req.SessionID, existingExecution.ID)
 		}
 	}

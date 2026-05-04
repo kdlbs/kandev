@@ -639,10 +639,21 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 
 // handleAgentStartFailed is called by the executor when StartAgentProcess fails.
 // It detects auth errors and routes them through the recoverable failure path so
-// the frontend shows login guidance instead of a terminal failure.
+// the frontend shows login guidance instead of a terminal failure. When the
+// failure occurred during a background session resume (fromResume=true) and is
+// not an auth error, it sets the suppressToast flag so the default FAILED
+// transition does not surface a user-facing toast for a transient bootstrap
+// error on focus / auto-resume.
 // Returns true if the failure was handled (caller should skip default FAILED logic).
-func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID, agentExecutionID string, err error) bool {
+func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID, agentExecutionID string, err error, fromResume bool) bool {
 	if !isAuthError(err.Error()) {
+		if fromResume {
+			s.logger.Info("suppressing toast for resume bootstrap failure",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			s.suppressToast.Store(sessionID, true)
+		}
 		return false
 	}
 	s.logger.Info("agent start failure is auth error, treating as recoverable",

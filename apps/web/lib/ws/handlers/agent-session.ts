@@ -228,6 +228,39 @@ function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
   }
 }
 
+interface SessionFailureContext {
+  taskId: string;
+  sessionId: string;
+  newState: TaskSessionState | undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any;
+  previousState: TaskSessionState | undefined;
+}
+
+/** Emits a session-failure notification for FAILED transitions, honoring suppress_toast and replay guards. */
+function maybeNotifySessionFailure(store: StoreApi<AppState>, ctx: SessionFailureContext): void {
+  const { taskId, sessionId, newState, payload, previousState } = ctx;
+  if (newState !== "FAILED") return;
+
+  // Only toast on observed transitions (previousState present and not FAILED).
+  // If previousState is undefined we're learning about this session for the
+  // first time — that's a snapshot of an already-failed session being replayed
+  // by the backend (e.g. on page load / WS reconnect), not a fresh failure.
+  if (
+    payload.suppress_toast === true ||
+    previousState === undefined ||
+    previousState === "FAILED"
+  ) {
+    return;
+  }
+
+  store.getState().setSessionFailureNotification({
+    sessionId,
+    taskId,
+    message: payload.error_message ? String(payload.error_message) : "Session failed unexpectedly",
+  });
+}
+
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "message.queue.status_changed": (message) => {
@@ -271,19 +304,13 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
 
       maybeAdoptSessionOnTransition(store, taskId, sessionId, newState, !!existingSession);
 
-      if (
-        newState === "FAILED" &&
-        payload.suppress_toast !== true &&
-        existingSession?.state !== "FAILED" // replay guard; hook dedup is the second layer
-      ) {
-        store.getState().setSessionFailureNotification({
-          sessionId,
-          taskId,
-          message: payload.error_message
-            ? String(payload.error_message)
-            : "Session failed unexpectedly",
-        });
-      }
+      maybeNotifySessionFailure(store, {
+        taskId,
+        sessionId,
+        newState,
+        payload,
+        previousState: existingSession?.state,
+      });
     },
     "session.agentctl_starting": (message) => {
       const payload = message.payload;

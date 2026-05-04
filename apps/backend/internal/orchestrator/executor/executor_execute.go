@@ -41,10 +41,14 @@ func isContainerizedExecutor(executorType string) bool {
 }
 
 // runAgentProcessAsync starts the agent subprocess in a background goroutine.
-// On error it marks both the session and task as FAILED.
+// On error it marks the session as FAILED. The task is also marked FAILED only
+// when escalateTaskOnFailure is true; resume callers pass false so a transient
+// background bootstrap error does not destructively overwrite the task's
+// existing state (e.g. REVIEW). fromResume is forwarded to onAgentStartFailed
+// so the orchestrator can suppress user-facing toasts on background recovery.
 // On success it calls onSuccess with a non-cancellable context derived from ctx.
 // ctx is used with WithoutCancel so trace spans are preserved without inheriting cancellation.
-func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string, onSuccess func(context.Context)) {
+func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string, onSuccess func(context.Context), escalateTaskOnFailure, fromResume bool) {
 	go func() {
 		startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 		defer cancel()
@@ -56,8 +60,9 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 				zap.String("session_id", sessionID),
 				zap.String("agent_execution_id", agentExecutionID),
 				zap.Error(err))
-			// Let the orchestrator handle auth errors as recoverable failures.
-			if e.onAgentStartFailed != nil && e.onAgentStartFailed(updateCtx, taskID, sessionID, agentExecutionID, err) {
+			// Let the orchestrator handle auth errors as recoverable failures
+			// and (for resume) suppress the toast before the session is marked FAILED.
+			if e.onAgentStartFailed != nil && e.onAgentStartFailed(updateCtx, taskID, sessionID, agentExecutionID, err, fromResume) {
 				return
 			}
 			if updateErr := e.updateSessionState(updateCtx, taskID, sessionID, models.TaskSessionStateFailed, err.Error()); updateErr != nil {
@@ -65,10 +70,12 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 					zap.String("session_id", sessionID),
 					zap.Error(updateErr))
 			}
-			if updateErr := e.updateTaskState(updateCtx, taskID, v1.TaskStateFailed); updateErr != nil {
-				e.logger.Warn("failed to mark task as failed after start error",
-					zap.String("task_id", taskID),
-					zap.Error(updateErr))
+			if escalateTaskOnFailure {
+				if updateErr := e.updateTaskState(updateCtx, taskID, v1.TaskStateFailed); updateErr != nil {
+					e.logger.Warn("failed to mark task as failed after start error",
+						zap.String("task_id", taskID),
+						zap.Error(updateErr))
+				}
 			}
 			// Clean up the execution environment (e.g., destroy remote Sprites instance).
 			// Use force=true since the agent process never fully started.
@@ -92,7 +99,7 @@ func (e *Executor) startAgentProcessAsync(ctx context.Context, taskID, sessionID
 				zap.String("task_id", taskID),
 				zap.Error(updateErr))
 		}
-	})
+	}, true, false)
 }
 
 // updateTaskState updates a task's state, using the callback if set for event publishing,

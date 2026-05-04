@@ -694,5 +694,5 @@ func (e *Executor) startAgentProcessOnResume(ctx context.Context, taskID string,
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.String("session_state", string(session.State)))
-	})
+	}, false, true)
 }
