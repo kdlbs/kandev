@@ -155,7 +155,10 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
 function PermanentTab(props: IDockviewPanelHeaderProps) {
   const toggleMaximize = useToggleGroupMaximize(props.api.group.id);
   return (
-    <div className="flex h-full items-center select-none" onDoubleClick={toggleMaximize}>
+    <div
+      className="flex h-full items-center cursor-pointer select-none"
+      onDoubleClick={toggleMaximize}
+    >
       <DockviewDefaultTab {...props} hideClose />
     </div>
   );

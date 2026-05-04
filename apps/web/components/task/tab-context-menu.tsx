@@ -43,7 +43,7 @@ export function ContextMenuTab(props: IDockviewPanelHeaderProps) {
   return (
     <ContextMenu>
       <ContextMenuTrigger
-        className="flex h-full items-center select-none"
+        className="flex h-full items-center cursor-pointer select-none"
         onDoubleClick={toggleMaximize}
       >
         <DockviewDefaultTab {...props} />
