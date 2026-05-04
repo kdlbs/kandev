@@ -73,17 +73,19 @@ func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int) 
 	// output (appended after the format) stays within the same record:
 	//   \x1e<fields>\n <stat summary>\n\x1e<fields>\n <stat summary>\n...
 	// Splitting on recordSep groups each commit's fields + stats together.
-	//
-	// --first-parent: when the branch has merged main back in (e.g. to resolve
-	// conflicts), git log otherwise walks both parents of the merge and surfaces
-	// commits that came in via main. Following only the first parent shows the
-	// branch's own line of work plus the merge commit itself, matching what the
-	// user thinks of as "what this branch did".
-	args := []string{"log", "--first-parent", "--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%s%x1f%aI", "--shortstat"}
+	args := []string{"log", "--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%s%x1f%aI", "--shortstat"}
 
 	switch {
 	case baseCommit != "":
-		args = append(args, baseCommit+"..HEAD")
+		// --first-parent only on the divergence-range path: when the branch
+		// has merged main back in, plain `git log <base>..HEAD` walks both
+		// parents of the merge and surfaces commits brought in via main as
+		// if they were the branch's own work. Following only the first parent
+		// keeps the branch's line plus its merge commits and excludes the
+		// merged-in side. We deliberately don't apply this to the open-ended
+		// "recent N commits" path so future history-view callers (activity
+		// widgets, etc.) keep getting the full graph.
+		args = append(args, "--first-parent", baseCommit+"..HEAD")
 	case limit > 0:
 		args = append(args, fmt.Sprintf("-n%d", limit))
 	default:

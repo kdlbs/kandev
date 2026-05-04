@@ -892,14 +892,21 @@ func (s *Server) runGitCumulativeDiffForRepo(
 		return nil
 	}
 	if targetBranch != "" {
-		mb, err := s.computeMergeBase(c.Request.Context(), gitOp, targetBranch)
-		if err == nil && mb != "" {
-			base = mb
-		} else if err != nil {
+		switch mb, err := s.computeMergeBase(c.Request.Context(), gitOp, targetBranch); {
+		case err != nil:
 			s.logger.Warn("cumulative diff: merge-base failed, using stored base",
 				zap.String("target_branch", targetBranch),
 				zap.String("repo", repo),
 				zap.Error(err))
+		case mb == "":
+			// merge-base returned no error but no SHA — happens when HEAD and
+			// targetBranch share no history. Log it so the silent fallback to
+			// the stored base is visible during diagnostics.
+			s.logger.Warn("cumulative diff: merge-base returned empty, using stored base",
+				zap.String("target_branch", targetBranch),
+				zap.String("repo", repo))
+		default:
+			base = mb
 		}
 	}
 	result, err := gitOp.GetCumulativeDiff(c.Request.Context(), base)

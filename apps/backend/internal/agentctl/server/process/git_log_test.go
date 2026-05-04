@@ -6,6 +6,48 @@ import (
 	"testing"
 )
 
+// TestGetLog_NoBaseReturnsFullGraph guards against a regression where
+// --first-parent gets applied unconditionally to GetLog. The flag is only
+// correct for the divergence-range path (baseCommit != ""); the open-ended
+// "recent N commits" path must keep returning the full commit graph so
+// future history-view callers (activity widgets, etc.) aren't silently
+// filtered.
+func TestGetLog_NoBaseReturnsFullGraph(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	ctx := context.Background()
+
+	// Build a graph where main has commits brought in via a merge from a
+	// side branch. Without --first-parent, GetLog returns all commits;
+	// with --first-parent, only the merge commit's first-parent line.
+	branchPoint := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+	runGit(t, repoDir, "checkout", "-b", "side", branchPoint)
+	writeFile(t, repoDir, "side.txt", "side\n")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "side: commit a")
+	sideCommit := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+	runGit(t, repoDir, "checkout", "main")
+	runGit(t, repoDir, "merge", "--no-ff", "-m", "Merge side", "side")
+
+	gitOp := NewGitOperator(repoDir, log, nil)
+	result, err := gitOp.GetLog(ctx, "", 0)
+	if err != nil {
+		t.Fatalf("GetLog returned error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("GetLog failed: %s", result.Error)
+	}
+	gotSHAs := make(map[string]bool, len(result.Commits))
+	for _, c := range result.Commits {
+		gotSHAs[c.CommitSHA] = true
+	}
+	if !gotSHAs[sideCommit] {
+		t.Errorf("expected side-branch commit %s in no-base log (full graph), missing — --first-parent likely leaked into this path", sideCommit)
+	}
+}
+
 // TestGetLog_StaleLocalBranchScenario reproduces the bug where a worktree's
 // local main has fallen behind origin/main. If the merge-base is computed
 // against the local ref, it returns an old SHA and the log range sweeps in

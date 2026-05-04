@@ -86,13 +86,14 @@ func TestComputeMergeBase_FallsBackToLocalWhenRemoteMissing(t *testing.T) {
 	}
 }
 
-// TestRunGitCumulativeDiffForRepo_PrefersOriginRef verifies the cumulative
-// diff path applies the same origin-first merge-base treatment as the commit
-// log path. With a stale local main and an up-to-date origin/main, anchoring
-// to the stored base SHA (which is the original branch point) would balloon
-// the diff to include file changes from main commits brought in via merges;
-// using merge-base against origin/main excludes them.
-func TestRunGitCumulativeDiffForRepo_PrefersOriginRef(t *testing.T) {
+// TestComputeMergeBase_CorrectAnchorForCumulativeDiff documents that the
+// shared computeMergeBase helper — which both the commit log and the
+// cumulative diff paths consume — returns the right anchor in the
+// stale-local / fresh-origin shape. It does not exercise
+// runGitCumulativeDiffForRepo end-to-end (that would need a Server +
+// httptest stack); the integration is structurally trivial since both
+// callers route through this helper.
+func TestComputeMergeBase_CorrectAnchorForCumulativeDiff(t *testing.T) {
 	repoDir, cleanup := setupAPITestRepo(t)
 	defer cleanup()
 
