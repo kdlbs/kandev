@@ -646,6 +646,11 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task cannot send a message to itself", nil)
 	}
 
+	// Sender lookup is global, not workspace-scoped: cross-workspace agent
+	// messaging is intentionally allowed (badge URL handles cross-workspace
+	// nav). Task IDs are UUIDs, so this is not exploitable in practice — and
+	// scoping would require a product-level decision about cross-workspace
+	// auth/visibility/discovery that we don't want to bake in here.
 	senderTask, err := h.taskSvc.GetTask(ctx, req.SenderTaskID)
 	if err != nil || senderTask == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "sender task not found", nil)
