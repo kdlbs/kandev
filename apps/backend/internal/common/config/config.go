@@ -82,6 +82,7 @@ func (c *Config) ResolvedDataDir() string {
 type ServerConfig struct {
 	Host           string `mapstructure:"host"`
 	Port           int    `mapstructure:"port"`
+	McpPort        int    `mapstructure:"mcpPort"`
 	ReadTimeout    int    `mapstructure:"readTimeout"`  // in seconds
 	WriteTimeout   int    `mapstructure:"writeTimeout"` // in seconds
 	WebInternalURL string `mapstructure:"webInternalUrl"`
@@ -339,6 +340,7 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv("agent.standalonePort", "AGENTCTL_PORT", "KANDEV_AGENT_STANDALONE_PORT")
 	_ = v.BindEnv("agent.standaloneHost", "KANDEV_AGENT_STANDALONE_HOST")
 	_ = v.BindEnv("server.webInternalUrl", "KANDEV_WEB_INTERNAL_URL")
+	_ = v.BindEnv("server.mcpPort", "KANDEV_MCP_PORT")
 	_ = v.BindEnv("homeDir", "KANDEV_HOME_DIR")
 	_ = v.BindEnv("logging.level", "KANDEV_LOG_LEVEL")
 	_ = v.BindEnv("events.namespace", "KANDEV_EVENTS_NAMESPACE")
