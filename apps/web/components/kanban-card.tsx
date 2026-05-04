@@ -99,20 +99,30 @@ function useKanbanCardMenus({
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const disabled = Boolean(isDeleting || isArchiving);
 
+  const runMoveTasks = (taskIds: string[], workflowId: string, stepId: string) => {
+    void moveTasks(taskIds, workflowId, stepId).catch(() => {
+      // useTaskWorkflowMove already shows the failure toast.
+    });
+  };
+
   const moveToStepFromDropdown = (stepId: string) => {
     if (onMove) {
       onMove(task, stepId);
       return;
     }
     if (moveTargets.currentWorkflowId) {
-      void moveTasks([task.id], moveTargets.currentWorkflowId, stepId);
+      runMoveTasks([task.id], moveTargets.currentWorkflowId, stepId);
     }
   };
 
   const selectedTaskIds = isSelected && selectedIds?.size ? [...selectedIds] : [task.id];
   const moveSelectedToStep = (stepId: string) => {
+    if (selectedTaskIds.length === 1 && selectedTaskIds[0] === task.id && onMove) {
+      onMove(task, stepId);
+      return;
+    }
     if (!moveTargets.currentWorkflowId) return;
-    void moveTasks(selectedTaskIds, moveTargets.currentWorkflowId, stepId);
+    runMoveTasks(selectedTaskIds, moveTargets.currentWorkflowId, stepId);
   };
 
   const menuBase = {
@@ -134,14 +144,14 @@ function useKanbanCardMenus({
       ...menuBase,
       onMoveToStep: moveToStepFromDropdown,
       onSendToWorkflow: (workflowId, stepId) => {
-        void moveTasks([task.id], workflowId, stepId);
+        runMoveTasks([task.id], workflowId, stepId);
       },
     }),
     contextMenuEntries: buildKanbanCardMenuEntries({
       ...menuBase,
       onMoveToStep: moveSelectedToStep,
       onSendToWorkflow: (workflowId, stepId) => {
-        void moveTasks(selectedTaskIds, workflowId, stepId);
+        runMoveTasks(selectedTaskIds, workflowId, stepId);
       },
     }),
     showDeleteConfirm,

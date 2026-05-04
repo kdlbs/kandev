@@ -370,7 +370,9 @@ function TaskItemWithContextMenu({
             }
             onSendToWorkflow={(workflowId, stepId) => {
               closeMenu();
-              void moveTasks([task.id], workflowId, stepId);
+              void moveTasks([task.id], workflowId, stepId).catch(() => {
+                // useTaskWorkflowMove already shows the failure toast.
+              });
             }}
           />
         )}

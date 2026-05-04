@@ -135,7 +135,9 @@ test.describe("Cross-workflow task move from home", () => {
 
     await expect(kanban.contextWorkflow(emptyWorkflow.id)).toBeVisible();
     await expect(kanban.contextWorkflow(emptyWorkflow.id)).toBeDisabled();
-    await expect(testPage.getByTestId("task-context-disabled-reason")).toContainText("No steps");
+    await expect(
+      kanban.contextWorkflow(emptyWorkflow.id).getByTestId("task-context-disabled-reason"),
+    ).toContainText("No steps");
   });
 
   test("marks auto-start target steps before moving", async ({ testPage, apiClient, seedData }) => {

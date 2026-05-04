@@ -2,10 +2,14 @@ package handlers
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -23,6 +27,49 @@ func newTestLogger(t *testing.T) *logger.Logger {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	return log
+}
+
+func TestHandleSelectedMoveError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{
+			name: "not found",
+			err:  errors.New("task not found: task-1"),
+			want: http.StatusNotFound,
+		},
+		{
+			name: "move conflict",
+			err:  errors.New("task task-1 cannot be moved: task has an active session (running)"),
+			want: http.StatusConflict,
+		},
+		{
+			name: "bad request validation",
+			err:  errors.New("invalid workflow id"),
+			want: http.StatusBadRequest,
+		},
+		{
+			name: "internal",
+			err:  errors.New("failed to count target workflow step tasks: database is locked"),
+			want: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+
+			handleSelectedMoveError(c, log, tc.err)
+
+			assert.Equal(t, tc.want, rec.Code)
+		})
+	}
 }
 
 func TestResolveFreshBranchName(t *testing.T) {

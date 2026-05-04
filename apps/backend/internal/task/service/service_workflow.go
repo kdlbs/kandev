@@ -372,7 +372,9 @@ type BulkMoveTasksResult struct {
 
 // BulkMoveSelectedTasks moves an explicit task list to a target workflow step.
 // The list order is treated as the visible UI order; tasks already in the
-// target step are skipped.
+// target step are skipped. Validation reads tasks one at a time because the UI
+// sends small selected batches; the move is not transactional if task state
+// changes between pre-validation and an individual MoveTask call.
 func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, targetWorkflowID, targetStepID string) (*BulkMoveTasksResult, error) {
 	ids := uniqueTaskIDs(taskIDs)
 	if len(ids) == 0 {

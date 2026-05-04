@@ -26,7 +26,11 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
 import type { Task, WorkflowStep } from "@/components/kanban-card";
-import type { TaskMoveStep, TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
+import {
+  stepHasAutoStart,
+  type TaskMoveStep,
+  type TaskMoveWorkflow,
+} from "@/components/task/task-move-context-menu";
 import { cn } from "@/lib/utils";
 
 type ItemEntry = {
@@ -78,10 +82,6 @@ type BuildKanbanCardMenuEntriesArgs = {
   onMoveToStep?: (stepId: string) => void;
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
 };
-
-function stepHasAutoStart(step: TaskMoveStep) {
-  return step.events?.on_enter?.some((action) => action.type === "auto_start_agent") ?? false;
-}
 
 function StepBadges({ step, isCurrent }: { step: TaskMoveStep; isCurrent: boolean }) {
   const hasAutoStart = stepHasAutoStart(step);
@@ -194,7 +194,7 @@ function buildSendToWorkflowSubmenu({
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
 }): KanbanCardMenuEntry | null {
   const targets = workflows.filter((workflow) => workflow.id !== currentWorkflowId);
-  if (!onSendToWorkflow || targets.length === 0) return null;
+  if (!onSendToWorkflow || !currentWorkflowId || targets.length === 0) return null;
   return {
     kind: "submenu",
     key: "send-to-workflow",
@@ -403,7 +403,7 @@ function DropdownEntry({ entry }: { entry: KanbanCardMenuEntry }) {
       data-testid={entry.testId}
       disabled={entry.disabled}
       className={entry.destructive ? "text-destructive focus:text-destructive" : undefined}
-      onClick={(event) => {
+      onSelect={(event) => {
         event.stopPropagation();
         if (!entry.disabled) entry.onSelect?.();
       }}

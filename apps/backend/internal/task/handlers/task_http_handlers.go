@@ -345,8 +345,7 @@ func (h *TaskHandlers) httpBulkMoveSelectedTasks(c *gin.Context, body httpBulkMo
 		body.TargetStepID,
 	)
 	if err != nil {
-		h.logger.Error("failed to bulk move selected tasks", zap.Error(err))
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		handleSelectedMoveError(c, h.logger, err)
 		return
 	}
 	c.JSON(http.StatusOK, dto.BulkMoveTasksResponse{MovedCount: result.MovedCount})

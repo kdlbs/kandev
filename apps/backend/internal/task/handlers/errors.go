@@ -22,11 +22,36 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
 }
 
+func handleSelectedMoveError(c *gin.Context, log *logger.Logger, err error) {
+	switch {
+	case isNotFound(err):
+		c.JSON(http.StatusNotFound, gin.H{"error": "task or workflow not found"})
+	case isMoveConflict(err):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	case isValidationError(err):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	default:
+		log.Error("failed to bulk move selected tasks", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to bulk move selected tasks"})
+	}
+}
+
 func isNotFound(err error) bool {
 	if err == nil {
 		return false
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "not found")
+}
+
+func isMoveConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "active session") ||
+		strings.Contains(msg, "archived tasks cannot be moved") ||
+		strings.Contains(msg, "different workspace") ||
+		strings.Contains(msg, "does not belong to target workflow")
 }
 
 func isValidationError(err error) bool {

@@ -34,7 +34,7 @@ type TaskMoveContextMenuItemsProps = {
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
 };
 
-function stepHasAutoStart(step: TaskMoveStep) {
+export function stepHasAutoStart(step: TaskMoveStep) {
   return step.events?.on_enter?.some((action) => action.type === "auto_start_agent") ?? false;
 }
 
@@ -174,7 +174,7 @@ function SendToWorkflowSubmenu({
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
 }) {
   const targets = workflows.filter((workflow) => workflow.id !== currentWorkflowId);
-  if (!onSendToWorkflow || targets.length === 0) return null;
+  if (!onSendToWorkflow || !currentWorkflowId || targets.length === 0) return null;
   return (
     <ContextMenuSub>
       <ContextMenuSubTrigger data-testid="task-context-send-to-workflow" disabled={disabled}>
@@ -210,7 +210,9 @@ export function TaskMoveContextMenuItems({
   const currentSteps = currentWorkflowId ? (stepsByWorkflowId[currentWorkflowId] ?? []) : [];
   const hasSameWorkflowMove = Boolean(onMoveToStep && currentSteps.length > 1);
   const hasCrossWorkflowMove = Boolean(
-    onSendToWorkflow && visibleWorkflows.some((workflow) => workflow.id !== currentWorkflowId),
+    onSendToWorkflow &&
+    currentWorkflowId &&
+    visibleWorkflows.some((workflow) => workflow.id !== currentWorkflowId),
   );
 
   if (!hasSameWorkflowMove && !hasCrossWorkflowMove) return null;

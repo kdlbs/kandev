@@ -100,16 +100,17 @@ function resolveDesiredWorkflowId({
   settingsWorkflowId?: string | null;
   workspaceWorkflows: WorkflowsState["items"];
 }): string | null {
-  if (activeWorkflowId && workspaceWorkflows.some((workflow) => workflow.id === activeWorkflowId)) {
+  const visibleWorkflows = workspaceWorkflows.filter((workflow) => !workflow.hidden);
+  if (activeWorkflowId && visibleWorkflows.some((workflow) => workflow.id === activeWorkflowId)) {
     return activeWorkflowId;
   }
   if (
     settingsWorkflowId &&
-    workspaceWorkflows.some((workflow) => workflow.id === settingsWorkflowId)
+    visibleWorkflows.some((workflow) => workflow.id === settingsWorkflowId)
   ) {
     return settingsWorkflowId;
   }
-  return workspaceWorkflows.length === 1 ? workspaceWorkflows[0].id : null;
+  return visibleWorkflows[0]?.id ?? null;
 }
 
 function useMoveErrorState(router: ReturnType<typeof useRouter>) {
