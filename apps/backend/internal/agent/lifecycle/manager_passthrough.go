@@ -605,20 +605,13 @@ func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpd
 		if execution.PassthroughProcessID != "" && status.ProcessID == execution.PassthroughProcessID {
 			// Snapshot the start time and resume-launch flag synchronously so the
 			// goroutine doesn't race the next launch's writes to those fields.
+			// passthroughResumeFailed and friends are flipped inside
+			// handlePassthroughExit only after isFastFailExit confirms the exit
+			// was a launch failure — flipping them here would also poison
+			// healthy resumed sessions that exit cleanly or crash long after
+			// launch.
 			startedAt := execution.PassthroughStartedAt
 			usedResume := execution.passthroughLaunchUsedResume
-			// If the launch used resume flags, mark the resume as failed
-			// synchronously so any concurrent path that re-triggers a launch
-			// (StartAgentProcess via isResumedSession, or ResumePassthroughSession
-			// via the WS handler's EnsurePassthroughExecution) takes the fresh
-			// branch instead of thrashing on another resume attempt that will
-			// fast-fail in the same way. The goroutine below still handles the
-			// banner + relaunch for the actively-connected case.
-			if usedResume {
-				execution.passthroughResumeFailed = true
-				execution.isResumedSession = false
-				execution.passthroughLaunchUsedResume = false
-			}
 			go m.handlePassthroughExit(execution, status, startedAt, usedResume)
 		} else {
 			m.logger.Debug("process exited but not the passthrough process, skipping auto-restart",
@@ -700,7 +693,15 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 		// restart — "No conversation found to continue". Retry once with a
 		// fresh command (no resume flag) before giving up.
 		if usedResume {
-			m.attemptResumeFallback(execution, interactiveRunner, sessionID, exitCode, uptime, fastFailWindow)
+			// Confirmed fast-fail of a resume launch: flip the sticky
+			// resume-failed flag so any subsequent ResumePassthroughSession
+			// call (auto-restart or a new WS reconnect via Ensure) builds a
+			// fresh command. Done before the relaunch so the WS retries that
+			// race with this goroutine see the new value.
+			execution.passthroughResumeFailed = true
+			execution.isResumedSession = false
+			execution.passthroughLaunchUsedResume = false
+			m.attemptResumeFallback(execution, interactiveRunner, sessionID, exitCode, uptime)
 			return
 		}
 		m.notifyFastFailExit(interactiveRunner, sessionID, uptime, exitCode, fastFailWindow)
@@ -717,7 +718,7 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 // continue". On a successful fallback the user keeps a working session; on
 // continued failure we surface the existing red banner so they can fix their
 // profile.
-func (m *Manager) attemptResumeFallback(execution *AgentExecution, runner *process.InteractiveRunner, sessionID string, exitCode int, uptime, fastFailWindow time.Duration) {
+func (m *Manager) attemptResumeFallback(execution *AgentExecution, runner *process.InteractiveRunner, sessionID string, exitCode int, uptime time.Duration) {
 	m.logger.Info("passthrough resume launch fast-failed, retrying without resume flag",
 		zap.String("session_id", sessionID),
 		zap.String("execution_id", execution.ID),
@@ -771,6 +772,14 @@ func (m *Manager) attemptResumeFallback(execution *AgentExecution, runner *proce
 		m.logger.Warn("passthrough resume fallback started but failed to reconnect WebSocket",
 			zap.String("session_id", sessionID),
 			zap.String("new_process_id", processInfo.ID))
+	}
+
+	// Mirror ResumePassthroughSession's post-launch bootstrap so right-panel
+	// shell/git/file features come back too — without this the main terminal
+	// works but the user's shell session and workspace stream stay torn down.
+	m.startPassthroughShell(ctx, execution, "failed to start shell after passthrough resume fallback")
+	if m.streamManager != nil && execution.agentctl != nil && execution.GetWorkspaceStream() == nil {
+		go m.streamManager.connectWorkspaceStream(execution, nil)
 	}
 }
 

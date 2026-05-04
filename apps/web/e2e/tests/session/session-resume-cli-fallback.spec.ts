@@ -17,7 +17,17 @@ import { SessionPage } from "../../pages/session-page";
 
 async function createTUIProfileWithFailOnResume(apiClient: ApiClient, name: string) {
   const { agents } = await apiClient.listAgents();
-  return apiClient.createAgentProfile(agents[0].id, name, {
+  // Resolve the mock agent by identity rather than position — this spec
+  // depends on mock-agent-only behaviour (--fail-on-resume + the "Mock Agent"
+  // header), so picking agents[0] would silently exercise the wrong agent if
+  // listAgents() ever changes order.
+  const mockAgent = agents.find((a) => a.id === "mock-agent" || a.name === "Mock Agent");
+  if (!mockAgent) {
+    throw new Error(
+      `mock-agent not found in listAgents() (got ${agents.map((a) => `${a.id}=${a.name}`).join(", ")})`,
+    );
+  }
+  return apiClient.createAgentProfile(mockAgent.id, name, {
     model: "mock-fast",
     cli_passthrough: true,
     cli_flags: [{ description: "fail on resume", flag: "--fail-on-resume", enabled: true }],
