@@ -106,6 +106,9 @@ func (e *Engine) buildTemplateData(ctx *Context) map[string]string {
 }
 
 // AvailableVariables returns the list of available template variables.
+// Integration-specific variables (Slack, future webhooks, etc.) are listed
+// in their own category so the UI can group them and users can tell which
+// ones make sense in a given utility-agent context.
 func (e *Engine) AvailableVariables() []VariableInfo {
 	return []VariableInfo{
 		{Name: "GitDiff", Description: "Output of git diff --staged or git diff", Example: "diff --git a/main.go...", Category: "git"},
@@ -120,6 +123,12 @@ func (e *Engine) AvailableVariables() []VariableInfo {
 		{Name: "WorkspacePath", Description: "Path to the workspace/worktree", Example: "/home/user/project", Category: "session"},
 		{Name: "UserPrompt", Description: "User's original prompt text", Example: "Fix the login bug", Category: "input"},
 		{Name: "ConversationHistory", Description: "Formatted conversation transcript", Example: "User: Fix the bug\nAgent: I'll look into...", Category: "session"},
+		{Name: "SlackInstruction", Description: "User's instruction (the !kandev message minus the prefix)", Example: "investigate the safari login bug", Category: "slack"},
+		{Name: "SlackThread", Description: "Surrounding Slack thread, one line per message", Example: "alice (1714658000.0): bug repros every Monday\nbob (1714659000.0): seeing it on safari only", Category: "slack"},
+		{Name: "SlackPermalink", Description: "Canonical URL of the triggering Slack message", Example: "https://acme.slack.com/archives/C1/p1714659000000100", Category: "slack"},
+		{Name: "SlackUser", Description: "Sender of the !kandev message (@name or user id)", Example: "@alice", Category: "slack"},
+		{Name: "SlackChannelID", Description: "Slack channel id of the trigger message", Example: "C0123ABCD", Category: "slack"},
+		{Name: "SlackTS", Description: "Slack timestamp of the trigger message", Example: "1714659000.000100", Category: "slack"},
 	}
 }
 

@@ -85,7 +85,12 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	}()
 
 	// Execute ACP protocol
-	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.Prompt, req.Model, req.Mode)
+	mcpServers, dropped := toACPMcpServers(req.MCPServers)
+	for _, name := range dropped {
+		e.logger.Warn("ACP inference: dropping unsupported MCP server transport",
+			zap.String("name", name))
+	}
+	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.Prompt, req.Model, req.Mode, mcpServers)
 	if err != nil {
 		return &PromptResponse{
 			Success:    false,
@@ -104,7 +109,9 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 
 // executeACPSession performs the ACP handshake, creates a session, optionally
 // sets the session model and mode, sends the prompt, and collects the response
-// text.
+// text. mcpServers, when non-empty, are forwarded to session/new so the agent
+// can call MCP tools mid-prompt; an empty slice preserves the legacy "pure
+// inference" behaviour.
 func (e *ACPInferenceExecutor) executeACPSession(
 	ctx context.Context,
 	stdin io.Writer,
@@ -113,6 +120,7 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	prompt string,
 	model string,
 	mode string,
+	mcpServers []acp.McpServer,
 ) (string, error) {
 	// Collect response text from updates
 	var responseText strings.Builder
@@ -149,10 +157,14 @@ func (e *ACPInferenceExecutor) executeACPSession(
 		return "", fmt.Errorf("ACP initialize failed: %w", err)
 	}
 
-	// Create new session with empty MCP servers array (required by ACP protocol)
+	// Create new session. ACP requires McpServers to be a non-nil slice;
+	// callers without tools pass nil and we substitute an empty array here.
+	if mcpServers == nil {
+		mcpServers = []acp.McpServer{}
+	}
 	sessionResp, err := conn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        workDir,
-		McpServers: []acp.McpServer{},
+		McpServers: mcpServers,
 	})
 	if err != nil {
 		return "", fmt.Errorf("ACP session/new failed: %w", err)
@@ -196,6 +208,59 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	mu.Unlock()
 
 	return result, nil
+}
+
+// toACPMcpServers converts the cross-process DTO list into the ACP SDK
+// shape. Uses the *Inline variants because the agentcooper fork (vendored
+// via go.mod replace) names them that way; the upstream SDK would call them
+// McpServerHttp / McpServerSse. Returns nil when there are no entries so
+// callers can use the nil-as-empty convention upstream. The second return
+// value carries the names of any DTOs we couldn't convert (unsupported
+// transport, e.g. stdio) so the caller can surface them in logs rather than
+// having them silently disappear from the agent's tool surface.
+func toACPMcpServers(in []MCPServerDTO) ([]acp.McpServer, []string) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make([]acp.McpServer, 0, len(in))
+	var dropped []string
+	for _, s := range in {
+		switch strings.ToLower(s.Type) {
+		case "http":
+			out = append(out, acp.McpServer{Http: &acp.McpServerHttpInline{
+				Name:    s.Name,
+				Type:    "http",
+				Url:     s.URL,
+				Headers: toACPHeaders(s.HeaderKVs),
+			}})
+		case "sse":
+			out = append(out, acp.McpServer{Sse: &acp.McpServerSseInline{
+				Name:    s.Name,
+				Type:    "sse",
+				Url:     s.URL,
+				Headers: toACPHeaders(s.HeaderKVs),
+			}})
+		default:
+			// Unsupported transport (stdio, or anything else). We don't fail
+			// the whole inference call on a single bad entry — the agent can
+			// still run with the entries that did convert — but we surface
+			// the name so misconfiguration is visible in logs rather than
+			// silently leaving the agent without tools it expected to have.
+			dropped = append(dropped, s.Name)
+		}
+	}
+	return out, dropped
+}
+
+func toACPHeaders(in []HTTPHeaderDTO) []acp.HttpHeader {
+	if len(in) == 0 {
+		return []acp.HttpHeader{}
+	}
+	out := make([]acp.HttpHeader, 0, len(in))
+	for _, h := range in {
+		out = append(out, acp.HttpHeader{Name: h.Name, Value: h.Value})
+	}
+	return out
 }
 
 // Probe runs an ephemeral ACP handshake (initialize + session/new) to discover

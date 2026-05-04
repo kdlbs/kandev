@@ -40,6 +40,23 @@ func (s *Server) listWorkflowsHandler() server.ToolHandlerFunc {
 	}
 }
 
+func (s *Server) listRepositoriesHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		workspaceID, err := req.RequireString("workspace_id")
+		if err != nil {
+			return mcp.NewToolResultError("workspace_id is required"), nil
+		}
+		payload := map[string]string{"workspace_id": workspaceID}
+		// Backend returns {repositories: [...], total: N}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListRepositories, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
 func (s *Server) listWorkflowStepsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		workflowID, err := req.RequireString("workflow_id")

@@ -56,11 +56,24 @@ func (m *Manager) Refresh(ctx context.Context, agentType string) (AgentCapabilit
 }
 
 // ExecutePrompt runs a sessionless utility prompt against the warm instance
-// for the given agent type. The caller picks the model (explicit from the
-// utility agent record, user default, or probe cache fallback).
+// for the given agent type. Convenience wrapper over ExecutePromptWithMCP
+// that opts the call out of MCP tool access — most callers (PR title, commit
+// message, etc.) want pure text-in/text-out.
 func (m *Manager) ExecutePrompt(
 	ctx context.Context,
 	agentType, model, mode, prompt string,
+) (*PromptResult, error) {
+	return m.ExecutePromptWithMCP(ctx, agentType, model, mode, prompt, nil)
+}
+
+// ExecutePromptWithMCP runs a sessionless utility prompt with the given MCP
+// servers wired into the agent's session. The agent (Claude Code, codex,
+// etc.) can call MCP tools mid-prompt and incorporate the results into its
+// final reply. Pass nil for mcpServers to disable MCP for this call.
+func (m *Manager) ExecutePromptWithMCP(
+	ctx context.Context,
+	agentType, model, mode, prompt string,
+	mcpServers []agentctlutil.MCPServerDTO,
 ) (*PromptResult, error) {
 	if prompt == "" {
 		return nil, fmt.Errorf("prompt is required")
@@ -83,6 +96,7 @@ func (m *Manager) ExecutePrompt(
 			ModelFlag: cfg.ModelFlag.Args(),
 			WorkDir:   inst.workDir,
 		},
+		MCPServers: mcpServers,
 	}
 	resp, err := inst.client.InferencePrompt(ctx, req)
 	if err != nil {

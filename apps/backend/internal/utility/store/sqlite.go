@@ -83,6 +83,22 @@ func (r *sqliteRepository) initSchema() error {
 	// Add enabled column if it doesn't exist (migration for existing DBs)
 	_, _ = r.db.Exec(`ALTER TABLE utility_agents ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1`)
 
+	// Heal pre-existing custom agents that were created with enabled=0 due
+	// to a bug in CreateAgent (the Enabled field on the model defaulted to
+	// the zero value, so the INSERT wrote 0 even though the DB schema's
+	// own DEFAULT was 1). Built-ins are skipped — they have their own
+	// "enabled=false means fall back to user defaults" semantics.
+	//
+	// Restricted to rows whose updated_at == created_at — i.e. agents that
+	// have never been modified since INSERT. UpdateAgent always bumps
+	// updated_at, so a user who deliberately disables an agent post-fix
+	// has updated_at > created_at and is left alone. Without this guard
+	// every restart would silently re-enable any user-disabled custom agent.
+	_, _ = r.db.Exec(`UPDATE utility_agents SET enabled = 1
+		WHERE builtin = 0 AND enabled = 0
+		  AND agent_id <> '' AND model <> ''
+		  AND updated_at = created_at`)
+
 	// Seed built-in agents
 	if err := r.seedBuiltinAgents(); err != nil {
 		return fmt.Errorf("failed to seed built-in agents: %w", err)

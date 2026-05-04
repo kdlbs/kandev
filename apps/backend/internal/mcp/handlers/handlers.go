@@ -144,6 +144,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPListWorkspaces, h.handleListWorkspaces)
 	d.RegisterFunc(ws.ActionMCPListWorkflows, h.handleListWorkflows)
 	d.RegisterFunc(ws.ActionMCPListWorkflowSteps, h.handleListWorkflowSteps)
+	d.RegisterFunc(ws.ActionMCPListRepositories, h.handleListRepositories)
 	d.RegisterFunc(ws.ActionMCPListTasks, h.handleListTasks)
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
@@ -155,7 +156,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPDeleteTaskPlan, h.handleDeleteTaskPlan)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 14
+	count := 15
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
@@ -291,6 +292,25 @@ func (h *Handlers) handleListWorkflowSteps(ctx context.Context, msg *ws.Message)
 	return h.handleListByField(ctx, msg, "workflow_id", "failed to list workflow steps", "Failed to list workflow steps",
 		func(ctx context.Context, workflowID string) (any, error) {
 			return h.workflowCtrl.ListStepsByWorkflow(ctx, workflowctrl.ListStepsRequest{WorkflowID: workflowID})
+		})
+}
+
+// handleListRepositories lists repositories for a workspace. Exposes the same
+// data the kanban "Edit task → Repositories" picker reads, so an MCP-driven
+// agent (e.g. the Slack triage runner) can match a request against an actual
+// repo instead of guessing or making up an ID.
+func (h *Handlers) handleListRepositories(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return h.handleListByField(ctx, msg, "workspace_id", "failed to list repositories", "Failed to list repositories",
+		func(ctx context.Context, workspaceID string) (any, error) {
+			repos, err := h.taskSvc.ListRepositories(ctx, workspaceID)
+			if err != nil {
+				return nil, err
+			}
+			dtos := make([]dto.RepositoryDTO, 0, len(repos))
+			for _, r := range repos {
+				dtos = append(dtos, dto.FromRepository(r))
+			}
+			return dto.ListRepositoriesResponse{Repositories: dtos, Total: len(dtos)}, nil
 		})
 }
 

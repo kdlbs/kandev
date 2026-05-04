@@ -311,6 +311,7 @@ const (
 	ActionMCPListWorkspaces       = "mcp.list_workspaces"
 	ActionMCPListWorkflows        = "mcp.list_workflows"
 	ActionMCPListWorkflowSteps    = "mcp.list_workflow_steps"
+	ActionMCPListRepositories     = "mcp.list_repositories"
 	ActionMCPListTasks            = "mcp.list_tasks"
 	ActionMCPCreateTask           = "mcp.create_task"
 	ActionMCPUpdateTask           = "mcp.update_task"
@@ -413,6 +414,14 @@ const (
 	ActionLinearIssueGet        = "linear.issue.get"
 	ActionLinearIssueTransition = "linear.issue.transition"
 	ActionLinearTeamsList       = "linear.teams.list"
+)
+
+// Slack integration actions
+const (
+	ActionSlackConfigGet    = "slack.config.get"
+	ActionSlackConfigSet    = "slack.config.set"
+	ActionSlackConfigDelete = "slack.config.delete"
+	ActionSlackConfigTest   = "slack.config.test"
 )
 
 // Error codes

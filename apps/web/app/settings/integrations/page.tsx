@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { IconBrandGithub, IconHexagon, IconTicket } from "@tabler/icons-react";
+import { IconBrandGithub, IconBrandSlack, IconHexagon, IconTicket } from "@tabler/icons-react";
 import { Card, CardContent } from "@kandev/ui/card";
 
 const INTEGRATIONS = [
@@ -20,6 +20,12 @@ const INTEGRATIONS = [
     label: "Linear",
     description: "Personal API key and team defaults.",
     Icon: IconHexagon,
+  },
+  {
+    href: "/settings/integrations/slack",
+    label: "Slack",
+    description: "Browser-session credentials and !kandev triage agent.",
+    Icon: IconBrandSlack,
   },
 ];
 

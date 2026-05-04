@@ -27,6 +27,13 @@ func (s *Server) registerConfigWorkflowTools() {
 		s.wrapHandler("list_workflows_kandev", s.listWorkflowsHandler()),
 	)
 	s.mcpServer.AddTool(
+		mcp.NewTool("list_repositories_kandev",
+			mcp.WithDescription("List repositories in a workspace. Use this to find a repository_id to attach to create_task_kandev when the task should target a specific codebase."),
+			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
+		),
+		s.wrapHandler("list_repositories_kandev", s.listRepositoriesHandler()),
+	)
+	s.mcpServer.AddTool(
 		mcp.NewTool("create_workflow_kandev",
 			mcp.WithDescription("Create a new workflow in a workspace."),
 			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
