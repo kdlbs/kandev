@@ -18,12 +18,19 @@ export function sanitizeLayout(
   const validPanels: Record<string, any> = {};
   for (const [id, panel] of Object.entries(layout.panels)) {
     const comp = (panel as any).contentComponent;
-    const isSessionPanel = id.startsWith("session:");
     // Session panels are scoped to a specific environment; when restoring the
     // global fallback (no envId yet), they belong to the previous task and
-    // would leak in as duplicate tabs. Strip them in that case.
-    const keepSessionPanel = isSessionPanel && !options.stripSessionPanels;
-    if (comp && (validComponents.has(comp) || keepSessionPanel)) {
+    // would leak in as duplicate tabs. Strip them in that case. The session
+    // check must happen before component-validity, since session panels are
+    // serialized with contentComponent: "chat" (a valid component) and would
+    // otherwise short-circuit the strip guard.
+    if (id.startsWith("session:")) {
+      if (options.stripSessionPanels) {
+        invalidIds.add(id);
+      } else {
+        validPanels[id] = panel;
+      }
+    } else if (comp && validComponents.has(comp)) {
       validPanels[id] = panel;
     } else {
       invalidIds.add(id);

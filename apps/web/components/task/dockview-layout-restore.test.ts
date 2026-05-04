@@ -169,4 +169,21 @@ describe("sanitizeLayout - session panel handling", () => {
     expect(Object.keys(result.panels)).toContain("chat");
     expect(Object.keys(result.panels)).toContain("files");
   });
+
+  it("strips session:* panels even when contentComponent is a valid component (e.g. 'chat')", () => {
+    // dockview serializes panels added via api.addPanel({ component: "chat" })
+    // with contentComponent: "chat", which is in VALID_COMPONENTS. The strip
+    // logic must key off the panel id, not the component name.
+    const layout = buildLayout();
+    layout.grid.root.data[1].data.views = ["chat", SESSION_PANEL_ID];
+    layout.panels = {
+      ...layout.panels,
+      // @ts-expect-error - injecting a session panel with the chat component
+      [SESSION_PANEL_ID]: { id: SESSION_PANEL_ID, contentComponent: "chat" },
+    };
+    const result = sanitizeLayout(layout, VALID_COMPONENTS, { stripSessionPanels: true });
+    expect(result).not.toBeNull();
+    expect(Object.keys(result.panels)).not.toContain(SESSION_PANEL_ID);
+    expect(Object.keys(result.panels)).toContain("chat");
+  });
 });
