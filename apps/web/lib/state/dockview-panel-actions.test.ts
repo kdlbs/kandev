@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { DockviewApi, AddPanelOptions } from "dockview-react";
-import { buildPanelActions } from "./dockview-panel-actions";
+import { buildPanelActions, buildExtraPanelActions } from "./dockview-panel-actions";
 import { CENTER_GROUP } from "./layout-manager";
 
 // ---------------------------------------------------------------------------
@@ -390,5 +390,61 @@ describe("preview slots are independent across types", () => {
     expect(api.getPanel(PREVIEW_FILE_ID)).toBeDefined();
     expect(api.getPanel(PREVIEW_DIFF_ID)).toBeDefined();
     expect(api.getPanel(PREVIEW_COMMIT_ID)).toBeDefined();
+  });
+});
+
+describe("addPRPanel — dedup with legacy auto-shown panel", () => {
+  const PR_KEY = "testorg/testrepo/101";
+  const LEGACY_PR_ID = "pr-detail";
+  const KEYED_PR_ID = `pr-detail|${PR_KEY}`;
+
+  function buildExtra(api: DockviewApi) {
+    const store = makeStore(api);
+    return { api, actions: buildExtraPanelActions(store.get) };
+  }
+
+  it("focuses the legacy auto-shown panel instead of creating a keyed duplicate", () => {
+    const { api, actions } = buildExtra(makeApi());
+
+    // Auto-show creates the legacy (unkeyed) panel.
+    actions.addPRPanel();
+    expect(api.getPanel(LEGACY_PR_ID)).toBeDefined();
+
+    // Topbar click with a prKey must reuse the legacy panel, not add a second tab.
+    actions.addPRPanel(PR_KEY);
+
+    const prPanels = api.panels.filter(
+      (p) => p.id === LEGACY_PR_ID || p.id.startsWith(`${LEGACY_PR_ID}|`),
+    );
+    expect(prPanels).toHaveLength(1);
+    expect(api.getPanel(KEYED_PR_ID)).toBeUndefined();
+
+    // Legacy panel was updated with the prKey so it renders the requested PR.
+    const legacy = api.getPanel(LEGACY_PR_ID) as unknown as MockPanel;
+    expect(legacy.params.prKey).toBe(PR_KEY);
+    expect(legacy.isActive).toBe(true);
+  });
+
+  it("creates a new keyed panel when no legacy panel exists", () => {
+    const { api, actions } = buildExtra(makeApi());
+
+    actions.addPRPanel(PR_KEY);
+
+    expect(api.getPanel(KEYED_PR_ID)).toBeDefined();
+    expect(api.getPanel(LEGACY_PR_ID)).toBeUndefined();
+  });
+
+  it("focuses an existing keyed panel exactly once", () => {
+    const { api, actions } = buildExtra(makeApi());
+
+    actions.addPRPanel(PR_KEY);
+    actions.addPRPanel(PR_KEY);
+
+    const prPanels = api.panels.filter(
+      (p) => p.id === LEGACY_PR_ID || p.id.startsWith(`${LEGACY_PR_ID}|`),
+    );
+    expect(prPanels).toHaveLength(1);
+    const keyed = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
+    expect(keyed.isActive).toBe(true);
   });
 });

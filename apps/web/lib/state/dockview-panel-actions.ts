@@ -432,6 +432,17 @@ export function buildExtraPanelActions(get: StoreGet) {
       // owner/repo/pr_number so multiple PRs can be tabbed side-by-side.
       // Legacy single-repo callers (no key) get the historical panel id.
       const id = prKey ? `pr-detail|${prKey}` : "pr-detail";
+      // If a legacy "pr-detail" panel is already open (auto-shown on task
+      // open or restored from a saved layout), reuse it instead of adding a
+      // second tab. Update its params so it renders the requested PR.
+      if (prKey && !api.getPanel(id)) {
+        const legacy = api.getPanel("pr-detail");
+        if (legacy) {
+          legacy.api.updateParameters({ prKey });
+          legacy.api.setActive();
+          return;
+        }
+      }
       focusOrAddPanel(api, {
         id,
         component: "pr-detail",
