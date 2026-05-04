@@ -94,28 +94,38 @@ func newMessageTaskHandler(t *testing.T, svc *service.Service) (*Handlers, *fake
 	return h, orch
 }
 
-// seedTaskWithSession creates a workspace, workflow, task, and primary session
-// in the given state. Returns the task and session models.
-func seedTaskWithSession(t *testing.T, svc *service.Service, repo interface {
+type seedRepo interface {
 	CreateWorkspace(context.Context, *models.Workspace) error
 	CreateWorkflow(context.Context, *models.Workflow) error
 	CreateTaskSession(context.Context, *models.TaskSession) error
 	UpdateTaskSessionState(context.Context, string, models.TaskSessionState, string) error
-}, state models.TaskSessionState) (*models.Task, *models.TaskSession) {
+}
+
+// seedTaskWithSession creates a workspace, workflow, target task with a primary
+// session in the given state, and a separate sender task to attribute messages
+// to. Returns (sender task, target task, target session). Most tests just need
+// the sender ID for the sender_task_id payload field.
+func seedTaskWithSession(t *testing.T, svc *service.Service, repo seedRepo, state models.TaskSessionState) (*models.Task, *models.Task, *models.TaskSession) {
 	t.Helper()
 	ctx := context.Background()
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
-	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	target, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Target task",
 	})
 	require.NoError(t, err)
+	sender, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Sender task",
+	})
+	require.NoError(t, err)
 
 	sess := &models.TaskSession{
 		ID:             "sess-1",
-		TaskID:         task.ID,
+		TaskID:         target.ID,
 		AgentProfileID: "agent-profile-1",
 		IsPrimary:      true,
 		State:          models.TaskSessionStateCreated,
@@ -126,7 +136,19 @@ func seedTaskWithSession(t *testing.T, svc *service.Service, repo interface {
 	}
 	loaded, err := svc.GetTaskSession(ctx, sess.ID)
 	require.NoError(t, err)
-	return task, loaded
+	return sender, target, loaded
+}
+
+// senderPayload returns the standard payload shape sent by the MCP server
+// (agentctl injects sender_task_id and sender_session_id). Helper keeps test
+// bodies focused on the behaviour under test.
+func senderPayload(targetTaskID, prompt, senderTaskID string) map[string]interface{} {
+	return map[string]interface{}{
+		"task_id":           targetTaskID,
+		"prompt":            prompt,
+		"sender_task_id":    senderTaskID,
+		"sender_session_id": "sender-sess-1",
+	}
 }
 
 func TestHandleMessageTask_MissingTaskID(t *testing.T) {
@@ -164,14 +186,11 @@ func TestHandleMessageTask_BadPayload(t *testing.T) {
 
 func TestHandleMessageTask_RunningSession_Queues(t *testing.T) {
 	svc, repo := newTestTaskService(t)
-	task, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 
 	h, orch := newMessageTaskHandler(t, svc)
 
-	msg := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{
-		"task_id": task.ID,
-		"prompt":  "follow-up message",
-	})
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "follow-up message", sender.ID))
 	resp, err := h.handleMessageTask(context.Background(), msg)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -182,24 +201,28 @@ func TestHandleMessageTask_RunningSession_Queues(t *testing.T) {
 	assert.Equal(t, "queued", payload["status"])
 	assert.Equal(t, sess.ID, payload["session_id"])
 
-	// Message landed in the queue.
+	// Message landed in the queue, with the <kandev-system> attribution wrapper
+	// and structured sender metadata so the drain path can write a Message row
+	// the UI can render with a sender badge.
 	status := orch.queue.GetStatus(context.Background(), sess.ID)
 	require.True(t, status.IsQueued)
-	assert.Equal(t, "follow-up message", status.Message.Content)
+	assert.Contains(t, status.Message.Content, "follow-up message")
+	assert.Contains(t, status.Message.Content, "<kandev-system>")
+	assert.Contains(t, status.Message.Content, "Sender task")
+	assert.Equal(t, sender.ID, status.Message.Metadata["sender_task_id"])
+	assert.Equal(t, "Sender task", status.Message.Metadata["sender_task_title"])
+	assert.Equal(t, "sender-sess-1", status.Message.Metadata["sender_session_id"])
 	assert.Empty(t, orch.promptCalls)
 	assert.Empty(t, orch.startCreatedCalls)
 }
 
 func TestHandleMessageTask_WaitingForInput_PromptsAgent(t *testing.T) {
 	svc, repo := newTestTaskService(t)
-	task, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
 
 	h, orch := newMessageTaskHandler(t, svc)
 
-	msg := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{
-		"task_id": task.ID,
-		"prompt":  "next instruction",
-	})
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "next instruction", sender.ID))
 	resp, err := h.handleMessageTask(context.Background(), msg)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -210,9 +233,12 @@ func TestHandleMessageTask_WaitingForInput_PromptsAgent(t *testing.T) {
 	assert.Equal(t, "sent", payload["status"])
 
 	require.Len(t, orch.promptCalls, 1)
-	assert.Equal(t, task.ID, orch.promptCalls[0].taskID)
+	assert.Equal(t, target.ID, orch.promptCalls[0].taskID)
 	assert.Equal(t, sess.ID, orch.promptCalls[0].sessionID)
-	assert.Equal(t, "next instruction", orch.promptCalls[0].prompt)
+	// The prompt sent to the agent is wrapped with the attribution block so the
+	// agent can identify the sender on this turn (and on resume).
+	assert.Contains(t, orch.promptCalls[0].prompt, "next instruction")
+	assert.Contains(t, orch.promptCalls[0].prompt, "<kandev-system>")
 	// MCP message_task uses dispatch-only mode so the tool returns once the
 	// prompt is accepted instead of blocking for the entire target turn.
 	assert.True(t, orch.promptCalls[0].dispatchOnly, "MCP path must use dispatch-only mode")
@@ -222,8 +248,11 @@ func TestHandleMessageTask_WaitingForInput_PromptsAgent(t *testing.T) {
 	messages, err := svc.ListMessages(context.Background(), sess.ID)
 	require.NoError(t, err)
 	require.Len(t, messages, 1)
-	assert.Equal(t, "next instruction", messages[0].Content)
+	assert.Contains(t, messages[0].Content, "next instruction")
 	assert.Equal(t, models.MessageAuthorUser, messages[0].AuthorType)
+	// Sender metadata persists on the recorded row.
+	assert.Equal(t, sender.ID, messages[0].Metadata["sender_task_id"])
+	assert.Equal(t, "Sender task", messages[0].Metadata["sender_task_title"])
 }
 
 func TestHandleMessageTask_PromptFailsWithExecutionNotFound_AutoResumes(t *testing.T) {
@@ -232,15 +261,12 @@ func TestHandleMessageTask_PromptFailsWithExecutionNotFound_AutoResumes(t *testi
 	// CLAUDE.md guidance to prefer synctest over time.Sleep-based waits.
 	synctest.Test(t, func(t *testing.T) {
 		svc, repo := newTestTaskService(t)
-		task, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+		sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
 
 		h, orch := newMessageTaskHandler(t, svc)
 		orch.promptErrFirst = executor.ErrExecutionNotFound
 
-		msg := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{
-			"task_id": task.ID,
-			"prompt":  "retry me",
-		})
+		msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "retry me", sender.ID))
 		resp, err := h.handleMessageTask(context.Background(), msg)
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeResponse, resp.Type)
@@ -252,14 +278,11 @@ func TestHandleMessageTask_PromptFailsWithExecutionNotFound_AutoResumes(t *testi
 
 func TestHandleMessageTask_CreatedSession_StartsAgent(t *testing.T) {
 	svc, repo := newTestTaskService(t)
-	task, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
 
 	h, orch := newMessageTaskHandler(t, svc)
 
-	msg := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{
-		"task_id": task.ID,
-		"prompt":  "kick off the work",
-	})
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "kick off the work", sender.ID))
 	resp, err := h.handleMessageTask(context.Background(), msg)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -271,25 +294,32 @@ func TestHandleMessageTask_CreatedSession_StartsAgent(t *testing.T) {
 
 	require.Len(t, orch.startCreatedCalls, 1)
 	c := orch.startCreatedCalls[0]
-	assert.Equal(t, task.ID, c.taskID)
+	assert.Equal(t, target.ID, c.taskID)
 	assert.Equal(t, sess.ID, c.sessionID)
 	assert.Equal(t, "agent-profile-1", c.agentProfileID)
-	assert.Equal(t, "kick off the work", c.prompt)
-	// skipMessageRecord must be false so postLaunchCreated → recordInitialMessage
-	// writes the prompt to the receiving task's chat.
-	assert.False(t, c.skipMessageRecord, "skipMessageRecord must be false so the prompt is recorded in chat")
+	// The prompt forwarded to the agent is the wrapped string (so the agent
+	// sees the attribution block both at start time and on ACP resume).
+	assert.Contains(t, c.prompt, "kick off the work")
+	assert.Contains(t, c.prompt, "<kandev-system>")
+	// We record the user message ourselves with sender metadata, so
+	// StartCreatedSession must skip its own initial-message recording —
+	// otherwise the chat would gain an unattributed duplicate row.
+	assert.True(t, c.skipMessageRecord, "skipMessageRecord must be true so the sender-attributed message is the only one recorded")
+
+	messages, err := svc.ListMessages(context.Background(), sess.ID)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0].Content, "kick off the work")
+	assert.Equal(t, sender.ID, messages[0].Metadata["sender_task_id"])
 }
 
 func TestHandleMessageTask_FailedSession_Rejects(t *testing.T) {
 	svc, repo := newTestTaskService(t)
-	task, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateFailed)
+	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateFailed)
 
 	h, _ := newMessageTaskHandler(t, svc)
 
-	msg := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{
-		"task_id": task.ID,
-		"prompt":  "hello",
-	})
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "hello", sender.ID))
 	resp, err := h.handleMessageTask(context.Background(), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeInternalError)
@@ -297,14 +327,11 @@ func TestHandleMessageTask_FailedSession_Rejects(t *testing.T) {
 
 func TestHandleMessageTask_CancelledSession_Rejects(t *testing.T) {
 	svc, repo := newTestTaskService(t)
-	task, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCancelled)
+	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCancelled)
 
 	h, _ := newMessageTaskHandler(t, svc)
 
-	msg := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{
-		"task_id": task.ID,
-		"prompt":  "hello",
-	})
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "hello", sender.ID))
 	resp, err := h.handleMessageTask(context.Background(), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeInternalError)
@@ -315,20 +342,74 @@ func TestHandleMessageTask_NoPrimarySession_Rejects(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
-	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	target, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Sessionless task",
 	})
 	require.NoError(t, err)
+	sender, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Sender task",
+	})
+	require.NoError(t, err)
+
+	h, _ := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "hello", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeNotFound)
+}
+
+// --- sender attribution validation ---
+
+func TestHandleMessageTask_MissingSenderTaskID_Rejects(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
 
 	h, _ := newMessageTaskHandler(t, svc)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{
-		"task_id": task.ID,
+		"task_id": target.ID,
 		"prompt":  "hello",
+		// sender_task_id intentionally omitted — old MCP server, malicious caller, etc.
 	})
-	resp, err := h.handleMessageTask(ctx, msg)
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+func TestHandleMessageTask_SelfMessage_Rejects(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	h, _ := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "hello", target.ID))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+
+	// No message recorded.
+	messages, err := svc.ListMessages(context.Background(), sess.ID)
+	require.NoError(t, err)
+	assert.Empty(t, messages)
+}
+
+func TestHandleMessageTask_UnknownSenderTask_Rejects(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	h, _ := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "hello", "00000000-0000-0000-0000-000000000000"))
+	resp, err := h.handleMessageTask(context.Background(), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeNotFound)
+
+	messages, err := svc.ListMessages(context.Background(), sess.ID)
+	require.NoError(t, err)
+	assert.Empty(t, messages)
 }
