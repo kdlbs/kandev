@@ -68,7 +68,7 @@ func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecuti
 	return m.StopAgent(ctx, agentExecutionID, force)
 }
 
-func (m *mockAgentManager) PromptAgent(ctx context.Context, agentExecutionID string, prompt string, _ []v1.MessageAttachment) (*executor.PromptResult, error) {
+func (m *mockAgentManager) PromptAgent(ctx context.Context, agentExecutionID string, prompt string, _ []v1.MessageAttachment, _ bool) (*executor.PromptResult, error) {
 	return &executor.PromptResult{StopReason: "end_turn"}, nil
 }
 

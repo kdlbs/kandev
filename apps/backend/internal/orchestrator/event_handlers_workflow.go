@@ -1086,7 +1086,7 @@ func (s *Service) autoStartStepPrompt(
 
 	const maxRetryAttempts = 5
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
-		_, err := s.PromptTask(ctx, taskID, sessionID, prompt, "", planMode, attachments)
+		_, err := s.PromptTask(ctx, taskID, sessionID, prompt, "", planMode, attachments, false)
 		if err == nil {
 			return nil
 		}

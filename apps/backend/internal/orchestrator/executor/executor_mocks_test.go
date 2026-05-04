@@ -70,7 +70,7 @@ func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecuti
 	return m.StopAgent(ctx, agentExecutionID, force)
 }
 
-func (m *mockAgentManager) PromptAgent(ctx context.Context, agentExecutionID string, prompt string, _ []v1.MessageAttachment) (*PromptResult, error) {
+func (m *mockAgentManager) PromptAgent(ctx context.Context, agentExecutionID string, prompt string, _ []v1.MessageAttachment, _ bool) (*PromptResult, error) {
 	return nil, nil
 }
 

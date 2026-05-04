@@ -93,7 +93,9 @@ type AgentManagerClient interface {
 	// PromptAgent sends a prompt to a running agent
 	// Returns PromptResult indicating if the agent needs input
 	// Attachments (images) are passed to the agent if provided
-	PromptAgent(ctx context.Context, agentExecutionID string, prompt string, attachments []v1.MessageAttachment) (*PromptResult, error)
+	// When dispatchOnly is true, returns once the prompt is accepted by agentctl
+	// without waiting for the agent's turn to complete.
+	PromptAgent(ctx context.Context, agentExecutionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error)
 
 	// CancelAgent interrupts the current agent turn without terminating the process.
 	CancelAgent(ctx context.Context, sessionID string) error

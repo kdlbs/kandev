@@ -199,7 +199,7 @@ func (m *mockAgentManager) StopAgentWithReason(_ context.Context, agentExecution
 	})
 	return nil
 }
-func (m *mockAgentManager) PromptAgent(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment) (*executor.PromptResult, error) {
+func (m *mockAgentManager) PromptAgent(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, _ bool) (*executor.PromptResult, error) {
 	m.mu.Lock()
 	first := len(m.capturedPrompts) == 0
 	m.capturedPrompts = append(m.capturedPrompts, prompt)

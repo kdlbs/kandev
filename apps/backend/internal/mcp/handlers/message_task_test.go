@@ -37,6 +37,7 @@ type fakeOrchestrator struct {
 
 type promptCall struct {
 	taskID, sessionID, prompt string
+	dispatchOnly              bool
 }
 type startCreatedCall struct {
 	taskID, sessionID, agentProfileID, prompt string
@@ -47,10 +48,10 @@ func (f *fakeOrchestrator) LaunchSession(context.Context, *orchestrator.LaunchSe
 	return nil, nil
 }
 
-func (f *fakeOrchestrator) PromptTask(_ context.Context, taskID, sessionID, prompt, _ string, _ bool, _ []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+func (f *fakeOrchestrator) PromptTask(_ context.Context, taskID, sessionID, prompt, _ string, _ bool, _ []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.promptCalls = append(f.promptCalls, promptCall{taskID, sessionID, prompt})
+	f.promptCalls = append(f.promptCalls, promptCall{taskID: taskID, sessionID: sessionID, prompt: prompt, dispatchOnly: dispatchOnly})
 	if f.promptErrFirst != nil {
 		err := f.promptErrFirst
 		f.promptErrFirst = nil
@@ -212,6 +213,9 @@ func TestHandleMessageTask_WaitingForInput_PromptsAgent(t *testing.T) {
 	assert.Equal(t, task.ID, orch.promptCalls[0].taskID)
 	assert.Equal(t, sess.ID, orch.promptCalls[0].sessionID)
 	assert.Equal(t, "next instruction", orch.promptCalls[0].prompt)
+	// MCP message_task uses dispatch-only mode so the tool returns once the
+	// prompt is accepted instead of blocking for the entire target turn.
+	assert.True(t, orch.promptCalls[0].dispatchOnly, "MCP path must use dispatch-only mode")
 	assert.Zero(t, orch.resumeCalls)
 
 	// Prompt is recorded as a user message so it shows in the receiving task's chat.

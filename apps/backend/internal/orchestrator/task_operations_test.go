@@ -63,7 +63,7 @@ func seedTaskAndSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessi
 func TestPromptTask_EmptySessionID(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-	_, err := svc.PromptTask(context.Background(), "task1", "", "hello", "", false, nil)
+	_, err := svc.PromptTask(context.Background(), "task1", "", "hello", "", false, nil, false)
 	if err == nil {
 		t.Fatal("expected error for empty session_id")
 	}
@@ -75,7 +75,7 @@ func TestPromptTask_SessionAlreadyRunning(t *testing.T) {
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 
-	_, err := svc.PromptTask(context.Background(), "task1", "session1", "hello", "", false, nil)
+	_, err := svc.PromptTask(context.Background(), "task1", "session1", "hello", "", false, nil, false)
 	if err == nil {
 		t.Fatal("expected error when session is already RUNNING")
 	}
@@ -102,7 +102,7 @@ func TestPromptTask_TransientErrorDoesNotMoveTaskToReview(t *testing.T) {
 		t.Fatalf("failed to update session: %v", err)
 	}
 
-	_, err = svc.PromptTask(context.Background(), "task1", "session1", "hello", "", false, nil)
+	_, err = svc.PromptTask(context.Background(), "task1", "session1", "hello", "", false, nil, false)
 	if err == nil {
 		t.Fatal("expected transient prompt error")
 	}
@@ -147,7 +147,7 @@ func TestPromptTask_CancelEscalatedDoesNotMoveTaskToReview(t *testing.T) {
 		t.Fatalf("failed to update session: %v", err)
 	}
 
-	_, err = svc.PromptTask(context.Background(), "task1", "session1", "hello", "", false, nil)
+	_, err = svc.PromptTask(context.Background(), "task1", "session1", "hello", "", false, nil, false)
 	if err == nil {
 		t.Fatal("expected cancel-escalated error to bubble up from PromptTask")
 	}
@@ -189,7 +189,7 @@ func TestPromptTask_ExecutionNotFoundRevertsStateAndBroadcasts(t *testing.T) {
 		t.Fatalf("failed to update session: %v", err)
 	}
 
-	_, err = svc.PromptTask(context.Background(), "task1", "session1", "hello", "", false, nil)
+	_, err = svc.PromptTask(context.Background(), "task1", "session1", "hello", "", false, nil, false)
 	if err == nil {
 		t.Fatal("expected error from prompt, got nil")
 	}
@@ -247,7 +247,7 @@ func TestPromptTask_PlanModeInjectsPrefix(t *testing.T) {
 		t.Fatalf("failed to update session: %v", err)
 	}
 
-	_, err = svc.PromptTask(context.Background(), "task1", "session1", "update the plan", "", true, nil)
+	_, err = svc.PromptTask(context.Background(), "task1", "session1", "update the plan", "", true, nil, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestPromptTask_NoPlanModeDoesNotInjectPrefix(t *testing.T) {
 		t.Fatalf("failed to update session: %v", err)
 	}
 
-	_, err = svc.PromptTask(context.Background(), "task1", "session1", "implement the feature", "", false, nil)
+	_, err = svc.PromptTask(context.Background(), "task1", "session1", "implement the feature", "", false, nil, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestPromptTask_ResetInProgressReturnsSentinelError(t *testing.T) {
 	svc.setSessionResetInProgress("session1", true)
 	defer svc.setSessionResetInProgress("session1", false)
 
-	_, err := svc.PromptTask(context.Background(), "task1", "session1", "hello", "", false, nil)
+	_, err := svc.PromptTask(context.Background(), "task1", "session1", "hello", "", false, nil, false)
 	if !errors.Is(err, ErrSessionResetInProgress) {
 		t.Fatalf("expected ErrSessionResetInProgress, got %v", err)
 	}

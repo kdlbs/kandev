@@ -61,7 +61,7 @@ type EventBus interface {
 // Both methods are implemented by *orchestrator.Service.
 type SessionLauncher interface {
 	LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)
-	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error)
+	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error)
 	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error)
 	ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error)
 	GetMessageQueue() *messagequeue.Service
@@ -828,8 +828,10 @@ func (h *Handlers) recordUserMessage(ctx context.Context, taskID, sessionID, pro
 
 // promptWithAutoResume sends a prompt to a session and resumes the agent
 // transparently if it has been torn down (mirrors message.add behaviour).
+// Uses dispatch-only mode so the MCP tool returns once the prompt is accepted
+// rather than blocking for the entire target turn.
 func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, prompt string) (string, error) {
-	_, err := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil)
+	_, err := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, true)
 	if err == nil {
 		return "sent", nil
 	}
@@ -844,7 +846,7 @@ func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, 
 	if waitErr := h.taskSvc.WaitForSessionReady(ctx, sessionID); waitErr != nil {
 		return "", fmt.Errorf("session not ready after resume: %w", waitErr)
 	}
-	if _, retryErr := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil); retryErr != nil {
+	if _, retryErr := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, true); retryErr != nil {
 		return "", fmt.Errorf("failed to send prompt after resume: %w", retryErr)
 	}
 	return "sent", nil

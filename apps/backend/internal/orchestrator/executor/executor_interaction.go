@@ -120,7 +120,7 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 // Prompt sends a follow-up prompt to a running agent for a task
 // Returns PromptResult indicating if the agent needs input
 // Attachments (images) are passed to the agent if provided
-func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, preloadedSession ...*models.TaskSession) (*PromptResult, error) {
+func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, preloadedSession ...*models.TaskSession) (*PromptResult, error) {
 	var session *models.TaskSession
 	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
 		session = preloadedSession[0]
@@ -144,9 +144,10 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 		zap.String("session_id", sessionID),
 		zap.String("agent_execution_id", executionID),
 		zap.Int("prompt_length", len(prompt)),
-		zap.Int("attachments_count", len(attachments)))
+		zap.Int("attachments_count", len(attachments)),
+		zap.Bool("dispatch_only", dispatchOnly))
 
-	result, err := e.agentManager.PromptAgent(ctx, executionID, prompt, attachments)
+	result, err := e.agentManager.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
 	if err != nil {
 		if errors.Is(err, lifecycle.ErrExecutionNotFound) {
 			return nil, ErrExecutionNotFound

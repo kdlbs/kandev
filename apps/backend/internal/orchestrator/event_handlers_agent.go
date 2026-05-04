@@ -342,7 +342,7 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 	}
 
 	_, err := s.PromptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
-		queuedMsg.Content, queuedMsg.Model, queuedMsg.PlanMode, attachments)
+		queuedMsg.Content, queuedMsg.Model, queuedMsg.PlanMode, attachments, false)
 	if err != nil {
 		s.logger.Error("failed to execute queued message",
 			zap.String("session_id", callerSessionID),
