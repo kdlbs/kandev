@@ -218,6 +218,12 @@ export class ApiClient {
     await this.request("PATCH", `/api/v1/tasks/${taskId}`, { state });
   }
 
+  /** Rename a task. Used in tests that exercise live-title resolution on the
+   *  cross-task message badge. */
+  async updateTaskTitle(taskId: string, title: string): Promise<void> {
+    await this.request("PATCH", `/api/v1/tasks/${taskId}`, { title });
+  }
+
   async listAgents(): Promise<{ agents: Agent[]; total: number }> {
     return this.request("GET", "/api/v1/agents");
   }

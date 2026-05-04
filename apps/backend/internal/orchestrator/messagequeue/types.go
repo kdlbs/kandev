@@ -4,15 +4,16 @@ import "time"
 
 // QueuedMessage represents a message queued for a session
 type QueuedMessage struct {
-	ID          string              `json:"id"`          // Unique queue entry ID
-	SessionID   string              `json:"session_id"`  // Task session ID
-	TaskID      string              `json:"task_id"`     // Task ID
-	Content     string              `json:"content"`     // Message content
-	Model       string              `json:"model"`       // Optional model override
-	PlanMode    bool                `json:"plan_mode"`   // Plan mode enabled
-	Attachments []MessageAttachment `json:"attachments"` // Image attachments
-	QueuedAt    time.Time           `json:"queued_at"`   // When queued
-	QueuedBy    string              `json:"queued_by"`   // User ID who queued
+	ID          string                 `json:"id"`                 // Unique queue entry ID
+	SessionID   string                 `json:"session_id"`         // Task session ID
+	TaskID      string                 `json:"task_id"`            // Task ID
+	Content     string                 `json:"content"`            // Message content
+	Model       string                 `json:"model"`              // Optional model override
+	PlanMode    bool                   `json:"plan_mode"`          // Plan mode enabled
+	Attachments []MessageAttachment    `json:"attachments"`        // Image attachments
+	Metadata    map[string]interface{} `json:"metadata,omitempty"` // Extra metadata (e.g. sender_task_id) merged into the resulting Message
+	QueuedAt    time.Time              `json:"queued_at"`          // When queued
+	QueuedBy    string                 `json:"queued_by"`          // User ID who queued
 }
 
 // MessageAttachment represents an attachment (image) in a queued message

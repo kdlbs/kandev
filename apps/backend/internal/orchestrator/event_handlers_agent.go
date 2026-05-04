@@ -71,8 +71,10 @@ func (s *Service) publishQueueStatusEvent(ctx context.Context, sessionID string)
 }
 
 // requeueMessage re-enqueues a message that could not be delivered, publishing a queue status event on success.
+// Preserves the original Metadata (e.g. sender_task_id from message_task_kandev)
+// so attribution survives transient failures + retries.
 func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage, queuedBy string) {
-	requeuedMsg, queueErr := s.messageQueue.QueueMessage(
+	requeuedMsg, queueErr := s.messageQueue.QueueMessageWithMetadata(
 		ctx,
 		queuedMsg.SessionID,
 		queuedMsg.TaskID,
@@ -81,6 +83,7 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 		queuedBy,
 		queuedMsg.PlanMode,
 		queuedMsg.Attachments,
+		queuedMsg.Metadata,
 	)
 	if queueErr != nil {
 		s.logger.Error("failed to requeue message",
@@ -325,7 +328,11 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 		meta := NewUserMessageMeta().
 			WithPlanMode(queuedMsg.PlanMode).
 			WithAttachments(attachments)
-		err := s.messageCreator.CreateUserMessage(promptCtx, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.SessionID, turnID, meta.ToMap())
+		// Merge any extra metadata captured at queue time (e.g. sender_task_id
+		// from message_task_kandev) so the resulting Message row carries the
+		// full context.
+		metaMap := mergeMetadata(meta.ToMap(), queuedMsg.Metadata)
+		err := s.messageCreator.CreateUserMessage(promptCtx, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.SessionID, turnID, metaMap)
 		if err != nil {
 			s.logger.Error("failed to create user message for queued message",
 				zap.String("session_id", queuedMsg.SessionID),
