@@ -158,9 +158,6 @@ jobs:
           TAG: ${{ steps.compute.outputs.tag }}
         run: |
           set -euo pipefail
-          # Refresh from main right before pushing so a concurrent merge
-          # doesn't get clobbered. main has no branch protection, so we can
-          # commit + push directly without a PR-and-merge dance.
           git fetch origin main
           git checkout main
           git reset --hard origin/main
