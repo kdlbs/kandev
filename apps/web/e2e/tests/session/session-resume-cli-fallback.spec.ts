@@ -21,7 +21,7 @@ async function createTUIProfileWithFailOnResume(apiClient: ApiClient, name: stri
   // depends on mock-agent-only behaviour (--fail-on-resume + the "Mock Agent"
   // header), so picking agents[0] would silently exercise the wrong agent if
   // listAgents() ever changes order.
-  const mockAgent = agents.find((a) => a.id === "mock-agent" || a.name === "Mock Agent");
+  const mockAgent = agents.find((a) => a.name === "mock-agent");
   if (!mockAgent) {
     throw new Error(
       `mock-agent not found in listAgents() (got ${agents.map((a) => `${a.id}=${a.name}`).join(", ")})`,
