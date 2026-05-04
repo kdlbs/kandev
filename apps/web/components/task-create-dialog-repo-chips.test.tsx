@@ -273,7 +273,7 @@ describe("RepoChipsRow", () => {
     );
     fireEvent.click(screen.getByTestId("repo-chip-trigger"));
     expect(screen.getByText("frontend")).toBeTruthy();
-    expect(screen.getByText("projects/local-project")).toBeTruthy();
+    expect(screen.getByText("~/projects/local-project")).toBeTruthy();
     expect(screen.queryByText("frontend-dup")).toBeNull();
   });
 
@@ -299,7 +299,7 @@ describe("RepoChipsRow", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("repo-chip-trigger"));
-    fireEvent.click(screen.getByText("projects/local-project"));
+    fireEvent.click(screen.getByText("~/projects/local-project"));
     expect(onRowRepositoryChange).toHaveBeenCalledWith("r0", "/home/me/projects/local-project");
   });
 

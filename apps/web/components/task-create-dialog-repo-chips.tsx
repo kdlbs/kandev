@@ -3,6 +3,7 @@
 import { useEffect, useMemo } from "react";
 import { IconPlus, IconX, IconCode, IconGitBranch, IconGitFork } from "@tabler/icons-react";
 import { cn, formatUserHomePath } from "@/lib/utils";
+import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useBranches, type BranchSource } from "@/hooks/domains/workspace/use-repository-branches";
 import type { LocalRepository, Repository } from "@/lib/types/http";
@@ -461,11 +462,19 @@ function useRepoChipData({
 
   const repoOptions: PillOption[] = useMemo(
     () => [
-      ...filteredRepos.map((r) => ({ value: r.id, label: r.name })),
+      ...filteredRepos.map((r) => ({
+        value: r.id,
+        label: r.name,
+        keywords: [r.name, r.local_path, formatUserHomePath(r.local_path)].filter(
+          (s): s is string => !!s,
+        ),
+        renderLabel: () => renderWorkspaceRepoOption(r),
+      })),
       ...filteredDiscovered.map((r) => ({
         value: r.path,
-        label: shortRepoPath(r.path),
-        keywords: [r.path],
+        label: leafSegment(r.path),
+        keywords: [r.path, formatUserHomePath(r.path)],
+        renderLabel: () => renderDiscoveredRepoOption(r.path),
       })),
     ],
     [filteredRepos, filteredDiscovered],
@@ -546,6 +555,7 @@ function RepoChip({
         emptyMessage="No repositories"
         testId="repo-chip-trigger"
         tooltip={repoTooltip}
+        filter={scoreRepo}
         flat
       />
       <Pill
@@ -593,9 +603,47 @@ function normalizeRepoPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/\/+$/g, "");
 }
 
-function shortRepoPath(path: string): string {
-  // Show the trailing folder name with one parent for context (e.g. "myorg/myrepo").
-  const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
-  if (parts.length <= 1) return path;
-  return parts.slice(-2).join("/");
+function renderWorkspaceRepoOption(repo: Repository) {
+  const display = repo.local_path ? formatUserHomePath(repo.local_path) : "";
+  return (
+    <span className="flex min-w-0 flex-1 flex-col overflow-hidden" title={display || repo.name}>
+      <span className="truncate">{repo.name}</span>
+      {display ? (
+        <span className="truncate text-[11px] text-muted-foreground">{display}</span>
+      ) : null}
+    </span>
+  );
+}
+
+function renderDiscoveredRepoOption(path: string) {
+  const display = formatUserHomePath(path);
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden" title={display}>
+      <span className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <span className="truncate">{leafSegment(path)}</span>
+        <span className="truncate text-[11px] text-muted-foreground">{display}</span>
+      </span>
+      <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0">
+        on disk
+      </Badge>
+    </span>
+  );
+}
+
+function leafSegment(path: string): string {
+  const cleaned = path.replace(/\\/g, "/").replace(/\/+$/g, "");
+  const idx = cleaned.lastIndexOf("/");
+  return idx >= 0 ? cleaned.slice(idx + 1) : cleaned;
+}
+
+// Repo dropdown wraps scoreBranch but drops weak subsequence-only matches.
+// scoreBranch's last-resort fuzzy fallback makes sense for branch names
+// (typos, partial fragments) but for repo paths it surfaces nonsense — e.g.
+// "arthur" scoring against "playground/fun/thm/.../lxd-alpine-builder"
+// because a-r-t-h-u-r appears in order across path segments. Substring,
+// prefix, and word-boundary hits all score >= 0.45, so a 0.4 floor keeps
+// real matches while filtering the long-path coincidences.
+function scoreRepo(value: string, search: string, keywords?: string[]): number {
+  const score = scoreBranch(value, search, keywords);
+  return score >= 0.4 ? score : 0;
 }

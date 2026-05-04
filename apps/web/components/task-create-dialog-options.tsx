@@ -48,13 +48,15 @@ export function useRepositoryOptions(
         renderLabel: () => (
           <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
             <span className="shrink-0">{repo.name}</span>
-            <Badge
-              variant="secondary"
-              className="text-xs text-muted-foreground max-w-[140px] min-w-0 truncate ml-auto"
-              title={formatUserHomePath(repo.local_path)}
-            >
-              {truncateRepoPath(repo.local_path, 24)}
-            </Badge>
+            {repo.local_path ? (
+              <Badge
+                variant="secondary"
+                className="text-xs text-muted-foreground max-w-[140px] min-w-0 truncate ml-auto"
+                title={formatUserHomePath(repo.local_path)}
+              >
+                {truncateRepoPath(repo.local_path, 24)}
+              </Badge>
+            ) : null}
           </span>
         ),
       })),
