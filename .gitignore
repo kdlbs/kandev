@@ -103,6 +103,3 @@ normalized-*.jsonl
 
 # playwright-cli snapshots/console logs
 .playwright-cli/
-
-# Local-only secrets file (never commit)
-/secret
