@@ -12,7 +12,8 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { KanbanColumn } from "@/components/kanban-column";
-import { KanbanCardPreview, type Task } from "@/components/kanban-card";
+import { type Task } from "@/components/kanban-card";
+import { KanbanCardPreview } from "@/components/kanban-card-preview";
 import type { WorkflowStep } from "@/components/kanban-column";
 import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 import { useTaskActions } from "@/hooks/use-task-actions";

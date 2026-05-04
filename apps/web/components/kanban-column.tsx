@@ -107,6 +107,7 @@ export function KanbanColumn({
             isDeleting={deletingTaskId === task.id}
             isArchiving={archivingTaskId === task.id}
             isSelected={selectedIds?.has(task.id)}
+            selectedIds={selectedIds}
             onToggleSelect={onToggleSelect}
             isMultiSelectMode={isMultiSelectMode}
           />

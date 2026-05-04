@@ -228,10 +228,11 @@ func (s *Service) MoveTask(ctx context.Context, id string, workflowID string, wo
 		return nil, err
 	}
 
-	if err := s.checkMoveTaskApproval(ctx, id, task.WorkflowStepID, workflowStepID); err != nil {
+	if err := s.validateTaskMove(ctx, task, workflowID, workflowStepID); err != nil {
 		return nil, err
 	}
 
+	oldWorkflowID := task.WorkflowID
 	oldStepID := task.WorkflowStepID
 	stepChanged := oldStepID != workflowStepID
 
@@ -254,14 +255,14 @@ func (s *Service) MoveTask(ctx context.Context, id string, workflowID string, wo
 
 	// Publish state_changed event if state changed, otherwise just updated
 	if oldState != task.State {
-		s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
+		s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState, oldWorkflowID)
 	} else {
-		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, oldWorkflowID)
 	}
 
 	// Publish task.moved event so the orchestrator can process on_exit/on_enter actions
 	if stepChanged {
-		s.publishTaskMovedEvent(ctx, task, oldStepID, workflowStepID, sessionID)
+		s.publishTaskMovedEvent(ctx, task, oldWorkflowID, oldStepID, workflowStepID, sessionID)
 	}
 
 	s.logger.Info("task moved",
@@ -288,20 +289,49 @@ func (s *Service) MoveTask(ctx context.Context, id string, workflowID string, wo
 	return result, nil
 }
 
-// checkMoveTaskApproval returns an error when the task's primary session has a pending
-// review and the caller is trying to move it to a different step.
-func (s *Service) checkMoveTaskApproval(ctx context.Context, taskID, currentStepID, targetStepID string) error {
-	if currentStepID == targetStepID {
+func (s *Service) validateTaskMove(ctx context.Context, task *models.Task, workflowID, workflowStepID string) error {
+	if task.ArchivedAt != nil {
+		return fmt.Errorf("archived tasks cannot be moved")
+	}
+	if err := s.validateMoveSessions(ctx, task.ID); err != nil {
+		return err
+	}
+	targetWorkflow, err := s.workflows.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return fmt.Errorf("failed to get target workflow: %w", err)
+	}
+	if targetWorkflow.WorkspaceID != task.WorkspaceID {
+		return fmt.Errorf("target workflow is in a different workspace")
+	}
+	if s.workflowStepGetter == nil {
 		return nil
 	}
-	primarySession, err := s.sessions.GetPrimarySessionByTaskID(ctx, taskID)
-	if err != nil || primarySession == nil {
-		return nil
+	targetStep, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+	if err != nil {
+		return fmt.Errorf("failed to get target workflow step: %w", err)
 	}
-	if primarySession.ReviewStatus != nil && *primarySession.ReviewStatus == "pending" {
-		return fmt.Errorf("task is pending approval - use Approve button to proceed or send a message to request changes")
+	if targetStep.WorkflowID != workflowID {
+		return fmt.Errorf("target workflow step does not belong to target workflow")
 	}
 	return nil
+}
+
+func (s *Service) validateMoveSessions(ctx context.Context, taskID string) error {
+	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("failed to list task sessions: %w", err)
+	}
+	for _, session := range sessions {
+		if isSessionMoveBlocked(session.State) {
+			return fmt.Errorf("task has an active session (%s)", session.State)
+		}
+	}
+	return nil
+}
+
+func isSessionMoveBlocked(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateStarting ||
+		state == models.TaskSessionStateRunning
 }
 
 // resolvePrimaryOrActiveSession returns the primary session if it is in an active
@@ -338,6 +368,72 @@ func (s *Service) CountTasksByWorkflowStep(ctx context.Context, stepID string) (
 // BulkMoveTasksResult contains the result of a BulkMoveTasks operation.
 type BulkMoveTasksResult struct {
 	MovedCount int
+}
+
+// BulkMoveSelectedTasks moves an explicit task list to a target workflow step.
+// The list order is treated as the visible UI order; tasks already in the
+// target step are skipped.
+func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, targetWorkflowID, targetStepID string) (*BulkMoveTasksResult, error) {
+	ids := uniqueTaskIDs(taskIDs)
+	if len(ids) == 0 {
+		return &BulkMoveTasksResult{MovedCount: 0}, nil
+	}
+
+	tasks, err := s.validateSelectedMoveBatch(ctx, ids, targetWorkflowID, targetStepID)
+	if err != nil {
+		return nil, err
+	}
+
+	nextPosition, err := s.tasks.CountTasksByWorkflowStep(ctx, targetStepID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count target workflow step tasks: %w", err)
+	}
+
+	movedCount := 0
+	for _, task := range tasks {
+		if task.WorkflowID == targetWorkflowID && task.WorkflowStepID == targetStepID {
+			continue
+		}
+		if _, err := s.MoveTask(ctx, task.ID, targetWorkflowID, targetStepID, nextPosition+movedCount); err != nil {
+			return nil, fmt.Errorf("failed to move task %s: %w", task.ID, err)
+		}
+		movedCount++
+	}
+
+	return &BulkMoveTasksResult{MovedCount: movedCount}, nil
+}
+
+func uniqueTaskIDs(taskIDs []string) []string {
+	seen := make(map[string]struct{}, len(taskIDs))
+	result := make([]string, 0, len(taskIDs))
+	for _, id := range taskIDs {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	return result
+}
+
+func (s *Service) validateSelectedMoveBatch(ctx context.Context, taskIDs []string, targetWorkflowID, targetStepID string) ([]*models.Task, error) {
+	tasks := make([]*models.Task, 0, len(taskIDs))
+	for _, id := range taskIDs {
+		task, err := s.tasks.GetTask(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if task.WorkflowID != targetWorkflowID || task.WorkflowStepID != targetStepID {
+			if err := s.validateTaskMove(ctx, task, targetWorkflowID, targetStepID); err != nil {
+				return nil, fmt.Errorf("task %s cannot be moved: %w", id, err)
+			}
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, nil
 }
 
 // BulkMoveTasks moves all tasks from a source workflow/step to a target workflow/step.

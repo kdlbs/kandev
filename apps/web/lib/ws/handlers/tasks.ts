@@ -36,6 +36,7 @@ function upsertMultiTask(state: AppState, workflowId: string, task: KanbanTask):
 
 type TaskEventPayload = TaskLike & {
   workflow_id: string;
+  old_workflow_id?: string | null;
   is_ephemeral?: boolean;
   archived_at?: string | null;
 };
@@ -123,12 +124,18 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
 
       store.setState((state) => {
         const wfId = message.payload.workflow_id;
+        const oldWfId = message.payload.old_workflow_id;
+        let next = state;
 
-        if (message.payload.archived_at) {
-          return removeTaskFromBothKanbans(state, wfId, taskId);
+        if (oldWfId && oldWfId !== wfId) {
+          next = removeTaskFromBothKanbans(next, oldWfId, taskId);
         }
 
-        return upsertTaskInBothKanbans(state, wfId, message.payload);
+        if (message.payload.archived_at) {
+          return removeTaskFromBothKanbans(next, wfId, taskId);
+        }
+
+        return upsertTaskInBothKanbans(next, wfId, message.payload);
       });
 
       // Follow focus to the new primary when:

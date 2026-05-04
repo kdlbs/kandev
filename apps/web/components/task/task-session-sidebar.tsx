@@ -180,7 +180,13 @@ type TaskSessionSidebarProps = {
   workflowId: string | null;
 };
 
-type StepInfo = { id: string; title: string; color: string; position: number };
+type StepInfo = {
+  id: string;
+  title: string;
+  color: string;
+  position: number;
+  events?: { on_enter?: Array<{ type: string; config?: Record<string, unknown> }> };
+};
 type SidebarItem = Omit<ReturnType<typeof toSidebarItem>, "workflowId"> & { workflowId?: string };
 
 function buildArchivedItem(s: ReturnType<typeof useArchivedTaskState>): SidebarItem {
@@ -221,6 +227,7 @@ function useSidebarData(workspaceId: string | null) {
   const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
   const envIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const workflows = useAppStore((state) => state.workflows.items);
   const isMultiLoading = useAppStore((state) => state.kanbanMulti.isLoading);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const taskPRsByTaskId = useAppStore((state) => state.taskPRs.byTaskId);
@@ -308,6 +315,9 @@ function useSidebarData(workspaceId: string | null) {
     isLoadingWorkflow,
     tasksWithRepositories,
     primarySessionIds,
+    workflows: workflows
+      .filter((workflow) => !workspaceId || workflow.workspaceId === workspaceId)
+      .map((workflow) => ({ id: workflow.id, name: workflow.name, hidden: workflow.hidden })),
   };
 }
 
@@ -521,6 +531,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     activeTaskId,
     selectedTaskId,
     stepsByWorkflowId,
+    workflows,
     isLoadingWorkflow,
     tasksWithRepositories,
     primarySessionIds,
@@ -569,6 +580,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
       <PanelBody className="space-y-4 p-0">
         <TaskSwitcher
           grouped={grouped}
+          workflows={workflows}
           stepsByWorkflowId={stepsByWorkflowId}
           activeTaskId={activeTaskId}
           selectedTaskId={selectedTaskId}

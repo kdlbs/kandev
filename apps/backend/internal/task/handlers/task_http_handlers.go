@@ -299,10 +299,11 @@ func (h *TaskHandlers) httpGetStepTaskCount(c *gin.Context) {
 }
 
 type httpBulkMoveTasksRequest struct {
-	SourceWorkflowID string `json:"source_workflow_id"`
-	SourceStepID     string `json:"source_step_id,omitempty"`
-	TargetWorkflowID string `json:"target_workflow_id"`
-	TargetStepID     string `json:"target_step_id"`
+	SourceWorkflowID string   `json:"source_workflow_id"`
+	SourceStepID     string   `json:"source_step_id,omitempty"`
+	TargetWorkflowID string   `json:"target_workflow_id"`
+	TargetStepID     string   `json:"target_step_id"`
+	TaskIDs          []string `json:"task_ids,omitempty"`
 }
 
 func (h *TaskHandlers) httpBulkMoveTasks(c *gin.Context) {
@@ -311,7 +312,15 @@ func (h *TaskHandlers) httpBulkMoveTasks(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	if body.SourceWorkflowID == "" || body.TargetWorkflowID == "" || body.TargetStepID == "" {
+	if body.TargetWorkflowID == "" || body.TargetStepID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target_workflow_id and target_step_id are required"})
+		return
+	}
+	if len(body.TaskIDs) > 0 {
+		h.httpBulkMoveSelectedTasks(c, body)
+		return
+	}
+	if body.SourceWorkflowID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "source_workflow_id, target_workflow_id, and target_step_id are required"})
 		return
 	}
@@ -323,6 +332,21 @@ func (h *TaskHandlers) httpBulkMoveTasks(c *gin.Context) {
 	if err != nil {
 		h.logger.Error("failed to bulk move tasks", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to bulk move tasks"})
+		return
+	}
+	c.JSON(http.StatusOK, dto.BulkMoveTasksResponse{MovedCount: result.MovedCount})
+}
+
+func (h *TaskHandlers) httpBulkMoveSelectedTasks(c *gin.Context, body httpBulkMoveTasksRequest) {
+	result, err := h.service.BulkMoveSelectedTasks(
+		c.Request.Context(),
+		body.TaskIDs,
+		body.TargetWorkflowID,
+		body.TargetStepID,
+	)
+	if err != nil {
+		h.logger.Error("failed to bulk move selected tasks", zap.Error(err))
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, dto.BulkMoveTasksResponse{MovedCount: result.MovedCount})

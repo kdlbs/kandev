@@ -195,6 +195,38 @@ describe("task.updated primary-session focus follow", () => {
   });
 });
 
+describe("task.updated cross-workflow placement", () => {
+  it("removes the task from its old workflow snapshot before upserting into the new one", () => {
+    const task = { id: "t1", title: "Test", workflowId: "wf1", workflowStepId: "step1" };
+    const store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [task],
+      } as unknown as AppState["kanban"],
+      kanbanMulti: {
+        isLoading: false,
+        snapshots: {
+          wf1: { workflow: { id: "wf1" }, steps: [], tasks: [task] },
+          wf2: { workflow: { id: "wf2" }, steps: [], tasks: [] },
+        },
+      } as unknown as AppState["kanbanMulti"],
+    });
+
+    const handlers = registerTasksHandlers(store);
+    handlers["task.updated"]!(
+      makeMessage({ ...makeTask("t1", null, "wf2"), old_workflow_id: "wf1" }),
+    );
+
+    const state = store.getState();
+    expect(state.kanban.tasks).toHaveLength(0);
+    expect(state.kanbanMulti.snapshots.wf1.tasks).toHaveLength(0);
+    expect(state.kanbanMulti.snapshots.wf2.tasks).toHaveLength(1);
+    expect(state.kanbanMulti.snapshots.wf2.tasks[0]?.id).toBe("t1");
+    expect(state.kanbanMulti.snapshots.wf2.tasks[0]?.workflowStepId).toBe("step1");
+  });
+});
+
 describe("task.deleted cleanup", () => {
   it("removes the deleted task from recent task history", () => {
     const store = makeStore({
