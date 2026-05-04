@@ -42,6 +42,70 @@ func newTestSpritesExecutor(store secrets.SecretStore) *SpritesExecutor {
 	}
 }
 
+func TestSpritesReconnectSetupEnvironmentDoesNotEmitSkippedSetupSteps(t *testing.T) {
+	r := newTestSpritesExecutor(nil)
+	var reported []PrepareStep
+
+	err := r.stepSetupEnvironment(context.Background(), nil, &ExecutorCreateRequest{}, true, func(_ spritesStepKey, step PrepareStep) {
+		reported = append(reported, step)
+	})
+
+	if err != nil {
+		t.Fatalf("stepSetupEnvironment returned error: %v", err)
+	}
+	if len(reported) != 0 {
+		t.Fatalf("expected reconnect setup to emit no upload/credentials/prepare steps, got %d: %#v", len(reported), reported)
+	}
+}
+
+func TestSpritesAgentInstanceIDPrefersCurrentLaunchInstance(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		InstanceID:          "current-session-exec",
+		PreviousExecutionID: "previous-session-exec",
+	}
+
+	if got := spritesAgentInstanceID(req); got != "current-session-exec" {
+		t.Fatalf("spritesAgentInstanceID() = %q, want current session instance", got)
+	}
+}
+
+func TestSpritesShouldReconnectWhenSpriteNameMetadataExists(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		InstanceID: "current-session-exec",
+		Metadata: map[string]interface{}{
+			"sprite_name": "kandev-existing-sprite",
+		},
+	}
+
+	if !spritesShouldReconnect(req) {
+		t.Fatal("expected sprite_name metadata to trigger reconnect")
+	}
+}
+
+func TestSpritesProgressPlanReconnectOmitsSetupAndNetworkSteps(t *testing.T) {
+	plan := newSpritesProgressPlan(true)
+
+	if plan.total() != 3 {
+		t.Fatalf("reconnect runtime plan has %d steps, want 3", plan.total())
+	}
+	for _, key := range []spritesStepKey{
+		spriteStepUploadAgentctl,
+		spriteStepUploadCredentials,
+		spriteStepRunPrepareScript,
+		spriteStepApplyNetworkPolicy,
+	} {
+		if plan.has(key) {
+			t.Fatalf("reconnect runtime plan unexpectedly includes %s", key)
+		}
+	}
+	if got := plan.index(spriteStepWaitHealthy); got != 1 {
+		t.Fatalf("wait healthy index = %d, want 1", got)
+	}
+	if got := plan.index(spriteStepAgentInstance); got != 2 {
+		t.Fatalf("agent instance index = %d, want 2", got)
+	}
+}
+
 func TestResolveTokenFromMetadata(t *testing.T) {
 	t.Run("nil secret store returns empty", func(t *testing.T) {
 		r := &SpritesExecutor{

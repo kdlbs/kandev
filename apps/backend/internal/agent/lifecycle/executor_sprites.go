@@ -57,7 +57,6 @@ const (
 	spriteHealthTimeout    = 15 * time.Second
 	spriteDestroyTimeout   = 30 * time.Second
 	spriteHealthRetryWait  = 500 * time.Millisecond
-	spritesTotalSteps      = 7 // create, upload, credentials, prepare script, health, create instance, network policy
 	spriteOutputMaxLines   = 20
 	spriteUploadMaxRetries = 3
 )
@@ -126,10 +125,11 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 	r.tokens[req.InstanceID] = token
 	r.mu.Unlock()
 
-	reconnect := req.PreviousExecutionID != ""
+	reconnect := spritesShouldReconnect(req)
 	spriteName := r.resolveSpriteName(req, reconnect)
 	client := sprites.New(token, sprites.WithDisableControl())
-	report := newStepReporter(req.OnProgress)
+	progressPlan := newSpritesProgressPlan(reconnect)
+	report := newSpritesStepReporter(req.OnProgress, progressPlan)
 	destroyOnFailure := !reconnect
 
 	r.logger.Info("creating sprite instance",
@@ -164,7 +164,9 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 	}
 
 	// Step 6: Network policy
-	r.stepApplyNetworkPolicy(ctx, client, spriteName, req, report)
+	if progressPlan.has(spriteStepApplyNetworkPolicy) {
+		r.stepApplyNetworkPolicy(ctx, client, spriteName, req, report)
+	}
 
 	// Port forwarding to the per-instance server
 	localPort, err := r.setupPortForwarding(ctx, sprite, spriteName, req.InstanceID, instancePort)
@@ -197,20 +199,37 @@ func (r *SpritesExecutor) resolveSpriteName(req *ExecutorCreateRequest, reconnec
 	return spritesNamePrefix + suffix
 }
 
+func spritesShouldReconnect(req *ExecutorCreateRequest) bool {
+	if req == nil {
+		return false
+	}
+	return req.PreviousExecutionID != "" || getMetadataString(req.Metadata, "sprite_name") != ""
+}
+
+func spritesAgentInstanceID(req *ExecutorCreateRequest) string {
+	if req == nil {
+		return ""
+	}
+	if req.InstanceID != "" {
+		return req.InstanceID
+	}
+	return req.PreviousExecutionID
+}
+
 // stepCreateSprite handles step 0: create or reconnect a sprite.
 func (r *SpritesExecutor) stepCreateSprite(
 	ctx context.Context,
 	client *sprites.Client,
 	name string,
 	reconnect bool,
-	report func(PrepareStep, int),
+	report func(spritesStepKey, PrepareStep),
 ) (*sprites.Sprite, error) {
 	stepName := "Creating cloud sandbox"
 	if reconnect {
 		stepName = "Reconnecting cloud sandbox"
 	}
 	step := beginStep(stepName)
-	report(step, 0)
+	report(spriteStepCreateSprite, step)
 
 	var sprite *sprites.Sprite
 	var err error
@@ -221,11 +240,11 @@ func (r *SpritesExecutor) stepCreateSprite(
 	}
 	if err != nil {
 		completeStepError(&step, err.Error())
-		report(step, 0)
+		report(spriteStepCreateSprite, step)
 		return sprite, err
 	}
 	completeStepSuccess(&step)
-	report(step, 0)
+	report(spriteStepCreateSprite, step)
 	return sprite, nil
 }
 
@@ -236,60 +255,51 @@ func (r *SpritesExecutor) stepSetupEnvironment(
 	sprite *sprites.Sprite,
 	req *ExecutorCreateRequest,
 	reconnect bool,
-	report func(PrepareStep, int),
+	report func(spritesStepKey, PrepareStep),
 ) error {
-	// Step 1: Upload agentctl binary
-	step := beginStep("Uploading agent controller")
-	report(step, 1)
 	if reconnect {
-		completeStepSkipped(&step)
-	} else {
-		if err := r.uploadAgentctl(ctx, sprite); err != nil {
-			completeStepError(&step, err.Error())
-			report(step, 1)
-			return err
-		}
-		completeStepSuccess(&step)
-	}
-	report(step, 1)
-
-	// Step 2: Upload remote credentials (SSH keys, gh CLI, agent auth)
-	step = beginStep("Uploading credentials")
-	report(step, 2)
-	if reconnect {
-		completeStepSkipped(&step)
-	} else {
-		if err := r.uploadCredentials(ctx, sprite, req, func(output string) {
-			step.Output = output
-			report(step, 2)
-		}); err != nil {
-			r.logger.Warn("failed to upload credentials (non-fatal)", zap.Error(err))
-			completeStepSkipped(&step)
-		} else {
-			completeStepSuccess(&step)
-		}
-	}
-	report(step, 2)
-
-	// Step 3: Run prepare script (with output streaming)
-	step = beginStep("Running prepare script")
-	report(step, 3)
-	if reconnect {
-		completeStepSkipped(&step)
-		report(step, 3)
 		return nil
 	}
-	err := r.runPrepareScript(ctx, sprite, req, func(output string) {
-		step.Output = output
-		report(step, 3)
-	})
-	if err != nil {
+
+	// Step 1: Upload agentctl binary
+	step := beginStep("Uploading agent controller")
+	report(spriteStepUploadAgentctl, step)
+	if err := r.uploadAgentctl(ctx, sprite); err != nil {
 		completeStepError(&step, err.Error())
-		report(step, 3)
+		report(spriteStepUploadAgentctl, step)
 		return err
 	}
 	completeStepSuccess(&step)
-	report(step, 3)
+	report(spriteStepUploadAgentctl, step)
+
+	// Step 2: Upload remote credentials (SSH keys, gh CLI, agent auth)
+	step = beginStep("Uploading credentials")
+	report(spriteStepUploadCredentials, step)
+	if err := r.uploadCredentials(ctx, sprite, req, func(output string) {
+		step.Output = output
+		report(spriteStepUploadCredentials, step)
+	}); err != nil {
+		r.logger.Warn("failed to upload credentials (non-fatal)", zap.Error(err))
+		completeStepSkipped(&step)
+	} else {
+		completeStepSuccess(&step)
+	}
+	report(spriteStepUploadCredentials, step)
+
+	// Step 3: Run prepare script (with output streaming)
+	step = beginStep("Running prepare script")
+	report(spriteStepRunPrepareScript, step)
+	err := r.runPrepareScript(ctx, sprite, req, func(output string) {
+		step.Output = output
+		report(spriteStepRunPrepareScript, step)
+	})
+	if err != nil {
+		completeStepError(&step, err.Error())
+		report(spriteStepRunPrepareScript, step)
+		return err
+	}
+	completeStepSuccess(&step)
+	report(spriteStepRunPrepareScript, step)
 	return nil
 }
 
@@ -297,17 +307,17 @@ func (r *SpritesExecutor) stepSetupEnvironment(
 func (r *SpritesExecutor) stepWaitHealthy(
 	ctx context.Context,
 	sprite *sprites.Sprite,
-	report func(PrepareStep, int),
+	report func(spritesStepKey, PrepareStep),
 ) error {
 	step := beginStep("Waiting for agent controller")
-	report(step, 4)
+	report(spriteStepWaitHealthy, step)
 	if err := r.waitForHealth(ctx, sprite); err != nil {
 		completeStepError(&step, err.Error())
-		report(step, 4)
+		report(spriteStepWaitHealthy, step)
 		return err
 	}
 	completeStepSuccess(&step)
-	report(step, 4)
+	report(spriteStepWaitHealthy, step)
 	return nil
 }
 
@@ -318,21 +328,23 @@ func (r *SpritesExecutor) stepEnsureAgentInstance(
 	sprite *sprites.Sprite,
 	req *ExecutorCreateRequest,
 	reconnect bool,
-	report func(PrepareStep, int),
+	report func(spritesStepKey, PrepareStep),
 ) (int, bool, error) {
-	step := beginStep("Creating agent instance")
-	report(step, 5)
+	step := beginStep("Starting agent session")
+	report(spriteStepAgentInstance, step)
 
 	var instancePort int
 	var reusingExisting bool
 	if reconnect {
-		port, portErr := r.getExistingInstancePort(ctx, sprite, req.PreviousExecutionID)
+		instanceID := spritesAgentInstanceID(req)
+		port, portErr := r.getExistingInstancePort(ctx, sprite, instanceID)
 		if portErr == nil && port > 0 && r.isAgentSubprocessRunning(ctx, sprite, port) {
 			instancePort = port
 			reusingExisting = true
 		} else if portErr == nil && port > 0 {
-			r.logger.Info("existing instance found but agent subprocess not running, creating fresh instance",
-				zap.String("instance_id", req.PreviousExecutionID),
+			instancePort = port
+			r.logger.Info("existing instance found but agent subprocess not running",
+				zap.String("instance_id", instanceID),
 				zap.Int("port", port))
 		}
 	}
@@ -340,13 +352,13 @@ func (r *SpritesExecutor) stepEnsureAgentInstance(
 		port, err := r.createAgentInstance(ctx, sprite, req)
 		if err != nil {
 			completeStepError(&step, err.Error())
-			report(step, 5)
+			report(spriteStepAgentInstance, step)
 			return 0, false, err
 		}
 		instancePort = port
 	}
 	completeStepSuccess(&step)
-	report(step, 5)
+	report(spriteStepAgentInstance, step)
 	return instancePort, reusingExisting, nil
 }
 
@@ -356,17 +368,17 @@ func (r *SpritesExecutor) stepApplyNetworkPolicy(
 	client *sprites.Client,
 	spriteName string,
 	req *ExecutorCreateRequest,
-	report func(PrepareStep, int),
+	report func(spritesStepKey, PrepareStep),
 ) {
 	step := beginStep("Applying network policy")
-	report(step, 6)
+	report(spriteStepApplyNetworkPolicy, step)
 	if err := r.applyNetworkPolicy(ctx, client, spriteName, req); err != nil {
 		r.logger.Warn("failed to apply network policy from profile", zap.Error(err))
 		completeStepSkipped(&step)
 	} else {
 		completeStepSuccess(&step)
 	}
-	report(step, 6)
+	report(spriteStepApplyNetworkPolicy, step)
 }
 
 // buildInstanceResult constructs the final ExecutorInstance from sprite creation results.

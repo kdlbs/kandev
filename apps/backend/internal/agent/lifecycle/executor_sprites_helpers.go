@@ -119,12 +119,72 @@ func (r *SpritesExecutor) buildSpriteEnv(env map[string]string) []string {
 	return result
 }
 
-// newStepReporter creates a reporting function that calls OnProgress if non-nil.
-func newStepReporter(onProgress PrepareProgressCallback) func(PrepareStep, int) {
-	return func(step PrepareStep, idx int) {
-		if onProgress != nil {
-			onProgress(step, idx, spritesTotalSteps)
+type spritesStepKey string
+
+const (
+	spriteStepCreateSprite       spritesStepKey = "create_sprite"
+	spriteStepUploadAgentctl     spritesStepKey = "upload_agentctl"
+	spriteStepUploadCredentials  spritesStepKey = "upload_credentials"
+	spriteStepRunPrepareScript   spritesStepKey = "run_prepare_script"
+	spriteStepWaitHealthy        spritesStepKey = "wait_healthy"
+	spriteStepAgentInstance      spritesStepKey = "agent_instance"
+	spriteStepApplyNetworkPolicy spritesStepKey = "apply_network_policy"
+)
+
+type spritesProgressPlan struct {
+	steps   []spritesStepKey
+	indexes map[spritesStepKey]int
+}
+
+func newSpritesProgressPlan(reconnect bool) spritesProgressPlan {
+	steps := []spritesStepKey{spriteStepCreateSprite}
+	if !reconnect {
+		steps = append(steps,
+			spriteStepUploadAgentctl,
+			spriteStepUploadCredentials,
+			spriteStepRunPrepareScript,
+		)
+	}
+	steps = append(steps, spriteStepWaitHealthy, spriteStepAgentInstance)
+	if !reconnect {
+		steps = append(steps, spriteStepApplyNetworkPolicy)
+	}
+
+	indexes := make(map[spritesStepKey]int, len(steps))
+	for i, key := range steps {
+		indexes[key] = i
+	}
+	return spritesProgressPlan{steps: steps, indexes: indexes}
+}
+
+func (p spritesProgressPlan) total() int {
+	return len(p.steps)
+}
+
+func (p spritesProgressPlan) has(key spritesStepKey) bool {
+	_, ok := p.indexes[key]
+	return ok
+}
+
+func (p spritesProgressPlan) index(key spritesStepKey) int {
+	idx, ok := p.indexes[key]
+	if !ok {
+		return -1
+	}
+	return idx
+}
+
+// newSpritesStepReporter creates a reporting function that calls OnProgress if non-nil.
+func newSpritesStepReporter(onProgress PrepareProgressCallback, plan spritesProgressPlan) func(spritesStepKey, PrepareStep) {
+	return func(key spritesStepKey, step PrepareStep) {
+		if onProgress == nil {
+			return
 		}
+		idx := plan.index(key)
+		if idx < 0 {
+			return
+		}
+		onProgress(step, idx, plan.total())
 	}
 }
 
