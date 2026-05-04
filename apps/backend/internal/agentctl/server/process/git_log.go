@@ -73,7 +73,13 @@ func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int) 
 	// output (appended after the format) stays within the same record:
 	//   \x1e<fields>\n <stat summary>\n\x1e<fields>\n <stat summary>\n...
 	// Splitting on recordSep groups each commit's fields + stats together.
-	args := []string{"log", "--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%s%x1f%aI", "--shortstat"}
+	//
+	// --first-parent: when the branch has merged main back in (e.g. to resolve
+	// conflicts), git log otherwise walks both parents of the merge and surfaces
+	// commits that came in via main. Following only the first parent shows the
+	// branch's own line of work plus the merge commit itself, matching what the
+	// user thinks of as "what this branch did".
+	args := []string{"log", "--first-parent", "--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%s%x1f%aI", "--shortstat"}
 
 	switch {
 	case baseCommit != "":

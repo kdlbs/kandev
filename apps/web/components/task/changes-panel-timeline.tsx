@@ -23,7 +23,12 @@ import type { FileInfo } from "@/lib/state/store";
 import { FileRow, BulkActionBar } from "./changes-panel-file-row";
 import { type CommitItem } from "./commit-row";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
-import { CommitsRepoGroup, RepoGroupItem } from "./changes-panel-repo-groups";
+import {
+  CommitsGroupActions,
+  CommitsRepoGroup,
+  FileSectionActions,
+  RepoGroupItem,
+} from "./changes-panel-repo-groups";
 import { PRFilesGroupedList } from "./changes-panel-pr-files";
 
 // --- Timeline visual components ---
@@ -170,11 +175,24 @@ export function CommitsSection({
   perRepoStatus,
   prByRepo,
 }: CommitsSectionProps) {
-  // Always group by repo. Single-repo shows up as one group with an empty
-  // repository_name; the group header still renders with a display label and
-  // per-repo buttons (Push, Create PR) so the UX is uniform across modes.
   const groups = groupByRepositoryName(commits, (c) => c.repository_name);
   const aheadByRepo = new Map((perRepoStatus ?? []).map((s) => [s.repository_name, s.ahead]));
+  // Single-repo: one group with empty repositoryName. Drop the per-repo
+  // sub-header (CommitsRepoGroup with showHeader=false renders flat) and
+  // lift the Push / PR buttons into the section header.
+  const isSingleRepo = groups.length === 1 && groups[0].repositoryName === "";
+  const sectionAction = isSingleRepo ? (
+    <CommitsGroupActions
+      repositoryName=""
+      unpushedCount={groups[0].items.filter((c) => !c.pushed).length}
+      aheadCount={aheadByRepo.get("") ?? 0}
+      prExists={!!prByRepo?.[""]}
+      canCreatePR={!!onRepoCreatePR && !prByRepo?.[""]}
+      onRepoPush={onRepoPush}
+      onRepoCreatePR={onRepoCreatePR}
+      stop={(e) => e.stopPropagation()}
+    />
+  ) : undefined;
 
   return (
     <TimelineSection
@@ -184,6 +202,7 @@ export function CommitsSection({
       isLast={isLast}
       defaultCollapsed
       data-testid="commits-section"
+      action={sectionAction}
     >
       <ul data-testid="commits-list" className="space-y-0.5">
         {groups.map((g) => (
@@ -194,6 +213,7 @@ export function CommitsSection({
             groupCommits={g.items}
             aheadCount={aheadByRepo.get(g.repositoryName) ?? 0}
             existingPrUrl={prByRepo?.[g.repositoryName] ?? prByRepo?.[""]}
+            showHeader={!isSingleRepo}
             baseBranch={repoBaseBranch}
             onOpenCommitDetail={onOpenCommitDetail}
             onAmendCommit={onAmendCommit}
@@ -411,6 +431,10 @@ function FileListBody(props: FileListBodyProps) {
     />
   );
 
+  // Single-repo: drop the per-repo sub-header. The action buttons (Stage all
+  // / Commit / Unstage all) move up to the section header — see FileListSection.
+  const isSingleRepo = groups.length === 1 && groups[0].repositoryName === "";
+
   return (
     <div>
       <ul
@@ -419,20 +443,22 @@ function FileListBody(props: FileListBodyProps) {
         tabIndex={-1}
         onKeyDown={props.onKeyDown}
       >
-        {groups.map((group) => (
-          <RepoGroupItem
-            key={group.repositoryName || "__no_repo__"}
-            group={group}
-            collapsed={collapsedRepos.has(group.repositoryName)}
-            onToggle={() => toggleRepo(group.repositoryName)}
-            renderRow={renderRow}
-            primaryLabel={props.primaryLabel}
-            secondaryLabel={props.secondaryLabel}
-            onRepoAction={props.onRepoAction}
-            onRepoSecondaryAction={props.onRepoSecondaryAction}
-            displayName={props.repoDisplayName?.(group.repositoryName)}
-          />
-        ))}
+        {isSingleRepo
+          ? groups[0].items.map(renderRow)
+          : groups.map((group) => (
+              <RepoGroupItem
+                key={group.repositoryName || "__no_repo__"}
+                group={group}
+                collapsed={collapsedRepos.has(group.repositoryName)}
+                onToggle={() => toggleRepo(group.repositoryName)}
+                renderRow={renderRow}
+                primaryLabel={props.primaryLabel}
+                secondaryLabel={props.secondaryLabel}
+                onRepoAction={props.onRepoAction}
+                onRepoSecondaryAction={props.onRepoSecondaryAction}
+                displayName={props.repoDisplayName?.(group.repositoryName)}
+              />
+            ))}
       </ul>
     </div>
   );
@@ -457,8 +483,9 @@ export function FileListSection(props: FileListSectionProps) {
   const multiSelect = useMultiSelect({ items: filePaths });
   const hasSelection = multiSelect.selectedPaths.size > 0;
   // Multi-repo when any file has a repositoryName. Per-repo group headers
-  // own the action buttons in this case; the bottom-of-section global
-  // buttons would be redundant, so we skip them.
+  // own the action buttons in this case; in single-repo we render them in
+  // the section header instead.
+  const isSingleRepo = files.length > 0 && files.every((f) => !f.repositoryName);
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Escape" && hasSelection) multiSelect.clearSelection();
@@ -473,6 +500,16 @@ export function FileListSection(props: FileListSectionProps) {
       count={files.length}
       isLast={isLast}
       data-testid={`${variant}-files-section`}
+      action={
+        isSingleRepo ? (
+          <FileSectionActions
+            primaryLabel={props.actionLabel}
+            secondaryLabel={props.secondaryActionLabel}
+            onAction={props.onRepoAction}
+            onSecondaryAction={props.onRepoSecondaryAction}
+          />
+        ) : undefined
+      }
     >
       {files.length > 0 && (
         <FileListBody

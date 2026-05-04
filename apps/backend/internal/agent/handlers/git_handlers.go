@@ -782,10 +782,15 @@ func (h *GitHandlers) wsCumulativeDiff(ctx context.Context, msg *ws.Message) (*w
 		})
 	}
 
-	// Look up base commit SHA from the session metadata
-	var baseCommit string
+	// Look up base commit SHA and target branch from the session metadata.
+	// targetBranch lets agentctl recompute the base via merge-base against
+	// origin/<branch> for live divergence — same anchoring as the COMMITS
+	// panel, so the file diff doesn't include changes that came in via merges
+	// from main after the session was started.
+	var baseCommit, targetBranch string
 	if h.sessionReader != nil {
 		baseCommit = h.sessionReader.GetSessionBaseCommit(ctx, req.SessionID)
+		targetBranch = h.sessionReader.GetSessionBaseBranch(ctx, req.SessionID)
 	}
 
 	// Fallback: if base_commit_sha is not stored, use git merge-base from status
@@ -801,7 +806,7 @@ func (h *GitHandlers) wsCumulativeDiff(ctx context.Context, msg *ws.Message) (*w
 		}
 	}
 
-	result, err := agentClient.GetCumulativeDiff(ctx, baseCommit)
+	result, err := agentClient.GetCumulativeDiff(ctx, baseCommit, targetBranch)
 	if err != nil {
 		return nil, fmt.Errorf("cumulative diff failed: %w", err)
 	}

@@ -406,7 +406,10 @@ func (a *lifecycleAdapter) GetCumulativeDiff(ctx context.Context, sessionID, bas
 	if agentClient == nil {
 		return nil, nil
 	}
-	return agentClient.GetCumulativeDiff(ctx, baseCommit)
+	// Orchestrator-side cumulative diffs (snapshot tracking) anchor to the
+	// caller-provided base SHA — no dynamic merge-base recomputation. The
+	// live panel uses the WS-handler path, which passes targetBranch.
+	return agentClient.GetCumulativeDiff(ctx, baseCommit, "")
 }
 
 // GetGitStatus retrieves the current git status for a session.
