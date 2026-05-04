@@ -44,11 +44,10 @@ permissions:
 
 jobs:
   prepare:
-    name: Prepare release (bump version, PR, tag)
+    name: Prepare release (bump version, commit, tag)
     runs-on: ubuntu-latest
     permissions:
-      contents: write       # push release branch + tag
-      pull-requests: write  # create + merge release PR
+      contents: write       # commit + push to main, push tag
     outputs:
       version: ${{ steps.compute.outputs.version }}
       tag: ${{ steps.compute.outputs.tag }}
@@ -152,65 +151,53 @@ jobs:
             exit 1
           fi
 
-      - name: Bump version
-        env:
-          NEXT: ${{ steps.compute.outputs.version }}
-        run: |
-          set -euo pipefail
-          # Bump only the main version. optionalDependencies stay pinned to
-          # 0.0.0-bootstrap in the committed source — the publish-npm step
-          # rewrites them to the real version in-flight before publishing,
-          # once the matching @kdlbs/runtime-* tarballs actually exist on npm.
-          (cd apps/cli && npm version --no-git-tag-version "$NEXT")
-          pnpm -C apps install --no-frozen-lockfile
-
-      - name: Generate CHANGELOG
-        env:
-          TAG: ${{ steps.compute.outputs.tag }}
-        run: git-cliff --tag "$TAG" -o CHANGELOG.md
-
-      - name: Create release PR + merge + tag (or dry-run)
+      - name: Bump version, generate CHANGELOG, commit, tag, push
         if: ${{ !inputs.dry_run }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEXT: ${{ steps.compute.outputs.version }}
           TAG: ${{ steps.compute.outputs.tag }}
         run: |
           set -euo pipefail
-          BRANCH="release/$TAG"
-          MSG="release: $NEXT"
-
-          git checkout -b "$BRANCH"
-          git add apps/cli/package.json CHANGELOG.md apps/pnpm-lock.yaml || true
-          if git diff --cached --quiet; then
-            echo "No changes to commit; aborting." >&2
-            exit 1
-          fi
-          git commit -m "$MSG"
-          git push -u origin "$BRANCH"
-
-          PR_URL="$(gh pr create \
-            --title "$MSG" \
-            --body "Automated release: \`$NEXT\`" \
-            --head "$BRANCH" \
-            --base main)"
-          echo "PR: $PR_URL"
-
-          gh pr merge "$BRANCH" --squash --delete-branch --subject "$MSG" --body ""
-
-          # Pull the squashed commit into local main, then tag from it.
+          # Refresh from main right before pushing so a concurrent merge
+          # doesn't get clobbered. main has no branch protection, so we can
+          # commit + push directly without a PR-and-merge dance.
           git fetch origin main
           git checkout main
           git reset --hard origin/main
+
+          # Bump only the main package version. optionalDependencies stay
+          # pinned to 0.0.0-bootstrap in committed source — publish-npm.sh
+          # rewrites them to the real version in-flight before publishing,
+          # once the matching @kdlbs/runtime-* tarballs exist on npm.
+          (cd apps/cli && npm version --no-git-tag-version "$NEXT")
+          pnpm -C apps install --no-frozen-lockfile
+
+          git-cliff --tag "$TAG" -o CHANGELOG.md
+
+          git add apps/cli/package.json CHANGELOG.md apps/pnpm-lock.yaml
+          git commit -m "release: $NEXT"
           git tag -a "$TAG" -m "release: $NEXT"
-          git push origin "$TAG"
+
+          # Push commit and tag together. If main advanced concurrently this
+          # fails non-fast-forward; the maintainer just re-runs.
+          git push origin main "$TAG"
 
       - name: Dry-run summary
         if: ${{ inputs.dry_run }}
+        env:
+          NEXT: ${{ steps.compute.outputs.version }}
+          TAG: ${{ steps.compute.outputs.tag }}
         run: |
-          echo "DRY RUN: Would have created PR + tag ${{ steps.compute.outputs.tag }}"
-          echo "DRY RUN: Would have updated CHANGELOG.md"
-          echo "DRY RUN: Would have bumped apps/cli/package.json to ${{ steps.compute.outputs.version }}"
+          # In dry-run we still bump + run git-cliff locally so the maintainer
+          # can verify the computed version + changelog look right, but nothing
+          # is committed or pushed.
+          (cd apps/cli && npm version --no-git-tag-version "$NEXT")
+          pnpm -C apps install --no-frozen-lockfile
+          git-cliff --tag "$TAG" -o CHANGELOG.md
+          echo
+          echo "DRY RUN: Would have committed + tagged $TAG and pushed to origin/main."
+          echo "DRY RUN: apps/cli/package.json bumped to $NEXT (in-runner only)."
+          echo "DRY RUN: CHANGELOG.md regenerated (in-runner only)."
 
   build-web:
     name: Build web standalone
