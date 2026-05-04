@@ -36,8 +36,6 @@ flowchart TB
 
 The Kandev CLI (`kandev`) is the primary way to run the Kandev application. It launches the backend and web processes from an installed runtime bundle and provides a unified interface for end users and developers.
 
-The runtime bundle (Go backend, agentctl, Next.js standalone web) is installed by your package manager — there is no first-run download.
-
 ## Installation
 
 ### Homebrew (macOS, Linux)

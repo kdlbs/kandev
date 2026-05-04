@@ -21,7 +21,7 @@ Either install path resolves a platform-matched runtime (Go backend, agentctl, N
 
 ## Version and Updates
 
-The package manager owns the runtime version. `kandev@X.Y.Z` ships with the matching runtime — no first-run download.
+The package manager owns the runtime version. `kandev@X.Y.Z` ships with the matching runtime.
 
 - **Update via Homebrew**: `brew upgrade kandev`
 - **Update via npm/npx**: `npx kandev@latest` or `npm install -g kandev@latest`
