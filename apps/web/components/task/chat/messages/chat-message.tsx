@@ -160,10 +160,8 @@ function SenderTaskBadge({ sender }: { sender: SenderTaskInfo }) {
   // non-clickable greyed-out badge — the source URL only works when we have
   // routing context.
   const liveTask = useTaskById(sender.id);
-  const liveTitle = liveTask?.title || "";
-  const displayTitle = liveTitle || sender.snapshotTitle || "(unknown task)";
-  const fullTitle = liveTitle || sender.snapshotTitle || "(unknown task)";
-  const truncated = truncateTitle(displayTitle);
+  const fullTitle = liveTask?.title || sender.snapshotTitle || "(unknown task)";
+  const truncated = truncateTitle(fullTitle);
 
   const inner = (
     <span

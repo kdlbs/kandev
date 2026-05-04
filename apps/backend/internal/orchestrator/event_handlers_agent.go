@@ -71,8 +71,10 @@ func (s *Service) publishQueueStatusEvent(ctx context.Context, sessionID string)
 }
 
 // requeueMessage re-enqueues a message that could not be delivered, publishing a queue status event on success.
+// Preserves the original Metadata (e.g. sender_task_id from message_task_kandev)
+// so attribution survives transient failures + retries.
 func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage, queuedBy string) {
-	requeuedMsg, queueErr := s.messageQueue.QueueMessage(
+	requeuedMsg, queueErr := s.messageQueue.QueueMessageWithMetadata(
 		ctx,
 		queuedMsg.SessionID,
 		queuedMsg.TaskID,
@@ -81,6 +83,7 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 		queuedBy,
 		queuedMsg.PlanMode,
 		queuedMsg.Attachments,
+		queuedMsg.Metadata,
 	)
 	if queueErr != nil {
 		s.logger.Error("failed to requeue message",

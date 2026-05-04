@@ -827,13 +827,15 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 		return "queued", nil
 
 	case models.TaskSessionStateCreated:
-		// Record the user message ourselves (with sender metadata) and tell
-		// StartCreatedSession to skip its own initial-message recording so the
-		// sender badge is preserved on the created task's first chat row.
-		h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
+		// Start first, then record the user message ourselves with sender
+		// metadata. This avoids leaving an orphaned attributed chat row when
+		// StartCreatedSession fails (the previous order wrote the row up-front
+		// regardless of launch outcome). skipMessageRecord=true keeps
+		// postLaunchCreated from writing its own duplicate row.
 		if _, err := h.sessionLauncher.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, prompt, true, false, nil); err != nil {
 			return "", fmt.Errorf("failed to start session: %w", err)
 		}
+		h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
 		return "started", nil
 
 	default: // WAITING_FOR_INPUT, COMPLETED, or any other promptable state
