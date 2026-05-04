@@ -201,7 +201,19 @@ function SidebarContent({ panelId }: { panelId: string }) {
   return <TaskSessionSidebar workspaceId={workspaceId} workflowId={workflowId} />;
 }
 
-function useChatSessionTitle(panelId: string, sessionId: string | null, isSessionTab: boolean) {
+/** Generic fallback shown when the active session's agent profile is unknown. */
+export const CHAT_PANEL_FALLBACK_LABEL = "Agent";
+
+/** Resolve the dockview tab title for the chat / session panel.
+ *  Returns the profile-derived label whenever it's known so the generic
+ *  "chat" placeholder reflects the active session's agent (e.g. "Opus")
+ *  instead of falling back to "Agent". Used by both the per-session
+ *  `session:*` tabs and the singleton `chat` placeholder. */
+export function resolveChatPanelTitle(agentLabel: string | null | undefined): string {
+  return agentLabel && agentLabel.length > 0 ? agentLabel : CHAT_PANEL_FALLBACK_LABEL;
+}
+
+function useChatSessionTitle(panelId: string, sessionId: string | null) {
   const agentLabel = useAppStore((state) => {
     if (!sessionId) return null;
     const session = state.taskSessions.items[sessionId];
@@ -214,12 +226,8 @@ function useChatSessionTitle(panelId: string, sessionId: string | null, isSessio
     return parts[1] || parts[0] || profile.label;
   });
   useEffect(() => {
-    let label = "Agent";
-    if (isSessionTab && agentLabel) {
-      label = agentLabel;
-    }
-    setPanelTitle(panelId, label);
-  }, [panelId, isSessionTab, agentLabel]);
+    setPanelTitle(panelId, resolveChatPanelTitle(agentLabel));
+  }, [panelId, agentLabel]);
 }
 
 function ChatContent({ panelId, params }: { panelId: string; params: Record<string, unknown> }) {
@@ -230,7 +238,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
   const isPassthrough = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,
   );
-  useChatSessionTitle(panelId, sessionId, !!paramSessionId);
+  useChatSessionTitle(panelId, sessionId);
 
   if (isPassthrough) {
     return (
@@ -405,7 +413,6 @@ function useEnvSwitchCleanup(effectiveSessionId: string | null, effectiveEnvId: 
   const prevEnvRef = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     const newEnvId = effectiveEnvId;
-
     if (prevEnvRef.current === undefined) {
       prevEnvRef.current = newEnvId;
       return;
@@ -467,7 +474,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   useEffect(() => {
     envIdRef.current = effectiveEnvId;
-  }, [effectiveEnvId]);
+  }, [effectiveEnvId, effectiveSessionId]);
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {

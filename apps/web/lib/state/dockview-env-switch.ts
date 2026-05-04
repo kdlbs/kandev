@@ -104,7 +104,6 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
   }
 
   if (!structuresMatch) return null;
-
   if (saved && savedLayoutHasEphemeralPanels(saved as SerializedDockview)) return null;
 
   const outgoingSessionPanel = api.panels.find(
@@ -158,7 +157,7 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
       api.layout(safeWidth, safeHeight);
       return applyLayoutFixups(api);
     } catch {
-      /* fall through */
+      /* fall through to default layout build */
     }
   }
   buildDefault(api);

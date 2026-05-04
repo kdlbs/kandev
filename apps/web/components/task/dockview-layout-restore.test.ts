@@ -138,3 +138,35 @@ describe("sanitizeLayout - size validation", () => {
     expect(Object.keys(result.panels)).not.toContain("unknown");
   });
 });
+
+describe("sanitizeLayout - session panel handling", () => {
+  const SESSION_PANEL_ID = "session:abc-123";
+
+  function buildLayoutWithSession() {
+    const layout = buildLayout();
+    layout.grid.root.data[1].data.views = ["chat", SESSION_PANEL_ID];
+    layout.panels = {
+      ...layout.panels,
+      // @ts-expect-error - injecting a session panel without a matching valid component
+      [SESSION_PANEL_ID]: { id: SESSION_PANEL_ID, contentComponent: "session-panel" },
+    };
+    return layout;
+  }
+
+  it("keeps session:* panels by default (per-env restore)", () => {
+    const result = sanitizeLayout(buildLayoutWithSession(), VALID_COMPONENTS);
+    expect(result).not.toBeNull();
+    expect(Object.keys(result.panels)).toContain(SESSION_PANEL_ID);
+  });
+
+  it("strips session:* panels when stripSessionPanels=true (global fallback)", () => {
+    const result = sanitizeLayout(buildLayoutWithSession(), VALID_COMPONENTS, {
+      stripSessionPanels: true,
+    });
+    expect(result).not.toBeNull();
+    expect(Object.keys(result.panels)).not.toContain(SESSION_PANEL_ID);
+    // The non-session panels stay so the rest of the layout is still usable.
+    expect(Object.keys(result.panels)).toContain("chat");
+    expect(Object.keys(result.panels)).toContain("files");
+  });
+});

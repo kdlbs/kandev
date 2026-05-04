@@ -25,7 +25,8 @@ export function useTaskSessions(taskId: string | null) {
       setTaskSessionsLoading(taskId, true);
       try {
         const response = await listTaskSessions(taskId, { cache: "no-store" });
-        setTaskSessionsForTask(taskId, response.sessions ?? []);
+        const sessions = response.sessions ?? [];
+        setTaskSessionsForTask(taskId, sessions);
       } catch {
         setTaskSessionsForTask(taskId, []);
       } finally {

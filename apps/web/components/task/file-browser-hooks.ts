@@ -373,7 +373,7 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
     return () => {
       clearRetryTimer();
     };
-  }, [clearRetryTimer, loadTree, effectiveResetKey]);
+  }, [clearRetryTimer, loadTree, effectiveResetKey, sessionId]);
 
   // Fire the initial load on the waiting → ready transition. `loadState` is
   // read via a ref so a failed load (which sets state back to "waiting") does
@@ -385,7 +385,7 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
     if (loadStateRef.current === "loading") return;
     if (loadStateRef.current === "loaded" && treeRef.current) return;
     void loadTree({ resetRetry: true });
-  }, [agentctlStatus.isReady, loadTree]);
+  }, [agentctlStatus.isReady, loadTree, sessionId]);
 
   useEffect(() => {
     if (!tree || isLoadingTree || hasInitializedExpandedRef.current === effectiveResetKey) return;
