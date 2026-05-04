@@ -147,11 +147,13 @@ class Kandev < Formula
 
   def install
     libexec.install Dir["*"]
-    # cli/bin/cli.js has #!/usr/bin/env node shebang; write_env_script sets
-    # KANDEV_BUNDLE_DIR so the CLI launcher finds bin/ and web/ in the Cellar.
-    # KANDEV_VERSION is read by run.ts at startup so the version is shown in
-    # logs (otherwise the launcher prints "release: (env)").
-    bin.write_env_script libexec/"cli/bin/cli.js",
+    # cli/bin/cli.js has #!/usr/bin/env node shebang. (bin/"kandev").write_env_script
+    # creates a wrapper at \$HOMEBREW_PREFIX/bin/kandev that sets KANDEV_BUNDLE_DIR
+    # (so the CLI launcher finds bin/ and web/ in the Cellar) and KANDEV_VERSION
+    # (read by run.ts at startup so the launcher logs "release: X.Y.Z" instead of
+    # "release: (env)"). Calling write_env_script on the bin directory itself would
+    # name the wrapper after the target's basename (cli.js), giving the wrong name.
+    (bin/"kandev").write_env_script libexec/"cli/bin/cli.js",
       KANDEV_BUNDLE_DIR: libexec.to_s,
       KANDEV_VERSION:    version.to_s
   end

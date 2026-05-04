@@ -154,12 +154,19 @@ log_ok "optionalDependencies pinned to $VERSION"
 
 echo
 echo "$(bold "Publishing kandev@$VERSION...")"
-(
-  cd "$ROOT_DIR/apps/cli"
-  # `prepublishOnly` (in package.json) runs `pnpm build` automatically.
-  npm publish --access public --provenance
-)
-log_ok "kandev@$VERSION published"
+# Same idempotency handling as the runtime packages: capture output, treat
+# "already published" as success so partial-failure re-runs converge.
+# `prepublishOnly` (in package.json) runs `pnpm build` automatically.
+if main_output="$(cd "$ROOT_DIR/apps/cli" && npm publish --access public --provenance 2>&1)"; then
+  log_ok "kandev@$VERSION published"
+elif echo "$main_output" | grep -qE "EPUBLISHCONFLICT|cannot publish over the previously published versions|You cannot publish over"; then
+  echo "  $(yellow "skip") kandev@$VERSION already published (treated as idempotent success)" >&2
+  ALREADY_PUBLISHED+=("kandev")
+else
+  echo "  $(red "FAIL") Failed to publish kandev@$VERSION:" >&2
+  echo "$main_output" | sed 's/^/      /' >&2
+  exit 1
+fi
 
 # -- Report -------------------------------------------------------------------
 # (WORK_DIR cleanup happens via the EXIT trap above.)
