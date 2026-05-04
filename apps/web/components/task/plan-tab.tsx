@@ -41,7 +41,11 @@ export function PlanTab(props: IDockviewPanelHeaderProps) {
   const hasUnseen = plan?.created_by === "agent" && lastSeen !== plan.updated_at;
 
   return (
-    <div data-testid="plan-tab" className="relative select-none" onDoubleClick={toggleMaximize}>
+    <div
+      data-testid="plan-tab"
+      className="relative cursor-pointer select-none"
+      onDoubleClick={toggleMaximize}
+    >
       <DockviewDefaultTab {...props} />
       {hasUnseen && (
         <span
