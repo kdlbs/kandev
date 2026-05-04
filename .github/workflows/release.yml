@@ -175,9 +175,12 @@ jobs:
           git commit -m "release: $NEXT"
           git tag -a "$TAG" -m "release: $NEXT"
 
-          # Push commit and tag together. If main advanced concurrently this
-          # fails non-fast-forward; the maintainer just re-runs.
-          git push origin main "$TAG"
+          # Push commit and tag atomically — without --atomic, Git could
+          # accept the tag push but reject the main update on a non-fast-forward,
+          # leaving an orphaned tag at the pre-bump commit (and tripping the
+          # "tag already exists" guard on the next re-run). --atomic makes the
+          # whole multi-ref push succeed or fail as a unit.
+          git push --atomic origin main "$TAG"
 
       - name: Dry-run summary
         if: ${{ inputs.dry_run }}
