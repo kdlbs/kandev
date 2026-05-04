@@ -581,6 +581,18 @@ func TestInitializeSession_LoadsExistingSession(t *testing.T) {
 	}
 }
 
+// waitForWSConnected blocks until the mock's agent stream WebSocket has accepted
+// a connection. Avoids racing the goroutine that StreamUpdates spawns to maintain
+// the WS, per CLAUDE.md preference for channel-based sync over time.Sleep.
+func waitForWSConnected(t *testing.T, mock *mockAgentServer) {
+	t.Helper()
+	select {
+	case <-mock.wsConnected:
+	case <-time.After(2 * time.Second):
+		t.Fatal("agent stream did not connect within 2s")
+	}
+}
+
 // TestSendPrompt_DispatchOnlyReturnsWithoutWaiting verifies that dispatch-only
 // mode returns immediately after agentctl.Prompt succeeds, without blocking on
 // the agent's complete event. This is what message_task_kandev relies on so the
@@ -600,7 +612,7 @@ func TestSendPrompt_DispatchOnlyReturnsWithoutWaiting(t *testing.T) {
 	if err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {}, nil, nil); err != nil {
 		t.Fatalf("failed to connect stream: %v", err)
 	}
-	time.Sleep(100 * time.Millisecond)
+	waitForWSConnected(t, mock)
 
 	execution := &AgentExecution{
 		ID:            "test-exec",
@@ -655,7 +667,7 @@ func TestSendPrompt_DrainsStaleSignalFromPriorDispatchOnly(t *testing.T) {
 	if err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {}, nil, nil); err != nil {
 		t.Fatalf("failed to connect stream: %v", err)
 	}
-	time.Sleep(100 * time.Millisecond)
+	waitForWSConnected(t, mock)
 
 	execution := &AgentExecution{
 		ID:            "test-exec",
