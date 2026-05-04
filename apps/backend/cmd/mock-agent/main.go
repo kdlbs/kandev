@@ -45,6 +45,15 @@ func main() {
 	if parseTUIFlag() {
 		resumeID := parseResumeFlag()
 		resumed := resumeID != "" || parseContinueFlag()
+		// --fail-on-resume simulates the real Claude CLI's "No conversation
+		// found to continue" behaviour: when invoked with -c / --resume but
+		// the local conversation history is gone, the CLI prints the error
+		// and exits 1. Used by e2e tests to drive the lifecycle manager's
+		// resume-fallback path.
+		if resumed && parseFailOnResumeFlag() {
+			fmt.Print("\033[38;2;255;107;128mNo conversation found to continue\033[39m\r\n")
+			os.Exit(1)
+		}
 		runTUI(model, parsePromptFlag(), resumed)
 		return
 	}
@@ -281,6 +290,20 @@ func parseResumeFromArgs(args []string) string {
 // Used by TUI mode for generic "continue last session" resume.
 func parseContinueFlag() bool {
 	return slices.Contains(os.Args[1:], "-c")
+}
+
+// parseFailOnResumeFlag checks if --fail-on-resume is present in the
+// command-line args. When set together with a resume flag (-c / --resume),
+// the mock-agent emits a "No conversation found to continue" message and
+// exits 1, matching the real Claude CLI's behaviour and exercising the
+// lifecycle manager's resume-fallback path.
+func parseFailOnResumeFlag() bool {
+	return parseFailOnResumeFromArgs(os.Args)
+}
+
+// parseFailOnResumeFromArgs reports whether --fail-on-resume is in args.
+func parseFailOnResumeFromArgs(args []string) bool {
+	return slices.Contains(args[1:], "--fail-on-resume")
 }
 
 // mcpConfigPayload is the JSON structure for --mcp-config.
