@@ -236,7 +236,6 @@ func (s *Service) MoveTask(ctx context.Context, id string, workflowID string, wo
 	oldStepID := task.WorkflowStepID
 	stepChanged := oldStepID != workflowStepID
 
-	oldState := task.State
 	task.WorkflowID = workflowID
 	task.WorkflowStepID = workflowStepID
 	task.Position = position
@@ -253,12 +252,7 @@ func (s *Service) MoveTask(ctx context.Context, id string, workflowID string, wo
 		sessionID = activeSession.ID
 	}
 
-	// Publish state_changed event if state changed, otherwise just updated
-	if oldState != task.State {
-		s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState, oldWorkflowID)
-	} else {
-		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, oldWorkflowID)
-	}
+	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, oldWorkflowID)
 
 	// Publish task.moved event so the orchestrator can process on_exit/on_enter actions
 	if stepChanged {
