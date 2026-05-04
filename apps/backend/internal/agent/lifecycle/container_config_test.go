@@ -134,6 +134,7 @@ func TestBuildContainerConfig_LabelsExecutorProfileAndTaskEnvironment(t *testing
 		AgentConfig:       newConfigStubAgent(),
 		InstanceID:        "0123456789abcdef",
 		TaskID:            "task-1",
+		TaskTitle:         "Readable Task Title",
 		SessionID:         "session-1",
 		TaskEnvironmentID: "env-1",
 		ExecutorProfileID: "profile-1",
@@ -147,6 +148,7 @@ func TestBuildContainerConfig_LabelsExecutorProfileAndTaskEnvironment(t *testing
 
 	assertLabel(t, got.Labels, "kandev.managed", boolStringTrue)
 	assertLabel(t, got.Labels, "kandev.task_id", "task-1")
+	assertLabel(t, got.Labels, "kandev.task_title", "Readable Task Title")
 	assertLabel(t, got.Labels, "kandev.session_id", "session-1")
 	assertLabel(t, got.Labels, "kandev.task_environment_id", "env-1")
 	assertLabel(t, got.Labels, "kandev.executor_profile_id", "profile-1")

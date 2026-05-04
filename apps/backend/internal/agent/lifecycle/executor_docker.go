@@ -165,6 +165,7 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		AgentConfig:       req.AgentConfig,
 		WorkspacePath:     "", // Empty = no workspace mount, we'll clone instead
 		TaskID:            req.TaskID,
+		TaskTitle:         req.TaskTitle,
 		TaskEnvironmentID: req.TaskEnvironmentID,
 		SessionID:         req.SessionID,
 		ExecutorProfileID: getMetadataString(req.Metadata, "executor_profile_id"),

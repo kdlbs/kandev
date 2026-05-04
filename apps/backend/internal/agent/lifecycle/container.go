@@ -30,6 +30,7 @@ type ContainerConfig struct {
 	AgentConfig       agents.Agent
 	WorkspacePath     string // If empty, workspace is not mounted (will clone inside container)
 	TaskID            string
+	TaskTitle         string
 	TaskEnvironmentID string
 	TaskDescription   string
 	Model             string
@@ -446,6 +447,9 @@ exec /usr/local/bin/agentctl`,
 	if config.ExecutorProfileID != "" {
 		containerCfg.Labels["kandev.executor_profile_id"] = config.ExecutorProfileID
 		containerCfg.Labels["kandev.profile_id"] = config.ExecutorProfileID
+	}
+	if config.TaskTitle != "" {
+		containerCfg.Labels["kandev.task_title"] = config.TaskTitle
 	}
 	if config.ProfileInfo != nil && config.ProfileInfo.ProfileID != "" {
 		containerCfg.Labels["kandev.profile_id"] = config.ProfileInfo.ProfileID

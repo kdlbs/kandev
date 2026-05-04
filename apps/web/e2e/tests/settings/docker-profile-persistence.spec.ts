@@ -84,6 +84,7 @@ test.describe("Docker executor profile persistence", () => {
         labels: {
           "kandev.executor_profile_id": profile.id,
           "kandev.task_id": "task-abc123",
+          "kandev.task_title": "Readable Task Title",
           "kandev.task_environment_id": "env-123",
         },
       },
@@ -117,7 +118,7 @@ test.describe("Docker executor profile persistence", () => {
 
       const row = testPage.getByTestId("docker-container-row-container-1");
       await expect(row).toBeVisible({ timeout: 10_000 });
-      await expect(row.getByTestId("docker-container-task")).toContainText("task-abc123");
+      await expect(row.getByTestId("docker-container-task")).toContainText("Readable Task Title");
       await expect(row.getByText("Up 5 seconds")).toBeVisible();
 
       await testPage.getByRole("button", { name: "Delete Profile" }).click();

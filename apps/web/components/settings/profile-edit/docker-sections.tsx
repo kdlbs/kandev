@@ -293,8 +293,9 @@ export function useDockerProfileContainers(profileId: string, enabled = true) {
   return { containers, loading, refresh };
 }
 
-function containerTaskLabel(container: DockerContainer) {
-  return container.labels?.["kandev.task_id"] ?? "Untracked";
+export function containerTaskLabel(container: DockerContainer) {
+  const title = container.labels?.["kandev.task_title"]?.trim();
+  return title || container.labels?.["kandev.task_id"] || "Untracked";
 }
 
 function ContainerRow({
@@ -313,7 +314,7 @@ function ContainerRow({
     <TableRow data-testid={`docker-container-row-${container.id}`}>
       <TableCell className="font-mono text-sm">{container.name}</TableCell>
       <TableCell className="text-sm">{container.image}</TableCell>
-      <TableCell className="font-mono text-xs" data-testid="docker-container-task">
+      <TableCell className="text-sm" data-testid="docker-container-task">
         {containerTaskLabel(container)}
       </TableCell>
       <TableCell>

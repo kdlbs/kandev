@@ -173,6 +173,7 @@ type RemoteStatusProvider interface {
 type ExecutorCreateRequest struct {
 	InstanceID          string
 	TaskID              string
+	TaskTitle           string
 	SessionID           string
 	TaskEnvironmentID   string // Env this execution belongs to (shared across sessions in same task)
 	AgentProfileID      string
