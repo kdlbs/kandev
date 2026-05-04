@@ -473,6 +473,23 @@ func TestResolveReconnectContainerRef(t *testing.T) {
 	})
 }
 
+func TestReconnectInstanceID(t *testing.T) {
+	t.Run("uses requested instance for new session in existing container", func(t *testing.T) {
+		req := &ExecutorCreateRequest{InstanceID: "exec-new"}
+		got := reconnectInstanceID(req, "exec-old")
+		if got != "exec-new" {
+			t.Fatalf("reconnectInstanceID = %q, want exec-new", got)
+		}
+	})
+
+	t.Run("falls back to previous execution for legacy callers", func(t *testing.T) {
+		got := reconnectInstanceID(&ExecutorCreateRequest{}, "exec-old")
+		if got != "exec-old" {
+			t.Fatalf("reconnectInstanceID = %q, want exec-old", got)
+		}
+	})
+}
+
 func TestShouldStartExistingDockerContainer(t *testing.T) {
 	tests := []struct {
 		state string

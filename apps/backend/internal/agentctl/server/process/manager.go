@@ -65,6 +65,8 @@ type PermissionNotification struct {
 // defaultStderrBufferSize is the number of recent stderr lines to keep for error context
 const defaultStderrBufferSize = 50
 
+const agentTempDirRoot = "kandev-agent"
+
 // Manager manages the agent subprocess
 type Manager struct {
 	cfg    *config.InstanceConfig
@@ -482,6 +484,11 @@ func (m *Manager) Start(ctx context.Context) error {
 		return fmt.Errorf("no agent command configured")
 	}
 
+	if err := m.ensureAgentTempEnv(); err != nil {
+		m.status.Store(StatusError)
+		return err
+	}
+
 	// Build adapter config and create protocol adapter
 	if err := m.buildAdapterConfig(); err != nil {
 		m.status.Store(StatusError)
@@ -631,6 +638,10 @@ func (m *Manager) buildAdapterConfig() error {
 // buildFinalCommand assembles the full command args and creates the exec.Cmd.
 // The process group is set so child processes can be killed together.
 func (m *Manager) buildFinalCommand() error {
+	if err := m.ensureAgentTempEnv(); err != nil {
+		return err
+	}
+
 	extraArgs := m.adapter.PrepareCommandArgs()
 
 	cmdArgs := make([]string, 0, len(m.cfg.AgentArgs)-1+len(extraArgs))
@@ -661,6 +672,68 @@ func (m *Manager) buildFinalCommand() error {
 		zap.Int("env_count", len(m.cfg.AgentEnv)))
 
 	return nil
+}
+
+func (m *Manager) ensureAgentTempEnv() error {
+	dir := filepath.Join(os.TempDir(), agentTempDirRoot, agentTempDirName(m.cfg.SessionID, m.cfg.Port))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("failed to create agent temp dir: %w", err)
+	}
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		m.cfg.AgentEnv = upsertEnvValue(m.cfg.AgentEnv, key, dir)
+	}
+	return nil
+}
+
+func agentTempDirName(sessionID string, port int) string {
+	name := strings.TrimSpace(sessionID)
+	if name == "" && port > 0 {
+		name = fmt.Sprintf("port-%d", port)
+	}
+	if name == "" {
+		return "default"
+	}
+
+	var b strings.Builder
+	for _, r := range name {
+		if isAgentTempDirRune(r) {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	cleaned := strings.Trim(b.String(), "._-")
+	if cleaned == "" {
+		return "default"
+	}
+	return cleaned
+}
+
+func isAgentTempDirRune(r rune) bool {
+	return r >= 'a' && r <= 'z' ||
+		r >= 'A' && r <= 'Z' ||
+		r >= '0' && r <= '9' ||
+		r == '.' || r == '_' || r == '-'
+}
+
+func upsertEnvValue(env []string, key, value string) []string {
+	prefix := key + "="
+	next := make([]string, 0, len(env)+1)
+	replaced := false
+	for _, item := range env {
+		if strings.HasPrefix(item, prefix) {
+			if !replaced {
+				next = append(next, prefix+value)
+				replaced = true
+			}
+			continue
+		}
+		next = append(next, item)
+	}
+	if !replaced {
+		next = append(next, prefix+value)
+	}
+	return next
 }
 
 // startProcessPipes creates stdin, stdout, and stderr pipes for the agent subprocess.

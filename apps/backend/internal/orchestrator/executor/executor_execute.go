@@ -1145,19 +1145,19 @@ func (e *Executor) applyExistingEnvironmentRuntimeMetadata(ctx context.Context, 
 	if env == nil || env.ID == "" {
 		return
 	}
-	running := e.latestExecutorRunningForEnvironment(ctx, req.TaskID, env.ID)
+	running := e.latestExecutorRunningForEnvironment(ctx, req.TaskID, env)
 	if running == nil {
 		return
 	}
 	applyExecutorRunningMetadata(req, running)
 }
 
-func (e *Executor) latestExecutorRunningForEnvironment(ctx context.Context, taskID, envID string) *models.ExecutorRunning {
+func (e *Executor) latestExecutorRunningForEnvironment(ctx context.Context, taskID string, env *models.TaskEnvironment) *models.ExecutorRunning {
 	sessions, err := e.repo.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		e.logger.Warn("failed to list sessions for task environment metadata reuse",
 			zap.String("task_id", taskID),
-			zap.String("task_environment_id", envID),
+			zap.String("task_environment_id", env.ID),
 			zap.Error(err))
 		return nil
 	}
@@ -1171,17 +1171,33 @@ func (e *Executor) latestExecutorRunningForEnvironment(ctx context.Context, task
 		return sessions[i].ID > sessions[j].ID
 	})
 
+	var fallback *models.ExecutorRunning
 	for _, s := range sessions {
-		if s.TaskEnvironmentID != envID {
-			continue
-		}
 		running, runErr := e.repo.GetExecutorRunningBySessionID(ctx, s.ID)
 		if runErr != nil || running == nil {
 			continue
 		}
-		return running
+		if s.TaskEnvironmentID == env.ID {
+			return running
+		}
+		if fallback == nil && executorRunningMatchesEnvironment(running, env) {
+			fallback = running
+		}
 	}
-	return nil
+	return fallback
+}
+
+func executorRunningMatchesEnvironment(running *models.ExecutorRunning, env *models.TaskEnvironment) bool {
+	if running == nil || env == nil {
+		return false
+	}
+	if env.ContainerID != "" && running.ContainerID == env.ContainerID {
+		return true
+	}
+	if env.AgentExecutionID != "" && running.AgentExecutionID == env.AgentExecutionID {
+		return true
+	}
+	return false
 }
 
 func applyExecutorRunningMetadata(req *LaunchAgentRequest, running *models.ExecutorRunning) {

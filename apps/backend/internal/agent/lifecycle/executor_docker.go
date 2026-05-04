@@ -260,14 +260,15 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 
 	// Check if the previous instance is still alive
 	authToken := req.AuthToken
-	instancePort, reusingProcess, err := r.findExistingInstance(ctx, dockerClient, ctl, req, info.ID, containerIP, prevID, authToken)
+	instanceID := reconnectInstanceID(req, prevID)
+	instancePort, reusingProcess, err := r.findExistingInstance(ctx, dockerClient, ctl, req, info.ID, containerIP, instanceID, authToken)
 	if err != nil && req.BootstrapNonce != "" && isAgentctlAuthError(err) {
 		var handshakeErr error
 		authToken, handshakeErr = ctl.Handshake(ctx, req.BootstrapNonce)
 		if handshakeErr != nil {
 			return nil, fmt.Errorf("agentctl auth failed and re-handshake failed in container %s: %w", info.ID, handshakeErr)
 		}
-		instancePort, reusingProcess, err = r.findExistingInstance(ctx, dockerClient, ctl, req, info.ID, containerIP, prevID, authToken)
+		instancePort, reusingProcess, err = r.findExistingInstance(ctx, dockerClient, ctl, req, info.ID, containerIP, instanceID, authToken)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to find instance in container %s: %w", info.ID, err)
@@ -313,6 +314,13 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 		Metadata:      metadata,
 		AuthToken:     refreshedAuthToken,
 	}, nil
+}
+
+func reconnectInstanceID(req *ExecutorCreateRequest, previousExecutionID string) string {
+	if req != nil && strings.TrimSpace(req.InstanceID) != "" {
+		return req.InstanceID
+	}
+	return previousExecutionID
 }
 
 func resolveReconnectContainerRef(req *ExecutorCreateRequest) (string, error) {

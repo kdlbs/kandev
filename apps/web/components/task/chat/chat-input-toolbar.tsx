@@ -45,6 +45,7 @@ export type ChatInputToolbarProps = {
   /** Whether the input has content to send (text, comments, or context) */
   hasContent?: boolean;
   isDisabled: boolean;
+  submitDisabledReason?: string;
   isSending: boolean;
   onCancel: () => void | Promise<void>;
   onSubmit: () => void;
@@ -77,6 +78,7 @@ type SubmitButtonProps = {
   isAgentBusy: boolean;
   hasContent: boolean;
   isDisabled: boolean;
+  submitDisabledReason?: string;
   isSending: boolean;
   planModeEnabled: boolean;
   onCancel: () => void | Promise<void>;
@@ -84,7 +86,12 @@ type SubmitButtonProps = {
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
 };
 
-function submitTooltipDescription(isAgentBusy: boolean, planModeEnabled: boolean) {
+function submitTooltipDescription(
+  isAgentBusy: boolean,
+  planModeEnabled: boolean,
+  submitDisabledReason?: string,
+) {
+  if (submitDisabledReason) return submitDisabledReason;
   if (isAgentBusy) return "Queue message";
   if (planModeEnabled) return "Request plan changes";
   return undefined;
@@ -94,6 +101,7 @@ function SubmitButton({
   isAgentBusy,
   hasContent,
   isDisabled,
+  submitDisabledReason,
   isSending,
   planModeEnabled,
   onCancel,
@@ -108,6 +116,11 @@ function SubmitButton({
   // take several seconds, and without this the user clicks repeatedly and
   // each click hits the backend.
   const [isCancelling, setIsCancelling] = useState(false);
+  const tooltipDescription = submitTooltipDescription(
+    isAgentBusy,
+    planModeEnabled,
+    submitDisabledReason,
+  );
   // Re-entrancy guard via ref: `disabled={isCancelling}` already blocks DOM
   // clicks, but the ref makes the guard effective for any programmatic caller
   // and keeps `isCancelling` out of the useCallback deps so the handler
@@ -156,25 +169,27 @@ function SubmitButton({
       {showSendButton && (
         <KeyboardShortcutTooltip
           shortcut={submitShortcut}
-          description={submitTooltipDescription(isAgentBusy, planModeEnabled)}
-          enabled={!isDisabled}
+          description={tooltipDescription}
+          enabled={!isDisabled || !!tooltipDescription}
         >
-          <Button
-            type="button"
-            variant="default"
-            size="icon"
-            className={cn(
-              "h-7 w-7 rounded-full cursor-pointer",
-              planModeEnabled && "bg-violet-600 hover:bg-violet-500",
-            )}
-            disabled={isDisabled}
-            onClick={onSubmit}
-            data-testid="submit-message-button"
-          >
-            {isSending && <GridSpinner className="text-primary-foreground" />}
-            {!isSending && planModeEnabled && <IconFileTextSpark className="h-4 w-4" />}
-            {!isSending && !planModeEnabled && <IconArrowUp className="h-4 w-4" />}
-          </Button>
+          <span className="inline-flex">
+            <Button
+              type="button"
+              variant="default"
+              size="icon"
+              className={cn(
+                "h-7 w-7 rounded-full cursor-pointer",
+                planModeEnabled && "bg-violet-600 hover:bg-violet-500",
+              )}
+              disabled={isDisabled}
+              onClick={onSubmit}
+              data-testid="submit-message-button"
+            >
+              {isSending && <GridSpinner className="text-primary-foreground" />}
+              {!isSending && planModeEnabled && <IconFileTextSpark className="h-4 w-4" />}
+              {!isSending && !planModeEnabled && <IconArrowUp className="h-4 w-4" />}
+            </Button>
+          </span>
         </KeyboardShortcutTooltip>
       )}
     </div>
@@ -305,6 +320,7 @@ function ToolbarRightSection({
   hasContent,
   onImplementPlan,
   isDisabled,
+  submitDisabledReason,
   isSending,
   onCancel,
   onSubmit,
@@ -318,6 +334,7 @@ function ToolbarRightSection({
   hasContent: boolean;
   onImplementPlan?: () => void;
   isDisabled: boolean;
+  submitDisabledReason?: string;
   isSending: boolean;
   onCancel: () => void;
   onSubmit: () => void;
@@ -335,6 +352,7 @@ function ToolbarRightSection({
           isAgentBusy={isAgentBusy}
           hasContent={hasContent}
           isDisabled={isDisabled}
+          submitDisabledReason={submitDisabledReason}
           isSending={isSending}
           planModeEnabled={planModeEnabled}
           onCancel={onCancel}
@@ -450,13 +468,21 @@ function MinimalToolbar({
   isAgentBusy,
   hasContent,
   isDisabled,
+  submitDisabledReason,
   isSending,
   onCancel,
   onSubmit,
   submitKey = "cmd_enter",
 }: Pick<
   ChatInputToolbarProps,
-  "isAgentBusy" | "hasContent" | "isDisabled" | "isSending" | "onCancel" | "onSubmit" | "submitKey"
+  | "isAgentBusy"
+  | "hasContent"
+  | "isDisabled"
+  | "submitDisabledReason"
+  | "isSending"
+  | "onCancel"
+  | "onSubmit"
+  | "submitKey"
 >) {
   const submitShortcut = submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
   return (
@@ -465,6 +491,7 @@ function MinimalToolbar({
         isAgentBusy={isAgentBusy}
         hasContent={hasContent ?? false}
         isDisabled={isDisabled}
+        submitDisabledReason={submitDisabledReason}
         isSending={isSending}
         planModeEnabled={false}
         onCancel={onCancel}
@@ -502,6 +529,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         isAgentBusy={props.isAgentBusy}
         hasContent={props.hasContent}
         isDisabled={props.isDisabled}
+        submitDisabledReason={props.submitDisabledReason}
         isSending={props.isSending}
         onCancel={props.onCancel}
         onSubmit={props.onSubmit}
@@ -572,6 +600,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         hasContent={props.hasContent ?? false}
         onImplementPlan={props.onImplementPlan}
         isDisabled={props.isDisabled}
+        submitDisabledReason={props.submitDisabledReason}
         isSending={props.isSending}
         onCancel={props.onCancel}
         onSubmit={props.onSubmit}

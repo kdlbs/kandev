@@ -231,6 +231,8 @@ function buildEditorAreaProps(
     handleSubmitWithReset: s.handleSubmitWithReset,
     inputPlaceholder: s.inputPlaceholder,
     isDisabled: s.isDisabled,
+    submitDisabled: s.submitDisabled,
+    submitDisabledReason: s.submitDisabledReason,
     hasClarification: s.hasClarification,
     planModeEnabled: p.planModeEnabled,
     planModeAvailable: p.planModeAvailable ?? true,

@@ -97,12 +97,13 @@ function computeDerivedState(params: {
   hasAgentCommands: boolean;
 }) {
   const isDisabled =
-    params.isStarting ||
     params.isMoving ||
     params.isSending ||
     params.isFailed ||
     params.needsRecovery ||
     params.executorUnavailable;
+  const submitDisabled = params.isStarting || isDisabled;
+  const submitDisabledReason = params.isStarting ? "The agent is still being set up." : undefined;
   const hasClarification = !!(params.pendingClarification && params.onClarificationResolved);
   const hasPendingComments = !!(
     params.pendingCommentsByFile && Object.keys(params.pendingCommentsByFile).length > 0
@@ -117,6 +118,8 @@ function computeDerivedState(params: {
   );
   return {
     isDisabled,
+    submitDisabled,
+    submitDisabledReason,
     hasClarification,
     hasPendingComments,
     hasContextZone,

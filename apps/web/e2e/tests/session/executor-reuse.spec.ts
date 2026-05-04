@@ -130,7 +130,7 @@ test.describe("Executor reuse", () => {
     }
   });
 
-  test("reset environment from executor settings popover removes the environment", async ({
+  test("worktree executor sessions do not show the managed environment popover", async ({
     testPage,
     apiClient,
     seedData,
@@ -146,6 +146,7 @@ test.describe("Executor reuse", () => {
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.worktreeExecutorProfileId,
       },
     );
 
@@ -161,6 +162,7 @@ test.describe("Executor reuse", () => {
 
     const envBefore = await apiClient.getTaskEnvironment(task.id);
     expect(envBefore).not.toBeNull();
+    expect(envBefore!.executor_type).toBe("worktree");
 
     // Navigate to task
     const kanban = new KanbanPage(testPage);
@@ -174,28 +176,6 @@ test.describe("Executor reuse", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    // Open popover
-    await testPage.getByTestId("executor-settings-button").click();
-    const popover = testPage.getByTestId("executor-settings-popover");
-    await expect(popover).toBeVisible({ timeout: 5_000 });
-
-    // Click Reset → confirmation dialog
-    await testPage.getByTestId("executor-settings-reset").click();
-    // Pick the acknowledgement checkbox by its label rather than position so
-    // adding another checkbox to the dialog (e.g. push-before-reset) doesn't
-    // silently make this test click the wrong control.
-    await testPage.getByLabel("I understand any uncommitted changes will be lost.").click();
-    await testPage.getByTestId("reset-env-confirm").click();
-
-    // Poll environment until gone
-    await expect
-      .poll(
-        async () => {
-          const env = await apiClient.getTaskEnvironment(task.id);
-          return env;
-        },
-        { timeout: 15_000, message: "Waiting for environment to be reset" },
-      )
-      .toBeNull();
+    await expect(testPage.getByTestId("executor-settings-button")).toHaveCount(0);
   });
 });

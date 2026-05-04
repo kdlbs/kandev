@@ -90,7 +90,7 @@ test.describe("Task creation", () => {
       throw new Error(`agent for profile ${profile.id} not found`);
     }
     const dockerExec = await apiClient.createExecutor("E2E Docker Empty Agent", "local_docker");
-    await apiClient.createExecutorProfile(dockerExec.id, {
+    const dockerProfile = await apiClient.createExecutorProfile(dockerExec.id, {
       name: "Docker Missing Auth",
       config: {
         image_tag: "kandev-mock-agent:test",
@@ -130,6 +130,13 @@ test.describe("Task creation", () => {
 
       await expect(testPage.getByTestId("agent-profile-empty-state")).toContainText(
         "No compatible agent profiles",
+      );
+      await expect(testPage.getByRole("link", { name: "Configure credentials" })).toHaveAttribute(
+        "href",
+        `/settings/executors/${dockerProfile.id}`,
+      );
+      await expect(dialog).toContainText(
+        "A Docker container will be created from the selected base branch and checked out on a task branch.",
       );
       await expect(testPage.getByTestId(START_AGENT_TEST_ID)).toBeDisabled();
     } finally {

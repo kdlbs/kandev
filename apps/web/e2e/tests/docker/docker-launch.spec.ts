@@ -81,7 +81,8 @@ async function waitForLatestSessionDone(
       async () => {
         const { sessions } = await apiClient.listTaskSessions(taskId);
         if (sessions.length < expectedCount) return false;
-        const latest = sessions[sessions.length - 1];
+        // API returns sessions newest-first.
+        const latest = sessions[0];
         return DONE_STATES.includes(latest?.state ?? "");
       },
       { timeout, message },
@@ -106,6 +107,28 @@ async function waitForSessionDone(
       { timeout, message },
     )
     .toBe(true);
+}
+
+async function waitForSessionEnvironment(
+  apiClient: import("../../helpers/api-client").ApiClient,
+  options: {
+    taskId: string;
+    sessionId: string;
+    expectedEnvironmentId: string;
+    message: string;
+    timeout?: number;
+  },
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(options.taskId);
+        const session = sessions.find((s) => s.id === options.sessionId);
+        return session?.task_environment_id ?? "";
+      },
+      { timeout: options.timeout ?? 60_000, message: options.message },
+    )
+    .toBe(options.expectedEnvironmentId);
 }
 
 test.describe("Docker executor — launch + reuse + recovery", () => {
@@ -180,6 +203,9 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       await expect(panel).toHaveAttribute("data-status", "preparing");
       await expect(panel.getByTestId("prepare-progress-header-spinner")).toBeVisible();
       await expect(panel).toContainText("Waiting for Docker container");
+      await expect(testPage.getByTestId("submit-message-button")).toBeDisabled({
+        timeout: 15_000,
+      });
 
       const launched = await launchPromise;
       await waitForSessionDone(
@@ -385,11 +411,108 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
     await session.expectTerminalHasText("terminal-after-restart");
   });
 
-  // FIXME: blocked on backend gap — workflow-prepared sessions (the "Review" step
-  // auto-creates a session without invoking persistTaskEnvironment, so
-  // session.task_environment_id stays empty for those rows). Re-enable once
-  // the prepare-only path also stamps task_environment_id from the existing env.
-  test.fixme("multiple sessions on the same task share one task environment", async ({
+  test("page refresh after an external stop resumes the same Docker container", async ({
+    apiClient,
+    seedData,
+    testPage,
+  }) => {
+    test.setTimeout(180_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Docker Refresh Reuse",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.dockerExecutorProfileId,
+      },
+    );
+    await waitForLatestSessionDone(apiClient, task.id, 1, "Waiting for first Docker session");
+    const before = await apiClient.getTaskEnvironment(task.id);
+    expect(before?.container_id).toBeTruthy();
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    dockerStop(before!.container_id!);
+    await expect
+      .poll(() => dockerState(before!.container_id!), {
+        timeout: 10_000,
+        message: "Waiting for external Docker stop",
+      })
+      .toBe("exited");
+
+    await testPage.reload();
+    await session.waitForLoad();
+
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.container_id, {
+        timeout: 30_000,
+        message: "Refresh resume must keep the original task container",
+      })
+      .toBe(before!.container_id);
+    await expect
+      .poll(() => dockerState(before!.container_id!), {
+        timeout: 60_000,
+        message: "Waiting for refresh resume to restart the original container",
+      })
+      .toBe("running");
+
+    await session.clickTab("Terminal");
+    await session.expectTerminalConnected(30_000);
+    await session.typeInTerminal("printf terminal-after-refresh");
+    await session.expectTerminalHasText("terminal-after-refresh");
+  });
+
+  test("reset environment from executor settings popover removes the Docker container", async ({
+    apiClient,
+    seedData,
+    testPage,
+  }) => {
+    test.setTimeout(180_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Docker Popover Reset",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.dockerExecutorProfileId,
+      },
+    );
+    await waitForLatestSessionDone(apiClient, task.id, 1, "Waiting for reset session");
+    const env = await apiClient.getTaskEnvironment(task.id);
+    expect(env?.container_id).toBeTruthy();
+    const containerID = env!.container_id!;
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    await testPage.getByTestId("executor-settings-button").click();
+    const popover = testPage.getByTestId("executor-settings-popover");
+    await expect(popover).toBeVisible({ timeout: 5_000 });
+    await testPage.getByTestId("executor-settings-reset").click();
+    await testPage.getByLabel("I understand any uncommitted changes will be lost.").click();
+    await testPage.getByTestId("reset-env-confirm").click();
+
+    await waitForDockerContainerRemoved(containerID, "Reset should remove Docker container");
+    await expect
+      .poll(async () => await apiClient.getTaskEnvironment(task.id), {
+        timeout: 15_000,
+        message: "Waiting for Docker environment row to be reset",
+      })
+      .toBeNull();
+  });
+
+  test("multiple sessions on the same task share one task environment", async ({
     apiClient,
     seedData,
   }) => {
@@ -411,7 +534,7 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
     const before = await apiClient.getTaskEnvironment(task.id);
     expect(before!.container_id).toBeTruthy();
 
-    await apiClient.launchSession({
+    const launched = await apiClient.launchSession({
       task_id: task.id,
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.dockerExecutorProfileId,
@@ -419,32 +542,24 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       auto_start: true,
     });
 
-    // Wait for the session count to grow (workflow may also create sessions),
-    // then for the latest one to settle.
-    await expect
-      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
-        timeout: 30_000,
-        message: "Waiting for an additional session to be created",
-      })
-      .toBeGreaterThanOrEqual(2);
-    await expect
-      .poll(
-        async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
-          return DONE_STATES.includes(sessions[sessions.length - 1]?.state ?? "");
-        },
-        { timeout: 60_000, message: "Waiting for latest session to settle" },
-      )
-      .toBe(true);
+    await waitForSessionEnvironment(apiClient, {
+      taskId: task.id,
+      sessionId: launched.session_id,
+      expectedEnvironmentId: before!.id,
+      message: "Waiting for second Docker session to reuse the task environment",
+    });
 
-    // The durable contract: every session on this task is bound to the same
-    // task_environment_id. The container itself may be recreated under the
-    // hood, but the env row is the stable handle.
+    const after = await apiClient.getTaskEnvironment(task.id);
+    expect(after?.id).toBe(before!.id);
+    expect(after?.container_id).toBe(before!.container_id);
+
+    // The durable contract for a launched session: it is bound to the same
+    // task_environment_id rather than creating its own container-scoped env.
+    // The list can also include unlaunched CREATED sessions from workflow
+    // automation; those legitimately have no task_environment_id yet.
     const { sessions } = await apiClient.listTaskSessions(task.id);
-    expect(sessions.length).toBeGreaterThanOrEqual(2);
-    for (const s of sessions) {
-      expect(s.task_environment_id, `session ${s.id} should reuse the env`).toBe(before!.id);
-    }
+    const launchedSession = sessions.find((s) => s.id === launched.session_id);
+    expect(launchedSession?.task_environment_id).toBe(before!.id);
   });
 
   // FIXME: blocked on backend gap — DockerExecutor.reconnectToContainer constructs

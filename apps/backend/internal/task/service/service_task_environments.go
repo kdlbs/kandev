@@ -97,7 +97,10 @@ func (s *Service) checkAnySessionRunning(ctx context.Context, taskID string) (bo
 }
 
 // isAnySessionRunning is the default SessionRunningChecker: a session is running
-// if it has an ExecutorRunning row in the repo.
+// if it has an ExecutorRunning row and is actively starting or processing a turn.
+// Idle sessions can keep an executor row so terminals and resumed prompts have
+// a live workspace, but Reset Environment must still be able to tear that
+// workspace down once the agent is waiting for input.
 func (s *Service) isAnySessionRunning(ctx context.Context, taskID string) (bool, error) {
 	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
 	if err != nil {
@@ -114,11 +117,15 @@ func (s *Service) isAnySessionRunning(ctx context.Context, taskID string) (bool,
 			}
 			return false, err
 		}
-		if running != nil {
+		if running != nil && sessionBlocksEnvironmentReset(sess.State) {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+func sessionBlocksEnvironmentReset(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateStarting || state == models.TaskSessionStateRunning
 }
 
 // GetTaskEnvironmentByTaskID returns the active task environment for a task.

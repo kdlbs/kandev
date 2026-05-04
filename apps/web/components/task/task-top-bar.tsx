@@ -137,6 +137,7 @@ const TaskTopBar = memo(function TaskTopBar({
         isArchived={isArchived}
         workspaceId={workspaceId}
         isRemoteExecutor={isRemoteExecutor}
+        remoteExecutorType={remoteExecutorType}
         isAgentctlReady={isAgentctlReady}
         taskTitle={taskTitle}
       />
@@ -329,6 +330,7 @@ function AttentionStatusGroup({
   isArchived,
   workspaceId,
   isRemoteExecutor,
+  remoteExecutorType,
   isAgentctlReady,
   taskTitle,
 }: {
@@ -337,15 +339,17 @@ function AttentionStatusGroup({
   isArchived?: boolean;
   workspaceId?: string | null;
   isRemoteExecutor?: boolean;
+  remoteExecutorType?: string | null;
   isAgentctlReady?: boolean;
   taskTitle?: string;
 }) {
+  const showExecutorSettings = shouldShowExecutorEnvironmentControls(remoteExecutorType);
   return (
     <TopbarCluster label="Task status and attention" className="[&_button]:h-8 [&_button]:text-xs">
       <DocumentControls activeSessionId={activeSessionId ?? null} />
       {!isArchived && (
         <>
-          <ExecutorSettingsButton taskId={taskId} />
+          {showExecutorSettings && <ExecutorSettingsButton taskId={taskId} />}
           <PortForwardButton
             isRemoteExecutor={isRemoteExecutor}
             sessionId={activeSessionId}
@@ -401,6 +405,7 @@ function TopBarRight({
   isArchived,
   workspaceId,
   isRemoteExecutor,
+  remoteExecutorType,
   isAgentctlReady,
   taskTitle,
 }: {
@@ -411,6 +416,7 @@ function TopBarRight({
   isArchived?: boolean;
   workspaceId?: string | null;
   isRemoteExecutor?: boolean;
+  remoteExecutorType?: string | null;
   isAgentctlReady?: boolean;
   taskTitle?: string;
 }) {
@@ -440,6 +446,7 @@ function TopBarRight({
         isArchived={isArchived}
         workspaceId={workspaceId}
         isRemoteExecutor={isRemoteExecutor}
+        remoteExecutorType={remoteExecutorType}
         isAgentctlReady={isAgentctlReady}
         taskTitle={taskTitle}
       />
@@ -463,6 +470,17 @@ function TopBarRight({
   return (
     <TopbarActionOverflow items={items} className="justify-self-end [&_button]:whitespace-nowrap" />
   );
+}
+
+function shouldShowExecutorEnvironmentControls(executorType?: string | null): boolean {
+  switch (executorType) {
+    case "local_docker":
+    case "remote_docker":
+    case "sprites":
+      return true;
+    default:
+      return false;
+  }
 }
 
 export { TaskTopBar };

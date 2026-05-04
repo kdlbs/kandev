@@ -175,6 +175,51 @@ func TestApplyExistingEnvironmentRuntimeMetadata_CarriesPersistentSecrets(t *tes
 	}
 }
 
+func TestApplyExistingEnvironmentRuntimeMetadata_FallsBackToMatchingContainer(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+	repo := newMockRepository()
+	now := time.Now().UTC()
+	repo.sessions["session-old"] = &models.TaskSession{
+		ID:        "session-old",
+		TaskID:    "task-1",
+		StartedAt: now,
+		UpdatedAt: now,
+	}
+	repo.executorsRunning["session-old"] = &models.ExecutorRunning{
+		SessionID:        "session-old",
+		AgentExecutionID: "exec-old",
+		ContainerID:      "container-old",
+		Metadata: map[string]interface{}{
+			lifecycle.MetadataKeyAuthTokenSecret:      "secret-token",
+			lifecycle.MetadataKeyBootstrapNonceSecret: "secret-nonce",
+		},
+	}
+	e := &Executor{logger: log, repo: repo}
+	req := &LaunchAgentRequest{TaskID: "task-1"}
+
+	e.applyExistingEnvironmentRuntimeMetadata(context.Background(), req, &models.TaskEnvironment{
+		ID:               "env-1",
+		AgentExecutionID: "exec-old",
+		ContainerID:      "container-old",
+	})
+
+	if req.PreviousExecutionID != "exec-old" {
+		t.Fatalf("PreviousExecutionID = %q, want exec-old", req.PreviousExecutionID)
+	}
+	if req.Metadata[lifecycle.MetadataKeyContainerID] != "container-old" {
+		t.Fatalf("container metadata = %v, want container-old", req.Metadata[lifecycle.MetadataKeyContainerID])
+	}
+	if req.Metadata[lifecycle.MetadataKeyAuthTokenSecret] != "secret-token" {
+		t.Fatalf("auth token secret missing: %v", req.Metadata)
+	}
+	if req.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] != "secret-nonce" {
+		t.Fatalf("bootstrap nonce secret missing: %v", req.Metadata)
+	}
+}
+
 func TestBuildResumeRequest_ReusesTaskEnvironmentRuntimeMetadata(t *testing.T) {
 	repo := newMockRepository()
 	agentManager := &mockAgentManager{}

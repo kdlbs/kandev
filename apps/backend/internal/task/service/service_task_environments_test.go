@@ -127,6 +127,27 @@ func TestResetTaskEnvironment_SessionRunningBlocks(t *testing.T) {
 	}
 }
 
+func TestSessionBlocksEnvironmentReset(t *testing.T) {
+	tests := []struct {
+		state models.TaskSessionState
+		want  bool
+	}{
+		{models.TaskSessionStateCreated, false},
+		{models.TaskSessionStateStarting, true},
+		{models.TaskSessionStateRunning, true},
+		{models.TaskSessionStateWaitingForInput, false},
+		{models.TaskSessionStateCompleted, false},
+		{models.TaskSessionStateFailed, false},
+		{models.TaskSessionStateCancelled, false},
+	}
+
+	for _, tt := range tests {
+		if got := sessionBlocksEnvironmentReset(tt.state); got != tt.want {
+			t.Fatalf("sessionBlocksEnvironmentReset(%q) = %v, want %v", tt.state, got, tt.want)
+		}
+	}
+}
+
 func TestResetTaskEnvironment_DestroysEachResourceTypeAndDeletesRow(t *testing.T) {
 	repo := &stubEnvRepo{env: &models.TaskEnvironment{
 		ID:               "env-1",

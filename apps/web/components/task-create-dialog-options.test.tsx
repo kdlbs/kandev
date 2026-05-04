@@ -9,10 +9,17 @@ function exec(id: string, type: Executor["type"]): Executor {
 const WORKTREE_SINGLE = "A git worktree will be created from the base branch.";
 const WORKTREE_MULTI =
   "A git worktree will be created for each repository in a parent folder. The agent runs in that parent folder so it can see every worktree side by side.";
+const DOCKER =
+  "A Docker container will be created from the selected base branch and checked out on a task branch.";
 const LOCAL = "The agent will run directly on the repository.";
 
 describe("computeExecutorHint", () => {
-  const executors = [exec("wt", "worktree"), exec("loc", "local")];
+  const executors = [
+    exec("wt", "worktree"),
+    exec("loc", "local"),
+    exec("docker", "local_docker"),
+    exec("remote-docker", "remote_docker"),
+  ];
 
   it("returns the multi-repo worktree hint when more than one repo is selected", () => {
     expect(computeExecutorHint(executors, "wt", 2)).toBe(WORKTREE_MULTI);
@@ -20,6 +27,11 @@ describe("computeExecutorHint", () => {
 
   it("returns the single-repo worktree hint when exactly one repo is selected", () => {
     expect(computeExecutorHint(executors, "wt", 1)).toBe(WORKTREE_SINGLE);
+  });
+
+  it("explains that Docker profiles create an isolated task branch", () => {
+    expect(computeExecutorHint(executors, "docker", 1)).toBe(DOCKER);
+    expect(computeExecutorHint(executors, "remote-docker", 1)).toBe(DOCKER);
   });
 
   it("returns the local hint regardless of repoCount", () => {
