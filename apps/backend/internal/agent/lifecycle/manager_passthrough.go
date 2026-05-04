@@ -605,13 +605,21 @@ func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpd
 		if execution.PassthroughProcessID != "" && status.ProcessID == execution.PassthroughProcessID {
 			// Snapshot the start time and resume-launch flag synchronously so the
 			// goroutine doesn't race the next launch's writes to those fields.
-			// passthroughResumeFailed and friends are flipped inside
-			// handlePassthroughExit only after isFastFailExit confirms the exit
-			// was a launch failure — flipping them here would also poison
-			// healthy resumed sessions that exit cleanly or crash long after
-			// launch.
 			startedAt := execution.PassthroughStartedAt
 			usedResume := execution.passthroughLaunchUsedResume
+			// Detect fast-fail synchronously so we can flip the resume-failed
+			// flag before the next WS reconnect arrives. The goroutine below
+			// would otherwise miss this race: when the PTY exits the WS bridge
+			// closes too, and by the time the goroutine runs (after a 100ms
+			// cleanup delay) HasActiveWebSocketBySession returns false and it
+			// bails without setting any flags. Scoped to fast-fail+usedResume
+			// so a healthy resumed session that exits cleanly or crashes long
+			// after launch keeps its resume intent for auto-restart.
+			if usedResume && passthroughExitIsFastFail(startedAt, status) {
+				execution.passthroughResumeFailed = true
+				execution.isResumedSession = false
+				execution.passthroughLaunchUsedResume = false
+			}
 			go m.handlePassthroughExit(execution, status, startedAt, usedResume)
 		} else {
 			m.logger.Debug("process exited but not the passthrough process, skipping auto-restart",
@@ -693,14 +701,10 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 		// restart — "No conversation found to continue". Retry once with a
 		// fresh command (no resume flag) before giving up.
 		if usedResume {
-			// Confirmed fast-fail of a resume launch: flip the sticky
-			// resume-failed flag so any subsequent ResumePassthroughSession
-			// call (auto-restart or a new WS reconnect via Ensure) builds a
-			// fresh command. Done before the relaunch so the WS retries that
-			// race with this goroutine see the new value.
-			execution.passthroughResumeFailed = true
-			execution.isResumedSession = false
-			execution.passthroughLaunchUsedResume = false
+			// Resume-failed flags have already been flipped synchronously in
+			// handlePassthroughStatus (see passthroughExitIsFastFail) so any
+			// concurrent WS reconnect that races this goroutine sees the new
+			// values immediately.
 			m.attemptResumeFallback(execution, interactiveRunner, sessionID, exitCode, uptime)
 			return
 		}
@@ -875,6 +879,22 @@ func (m *Manager) notifyFastFailExit(runner *process.InteractiveRunner, sessionI
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+}
+
+// passthroughExitIsFastFail wraps isFastFailExit for the synchronous
+// status-callback path that doesn't yet have the unpacked exit code or
+// timestamp. Same window/semantics as the goroutine path.
+func passthroughExitIsFastFail(startedAt time.Time, status *agentctltypes.ProcessStatusUpdate) bool {
+	const fastFailWindow = 2 * time.Second
+	exitCode := 0
+	if status.ExitCode != nil {
+		exitCode = *status.ExitCode
+	}
+	exitedAt := status.Timestamp
+	if exitedAt.IsZero() {
+		exitedAt = time.Now()
+	}
+	return isFastFailExit(startedAt, exitedAt, exitCode, fastFailWindow)
 }
 
 // isFastFailExit reports whether a passthrough process exit looks like a
