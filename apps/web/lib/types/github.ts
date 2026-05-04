@@ -16,6 +16,29 @@ export type GitHubStatus = {
   token_secret_id?: string;
   required_scopes: string[];
   diagnostics?: AuthDiagnostics;
+  rate_limit?: GitHubRateLimitInfo;
+};
+
+export type GitHubRateLimitResource = "core" | "graphql" | "search";
+
+export type GitHubRateLimitSnapshot = {
+  resource: GitHubRateLimitResource;
+  remaining: number;
+  limit: number;
+  reset_at: string;
+  updated_at: string;
+};
+
+export type GitHubRateLimitInfo = {
+  core?: GitHubRateLimitSnapshot;
+  graphql?: GitHubRateLimitSnapshot;
+  search?: GitHubRateLimitSnapshot;
+};
+
+export type GitHubRateLimitUpdate = {
+  snapshots: GitHubRateLimitSnapshot[];
+  trigger: GitHubRateLimitResource;
+  exhaustion_transition?: "exhausted" | "recovered";
 };
 
 export type GitHubPR = {

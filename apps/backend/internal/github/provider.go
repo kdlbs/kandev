@@ -30,6 +30,9 @@ func Provide(
 	}
 
 	svc := NewService(client, authMethod, secrets, store, eventBus, log)
+	if pat, ok := client.(*PATClient); ok {
+		pat.WithRateTracker(svc.RateTracker())
+	}
 	svc.subscribeTaskEvents()
 
 	cleanup := func() error {

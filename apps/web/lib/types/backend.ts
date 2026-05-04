@@ -63,7 +63,8 @@ export type BackendMessageType =
   | "secrets.updated"
   | "secrets.deleted"
   | "message.queue.status_changed"
-  | "github.task_pr.updated";
+  | "github.task_pr.updated"
+  | "github.rate_limit.updated";
 
 export type BackendMessage<T extends BackendMessageType, P> = {
   id?: string;
@@ -82,7 +83,7 @@ import type {
 } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
-import type { TaskPR } from "@/lib/types/github";
+import type { GitHubRateLimitUpdate, TaskPR } from "@/lib/types/github";
 import type { FileChangeNotificationPayload } from "./workspace-files";
 import type {
   AgentCapabilitiesPayload,
@@ -604,6 +605,10 @@ export type BackendMessageMap = {
     QueueStatusChangedPayload
   >;
   "github.task_pr.updated": BackendMessage<"github.task_pr.updated", TaskPR>;
+  "github.rate_limit.updated": BackendMessage<
+    "github.rate_limit.updated",
+    GitHubRateLimitUpdate
+  >;
 };
 
 // Workspace file types (extracted to reduce file size)

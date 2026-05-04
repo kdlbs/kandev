@@ -1,6 +1,10 @@
 package github
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -179,4 +183,79 @@ func TestConvertPatRequestedReviewers(t *testing.T) {
 	if got[2] != (RequestedReviewer{Login: "fallback-team", Type: reviewerTypeTeam}) {
 		t.Errorf("unexpected third reviewer: %#v", got[2])
 	}
+}
+
+func TestPATClient_RecordsRateHeadersOnSuccess(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Limit", "5000")
+		w.Header().Set("X-RateLimit-Remaining", "4998")
+		w.Header().Set("X-RateLimit-Reset", "2000000000")
+		w.Header().Set("X-RateLimit-Resource", "core")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"login":"octocat"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	tracker := NewRateTracker(nil, nil)
+	c.WithRateTracker(tracker)
+
+	var out struct {
+		Login string `json:"login"`
+	}
+	if err := c.get(context.Background(), "/user", &out); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	snap, ok := tracker.Snapshot(ResourceCore)
+	if !ok {
+		t.Fatalf("expected core snapshot")
+	}
+	if snap.Remaining != 4998 || snap.Limit != 5000 {
+		t.Fatalf("snap = %+v", snap)
+	}
+}
+
+func TestPATClient_MarksExhaustedFromRateLimitBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// No headers — secondary limits sometimes omit them entirely.
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"API rate limit exceeded for user."}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	tracker := NewRateTracker(nil, nil)
+	c.WithRateTracker(tracker)
+
+	var out struct{}
+	if err := c.get(context.Background(), "/repos/o/r/pulls/1", &out); err == nil {
+		t.Fatalf("expected error from 403")
+	}
+	if !tracker.IsExhausted(ResourceCore) {
+		t.Fatalf("expected core exhausted from body parse")
+	}
+}
+
+// newPATClientPointingAt builds a PATClient whose underlying HTTP client
+// reroutes any github API URL to the given test server.
+func newPATClientPointingAt(t *testing.T, baseURL string) *PATClient {
+	t.Helper()
+	c := NewPATClient("test-token")
+	c.httpClient = &http.Client{
+		Transport: &rewriteTransport{base: baseURL},
+		Timeout:   2 * time.Second,
+	}
+	return c
+}
+
+type rewriteTransport struct{ base string }
+
+func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	rewritten := strings.Replace(req.URL.String(), githubAPIBase, rt.base, 1)
+	req2, err := http.NewRequestWithContext(req.Context(), req.Method, rewritten, req.Body)
+	if err != nil {
+		return nil, err
+	}
+	req2.Header = req.Header.Clone()
+	return http.DefaultTransport.RoundTrip(req2)
 }

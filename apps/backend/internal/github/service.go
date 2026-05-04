@@ -71,6 +71,7 @@ type Service struct {
 	taskEventSubs      []bus.Subscription
 	searchCache        *ttlCache
 	prStatusCache      *ttlCache
+	rateTracker        *RateTracker
 }
 
 // NewService creates a new GitHub service.
@@ -84,7 +85,41 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		logger:        log,
 		searchCache:   newTTLCache(),
 		prStatusCache: newTTLCache(),
+		rateTracker:   NewRateTracker(eventBus, log),
 	}
+}
+
+// RateTracker exposes the service's rate-limit tracker so factory callers
+// can wire it into individual clients.
+func (s *Service) RateTracker() *RateTracker {
+	return s.rateTracker
+}
+
+// rateLimitInfo materializes the tracker's snapshots into the DTO shape
+// returned by GetStatus and the rate-limit WS notification. Returns nil
+// when no buckets are known yet so the field stays omitted.
+func (s *Service) rateLimitInfo() *GitHubRateLimitInfo {
+	if s.rateTracker == nil {
+		return nil
+	}
+	all := s.rateTracker.All()
+	if len(all) == 0 {
+		return nil
+	}
+	info := &GitHubRateLimitInfo{}
+	if snap, ok := all[ResourceCore]; ok {
+		v := snap
+		info.Core = &v
+	}
+	if snap, ok := all[ResourceGraphQL]; ok {
+		v := snap
+		info.GraphQL = &v
+	}
+	if snap, ok := all[ResourceSearch]; ok {
+		v := snap
+		info.Search = &v
+	}
+	return info
 }
 
 // SetTaskDeleter sets the task deletion dependency for cleanup operations.
@@ -143,6 +178,7 @@ func (s *Service) GetStatus(ctx context.Context) (*GitHubStatus, error) {
 	status := &GitHubStatus{
 		AuthMethod:     authMethod,
 		RequiredScopes: RequiredGitHubScopes,
+		RateLimit:      s.rateLimitInfo(),
 	}
 
 	// Check if a GITHUB_TOKEN secret is configured
@@ -203,6 +239,9 @@ func (s *Service) retryClientCreation(ctx context.Context) {
 	if err != nil {
 		s.logger.Debug("GitHub client retry failed", zap.Error(err))
 		return
+	}
+	if pat, ok := client.(*PATClient); ok {
+		pat.WithRateTracker(s.rateTracker)
 	}
 	s.client = client
 	s.authMethod = authMethod

@@ -372,6 +372,7 @@ const (
 	ActionGitHubPRFilesGet        = "github.pr_files.get"
 	ActionGitHubPRCommitsGet      = "github.pr_commits.get"
 	ActionGitHubTaskPRUpdated     = "github.task_pr.updated"      // Notification
+	ActionGitHubRateLimitUpdated  = "github.rate_limit.updated"   // Notification
 	ActionGitHubPRFeedbackNotify  = "github.pr_feedback.notify"   // Notification
 	ActionGitHubNewReviewPRNotify = "github.new_review_pr.notify" // Notification
 	ActionGitHubTaskPRSync        = "github.task_pr.sync"
