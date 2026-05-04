@@ -226,6 +226,7 @@ function TopBarLeft({
         <RemoteCloudTooltip
           taskId={taskId ?? ""}
           sessionId={activeSessionId}
+          executorType={remoteExecutorType}
           fallbackName={remoteExecutorName ?? remoteExecutorType}
           iconClassName="h-4 w-4"
           status={{

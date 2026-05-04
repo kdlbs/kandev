@@ -150,6 +150,7 @@ function KanbanCardBody({
           <RemoteCloudTooltip
             taskId={task.id}
             sessionId={task.primarySessionId ?? null}
+            executorType={task.primaryExecutorType}
             fallbackName={task.primaryExecutorName ?? task.primaryExecutorType}
           />
         )}
