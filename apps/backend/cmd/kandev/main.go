@@ -69,6 +69,7 @@ import (
 // Command-line flags
 var (
 	flagPort     = flag.Int("port", 0, fmt.Sprintf("HTTP server port (default: %d)", ports.Backend))
+	flagMcpPort  = flag.Int("mcp-port", 0, "Dedicated MCP server port (0 = share main port)")
 	flagLogLevel = flag.String("log-level", "", "Log level: debug, info, warn, error")
 	flagHelp     = flag.Bool("help", false, "Show help message")
 	flagVersion  = flag.Bool("version", false, "Show version information")
@@ -126,6 +127,9 @@ func realMain() int {
 	// Apply command-line flag overrides (flags take precedence over config/env)
 	if *flagPort > 0 {
 		cfg.Server.Port = *flagPort
+	}
+	if *flagMcpPort > 0 {
+		cfg.Server.McpPort = *flagMcpPort
 	}
 	if *flagLogLevel != "" {
 		cfg.Logging.Level = *flagLogLevel
@@ -569,6 +573,7 @@ func buildHTTPServer(
 		webInternalURL:          cfg.Server.WebInternalURL,
 		pprofEnabled:            cfg.Debug.PprofEnabled,
 		httpPort:                port,
+		mcpPort:                 cfg.Server.McpPort,
 		log:                     log,
 	})
 
