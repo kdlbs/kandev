@@ -4,7 +4,7 @@ name: release
 # Trigger: GitHub Actions UI → "Run workflow" (workflow_dispatch).
 #
 # Flow (one click → everything below):
-#   1. prepare        — bump version, regen CHANGELOG, commit to main, push tag vX.Y.Z
+#   1. prepare        — bump version, regen CHANGELOG, open + merge release PR, push tag vX.Y.Z
 #   2. build-web      — build Next.js standalone bundle
 #   3. build-cli      — build + esbuild-bundle CLI
 #   4. build-bundles  — assemble bin/ + web/ + cli/ tarballs for 5 platforms
@@ -33,7 +33,7 @@ on:
           - minor
           - major
       dry_run:
-        description: "Dry run (no commit, tag, npm publish, or tap update)"
+        description: "Dry run (no PR, tag, npm publish, or tap update)"
         type: boolean
         default: false
 
@@ -44,10 +44,11 @@ permissions:
 
 jobs:
   prepare:
-    name: Prepare release (bump version, commit, tag)
+    name: Prepare release (bump version, PR, tag)
     runs-on: ubuntu-latest
     permissions:
-      contents: write       # commit + push to main, push tag
+      contents: write       # push release branch + tag
+      pull-requests: write  # create + merge release PR (required by main ruleset)
     outputs:
       version: ${{ steps.compute.outputs.version }}
       tag: ${{ steps.compute.outputs.tag }}
@@ -151,36 +152,52 @@ jobs:
             exit 1
           fi
 
-      - name: Bump version, generate CHANGELOG, commit, tag, push
+      - name: Bump version + generate CHANGELOG (in working tree)
         if: ${{ !inputs.dry_run }}
         env:
           NEXT: ${{ steps.compute.outputs.version }}
           TAG: ${{ steps.compute.outputs.tag }}
         run: |
           set -euo pipefail
-          git fetch origin main
-          git checkout main
-          git reset --hard origin/main
-
           # Bump only the main package version. optionalDependencies stay
           # pinned to 0.0.0-bootstrap in committed source — publish-npm.sh
           # rewrites them to the real version in-flight before publishing,
           # once the matching @kdlbs/runtime-* tarballs exist on npm.
           (cd apps/cli && npm version --no-git-tag-version "$NEXT")
           pnpm -C apps install --no-frozen-lockfile
-
           git-cliff --tag "$TAG" -o CHANGELOG.md
 
-          git add apps/cli/package.json CHANGELOG.md apps/pnpm-lock.yaml
-          git commit -m "release: $NEXT"
-          git tag -a "$TAG" -m "release: $NEXT"
+      - name: Create release PR + squash-merge + tag
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT: ${{ steps.compute.outputs.version }}
+          TAG: ${{ steps.compute.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # main is protected by a ruleset that requires PRs, so we go through
+          # a release branch + auto-merged PR rather than pushing directly.
+          BRANCH="release/$TAG"
+          MSG="release: $NEXT"
 
-          # Push commit and tag atomically — without --atomic, Git could
-          # accept the tag push but reject the main update on a non-fast-forward,
-          # leaving an orphaned tag at the pre-bump commit (and tripping the
-          # "tag already exists" guard on the next re-run). --atomic makes the
-          # whole multi-ref push succeed or fail as a unit.
-          git push --atomic origin main "$TAG"
+          git checkout -b "$BRANCH"
+          git add apps/cli/package.json CHANGELOG.md apps/pnpm-lock.yaml
+          git commit -m "$MSG"
+          git push -u origin "$BRANCH"
+
+          gh pr create \
+            --title "$MSG" \
+            --body "Automated release: \`$NEXT\`" \
+            --head "$BRANCH" \
+            --base main
+          gh pr merge "$BRANCH" --squash --delete-branch --subject "$MSG" --body ""
+
+          # Pull the squashed commit into local main, then tag from it.
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+          git tag -a "$TAG" -m "release: $NEXT"
+          git push origin "$TAG"
 
       - name: Dry-run summary
         if: ${{ inputs.dry_run }}
@@ -195,7 +212,7 @@ jobs:
           pnpm -C apps install --no-frozen-lockfile
           git-cliff --tag "$TAG" -o CHANGELOG.md
           echo
-          echo "DRY RUN: Would have committed + tagged $TAG and pushed to origin/main."
+          echo "DRY RUN: Would have created + merged release PR and tagged $TAG."
           echo "DRY RUN: apps/cli/package.json bumped to $NEXT (in-runner only)."
           echo "DRY RUN: CHANGELOG.md regenerated (in-runner only)."
 
