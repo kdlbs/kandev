@@ -1,12 +1,9 @@
 import path from "node:path";
 import fs from "node:fs";
 
-import { findBundleRoot, resolveWebServerPath } from "./bundle";
-import { CACHE_DIR } from "./constants";
+import { resolveWebServerPath } from "./bundle";
 import { getBinaryName, getPlatformDir, type PlatformDir } from "./platform";
 
-// Maps platform.ts dir strings to npm @kdlbs/runtime-* package names.
-// platform.ts uses internal names (macos, windows); npm uses os identifiers (darwin, win32).
 const PLATFORM_TO_NPM_PACKAGE: Record<PlatformDir, string> = {
   "linux-x64": "@kdlbs/runtime-linux-x64",
   "linux-arm64": "@kdlbs/runtime-linux-arm64",
@@ -15,28 +12,29 @@ const PLATFORM_TO_NPM_PACKAGE: Record<PlatformDir, string> = {
   "windows-x64": "@kdlbs/runtime-win32-x64",
 };
 
-export type RuntimeSource = "env" | "npm" | "cache";
+export type RuntimeSource = "env" | "npm";
 
 export type ResolvedRuntime = {
   bundleDir: string;
   source: RuntimeSource;
-  tag?: string;
 };
 
 /**
- * Resolve the runtime bundle directory using a three-step priority chain:
+ * Resolve the runtime bundle directory using a two-step priority chain:
  *
- * 1. KANDEV_BUNDLE_DIR env var — set by the Homebrew formula wrapper and useful
- *    for local testing. Skips all other resolution.
- * 2. Installed npm runtime package — looks for @kdlbs/runtime-{platform} in
- *    node_modules via Node module resolution. Only works after `npx kandev@latest`
- *    or `npm install -g kandev` (npm 7+).
- * 3. Cached download — only checked when runtimeVersion is explicitly specified
- *    via --runtime-version. Used by the explicit version download path in run.ts.
+ * 1. KANDEV_BUNDLE_DIR env var — set by the Homebrew formula wrapper and
+ *    useful for local testing. Skips all other resolution.
+ * 2. Installed npm runtime package — looks for @kdlbs/runtime-{platform}
+ *    in node_modules via Node module resolution. Works after
+ *    `npx kandev@latest` or `npm install -g kandev` (requires npm 7+).
+ *
+ * The explicit `--runtime-version <tag>` download path is handled directly
+ * in run.ts (which manages the GitHub download + cache itself); it does
+ * not flow through this function.
  *
  * Throws with an actionable error message if no runtime is found.
  */
-export function resolveRuntime(runtimeVersion?: string): ResolvedRuntime {
+export function resolveRuntime(): ResolvedRuntime {
   const envBundleDir = process.env.KANDEV_BUNDLE_DIR;
   if (envBundleDir) {
     validateBundle(envBundleDir);
@@ -50,7 +48,7 @@ export function resolveRuntime(runtimeVersion?: string): ResolvedRuntime {
     pkgJsonPath = require.resolve(`${packageName}/package.json`);
   } catch {
     // MODULE_NOT_FOUND — npm runtime package is not installed. Fall through
-    // to step 3 (cache fallback only if --runtime-version is set).
+    // to the actionable error below.
   }
   if (pkgJsonPath) {
     // The package IS installed. If validateBundle throws here, the bundle is
@@ -59,13 +57,6 @@ export function resolveRuntime(runtimeVersion?: string): ResolvedRuntime {
     const packageRoot = path.dirname(pkgJsonPath);
     validateBundle(packageRoot);
     return { bundleDir: packageRoot, source: "npm" };
-  }
-
-  if (runtimeVersion) {
-    const cacheDir = path.join(CACHE_DIR, runtimeVersion, platformDir);
-    const bundleDir = findBundleRoot(cacheDir);
-    validateBundle(bundleDir);
-    return { bundleDir, source: "cache", tag: runtimeVersion };
   }
 
   throw new Error(

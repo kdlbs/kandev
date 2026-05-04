@@ -154,34 +154,6 @@ describe("resolveRuntime", () => {
     });
   });
 
-  describe("cache fallback (step 3 — runtimeVersion only)", () => {
-    it("resolves from cache when runtimeVersion is given and cache exists", () => {
-      const tag = "v0.16.0";
-      const cacheDir = path.join(tmpDir, tag, PLATFORM, "kandev");
-      createFakeBundle(cacheDir);
-
-      const result = resolveRuntime(tag);
-      expect(result.source).toBe("cache");
-      expect(result.tag).toBe(tag);
-      expect(result.bundleDir).toContain(tag);
-    });
-
-    it("throws when runtimeVersion is given but cache dir is missing", () => {
-      expect(() => resolveRuntime("v9.9.9")).toThrow(/Backend binary not found/);
-    });
-
-    it("does not check cache when runtimeVersion is not given", () => {
-      // Create a cache entry — should not be picked up without runtimeVersion
-      const tag = "v0.16.0";
-      const cacheDir = path.join(tmpDir, tag, PLATFORM, "kandev");
-      createFakeBundle(cacheDir);
-
-      // No KANDEV_BUNDLE_DIR, no npm package (require.resolve will fail in test)
-      // Should throw the "no runtime found" error, not resolve from cache
-      expect(() => resolveRuntime()).toThrow(/No Kandev runtime found/);
-    });
-  });
-
   describe("no runtime found", () => {
     it("throws an actionable error message mentioning install paths", () => {
       let error: Error | null = null;
