@@ -6,29 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resolveRuntime, validateBundle } from "./runtime";
 
-// Mock constants so CACHE_DIR points to a temp directory.
-const mockCacheDir = { value: "" };
-vi.mock("./constants", () => ({
-  get CACHE_DIR() {
-    return mockCacheDir.value;
-  },
-  DATA_DIR: "/tmp/kandev-test-data",
-  DEFAULT_BACKEND_PORT: 38429,
-  DEFAULT_WEB_PORT: 37429,
-  DEFAULT_AGENTCTL_PORT: 39429,
-  HEALTH_TIMEOUT_MS_RELEASE: 15000,
-  RANDOM_PORT_MIN: 10000,
-  RANDOM_PORT_MAX: 60000,
-  RANDOM_PORT_RETRIES: 10,
-}));
-
 // Keep getPlatformDir deterministic across test environments.
 vi.mock("./platform", () => ({
   getPlatformDir: () => "macos-arm64" as const,
   getBinaryName: (base: string) => base,
 }));
-
-const PLATFORM = "macos-arm64";
 
 function createFakeBundle(dir: string) {
   fs.mkdirSync(path.join(dir, "bin"), { recursive: true });
@@ -84,7 +66,6 @@ describe("resolveRuntime", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-runtime-"));
-    mockCacheDir.value = tmpDir;
     // Clear relevant env vars before each test
     delete process.env.KANDEV_BUNDLE_DIR;
   });
