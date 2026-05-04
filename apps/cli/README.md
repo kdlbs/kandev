@@ -4,18 +4,36 @@ Manage tasks. Orchestrate agents. Review changes. Ship value.
 
 ## Quick Start
 
+### Homebrew
+
 ```bash
-npx kandev
+brew install kdlbs/kandev/kandev
+kandev
 ```
 
-Downloads the latest release, starts the backend + web app, and opens your browser. Data (worktrees, SQLite DB) is stored in `~/.kandev` by default.
+### NPX (requires npm 7+)
+
+```bash
+npx kandev@latest
+```
+
+Either install path resolves a platform-matched runtime (Go backend, agentctl, Next.js standalone web), launches the backend + web, and opens your browser. Data (worktrees, SQLite DB) is stored in `~/.kandev` by default.
 
 ## Version and Updates
 
-- `npx kandev` (run mode) uses the latest GitHub release bundle by default.
-- At startup, the launcher prints the resolved release tag (for example: `[kandev] release: v0.2.3 (github latest)`).
-- Use `--version <tag>` to pin a specific runtime bundle release.
-- CLI package updates are checked from npm and shown as a prompt. They are not forced.
+The package manager owns the runtime version. `kandev@X.Y.Z` ships with the matching runtime.
+
+- **Update via Homebrew**: `brew upgrade kandev`
+- **Update via npm/npx**: `npx kandev@latest` or `npm install -g kandev@latest`
+- **Print CLI version**: `kandev --version`
+
+### Advanced: pin a specific runtime tag
+
+`--runtime-version <tag>` downloads a specific GitHub release runtime instead of using the installed one. For debugging compatibility issues only:
+
+```bash
+kandev --runtime-version v0.16.0
+```
 
 ## What You Get
 

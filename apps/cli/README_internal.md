@@ -1,158 +1,170 @@
-# Kandev Launcher (npx)
+# Kandev CLI (internal docs)
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    A["npx kandev"] --> B["npm downloads kandev package"]
-    B --> C["CLI parses arguments"]
-    C --> D{"Command?"}
+    A["kandev"] --> B["CLI parses arguments"]
+    B --> C{"Command?"}
 
-    D -->|run| E["Fetch latest GitHub release"]
-    D -->|dev| F["Use local repo"]
-    D -->|start| G["Use local build"]
+    C -->|run / default| D["resolveRuntime()"]
+    C -->|dev| F["Use local repo"]
+    C -->|start| G["Use local build"]
 
-    E --> E1["Download platform zip"]
-    E1 --> E2["Extract to ~/.kandev/bin/"]
-    E2 --> E3["Start backend + Next.js standalone"]
+    D --> D1{"KANDEV_BUNDLE_DIR set?"}
+    D1 -->|yes| D2["Use env bundle (Homebrew)"]
+    D1 -->|no| D3["require.resolve('@kdlbs/runtime-{platform}')"]
+    D3 -->|hit| D4["Use installed npm bundle"]
+    D3 -->|miss| D5{"--runtime-version given?"}
+    D5 -->|yes| D6["Download from GitHub Releases (cache)"]
+    D5 -->|no| D7["Throw: 'No runtime found'"]
+
+    D2 --> E["Start backend + Next.js standalone"]
+    D4 --> E
+    D6 --> E
 
     F --> F1["make dev + next dev"]
-
     G --> G1["binary + next start"]
 ```
 
 ## Overview
 
-This package powers `npx kandev` by downloading prebuilt release bundles from GitHub Releases and running them locally. It:
+This package provides the `kandev` CLI launcher. The runtime bundle (Go backend, agentctl, Next.js standalone web) is **installed by the package manager** — there is no first-run download.
 
-- Detects OS/arch and fetches the matching bundle ZIP.
-- Verifies the SHA256 checksum when available.
-- Extracts the bundle into `~/.kandev/bin/<version>/<platform>/`.
-- Starts the backend binary and waits for the `/health` endpoint.
-- Starts the Next.js standalone server with runtime `KANDEV_API_BASE_URL`.
-- Uses the latest GitHub Release by default, so runtime bundles update automatically.
+Two install channels share the same release artifacts:
 
-It also supports local dev and production runs from a repo checkout.
+- **npm/npx**: `kandev@X.Y.Z` declares `optionalDependencies` for `@kdlbs/runtime-{platform}@X.Y.Z`. npm 7+ filters by `os`/`cpu` and installs only the matching one.
+- **Homebrew**: `kdlbs/homebrew-kandev` formula downloads the GitHub release tarball into the Cellar and sets `KANDEV_BUNDLE_DIR`.
+
+Both channels resolve to the same runtime bundle layout (`bin/kandev`, `bin/agentctl`, `web/server.js`). The CLI launcher (`runtime.ts`) abstracts over them.
+
+## Artifact shapes
+
+The GitHub release bundle and the npm runtime package are **different shapes** because they serve different consumers:
+
+```
+# GitHub release bundle (used by Homebrew + manual installs)
+kandev/
+├── bin/{kandev,agentctl}
+├── web/server.js
+└── cli/
+    ├── bin/cli.js              # #!/usr/bin/env node + chmod +x
+    └── dist/cli.bundle.js      # esbuild single-file bundle (deps inlined)
+
+# npm runtime package (@kdlbs/runtime-{platform})
+@kdlbs/runtime-{platform}/
+├── bin/{kandev,agentctl}
+└── web/server.js
+```
+
+The `cli/` directory is only in the GitHub bundle (Homebrew needs the launcher). For npm installs, the main `kandev` package already provides the CLI; the runtime package only ships the binaries + web bundle.
 
 ## Commands
 
 | Command                  | Description                                              |
 | ------------------------ | -------------------------------------------------------- |
-| `kandev` or `kandev run` | Download and run release bundles (default)               |
+| `kandev` or `kandev run` | Run from installed runtime bundle (default)              |
 | `kandev dev`             | Run local repo with hot-reload (requires repo checkout)  |
 | `kandev start`           | Run local production build (requires `make build` first) |
 
-## Updates
-
-On `run`, the launcher checks npm for the latest `kandev` CLI version and prompts:
-
-```
-Update available: <current> -> <latest>. Update now? [y/N]
-```
-
-If you accept, it re-runs `npx kandev@latest` with the same arguments.
-This check is skipped in `dev` and `start` modes.
-
-Note: the runtime bundles are pulled from the latest GitHub Release by default, even if the CLI version is unchanged. So:
-
-- **New runtime release without CLI publish**: users get new runtime automatically, but no update prompt.
-- **New CLI publish**: users get an update prompt and then re-run with the new CLI.
-- On startup, `run` also prints the resolved runtime release tag.
-- Runtime assets are published atomically in CI (single final release upload job), so `/releases/latest`
-  does not surface partially uploaded platform bundles.
-
-You can disable the prompt with:
-
-```bash
-KANDEV_NO_UPDATE_PROMPT=1 npx kandev
-```
-
-## Usage
-
-```bash
-# Run the latest release bundle
-npx kandev
-
-# Run a specific release tag
-npx kandev run --version v0.1.0
-
-# Override ports
-npx kandev --backend-port 18080 --web-port 13000
-
-# Local dev with hot-reload (from repo)
-npx kandev dev
-
-# Local production build (from repo, after `make build`)
-npx kandev start
-
-# Local test the built CLI (from repo root)
-pnpm -C apps/cli build
-pnpm -C apps/cli start
-```
-
 ## CLI Options
 
-| Option                  | Description                              |
-| ----------------------- | ---------------------------------------- |
-| `run`                   | Use release bundles (default)            |
-| `dev`                   | Use local repo with hot-reload           |
-| `start`                 | Use local production build               |
-| `--version <tag>`       | Release tag to install (default: latest) |
-| `--backend-port <port>` | Override backend port                    |
-| `--web-port <port>`     | Override web port                        |
-| `--help`, `-h`          | Show help                                |
+| Option                     | Description                                                |
+| -------------------------- | ---------------------------------------------------------- |
+| `--version`, `-V`          | Print CLI version and exit                                 |
+| `--port`, `--backend-port` | Backend port                                               |
+| `--web-internal-port`      | Override internal Next.js port                             |
+| `--verbose`, `-v`          | Show info logs                                             |
+| `--debug`                  | Show debug logs + agent message dumps                      |
+| `--runtime-version <tag>`  | **Advanced/debug**: download a specific GitHub runtime tag |
+| `--help`, `-h`             | Show help                                                  |
+
+## Updates (package-manager owned)
+
+The CLI no longer self-updates. Updates flow through the install channel:
+
+```bash
+brew upgrade kandev                  # Homebrew
+npm install -g kandev@latest         # npm global
+npx kandev@latest                    # always pulls latest
+```
+
+There is no `KANDEV_NO_UPDATE_PROMPT` or `KANDEV_SKIP_UPDATE` env var anymore — they're gone with the self-updater.
+
+## Bundling for Homebrew
+
+The Homebrew bundle uses `dist/cli.bundle.js`, an esbuild single-file output that inlines `tree-kill`, `tar`, and other Node deps. Required because the Cellar has no `node_modules`. The npm package uses the unbundled `dist/cli.js` and resolves deps via npm.
+
+```bash
+pnpm -C apps/cli build      # produces dist/cli.js
+pnpm -C apps/cli bundle     # produces dist/cli.bundle.js (~212KB)
+```
+
+Smoke test the bundle in a clean directory:
+
+```bash
+mkdir /tmp/smoke && cd /tmp/smoke
+node /path/to/apps/cli/dist/cli.bundle.js --help
+```
+
+If `Cannot find module 'tree-kill'` appears, the bundle is broken.
 
 ## Local Development
 
 ```bash
-# Run CLI in dev mode
+# Run CLI in dev mode (uses tsx)
 pnpm -C apps/cli dev
 
 # Run with arguments
 pnpm -C apps/cli dev -- start
-pnpm -C apps/cli dev -- --backend-port 9000
+pnpm -C apps/cli dev -- --port 9000
 ```
-
-## Build / Publish
-
-```bash
-pnpm -C apps/cli build
-npm publish --access public
-```
-
-The published package name is `kandev`, with a bin entry `kandev`.
 
 ## Release
 
-```bash
-scripts/release/release.sh
-```
+Releases run entirely in GitHub Actions. From the GHA UI:
 
-The unified release script supports `cli`, `app`, or `both` in one flow.
-Versioning strategy:
+1. Open the **Release** workflow.
+2. Click **Run workflow**.
+3. Choose `bump` (patch / minor / major) from the dropdown.
+4. Optionally tick `dry_run` to validate without publishing.
+5. Click **Run workflow**.
 
-- App release tags: `vM.m`
-- CLI npm version: `M.m.0`
-- Default bump mode: `minor`
+The workflow does everything: version bump, CHANGELOG, PR, merge, tag, build, npm publish, Homebrew tap update. See [/.github/workflows/release.yml](../../.github/workflows/release.yml).
+
+Single SemVer flow: `apps/cli/package.json` version, git tag, npm packages, and Homebrew formula are all bumped to the same `X.Y.Z`.
+
+Versioning:
+
+- One SemVer `X.Y.Z` for everything (npm, GitHub tag, Homebrew formula)
+- Git tag format: `vX.Y.Z`
+- Legacy `vM.m` tags normalized to `M.m.0` during migration; new releases always use `vX.Y.Z`
 
 ## Environment Overrides
 
-| Variable                    | Description                                    |
-| --------------------------- | ---------------------------------------------- |
-| `KANDEV_GITHUB_OWNER`       | Override GitHub repo owner (default: `kandev`) |
-| `KANDEV_GITHUB_REPO`        | Override GitHub repo name (default: `kandev`)  |
-| `KANDEV_GITHUB_TOKEN`       | Optional token for GitHub API rate limits      |
-| `KANDEV_NO_UPDATE_PROMPT=1` | Disable the CLI update prompt                  |
-| `KANDEV_SKIP_UPDATE=1`      | Internal guard to avoid update loops           |
-| `KANDEV_HEALTH_TIMEOUT_MS`  | Override health check timeout in milliseconds  |
+| Variable                              | Description                                                           |
+| ------------------------------------- | --------------------------------------------------------------------- |
+| `KANDEV_BUNDLE_DIR`                   | Force runtime bundle location (set by Homebrew wrapper, tests)        |
+| `KANDEV_PORT` / `KANDEV_BACKEND_PORT` | Backend port                                                          |
+| `KANDEV_WEB_PORT`                     | Internal Next.js port                                                 |
+| `KANDEV_HEALTH_TIMEOUT_MS`            | Override health check timeout (ms)                                    |
+| `KANDEV_GITHUB_OWNER`                 | Override GitHub repo owner (default: `kdlbs`) for `--runtime-version` |
+| `KANDEV_GITHUB_REPO`                  | Override GitHub repo name (default: `kandev`) for `--runtime-version` |
+| `KANDEV_GITHUB_TOKEN`                 | Optional GitHub token for rate limits                                 |
 
 ## Supported Platforms
 
-| Platform              | Asset Name                                  |
-| --------------------- | ------------------------------------------- |
-| macOS (Apple Silicon) | `kandev-macos-arm64.zip`                    |
-| macOS (Intel)         | `kandev-macos-x64.zip`                      |
-| Linux (x64)           | `kandev-linux-x64.zip`                      |
-| Linux (ARM64)         | `kandev-linux-arm64.zip`                    |
-| Windows (x64)         | `kandev-windows-x64.zip`                    |
-| Windows (ARM64)       | Falls back to `windows-x64` (x64 emulation) |
+| Platform              | npm runtime package                         | GitHub asset name           |
+| --------------------- | ------------------------------------------- | --------------------------- |
+| macOS (Apple Silicon) | `@kdlbs/runtime-darwin-arm64`               | `kandev-macos-arm64.tar.gz` |
+| macOS (Intel)         | `@kdlbs/runtime-darwin-x64`                 | `kandev-macos-x64.tar.gz`   |
+| Linux (x64)           | `@kdlbs/runtime-linux-x64`                  | `kandev-linux-x64.tar.gz`   |
+| Linux (ARM64)         | `@kdlbs/runtime-linux-arm64`                | `kandev-linux-arm64.tar.gz` |
+| Windows (x64)         | `@kdlbs/runtime-win32-x64`                  | `kandev-windows-x64.tar.gz` |
+| Windows (ARM64)       | Falls back to `windows-x64` (x64 emulation) |                             |
+
+Note: `platform.ts` uses internal naming (`macos`, `windows`); npm `os` field uses npm conventions (`darwin`, `win32`). `runtime.ts` maps between the two.
+
+## npm requirements
+
+The optional-dependency runtime resolution requires **npm 7 or newer**. npm 6 silently skips optional deps during `npx`, which would leave users with no runtime. `package.json` declares `engines.npm: ">=7"` to surface this at install time as a clear error.
