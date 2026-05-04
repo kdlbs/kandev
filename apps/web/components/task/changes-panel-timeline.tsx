@@ -1,29 +1,20 @@
 "use client";
 
 import { useState, useMemo, useCallback } from "react";
-import {
-  IconGitPullRequest,
-  IconCloudUpload,
-  IconChevronDown,
-  IconChevronRight,
-  IconLoader2,
-} from "@tabler/icons-react";
+import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { useMultiSelect } from "@/hooks/use-multi-select";
-
-import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { FileInfo } from "@/lib/state/store";
 import { FileRow, BulkActionBar } from "./changes-panel-file-row";
 import { type CommitItem } from "./commit-row";
-import { groupByRepositoryName } from "@/lib/group-by-repo";
-import { CommitsRepoGroup, RepoGroupItem } from "./changes-panel-repo-groups";
+import { groupByRepositoryName, isSingleRepoGroup } from "@/lib/group-by-repo";
+import {
+  CommitsGroupActions,
+  CommitsRepoGroup,
+  FileSectionActions,
+  RepoGroupItem,
+} from "./changes-panel-repo-groups";
 import { PRFilesGroupedList } from "./changes-panel-pr-files";
 
 // --- Timeline visual components ---
@@ -47,7 +38,6 @@ const DOT_COLORS = {
   staged: "bg-emerald-500",
   commits: "bg-blue-500",
   pr: "bg-purple-500",
-  action: "bg-muted-foreground/25",
 } as const;
 
 function TimelineDot({ color }: { color: string }) {
@@ -170,11 +160,24 @@ export function CommitsSection({
   perRepoStatus,
   prByRepo,
 }: CommitsSectionProps) {
-  // Always group by repo. Single-repo shows up as one group with an empty
-  // repository_name; the group header still renders with a display label and
-  // per-repo buttons (Push, Create PR) so the UX is uniform across modes.
   const groups = groupByRepositoryName(commits, (c) => c.repository_name);
   const aheadByRepo = new Map((perRepoStatus ?? []).map((s) => [s.repository_name, s.ahead]));
+  // Single-repo: drop the per-repo sub-header (CommitsRepoGroup with
+  // showHeader=false renders flat) and lift the Push / PR buttons into the
+  // section header.
+  const isSingleRepo = isSingleRepoGroup(groups);
+  const sectionAction = isSingleRepo ? (
+    <CommitsGroupActions
+      repositoryName=""
+      unpushedCount={groups[0].items.filter((c) => !c.pushed).length}
+      aheadCount={aheadByRepo.get("") ?? 0}
+      prExists={!!prByRepo?.[""]}
+      canCreatePR={!!onRepoCreatePR && !prByRepo?.[""]}
+      onRepoPush={onRepoPush}
+      onRepoCreatePR={onRepoCreatePR}
+      stop={(e) => e.stopPropagation()}
+    />
+  ) : undefined;
 
   return (
     <TimelineSection
@@ -184,6 +187,7 @@ export function CommitsSection({
       isLast={isLast}
       defaultCollapsed
       data-testid="commits-section"
+      action={sectionAction}
     >
       <ul data-testid="commits-list" className="space-y-0.5">
         {groups.map((g) => (
@@ -194,6 +198,7 @@ export function CommitsSection({
             groupCommits={g.items}
             aheadCount={aheadByRepo.get(g.repositoryName) ?? 0}
             existingPrUrl={prByRepo?.[g.repositoryName] ?? prByRepo?.[""]}
+            showHeader={!isSingleRepo}
             baseBranch={repoBaseBranch}
             onOpenCommitDetail={onOpenCommitDetail}
             onAmendCommit={onAmendCommit}
@@ -204,120 +209,6 @@ export function CommitsSection({
           />
         ))}
       </ul>
-    </TimelineSection>
-  );
-}
-
-// --- Action buttons section (Create PR / Push) ---
-
-type ActionButtonsSectionProps = {
-  onOpenPRDialog: () => void;
-  onPush: () => void;
-  onForcePush: () => void;
-  isLoading: boolean;
-  loadingOperation: string | null;
-  aheadCount: number;
-  canPush: boolean;
-  canCreatePR: boolean;
-  existingPrUrl?: string;
-  isLast?: boolean;
-  /** Hide the Push button (per-repo Push is rendered elsewhere in multi-repo). */
-  hidePush?: boolean;
-};
-
-export function ActionButtonsSection({
-  onOpenPRDialog,
-  onPush,
-  onForcePush,
-  isLoading,
-  loadingOperation,
-  aheadCount,
-  canPush,
-  canCreatePR,
-  existingPrUrl,
-  isLast = true,
-  hidePush = false,
-}: ActionButtonsSectionProps) {
-  const prExists = !!existingPrUrl;
-  const createPrDisabled = !canCreatePR || prExists || isLoading;
-  const pushDisabled = !canPush || isLoading;
-  const isPushing = loadingOperation === "push";
-  const isCreatingPR = loadingOperation === "create_pr";
-  let pushTooltip: string | null = null;
-  if (isLoading) pushTooltip = "A git operation is in progress";
-  else if (!canPush) pushTooltip = "No commits ahead of remote";
-  return (
-    <TimelineSection dotColor={DOT_COLORS.action} isLast={isLast}>
-      <div className="flex items-center gap-2 -mt-0.5">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
-                onClick={onOpenPRDialog}
-                disabled={createPrDisabled}
-              >
-                {isCreatingPR ? (
-                  <IconLoader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <IconGitPullRequest className="h-3 w-3" />
-                )}
-                Create PR
-              </Button>
-            </span>
-          </TooltipTrigger>
-          {prExists && <TooltipContent>A pull request already exists for this task</TooltipContent>}
-        </Tooltip>
-        {!hidePush && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="flex items-center">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer rounded-r-none border-r-0"
-                  onClick={onPush}
-                  disabled={pushDisabled}
-                >
-                  {isPushing ? (
-                    <IconLoader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <IconCloudUpload className="h-3 w-3" />
-                  )}
-                  Push
-                  {aheadCount > 0 && !isPushing && (
-                    <span className="text-muted-foreground">{aheadCount} ahead</span>
-                  )}
-                </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 w-5 px-0 cursor-pointer rounded-l-none"
-                      disabled={pushDisabled}
-                    >
-                      <IconChevronDown className="h-3 w-3" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48">
-                    <DropdownMenuItem
-                      className="cursor-pointer gap-2 text-xs"
-                      onClick={onForcePush}
-                    >
-                      <IconCloudUpload className="h-3.5 w-3.5 shrink-0" />
-                      Force Push (with lease)
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </span>
-            </TooltipTrigger>
-            {pushTooltip && <TooltipContent>{pushTooltip}</TooltipContent>}
-          </Tooltip>
-        )}
-      </div>
     </TimelineSection>
   );
 }
@@ -411,6 +302,10 @@ function FileListBody(props: FileListBodyProps) {
     />
   );
 
+  // Single-repo: drop the per-repo sub-header. The action buttons (Stage all
+  // / Commit / Unstage all) move up to the section header — see FileListSection.
+  const isSingleRepo = isSingleRepoGroup(groups);
+
   return (
     <div>
       <ul
@@ -419,20 +314,22 @@ function FileListBody(props: FileListBodyProps) {
         tabIndex={-1}
         onKeyDown={props.onKeyDown}
       >
-        {groups.map((group) => (
-          <RepoGroupItem
-            key={group.repositoryName || "__no_repo__"}
-            group={group}
-            collapsed={collapsedRepos.has(group.repositoryName)}
-            onToggle={() => toggleRepo(group.repositoryName)}
-            renderRow={renderRow}
-            primaryLabel={props.primaryLabel}
-            secondaryLabel={props.secondaryLabel}
-            onRepoAction={props.onRepoAction}
-            onRepoSecondaryAction={props.onRepoSecondaryAction}
-            displayName={props.repoDisplayName?.(group.repositoryName)}
-          />
-        ))}
+        {isSingleRepo
+          ? groups[0].items.map(renderRow)
+          : groups.map((group) => (
+              <RepoGroupItem
+                key={group.repositoryName || "__no_repo__"}
+                group={group}
+                collapsed={collapsedRepos.has(group.repositoryName)}
+                onToggle={() => toggleRepo(group.repositoryName)}
+                renderRow={renderRow}
+                primaryLabel={props.primaryLabel}
+                secondaryLabel={props.secondaryLabel}
+                onRepoAction={props.onRepoAction}
+                onRepoSecondaryAction={props.onRepoSecondaryAction}
+                displayName={props.repoDisplayName?.(group.repositoryName)}
+              />
+            ))}
       </ul>
     </div>
   );
@@ -457,8 +354,12 @@ export function FileListSection(props: FileListSectionProps) {
   const multiSelect = useMultiSelect({ items: filePaths });
   const hasSelection = multiSelect.selectedPaths.size > 0;
   // Multi-repo when any file has a repositoryName. Per-repo group headers
-  // own the action buttons in this case; the bottom-of-section global
-  // buttons would be redundant, so we skip them.
+  // own the action buttons in this case; in single-repo we render them in
+  // the section header instead. Compute via the shared helper against the
+  // grouped output so the three sites (commits + file-list body + this
+  // section) stay in sync.
+  const groups = useMemo(() => groupByRepositoryName(files, (f) => f.repositoryName), [files]);
+  const isSingleRepo = files.length > 0 && isSingleRepoGroup(groups);
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Escape" && hasSelection) multiSelect.clearSelection();
@@ -473,6 +374,16 @@ export function FileListSection(props: FileListSectionProps) {
       count={files.length}
       isLast={isLast}
       data-testid={`${variant}-files-section`}
+      action={
+        isSingleRepo ? (
+          <FileSectionActions
+            primaryLabel={props.actionLabel}
+            secondaryLabel={props.secondaryActionLabel}
+            onAction={props.onRepoAction}
+            onSecondaryAction={props.onRepoSecondaryAction}
+          />
+        ) : undefined
+      }
     >
       {files.length > 0 && (
         <FileListBody

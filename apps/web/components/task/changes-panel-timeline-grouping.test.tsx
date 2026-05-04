@@ -58,12 +58,10 @@ function file(path: string, repo?: string): Props["files"][number] {
 }
 
 describe("FileListSection — multi-repo grouping", () => {
-  it("renders a single repo header (uniform UI) for files without a repository_name", () => {
-    // Per-repo headers always render now, including in single-repo / untagged
-    // mode — the resolver fills in the workspace primary repo name (or a
-    // neutral "Repository" fallback). This keeps the UX consistent across
-    // single-repo and multi-repo workspaces and gives us per-repo Stage all /
-    // Commit / Unstage all buttons in both modes.
+  it("renders a flat file list (no per-repo header) for single-repo workspaces", () => {
+    // Single-repo: drop the redundant per-repo sub-header above a flat file
+    // list. Action buttons (Stage all / Commit / Unstage all) move up to the
+    // section header so they remain accessible.
     render(
       <FileListSection
         {...baseProps}
@@ -71,11 +69,14 @@ describe("FileListSection — multi-repo grouping", () => {
         isLast={false}
         actionLabel="Stage all"
         onAction={() => undefined}
+        onRepoAction={() => undefined}
         files={[file("a.ts"), file("b.ts")]}
       />,
     );
-    expect(screen.getAllByTestId(REPO_HEADER_TID)).toHaveLength(1);
+    expect(screen.queryAllByTestId(REPO_HEADER_TID)).toHaveLength(0);
     expect(screen.getAllByTestId("file-row")).toHaveLength(2);
+    // Section-level action button is still rendered.
+    expect(screen.getByTestId("repo-group-action").textContent).toContain("Stage all");
   });
 
   it("renders one header per repo when 2+ repos are present", () => {
@@ -199,14 +200,18 @@ describe("CommitsSection", () => {
     expect(screen.getAllByTestId(COMMIT_ROW_TID)).toHaveLength(3);
   });
 
-  it("renders a single commits-repo header (uniform UI) for untagged commits", () => {
-    // The Commits section, like the file lists, always groups by repo now.
-    // For untagged or single-repo commits we get one group with the empty
-    // repository_name; the header still renders so the per-repo Push / PR
-    // buttons live in a consistent place across single-repo and multi-repo.
-    render(<CommitsSection commits={[commit("c1", "msg"), commit("c2", "msg")]} isLast />);
+  it("renders commits flat (no commits-repo header) for single-repo workspaces", () => {
+    // Single-repo: drop the per-repo "REPOSITORY" sub-header. Push / PR
+    // buttons live in the section header instead.
+    render(
+      <CommitsSection
+        commits={[commit("c1", "msg"), commit("c2", "msg")]}
+        isLast
+        onRepoPush={() => undefined}
+      />,
+    );
     fireEvent.click(screen.getByTestId(COMMITS_SECTION_TOGGLE_TID));
-    expect(screen.getAllByTestId("commits-repo-header")).toHaveLength(1);
+    expect(screen.queryAllByTestId("commits-repo-header")).toHaveLength(0);
     expect(screen.getAllByTestId(COMMIT_ROW_TID)).toHaveLength(2);
   });
 
