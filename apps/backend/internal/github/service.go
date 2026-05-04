@@ -95,6 +95,33 @@ func (s *Service) RateTracker() *RateTracker {
 	return s.rateTracker
 }
 
+// ExhaustedRateLimit is a tiny DTO returned to the health package — the
+// health package can't import github (cycle), so it consumes a structural
+// shape via interface assertion.
+type ExhaustedRateLimit struct {
+	Resource string
+	ResetAt  time.Time
+}
+
+// ExhaustedRateLimits lists every resource bucket currently out of quota.
+// Returns an empty slice when none are exhausted, so callers can safely
+// `len()` the result.
+func (s *Service) ExhaustedRateLimits() []ExhaustedRateLimit {
+	if s.rateTracker == nil {
+		return nil
+	}
+	out := []ExhaustedRateLimit{}
+	for resource, snap := range s.rateTracker.All() {
+		if snap.Exhausted() {
+			out = append(out, ExhaustedRateLimit{
+				Resource: string(resource),
+				ResetAt:  snap.ResetAt,
+			})
+		}
+	}
+	return out
+}
+
 // rateLimitInfo materializes the tracker's snapshots into the DTO shape
 // returned by GetStatus and the rate-limit WS notification. Returns nil
 // when no buckets are known yet so the field stays omitted.
@@ -240,9 +267,7 @@ func (s *Service) retryClientCreation(ctx context.Context) {
 		s.logger.Debug("GitHub client retry failed", zap.Error(err))
 		return
 	}
-	if pat, ok := client.(*PATClient); ok {
-		pat.WithRateTracker(s.rateTracker)
-	}
+	attachRateTracker(client, s.rateTracker, s.logger)
 	s.client = client
 	s.authMethod = authMethod
 	s.logger.Info("GitHub client recovered after retry",

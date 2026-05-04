@@ -16,7 +16,38 @@ const (
 	defaultPRPollInterval     = 30 * time.Second
 	defaultReviewPollInterval = 5 * time.Minute
 	defaultIssuePollInterval  = 5 * time.Minute
+	// rateLimitedSleepCap bounds the rate-limit sleep so a misreported reset
+	// (e.g. far-future reset_at after a CLI failure) cannot wedge the loop.
+	rateLimitedSleepCap = 10 * time.Minute
 )
+
+// waitForRateLimit returns true after sleeping the loop until the relevant
+// resource bucket has quota again, or false if ctx was cancelled. When the
+// bucket is healthy the call is a no-op and returns true immediately.
+func (p *Poller) waitForRateLimit(ctx context.Context, resource Resource, loop string) bool {
+	if p.service == nil || p.service.rateTracker == nil {
+		return true
+	}
+	d := p.service.rateTracker.WaitDuration(resource)
+	if d <= 0 {
+		return true
+	}
+	if d > rateLimitedSleepCap {
+		d = rateLimitedSleepCap
+	}
+	p.logger.Info("github rate-limited; pausing poller loop",
+		zap.String("loop", loop),
+		zap.String("resource", string(resource)),
+		zap.Duration("sleep", d))
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
 
 // TaskBranchInfo describes a task+session that may need a PR watch.
 // RepositoryID scopes multi-repo tasks: each repo is a separate watch row.
@@ -94,7 +125,9 @@ func (p *Poller) prMonitorLoop(ctx context.Context) {
 	defer p.wg.Done()
 
 	// Run an initial check immediately so existing watches are evaluated on startup.
-	p.checkPRWatches(ctx)
+	if p.waitForRateLimit(ctx, ResourceGraphQL, "pr_monitor") {
+		p.checkPRWatches(ctx)
+	}
 
 	ticker := time.NewTicker(defaultPRPollInterval)
 	defer ticker.Stop()
@@ -104,6 +137,9 @@ func (p *Poller) prMonitorLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if !p.waitForRateLimit(ctx, ResourceGraphQL, "pr_monitor") {
+				return
+			}
 			p.checkPRWatches(ctx)
 		}
 	}
@@ -117,9 +153,164 @@ func (p *Poller) checkPRWatches(ctx context.Context) {
 		p.logger.Error("failed to list PR watches", zap.Error(err))
 		return
 	}
+	if len(watches) == 0 {
+		return
+	}
+
+	// Try the batched GraphQL path first — collapses N HTTP requests into a
+	// handful of multi-aliased GraphQL calls. On error or unsupported client
+	// (e.g. NoopClient), fall back to per-watch checks so one bad poll cycle
+	// doesn't lose state.
+	if p.tryBatchedPRWatchCheck(ctx, watches) {
+		return
+	}
 	for _, watch := range watches {
 		p.checkSinglePRWatch(ctx, watch)
 	}
+}
+
+// tryBatchedPRWatchCheck runs the batched GraphQL flow for the supplied
+// watches. Returns true when the path succeeded so the caller can skip the
+// per-watch fallback.
+func (p *Poller) tryBatchedPRWatchCheck(ctx context.Context, watches []*PRWatch) bool {
+	exec, err := graphQLExecutorFor(p.service.client)
+	if err != nil {
+		return false
+	}
+	numbered, searching := splitPRWatches(watches)
+	statusByKey, branchOK := p.fetchBatchedStatuses(ctx, exec, numbered, searching)
+	if statusByKey == nil && !branchOK {
+		return false
+	}
+	for _, w := range numbered {
+		key := prStatusCacheKey(w.Owner, w.Repo, w.PRNumber)
+		status, ok := statusByKey[key]
+		if !ok {
+			// Alias missing — PR may have been deleted; fall through to the
+			// per-watch path which already handles the not-found case.
+			p.checkSinglePRWatch(ctx, w)
+			continue
+		}
+		p.applyPRStatus(ctx, w, status)
+	}
+	for _, w := range searching {
+		key := graphqlBranchKey(w.Owner, w.Repo, w.Branch)
+		status, ok := statusByKey[key]
+		if !ok || status == nil || status.PR == nil {
+			// No PR yet for this branch — record the timestamp like the
+			// per-watch path so liveness updates.
+			now := time.Now().UTC()
+			_ = p.service.store.UpdatePRWatchTimestamps(ctx, w.ID, now, nil, "", "")
+			continue
+		}
+		p.applyDetectedPR(ctx, w, status.PR)
+	}
+	return true
+}
+
+// fetchBatchedStatuses runs both the numbered-PR query and the branch query
+// against GraphQL. The combined map keys numbered watches by
+// prStatusCacheKey and searching watches by graphqlBranchKey, so callers can
+// look up either kind in one place.
+func (p *Poller) fetchBatchedStatuses(
+	ctx context.Context, exec GraphQLExecutor, numbered, searching []*PRWatch,
+) (map[string]*PRStatus, bool) {
+	combined := make(map[string]*PRStatus)
+
+	if len(numbered) > 0 {
+		refs := make([]graphQLPRRef, 0, len(numbered))
+		for _, w := range numbered {
+			refs = append(refs, graphQLPRRef{Owner: w.Owner, Repo: w.Repo, Number: w.PRNumber})
+		}
+		out, err := runBatchedPRQuery(ctx, exec, refs)
+		if err != nil {
+			p.logger.Debug("batched PR status query failed", zap.Error(err))
+			return nil, false
+		}
+		for k, v := range out {
+			combined[k] = v
+		}
+	}
+	if len(searching) > 0 {
+		refs := make([]graphQLBranchRef, 0, len(searching))
+		for _, w := range searching {
+			refs = append(refs, graphQLBranchRef{Owner: w.Owner, Repo: w.Repo, Branch: w.Branch})
+		}
+		out, err := runBatchedBranchQuery(ctx, exec, refs)
+		if err != nil {
+			p.logger.Debug("batched branch query failed", zap.Error(err))
+			return combined, len(combined) > 0
+		}
+		for k, v := range out {
+			combined[k] = v
+		}
+	}
+	return combined, true
+}
+
+// splitPRWatches partitions watches into "we know the PR number" and "still
+// searching for one on this branch" buckets so each gets its own batched
+// query shape.
+func splitPRWatches(watches []*PRWatch) (numbered, searching []*PRWatch) {
+	for _, w := range watches {
+		if w.PRNumber == 0 {
+			searching = append(searching, w)
+		} else {
+			numbered = append(numbered, w)
+		}
+	}
+	return numbered, searching
+}
+
+// applyPRStatus is the post-fetch processing extracted from
+// checkSinglePRWatch so the batched path can reuse it.
+func (p *Poller) applyPRStatus(ctx context.Context, watch *PRWatch, status *PRStatus) {
+	if status == nil {
+		return
+	}
+	hasNew := status.ChecksState != watch.LastCheckStatus || status.ReviewState != watch.LastReviewState
+	now := time.Now().UTC()
+	if err := p.service.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, nil, status.ChecksState, status.ReviewState); err != nil {
+		p.logger.Error("failed to update PR watch timestamps", zap.String("id", watch.ID), zap.Error(err))
+	}
+	if syncErr := p.service.SyncTaskPR(ctx, watch.TaskID, status); syncErr != nil {
+		p.logger.Error("failed to sync task PR",
+			zap.String("task_id", watch.TaskID), zap.Error(syncErr))
+		return
+	}
+	if status.PR != nil && (status.PR.State == prStateMerged || status.PR.State == prStateClosed) {
+		p.publishPRStatusEvent(ctx, watch, status)
+		if resetErr := p.service.store.UpdatePRWatchPRNumber(ctx, watch.ID, 0); resetErr != nil {
+			p.logger.Error("failed to reset completed PR watch",
+				zap.String("id", watch.ID), zap.Error(resetErr))
+		}
+		return
+	}
+	if hasNew {
+		p.publishPRStatusEvent(ctx, watch, status)
+	}
+}
+
+// applyDetectedPR is the searching-watch counterpart to applyPRStatus —
+// promotes a PRWatch from "searching" to a known PR number and records the
+// task association.
+func (p *Poller) applyDetectedPR(ctx context.Context, watch *PRWatch, pr *PR) {
+	now := time.Now().UTC()
+	_ = p.service.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, nil, "", "")
+	if err := p.service.store.UpdatePRWatchPRNumber(ctx, watch.ID, pr.Number); err != nil {
+		p.logger.Error("failed to update PR watch with detected PR",
+			zap.String("watch_id", watch.ID), zap.Int("pr_number", pr.Number), zap.Error(err))
+		return
+	}
+	if _, err := p.service.AssociatePRWithTask(ctx, watch.TaskID, watch.RepositoryID, pr); err != nil {
+		p.logger.Error("failed to associate detected PR with task",
+			zap.String("task_id", watch.TaskID), zap.Int("pr_number", pr.Number), zap.Error(err))
+		return
+	}
+	p.logger.Info("detected PR for session branch (batched)",
+		zap.String("watch_id", watch.ID),
+		zap.String("branch", watch.Branch),
+		zap.Int("pr_number", pr.Number))
 }
 
 func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
@@ -302,8 +493,9 @@ func (p *Poller) refreshStaleBranches(ctx context.Context) {
 func (p *Poller) reviewQueueLoop(ctx context.Context) {
 	defer p.wg.Done()
 
-	// Run an initial check immediately so existing watches are evaluated on startup.
-	p.checkReviewWatches(ctx)
+	if p.waitForRateLimit(ctx, ResourceSearch, "review_queue") {
+		p.checkReviewWatches(ctx)
+	}
 
 	ticker := time.NewTicker(defaultReviewPollInterval)
 	defer ticker.Stop()
@@ -313,6 +505,9 @@ func (p *Poller) reviewQueueLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if !p.waitForRateLimit(ctx, ResourceSearch, "review_queue") {
+				return
+			}
 			p.checkReviewWatches(ctx)
 		}
 	}
@@ -368,8 +563,9 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 func (p *Poller) issueWatchLoop(ctx context.Context) {
 	defer p.wg.Done()
 
-	// Run an initial check immediately so existing watches are evaluated on startup.
-	p.checkIssueWatches(ctx)
+	if p.waitForRateLimit(ctx, ResourceSearch, "issue_watch") {
+		p.checkIssueWatches(ctx)
+	}
 
 	ticker := time.NewTicker(defaultIssuePollInterval)
 	defer ticker.Stop()
@@ -379,6 +575,9 @@ func (p *Poller) issueWatchLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if !p.waitForRateLimit(ctx, ResourceSearch, "issue_watch") {
+				return
+			}
 			p.checkIssueWatches(ctx)
 		}
 	}

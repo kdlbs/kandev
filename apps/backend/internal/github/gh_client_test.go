@@ -237,3 +237,39 @@ func TestConvertGHRequestedReviewers(t *testing.T) {
 		t.Errorf("unexpected third reviewer: %#v", got[2])
 	}
 }
+
+func TestGHStderrIndicatesRateLimit(t *testing.T) {
+	cases := []struct {
+		stderr string
+		want   bool
+	}{
+		{"GraphQL: API rate limit already exceeded for user ID 12345.", true},
+		{"You have exceeded a secondary rate limit.", true},
+		{"abuse detection mechanism triggered", true},
+		{"network: connection refused", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := ghStderrIndicatesRateLimit(c.stderr); got != c.want {
+			t.Errorf("ghStderrIndicatesRateLimit(%q) = %v, want %v", c.stderr, got, c.want)
+		}
+	}
+}
+
+func TestGHClient_InspectRateStderr_MarksGraphQL(t *testing.T) {
+	tracker := NewRateTracker(nil, nil)
+	c := NewGHClient().WithRateTracker(tracker)
+	c.inspectRateStderr([]string{"pr", "view", "1"}, "GraphQL: API rate limit already exceeded")
+	if !tracker.IsExhausted(ResourceGraphQL) {
+		t.Errorf("expected graphql exhausted")
+	}
+}
+
+func TestGHClient_InspectRateStderr_MarksSearchForSearchEndpoints(t *testing.T) {
+	tracker := NewRateTracker(nil, nil)
+	c := NewGHClient().WithRateTracker(tracker)
+	c.inspectRateStderr([]string{"api", "search/issues"}, "API rate limit exceeded")
+	if !tracker.IsExhausted(ResourceSearch) {
+		t.Errorf("expected search exhausted")
+	}
+}
