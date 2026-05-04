@@ -27,6 +27,7 @@ import (
 	analyticshandlers "github.com/kandev/kandev/internal/analytics/handlers"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/clarification"
+	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
 	debughandlers "github.com/kandev/kandev/internal/debug"
@@ -425,6 +426,7 @@ type routeParams struct {
 	webInternalURL          string
 	pprofEnabled            bool
 	httpPort                int
+	mcpPort                 int
 	log                     *logger.Logger
 }
 
@@ -689,15 +691,52 @@ func registerMCPAndDebugRoutes(
 
 // registerExternalMCP mounts an MCP server on the backend HTTP router so external
 // coding agents can connect to Kandev at /mcp, /mcp/sse, /mcp/message.
+// When p.mcpPort is non-zero, the MCP server runs on a dedicated HTTP server on
+// that port. Otherwise it shares the main HTTP server port.
 func registerExternalMCP(p routeParams) {
 	port := p.httpPort
 	if port == 0 {
 		port = ports.Backend
 	}
-	baseURL := fmt.Sprintf("http://localhost:%d", port)
+
+	mcpPort := p.mcpPort
+	if mcpPort == 0 {
+		mcpPort = port
+	}
+	mcpAddr := fmt.Sprintf(":%d", mcpPort)
+	baseURL := fmt.Sprintf("http://localhost:%d", mcpPort)
 
 	backendClient := mcpserver.NewDispatcherBackendClient(p.gateway.Dispatcher, p.log)
 	srv := mcpserver.NewExternal(backendClient, baseURL, p.log, "")
+
+	if p.mcpPort != 0 {
+		mcpRouter := gin.New()
+		mcpRouter.Use(httpmw.RequestLogger(p.log, "kandev-mcp"))
+		mcpRouter.Use(gin.Recovery())
+		mcpGroup := mcpRouter.Group("")
+		srv.RegisterBackendRoutes(mcpGroup)
+
+		mcpServer := &http.Server{Addr: mcpAddr, Handler: mcpRouter}
+		go func() {
+			p.log.Info("Starting MCP server on dedicated port",
+				zap.String("addr", mcpAddr),
+				zap.String("streamable_http", baseURL+"/mcp"),
+				zap.String("sse", baseURL+"/mcp/sse"))
+			if err := mcpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				p.log.Error("MCP server error", zap.Error(err))
+			}
+		}()
+		if p.addCleanup != nil {
+			p.addCleanup(func() error {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = srv.Close(ctx)
+				return mcpServer.Shutdown(ctx)
+			})
+		}
+		return
+	}
+
 	mcpGroup := p.router.Group("")
 	srv.RegisterBackendRoutes(mcpGroup)
 	if p.addCleanup != nil {
