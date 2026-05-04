@@ -580,3 +580,118 @@ func TestInitializeSession_LoadsExistingSession(t *testing.T) {
 		t.Error("did not expect agent.session.new to be called when loading existing session")
 	}
 }
+
+// waitForWSConnected blocks until the mock's agent stream WebSocket has accepted
+// a connection. Avoids racing the goroutine that StreamUpdates spawns to maintain
+// the WS, per CLAUDE.md preference for channel-based sync over time.Sleep.
+func waitForWSConnected(t *testing.T, mock *mockAgentServer) {
+	t.Helper()
+	select {
+	case <-mock.wsConnected:
+	case <-time.After(2 * time.Second):
+		t.Fatal("agent stream did not connect within 2s")
+	}
+}
+
+// TestSendPrompt_DispatchOnlyReturnsWithoutWaiting verifies that dispatch-only
+// mode returns immediately after agentctl.Prompt succeeds, without blocking on
+// the agent's complete event. This is what message_task_kandev relies on so the
+// MCP tool call doesn't hang for the duration of the target's turn.
+func TestSendPrompt_DispatchOnlyReturnsWithoutWaiting(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+
+	log := newSessionTestLogger()
+	sm := NewSessionManager(log, make(chan struct{}))
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+
+	// Stream must be connected before SendPrompt — agentctl.Prompt sends through it.
+	ctx := context.Background()
+	if err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("failed to connect stream: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	execution := &AgentExecution{
+		ID:            "test-exec",
+		TaskID:        "test-task",
+		SessionID:     "test-session",
+		WorkspacePath: "/workspace",
+		agentctl:      client,
+		// Buffered chan but nothing will ever publish to it during this test —
+		// dispatch-only must not wait on it.
+		promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+
+	done := make(chan struct {
+		result *PromptResult
+		err    error
+	}, 1)
+	go func() {
+		result, err := sm.SendPrompt(ctx, execution, "hello", false, nil, true)
+		done <- struct {
+			result *PromptResult
+			err    error
+		}{result, err}
+	}()
+
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("SendPrompt(dispatchOnly) returned error: %v", got.err)
+		}
+		if got.result == nil || got.result.StopReason != PromptStopReasonDispatched {
+			t.Fatalf("expected StopReason=%q, got %+v", PromptStopReasonDispatched, got.result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SendPrompt(dispatchOnly=true) blocked waiting for completion signal")
+	}
+}
+
+// TestSendPrompt_DrainsStaleSignalFromPriorDispatchOnly verifies that a leftover
+// completion signal from a previous dispatch-only prompt does not cause the next
+// (waiting) SendPrompt to return immediately with a stale result.
+func TestSendPrompt_DrainsStaleSignalFromPriorDispatchOnly(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+
+	log := newSessionTestLogger()
+	sm := NewSessionManager(log, make(chan struct{}))
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+
+	ctx := context.Background()
+	if err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("failed to connect stream: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	execution := &AgentExecution{
+		ID:            "test-exec",
+		TaskID:        "test-task",
+		SessionID:     "test-session",
+		WorkspacePath: "/workspace",
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+
+	// Pre-load a stale signal as if a prior dispatch-only prompt's completion
+	// landed in the buffer after SendPrompt returned.
+	execution.promptDoneCh <- PromptCompletionSignal{StopReason: "stale"}
+
+	// Run a normal SendPrompt (waits for completion). It must drain the stale
+	// signal and block until a real signal arrives or ctx times out.
+	timeoutCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+
+	_, err := sm.SendPrompt(timeoutCtx, execution, "hello", false, nil, false)
+	if err == nil {
+		t.Fatal("expected SendPrompt to block until ctx timeout, but it returned immediately (stale signal not drained)")
+	}
+	if !strings.Contains(err.Error(), context.DeadlineExceeded.Error()) {
+		t.Fatalf("expected deadline exceeded error, got: %v", err)
+	}
+}

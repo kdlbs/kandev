@@ -837,7 +837,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	}
 
 	stepPlanMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
-	_, err = s.PromptTask(ctx, taskID, sessionID, effectivePrompt, "", stepPlanMode, nil)
+	_, err = s.PromptTask(ctx, taskID, sessionID, effectivePrompt, "", stepPlanMode, nil, false)
 	if err != nil {
 		return fmt.Errorf("failed to prompt session: %w", err)
 	}
@@ -1599,14 +1599,15 @@ func (s *Service) saveArchiveCommits(ctx context.Context, sessionID string, comm
 // PromptTask sends a follow-up prompt to a running agent for a task session.
 // If planMode is true, a plan mode prefix is prepended to the prompt.
 // Attachments (images) are passed through to the agent if provided.
-func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment) (*PromptResult, error) {
+func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error) {
 	s.logger.Debug("PromptTask called",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.Int("prompt_length", len(prompt)),
 		zap.String("requested_model", model),
 		zap.Bool("plan_mode", planMode),
-		zap.Int("attachments_count", len(attachments)))
+		zap.Int("attachments_count", len(attachments)),
+		zap.Bool("dispatch_only", dispatchOnly))
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
@@ -1620,21 +1621,8 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
-	switch session.State {
-	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateCompleted:
-		// OK — session is ready for a new prompt
-	case models.TaskSessionStateRunning:
-		s.logger.Warn("rejected prompt while agent is already running",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.String("session_state", string(session.State)))
-		return nil, fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
-	default:
-		s.logger.Warn("rejected prompt: session not ready for input",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.String("session_state", string(session.State)))
-		return nil, fmt.Errorf("%w, session is in %s state", ErrAgentPromptInProgress, session.State)
+	if err := s.checkSessionPromptable(taskID, sessionID, session.State); err != nil {
+		return nil, err
 	}
 
 	// Ensure the agent process is actually running. After a lazy backend restart,
@@ -1679,54 +1667,73 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	// Prompts can take a long time (minutes) while the WS request may timeout in 15 seconds.
 	// We still want to log and respond, but the prompt should continue regardless.
 	promptCtx := context.WithoutCancel(ctx)
-	result, err := s.executor.Prompt(promptCtx, taskID, sessionID, effectivePrompt, attachments, session)
+	result, err := s.executor.Prompt(promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly, session)
 	if err != nil {
-		expectedResetInterrupt := false
-		if isTransientPromptError(err) && s.isSessionResetInProgress(sessionID) {
-			s.logger.Warn("prompt interrupted by in-progress session reset; retry expected",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			err = ErrSessionResetInProgress
-			expectedResetInterrupt = true
-		}
-
-		if expectedResetInterrupt {
-			s.logger.Warn("prompt deferred while session reset is in progress",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		} else {
-			s.logger.Error("prompt failed",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		}
-		// Revert session state so it doesn't stay stuck in RUNNING. Route through the
-		// wrapper so WS subscribers are notified — the UI relies on the
-		// session.state_changed broadcast to flip the composer/pause button out of
-		// "Agent is running". The wrapper's terminal-state guard is also correct here:
-		// if a concurrent agent-failure handler moved the session to FAILED we don't
-		// want to overwrite that with previousSessionState. Do NOT pass the preloaded
-		// `session` — the wrapper must re-read the row to see any such concurrent
-		// terminal transition; the stale pre-RUNNING snapshot would defeat the guard.
-		// allowWakeFromWaiting=false — this is a revert away from RUNNING, never a
-		// wake transition; the flag only matters when going WAITING_FOR_INPUT → RUNNING.
-		s.updateTaskSessionState(ctx, taskID, sessionID, previousSessionState, "", false)
-		// ErrCancelEscalated means the user cancelled and the lifecycle manager had to
-		// force-unblock a hung agent. That is not a "review this failure" condition —
-		// Service.CancelAgent reconciles DB state (WAITING_FOR_INPUT, cancel message,
-		// complete turn) already.
-		if !isTransientPromptError(err) && !errors.Is(err, lifecycle.ErrCancelEscalated) {
-			_ = s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview)
-		}
-		s.completeTurnForSession(ctx, sessionID)
-		return nil, err
+		return nil, s.handlePromptError(ctx, taskID, sessionID, previousSessionState, err)
 	}
 	return &PromptResult{
 		StopReason:   result.StopReason,
 		AgentMessage: result.AgentMessage,
 	}, nil
+}
+
+// checkSessionPromptable returns nil when the session's state accepts a new
+// prompt, or an ErrAgentPromptInProgress-wrapped error otherwise.
+func (s *Service) checkSessionPromptable(taskID, sessionID string, state models.TaskSessionState) error {
+	switch state {
+	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateCompleted:
+		return nil
+	case models.TaskSessionStateRunning:
+		s.logger.Warn("rejected prompt while agent is already running",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("session_state", string(state)))
+		return fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
+	default:
+		s.logger.Warn("rejected prompt: session not ready for input",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("session_state", string(state)))
+		return fmt.Errorf("%w, session is in %s state", ErrAgentPromptInProgress, state)
+	}
+}
+
+// handlePromptError reverts session state, logs the failure, transitions the
+// task to REVIEW for non-transient errors, and completes the in-flight turn.
+// Returns the (possibly remapped) error for the caller to surface.
+func (s *Service) handlePromptError(ctx context.Context, taskID, sessionID string, previousSessionState models.TaskSessionState, err error) error {
+	if isTransientPromptError(err) && s.isSessionResetInProgress(sessionID) {
+		s.logger.Warn("prompt deferred while session reset is in progress; retry expected",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		err = ErrSessionResetInProgress
+	} else {
+		s.logger.Error("prompt failed",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+	// Revert session state so it doesn't stay stuck in RUNNING. Route through the
+	// wrapper so WS subscribers are notified — the UI relies on the
+	// session.state_changed broadcast to flip the composer/pause button out of
+	// "Agent is running". The wrapper's terminal-state guard is also correct here:
+	// if a concurrent agent-failure handler moved the session to FAILED we don't
+	// want to overwrite that with previousSessionState. Do NOT pass the preloaded
+	// `session` — the wrapper must re-read the row to see any such concurrent
+	// terminal transition; the stale pre-RUNNING snapshot would defeat the guard.
+	// allowWakeFromWaiting=false — this is a revert away from RUNNING, never a
+	// wake transition; the flag only matters when going WAITING_FOR_INPUT → RUNNING.
+	s.updateTaskSessionState(ctx, taskID, sessionID, previousSessionState, "", false)
+	// ErrCancelEscalated means the user cancelled and the lifecycle manager had to
+	// force-unblock a hung agent. That is not a "review this failure" condition —
+	// Service.CancelAgent reconciles DB state (WAITING_FOR_INPUT, cancel message,
+	// complete turn) already.
+	if !isTransientPromptError(err) && !errors.Is(err, lifecycle.ErrCancelEscalated) {
+		_ = s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview)
+	}
+	s.completeTurnForSession(ctx, sessionID)
+	return err
 }
 
 // trySwitchModel handles model switching for a prompt. Returns (result, true, nil) if a switch was

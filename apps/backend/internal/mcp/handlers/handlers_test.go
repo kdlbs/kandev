@@ -156,7 +156,7 @@ func (m *mockSessionLauncher) getRequest() *orchestrator.LaunchSessionRequest {
 // The following methods satisfy the SessionLauncher interface but are not used by
 // the autoStartTask tests. handleMessageTask tests use a dedicated fakeOrchestrator
 // (see message_task_test.go) that exercises these paths.
-func (m *mockSessionLauncher) PromptTask(context.Context, string, string, string, string, bool, []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+func (m *mockSessionLauncher) PromptTask(context.Context, string, string, string, string, bool, []v1.MessageAttachment, bool) (*orchestrator.PromptResult, error) {
 	return nil, nil
 }
 func (m *mockSessionLauncher) StartCreatedSession(context.Context, string, string, string, string, bool, bool, []v1.MessageAttachment) (*executor.TaskExecution, error) {

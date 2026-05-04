@@ -452,3 +452,8 @@ type PromptResult struct {
 	StopReason   string // The reason the agent stopped (e.g., "end_turn")
 	AgentMessage string // The agent's accumulated response message
 }
+
+// PromptStopReasonDispatched is the StopReason returned when SendPrompt was
+// called in dispatch-only mode and returned after the agent acknowledged the
+// prompt instead of waiting for the turn to complete.
+const PromptStopReasonDispatched = "dispatched"
