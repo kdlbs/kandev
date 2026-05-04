@@ -190,6 +190,10 @@ jobs:
             --body "Automated release: \`$NEXT\`" \
             --head "$BRANCH" \
             --base main
+          # Immediate squash-merge. This relies on main's ruleset requiring
+          # only "PR required" with no status checks. If status checks are
+          # added to the ruleset later, this needs to switch to `--auto` +
+          # polling for merge completion before the tag steps below.
           gh pr merge "$BRANCH" --squash --delete-branch --subject "$MSG" --body ""
 
           # Pull the squashed commit into local main, then tag from it.
@@ -197,7 +201,21 @@ jobs:
           git checkout main
           git reset --hard origin/main
           git tag -a "$TAG" -m "release: $NEXT"
-          git push origin "$TAG"
+
+          # Tag push: retry once for transient network blips. If both attempts
+          # fail, main already has the bumped commit but no tag exists.
+          # Recover by manually pushing the tag from any clone pointing at the
+          # squashed merge commit:  git push origin "$TAG"
+          git push origin "$TAG" || {
+            echo "Tag push failed; retrying in 5s..." >&2
+            sleep 5
+            git push origin "$TAG" || {
+              echo "ERROR: Tag push failed twice after PR merge succeeded." >&2
+              echo "  main is at $NEXT but the tag was not created on origin." >&2
+              echo "  Recover manually: git push origin $TAG" >&2
+              exit 1
+            }
+          }
 
       - name: Dry-run summary
         if: ${{ inputs.dry_run }}
