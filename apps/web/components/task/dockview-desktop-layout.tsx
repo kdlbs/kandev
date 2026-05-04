@@ -201,16 +201,10 @@ function SidebarContent({ panelId }: { panelId: string }) {
   return <TaskSessionSidebar workspaceId={workspaceId} workflowId={workflowId} />;
 }
 
-/** Generic fallback shown when the active session's agent profile is unknown. */
 export const CHAT_PANEL_FALLBACK_LABEL = "Agent";
 
-/** Resolve the dockview tab title for the chat / session panel.
- *  Returns the profile-derived label whenever it's known so the generic
- *  "chat" placeholder reflects the active session's agent (e.g. "Opus")
- *  instead of falling back to "Agent". Used by both the per-session
- *  `session:*` tabs and the singleton `chat` placeholder. */
 export function resolveChatPanelTitle(agentLabel: string | null | undefined): string {
-  return agentLabel && agentLabel.length > 0 ? agentLabel : CHAT_PANEL_FALLBACK_LABEL;
+  return agentLabel || CHAT_PANEL_FALLBACK_LABEL;
 }
 
 function useChatSessionTitle(panelId: string, sessionId: string | null) {
@@ -474,7 +468,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   useEffect(() => {
     envIdRef.current = effectiveEnvId;
-  }, [effectiveEnvId, effectiveSessionId]);
+  }, [effectiveEnvId]);
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
