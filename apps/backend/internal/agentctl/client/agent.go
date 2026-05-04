@@ -199,6 +199,29 @@ func (c *Client) SetModel(ctx context.Context, modelID string) error {
 	return nil
 }
 
+// SetConfigOption sets a session config option via the agent WebSocket stream.
+func (c *Client) SetConfigOption(ctx context.Context, configID, value string) error {
+	payload := struct {
+		ConfigID string `json:"config_id"`
+		Value    string `json:"value"`
+	}{ConfigID: configID, Value: value}
+
+	resp, err := c.sendStreamRequest(ctx, "agent.session.set_config_option", payload)
+	if err != nil {
+		return fmt.Errorf("set config option request failed: %w", err)
+	}
+
+	if resp.Type == ws.MessageTypeError {
+		var errPayload ws.ErrorPayload
+		if err := resp.ParsePayload(&errPayload); err != nil {
+			return fmt.Errorf("set config option failed: unable to parse error")
+		}
+		return fmt.Errorf("set config option failed: %s", errPayload.Message)
+	}
+
+	return nil
+}
+
 // Authenticate triggers authentication for a given auth method via the agent WebSocket stream.
 func (c *Client) Authenticate(ctx context.Context, methodID string) error {
 	payload := struct {

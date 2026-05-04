@@ -29,7 +29,7 @@ Open source, multi-provider, no telemetry, not tied to any cloud.
 
 ## Features
 
-- **Multi-agent support** - Claude Code, Codex, GitHub Copilot, Gemini CLI, Amp, Auggie, OpenCode
+- **Multi-agent support** - Claude Code, Codex, GitHub Copilot, Gemini CLI, Amp, Auggie, OpenCode, Cursor, Qwen, Factory Droid, iFlow, Kilocode, Pi, Kimi, AWS Kiro, Qoder, Trae
 - **Parallel task execution** – start and manage multiple tasks from different sources simultaneously, boosting productivity with AI agents
 - **Integrated workspace** - Built-in terminal, code editor with LSP, git changes panel, embedded vscode and chat in one IDE-like view
 - **Kanban task management** - Drag-and-drop boards, columns, and workflow automation
@@ -54,15 +54,25 @@ Connect Kandev to the tools your team already uses — pull issues into the kanb
 
 ## Supported ACP Agents
 
-| Agent | Protocol |
+| Agent | Launch |
 |:-------:|:----------:|
-| **Claude Code** | ACP (`@zed-industries/claude-agent-acp`) |
-| **Codex** | ACP (`@zed-industries/codex-acp`) |
-| **GitHub Copilot** | ACP |
-| **Gemini CLI** | ACP |
-| **Amp** | ACP (`amp-acp`) |
-| **Auggie** | ACP |
-| **OpenCode** | ACP |
+| **Claude Code** | `npx -y @agentclientprotocol/claude-agent-acp` |
+| **Codex** | `npx -y @zed-industries/codex-acp` |
+| **GitHub Copilot** | `npx -y @github/copilot --acp` |
+| **Gemini CLI** | `npx -y @google/gemini-cli --acp` |
+| **Amp** | `npx -y amp-acp` |
+| **Auggie** | `npx -y @augmentcode/auggie --acp` |
+| **OpenCode** | `opencode acp` |
+| **Cursor** | `cursor-agent acp` *(requires Cursor Pro)* |
+| **Qwen** | `npx -y @qwen-code/qwen-code --acp` |
+| **Factory Droid** | `npx -y droid exec --output-format acp` |
+| **iFlow (beta)** | `npx -y @iflow-ai/iflow-cli --experimental-acp` |
+| **Kilocode** | `npx -y @kilocode/cli acp` |
+| **Pi** | `npx -y pi-acp` |
+| **Kimi** | `kimi acp` *(install Kimi CLI from Moonshot AI)* |
+| **Kiro** | `kiro-cli-chat acp` *(install Kiro CLI from AWS)* |
+| **Qoder** | `qodercli --acp` *(install Qoder CLI)* |
+| **Trae** | `traecli acp serve` *(install Trae IDE CLI)* |
 
 > All agents communicate via [ACP](https://agentclientprotocol.com) (Agent Client Protocol). Some agents support ACP natively, while others use ACP adapter packages that bridge their native protocols. **CLI Passthrough mode** is also available for direct terminal interaction with any agent CLI. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/add-agent-cli.md) for a step-by-step guide.
 
@@ -186,7 +196,7 @@ There are a few similar tools in this space, and new ones appearing everyday. He
 
 - **Server-first architecture** - Not a desktop app. Runs as a server you can access from any device, including your phone. Start a task away from your computer and check in on it later.
 - **Remote runtimes** - Run agents on remote servers and Docker hosts, not just your local machine.
-- **Multi-provider** - Use Claude Code, Codex, Copilot, Gemini, Amp, Auggie, and OpenCode side by side. Not locked to one vendor.
+- **Multi-provider** - Use Claude Code, Codex, Copilot, Gemini, Amp, Auggie, OpenCode, Cursor, Qwen, Droid, iFlow, Kilocode, Pi, Kimi, Kiro, Qoder, and Trae side by side. Not locked to one vendor.
 - **CLI passthrough and chat** - Interact with agents through structured chat messages or drop into raw CLI mode for full agent TUI capabilities.
 - **Open source and self-hostable** - No vendor lock-in, no telemetry, runs on your infrastructure.
 
