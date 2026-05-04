@@ -40,6 +40,35 @@ func WithCommand(name string) DetectOption {
 	}
 }
 
+// WithNpxRunnable reports the agent as runnable via `npx -y <pkg>` whenever
+// npx is on PATH. MatchedPath is tagged "npx <pkg>" so the settings page
+// renders "Detected at npx <pkg>", giving users an honest hint that the
+// package isn't globally installed but will be fetched on launch.
+//
+// Only `npx` is checked, not `node`: every npm-distributed agent's launch
+// command is `npx -y <pkg>`, so a node-only setup would pass detection but
+// fail at session start with "exec: npx: executable file not found in PATH".
+//
+// Use this AFTER a WithCommand check for the global binary — Detect is
+// first-match-wins, so the global install (if present) is preferred and
+// reports its real path.
+//
+// NOTE: not currently wired into any agent's IsInstalled. The host-utility
+// manager treats Available=true as a green light to spawn and probe the
+// agent at boot, so claiming availability via npx alone caused unwanted
+// downloads and misleading auth_required/failed states for agents the user
+// never installed. The helper is parked here until the host-utility manager
+// gains a "skip probe for npx-fallback detections" path; at that point this
+// can be re-wired into the npm-distributed agents' IsInstalled.
+func WithNpxRunnable(pkg string) DetectOption {
+	return func(ctx context.Context) (bool, string, error) {
+		if _, err := exec.LookPath("npx"); err == nil {
+			return true, "npx " + pkg, nil
+		}
+		return false, "", nil
+	}
+}
+
 // WithCommandOutput runs a command and checks stdout matches regex.
 func WithCommandOutput(pattern string, name string, args ...string) DetectOption {
 	return func(ctx context.Context) (bool, string, error) {

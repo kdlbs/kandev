@@ -262,6 +262,8 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		return s.handleWSSetMode(ctx, msg)
 	case "agent.session.set_model":
 		return s.handleWSSetModel(ctx, msg)
+	case "agent.session.set_config_option":
+		return s.handleWSSetConfigOption(ctx, msg)
 	case "agent.session.authenticate":
 		return s.handleWSAuthenticate(ctx, msg)
 	case "agent.session.reset":
@@ -574,6 +576,20 @@ func (s *Server) handleWSSetModel(ctx context.Context, msg *ws.Message) *ws.Mess
 			return fmt.Errorf("agent does not support model switching")
 		}
 		return ms.SetModel(ctx, req.ModelID)
+	})
+}
+
+func (s *Server) handleWSSetConfigOption(ctx context.Context, msg *ws.Message) *ws.Message {
+	var req struct {
+		ConfigID string `json:"config_id"`
+		Value    string `json:"value"`
+	}
+	return s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
+		cs, ok := a.(adapter.ConfigOptionSettableAdapter)
+		if !ok {
+			return fmt.Errorf("agent does not support set_config_option")
+		}
+		return cs.SetConfigOption(ctx, req.ConfigID, req.Value)
 	})
 }
 

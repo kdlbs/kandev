@@ -11,11 +11,10 @@ export type TopbarOverflowItem = {
   id: string;
   label: string;
   priority: number;
-  required?: boolean;
   content: ReactNode;
 };
 
-type TopbarOverflowMetricItem = Pick<TopbarOverflowItem, "id" | "priority" | "required">;
+type TopbarOverflowMetricItem = Pick<TopbarOverflowItem, "id" | "priority">;
 
 type HiddenTopbarActionArgs = {
   items: TopbarOverflowMetricItem[];
@@ -77,9 +76,7 @@ export function getHiddenTopbarActionIds({
   fallbackItemWidth = DEFAULT_FALLBACK_ITEM_WIDTH,
 }: HiddenTopbarActionArgs): string[] {
   const hiddenIds = new Set<string>();
-  const hideableItems = [...items]
-    .filter((item) => !item.required)
-    .sort((a, b) => a.priority - b.priority);
+  const hideableItems = [...items].sort((a, b) => a.priority - b.priority);
 
   while (
     totalActionWidth({

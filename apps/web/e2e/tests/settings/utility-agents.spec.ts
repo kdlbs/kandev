@@ -192,4 +192,30 @@ test.describe("Utility Agents settings page", () => {
       [],
     );
   });
+
+  test("Configuration Chat Agent section lives here, not on the agents page", async ({
+    testPage,
+  }) => {
+    // Regression guard for the move from /settings/agents to /settings/utility-agents.
+    await testPage.goto("/settings/utility-agents");
+    await expect(
+      testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(
+      testPage.getByRole("heading", { name: "Configuration Chat Agent", exact: true }),
+    ).toBeVisible();
+    await expect(
+      testPage.getByText(
+        "Choose which agent profile to use for the Configuration Chat. This agent can manage your workflows, agent profiles, and MCP configuration.",
+      ),
+    ).toBeVisible();
+
+    await testPage.goto("/settings/agents");
+    await expect(testPage.getByRole("heading", { name: "Agents", exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(
+      testPage.getByRole("heading", { name: "Configuration Chat Agent", exact: true }),
+    ).toHaveCount(0);
+  });
 });

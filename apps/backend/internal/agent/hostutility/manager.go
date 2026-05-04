@@ -361,9 +361,20 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 	return v.(*instance), ia, nil
 }
 
+// probeTimeout caps each ACP probe so an agent that hangs (e.g. one that
+// blocks waiting for interactive auth) doesn't keep its UI badge stuck on
+// "Probing". 60s is generous enough for cold npm fetches and ACP handshake,
+// short enough that the user sees a definitive Error/AuthRequired status
+// quickly. Without this bound the only ceiling is the 5-minute HTTP client
+// timeout on the agentctl call.
+const probeTimeout = 60 * time.Second
+
 // probe runs an ACP probe against the given instance and translates the result
 // into an AgentCapabilities record suitable for the cache.
 func (m *Manager) probe(ctx context.Context, inst *instance, ia agents.InferenceAgent) AgentCapabilities {
+	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+
 	cfg := ia.InferenceConfig()
 	req := &agentctlutil.ProbeRequest{
 		AgentID: inst.agentType,
@@ -373,7 +384,7 @@ func (m *Manager) probe(ctx context.Context, inst *instance, ia agents.Inference
 			WorkDir:   inst.workDir,
 		},
 	}
-	resp, err := inst.client.Probe(ctx, req)
+	resp, err := inst.client.Probe(probeCtx, req)
 	now := time.Now()
 	if err != nil {
 		return AgentCapabilities{

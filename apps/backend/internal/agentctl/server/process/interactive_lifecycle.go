@@ -507,7 +507,7 @@ func (r *InteractiveRunner) wait(proc *interactiveProcess) {
 	)
 
 	// Log buffer contents if process exited with error (helps debug startup failures)
-	// Bump to Warn for early-exit failures (process died within 5s of start) — those
+	// Bump to Error for early-exit failures (process died within 5s of start) — those
 	// are almost always real problems (bad CLI flag, missing binary, auth failure)
 	// rather than the expected user-closes-terminal case. Keep Debug for late exits.
 	if status == types.ProcessStatusFailed && proc.buffer != nil {
@@ -530,7 +530,7 @@ func (r *InteractiveRunner) wait(proc *interactiveProcess) {
 				zap.String("output", combinedOutput),
 			}
 			if lifetime < 5*time.Second {
-				r.logger.Warn("interactive process exited early — likely startup failure", fields...)
+				r.logger.Error("interactive process exited early — likely startup failure", fields...)
 			} else {
 				r.logger.Debug("interactive process output before exit", fields...)
 			}
