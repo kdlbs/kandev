@@ -183,6 +183,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateSessionsRemoveAgentExecutionID(); err != nil {
 		return err
 	}
+	// Add task_dir_name column to task_environments for multi-repo task root layout (ignore error if already exists).
+	// Must run BEFORE migrateTaskEnvironmentsRemoveAgentExecutionID, which copies task_dir_name into the recreated table.
+	_, _ = r.db.Exec(`ALTER TABLE task_environments ADD COLUMN task_dir_name TEXT DEFAULT ''`)
 	if err := r.migrateTaskEnvironmentsRemoveAgentExecutionID(); err != nil {
 		return err
 	}
@@ -190,8 +193,6 @@ func (r *Repository) runMigrations() error {
 	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
 	// Add agent_profile_id column to workflows for per-workflow agent profile override (ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
-	// Add task_dir_name column to task_environments for multi-repo task root layout (ignore error if already exists)
-	_, _ = r.db.Exec(`ALTER TABLE task_environments ADD COLUMN task_dir_name TEXT DEFAULT ''`)
 	// Add hidden flag to workflows for system-only flows excluded from management UI (ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
 	return nil
@@ -415,7 +416,9 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 		`ALTER TABLE task_environments_new RENAME TO task_environments`,
 		`CREATE INDEX IF NOT EXISTS idx_task_environments_task_id ON task_environments(task_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_environments_status ON task_environments(status)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_environments_task_id ON task_environments(task_id)`,
+		// uniq_task_environments_task_id is created by ensureTaskEnvironmentTaskUniqueIndex
+		// AFTER healDuplicateTaskEnvironments collapses any pre-existing duplicates.
+		// Creating it here would fail on databases that still have duplicate task_id rows.
 	})
 }
 
