@@ -150,12 +150,11 @@ func TestSessionBlocksEnvironmentReset(t *testing.T) {
 
 func TestResetTaskEnvironment_DestroysEachResourceTypeAndDeletesRow(t *testing.T) {
 	repo := &stubEnvRepo{env: &models.TaskEnvironment{
-		ID:               "env-1",
-		TaskID:           "task-1",
-		ContainerID:      "container-abc",
-		SandboxID:        "sandbox-xyz",
-		WorktreeID:       "wt-1",
-		AgentExecutionID: "exec-1",
+		ID:          "env-1",
+		TaskID:      "task-1",
+		ContainerID: "container-abc",
+		SandboxID:   "sandbox-xyz",
+		WorktreeID:  "wt-1",
 	}}
 	destroyer := &stubDestroyer{}
 	svc := newResetTestService(t, repo)

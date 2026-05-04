@@ -190,15 +190,14 @@ func TestGetWorkspaceInfoForSession_IncludesEnvironmentReconnectMetadata(t *test
 	}
 
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
-		ID:               "env-123",
-		TaskID:           "task-123",
-		ExecutorType:     string(models.ExecutorTypeLocalDocker),
-		Status:           models.TaskEnvironmentStatusReady,
-		AgentExecutionID: "env-exec",
-		WorkspacePath:    "/host/repo",
-		ContainerID:      "container-from-env",
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		ID:            "env-123",
+		TaskID:        "task-123",
+		ExecutorType:  string(models.ExecutorTypeLocalDocker),
+		Status:        models.TaskEnvironmentStatusReady,
+		WorkspacePath: "/host/repo",
+		ContainerID:   "container-from-env",
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}); err != nil {
 		t.Fatalf("failed to create task environment: %v", err)
 	}

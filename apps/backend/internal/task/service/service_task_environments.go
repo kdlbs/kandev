@@ -218,7 +218,7 @@ func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.
 		}
 	}
 	if env.SandboxID != "" {
-		if err := s.envDestroyer.DestroySandbox(ctx, env.SandboxID, env.AgentExecutionID); err != nil {
+		if err := s.envDestroyer.DestroySandbox(ctx, env.SandboxID, ""); err != nil {
 			errs = append(errs, fmt.Errorf("destroy sandbox %s: %w", env.SandboxID, err))
 		}
 	}

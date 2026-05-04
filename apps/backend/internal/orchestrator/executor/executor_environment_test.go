@@ -60,10 +60,9 @@ func TestApplyExistingEnvironment_SkipsReuseOnExecutorTypeMismatch(t *testing.T)
 		UseWorktree:  true,
 	}
 	env := &models.TaskEnvironment{
-		ExecutorType:     "sprites",
-		ContainerID:      "container-abc",
-		WorktreeID:       "wt-1",
-		AgentExecutionID: "exec-123",
+		ExecutorType: "sprites",
+		ContainerID:  "container-abc",
+		WorktreeID:   "wt-1",
 	}
 
 	e.applyExistingEnvironment(req, env)
@@ -114,10 +113,9 @@ func TestApplyExistingEnvironment_DockerBranchReuse(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1", ExecutorType: "local_docker"}
 	env := &models.TaskEnvironment{
-		ExecutorType:     "local_docker",
-		ContainerID:      "container-abc",
-		AgentExecutionID: "exec-123",
-		WorktreeBranch:   "feature/existing-task-abc",
+		ExecutorType:   "local_docker",
+		ContainerID:    "container-abc",
+		WorktreeBranch: "feature/existing-task-abc",
 	}
 
 	e.applyExistingEnvironment(req, env)
@@ -201,9 +199,8 @@ func TestApplyExistingEnvironmentRuntimeMetadata_FallsBackToMatchingContainer(t 
 	req := &LaunchAgentRequest{TaskID: "task-1"}
 
 	e.applyExistingEnvironmentRuntimeMetadata(context.Background(), req, &models.TaskEnvironment{
-		ID:               "env-1",
-		AgentExecutionID: "exec-old",
-		ContainerID:      "container-old",
+		ID:          "env-1",
+		ContainerID: "container-old",
 	})
 
 	if req.PreviousExecutionID != "exec-old" {
@@ -247,12 +244,11 @@ func TestBuildResumeRequest_ReusesTaskEnvironmentRuntimeMetadata(t *testing.T) {
 		Resumable: true,
 	}
 	repo.taskEnvironments["env-1"] = &models.TaskEnvironment{
-		ID:               "env-1",
-		TaskID:           "task-1",
-		ExecutorType:     string(models.ExecutorTypeLocalDocker),
-		AgentExecutionID: "exec-old",
-		ContainerID:      "container-old",
-		Status:           models.TaskEnvironmentStatusReady,
+		ID:           "env-1",
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeLocalDocker),
+		ContainerID:  "container-old",
+		Status:       models.TaskEnvironmentStatusReady,
 	}
 	repo.sessions["session-old"] = &models.TaskSession{
 		ID:                "session-old",

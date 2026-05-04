@@ -334,9 +334,6 @@ func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *mod
 	if info.WorkspacePath == "" {
 		info.WorkspacePath = env.WorkspacePath
 	}
-	if info.AgentExecutionID == "" {
-		info.AgentExecutionID = env.AgentExecutionID
-	}
 	if env.ContainerID != "" {
 		ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyContainerID] = env.ContainerID
 	}

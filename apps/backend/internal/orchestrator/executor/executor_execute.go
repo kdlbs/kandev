@@ -1194,7 +1194,7 @@ func executorRunningMatchesEnvironment(running *models.ExecutorRunning, env *mod
 	if env.ContainerID != "" && running.ContainerID == env.ContainerID {
 		return true
 	}
-	if env.AgentExecutionID != "" && running.AgentExecutionID == env.AgentExecutionID {
+	if env.SandboxID != "" && running.Metadata != nil && running.Metadata["sprite_name"] == env.SandboxID {
 		return true
 	}
 	return false
