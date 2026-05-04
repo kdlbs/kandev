@@ -116,8 +116,7 @@ func SanitizeForBranch(title string, maxLen int) string {
 	result = sb.String()
 
 	// Remove consecutive hyphens
-	re := regexp.MustCompile(`-+`)
-	result = re.ReplaceAllString(result, "-")
+	result = repoDirHyphenRun.ReplaceAllString(result, "-")
 
 	// Remove leading and trailing hyphens
 	result = strings.Trim(result, "-")
@@ -188,6 +187,12 @@ func SmallSuffix(maxLen int) string {
 // This guards against names like "owner/repo" producing nested subdirectories
 // when used as the worktree directory under a multi-repo task root — the
 // extra path level breaks sibling-repo detection in agentctl.
+//
+// Limitation: distinct names that differ only in unsafe characters (e.g.
+// "acme/widget-config" and "acme-widget-config") collapse to the same
+// segment. Two such repos in one task would collide on `git worktree add`.
+// Acceptable in practice — provider repos (the common case) are uniquely
+// identified by owner/name and won't collide with each other.
 func SanitizeRepoDirName(name string) string {
 	if name == "" {
 		return ""

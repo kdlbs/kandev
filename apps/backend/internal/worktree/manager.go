@@ -298,7 +298,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRef string) (*Worktree, error) {
 	repoDir := SanitizeRepoDirName(req.RepoName)
 	if repoDir == "" {
-		return nil, ErrTaskDirRequired
+		return nil, ErrInvalidRepoName
 	}
 	worktreePath, err := m.config.TaskWorktreePath(req.TaskDirName, repoDir)
 	if err != nil {

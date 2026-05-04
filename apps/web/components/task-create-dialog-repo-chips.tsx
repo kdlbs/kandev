@@ -10,6 +10,7 @@ import type { LocalRepository, Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
 import { autoSelectBranch } from "@/components/task-create-dialog-helpers";
 import { scoreBranch } from "@/lib/utils/branch-filter";
+import { scoreRepo } from "@/lib/utils/repo-filter";
 import {
   Pill,
   sortBranches,
@@ -634,16 +635,4 @@ function leafSegment(path: string): string {
   const cleaned = path.replace(/\\/g, "/").replace(/\/+$/g, "");
   const idx = cleaned.lastIndexOf("/");
   return idx >= 0 ? cleaned.slice(idx + 1) : cleaned;
-}
-
-// Repo dropdown wraps scoreBranch but drops weak subsequence-only matches.
-// scoreBranch's last-resort fuzzy fallback makes sense for branch names
-// (typos, partial fragments) but for repo paths it surfaces nonsense — e.g.
-// "arthur" scoring against "playground/fun/thm/.../lxd-alpine-builder"
-// because a-r-t-h-u-r appears in order across path segments. Substring,
-// prefix, and word-boundary hits all score >= 0.45, so a 0.4 floor keeps
-// real matches while filtering the long-path coincidences.
-function scoreRepo(value: string, search: string, keywords?: string[]): number {
-  const score = scoreBranch(value, search, keywords);
-  return score >= 0.4 ? score : 0;
 }
