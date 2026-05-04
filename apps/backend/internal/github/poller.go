@@ -21,6 +21,23 @@ const (
 	rateLimitedSleepCap = 10 * time.Minute
 )
 
+// searchBucketExhausted reports whether the search bucket is currently
+// exhausted. Used by per-watch loops to bail out mid-cycle once a single
+// search request has tripped the limit, so the remaining watches don't issue
+// doomed searches that worsen secondary-limit penalties. Returns false when
+// the tracker is unavailable (tests, disabled feature).
+func (p *Poller) searchBucketExhausted(loop string) bool {
+	if p.service == nil || p.service.rateTracker == nil {
+		return false
+	}
+	if p.service.rateTracker.WaitDuration(ResourceSearch) <= 0 {
+		return false
+	}
+	p.logger.Debug("search bucket exhausted; stopping watch loop early",
+		zap.String("loop", loop))
+	return true
+}
+
 // waitForRateLimit returns true after sleeping the loop until the relevant
 // resource bucket has quota again, or false if ctx was cancelled. When the
 // bucket is healthy the call is a no-op and returns true immediately.
@@ -526,6 +543,12 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 	}
 	p.logger.Debug("checking review watches", zap.Int("count", len(watches)))
 	for _, watch := range watches {
+		// A previous iteration in this same cycle may have exhausted the
+		// search bucket. Stop early instead of issuing another doomed search
+		// that would only deepen the secondary-limit penalty.
+		if p.searchBucketExhausted("review_watch") {
+			return
+		}
 		p.logger.Debug("polling review watch",
 			zap.String("watch_id", watch.ID),
 			zap.String("workspace_id", watch.WorkspaceID),
@@ -596,6 +619,9 @@ func (p *Poller) checkIssueWatches(ctx context.Context) {
 	}
 	p.logger.Debug("checking issue watches", zap.Int("count", len(watches)))
 	for _, watch := range watches {
+		if p.searchBucketExhausted("issue_watch") {
+			return
+		}
 		p.logger.Debug("polling issue watch",
 			zap.String("watch_id", watch.ID),
 			zap.String("workspace_id", watch.WorkspaceID),

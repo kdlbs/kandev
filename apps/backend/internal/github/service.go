@@ -95,6 +95,16 @@ func (s *Service) RateTracker() *RateTracker {
 	return s.rateTracker
 }
 
+// newPATClient builds a PATClient pre-wired with the service's shared rate
+// tracker. Centralizing this guards against forgetting the wiring on auth
+// flips (e.g. ConfigureToken), which would otherwise leave PAT calls
+// invisible to the rate-limit UI, health checks, and poller throttling.
+func (s *Service) newPATClient(token string) *PATClient {
+	c := NewPATClient(token)
+	attachRateTracker(c, s.rateTracker, s.logger)
+	return c
+}
+
 // ExhaustedRateLimit is a tiny DTO returned to the health package — the
 // health package can't import github (cycle), so it consumes a structural
 // shape via interface assertion.
@@ -293,8 +303,10 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 		return fmt.Errorf("secret manager not configured")
 	}
 
-	// Validate the token by testing authentication
-	testClient := NewPATClient(token)
+	// Validate the token by testing authentication. Wire the rate tracker
+	// onto the test client up front so the validation request seeds the
+	// shared quota and subsequent PAT-backed calls keep feeding it.
+	testClient := s.newPATClient(token)
 	user, err := testClient.GetAuthenticatedUser(ctx)
 	if err != nil {
 		return fmt.Errorf("invalid token: %w", err)

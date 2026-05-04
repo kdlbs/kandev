@@ -49,9 +49,10 @@ func ghStderrIndicatesRateLimit(stderr string) bool {
 }
 
 // inspectRateStderr inspects the stderr from a failed `gh` invocation and
-// flags the appropriate resource bucket as exhausted. The default resource is
-// graphql since `gh pr` and `gh api graphql` are the most common CLI calls;
-// callers that hit /search/* override via subcommand inspection.
+// flags the appropriate resource bucket as exhausted. `gh api <path>` is REST
+// (Core) by default, with `api graphql` and `api search/*` as the documented
+// exceptions; non-`api` subcommands like `pr`, `issue`, and `repo` are
+// implemented against GraphQL by gh itself, so they map to the GraphQL bucket.
 func (c *GHClient) inspectRateStderr(args []string, stderr string) {
 	if c.rateTracker == nil {
 		return
@@ -59,11 +60,30 @@ func (c *GHClient) inspectRateStderr(args []string, stderr string) {
 	if !ghStderrIndicatesRateLimit(stderr) {
 		return
 	}
-	resource := ResourceGraphQL
-	if len(args) >= 2 && args[0] == "api" && strings.HasPrefix(args[1], "search/") {
-		resource = ResourceSearch
+	c.rateTracker.markRateExhausted(resourceForGHArgs(args), time.Time{})
+}
+
+// resourceForGHArgs maps a `gh` argv to the rate-limit bucket the call hits.
+// Exposed at package scope so the table-driven test can pin every branch.
+func resourceForGHArgs(args []string) Resource {
+	if len(args) == 0 {
+		return ResourceCore
 	}
-	c.rateTracker.markRateExhausted(resource, time.Time{})
+	if args[0] != "api" {
+		// `gh pr`, `gh issue`, `gh repo`, etc. are all GraphQL under the hood.
+		return ResourceGraphQL
+	}
+	if len(args) < 2 {
+		return ResourceCore
+	}
+	switch {
+	case args[1] == "graphql":
+		return ResourceGraphQL
+	case strings.HasPrefix(args[1], "search/"):
+		return ResourceSearch
+	default:
+		return ResourceCore
+	}
 }
 
 // GHAvailable checks if the gh CLI is installed and accessible.

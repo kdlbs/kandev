@@ -766,6 +766,93 @@ func TestWaitForRateLimit_SkipsWhenHealthy(t *testing.T) {
 	}
 }
 
+func TestSearchBucketExhausted(t *testing.T) {
+	poller, svc, _, _ := setupPollerTest(t)
+
+	if poller.searchBucketExhausted("test") {
+		t.Errorf("expected false when no exhaustion recorded")
+	}
+
+	// Mark the search bucket exhausted with a future reset.
+	svc.RateTracker().Record(RateSnapshot{
+		Resource:  ResourceSearch,
+		Limit:     30,
+		Remaining: 0,
+		ResetAt:   time.Now().Add(5 * time.Minute),
+		UpdatedAt: time.Now(),
+	})
+
+	if !poller.searchBucketExhausted("test") {
+		t.Errorf("expected true when search bucket exhausted")
+	}
+
+	// Other buckets exhausting must not trip the search guard.
+	poller2, svc2, _, _ := setupPollerTest(t)
+	svc2.RateTracker().Record(RateSnapshot{
+		Resource:  ResourceCore,
+		Remaining: 0,
+		ResetAt:   time.Now().Add(5 * time.Minute),
+		UpdatedAt: time.Now(),
+	})
+	if poller2.searchBucketExhausted("test") {
+		t.Errorf("expected false when only core (not search) is exhausted")
+	}
+}
+
+// Regression: when the search bucket trips mid-cycle, checkReviewWatches must
+// stop iterating so the remaining watches don't issue doomed search requests
+// that deepen the secondary-limit penalty.
+func TestCheckReviewWatches_BailsOutWhenSearchExhaustedMidCycle(t *testing.T) {
+	poller, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	// Pre-exhaust the search bucket so the very first iteration short-circuits.
+	svc.RateTracker().Record(RateSnapshot{
+		Resource:  ResourceSearch,
+		Remaining: 0,
+		ResetAt:   time.Now().Add(5 * time.Minute),
+		UpdatedAt: time.Now(),
+	})
+
+	for _, id := range []string{"rw1", "rw2", "rw3"} {
+		if err := store.CreateReviewWatch(ctx, &ReviewWatch{
+			ID:          id,
+			WorkspaceID: "ws1",
+			Enabled:     true,
+		}); err != nil {
+			t.Fatalf("seed review watch %s: %v", id, err)
+		}
+	}
+
+	// Should return cleanly without panic / without errors despite N watches
+	// being enabled.
+	poller.checkReviewWatches(ctx)
+}
+
+func TestCheckIssueWatches_BailsOutWhenSearchExhaustedMidCycle(t *testing.T) {
+	poller, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	svc.RateTracker().Record(RateSnapshot{
+		Resource:  ResourceSearch,
+		Remaining: 0,
+		ResetAt:   time.Now().Add(5 * time.Minute),
+		UpdatedAt: time.Now(),
+	})
+
+	for _, id := range []string{"iw1", "iw2"} {
+		if err := store.CreateIssueWatch(ctx, &IssueWatch{
+			ID:          id,
+			WorkspaceID: "ws1",
+			Enabled:     true,
+		}); err != nil {
+			t.Fatalf("seed issue watch %s: %v", id, err)
+		}
+	}
+
+	poller.checkIssueWatches(ctx)
+}
+
 func TestWaitForRateLimit_ReturnsFalseOnContextCancel(t *testing.T) {
 	poller, svc, _, _ := setupPollerTest(t)
 	// Force exhaustion with a far-future reset.

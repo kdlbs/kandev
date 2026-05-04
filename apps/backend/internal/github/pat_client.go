@@ -67,12 +67,22 @@ func (c *PATClient) recordRateHeaders(resp *http.Response, endpoint string) {
 	} else if strings.HasPrefix(endpoint, "/graphql") {
 		defaultResource = ResourceGraphQL
 	}
-	if snap, ok := parseRateHeaders(resp, defaultResource); ok {
+	snap, headersOK := parseRateHeaders(resp, defaultResource)
+	if headersOK {
 		c.rateTracker.Record(snap)
 	}
-	if isRateLimitStatus(resp.StatusCode) {
-		c.rateTracker.markRateExhausted(defaultResource, time.Time{})
+	if !isRateLimitStatus(resp.StatusCode) {
+		return
 	}
+	// On a 429, prefer the real X-RateLimit-Reset over the synthetic 1h
+	// fallback. parseRateHeaders may return ok=true with Remaining>0 if the
+	// secondary-limit response carried stale headers — only skip the
+	// fallback when the headers themselves report exhaustion (Remaining<=0
+	// + future ResetAt). Otherwise fall through to the conservative pause.
+	if headersOK && snap.Exhausted() {
+		return
+	}
+	c.rateTracker.markRateExhausted(defaultResource, time.Time{})
 }
 
 // isRateLimitStatus returns true for status codes GitHub uses to signal
@@ -103,6 +113,11 @@ func (c *PATClient) maybeMarkRateExhaustedFromBody(endpoint string, status int, 
 		resource = ResourceSearch
 	} else if strings.HasPrefix(endpoint, "/graphql") {
 		resource = ResourceGraphQL
+	}
+	// If recordRateHeaders already captured a real reset for this bucket on
+	// the same response, don't clobber it with the synthetic 1h fallback.
+	if existing, ok := c.rateTracker.Snapshot(resource); ok && existing.Exhausted() {
+		return
 	}
 	c.rateTracker.markRateExhausted(resource, time.Time{})
 }

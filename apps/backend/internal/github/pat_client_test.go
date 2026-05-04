@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -212,6 +213,66 @@ func TestPATClient_RecordsRateHeadersOnSuccess(t *testing.T) {
 	}
 	if snap.Remaining != 4998 || snap.Limit != 5000 {
 		t.Fatalf("snap = %+v", snap)
+	}
+}
+
+// Regression: when a 429 carries valid X-RateLimit-Reset headers, the reset
+// time from the headers must win — not the synthetic +1h fallback in
+// markRateExhausted. Previously, recordRateHeaders called Record(snap)
+// followed by markRateExhausted(time.Time{}), and the second call clobbered
+// the real reset with a 1-hour pause that could over-throttle the poller.
+func TestPATClient_RateLimit429_PreservesRealReset(t *testing.T) {
+	realReset := time.Now().Add(7 * time.Minute).UTC().Truncate(time.Second)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-RateLimit-Limit", "5000")
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(realReset.Unix(), 10))
+		w.Header().Set("X-RateLimit-Resource", "core")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"message":"API rate limit exceeded"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	tracker := NewRateTracker(nil, nil)
+	c.WithRateTracker(tracker)
+
+	var out struct{}
+	if err := c.get(context.Background(), "/repos/o/r/pulls/1", &out); err == nil {
+		t.Fatalf("expected error from 429")
+	}
+	snap, ok := tracker.Snapshot(ResourceCore)
+	if !ok {
+		t.Fatalf("expected core snapshot")
+	}
+	if !snap.ResetAt.Equal(realReset) {
+		t.Errorf("expected reset_at preserved from headers (%s), got %s (off by %s)",
+			realReset, snap.ResetAt, snap.ResetAt.Sub(realReset))
+	}
+	if !tracker.IsExhausted(ResourceCore) {
+		t.Errorf("expected core to be exhausted")
+	}
+}
+
+// When a 429 has no rate-limit headers, the synthetic 1h fallback still
+// applies so the poller pauses instead of hammering the secondary limit.
+func TestPATClient_RateLimit429_NoHeaders_UsesSyntheticReset(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"message":"abuse detection"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	tracker := NewRateTracker(nil, nil)
+	c.WithRateTracker(tracker)
+
+	var out struct{}
+	if err := c.get(context.Background(), "/repos/o/r/pulls/1", &out); err == nil {
+		t.Fatalf("expected error from 429")
+	}
+	if !tracker.IsExhausted(ResourceCore) {
+		t.Fatalf("expected core exhausted via synthetic fallback")
 	}
 }
 
