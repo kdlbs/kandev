@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClarificationAnswer, ClarificationRequestMetadata, Message } from "@/lib/types/http";
 import { getBackendConfig } from "@/lib/config";
 
@@ -12,7 +12,13 @@ export type ClarificationGroupApi = {
   answeredCount: number;
   answers: Record<string, ClarificationAnswer>;
   submitState: SubmitState;
-  recordAnswer: (questionId: string, answer: ClarificationAnswer) => Promise<void>;
+  recordAnswer: (questionId: string, answer: ClarificationAnswer) => void;
+  // Submits every recorded answer in a single batch. An optional `override`
+  // map is merged into the current answers right before the POST so callers
+  // can safely auto-submit immediately after recording an answer (the React
+  // state update is async, so the hook's stored map may not include the
+  // freshly recorded answer yet).
+  submitCollected: (override?: Record<string, ClarificationAnswer>) => Promise<void>;
   skipAll: (reason?: string) => Promise<void>;
 };
 
@@ -60,15 +66,24 @@ async function postClarificationSkip(pendingId: string, reason: string): Promise
   return "error";
 }
 
-// useClarificationGroup coordinates per-question answers for a multi-question
-// clarification bundle. Decision A (per-question commit, batched on the wire):
-// every option click / custom-text Enter writes the answer locally, and once
-// the last question is answered the hook posts every answer in a single
-// request. The agent unblocks at that point and receives a map keyed by id.
+// useClarificationGroup tracks the per-question answers for a multi-question
+// clarification bundle. The carousel UI owns navigation; this hook just stores
+// the local answer state and exposes:
+//   - recordAnswer:    write a single question's answer to local state
+//   - submitCollected: POST every recorded answer in one batch (called from
+//                      the explicit "Submit answers" button on the last step)
+//   - skipAll:         reject the entire bundle.
+// Decision A is preserved (per-question commit, batched on the wire) but the
+// final submit is no longer implicit — the user clicks "Submit answers" or
+// presses ArrowRight on the last step.
 export function useClarificationGroup(
   messages: readonly Message[] | null | undefined,
 ): ClarificationGroupApi {
   const [answers, setAnswers] = useState<Record<string, ClarificationAnswer>>({});
+  const answersRef = useRef(answers);
+  useEffect(() => {
+    answersRef.current = answers;
+  }, [answers]);
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
 
   const pendingId = useMemo(() => {
@@ -84,18 +99,19 @@ export function useClarificationGroup(
   const total = questionIds.length;
   const answeredCount = Object.keys(answers).filter((id) => questionIds.includes(id)).length;
 
-  const recordAnswer = useCallback(
-    async (questionId: string, answer: ClarificationAnswer) => {
+  const recordAnswer = useCallback((questionId: string, answer: ClarificationAnswer) => {
+    setAnswers((prev) => ({ ...prev, [questionId]: answer }));
+  }, []);
+
+  const submitCollected = useCallback(
+    async (override?: Record<string, ClarificationAnswer>) => {
       if (!pendingId) return;
-      const next = { ...answers, [questionId]: answer };
-      setAnswers(next);
-
-      const haveAll = questionIds.every((id) => Boolean(next[id]));
+      const current = { ...answersRef.current, ...(override ?? {}) };
+      const haveAll = questionIds.every((id) => Boolean(current[id]));
       if (!haveAll) return;
-
       setSubmitState("submitting");
       const ordered = questionIds
-        .map((id) => next[id])
+        .map((id) => current[id])
         .filter((a): a is ClarificationAnswer => Boolean(a));
       try {
         setSubmitState(await postClarificationBatch(pendingId, ordered));
@@ -104,7 +120,7 @@ export function useClarificationGroup(
         setSubmitState("error");
       }
     },
-    [answers, pendingId, questionIds],
+    [pendingId, questionIds],
   );
 
   const skipAll = useCallback(
@@ -121,5 +137,14 @@ export function useClarificationGroup(
     [pendingId],
   );
 
-  return { pendingId, total, answeredCount, answers, submitState, recordAnswer, skipAll };
+  return {
+    pendingId,
+    total,
+    answeredCount,
+    answers,
+    submitState,
+    recordAnswer,
+    submitCollected,
+    skipAll,
+  };
 }

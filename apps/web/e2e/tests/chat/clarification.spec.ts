@@ -50,19 +50,13 @@ test.describe("Clarification flow", () => {
       "clarification",
     );
 
-    // Wait for clarification overlay to appear (agent calls ask_user_question MCP tool)
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-
-    // Verify the question text appears
     await expect(session.clarificationOverlay()).toContainText("Which database");
 
-    // Click the PostgreSQL option
+    // Single-question bundles still expose option click → instant resolve.
     await session.clarificationOption("PostgreSQL").click();
 
-    // Agent receives the answer and completes its turn
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
-
-    // Verify the answer was reflected in chat
     await expect(session.chat).toContainText(/You answered|selected_option/);
   });
 
@@ -75,13 +69,8 @@ test.describe("Clarification flow", () => {
       "clarification",
     );
 
-    // Wait for clarification overlay
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-
-    // Click skip button
     await session.clarificationSkip().click();
-
-    // Agent should complete its turn
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
@@ -98,23 +87,11 @@ test.describe("Clarification flow", () => {
       "clarification-timeout",
     );
 
-    // Wait for clarification overlay to appear
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-
-    // Wait for agent to time out (5s) and complete its turn.
     await expect(session.chat).toContainText("timed out", { timeout: 30_000 });
-
-    // Overlay should auto-close once the canceller marks status=expired. The
-    // deferred "your response will be sent as a new message" notice must NOT
-    // appear — we're not keeping a stale interactive prompt around.
     await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 10_000 });
     await expect(session.clarificationDeferredNotice()).not.toBeVisible();
-
-    // Chat history should show the question as expired (orange X + label).
     await expect(session.clarificationExpiredNotice()).toBeVisible();
-
-    // Chat input returns to the default idle placeholder — not the clarification
-    // one. Confirms no new turn was triggered by the timeout flow.
     await expect(session.idleInput()).toBeVisible({ timeout: 10_000 });
   });
 
@@ -132,16 +109,10 @@ test.describe("Clarification flow", () => {
     );
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-
-    // The mock scenario uses three options, each with a label and description.
     const labels = session.clarificationOptionLabels();
     const descriptions = session.clarificationOptionDescriptions();
     await expect(labels).toHaveCount(3);
     await expect(descriptions).toHaveCount(3);
-
-    // Label and description must be stacked vertically (description's top
-    // edge sits below the label's bottom edge). Regression guard for the
-    // old layout that rendered them side-by-side on a single row.
     const labelBox = await labels.first().boundingBox();
     const descriptionBox = await descriptions.first().boundingBox();
     if (!labelBox || !descriptionBox) {
@@ -153,7 +124,6 @@ test.describe("Clarification flow", () => {
   test("plan mode + clarification does not leave pointer-events stuck on body", async ({
     testPage,
   }) => {
-    // Navigate to kanban board and open the task create dialog
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
@@ -161,78 +131,163 @@ test.describe("Clarification flow", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
 
-    // Fill title
     await testPage.getByTestId("task-title-input").fill("Plan Mode Clarification PE");
 
-    // Fill description with clarification scenario so the agent starts and
-    // calls the ask_user_question MCP tool.
     const descriptionInput = dialog.getByRole("textbox", {
       name: "Write a prompt for the agent...",
     });
     await descriptionInput.click();
     await descriptionInput.fill("/e2e:clarification");
 
-    // With a description present, the footer shows a split button with dropdown.
-    // Open the chevron dropdown and click "Start task in plan mode".
     await testPage.getByTestId("submit-start-agent-chevron").click();
     await testPage.getByTestId("submit-plan-mode").click();
 
-    // Wait for navigation to session page
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    // Wait for clarification overlay to appear (agent calls ask_user_question MCP tool)
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
 
-    // CRITICAL ASSERTION: body must not have pointer-events: none stuck on it.
-    // Radix Dialog sets pointer-events: none on body when modal. If the task
-    // create dialog unmounts mid-close (onOpenChange(false) then router.push),
-    // Radix never finishes cleanup, leaving the page unclickable.
     const pointerEvents = await testPage.evaluate(() => document.body.style.pointerEvents);
     expect(pointerEvents).not.toBe("none");
 
-    // Verify the UI is actually interactive by clicking a clarification option
     await session.clarificationOption("PostgreSQL").click();
-
-    // Agent receives the answer and completes its turn (plan mode uses different placeholder)
     await expect(session.planModeInput()).toBeVisible({ timeout: 30_000 });
   });
 });
 
-test.describe("Multi-question clarification", () => {
+// Multi-question carousel UX. Each scenario uses the mock-agent's
+// `clarification-multi` scenario which sends 3 questions in a single MCP call.
+test.describe("Multi-question clarification carousel", () => {
   test.describe.configure({ retries: 1 });
 
-  test("renders all 3 question cards stacked", async ({ testPage, apiClient, seedData }) => {
+  test("renders stepper with 3 steps and shows the first question", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     const session = await seedClarificationTask(
       testPage,
       apiClient,
       seedData,
-      "Multi-q render",
+      "Multi-q stepper",
       "clarification-multi",
     );
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-    await expect(session.clarificationQuestionCards()).toHaveCount(3);
 
-    // Per-question progress chips should label each card.
-    await expect(session.clarificationProgressChips()).toHaveCount(3);
-    await expect(session.clarificationProgressChips().first()).toContainText("Question 1 of 3");
-    await expect(session.clarificationProgressChips().last()).toContainText("Question 3 of 3");
+    // 3 stepper buttons rendered; the first is active and unanswered.
+    await expect(session.clarificationSteps()).toHaveCount(3);
+    await expect(session.clarificationStep(0)).toHaveAttribute("data-active", "true");
+    await expect(session.clarificationStep(0)).toHaveAttribute("data-answered", "false");
+    await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "false");
 
-    // Group-wide chip starts at 0 of 3 — all required.
+    // Group progress + per-question chip both rendered.
     await expect(session.clarificationGroupProgress()).toContainText("0 of 3 answered");
+    await expect(session.clarificationOverlay()).toContainText("Question 1 of 3");
 
-    // Visual stacking sanity: card 2's top edge sits below card 1's top edge.
-    const cards = session.clarificationQuestionCards();
-    const firstBox = await cards.nth(0).boundingBox();
-    const secondBox = await cards.nth(1).boundingBox();
-    if (!firstBox || !secondBox) throw new Error("expected bounding boxes");
-    expect(secondBox.y).toBeGreaterThan(firstBox.y);
+    // Only one card is visible at a time (carousel UX, not stacked).
+    await expect(session.clarificationQuestionCards()).toHaveCount(1);
+    await expect(session.clarificationOverlay()).toContainText("Which database");
   });
 
-  test("answering all 3 questions resolves and unblocks agent", async ({
+  test("answering option auto-advances to next step and marks step as answered", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q advance",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    // Pick an option on step 1; auto-advances to step 2.
+    await session.clarificationOption("PostgreSQL").click();
+    await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
+    await expect(session.clarificationStep(0)).toHaveAttribute("data-answered", "true");
+    await expect(session.clarificationGroupProgress()).toContainText("1 of 3 answered");
+    await expect(session.clarificationOverlay()).toContainText("Question 2 of 3");
+    await expect(session.clarificationOverlay()).toContainText("Which language");
+  });
+
+  test("Back button restores the previous question and the prior selection", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q back",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    await session.clarificationOption("PostgreSQL").click();
+    await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
+
+    await session.clarificationPrev().click();
+    await expect(session.clarificationStep(0)).toHaveAttribute("data-active", "true");
+
+    // Previous answer is still selected.
+    const selectedOption = session
+      .clarificationQuestionCardById("db")
+      .locator('[data-testid="clarification-option"][data-selected="true"]');
+    await expect(selectedOption).toContainText("PostgreSQL");
+  });
+
+  test("clicking a step in the stepper jumps directly to that question", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q jump",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    await session.clarificationStep(2).click();
+    await expect(session.clarificationStep(2)).toHaveAttribute("data-active", "true");
+    await expect(session.clarificationOverlay()).toContainText("Question 3 of 3");
+    await expect(session.clarificationOverlay()).toContainText("How should we deploy");
+  });
+
+  test("Submit button disabled until every question is answered", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q submit gating",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    // Jump to last step without answering.
+    await session.clarificationStep(2).click();
+    const submit = session.clarificationSubmit();
+    await expect(submit).toBeVisible();
+    await expect(submit).toBeDisabled();
+  });
+
+  test("happy path: answer all 3 then Submit unblocks the agent", async ({
     testPage,
     apiClient,
     seedData,
@@ -246,51 +301,19 @@ test.describe("Multi-question clarification", () => {
     );
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-    await expect(session.clarificationQuestionCards()).toHaveCount(3);
 
-    // Answer the first question — group still pending.
-    await session.clarificationOptionForQuestion("db", "PostgreSQL").click();
-    await expect(session.clarificationGroupProgress()).toContainText("1 of 3 answered");
-    await expect(session.clarificationOverlay()).toBeVisible();
+    await session.clarificationOption("PostgreSQL").click();
+    await session.clarificationOption("Go").click();
+    await session.clarificationOption("Docker").click();
 
-    // Answer second — still pending.
-    await session.clarificationOptionForQuestion("language", "Go").click();
-    await expect(session.clarificationGroupProgress()).toContainText("2 of 3 answered");
-    await expect(session.clarificationOverlay()).toBeVisible();
+    // We're on the last step; Submit is enabled.
+    const submit = session.clarificationSubmit();
+    await expect(submit).toBeEnabled();
+    await submit.click();
 
-    // Answer the last question — bundle resolves, overlay disappears,
-    // agent receives the map and completes its turn.
-    await session.clarificationOptionForQuestion("deploy", "Docker").click();
     await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
-
-    // Agent's reply contains the JSON map (we asserted `selected_option` in the agent text).
     await expect(session.chat).toContainText("selected_option");
-  });
-
-  test("partial answer keeps overlay open with all required hint", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await seedClarificationTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Multi-q partial",
-      "clarification-multi",
-    );
-
-    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-    await session.clarificationOptionForQuestion("db", "MongoDB").click();
-
-    // Group progress + helper hint both visible — agent NOT unblocked.
-    await expect(session.clarificationGroupProgress()).toContainText("1 of 3 answered");
-    await expect(session.clarificationOverlay()).toContainText("all required");
-    await expect(session.clarificationOverlay()).toBeVisible();
-
-    // The first question card now wears the answered badge.
-    await expect(session.clarificationAnsweredBadges()).toHaveCount(1);
   });
 
   test("mix custom text + option selections round-trips", async ({
@@ -308,49 +331,26 @@ test.describe("Multi-question clarification", () => {
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
 
-    // Q1: option click.
-    await session.clarificationOptionForQuestion("db", "SQLite").click();
+    // Q1: option click → advances.
+    await session.clarificationOption("SQLite").click();
 
-    // Q2: free-form custom text via Enter key inside that card's input.
+    // Q2: custom text via Enter → advances.
     const langInput = session.clarificationInputForQuestion("language");
     await langInput.click();
     await langInput.fill("Elixir");
     await langInput.press("Enter");
     await expect(session.clarificationGroupProgress()).toContainText("2 of 3 answered");
 
-    // Q3: option click finalizes the bundle.
-    await session.clarificationOptionForQuestion("deploy", "Bare metal").click();
+    // Q3: option click; submit batch.
+    await session.clarificationOption("Bare metal").click();
+    await session.clarificationSubmit().click();
+
     await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
-
-    // Custom text should round-trip into the agent reply.
     await expect(session.chat).toContainText("Elixir");
   });
 
-  test("skip rejects the entire bundle", async ({ testPage, apiClient, seedData }) => {
-    const session = await seedClarificationTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Multi-q skip",
-      "clarification-multi",
-    );
-
-    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-    await expect(session.clarificationQuestionCards()).toHaveCount(3);
-
-    // Hit the skip (X) button — should reject all without sending answers.
-    await session.clarificationSkip().click();
-
-    // Overlay disappears and the agent unblocks.
-    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
-
-    // Agent's reply mentions the rejection (mock scenario echoes the tool result).
-    await expect(session.chat).toContainText("rejected");
-  });
-
-  test("answered card collapses to summary while siblings remain pending", async ({
+  test("revising an answer via stepper jump updates the response", async ({
     testPage,
     apiClient,
     seedData,
@@ -359,22 +359,118 @@ test.describe("Multi-question clarification", () => {
       testPage,
       apiClient,
       seedData,
-      "Multi-q sibling state",
+      "Multi-q revise",
       "clarification-multi",
     );
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
 
-    await session.clarificationOptionForQuestion("db", "PostgreSQL").click();
+    await session.clarificationOption("PostgreSQL").click();
+    await session.clarificationOption("Go").click();
+    await session.clarificationOption("Docker").click();
 
-    // Q1 wears the Answered badge. Q2/Q3 remain interactive (no badge).
-    await expect(session.clarificationAnsweredBadges()).toHaveCount(1);
-    await expect(session.clarificationProgressChips()).toHaveCount(3);
+    // Jump back to Q1 and pick a different option.
+    await session.clarificationStep(0).click();
+    await session.clarificationOption("MongoDB").click();
+    // Auto-advance brings us to Q2; jump to last step to submit.
+    await session.clarificationStep(2).click();
 
-    // The other two cards still expose option buttons.
-    const q2Options = session
-      .clarificationQuestionCardById("language")
-      .getByTestId("clarification-option");
-    await expect(q2Options.first()).toBeVisible();
+    await session.clarificationSubmit().click();
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
+    await expect(session.chat).toContainText("MongoDB");
+  });
+
+  test("skip rejects the entire bundle from any step", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q skip mid",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    // Answer the first one then skip from step 2.
+    await session.clarificationOption("PostgreSQL").click();
+    await session.clarificationSkip().click();
+
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat).toContainText("rejected");
+  });
+
+  test("number key shortcuts pick options on the active step", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q kbd",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    // Press "1" → first option of the first question, auto-advance.
+    await testPage.keyboard.press("1");
+    await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
+    await expect(session.clarificationGroupProgress()).toContainText("1 of 3 answered");
+
+    // Press "2" → second option of Q2.
+    await testPage.keyboard.press("2");
+    await expect(session.clarificationStep(2)).toHaveAttribute("data-active", "true");
+    await expect(session.clarificationGroupProgress()).toContainText("2 of 3 answered");
+
+    // Press "1" → first option of Q3 (last step, no advance).
+    await testPage.keyboard.press("1");
+    await expect(session.clarificationGroupProgress()).toContainText("3 of 3 answered");
+
+    // ArrowRight on the last step with all answered → submits.
+    await testPage.keyboard.press("ArrowRight");
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("Esc skips the entire bundle from anywhere in the carousel", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q esc",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    await session.clarificationStep(1).click();
+    await testPage.keyboard.press("Escape");
+
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
+    await expect(session.chat).toContainText("rejected");
+  });
+
+  test("Back button is disabled on the first step", async ({ testPage, apiClient, seedData }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q back disabled",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await expect(session.clarificationPrev()).toBeDisabled();
   });
 });

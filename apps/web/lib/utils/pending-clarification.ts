@@ -18,6 +18,12 @@ export function findPendingClarification(messages?: readonly Message[] | null): 
 // that shares the latest pending message's pending_id, ordered by chat position.
 // Multi-question bundles emit one message per question; the chat panel uses this
 // list to render every pending question card together.
+//
+// Gates on `question_total` from metadata: returns an empty array until the
+// number of messages received equals the expected bundle size. This prevents
+// a user from acting on a partially-arrived bundle (clicking an option before
+// the rest of the N messages have been streamed in via the WS), which would
+// otherwise trigger a 400 from the backend's all-required gate.
 export function findPendingClarificationGroup(messages?: readonly Message[] | null): Message[] {
   if (!messages) return [];
   const last = findPendingClarification(messages);
@@ -25,11 +31,16 @@ export function findPendingClarificationGroup(messages?: readonly Message[] | nu
   const meta = last.metadata as ClarificationRequestMetadata | undefined;
   const pendingID = meta?.pending_id;
   if (!pendingID) return [last];
-  return messages.filter((m) => {
+  const group = messages.filter((m) => {
     if (m.type !== "clarification_request") return false;
     const mMeta = m.metadata as ClarificationRequestMetadata | undefined;
     return mMeta?.pending_id === pendingID;
   });
+  const expectedTotal = meta?.question_total;
+  if (typeof expectedTotal === "number" && expectedTotal > 0 && group.length < expectedTotal) {
+    return [];
+  }
+  return group;
 }
 
 export function hasPendingClarification(messages?: readonly Message[] | null): boolean {

@@ -281,6 +281,33 @@ export class SessionPage {
       .filter({ hasText: text });
   }
 
+  /** All step buttons in the horizontal stepper. */
+  clarificationSteps(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-step");
+  }
+
+  /** A single step in the stepper, by its 0-based index. */
+  clarificationStep(index: number): Locator {
+    return this.clarificationOverlay().locator(
+      `[data-testid="clarification-step"][data-step-index="${index}"]`,
+    );
+  }
+
+  /** Back button inside the carousel nav. */
+  clarificationPrev(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-prev");
+  }
+
+  /** Next button inside the carousel nav. */
+  clarificationNext(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-next");
+  }
+
+  /** Final "Submit answers" button (rendered only on the last step). */
+  clarificationSubmit(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-submit");
+  }
+
   /** All visible "Approve / Deny" rows for pending permission requests. */
   permissionActionRows(): Locator {
     return this.chat.getByTestId("permission-action-row");
