@@ -217,6 +217,10 @@ func (a *testTurnServiceAdapter) GetActiveTurn(ctx context.Context, sessionID st
 	return a.svc.GetActiveTurn(ctx, sessionID)
 }
 
+func (a *testTurnServiceAdapter) AbandonOpenTurns(ctx context.Context, sessionID string) error {
+	return a.svc.AbandonOpenTurns(ctx, sessionID)
+}
+
 // NewOrchestratorTestServer creates a test server with full orchestrator support
 func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	t.Helper()
