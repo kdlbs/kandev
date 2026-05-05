@@ -2,6 +2,7 @@ import type { DockviewReadyEvent, SerializedDockview } from "dockview-react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { applyLayoutFixups } from "@/lib/state/dockview-layout-builders";
 import { isLayoutShapeHealthy } from "@/lib/state/dockview-layout-health";
+import type { LayoutState } from "@/lib/state/layout-manager";
 import { getEnvLayout, getEnvMaximizeState } from "@/lib/local-storage";
 
 const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
@@ -76,10 +77,9 @@ function applySavedMaximize(api: DockviewReadyEvent["api"], savedMax: NonNullabl
   api.fromJSON(savedMax.maximizedDockviewJson as SerializedDockview);
   api.layout(api.width, api.height);
   const ids = applyLayoutFixups(api);
-  type LM = import("@/lib/state/layout-manager").LayoutState;
   useDockviewStore.setState({
     ...ids,
-    preMaximizeLayout: savedMax.preMaximizeLayout as unknown as LM,
+    preMaximizeLayout: savedMax.preMaximizeLayout as unknown as LayoutState,
     maximizedGroupId: ids.centerGroupId,
   });
 }
