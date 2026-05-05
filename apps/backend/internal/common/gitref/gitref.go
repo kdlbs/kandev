@@ -61,17 +61,19 @@ func guardRepoPath(repoPath string) (string, error) {
 	if !filepath.IsAbs(repoPath) {
 		return "", fmt.Errorf("repository path must be absolute")
 	}
-	cleaned := filepath.Clean(repoPath)
-	// After Clean, any surviving ".." segment means the cleaned path itself
-	// is a parent traversal (e.g. starting with "../") — reject. A legitimate
-	// branch name like "feature/..foo" never reaches this function; we deal
-	// in repo paths only.
-	for _, part := range strings.Split(cleaned, string(filepath.Separator)) {
+	// Check the RAW input for '..' segments before cleaning. filepath.Clean
+	// resolves traversal away from absolute paths (`/allowed/../etc` →
+	// `/etc`), so iterating the cleaned path would silently pass attempted
+	// escapes. Splitting on both separators handles cross-platform inputs
+	// without depending on the OS-native separator.
+	for _, part := range strings.FieldsFunc(repoPath, func(r rune) bool {
+		return r == '/' || r == filepath.Separator
+	}) {
 		if part == ".." {
 			return "", fmt.Errorf("repository path must not contain '..' segments")
 		}
 	}
-	return cleaned, nil
+	return filepath.Clean(repoPath), nil
 }
 
 // ResolveGitDir returns the actual git directory for repoPath, following

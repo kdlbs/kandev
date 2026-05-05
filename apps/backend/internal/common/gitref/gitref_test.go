@@ -3,7 +3,6 @@ package gitref
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -17,11 +16,19 @@ func TestDefaultBranch_RejectsRelativePath(t *testing.T) {
 }
 
 // TestDefaultBranch_RejectsTraversal — explicit guard against ".."
-// segments. CodeQL's go/path-injection taint analysis recognizes this
-// shape as a sanitizer.
+// segments in the RAW input. We must check before filepath.Clean: Clean
+// resolves '..' away from absolute paths (`/allowed/../etc` → `/etc`) and
+// would silently let a traversal attempt through.
 func TestDefaultBranch_RejectsTraversal(t *testing.T) {
-	if _, err := DefaultBranch("/tmp/../etc"); err == nil {
-		t.Fatal("expected error for path containing ..")
+	cases := []string{
+		"/tmp/../etc",
+		"/foo/bar/../../etc",
+		"/a/b/..",
+	}
+	for _, p := range cases {
+		if _, err := DefaultBranch(p); err == nil {
+			t.Errorf("expected error for path %q (contains '..')", p)
+		}
 	}
 }
 
@@ -52,7 +59,9 @@ func TestDefaultBranch_AcceptsAbsolutePathToValidRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.EqualFold(branch, "main") {
+	// Git branch names are case-sensitive — assert exact equality, not
+	// EqualFold. A function that returns "Main" or "MAIN" should fail.
+	if branch != "main" {
 		t.Fatalf("expected main, got %q", branch)
 	}
 }

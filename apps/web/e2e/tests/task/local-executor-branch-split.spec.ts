@@ -157,12 +157,17 @@ test.describe("Local executor branch split", () => {
     // Use the "create without starting agent" path so the test doesn't wait
     // for agent boot. We care about the persisted task shape, not session
     // lifecycle. The chevron opens the split-button menu.
-    const createTaskRequest = opts.testPage.waitForRequest(
-      (req) => req.url().endsWith("/api/v1/tasks") && req.method() === "POST",
+    //
+    // Wait on the *response* rather than the request — waitForRequest
+    // resolves the moment the browser sends the POST, before the server has
+    // finished writing to the database. Callers that read the task back via
+    // the API immediately after would race the persistence.
+    const createTaskResponse = opts.testPage.waitForResponse(
+      (res) => res.url().endsWith("/api/v1/tasks") && res.request().method() === "POST",
     );
     await testPage.getByTestId("submit-start-agent-chevron").click();
     await testPage.getByTestId("submit-create-without-agent").click();
-    await createTaskRequest;
+    await createTaskResponse;
   }
 
   test("submits with base_branch=default_branch and checkout_branch=working_branch", async ({
@@ -427,12 +432,15 @@ test.describe("Local executor + fresh-branch toggle", () => {
         .click();
       await expect(branchSelector).toContainText("develop");
 
-      const createTaskRequest = testPage.waitForRequest(
-        (req) => req.url().endsWith("/api/v1/tasks") && req.method() === "POST",
+      // Wait on the response so the server has finished persisting before we
+      // inspect the request body. waitForRequest resolves on send, which
+      // would race the rest of the test on slow CI.
+      const createTaskResponse = testPage.waitForResponse(
+        (res) => res.url().endsWith("/api/v1/tasks") && res.request().method() === "POST",
       );
       await testPage.getByTestId("submit-start-agent-chevron").click();
       await testPage.getByTestId("submit-create-without-agent").click();
-      const req = await createTaskRequest;
+      const req = (await createTaskResponse).request();
 
       // Wire-level contract: base_branch must carry "develop" verbatim and
       // checkout_branch must be absent. fresh_branch must be true so the
@@ -497,12 +505,12 @@ test.describe("Local executor + fresh-branch toggle", () => {
       await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
       await expect(branchSelector).toContainText("main");
 
-      const createTaskRequest = testPage.waitForRequest(
-        (req) => req.url().endsWith("/api/v1/tasks") && req.method() === "POST",
+      const createTaskResponse = testPage.waitForResponse(
+        (res) => res.url().endsWith("/api/v1/tasks") && res.request().method() === "POST",
       );
       await testPage.getByTestId("submit-start-agent-chevron").click();
       await testPage.getByTestId("submit-create-without-agent").click();
-      const req = await createTaskRequest;
+      const req = (await createTaskResponse).request();
 
       const payload = JSON.parse(req.postData() ?? "{}") as {
         repositories?: Array<{ base_branch?: string; checkout_branch?: string }>;
