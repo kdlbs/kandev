@@ -545,7 +545,6 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   setPlanMode: (sessionId, enabled) =>
     set((draft) => {
       draft.chatInput.planModeBySessionId[sessionId] = enabled;
-      setLocalStorage(`plan-mode-${sessionId}`, enabled);
     }),
   setActiveDocument: (sessionId, doc) =>
     set((draft) => {

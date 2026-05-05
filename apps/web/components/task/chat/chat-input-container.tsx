@@ -38,6 +38,7 @@ export type ChatInputContainerHandle = {
   getSelectionStart: () => number;
   insertText: (text: string, from: number, to: number) => void;
   clear: () => void;
+  getAttachments: () => MessageAttachment[];
 };
 
 type ChatInputContainerProps = {
@@ -76,7 +77,7 @@ type ChatInputContainerProps = {
   contextFiles?: ContextFile[];
   onToggleContextFile?: (file: ContextFile) => void;
   onAddContextFile?: (file: ContextFile) => void;
-  onImplementPlan?: () => void;
+  onImplementPlan?: (fresh: boolean) => void;
   hideSessionsDropdown?: boolean;
   minimalToolbar?: boolean;
   /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */

@@ -590,6 +590,69 @@ func TestProcessOnExit(t *testing.T) {
 	})
 }
 
+func TestSetSessionPlanModeByID(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("clears plan mode when enabled=false", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		_ = repo.UpdateSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true})
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+		if err := svc.SetSessionPlanModeByID(ctx, "s1", false); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if pm, _ := updated.Metadata["plan_mode"].(bool); pm {
+			t.Error("expected plan_mode to be cleared")
+		}
+	})
+
+	t.Run("sets plan mode when enabled=true", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+		if err := svc.SetSessionPlanModeByID(ctx, "s1", true); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if pm, ok := updated.Metadata["plan_mode"].(bool); !ok || !pm {
+			t.Error("expected plan_mode to be true")
+		}
+	})
+
+	t.Run("no-op for passthrough session", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		_ = repo.UpdateSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true})
+
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isPassthrough: true})
+
+		if err := svc.SetSessionPlanModeByID(ctx, "s1", false); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if pm, ok := updated.Metadata["plan_mode"].(bool); !ok || !pm {
+			t.Error("expected plan_mode to remain true for passthrough session")
+		}
+	})
+
+	t.Run("propagates session lookup error", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+		if err := svc.SetSessionPlanModeByID(ctx, "missing", false); err == nil {
+			t.Error("expected error for missing session")
+		}
+	})
+}
+
 func TestProcessOnEnterPassthrough(t *testing.T) {
 	ctx := context.Background()
 

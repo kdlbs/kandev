@@ -46,7 +46,7 @@ export type ChatInputEditorAreaProps = {
   contextPopoverOpen: boolean;
   setContextPopoverOpen: (open: boolean) => void;
   contextFiles: ContextFile[];
-  onImplementPlan?: () => void;
+  onImplementPlan?: (fresh: boolean) => void;
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
   isUtilityConfigured?: boolean;

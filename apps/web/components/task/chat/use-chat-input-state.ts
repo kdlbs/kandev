@@ -118,12 +118,18 @@ function useAttachments(sessionId: string | null) {
     setAttachments((prev) => prev.filter((att) => att.id !== id));
   }, []);
 
+  const getAttachments = useCallback(
+    () => toMessageAttachments(attachmentsRef.current),
+    [attachmentsRef],
+  );
+
   return {
     attachments,
     attachmentsRef,
     setAttachments,
     addFiles,
     handleRemoveAttachment,
+    getAttachments,
   };
 }
 
@@ -144,8 +150,14 @@ export function useChatInputState({
   const pendingCommentsRef = useRef(pendingCommentsByFile);
   const prevTextSessionIdRef = useRef(sessionId);
 
-  const { attachments, attachmentsRef, setAttachments, addFiles, handleRemoveAttachment } =
-    useAttachments(sessionId);
+  const {
+    attachments,
+    attachmentsRef,
+    setAttachments,
+    addFiles,
+    handleRemoveAttachment,
+    getAttachments,
+  } = useAttachments(sessionId);
 
   // Reset text value from storage when session changes (runs before paint)
   useLayoutEffect(() => {
@@ -158,10 +170,8 @@ export function useChatInputState({
 
   useEffect(() => {
     valueRef.current = value;
-  }, [value]);
-  useEffect(() => {
     pendingCommentsRef.current = pendingCommentsByFile;
-  }, [pendingCommentsByFile]);
+  }, [value, pendingCommentsByFile]);
 
   const handleChange = useCallback(
     (newValue: string) => {
@@ -223,5 +233,6 @@ export function useChatInputState({
     return [...contextItems, ...attachmentItems];
   }, [contextItems, attachments, handleRemoveAttachment]);
 
-  return { value, attachments, inputRef, addFiles, handleChange, handleSubmit, allItems };
+  // prettier-ignore
+  return { value, attachments, inputRef, addFiles, handleChange, handleSubmit, allItems, getAttachments };
 }

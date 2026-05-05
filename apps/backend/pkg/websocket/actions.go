@@ -84,6 +84,7 @@ const (
 	ActionSessionStop         = "session.stop"
 	ActionSessionDelete       = "session.delete"
 	ActionSessionSetPrimary   = "session.set_primary"
+	ActionSessionSetPlanMode  = "session.set_plan_mode"
 
 	// Agent actions
 	ActionAgentList   = "agent.list"

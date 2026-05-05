@@ -1416,6 +1416,22 @@ func (s *Service) clearSessionPlanMode(ctx context.Context, session *models.Task
 	s.setSessionPlanMode(ctx, session, false)
 }
 
+// SetSessionPlanModeByID looks up the session and writes plan_mode in its metadata.
+// Skips passthrough sessions, which manage plan mode in the underlying CLI.
+// Public entry point for client-driven plan-mode toggles (e.g. the "Implement plan"
+// affordance) so the change is server-authoritative and survives page refresh.
+func (s *Service) SetSessionPlanModeByID(ctx context.Context, sessionID string, enabled bool) error {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if s.agentManager.IsPassthroughSession(ctx, session.ID) {
+		return nil
+	}
+	s.setSessionPlanMode(ctx, session, enabled)
+	return nil
+}
+
 // setSessionPlanMode sets or clears plan mode in session metadata.
 // Uses targeted metadata update to avoid overwriting other session fields.
 func (s *Service) setSessionPlanMode(ctx context.Context, session *models.TaskSession, enabled bool) {
