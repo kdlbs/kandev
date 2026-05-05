@@ -399,7 +399,7 @@ function PrepareStatusSection({ summary }: { summary: PrepareSummary }) {
       <div
         data-testid="executor-prepare-status"
         data-phase={summary.phase}
-        className="border-b border-border p-3 space-y-1"
+        className="border-b border-border px-3 py-2.5 space-y-1"
       >
         <div className="flex items-center gap-2">
           <IconLoader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
@@ -428,7 +428,7 @@ function PrepareStatusSection({ summary }: { summary: PrepareSummary }) {
       <div
         data-testid="executor-prepare-status"
         data-phase="failed"
-        className="border-b border-border p-3 space-y-1"
+        className="border-b border-border px-3 py-2.5 space-y-1"
       >
         <div className="flex items-center gap-2 text-destructive">
           <IconAlertTriangle className="h-3.5 w-3.5" />
@@ -500,7 +500,7 @@ function EnvironmentInfo({
   }
 
   return (
-    <div className="p-3 space-y-3">
+    <div className="px-3 pt-2.5 pb-3 space-y-2">
       <div className="flex items-center justify-between gap-2">
         <span className="font-medium text-foreground">{formatExecutorType(env.executor_type)}</span>
         <StatusBadge env={env} container={container} />

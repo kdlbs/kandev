@@ -565,6 +565,79 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
     expect(launchedSession?.task_environment_id).toBe(before!.id);
   });
 
+  test("stops the agent then resumes onto the same container without re-cloning", async ({
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(240_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Docker Stop Resume",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.dockerExecutorProfileId,
+      },
+    );
+    await waitForLatestSessionDone(apiClient, task.id, 1, "Waiting for first Docker session");
+
+    const before = await apiClient.getTaskEnvironment(task.id);
+    expect(before?.container_id).toBeTruthy();
+    const containerID = before!.container_id!;
+    const branchBefore = dockerCurrentBranch(containerID);
+    expect(branchBefore).toMatch(/^feature\/docker-stop-resume-[0-9a-f]{6}$/);
+
+    const { sessions: sessionsBefore } = await apiClient.listTaskSessions(task.id);
+    const firstSession = sessionsBefore[0];
+    expect(firstSession?.id).toBeTruthy();
+
+    // Stop via the same WS path the UI uses.
+    await apiClient.stopSession({
+      session_id: firstSession!.id,
+      reason: "e2e stop",
+      force: false,
+    });
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.find((s) => s.id === firstSession!.id)?.state;
+        },
+        { timeout: 30_000, message: "Waiting for first session to reach CANCELLED" },
+      )
+      .toBe("CANCELLED");
+
+    // Resume by launching a new session on the same task — the UI Resume
+    // button takes this path (it just creates a new session bound to the
+    // same task environment).
+    const launched = await apiClient.launchSession({
+      task_id: task.id,
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.dockerExecutorProfileId,
+      workflow_step_id: seedData.startStepId,
+      prompt: "/e2e:simple-message",
+    });
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      launched.session_id,
+      "Waiting for resumed Docker session",
+    );
+
+    const after = await apiClient.getTaskEnvironment(task.id);
+    expect(after?.id, "task environment is reused on resume").toBe(before!.id);
+    expect(after?.container_id, "container is reused on resume").toBe(containerID);
+
+    // Container is still alive and on the same kandev feature branch — no
+    // re-clone, no re-checkout to base.
+    expect(dockerInspectExists(containerID)).toBe(true);
+    expect(dockerCurrentBranch(containerID), "feature branch is preserved").toBe(branchBefore);
+  });
+
   // FIXME: blocked on backend gap — DockerExecutor.reconnectToContainer constructs
   // its agentctl ControlClient with no auth token (the original handshake token
   // is held only in memory and lost across launches). Reconnect 401s, the

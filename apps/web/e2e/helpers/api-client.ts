@@ -839,6 +839,15 @@ export class ApiClient {
     return this.wsRequest("session.launch", payload);
   }
 
+  /** Stop a running session via WS `session.stop` — same path the UI uses. */
+  async stopSession(payload: {
+    session_id: string;
+    reason?: string;
+    force?: boolean;
+  }): Promise<{ success: boolean }> {
+    return this.wsRequest("session.stop", payload);
+  }
+
   async getTaskEnvironment(taskId: string): Promise<{
     id: string;
     task_id: string;
