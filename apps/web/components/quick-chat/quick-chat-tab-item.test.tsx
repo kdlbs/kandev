@@ -60,6 +60,19 @@ describe("QuickChatTabItem rename", () => {
     expect(onRename).not.toHaveBeenCalled();
   });
 
+  it("ignores Enter while IME composition is active", () => {
+    const onRename = vi.fn();
+    const { getByText, getByLabelText } = render(<QuickChatTabItem {...makeProps({ onRename })} />);
+    startEditing(getByText("Original"));
+
+    const input = getByLabelText(RENAME_LABEL) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Composing candidate" } });
+    // Enter pressed while IME is composing — should be a no-op (IME confirms candidate).
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
   it("does not enter edit mode when isRenameable is false", () => {
     const { getByText, queryByLabelText } = render(
       <QuickChatTabItem {...makeProps({ isRenameable: false })} />,

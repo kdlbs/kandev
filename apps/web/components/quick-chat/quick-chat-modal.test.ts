@@ -69,11 +69,11 @@ describe("renameQuickChatSession local persistence", () => {
     expect(getStoredQuickChatNames()).toEqual({ [SESSION_ID]: "Persisted name" });
   });
 
-  it("does not throw when renaming a session not in state (storage-only write is fine)", () => {
+  it("does not write to storage when the session does not exist in state", () => {
     const store = makeStore();
     expect(() =>
       store.getState().renameQuickChatSession("ghost-session", "Whatever"),
     ).not.toThrow();
-    expect(getStoredQuickChatNames()).toEqual({ "ghost-session": "Whatever" });
+    expect(getStoredQuickChatNames()).toEqual({});
   });
 });

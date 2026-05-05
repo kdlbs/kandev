@@ -76,6 +76,9 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => {
+            // IME composition uses Enter to confirm a candidate; let the IME
+            // handle it instead of committing the rename.
+            if (e.nativeEvent.isComposing) return;
             if (e.key === "Enter") {
               e.preventDefault();
               // Trigger blur instead of calling commit() directly: the input

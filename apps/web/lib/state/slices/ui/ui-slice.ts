@@ -586,13 +586,15 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
       draft.quickChat.activeSessionId = sessionId;
     }),
   renameQuickChatSession: (sessionId, name) => {
+    let renamed = false;
     set((draft) => {
       const session = draft.quickChat.sessions.find((s) => s.sessionId === sessionId);
       if (session) {
         session.name = name;
+        renamed = true;
       }
     });
-    setStoredQuickChatName(sessionId, name);
+    if (renamed) setStoredQuickChatName(sessionId, name);
   },
   setSessionFailureNotification: (n) =>
     set((draft) => {
