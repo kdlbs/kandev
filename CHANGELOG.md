@@ -2,6 +2,12 @@
 
 All notable changes to Kandev.
 
+## 0.39.2 - 2026-05-05
+
+### Bug Fixes
+
+- add repository field for npm provenance, patch CLI perms ([#826](https://github.com/kdlbs/kandev/pull/826))
+
 ## 0.39.1 - 2026-05-05
 
 ### Features
