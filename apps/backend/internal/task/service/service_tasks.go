@@ -209,8 +209,14 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		// a feature branch and break every downstream merge-base lookup.
 		defaultBranch := repoInput.DefaultBranch
 		if defaultBranch == "" {
-			if probed, err := gitref.DefaultBranch(repoInput.LocalPath); err == nil && probed != "" && probed != "HEAD" {
-				defaultBranch = probed
+			// Probe must operate on a path validated against the discovery
+			// allowlist — repoInput.LocalPath comes straight from the HTTP body
+			// and feeds into os.Stat/ReadFile inside gitref.DefaultBranch, so
+			// without this guard a caller could traverse the filesystem.
+			if safePath, pathErr := s.resolveAllowedLocalPath(repoInput.LocalPath); pathErr == nil {
+				if probed, err := gitref.DefaultBranch(safePath); err == nil && probed != "" && probed != "HEAD" {
+					defaultBranch = probed
+				}
 			}
 		}
 		created, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{

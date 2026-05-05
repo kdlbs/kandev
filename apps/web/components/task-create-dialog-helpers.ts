@@ -270,10 +270,17 @@ function splitLocalExecutorBranches(args: {
   defaultBranch?: string;
   isLocalExecutor: boolean;
 }): { base_branch: string | undefined; checkout_branch: string | undefined } {
-  if (!args.isLocalExecutor) {
+  // Without a known default_branch we can't anchor base_branch to the
+  // integration ref — and using rowBranch as a stand-in reproduces the
+  // exact bug this PR fixes (changes panel collapses to HEAD on refresh).
+  // Fall through to the legacy non-split shape: a workspace repo with an
+  // unset default_branch is no worse off than before, and the backend's
+  // resolveRepoInput probe will populate it on the next CreateRepository
+  // call. Wait for that probe rather than synthesizing a guess here.
+  if (!args.isLocalExecutor || !args.defaultBranch) {
     return { base_branch: args.rowBranch || undefined, checkout_branch: undefined };
   }
-  const base = args.defaultBranch || args.rowBranch || undefined;
+  const base = args.defaultBranch;
   const checkout =
     args.rowBranch && args.rowBranch !== args.defaultBranch ? args.rowBranch : undefined;
   return { base_branch: base, checkout_branch: checkout };

@@ -90,29 +90,16 @@ func ResolveCommonGitDir(gitDir string) string {
 
 func readOriginHEAD(commonDir string) string {
 	headPath := filepath.Join(commonDir, "refs", "remotes", "origin", headFile)
-	if content, err := os.ReadFile(headPath); err == nil {
-		if branch := parseSymbolicRefToBranch(strings.TrimSpace(string(content))); branch != "" {
-			return branch
-		}
-	}
-	packed, err := os.ReadFile(filepath.Join(commonDir, "packed-refs"))
+	content, err := os.ReadFile(headPath)
 	if err != nil {
+		// origin/HEAD only lives in packed-refs after a `git pack-refs --all`,
+		// and the on-disk symref format there is gnarly to parse correctly.
+		// We deliberately skip that case rather than maintain a broken parser:
+		// pickFirstExistingBranch's origin/main → origin/master → main →
+		// master fallbacks cover every realistic clone in practice.
 		return ""
 	}
-	for _, line := range strings.Split(string(packed), "\n") {
-		line = strings.TrimSpace(line)
-		ref, ok := strings.CutPrefix(line, "ref: ")
-		if !ok {
-			continue
-		}
-		if strings.Contains(ref, "remotes/origin/HEAD") {
-			continue
-		}
-		if branch := parseSymbolicRefToBranch(ref); branch != "" {
-			return branch
-		}
-	}
-	return ""
+	return parseSymbolicRefToBranch(strings.TrimSpace(string(content)))
 }
 
 func parseSymbolicRefToBranch(line string) string {
@@ -174,12 +161,11 @@ func readHEADBranchFallback(gitDir string) (string, error) {
 		return "", err
 	}
 	trimmed := strings.TrimSpace(string(content))
-	if strings.HasPrefix(trimmed, "ref: ") {
-		ref := strings.TrimPrefix(trimmed, "ref: ")
-		parts := strings.Split(ref, "/")
-		if len(parts) > 0 {
-			return parts[len(parts)-1], nil
-		}
+	if ref, ok := strings.CutPrefix(trimmed, "ref: "); ok {
+		// Strip refs/heads/ as a prefix rather than splitting on "/" — branch
+		// names legally contain slashes (e.g. "feature/my-feature"), so taking
+		// the last path component would silently corrupt every nested branch.
+		return strings.TrimPrefix(ref, "refs/heads/"), nil
 	}
 	if trimmed != "" {
 		return headFile, nil

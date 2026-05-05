@@ -219,6 +219,24 @@ func TestReadGitDefaultBranch_FallsBackToHEAD(t *testing.T) {
 	}
 }
 
+// TestReadGitDefaultBranch_FallsBackToHEAD_PreservesSlashes — branch names
+// can contain slashes (e.g. "feature/my-feature"). The HEAD fallback must
+// strip the refs/heads/ prefix verbatim rather than split on "/" and take
+// the tail, otherwise nested branches get silently corrupted into their
+// last path component, which then becomes the stored default_branch and
+// poisons every downstream merge-base lookup.
+func TestReadGitDefaultBranch_FallsBackToHEAD_PreservesSlashes(t *testing.T) {
+	repoPath := t.TempDir()
+	seedBareGitDir(t, repoPath, "ref: refs/heads/feature/my-feature\n")
+	branch, err := readGitDefaultBranch(repoPath)
+	if err != nil {
+		t.Fatalf("readGitDefaultBranch error: %v", err)
+	}
+	if branch != "feature/my-feature" {
+		t.Fatalf("expected feature/my-feature, got %q", branch)
+	}
+}
+
 // TestReadGitDefaultBranch_DetachedHEADReturnsHEADLiteral — detached HEAD on
 // a repo with no integration branches yields the literal "HEAD" sentinel
 // (preserved from the previous behavior so callers depending on it don't
