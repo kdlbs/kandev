@@ -230,11 +230,18 @@ export type ClarificationQuestion = {
   options: ClarificationOption[];
 };
 
+// Each per-question chat message carries its own metadata. For multi-question
+// bundles, every message in the group shares the same pending_id and includes
+// question_index/question_total so the renderer can show "Question 2 of 3"
+// progress chips.
 export type ClarificationRequestMetadata = {
   pending_id: string;
   session_id: string;
   task_id?: string;
   question: ClarificationQuestion;
+  question_id?: string;
+  question_index?: number;
+  question_total?: number;
   context?: string;
   status?: "pending" | "answered" | "rejected" | "expired";
   response?: ClarificationAnswer;

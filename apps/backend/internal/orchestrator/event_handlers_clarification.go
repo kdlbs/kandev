@@ -295,14 +295,27 @@ func (s *Service) cancelAllClarificationWatchdogs() {
 }
 
 // buildClarificationPrompt constructs the resume prompt from a clarification answer.
+// Handles both single- and multi-question bundles: when data.Question contains
+// newlines it is treated as a pre-formatted multi-line summary and embedded
+// as-is rather than quoted.
 func buildClarificationPrompt(data clarificationAnsweredData) string {
+	multiQuestion := strings.Contains(data.Question, "\n")
+
 	if data.Rejected {
 		reason := data.RejectReason
 		if reason == "" {
 			reason = "No reason provided"
 		}
+		if multiQuestion {
+			return fmt.Sprintf("The user declined to answer your questions:\n%s\nReason: %s\nPlease continue without this information.",
+				data.Question, reason)
+		}
 		return fmt.Sprintf("The user declined to answer your question: %q\nReason: %s\nPlease continue without this information.",
 			data.Question, reason)
+	}
+	if multiQuestion {
+		return fmt.Sprintf("You previously asked the user:\n%s\n\n%s\nPlease continue with this information.",
+			data.Question, data.AnswerText)
 	}
 	return fmt.Sprintf("You previously asked the user: %q\n%s\nPlease continue with this information.",
 		data.Question, data.AnswerText)
