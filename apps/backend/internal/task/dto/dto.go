@@ -139,14 +139,15 @@ type TaskDTO struct {
 }
 
 type TaskRepositoryDTO struct {
-	ID           string                 `json:"id"`
-	TaskID       string                 `json:"task_id"`
-	RepositoryID string                 `json:"repository_id"`
-	BaseBranch   string                 `json:"base_branch"`
-	Position     int                    `json:"position"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
+	ID             string                 `json:"id"`
+	TaskID         string                 `json:"task_id"`
+	RepositoryID   string                 `json:"repository_id"`
+	BaseBranch     string                 `json:"base_branch"`
+	CheckoutBranch string                 `json:"checkout_branch,omitempty"`
+	Position       int                    `json:"position"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
 }
 
 type TaskSessionDTO struct {
@@ -519,14 +520,15 @@ func FromTaskWithSessionInfo(
 	var repositories []TaskRepositoryDTO
 	for _, repo := range task.Repositories {
 		repositories = append(repositories, TaskRepositoryDTO{
-			ID:           repo.ID,
-			TaskID:       repo.TaskID,
-			RepositoryID: repo.RepositoryID,
-			BaseBranch:   repo.BaseBranch,
-			Position:     repo.Position,
-			Metadata:     repo.Metadata,
-			CreatedAt:    repo.CreatedAt,
-			UpdatedAt:    repo.UpdatedAt,
+			ID:             repo.ID,
+			TaskID:         repo.TaskID,
+			RepositoryID:   repo.RepositoryID,
+			BaseBranch:     repo.BaseBranch,
+			CheckoutBranch: repo.CheckoutBranch,
+			Position:       repo.Position,
+			Metadata:       repo.Metadata,
+			CreatedAt:      repo.CreatedAt,
+			UpdatedAt:      repo.UpdatedAt,
 		})
 	}
 

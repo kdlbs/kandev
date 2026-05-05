@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/kandev/kandev/internal/common/gitref"
 )
 
 type RepositoryDiscoveryConfig struct {
@@ -555,28 +557,11 @@ func readGitDirtyFiles(ctx context.Context, repoPath string) ([]string, error) {
 	return paths, nil
 }
 
+// readGitDefaultBranch is a thin wrapper around gitref.DefaultBranch so this
+// file's existing callers (ValidateLocalRepositoryPath, repoWalker.makeRepo,
+// the test suite) keep their existing API.
 func readGitDefaultBranch(repoPath string) (string, error) {
-	gitDir, err := resolveGitDir(repoPath)
-	if err != nil {
-		return "", err
-	}
-	headPath := filepath.Join(gitDir, gitHEAD)
-	content, err := os.ReadFile(headPath)
-	if err != nil {
-		return "", err
-	}
-	trimmed := strings.TrimSpace(string(content))
-	if strings.HasPrefix(trimmed, "ref: ") {
-		ref := strings.TrimPrefix(trimmed, "ref: ")
-		parts := strings.Split(ref, "/")
-		if len(parts) > 0 {
-			return parts[len(parts)-1], nil
-		}
-	}
-	if trimmed != "" {
-		return gitHEAD, nil
-	}
-	return "", fmt.Errorf("unable to determine branch")
+	return gitref.DefaultBranch(repoPath)
 }
 
 func resolveGitDir(repoPath string) (string, error) {
