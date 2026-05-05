@@ -48,9 +48,10 @@ async function postClarificationBatch(
     body: JSON.stringify({ answers, rejected: false }),
   });
   if (res.ok) return "ok";
-  // The backend's respond endpoint always returns 200 (even when the agent
-  // already moved on — the canceller marks the messages expired and the
-  // event-fallback path is taken). Anything else is a real failure.
+  // 409 Conflict means a duplicate submit (the user clicked Submit twice in
+  // quick succession). Treat it as success — the first submit already won
+  // and resolved the bundle on the backend, so the overlay should close.
+  if (res.status === 409) return "ok";
   console.error("Clarification submit failed:", res.status, res.statusText);
   return "error";
 }
@@ -63,6 +64,7 @@ async function postClarificationSkip(pendingId: string, reason: string): Promise
     body: JSON.stringify({ rejected: true, reject_reason: reason }),
   });
   if (res.ok) return "ok";
+  if (res.status === 409) return "ok";
   console.error("Clarification skip failed:", res.status, res.statusText);
   return "error";
 }
