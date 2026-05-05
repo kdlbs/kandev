@@ -181,6 +181,7 @@ function ViewToggleGroup({
         <ToggleGroupItem
           key={value}
           value={value}
+          data-testid={`view-toggle-${value}`}
           className={`cursor-pointer data-[state=on]:bg-muted data-[state=on]:text-foreground ${itemClassName ?? ""}`}
         >
           <Tooltip>

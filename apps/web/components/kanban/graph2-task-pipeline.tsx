@@ -205,7 +205,12 @@ function TaskButton({
     >
       <span className="text-xs font-medium truncate block text-foreground/80">{task.title}</span>
       {repoName && (
-        <span className="text-xs text-muted-foreground/60 truncate block">{repoName}</span>
+        <span
+          data-testid={`pipeline-task-repo-${task.id}`}
+          className="text-xs text-muted-foreground/60 truncate block"
+        >
+          {repoName}
+        </span>
       )}
       <div className="flex items-center gap-1.5 mt-0.5">
         {task.updatedAt && (
@@ -272,7 +277,10 @@ export function Graph2TaskPipeline({
   };
 
   return (
-    <div className="flex items-center justify-center rounded-lg hover:bg-muted/30 transition-colors px-3 py-2">
+    <div
+      data-testid={`pipeline-task-${task.id}`}
+      className="flex items-center justify-center rounded-lg hover:bg-muted/30 transition-colors px-3 py-2"
+    >
       <div className="flex items-center gap-3">
         {showCheckbox && (
           <div
