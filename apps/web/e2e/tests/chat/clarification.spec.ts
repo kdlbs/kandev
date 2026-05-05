@@ -63,7 +63,7 @@ test.describe("Clarification flow", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
     // Verify the answer was reflected in chat
-    await expect(session.chat).toContainText(/You answered|User selected/);
+    await expect(session.chat).toContainText(/You answered|selected_option/);
   });
 
   test("skip clarification", async ({ testPage, apiClient, seedData }) => {
@@ -198,5 +198,183 @@ test.describe("Clarification flow", () => {
 
     // Agent receives the answer and completes its turn (plan mode uses different placeholder)
     await expect(session.planModeInput()).toBeVisible({ timeout: 30_000 });
+  });
+});
+
+test.describe("Multi-question clarification", () => {
+  test.describe.configure({ retries: 1 });
+
+  test("renders all 3 question cards stacked", async ({ testPage, apiClient, seedData }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q render",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await expect(session.clarificationQuestionCards()).toHaveCount(3);
+
+    // Per-question progress chips should label each card.
+    await expect(session.clarificationProgressChips()).toHaveCount(3);
+    await expect(session.clarificationProgressChips().first()).toContainText("Question 1 of 3");
+    await expect(session.clarificationProgressChips().last()).toContainText("Question 3 of 3");
+
+    // Group-wide chip starts at 0 of 3 — all required.
+    await expect(session.clarificationGroupProgress()).toContainText("0 of 3 answered");
+
+    // Visual stacking sanity: card 2's top edge sits below card 1's top edge.
+    const cards = session.clarificationQuestionCards();
+    const firstBox = await cards.nth(0).boundingBox();
+    const secondBox = await cards.nth(1).boundingBox();
+    if (!firstBox || !secondBox) throw new Error("expected bounding boxes");
+    expect(secondBox.y).toBeGreaterThan(firstBox.y);
+  });
+
+  test("answering all 3 questions resolves and unblocks agent", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q happy path",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await expect(session.clarificationQuestionCards()).toHaveCount(3);
+
+    // Answer the first question — group still pending.
+    await session.clarificationOptionForQuestion("db", "PostgreSQL").click();
+    await expect(session.clarificationGroupProgress()).toContainText("1 of 3 answered");
+    await expect(session.clarificationOverlay()).toBeVisible();
+
+    // Answer second — still pending.
+    await session.clarificationOptionForQuestion("language", "Go").click();
+    await expect(session.clarificationGroupProgress()).toContainText("2 of 3 answered");
+    await expect(session.clarificationOverlay()).toBeVisible();
+
+    // Answer the last question — bundle resolves, overlay disappears,
+    // agent receives the map and completes its turn.
+    await session.clarificationOptionForQuestion("deploy", "Docker").click();
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+    // Agent's reply contains the JSON map (we asserted `selected_option` in the agent text).
+    await expect(session.chat).toContainText("selected_option");
+  });
+
+  test("partial answer keeps overlay open with all required hint", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q partial",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await session.clarificationOptionForQuestion("db", "MongoDB").click();
+
+    // Group progress + helper hint both visible — agent NOT unblocked.
+    await expect(session.clarificationGroupProgress()).toContainText("1 of 3 answered");
+    await expect(session.clarificationOverlay()).toContainText("all required");
+    await expect(session.clarificationOverlay()).toBeVisible();
+
+    // The first question card now wears the answered badge.
+    await expect(session.clarificationAnsweredBadges()).toHaveCount(1);
+  });
+
+  test("mix custom text + option selections round-trips", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q mixed",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    // Q1: option click.
+    await session.clarificationOptionForQuestion("db", "SQLite").click();
+
+    // Q2: free-form custom text via Enter key inside that card's input.
+    const langInput = session.clarificationInputForQuestion("language");
+    await langInput.click();
+    await langInput.fill("Elixir");
+    await langInput.press("Enter");
+    await expect(session.clarificationGroupProgress()).toContainText("2 of 3 answered");
+
+    // Q3: option click finalizes the bundle.
+    await session.clarificationOptionForQuestion("deploy", "Bare metal").click();
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+    // Custom text should round-trip into the agent reply.
+    await expect(session.chat).toContainText("Elixir");
+  });
+
+  test("skip rejects the entire bundle", async ({ testPage, apiClient, seedData }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q skip",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await expect(session.clarificationQuestionCards()).toHaveCount(3);
+
+    // Hit the skip (X) button — should reject all without sending answers.
+    await session.clarificationSkip().click();
+
+    // Overlay disappears and the agent unblocks.
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+    // Agent's reply mentions the rejection (mock scenario echoes the tool result).
+    await expect(session.chat).toContainText("rejected");
+  });
+
+  test("answered card collapses to summary while siblings remain pending", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q sibling state",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    await session.clarificationOptionForQuestion("db", "PostgreSQL").click();
+
+    // Q1 wears the Answered badge. Q2/Q3 remain interactive (no badge).
+    await expect(session.clarificationAnsweredBadges()).toHaveCount(1);
+    await expect(session.clarificationProgressChips()).toHaveCount(3);
+
+    // The other two cards still expose option buttons.
+    const q2Options = session
+      .clarificationQuestionCardById("language")
+      .getByTestId("clarification-option");
+    await expect(q2Options.first()).toBeVisible();
   });
 });

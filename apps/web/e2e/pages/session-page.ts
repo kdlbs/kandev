@@ -242,6 +242,45 @@ export class SessionPage {
     return this.clarificationOverlay().getByTestId("clarification-option-description");
   }
 
+  /** All question cards rendered for the active clarification bundle. */
+  clarificationQuestionCards(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-question-card");
+  }
+
+  /** A single question card by its question id (matches metadata.question_id). */
+  clarificationQuestionCardById(questionId: string): Locator {
+    return this.clarificationOverlay().locator(
+      `[data-testid="clarification-question-card"][data-question-id="${questionId}"]`,
+    );
+  }
+
+  /** Group-wide progress chip "N of M answered" — only shown for bundles >1. */
+  clarificationGroupProgress(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-group-progress");
+  }
+
+  /** Per-question "Question N of M" progress chip. */
+  clarificationProgressChips(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-progress-chip");
+  }
+
+  /** Per-question "Answered" badge that appears once a card has been committed. */
+  clarificationAnsweredBadges(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-question-answered");
+  }
+
+  /** Custom text input within a specific question card. */
+  clarificationInputForQuestion(questionId: string): Locator {
+    return this.clarificationQuestionCardById(questionId).getByTestId("clarification-input");
+  }
+
+  /** Option button (by visible label text) inside a specific question card. */
+  clarificationOptionForQuestion(questionId: string, text: string): Locator {
+    return this.clarificationQuestionCardById(questionId)
+      .getByTestId("clarification-option")
+      .filter({ hasText: text });
+  }
+
   /** All visible "Approve / Deny" rows for pending permission requests. */
   permissionActionRows(): Locator {
     return this.chat.getByTestId("permission-action-row");
