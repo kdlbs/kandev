@@ -206,7 +206,7 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 		})
 	})
 
-	t.Run("clears review status on step transition", func(t *testing.T) {
+	t.Run("preserves review status on manual move to non-auto-start step", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			repo := setupTestRepo(t)
 			seedSession(t, repo, "t1", "s1", "step1")
@@ -236,8 +236,47 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 			synctest.Wait()
 
 			updated, _ := repo.GetTaskSession(ctx, "s1")
+			if updated.ReviewStatus == nil || *updated.ReviewStatus != "pending" {
+				t.Fatalf("expected pending review status to be preserved, got %#v", updated.ReviewStatus)
+			}
+		})
+	})
+
+	t.Run("clears review status on manual move to auto-start step", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "step1")
+
+			_ = repo.UpdateSessionReviewStatus(ctx, "s1", "pending")
+
+			stepGetter := newMockStepGetter()
+			stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+				ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+				Events: wfmodels.StepEvents{},
+			}
+			stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+				ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+				Events: wfmodels.StepEvents{
+					OnEnter: []wfmodels.OnEnterAction{
+						{Type: wfmodels.OnEnterAutoStartAgent},
+					},
+				},
+			}
+
+			svc := createTestService(repo, stepGetter, newMockTaskRepo())
+			svc.handleTaskMovedWithSession(ctx, watcher.TaskMovedEventData{
+				TaskID:          "t1",
+				SessionID:       "s1",
+				FromStepID:      "step1",
+				ToStepID:        "step2",
+				TaskDescription: "test task",
+			})
+
+			synctest.Wait()
+
+			updated, _ := repo.GetTaskSession(ctx, "s1")
 			if updated.ReviewStatus != nil && *updated.ReviewStatus != "" {
-				t.Errorf("expected review status to be cleared, got %q", *updated.ReviewStatus)
+				t.Fatalf("expected review status to be cleared, got %q", *updated.ReviewStatus)
 			}
 		})
 	})

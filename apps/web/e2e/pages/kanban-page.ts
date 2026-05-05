@@ -64,6 +64,58 @@ export class KanbanPage {
     });
   }
 
+  contextMoveTo(): Locator {
+    return this.page.getByTestId("task-context-move-to");
+  }
+
+  contextSendToWorkflow(): Locator {
+    return this.page.getByTestId("task-context-send-to-workflow");
+  }
+
+  contextWorkflow(workflowId: string): Locator {
+    return this.page.getByTestId(`task-context-workflow-${workflowId}`);
+  }
+
+  contextStep(stepId: string): Locator {
+    return this.page.getByTestId(`task-context-step-${stepId}`);
+  }
+
+  contextAutoStartStep(stepId: string): Locator {
+    return this.page.getByTestId(`task-context-step-autostart-${stepId}`);
+  }
+
+  async openTaskContextMenu(taskId: string) {
+    const card = this.taskCard(taskId);
+    await card.waitFor({ state: "visible" });
+    await card.click({ button: "right" });
+  }
+
+  async openTaskActionsMenu(taskId: string) {
+    const card = this.taskCard(taskId);
+    await card.waitFor({ state: "visible" });
+    await card.getByLabel("More options").click();
+  }
+
+  async moveTaskWithinWorkflow(taskId: string, stepId: string) {
+    await this.openTaskContextMenu(taskId);
+    await this.contextMoveTo().hover();
+    await this.contextStep(stepId).click();
+  }
+
+  async sendTaskToWorkflow(taskId: string, workflowId: string, stepId: string) {
+    await this.openTaskContextMenu(taskId);
+    await this.contextSendToWorkflow().hover();
+    await this.contextWorkflow(workflowId).hover();
+    await this.contextStep(stepId).click();
+  }
+
+  async sendTaskToWorkflowFromActions(taskId: string, workflowId: string, stepId: string) {
+    await this.openTaskActionsMenu(taskId);
+    await this.contextSendToWorkflow().hover();
+    await this.contextWorkflow(workflowId).hover();
+    await this.contextStep(stepId).click();
+  }
+
   async enableMultiSelect() {
     await this.multiSelectToggle.first().waitFor({ state: "visible" });
     const isEnabled = await this.page

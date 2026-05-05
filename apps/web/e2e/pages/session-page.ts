@@ -150,6 +150,29 @@ export class SessionPage {
     return this.sidebar.getByText(title, { exact: false });
   }
 
+  sidebarTaskItem(title: string): Locator {
+    return this.sidebar.getByTestId("sidebar-task-item").filter({
+      has: this.page.getByText(title, { exact: false }),
+    });
+  }
+
+  async openSidebarTaskContextMenu(title: string): Promise<void> {
+    const taskRow = this.sidebarTaskItem(title).first();
+    await taskRow.waitFor({ state: "visible" });
+    await taskRow.click({ button: "right" });
+  }
+
+  async sendSidebarTaskToWorkflow(
+    title: string,
+    workflowId: string,
+    stepId: string,
+  ): Promise<void> {
+    await this.openSidebarTaskContextMenu(title);
+    await this.page.getByTestId("task-context-send-to-workflow").hover();
+    await this.page.getByTestId(`task-context-workflow-${workflowId}`).hover();
+    await this.page.getByTestId(`task-context-step-${stepId}`).click();
+  }
+
   /**
    * Sidebar state indicator — returns the first icon matching the given state label.
    * Accepts "Turn Finished" (review/completed), "Running" (in-progress), or "Backlog".
