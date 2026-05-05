@@ -61,20 +61,12 @@ function StepMenuItem({
     >
       <span className={cn("block h-2 w-2 rounded-full shrink-0", step.color ?? "")} />
       <span className="flex-1 truncate">{step.title}</span>
-      {isCurrent && (
-        <span
-          data-testid={`task-context-step-current-${step.id}`}
-          className="ml-auto text-[10px] text-muted-foreground"
-        >
-          Current
-        </span>
-      )}
-      {hasAutoStart && (
-        <span
-          data-testid={`task-context-step-autostart-${step.id}`}
-          className="ml-auto text-[10px] text-muted-foreground"
-        >
-          Auto-start
+      {(isCurrent || hasAutoStart) && (
+        <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
+          {isCurrent && <span data-testid={`task-context-step-current-${step.id}`}>Current</span>}
+          {hasAutoStart && (
+            <span data-testid={`task-context-step-autostart-${step.id}`}>Auto-start</span>
+          )}
         </span>
       )}
     </ContextMenuItem>

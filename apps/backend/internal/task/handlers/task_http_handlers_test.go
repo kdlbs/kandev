@@ -77,45 +77,80 @@ func TestHandleSelectedMoveError(t *testing.T) {
 
 type moveTaskConflictRepo struct {
 	mockRepository
-	task *models.Task
+	task     *models.Task
+	sessions []*models.TaskSession
 }
 
 func (m *moveTaskConflictRepo) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	return m.task, nil
 }
 
+func (m *moveTaskConflictRepo) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	return m.sessions, nil
+}
+
 func TestHTTPMoveTaskMapsMoveConflict(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	log := newTestLogger(t)
 	archivedAt := time.Now().UTC()
-	repo := &moveTaskConflictRepo{task: &models.Task{
-		ID:             "task-archived",
-		WorkspaceID:    "workspace-1",
-		WorkflowID:     "wf-source",
-		WorkflowStepID: "step-source",
-		ArchivedAt:     &archivedAt,
-	}}
-	svc := service.NewService(service.Repos{
-		Workspaces: repo, Tasks: repo, TaskRepos: repo,
-		Workflows: repo, Messages: repo, Turns: repo,
-		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
-		Executors: repo, Environments: repo, TaskEnvironments: repo,
-		Reviews: repo,
-	}, nil, log, service.RepositoryDiscoveryConfig{})
-	h := &TaskHandlers{service: svc, logger: log}
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Params = gin.Params{{Key: "id", Value: "task-archived"}}
-	c.Request = httptest.NewRequest(http.MethodPost, "/tasks/task-archived/move", strings.NewReader(`{
-		"workflow_id": "wf-target",
-		"workflow_step_id": "step-target",
-		"position": 0
-	}`))
-	c.Request.Header.Set("Content-Type", "application/json")
 
-	h.httpMoveTask(c)
+	tests := []struct {
+		name     string
+		task     *models.Task
+		sessions []*models.TaskSession
+	}{
+		{
+			name: "archived task",
+			task: &models.Task{
+				ID:             "task-archived",
+				WorkspaceID:    "workspace-1",
+				WorkflowID:     "wf-source",
+				WorkflowStepID: "step-source",
+				ArchivedAt:     &archivedAt,
+			},
+		},
+		{
+			name: "active session",
+			task: &models.Task{
+				ID:             "task-running",
+				WorkspaceID:    "workspace-1",
+				WorkflowID:     "wf-source",
+				WorkflowStepID: "step-source",
+			},
+			sessions: []*models.TaskSession{{
+				ID:     "session-running",
+				TaskID: "task-running",
+				State:  models.TaskSessionStateRunning,
+			}},
+		},
+	}
 
-	assert.Equal(t, http.StatusConflict, rec.Code)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &moveTaskConflictRepo{task: tc.task, sessions: tc.sessions}
+			svc := service.NewService(service.Repos{
+				Workspaces: repo, Tasks: repo, TaskRepos: repo,
+				Workflows: repo, Messages: repo, Turns: repo,
+				Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+				Executors: repo, Environments: repo, TaskEnvironments: repo,
+				Reviews: repo,
+			}, nil, log, service.RepositoryDiscoveryConfig{})
+			h := &TaskHandlers{service: svc, logger: log}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Params = gin.Params{{Key: "id", Value: tc.task.ID}}
+			c.Request = httptest.NewRequest(http.MethodPost, "/tasks/"+tc.task.ID+"/move", strings.NewReader(`{
+				"workflow_id": "wf-target",
+				"workflow_step_id": "step-target",
+				"position": 0
+			}`))
+			c.Request.Header.Set("Content-Type", "application/json")
+
+			h.httpMoveTask(c)
+
+			assert.Equal(t, http.StatusConflict, rec.Code)
+		})
+	}
 }
 
 func TestResolveFreshBranchName(t *testing.T) {

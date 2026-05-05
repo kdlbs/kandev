@@ -14,6 +14,10 @@ vi.mock("@/lib/api", () => ({
 }));
 
 const mockBulkMoveSelectedTasks = vi.mocked(bulkMoveSelectedTasks);
+const TASK_1 = "task-1";
+const TASK_2 = "task-2";
+const TARGET_WORKFLOW_ID = "wf-2";
+const TARGET_STEP_ID = "step-2";
 
 describe("useTaskWorkflowMove", () => {
   beforeEach(() => {
@@ -25,13 +29,13 @@ describe("useTaskWorkflowMove", () => {
     const { result } = renderHook(() => useTaskWorkflowMove());
 
     await act(async () => {
-      await result.current(["task-1", "", "task-1", "task-2"], "wf-2", "step-2");
+      await result.current([TASK_1, "", TASK_1, TASK_2], TARGET_WORKFLOW_ID, TARGET_STEP_ID);
     });
 
     expect(mockBulkMoveSelectedTasks).toHaveBeenCalledWith({
-      task_ids: ["task-1", "task-2"],
-      target_workflow_id: "wf-2",
-      target_step_id: "step-2",
+      task_ids: [TASK_1, TASK_2],
+      target_workflow_id: TARGET_WORKFLOW_ID,
+      target_step_id: TARGET_STEP_ID,
     });
   });
 
@@ -39,7 +43,7 @@ describe("useTaskWorkflowMove", () => {
     const { result } = renderHook(() => useTaskWorkflowMove());
 
     await act(async () => {
-      await result.current([""], "wf-2", "step-2");
+      await result.current([""], TARGET_WORKFLOW_ID, TARGET_STEP_ID);
     });
 
     expect(mockBulkMoveSelectedTasks).not.toHaveBeenCalled();
@@ -54,9 +58,9 @@ describe("useTaskWorkflowMove", () => {
     const { result } = renderHook(() => useTaskWorkflowMove());
 
     await act(async () => {
-      await result.current(["task-1"], "wf-2", "step-2");
-      await result.current(["task-1", "task-2"], "wf-2", "step-2");
-      await result.current(["task-1"], "wf-2", "step-2");
+      await result.current([TASK_1], TARGET_WORKFLOW_ID, TARGET_STEP_ID);
+      await result.current([TASK_1, TASK_2], TARGET_WORKFLOW_ID, TARGET_STEP_ID);
+      await result.current([TASK_1], TARGET_WORKFLOW_ID, TARGET_STEP_ID);
     });
 
     expect(mockToast).toHaveBeenNthCalledWith(1, {
@@ -81,7 +85,9 @@ describe("useTaskWorkflowMove", () => {
     mockBulkMoveSelectedTasks.mockRejectedValue(error);
     const { result } = renderHook(() => useTaskWorkflowMove());
 
-    await expect(result.current(["task-1"], "wf-2", "step-2")).rejects.toThrow(error);
+    await expect(result.current([TASK_1], TARGET_WORKFLOW_ID, TARGET_STEP_ID)).rejects.toThrow(
+      error,
+    );
 
     expect(mockToast).toHaveBeenCalledWith({
       title: "Failed to move task",
