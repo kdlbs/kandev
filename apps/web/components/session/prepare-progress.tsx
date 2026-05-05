@@ -275,6 +275,14 @@ function HeaderIcon({ status }: { status: EffectiveStatus }) {
   return <IconTerminal2 className="h-4 w-4 text-muted-foreground" />;
 }
 
+// isFallbackNoticeStep returns true when a step is the "previous sandbox went
+// away, we provisioned a fresh one" notice. It carries a warning rather than
+// an error, so the only signal that the prepare succeeded *with a recovery*
+// (not just a generic warning) is matching this row by name + status.
+function isFallbackNoticeStep(step: PrepareStepInfo): boolean {
+  return step.status === "skipped" && step.name === "Reconnecting cloud sandbox";
+}
+
 function getHeaderLabel(status: EffectiveStatus, prepareState: SessionPrepareState): string {
   if (status === "preparing") return "Preparing environment...";
   if (status === "failed") return prepareState.errorMessage || "Environment preparation failed";
@@ -283,7 +291,13 @@ function getHeaderLabel(status: EffectiveStatus, prepareState: SessionPrepareSta
     // `||` (not `??`) so an empty-string error also falls through to the name fallback.
     return failed?.error || `${failed?.name ?? "Environment prepared"} — step failed`;
   }
-  if (status === "completed_with_warnings") return "Environment prepared with warnings";
+  if (status === "completed_with_warnings") {
+    const warningSteps = prepareState.steps.filter((s) => s.warning);
+    if (warningSteps.length === 1 && isFallbackNoticeStep(warningSteps[0])) {
+      return "Environment prepared on a fresh sandbox";
+    }
+    return "Environment prepared with warnings";
+  }
   return "Environment prepared";
 }
 
