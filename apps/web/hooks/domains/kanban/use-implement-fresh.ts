@@ -32,7 +32,6 @@ export function useImplementFresh(
 
     const userText = chatInputRef.current?.getValue() ?? "";
     const attachments = chatInputRef.current?.getAttachments() ?? [];
-    chatInputRef.current?.clear();
 
     const prompt = buildImplementPlanContent(userText);
 
@@ -46,6 +45,9 @@ export function useImplementFresh(
         plan_mode: false,
         ...(attachments.length > 0 && { attachments }),
       });
+      // Clear composer + draft only on success so a failed launch leaves the
+      // user's input intact for retry.
+      chatInputRef.current?.clear();
       setChatDraftContent(resolvedSessionId, null);
     } catch (err) {
       console.error("Failed to launch fresh implementation session:", err);

@@ -123,7 +123,6 @@ function useImplementPlan(
     const userText = chatInputRef.current?.getValue() ?? "";
     const attachments = chatInputRef.current?.getAttachments() ?? [];
     const contextFilesMeta = readContextFilesMeta(resolvedSessionId);
-    chatInputRef.current?.clear();
 
     const content = buildImplementPlanContent(userText);
 
@@ -141,16 +140,19 @@ function useImplementPlan(
         attachments.length > 0 ? 30000 : 10000,
       )
       .then(() => {
-        // Clear persisted draft only on success — failure leaves draft so
-        // the user can retry without losing input.
+        // Clear composer + persisted draft only on success so a failed send
+        // leaves the user's input intact for retry.
+        chatInputRef.current?.clear();
         setChatDraftContent(resolvedSessionId, null);
         // Authoritatively clear plan_mode in session metadata so a refresh
         // mid-implementation cannot re-hydrate plan mode from the server.
-        return client.request(
-          "session.set_plan_mode",
-          { session_id: resolvedSessionId, enabled: false },
-          5000,
-        );
+        // Run as a separate request with its own catch so a set_plan_mode
+        // failure doesn't masquerade as a message send failure.
+        client
+          .request("session.set_plan_mode", { session_id: resolvedSessionId, enabled: false }, 5000)
+          .catch((err: unknown) =>
+            console.error("Failed to clear plan mode after implement:", err),
+          );
       })
       .catch((err: unknown) => console.error("Failed to send implement plan message:", err));
 
