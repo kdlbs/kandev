@@ -1126,15 +1126,20 @@ func (e *Executor) applyExistingEnvironment(req *LaunchAgentRequest, env *models
 		}
 	}
 
-	if env.WorktreeBranch != "" && isDockerExecutorType(req.ExecutorType) {
+	// Forward the persisted feature branch so the in-sandbox prepare script can
+	// re-create or reuse it. Applies to every clone-based remote executor (the
+	// preparer is responsible for stamping env.WorktreeBranch in the first
+	// place); the host-side worktree path uses req.WorktreeID instead and
+	// doesn't need this metadata.
+	if env.WorktreeBranch != "" && isCloneBasedExecutorType(req.ExecutorType) {
 		metadata := ensureLaunchMetadata(req)
 		metadata[lifecycle.MetadataKeyWorktreeBranch] = env.WorktreeBranch
 	}
 }
 
-func isDockerExecutorType(executorType string) bool {
+func isCloneBasedExecutorType(executorType string) bool {
 	switch models.ExecutorType(executorType) {
-	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker:
+	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker, models.ExecutorTypeSprites:
 		return true
 	default:
 		return false
