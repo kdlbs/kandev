@@ -24,6 +24,11 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(name);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Both Enter and Escape close edit mode by blurring the input so onBlur is
+  // the single commit path. Escape additionally sets this ref so commit knows
+  // to skip the rename — the blur fires synchronously with the typed draft
+  // still in the closure, and we'd otherwise rename to whatever the user typed.
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -33,14 +38,20 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
   }, [isEditing]);
 
   const commit = useCallback(() => {
+    if (cancelledRef.current) {
+      cancelledRef.current = false;
+      setIsEditing(false);
+      return;
+    }
     const trimmed = draft.trim();
     if (trimmed && trimmed !== name) onRename(trimmed);
     setIsEditing(false);
   }, [draft, name, onRename]);
 
   const cancel = useCallback(() => {
+    cancelledRef.current = true;
     setDraft(name);
-    setIsEditing(false);
+    inputRef.current?.blur();
   }, [name]);
 
   const handleStartEdit = useCallback(() => {
