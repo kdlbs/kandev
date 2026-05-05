@@ -22,7 +22,7 @@ func TestNewStore_CustomTimeout(t *testing.T) {
 
 func TestCreateRequest_GeneratesID(t *testing.T) {
 	s := NewStore(time.Minute)
-	req := &Request{SessionID: "s1", Question: Question{Prompt: "test?"}}
+	req := &Request{SessionID: "s1", Questions: []Question{{Prompt: "test?"}}}
 
 	id := s.CreateRequest(req)
 
@@ -47,7 +47,7 @@ func TestCreateRequest_PreservesExistingID(t *testing.T) {
 
 func TestGetRequest_Found(t *testing.T) {
 	s := NewStore(time.Minute)
-	id := s.CreateRequest(&Request{SessionID: "s1", Question: Question{Prompt: "test?"}})
+	id := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "test?"}}})
 
 	req, ok := s.GetRequest(id)
 
@@ -76,14 +76,14 @@ func TestWaitForResponse_Success(t *testing.T) {
 	// Respond in a goroutine
 	go func() {
 		time.Sleep(10 * time.Millisecond)
-		_ = s.Respond(id, &Response{Answer: &Answer{CustomText: "hello"}})
+		_ = s.Respond(id, &Response{Answers: []Answer{{CustomText: "hello"}}})
 	}()
 
 	resp, err := s.WaitForResponse(context.Background(), id)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Answer == nil || resp.Answer.CustomText != "hello" {
+	if len(resp.Answers) != 1 || resp.Answers[0].CustomText != "hello" {
 		t.Errorf("unexpected response: %+v", resp)
 	}
 
@@ -155,7 +155,7 @@ func TestRespond_Success(t *testing.T) {
 	s := NewStore(time.Minute)
 	id := s.CreateRequest(&Request{SessionID: "s1"})
 
-	err := s.Respond(id, &Response{Answer: &Answer{CustomText: "yes"}})
+	err := s.Respond(id, &Response{Answers: []Answer{{CustomText: "yes"}}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -38,7 +38,7 @@ type ClarificationService interface {
 
 // MessageCreator creates messages for clarification requests.
 type MessageCreator interface {
-	CreateClarificationRequestMessage(ctx context.Context, taskID, sessionID, pendingID string, question clarification.Question, clarificationContext string) (string, error)
+	CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []clarification.Question, clarificationContext string) ([]string, error)
 }
 
 // SessionRepository interface for updating session state.
@@ -920,10 +920,10 @@ func (h *Handlers) publishQueueStatusEvent(ctx context.Context, sessionID string
 // the event-based fallback in the orchestrator handles resuming with a new turn.
 func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		SessionID string                 `json:"session_id"`
-		TaskID    string                 `json:"task_id"`
-		Question  clarification.Question `json:"question"`
-		Context   string                 `json:"context"`
+		SessionID string                   `json:"session_id"`
+		TaskID    string                   `json:"task_id"`
+		Questions []clarification.Question `json:"questions"`
+		Context   string                   `json:"context"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -931,18 +931,34 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
-	if req.Question.Prompt == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "question.prompt is required", nil)
+	if len(req.Questions) == 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "questions must contain at least 1 question", nil)
+	}
+	if len(req.Questions) > 4 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "questions must contain at most 4 questions", nil)
 	}
 
-	// Generate question ID if missing
-	if req.Question.ID == "" {
-		req.Question.ID = "q1"
-	}
-	// Generate option IDs if missing
-	for i := range req.Question.Options {
-		if req.Question.Options[i].ID == "" {
-			req.Question.Options[i].ID = generateOptionID(0, i)
+	// Normalize question + option IDs in the same shape the HTTP handler does.
+	for i := range req.Questions {
+		if req.Questions[i].Prompt == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+				fmt.Sprintf("question %d is missing required 'prompt'", i+1), nil)
+		}
+		if req.Questions[i].ID == "" {
+			req.Questions[i].ID = fmt.Sprintf("q%d", i+1)
+		}
+		if len(req.Questions[i].Options) < 2 {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+				fmt.Sprintf("question %d must have at least 2 options", i+1), nil)
+		}
+		if len(req.Questions[i].Options) > 6 {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+				fmt.Sprintf("question %d must have at most 6 options", i+1), nil)
+		}
+		for j := range req.Questions[i].Options {
+			if req.Questions[i].Options[j].ID == "" {
+				req.Questions[i].Options[j].ID = generateOptionID(i, j)
+			}
 		}
 	}
 
@@ -963,17 +979,17 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	clarificationReq := &clarification.Request{
 		SessionID: req.SessionID,
 		TaskID:    taskID,
-		Question:  req.Question,
+		Questions: req.Questions,
 		Context:   req.Context,
 	}
 	pendingID := h.clarificationSvc.CreateRequest(clarificationReq)
 
-	// Create the message in the database (triggers WS event to frontend)
+	// Create one chat message per question (triggers WS events to frontend).
 	if h.messageCreator != nil {
-		if _, err := h.messageCreator.CreateClarificationRequestMessage(
-			ctx, taskID, req.SessionID, pendingID, req.Question, req.Context,
+		if _, err := h.messageCreator.CreateClarificationRequestMessages(
+			ctx, taskID, req.SessionID, pendingID, req.Questions, req.Context,
 		); err != nil {
-			h.logger.Error("failed to create clarification request message",
+			h.logger.Error("failed to create clarification request messages",
 				zap.String("pending_id", pendingID),
 				zap.String("session_id", req.SessionID),
 				zap.Error(err))

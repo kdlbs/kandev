@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -16,10 +17,19 @@ import (
 	"go.uber.org/zap"
 )
 
+// Metadata key constants used when constructing event payloads and reading
+// per-message clarification metadata. Pulled out so goconst stays happy and
+// renames stay safe.
+const (
+	metaQuestionKey   = "question"
+	metaQuestionIDKey = "question_id"
+)
+
 // messageStore is the minimal task repository interface required by clarification handlers.
 type messageStore interface {
 	GetTaskSession(ctx context.Context, id string) (*taskmodels.TaskSession, error)
 	FindMessageByPendingID(ctx context.Context, pendingID string) (*taskmodels.Message, error)
+	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*taskmodels.Message, error)
 	UpdateMessage(ctx context.Context, message *taskmodels.Message) error
 }
 
@@ -30,10 +40,16 @@ type Broadcaster interface {
 
 // MessageCreator interface for creating messages in the database
 type MessageCreator interface {
-	// CreateClarificationRequestMessage creates a message for a clarification request
-	CreateClarificationRequestMessage(ctx context.Context, taskID, sessionID, pendingID string, question Question, clarificationContext string) (string, error)
-	// UpdateClarificationMessage updates a clarification message's status and response
-	UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, status string, answer *Answer) error
+	// CreateClarificationRequestMessages creates one chat message per question in
+	// a multi-question clarification request, all sharing the given pending_id.
+	// Only the last message returned should set RequestsInput=true so the chat
+	// scrolls to the bottom of the group. Returns the created message IDs in the
+	// same order as the input questions.
+	CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []Question, clarificationContext string) ([]string, error)
+	// UpdateClarificationMessage updates the per-question clarification message's
+	// status (and stores the matching answer if any) for a (pending_id, question_id)
+	// pair within the session.
+	UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, questionID, status string, answer *Answer) error
 }
 
 // EventBus interface for publishing events.
@@ -74,11 +90,13 @@ func RegisterRoutes(router *gin.Engine, store *Store, hub Broadcaster, messageCr
 }
 
 // CreateRequestBody is the request body for creating a clarification request.
+// A single request may bundle 1..N questions; the bundle is gated on the user
+// answering every question (or rejecting the bundle as a whole).
 type CreateRequestBody struct {
-	SessionID string   `json:"session_id" binding:"required"`
-	TaskID    string   `json:"task_id"`
-	Question  Question `json:"question" binding:"required"`
-	Context   string   `json:"context"`
+	SessionID string     `json:"session_id" binding:"required"`
+	TaskID    string     `json:"task_id"`
+	Questions []Question `json:"questions" binding:"required,min=1,dive"`
+	Context   string     `json:"context"`
 }
 
 // CreateRequestResponse is the response for creating a clarification request.
@@ -93,15 +111,9 @@ func (h *Handlers) httpCreateRequest(c *gin.Context) {
 		return
 	}
 
-	// Validate question has ID, generate if missing
-	if body.Question.ID == "" {
-		body.Question.ID = "q1"
-	}
-	// Validate options have IDs
-	for j := range body.Question.Options {
-		if body.Question.Options[j].ID == "" {
-			body.Question.Options[j].ID = generateOptionID(0, j)
-		}
+	if errMsg := validateAndNormalizeQuestions(body.Questions); errMsg != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": errMsg})
+		return
 	}
 
 	// Look up the task ID for this session
@@ -121,25 +133,26 @@ func (h *Handlers) httpCreateRequest(c *gin.Context) {
 	req := &Request{
 		SessionID: sessionID,
 		TaskID:    taskID,
-		Question:  body.Question,
+		Questions: body.Questions,
 		Context:   body.Context,
 	}
 
 	pendingID := h.store.CreateRequest(req)
 
-	// Create a message in the database for the clarification request.
-	// This triggers the session.message.added WebSocket event which the frontend listens to.
+	// Create one message per question in the database; all share the same
+	// pending_id and are rendered as a stacked group on the frontend. The
+	// session.message.added WebSocket event fires per message.
 	if h.messageCreator != nil {
-		_, err := h.messageCreator.CreateClarificationRequestMessage(
+		_, err := h.messageCreator.CreateClarificationRequestMessages(
 			c.Request.Context(),
 			taskID,
 			sessionID,
 			pendingID,
-			body.Question,
+			body.Questions,
 			body.Context,
 		)
 		if err != nil {
-			h.logger.Error("failed to create clarification request message",
+			h.logger.Error("failed to create clarification request messages",
 				zap.String("pending_id", pendingID),
 				zap.String("session_id", sessionID),
 				zap.Error(err))
@@ -148,6 +161,43 @@ func (h *Handlers) httpCreateRequest(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, CreateRequestResponse{PendingID: pendingID})
+}
+
+// validateAndNormalizeQuestions assigns missing IDs (q1, q2, ...) and option IDs,
+// and validates per-question option counts. Returns an empty string on success
+// or an error message describing the first validation failure.
+func validateAndNormalizeQuestions(questions []Question) string {
+	if len(questions) == 0 {
+		return "questions must contain at least 1 question"
+	}
+	if len(questions) > 4 {
+		return "questions must contain at most 4 questions"
+	}
+	seen := map[string]bool{}
+	for i := range questions {
+		if questions[i].ID == "" {
+			questions[i].ID = fmt.Sprintf("q%d", i+1)
+		}
+		if seen[questions[i].ID] {
+			return fmt.Sprintf("duplicate question id %q", questions[i].ID)
+		}
+		seen[questions[i].ID] = true
+		if questions[i].Prompt == "" {
+			return fmt.Sprintf("question %d is missing required 'prompt'", i+1)
+		}
+		if len(questions[i].Options) < 2 {
+			return fmt.Sprintf("question %d must have at least 2 options", i+1)
+		}
+		if len(questions[i].Options) > 6 {
+			return fmt.Sprintf("question %d must have at most 6 options", i+1)
+		}
+		for j := range questions[i].Options {
+			if questions[i].Options[j].ID == "" {
+				questions[i].Options[j].ID = generateOptionID(i, j)
+			}
+		}
+	}
+	return ""
 }
 
 func (h *Handlers) httpGetRequest(c *gin.Context) {
@@ -174,8 +224,12 @@ func (h *Handlers) httpWaitForResponse(c *gin.Context) {
 }
 
 // RespondBody is the request body for responding to a clarification request.
+// The frontend posts every answer at once when the user finishes the bundle
+// (decision A: per-question commit collected in the hook, batched on the wire).
+// Answers must contain exactly one entry per question in the original request,
+// or be empty when Rejected=true.
 type RespondBody struct {
-	Answers      []Answer `json:"answers"` // Keep as array for frontend compatibility, but only first is used
+	Answers      []Answer `json:"answers"`
 	Rejected     bool     `json:"rejected"`
 	RejectReason string   `json:"reject_reason"`
 }
@@ -189,16 +243,23 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 		return
 	}
 
-	// Extract the single answer (first one if provided)
-	var answer *Answer
-	if len(body.Answers) > 0 {
-		answer = &body.Answers[0]
+	// Gate: when not rejecting, the user must have answered every question.
+	// We compare against the in-store request first; if the entry is gone (agent
+	// already moved on), fall back to inspecting the persisted messages so we
+	// still validate the response cardinality.
+	if !body.Rejected {
+		expected, ok := h.expectedAnswerCount(c.Request.Context(), pendingID)
+		if ok && len(body.Answers) != expected {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("expected %d answers, got %d", expected, len(body.Answers)),
+			})
+			return
+		}
 	}
 
-	// Build the response object
 	resp := &Response{
 		PendingID:    pendingID,
-		Answer:       answer,
+		Answers:      body.Answers,
 		Rejected:     body.Rejected,
 		RejectReason: body.RejectReason,
 	}
@@ -209,11 +270,13 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 	err := h.store.Respond(pendingID, resp)
 
 	if err == nil {
-		// Primary path succeeded — agent will receive the answer directly.
-		h.updateClarificationMessage(c, pendingID, body.Rejected, answer)
-		h.publishPrimaryAnsweredEvent(c, pendingID, answer, body.Rejected, body.RejectReason)
+		// Primary path succeeded — agent will receive the answers directly.
+		h.applyAnswersToMessages(c, pendingID, body.Rejected, body.Answers)
+		h.publishPrimaryAnsweredEvent(c, pendingID, body.Answers, body.Rejected, body.RejectReason)
 		h.logger.Info("clarification answered via primary path (same turn)",
-			zap.String("pending_id", pendingID))
+			zap.String("pending_id", pendingID),
+			zap.Int("answers", len(body.Answers)),
+			zap.Bool("rejected", body.Rejected))
 		c.JSON(http.StatusOK, gin.H{"success": true})
 		return
 	}
@@ -246,32 +309,91 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 		zap.String("pending_id", pendingID),
 		zap.String("error", err.Error()))
 
-	h.updateClarificationMessage(c, pendingID, body.Rejected, answer)
-	h.respondViaEventFallback(c, pendingID, answer, body.Rejected, body.RejectReason)
+	h.applyAnswersToMessages(c, pendingID, body.Rejected, body.Answers)
+	h.respondViaEventFallback(c, pendingID, body.Answers, body.Rejected, body.RejectReason)
 
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// updateClarificationMessage updates the message in the database with status and answer.
-func (h *Handlers) updateClarificationMessage(c *gin.Context, pendingID string, rejected bool, answer *Answer) {
+// expectedAnswerCount reports how many answers the user is expected to submit
+// for the bundle identified by pendingID. The store is consulted first; if the
+// in-memory entry has already been cleaned up, the persisted messages serve as
+// fallback. Returns ok=false when the count cannot be determined (in which case
+// callers should not enforce the gate).
+func (h *Handlers) expectedAnswerCount(ctx context.Context, pendingID string) (int, bool) {
+	if req, ok := h.store.GetRequest(pendingID); ok && req != nil {
+		return len(req.Questions), true
+	}
+	if h.repo == nil {
+		return 0, false
+	}
+	msgs, err := h.repo.FindMessagesByPendingID(ctx, pendingID)
+	if err != nil || len(msgs) == 0 {
+		return 0, false
+	}
+	return len(msgs), true
+}
+
+// applyAnswersToMessages flips per-question status (answered/rejected) on every
+// message that belongs to the bundle. When rejected, every question is marked
+// rejected; when answered, each answer updates the matching question's row.
+func (h *Handlers) applyAnswersToMessages(c *gin.Context, pendingID string, rejected bool, answers []Answer) {
 	if h.messageCreator == nil {
 		return
 	}
 	sessionID := h.lookupSessionForPending(c, pendingID)
-	status := "answered"
+
 	if rejected {
-		status = "rejected"
+		// Mark every question in the bundle as rejected.
+		msgs, err := h.repo.FindMessagesByPendingID(c.Request.Context(), pendingID)
+		if err != nil || len(msgs) == 0 {
+			h.logger.Debug("rejected clarification: no messages to update",
+				zap.String("pending_id", pendingID),
+				zap.Error(err))
+			return
+		}
+		for _, msg := range msgs {
+			questionID := stringFromMetadata(msg.Metadata, "question_id")
+			if questionID == "" {
+				continue
+			}
+			if err := h.messageCreator.UpdateClarificationMessage(c.Request.Context(), sessionID, pendingID, questionID, "rejected", nil); err != nil {
+				h.logger.Warn("failed to mark clarification question rejected",
+					zap.String("pending_id", pendingID),
+					zap.String("question_id", questionID),
+					zap.Error(err))
+			}
+		}
+		return
 	}
-	if err := h.messageCreator.UpdateClarificationMessage(c.Request.Context(), sessionID, pendingID, status, answer); err != nil {
-		h.logger.Warn("failed to update clarification message",
-			zap.String("pending_id", pendingID),
-			zap.Error(err))
+
+	for i := range answers {
+		ans := answers[i]
+		if ans.QuestionID == "" {
+			continue
+		}
+		if err := h.messageCreator.UpdateClarificationMessage(c.Request.Context(), sessionID, pendingID, ans.QuestionID, "answered", &ans); err != nil {
+			h.logger.Warn("failed to update clarification question",
+				zap.String("pending_id", pendingID),
+				zap.String("question_id", ans.QuestionID),
+				zap.Error(err))
+		}
 	}
+}
+
+func stringFromMetadata(meta map[string]any, key string) string {
+	if meta == nil {
+		return ""
+	}
+	if v, ok := meta[key].(string); ok {
+		return v
+	}
+	return ""
 }
 
 // respondViaEventFallback publishes a ClarificationAnswered event for the orchestrator
 // to resume the agent with a new turn. Used when the agent timed out.
-func (h *Handlers) respondViaEventFallback(c *gin.Context, pendingID string, answer *Answer, rejected bool, rejectReason string) {
+func (h *Handlers) respondViaEventFallback(c *gin.Context, pendingID string, answers []Answer, rejected bool, rejectReason string) {
 	if h.eventBus == nil {
 		return
 	}
@@ -291,13 +413,13 @@ func (h *Handlers) respondViaEventFallback(c *gin.Context, pendingID string, ans
 		return
 	}
 
-	answerText := buildAnswerText(answer, rejected, rejectReason)
+	answerText := buildAnswerSummary(clarificationCtx.Questions, answers, rejected, rejectReason)
 
 	eventData := map[string]any{
 		"session_id":    clarificationCtx.SessionID,
 		"task_id":       clarificationCtx.TaskID,
 		"pending_id":    pendingID,
-		"question":      clarificationCtx.Question,
+		metaQuestionKey: clarificationCtx.QuestionSummary,
 		"answer_text":   answerText,
 		"rejected":      rejected,
 		"reject_reason": rejectReason,
@@ -334,7 +456,7 @@ func (h *Handlers) lookupSessionForPending(c *gin.Context, pendingID string) str
 	return msg.TaskSessionID
 }
 
-func (h *Handlers) publishPrimaryAnsweredEvent(c *gin.Context, pendingID string, answer *Answer, rejected bool, rejectReason string) {
+func (h *Handlers) publishPrimaryAnsweredEvent(c *gin.Context, pendingID string, answers []Answer, rejected bool, rejectReason string) {
 	if h.eventBus == nil {
 		return
 	}
@@ -353,12 +475,12 @@ func (h *Handlers) publishPrimaryAnsweredEvent(c *gin.Context, pendingID string,
 		return
 	}
 
-	answerText := buildAnswerText(answer, rejected, rejectReason)
+	answerText := buildAnswerSummary(clarificationCtx.Questions, answers, rejected, rejectReason)
 	eventData := map[string]any{
 		"session_id":    clarificationCtx.SessionID,
 		"task_id":       clarificationCtx.TaskID,
 		"pending_id":    pendingID,
-		"question":      clarificationCtx.Question,
+		metaQuestionKey: clarificationCtx.QuestionSummary,
 		"answer_text":   answerText,
 		"rejected":      rejected,
 		"reject_reason": rejectReason,
@@ -376,9 +498,10 @@ func (h *Handlers) publishPrimaryAnsweredEvent(c *gin.Context, pendingID string,
 }
 
 type clarificationEventContext struct {
-	SessionID string
-	TaskID    string
-	Question  string
+	SessionID       string
+	TaskID          string
+	Questions       []Question // Source-of-truth questions used to label answers; falls back to a single synthetic Question when only metadata is available.
+	QuestionSummary string     // Pre-formatted multi-line "Q1: ...\nQ2: ..." used by the orchestrator resume prompt.
 }
 
 func (h *Handlers) resolveClarificationEventContext(ctx context.Context, pendingID string) (clarificationEventContext, error) {
@@ -387,55 +510,142 @@ func (h *Handlers) resolveClarificationEventContext(ctx context.Context, pending
 	if req, ok := h.store.GetRequest(pendingID); ok && req != nil {
 		out.SessionID = req.SessionID
 		out.TaskID = req.TaskID
-		out.Question = req.Question.Prompt
+		out.Questions = req.Questions
+		out.QuestionSummary = formatQuestionSummary(req.Questions)
+		if out.SessionID != "" && out.TaskID != "" && len(out.Questions) > 0 {
+			return out, nil
+		}
 	}
 
-	if out.SessionID != "" && out.TaskID != "" && out.Question != "" {
-		return out, nil
-	}
 	if h.repo == nil {
 		return out, fmt.Errorf("message repository unavailable")
 	}
 
-	msg, err := h.repo.FindMessageByPendingID(ctx, pendingID)
+	msgs, err := h.repo.FindMessagesByPendingID(ctx, pendingID)
 	if err != nil {
 		return out, err
 	}
+	if len(msgs) == 0 {
+		return out, fmt.Errorf("no messages for pending_id %s", pendingID)
+	}
+
 	if out.SessionID == "" {
-		out.SessionID = msg.TaskSessionID
+		out.SessionID = msgs[0].TaskSessionID
 	}
 	if out.TaskID == "" {
-		out.TaskID = msg.TaskID
+		out.TaskID = msgs[0].TaskID
 	}
-	if out.Question == "" && msg.Metadata != nil {
-		if qData, ok := msg.Metadata["question"].(map[string]interface{}); ok {
-			if q, ok := qData["prompt"].(string); ok {
-				out.Question = q
-			}
-		}
+	if len(out.Questions) == 0 {
+		out.Questions = questionsFromMessages(msgs)
+		out.QuestionSummary = formatQuestionSummary(out.Questions)
 	}
 
 	return out, nil
 }
 
-// buildAnswerText constructs a human-readable answer text from the response.
-func buildAnswerText(answer *Answer, rejected bool, rejectReason string) string {
+// questionsFromMessages reconstructs a Question slice from persisted clarification
+// messages. Used as a fallback when the in-store request has been cleaned up but
+// the persisted metadata still carries the original question text.
+func questionsFromMessages(msgs []*taskmodels.Message) []Question {
+	out := make([]Question, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, questionFromMessageMetadata(m.Metadata))
+	}
+	return out
+}
+
+func questionFromMessageMetadata(meta map[string]any) Question {
+	q := Question{ID: stringFromMetadata(meta, metaQuestionIDKey)}
+	qData, ok := meta[metaQuestionKey].(map[string]any)
+	if !ok {
+		return q
+	}
+	if v, ok := qData["prompt"].(string); ok {
+		q.Prompt = v
+	}
+	if v, ok := qData["title"].(string); ok {
+		q.Title = v
+	}
+	if q.ID == "" {
+		if v, ok := qData["id"].(string); ok {
+			q.ID = v
+		}
+	}
+	return q
+}
+
+func formatQuestionSummary(questions []Question) string {
+	if len(questions) == 0 {
+		return ""
+	}
+	if len(questions) == 1 {
+		return questions[0].Prompt
+	}
+	parts := make([]string, 0, len(questions))
+	for i, q := range questions {
+		parts = append(parts, fmt.Sprintf("Q%d: %s", i+1, q.Prompt))
+	}
+	return strings.Join(parts, "\n")
+}
+
+// buildAnswerSummary constructs a human-readable summary of the user's response
+// across every question in the bundle. Used in the orchestrator resume prompt
+// and for chat history rendering.
+func buildAnswerSummary(questions []Question, answers []Answer, rejected bool, rejectReason string) string {
 	if rejected {
 		if rejectReason != "" {
 			return fmt.Sprintf("User declined to answer. Reason: %s", rejectReason)
 		}
 		return "User declined to answer."
 	}
-	if answer == nil {
+	if len(answers) == 0 {
 		return "User provided no specific answer."
 	}
-	if answer.CustomText != "" {
-		return fmt.Sprintf("User answered: %s", answer.CustomText)
+	if len(questions) <= 1 && len(answers) == 1 {
+		return formatSingleAnswer(answers[0])
 	}
-	if len(answer.SelectedOptions) > 0 {
-		return fmt.Sprintf("User selected: %v", answer.SelectedOptions)
+
+	answersByID := make(map[string]Answer, len(answers))
+	for _, a := range answers {
+		answersByID[a.QuestionID] = a
+	}
+
+	parts := make([]string, 0, len(answers))
+	for i, q := range questions {
+		ans, ok := answersByID[q.ID]
+		if !ok {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("A%d: %s", i+1, formatAnswerBody(ans)))
+	}
+	if len(parts) == 0 {
+		// No matches by id — fall back to positional formatting so we still
+		// surface the answers rather than silently dropping them.
+		for i, a := range answers {
+			parts = append(parts, fmt.Sprintf("A%d: %s", i+1, formatAnswerBody(a)))
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func formatSingleAnswer(a Answer) string {
+	if a.CustomText != "" {
+		return fmt.Sprintf("User answered: %s", a.CustomText)
+	}
+	if len(a.SelectedOptions) > 0 {
+		return fmt.Sprintf("User selected: %v", a.SelectedOptions)
 	}
 	return "User provided no specific answer."
+}
+
+func formatAnswerBody(a Answer) string {
+	if a.CustomText != "" {
+		return a.CustomText
+	}
+	if len(a.SelectedOptions) > 0 {
+		return fmt.Sprintf("%v", a.SelectedOptions)
+	}
+	return "(no answer)"
 }
 
 func generateOptionID(questionIndex, optionIndex int) string {

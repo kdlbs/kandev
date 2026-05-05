@@ -49,28 +49,28 @@ func (c *Canceller) CancelSessionAndNotify(ctx context.Context, sessionID string
 	}
 
 	for _, id := range pendingIDs {
-		msg, err := c.repo.FindMessageByPendingID(ctx, id)
-		if err != nil || msg == nil {
-			c.logger.Debug("message not found for cancelled clarification",
+		msgs, err := c.repo.FindMessagesByPendingID(ctx, id)
+		if err != nil || len(msgs) == 0 {
+			c.logger.Debug("messages not found for cancelled clarification",
 				zap.String("pending_id", id),
 				zap.Error(err))
 			continue
 		}
-		if msg.Metadata == nil {
-			msg.Metadata = map[string]any{}
+		for _, msg := range msgs {
+			if msg.Metadata == nil {
+				msg.Metadata = map[string]any{}
+			}
+			msg.Metadata["agent_disconnected"] = true
+			msg.Metadata["status"] = string(StatusExpired)
+			if err := c.repo.UpdateMessage(ctx, msg); err != nil {
+				c.logger.Warn("failed to update message with expired status",
+					zap.String("pending_id", id),
+					zap.String("message_id", msg.ID),
+					zap.Error(err))
+				continue
+			}
+			c.publishMessageUpdated(ctx, msg)
 		}
-		msg.Metadata["agent_disconnected"] = true
-		msg.Metadata["status"] = "expired"
-		if err := c.repo.UpdateMessage(ctx, msg); err != nil {
-			c.logger.Warn("failed to update message with expired status",
-				zap.String("pending_id", id),
-				zap.String("message_id", msg.ID),
-				zap.Error(err))
-			continue
-		}
-
-		// Publish message.updated event so the frontend picks up the metadata change
-		c.publishMessageUpdated(ctx, msg)
 	}
 
 	return len(pendingIDs)

@@ -483,54 +483,56 @@ IMPORTANT:
 func (s *Server) registerInteractionTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("ask_user_question_kandev",
-			mcp.WithDescription(`Ask the user a clarifying question with multiple choice options.
+			mcp.WithDescription(`Ask the user one or more clarifying questions in a single tool call.
 
-Use this tool when you need user input to proceed. The user will see the prompt and can select one of the options or provide a custom text response.
+Use this tool when you need user input to proceed. Bundle related questions
+together in one call so the user answers them all in one back-and-forth instead
+of sequential round-trips. Each question is rendered as its own card; the user
+selects an option or provides a custom text response per question, and the
+agent receives a map keyed by question id once every question has been answered.
 
-IMPORTANT: Each option must be a concrete, actionable choice - NOT meta-text like "Answer questions below".
-
-Options format - array of objects with:
-- "label": Short text (1-5 words) shown as the clickable option
-- "description": Brief explanation of what this option means
+IMPORTANT:
+- Provide 1 to 4 questions per call.
+- Each question must have 2 to 6 concrete, actionable options.
+- Each option must have a short "label" (1-5 words) and a "description"
+  explaining what selecting it means. NEVER use meta-text like "Answer below".
+- Only call this tool when you genuinely need information you cannot infer.
 
 Example usage:
 {
-  "prompt": "Which database should I use for this project?",
-  "options": [
-    {"label": "PostgreSQL", "description": "Relational database, good for complex queries"},
-    {"label": "MongoDB", "description": "Document database, flexible schema"},
-    {"label": "SQLite", "description": "Embedded database, simple setup"}
+  "questions": [
+    {
+      "id": "db",
+      "prompt": "Which database should I use for this project?",
+      "options": [
+        {"label": "PostgreSQL", "description": "Relational, good for complex queries"},
+        {"label": "MongoDB", "description": "Document database, flexible schema"},
+        {"label": "SQLite", "description": "Embedded, simple setup"}
+      ]
+    },
+    {
+      "id": "migration",
+      "prompt": "How should I handle the existing user data during migration?",
+      "options": [
+        {"label": "Migrate all", "description": "Keep all existing records"},
+        {"label": "Archive old", "description": "Archive records older than 1 year"},
+        {"label": "Fresh start", "description": "Delete existing data and start fresh"}
+      ]
+    }
   ],
-  "context": "The project requires storing user profiles and relationships between entities."
+  "context": "Backend redesign — picking the persistence layer and migration policy together."
 }
 
-Another example:
+The response is a JSON object keyed by each question id, e.g.:
 {
-  "prompt": "How should I handle the existing user data during migration?",
-  "options": [
-    {"label": "Migrate all", "description": "Keep all existing records"},
-    {"label": "Archive old", "description": "Archive records older than 1 year"},
-    {"label": "Fresh start", "description": "Delete existing data and start fresh"}
-  ]
+  "db": {"selected_options": ["PostgreSQL"]},
+  "migration": {"custom_text": "Migrate all but flag rows older than 2 years"}
 }`),
-			mcp.WithString("prompt", mcp.Required(), mcp.Description("The question to ask the user. Be specific and clear.")),
-			mcp.WithArray("options", mcp.Required(), mcp.Description(`Array of option objects. Each option must have: "label" (1-5 words, the clickable choice) and "description" (explanation of the option). Provide 2-4 concrete, actionable options.`),
-				mcp.Items(map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"label": map[string]any{
-							"type":        "string",
-							"description": "Short text (1-5 words) shown as the clickable option",
-						},
-						"description": map[string]any{
-							"type":        "string",
-							"description": "Brief explanation of what this option means",
-						},
-					},
-					"required": []string{"label", "description"},
-				}),
+			mcp.WithArray(questionsArg, mcp.Required(),
+				mcp.Description(`Array of 1-4 question objects. Each question must have a "prompt" (the question text) and an "options" array (2-6 entries with label + description). Optional fields: "id" (stable identifier in the response map; auto-generated if omitted), "title" (≤12 chars short label).`),
+				mcp.Items(buildQuestionSchemaItem()),
 			),
-			mcp.WithString("context", mcp.Description("Optional background information to help the user understand why you're asking this question.")),
+			mcp.WithString("context", mcp.Description("Optional shared background information to help the user understand why you're asking these questions.")),
 		),
 		s.wrapHandler("ask_user_question_kandev", s.askUserQuestionHandler()),
 	)
@@ -569,4 +571,42 @@ func (s *Server) registerPlanTools() {
 		),
 		s.wrapHandler("delete_task_plan_kandev", s.deleteTaskPlanHandler()),
 	)
+}
+
+// buildQuestionSchemaItem describes the shape of a single question object in
+// the ask_user_question_kandev tool schema. Hoisted out of registerInteractionTools
+// to keep the registration body short and to deduplicate the JSON-schema
+// keyword strings (linter goconst rules).
+func buildQuestionSchemaItem() map[string]any {
+	const typeKey = "type"
+	const propsKey = "properties"
+	const reqKey = "required"
+	const objType = "object"
+	const stringType = "string"
+
+	str := func(desc string) map[string]any {
+		return map[string]any{typeKey: stringType, descriptionArg: desc}
+	}
+
+	return map[string]any{
+		typeKey: objType,
+		propsKey: map[string]any{
+			idArg:     str("Stable identifier used as the key in the response map. Auto-assigned (q1, q2, ...) if omitted."),
+			titleArg:  str("Optional short label (≤12 chars) shown above the prompt."),
+			promptArg: str("The question text shown to the user."),
+			optionsArg: map[string]any{
+				typeKey:        "array",
+				descriptionArg: "2-6 concrete, actionable choices.",
+				"items": map[string]any{
+					typeKey: objType,
+					propsKey: map[string]any{
+						labelArg:       str("Short text (1-5 words) shown as the clickable option."),
+						descriptionArg: str("Brief explanation of what this option means."),
+					},
+					reqKey: []string{labelArg, descriptionArg},
+				},
+			},
+		},
+		reqKey: []string{promptArg, optionsArg},
+	}
 }
