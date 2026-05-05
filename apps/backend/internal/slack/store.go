@@ -115,7 +115,7 @@ func (s *Store) migrateLegacyPerWorkspaceTable() error {
 	var lastCheckedAt sql.NullTime
 	var lastOk sql.NullInt64
 	var createdAt, updatedAt sql.NullTime
-	row := tx.QueryRow(`SELECT ` + selectCols + ` FROM slack_configs ORDER BY updated_at DESC LIMIT 1`)
+	row := tx.QueryRow(`SELECT ` + selectCols + ` FROM slack_configs ORDER BY updated_at DESC, workspace_id DESC LIMIT 1`)
 	switch err := row.Scan(&sourceWorkspace, &authMethod,
 		&commandPrefix, &utilityAgentID, &pollIntervalSeconds,
 		&slackTeamID, &slackUserID, &lastSeenTS,

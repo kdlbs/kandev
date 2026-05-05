@@ -237,6 +237,9 @@ func (s *Service) RecordAuthHealth(ctx context.Context) {
 	if updateErr := s.store.UpdateAuthHealth(writeCtx, ok, errMsg, teamID, userID, time.Now().UTC()); updateErr != nil {
 		s.log.Warn("slack: update auth health failed", zap.Error(updateErr))
 	}
+	if !ok {
+		s.invalidateClient()
+	}
 	s.mu.Lock()
 	hook := s.probeHook
 	s.mu.Unlock()

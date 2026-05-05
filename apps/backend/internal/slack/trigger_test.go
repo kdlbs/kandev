@@ -458,9 +458,6 @@ func TestRunner_PromptIncludesAllSlackContext(t *testing.T) {
 	}
 }
 
-// Ensure logger package is referenced even if some tests are skipped.
-var _ = time.Second
-
 // --- watermark advance under partial failure ---
 
 // failingRunner fails handleOne the Nth time it's called (1-indexed).
