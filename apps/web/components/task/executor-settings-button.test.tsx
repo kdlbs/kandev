@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
 
 let mockPrepareState: SessionPrepareState | null = null;
+let mockSessionState: string | null = null;
 let mockEnv: { executor_type: string; sandbox_id?: string; container_id?: string } | null = null;
 
 vi.mock("@/components/state-provider", () => ({
@@ -10,6 +11,11 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       prepareProgress: {
         bySessionId: mockPrepareState ? { [mockPrepareState.sessionId]: mockPrepareState } : {},
+      },
+      taskSessions: {
+        items: mockSessionState
+          ? { [SESSION_ID]: { id: SESSION_ID, state: mockSessionState } }
+          : {},
       },
     }),
 }));
@@ -31,11 +37,14 @@ import { ExecutorSettingsButton } from "./executor-settings-button";
 const SESSION_ID = "session-1";
 const TASK_ID = "task-1";
 const STEP_CREATE_SANDBOX = "Creating cloud sandbox";
+const PREPARE_STATUS_TESTID = "executor-prepare-status";
+const SETTINGS_BUTTON_TESTID = "executor-settings-button";
 
 describe("ExecutorSettingsButton", () => {
   afterEach(() => {
     cleanup();
     mockPrepareState = null;
+    mockSessionState = null;
     mockEnv = null;
   });
 
@@ -87,10 +96,10 @@ describe("ExecutorSettingsButton", () => {
     render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
 
     // Open the popover by clicking the trigger.
-    const trigger = screen.getByTestId("executor-settings-button");
+    const trigger = screen.getByTestId(SETTINGS_BUTTON_TESTID);
     trigger.click();
 
-    expect(await screen.findByTestId("executor-prepare-status")).toHaveProperty(
+    expect(await screen.findByTestId(PREPARE_STATUS_TESTID)).toHaveProperty(
       "dataset.phase",
       "preparing",
     );
@@ -113,11 +122,25 @@ describe("ExecutorSettingsButton", () => {
     };
 
     render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
-    screen.getByTestId("executor-settings-button").click();
+    screen.getByTestId(SETTINGS_BUTTON_TESTID).click();
 
-    const status = await screen.findByTestId("executor-prepare-status");
+    const status = await screen.findByTestId(PREPARE_STATUS_TESTID);
     expect(status.dataset.phase).toBe("preparing_fallback");
     expect(screen.getByTestId("executor-prepare-fallback-warning")).toBeTruthy();
+  });
+
+  it("renders the Resuming session row when session is STARTING with no prepare events", async () => {
+    mockSessionState = "STARTING";
+
+    render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
+
+    expect(screen.getByTestId("executor-settings-button-spinner")).toBeTruthy();
+    screen.getByTestId(SETTINGS_BUTTON_TESTID).click();
+
+    const status = await screen.findByTestId(PREPARE_STATUS_TESTID);
+    expect(status.dataset.phase).toBe("resuming");
+    expect(screen.getByText("Resuming session")).toBeTruthy();
+    expect(screen.getByText(/Reconnecting to the existing environment/)).toBeTruthy();
   });
 
   it("shows an Environment ready row once preparation completes", async () => {
@@ -129,9 +152,9 @@ describe("ExecutorSettingsButton", () => {
     };
 
     render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
-    screen.getByTestId("executor-settings-button").click();
+    screen.getByTestId(SETTINGS_BUTTON_TESTID).click();
 
-    const status = await screen.findByTestId("executor-prepare-status");
+    const status = await screen.findByTestId(PREPARE_STATUS_TESTID);
     expect(status.dataset.phase).toBe("ready");
     expect(screen.getByText(/Environment ready/)).toBeTruthy();
     expect(screen.getByText(/13s/)).toBeTruthy();
