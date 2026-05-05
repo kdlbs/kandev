@@ -16,6 +16,9 @@ export function SwimlaneGraph2Content({
   onMoveError,
   deletingTaskId,
   archivingTaskId,
+  selectedIds,
+  onToggleSelect,
+  isMultiSelectMode,
 }: ViewContentProps) {
   const { moveTask } = useSwimlaneMove(workflowId, {
     onMoveError,
@@ -66,6 +69,9 @@ export function SwimlaneGraph2Content({
             isMoving={movingTaskId === task.id}
             isDeleting={deletingTaskId === task.id}
             isArchiving={archivingTaskId === task.id}
+            isSelected={selectedIds?.has(task.id)}
+            onToggleSelect={onToggleSelect}
+            isMultiSelectMode={isMultiSelectMode}
           />
         ))}
       </div>
