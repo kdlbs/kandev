@@ -376,8 +376,9 @@ function SelectionBar({ isSelected, color }: { isSelected: boolean; color: TaskC
     return (
       <div
         className={cn(
-          "absolute left-0 top-0 bottom-0 w-[3px] opacity-100",
+          "absolute left-0 top-0 bottom-0 w-[3px] transition-opacity",
           TASK_COLOR_BAR_CLASS[color],
+          isSelected ? "opacity-100" : "opacity-60",
         )}
       />
     );

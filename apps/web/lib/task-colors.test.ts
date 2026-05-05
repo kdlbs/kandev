@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  __resetTaskColorsCacheForTests,
   getTaskColor,
   setTaskColor,
   TASK_COLORS_CHANGED_EVENT,
@@ -9,6 +10,7 @@ import {
 describe("task colors storage", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    __resetTaskColorsCacheForTests();
   });
 
   it("returns null when no color is stored", () => {

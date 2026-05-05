@@ -31,17 +31,29 @@ function isTaskColor(value: unknown): value is TaskColor {
   return typeof value === "string" && (TASK_COLORS as readonly string[]).includes(value);
 }
 
+let cachedMap: Record<string, TaskColor> | null = null;
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key === null || e.key === TASK_COLORS_STORAGE_KEY) cachedMap = null;
+  });
+}
+
 function readAll(): Record<string, TaskColor> {
+  if (cachedMap) return cachedMap;
   const raw = getLocalStorage<Record<string, string>>(TASK_COLORS_STORAGE_KEY, {});
-  if (!raw || typeof raw !== "object") return {};
   const out: Record<string, TaskColor> = {};
-  for (const [taskId, color] of Object.entries(raw)) {
-    if (typeof taskId === "string" && isTaskColor(color)) out[taskId] = color;
+  if (raw && typeof raw === "object") {
+    for (const [taskId, color] of Object.entries(raw)) {
+      if (isTaskColor(color)) out[taskId] = color;
+    }
   }
+  cachedMap = out;
   return out;
 }
 
 function writeAll(map: Record<string, TaskColor>): void {
+  cachedMap = map;
   setLocalStorage(TASK_COLORS_STORAGE_KEY, map);
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(TASK_COLORS_CHANGED_EVENT));
@@ -58,10 +70,16 @@ export function setTaskColor(taskId: string, color: TaskColor | null): void {
   const all = readAll();
   if (color === null) {
     if (!(taskId in all)) return;
-    delete all[taskId];
+    const next = { ...all };
+    delete next[taskId];
+    writeAll(next);
   } else {
     if (all[taskId] === color) return;
-    all[taskId] = color;
+    writeAll({ ...all, [taskId]: color });
   }
-  writeAll(all);
+}
+
+/** Test-only: clears the in-memory cache so localStorage mutations from tests are observed. */
+export function __resetTaskColorsCacheForTests(): void {
+  cachedMap = null;
 }
