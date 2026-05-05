@@ -149,9 +149,11 @@ type MergedCommit = {
 };
 
 /**
- * Merge local session commits and PR commits into a single list. Local
- * commits matched to a PR commit are marked pushed; unmatched are unpushed.
- * PR-only commits (e.g. from other contributors) are appended as pushed.
+ * Merge local session commits and PR commits into a single list. Pushed status
+ * for local commits is sourced from the backend (`pushed` field, computed
+ * against the branch's upstream tracking ref) — not from PR-SHA matching, so
+ * it stays correct without an open PR. PR commits not represented locally
+ * (e.g. authored by other contributors) are appended as pushed.
  * Order: unpushed first, then pushed.
  */
 export function mergeCommits(
@@ -162,24 +164,28 @@ export function mergeCommits(
     deletions: number;
     /** Multi-repo: name of the repo this commit was made in. */
     repository_name?: string;
+    pushed?: boolean;
   }[],
   prCommits: { sha: string; message: string; additions: number; deletions: number }[],
 ): MergedCommit[] {
-  const matchesPR = (localSha: string) =>
-    prCommits.some((pr) => pr.sha.startsWith(localSha) || localSha.startsWith(pr.sha));
+  const shaMatches = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
   const unpushed: MergedCommit[] = [];
   const pushed: MergedCommit[] = [];
   const matchedPRShas = new Set<string>();
   for (const c of localCommits) {
-    if (matchesPR(c.commit_sha)) {
+    // Trust the backend's pushed flag when present. Fall back to PR-SHA
+    // matching only for commits that came in without it (e.g. an old
+    // commit_created notification before a refetch).
+    const isPushed = c.pushed ?? prCommits.some((pr) => shaMatches(pr.sha, c.commit_sha));
+    if (isPushed) {
       pushed.push({ ...c, pushed: true });
-      for (const pr of prCommits) {
-        if (pr.sha.startsWith(c.commit_sha) || c.commit_sha.startsWith(pr.sha)) {
-          matchedPRShas.add(pr.sha);
-        }
-      }
     } else {
       unpushed.push({ ...c, pushed: false });
+    }
+    for (const pr of prCommits) {
+      if (shaMatches(pr.sha, c.commit_sha)) {
+        matchedPRShas.add(pr.sha);
+      }
     }
   }
   for (const pr of prCommits) {
