@@ -94,10 +94,6 @@ vi.mock("@/components/task/branch-path-popover", () => ({
   BranchPathPopover: () => null,
 }));
 
-vi.mock("@/components/task/remote-cloud-tooltip", () => ({
-  RemoteCloudTooltip: () => null,
-}));
-
 describe("TaskTopBar executor environment controls", () => {
   it("hides the executor environment button for filesystem executors", () => {
     render(<TaskTopBar taskId="task-1" remoteExecutorType="worktree" />);

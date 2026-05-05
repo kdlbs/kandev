@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { IconBox, IconCopy, IconLoader, IconTrash } from "@tabler/icons-react";
+import {
+  IconAlertTriangle,
+  IconBox,
+  IconCheck,
+  IconCopy,
+  IconLoader,
+  IconLoader2,
+  IconTrash,
+} from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
@@ -14,6 +22,12 @@ import {
   type TaskEnvironment,
 } from "@/lib/api/domains/task-environment-api";
 import { ApiError } from "@/lib/api/client";
+import { useAppStore } from "@/components/state-provider";
+import { getExecutorStatusIcon } from "@/lib/executor-icons";
+import type {
+  PrepareStepInfo,
+  SessionPrepareState,
+} from "@/lib/state/slices/session-runtime/types";
 import { TaskResetEnvConfirmDialog } from "./task-reset-env-confirm-dialog";
 import {
   getEnvironmentStatusSnapshot,
@@ -24,7 +38,20 @@ import {
 
 type ExecutorSettingsButtonProps = {
   taskId?: string | null;
+  sessionId?: string | null;
   disabled?: boolean;
+};
+
+type PreparePhase = "idle" | "preparing" | "preparing_fallback" | "ready" | "failed";
+
+type PrepareSummary = {
+  phase: PreparePhase;
+  current: PrepareStepInfo | null;
+  currentIndex: number;
+  totalSteps: number;
+  fallbackWarning: string | null;
+  failedStep: PrepareStepInfo | null;
+  durationMs: number | null;
 };
 
 const ACTIVE_POLL_INTERVAL_MS = 3000;
@@ -130,10 +157,104 @@ function useTaskEnvironment(taskId: string | null | undefined, active: boolean) 
   return { env, container, loading, isResetting, reset, status };
 }
 
-export function ExecutorSettingsButton({ taskId, disabled }: ExecutorSettingsButtonProps) {
+/**
+ * Reduces the full prepare-progress slice for one session into a UI-friendly
+ * summary. The reducer is the only place that decides what counts as "still
+ * preparing" vs "ready" vs "failed", and it surfaces the fallback notice as
+ * a first-class phase so the popover can render dedicated UI for the
+ * "previous sandbox went away" recovery path.
+ */
+function usePrepareSummary(sessionId: string | null): PrepareSummary {
+  const prepareState = useAppStore((state) =>
+    sessionId ? (state.prepareProgress?.bySessionId?.[sessionId] ?? null) : null,
+  );
+  return useMemo(() => summarizePrepare(prepareState), [prepareState]);
+}
+
+const IDLE_PREPARE_SUMMARY: PrepareSummary = {
+  phase: "idle",
+  current: null,
+  currentIndex: 0,
+  totalSteps: 0,
+  fallbackWarning: null,
+  failedStep: null,
+  durationMs: null,
+};
+
+function summarizePrepare(state: SessionPrepareState | null): PrepareSummary {
+  if (!state) return IDLE_PREPARE_SUMMARY;
+
+  const steps = state.steps ?? [];
+  const fallbackStep = steps.find(isFallbackNoticeStep) ?? null;
+  const failedStep = steps.find((s) => s.status === "failed") ?? null;
+  const runningStep = steps.find((s) => s.status === "running") ?? null;
+  const { current, currentIndex } = pickCurrentStep(steps, runningStep);
+
+  return {
+    phase: derivePhase(state.status, fallbackStep, failedStep),
+    current,
+    currentIndex,
+    totalSteps: steps.length,
+    fallbackWarning: fallbackStep?.warning ?? null,
+    failedStep,
+    durationMs: state.durationMs ?? null,
+  };
+}
+
+function pickCurrentStep(
+  steps: PrepareStepInfo[],
+  runningStep: PrepareStepInfo | null,
+): { current: PrepareStepInfo | null; currentIndex: number } {
+  if (runningStep) {
+    return { current: runningStep, currentIndex: steps.indexOf(runningStep) };
+  }
+  const lastCompletedIdx = lastIndexWhere(
+    steps,
+    (s) => s.status === "completed" || s.status === "skipped" || s.status === "failed",
+  );
+  if (lastCompletedIdx >= 0) {
+    return { current: steps[lastCompletedIdx], currentIndex: lastCompletedIdx };
+  }
+  return { current: steps[0] ?? null, currentIndex: 0 };
+}
+
+function derivePhase(
+  status: string,
+  fallbackStep: PrepareStepInfo | null,
+  failedStep: PrepareStepInfo | null,
+): PreparePhase {
+  if (status === "preparing") return fallbackStep ? "preparing_fallback" : "preparing";
+  if (status === "failed" || failedStep) return "failed";
+  if (status === "completed") return "ready";
+  return "idle";
+}
+
+function isFallbackNoticeStep(step: PrepareStepInfo): boolean {
+  return step.status === "skipped" && step.name === "Reconnecting cloud sandbox";
+}
+
+function lastIndexWhere<T>(items: T[], pred: (item: T) => boolean): number {
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (pred(items[i])) return i;
+  }
+  return -1;
+}
+
+export function ExecutorSettingsButton({
+  taskId,
+  sessionId,
+  disabled,
+}: ExecutorSettingsButtonProps) {
   const [open, setOpen] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
-  const { env, container, loading, isResetting, reset, status } = useTaskEnvironment(taskId, open);
+  const prepare = usePrepareSummary(sessionId ?? null);
+  const isPreparing = prepare.phase === "preparing" || prepare.phase === "preparing_fallback";
+  // Promote the foreground polling cadence while preparing so the icon flips
+  // to "ready" without the user opening the popover.
+  const { env, container, loading, isResetting, reset, status } = useTaskEnvironment(
+    taskId,
+    open || isPreparing,
+  );
 
   const handleReset = useCallback(
     async (opts: { pushBranch: boolean }) => {
@@ -148,6 +269,9 @@ export function ExecutorSettingsButton({ taskId, disabled }: ExecutorSettingsBut
 
   if (!taskId) return null;
 
+  const executorType = env?.executor_type ?? null;
+  const ariaLabel = computeAriaLabel(isPreparing, status);
+
   return (
     <>
       <Popover open={open} onOpenChange={setOpen}>
@@ -158,11 +282,9 @@ export function ExecutorSettingsButton({ taskId, disabled }: ExecutorSettingsBut
             className="relative cursor-pointer px-2"
             disabled={disabled}
             data-testid="executor-settings-button"
-            aria-label={
-              status ? `Executor settings, environment ${status.label}` : "Executor settings"
-            }
+            aria-label={ariaLabel}
           >
-            <IconBox className="h-4 w-4" />
+            <ExecutorButtonIcon executorType={executorType} preparing={isPreparing} />
             <ExecutorStatusDot status={status} loading={loading} />
           </Button>
         </PopoverTrigger>
@@ -171,6 +293,7 @@ export function ExecutorSettingsButton({ taskId, disabled }: ExecutorSettingsBut
           className="w-[340px] p-0 text-sm"
           data-testid="executor-settings-popover"
         >
+          <PrepareStatusSection summary={prepare} />
           <EnvironmentInfo env={env} container={container} loading={loading} />
           <div className="border-t border-border p-2 flex items-center justify-end">
             <Button
@@ -196,6 +319,37 @@ export function ExecutorSettingsButton({ taskId, disabled }: ExecutorSettingsBut
       />
     </>
   );
+}
+
+function computeAriaLabel(
+  preparing: boolean,
+  status: { label: string; tone: StatusTone } | null,
+): string {
+  if (preparing) return "Executor settings, preparing environment";
+  if (status) return `Executor settings, environment ${status.label}`;
+  return "Executor settings";
+}
+
+function ExecutorButtonIcon({
+  executorType,
+  preparing,
+}: {
+  executorType: string | null;
+  preparing: boolean;
+}) {
+  if (preparing) {
+    return (
+      <IconLoader2
+        className="h-4 w-4 animate-spin"
+        data-testid="executor-settings-button-spinner"
+      />
+    );
+  }
+  if (!executorType) {
+    return <IconBox className="h-4 w-4" data-testid="executor-status-box-icon" />;
+  }
+  const { Icon, testId } = getExecutorStatusIcon(executorType, false);
+  return <Icon className="h-4 w-4" data-testid={testId} />;
 }
 
 function maybeNotifyEnvironmentStatus(
@@ -231,6 +385,90 @@ function ExecutorStatusDot({
       }`}
     />
   );
+}
+
+function PrepareStatusSection({ summary }: { summary: PrepareSummary }) {
+  if (summary.phase === "idle") {
+    return null;
+  }
+
+  if (summary.phase === "preparing" || summary.phase === "preparing_fallback") {
+    const stepLabel = summary.current?.name ?? "Preparing...";
+    const stepNumber = Math.min(summary.currentIndex + 1, summary.totalSteps);
+    return (
+      <div
+        data-testid="executor-prepare-status"
+        data-phase={summary.phase}
+        className="border-b border-border p-3 space-y-1"
+      >
+        <div className="flex items-center gap-2">
+          <IconLoader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+          <span className="font-medium text-foreground">Preparing environment</span>
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {summary.totalSteps > 0
+            ? `Step ${stepNumber} of ${summary.totalSteps}: ${stepLabel}`
+            : stepLabel}
+        </div>
+        {summary.phase === "preparing_fallback" && summary.fallbackWarning && (
+          <div
+            data-testid="executor-prepare-fallback-warning"
+            className="mt-1 flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400"
+          >
+            <IconAlertTriangle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+            <span>{summary.fallbackWarning}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (summary.phase === "failed") {
+    return (
+      <div
+        data-testid="executor-prepare-status"
+        data-phase="failed"
+        className="border-b border-border p-3 space-y-1"
+      >
+        <div className="flex items-center gap-2 text-destructive">
+          <IconAlertTriangle className="h-3.5 w-3.5" />
+          <span className="font-medium">Environment preparation failed</span>
+        </div>
+        {summary.failedStep && (
+          <div className="text-xs text-muted-foreground">Failed at: {summary.failedStep.name}</div>
+        )}
+        {summary.failedStep?.error && (
+          <pre className="text-[11px] text-destructive whitespace-pre-wrap max-h-16 overflow-auto">
+            {summary.failedStep.error}
+          </pre>
+        )}
+      </div>
+    );
+  }
+
+  // phase === "ready"
+  return (
+    <div
+      data-testid="executor-prepare-status"
+      data-phase="ready"
+      className="border-b border-border p-3 flex items-center gap-2 text-xs text-muted-foreground"
+    >
+      <IconCheck className="h-3.5 w-3.5 text-green-500" />
+      <span>
+        Environment ready
+        {summary.durationMs ? ` · ${formatDuration(summary.durationMs)}` : ""}
+      </span>
+    </div>
+  );
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const secs = Math.round(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  const remSecs = secs % 60;
+  return remSecs > 0 ? `${mins}m ${remSecs}s` : `${mins}m`;
 }
 
 function EnvironmentInfo({

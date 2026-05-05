@@ -1,16 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  IconCloud,
-  IconCloudOff,
-  IconContainer,
-  IconContainerOff,
-  IconServer,
-  IconServerOff,
-} from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { getExecutorStatusIcon } from "@/lib/executor-icons";
 
 type RemoteStatusData = {
   remote_name?: string;
@@ -81,25 +74,6 @@ const CLOUD_STATE_CLASSES: Record<ReturnType<typeof getCloudState>, string> = {
   connected: "text-emerald-500",
   stale: "text-muted-foreground",
 };
-
-function getExecutorStatusIcon(executorType: string | null | undefined, hasError: boolean) {
-  if (executorType === "local_docker" || executorType === "remote_docker") {
-    return {
-      Icon: hasError ? IconContainerOff : IconContainer,
-      testId: "executor-status-container-icon",
-    };
-  }
-  if (executorType === "sprites") {
-    return {
-      Icon: hasError ? IconCloudOff : IconCloud,
-      testId: "executor-status-cloud-icon",
-    };
-  }
-  return {
-    Icon: hasError ? IconServerOff : IconServer,
-    testId: "executor-status-server-icon",
-  };
-}
 
 export function RemoteCloudTooltip({
   taskId,
