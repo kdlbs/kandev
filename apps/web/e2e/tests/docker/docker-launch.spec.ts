@@ -156,7 +156,10 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
     expect(env!.executor_type).toBe("local_docker");
     expect(env!.container_id, "task environment must record container_id").toBeTruthy();
     expect(dockerInspectExists(env!.container_id!), "container should exist on host").toBe(true);
-    expect(dockerCurrentBranch(env!.container_id!)).toMatch(/^feature\/docker-launch-[a-z0-9]{3}$/);
+    // Suffix is the first 6 chars of the task UUID (deterministic so resume
+    // lands on the same branch even when the env row predates the suffix
+    // change), so the pattern is hex chars rather than a 3-char random tail.
+    expect(dockerCurrentBranch(env!.container_id!)).toMatch(/^feature\/docker-launch-[0-9a-f]{6}$/);
   });
 
   test("shows Docker container wait progress during slow bootstrap", async ({

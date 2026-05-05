@@ -82,6 +82,43 @@ func TestSpritesShouldReconnectWhenSpriteNameMetadataExists(t *testing.T) {
 	}
 }
 
+// TestSpritesStopInstancePreservesSandboxOnSessionStop locks in the resume-fast
+// invariant: a plain agent stop must not destroy the upstream sandbox.
+// Otherwise the next resume always falls into the missing-sandbox fallback,
+// re-runs prepare, and loses the working tree the user had inside the sandbox.
+func TestSpritesStopInstancePreservesSandboxOnSessionStop(t *testing.T) {
+	r := newTestSpritesExecutor(nil)
+	r.tokens["inst-1"] = "tok"
+
+	preserveReasons := []string{
+		"",
+		"stopped via API",
+		"agent crashed",
+		"user requested",
+	}
+
+	for _, reason := range preserveReasons {
+		t.Run(reason, func(t *testing.T) {
+			err := r.StopInstance(context.Background(), &ExecutorInstance{
+				InstanceID: "inst-1",
+				Metadata:   map[string]interface{}{"sprite_name": "kandev-abc"},
+				StopReason: reason,
+			}, false)
+			if err != nil {
+				t.Fatalf("StopInstance: %v", err)
+			}
+			// Token cache is NOT cleared on a preserving stop; we'll need it
+			// to talk to the same sandbox on resume.
+			r.mu.RLock()
+			tok := r.tokens["inst-1"]
+			r.mu.RUnlock()
+			if tok != "tok" {
+				t.Fatalf("token cache cleared on preserving stop (reason=%q)", reason)
+			}
+		})
+	}
+}
+
 func TestSpritesProgressPlanReconnectOmitsSetupAndNetworkSteps(t *testing.T) {
 	plan := newSpritesProgressPlan(true)
 
