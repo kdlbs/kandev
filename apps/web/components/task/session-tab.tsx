@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import { IconStar } from "@tabler/icons-react";
 import { AgentLogo } from "@/components/agent-logo";
+import { GridSpinner } from "@/components/grid-spinner";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -316,13 +317,18 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
                 {sessionNumber}
               </span>
             )}
-            {agentName && (
-              <AgentLogo
-                agentName={agentName}
-                size={14}
-                className={`ml-1.5 shrink-0${isActive ? "" : " opacity-50"}`}
-              />
-            )}
+            {agentName &&
+              (sessionState === "RUNNING" || sessionState === "STARTING" ? (
+                <GridSpinner
+                  className={`ml-1.5 shrink-0 text-[14px] text-blue-500${isActive ? "" : " opacity-50"}`}
+                />
+              ) : (
+                <AgentLogo
+                  agentName={agentName}
+                  size={14}
+                  className={`ml-1.5 shrink-0${isActive ? "" : " opacity-50"}`}
+                />
+              ))}
             <DockviewDefaultTab {...props} hideClose={sessionCount <= 1} />
           </div>
         </ContextMenuTrigger>

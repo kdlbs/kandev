@@ -4,6 +4,7 @@ import { useCallback, useMemo } from "react";
 import { IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { AgentLogo } from "@/components/agent-logo";
+import { GridSpinner } from "@/components/grid-spinner";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -179,7 +180,7 @@ function isSessionActive(state: TaskSessionState): boolean {
 }
 
 function RunningSpinner() {
-  return <IconLoader2 className="h-3 w-3 shrink-0 text-blue-500 animate-spin" />;
+  return <GridSpinner className="text-blue-500 shrink-0 text-[12px]" />;
 }
 
 function PreviewLoadingState({ label }: { label: string }) {
