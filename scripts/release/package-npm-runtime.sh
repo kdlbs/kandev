@@ -89,12 +89,20 @@ for platform in linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64; do
   os_field="${PLATFORM_TO_OS[$platform]}"
   cpu_field="${PLATFORM_TO_CPU[$platform]}"
 
+  # Note: `repository` is required when publishing with `npm publish --provenance`.
+  # npm's sigstore attestation embeds repo info from the OIDC token and refuses
+  # to publish if the package.json's repository.url doesn't match.
   cat > "$pkg_out/package.json" <<EOF
 {
   "name": "$package_name",
   "version": "$VERSION",
   "description": "Kandev runtime bundle for $platform",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kdlbs/kandev.git"
+  },
+  "homepage": "https://github.com/kdlbs/kandev",
   "os": $os_field,
   "cpu": $cpu_field,
   "files": [

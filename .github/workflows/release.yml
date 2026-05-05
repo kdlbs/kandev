@@ -369,7 +369,12 @@ jobs:
           cp apps/backend/bin/agentctl${EXT} dist/kandev/bin/
           mkdir -p dist/kandev/web
           cp -R dist/web/. dist/kandev/web/
-          # cli/ was already placed by the build-cli job (downloaded above)
+          # cli/ was already placed by the build-cli job (downloaded above).
+          # actions/upload-artifact + download-artifact zip-roundtrip strips the
+          # executable bit, so re-apply it. The Homebrew formula's wrapper at
+          # bin/kandev does `exec libexec/cli/bin/cli.js`, which fails with
+          # "Permission denied" if this isn't +x.
+          chmod +x dist/kandev/cli/bin/cli.js
           cd dist
           tar -czf "kandev-${{ matrix.platform }}.tar.gz" kandev
           shasum -a 256 "kandev-${{ matrix.platform }}.tar.gz" > "kandev-${{ matrix.platform }}.tar.gz.sha256"
