@@ -12,7 +12,7 @@ import (
 )
 
 type stubMessageStore struct {
-	messages map[string]*taskmodels.Message
+	messages map[string][]*taskmodels.Message
 	updated  []*taskmodels.Message
 }
 
@@ -21,11 +21,19 @@ func (s *stubMessageStore) GetTaskSession(context.Context, string) (*taskmodels.
 }
 
 func (s *stubMessageStore) FindMessageByPendingID(_ context.Context, pendingID string) (*taskmodels.Message, error) {
-	m, ok := s.messages[pendingID]
-	if !ok {
+	msgs, ok := s.messages[pendingID]
+	if !ok || len(msgs) == 0 {
 		return nil, errors.New("not found")
 	}
-	return m, nil
+	return msgs[0], nil
+}
+
+func (s *stubMessageStore) FindMessagesByPendingID(_ context.Context, pendingID string) ([]*taskmodels.Message, error) {
+	msgs, ok := s.messages[pendingID]
+	if !ok {
+		return nil, nil
+	}
+	return msgs, nil
 }
 
 func (s *stubMessageStore) UpdateMessage(_ context.Context, m *taskmodels.Message) error {
@@ -42,7 +50,7 @@ func (s *stubEventBus) Publish(_ context.Context, _ string, ev *bus.Event) error
 	return nil
 }
 
-func newTestCanceller(t *testing.T, msgs map[string]*taskmodels.Message) (*Canceller, *stubMessageStore, *stubEventBus) {
+func newTestCanceller(t *testing.T, msgs map[string][]*taskmodels.Message) (*Canceller, *stubMessageStore, *stubEventBus) {
 	t.Helper()
 	store := NewStore(time.Minute)
 	repo := &stubMessageStore{messages: msgs}
@@ -56,17 +64,17 @@ func newTestCanceller(t *testing.T, msgs map[string]*taskmodels.Message) (*Cance
 // stays interactive and a user clicking X triggers an unintended new turn via
 // the event fallback path in the respond handler.
 func TestCanceller_MarksStatusExpiredOnDisconnect(t *testing.T) {
-	msgs := map[string]*taskmodels.Message{}
+	msgs := map[string][]*taskmodels.Message{}
 	c, repo, _ := newTestCanceller(t, msgs)
 
 	pendingID := c.store.CreateRequest(&Request{SessionID: "s1"})
-	msgs[pendingID] = &taskmodels.Message{
+	msgs[pendingID] = []*taskmodels.Message{{
 		ID:            "m1",
 		TaskSessionID: "s1",
 		Metadata: map[string]any{
 			"status": "pending",
 		},
-	}
+	}}
 
 	cancelled := c.CancelSessionAndNotify(context.Background(), "s1")
 	if cancelled != 1 {
@@ -88,7 +96,7 @@ func TestCanceller_MarksStatusExpiredOnDisconnect(t *testing.T) {
 // TestCanceller_NoMessagesToUpdate confirms that a cancel with no pending
 // clarifications returns 0 and does not touch the repo.
 func TestCanceller_NoMessagesToUpdate(t *testing.T) {
-	c, repo, _ := newTestCanceller(t, map[string]*taskmodels.Message{})
+	c, repo, _ := newTestCanceller(t, map[string][]*taskmodels.Message{})
 
 	if got := c.CancelSessionAndNotify(context.Background(), "nonexistent"); got != 0 {
 		t.Errorf("expected 0 cancelled, got %d", got)
@@ -101,19 +109,42 @@ func TestCanceller_NoMessagesToUpdate(t *testing.T) {
 // TestCanceller_PublishesMessageUpdatedEvent confirms the canceller publishes
 // a message.updated event so the frontend refreshes the message in place.
 func TestCanceller_PublishesMessageUpdatedEvent(t *testing.T) {
-	msgs := map[string]*taskmodels.Message{}
+	msgs := map[string][]*taskmodels.Message{}
 	c, _, eventBus := newTestCanceller(t, msgs)
 
 	pendingID := c.store.CreateRequest(&Request{SessionID: "s1"})
-	msgs[pendingID] = &taskmodels.Message{
+	msgs[pendingID] = []*taskmodels.Message{{
 		ID:            "m1",
 		TaskSessionID: "s1",
 		Metadata:      map[string]any{"status": "pending"},
-	}
+	}}
 
 	c.CancelSessionAndNotify(context.Background(), "s1")
 
 	if len(eventBus.events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(eventBus.events))
+	}
+}
+
+// TestCanceller_MultiQuestion_MarksAllMessagesExpired confirms a multi-question
+// bundle has every message marked expired (and emits one update event each)
+// so the frontend overlay closes for the whole stack on agent timeout.
+func TestCanceller_MultiQuestion_MarksAllMessagesExpired(t *testing.T) {
+	msgs := map[string][]*taskmodels.Message{}
+	c, _, eventBus := newTestCanceller(t, msgs)
+
+	pendingID := c.store.CreateRequest(&Request{SessionID: "s1"})
+	msgs[pendingID] = []*taskmodels.Message{
+		{ID: "m1", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending", "question_id": "q1"}},
+		{ID: "m2", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending", "question_id": "q2"}},
+		{ID: "m3", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending", "question_id": "q3"}},
+	}
+
+	cancelled := c.CancelSessionAndNotify(context.Background(), "s1")
+	if cancelled != 1 {
+		t.Fatalf("expected 1 cancelled bundle, got %d", cancelled)
+	}
+	if len(eventBus.events) != 3 {
+		t.Fatalf("expected 3 message.updated events, got %d", len(eventBus.events))
 	}
 }

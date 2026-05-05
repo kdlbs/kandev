@@ -584,19 +584,19 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 	return nil
 }
 
-// UpdateClarificationMessage updates a clarification request message's status and response.
-// It includes retry logic to handle race conditions.
-// The answers parameter should be a slice of answer objects with question_id, selected_options, and custom_text.
-func (s *Service) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, status string, answers interface{}) error {
+// UpdateClarificationMessageForQuestion updates a single clarification message
+// (identified by pending_id + question_id) with the new status and the answer
+// payload. Used by both single- and multi-question clarification bundles since
+// each question lives in its own chat message.
+func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, sessionID, pendingID, questionID, status string, answer interface{}) error {
 	const maxRetries = 5
 	const retryDelay = 100 * time.Millisecond
 
 	var message *models.Message
 	var err error
 
-	// Retry loop to handle race condition
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		message, err = s.messages.GetMessageByPendingID(ctx, sessionID, pendingID)
+		message, err = s.messages.FindMessageByPendingIDAndQuestion(ctx, sessionID, pendingID, questionID)
 		if err == nil {
 			break
 		}
@@ -609,6 +609,7 @@ func (s *Service) UpdateClarificationMessage(ctx context.Context, sessionID, pen
 			s.logger.Debug("clarification message not found, retrying",
 				zap.String("session_id", sessionID),
 				zap.String("pending_id", pendingID),
+				zap.String("question_id", questionID),
 				zap.Int("attempt", attempt+1),
 				zap.Int("max_retries", maxRetries))
 			time.Sleep(retryDelay)
@@ -619,6 +620,7 @@ func (s *Service) UpdateClarificationMessage(ctx context.Context, sessionID, pen
 		s.logger.Warn("clarification message not found for update after retries",
 			zap.String("session_id", sessionID),
 			zap.String("pending_id", pendingID),
+			zap.String("question_id", questionID),
 			zap.Int("retries", maxRetries),
 			zap.Error(err))
 		return err
@@ -628,24 +630,25 @@ func (s *Service) UpdateClarificationMessage(ctx context.Context, sessionID, pen
 		message.Metadata = make(map[string]interface{})
 	}
 	message.Metadata["status"] = status
-	if answers != nil {
-		message.Metadata["response"] = answers
+	if answer != nil {
+		message.Metadata["response"] = answer
 	}
 
 	if err := s.messages.UpdateMessage(ctx, message); err != nil {
 		s.logger.Error("failed to update clarification message",
 			zap.String("message_id", message.ID),
 			zap.String("pending_id", pendingID),
+			zap.String("question_id", questionID),
 			zap.Error(err))
 		return err
 	}
 
-	// Publish message.updated event
 	s.publishMessageEvent(ctx, events.MessageUpdated, message)
 
 	s.logger.Info("clarification message updated",
 		zap.String("message_id", message.ID),
 		zap.String("pending_id", pendingID),
+		zap.String("question_id", questionID),
 		zap.String("status", status))
 
 	return nil

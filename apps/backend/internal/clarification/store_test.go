@@ -22,7 +22,7 @@ func TestNewStore_CustomTimeout(t *testing.T) {
 
 func TestCreateRequest_GeneratesID(t *testing.T) {
 	s := NewStore(time.Minute)
-	req := &Request{SessionID: "s1", Question: Question{Prompt: "test?"}}
+	req := &Request{SessionID: "s1", Questions: []Question{{Prompt: "test?"}}}
 
 	id := s.CreateRequest(req)
 
@@ -47,7 +47,7 @@ func TestCreateRequest_PreservesExistingID(t *testing.T) {
 
 func TestGetRequest_Found(t *testing.T) {
 	s := NewStore(time.Minute)
-	id := s.CreateRequest(&Request{SessionID: "s1", Question: Question{Prompt: "test?"}})
+	id := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "test?"}}})
 
 	req, ok := s.GetRequest(id)
 
@@ -76,14 +76,14 @@ func TestWaitForResponse_Success(t *testing.T) {
 	// Respond in a goroutine
 	go func() {
 		time.Sleep(10 * time.Millisecond)
-		_ = s.Respond(id, &Response{Answer: &Answer{CustomText: "hello"}})
+		_ = s.Respond(id, &Response{Answers: []Answer{{CustomText: "hello"}}})
 	}()
 
 	resp, err := s.WaitForResponse(context.Background(), id)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Answer == nil || resp.Answer.CustomText != "hello" {
+	if len(resp.Answers) != 1 || resp.Answers[0].CustomText != "hello" {
 		t.Errorf("unexpected response: %+v", resp)
 	}
 
@@ -155,7 +155,7 @@ func TestRespond_Success(t *testing.T) {
 	s := NewStore(time.Minute)
 	id := s.CreateRequest(&Request{SessionID: "s1"})
 
-	err := s.Respond(id, &Response{Answer: &Answer{CustomText: "yes"}})
+	err := s.Respond(id, &Response{Answers: []Answer{{CustomText: "yes"}}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -206,6 +206,44 @@ func TestCancelSession_CancelsMatchingRequests(t *testing.T) {
 	// s2 entry should remain
 	if _, ok := s.GetRequest(id3); !ok {
 		t.Error("expected id3 to remain")
+	}
+}
+
+// TestCancelRequest unblocks WaitForResponse for a single pending entry.
+// Used by the create-message-failure recovery path so the agent doesn't
+// have to wait for the full MCP timeout when the bundle could not be
+// persisted.
+//
+// Synchronisation: the goroutine signals it has started before invoking
+// WaitForResponse so we don't rely on a time.Sleep. CancelRequest may run
+// either before or after the goroutine reads from the pending map, and both
+// paths return an error from WaitForResponse — that's the contract under test.
+func TestCancelRequest(t *testing.T) {
+	s := NewStore(time.Minute)
+	id := s.CreateRequest(&Request{SessionID: "s1"})
+
+	started := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		close(started)
+		_, err := s.WaitForResponse(context.Background(), id)
+		done <- err
+	}()
+	<-started
+
+	if !s.CancelRequest(id) {
+		t.Fatalf("CancelRequest returned false for known id")
+	}
+	if s.CancelRequest(id) {
+		t.Errorf("CancelRequest should return false the second time")
+	}
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Errorf("expected error from cancelled WaitForResponse")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("WaitForResponse did not return after CancelRequest")
 	}
 }
 

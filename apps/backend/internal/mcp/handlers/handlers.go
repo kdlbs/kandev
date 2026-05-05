@@ -33,12 +33,13 @@ import (
 type ClarificationService interface {
 	CreateRequest(req *clarification.Request) string
 	WaitForResponse(ctx context.Context, pendingID string) (*clarification.Response, error)
+	CancelRequest(pendingID string) bool
 	CancelSession(sessionID string) []string
 }
 
 // MessageCreator creates messages for clarification requests.
 type MessageCreator interface {
-	CreateClarificationRequestMessage(ctx context.Context, taskID, sessionID, pendingID string, question clarification.Question, clarificationContext string) (string, error)
+	CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []clarification.Question, clarificationContext string) ([]string, error)
 }
 
 // SessionRepository interface for updating session state.
@@ -940,10 +941,10 @@ func (h *Handlers) publishQueueStatusEvent(ctx context.Context, sessionID string
 // the event-based fallback in the orchestrator handles resuming with a new turn.
 func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		SessionID string                 `json:"session_id"`
-		TaskID    string                 `json:"task_id"`
-		Question  clarification.Question `json:"question"`
-		Context   string                 `json:"context"`
+		SessionID string                   `json:"session_id"`
+		TaskID    string                   `json:"task_id"`
+		Questions []clarification.Question `json:"questions"`
+		Context   string                   `json:"context"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -951,19 +952,11 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
-	if req.Question.Prompt == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "question.prompt is required", nil)
-	}
-
-	// Generate question ID if missing
-	if req.Question.ID == "" {
-		req.Question.ID = "q1"
-	}
-	// Generate option IDs if missing
-	for i := range req.Question.Options {
-		if req.Question.Options[i].ID == "" {
-			req.Question.Options[i].ID = generateOptionID(0, i)
-		}
+	// Single source of truth — same validator the HTTP handler uses, so
+	// duplicate IDs / bad option counts / empty prompts can't slip through
+	// either path.
+	if errMsg := clarification.NormalizeAndValidateQuestions(req.Questions); errMsg != "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, errMsg, nil)
 	}
 
 	// Look up task ID from session if not provided
@@ -983,20 +976,26 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	clarificationReq := &clarification.Request{
 		SessionID: req.SessionID,
 		TaskID:    taskID,
-		Question:  req.Question,
+		Questions: req.Questions,
 		Context:   req.Context,
 	}
 	pendingID := h.clarificationSvc.CreateRequest(clarificationReq)
 
-	// Create the message in the database (triggers WS event to frontend)
+	// Create one chat message per question (triggers WS events to frontend).
+	// If the create fails, the in-store pending entry must be cancelled too —
+	// otherwise the agent's WaitForResponse would block for the full 2-hour
+	// timeout while the user never sees clarification cards.
 	if h.messageCreator != nil {
-		if _, err := h.messageCreator.CreateClarificationRequestMessage(
-			ctx, taskID, req.SessionID, pendingID, req.Question, req.Context,
+		if _, err := h.messageCreator.CreateClarificationRequestMessages(
+			ctx, taskID, req.SessionID, pendingID, req.Questions, req.Context,
 		); err != nil {
-			h.logger.Error("failed to create clarification request message",
+			h.logger.Error("failed to create clarification request messages",
 				zap.String("pending_id", pendingID),
 				zap.String("session_id", req.SessionID),
 				zap.Error(err))
+			h.clarificationSvc.CancelRequest(pendingID)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to create clarification messages: "+err.Error(), nil)
 		}
 	}
 
@@ -1095,11 +1094,6 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 			eventData,
 		))
 	}
-}
-
-// generateOptionID generates an option ID for a question.
-func generateOptionID(questionIndex, optionIndex int) string {
-	return fmt.Sprintf("q%d_opt%d", questionIndex+1, optionIndex+1)
 }
 
 // handleCreateTaskPlan creates a new task plan.
