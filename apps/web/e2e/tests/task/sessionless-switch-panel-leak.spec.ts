@@ -1,6 +1,7 @@
 import path from "node:path";
 import { type Page, expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
+import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import {
   GitHelper,
@@ -9,13 +10,6 @@ import {
   createStandardProfile,
 } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
-
-type SeedData = {
-  workspaceId: string;
-  workflowId: string;
-  startStepId: string;
-  repositoryId: string;
-};
 
 /**
  * Regression: switching from a task with env-scoped panels open (file-editor,

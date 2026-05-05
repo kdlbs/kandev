@@ -136,6 +136,15 @@ describe("prepareAndSwitchTask — outgoing-env panel cleanup", () => {
     expect(switchToSession).not.toHaveBeenCalled();
 
     resolveLaunch({ session_id: "new-session" });
-    await promise;
+    const result = await promise;
+
+    // Happy-path coverage: switchToSession must run with the new session id and
+    // a null oldSessionId (releaseLayoutToDefault already saved + released the
+    // outgoing env; passing the real oldSessionId would trigger a second
+    // saveOutgoingEnv that overwrites envA's correct layout with the default).
+    expect(result).toBe(true);
+    expect(switchToSession).toHaveBeenCalledTimes(1);
+    expect(switchToSession).toHaveBeenCalledWith(NEW_TASK_ID, "new-session", null);
+    expect(setPreparingTaskId).toHaveBeenLastCalledWith(null);
   });
 });

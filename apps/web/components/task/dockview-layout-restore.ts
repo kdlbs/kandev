@@ -65,18 +65,29 @@ export function sanitizeLayout(
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
+type SavedMax = ReturnType<typeof getEnvMaximizeState>;
+
+/**
+ * Apply a saved maximize blob onto the live dockview api and mirror the full
+ * maximize state into the store. Single source of truth for both restore
+ * call sites — keeping `preMaximizeLayout` and `maximizedGroupId` in lockstep.
+ */
+function applySavedMaximize(api: DockviewReadyEvent["api"], savedMax: NonNullable<SavedMax>): void {
+  api.fromJSON(savedMax.maximizedDockviewJson as SerializedDockview);
+  api.layout(api.width, api.height);
+  const ids = applyLayoutFixups(api);
+  type LM = import("@/lib/state/layout-manager").LayoutState;
+  useDockviewStore.setState({
+    ...ids,
+    preMaximizeLayout: savedMax.preMaximizeLayout as unknown as LM,
+    maximizedGroupId: ids.centerGroupId,
+  });
+}
+
 function applyFixupsWithMaximize(api: DockviewReadyEvent["api"], envId: string | null): void {
   const savedMax = envId ? getEnvMaximizeState(envId) : null;
   if (savedMax) {
-    api.fromJSON(savedMax.maximizedDockviewJson as SerializedDockview);
-    api.layout(api.width, api.height);
-    const ids = applyLayoutFixups(api);
-    type LM = import("@/lib/state/layout-manager").LayoutState;
-    useDockviewStore.setState({
-      ...ids,
-      preMaximizeLayout: savedMax.preMaximizeLayout as unknown as LM,
-      maximizedGroupId: ids.centerGroupId,
-    });
+    applySavedMaximize(api, savedMax);
   } else {
     const ids = applyLayoutFixups(api);
     useDockviewStore.setState(ids);
@@ -87,15 +98,7 @@ function tryRestoreMaximizeOnly(api: DockviewReadyEvent["api"], envId: string): 
   const savedMax = getEnvMaximizeState(envId);
   if (!savedMax) return false;
   try {
-    api.fromJSON(savedMax.maximizedDockviewJson as SerializedDockview);
-    api.layout(api.width, api.height);
-    const ids = applyLayoutFixups(api);
-    type LM = import("@/lib/state/layout-manager").LayoutState;
-    useDockviewStore.setState({
-      ...ids,
-      preMaximizeLayout: savedMax.preMaximizeLayout as unknown as LM,
-      maximizedGroupId: ids.centerGroupId,
-    });
+    applySavedMaximize(api, savedMax);
     return true;
   } catch {
     return false;

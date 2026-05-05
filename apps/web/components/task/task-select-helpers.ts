@@ -96,7 +96,12 @@ export async function prepareAndSwitchTask(
     const { request } = buildPrepareRequest(taskId);
     const resp = await launchSession(request);
     if (resp.session_id) {
-      switchToSession(taskId, resp.session_id, oldSessionId);
+      // Pass `null` instead of the original oldSessionId — releaseLayoutToDefault
+      // already saved + released the outgoing env, and the dockview now holds the
+      // default layout. If we forwarded oldSessionId, the subsequent
+      // switchEnvLayout would call saveOutgoingEnv(envA) a second time and
+      // overwrite envA's correctly-persisted layout with the default.
+      switchToSession(taskId, resp.session_id, null);
       if ((store.getState().taskPRs.byTaskId[taskId]?.length ?? 0) > 0) {
         const { api, buildDefaultLayout } = useDockviewStore.getState();
         if (api) buildDefaultLayout(api, INTENT_PR_REVIEW);
