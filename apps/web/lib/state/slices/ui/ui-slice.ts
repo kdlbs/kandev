@@ -8,6 +8,7 @@ import {
   removeStoredSidebarDraft,
   setLocalStorage,
   setStoredCollapsedSubtaskParents,
+  setStoredQuickChatName,
   setStoredSidebarActiveViewId,
   setStoredSidebarDraft,
   setStoredSidebarUserViews,
@@ -584,13 +585,15 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
     set((draft) => {
       draft.quickChat.activeSessionId = sessionId;
     }),
-  renameQuickChatSession: (sessionId, name) =>
+  renameQuickChatSession: (sessionId, name) => {
     set((draft) => {
       const session = draft.quickChat.sessions.find((s) => s.sessionId === sessionId);
       if (session) {
         session.name = name;
       }
-    }),
+    });
+    setStoredQuickChatName(sessionId, name);
+  },
   setSessionFailureNotification: (n) =>
     set((draft) => {
       draft.sessionFailureNotification = n;

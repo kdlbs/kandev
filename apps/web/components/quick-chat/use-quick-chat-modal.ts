@@ -155,6 +155,14 @@ export function useQuickChatModal(workspaceId: string) {
     [reset, store],
   );
 
+  const handleRename = useCallback(
+    (sessionId: string, name: string) => {
+      if (!sessionId) return;
+      store.renameQuickChatSession(sessionId, name);
+    },
+    [store],
+  );
+
   const handleConfirmClose = useCallback(async () => {
     if (!sessionToClose) return;
     const sessionId = sessionToClose;
@@ -188,5 +196,6 @@ export function useQuickChatModal(workspaceId: string) {
     handleSelectAgent,
     handleCloseTab,
     handleConfirmClose,
+    handleRename,
   };
 }

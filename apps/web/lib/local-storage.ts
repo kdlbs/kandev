@@ -642,6 +642,7 @@ export function cleanupTaskStorage(
 
   // Session-keyed storage — drafts, files panel state, scroll, etc.
   for (const sessionId of sessionIds) {
+    removeStoredQuickChatName(sessionId);
     removeSessionStorage(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_CONTENT_KEY}.${sessionId}`);
@@ -656,6 +657,36 @@ export function cleanupTaskStorage(
     removeSessionStorage(`kandev.contextFiles.${sessionId}`);
     removeSessionStorage(`kandev.comments.${sessionId}`);
   }
+}
+
+// --- Quick chat custom names (localStorage, global) ---
+//
+// Local-only: not persisted to the backend. Keyed by sessionId so the rename
+// follows the underlying chat across reloads but vanishes if the user clears
+// browser storage. The backend task title remains the auto-generated name.
+
+const QUICK_CHAT_NAMES_KEY = "kandev.quickChat.names";
+
+export function getStoredQuickChatNames(): Record<string, string> {
+  const raw = getLocalStorage<Record<string, string>>(QUICK_CHAT_NAMES_KEY, {});
+  if (!raw || typeof raw !== "object") return {};
+  return raw;
+}
+
+export function setStoredQuickChatName(sessionId: string, name: string): void {
+  if (!sessionId) return;
+  const all = getStoredQuickChatNames();
+  if (name) all[sessionId] = name;
+  else delete all[sessionId];
+  setLocalStorage(QUICK_CHAT_NAMES_KEY, all);
+}
+
+export function removeStoredQuickChatName(sessionId: string): void {
+  if (!sessionId) return;
+  const all = getStoredQuickChatNames();
+  if (!(sessionId in all)) return;
+  delete all[sessionId];
+  setLocalStorage(QUICK_CHAT_NAMES_KEY, all);
 }
 
 // --- Sidebar filter views (localStorage, global) ---
