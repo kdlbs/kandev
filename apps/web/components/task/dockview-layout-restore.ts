@@ -75,6 +75,7 @@ function applyFixupsWithMaximize(api: DockviewReadyEvent["api"], envId: string |
     useDockviewStore.setState({
       ...ids,
       preMaximizeLayout: savedMax.preMaximizeLayout as unknown as LM,
+      maximizedGroupId: ids.centerGroupId,
     });
   } else {
     const ids = applyLayoutFixups(api);
@@ -93,6 +94,7 @@ function tryRestoreMaximizeOnly(api: DockviewReadyEvent["api"], envId: string): 
     useDockviewStore.setState({
       ...ids,
       preMaximizeLayout: savedMax.preMaximizeLayout as unknown as LM,
+      maximizedGroupId: ids.centerGroupId,
     });
     return true;
   } catch {

@@ -58,6 +58,12 @@ export function setupLayoutPersistence(
 ): void {
   api.onDidLayoutChange(() => {
     if (useDockviewStore.getState().isRestoringLayout) return;
+    // While maximized, the live layout is the 2-column overlay. Persisting it
+    // as the env's regular layout would mean: if we ever fall back to that
+    // layout (e.g. maximize state lost), the user gets a truncated layout
+    // instead of their real one. The dedicated maximize-state slot (managed
+    // by maximizeGroup / saveOutgoingEnv) already captures the overlay.
+    if (useDockviewStore.getState().preMaximizeLayout !== null) return;
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {

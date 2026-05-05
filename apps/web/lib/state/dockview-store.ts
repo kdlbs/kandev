@@ -20,6 +20,7 @@ import {
   filterEphemeral,
   defaultLayout,
   mergeCurrentPanelsIntoPreset,
+  toSerializedDockview,
 } from "./layout-manager";
 import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
 import { performEnvSwitch } from "./dockview-env-switch";
@@ -408,7 +409,12 @@ function restoreMaximizeFromStorage(api: DockviewApi, envId: string, set: StoreS
     api.layout(api.width, api.height);
     const ids = applyLayoutFixups(api);
     const preMax = saved.preMaximizeLayout as unknown as LayoutState;
-    set({ ...ids, preMaximizeLayout: preMax });
+    // The maximized layout is `[sidebar?, maximized]` — the non-sidebar group
+    // is the one being maximized, which `resolveGroupIds` returns as
+    // `centerGroupId`. Tracking it keeps the store consistent with what
+    // `maximizeGroup` would have set (so toggle/exit logic doesn't operate on
+    // a half-restored maximize).
+    set({ ...ids, preMaximizeLayout: preMax, maximizedGroupId: ids.centerGroupId });
   } catch {
     return false;
   }
@@ -423,20 +429,38 @@ function saveOutgoingEnv(
   api: DockviewApi,
   oldEnvId: string | null,
   preMaximizeLayout: LayoutState | null,
+  pinnedWidths: Map<string, number>,
 ): void {
   if (!oldEnvId) return;
   if (preMaximizeLayout) {
+    // While maximized, `api.toJSON()` is the 2-column maximize overlay, NOT
+    // the user's intended layout. Persist the pre-max layout under both keys:
+    //  - max state: maximizedDockviewJson is what the user sees (the overlay);
+    //  - env layout: pre-max serialized so a reload that misses the max state
+    //    (e.g. cleared maximize) falls back to the user's real layout, not a
+    //    truncated 2-column slice.
     setEnvMaximizeState(oldEnvId, {
       preMaximizeLayout: preMaximizeLayout as unknown as object,
       maximizedDockviewJson: api.toJSON(),
     });
+    try {
+      const preMaxSerialized = toSerializedDockview(
+        preMaximizeLayout,
+        api.width,
+        api.height,
+        pinnedWidths,
+      );
+      setEnvLayout(oldEnvId, preMaxSerialized as unknown as object);
+    } catch {
+      /* fall back: skip writing rather than overwrite with maximized JSON */
+    }
   } else {
     removeEnvMaximizeState(oldEnvId);
-  }
-  try {
-    setEnvLayout(oldEnvId, api.toJSON());
-  } catch {
-    /* ignore */
+    try {
+      setEnvLayout(oldEnvId, api.toJSON());
+    } catch {
+      /* ignore */
+    }
   }
   panelPortalManager.releaseByEnv(oldEnvId);
 }
@@ -465,7 +489,7 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
     // fall back to currentLayoutEnvId so we correctly save and release the
     // outgoing env rather than silently skipping it.
     const effectiveOld = oldEnvId ?? currentLayoutEnvId;
-    saveOutgoingEnv(api, effectiveOld, preMaximizeLayout);
+    saveOutgoingEnv(api, effectiveOld, preMaximizeLayout, get().pinnedWidths);
     set({ preMaximizeLayout: null, maximizedGroupId: null });
     set({ isRestoringLayout: true, currentLayoutEnvId: newEnvId });
     try {
@@ -698,11 +722,11 @@ export function performLayoutSwitch(
  * active session, and the corrupted state can be persisted on the next save.
  */
 export function releaseLayoutToDefault(oldEnvId: string | null): void {
-  const { api, currentLayoutEnvId, preMaximizeLayout, buildDefaultLayout } =
+  const { api, currentLayoutEnvId, preMaximizeLayout, buildDefaultLayout, pinnedWidths } =
     useDockviewStore.getState();
   if (!api) return;
   const effectiveOld = oldEnvId ?? currentLayoutEnvId;
-  saveOutgoingEnv(api, effectiveOld, preMaximizeLayout);
+  saveOutgoingEnv(api, effectiveOld, preMaximizeLayout, pinnedWidths);
   useDockviewStore.setState({
     preMaximizeLayout: null,
     maximizedGroupId: null,
