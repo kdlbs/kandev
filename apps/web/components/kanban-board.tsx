@@ -69,14 +69,11 @@ function useWorkflowSelection({
       (workflow: WorkflowsState["items"][number]) => workflow.workspaceId === workspaceId,
     );
 
-    const hasSettingsWorkflow =
-      settings.workflowId &&
-      workspaceWorkflows.some(
-        (workflow: WorkflowsState["items"][number]) => workflow.id === settings.workflowId,
-      );
-    const fallbackWorkflowId = workspaceWorkflows.length === 1 ? workspaceWorkflows[0].id : null;
-    const desiredWorkflowId =
-      (hasSettingsWorkflow ? settings.workflowId : fallbackWorkflowId) ?? null;
+    const desiredWorkflowId = resolveDesiredWorkflowId({
+      activeWorkflowId: workflowsState.activeId,
+      settingsWorkflowId: settings.workflowId,
+      workspaceWorkflows,
+    });
     setActiveWorkflow(desiredWorkflowId);
     if (!desiredWorkflowId) {
       store.getState().hydrate({
@@ -92,6 +89,28 @@ function useWorkflowSelection({
     store,
     workspaceState.activeId,
   ]);
+}
+
+function resolveDesiredWorkflowId({
+  activeWorkflowId,
+  settingsWorkflowId,
+  workspaceWorkflows,
+}: {
+  activeWorkflowId?: string | null;
+  settingsWorkflowId?: string | null;
+  workspaceWorkflows: WorkflowsState["items"];
+}): string | null {
+  const visibleWorkflows = workspaceWorkflows.filter((workflow) => !workflow.hidden);
+  if (activeWorkflowId && visibleWorkflows.some((workflow) => workflow.id === activeWorkflowId)) {
+    return activeWorkflowId;
+  }
+  if (
+    settingsWorkflowId &&
+    visibleWorkflows.some((workflow) => workflow.id === settingsWorkflowId)
+  ) {
+    return settingsWorkflowId;
+  }
+  return visibleWorkflows[0]?.id ?? null;
 }
 
 function useMoveErrorState(router: ReturnType<typeof useRouter>) {

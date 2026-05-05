@@ -12,7 +12,8 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { KanbanColumn, WorkflowStep } from "./kanban-column";
-import { KanbanCardPreview, Task } from "./kanban-card";
+import { Task } from "./kanban-card";
+import { KanbanCardPreview } from "./kanban-card-preview";
 import { MobileColumnTabs } from "./kanban/mobile-column-tabs";
 import { SwipeableColumns } from "./kanban/swipeable-columns";
 import { MobileDropTargets } from "./kanban/mobile-drop-targets";

@@ -3,7 +3,6 @@
 import { cloneElement, isValidElement, memo, useState } from "react";
 import {
   IconChevronDown,
-  IconArrowRight,
   IconPencil,
   IconCopy,
   IconArchive,
@@ -15,15 +14,17 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { cn } from "@/lib/utils";
 import { TaskItem } from "./task-item";
 import type { GroupedSidebarList, SidebarGroup } from "@/lib/sidebar/apply-view";
+import {
+  TaskMoveContextMenuItems,
+  type TaskMoveWorkflow,
+} from "@/components/task/task-move-context-menu";
+import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 
 export type TaskSwitcherItem = {
   id: string;
@@ -54,10 +55,16 @@ export type TaskSwitcherItem = {
   issueInfo?: { url: string; number: number };
 };
 
-type StepDef = { id: string; title: string; color?: string };
+type StepDef = {
+  id: string;
+  title: string;
+  color?: string;
+  events?: { on_enter?: Array<{ type: string; config?: Record<string, unknown> }> };
+};
 
 type TaskSwitcherProps = {
   grouped: GroupedSidebarList;
+  workflows?: TaskMoveWorkflow[];
   stepsByWorkflowId?: Record<string, StepDef[]>;
   activeTaskId: string | null;
   selectedTaskId: string | null;
@@ -132,6 +139,7 @@ type TaskRowProps = {
   task: TaskSwitcherItem;
   isSubTask?: boolean;
   subtaskToggle?: SubtaskToggleInfo;
+  workflows?: TaskMoveWorkflow[];
   stepsByWorkflowId?: Record<string, StepDef[]>;
   activeTaskId: string | null;
   selectedTaskId: string | null;
@@ -147,6 +155,7 @@ function TaskRow({
   task,
   isSubTask,
   subtaskToggle,
+  workflows,
   stepsByWorkflowId,
   activeTaskId,
   selectedTaskId,
@@ -162,6 +171,8 @@ function TaskRow({
   return (
     <TaskItemWithContextMenu
       task={task}
+      workflows={workflows}
+      stepsByWorkflowId={stepsByWorkflowId}
       steps={taskSteps}
       onRenameTask={onRenameTask}
       onArchiveTask={onArchiveTask}
@@ -200,6 +211,7 @@ function TaskRow({
 function GroupSection({
   group,
   subTasksByParentId,
+  workflows,
   stepsByWorkflowId,
   activeTaskId,
   selectedTaskId,
@@ -217,6 +229,7 @@ function GroupSection({
 }: {
   group: SidebarGroup;
   subTasksByParentId: Map<string, TaskSwitcherItem[]>;
+  workflows?: TaskMoveWorkflow[];
   stepsByWorkflowId?: Record<string, StepDef[]>;
   activeTaskId: string | null;
   selectedTaskId: string | null;
@@ -238,6 +251,7 @@ function GroupSection({
   );
   const collapsedSubs = new Set(collapsedSubtaskParentIds ?? []);
   const rowProps = {
+    workflows,
     stepsByWorkflowId,
     activeTaskId,
     selectedTaskId,
@@ -287,6 +301,8 @@ function GroupSection({
 
 function TaskItemWithContextMenu({
   task,
+  workflows,
+  stepsByWorkflowId,
   steps,
   children,
   onRenameTask,
@@ -296,6 +312,8 @@ function TaskItemWithContextMenu({
   isDeleting,
 }: {
   task: TaskSwitcherItem;
+  workflows?: TaskMoveWorkflow[];
+  stepsByWorkflowId?: Record<string, StepDef[]>;
   steps?: StepDef[];
   children: React.ReactElement<{ menuOpen?: boolean }>;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
@@ -306,7 +324,12 @@ function TaskItemWithContextMenu({
 }) {
   const [contextOpen, setContextOpen] = useState(false);
   const [menuKey, setMenuKey] = useState(0);
+  const moveTasks = useTaskWorkflowMove();
   const menuOpen = contextOpen || isDeleting === true;
+  const closeMenu = () => {
+    setContextOpen(false);
+    setMenuKey((k) => k + 1);
+  };
 
   return (
     <ContextMenu key={menuKey} onOpenChange={setContextOpen}>
@@ -330,15 +353,26 @@ function TaskItemWithContextMenu({
             Archive
           </ContextMenuItem>
         )}
-        {onMoveToStep && task.workflowId && steps && steps.length > 0 && (
-          <MoveToStepSubmenu
-            steps={steps}
+        {task.workflowId && (
+          <TaskMoveContextMenuItems
+            currentWorkflowId={task.workflowId}
             currentStepId={task.workflowStepId}
-            disabled={isDeleting}
-            onSelect={(stepId) => {
-              setContextOpen(false);
-              setMenuKey((k) => k + 1);
-              onMoveToStep(task.id, task.workflowId!, stepId);
+            workflows={workflows ?? []}
+            stepsByWorkflowId={stepsByWorkflowId ?? (steps ? { [task.workflowId]: steps } : {})}
+            disabled={isDeleting || task.isArchived}
+            onMoveToStep={
+              onMoveToStep
+                ? (stepId) => {
+                    closeMenu();
+                    onMoveToStep(task.id, task.workflowId!, stepId);
+                  }
+                : undefined
+            }
+            onSendToWorkflow={(workflowId, stepId) => {
+              closeMenu();
+              void moveTasks([task.id], workflowId, stepId).catch(() => {
+                // useTaskWorkflowMove already shows the failure toast.
+              });
             }}
           />
         )}
@@ -364,48 +398,6 @@ function TaskItemWithContextMenu({
   );
 }
 
-function MoveToStepSubmenu({
-  steps,
-  currentStepId,
-  disabled,
-  onSelect,
-}: {
-  steps: StepDef[];
-  currentStepId?: string;
-  disabled?: boolean;
-  onSelect: (stepId: string) => void;
-}) {
-  return (
-    <>
-      <ContextMenuSeparator />
-      <ContextMenuSub>
-        <ContextMenuSubTrigger disabled={disabled}>
-          <IconArrowRight className="mr-2 h-4 w-4" />
-          Move to
-        </ContextMenuSubTrigger>
-        <ContextMenuSubContent className="w-44">
-          {steps.map((step) => (
-            <ContextMenuItem
-              key={step.id}
-              disabled={step.id === currentStepId}
-              onSelect={(e) => {
-                e.preventDefault();
-                onSelect(step.id);
-              }}
-            >
-              <span className={cn("block h-2 w-2 rounded-full shrink-0", step.color)} />
-              <span className="flex-1 truncate">{step.title}</span>
-              {step.id === currentStepId && (
-                <span className="ml-auto text-[10px] text-muted-foreground">Current</span>
-              )}
-            </ContextMenuItem>
-          ))}
-        </ContextMenuSubContent>
-      </ContextMenuSub>
-    </>
-  );
-}
-
 function cloneWithMenuOpen(
   children: React.ReactElement<{ menuOpen?: boolean }>,
   menuOpen: boolean,
@@ -416,6 +408,7 @@ function cloneWithMenuOpen(
 
 export const TaskSwitcher = memo(function TaskSwitcher({
   grouped,
+  workflows,
   stepsByWorkflowId,
   activeTaskId,
   selectedTaskId,
@@ -450,6 +443,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           key={group.key}
           group={group}
           subTasksByParentId={grouped.subTasksByParentId}
+          workflows={workflows}
           stepsByWorkflowId={stepsByWorkflowId}
           activeTaskId={activeTaskId}
           selectedTaskId={selectedTaskId}

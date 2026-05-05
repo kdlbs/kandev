@@ -117,6 +117,7 @@ export type KanbanUpdatePayload = {
 export type TaskEventPayload = {
   task_id: string;
   workflow_id: string;
+  old_workflow_id?: string | null;
   workflow_step_id: string;
   title: string;
   description?: string;
