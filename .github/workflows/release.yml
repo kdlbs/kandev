@@ -183,6 +183,12 @@ jobs:
           git checkout -b "$BRANCH"
           git add apps/cli/package.json CHANGELOG.md apps/pnpm-lock.yaml
           git commit -m "$MSG"
+          # If a previous run pushed this branch but failed before the merge
+          # landed, the remote branch still exists. Delete it so the push
+          # below is a clean -u origin "$BRANCH" rather than a non-fast-forward
+          # rejection. Closing the corresponding stale PR (if any) happens
+          # automatically when GitHub sees the head branch deleted.
+          git push origin --delete "$BRANCH" 2>/dev/null || true
           git push -u origin "$BRANCH"
 
           gh pr create \
