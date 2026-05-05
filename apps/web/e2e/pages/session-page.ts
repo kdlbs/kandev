@@ -264,11 +264,6 @@ export class SessionPage {
     return this.clarificationOverlay().getByTestId("clarification-progress-chip");
   }
 
-  /** Per-question "Answered" badge that appears once a card has been committed. */
-  clarificationAnsweredBadges(): Locator {
-    return this.clarificationOverlay().getByTestId("clarification-question-answered");
-  }
-
   /** Custom text input within a specific question card. */
   clarificationInputForQuestion(questionId: string): Locator {
     return this.clarificationQuestionCardById(questionId).getByTestId("clarification-input");

@@ -213,18 +213,24 @@ func TestCancelSession_CancelsMatchingRequests(t *testing.T) {
 // Used by the create-message-failure recovery path so the agent doesn't
 // have to wait for the full MCP timeout when the bundle could not be
 // persisted.
+//
+// Synchronisation: the goroutine signals it has started before invoking
+// WaitForResponse so we don't rely on a time.Sleep. CancelRequest may run
+// either before or after the goroutine reads from the pending map, and both
+// paths return an error from WaitForResponse — that's the contract under test.
 func TestCancelRequest(t *testing.T) {
 	s := NewStore(time.Minute)
 	id := s.CreateRequest(&Request{SessionID: "s1"})
 
+	started := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
+		close(started)
 		_, err := s.WaitForResponse(context.Background(), id)
 		done <- err
 	}()
+	<-started
 
-	// Brief yield so WaitForResponse has parked on the channel.
-	time.Sleep(10 * time.Millisecond)
 	if !s.CancelRequest(id) {
 		t.Fatalf("CancelRequest returned false for known id")
 	}
