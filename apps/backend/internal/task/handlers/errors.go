@@ -31,8 +31,8 @@ func handleSelectedMoveError(c *gin.Context, log *logger.Logger, err error) {
 	case isValidationError(err):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	default:
-		log.Error("failed to bulk move selected tasks", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to bulk move selected tasks"})
+		log.Error("task move failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "task move failed"})
 	}
 }
 

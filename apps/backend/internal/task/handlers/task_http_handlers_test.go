@@ -37,9 +37,10 @@ func TestHandleSelectedMoveError(t *testing.T) {
 	log := newTestLogger(t)
 
 	tests := []struct {
-		name string
-		err  error
-		want int
+		name             string
+		err              error
+		want             int
+		wantBodyContains string
 	}{
 		{
 			name: "not found",
@@ -57,9 +58,10 @@ func TestHandleSelectedMoveError(t *testing.T) {
 			want: http.StatusBadRequest,
 		},
 		{
-			name: "internal",
-			err:  errors.New("failed to count target workflow step tasks: database is locked"),
-			want: http.StatusInternalServerError,
+			name:             "internal",
+			err:              errors.New("failed to count target workflow step tasks: database is locked"),
+			want:             http.StatusInternalServerError,
+			wantBodyContains: "task move failed",
 		},
 	}
 
@@ -71,6 +73,9 @@ func TestHandleSelectedMoveError(t *testing.T) {
 			handleSelectedMoveError(c, log, tc.err)
 
 			assert.Equal(t, tc.want, rec.Code)
+			if tc.wantBodyContains != "" {
+				assert.Contains(t, rec.Body.String(), tc.wantBodyContains)
+			}
 		})
 	}
 }
