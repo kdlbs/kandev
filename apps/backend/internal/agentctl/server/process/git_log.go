@@ -175,10 +175,10 @@ func (g *GitOperator) markPushedCommits(ctx context.Context, commits []*GitCommi
 	if upstream == "" {
 		return
 	}
-	// Resolve to a SHA so we can pass it to rev-list as `^<sha>` without
-	// hitting the branch-name validator (which rejects `^origin/main` because
-	// of the leading caret). SHAs go through LooksLikeCommitSHA and the
-	// non-branch fall-through path.
+	// Resolve to a SHA so we can pass it to rev-list as `^<sha>`. The caret
+	// prefix means the arg doesn't match LooksLikeCommitSHA; it falls through
+	// to the non-branch catch-all in runGitCommand, which passes it unchanged.
+	// Safe: upstreamSHA is local rev-parse output, not user input.
 	upstreamSHA, err := g.runGitCommand(ctx, "rev-parse", upstream)
 	if err != nil {
 		return

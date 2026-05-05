@@ -149,12 +149,15 @@ type MergedCommit = {
 };
 
 /**
- * Merge local session commits and PR commits into a single list. Pushed status
- * for local commits is sourced from the backend (`pushed` field, computed
- * against the branch's upstream tracking ref) — not from PR-SHA matching, so
- * it stays correct without an open PR. PR commits not represented locally
- * (e.g. authored by other contributors) are appended as pushed.
- * Order: unpushed first, then pushed.
+ * Merge local session commits and PR commits into a single list. A commit is
+ * pushed when EITHER source confirms it: the backend's `pushed` field
+ * (computed from the upstream tracking ref) or a SHA match in `prCommits` (PR
+ * existence implies the commit is on the remote). The git signal fixes the
+ * original bug — pushed commits showing as unpushed when no PR exists — while
+ * keeping the PR signal so a commit visible only via a PR (e.g. authored by
+ * another contributor, or a rebased SHA the local repo doesn't track yet)
+ * still renders as pushed. PR commits not represented locally are appended
+ * as pushed. Order: unpushed first, then pushed.
  */
 export function mergeCommits(
   localCommits: {
@@ -173,18 +176,18 @@ export function mergeCommits(
   const pushed: MergedCommit[] = [];
   const matchedPRShas = new Set<string>();
   for (const c of localCommits) {
-    // Trust the backend's pushed flag when present. Fall back to PR-SHA
-    // matching only for commits that came in without it (e.g. an old
-    // commit_created notification before a refetch).
-    const isPushed = c.pushed ?? prCommits.some((pr) => shaMatches(pr.sha, c.commit_sha));
+    const matchesPR = prCommits.some((pr) => shaMatches(pr.sha, c.commit_sha));
+    const isPushed = c.pushed === true || matchesPR;
     if (isPushed) {
       pushed.push({ ...c, pushed: true });
     } else {
       unpushed.push({ ...c, pushed: false });
     }
-    for (const pr of prCommits) {
-      if (shaMatches(pr.sha, c.commit_sha)) {
-        matchedPRShas.add(pr.sha);
+    if (matchesPR) {
+      for (const pr of prCommits) {
+        if (shaMatches(pr.sha, c.commit_sha)) {
+          matchedPRShas.add(pr.sha);
+        }
       }
     }
   }
