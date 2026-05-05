@@ -627,6 +627,11 @@ func (a *messageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, ses
 // renders them as a stacked group; only the last message sets RequestsInput=true
 // so the chat scrolls to the bottom of the group when the bundle arrives.
 // Returns the created message IDs in the same order as the input questions.
+//
+// If any individual CreateMessage call fails, every previously created message
+// in the bundle is deleted so we don't leave a half-rendered group dangling in
+// the chat. Best-effort: if cleanup itself fails the caller still receives the
+// original error and the orphan messages stay (logged at warn-level).
 func (a *messageCreatorAdapter) CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []clarification.Question, clarificationContext string) ([]string, error) {
 	ids := make([]string, 0, len(questions))
 	total := len(questions)
@@ -671,11 +676,26 @@ func (a *messageCreatorAdapter) CreateClarificationRequestMessages(ctx context.C
 			RequestsInput: requestsInput,
 		})
 		if err != nil {
-			return ids, err
+			a.rollbackPartialBundle(ctx, ids, pendingID)
+			return nil, err
 		}
 		ids = append(ids, msg.ID)
 	}
 	return ids, nil
+}
+
+// rollbackPartialBundle removes the messages already created when later writes
+// in a multi-question bundle fail. Best-effort — failures are logged but do
+// not bubble up because the caller already has a more useful error.
+func (a *messageCreatorAdapter) rollbackPartialBundle(ctx context.Context, ids []string, pendingID string) {
+	for _, id := range ids {
+		if err := a.svc.DeleteMessage(ctx, id); err != nil {
+			a.logger.Warn("failed to roll back partial clarification bundle message",
+				zap.String("pending_id", pendingID),
+				zap.String("message_id", id),
+				zap.Error(err))
+		}
+	}
 }
 
 // UpdateClarificationMessage updates a clarification message's status and answer

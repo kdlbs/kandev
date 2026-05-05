@@ -931,35 +931,11 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
-	if len(req.Questions) == 0 {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "questions must contain at least 1 question", nil)
-	}
-	if len(req.Questions) > 4 {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "questions must contain at most 4 questions", nil)
-	}
-
-	// Normalize question + option IDs in the same shape the HTTP handler does.
-	for i := range req.Questions {
-		if req.Questions[i].Prompt == "" {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
-				fmt.Sprintf("question %d is missing required 'prompt'", i+1), nil)
-		}
-		if req.Questions[i].ID == "" {
-			req.Questions[i].ID = fmt.Sprintf("q%d", i+1)
-		}
-		if len(req.Questions[i].Options) < 2 {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
-				fmt.Sprintf("question %d must have at least 2 options", i+1), nil)
-		}
-		if len(req.Questions[i].Options) > 6 {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
-				fmt.Sprintf("question %d must have at most 6 options", i+1), nil)
-		}
-		for j := range req.Questions[i].Options {
-			if req.Questions[i].Options[j].ID == "" {
-				req.Questions[i].Options[j].ID = generateOptionID(i, j)
-			}
-		}
+	// Single source of truth — same validator the HTTP handler uses, so
+	// duplicate IDs / bad option counts / empty prompts can't slip through
+	// either path.
+	if errMsg := clarification.NormalizeAndValidateQuestions(req.Questions); errMsg != "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, errMsg, nil)
 	}
 
 	// Look up task ID from session if not provided
@@ -1091,11 +1067,6 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 			eventData,
 		))
 	}
-}
-
-// generateOptionID generates an option ID for a question.
-func generateOptionID(questionIndex, optionIndex int) string {
-	return fmt.Sprintf("q%d_opt%d", questionIndex+1, optionIndex+1)
 }
 
 // handleCreateTaskPlan creates a new task plan.

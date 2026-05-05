@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClarificationAnswer, ClarificationRequestMetadata, Message } from "@/lib/types/http";
 import { getBackendConfig } from "@/lib/config";
 
-type SubmitState = "idle" | "submitting" | "ok" | "expired" | "error";
+type SubmitState = "idle" | "submitting" | "ok" | "error";
 
 export type ClarificationGroupApi = {
   pendingId: string | null;
@@ -48,7 +48,9 @@ async function postClarificationBatch(
     body: JSON.stringify({ answers, rejected: false }),
   });
   if (res.ok) return "ok";
-  if (res.status === 410) return "expired";
+  // The backend's respond endpoint always returns 200 (even when the agent
+  // already moved on — the canceller marks the messages expired and the
+  // event-fallback path is taken). Anything else is a real failure.
   console.error("Clarification submit failed:", res.status, res.statusText);
   return "error";
 }
@@ -61,7 +63,6 @@ async function postClarificationSkip(pendingId: string, reason: string): Promise
     body: JSON.stringify({ rejected: true, reject_reason: reason }),
   });
   if (res.ok) return "ok";
-  if (res.status === 410) return "expired";
   console.error("Clarification skip failed:", res.status, res.statusText);
   return "error";
 }

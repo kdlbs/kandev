@@ -75,15 +75,18 @@ export function ClarificationStepper({
 type OptionListProps = {
   options: ClarificationOption[];
   selectedOption: string | null;
-  customCommittedText: string | null;
   isSubmitting: boolean;
   onSelectOption: (optionId: string) => void;
 };
 
+// The agent receives both the selected option id and the custom text when
+// both are present, so we never visually grey out one when the other is
+// active — that previously created an asymmetric dimming bug where typing
+// a custom answer dimmed the options but selecting an option did not dim
+// the custom input.
 export function ClarificationOptions({
   options,
   selectedOption,
-  customCommittedText,
   isSubmitting,
   onSelectOption,
 }: OptionListProps) {
@@ -91,7 +94,6 @@ export function ClarificationOptions({
     <div className="space-y-1.5">
       {options.map((option, idx) => {
         const isSelected = selectedOption === option.option_id;
-        const dimmed = customCommittedText !== null && !isSelected;
         return (
           <button
             key={option.option_id}
@@ -106,7 +108,6 @@ export function ClarificationOptions({
                 ? "bg-blue-500/15 border-blue-500/50 text-foreground"
                 : "border-border hover:bg-muted/40 hover:border-border/80 text-foreground/90",
               isSubmitting ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
-              dimmed ? "opacity-60" : "",
             )}
           >
             <kbd

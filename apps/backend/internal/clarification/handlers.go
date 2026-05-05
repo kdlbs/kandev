@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -111,7 +112,7 @@ func (h *Handlers) httpCreateRequest(c *gin.Context) {
 		return
 	}
 
-	if errMsg := validateAndNormalizeQuestions(body.Questions); errMsg != "" {
+	if errMsg := NormalizeAndValidateQuestions(body.Questions); errMsg != "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": errMsg})
 		return
 	}
@@ -163,10 +164,18 @@ func (h *Handlers) httpCreateRequest(c *gin.Context) {
 	c.JSON(http.StatusOK, CreateRequestResponse{PendingID: pendingID})
 }
 
-// validateAndNormalizeQuestions assigns missing IDs (q1, q2, ...) and option IDs,
-// and validates per-question option counts. Returns an empty string on success
-// or an error message describing the first validation failure.
-func validateAndNormalizeQuestions(questions []Question) string {
+// NormalizeAndValidateQuestions is the single source of truth for clarification
+// bundle validation. It mutates `questions` to assign missing IDs (q1, q2, ...)
+// and option IDs, and enforces:
+//   - 1..4 questions per bundle
+//   - unique question IDs (rejects duplicates)
+//   - non-empty prompt
+//   - 2..6 options per question
+//
+// Both the HTTP handler (httpCreateRequest) and the WebSocket-side MCP handler
+// (handleAskUserQuestion) call this so validation never drifts between paths.
+// Returns "" on success or an error message describing the first failure.
+func NormalizeAndValidateQuestions(questions []Question) string {
 	if len(questions) == 0 {
 		return "questions must contain at least 1 question"
 	}
@@ -243,16 +252,14 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 		return
 	}
 
-	// Gate: when not rejecting, the user must have answered every question.
-	// We compare against the in-store request first; if the entry is gone (agent
-	// already moved on), fall back to inspecting the persisted messages so we
-	// still validate the response cardinality.
+	// Gate: when not rejecting, the user must have answered every question and
+	// each answer must reference a question id from the original bundle (no
+	// duplicates, no fabricated ids). We compare against the in-store request
+	// first; if the entry is gone (agent already moved on), fall back to the
+	// persisted messages so we still validate even after the in-memory cleanup.
 	if !body.Rejected {
-		expected, ok := h.expectedAnswerCount(c.Request.Context(), pendingID)
-		if ok && len(body.Answers) != expected {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": fmt.Sprintf("expected %d answers, got %d", expected, len(body.Answers)),
-			})
+		if errMsg := h.validateRespondAnswers(c.Request.Context(), pendingID, body.Answers); errMsg != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": errMsg})
 			return
 		}
 	}
@@ -315,23 +322,72 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// expectedAnswerCount reports how many answers the user is expected to submit
-// for the bundle identified by pendingID. The store is consulted first; if the
-// in-memory entry has already been cleaned up, the persisted messages serve as
-// fallback. Returns ok=false when the count cannot be determined (in which case
-// callers should not enforce the gate).
-func (h *Handlers) expectedAnswerCount(ctx context.Context, pendingID string) (int, bool) {
+// validateRespondAnswers enforces the all-required gate **and** the question-id
+// invariant: every answer must target a real question in the bundle, every
+// question must have an answer, and no question id may be answered twice.
+// Returns "" on success or an error message describing the first failure.
+//
+// The expected question ids come from the in-store request; if the in-memory
+// entry has already been cleaned up (agent timed out before user responded),
+// the persisted messages serve as fallback so the late-respond path is
+// validated the same way as the primary path.
+func (h *Handlers) validateRespondAnswers(ctx context.Context, pendingID string, answers []Answer) string {
+	expected := h.expectedQuestionIDs(ctx, pendingID)
+	if len(expected) == 0 {
+		// Couldn't determine the expected set — fall back to permissive (the
+		// primary-path Respond will still error sensibly if the bundle is gone).
+		return ""
+	}
+	expectedSet := make(map[string]bool, len(expected))
+	for _, id := range expected {
+		expectedSet[id] = true
+	}
+
+	if len(answers) != len(expected) {
+		return fmt.Sprintf("expected %d answers, got %d", len(expected), len(answers))
+	}
+
+	seen := make(map[string]bool, len(answers))
+	for i, a := range answers {
+		if a.QuestionID == "" {
+			return fmt.Sprintf("answer %d is missing question_id", i+1)
+		}
+		if !expectedSet[a.QuestionID] {
+			return fmt.Sprintf("answer %d references unknown question id %q", i+1, a.QuestionID)
+		}
+		if seen[a.QuestionID] {
+			return fmt.Sprintf("answer %d duplicates question id %q", i+1, a.QuestionID)
+		}
+		seen[a.QuestionID] = true
+	}
+	return ""
+}
+
+// expectedQuestionIDs returns the ordered question ids the user is expected to
+// answer for the given pending bundle. Falls back to the persisted messages if
+// the in-store request has been cleaned up.
+func (h *Handlers) expectedQuestionIDs(ctx context.Context, pendingID string) []string {
 	if req, ok := h.store.GetRequest(pendingID); ok && req != nil {
-		return len(req.Questions), true
+		ids := make([]string, 0, len(req.Questions))
+		for _, q := range req.Questions {
+			ids = append(ids, q.ID)
+		}
+		return ids
 	}
 	if h.repo == nil {
-		return 0, false
+		return nil
 	}
 	msgs, err := h.repo.FindMessagesByPendingID(ctx, pendingID)
 	if err != nil || len(msgs) == 0 {
-		return 0, false
+		return nil
 	}
-	return len(msgs), true
+	ids := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		if id := stringFromMetadata(m.Metadata, metaQuestionIDKey); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // applyAnswersToMessages flips per-question status (answered/rejected) on every
@@ -544,14 +600,36 @@ func (h *Handlers) resolveClarificationEventContext(ctx context.Context, pending
 }
 
 // questionsFromMessages reconstructs a Question slice from persisted clarification
-// messages. Used as a fallback when the in-store request has been cleaned up but
-// the persisted metadata still carries the original question text.
+// messages, ordered by metadata.question_index so the rebuilt summary matches
+// the bundle the agent originally sent. Used as a fallback when the in-store
+// request has been cleaned up but the persisted metadata still carries the
+// original question text.
 func questionsFromMessages(msgs []*taskmodels.Message) []Question {
-	out := make([]Question, 0, len(msgs))
-	for _, m := range msgs {
+	sorted := make([]*taskmodels.Message, len(msgs))
+	copy(sorted, msgs)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return questionIndexFromMetadata(sorted[i].Metadata) < questionIndexFromMetadata(sorted[j].Metadata)
+	})
+	out := make([]Question, 0, len(sorted))
+	for _, m := range sorted {
 		out = append(out, questionFromMessageMetadata(m.Metadata))
 	}
 	return out
+}
+
+func questionIndexFromMetadata(meta map[string]any) int {
+	if meta == nil {
+		return 0
+	}
+	switch v := meta["question_index"].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	}
+	return 0
 }
 
 func questionFromMessageMetadata(meta map[string]any) Question {

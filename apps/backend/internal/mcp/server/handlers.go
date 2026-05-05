@@ -426,15 +426,20 @@ func validateAndNormalizeOptions(options []map[string]interface{}, questionNum i
 }
 
 // extractQuestionAnswers converts the backend response into a JSON tool result
-// keyed by question id. Returns a friendly free-form string when the bundle was
-// rejected.
+// keyed by question id. The shape is consistent across happy / rejected paths
+// so the agent can always parse the response as a JSON object — rejected
+// bundles emit an envelope { "rejected": true, "reject_reason": "..." } as
+// well as per-question stub entries.
 func extractQuestionAnswers(result map[string]interface{}, questions []map[string]interface{}) *mcp.CallToolResult {
-	if rejected, ok := result["rejected"].(bool); ok && rejected {
-		reason, _ := result["reject_reason"].(string)
-		if reason == "" {
-			reason = "no reason provided"
+	rejected, _ := result["rejected"].(bool)
+	rejectReason, _ := result["reject_reason"].(string)
+
+	out := make(map[string]interface{}, len(questions)+2)
+	if rejected {
+		out["rejected"] = true
+		if rejectReason != "" {
+			out["reject_reason"] = rejectReason
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("User rejected the questions: %s", reason))
 	}
 
 	answers, _ := result["answers"].([]interface{})
@@ -448,10 +453,9 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 		if qid == "" {
 			continue
 		}
-		answersByID[qid] = simplifyAnswer(ans)
+		answersByID[qid] = simplifyAnswer(ans, rejected)
 	}
 
-	out := make(map[string]interface{}, len(questions))
 	for _, q := range questions {
 		qid, _ := q[idArg].(string)
 		if qid == "" {
@@ -474,23 +478,34 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 	return mcp.NewToolResultText(string(data))
 }
 
-// simplifyAnswer normalizes the answer map into one of:
+// simplifyAnswer normalizes the answer map. Single-choice per question, but
+// the user can also type a custom text alongside an option pick — we preserve
+// both fields so the agent gets the full context. When the bundle was
+// rejected we annotate the entry to make the partial-answer scenario explicit.
 //
-//	{"selected_option": "<id>"}   when the user picked an option
-//	{"custom_text": "<text>"}     when the user typed a free-form answer
-//	{"answered": false}            otherwise (defensive fallback)
+// Output shape (one or more keys may be set):
 //
-// Single-select per question, so we collapse the slice to a single id.
-func simplifyAnswer(ans map[string]interface{}) map[string]interface{} {
-	if customText, ok := ans["custom_text"].(string); ok && customText != "" {
-		return map[string]interface{}{"custom_text": customText}
-	}
+//	{"selected_option": "<id>"}
+//	{"custom_text": "<text>"}
+//	{"selected_option": "<id>", "custom_text": "<text>"}
+//	{"answered": false}
+func simplifyAnswer(ans map[string]interface{}, rejected bool) map[string]interface{} {
+	out := map[string]interface{}{}
 	if selected, ok := ans["selected_options"].([]interface{}); ok && len(selected) > 0 {
 		if first, ok := selected[0].(string); ok && first != "" {
-			return map[string]interface{}{"selected_option": first}
+			out["selected_option"] = first
 		}
 	}
-	return map[string]interface{}{"answered": false}
+	if customText, ok := ans["custom_text"].(string); ok && customText != "" {
+		out["custom_text"] = customText
+	}
+	if rejected && len(out) == 0 {
+		return map[string]interface{}{"answered": false, "rejected": true}
+	}
+	if len(out) == 0 {
+		return map[string]interface{}{"answered": false}
+	}
+	return out
 }
 
 // notifyClarificationTimeout sends a fire-and-forget notification to the backend

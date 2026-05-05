@@ -523,13 +523,27 @@ Example usage:
   "context": "Backend redesign — picking the persistence layer and migration policy together."
 }
 
-The response is a JSON object keyed by each question id, e.g.:
+The response is a JSON object keyed by each question id. Each entry may include
+"selected_option" (the option_id the user picked), "custom_text" (the user's
+free-form answer; can co-exist with a selected option), or "answered": false
+when the user did not respond to that question. When the user skipped the entire
+bundle, the envelope also carries "rejected": true and an optional
+"reject_reason". Example success response:
 {
-  "db": {"selected_options": ["PostgreSQL"]},
+  "db": {"selected_option": "q1_opt1"},
   "migration": {"custom_text": "Migrate all but flag rows older than 2 years"}
+}
+Example rejection:
+{
+  "rejected": true,
+  "reject_reason": "User skipped",
+  "db": {"answered": false, "rejected": true},
+  "migration": {"answered": false, "rejected": true}
 }`),
 			mcp.WithArray(questionsArg, mcp.Required(),
 				mcp.Description(`Array of 1-4 question objects. Each question must have a "prompt" (the question text) and an "options" array (2-6 entries with label + description). Optional fields: "id" (stable identifier in the response map; auto-generated if omitted), "title" (≤12 chars short label).`),
+				mcp.MinItems(1),
+				mcp.MaxItems(4),
 				mcp.Items(buildQuestionSchemaItem()),
 			),
 			mcp.WithString("context", mcp.Description("Optional shared background information to help the user understand why you're asking these questions.")),
@@ -597,6 +611,8 @@ func buildQuestionSchemaItem() map[string]any {
 			optionsArg: map[string]any{
 				typeKey:        "array",
 				descriptionArg: "2-6 concrete, actionable choices.",
+				"minItems":     2,
+				"maxItems":     6,
 				"items": map[string]any{
 					typeKey: objType,
 					propsKey: map[string]any{

@@ -42,9 +42,12 @@ function readSingleQuestionMeta(message: Message | null | undefined): SingleQues
   return { message, metadata, question: metadata.question, questionId };
 }
 
-function resolveQuestionMessages(props: ClarificationInputOverlayProps): Message[] {
-  if (props.messages && props.messages.length > 0) return [...props.messages];
-  if (props.message) return [props.message];
+function resolveQuestionMessages(args: {
+  message?: Message | null;
+  messages?: readonly Message[] | null;
+}): Message[] {
+  if (args.messages && args.messages.length > 0) return [...args.messages];
+  if (args.message) return [args.message];
   return [];
 }
 
@@ -114,7 +117,6 @@ function ClarificationCard(props: CardProps) {
       <ClarificationOptions
         options={question.options}
         selectedOption={selectedOption}
-        customCommittedText={customCommittedText}
         isSubmitting={isSubmitting}
         onSelectOption={onSelectOption}
       />
@@ -144,7 +146,7 @@ function useResolveCallback(
 ) {
   const last = useRef(submitState);
   useEffect(() => {
-    if (last.current !== submitState && (submitState === "ok" || submitState === "expired")) {
+    if (last.current !== submitState && submitState === "ok") {
       onResolved();
     }
     last.current = submitState;
@@ -322,10 +324,12 @@ function ClarificationCarouselBody({
 }
 
 export function ClarificationInputOverlay(props: ClarificationInputOverlayProps) {
-  const { onResolved } = props;
+  const { onResolved, message, messages } = props;
+  // Depend on the actual array refs (not the surrounding props object) so
+  // the memo isn't invalidated on every parent render.
   const sortedMessages = useMemo(
-    () => sortMessagesByQuestionIndex(resolveQuestionMessages(props)),
-    [props],
+    () => sortMessagesByQuestionIndex(resolveQuestionMessages({ message, messages })),
+    [message, messages],
   );
   const group = useClarificationGroup(sortedMessages);
   const [customDrafts, setCustomDrafts] = useState<Record<string, string>>({});

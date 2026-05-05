@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,6 +149,52 @@ func TestHttpRespond_AnsweredAfterTimeout_PublishesEvent(t *testing.T) {
 	}
 }
 
+// TestHttpRespond_DuplicateQuestionID_Rejected400 covers the dedupe gate:
+// a payload that names the same question id twice should be rejected even
+// when the cardinality matches the bundle size, otherwise the agent could
+// receive a phantom answer for the question that was actually skipped.
+func TestHttpRespond_DuplicateQuestionID_Rejected400(t *testing.T) {
+	h, _, _, _ := setupTestHandler(t, map[string][]*taskmodels.Message{})
+	pendingID := h.store.CreateRequest(&Request{
+		SessionID: "s1",
+		TaskID:    "t1",
+		Questions: []Question{
+			{ID: "q1", Prompt: "First?"},
+			{ID: "q2", Prompt: "Second?"},
+		},
+	})
+	body := RespondBody{
+		Answers: []Answer{
+			{QuestionID: "q1", SelectedOptions: []string{"opt1"}},
+			{QuestionID: "q1", SelectedOptions: []string{"opt2"}},
+		},
+	}
+	rec := runRespond(t, h, pendingID, body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for duplicate question_id, got %d (body=%s)", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHttpRespond_UnknownQuestionID_Rejected400 ensures that fabricated ids
+// are rejected even with the right cardinality.
+func TestHttpRespond_UnknownQuestionID_Rejected400(t *testing.T) {
+	h, _, _, _ := setupTestHandler(t, map[string][]*taskmodels.Message{})
+	pendingID := h.store.CreateRequest(&Request{
+		SessionID: "s1",
+		TaskID:    "t1",
+		Questions: []Question{
+			{ID: "q1", Prompt: "First?"},
+		},
+	})
+	body := RespondBody{
+		Answers: []Answer{{QuestionID: "qZZZ", SelectedOptions: []string{"opt1"}}},
+	}
+	rec := runRespond(t, h, pendingID, body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown question_id, got %d (body=%s)", rec.Code, rec.Body.String())
+	}
+}
+
 // TestHttpRespond_PartialAnswers_Rejected400 confirms that the handler
 // refuses a respond payload that does not contain one answer per question
 // in the original bundle. All-required gating is enforced here.
@@ -226,7 +273,7 @@ func TestValidateAndNormalizeQuestions_AssignsDefaults(t *testing.T) {
 		{Prompt: "First?", Options: []Option{{Label: "A", Description: "a"}, {Label: "B", Description: "b"}}},
 		{Prompt: "Second?", Options: []Option{{Label: "X", Description: "x"}, {Label: "Y", Description: "y"}}},
 	}
-	if err := validateAndNormalizeQuestions(qs); err != "" {
+	if err := NormalizeAndValidateQuestions(qs); err != "" {
 		t.Fatalf("unexpected validation error: %s", err)
 	}
 	if qs[0].ID != "q1" || qs[1].ID != "q2" {
@@ -256,7 +303,7 @@ func TestValidateAndNormalizeQuestions_RejectsInvalid(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if msg := validateAndNormalizeQuestions(tc.input); msg == "" {
+			if msg := NormalizeAndValidateQuestions(tc.input); msg == "" {
 				t.Fatalf("expected validation error, got nil for %+v", tc.input)
 			}
 		})
@@ -290,18 +337,9 @@ func TestBuildAnswerSummary_MultiQuestion(t *testing.T) {
 		},
 		false, "",
 	)
-	if got == "" || !contains(got, "A1:") || !contains(got, "A2:") {
+	if got == "" || !strings.Contains(got, "A1:") || !strings.Contains(got, "A2:") {
 		t.Errorf("expected multi-line summary with A1/A2, got %q", got)
 	}
-}
-
-func contains(haystack, needle string) bool {
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return true
-		}
-	}
-	return false
 }
 
 func runRespond(t *testing.T, h *Handlers, pendingID string, body RespondBody) *httptest.ResponseRecorder {
