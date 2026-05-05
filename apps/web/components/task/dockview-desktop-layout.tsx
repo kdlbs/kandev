@@ -42,6 +42,7 @@ import { ChangesTab } from "./changes-tab";
 import { PlanTab } from "./plan-tab";
 import { PreviewFileTab, PreviewDiffTab, PreviewCommitTab, PinnedDefaultTab } from "./preview-tab";
 import { SessionTab } from "./session-tab";
+import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import {
   setupSessionTabSync,
   setupChatPanelSafetyNet,
@@ -152,7 +153,15 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
 
 // --- TAB COMPONENTS ---
 function PermanentTab(props: IDockviewPanelHeaderProps) {
-  return <DockviewDefaultTab {...props} hideClose />;
+  const onDoubleClick = useTabMaximizeOnDoubleClick(props.api);
+  return (
+    <div
+      className="flex h-full items-center cursor-pointer select-none"
+      onDoubleClick={onDoubleClick}
+    >
+      <DockviewDefaultTab {...props} hideClose />
+    </div>
+  );
 }
 
 /** Sync the user's default saved layout from settings into the dockview store. */
