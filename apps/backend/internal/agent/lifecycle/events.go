@@ -80,13 +80,14 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 	}
 
 	payload := AgentctlEventPayload{
-		TaskID:           execution.TaskID,
-		SessionID:        execution.SessionID,
-		AgentExecutionID: execution.ID,
-		ErrorMessage:     errMsg,
-		WorktreeID:       worktreeID,
-		WorktreePath:     execution.WorkspacePath,
-		WorktreeBranch:   worktreeBranch,
+		TaskID:            execution.TaskID,
+		SessionID:         execution.SessionID,
+		TaskEnvironmentID: execution.TaskEnvironmentID,
+		AgentExecutionID:  execution.ID,
+		ErrorMessage:      errMsg,
+		WorktreeID:        worktreeID,
+		WorktreePath:      execution.WorkspacePath,
+		WorktreeBranch:    worktreeBranch,
 	}
 
 	event := bus.NewEvent(eventType, "agent-manager", payload)

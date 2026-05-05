@@ -266,8 +266,8 @@ func (a *lifecycleAdapter) GetSessionAuthMethods(sessionID string) []streams.Aut
 
 // PromptAgent sends a follow-up prompt to a running agent
 // Attachments (images) are passed to the agent if provided
-func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID string, prompt string, attachments []v1.MessageAttachment) (*executor.PromptResult, error) {
-	result, err := a.mgr.PromptAgent(ctx, agentInstanceID, prompt, attachments)
+func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*executor.PromptResult, error) {
+	result, err := a.mgr.PromptAgent(ctx, agentInstanceID, prompt, attachments, dispatchOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -406,7 +406,10 @@ func (a *lifecycleAdapter) GetCumulativeDiff(ctx context.Context, sessionID, bas
 	if agentClient == nil {
 		return nil, nil
 	}
-	return agentClient.GetCumulativeDiff(ctx, baseCommit)
+	// Orchestrator-side cumulative diffs (snapshot tracking) anchor to the
+	// caller-provided base SHA — no dynamic merge-base recomputation. The
+	// live panel uses the WS-handler path, which passes targetBranch.
+	return agentClient.GetCumulativeDiff(ctx, baseCommit, "")
 }
 
 // GetGitStatus retrieves the current git status for a session.
@@ -435,8 +438,8 @@ type orchestratorWrapper struct {
 
 // PromptTask forwards directly to the orchestrator service.
 // Attachments (images) are passed through to the agent.
-func (w *orchestratorWrapper) PromptTask(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
-	return w.svc.PromptTask(ctx, taskID, taskSessionID, prompt, model, planMode, attachments)
+func (w *orchestratorWrapper) PromptTask(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error) {
+	return w.svc.PromptTask(ctx, taskID, taskSessionID, prompt, model, planMode, attachments, dispatchOnly)
 }
 
 // ResumeTaskSession forwards to the orchestrator service, discarding the TaskExecution result.

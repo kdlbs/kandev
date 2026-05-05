@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 // SecretStore is the subset of the secrets store the service needs.
@@ -30,6 +31,7 @@ type Service struct {
 	clientFn  ClientFactory
 	client    Client // singleton, cleared on config change.
 	probeHook func()
+	eventBus  bus.EventBus
 	// mockClient is non-nil only when Provide built the service with a MockClient
 	// (KANDEV_MOCK_LINEAR=true). Exposed via MockClient() so the e2e control
 	// routes can drive the same instance the clientFn returns.

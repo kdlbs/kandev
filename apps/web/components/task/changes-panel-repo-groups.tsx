@@ -106,7 +106,51 @@ export function RepoGroupItem({
   );
 }
 
-function CommitsGroupActions({
+// Inline action buttons rendered in the file-list section header for single-repo
+// workspaces. Mirrors the per-repo buttons that RepoGroupItem renders for
+// multi-repo. Handlers receive an empty repo string which routes to the
+// workspace root in single-repo mode.
+export function FileSectionActions({
+  primaryLabel,
+  secondaryLabel,
+  onAction,
+  onSecondaryAction,
+}: {
+  primaryLabel: string;
+  secondaryLabel?: string;
+  onAction?: (repo: string) => void;
+  onSecondaryAction?: (repo: string) => void;
+}) {
+  if (!onAction && !onSecondaryAction) return null;
+  return (
+    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+      {onAction && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-5 text-[10px] px-1.5 cursor-pointer"
+          data-testid="repo-group-action"
+          onClick={() => onAction("")}
+        >
+          {primaryLabel}
+        </Button>
+      )}
+      {onSecondaryAction && secondaryLabel && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-5 text-[10px] px-1.5 cursor-pointer text-muted-foreground"
+          data-testid="repo-group-secondary-action"
+          onClick={() => onSecondaryAction("")}
+        >
+          {secondaryLabel}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+export function CommitsGroupActions({
   repositoryName,
   unpushedCount,
   aheadCount,
@@ -172,6 +216,7 @@ export function CommitsRepoGroup({
   groupCommits,
   aheadCount = 0,
   existingPrUrl,
+  showHeader = true,
   onOpenCommitDetail,
   onAmendCommit,
   onRevertCommit,
@@ -184,6 +229,10 @@ export function CommitsRepoGroup({
   groupCommits: CommitItem[];
   aheadCount?: number;
   existingPrUrl?: string;
+  /** When false, render commits flat without the per-repo header. Single-repo
+   *  workspaces use this — the action buttons (Push / PR) move up to the
+   *  section header so we don't render a redundant repo sub-header. */
+  showHeader?: boolean;
   onOpenCommitDetail?: (sha: string, repo?: string) => void;
   onAmendCommit?: (currentMessage: string, repo?: string) => void;
   onRevertCommit?: (sha: string, repo?: string) => void;
@@ -212,6 +261,20 @@ export function CommitsRepoGroup({
   // The PR scope today is workspace-wide (one PR per task). Disable per-repo
   // Create PR once a PR exists; the user can update it via push instead.
   const canCreatePR = !!onRepoCreatePR && !prExists;
+  const rows = groupCommits.map((commit, index) => (
+    <CommitRow
+      key={commit.commit_sha}
+      commit={commit}
+      isLatest={index === firstUnpushedInGroup}
+      onOpenCommitDetail={onOpenCommitDetail}
+      onAmendCommit={commit.pushed ? undefined : onAmendCommit}
+      onRevertCommit={commit.pushed ? undefined : onRevertCommit}
+      onResetToCommit={commit.pushed ? undefined : onResetToCommit}
+    />
+  ));
+  if (!showHeader) {
+    return <>{rows}</>;
+  }
   return (
     <li data-testid="commits-repo-group" data-repository-name={repositoryName || ""}>
       <div className="flex items-center justify-between gap-2 px-1 py-0.5">
@@ -243,21 +306,7 @@ export function CommitsRepoGroup({
           stop={stop}
         />
       </div>
-      {!collapsed && (
-        <ul className="space-y-0.5">
-          {groupCommits.map((commit, index) => (
-            <CommitRow
-              key={commit.commit_sha}
-              commit={commit}
-              isLatest={index === firstUnpushedInGroup}
-              onOpenCommitDetail={onOpenCommitDetail}
-              onAmendCommit={commit.pushed ? undefined : onAmendCommit}
-              onRevertCommit={commit.pushed ? undefined : onRevertCommit}
-              onResetToCommit={commit.pushed ? undefined : onResetToCommit}
-            />
-          ))}
-        </ul>
-      )}
+      {!collapsed && <ul className="space-y-0.5">{rows}</ul>}
     </li>
   );
 }

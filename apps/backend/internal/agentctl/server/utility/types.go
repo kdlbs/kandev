@@ -24,6 +24,32 @@ type PromptRequest struct {
 
 	// MaxTokens is the maximum tokens for the response (default: 1024).
 	MaxTokens int `json:"max_tokens,omitempty"`
+
+	// MCPServers are the MCP servers to expose to the agent for the duration
+	// of this single inference call. Forwarded to ACP `session/new` so the
+	// agent can call tools mid-prompt. Empty (the common case) keeps the
+	// existing "pure inference, no tools" behaviour for utility-agent
+	// callers that only need text-in/text-out (PR title generation, commit
+	// messages, etc.).
+	MCPServers []MCPServerDTO `json:"mcp_servers,omitempty"`
+}
+
+// MCPServerDTO describes a single MCP server endpoint to wire into the
+// agent's session. Mirrors the ACP McpServer shape but kept JSON-flat so it
+// crosses the agentctl HTTP boundary cleanly. Today we use HTTP transport
+// only (Type="http"); stdio/sse can be added when a caller needs them.
+type MCPServerDTO struct {
+	Name string `json:"name"`
+	Type string `json:"type"`          // "http" | "sse" | "stdio"
+	URL  string `json:"url,omitempty"` // for http/sse
+	// HeaderKVs is an optional set of HTTP headers (key, value pairs).
+	HeaderKVs []HTTPHeaderDTO `json:"headers,omitempty"`
+}
+
+// HTTPHeaderDTO is a single HTTP header for HTTP/SSE-transport MCP servers.
+type HTTPHeaderDTO struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // ProbeRequest is the request for probing an agent's capabilities.

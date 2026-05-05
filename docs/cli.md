@@ -4,17 +4,23 @@
 
 ```mermaid
 flowchart TB
-    subgraph CLI["npx kandev"]
+    subgraph CLI["kandev"]
         run["run"]
         dev["dev"]
         start["start"]
     end
 
-    run --> gh["GitHub Release"]
+    run --> resolve["Resolve installed runtime"]
     dev --> makedev["make dev"]
-    start --> binary["Binary + next start"]
+    start --> binary["Local binary + next start"]
 
-    gh --> supervisor
+    resolve --> envvar["KANDEV_BUNDLE_DIR<br/>(Homebrew, tests)"]
+    resolve --> npmpkg["@kdlbs/runtime-{platform}<br/>(npm/npx)"]
+    resolve --> cache["~/.kandev/bin cache<br/>(--runtime-version only)"]
+
+    envvar --> supervisor
+    npmpkg --> supervisor
+    cache --> supervisor
     makedev --> supervisor
     binary --> supervisor
 
@@ -28,51 +34,66 @@ flowchart TB
 
 ## Overview
 
-The Kandev CLI (`kandev`) is the primary way to run the Kandev application. It handles downloading release bundles, managing processes, and providing a unified interface for both end users and developers.
+The Kandev CLI (`kandev`) is the primary way to run the Kandev application. It launches the backend and web processes from an installed runtime bundle and provides a unified interface for end users and developers.
 
 ## Installation
 
-No installation required. Use npx:
+### Homebrew (macOS, Linux)
 
 ```bash
-npx kandev
+brew install kdlbs/kandev/kandev
 ```
 
-Or install globally:
+### NPX (requires npm 7+)
 
 ```bash
-npm install -g kandev
+npx kandev@latest
+```
+
+`npx` installs the `kandev` CLI plus the matching `@kdlbs/runtime-{platform}` package via npm optional dependencies. Older npm versions silently skip optional deps and won't work — npm 7 is the floor.
+
+### NPM (global)
+
+```bash
+npm install -g kandev@latest
 ```
 
 ## Quick Start
 
 ```bash
-# Run the latest release (recommended for users)
-npx kandev
+# Run the installed runtime
+kandev
 
-# Opens the app at http://localhost:37429 (or next available port)
+# Opens the app at http://localhost:38429 (or next available port)
+```
+
+## Updates
+
+The package manager controls the runtime version:
+
+```bash
+brew upgrade kandev                  # Homebrew users
+npm install -g kandev@latest         # global npm users
+npx kandev@latest                    # npx users (always latest)
 ```
 
 ## Commands
 
 ### `kandev` / `kandev run`
 
-Downloads and runs the latest release bundle from GitHub. This is the default command and recommended for end users.
+Runs the installed runtime bundle. This is the default command.
 
 ```bash
-npx kandev
-npx kandev run
-npx kandev run --version v0.1.0
+kandev
+kandev run
 ```
 
 **What happens:**
-1. Checks for CLI updates (prompts if newer version available)
-2. Downloads the platform-specific release bundle from GitHub
-3. Extracts to `~/.kandev/bin/<version>/<platform>/`
-4. Starts the backend server
-5. Waits for backend health check
-6. Starts the web app
-7. Prints URLs when ready
+1. Resolves the runtime bundle (KANDEV_BUNDLE_DIR → npm package → cache).
+2. Starts the backend server.
+3. Waits for backend health check.
+4. Starts the web app.
+5. Opens browser when ready.
 
 ### `kandev dev`
 
@@ -80,53 +101,49 @@ Runs the application in development mode with hot-reloading. Requires a local re
 
 ```bash
 # From the repo root or any subdirectory
-npx kandev dev
+kandev dev
 ```
 
 **What happens:**
-1. Locates the repo root (looks for `apps/backend` and `apps/web`)
-2. Runs `make dev` for the backend (Go with hot-reload)
-3. Runs `pnpm dev` for the web app (Next.js dev server)
-4. Both processes run with hot-reloading enabled
+1. Locates the repo root (looks for `apps/backend` and `apps/web`).
+2. Runs `make dev` for the backend (Go with hot-reload).
+3. Runs `pnpm dev` for the web app (Next.js dev server).
 
 ### `kandev start`
 
 Runs the application using local production builds. Requires running `make build` first.
 
 ```bash
-# Build first
 make build
-
-# Then start
-npx kandev start
+kandev start
 ```
-
-**What happens:**
-1. Locates the repo root
-2. Runs the compiled backend binary (`apps/backend/bin/kandev`)
-3. Runs `pnpm start` for the web app (Next.js production server)
-4. Both run in production mode without hot-reloading
 
 ## Options
 
 | Option | Description | Example |
 |--------|-------------|---------|
-| `--version <tag>` | Use a specific release version | `--version v0.1.0` |
-| `--backend-port <port>` | Override backend port | `--backend-port 18080` |
-| `--web-port <port>` | Override web port | `--web-port 13000` |
+| `--version`, `-V` | Print CLI version and exit | `kandev --version` |
+| `--port <port>` | Backend port (alias: `--backend-port`) | `--port 3000` |
+| `--web-internal-port <port>` | Override internal Next.js port | `--web-internal-port 13000` |
+| `--verbose`, `-v` | Show info logs from backend + web | `--verbose` |
+| `--debug` | Show debug logs + agent message dumps | `--debug` |
 | `--help`, `-h` | Show help | `--help` |
+| `--runtime-version <tag>` | **Advanced/debug only**: download a specific runtime tag from GitHub releases instead of using the installed runtime | `--runtime-version v0.16.0` |
 
 ### Examples
 
 ```bash
-# Use specific release
-npx kandev --version v0.1.0
+# Print CLI version
+kandev --version
 
 # Custom ports
-npx kandev --backend-port 18080 --web-port 13000
+kandev --port 18080 --web-internal-port 13000
 
-# Dev mode with custom ports
-npx kandev dev --backend-port 18080 --web-port 13000
+# Dev mode
+kandev dev --port 18080
+
+# Force a specific runtime version (debug)
+kandev --runtime-version v0.16.0
 ```
 
 ## Port Selection
@@ -135,10 +152,9 @@ By default, the CLI automatically finds available ports:
 
 | Service | Default Port | Fallback |
 |---------|--------------|----------|
-| Backend | 38429 | Auto-selects from 10000-60000 |
-| Web | 37429 | Auto-selects from 10000-60000 |
-| AgentCtl | 39429 | Auto-selects from 10000-60000 |
-| MCP Server | 40429 | Auto-selects from 10000-60000 |
+| Backend | 38429 | Auto-selects from 10000–60000 |
+| Web | 37429 | Auto-selects from 10000–60000 |
+| AgentCtl | 39429 | Auto-selects from 10000–60000 |
 
 If the default port is in use, the CLI finds the next available port automatically.
 
@@ -146,25 +162,21 @@ If the default port is in use, the CLI finds the next available port automatical
 
 | Variable | Description |
 |----------|-------------|
-| `KANDEV_GITHUB_OWNER` | Override GitHub repo owner for releases |
-| `KANDEV_GITHUB_REPO` | Override GitHub repo name for releases |
-| `KANDEV_GITHUB_TOKEN` | GitHub token for API rate limits |
-| `KANDEV_NO_UPDATE_PROMPT=1` | Disable CLI update prompts |
+| `KANDEV_BUNDLE_DIR` | Force the runtime bundle location (set by Homebrew wrapper) |
+| `KANDEV_PORT` / `KANDEV_BACKEND_PORT` | Backend port (CLI flag wins) |
+| `KANDEV_WEB_PORT` | Internal Next.js port |
 | `KANDEV_HEALTH_TIMEOUT_MS` | Override health check timeout (ms) |
+| `KANDEV_GITHUB_OWNER` / `KANDEV_GITHUB_REPO` | Override GitHub repo for `--runtime-version` downloads |
+| `KANDEV_GITHUB_TOKEN` | GitHub token for `--runtime-version` API access |
 
 ## Makefile Integration
 
 The repo includes a Makefile that wraps the CLI for common operations:
 
 ```bash
-# Install deps, build, and start in production mode
-make start
-
-# Run in development mode
-make dev
-
-# Build everything
-make build
+make start    # Production mode (after make build)
+make dev      # Development mode
+make build    # Build everything
 ```
 
 See `make help` for all available commands.
@@ -173,7 +185,7 @@ See `make help` for all available commands.
 
 | Feature | `run` | `dev` | `start` |
 |---------|-------|-------|---------|
-| Source | GitHub releases | Local repo | Local build |
+| Source | Installed runtime | Local repo | Local build |
 | Hot-reload | No | Yes | No |
 | Requires repo | No | Yes | Yes |
 | Requires build | No | No | Yes |
@@ -181,12 +193,25 @@ See `make help` for all available commands.
 
 ## Troubleshooting
 
+### "No Kandev runtime found for {platform}"
+
+The CLI couldn't find an installed runtime. Install one:
+
+```bash
+# via npm (requires npm 7+ for optional dep resolution)
+npx kandev@latest
+# via Homebrew
+brew install kdlbs/kandev/kandev
+```
+
+If you're on npm 6 or older, optional dependencies aren't installed by `npx`. Upgrade npm: `npm install -g npm@latest`.
+
 ### Port Already in Use
 
 The CLI automatically finds available ports. If you need a specific port:
 
 ```bash
-npx kandev --backend-port 18080 --web-port 13000
+kandev --port 18080
 ```
 
 ### Backend Takes Too Long to Start
@@ -194,15 +219,7 @@ npx kandev --backend-port 18080 --web-port 13000
 Increase the health check timeout:
 
 ```bash
-KANDEV_HEALTH_TIMEOUT_MS=60000 npx kandev
-```
-
-### GitHub Rate Limits
-
-If you hit GitHub API rate limits, provide a token:
-
-```bash
-KANDEV_GITHUB_TOKEN=ghp_xxx npx kandev
+KANDEV_HEALTH_TIMEOUT_MS=60000 kandev
 ```
 
 ### Dev Mode: "Unable to locate repo root"
@@ -211,7 +228,7 @@ Run from within the kandev repository:
 
 ```bash
 cd /path/to/kandev
-npx kandev dev
+kandev dev
 ```
 
 ### Start Mode: "Backend binary not found"
@@ -220,12 +237,14 @@ Build the project first:
 
 ```bash
 make build
-npx kandev start
+kandev start
 ```
 
 ## Data Storage
 
 | Path | Contents |
 |------|----------|
-| `~/.kandev/bin/` | Downloaded release bundles |
+| `~/.kandev/bin/` | Cached downloads from `--runtime-version` (debug only) |
 | `~/.kandev/data/` | SQLite database and app data |
+| Homebrew Cellar | Installed runtime (when installed via brew) |
+| `<npm cache>/node_modules/@kdlbs/runtime-{platform}/` | Installed runtime (when installed via npm/npx) |

@@ -23,7 +23,7 @@ import (
 
 // OrchestratorService defines the interface for orchestrator operations
 type OrchestratorService interface {
-	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error)
+	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error)
 	ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error
 	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool, attachments []v1.MessageAttachment) error
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
@@ -370,7 +370,7 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		return
 	}
 
-	_, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments)
+	_, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false)
 	if err != nil {
 		err = h.handlePromptWithResume(ctx, taskID, sessionID, content, model, planMode, attachments, err)
 	}
@@ -419,7 +419,7 @@ func (h *MessageHandlers) handlePromptWithResume(
 			zap.Error(waitErr))
 		return waitErr
 	}
-	_, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments)
+	_, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false)
 	return err
 }
 

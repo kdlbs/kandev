@@ -137,4 +137,51 @@ func TestUserMessageMeta_Chaining(t *testing.T) {
 	if returned != meta {
 		t.Error("WithContextFiles should return the same pointer for chaining")
 	}
+	returned = meta.WithSenderTask("t", "title", "s")
+	if returned != meta {
+		t.Error("WithSenderTask should return the same pointer for chaining")
+	}
+}
+
+func TestUserMessageMeta_ToMap_SenderTaskOnly(t *testing.T) {
+	meta := NewUserMessageMeta().WithSenderTask("task-uuid", "Fix login bug", "session-uuid")
+	result := meta.ToMap()
+	if result == nil {
+		t.Fatal("expected non-nil map")
+	}
+	if v, ok := result["sender_task_id"]; !ok || v != "task-uuid" {
+		t.Errorf("expected sender_task_id=task-uuid, got %v", result)
+	}
+	if v, ok := result["sender_task_title"]; !ok || v != "Fix login bug" {
+		t.Errorf("expected sender_task_title=Fix login bug, got %v", result)
+	}
+	if v, ok := result["sender_session_id"]; !ok || v != "session-uuid" {
+		t.Errorf("expected sender_session_id=session-uuid, got %v", result)
+	}
+	if _, ok := result["plan_mode"]; ok {
+		t.Error("unexpected plan_mode key")
+	}
+}
+
+func TestUserMessageMeta_ToMap_SenderTaskWithoutSession(t *testing.T) {
+	meta := NewUserMessageMeta().WithSenderTask("task-uuid", "Fix login bug", "")
+	result := meta.ToMap()
+	if result == nil {
+		t.Fatal("expected non-nil map")
+	}
+	if _, ok := result["sender_task_id"]; !ok {
+		t.Error("expected sender_task_id key")
+	}
+	if _, ok := result["sender_session_id"]; ok {
+		t.Error("unexpected sender_session_id key when sessionID is empty")
+	}
+}
+
+func TestUserMessageMeta_ToMap_SenderTaskEmptyIDIsNoop(t *testing.T) {
+	// Empty taskID means no sender — must not emit sender keys even if title was set.
+	meta := NewUserMessageMeta().WithSenderTask("", "ghost title", "session-uuid")
+	result := meta.ToMap()
+	if result != nil {
+		t.Errorf("expected nil map when sender_task_id is empty, got %v", result)
+	}
 }

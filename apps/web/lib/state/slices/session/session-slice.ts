@@ -58,6 +58,7 @@ function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSes
     worktree_branch: incoming.worktree_branch ?? existing.worktree_branch,
     repository_id: incoming.repository_id ?? existing.repository_id,
     base_branch: incoming.base_branch ?? existing.base_branch,
+    task_environment_id: incoming.task_environment_id ?? existing.task_environment_id,
   };
 }
 
@@ -288,6 +289,79 @@ function nextPair(
   return [current[1], revisionId];
 }
 
+function buildTaskSessionActions(set: ImmerSet) {
+  return {
+    setTaskSession: (session: Parameters<SessionSlice["setTaskSession"]>[0]) =>
+      set((draft) => {
+        const existingSession = draft.taskSessions.items[session.id];
+        const mergedSession = existingSession
+          ? mergeTaskSession(existingSession, session)
+          : session;
+        draft.taskSessions.items[session.id] = mergedSession;
+        const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[session.task_id];
+        if (sessionsByTask) {
+          const sessionIndex = sessionsByTask.findIndex((s) => s.id === session.id);
+          if (sessionIndex >= 0) sessionsByTask[sessionIndex] = mergedSession;
+        }
+        syncEnvironmentMapping(draft, session.id, mergedSession.task_environment_id);
+      }),
+    removeTaskSession: (taskId: string, sessionId: string) =>
+      set((draft) => {
+        delete draft.taskSessions.items[sessionId];
+        const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[taskId];
+        if (sessionsByTask) {
+          draft.taskSessionsByTask.itemsByTaskId[taskId] = sessionsByTask.filter(
+            (s) => s.id !== sessionId,
+          );
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (draft as any).environmentIdBySessionId[sessionId];
+      }),
+    setTaskSessionsForTask: (
+      taskId: string,
+      sessions: Parameters<SessionSlice["setTaskSessionsForTask"]>[1],
+    ) =>
+      set((draft) => {
+        const merged = sessions.map((session) => {
+          const existing = draft.taskSessions.items[session.id];
+          return existing ? mergeTaskSession(existing, session) : session;
+        });
+        draft.taskSessionsByTask.itemsByTaskId[taskId] = merged;
+        draft.taskSessionsByTask.loadingByTaskId[taskId] = false;
+        draft.taskSessionsByTask.loadedByTaskId[taskId] = true;
+        for (const session of merged) {
+          draft.taskSessions.items[session.id] = session;
+          syncEnvironmentMapping(draft, session.id, session.task_environment_id);
+        }
+      }),
+    // Upsert a session from a WS event without flipping the per-task `loadedByTaskId`
+    // flag — partial event-driven records must not gate the API hydration that
+    // fills in fields like agent_profile_id / repository_id / worktree_path.
+    upsertTaskSessionFromEvent: (
+      taskId: string,
+      session: Parameters<SessionSlice["upsertTaskSessionFromEvent"]>[1],
+    ) =>
+      set((draft) => {
+        const existing = draft.taskSessions.items[session.id];
+        const merged = existing ? mergeTaskSession(existing, session) : session;
+        draft.taskSessions.items[session.id] = merged;
+        const list = draft.taskSessionsByTask.itemsByTaskId[taskId];
+        if (list) {
+          const idx = list.findIndex((s) => s.id === session.id);
+          if (idx >= 0) list[idx] = merged;
+          else list.push(merged);
+        } else {
+          draft.taskSessionsByTask.itemsByTaskId[taskId] = [merged];
+        }
+        syncEnvironmentMapping(draft, session.id, merged.task_environment_id);
+      }),
+    setTaskSessionsLoading: (taskId: string, loading: boolean) =>
+      set((draft) => {
+        draft.taskSessionsByTask.loadingByTaskId[taskId] = loading;
+      }),
+  };
+}
+
 export const createSessionSlice: StateCreator<
   SessionSlice,
   [["zustand/immer", never]],
@@ -313,44 +387,7 @@ export const createSessionSlice: StateCreator<
     set((draft) => {
       draft.turns.activeBySession[sessionId] = turnId;
     }),
-  setTaskSession: (session) =>
-    set((draft) => {
-      const existingSession = draft.taskSessions.items[session.id];
-      const mergedSession = existingSession ? mergeTaskSession(existingSession, session) : session;
-      draft.taskSessions.items[session.id] = mergedSession;
-      const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[session.task_id];
-      if (sessionsByTask) {
-        const sessionIndex = sessionsByTask.findIndex((s) => s.id === session.id);
-        if (sessionIndex >= 0) sessionsByTask[sessionIndex] = mergedSession;
-      }
-      syncEnvironmentMapping(draft, session.id, mergedSession.task_environment_id);
-    }),
-  removeTaskSession: (taskId, sessionId) =>
-    set((draft) => {
-      delete draft.taskSessions.items[sessionId];
-      const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[taskId];
-      if (sessionsByTask) {
-        draft.taskSessionsByTask.itemsByTaskId[taskId] = sessionsByTask.filter(
-          (s) => s.id !== sessionId,
-        );
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (draft as any).environmentIdBySessionId[sessionId];
-    }),
-  setTaskSessionsForTask: (taskId, sessions) =>
-    set((draft) => {
-      draft.taskSessionsByTask.itemsByTaskId[taskId] = sessions;
-      draft.taskSessionsByTask.loadingByTaskId[taskId] = false;
-      draft.taskSessionsByTask.loadedByTaskId[taskId] = true;
-      for (const session of sessions) {
-        draft.taskSessions.items[session.id] = session;
-        syncEnvironmentMapping(draft, session.id, session.task_environment_id);
-      }
-    }),
-  setTaskSessionsLoading: (taskId, loading) =>
-    set((draft) => {
-      draft.taskSessionsByTask.loadingByTaskId[taskId] = loading;
-    }),
+  ...buildTaskSessionActions(set),
   setSessionAgentctlStatus: (sessionId, status) =>
     set((draft) => {
       draft.sessionAgentctl.itemsBySessionId[sessionId] = status;

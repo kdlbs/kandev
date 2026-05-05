@@ -151,6 +151,44 @@ function buildTerminalShellProcessActions(set: ImmerSet) {
   };
 }
 
+function buildSessionCommitActions(set: ImmerSet) {
+  return {
+    setSessionCommits: (
+      sessionId: string,
+      commits: Parameters<SessionRuntimeSlice["setSessionCommits"]>[1],
+    ) =>
+      set((draft) => {
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        draft.sessionCommits.byEnvironmentId[envKey] = commits;
+      }),
+    setSessionCommitsLoading: (sessionId: string, loading: boolean) =>
+      set((draft) => {
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        draft.sessionCommits.loading[envKey] = loading;
+      }),
+    addSessionCommit: (
+      sessionId: string,
+      commit: Parameters<SessionRuntimeSlice["addSessionCommit"]>[1],
+    ) =>
+      set((draft) => {
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        const existing = draft.sessionCommits.byEnvironmentId[envKey] || [];
+        // For amend: only replace HEAD (first entry) if it has the same parent
+        if (existing.length > 0 && existing[0].parent_sha === commit.parent_sha) {
+          existing[0] = commit;
+          draft.sessionCommits.byEnvironmentId[envKey] = existing;
+        } else {
+          draft.sessionCommits.byEnvironmentId[envKey] = [commit, ...existing];
+        }
+      }),
+    clearSessionCommits: (sessionId: string) =>
+      set((draft) => {
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        delete draft.sessionCommits.byEnvironmentId[envKey];
+      }),
+  };
+}
+
 function buildUserShellActions(set: ImmerSet) {
   return {
     setUserShells: (
@@ -265,35 +303,7 @@ export const createSessionRuntimeSlice: StateCreator<
     set((draft) => {
       draft.contextWindow.bySessionId[sessionId] = contextWindow;
     }),
-  setSessionCommits: (sessionId, commits) =>
-    set((draft) => {
-      const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
-      draft.sessionCommits.byEnvironmentId[envKey] = commits;
-    }),
-  setSessionCommitsLoading: (sessionId, loading) =>
-    set((draft) => {
-      const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
-      draft.sessionCommits.loading[envKey] = loading;
-    }),
-  addSessionCommit: (sessionId, commit) =>
-    set((draft) => {
-      const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
-      const existing = draft.sessionCommits.byEnvironmentId[envKey] || [];
-      // For amend: only replace HEAD (first entry) if it has the same parent
-      if (existing.length > 0 && existing[0].parent_sha === commit.parent_sha) {
-        // Replace HEAD commit (this is an amend)
-        existing[0] = commit;
-        draft.sessionCommits.byEnvironmentId[envKey] = existing;
-      } else {
-        // Normal commit: prepend to list
-        draft.sessionCommits.byEnvironmentId[envKey] = [commit, ...existing];
-      }
-    }),
-  clearSessionCommits: (sessionId) =>
-    set((draft) => {
-      const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
-      delete draft.sessionCommits.byEnvironmentId[envKey];
-    }),
+  ...buildSessionCommitActions(set),
   setAvailableCommands: (sessionId, commands) =>
     set((draft) => {
       draft.availableCommands.bySessionId[sessionId] = commands;

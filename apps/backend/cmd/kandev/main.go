@@ -32,6 +32,7 @@ import (
 	// JIRA integration
 	jirapkg "github.com/kandev/kandev/internal/jira"
 	linearpkg "github.com/kandev/kandev/internal/linear"
+	slackpkg "github.com/kandev/kandev/internal/slack"
 
 	// Agent infrastructure
 	"github.com/kandev/kandev/internal/agent/hostutility"
@@ -358,11 +359,28 @@ func startAgentInfrastructure(
 		addCleanup(func() error { jiraPoller.Stop(); return nil })
 	}
 
-	// Start Linear auth-health poller, mirroring the Jira poller.
+	// Start Linear poller. Mirrors the Jira shape: auth-health probe plus an
+	// issue-watch loop that runs configured filters and emits
+	// NewLinearIssueEvent for the orchestrator to turn into tasks.
 	if services.Linear != nil {
+		orchestratorSvc.SetLinearService(&linearServiceAdapter{svc: services.Linear})
 		linearPoller := linearpkg.NewPoller(services.Linear, log)
 		linearPoller.Start(ctx)
 		addCleanup(func() error { linearPoller.Stop(); return nil })
+	}
+
+	// Start Slack auth-health poller and the trigger loop. The trigger
+	// polls each configured workspace every 30s for new `!kandev …`
+	// messages from the authenticated user and turns them into Kandev
+	// tasks via taskSvc.
+	if services.Slack != nil {
+		slackPoller := slackpkg.NewPoller(services.Slack, log)
+		slackPoller.Start(ctx)
+		addCleanup(func() error { slackPoller.Stop(); return nil })
+
+		slackTrigger := slackpkg.NewTrigger(services.Slack, log)
+		slackTrigger.Start(ctx)
+		addCleanup(func() error { slackTrigger.Stop(); return nil })
 	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, repos, services,
@@ -439,6 +457,24 @@ func startGatewayAndServe(
 		hostUtilityMgr.Stop(stopCtx)
 		return nil
 	})
+
+	// Wire the Slack agent runner. Slack triage uses the host-utility
+	// inference path (single-shot ACP subprocess) with the Kandev MCP
+	// server attached so the agent can call list_workflows_kandev /
+	// create_task_kandev / etc. mid-prompt. Both deps land here at the
+	// same time: hostUtilityMgr just bootstrapped above, services.Utility
+	// was constructed in provideServices.
+	if services.Slack != nil && services.Utility != nil {
+		mcpURL := buildKandevMCPURL(cfg.Server.Port)
+		slackRunner := slackpkg.NewRunner(
+			services.Utility,
+			services.User,
+			slackHostUtilityAdapter{mgr: hostUtilityMgr},
+			[]slackpkg.MCPDescriptor{{Name: "kandev", URL: mcpURL}},
+			log,
+		)
+		services.Slack.SetRunner(slackRunner)
+	}
 
 	if err := orchestratorSvc.Start(ctx); err != nil {
 		log.Error("Failed to start orchestrator", zap.Error(err))

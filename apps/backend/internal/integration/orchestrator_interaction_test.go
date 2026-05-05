@@ -2,7 +2,6 @@
 package integration
 
 import (
-	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -11,129 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/pkg/acp/protocol"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
-
-func TestOrchestratorPromptTask(t *testing.T) {
-	ts := NewOrchestratorTestServer(t)
-	defer ts.Close()
-
-	taskID := ts.CreateTestTask(t, "augment-agent", 2)
-
-	client := NewOrchestratorWSClient(t, ts.Server.URL)
-	defer client.Close()
-
-	// Subscribe to task
-	_, err := client.SendRequest("sub-1", ws.ActionTaskSubscribe, map[string]string{"task_id": taskID})
-	require.NoError(t, err)
-
-	// Start task
-	startResp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
-		"task_id":          taskID,
-		"agent_profile_id": "augment-agent",
-	})
-	require.NoError(t, err)
-
-	var startPayload map[string]interface{}
-	require.NoError(t, startResp.ParsePayload(&startPayload))
-	require.True(t, startPayload["success"].(bool))
-	sessionID, _ := startPayload["session_id"].(string)
-	require.NotEmpty(t, sessionID)
-
-	_, err = client.SendRequest("session-sub-1", ws.ActionSessionSubscribe, map[string]string{"session_id": sessionID})
-	require.NoError(t, err)
-
-	// Test 1: Verify that prompting while agent is not yet ready is rejected.
-	// The simulated agent takes ~310ms (50ms launch + 60ms ACP + 200ms execution) before
-	// publishing AgentReady, so at 100ms the session is still in CREATED state.
-	time.Sleep(100 * time.Millisecond)
-
-	// Attempt to send prompt while agent is still initializing — should be rejected
-	promptResp1, err := client.SendRequest("prompt-rejected", ws.ActionOrchestratorPrompt, map[string]interface{}{
-		"task_id":    taskID,
-		"session_id": sessionID,
-		"prompt":     "This should be rejected",
-	})
-	require.NoError(t, err)
-
-	// Should receive an error response (type=error with ErrorPayload)
-	assert.Equal(t, ws.MessageTypeError, promptResp1.Type, "Expected error response when session is not ready")
-	var errPayload ws.ErrorPayload
-	require.NoError(t, promptResp1.ParsePayload(&errPayload))
-	t.Logf("Prompt rejection: code=%s message=%s", errPayload.Code, errPayload.Message)
-	assert.NotEmpty(t, errPayload.Message)
-
-	// Test 2: Wait for agent to complete, then send a valid prompt
-	// Wait for agent to reach COMPLETED or WAITING_FOR_INPUT state
-	waitForSessionReady := func(timeout time.Duration) bool {
-		deadline := time.Now().Add(timeout)
-		for time.Now().Before(deadline) {
-			session, err := ts.TaskRepo.GetTaskSession(context.Background(), sessionID)
-			if err == nil && (session.State == models.TaskSessionStateWaitingForInput || session.State == models.TaskSessionStateCompleted) {
-				return true
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-		return false
-	}
-
-	// Wait up to 5 seconds for session to be ready
-	if waitForSessionReady(5 * time.Second) {
-		// Now send a valid prompt
-		promptResp2, err := client.SendRequest("prompt-valid", ws.ActionOrchestratorPrompt, map[string]interface{}{
-			"task_id":    taskID,
-			"session_id": sessionID,
-			"prompt":     "Please continue and add error handling",
-		})
-		require.NoError(t, err)
-
-		var promptPayload map[string]interface{}
-		require.NoError(t, promptResp2.ParsePayload(&promptPayload))
-		assert.True(t, promptPayload["success"].(bool), "Prompt should succeed when agent is ready")
-	}
-}
-
-func TestOrchestratorCompleteTask(t *testing.T) {
-	ts := NewOrchestratorTestServer(t)
-	defer ts.Close()
-
-	taskID := ts.CreateTestTask(t, "augment-agent", 2)
-
-	client := NewOrchestratorWSClient(t, ts.Server.URL)
-	defer client.Close()
-
-	// Start task
-	startResp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
-		"task_id":          taskID,
-		"agent_profile_id": "augment-agent",
-	})
-	require.NoError(t, err)
-
-	var startPayload map[string]interface{}
-	require.NoError(t, startResp.ParsePayload(&startPayload))
-	require.True(t, startPayload["success"].(bool))
-
-	// Wait for agent to be running
-	time.Sleep(200 * time.Millisecond)
-
-	// Complete task
-	completeResp, err := client.SendRequest("complete-1", ws.ActionOrchestratorComplete, map[string]interface{}{
-		"task_id": taskID,
-	})
-	require.NoError(t, err)
-
-	var completePayload map[string]interface{}
-	require.NoError(t, completeResp.ParsePayload(&completePayload))
-	assert.True(t, completePayload["success"].(bool))
-
-	// Verify task state is COMPLETED
-	task, err := ts.TaskRepo.GetTask(context.Background(), taskID)
-	require.NoError(t, err)
-	assert.Equal(t, v1.TaskStateCompleted, task.State)
-}
 
 func TestOrchestratorConcurrentTasks(t *testing.T) {
 	ts := NewOrchestratorTestServer(t)
@@ -157,7 +36,7 @@ func TestOrchestratorConcurrentTasks(t *testing.T) {
 		go func(idx int, tid string) {
 			defer wg.Done()
 
-			resp, err := client.SendRequest(fmt.Sprintf("start-%d", idx), ws.ActionOrchestratorStart, map[string]interface{}{
+			resp, err := client.SendRequest(fmt.Sprintf("start-%d", idx), ws.ActionSessionLaunch, map[string]interface{}{
 				"task_id":          tid,
 				"agent_profile_id": "augment-agent",
 			})
@@ -256,7 +135,7 @@ func TestOrchestratorACPStreaming(t *testing.T) {
 	require.NoError(t, err)
 
 	// Start task
-	startResp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
+	startResp, err := client.SendRequest("start-1", ws.ActionSessionLaunch, map[string]interface{}{
 		"task_id":          taskID,
 		"agent_profile_id": "augment-agent",
 	})
@@ -302,7 +181,7 @@ func TestOrchestratorMultipleClients(t *testing.T) {
 	require.NoError(t, err)
 
 	// Client 1 starts the task
-	startResp, err := client1.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
+	startResp, err := client1.SendRequest("start-1", ws.ActionSessionLaunch, map[string]interface{}{
 		"task_id":          taskID,
 		"agent_profile_id": "augment-agent",
 	})
@@ -339,7 +218,7 @@ func TestOrchestratorErrorHandling(t *testing.T) {
 		client := NewOrchestratorWSClient(t, ts.Server.URL)
 		defer client.Close()
 
-		resp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{})
+		resp, err := client.SendRequest("start-1", ws.ActionSessionLaunch, map[string]interface{}{})
 		require.NoError(t, err)
 
 		assert.Equal(t, ws.MessageTypeError, resp.Type)
@@ -357,35 +236,13 @@ func TestOrchestratorErrorHandling(t *testing.T) {
 		client := NewOrchestratorWSClient(t, ts.Server.URL)
 		defer client.Close()
 
-		resp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
+		resp, err := client.SendRequest("start-1", ws.ActionSessionLaunch, map[string]interface{}{
 			"task_id":          "non-existent-task",
 			"agent_profile_id": "augment-agent",
 		})
 		require.NoError(t, err)
 
 		assert.Equal(t, ws.MessageTypeError, resp.Type)
-	})
-
-	t.Run("PromptTaskMissingPrompt", func(t *testing.T) {
-		ts := NewOrchestratorTestServer(t)
-		defer ts.Close()
-
-		taskID := ts.CreateTestTask(t, "augment-agent", 2)
-
-		client := NewOrchestratorWSClient(t, ts.Server.URL)
-		defer client.Close()
-
-		resp, err := client.SendRequest("prompt-1", ws.ActionOrchestratorPrompt, map[string]interface{}{
-			"task_id":    taskID,
-			"session_id": "session-1",
-		})
-		require.NoError(t, err)
-
-		assert.Equal(t, ws.MessageTypeError, resp.Type)
-
-		var errPayload ws.ErrorPayload
-		require.NoError(t, resp.ParsePayload(&errPayload))
-		assert.Contains(t, errPayload.Message, "prompt")
 	})
 
 	t.Run("StopTaskNotRunning", func(t *testing.T) {
@@ -420,7 +277,7 @@ func TestOrchestratorAgentFailure(t *testing.T) {
 	client := NewOrchestratorWSClient(t, ts.Server.URL)
 	defer client.Close()
 
-	resp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
+	resp, err := client.SendRequest("start-1", ws.ActionSessionLaunch, map[string]interface{}{
 		"task_id":          taskID,
 		"agent_profile_id": "augment-agent",
 	})
@@ -431,5 +288,5 @@ func TestOrchestratorAgentFailure(t *testing.T) {
 
 	var errPayload ws.ErrorPayload
 	require.NoError(t, resp.ParsePayload(&errPayload))
-	assert.Contains(t, errPayload.Message, "Failed to start task")
+	assert.Contains(t, errPayload.Message, "Failed to launch session")
 }

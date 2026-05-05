@@ -49,6 +49,7 @@ import (
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/slack"
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
@@ -119,6 +120,9 @@ func appendAgentctlStatusMessage(
 	payload := map[string]interface{}{
 		sessionIDPayloadKey:  sessionID,
 		"agent_execution_id": execution.ID,
+	}
+	if execution.TaskEnvironmentID != "" {
+		payload["task_environment_id"] = execution.TaskEnvironmentID
 	}
 	action := ws.ActionSessionAgentctlStarting
 	if execution.GetWorkspaceStream() != nil {
@@ -621,6 +625,11 @@ func registerSecondaryRoutes(
 		linear.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Linear, p.log)
 		linear.RegisterMockRoutes(p.router, p.services.Linear, p.log)
 		p.log.Debug("Registered Linear handlers (HTTP + WebSocket)")
+	}
+
+	if p.services.Slack != nil {
+		slack.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Slack, p.log)
+		p.log.Debug("Registered Slack handlers (HTTP + WebSocket)")
 	}
 
 	docker.RegisterDockerRoutes(p.router, p.lifecycleMgr.DockerClientProvider(), p.log)

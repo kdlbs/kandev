@@ -633,11 +633,12 @@ func TestRunAgentProcessAsync_CleansUpOnStartFailure(t *testing.T) {
 		return repo.UpdateTaskState(ctx, taskID, state)
 	})
 
-	// Use runAgentProcessAsync with a no-op onSuccess that should never be called
+	// Use runAgentProcessAsync with a no-op onSuccess that should never be called.
+	// escalateTaskOnFailure=true mirrors the fresh-start path.
 	exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456", func(ctx context.Context) {
 		t.Error("onSuccess should not be called when StartAgentProcess fails")
 		close(done)
-	})
+	}, true, false)
 
 	// Wait for the async goroutine to finish
 	deadline := time.After(5 * time.Second)
@@ -666,6 +667,104 @@ verified:
 	session := repo.sessions["session-123"]
 	if session.State != models.TaskSessionStateFailed {
 		t.Errorf("expected session state FAILED, got %s", session.State)
+	}
+}
+
+// runAgentProcessAsyncFailureFixture builds an Executor configured to fail
+// StartAgentProcess, with task/session-state-change recorders for assertions.
+// stopCh is closed when StopAgent is invoked — since the failure path calls
+// StopAgent last, blocking on stopCh provides a happens-before barrier for all
+// other recorded fields, removing the need for atomicity or polling.
+type runAgentProcessAsyncFailureFixture struct {
+	exec              *Executor
+	taskStateUpdates  []string
+	sessionFailedSeen bool
+	startFailedCalls  int
+	lastFromResume    bool
+	stopCh            chan struct{}
+}
+
+func newRunAgentProcessAsyncFailureFixture(t *testing.T) *runAgentProcessAsyncFailureFixture {
+	t.Helper()
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	f := &runAgentProcessAsyncFailureFixture{stopCh: make(chan struct{})}
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+			return fmt.Errorf("ACP initialize handshake failed: context deadline exceeded")
+		},
+		stopAgentFunc: func(ctx context.Context, agentExecutionID string, force bool) error {
+			close(f.stopCh)
+			return nil
+		},
+	}
+	f.exec = newTestExecutor(t, agentManager, repo)
+	f.exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		f.taskStateUpdates = append(f.taskStateUpdates, string(state))
+		return nil
+	})
+	f.exec.SetOnSessionStateChange(func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error {
+		if state == models.TaskSessionStateFailed {
+			f.sessionFailedSeen = true
+		}
+		return repo.UpdateTaskSessionState(ctx, sessionID, state, errorMessage)
+	})
+	f.exec.SetOnAgentStartFailed(func(ctx context.Context, taskID, sessionID, agentExecutionID string, err error, fromResume bool) bool {
+		f.startFailedCalls++
+		f.lastFromResume = fromResume
+		return false
+	})
+	return f
+}
+
+// awaitStop blocks until the failure-path goroutine calls StopAgent.
+// Closing stopCh is the last side-effect, so all other field writes are
+// guaranteed visible by the channel-receive happens-before edge.
+func (f *runAgentProcessAsyncFailureFixture) awaitStop(t *testing.T) {
+	t.Helper()
+	select {
+	case <-f.stopCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for StopAgent to be called")
+	}
+}
+
+func TestRunAgentProcessAsync_ResumeDoesNotEscalateTaskState(t *testing.T) {
+	f := newRunAgentProcessAsyncFailureFixture(t)
+	f.exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456",
+		func(ctx context.Context) { t.Error("onSuccess should not run on failure") },
+		false, true) // resume path: no escalation, fromResume=true
+	f.awaitStop(t)
+	if !f.sessionFailedSeen {
+		t.Error("expected session state FAILED")
+	}
+	if len(f.taskStateUpdates) != 0 {
+		t.Errorf("expected no task state updates on resume failure, got %v", f.taskStateUpdates)
+	}
+	if f.startFailedCalls != 1 {
+		t.Errorf("expected onAgentStartFailed called once, got %d", f.startFailedCalls)
+	}
+	if !f.lastFromResume {
+		t.Error("expected fromResume=true to be propagated to onAgentStartFailed")
+	}
+}
+
+func TestRunAgentProcessAsync_FreshStartEscalatesTaskState(t *testing.T) {
+	f := newRunAgentProcessAsyncFailureFixture(t)
+	f.exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456",
+		func(ctx context.Context) { t.Error("onSuccess should not run on failure") },
+		true, false) // fresh-start path: escalate, fromResume=false
+	f.awaitStop(t)
+	if !f.sessionFailedSeen {
+		t.Error("expected session state FAILED")
+	}
+	if len(f.taskStateUpdates) != 1 || f.taskStateUpdates[0] != string(v1.TaskStateFailed) {
+		t.Errorf("expected fresh-start failure to set task state FAILED, got %v", f.taskStateUpdates)
+	}
+	if f.lastFromResume {
+		t.Error("expected fromResume=false on fresh-start path")
 	}
 }
 

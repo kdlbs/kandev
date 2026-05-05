@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -132,8 +133,9 @@ type GitLogRequest struct {
 
 // GitCumulativeDiffRequest for GET /api/v1/git/cumulative-diff
 type GitCumulativeDiffRequest struct {
-	Base string `form:"base" binding:"required"` // Base commit SHA
-	Repo string `form:"repo"`
+	Base         string `form:"base" binding:"required"` // Base commit SHA (used as fallback when target_branch is empty or merge-base fails)
+	TargetBranch string `form:"target_branch"`           // When set, recompute base via merge-base HEAD <origin/target_branch> for live divergence
+	Repo         string `form:"repo"`
 }
 
 // gitOpForRepo resolves the optional repo subpath to a per-repo GitOperator.
@@ -667,6 +669,22 @@ func (s *Server) handleGitLog(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// computeMergeBase finds the merge-base between HEAD and the target branch.
+// It tries origin/<target_branch> first (the upstream source of truth) and
+// falls back to <target_branch> if the remote ref isn't present. Local refs
+// can lag arbitrarily far behind upstream on long-lived worktrees; using the
+// remote ref keeps the log/diff range anchored to live divergence.
+func (s *Server) computeMergeBase(
+	ctx context.Context,
+	gitOp *process.GitOperator,
+	targetBranch string,
+) (string, error) {
+	if mb, err := gitOp.GetMergeBase(ctx, "HEAD", "origin/"+targetBranch); err == nil {
+		return mb, nil
+	}
+	return gitOp.GetMergeBase(ctx, "HEAD", targetBranch)
+}
+
 // runGitLogForRepo runs git log against a single repo subpath. Returns a
 // result-with-error or a non-nil error for transport failures.
 func (s *Server) runGitLogForRepo(
@@ -682,7 +700,7 @@ func (s *Server) runGitLogForRepo(
 
 	baseCommit := req.Since
 	if req.TargetBranch != "" {
-		mergeBase, err := gitOp.GetMergeBase(c.Request.Context(), "HEAD", req.TargetBranch)
+		mergeBase, err := s.computeMergeBase(c.Request.Context(), gitOp, req.TargetBranch)
 		if err != nil {
 			s.logger.Warn("failed to compute merge-base, falling back to since",
 				zap.String("target_branch", req.TargetBranch),
@@ -845,7 +863,7 @@ func (s *Server) handleGitCumulativeDiff(c *gin.Context) {
 		}
 	}
 
-	result := s.runGitCumulativeDiffForRepo(c, req.Base, req.Repo)
+	result := s.runGitCumulativeDiffForRepo(c, req.Base, req.TargetBranch, req.Repo)
 	if result == nil {
 		return // gitOp lookup error already wrote the response
 	}
@@ -855,9 +873,15 @@ func (s *Server) handleGitCumulativeDiff(c *gin.Context) {
 // runGitCumulativeDiffForRepo runs cumulative diff against a single repo
 // subpath. Returns nil after writing an error response on lookup failures;
 // otherwise returns the (possibly success=false) result for the caller.
+//
+// When targetBranch is non-empty the base is recomputed dynamically via
+// merge-base against origin/<targetBranch> (with a local-ref fallback). This
+// matches the COMMITS panel: anchor to live divergence with the upstream so
+// the diff updates as main moves forward and excludes file changes brought
+// in via merges from main.
 func (s *Server) runGitCumulativeDiffForRepo(
 	c *gin.Context,
-	base, repo string,
+	base, targetBranch, repo string,
 ) *process.CumulativeDiffResult {
 	gitOp, gitOpErr := s.procMgr.GitOperatorFor(repo)
 	if gitOpErr != nil {
@@ -866,6 +890,24 @@ func (s *Server) runGitCumulativeDiffForRepo(
 			Error:   gitOpErr.Error(),
 		})
 		return nil
+	}
+	if targetBranch != "" {
+		switch mb, err := s.computeMergeBase(c.Request.Context(), gitOp, targetBranch); {
+		case err != nil:
+			s.logger.Warn("cumulative diff: merge-base failed, using stored base",
+				zap.String("target_branch", targetBranch),
+				zap.String("repo", repo),
+				zap.Error(err))
+		case mb == "":
+			// merge-base returned no error but no SHA — happens when HEAD and
+			// targetBranch share no history. Log it so the silent fallback to
+			// the stored base is visible during diagnostics.
+			s.logger.Warn("cumulative diff: merge-base returned empty, using stored base",
+				zap.String("target_branch", targetBranch),
+				zap.String("repo", repo))
+		default:
+			base = mb
+		}
 	}
 	result, err := gitOp.GetCumulativeDiff(c.Request.Context(), base)
 	if err != nil {
@@ -906,7 +948,9 @@ func (s *Server) handleGitCumulativeDiffMultiRepo(
 				zap.String("repo", sub))
 			continue
 		}
-		result := s.runGitCumulativeDiffForRepo(c, base, sub)
+		// Multi-repo: base is already merge-base'd per-repo via resolvePerRepoBase,
+		// so we pass empty target_branch to skip the second merge-base attempt.
+		result := s.runGitCumulativeDiffForRepo(c, base, "", sub)
 		if result == nil {
 			return // response already written
 		}

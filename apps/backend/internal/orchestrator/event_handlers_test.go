@@ -199,7 +199,7 @@ func (m *mockAgentManager) StopAgentWithReason(_ context.Context, agentExecution
 	})
 	return nil
 }
-func (m *mockAgentManager) PromptAgent(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment) (*executor.PromptResult, error) {
+func (m *mockAgentManager) PromptAgent(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, _ bool) (*executor.PromptResult, error) {
 	m.mu.Lock()
 	first := len(m.capturedPrompts) == 0
 	m.capturedPrompts = append(m.capturedPrompts, prompt)
@@ -1283,6 +1283,58 @@ func TestHandleRecoverableFailure(t *testing.T) {
 		defer agentMgr.mu.Unlock()
 		if len(agentMgr.stopAgentWithReasonArgs) == 0 {
 			t.Error("expected cleanup to call StopAgentWithReason")
+		}
+	})
+}
+
+func TestHandleAgentStartFailed(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("non-auth resume failure sets suppressToast and returns false", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+		handled := svc.handleAgentStartFailed(ctx, "t1", "s1", "exec-1",
+			fmt.Errorf("ACP initialize handshake failed"), true)
+
+		if handled {
+			t.Error("expected handled=false so default FAILED transition runs")
+		}
+		v, ok := svc.suppressToast.Load("s1")
+		if !ok || v.(bool) != true {
+			t.Errorf("expected suppressToast[s1]=true, got ok=%v val=%v", ok, v)
+		}
+	})
+
+	t.Run("non-auth fresh-start failure does not set suppressToast", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+		handled := svc.handleAgentStartFailed(ctx, "t1", "s1", "exec-1",
+			fmt.Errorf("ACP initialize handshake failed"), false)
+
+		if handled {
+			t.Error("expected handled=false")
+		}
+		if _, ok := svc.suppressToast.Load("s1"); ok {
+			t.Error("expected suppressToast NOT set for fresh-start failure")
+		}
+	})
+
+	t.Run("auth error returns true regardless of fromResume", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		taskRepo := newMockTaskRepo()
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+		handled := svc.handleAgentStartFailed(ctx, "t1", "s1", "exec-1",
+			fmt.Errorf("authentication required: please log in"), true)
+
+		if !handled {
+			t.Error("expected handled=true for auth errors")
 		}
 	})
 }

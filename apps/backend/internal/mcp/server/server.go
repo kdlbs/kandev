@@ -276,7 +276,7 @@ func (s *Server) registerTools() {
 	switch s.mode {
 	case ModeConfig:
 		s.registerConfigWorkflowTools()
-		count += 10
+		count += 11
 		s.registerConfigAgentTools()
 		count += 4
 		s.registerConfigMcpTools()
@@ -294,7 +294,7 @@ func (s *Server) registerTools() {
 		// they can both manage Kandev configuration and spawn new tasks.
 		// No interaction or plan tools (no live session to attach them to).
 		s.registerConfigWorkflowTools()
-		count += 10
+		count += 11
 		s.registerConfigAgentTools()
 		count += 4
 		s.registerConfigMcpTools()

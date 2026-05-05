@@ -22,7 +22,7 @@ func TestHandleGetTaskConversation_MissingTaskID(t *testing.T) {
 
 func TestHandleGetTaskConversation_UsesPrimarySession(t *testing.T) {
 	svc, repo := newTestTaskService(t)
-	task, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	_, task, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
 
 	_, err := svc.CreateMessage(context.Background(), &service.CreateMessageRequest{
 		TaskSessionID: sess.ID,
@@ -51,7 +51,7 @@ func TestHandleGetTaskConversation_UsesPrimarySession(t *testing.T) {
 
 func TestHandleGetTaskConversation_SessionMustBelongToTask(t *testing.T) {
 	svc, repo := newTestTaskService(t)
-	taskA, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	_, taskA, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
 
 	// Create another task/session in the same workflow to validate cross-task mismatch.
 	taskB, err := svc.CreateTask(context.Background(), &service.CreateTaskRequest{
@@ -82,7 +82,7 @@ func TestHandleGetTaskConversation_SessionMustBelongToTask(t *testing.T) {
 
 func TestHandleGetTaskConversation_NegativeLimit(t *testing.T) {
 	svc, repo := newTestTaskService(t)
-	task, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	_, task, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
 
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
 	msg := makeWSMessage(t, ws.ActionMCPGetTaskConversation, map[string]interface{}{
@@ -97,7 +97,7 @@ func TestHandleGetTaskConversation_NegativeLimit(t *testing.T) {
 
 func TestHandleGetTaskConversation_FilteredPageStillReturnsCursor(t *testing.T) {
 	svc, repo := newTestTaskService(t)
-	task, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	_, task, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
 
 	_, err := svc.CreateMessage(context.Background(), &service.CreateMessageRequest{
 		TaskSessionID: sess.ID,

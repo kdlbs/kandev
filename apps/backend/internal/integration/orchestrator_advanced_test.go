@@ -30,21 +30,21 @@ func TestOrchestratorTaskPriority(t *testing.T) {
 	defer client.Close()
 
 	// Start low priority first
-	_, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
+	_, err := client.SendRequest("start-1", ws.ActionSessionLaunch, map[string]interface{}{
 		"task_id":          lowPriorityTask,
 		"agent_profile_id": "augment-agent",
 	})
 	require.NoError(t, err)
 
 	// Then high priority
-	_, err = client.SendRequest("start-2", ws.ActionOrchestratorStart, map[string]interface{}{
+	_, err = client.SendRequest("start-2", ws.ActionSessionLaunch, map[string]interface{}{
 		"task_id":          highPriorityTask,
 		"agent_profile_id": "augment-agent",
 	})
 	require.NoError(t, err)
 
 	// Then medium priority
-	_, err = client.SendRequest("start-3", ws.ActionOrchestratorStart, map[string]interface{}{
+	_, err = client.SendRequest("start-3", ws.ActionSessionLaunch, map[string]interface{}{
 		"task_id":          medPriorityTask,
 		"agent_profile_id": "augment-agent",
 	})
@@ -52,137 +52,6 @@ func TestOrchestratorTaskPriority(t *testing.T) {
 
 	// All should start (we have capacity)
 	assert.Equal(t, 3, ts.AgentManager.GetLaunchCount())
-}
-
-func TestOrchestratorTriggerTask(t *testing.T) {
-	ts := NewOrchestratorTestServer(t)
-	defer ts.Close()
-
-	taskID := ts.CreateTestTask(t, "augment-agent", 2)
-
-	client := NewOrchestratorWSClient(t, ts.Server.URL)
-	defer client.Close()
-
-	resp, err := client.SendRequest("trigger-1", ws.ActionOrchestratorTrigger, map[string]interface{}{
-		"task_id": taskID,
-	})
-	require.NoError(t, err)
-
-	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
-
-	var payload map[string]interface{}
-	require.NoError(t, resp.ParsePayload(&payload))
-	assert.True(t, payload["success"].(bool))
-	assert.Equal(t, taskID, payload["task_id"])
-}
-
-func TestOrchestratorEndToEndWorkflow(t *testing.T) {
-	ts := NewOrchestratorTestServer(t)
-	defer ts.Close()
-
-	client := NewOrchestratorWSClient(t, ts.Server.URL)
-	defer client.Close()
-
-	workspaceID := createOrchestratorWorkspace(t, client)
-
-	// 1. Create workflow with workflow template
-	workflowResp, err := client.SendRequest("workflow-1", ws.ActionWorkflowCreate, map[string]interface{}{
-		"workspace_id":         workspaceID,
-		"name":                 "E2E Test Workflow",
-		"description":          "End-to-end test workflow",
-		"workflow_template_id": "simple",
-	})
-	require.NoError(t, err)
-
-	var workflowPayload map[string]interface{}
-	require.NoError(t, workflowResp.ParsePayload(&workflowPayload))
-	workflowID := workflowPayload["id"].(string)
-
-	// 2. Get first workflow step from workflow
-	stepResp, err := client.SendRequest("step-list-1", ws.ActionWorkflowStepList, map[string]interface{}{
-		"workflow_id": workflowID,
-	})
-	require.NoError(t, err)
-
-	var stepListPayload map[string]interface{}
-	require.NoError(t, stepResp.ParsePayload(&stepListPayload))
-	steps := stepListPayload["steps"].([]interface{})
-	require.NotEmpty(t, steps, "workflow should have workflow steps")
-	workflowStepID := steps[0].(map[string]interface{})["id"].(string)
-
-	// 3. Create task with workflow step
-	repoResp, err := client.SendRequest("repo-1", ws.ActionRepositoryCreate, map[string]interface{}{
-		"workspace_id": workspaceID,
-		"name":         "Test Repo",
-		"source_type":  "local",
-		"local_path":   createTempRepoDir(t),
-	})
-	require.NoError(t, err)
-
-	var repoPayload map[string]interface{}
-	require.NoError(t, repoResp.ParsePayload(&repoPayload))
-	repositoryID := repoPayload["id"].(string)
-
-	taskResp, err := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"workspace_id":     workspaceID,
-		"workflow_id":      workflowID,
-		"workflow_step_id": workflowStepID,
-		"title":            "Implement feature X",
-		"description":      "Create a new feature with tests",
-		"priority":         2,
-		"repository_id":    repositoryID,
-		"base_branch":      "main",
-	})
-	require.NoError(t, err)
-
-	var taskPayload map[string]interface{}
-	require.NoError(t, taskResp.ParsePayload(&taskPayload))
-	taskID := taskPayload["id"].(string)
-
-	// 4. Subscribe to task
-	_, err = client.SendRequest("sub-1", ws.ActionTaskSubscribe, map[string]string{"task_id": taskID})
-	require.NoError(t, err)
-
-	// 5. Start orchestrator
-	startResp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
-		"task_id":          taskID,
-		"agent_profile_id": "test-profile-id",
-	})
-	require.NoError(t, err)
-
-	var startPayload map[string]interface{}
-	require.NoError(t, startResp.ParsePayload(&startPayload))
-	assert.True(t, startPayload["success"].(bool))
-	agentExecutionID := startPayload["agent_execution_id"].(string)
-	assert.NotEmpty(t, agentExecutionID)
-	sessionID, _ := startPayload["session_id"].(string)
-	require.NotEmpty(t, sessionID)
-
-	_, err = client.SendRequest("session-sub-1", ws.ActionSessionSubscribe, map[string]string{"session_id": sessionID})
-	require.NoError(t, err)
-
-	// 6. Collect notifications during execution
-	time.Sleep(400 * time.Millisecond)
-	notifications := client.CollectNotifications(200 * time.Millisecond)
-	t.Logf("Received %d notifications", len(notifications))
-
-	// 7. Complete the task
-	completeResp, err := client.SendRequest("complete-1", ws.ActionOrchestratorComplete, map[string]interface{}{
-		"task_id": taskID,
-	})
-	require.NoError(t, err)
-
-	var completePayload map[string]interface{}
-	require.NoError(t, completeResp.ParsePayload(&completePayload))
-	assert.True(t, completePayload["success"].(bool))
-
-	// 8. Verify final task state
-	getResp, err := client.SendRequest("get-1", ws.ActionTaskGet, map[string]string{"id": taskID})
-	require.NoError(t, err)
-
-	var getPayload map[string]interface{}
-	require.NoError(t, getResp.ParsePayload(&getPayload))
-	assert.Equal(t, "COMPLETED", getPayload["state"].(string))
 }
 
 // TestOrchestratorAgentMessagePersistence validates that agent messages are stored
@@ -223,7 +92,7 @@ func TestOrchestratorAgentMessagePersistence(t *testing.T) {
 	require.NoError(t, err)
 
 	// Start task execution
-	startResp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
+	startResp, err := client.SendRequest("start-1", ws.ActionSessionLaunch, map[string]interface{}{
 		"task_id":          taskID,
 		"agent_profile_id": "test-profile-id",
 	})
@@ -462,7 +331,7 @@ func TestOrchestratorAgentMessagePersistenceWithToolCalls(t *testing.T) {
 	require.NoError(t, err)
 
 	// Start task execution
-	startResp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
+	startResp, err := client.SendRequest("start-1", ws.ActionSessionLaunch, map[string]interface{}{
 		"task_id":          taskID,
 		"agent_profile_id": "test-profile-id",
 	})
@@ -630,7 +499,7 @@ func TestOrchestratorAgentMessageChunkStreaming(t *testing.T) {
 	_, err := client.SendRequest("sub-1", ws.ActionTaskSubscribe, map[string]string{"task_id": taskID})
 	require.NoError(t, err)
 
-	startResp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
+	startResp, err := client.SendRequest("start-1", ws.ActionSessionLaunch, map[string]interface{}{
 		"task_id":          taskID,
 		"agent_profile_id": "test-profile-id",
 	})

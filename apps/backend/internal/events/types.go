@@ -211,6 +211,11 @@ const (
 	JiraNewIssue = "jira.new_issue" // New issue found matching a Jira issue watch
 )
 
+// Event types for Linear integration
+const (
+	LinearNewIssue = "linear.new_issue" // New issue found matching a Linear issue watch
+)
+
 // BuildShellOutputSubject creates a shell output subject for a specific session
 func BuildShellOutputSubject(sessionID string) string {
 	return ShellOutput + "." + sessionID

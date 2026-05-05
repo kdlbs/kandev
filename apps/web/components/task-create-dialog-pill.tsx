@@ -206,7 +206,7 @@ export function Pill({
       <PopoverTrigger asChild>
         {tooltip ? <TooltipTrigger asChild>{triggerButton}</TooltipTrigger> : triggerButton}
       </PopoverTrigger>
-      <PopoverContent className="w-72 p-0" align="start" portal={false}>
+      <PopoverContent className="w-[360px] p-0" align="start" portal={false}>
         <Command filter={filter}>
           <div className="flex items-center gap-1 px-2 pt-1">
             <CommandInput placeholder={searchPlaceholder} className="h-9 flex-1" />

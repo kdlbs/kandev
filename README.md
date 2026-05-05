@@ -92,13 +92,35 @@ Each executor uses git worktrees for workspace isolation, preventing concurrent 
 
 ## Quick Start
 
-### NPX (recommended)
+### Homebrew (macOS, Linux)
 
 ```bash
-npx kandev
+brew install kdlbs/kandev/kandev
+kandev
 ```
 
-This downloads pre-built backend + frontend bundles and starts them locally. The worktrees and sqlite db will be created in `~/.kandev` by default. Should work on macOS, Linux, and Windows (WSL or native).
+### NPX
+
+```bash
+npx kandev@latest
+```
+
+Requires npm 7+. Installs the CLI plus a platform-matched runtime bundle in one step.
+
+### NPM (global)
+
+```bash
+npm install -g kandev@latest
+kandev
+```
+
+### Updates
+
+- `brew upgrade kandev`
+- `npx kandev@latest` (always uses the latest published version)
+- `npm install -g kandev@latest`
+
+The worktrees and sqlite db live in `~/.kandev` by default. Works on macOS, Linux, and Windows (WSL or native).
 
 ### From Source
 

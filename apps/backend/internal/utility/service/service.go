@@ -80,6 +80,12 @@ func (s *Service) CreateAgent(ctx context.Context, name, description, prompt, ag
 		AgentID:     agentID,
 		Model:       model,
 		Builtin:     false,
+		// Custom agents validate agent_id + model above, so they're always
+		// configured and ready to run at creation time. The DB's NOT NULL
+		// column persists the field value (not the schema default), so we
+		// have to set it here — otherwise new custom agents land disabled
+		// and never appear as runnable in pickers like the Slack triage one.
+		Enabled: true,
 	}
 
 	if err := s.repo.CreateAgent(ctx, agent); err != nil {

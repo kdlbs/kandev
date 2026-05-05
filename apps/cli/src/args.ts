@@ -2,11 +2,12 @@ export type Command = "run" | "dev" | "start";
 
 export type CliOptions = {
   command: Command;
-  version?: string;
+  runtimeVersion?: string;
   backendPort?: number;
   webPort?: number;
   verbose?: boolean;
   debug?: boolean;
+  showVersion?: boolean;
 };
 
 export type ParseResult = {
@@ -31,19 +32,23 @@ export function parseArgs(argv: string[]): ParseResult {
       showHelp = true;
       continue;
     }
+    if (arg === "--version" || arg === "-V") {
+      opts.showVersion = true;
+      continue;
+    }
     if (arg === "dev" || arg === "run" || arg === "start") {
       opts.command = arg;
       continue;
     }
-    if (arg === "--version") {
-      opts.version = takeValue(argv, i, "--version");
+    if (arg === "--runtime-version") {
+      opts.runtimeVersion = takeValue(argv, i, "--runtime-version");
       i += 1;
       continue;
     }
-    if (arg.startsWith("--version=")) {
-      const value = arg.slice("--version=".length);
-      if (value.length === 0) throw new ParseError("--version requires a value");
-      opts.version = value;
+    if (arg.startsWith("--runtime-version=")) {
+      const value = arg.slice("--runtime-version=".length);
+      if (value.length === 0) throw new ParseError("--runtime-version requires a value");
+      opts.runtimeVersion = value;
       continue;
     }
     if (arg === "--dev") {

@@ -252,6 +252,7 @@ export type TaskSessionWaitingForInputPayload = {
 export type TaskSessionAgentctlPayload = {
   task_id: string;
   session_id: string;
+  task_environment_id?: string;
   agent_execution_id?: string;
   error_message?: string;
   worktree_id?: string;

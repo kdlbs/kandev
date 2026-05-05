@@ -51,6 +51,35 @@ const createTablesSQL = `
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
+
+	CREATE TABLE IF NOT EXISTS linear_issue_watches (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		workflow_id TEXT NOT NULL,
+		workflow_step_id TEXT NOT NULL,
+		filter_json TEXT NOT NULL DEFAULT '{}',
+		agent_profile_id TEXT NOT NULL DEFAULT '',
+		executor_profile_id TEXT NOT NULL DEFAULT '',
+		prompt TEXT NOT NULL DEFAULT '',
+		enabled BOOLEAN NOT NULL DEFAULT 1,
+		poll_interval_seconds INTEGER NOT NULL DEFAULT 300,
+		last_polled_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_linear_issue_watches_workspace
+		ON linear_issue_watches(workspace_id);
+
+	CREATE TABLE IF NOT EXISTS linear_issue_watch_tasks (
+		id TEXT PRIMARY KEY,
+		issue_watch_id TEXT NOT NULL,
+		issue_identifier TEXT NOT NULL,
+		issue_url TEXT NOT NULL,
+		task_id TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL,
+		UNIQUE(issue_watch_id, issue_identifier),
+		FOREIGN KEY(issue_watch_id) REFERENCES linear_issue_watches(id) ON DELETE CASCADE
+	);
 `
 
 // singletonID is the synthetic primary key of the (only) row in linear_configs.

@@ -10,8 +10,33 @@ const TERMINAL_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
   "FAILED",
 ]);
 
+// States that imply agentctl is up and processing (or has fully processed) input.
+// If we observe a session in one of these, agentctl must be ready even if we
+// missed the agentctl_ready WS event (e.g. it fired before our subscription).
+const AGENT_LIVE_STATES: ReadonlySet<TaskSessionState> = new Set(["RUNNING", "WAITING_FOR_INPUT"]);
+
 export function isTerminalSessionState(state: TaskSessionState | undefined): boolean {
   return !!state && TERMINAL_SESSION_STATES.has(state);
+}
+
+/** Promote agentctl status to "ready" when the session enters a live state.
+ *  Acts as a fallback for missed/late agentctl_ready WS events — the backend
+ *  cannot reach RUNNING/WAITING_FOR_INPUT without a live agentctl. Never
+ *  downgrades an existing "ready" entry. */
+function maybePromoteAgentctlReady(
+  store: StoreApi<AppState>,
+  sessionId: string,
+  newState: TaskSessionState | undefined,
+  timestamp: string | undefined,
+): void {
+  if (!newState || !AGENT_LIVE_STATES.has(newState)) return;
+  const current = store.getState().sessionAgentctl?.itemsBySessionId?.[sessionId];
+  if (current?.status === "ready") return;
+  store.getState().setSessionAgentctlStatus(sessionId, {
+    status: "ready",
+    agentExecutionId: current?.agentExecutionId,
+    updatedAt: timestamp,
+  });
 }
 
 /**
@@ -73,7 +98,10 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
   return update;
 }
 
-/** Upsert the session in the per-task sessions list. */
+/** Upsert the session in the per-task sessions list from a WS event.
+ *  Uses `upsertTaskSessionFromEvent` so the per-task list is not marked as
+ *  fully loaded — partial event payloads must not gate the API hydration that
+ *  fills in fields like agent_profile_id / repository_id / worktree_path. */
 function upsertTaskSessionList(
   store: StoreApi<AppState>,
   taskId: string,
@@ -82,49 +110,19 @@ function upsertTaskSessionList(
   payload: any,
   sessionUpdate: Record<string, unknown>,
 ): void {
-  const sessionsByTask = store.getState().taskSessionsByTask.itemsByTaskId[taskId];
   const newState = payload.new_state as TaskSessionState | undefined;
+  const existing = store.getState().taskSessions.items[sessionId];
+  if (!existing && !newState) return;
 
-  if (!sessionsByTask) {
-    // Initialize per-task sessions from WS event so the sidebar can
-    // display up-to-date status even for tasks not yet clicked.
-    if (newState) {
-      store.getState().setTaskSessionsForTask(taskId, [
-        {
-          id: sessionId,
-          task_id: taskId,
-          state: newState,
-          started_at: "",
-          updated_at: "",
-          ...(payload.agent_profile_id ? { agent_profile_id: payload.agent_profile_id } : {}),
-          ...sessionUpdate,
-        },
-      ]);
-    }
-    return;
-  }
-
-  const hasSession = sessionsByTask.some((s) => s.id === sessionId);
-
-  if (!hasSession && newState) {
-    store.getState().setTaskSessionsForTask(taskId, [
-      ...sessionsByTask,
-      {
-        id: sessionId,
-        task_id: taskId,
-        state: newState,
-        started_at: "",
-        updated_at: "",
-        ...(payload.agent_profile_id ? { agent_profile_id: payload.agent_profile_id } : {}),
-        ...sessionUpdate,
-      },
-    ]);
-  } else if (hasSession) {
-    store.getState().setTaskSessionsForTask(
-      taskId,
-      sessionsByTask.map((s) => (s.id === sessionId ? { ...s, ...sessionUpdate } : s)),
-    );
-  }
+  store.getState().upsertTaskSessionFromEvent(taskId, {
+    id: sessionId,
+    task_id: taskId,
+    state: (newState ?? existing?.state) as TaskSessionState,
+    started_at: existing?.started_at ?? "",
+    updated_at: existing?.updated_at ?? "",
+    ...(payload.agent_profile_id ? { agent_profile_id: payload.agent_profile_id } : {}),
+    ...sessionUpdate,
+  });
 }
 
 /** Extract context window data from payload metadata and store it. */
@@ -197,6 +195,32 @@ function maybeAdoptSessionOnTransition(
   }
 }
 
+/** Seed the session→environment mapping from an agentctl event payload.
+ *  Brand-new CREATED sessions never receive a `state_changed` carrying
+ *  `task_environment_id` (no transition fires), so the env mapping would
+ *  otherwise stay empty and env-routed shell terminals stall on
+ *  "Connecting terminal...". Routes through `upsertTaskSessionFromEvent`
+ *  which calls `syncEnvironmentMapping` and merges with any existing row. */
+function syncEnvFromAgentctlPayload(
+  store: StoreApi<AppState>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+): void {
+  const taskId = payload?.task_id;
+  const sessionId = payload?.session_id;
+  const envId = payload?.task_environment_id;
+  if (!taskId || !sessionId || !envId) return;
+  const existing = store.getState().taskSessions.items[sessionId];
+  store.getState().upsertTaskSessionFromEvent(taskId, {
+    id: sessionId,
+    task_id: taskId,
+    state: existing?.state ?? "CREATED",
+    started_at: existing?.started_at ?? "",
+    updated_at: existing?.updated_at ?? "",
+    task_environment_id: envId,
+  });
+}
+
 /** Handle the agentctl_ready event: update session worktree info. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
@@ -228,6 +252,39 @@ function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
   }
 }
 
+interface SessionFailureContext {
+  taskId: string;
+  sessionId: string;
+  newState: TaskSessionState | undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any;
+  previousState: TaskSessionState | undefined;
+}
+
+/** Emits a session-failure notification for FAILED transitions, honoring suppress_toast and replay guards. */
+function maybeNotifySessionFailure(store: StoreApi<AppState>, ctx: SessionFailureContext): void {
+  const { taskId, sessionId, newState, payload, previousState } = ctx;
+  if (newState !== "FAILED") return;
+
+  // Only toast on observed transitions (previousState present and not FAILED).
+  // If previousState is undefined we're learning about this session for the
+  // first time — that's a snapshot of an already-failed session being replayed
+  // by the backend (e.g. on page load / WS reconnect), not a fresh failure.
+  if (
+    payload.suppress_toast === true ||
+    previousState === undefined ||
+    previousState === "FAILED"
+  ) {
+    return;
+  }
+
+  store.getState().setSessionFailureNotification({
+    sessionId,
+    taskId,
+    message: payload.error_message ? String(payload.error_message) : "Session failed unexpectedly",
+  });
+}
+
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "message.queue.status_changed": (message) => {
@@ -252,38 +309,19 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       const sessionUpdate = buildSessionUpdate(payload);
       const existingSession = store.getState().taskSessions.items[sessionId];
 
-      if (existingSession) {
-        store.getState().setTaskSession({ ...existingSession, ...sessionUpdate });
-      } else if (newState) {
-        store.getState().setTaskSession({
-          id: sessionId,
-          task_id: taskId,
-          state: newState as TaskSessionState,
-          started_at: "",
-          updated_at: "",
-          ...(payload.agent_profile_id ? { agent_profile_id: payload.agent_profile_id } : {}),
-          ...sessionUpdate,
-        });
-      }
-
       upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
       extractContextWindow(store, sessionId, payload);
+      maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);
 
       maybeAdoptSessionOnTransition(store, taskId, sessionId, newState, !!existingSession);
 
-      if (
-        newState === "FAILED" &&
-        payload.suppress_toast !== true &&
-        existingSession?.state !== "FAILED" // replay guard; hook dedup is the second layer
-      ) {
-        store.getState().setSessionFailureNotification({
-          sessionId,
-          taskId,
-          message: payload.error_message
-            ? String(payload.error_message)
-            : "Session failed unexpectedly",
-        });
-      }
+      maybeNotifySessionFailure(store, {
+        taskId,
+        sessionId,
+        newState,
+        payload,
+        previousState: existingSession?.state,
+      });
     },
     "session.agentctl_starting": (message) => {
       const payload = message.payload;
@@ -293,6 +331,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         agentExecutionId: payload.agent_execution_id,
         updatedAt: message.timestamp,
       });
+      syncEnvFromAgentctlPayload(store, payload);
     },
     "session.agentctl_ready": (message) => {
       const payload = message.payload;
@@ -302,6 +341,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         agentExecutionId: payload.agent_execution_id,
         updatedAt: message.timestamp,
       });
+      syncEnvFromAgentctlPayload(store, payload);
       handleAgentctlReady(store, payload);
     },
     "session.agentctl_error": (message) => {

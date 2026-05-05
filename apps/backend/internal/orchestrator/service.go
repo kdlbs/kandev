@@ -225,6 +225,9 @@ type Service struct {
 	// Jira service for issue watch dedup operations
 	jiraService JiraService
 
+	// Linear service for issue watch dedup operations
+	linearService LinearService
+
 	// Repository resolver for cloning + finding/creating repos for review tasks
 	repositoryResolver RepositoryResolver
 
@@ -661,6 +664,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Subscribe to JIRA integration events
 	s.subscribeJiraEvents()
+
+	// Subscribe to Linear integration events
+	s.subscribeLinearEvents()
 
 	// Subscribe to clarification events (cancel-and-resume flow)
 	s.subscribeClarificationEvents()

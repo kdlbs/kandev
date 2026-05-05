@@ -207,6 +207,70 @@ func TestLaunchResolveWorkspacePath_NonEphemeralSkipsQuickChatDir(t *testing.T) 
 	require.Empty(t, workspacePath, "non-ephemeral task without repo should NOT get a quick-chat workspace")
 }
 
+// TestLaunch_PromotesWorkspaceOnlyExecution verifies that when Launch finds an
+// existing workspace-only execution in the store (created by a peer
+// EnsureWorkspaceExecutionForSession / GetOrEnsureExecution call), it promotes
+// it in place by populating AgentCommand instead of returning an
+// "already has an agent running" error. This regression test covers the
+// singleflight-collision bug that surfaced as "Task failed to start" toasts on
+// backend restart, where a workspace-only execution was returned to the resume
+// path and StartAgentProcess() then failed with "no agent command configured".
+func TestLaunch_PromotesWorkspaceOnlyExecution(t *testing.T) {
+	mgr := newTestManager()
+
+	// Inject a workspace-only execution: AgentCommand is intentionally empty,
+	// matching what createExecution produces when called from
+	// ensureWorkspaceExecutionLocked.
+	existing := &AgentExecution{
+		ID:             "exec-workspace-only",
+		SessionID:      "session-1",
+		TaskID:         "task-1",
+		AgentProfileID: "profile-1",
+	}
+	require.NoError(t, mgr.executionStore.Add(existing))
+
+	req := &LaunchRequest{
+		TaskID:              "task-1",
+		SessionID:           "session-1",
+		AgentProfileID:      "profile-1",
+		ACPSessionID:        "acp-session-abc",
+		PreviousExecutionID: "exec-prev",
+	}
+
+	got, err := mgr.Launch(context.Background(), req)
+	require.NoError(t, err)
+	require.Same(t, existing, got, "Launch must reuse the workspace-only execution, not create a new one")
+	require.NotEmpty(t, got.AgentCommand, "AgentCommand must be populated by promotion")
+	require.Equal(t, "acp-session-abc", got.ACPSessionID, "ACPSessionID must be carried over from the request")
+	require.True(t, got.isResumedSession, "isResumedSession must be set when PreviousExecutionID is non-empty")
+}
+
+// TestLaunch_RejectsWhenAgentAlreadyRunning verifies the original "already has
+// an agent running" guard still fires when the existing execution is a real
+// agent-equipped one (AgentCommand populated), preventing duplicate launches.
+func TestLaunch_RejectsWhenAgentAlreadyRunning(t *testing.T) {
+	mgr := newTestManager()
+
+	existing := &AgentExecution{
+		ID:             "exec-running",
+		SessionID:      "session-2",
+		TaskID:         "task-2",
+		AgentProfileID: "profile-2",
+		AgentCommand:   "auggie --acp",
+	}
+	require.NoError(t, mgr.executionStore.Add(existing))
+
+	req := &LaunchRequest{
+		TaskID:         "task-2",
+		SessionID:      "session-2",
+		AgentProfileID: "profile-2",
+	}
+
+	_, err := mgr.Launch(context.Background(), req)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already has an agent running")
+}
+
 // TestLaunch_RaceRollback exercises the race window between the step-3 duplicate
 // session pre-check and the step-8 executionStore.Add in Launch. A barrier inside
 // CreateInstance keeps the goroutine in the race window; the test injects a
