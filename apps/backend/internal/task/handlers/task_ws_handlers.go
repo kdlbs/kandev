@@ -249,12 +249,13 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.Repositories != nil {
 		for _, r := range req.Repositories {
 			repos = append(repos, dto.TaskRepositoryInput{
-				RepositoryID:  r.RepositoryID,
-				BaseBranch:    r.BaseBranch,
-				LocalPath:     r.LocalPath,
-				Name:          r.Name,
-				DefaultBranch: r.DefaultBranch,
-				GitHubURL:     r.GitHubURL,
+				RepositoryID:   r.RepositoryID,
+				BaseBranch:     r.BaseBranch,
+				CheckoutBranch: r.CheckoutBranch,
+				LocalPath:      r.LocalPath,
+				Name:           r.Name,
+				DefaultBranch:  r.DefaultBranch,
+				GitHubURL:      r.GitHubURL,
 			})
 		}
 	}
