@@ -741,7 +741,7 @@ type mockCapabilities struct{}
 
 func (m *mockCapabilities) RequiresCloneURL(executorType string) bool {
 	switch models.ExecutorType(executorType) {
-	case models.ExecutorTypeRemoteDocker, models.ExecutorTypeSprites:
+	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker, models.ExecutorTypeSprites:
 		return true
 	default:
 		return false

@@ -649,6 +649,16 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 			req.Metadata = make(map[string]interface{})
 		}
 		req.Metadata["repository_clone_url"] = cloneURL
+
+		// Clone-based remote executors (Sprites, Docker, …) need BaseBranch
+		// in launch metadata so the prepare script's `git clone --branch <X>`
+		// resolves. The local executor must NOT receive BaseBranch on resume:
+		// LocalPreparer would force a `git fetch && git checkout` against
+		// the user's actual workspace and clobber the "use current state" UX.
+		// Worktree executors set their own BaseBranch in the block below.
+		if baseBranch != "" {
+			req.BaseBranch = baseBranch
+		}
 	}
 
 	if shouldUseWorktree(req.ExecutorType) && repositoryPath != "" {
