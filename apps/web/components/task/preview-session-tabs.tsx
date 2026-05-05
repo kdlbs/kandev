@@ -12,12 +12,13 @@ import { useSessionResumption } from "@/hooks/domains/session/use-session-resump
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import type { AgentProfileOption } from "@/lib/state/slices";
-import type { TaskSession, TaskSessionState } from "@/lib/types/http";
+import type { TaskSession } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { PassthroughTerminal } from "./passthrough-terminal";
 import { TaskChatPanel } from "./task-chat-panel";
 import {
   buildAgentLabelsById,
+  isSessionActive,
   pickActiveSessionId,
   resolveAgentLabelFor,
   sortSessions,
@@ -173,10 +174,6 @@ function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId:
       <TaskChatPanel onSend={handleSendMessage} sessionId={session.id} hideSessionsDropdown />
     </div>
   );
-}
-
-function isSessionActive(state: TaskSessionState): boolean {
-  return state === "RUNNING" || state === "STARTING";
 }
 
 function RunningSpinner() {

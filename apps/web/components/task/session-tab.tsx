@@ -26,6 +26,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { TaskSessionState } from "@/lib/types/http";
+import { isSessionActive } from "./session-sort";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 
 function isStoppable(s: TaskSessionState) {
@@ -318,7 +319,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
               </span>
             )}
             {agentName &&
-              (sessionState === "RUNNING" || sessionState === "STARTING" ? (
+              (isSessionActive(sessionState) ? (
                 <GridSpinner
                   className={`ml-1.5 shrink-0 text-[14px] text-blue-500${isActive ? "" : " opacity-50"}`}
                 />
