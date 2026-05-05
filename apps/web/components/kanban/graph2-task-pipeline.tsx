@@ -264,7 +264,7 @@ export function Graph2TaskPipeline({
   const showCheckbox = isMultiSelectMode || !!isSelected;
 
   const handleTaskClick = () => {
-    if (isMultiSelectMode) {
+    if (isMultiSelectMode || isSelected) {
       onToggleSelect?.(task.id);
       return;
     }

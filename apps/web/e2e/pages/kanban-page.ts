@@ -92,8 +92,8 @@ export class KanbanPage {
 
   async switchToPipelineView() {
     await this.viewTogglePipeline.first().click();
-    // Wait for the pipeline view to render — the kanban board container is gone in pipeline view.
-    await this.page.locator('[data-testid="swimlane-container"]').first().waitFor();
+    // Wait for a pipeline-specific element — swimlane-container is shared with the kanban view.
+    await this.page.locator('[data-testid^="pipeline-task-"]').first().waitFor();
   }
 
   async selectPipelineTask(taskId: string) {
