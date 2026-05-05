@@ -117,6 +117,36 @@ func TestSpritesFallbackToFreshSandboxEmitsWarningAndMutatesPlan(t *testing.T) {
 	}
 }
 
+func TestSpritesFallbackNamesBaseBranchInWarningDetail(t *testing.T) {
+	r := newTestSpritesExecutor(nil)
+	plan := newSpritesProgressPlan(true)
+	var emitted []PrepareStep
+
+	// After Fix 1 (preserve BaseBranch on resume for clone-based executors),
+	// the fallback request always carries MetadataKeyBaseBranch — this test
+	// locks in that the user-facing warning detail names the actual base
+	// branch rather than the "(unknown)" placeholder.
+	req := &ExecutorCreateRequest{
+		InstanceID: "abcdef0123456789aaaa",
+		Metadata: map[string]interface{}{
+			MetadataKeyBaseBranch: "main",
+		},
+	}
+	r.fallbackToFreshSandbox(req, plan, func(_ spritesStepKey, step PrepareStep) {
+		emitted = append(emitted, step)
+	}, "kandev-old1234567890")
+
+	if len(emitted) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(emitted))
+	}
+	if !strings.Contains(emitted[0].WarningDetail, "branch main") {
+		t.Fatalf("warning detail should name base branch, got %q", emitted[0].WarningDetail)
+	}
+	if !strings.Contains(emitted[0].Output, "Branch: main") {
+		t.Fatalf("output should name base branch, got %q", emitted[0].Output)
+	}
+}
+
 func TestSpritesFallbackUsesPlaceholderBranchWhenMissing(t *testing.T) {
 	r := newTestSpritesExecutor(nil)
 	plan := newSpritesProgressPlan(true)
