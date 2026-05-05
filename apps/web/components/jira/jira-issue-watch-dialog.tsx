@@ -15,11 +15,21 @@ import {
 } from "@kandev/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Textarea } from "@kandev/ui/textarea";
+import { IconInfoCircle } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
 import { searchJiraTickets } from "@/lib/api/domains/jira-api";
+import {
+  ScriptEditor,
+  computeEditorHeight,
+} from "@/components/settings/profile-edit/script-editor";
+import {
+  JIRA_ISSUE_WATCH_PLACEHOLDERS,
+  DEFAULT_JIRA_ISSUE_WATCH_PROMPT,
+} from "@/components/jira/jira-issue-watch-placeholders";
 import type {
   CreateJiraIssueWatchInput,
   JiraIssueWatch,
@@ -52,7 +62,6 @@ type FormState = {
 };
 
 const DEFAULT_JQL = `project = PROJ AND status = "Open" ORDER BY created DESC`;
-const DEFAULT_PROMPT = `Investigate JIRA ticket {{issue.key}}: {{issue.summary}}\n\n{{issue.url}}`;
 
 function makeEmptyForm(workspaceId: string): FormState {
   return {
@@ -62,7 +71,7 @@ function makeEmptyForm(workspaceId: string): FormState {
     workflowStepId: "",
     agentProfileId: "",
     executorProfileId: "",
-    prompt: DEFAULT_PROMPT,
+    prompt: DEFAULT_JIRA_ISSUE_WATCH_PROMPT,
     enabled: true,
     pollInterval: 300,
   };
@@ -76,7 +85,7 @@ function formStateFromWatch(w: JiraIssueWatch): FormState {
     workflowStepId: w.workflowStepId,
     agentProfileId: w.agentProfileId,
     executorProfileId: w.executorProfileId,
-    prompt: w.prompt || DEFAULT_PROMPT,
+    prompt: w.prompt.trim() ? w.prompt : DEFAULT_JIRA_ISSUE_WATCH_PROMPT,
     enabled: w.enabled,
     pollInterval: w.pollIntervalSeconds,
   };
@@ -183,22 +192,49 @@ function JQLField({ jql, onChange }: { jql: string; onChange: (v: string) => voi
   );
 }
 
+function PlaceholdersHelp() {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground/50 hover:text-muted-foreground cursor-help shrink-0" />
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs" align="start">
+          <p className="text-xs font-medium mb-1">Available placeholders:</p>
+          <ul className="text-xs space-y-0.5">
+            {JIRA_ISSUE_WATCH_PLACEHOLDERS.map((p) => (
+              <li key={p.key}>
+                <code className="text-[10px] bg-white/15 px-1 rounded">{`{{${p.key}}}`}</code>{" "}
+                <span className="opacity-70">{p.description}</span>
+              </li>
+            ))}
+          </ul>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 function PromptField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <div className="space-y-1.5">
-      <Label>Task Prompt</Label>
+      <div className="flex items-center gap-1.5">
+        <Label>Task Prompt</Label>
+        <PlaceholdersHelp />
+      </div>
       <p className="text-xs text-muted-foreground">
-        Sent to the agent for each new ticket. Placeholders: {`{{issue.key}}`},{" "}
-        {`{{issue.summary}}`}, {`{{issue.url}}`}, {`{{issue.status}}`}, {`{{issue.priority}}`},{" "}
-        {`{{issue.type}}`}, {`{{issue.assignee}}`}, {`{{issue.reporter}}`}, {`{{issue.project}}`},{" "}
-        {`{{issue.description}}`}.
+        The prompt sent to the agent for each new ticket. Type {"{{"} to insert placeholders.
       </p>
-      <Textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        rows={5}
-        className="text-sm resize-y"
-      />
+      <div className="rounded-md border border-border overflow-hidden">
+        <ScriptEditor
+          value={value}
+          onChange={onChange}
+          language="markdown"
+          height={computeEditorHeight(value)}
+          lineNumbers="off"
+          placeholders={JIRA_ISSUE_WATCH_PLACEHOLDERS}
+        />
+      </div>
     </div>
   );
 }

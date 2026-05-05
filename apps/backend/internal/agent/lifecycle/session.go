@@ -406,7 +406,7 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 		go func() {
 			promptCtx, cancel := appctx.Detached(ctx, sm.stopCh, 0)
 			defer cancel()
-			_, err := sm.SendPrompt(promptCtx, execution, effectivePrompt, false, acpAttachments)
+			_, err := sm.SendPrompt(promptCtx, execution, effectivePrompt, false, acpAttachments, false)
 			if err != nil {
 				sm.logger.Error("initial prompt failed",
 					zap.String("execution_id", execution.ID),
@@ -523,6 +523,9 @@ func (sm *SessionManager) waitForPromptDone(ctx context.Context, execution *Agen
 
 // SendPrompt sends a prompt to an agent execution and waits for completion.
 // For initial prompts, pass validateStatus=false. For follow-up prompts, pass validateStatus=true.
+// When dispatchOnly is true, returns once agentctl.Prompt has accepted the prompt
+// instead of blocking on the agent's complete event — used by the MCP message_task
+// path so the tool call doesn't hang for the duration of the target's turn.
 // Attachments (images) are passed to the agent if provided.
 // Returns the prompt result containing the stop reason and agent message.
 // Note: MarkReady is handled by handleAgentEvent(complete), not by this method.
@@ -532,13 +535,28 @@ func (sm *SessionManager) SendPrompt(
 	prompt string,
 	validateStatus bool,
 	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
 ) (*PromptResult, error) {
 	if execution.agentctl == nil {
 		return nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
 
+	// Drain any stale signal left in the channel by a prior dispatch-only prompt
+	// whose completion arrived after SendPrompt returned. Without this, the next
+	// waitForPromptDone would consume the stale signal and report an immediate
+	// (wrong) completion for the new prompt.
+	select {
+	case <-execution.promptDoneCh:
+	default:
+	}
+
 	// Signal when this prompt completes so CancelAgent can wait for it.
-	defer beginPromptBarrier(execution)()
+	// In dispatch-only mode there is no in-flight wait to coordinate with, so the
+	// barrier is unused — skip it to avoid closing the channel before the agent's
+	// async processing actually finishes.
+	if !dispatchOnly {
+		defer beginPromptBarrier(execution)()
+	}
 
 	// Inject session trace context so prompt spans become children of the session span
 	if sessionSpan := trace.SpanFromContext(execution.SessionTraceContext()); sessionSpan.SpanContext().IsValid() {
@@ -591,6 +609,9 @@ func (sm *SessionManager) SendPrompt(
 				zap.String("execution_id", execution.ID))
 			retryErr := sm.retryPromptAfterReconnect(ctx, execution, effectivePrompt, attachments)
 			if retryErr == nil {
+				if dispatchOnly {
+					return &PromptResult{StopReason: PromptStopReasonDispatched}, nil
+				}
 				return sm.waitForPromptDone(ctx, execution)
 			}
 			sm.logger.Warn("prompt retry after stream reconnect failed",
@@ -601,6 +622,10 @@ func (sm *SessionManager) SendPrompt(
 			zap.String("execution_id", execution.ID),
 			zap.Error(err))
 		return nil, fmt.Errorf("failed to trigger prompt: %w", err)
+	}
+
+	if dispatchOnly {
+		return &PromptResult{StopReason: PromptStopReasonDispatched}, nil
 	}
 
 	// Wait for completion signal from handleAgentEvent(complete) or stream disconnect.

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -133,6 +134,12 @@ type Adapter struct {
 	// Used by SetModel to validate the requested model exists.
 	availableModels []acp.UnstableModelInfo
 
+	// Available auth methods captured from the ACP initialize response.
+	// Re-emitted via EventTypeAuthRequired when session/new fails with the
+	// AuthenticationRequired error code so the frontend can surface a picker
+	// without re-running initialize.
+	availableAuthMethods []streams.AuthMethodInfo
+
 	// Available modes from the most recent session creation/load.
 	// Used by SetMode to include cached modes in the event so the
 	// frontend mode selector can render available options.
@@ -255,13 +262,19 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		zap.String("agent_version", a.agentInfo.Version),
 		zap.Bool("supports_load_session", a.capabilities.LoadSession))
 
+	// Cache auth methods so we can re-emit them on auth_required without re-running initialize.
+	authMethods := convertAuthMethods(resp.AuthMethods)
+	a.mu.Lock()
+	a.availableAuthMethods = authMethods
+	a.mu.Unlock()
+
 	// Emit agent capabilities event with prompt capabilities and auth methods
 	a.sendUpdate(AgentEvent{
 		Type:                    streams.EventTypeAgentCapabilities,
 		SupportsImage:           a.capabilities.PromptCapabilities.Image,
 		SupportsAudio:           a.capabilities.PromptCapabilities.Audio,
 		SupportsEmbeddedContext: a.capabilities.PromptCapabilities.EmbeddedContext,
-		AuthMethods:             convertAuthMethods(resp.AuthMethods),
+		AuthMethods:             authMethods,
 	})
 
 	return nil
@@ -305,6 +318,9 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	})
 	if err != nil {
 		span.RecordError(err)
+		if a.maybeEmitAuthRequired(err) {
+			return "", fmt.Errorf("authentication required: %w", err)
+		}
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
 
@@ -1402,6 +1418,68 @@ func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
 	})
 	if err != nil {
 		return fmt.Errorf("set session model failed: %w", err)
+	}
+	return nil
+}
+
+// maybeEmitAuthRequired inspects an ACP error and, if it represents an
+// AuthenticationRequired (-32000) failure, emits an EventTypeAuthRequired
+// carrying the cached auth methods so the frontend can drive the
+// authenticate → session/new retry. Returns true when the event was emitted.
+//
+// The emitted event has no SessionID by design: the failure occurred while
+// session/new was attempting to create a session, so no session ID exists
+// yet. Consumers that correlate events by session must treat
+// EventTypeAuthRequired as a connection-scoped (not session-scoped) signal.
+//
+// Returns false when no auth methods are cached. Without methods to choose
+// from, the frontend can't drive the picker — letting the error fall through
+// to the generic "failed to create session" path is more actionable than a
+// pseudo-auth-required signal with no options.
+func (a *Adapter) maybeEmitAuthRequired(err error) bool {
+	var reqErr *acp.RequestError
+	if !errors.As(err, &reqErr) || reqErr.Code != -32000 {
+		return false
+	}
+
+	a.mu.RLock()
+	methods := a.availableAuthMethods
+	a.mu.RUnlock()
+
+	if len(methods) == 0 {
+		return false
+	}
+
+	a.sendUpdate(AgentEvent{
+		Type:        streams.EventTypeAuthRequired,
+		AuthMethods: methods,
+		Error:       reqErr.Message,
+	})
+	return true
+}
+
+// SetConfigOption sets a session configuration option via ACP session/set_config_option.
+// configID is the option's ID; value is the option-value ID to apply.
+func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) error {
+	a.mu.RLock()
+	conn := a.acpConn
+	sessionID := a.sessionID
+	a.mu.RUnlock()
+
+	if conn == nil {
+		return fmt.Errorf("adapter not initialized")
+	}
+	if sessionID == "" {
+		return fmt.Errorf("no active session: call NewSession before SetConfigOption")
+	}
+
+	_, err := conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
+		SessionId: acp.SessionId(sessionID),
+		ConfigId:  acp.SessionConfigId(configID),
+		Value:     acp.SessionConfigValueId(value),
+	})
+	if err != nil {
+		return fmt.Errorf("set session config option failed: %w", err)
 	}
 	return nil
 }

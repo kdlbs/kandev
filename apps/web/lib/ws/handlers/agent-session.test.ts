@@ -16,6 +16,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     taskSessionsByTask: { itemsByTaskId: {} },
     setTaskSession: vi.fn(),
     setTaskSessionsForTask: vi.fn(),
+    upsertTaskSessionFromEvent: vi.fn(),
     setActiveSession: vi.fn(),
     setActiveSessionAuto: vi.fn(),
     setSessionFailureNotification: vi.fn(),
@@ -90,7 +91,10 @@ describe("session.state_changed handler", () => {
     expect(store.getState().setSessionFailureNotification).not.toHaveBeenCalled();
   });
 
-  it("sets failure notification for unknown session (first event)", () => {
+  it("does not set failure notification for unknown session (snapshot replay)", () => {
+    // When a session is replayed on reconnect/page-load, it lands in the FE
+    // store for the first time already in FAILED state. This is not a real
+    // transition we just observed, so no toast should fire.
     store = makeStore();
     handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
 
@@ -103,11 +107,7 @@ describe("session.state_changed handler", () => {
       }),
     );
 
-    expect(store.getState().setSessionFailureNotification).toHaveBeenCalledWith({
-      sessionId: "s-new",
-      taskId: "t-1",
-      message: "timeout",
-    });
+    expect(store.getState().setSessionFailureNotification).not.toHaveBeenCalled();
   });
 
   it("respects suppress_toast flag", () => {
@@ -452,5 +452,193 @@ describe("session.state_changed → respects user-pinned session", () => {
 
     expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
     expect(store.getState().setActiveSession).not.toHaveBeenCalled();
+  });
+});
+
+// eslint-disable-next-line max-lines-per-function -- test describe block, splitting hurts readability
+describe("session.state_changed → agentctl ready fallback", () => {
+  const TS = "2026-05-04T00:00:00Z";
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("promotes agentctl status to 'ready' when session enters RUNNING and ready event was missed", () => {
+    const setSessionAgentctlStatus = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "STARTING" } },
+      },
+      sessionAgentctl: { itemsBySessionId: { "s-1": { status: "starting" } } },
+      setSessionAgentctlStatus,
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: STATE_CHANGED_EVENT,
+      timestamp: TS,
+      payload: { task_id: "t-1", session_id: "s-1", new_state: "RUNNING" },
+    });
+
+    expect(setSessionAgentctlStatus).toHaveBeenCalledWith(
+      "s-1",
+      expect.objectContaining({ status: "ready" }),
+    );
+  });
+
+  it("promotes agentctl status to 'ready' on WAITING_FOR_INPUT even when no prior entry exists", () => {
+    const setSessionAgentctlStatus = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "STARTING" } },
+      },
+      sessionAgentctl: { itemsBySessionId: {} },
+      setSessionAgentctlStatus,
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: STATE_CHANGED_EVENT,
+      timestamp: TS,
+      payload: { task_id: "t-1", session_id: "s-1", new_state: "WAITING_FOR_INPUT" },
+    });
+
+    expect(setSessionAgentctlStatus).toHaveBeenCalledWith(
+      "s-1",
+      expect.objectContaining({ status: "ready" }),
+    );
+  });
+
+  it("does not re-set 'ready' when the session is already ready", () => {
+    const setSessionAgentctlStatus = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "RUNNING" } },
+      },
+      sessionAgentctl: { itemsBySessionId: { "s-1": { status: "ready" } } },
+      setSessionAgentctlStatus,
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: STATE_CHANGED_EVENT,
+      timestamp: TS,
+      payload: { task_id: "t-1", session_id: "s-1", new_state: "WAITING_FOR_INPUT" },
+    });
+
+    expect(setSessionAgentctlStatus).not.toHaveBeenCalled();
+  });
+
+  it("seeds env mapping from agentctl_starting payload via upsertTaskSessionFromEvent", () => {
+    const upsertTaskSessionFromEvent = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "CREATED" } },
+      },
+      sessionAgentctl: { itemsBySessionId: {} },
+      setSessionAgentctlStatus: vi.fn(),
+      upsertTaskSessionFromEvent,
+    });
+    const handler = registerTaskSessionHandlers(store)["session.agentctl_starting"]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: "session.agentctl_starting",
+      timestamp: TS,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        agent_execution_id: "ae-1",
+        task_environment_id: "env-1",
+      },
+    });
+
+    expect(upsertTaskSessionFromEvent).toHaveBeenCalledWith(
+      "t-1",
+      expect.objectContaining({ id: "s-1", task_environment_id: "env-1" }),
+    );
+  });
+
+  it("seeds env mapping from agentctl_ready payload", () => {
+    const upsertTaskSessionFromEvent = vi.fn();
+    const store = makeStore({
+      taskSessions: { items: {} },
+      sessionAgentctl: { itemsBySessionId: {} },
+      setSessionAgentctlStatus: vi.fn(),
+      upsertTaskSessionFromEvent,
+      setWorktree: vi.fn(),
+      sessionWorktreesBySessionId: { itemsBySessionId: {} },
+      setSessionWorktrees: vi.fn(),
+    });
+    const handler = registerTaskSessionHandlers(store)["session.agentctl_ready"]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: "session.agentctl_ready",
+      timestamp: TS,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        agent_execution_id: "ae-1",
+        task_environment_id: "env-1",
+      },
+    });
+
+    expect(upsertTaskSessionFromEvent).toHaveBeenCalledWith(
+      "t-1",
+      expect.objectContaining({ id: "s-1", task_environment_id: "env-1" }),
+    );
+  });
+
+  it("does not call upsertTaskSessionFromEvent when agentctl payload omits task_environment_id", () => {
+    const upsertTaskSessionFromEvent = vi.fn();
+    const store = makeStore({
+      taskSessions: { items: {} },
+      sessionAgentctl: { itemsBySessionId: {} },
+      setSessionAgentctlStatus: vi.fn(),
+      upsertTaskSessionFromEvent,
+    });
+    const handler = registerTaskSessionHandlers(store)["session.agentctl_starting"]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: "session.agentctl_starting",
+      timestamp: TS,
+      payload: { task_id: "t-1", session_id: "s-1", agent_execution_id: "ae-1" },
+    });
+
+    expect(upsertTaskSessionFromEvent).not.toHaveBeenCalled();
+  });
+
+  it("does not promote on non-live states (STARTING, COMPLETED, FAILED)", () => {
+    const setSessionAgentctlStatus = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "CREATED" } },
+      },
+      sessionAgentctl: { itemsBySessionId: {} },
+      setSessionAgentctlStatus,
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    for (const newState of ["STARTING", "COMPLETED", "FAILED", "CANCELLED"]) {
+      handler({
+        id: "m",
+        type: "notification",
+        action: STATE_CHANGED_EVENT,
+        timestamp: TS,
+        payload: { task_id: "t-1", session_id: "s-1", new_state: newState },
+      });
+    }
+
+    expect(setSessionAgentctlStatus).not.toHaveBeenCalled();
   });
 });

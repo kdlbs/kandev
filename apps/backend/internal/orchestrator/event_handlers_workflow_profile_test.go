@@ -117,7 +117,7 @@ func TestSwitchSessionForStep(t *testing.T) {
 			State:       v1.TaskStateInProgress,
 		}
 
-		agentMgr := &mockAgentManager{}
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 		log := testLogger()
 		exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 		sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
@@ -221,7 +221,7 @@ func TestSwitchSessionForStep_ReusesExistingProfileSession(t *testing.T) {
 		Title: "Test", Description: "Test", State: v1.TaskStateInProgress,
 	}
 
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	log := testLogger()
 	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
@@ -349,7 +349,7 @@ func TestSwitchSessionForStep_ReusesPreviouslyLaunchedSession(t *testing.T) {
 		Title: "Test", Description: "Test", State: v1.TaskStateInProgress,
 	}
 
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	log := testLogger()
 	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
@@ -441,7 +441,7 @@ func TestSwitchSessionForStep_ReusesFailedSession(t *testing.T) {
 		Title: "Test", Description: "Test", State: v1.TaskStateInProgress,
 	}
 
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	log := testLogger()
 	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
@@ -532,7 +532,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		}
 		sg.steps["step2"] = step
 
-		agentMgr := &mockAgentManager{}
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 		log := testLogger()
 		exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 		sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
@@ -769,7 +769,7 @@ func TestSwitchSessionForStep_PreservesOldSessionOnFailure(t *testing.T) {
 		taskRepo := newMockTaskRepo()
 		taskRepo.getTaskErr = errors.New("task store unavailable")
 
-		agentMgr := &mockAgentManager{}
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 		log := testLogger()
 		exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 		sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})

@@ -336,3 +336,39 @@ func TestParseResumeFromArgs(t *testing.T) {
 		})
 	}
 }
+
+func TestParseFailOnResumeFromArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{
+			name: "absent",
+			args: []string{"mock-agent", "--tui"},
+			want: false,
+		},
+		{
+			name: "present alone",
+			args: []string{"mock-agent", "--tui", "--fail-on-resume"},
+			want: true,
+		},
+		{
+			name: "present with -c",
+			args: []string{"mock-agent", "--tui", "-c", "--fail-on-resume"},
+			want: true,
+		},
+		{
+			name: "present interleaved with other flags",
+			args: []string{"mock-agent", "--fail-on-resume", "--tui", "--model", "mock-fast"},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseFailOnResumeFromArgs(tt.args); got != tt.want {
+				t.Errorf("parseFailOnResumeFromArgs(%v) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}

@@ -17,7 +17,11 @@ import (
 )
 
 // LocalPreparer prepares a local (non-worktree) execution environment.
-// Steps: validate workspace → checkout branch (if set) → run setup script (if any).
+// Steps: validate workspace → checkout target branch (only when it differs
+// from the workspace's current branch) → run setup script (if any).
+// "Switching branches" is an explicit user choice from the chip; matching
+// values are treated as "use current state" and no git ops fire. Creating
+// a new branch is a separate flow (handlers.applyFreshBranch).
 type LocalPreparer struct {
 	logger *logger.Logger
 }
@@ -31,6 +35,18 @@ func NewLocalPreparer(log *logger.Logger) *LocalPreparer {
 
 func (p *LocalPreparer) Name() string { return "local" }
 
+// Prepare runs the local-executor environment preparation: validate the
+// workspace path → checkout target branch (only when explicitly different
+// from the current branch) → run setup script (if any). The checkout step
+// is skipped when the request's effective branch matches the workspace's
+// current branch, so "use current state" submissions (chip unchanged) never
+// touch the working tree — this includes the case where resolveTaskRepoInfo
+// has fallen back to the repo's default branch and that default happens to
+// equal what the user is already on.
+//
+// Creating a new branch from a base is a separate flow handled before
+// launch (handlers.applyFreshBranch → service.PerformFreshBranch), not
+// here. The local preparer only ever switches between existing branches.
 func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onProgress PrepareProgressCallback) (*EnvPrepareResult, error) {
 	start := time.Now()
 	var steps []PrepareStep
@@ -41,7 +57,7 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 	}
 	resolvedScript := resolvePreparerSetupScript(req, workspacePath)
 
-	// Determine effective branch: CheckoutBranch (PR head) takes priority over BaseBranch.
+	// CheckoutBranch (PR head) takes priority over BaseBranch when both set.
 	effectiveBranch := req.CheckoutBranch
 	if effectiveBranch == "" {
 		effectiveBranch = req.BaseBranch
@@ -70,24 +86,38 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 	reportProgress(onProgress, step, stepIdx, totalSteps)
 	stepIdx++
 
-	// Step 2: Checkout branch (if specified)
+	// Step 2: Checkout target branch (only when it differs from current).
 	if effectiveBranch != "" {
-		step = beginStep("Checkout branch")
-		step.Command = fmt.Sprintf("git fetch origin %s && git checkout %s", effectiveBranch, effectiveBranch)
-		reportProgress(onProgress, step, stepIdx, totalSteps)
-		output, err := checkoutBranch(ctx, workspacePath, effectiveBranch)
-		if err != nil {
-			errMsg := fmt.Sprintf("failed to checkout branch %q: %s", effectiveBranch, output)
-			completeStepError(&step, errMsg)
+		currentBranch := readCurrentBranchForLocal(workspacePath)
+		if currentBranch != "" && currentBranch == effectiveBranch {
+			// Workspace already on the target branch — "use current state"
+			// path, no git ops, no risk of failing on dirty/unmerged index.
+			step = beginStep("Checkout branch")
+			step.Command = fmt.Sprintf("git checkout %s", effectiveBranch)
+			step.Output = fmt.Sprintf("already on %q, skipping", effectiveBranch)
+			completeStepSuccess(&step)
 			steps = append(steps, step)
 			reportProgress(onProgress, step, stepIdx, totalSteps)
-			return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: errMsg, Duration: time.Since(start)}, fmt.Errorf("checkout branch: %w", err)
+			stepIdx++
+		} else {
+			// User picked a different branch — switch the working tree.
+			step = beginStep("Checkout branch")
+			step.Command = fmt.Sprintf("git fetch origin %s && git checkout %s", effectiveBranch, effectiveBranch)
+			reportProgress(onProgress, step, stepIdx, totalSteps)
+			output, err := checkoutBranch(ctx, workspacePath, effectiveBranch)
+			if err != nil {
+				errMsg := fmt.Sprintf("failed to checkout branch %q: %s", effectiveBranch, output)
+				completeStepError(&step, errMsg)
+				steps = append(steps, step)
+				reportProgress(onProgress, step, stepIdx, totalSteps)
+				return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: errMsg, Duration: time.Since(start)}, fmt.Errorf("checkout branch: %w", err)
+			}
+			step.Output = output
+			completeStepSuccess(&step)
+			steps = append(steps, step)
+			reportProgress(onProgress, step, stepIdx, totalSteps)
+			stepIdx++
 		}
-		step.Output = output
-		completeStepSuccess(&step)
-		steps = append(steps, step)
-		reportProgress(onProgress, step, stepIdx, totalSteps)
-		stepIdx++
 	}
 
 	// Step 3: Run setup script (if provided)
@@ -103,18 +133,33 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 	}, nil
 }
 
+// readCurrentBranchForLocal returns the workspace's currently-checked-out
+// branch name, or "" when HEAD is detached, the dir is not a git repo, or
+// git is unavailable. Used to short-circuit a same-branch checkout that
+// would otherwise touch the working tree (and fail on dirty/unmerged index).
+//
+// Uses `git symbolic-ref --short HEAD` instead of reading .git/HEAD directly:
+// the workspace_path may be a worktree pointer file or a submodule, both of
+// which git resolves correctly while a manual HEAD read would not.
+func readCurrentBranchForLocal(workDir string) string {
+	cmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
+	cmd.Dir = workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // checkoutBranch ensures a branch is checked out in the given working directory.
-// It first tries to fetch the latest from origin, then checks out the branch.
-// If fetch fails (no remote, offline), it falls back to the local branch.
+// Best-effort fetch first so newly-created remote branches are visible, then
+// the checkout. If the local branch doesn't exist but the remote tracking
+// branch does (from the fetch), git creates a local branch tracking it.
 func checkoutBranch(ctx context.Context, workDir, branch string) (string, error) {
-	// Try to fetch the latest from origin (best-effort).
 	fetchCmd := exec.CommandContext(ctx, "git", "fetch", "origin", branch)
 	fetchCmd.Dir = workDir
 	fetchCmd.Run() //nolint:errcheck // fetch failure is non-fatal, we fall back to local
 
-	// Checkout the branch. If the local branch doesn't exist but the remote
-	// tracking branch does (from the fetch above), git will create a local
-	// branch tracking the remote automatically.
 	cmd := exec.CommandContext(ctx, "git", "checkout", branch)
 	cmd.Dir = workDir
 	out, err := cmd.CombinedOutput()

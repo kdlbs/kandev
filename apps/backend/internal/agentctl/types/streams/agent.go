@@ -54,6 +54,12 @@ const (
 
 	// EventTypeSessionModels indicates available models from ACP session/new.
 	EventTypeSessionModels = "session_models"
+
+	// EventTypeAuthRequired indicates the agent rejected session/new with an
+	// authentication-required error. The event carries the available auth
+	// methods (from ACP initialize); the client picks one and replays the
+	// authenticate → session/new round-trip.
+	EventTypeAuthRequired = "auth_required"
 )
 
 // Session status constants for EventTypeSessionStatus events.

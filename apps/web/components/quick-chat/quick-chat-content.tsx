@@ -117,7 +117,7 @@ export const QuickChatContent = memo(function QuickChatContent({
         </div>
       )}
       {isQueued && queuedMessage && (
-        <div className="flex-shrink-0 border-t border-blue-400/30 bg-card px-3 py-1">
+        <div className="flex-shrink-0 bg-card px-3 pt-1.5">
           <QueuedMessageIndicator
             ref={queuedMessageRef}
             content={queuedMessage.content}

@@ -70,7 +70,7 @@ func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecuti
 	return m.StopAgent(ctx, agentExecutionID, force)
 }
 
-func (m *mockAgentManager) PromptAgent(ctx context.Context, agentExecutionID string, prompt string, _ []v1.MessageAttachment) (*PromptResult, error) {
+func (m *mockAgentManager) PromptAgent(ctx context.Context, agentExecutionID string, prompt string, _ []v1.MessageAttachment, _ bool) (*PromptResult, error) {
 	return nil, nil
 }
 
@@ -459,7 +459,6 @@ func (m *mockRepository) GetTaskSessionByTaskID(ctx context.Context, taskID stri
 func (m *mockRepository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	return nil, nil
 }
-func (m *mockRepository) ClearSessionExecutionID(ctx context.Context, id string) error { return nil }
 func (m *mockRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	return nil, nil
 }
@@ -610,6 +609,13 @@ func (m *mockRepository) GetExecutorRunningBySessionID(ctx context.Context, sess
 }
 func (m *mockRepository) DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error {
 	return nil
+}
+func (m *mockRepository) HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error) {
+	if m.executorsRunning != nil {
+		_, ok := m.executorsRunning[sessionID]
+		return ok, nil
+	}
+	return false, nil
 }
 
 // Environment operations

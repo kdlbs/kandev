@@ -12,6 +12,7 @@ import {
   IconLock,
 } from "@tabler/icons-react";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@kandev/ui/collapsible";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { AgentLogo } from "@/components/agent-logo";
 import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
 import type { AvailableAgent, ToolStatus } from "@/lib/types/http";
@@ -56,26 +57,42 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function StatusPill({ status }: { status: string }) {
+function StatusPill({ status, error }: { status: string; error?: string }) {
   switch (status) {
-    case "auth_required":
-      return (
+    case "auth_required": {
+      const pill = (
         <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
           <IconLock className="h-3.5 w-3.5" />
           No auth
         </span>
       );
+      if (!error) return pill;
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>{pill}</TooltipTrigger>
+          <TooltipContent className="max-w-sm">{error}</TooltipContent>
+        </Tooltip>
+      );
+    }
     case "not_installed":
       return (
         <span className="flex items-center gap-1 text-xs text-muted-foreground">Not installed</span>
       );
-    case "failed":
-      return (
+    case "failed": {
+      const pill = (
         <span className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
           <IconAlertTriangle className="h-3.5 w-3.5" />
           Error
         </span>
       );
+      if (!error) return pill;
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>{pill}</TooltipTrigger>
+          <TooltipContent className="max-w-sm">{error}</TooltipContent>
+        </Tooltip>
+      );
+    }
     case "probing":
       return (
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -130,7 +147,7 @@ function InstalledAgentRow({
               {modelName}
             </span>
           )}
-          <StatusPill status={status} />
+          <StatusPill status={status} error={agent.model_config.error} />
           <IconChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
         </button>
       </CollapsibleTrigger>

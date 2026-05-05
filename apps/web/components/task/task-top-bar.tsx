@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, type ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import Link from "next/link";
 import { IconBug, IconDots, IconHome, IconSettings } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -21,12 +21,9 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { EditorsMenu } from "@/components/task/editors-menu";
-import { BranchPathPopover } from "@/components/task/branch-path-popover";
 import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
 import { DocumentControls } from "@/components/task/document/document-controls";
-import { VcsSplitButton } from "@/components/vcs-split-button";
 import { PRTopbarButton } from "@/components/github/pr-topbar-button";
 import { JiraTicketButton, extractJiraKey } from "@/components/jira/jira-ticket-button";
 import { JiraLinkButton } from "@/components/jira/jira-link-button";
@@ -44,23 +41,15 @@ import {
 } from "@/components/task/topbar-action-overflow";
 import { IntegrationsMenu } from "@/components/integrations/integrations-menu";
 import { DEBUG_UI } from "@/lib/config";
-import { toast } from "sonner";
 
 type TaskTopBarProps = {
   taskId?: string | null;
   activeSessionId?: string | null;
   taskTitle?: string;
-  baseBranch?: string;
   onStartAgent?: (agentProfileId: string) => void;
   onStopAgent?: () => void;
   isAgentRunning?: boolean;
   isAgentLoading?: boolean;
-  worktreePath?: string | null;
-  worktreeBranch?: string | null;
-  repositoryPath?: string | null;
-  repositoryName?: string | null;
-  /** Total repositories on the task; used to render a "+N" chip on the breadcrumb. */
-  repositoryCount?: number;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   workflowSteps?: WorkflowStepperStep[];
@@ -82,11 +71,6 @@ type TopBarLeftProps = {
   taskId?: string | null;
   activeSessionId?: string | null;
   taskTitle?: string;
-  repositoryName?: string | null;
-  repositoryCount?: number;
-  displayBranch?: string;
-  repositoryPath?: string | null;
-  worktreePath?: string | null;
   isRemoteExecutor?: boolean;
   remoteExecutorName?: string | null;
   remoteExecutorType?: string | null;
@@ -94,19 +78,12 @@ type TopBarLeftProps = {
   remoteCreatedAt?: string | null;
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
-  onRenameBranch?: (newName: string) => Promise<void>;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
   taskId,
   activeSessionId,
   taskTitle,
-  baseBranch,
-  worktreePath,
-  worktreeBranch,
-  repositoryPath,
-  repositoryName,
-  repositoryCount,
   showDebugOverlay,
   onToggleDebugOverlay,
   workflowSteps,
@@ -123,25 +100,6 @@ const TaskTopBar = memo(function TaskTopBar({
   remoteCheckedAt,
   remoteStatusError,
 }: TaskTopBarProps) {
-  const git = useSessionGit(activeSessionId);
-  // Prefer live git status branch (updates after rename), fallback to session worktree branch
-  const displayBranch = git.branch || worktreeBranch || baseBranch;
-
-  // Callback for renaming branch
-  const handleRenameBranch = useCallback(
-    async (newName: string) => {
-      const result = await git.renameBranch(newName);
-      if (result.success) {
-        toast.success(`Branch renamed to "${newName}"`);
-      } else {
-        const msg = result.error || "Failed to rename branch";
-        toast.error(msg);
-        throw new Error(msg);
-      }
-    },
-    [git],
-  );
-
   return (
     <header
       data-testid="task-topbar"
@@ -151,11 +109,6 @@ const TaskTopBar = memo(function TaskTopBar({
         taskId={taskId}
         activeSessionId={activeSessionId}
         taskTitle={taskTitle}
-        repositoryName={repositoryName}
-        repositoryCount={repositoryCount}
-        displayBranch={displayBranch}
-        repositoryPath={repositoryPath}
-        worktreePath={worktreePath}
         isRemoteExecutor={isRemoteExecutor}
         remoteExecutorName={remoteExecutorName}
         remoteExecutorType={remoteExecutorType}
@@ -163,7 +116,6 @@ const TaskTopBar = memo(function TaskTopBar({
         remoteCreatedAt={remoteCreatedAt}
         remoteCheckedAt={remoteCheckedAt}
         remoteStatusError={remoteStatusError}
-        onRenameBranch={activeSessionId ? handleRenameBranch : undefined}
       />
       <div className="min-w-0 justify-self-center overflow-hidden">
         {workflowSteps && workflowSteps.length > 0 && (
@@ -179,7 +131,6 @@ const TaskTopBar = memo(function TaskTopBar({
       <TopBarRight
         taskId={taskId}
         activeSessionId={activeSessionId}
-        baseBranch={baseBranch}
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}
@@ -191,35 +142,6 @@ const TaskTopBar = memo(function TaskTopBar({
     </header>
   );
 });
-
-/** Breadcrumb item for the task's repository, with a "+N" chip on multi-repo. */
-function RepositoryBreadcrumb({ name, extraCount }: { name: string; extraCount: number }) {
-  const tooltipText =
-    extraCount > 0 ? `${name} (+${extraCount} more ${extraCount === 1 ? "repo" : "repos"})` : name;
-  return (
-    <>
-      <BreadcrumbSeparator className="shrink-0 @max-[900px]/topbar:hidden" />
-      <BreadcrumbItem className="min-w-0 @max-[900px]/topbar:hidden">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="text-muted-foreground truncate flex items-center gap-1.5">
-              <span className="truncate">{name}</span>
-              {extraCount > 0 && (
-                <span
-                  className="shrink-0 rounded-sm bg-muted px-1 py-px text-[10px] font-medium text-muted-foreground/80"
-                  data-testid="topbar-extra-repo-count"
-                >
-                  +{extraCount}
-                </span>
-              )}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{tooltipText}</TooltipContent>
-        </Tooltip>
-      </BreadcrumbItem>
-    </>
-  );
-}
 
 // IssueTrackerButtons picks the right ticket button for a task. Jira and
 // Linear use the same TEAM-NUMBER identifier shape, so both `extract` calls
@@ -255,16 +177,11 @@ function IssueTrackerButtons({
   );
 }
 
-/** Left section: breadcrumbs, branch pill */
+/** Left section: home → task name breadcrumb, integrations menu, remote indicator */
 function TopBarLeft({
   taskId,
   activeSessionId,
   taskTitle,
-  repositoryName,
-  repositoryCount,
-  displayBranch,
-  repositoryPath,
-  worktreePath,
   isRemoteExecutor,
   remoteExecutorName,
   remoteExecutorType,
@@ -272,9 +189,7 @@ function TopBarLeft({
   remoteCreatedAt,
   remoteCheckedAt,
   remoteStatusError,
-  onRenameBranch,
 }: TopBarLeftProps) {
-  const extraRepoCount = (repositoryCount ?? 0) - 1;
   return (
     <div className="flex items-center gap-2.5 min-w-0 overflow-hidden">
       <Breadcrumb className="min-w-0">
@@ -289,9 +204,6 @@ function TopBarLeft({
               </Link>
             </BreadcrumbLink>
           </BreadcrumbItem>
-          {repositoryName && (
-            <RepositoryBreadcrumb name={repositoryName} extraCount={extraRepoCount} />
-          )}
           <BreadcrumbSeparator className="shrink-0" />
           <BreadcrumbItem className="min-w-0">
             <Tooltip>
@@ -307,15 +219,6 @@ function TopBarLeft({
       </Breadcrumb>
 
       <IntegrationsMenu />
-
-      <div className="shrink-0 @max-[1352px]/topbar:hidden">
-        <BranchPathPopover
-          displayBranch={displayBranch}
-          repositoryPath={repositoryPath}
-          worktreePath={worktreePath}
-          onRenameBranch={onRenameBranch}
-        />
-      </div>
 
       {isRemoteExecutor && (
         <RemoteCloudTooltip
@@ -487,11 +390,10 @@ function TopbarToolsGroup({
   );
 }
 
-/** Right section: primary VCS action, status/attention, tools menu */
+/** Right section: status/attention, tools menu */
 function TopBarRight({
   taskId,
   activeSessionId,
-  baseBranch,
   showDebugOverlay,
   onToggleDebugOverlay,
   isArchived,
@@ -502,7 +404,6 @@ function TopBarRight({
 }: {
   taskId?: string | null;
   activeSessionId?: string | null;
-  baseBranch?: string;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
@@ -521,24 +422,6 @@ function TopBarRight({
       content: (
         <TopbarCluster label="Quick chat" className="[&_button]:h-8 [&_button]:text-xs">
           <QuickChatButton workspaceId={workspaceId} />
-        </TopbarCluster>
-      ),
-    });
-  }
-
-  if (!isArchived) {
-    items.push({
-      id: "vcs",
-      label: "Primary version control action",
-      priority: 100,
-      required: true,
-      content: (
-        <TopbarCluster label="Primary version control action">
-          <VcsSplitButton
-            sessionId={activeSessionId ?? null}
-            baseBranch={baseBranch}
-            buttonSize="lg"
-          />
         </TopbarCluster>
       ),
     });

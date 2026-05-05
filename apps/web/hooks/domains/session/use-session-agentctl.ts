@@ -19,11 +19,13 @@ export function useSessionAgentctl(sessionId: string | null) {
     return client.subscribeSession(session.id);
   }, [session?.id, connectionStatus]);
 
+  const isReady = status?.status === "ready";
+
   return {
     status: status?.status ?? "starting",
     errorMessage: status?.errorMessage,
     agentExecutionId: status?.agentExecutionId,
-    isReady: status?.status === "ready",
+    isReady,
     isStarting: status?.status === "starting" || !status,
     isError: status?.status === "error",
   };

@@ -2,6 +2,115 @@
 
 All notable changes to Kandev.
 
+## 0.39.2 - 2026-05-05
+
+### Bug Fixes
+
+- add repository field for npm provenance, patch CLI perms ([#826](https://github.com/kdlbs/kandev/pull/826))
+
+## 0.39.1 - 2026-05-05
+
+### Features
+
+- brew install + npm sibling channels via OIDC trusted publishing ([#806](https://github.com/kdlbs/kandev/pull/806))
+
+### Bug Fixes
+
+- restore PR-and-merge pattern ([#824](https://github.com/kdlbs/kandev/pull/824))
+
+## 0.39 - 2026-05-04
+
+### Features
+
+- attribute cross-task agent messages with a sender badge ([#819](https://github.com/kdlbs/kandev/pull/819))
+- add 10 ACP agents, set_config_option, auth_required flow ([#807](https://github.com/kdlbs/kandev/pull/807))
+- polish workbench topbars and task-create dialog ([#792](https://github.com/kdlbs/kandev/pull/792))
+- show question icon only for pending input ([#782](https://github.com/kdlbs/kandev/pull/782))
+- add recent task switcher ([#779](https://github.com/kdlbs/kandev/pull/779))
+- collapse commits and PR changes by default in changes panel ([#781](https://github.com/kdlbs/kandev/pull/781))
+- support tasks spanning multiple repositories ([#767](https://github.com/kdlbs/kandev/pull/767))
+- allow reordering sidebar views ([#764](https://github.com/kdlbs/kandev/pull/764))
+- refine workbench chrome ([#761](https://github.com/kdlbs/kandev/pull/761))
+- add get_task_conversation tool ([#756](https://github.com/kdlbs/kandev/pull/756))
+- add improve kandev in-app contribution flow ([#740](https://github.com/kdlbs/kandev/pull/740))
+- refresh + smarter filter for new-task branch selector ([#750](https://github.com/kdlbs/kandev/pull/750))
+- poll JQL queries to auto-create tasks (issue watchers) ([#746](https://github.com/kdlbs/kandev/pull/746))
+- key terminals + dockview layout to TaskEnvironment ([#755](https://github.com/kdlbs/kandev/pull/755))
+- add Linear integration ([#736](https://github.com/kdlbs/kandev/pull/736))
+- show active time and elapsed span per task ([#748](https://github.com/kdlbs/kandev/pull/748))
+- eager-init agent on profile selection ([#747](https://github.com/kdlbs/kandev/pull/747))
+- add message_task_kandev tool ([#745](https://github.com/kdlbs/kandev/pull/745))
+- deferred task move with hand-off prompt + boot/turn-end event split ([#743](https://github.com/kdlbs/kandev/pull/743))
+- mobile terminal key-bar — Ctrl/Shift modify OS-keyboard input + iOS keyboard fixes ([#741](https://github.com/kdlbs/kandev/pull/741))
+- make --port the user-facing port flag ([#737](https://github.com/kdlbs/kandev/pull/737))
+- expose MCP server to external coding agents ([#732](https://github.com/kdlbs/kandev/pull/732))
+- hide Jira buttons when disabled or auth failing ([#725](https://github.com/kdlbs/kandev/pull/725))
+- add GitHub dashboard shortcut to command panel ([#721](https://github.com/kdlbs/kandev/pull/721))
+
+### Bug Fixes
+
+- dedup topbar PR button against auto-shown PR panel ([#812](https://github.com/kdlbs/kandev/pull/812))
+- stabilize task switch flow and session recovery ([#818](https://github.com/kdlbs/kandev/pull/818))
+- suppress spurious task-failed toasts on resume and reconnect ([#814](https://github.com/kdlbs/kandev/pull/814))
+- scope commits/diff to live branch divergence; flatten single-repo ([#816](https://github.com/kdlbs/kandev/pull/816))
+- sanitize multi-repo worktree dirs and polish task-create chip dropdown ([#815](https://github.com/kdlbs/kandev/pull/815))
+- return mcp message_task once dispatched, not after target turn ends ([#817](https://github.com/kdlbs/kandev/pull/817))
+- correct task_environments migration order for older DBs ([#811](https://github.com/kdlbs/kandev/pull/811))
+- retry CLI passthrough launch without resume flag after fast-fail ([#810](https://github.com/kdlbs/kandev/pull/810))
+- close tooltips on popover close and refine branch chip UX ([#808](https://github.com/kdlbs/kandev/pull/808))
+- make executors_running the single source of truth for agent_execution_id ([#799](https://github.com/kdlbs/kandev/pull/799))
+- use shared prompt template with placeholder autocomplete ([#801](https://github.com/kdlbs/kandev/pull/801))
+- tab session bugs — primary star drift + tab close re-creation ([#800](https://github.com/kdlbs/kandev/pull/800))
+- retry session commits fetch when workspace not ready ([#789](https://github.com/kdlbs/kandev/pull/789))
+- focus task name on create dialog open ([#788](https://github.com/kdlbs/kandev/pull/788))
+- dedupe cancel-turn clicks to stop "turn cancelled" cascade ([#784](https://github.com/kdlbs/kandev/pull/784))
+- heal legacy PR watches so single-repo tasks don't dupe PRs ([#785](https://github.com/kdlbs/kandev/pull/785))
+- add border to task name input in create dialog ([#783](https://github.com/kdlbs/kandev/pull/783))
+- prevent inline code from rendering diagrams ([#773](https://github.com/kdlbs/kandev/pull/773))
+- remove settings topbar border ([#774](https://github.com/kdlbs/kandev/pull/774))
+- re-key user-shell RPCs to task_environment_id ([#770](https://github.com/kdlbs/kandev/pull/770))
+- unblock terminals stuck on Connecting and heal task_environments ([#769](https://github.com/kdlbs/kandev/pull/769))
+- prevent orphaned agent subprocesses from concurrent execution creates ([#768](https://github.com/kdlbs/kandev/pull/768))
+- restore readable boxed chat hotkey tooltip ([#765](https://github.com/kdlbs/kandev/pull/765))
+- make mermaid sanitizer quote-aware and detect parens in bracket labels ([#763](https://github.com/kdlbs/kandev/pull/763))
+- refine workbench action button layout ([#762](https://github.com/kdlbs/kandev/pull/762))
+- server-authoritative session ensure for kanban preview ([#760](https://github.com/kdlbs/kandev/pull/760))
+- guide recovery when session profile is deleted ([#752](https://github.com/kdlbs/kandev/pull/752))
+- drop stuck pending permission_request messages ([#723](https://github.com/kdlbs/kandev/pull/723))
+- plan panel misses agent updates emitted before WS connects ([#749](https://github.com/kdlbs/kandev/pull/749))
+- render passthrough terminal in quick chat ([#744](https://github.com/kdlbs/kandev/pull/744))
+- contain kanban card badges within card width ([#739](https://github.com/kdlbs/kandev/pull/739))
+- improve create_task_kandev repository and workspace resolution ([#733](https://github.com/kdlbs/kandev/pull/733))
+- publish agentctl events on workspace restore ([#731](https://github.com/kdlbs/kandev/pull/731))
+- self-recover dockview layout from corrupt persisted state ([#729](https://github.com/kdlbs/kandev/pull/729))
+- populate diff for renamed-and-modified files in git status ([#730](https://github.com/kdlbs/kandev/pull/730))
+- preserve chat scroll position when maximizing panel ([#728](https://github.com/kdlbs/kandev/pull/728))
+- prevent crowding in narrow changes panel and dockview tabs ([#727](https://github.com/kdlbs/kandev/pull/727))
+- drain queued message on workflow transition to non-auto-start step ([#726](https://github.com/kdlbs/kandev/pull/726))
+- apply profile cli_flags to passthrough command ([#722](https://github.com/kdlbs/kandev/pull/722))
+- restore release changelog boundaries ([#716](https://github.com/kdlbs/kandev/pull/716))
+
+### Performance
+
+- speed up stats endpoint aggregation ([#766](https://github.com/kdlbs/kandev/pull/766))
+
+### Refactoring
+
+- move Configuration Chat Agent to utility agents page ([#809](https://github.com/kdlbs/kandev/pull/809))
+- drop redundant VCS split button from task top bar ([#804](https://github.com/kdlbs/kandev/pull/804))
+- drop dead taskPRs loading state and unused removeTaskPR ([#791](https://github.com/kdlbs/kandev/pull/791))
+- move integrations to top-level settings with install-wide configs ([#787](https://github.com/kdlbs/kandev/pull/787))
+- use GetOrEnsureExecution for workspace ops ([#786](https://github.com/kdlbs/kandev/pull/786))
+- extract shared shapes between jira and linear integrations ([#759](https://github.com/kdlbs/kandev/pull/759))
+- route user terminals by environment ([#758](https://github.com/kdlbs/kandev/pull/758))
+- drop unused flat-layout worktrees/ path ([#708](https://github.com/kdlbs/kandev/pull/708))
+
+### Documentation
+
+- add integrations banner to README ([#790](https://github.com/kdlbs/kandev/pull/790))
+- add issue templates ([#754](https://github.com/kdlbs/kandev/pull/754))
+- add star history chart ([#753](https://github.com/kdlbs/kandev/pull/753))
+
 ## 0.38 - 2026-04-27
 
 ### Features
@@ -100,7 +209,7 @@ All notable changes to Kandev.
 
 ### Bug Fixes
 
-- release script tags fetching ([986410ab](https://github.com/kdlbs/kandev/commit/986410ab2ebb1cc25e1ad046c9daae18a58cc150))
+- release script tags fetching
 - show repo name instead of full path in task sidebar ([#652](https://github.com/kdlbs/kandev/pull/652))
 - unstick agent session when cancel times out ([#651](https://github.com/kdlbs/kandev/pull/651))
 - anchor PR detail panel to session group on auto-open ([#646](https://github.com/kdlbs/kandev/pull/646))
@@ -1155,4 +1264,5 @@ All notable changes to Kandev.
 ### Merge
 
 - resolve conflicts with main
+
 

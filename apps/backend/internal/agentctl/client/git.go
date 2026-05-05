@@ -440,8 +440,13 @@ type CumulativeDiffResult struct {
 }
 
 // GetCumulativeDiff gets the cumulative diff from baseCommit to HEAD.
-func (c *Client) GetCumulativeDiff(ctx context.Context, baseCommit string) (*CumulativeDiffResult, error) {
+// When targetBranch is non-empty the server recomputes the base via merge-base
+// against origin/<targetBranch>, falling back to baseCommit when that fails.
+func (c *Client) GetCumulativeDiff(ctx context.Context, baseCommit, targetBranch string) (*CumulativeDiffResult, error) {
 	reqURL := fmt.Sprintf("%s/api/v1/git/cumulative-diff?base=%s", c.baseURL, url.QueryEscape(baseCommit))
+	if targetBranch != "" {
+		reqURL += "&target_branch=" + url.QueryEscape(targetBranch)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {

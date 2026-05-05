@@ -116,8 +116,7 @@ func SanitizeForBranch(title string, maxLen int) string {
 	result = sb.String()
 
 	// Remove consecutive hyphens
-	re := regexp.MustCompile(`-+`)
-	result = re.ReplaceAllString(result, "-")
+	result = repoDirHyphenRun.ReplaceAllString(result, "-")
 
 	// Remove leading and trailing hyphens
 	result = strings.Trim(result, "-")
@@ -178,6 +177,43 @@ func SmallSuffix(maxLen int) string {
 	}
 	return string(buf)
 }
+
+// SanitizeRepoDirName converts a repository display name into a single,
+// filesystem-safe path segment. Path separators and other unsafe characters
+// are replaced with hyphens, runs of hyphens are collapsed, and surrounding
+// hyphens/dots are trimmed. Returns an empty string when the input has no
+// usable characters.
+//
+// This guards against names like "owner/repo" producing nested subdirectories
+// when used as the worktree directory under a multi-repo task root — the
+// extra path level breaks sibling-repo detection in agentctl.
+//
+// Limitation: distinct names that differ only in unsafe characters (e.g.
+// "acme/widget-config" and "acme-widget-config") collapse to the same
+// segment. Two such repos in one task would collide on `git worktree add`.
+// Acceptable in practice — provider repos (the common case) are uniquely
+// identified by owner/name and won't collide with each other.
+func SanitizeRepoDirName(name string) string {
+	if name == "" {
+		return ""
+	}
+	var sb strings.Builder
+	sb.Grow(len(name))
+	for _, r := range name {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+			sb.WriteRune(r)
+		case r == '_', r == '.', r == '-':
+			sb.WriteRune(r)
+		default:
+			sb.WriteRune('-')
+		}
+	}
+	result := repoDirHyphenRun.ReplaceAllString(sb.String(), "-")
+	return strings.Trim(result, "-.")
+}
+
+var repoDirHyphenRun = regexp.MustCompile(`-+`)
 
 // SemanticWorktreeName generates a semantic worktree directory name from a task title.
 // Format: {sanitizedTitle}_{suffix} e.g. fix-login-bug_ab12cd34

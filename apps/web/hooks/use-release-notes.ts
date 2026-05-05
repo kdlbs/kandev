@@ -73,11 +73,17 @@ export function useReleaseNotes() {
   }, [settingsLoaded, lastSeenVersion, storeApi]);
 
   const markAsSeen = useCallback(() => {
-    const version = latestRelease.version;
+    // Mark against the newest version in the full changelog rather than the
+    // current build's release-notes version. In dev/CI those can diverge —
+    // git-cliff backfills the changelog from unreleased commits while
+    // release-notes.json is pinned to `git describe --tags --abbrev=0`. If we
+    // marked against the build version, getUnseenEntries would still see the
+    // backfilled entries as newer and the topbar dot would never clear.
+    const version = changelog[0]?.version ?? latestRelease.version;
     const { userSettings, setUserSettings } = storeApi.getState();
     setUserSettings({ ...userSettings, releaseNotesLastSeenVersion: version });
     persistLastSeenVersion(version);
-  }, [latestRelease.version, storeApi]);
+  }, [changelog, latestRelease.version, storeApi]);
 
   const openDialog = useCallback(() => {
     setDialogEntries(unseenEntries);

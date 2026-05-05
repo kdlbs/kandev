@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { forwardRef } from "react";
 import type { ReactNode } from "react";
-import { IconArrowLeft } from "@tabler/icons-react";
+import { IconArrowLeft, IconHome } from "@tabler/icons-react";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -58,7 +58,7 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
   return (
     <header
       ref={ref}
-      className={cn("relative flex h-14 shrink-0 items-center gap-3 border-b px-4", className)}
+      className={cn("relative flex h-10 shrink-0 items-center gap-3 border-b px-3 py-1", className)}
     >
       {leading}
       {variant === "root" ? (
@@ -67,20 +67,30 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
         </div>
       ) : (
         <Breadcrumb className="relative z-10 min-w-0">
-          <BreadcrumbList className="flex-nowrap">
+          <BreadcrumbList className="flex-nowrap text-sm">
             <BreadcrumbItem className="shrink-0">
-              <BreadcrumbLink asChild className="flex items-center gap-1.5 cursor-pointer">
-                <Link href={backHref}>
-                  <IconArrowLeft className="h-3.5 w-3.5" />
-                  {backLabel}
-                </Link>
+              <BreadcrumbLink asChild>
+                {backHref === "/" ? (
+                  <Link
+                    href={backHref}
+                    aria-label={backLabel}
+                    className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <IconHome className="h-4 w-4" />
+                  </Link>
+                ) : (
+                  <Link href={backHref} className="flex items-center gap-1.5 cursor-pointer">
+                    <IconArrowLeft className="h-3.5 w-3.5" />
+                    {backLabel}
+                  </Link>
+                )}
               </BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator className="shrink-0" />
             <BreadcrumbItem className="min-w-0">
               <BreadcrumbPage className="flex min-w-0 items-center gap-2">
                 {icon}
-                <span className="truncate text-sm font-semibold">{title}</span>
+                <span className="truncate text-sm font-medium">{title}</span>
                 {subtitle && (
                   <>
                     <span className="hidden text-muted-foreground/50 sm:inline">·</span>

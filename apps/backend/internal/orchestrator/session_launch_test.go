@@ -226,7 +226,7 @@ func TestLaunchRestoreWorkspace_WrongTask(t *testing.T) {
 
 func TestLaunchRestoreWorkspace_Success(t *testing.T) {
 	repo := setupTestRepo(t)
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCompleted)
@@ -389,7 +389,7 @@ func seedTaskAndSessionWithStep(t *testing.T, repo *sqliterepo.Repository, taskI
 func TestLaunchRestoreWorkspace_IncludesWorktreeInfo(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)

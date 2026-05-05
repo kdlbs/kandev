@@ -33,9 +33,10 @@ export type UseBranchesResult = {
   branches: Branch[];
   isLoading: boolean;
   /**
-   * Force-refreshes the branch list with a `git fetch` first. Only available
-   * for id-based sources (workspace-imported repos); on-machine path sources
-   * resolve to `undefined` since the refresh endpoint takes a repository id.
+   * Refreshes the branch list. For id-based sources the backend runs
+   * `git fetch` first (force-refresh). For path-based sources we re-issue
+   * the standard list call — there's no fetch endpoint for unimported
+   * folders, but re-reading still surfaces newly created local branches.
    */
   refresh?: () => Promise<void>;
 };
@@ -77,10 +78,13 @@ export function useBranches(source: BranchSource | null, enabled = true): UseBra
   }, [enabled, isLoaded, key, setRepositoryBranches, setRepositoryBranchesLoading]);
 
   const refresh = useCallback(async () => {
-    if (!source || source.kind !== "id") return;
+    if (!source) return;
     setRepositoryBranchesLoading(key, true);
     try {
-      const response = await listRepositoryBranches(source.repositoryId, { refresh: true });
+      const response =
+        source.kind === "id"
+          ? await listRepositoryBranches(source.repositoryId, { refresh: true })
+          : await listBranches(source.workspaceId, { path: source.path });
       setRepositoryBranches(key, response.branches);
     } catch {
       // Refresh failures leave the existing branch list in place; the user
@@ -95,6 +99,6 @@ export function useBranches(source: BranchSource | null, enabled = true): UseBra
   return {
     branches,
     isLoading,
-    refresh: source?.kind === "id" ? refresh : undefined,
+    refresh: source ? refresh : undefined,
   };
 }

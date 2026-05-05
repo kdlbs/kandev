@@ -61,7 +61,7 @@ type EventBus interface {
 // Both methods are implemented by *orchestrator.Service.
 type SessionLauncher interface {
 	LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)
-	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error)
+	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error)
 	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error)
 	ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error)
 	GetMessageQueue() *messagequeue.Service
@@ -609,13 +609,26 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 }
 
-// handleMessageTask sends a prompt to an existing task. The dispatch path depends
-// on the primary session's state: RUNNING/STARTING messages are queued and drained
-// at turn end; idle sessions are prompted directly; CREATED sessions are started.
+// handleMessageTask sends a prompt to an existing task on behalf of an agent
+// in another task. The MCP server (agentctl) injects the sender's task_id and
+// session_id into the payload; this handler validates the sender, looks up its
+// title, wraps the prompt in a <kandev-system> attribution block (so the
+// receiving agent knows the message is from a peer agent), and dispatches via
+// one of three paths depending on the target session state:
+//
+//   - RUNNING/STARTING : message is queued and drained at turn end
+//   - WAITING/COMPLETED: message is recorded and the agent is prompted (auto-resuming if needed)
+//   - CREATED          : message is recorded then the agent is started with it as initial prompt
+//
+// Strict validation: missing sender_task_id, self-message, and unknown sender
+// task all reject with an MCP error rather than silently delivering an
+// unattributed message.
 func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		TaskID string `json:"task_id"`
-		Prompt string `json:"prompt"`
+		TaskID          string `json:"task_id"`
+		Prompt          string `json:"prompt"`
+		SenderTaskID    string `json:"sender_task_id"`
+		SenderSessionID string `json:"sender_session_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -626,6 +639,22 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	if req.Prompt == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "prompt is required", nil)
 	}
+	if req.SenderTaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "sender_task_id is required (the calling agent's MCP server must supply this)", nil)
+	}
+	if req.SenderTaskID == req.TaskID {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task cannot send a message to itself", nil)
+	}
+
+	// Sender lookup is global, not workspace-scoped: cross-workspace agent
+	// messaging is intentionally allowed (badge URL handles cross-workspace
+	// nav). Task IDs are UUIDs, so this is not exploitable in practice — and
+	// scoping would require a product-level decision about cross-workspace
+	// auth/visibility/discovery that we don't want to bake in here.
+	senderTask, err := h.taskSvc.GetTask(ctx, req.SenderTaskID)
+	if err != nil || senderTask == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "sender task not found", nil)
+	}
 
 	session, err := h.taskSvc.GetPrimarySession(ctx, req.TaskID)
 	if err != nil {
@@ -635,7 +664,9 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task has no active session — use create_task_kandev to start one", nil)
 	}
 
-	status, err := h.dispatchTaskMessage(ctx, req.TaskID, session, req.Prompt)
+	wrappedPrompt, senderMeta := wrapAgentMessage(req.Prompt, senderTask, req.SenderSessionID)
+
+	status, err := h.dispatchTaskMessage(ctx, req.TaskID, session, wrappedPrompt, senderMeta)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
@@ -775,7 +806,12 @@ func conversationCursor(messages []*models.Message) string {
 
 // dispatchTaskMessage routes a message to the right delivery path based on session state.
 // Returns the action taken: "queued", "sent", or "started".
-func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string) (string, error) {
+//
+// metadata is the Message.Metadata map to attach to the resulting user message
+// row (sender_task_id, sender_task_title, sender_session_id when called from
+// handleMessageTask). It is propagated to all three delivery paths so the
+// receiving task's chat displays the sender badge consistently.
+func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (string, error) {
 	if h.sessionLauncher == nil {
 		return "", errors.New("orchestrator not available")
 	}
@@ -789,27 +825,35 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 		if queue == nil {
 			return "", errors.New("message queue not available")
 		}
-		if _, err := queue.QueueMessage(ctx, session.ID, taskID, prompt, "", "agent", false, nil); err != nil {
+		if _, err := queue.QueueMessageWithMetadata(ctx, session.ID, taskID, prompt, "", "agent", false, nil, metadata); err != nil {
 			return "", fmt.Errorf("failed to queue message: %w", err)
 		}
 		h.publishQueueStatusEvent(ctx, session.ID, queue)
 		return "queued", nil
 
 	case models.TaskSessionStateCreated:
-		if _, err := h.sessionLauncher.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, prompt, false, false, nil); err != nil {
+		// Start first, then record the user message ourselves with sender
+		// metadata. This avoids leaving an orphaned attributed chat row when
+		// StartCreatedSession fails (the previous order wrote the row up-front
+		// regardless of launch outcome). skipMessageRecord=true keeps
+		// postLaunchCreated from writing its own duplicate row.
+		if _, err := h.sessionLauncher.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, prompt, true, false, nil); err != nil {
 			return "", fmt.Errorf("failed to start session: %w", err)
 		}
+		h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
 		return "started", nil
 
 	default: // WAITING_FOR_INPUT, COMPLETED, or any other promptable state
-		h.recordUserMessage(ctx, taskID, session.ID, prompt)
+		h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
 		return h.promptWithAutoResume(ctx, taskID, session.ID, prompt)
 	}
 }
 
 // recordUserMessage writes the prompt to the task's chat as a user message so it
 // is visible in the conversation. Mirrors the message.add path used by the UI.
-func (h *Handlers) recordUserMessage(ctx context.Context, taskID, sessionID, prompt string) {
+// metadata is attached to the resulting Message row (used for sender_task_id /
+// sender_task_title / sender_session_id when called from handleMessageTask).
+func (h *Handlers) recordUserMessage(ctx context.Context, taskID, sessionID, prompt string, metadata map[string]interface{}) {
 	if h.taskSvc == nil {
 		return
 	}
@@ -818,6 +862,7 @@ func (h *Handlers) recordUserMessage(ctx context.Context, taskID, sessionID, pro
 		TaskID:        taskID,
 		Content:       prompt,
 		AuthorType:    "user",
+		Metadata:      metadata,
 	}); err != nil {
 		h.logger.Warn("failed to record user message for message_task",
 			zap.String("task_id", taskID),
@@ -828,8 +873,10 @@ func (h *Handlers) recordUserMessage(ctx context.Context, taskID, sessionID, pro
 
 // promptWithAutoResume sends a prompt to a session and resumes the agent
 // transparently if it has been torn down (mirrors message.add behaviour).
+// Uses dispatch-only mode so the MCP tool returns once the prompt is accepted
+// rather than blocking for the entire target turn.
 func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, prompt string) (string, error) {
-	_, err := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil)
+	_, err := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, true)
 	if err == nil {
 		return "sent", nil
 	}
@@ -844,7 +891,7 @@ func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, 
 	if waitErr := h.taskSvc.WaitForSessionReady(ctx, sessionID); waitErr != nil {
 		return "", fmt.Errorf("session not ready after resume: %w", waitErr)
 	}
-	if _, retryErr := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil); retryErr != nil {
+	if _, retryErr := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, true); retryErr != nil {
 		return "", fmt.Errorf("failed to send prompt after resume: %w", retryErr)
 	}
 	return "sent", nil

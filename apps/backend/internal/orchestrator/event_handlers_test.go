@@ -143,8 +143,16 @@ type mockAgentManager struct {
 	markPassthroughCalls  []string // session IDs
 	markPassthroughErr    error
 
-	// Optional override for GetExecutionIDForSession
+	// Optional override for GetExecutionIDForSession. When unset, the default
+	// implementation reads from repoForExecutionLookup if provided so tests that
+	// seed an executors_running row don't also have to mock this function.
 	getExecutionIDForSessionFunc func(context.Context, string) (string, error)
+	// Optional repo used as a fallback by GetExecutionIDForSession when no
+	// override is provided — keeps tests that seed executors_running automatically
+	// resolvable without per-test boilerplate.
+	repoForExecutionLookup interface {
+		GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+	}
 
 	// CancelAgent tracking. cancelAgentCalls counts every invocation. If
 	// cancelAgentBlock is non-nil, CancelAgent blocks on it before returning;
@@ -191,7 +199,7 @@ func (m *mockAgentManager) StopAgentWithReason(_ context.Context, agentExecution
 	})
 	return nil
 }
-func (m *mockAgentManager) PromptAgent(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment) (*executor.PromptResult, error) {
+func (m *mockAgentManager) PromptAgent(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, _ bool) (*executor.PromptResult, error) {
 	m.mu.Lock()
 	first := len(m.capturedPrompts) == 0
 	m.capturedPrompts = append(m.capturedPrompts, prompt)
@@ -291,6 +299,14 @@ func (m *mockAgentManager) GetExecutionIDForSession(ctx context.Context, session
 	if m.getExecutionIDForSessionFunc != nil {
 		return m.getExecutionIDForSessionFunc(ctx, sessionID)
 	}
+	// Smart default: resolve from a seeded executors_running row when a repo
+	// is provided. Removes per-test boilerplate when tests use seedExecutorRunning.
+	if m.repoForExecutionLookup != nil {
+		running, err := m.repoForExecutionLookup.GetExecutorRunningBySessionID(ctx, sessionID)
+		if err == nil && running != nil && running.AgentExecutionID != "" {
+			return running.AgentExecutionID, nil
+		}
+	}
 	return "", fmt.Errorf("no execution found")
 }
 func (m *mockAgentManager) GetGitLog(_ context.Context, _, _ string, _ int, _ string) (*client.GitLogResult, error) {
@@ -389,6 +405,24 @@ func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, w
 	}
 }
 
+// seedExecutorRunning attaches an executors_running row to a session so the
+// post-refactor "session has been launched" / GetExecutionIDForSession lookups
+// resolve. Pre-refactor tests set session.AgentExecutionID directly; that field
+// no longer drives runtime decisions, so any test that exercises the launched-
+// session code paths must seed this row instead.
+func seedExecutorRunning(t *testing.T, repo *sqliterepo.Repository, sessionID, taskID, executionID string) {
+	t.Helper()
+	if err := repo.UpsertExecutorRunning(context.Background(), &models.ExecutorRunning{
+		ID:               sessionID,
+		SessionID:        sessionID,
+		TaskID:           taskID,
+		AgentExecutionID: executionID,
+		Status:           "ready",
+	}); err != nil {
+		t.Fatalf("seed executors_running: %v", err)
+	}
+}
+
 // createTestService creates a Service with minimal dependencies for event handler testing.
 func createTestService(repo *sqliterepo.Repository, stepGetter *mockStepGetter, taskRepo *mockTaskRepo) *Service {
 	return createTestServiceWithAgent(repo, stepGetter, taskRepo, &mockAgentManager{})
@@ -396,6 +430,13 @@ func createTestService(repo *sqliterepo.Repository, stepGetter *mockStepGetter, 
 
 func createTestServiceWithAgent(repo *sqliterepo.Repository, stepGetter *mockStepGetter, taskRepo *mockTaskRepo, agentMgr executor.AgentManagerClient) *Service {
 	log := testLogger()
+	// Wire the repo into the mockAgentManager's smart default for
+	// GetExecutionIDForSession so tests that seed executors_running don't have
+	// to also override the function. Skipped when the agent manager isn't a
+	// mockAgentManager (custom implementations).
+	if mock, ok := agentMgr.(*mockAgentManager); ok && mock.repoForExecutionLookup == nil {
+		mock.repoForExecutionLookup = repo
+	}
 	return &Service{
 		logger:             log,
 		repo:               repo,
@@ -594,39 +635,14 @@ func TestHandleAgentReadyGuards(t *testing.T) {
 		}
 	})
 
-	t.Run("ignores stale ready from old execution", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
-
-		stepGetter := newMockStepGetter()
-		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
-			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
-			Events: wfmodels.StepEvents{
-				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
-					{Type: wfmodels.OnTurnCompleteMoveToNext},
-				},
-			},
-		}
-		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
-			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
-		}
-
-		svc := createTestService(repo, stepGetter, newMockTaskRepo())
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		session.AgentExecutionID = "exec-active"
-		_ = repo.UpdateTaskSession(ctx, session)
-
-		svc.handleAgentReady(ctx, watcher.AgentEventData{
-			TaskID:           "t1",
-			SessionID:        "s1",
-			AgentExecutionID: "exec-stale",
-		})
-
-		updatedTask, _ := repo.GetTask(ctx, "t1")
-		if updatedTask.WorkflowStepID != "step1" {
-			t.Fatalf("expected workflow step to remain step1, got %q", updatedTask.WorkflowStepID)
-		}
-	})
+	// "ignores stale ready from old execution" was removed: the early-drop branch
+	// in handleAgentReady that compared session.AgentExecutionID with the event's
+	// AgentExecutionID is gone. With executors_running as the single source of
+	// truth and lifecycle-owned writes, a live event implies the emitting
+	// execution is the active one for the session — there is no "old execution"
+	// to filter out at this layer. See event_handlers_agent.go for the comment
+	// explaining why the drop was removed and the lifecycle store invariant
+	// that makes it unnecessary.
 }
 
 func TestExecuteQueuedMessage_RequeuesTransientPromptFailure(t *testing.T) {
@@ -640,6 +656,7 @@ func TestExecuteQueuedMessage_RequeuesTransientPromptFailure(t *testing.T) {
 	}
 	session.State = models.TaskSessionStateWaitingForInput
 	session.AgentExecutionID = "exec-1"
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-1")
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to update session: %v", err)
 	}
@@ -682,6 +699,7 @@ func TestExecuteQueuedMessage_FiresOnTurnStart(t *testing.T) {
 	}
 	session.State = models.TaskSessionStateWaitingForInput
 	session.AgentExecutionID = "exec-1"
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-1")
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to update session: %v", err)
 	}
@@ -747,6 +765,7 @@ func TestExecuteQueuedMessage_NoOnTurnStart_StepUnchanged(t *testing.T) {
 	}
 	session.State = models.TaskSessionStateWaitingForInput
 	session.AgentExecutionID = "exec-1"
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-1")
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to update session: %v", err)
 	}
@@ -812,7 +831,7 @@ func TestHandleAgentCompleted_CleansUpExecution(t *testing.T) {
 	seedSession(t, repo, "t1", "s1", "")
 
 	taskRepo := newMockTaskRepo()
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 
 	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
@@ -841,7 +860,7 @@ func TestHandleAgentFailed_CleansUpExecution(t *testing.T) {
 	seedSession(t, repo, "t1", "s1", "")
 
 	taskRepo := newMockTaskRepo()
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 
 	svc.handleAgentFailed(ctx, watcher.AgentEventData{
@@ -864,7 +883,7 @@ func TestHandleAgentFailed_CleansUpExecution(t *testing.T) {
 
 func TestCleanupAgentExecution_SkipsEmptyExecutionID(t *testing.T) {
 	repo := setupTestRepo(t)
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 
 	// Should return immediately without calling StopAgentWithReason
@@ -1201,7 +1220,7 @@ func TestHandleRecoverableFailure(t *testing.T) {
 		seedSession(t, repo, "t1", "s1", "step1")
 
 		taskRepo := newMockTaskRepo()
-		agentMgr := &mockAgentManager{}
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 
 		svc.handleRecoverableFailure(ctx, watcher.AgentEventData{
@@ -1228,7 +1247,7 @@ func TestHandleRecoverableFailure(t *testing.T) {
 		seedSession(t, repo, "t1", "s1", "step1")
 
 		taskRepo := newMockTaskRepo()
-		agentMgr := &mockAgentManager{}
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 
 		svc.handleRecoverableFailure(ctx, watcher.AgentEventData{
@@ -1248,7 +1267,7 @@ func TestHandleRecoverableFailure(t *testing.T) {
 		seedSession(t, repo, "t1", "s1", "step1")
 
 		taskRepo := newMockTaskRepo()
-		agentMgr := &mockAgentManager{}
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 
 		svc.handleRecoverableFailure(ctx, watcher.AgentEventData{
@@ -1264,6 +1283,58 @@ func TestHandleRecoverableFailure(t *testing.T) {
 		defer agentMgr.mu.Unlock()
 		if len(agentMgr.stopAgentWithReasonArgs) == 0 {
 			t.Error("expected cleanup to call StopAgentWithReason")
+		}
+	})
+}
+
+func TestHandleAgentStartFailed(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("non-auth resume failure sets suppressToast and returns false", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+		handled := svc.handleAgentStartFailed(ctx, "t1", "s1", "exec-1",
+			fmt.Errorf("ACP initialize handshake failed"), true)
+
+		if handled {
+			t.Error("expected handled=false so default FAILED transition runs")
+		}
+		v, ok := svc.suppressToast.Load("s1")
+		if !ok || v.(bool) != true {
+			t.Errorf("expected suppressToast[s1]=true, got ok=%v val=%v", ok, v)
+		}
+	})
+
+	t.Run("non-auth fresh-start failure does not set suppressToast", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+		handled := svc.handleAgentStartFailed(ctx, "t1", "s1", "exec-1",
+			fmt.Errorf("ACP initialize handshake failed"), false)
+
+		if handled {
+			t.Error("expected handled=false")
+		}
+		if _, ok := svc.suppressToast.Load("s1"); ok {
+			t.Error("expected suppressToast NOT set for fresh-start failure")
+		}
+	})
+
+	t.Run("auth error returns true regardless of fromResume", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		taskRepo := newMockTaskRepo()
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+		handled := svc.handleAgentStartFailed(ctx, "t1", "s1", "exec-1",
+			fmt.Errorf("authentication required: please log in"), true)
+
+		if !handled {
+			t.Error("expected handled=true for auth errors")
 		}
 	})
 }
@@ -1329,7 +1400,7 @@ func TestHandleAgentFailed_RecoverableWithSession(t *testing.T) {
 		seedSession(t, repo, "t1", "s1", "step1")
 
 		taskRepo := newMockTaskRepo()
-		agentMgr := &mockAgentManager{}
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 
 		svc.handleAgentFailed(ctx, watcher.AgentEventData{
@@ -1360,7 +1431,7 @@ func TestHandleAgentFailed_RecoverableWithSession(t *testing.T) {
 		})
 
 		taskRepo := newMockTaskRepo()
-		agentMgr := &mockAgentManager{} // WasSessionInitialized returns false by default
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo} // WasSessionInitialized returns false by default
 		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 
 		svc.handleAgentFailed(ctx, watcher.AgentEventData{

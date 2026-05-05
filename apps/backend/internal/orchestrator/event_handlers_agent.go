@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -70,8 +71,10 @@ func (s *Service) publishQueueStatusEvent(ctx context.Context, sessionID string)
 }
 
 // requeueMessage re-enqueues a message that could not be delivered, publishing a queue status event on success.
+// Preserves the original Metadata (e.g. sender_task_id from message_task_kandev)
+// so attribution survives transient failures + retries.
 func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage, queuedBy string) {
-	requeuedMsg, queueErr := s.messageQueue.QueueMessage(
+	requeuedMsg, queueErr := s.messageQueue.QueueMessageWithMetadata(
 		ctx,
 		queuedMsg.SessionID,
 		queuedMsg.TaskID,
@@ -80,6 +83,7 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 		queuedBy,
 		queuedMsg.PlanMode,
 		queuedMsg.Attachments,
+		queuedMsg.Metadata,
 	)
 	if queueErr != nil {
 		s.logger.Error("failed to requeue message",
@@ -133,17 +137,14 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 		return
 	}
 
-	// Stale event: the session has rotated to a different execution. The agent
-	// process tied to data.AgentExecutionID is no longer the active one for this
-	// session, so its boot signal is irrelevant.
-	if data.AgentExecutionID != "" && session.AgentExecutionID != "" && session.AgentExecutionID != data.AgentExecutionID {
-		s.logger.Debug("ignoring stale agent.boot_ready for non-active execution",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID),
-			zap.String("event_execution_id", data.AgentExecutionID),
-			zap.String("active_execution_id", session.AgentExecutionID))
-		return
-	}
+	// Pre-refactor this branch dropped events from "non-active" executions by
+	// comparing data.AgentExecutionID with session.AgentExecutionID. With the
+	// in-memory ExecutionStore now the single source of truth (and persisted
+	// in lockstep with executors_running), a live event arriving here means
+	// the lifecycle manager already considers data.AgentExecutionID active
+	// for this session — there's no "old execution" to drop. The check is gone.
+	// If the in-memory store has been torn down, the event simply has nowhere
+	// to land and the downstream session-state guard handles it.
 
 	// Terminal sessions never need a boot signal — if a stale init event
 	// arrives after the session was completed/cancelled, just drop it.
@@ -197,14 +198,9 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		return
 	}
 
-	if data.AgentExecutionID != "" && session.AgentExecutionID != "" && session.AgentExecutionID != data.AgentExecutionID {
-		s.logger.Debug("ignoring stale agent.ready for non-active execution",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID),
-			zap.String("event_execution_id", data.AgentExecutionID),
-			zap.String("active_execution_id", session.AgentExecutionID))
-		return
-	}
+	// See comment in handleAgentBootReady: the stale-execution drop is gone; the
+	// in-memory ExecutionStore is the source of truth and a live event implies
+	// the emitting execution is the active one for this session.
 
 	if session.State != models.TaskSessionStateRunning && session.State != models.TaskSessionStateStarting {
 		s.logger.Debug("ignoring agent.ready while session is not running or starting",
@@ -332,7 +328,11 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 		meta := NewUserMessageMeta().
 			WithPlanMode(queuedMsg.PlanMode).
 			WithAttachments(attachments)
-		err := s.messageCreator.CreateUserMessage(promptCtx, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.SessionID, turnID, meta.ToMap())
+		// Merge any extra metadata captured at queue time (e.g. sender_task_id
+		// from message_task_kandev) so the resulting Message row carries the
+		// full context.
+		metaMap := mergeMetadata(meta.ToMap(), queuedMsg.Metadata)
+		err := s.messageCreator.CreateUserMessage(promptCtx, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.SessionID, turnID, metaMap)
 		if err != nil {
 			s.logger.Error("failed to create user message for queued message",
 				zap.String("session_id", queuedMsg.SessionID),
@@ -349,7 +349,7 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 	}
 
 	_, err := s.PromptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
-		queuedMsg.Content, queuedMsg.Model, queuedMsg.PlanMode, attachments)
+		queuedMsg.Content, queuedMsg.Model, queuedMsg.PlanMode, attachments, false)
 	if err != nil {
 		s.logger.Error("failed to execute queued message",
 			zap.String("session_id", callerSessionID),
@@ -402,20 +402,23 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 	// Skip transition logic when this event is the side-effect of a deliberate
 	// stop (e.g. a workflow profile-switch calling completeAndStopSession). Two
 	// signals identify that case:
-	//   - Stale execution ID: the session has already adopted a new agent
-	//     execution (or cleared the old one), so this event refers to a stopped
-	//     run, not the current one.
+	//   - The session's current live execution differs from the event's: the
+	//     lifecycle manager has rotated the session to a new execution, so this
+	//     event refers to a stopped run, not the current one. (Pre-refactor this
+	//     compared session.AgentExecutionID; now the lifecycle store is the
+	//     source of truth.)
 	//   - Terminal session state: completeAndStopSession set state to COMPLETED
 	//     before StopAgent fired this event.
 	// Without this guard, processOnTurnCompleteViaEngine evaluates the *current*
 	// task step (which has already moved past where this agent ran) and triggers
 	// spurious transitions — manifesting as task-step ping-pong on profile switches.
-	if data.AgentExecutionID != "" && session.AgentExecutionID != "" && session.AgentExecutionID != data.AgentExecutionID {
-		s.logger.Debug("ignoring stale agent.completed for non-active execution",
+	liveExecID, _ := s.agentManager.GetExecutionIDForSession(ctx, data.SessionID)
+	if data.AgentExecutionID != "" && liveExecID != "" && liveExecID != data.AgentExecutionID {
+		s.logger.Debug("ignoring agent.completed for non-active (rotated) execution",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.String("event_execution_id", data.AgentExecutionID),
-			zap.String("active_execution_id", session.AgentExecutionID))
+			zap.String("live_execution_id", liveExecID))
 		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 		return
 	}
@@ -499,18 +502,18 @@ func (s *Service) wasResumeAttempt(ctx context.Context, sessionID string) bool {
 }
 
 // clearResumeToken removes the resume token from the executor running record so
-// the next agent start won't use --resume. This is used by both automatic resume
-// failure handling and user-initiated fresh start recovery.
+// the next agent start won't use --resume. Used by both automatic resume failure
+// handling and user-initiated fresh start recovery.
+//
+// Unconditional clear: passes expectedExecID="" so the narrow update is not
+// CAS-guarded — clearing a token is always intentional regardless of which
+// execution is currently registered.
 func (s *Service) clearResumeToken(ctx context.Context, sessionID string) {
-	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-	if err != nil || running == nil || running.ResumeToken == "" {
-		return
-	}
-	running.ResumeToken = ""
-	if upsertErr := s.repo.UpsertExecutorRunning(ctx, running); upsertErr != nil {
+	err := s.repo.UpdateResumeToken(ctx, sessionID, "", "", "")
+	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
 		s.logger.Error("failed to clear resume token",
 			zap.String("session_id", sessionID),
-			zap.Error(upsertErr))
+			zap.Error(err))
 	}
 }
 
@@ -643,10 +646,21 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 
 // handleAgentStartFailed is called by the executor when StartAgentProcess fails.
 // It detects auth errors and routes them through the recoverable failure path so
-// the frontend shows login guidance instead of a terminal failure.
+// the frontend shows login guidance instead of a terminal failure. When the
+// failure occurred during a background session resume (fromResume=true) and is
+// not an auth error, it sets the suppressToast flag so the default FAILED
+// transition does not surface a user-facing toast for a transient bootstrap
+// error on focus / auto-resume.
 // Returns true if the failure was handled (caller should skip default FAILED logic).
-func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID, agentExecutionID string, err error) bool {
+func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID, agentExecutionID string, err error, fromResume bool) bool {
 	if !isAuthError(err.Error()) {
+		if fromResume {
+			s.logger.Info("suppressing toast for resume bootstrap failure",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			s.suppressToast.Store(sessionID, true)
+		}
 		return false
 	}
 	s.logger.Info("agent start failure is auth error, treating as recoverable",

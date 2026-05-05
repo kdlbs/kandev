@@ -233,12 +233,21 @@ func (m *Manager) GetExecutionIDForSession(_ context.Context, sessionID string) 
 //
 // Returns the execution with a running passthrough process, or an error.
 func (m *Manager) EnsurePassthroughExecution(ctx context.Context, sessionID string) (*AgentExecution, error) {
-	// Check if execution already exists with a running passthrough process
+	// Check if execution already exists with a running passthrough process.
+	// PassthroughProcessID is not cleared on exit, so a stale ID can point at
+	// a dead process; verify the runner still has it before short-circuiting,
+	// otherwise a fast-failed resume launch would keep returning the dead ID
+	// and the WS handler's IsProcessReadyOrPending check would 503 forever.
 	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
 		if execution.PassthroughProcessID != "" {
-			return execution, nil
+			if runner := m.GetInteractiveRunner(); runner != nil && runner.IsProcessReadyOrPending(execution.PassthroughProcessID) {
+				return execution, nil
+			}
+			m.logger.Info("execution has stale passthrough process ID, relaunching",
+				zap.String("session_id", sessionID),
+				zap.String("execution_id", execution.ID),
+				zap.String("stale_process_id", execution.PassthroughProcessID))
 		}
-		// Execution exists but no passthrough process - will try to start it
 		return m.resumeExistingExecution(ctx, sessionID, execution)
 	}
 
@@ -419,6 +428,12 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		}
 		return nil, fmt.Errorf("failed to register execution: %w", addErr)
 	}
+
+	// Persist executors_running row in lockstep with the in-memory Add so the
+	// DB never holds an execution_id the store doesn't know about. This is the
+	// structural fix for the divergence bug — pre-refactor, the orchestrator
+	// wrote the row later via a full-row UPDATE that could race with the store.
+	m.persistExecutorRunning(ctx, execution)
 
 	// Persist agentctl auth token only after the execution is tracked, so a
 	// race-lost rollback never leaves an orphaned secret in the store.

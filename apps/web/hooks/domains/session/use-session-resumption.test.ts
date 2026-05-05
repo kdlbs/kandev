@@ -48,6 +48,7 @@ function createSetters(): { setters: ResumeStateSetter; calls: SetterCalls } {
   return { setters, calls };
 }
 
+// eslint-disable-next-line max-lines-per-function -- test describe block, splitting hurts readability
 describe("resumeWithSilentFallback", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -154,5 +155,40 @@ describe("resumeWithSilentFallback", () => {
     expect(calls.errors.at(-1)).toBe(
       "Failed to resume session — workspace restore also unavailable",
     );
+  });
+
+  it("seeds agentctl ready when restore_workspace fallback succeeds", async () => {
+    mockRequest
+      .mockResolvedValueOnce({ success: false, task_id: "t1", state: "FAILED" })
+      .mockResolvedValueOnce({
+        success: true,
+        task_id: "t1",
+        session_id: "s1",
+        state: "FAILED",
+      });
+    const { setters } = createSetters();
+    const setAgentctlReady = vi.fn();
+    setters.setAgentctlReady = setAgentctlReady;
+
+    await resumeWithSilentFallback("t1", "s1", null, setters);
+
+    expect(setAgentctlReady).toHaveBeenCalledTimes(1);
+    expect(setAgentctlReady).toHaveBeenCalledWith("s1");
+  });
+
+  it("does not seed agentctl ready when resume succeeds (new execution will emit its own events)", async () => {
+    mockRequest.mockResolvedValueOnce({
+      success: true,
+      task_id: "t1",
+      session_id: "s1",
+      state: "STARTING",
+    });
+    const { setters } = createSetters();
+    const setAgentctlReady = vi.fn();
+    setters.setAgentctlReady = setAgentctlReady;
+
+    await resumeWithSilentFallback("t1", "s1", null, setters);
+
+    expect(setAgentctlReady).not.toHaveBeenCalled();
   });
 });

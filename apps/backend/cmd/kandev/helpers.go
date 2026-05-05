@@ -120,6 +120,9 @@ func appendAgentctlStatusMessage(
 		sessionIDPayloadKey:  sessionID,
 		"agent_execution_id": execution.ID,
 	}
+	if execution.TaskEnvironmentID != "" {
+		payload["task_environment_id"] = execution.TaskEnvironmentID
+	}
 	action := ws.ActionSessionAgentctlStarting
 	if execution.GetWorkspaceStream() != nil {
 		action = ws.ActionSessionAgentctlReady

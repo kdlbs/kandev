@@ -59,6 +59,13 @@ export function setupChatPanelSafetyNet(
         // If all sessions were deleted, leave the layout empty — the user
         // can create a new session via the "+" menu.
         if (!activeSessionId) return;
+        // Don't recreate a panel for a session that no longer exists in the
+        // store — this guards against handleDelete racing with the safety net.
+        const activeTaskId = appStore.getState().tasks.activeTaskId;
+        const knownSessions = activeTaskId
+          ? (appStore.getState().taskSessionsByTask.itemsByTaskId[activeTaskId] ?? [])
+          : [];
+        if (!knownSessions.some((s) => s.id === activeSessionId)) return;
         api.addPanel({
           id: `session:${activeSessionId}`,
           component: "chat",
@@ -284,6 +291,12 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     );
 
     if (!effectiveSessionId) return;
+
+    // Don't create a panel for a session that no longer exists in the store —
+    // guards against a race where removeTaskSession fires before the active
+    // session is switched, which would cause the deleted session's panel to
+    // be re-created by ensureSessionPanel.
+    if (!currentSessionIds.includes(effectiveSessionId)) return;
 
     // Remove the generic "chat" placeholder as soon as a real session is
     // active — per-session tabs replace it. Skip in maximized state to

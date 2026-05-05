@@ -78,14 +78,16 @@ func fallbackAuthMethods(agentID string) []streams.AuthMethodInfo {
 	}
 }
 
-// PromptAgent sends a follow-up prompt to a running agent
-// Attachments (images) are passed to the agent if provided
-func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment) (*PromptResult, error) {
+// PromptAgent sends a follow-up prompt to a running agent.
+// Attachments (images) are passed to the agent if provided.
+// When dispatchOnly is true, returns once the prompt is accepted instead of
+// waiting for the agent's turn to complete.
+func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error) {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
-	return m.sessionManager.SendPrompt(ctx, execution, prompt, true, attachments)
+	return m.sessionManager.SendPrompt(ctx, execution, prompt, true, attachments, dispatchOnly)
 }
 
 // cancelWaitTimeout bounds how long CancelAgent waits for the in-flight SendPrompt

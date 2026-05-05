@@ -269,17 +269,17 @@ function MobileUtilityActions({
           Release notes
         </Button>
       )}
-      <Button
-        type="button"
-        variant="outline"
-        className="w-full cursor-pointer justify-start gap-2"
-        onClick={openHealth}
-      >
-        <IconAlertTriangle
-          className={`h-4 w-4 ${showHealthIndicator ? "text-warning" : "text-muted-foreground"}`}
-        />
-        {showHealthIndicator ? "Health issues" : "System health"}
-      </Button>
+      {showHealthIndicator && (
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full cursor-pointer justify-start gap-2"
+          onClick={openHealth}
+        >
+          <IconAlertTriangle className="h-4 w-4 text-warning" />
+          Health issues
+        </Button>
+      )}
       <Button asChild variant="outline" className="w-full cursor-pointer justify-start gap-2">
         <Link href="/stats" onClick={closeSheet}>
           <IconChartBar className="h-4 w-4 mr-2" />

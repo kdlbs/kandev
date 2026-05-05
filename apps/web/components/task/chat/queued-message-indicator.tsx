@@ -53,9 +53,7 @@ function QueuedEditView({
         onKeyDown={onKeyDown}
         className={cn(
           "min-h-[60px] max-h-[200px] overflow-y-auto resize-none",
-          "bg-white dark:bg-gray-900",
-          "border-blue-300 dark:border-blue-700",
-          "focus:ring-blue-500 focus:border-blue-500",
+          "bg-background border-border",
         )}
         placeholder="Enter message content..."
         disabled={isSaving}
@@ -90,25 +88,22 @@ type QueuedDisplayViewProps = {
 
 function QueuedDisplayView({ displayContent, onStartEdit, onCancel }: QueuedDisplayViewProps) {
   return (
-    <div className="flex items-center gap-2 px-3 py-2">
+    <div className="flex items-center gap-2 px-3 py-1.5">
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className="flex-shrink-0">
-            <IconClock className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+          <div className="flex items-center gap-1.5 flex-shrink-0 text-muted-foreground">
+            <IconClock className="h-3.5 w-3.5" />
+            <span className="text-xs font-medium uppercase tracking-wide">Queued</span>
           </div>
         </TooltipTrigger>
-        <TooltipContent side="top">
-          Message queued - will execute when agent completes
-        </TooltipContent>
+        <TooltipContent side="top">Will run when the agent completes</TooltipContent>
       </Tooltip>
-      <div className="flex-1 min-w-0 text-blue-700 dark:text-blue-300 truncate">
-        {displayContent}
-      </div>
-      <div className="flex items-center gap-1 flex-shrink-0">
+      <div className="flex-1 min-w-0 text-foreground/80 truncate">{displayContent}</div>
+      <div className="flex items-center gap-0.5 flex-shrink-0">
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 w-6 p-0 hover:bg-blue-100 dark:hover:bg-blue-900"
+          className="h-6 w-6 p-0 cursor-pointer text-muted-foreground hover:text-foreground"
           onClick={onStartEdit}
           title="Edit message"
         >
@@ -117,7 +112,7 @@ function QueuedDisplayView({ displayContent, onStartEdit, onCancel }: QueuedDisp
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 w-6 p-0 hover:bg-blue-100 dark:hover:bg-blue-900"
+          className="h-6 w-6 p-0 cursor-pointer text-muted-foreground hover:text-foreground"
           onClick={onCancel}
           title="Cancel queued message"
         >
@@ -203,12 +198,7 @@ export const QueuedMessageIndicator = forwardRef<
     visibleContent.length > 80 ? visibleContent.substring(0, 80) + "..." : visibleContent;
 
   return (
-    <div
-      className={cn(
-        "bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800/50",
-        "rounded-lg text-sm",
-      )}
-    >
+    <div className={cn("bg-muted/40 border-l-2 border-primary/40 rounded-md text-sm")}>
       {isEditing ? (
         <QueuedEditView
           editValue={editValue}

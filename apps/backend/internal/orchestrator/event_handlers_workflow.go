@@ -675,11 +675,11 @@ func (s *Service) completeAndStopSession(ctx context.Context, taskID string, ses
 	// just performed and ping-ponging the task between steps.
 	s.updateTaskSessionState(ctx, taskID, session.ID, models.TaskSessionStateCompleted, "", false)
 
-	if session.AgentExecutionID != "" {
-		if err := s.agentManager.StopAgent(ctx, session.AgentExecutionID, false); err != nil {
+	if execID, err := s.agentManager.GetExecutionIDForSession(ctx, session.ID); err == nil && execID != "" {
+		if stopErr := s.agentManager.StopAgent(ctx, execID, false); stopErr != nil {
 			s.logger.Warn("failed to stop agent for session switch",
 				zap.String("session_id", session.ID),
-				zap.Error(err))
+				zap.Error(stopErr))
 		}
 	}
 
@@ -1086,7 +1086,7 @@ func (s *Service) autoStartStepPrompt(
 
 	const maxRetryAttempts = 5
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
-		_, err := s.PromptTask(ctx, taskID, sessionID, prompt, "", planMode, attachments)
+		_, err := s.PromptTask(ctx, taskID, sessionID, prompt, "", planMode, attachments, false)
 		if err == nil {
 			return nil
 		}
@@ -1173,7 +1173,15 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 		return err
 	}
 
-	fresh.AgentExecutionID = ""
+	// Drop the executors_running row for this session: the next StartCreatedSession
+	// will go through the full LaunchAgent path which creates a fresh row via
+	// lifecycle.persistExecutorRunning. Pre-refactor this also cleared
+	// fresh.AgentExecutionID; that field no longer drives runtime decisions —
+	// the in-memory store + executors_running are the source of truth.
+	if delErr := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); delErr != nil && !errors.Is(delErr, models.ErrExecutorRunningNotFound) {
+		s.logger.Warn("auto-start fallback: failed to clear executors_running for fresh launch",
+			zap.String("session_id", sessionID), zap.Error(delErr))
+	}
 	fresh.State = models.TaskSessionStateCreated
 	fresh.UpdatedAt = time.Now().UTC()
 	if err := s.repo.UpdateTaskSession(ctx, fresh); err != nil {
@@ -1323,7 +1331,8 @@ func (s *Service) markIdleAfterReset(
 func (s *Service) resetAgentContext(ctx context.Context, taskID string, session *models.TaskSession, stepName string) bool {
 	sessionID := session.ID
 
-	if session.AgentExecutionID == "" {
+	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if err != nil || executionID == "" {
 		s.logger.Debug("no agent execution for context reset, skipping",
 			zap.String("session_id", sessionID))
 		return true
@@ -1333,12 +1342,12 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.String("step_name", stepName),
-		zap.String("agent_execution_id", session.AgentExecutionID))
+		zap.String("agent_execution_id", executionID))
 
 	s.setSessionResetInProgress(sessionID, true)
 	defer s.setSessionResetInProgress(sessionID, false)
 
-	if err := s.agentManager.ResetAgentContext(ctx, session.AgentExecutionID); err != nil {
+	if err := s.agentManager.ResetAgentContext(ctx, executionID); err != nil {
 		s.logger.Error("failed to reset agent context",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),

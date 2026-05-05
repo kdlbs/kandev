@@ -1,13 +1,17 @@
 "use client";
 
 import { memo, useState, useCallback } from "react";
+import Link from "next/link";
 import ReactMarkdown from "react-markdown";
-import { IconWand, IconMessageDots, IconFile } from "@tabler/icons-react";
+import { IconWand, IconMessageDots, IconFile, IconRobot } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import { RichBlocks } from "@/components/task/chat/messages/rich-blocks";
 import { MessageActions } from "@/components/task/chat/messages/message-actions";
 import { useMessageNavigation } from "@/hooks/use-message-navigation";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
+import { linkToTask } from "@/lib/links";
 import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 
 type ChatMessageProps = {
@@ -104,6 +108,16 @@ type UserMessageMetadata = {
   has_review_comments?: boolean;
   has_hidden_prompts?: boolean;
   context_files?: Array<{ path: string; name: string }>;
+  sender_task_id?: string;
+  sender_task_title?: string;
+  sender_session_id?: string;
+};
+
+type SenderTaskInfo = {
+  id: string;
+  // Snapshot title captured when the message was sent. May differ from the
+  // task's current title; used as a fallback when the live task isn't loaded.
+  snapshotTitle: string;
 };
 
 function parseUserMessageMetadata(comment: Message) {
@@ -116,6 +130,9 @@ function parseUserMessageMetadata(comment: Message) {
   const hasHiddenPrompts = !!metadata?.has_hidden_prompts;
   const hasContent = !!(comment.content && comment.content.trim() !== "");
   const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
+  const senderTask: SenderTaskInfo | null = metadata?.sender_task_id
+    ? { id: metadata.sender_task_id, snapshotTitle: metadata.sender_task_title || "" }
+    : null;
   return {
     imageAttachments,
     fileAttachments,
@@ -125,21 +142,76 @@ function parseUserMessageMetadata(comment: Message) {
     hasHiddenPrompts,
     hasContent,
     hasAttachments,
+    senderTask,
   };
+}
+
+const SENDER_TITLE_MAX = 24;
+
+function truncateTitle(title: string): string {
+  if (title.length <= SENDER_TITLE_MAX) return title;
+  return title.slice(0, SENDER_TITLE_MAX - 1).trimEnd() + "…";
+}
+
+function SenderTaskBadge({ sender }: { sender: SenderTaskInfo }) {
+  // Live-resolve the sender task from the loaded kanban state so the badge
+  // reflects renames. When the sender task isn't loaded (cross-workspace,
+  // archived, etc.) we fall back to the snapshot title and render a static,
+  // non-clickable greyed-out badge — the source URL only works when we have
+  // routing context.
+  const liveTask = useTaskById(sender.id);
+  const fullTitle = liveTask?.title || sender.snapshotTitle || "(unknown task)";
+  const truncated = truncateTitle(fullTitle);
+
+  const inner = (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full bg-purple-500/20 px-2.5 py-1 text-xs font-medium text-purple-300",
+        liveTask && "cursor-pointer hover:bg-purple-500/30 transition-colors",
+        !liveTask && "opacity-60",
+      )}
+      data-testid="sender-task-badge"
+      data-sender-task-id={sender.id}
+    >
+      <IconRobot size={14} /> {truncated}
+    </span>
+  );
+
+  const wrapped = liveTask ? (
+    <Link href={linkToTask(sender.id)} aria-label={`Open source task ${fullTitle}`}>
+      {inner}
+    </Link>
+  ) : (
+    inner
+  );
+
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>{wrapped}</TooltipTrigger>
+        <TooltipContent>
+          From agent in task <span className="font-semibold">&ldquo;{fullTitle}&rdquo;</span>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
 
 function UserContextBadges({
   hasPlanMode,
   hasReviewComments,
   contextFiles,
+  senderTask,
 }: {
   hasPlanMode: boolean;
   hasReviewComments: boolean;
   contextFiles: Array<{ path: string; name: string }>;
+  senderTask: SenderTaskInfo | null;
 }) {
-  if (!hasPlanMode && !hasReviewComments && contextFiles.length === 0) return null;
+  if (!hasPlanMode && !hasReviewComments && contextFiles.length === 0 && !senderTask) return null;
   return (
     <div className="flex justify-end gap-1.5 mb-1 flex-wrap">
+      {senderTask && <SenderTaskBadge sender={senderTask} />}
       {hasPlanMode && (
         <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/20 px-2 py-0.5 text-[10px] text-slate-400">
           <IconWand size={10} /> Plan mode
@@ -188,6 +260,7 @@ function UserMessageContent({
     hasHiddenPrompts,
     hasContent,
     hasAttachments,
+    senderTask,
   } = parseUserMessageMetadata(comment);
 
   return (
@@ -197,6 +270,7 @@ function UserMessageContent({
           hasPlanMode={hasPlanMode}
           hasReviewComments={hasReviewComments}
           contextFiles={contextFiles}
+          senderTask={senderTask}
         />
         <div className="rounded-2xl bg-primary/30 px-4 py-2.5 overflow-hidden">
           {hasAttachments && (

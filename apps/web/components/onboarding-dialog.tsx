@@ -152,18 +152,57 @@ function useOnboardingResources(open: boolean) {
 
   useEffect(() => {
     if (!open) return;
-    Promise.all([listAvailableAgents({ cache: "no-store" }), listAgentsAction()])
-      .then(([availRes, savedRes]) => {
-        setAvailableAgents(availRes.agents ?? []);
-        setTools(availRes.tools ?? []);
-        setAgentSettings(buildAgentSettings(availRes.agents ?? [], savedRes.agents ?? []));
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    // Poll while any agent is still in the "probing" state — the host-utility
+    // probes async at boot and the dialog can open before they all resolve.
+    // Without re-polling, agents that flip status mid-session stay stuck on
+    // the initial badge in the UI. Re-poll on transient fetch errors too:
+    // a single 500 shouldn't strand the dialog on stale probing status.
+    let lastSawProbing = true;
+    const pollOnce = (firstRun: boolean) => {
+      Promise.all([
+        listAvailableAgents({ cache: "no-store" }),
+        firstRun ? listAgentsAction() : Promise.resolve(null),
+      ])
+        .then(([availRes, savedRes]) => {
+          if (cancelled) return;
+          const agents = availRes.agents ?? [];
+          setAvailableAgents(agents);
+          setTools(availRes.tools ?? []);
+          if (savedRes) {
+            setAgentSettings(buildAgentSettings(agents, savedRes.agents ?? []));
+          }
+          lastSawProbing = agents.some((a) => a.model_config.status === "probing");
+        })
+        .catch(() => {
+          // Keep polling on transient errors — backend may be momentarily
+          // unreachable while still resolving probes.
+        })
+        .finally(() => {
+          if (cancelled) return;
+          if (firstRun) setLoadingAgents(false);
+          if (lastSawProbing) {
+            timeoutId = setTimeout(() => pollOnce(false), 2000);
+          }
+        });
+    };
+
+    pollOnce(true);
+    listWorkflowTemplates()
+      .then((res) => {
+        if (!cancelled) setTemplates(res.templates ?? []);
       })
       .catch(() => {})
-      .finally(() => setLoadingAgents(false));
-    listWorkflowTemplates()
-      .then((res) => setTemplates(res.templates ?? []))
-      .catch(() => {})
-      .finally(() => setLoadingTemplates(false));
+      .finally(() => {
+        if (!cancelled) setLoadingTemplates(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, [open]);
 
   return {
@@ -265,7 +304,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={() => {}}>
-      <DialogContent className="sm:max-w-[540px]" showCloseButton={false}>
+      <DialogContent className="sm:max-w-3xl" showCloseButton={false}>
         <DialogHeader>
           <DialogTitle className="text-center text-2xl">{STEP_TITLES[step]}</DialogTitle>
           <DialogDescription className="text-center">{STEP_DESCRIPTIONS[step]}</DialogDescription>

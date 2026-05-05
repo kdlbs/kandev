@@ -4,14 +4,6 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@kandev/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
@@ -23,14 +15,12 @@ import {
   IconChartBar,
   IconTimeline,
   IconStethoscope,
-  IconDots,
-  IconSparkles,
-  IconAlertTriangle,
 } from "@tabler/icons-react";
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
-import { IntegrationsMenu } from "@/components/integrations/integrations-menu";
+import { IntegrationsTopbarLinks } from "@/components/integrations/integrations-menu";
 import { PageTopbar } from "@/components/page-topbar";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
+import { ReleaseNotesButton } from "../release-notes/release-notes-button";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
 import { HealthIndicatorButton, HealthIssuesDialog } from "../system-health/health-indicator";
 import { TaskSearchInput } from "./task-search-input";
@@ -60,22 +50,13 @@ type ViewToggleItem = {
   label: string;
 };
 
-type HeaderUtilityMenuProps = {
-  showReleaseNotesButton: boolean;
-  onOpenReleaseNotes: () => void;
-  showHealthIndicator: boolean;
-  onOpenHealthDialog: () => void;
-  showStatsLink?: boolean;
-  buttonSize?: ComponentProps<typeof Button>["size"];
-};
-
 const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
   { value: "kanban", icon: IconLayoutKanban, label: "Kanban" },
   { value: "pipeline", icon: IconTimeline, label: "Pipeline" },
   { value: "list", icon: IconList, label: "List" },
 ];
 
-const WORKBENCH_TOPBAR_CLASSNAME = "h-10 px-3 py-1";
+const WORKBENCH_TOPBAR_CLASSNAME = "h-12 border-b-0 px-3 py-2";
 const DESKTOP_HEADER_NARROW_PX = 1100;
 
 function getWorkspaceLabel(
@@ -90,59 +71,18 @@ function getHeaderTitle(currentPage: string): string {
   return currentPage === "tasks" ? "Tasks" : "Home";
 }
 
-function BoardUtilitiesMenu({
-  showReleaseNotesButton,
-  onOpenReleaseNotes,
-  showHealthIndicator,
-  onOpenHealthDialog,
-  showStatsLink = true,
-  buttonSize = "icon",
-}: HeaderUtilityMenuProps) {
+function SettingsTopbarButton({ size = "icon" }: { size?: ComponentProps<typeof Button>["size"] }) {
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          size={buttonSize}
-          className="cursor-pointer"
-          aria-label="Utilities"
-        >
-          <IconDots className="h-4 w-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuLabel>Utilities</DropdownMenuLabel>
-        {showReleaseNotesButton && (
-          <DropdownMenuItem onClick={onOpenReleaseNotes} className="cursor-pointer">
-            <IconSparkles className="h-4 w-4" />
-            Release notes
-          </DropdownMenuItem>
-        )}
-        <DropdownMenuItem onClick={onOpenHealthDialog} className="cursor-pointer">
-          <IconAlertTriangle
-            className={`h-4 w-4 ${showHealthIndicator ? "text-warning" : "text-muted-foreground"}`}
-          />
-          {showHealthIndicator ? "Health issues" : "System health"}
-        </DropdownMenuItem>
-        {showStatsLink && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem asChild className="cursor-pointer">
-              <Link href="/stats">
-                <IconChartBar className="h-4 w-4" />
-                Stats
-              </Link>
-            </DropdownMenuItem>
-          </>
-        )}
-        <DropdownMenuItem asChild className="cursor-pointer">
-          <Link href="/settings">
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button asChild variant="outline" size={size} className="cursor-pointer">
+          <Link href="/settings" aria-label="Settings">
             <IconSettings className="h-4 w-4" />
-            Settings
           </Link>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Settings</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -181,17 +121,27 @@ function ImproveKandevTopbarButton({
   );
 }
 
+function StatsTopbarButton() {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button asChild variant="outline" size="icon-lg" className="cursor-pointer">
+          <Link href="/stats" aria-label="Stats">
+            <IconChartBar className="h-4 w-4" />
+          </Link>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Stats</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function HomeLeftActions({ workspaceId }: { workspaceId?: string }) {
   return (
     <>
-      <Button asChild variant="outline" size="lg" className="cursor-pointer">
-        <Link href="/stats" aria-label="Stats">
-          <IconChartBar className="h-4 w-4" />
-          Stats
-        </Link>
-      </Button>
+      <IntegrationsTopbarLinks />
+      <StatsTopbarButton />
       <ImproveKandevTopbarButton workspaceId={workspaceId} />
-      <IntegrationsMenu />
     </>
   );
 }
@@ -199,8 +149,8 @@ function HomeLeftActions({ workspaceId }: { workspaceId?: string }) {
 function WorkspaceLeftActions({ workspaceId }: { workspaceId?: string }) {
   return (
     <>
+      <IntegrationsTopbarLinks />
       <ImproveKandevTopbarButton workspaceId={workspaceId} />
-      <IntegrationsMenu />
     </>
   );
 }
@@ -368,6 +318,7 @@ function DesktopHeader({
   toggleValue,
   handleViewChange,
   showReleaseNotesButton,
+  releaseNotesHasUnseen,
   onOpenReleaseNotes,
   showHealthIndicator,
   onOpenHealthDialog,
@@ -382,6 +333,7 @@ function DesktopHeader({
   toggleValue: string;
   handleViewChange: (value: string) => void;
   showReleaseNotesButton: boolean;
+  releaseNotesHasUnseen: boolean;
   onOpenReleaseNotes: () => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
@@ -439,14 +391,14 @@ function DesktopHeader({
             onClick={onOpenHealthDialog}
             size="icon-lg"
           />
-          <BoardUtilitiesMenu
-            showReleaseNotesButton={showReleaseNotesButton}
-            onOpenReleaseNotes={onOpenReleaseNotes}
-            showHealthIndicator={showHealthIndicator}
-            onOpenHealthDialog={onOpenHealthDialog}
-            showStatsLink={!isHome}
-            buttonSize="icon-lg"
-          />
+          {showReleaseNotesButton && (
+            <ReleaseNotesButton
+              hasUnseen={releaseNotesHasUnseen}
+              onClick={onOpenReleaseNotes}
+              size="icon-lg"
+            />
+          )}
+          <SettingsTopbarButton size="icon-lg" />
         </>
       }
     />
@@ -494,6 +446,7 @@ export function KanbanHeader({
 
   const indicatorProps = {
     showReleaseNotesButton: releaseNotes.showTopbarButton,
+    releaseNotesHasUnseen: releaseNotes.hasUnseen,
     onOpenReleaseNotes: releaseNotes.openDialog,
     showHealthIndicator: healthIndicator.hasIssues,
     onOpenHealthDialog: healthIndicator.openDialog,

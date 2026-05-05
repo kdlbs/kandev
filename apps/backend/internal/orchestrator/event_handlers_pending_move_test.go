@@ -149,7 +149,7 @@ func buildPendingMoveScenario(t *testing.T) *pendingMoveScenario {
 		State: v1.TaskStateInProgress,
 	}
 
-	agentMgr := &mockAgentManager{}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	log := testLogger()
 	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
@@ -286,6 +286,20 @@ func seedReviewSession(t *testing.T, repo *sqliterepo.Repository, now time.Time)
 // path complete in unit tests without spawning a real subprocess.
 func wireBootReadySimulator(svc *Service, agentMgr *mockAgentManager, newExecID string) {
 	agentMgr.launchAgentFunc = func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		// Simulate the lifecycle manager's persistExecutorRunning: in production
+		// the row is upserted in lockstep with executionStore.Add; here we mirror
+		// that timing so the orchestrator's GetExecutionIDForSession lookup
+		// resolves to the new exec id immediately.
+		if svc != nil && svc.repo != nil {
+			_ = svc.repo.UpsertExecutorRunning(context.Background(), &models.ExecutorRunning{
+				ID:               req.SessionID,
+				SessionID:        req.SessionID,
+				TaskID:           req.TaskID,
+				AgentExecutionID: newExecID,
+				ContainerID:      "container-relaunch",
+				Status:           "starting",
+			})
+		}
 		go func() {
 			time.Sleep(50 * time.Millisecond)
 			svc.handleAgentBootReady(context.Background(), watcher.AgentEventData{
@@ -541,7 +555,7 @@ func TestHandleAgentBootReady_DoesNotTriggerOnTurnComplete(t *testing.T) {
 				ID: "task-1", WorkflowID: "wf1", State: v1.TaskStateInProgress,
 			}
 
-			agentMgr := &mockAgentManager{}
+			agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 			log := testLogger()
 			exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 			svc := &Service{

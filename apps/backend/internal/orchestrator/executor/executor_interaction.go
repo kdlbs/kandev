@@ -26,14 +26,17 @@ func (e *Executor) Stop(ctx context.Context, sessionID string, reason string, fo
 // caller can return quickly, then terminates the agent process asynchronously
 // to avoid blocking the caller on agentctl's blocking stop HTTP call.
 func (e *Executor) stopWithSession(ctx context.Context, session *models.TaskSession, reason string, force bool) error {
-	if session.AgentExecutionID == "" {
+	// Look up the live execution for this session via the lifecycle manager —
+	// the in-memory store is the single source of truth post-refactor.
+	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
+	if err != nil || executionID == "" {
 		return ErrExecutionNotFound
 	}
 
 	e.logger.Info("stopping execution",
 		zap.String("task_id", session.TaskID),
 		zap.String("session_id", session.ID),
-		zap.String("agent_execution_id", session.AgentExecutionID),
+		zap.String("agent_execution_id", executionID),
 		zap.String("reason", reason),
 		zap.Bool("force", force))
 
@@ -48,7 +51,6 @@ func (e *Executor) stopWithSession(ctx context.Context, session *models.TaskSess
 	// Terminate the agent process in the background — agentctl's stop endpoint
 	// blocks until the process exits, which can exceed the WS request timeout.
 	stopCtx := context.WithoutCancel(ctx)
-	executionID := session.AgentExecutionID
 	go func() {
 		if err := e.agentManager.StopAgentWithReason(stopCtx, executionID, reason, force); err != nil {
 			// Log the error; the agent instance may already be gone
@@ -118,7 +120,7 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 // Prompt sends a follow-up prompt to a running agent for a task
 // Returns PromptResult indicating if the agent needs input
 // Attachments (images) are passed to the agent if provided
-func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, preloadedSession ...*models.TaskSession) (*PromptResult, error) {
+func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, preloadedSession ...*models.TaskSession) (*PromptResult, error) {
 	var session *models.TaskSession
 	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
 		session = preloadedSession[0]
@@ -132,18 +134,20 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 	if session.TaskID != taskID {
 		return nil, ErrExecutionNotFound
 	}
-	if session.AgentExecutionID == "" {
+	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if err != nil || executionID == "" {
 		return nil, ErrExecutionNotFound
 	}
 
 	e.logger.Debug("sending prompt to agent",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
-		zap.String("agent_execution_id", session.AgentExecutionID),
+		zap.String("agent_execution_id", executionID),
 		zap.Int("prompt_length", len(prompt)),
-		zap.Int("attachments_count", len(attachments)))
+		zap.Int("attachments_count", len(attachments)),
+		zap.Bool("dispatch_only", dispatchOnly))
 
-	result, err := e.agentManager.PromptAgent(ctx, session.AgentExecutionID, prompt, attachments)
+	result, err := e.agentManager.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
 	if err != nil {
 		if errors.Is(err, lifecycle.ErrExecutionNotFound) {
 			return nil, ErrExecutionNotFound
@@ -219,7 +223,8 @@ func (e *Executor) prepareModelSwitch(ctx context.Context, taskID, sessionID str
 	if session.TaskID != taskID {
 		return nil, nil, "", nil, fmt.Errorf("session %s does not belong to task %s", sessionID, taskID)
 	}
-	if session.AgentExecutionID == "" {
+	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if err != nil || executionID == "" {
 		return nil, nil, "", nil, ErrExecutionNotFound
 	}
 
@@ -236,11 +241,11 @@ func (e *Executor) prepareModelSwitch(ctx context.Context, taskID, sessionID str
 	}
 
 	e.logger.Info("stopping current agent for model switch",
-		zap.String("agent_execution_id", session.AgentExecutionID))
-	if err := e.agentManager.StopAgent(ctx, session.AgentExecutionID, false); err != nil {
+		zap.String("agent_execution_id", executionID))
+	if err := e.agentManager.StopAgent(ctx, executionID, false); err != nil {
 		e.logger.Warn("failed to stop agent for model switch, continuing anyway",
 			zap.Error(err),
-			zap.String("agent_execution_id", session.AgentExecutionID))
+			zap.String("agent_execution_id", executionID))
 	}
 
 	return session, task, acpSessionID, existingRunning, nil
@@ -280,16 +285,17 @@ func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID
 // repository and worktree config from the existing session.
 func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Task, session *models.TaskSession, sessionID, newModel, prompt, acpSessionID string, execConfig executorConfig, running *models.ExecutorRunning) (*LaunchAgentRequest, error) {
 	req := &LaunchAgentRequest{
-		TaskID:          task.ID,
-		SessionID:       sessionID,
-		TaskTitle:       task.Title,
-		AgentProfileID:  session.AgentProfileID,
-		TaskDescription: prompt,
-		ModelOverride:   newModel,
-		ACPSessionID:    acpSessionID,
-		ExecutorType:    execConfig.ExecutorType,
-		Metadata:        execConfig.Metadata,
-		IsEphemeral:     task.IsEphemeral,
+		TaskID:            task.ID,
+		SessionID:         sessionID,
+		TaskTitle:         task.Title,
+		AgentProfileID:    session.AgentProfileID,
+		TaskDescription:   prompt,
+		ModelOverride:     newModel,
+		ACPSessionID:      acpSessionID,
+		ExecutorType:      execConfig.ExecutorType,
+		Metadata:          execConfig.Metadata,
+		IsEphemeral:       task.IsEphemeral,
+		TaskEnvironmentID: session.TaskEnvironmentID,
 	}
 
 	// Activate config-mode MCP tools when config_mode is set in session metadata.
@@ -354,10 +360,14 @@ func (e *Executor) applyWorktreeToSwitchRequest(req *LaunchAgentRequest, session
 	}
 }
 
-// persistModelSwitchState updates session and executor running records after a model switch launch.
+// persistModelSwitchState updates the session row's model metadata and state
+// after a model switch launch. The executors_running row's agent_execution_id /
+// container_id / status are written by the lifecycle manager during the launch
+// itself (lifecycle.persistExecutorRunning) and not touched here.
 func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, newModel string, existingRunning *models.ExecutorRunning) {
-	session.AgentExecutionID = resp.AgentExecutionID
-	session.ContainerID = resp.ContainerID
+	_ = resp
+	_ = existingRunning
+
 	session.State = models.TaskSessionStateStarting
 	session.UpdatedAt = time.Now().UTC()
 
@@ -371,18 +381,6 @@ func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionI
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-	}
-
-	if existingRunning != nil {
-		existingRunning.AgentExecutionID = resp.AgentExecutionID
-		existingRunning.ContainerID = resp.ContainerID
-		existingRunning.Status = "starting"
-		if err := e.repo.UpsertExecutorRunning(ctx, existingRunning); err != nil {
-			e.logger.Warn("failed to update executor running after model switch",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		}
 	}
 }
 

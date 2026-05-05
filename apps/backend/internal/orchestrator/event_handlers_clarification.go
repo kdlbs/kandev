@@ -72,7 +72,7 @@ func (s *Service) handleClarificationAnswered(ctx context.Context, event *bus.Ev
 		zap.String("session_id", data.SessionID),
 		zap.Bool("rejected", data.Rejected))
 
-	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil); err != nil {
+	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil, false); err != nil {
 		if !s.retryClarificationAfterCancel(ctx, data, prompt, err) {
 			s.logger.Error("failed to resume agent with clarification answer",
 				zap.String("task_id", data.TaskID),
@@ -175,7 +175,7 @@ func (s *Service) resumeClarificationViaFallback(data clarificationAnsweredData)
 		zap.String("pending_id", data.PendingID))
 
 	ctx := context.Background()
-	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil); err != nil {
+	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil, false); err != nil {
 		if !s.retryClarificationAfterCancel(ctx, data, prompt, err) {
 			s.logger.Error("failed to resume agent via clarification watchdog fallback",
 				zap.String("task_id", data.TaskID),
@@ -214,7 +214,7 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		s.completeTurnForSession(ctx, data.SessionID)
 	}
 
-	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil); err != nil {
+	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil, false); err != nil {
 		s.logger.Error("failed to resume agent after cancel in clarification recovery",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),

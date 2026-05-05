@@ -87,6 +87,13 @@ func (s *Service) TakePendingMove(ctx context.Context, sessionID string) (*Pendi
 
 // QueueMessage queues a message for a session (replaces existing queued message)
 func (s *Service) QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment) (*QueuedMessage, error) {
+	return s.QueueMessageWithMetadata(ctx, sessionID, taskID, content, model, userID, planMode, attachments, nil)
+}
+
+// QueueMessageWithMetadata is like QueueMessage but stores extra metadata that
+// is propagated to the resulting Message row when the queued message is
+// drained (e.g. sender_task_id for messages sent via message_task_kandev).
+func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}) (*QueuedMessage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -98,6 +105,7 @@ func (s *Service) QueueMessage(ctx context.Context, sessionID, taskID, content, 
 		Model:       model,
 		PlanMode:    planMode,
 		Attachments: attachments,
+		Metadata:    metadata,
 		QueuedAt:    time.Now(),
 		QueuedBy:    userID,
 	}
