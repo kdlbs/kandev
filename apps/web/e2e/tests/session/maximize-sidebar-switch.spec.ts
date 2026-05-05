@@ -16,12 +16,23 @@ const TERMINAL_MARKER = "KANDEV_E2E_MAXIMIZE_SIDEBAR_5567";
  * Reproduces with sidebar clicks (no page reload), exercising
  * `performLayoutSwitch` rather than `tryRestoreLayout`.
  */
-async function seedTaskWithSession(
+async function gotoTaskAndWaitForIdle(
   testPage: Page,
+  taskId: string,
+  timeoutMs = 30_000,
+): Promise<SessionPage> {
+  await testPage.goto(`/t/${taskId}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
+  await expect(session.idleInput()).toBeVisible({ timeout: timeoutMs });
+  return session;
+}
+
+async function createSeedTask(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
-): Promise<SessionPage> {
+): Promise<{ id: string; sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
@@ -33,13 +44,8 @@ async function seedTaskWithSession(
       repository_ids: [seedData.repositoryId],
     },
   );
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-
-  await testPage.goto(`/t/${task.id}`);
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
-  return session;
+  if (!task.session_id) throw new Error(`createTaskWithAgent did not return a session_id: ${title}`);
+  return { id: task.id, sessionId: task.session_id };
 }
 
 test.describe("Maximize survives sidebar task switch", () => {
@@ -50,31 +56,24 @@ test.describe("Maximize survives sidebar task switch", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
 
-    // Task A — will be maximized.
-    const sessionA = await seedTaskWithSession(testPage, apiClient, seedData, "Maximize Task A");
+    // Create both tasks first so they're both visible in each other's sidebar.
+    const taskA = await createSeedTask(apiClient, seedData, "Maximize Task A");
+    const taskB = await createSeedTask(apiClient, seedData, "Maximize Task B");
+
+    // Prime both env mappings in the store: visit B briefly, then settle on A.
+    // Without this, the sidebar click below can fire before the WS env-id for
+    // the target session has propagated, so `switchToSession` short-circuits
+    // and the layout doesn't switch — masking the test's invariant.
+    await gotoTaskAndWaitForIdle(testPage, taskB.id);
+    const sessionA = await gotoTaskAndWaitForIdle(testPage, taskA.id);
 
     // Type into the terminal so it's actually connected before we maximize —
     // the existing maximize tests in session-layout.spec.ts use the same
-    // pattern. Without it, clickMaximize can race with the terminal panel
-    // mounting.
+    // pattern. Without it, clickMaximize can race with the panel mounting.
     await sessionA.typeInTerminal(`echo ${TERMINAL_MARKER}`);
     await sessionA.expectTerminalHasText(TERMINAL_MARKER);
-
-    // Task B — created after Task A is settled so the sidebar is stable.
-    const taskB = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Maximize Task B",
-      seedData.agentProfileId,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-    if (!taskB.session_id) throw new Error("Task B creation did not return a session_id");
 
     // Maximize the terminal group on Task A.
     await sessionA.clickMaximize();
@@ -94,16 +93,16 @@ test.describe("Maximize survives sidebar task switch", () => {
     const taskARow = sessionA.taskInSidebar("Maximize Task A");
     await expect(taskARow).toBeVisible({ timeout: 15_000 });
     await sessionA.clickTaskInSidebar("Maximize Task A");
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(new RegExp(`/t/${taskA.id}(?:\\?|$)`), { timeout: 15_000 });
     await sessionA.waitForLoad();
 
     // Bug invariants:
-    //  1. The layout must be healthy — no zero-width groups, no large gap on
-    //     the right (the user-visible "centre group is shrunk" symptom).
-    //  2. The maximize state must be preserved across the round-trip — same
-    //     expectation we already hold for full page reloads.
+    //  1. Maximize state preserved across the round-trip — same expectation
+    //     we hold for full page reloads.
+    //  2. Layout healthy — no zero-width groups, no large gap on the right
+    //     (the user-visible "centre group is shrunk" symptom).
     await expect(sessionA.terminal).toBeVisible({ timeout: 15_000 });
-    await sessionA.expectLayoutHealthy();
     await sessionA.expectMaximized();
+    await sessionA.expectLayoutHealthy();
   });
 });

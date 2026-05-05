@@ -67,6 +67,15 @@ export function setupLayoutPersistence(
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
+      // Re-check at fire time: a maximize (or another restore) may have
+      // started after this timer was scheduled. Persisting api.toJSON() now
+      // would write the maximize overlay as the env's regular layout — the
+      // bug this guard is meant to prevent.
+      const live = useDockviewStore.getState();
+      if (live.preMaximizeLayout !== null || live.isRestoringLayout) {
+        saveTimerRef.current = null;
+        return;
+      }
       try {
         const json = api.toJSON();
         const envId = envIdRef.current;

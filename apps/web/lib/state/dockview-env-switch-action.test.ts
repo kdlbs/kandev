@@ -180,6 +180,6 @@ describe("switchEnvLayout — maximize+sidebar-switch regression", () => {
 
     const state = useDockviewStore.getState();
     expect(state.preMaximizeLayout).not.toBeNull();
-    expect(state.maximizedGroupId).not.toBeNull();
+    expect(state.maximizedGroupId).toBeTruthy();
   });
 });
