@@ -1,24 +1,37 @@
 "use client";
 
 import { useCallback } from "react";
+import type { DockviewPanelApi } from "dockview-react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 
 /**
- * Returns a callback that toggles the maximize state for the given dockview
- * group. No-ops for the sidebar group (it has no maximize button either).
+ * Returns an `onDoubleClick` handler that toggles the maximize state for the
+ * dockview group containing the given panel. No-ops for the sidebar group
+ * (which has no maximize button either) and while the dockview store is in
+ * the middle of restoring a layout (guards against rapid double-firing on
+ * back-to-back dblclicks during the maximize/restore animation frame).
+ *
+ * Reads `api.group.id` and store state at call time rather than render time
+ * so the toggle remains correct after dockview rebuilds groups via fromJSON.
  */
-export function useToggleGroupMaximize(groupId: string): () => void {
-  const isMaximized = useDockviewStore((s) => s.preMaximizeLayout !== null);
-  const sidebarGroupId = useDockviewStore((s) => s.sidebarGroupId);
-  const maximizeGroup = useDockviewStore((s) => s.maximizeGroup);
-  const exitMaximizedLayout = useDockviewStore((s) => s.exitMaximizedLayout);
-
-  return useCallback(() => {
-    if (groupId === sidebarGroupId) return;
-    if (isMaximized) {
-      exitMaximizedLayout();
-    } else {
-      maximizeGroup(groupId);
-    }
-  }, [groupId, sidebarGroupId, isMaximized, maximizeGroup, exitMaximizedLayout]);
+export function useTabMaximizeOnDoubleClick(
+  api: Pick<DockviewPanelApi, "group">,
+): (event: React.MouseEvent) => void {
+  return useCallback(
+    (event) => {
+      event.stopPropagation();
+      event.preventDefault();
+      const groupId = api.group?.id;
+      if (!groupId) return;
+      const state = useDockviewStore.getState();
+      if (state.isRestoringLayout) return;
+      if (groupId === state.sidebarGroupId) return;
+      if (state.preMaximizeLayout) {
+        state.exitMaximizedLayout();
+      } else {
+        state.maximizeGroup(groupId);
+      }
+    },
+    [api],
+  );
 }

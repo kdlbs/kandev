@@ -42,7 +42,7 @@ import { ChangesTab } from "./changes-tab";
 import { PlanTab } from "./plan-tab";
 import { PreviewFileTab, PreviewDiffTab, PreviewCommitTab, PinnedDefaultTab } from "./preview-tab";
 import { SessionTab } from "./session-tab";
-import { useToggleGroupMaximize } from "./use-tab-maximize";
+import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import {
   setupSessionTabSync,
   setupChatPanelSafetyNet,
@@ -153,11 +153,11 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
 
 // --- TAB COMPONENTS ---
 function PermanentTab(props: IDockviewPanelHeaderProps) {
-  const toggleMaximize = useToggleGroupMaximize(props.api.group.id);
+  const onDoubleClick = useTabMaximizeOnDoubleClick(props.api);
   return (
     <div
       className="flex h-full items-center cursor-pointer select-none"
-      onDoubleClick={toggleMaximize}
+      onDoubleClick={onDoubleClick}
     >
       <DockviewDefaultTab {...props} hideClose />
     </div>

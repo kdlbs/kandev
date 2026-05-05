@@ -6,56 +6,101 @@ const SIDEBAR_GROUP_ID = "sidebar-group";
 const mockMaximizeGroup = vi.fn();
 const mockExitMaximizedLayout = vi.fn();
 
-let mockPreMaximizeLayout: object | null = null;
-let mockSidebarGroupId = SIDEBAR_GROUP_ID;
+const storeState: {
+  preMaximizeLayout: object | null;
+  sidebarGroupId: string;
+  isRestoringLayout: boolean;
+  maximizeGroup: typeof mockMaximizeGroup;
+  exitMaximizedLayout: typeof mockExitMaximizedLayout;
+} = {
+  preMaximizeLayout: null,
+  sidebarGroupId: SIDEBAR_GROUP_ID,
+  isRestoringLayout: false,
+  maximizeGroup: mockMaximizeGroup,
+  exitMaximizedLayout: mockExitMaximizedLayout,
+};
 
 vi.mock("@/lib/state/dockview-store", () => ({
-  useDockviewStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      preMaximizeLayout: mockPreMaximizeLayout,
-      sidebarGroupId: mockSidebarGroupId,
-      maximizeGroup: mockMaximizeGroup,
-      exitMaximizedLayout: mockExitMaximizedLayout,
-    }),
+  useDockviewStore: Object.assign(
+    (selector: (state: typeof storeState) => unknown) => selector(storeState),
+    { getState: () => storeState },
+  ),
 }));
 
-import { useToggleGroupMaximize } from "../use-tab-maximize";
+import { useTabMaximizeOnDoubleClick } from "../use-tab-maximize";
 
-describe("useToggleGroupMaximize", () => {
+function makeApi(groupId: string | undefined) {
+  return { group: groupId === undefined ? undefined : { id: groupId } } as Parameters<
+    typeof useTabMaximizeOnDoubleClick
+  >[0];
+}
+
+function makeEvent() {
+  return {
+    stopPropagation: vi.fn(),
+    preventDefault: vi.fn(),
+  } as unknown as React.MouseEvent;
+}
+
+describe("useTabMaximizeOnDoubleClick", () => {
   beforeEach(() => {
     mockMaximizeGroup.mockClear();
     mockExitMaximizedLayout.mockClear();
-    mockPreMaximizeLayout = null;
-    mockSidebarGroupId = SIDEBAR_GROUP_ID;
+    storeState.preMaximizeLayout = null;
+    storeState.sidebarGroupId = SIDEBAR_GROUP_ID;
+    storeState.isRestoringLayout = false;
   });
 
   it("calls maximizeGroup when not currently maximized", () => {
-    const { result } = renderHook(() => useToggleGroupMaximize("group-a"));
-    result.current();
+    const { result } = renderHook(() => useTabMaximizeOnDoubleClick(makeApi("group-a")));
+    result.current(makeEvent());
     expect(mockMaximizeGroup).toHaveBeenCalledWith("group-a");
     expect(mockExitMaximizedLayout).not.toHaveBeenCalled();
   });
 
   it("calls exitMaximizedLayout when currently maximized", () => {
-    mockPreMaximizeLayout = { columns: [] };
-    const { result } = renderHook(() => useToggleGroupMaximize("group-a"));
-    result.current();
+    storeState.preMaximizeLayout = { columns: [] };
+    const { result } = renderHook(() => useTabMaximizeOnDoubleClick(makeApi("group-a")));
+    result.current(makeEvent());
     expect(mockExitMaximizedLayout).toHaveBeenCalledTimes(1);
     expect(mockMaximizeGroup).not.toHaveBeenCalled();
   });
 
   it("no-ops when groupId is the sidebar group", () => {
-    const { result } = renderHook(() => useToggleGroupMaximize(SIDEBAR_GROUP_ID));
-    result.current();
+    const { result } = renderHook(() => useTabMaximizeOnDoubleClick(makeApi(SIDEBAR_GROUP_ID)));
+    result.current(makeEvent());
     expect(mockMaximizeGroup).not.toHaveBeenCalled();
     expect(mockExitMaximizedLayout).not.toHaveBeenCalled();
   });
 
-  it("no-ops on sidebar group even when maximized state is set", () => {
-    mockPreMaximizeLayout = { columns: [] };
-    const { result } = renderHook(() => useToggleGroupMaximize(SIDEBAR_GROUP_ID));
-    result.current();
+  it("no-ops while a layout restore is in progress", () => {
+    storeState.isRestoringLayout = true;
+    const { result } = renderHook(() => useTabMaximizeOnDoubleClick(makeApi("group-a")));
+    result.current(makeEvent());
     expect(mockMaximizeGroup).not.toHaveBeenCalled();
     expect(mockExitMaximizedLayout).not.toHaveBeenCalled();
+  });
+
+  it("no-ops when api.group is missing", () => {
+    const { result } = renderHook(() => useTabMaximizeOnDoubleClick(makeApi(undefined)));
+    result.current(makeEvent());
+    expect(mockMaximizeGroup).not.toHaveBeenCalled();
+  });
+
+  it("reads groupId fresh at call time, not from render-time closure", () => {
+    const api = makeApi("group-a");
+    const { result } = renderHook(() => useTabMaximizeOnDoubleClick(api));
+    // Simulate dockview reassigning the panel's group after layout rebuild.
+    (api.group as { id: string }).id = "group-b";
+    result.current(makeEvent());
+    expect(mockMaximizeGroup).toHaveBeenCalledWith("group-b");
+  });
+
+  it("stops the event from propagating to the underlying tab", () => {
+    const event = makeEvent();
+    const { result } = renderHook(() => useTabMaximizeOnDoubleClick(makeApi("group-a")));
+    result.current(event);
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(event.preventDefault).toHaveBeenCalled();
   });
 });

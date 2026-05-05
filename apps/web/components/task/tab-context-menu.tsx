@@ -8,7 +8,7 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
-import { useToggleGroupMaximize } from "./use-tab-maximize";
+import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 
 /** An item in the tab right-click context menu.
  *  Items are ephemeral — not serialized to the saved layout. */
@@ -28,7 +28,7 @@ export type TabContextMenuParams = {
  *  props.params.contextMenuItems. */
 export function ContextMenuTab(props: IDockviewPanelHeaderProps) {
   const { api, containerApi } = props;
-  const toggleMaximize = useToggleGroupMaximize(api.group.id);
+  const onDoubleClick = useTabMaximizeOnDoubleClick(api);
 
   const handleCloseOthers = useCallback(() => {
     const toClose = api.group.panels.filter(
@@ -44,7 +44,7 @@ export function ContextMenuTab(props: IDockviewPanelHeaderProps) {
     <ContextMenu>
       <ContextMenuTrigger
         className="flex h-full items-center cursor-pointer select-none"
-        onDoubleClick={toggleMaximize}
+        onDoubleClick={onDoubleClick}
       >
         <DockviewDefaultTab {...props} />
       </ContextMenuTrigger>

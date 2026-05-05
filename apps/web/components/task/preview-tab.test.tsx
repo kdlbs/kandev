@@ -5,17 +5,20 @@ const mockPromote = vi.fn();
 const mockMaximizeGroup = vi.fn();
 const mockExitMaximizedLayout = vi.fn();
 
-let mockPreMaximizeLayout: object | null = null;
+const storeState = {
+  promotePreviewToPinned: mockPromote,
+  preMaximizeLayout: null as object | null,
+  sidebarGroupId: "sidebar-group",
+  isRestoringLayout: false,
+  maximizeGroup: mockMaximizeGroup,
+  exitMaximizedLayout: mockExitMaximizedLayout,
+};
 
 vi.mock("@/lib/state/dockview-store", () => ({
-  useDockviewStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      promotePreviewToPinned: mockPromote,
-      preMaximizeLayout: mockPreMaximizeLayout,
-      sidebarGroupId: "sidebar-group",
-      maximizeGroup: mockMaximizeGroup,
-      exitMaximizedLayout: mockExitMaximizedLayout,
-    }),
+  useDockviewStore: Object.assign(
+    (selector: (state: typeof storeState) => unknown) => selector(storeState),
+    { getState: () => storeState },
+  ),
 }));
 
 vi.mock("dockview-react", () => ({
@@ -31,6 +34,8 @@ vi.mock("@kandev/ui/context-menu", () => ({
 }));
 
 import { PreviewFileTab } from "./preview-tab";
+
+const PREVIEW_TAB_TID = "preview-tab-file-editor";
 
 type TabApi = {
   id: string;
@@ -52,29 +57,38 @@ describe("PreviewTab dblclick sequencing", () => {
     mockPromote.mockClear();
     mockMaximizeGroup.mockClear();
     mockExitMaximizedLayout.mockClear();
-    mockPreMaximizeLayout = null;
+    storeState.preMaximizeLayout = null;
+    storeState.isRestoringLayout = false;
   });
   afterEach(() => cleanup());
 
   it("first dblclick on unpinned preview promotes to pinned (no maximize)", () => {
     render(<PreviewFileTab {...makeProps(false)} />);
-    fireEvent.doubleClick(screen.getByTestId("preview-tab-file-editor"));
+    fireEvent.doubleClick(screen.getByTestId(PREVIEW_TAB_TID));
     expect(mockPromote).toHaveBeenCalledWith("file-editor");
     expect(mockMaximizeGroup).not.toHaveBeenCalled();
   });
 
   it("dblclick on pinned preview maximizes (no further promote)", () => {
     render(<PreviewFileTab {...makeProps(true)} />);
-    fireEvent.doubleClick(screen.getByTestId("preview-tab-file-editor"));
+    fireEvent.doubleClick(screen.getByTestId(PREVIEW_TAB_TID));
     expect(mockPromote).not.toHaveBeenCalled();
     expect(mockMaximizeGroup).toHaveBeenCalledWith("group-a");
   });
 
   it("dblclick on pinned preview while maximized restores layout", () => {
-    mockPreMaximizeLayout = { columns: [] };
+    storeState.preMaximizeLayout = { columns: [] };
     render(<PreviewFileTab {...makeProps(true)} />);
-    fireEvent.doubleClick(screen.getByTestId("preview-tab-file-editor"));
+    fireEvent.doubleClick(screen.getByTestId(PREVIEW_TAB_TID));
     expect(mockExitMaximizedLayout).toHaveBeenCalledTimes(1);
     expect(mockMaximizeGroup).not.toHaveBeenCalled();
+  });
+
+  it("ignores dblclick while a layout restore is in progress", () => {
+    storeState.isRestoringLayout = true;
+    render(<PreviewFileTab {...makeProps(true)} />);
+    fireEvent.doubleClick(screen.getByTestId(PREVIEW_TAB_TID));
+    expect(mockMaximizeGroup).not.toHaveBeenCalled();
+    expect(mockExitMaximizedLayout).not.toHaveBeenCalled();
   });
 });

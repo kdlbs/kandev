@@ -12,7 +12,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { PreviewType } from "@/lib/state/dockview-panel-actions";
-import { useToggleGroupMaximize } from "./use-tab-maximize";
+import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 
 /**
  * Middle-click to close any tab (preview or pinned).
@@ -62,16 +62,19 @@ function PreviewTab(props: IDockviewPanelHeaderProps & { type: PreviewType }) {
   const promote = useDockviewStore((s) => s.promotePreviewToPinned);
   const onMouseDown = useMiddleClickClose(api, containerApi);
   const { handleClose, handleCloseOthers } = useTabContextActions(api, containerApi);
-  const toggleMaximize = useToggleGroupMaximize(api.group.id);
+  const handleMaximizeDblClick = useTabMaximizeOnDoubleClick(api);
   const isPromoted = (props.params as Record<string, unknown> | undefined)?.promoted === true;
 
-  const onDoubleClick = useCallback(() => {
-    if (!isPromoted) {
-      promote(type);
-      return;
-    }
-    toggleMaximize();
-  }, [promote, type, isPromoted, toggleMaximize]);
+  const onDoubleClick = useCallback(
+    (event: React.MouseEvent) => {
+      if (!isPromoted) {
+        promote(type);
+        return;
+      }
+      handleMaximizeDblClick(event);
+    },
+    [promote, type, isPromoted, handleMaximizeDblClick],
+  );
 
   const handleKeepOpen = useCallback(() => {
     promote(type);
@@ -131,7 +134,7 @@ export function PinnedDefaultTab(props: IDockviewPanelHeaderProps) {
   const { api, containerApi } = props;
   const onMouseDown = useMiddleClickClose(api, containerApi);
   const { handleClose, handleCloseOthers } = useTabContextActions(api, containerApi);
-  const toggleMaximize = useToggleGroupMaximize(api.group.id);
+  const onDoubleClick = useTabMaximizeOnDoubleClick(api);
 
   return (
     <ContextMenu>
@@ -139,7 +142,7 @@ export function PinnedDefaultTab(props: IDockviewPanelHeaderProps) {
         <div
           className="flex h-full items-center cursor-pointer select-none"
           onMouseDown={onMouseDown}
-          onDoubleClick={toggleMaximize}
+          onDoubleClick={onDoubleClick}
         >
           <DockviewDefaultTab {...props} />
         </div>

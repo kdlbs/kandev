@@ -27,14 +27,19 @@ vi.mock("dockview-react", () => ({
   DockviewDefaultTab: () => null,
 }));
 
+const mockDockviewState = {
+  preMaximizeLayout: null,
+  sidebarGroupId: "sidebar-group",
+  isRestoringLayout: false,
+  maximizeGroup: vi.fn(),
+  exitMaximizedLayout: vi.fn(),
+};
+
 vi.mock("@/lib/state/dockview-store", () => ({
-  useDockviewStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      preMaximizeLayout: null,
-      sidebarGroupId: "sidebar-group",
-      maximizeGroup: vi.fn(),
-      exitMaximizedLayout: vi.fn(),
-    }),
+  useDockviewStore: Object.assign(
+    (selector: (state: typeof mockDockviewState) => unknown) => selector(mockDockviewState),
+    { getState: () => mockDockviewState },
+  ),
 }));
 
 import { PlanTab } from "./plan-tab";
