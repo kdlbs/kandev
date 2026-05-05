@@ -11,6 +11,11 @@ import (
 	"go.uber.org/zap"
 )
 
+// promptArg is the name of the MCP tool argument that carries the user-facing
+// prompt text. Repeated across tool handlers; pulled out here so goconst stays
+// happy and renames stay safe.
+const promptArg = "prompt"
+
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Backend returns {workspaces: [...], total: N}
@@ -196,13 +201,18 @@ func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
-		prompt, err := req.RequireString("prompt")
+		prompt, err := req.RequireString(promptArg)
 		if err != nil {
 			return mcp.NewToolResultError("prompt is required"), nil
 		}
+		// Inject sender attribution from the server's own task/session so the
+		// receiving task can identify who sent the message. The backend rejects
+		// the request if sender_task_id is missing or matches the target task.
 		payload := map[string]interface{}{
-			"task_id": taskID,
-			"prompt":  prompt,
+			"task_id":           taskID,
+			promptArg:           prompt,
+			"sender_task_id":    s.taskID,
+			"sender_session_id": s.sessionID,
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPMessageTask, payload, &result); err != nil {
@@ -281,7 +291,7 @@ func copyOptionalMessageTypesArg(payload map[string]interface{}, req mcp.CallToo
 
 func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		prompt, err := req.RequireString("prompt")
+		prompt, err := req.RequireString(promptArg)
 		if err != nil {
 			return mcp.NewToolResultError("prompt is required"), nil
 		}
@@ -295,7 +305,7 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 		question := map[string]interface{}{
 			"id":      "q1",
 			"title":   "Question",
-			"prompt":  prompt,
+			promptArg: prompt,
 			"options": options,
 		}
 		payload := map[string]interface{}{

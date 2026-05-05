@@ -103,7 +103,7 @@ async function resumeViaLaunch(
   setters.setResumptionState("resuming");
   const { request } = buildRequest(taskId, sessionId);
   const launchResp = await launchSession(request);
-  applyResumeResponse(
+  const ok = applyResumeResponse(
     {
       success: launchResp.success,
       state: launchResp.state,
@@ -115,6 +115,16 @@ async function resumeViaLaunch(
     session,
     setters,
   );
+  // restore_workspace's whole purpose is to bring up agentctl HTTP for an
+  // otherwise-idle session — when it returns success the workspace+agentctl
+  // is up by definition. The backend's cached agentctl status snapshot uses
+  // "workspace stream attached" as its readiness signal, which is wrong on
+  // WS reconnect (stream detaches but agentctl HTTP keeps running) and the
+  // existing execution does not re-emit agentctl_ready, so the FileBrowser
+  // would otherwise stay stuck on "Preparing workspace".
+  if (ok && request.intent === "restore_workspace" && setters.setAgentctlReady) {
+    setters.setAgentctlReady(sessionId);
+  }
 }
 
 /** Attempt resume, silently falling back to restore_workspace on any failure.
@@ -183,6 +193,12 @@ async function tryLaunch(
       session,
       setters,
     );
+    // See comment in resumeViaLaunch — restore_workspace success implies
+    // agentctl HTTP is ready, but the existing execution may not re-emit the
+    // agentctl_ready WS event after WS reconnect.
+    if (request.intent === "restore_workspace" && setters.setAgentctlReady) {
+      setters.setAgentctlReady(sessionId);
+    }
     return true;
   } catch (err) {
     console.error("[tryLaunch] session launch failed", {

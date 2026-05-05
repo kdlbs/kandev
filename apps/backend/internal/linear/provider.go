@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 // mockEnvVar gates the in-memory mock client used in E2E tests.
@@ -20,14 +21,16 @@ func MockEnabled() bool {
 	return os.Getenv(mockEnvVar) == "true"
 }
 
-// Provide builds the Linear service. Cleanup is a no-op today — the service
-// holds only in-memory client caches — but the signature mirrors other
-// integration providers so callers can register it uniformly.
+// Provide builds the Linear service. eventBus may be nil — used in tests and
+// during early boot before the bus is ready; the service falls back to a
+// no-op publish path. Cleanup is a no-op today — the service holds only
+// in-memory client caches — but the signature mirrors other integration
+// providers so callers can register it uniformly.
 //
 // When KANDEV_MOCK_LINEAR=true, the service is wired to a process-wide
 // MockClient and the same instance is exposed via Service.MockClient() so the
 // E2E mock controller can drive it.
-func Provide(writer, reader *sqlx.DB, secrets SecretStore, log *logger.Logger) (*Service, func() error, error) {
+func Provide(writer, reader *sqlx.DB, secrets SecretStore, eventBus bus.EventBus, log *logger.Logger) (*Service, func() error, error) {
 	store, err := NewStore(writer, reader)
 	if err != nil {
 		return nil, nil, err
@@ -42,6 +45,9 @@ func Provide(writer, reader *sqlx.DB, secrets SecretStore, log *logger.Logger) (
 	}
 	svc := NewService(store, secrets, clientFn, log)
 	svc.mockClient = mock
+	if eventBus != nil {
+		svc.SetEventBus(eventBus)
+	}
 	cleanup := func() error { return nil }
 	return svc, cleanup, nil
 }

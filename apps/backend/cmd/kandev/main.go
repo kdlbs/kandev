@@ -359,8 +359,11 @@ func startAgentInfrastructure(
 		addCleanup(func() error { jiraPoller.Stop(); return nil })
 	}
 
-	// Start Linear auth-health poller, mirroring the Jira poller.
+	// Start Linear poller. Mirrors the Jira shape: auth-health probe plus an
+	// issue-watch loop that runs configured filters and emits
+	// NewLinearIssueEvent for the orchestrator to turn into tasks.
 	if services.Linear != nil {
+		orchestratorSvc.SetLinearService(&linearServiceAdapter{svc: services.Linear})
 		linearPoller := linearpkg.NewPoller(services.Linear, log)
 		linearPoller.Start(ctx)
 		addCleanup(func() error { linearPoller.Stop(); return nil })

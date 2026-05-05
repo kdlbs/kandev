@@ -7,15 +7,20 @@ vi.mock("@/lib/config", () => ({
 }));
 
 import {
+  createLinearIssueWatch,
   deleteLinearConfig,
+  deleteLinearIssueWatch,
   getLinearConfig,
   getLinearIssue,
+  listLinearIssueWatches,
   listLinearStates,
   listLinearTeams,
   searchLinearIssues,
   setLinearConfig,
   setLinearIssueState,
   testLinearConnection,
+  triggerLinearIssueWatch,
+  updateLinearIssueWatch,
 } from "./linear-api";
 
 const BASE = "http://api.test/api/v1/linear";
@@ -171,5 +176,84 @@ describe("setLinearIssueState", () => {
     expect(url).toBe(`${BASE}/issues/ENG-1/state`);
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toEqual({ stateId: "state-id-123" });
+  });
+});
+
+// Issue watches: workspace_id is a query param on list/update/delete/trigger
+// but absent on create — exactly the kind of subtle URL-construction
+// difference that's worth catching at the API client boundary.
+describe("listLinearIssueWatches", () => {
+  it("hits /watches/issue with no query param when workspaceId omitted", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ watches: [] }));
+    await listLinearIssueWatches();
+    expect(lastCall().url).toBe(`${BASE}/watches/issue`);
+  });
+
+  it("appends workspace_id query param when provided", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ watches: [] }));
+    await listLinearIssueWatches("ws-1");
+    expect(lastCall().url).toBe(`${BASE}/watches/issue?workspace_id=ws-1`);
+  });
+
+  it("returns an empty array when the response has no watches field", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({}));
+    await expect(listLinearIssueWatches()).resolves.toEqual([]);
+  });
+});
+
+describe("createLinearIssueWatch", () => {
+  it("POSTs to /watches/issue without workspace_id in the URL", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ id: "w1" }));
+    await createLinearIssueWatch({
+      workspaceId: "ws-1",
+      workflowId: "wf-1",
+      workflowStepId: "step-1",
+      filter: { teamKey: "ENG" },
+    });
+    const { url, init } = lastCall();
+    expect(url).toBe(`${BASE}/watches/issue`);
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      workspaceId: "ws-1",
+      filter: { teamKey: "ENG" },
+    });
+  });
+});
+
+describe("updateLinearIssueWatch", () => {
+  it("PATCHes /watches/issue/:id with workspace_id query param", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ id: "w1" }));
+    await updateLinearIssueWatch("ws-1", "w1", { enabled: false });
+    const { url, init } = lastCall();
+    expect(url).toBe(`${BASE}/watches/issue/w1?workspace_id=ws-1`);
+    expect(init?.method).toBe("PATCH");
+    expect(JSON.parse(String(init?.body))).toEqual({ enabled: false });
+  });
+
+  it("URL-encodes both id and workspace_id", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ id: "w/1" }));
+    await updateLinearIssueWatch("ws/space", "w/1", {});
+    expect(lastCall().url).toBe(`${BASE}/watches/issue/w%2F1?workspace_id=ws%2Fspace`);
+  });
+});
+
+describe("deleteLinearIssueWatch", () => {
+  it("issues DELETE on /watches/issue/:id with workspace_id query param", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ deleted: true }));
+    await deleteLinearIssueWatch("ws-1", "w1");
+    const { url, init } = lastCall();
+    expect(url).toBe(`${BASE}/watches/issue/w1?workspace_id=ws-1`);
+    expect(init?.method).toBe("DELETE");
+  });
+});
+
+describe("triggerLinearIssueWatch", () => {
+  it("POSTs to /watches/issue/:id/trigger with workspace_id query param", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ newIssues: 3 }));
+    const res = await triggerLinearIssueWatch("ws-1", "w1");
+    const { url, init } = lastCall();
+    expect(url).toBe(`${BASE}/watches/issue/w1/trigger?workspace_id=ws-1`);
+    expect(init?.method).toBe("POST");
+    expect(res.newIssues).toBe(3);
   });
 });

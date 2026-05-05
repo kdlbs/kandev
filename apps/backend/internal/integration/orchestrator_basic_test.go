@@ -69,7 +69,7 @@ func TestOrchestratorStartTask(t *testing.T) {
 	assert.Equal(t, ws.MessageTypeResponse, subResp.Type)
 
 	// Start task execution
-	resp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
+	resp, err := client.SendRequest("start-1", ws.ActionSessionLaunch, map[string]interface{}{
 		"task_id":          taskID,
 		"agent_profile_id": "test-profile-id",
 	})
@@ -111,7 +111,7 @@ func TestOrchestratorStartTaskWithAgentTypeOverride(t *testing.T) {
 	defer client.Close()
 
 	// Start with different agent profile
-	resp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
+	resp, err := client.SendRequest("start-1", ws.ActionSessionLaunch, map[string]interface{}{
 		"task_id":          taskID,
 		"agent_profile_id": "override-profile-id",
 		"priority":         3,
@@ -134,7 +134,7 @@ func TestOrchestratorStopTask(t *testing.T) {
 	defer client.Close()
 
 	// Start task
-	startResp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
+	startResp, err := client.SendRequest("start-1", ws.ActionSessionLaunch, map[string]interface{}{
 		"task_id":          taskID,
 		"agent_profile_id": "augment-agent",
 	})

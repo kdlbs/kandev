@@ -162,7 +162,7 @@ Client (WS) → Orchestrator → Lifecycle Manager → ExecutorBackend (containe
 Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream updates (WS) ──────── agent subprocess
 ```
 
-1. Orchestrator receives `task.start` via WS
+1. Orchestrator receives `session.launch` via WS
 2. Lifecycle Manager creates executor instance (container or process)
 3. agentctl starts inside the instance, agent subprocess is configured and started
 4. Agent events stream back via WS through the chain
@@ -274,6 +274,36 @@ lib/api/domains/                    # API clients
 
 Commits to `main` **must** follow [Conventional Commits](https://www.conventionalcommits.org/) (`type: description`). PRs are squash-merged — the PR title becomes the commit, validated by CI. Changelog is auto-generated from these via git-cliff (`cliff.toml`). See `.agents/skills/commit/SKILL.md` for allowed types and examples.
 
+### Release & Versioning Convention
+
+Kandev uses a **single SemVer** `X.Y.Z` shared across all distribution channels:
+
+- `apps/cli/package.json` version → `X.Y.Z`
+- npm main package: `kandev@X.Y.Z`
+- npm runtime packages: `@kdlbs/runtime-{platform}@X.Y.Z` (5 platforms; declared as `optionalDependencies` in main package)
+- Git tag: `vX.Y.Z` (three-part; legacy `vM.m` tags normalize to `M.m.0`)
+- Homebrew formula: `kdlbs/homebrew-kandev` `Formula/kandev.rb` `version "X.Y.Z"`
+- GitHub release: `vX.Y.Z` with platform tarballs `kandev-{platform}.tar.gz` + `.sha256`
+
+**npm and Homebrew are sibling channels**, not chained. Both consume the same GitHub release artifacts; neither depends on the other.
+
+**Release flow** (entirely in CI via `.github/workflows/release.yml`, triggered by maintainer from GitHub Actions UI):
+
+1. Maintainer clicks "Run workflow" → picks `bump` (patch/minor/major) → optional `dry_run`.
+2. `prepare` job bumps version + regenerates CHANGELOG, opens release PR, squash-merges, tags `vX.Y.Z`.
+3. `build-web` + `build-cli` + `build-bundles` (5 platforms) build the release artifacts.
+4. `publish-release` creates the GitHub release with platform tarballs + sha256 + auto-generated notes.
+5. `publish-npm` publishes 5 `@kdlbs/runtime-*` packages + main `kandev` package to npmjs.
+6. `update-homebrew-tap` pushes updated `Formula/kandev.rb` to `kdlbs/homebrew-kandev` via SSH deploy key.
+
+There is no local release script — the entire flow runs in GHA.
+
+**Runtime resolution** (in `apps/cli/src/runtime.ts`):
+
+1. `KANDEV_BUNDLE_DIR` env var (set by Homebrew wrapper, used by tests).
+2. Installed `@kdlbs/runtime-{platform}` npm package via `require.resolve()`.
+3. `--runtime-version <tag>` cache fallback (debug only — downloads from GitHub).
+
 ### Code Quality (enforced by linters)
 
 Static analysis runs in CI and pre-commit. New code **must** stay within these limits:
@@ -332,7 +362,7 @@ Skills use `gh` CLI by default. If a `gh` command fails (not installed, not auth
 Jira and Linear are the model: per-workspace credentials, a 90s auth-health poller, a settings page with status banner + reconnect CTA, link/import buttons that gate on availability. New integrations should reuse the shared shapes rather than copying either.
 
 **Backend** (`apps/backend/internal/<name>/`):
-- Mirror the package layout: `service.go`, `store.go`, `client.go`, `provider.go`, `handlers.go`, `models.go`, `poller.go`. Expose `Provide(writer, reader *sqlx.DB, secrets SecretStore, log *logger.Logger) (*Service, func() error, error)` (add `eventBus bus.EventBus` only if the integration actually publishes events — Linear does not).
+- Mirror the package layout: `service.go`, `store.go`, `client.go`, `provider.go`, `handlers.go`, `models.go`, `poller.go`. Expose `Provide(writer, reader *sqlx.DB, secrets SecretStore, eventBus bus.EventBus, log *logger.Logger) (*Service, func() error, error)`. Pass `nil` for `eventBus` when the integration doesn't publish events; both Jira and Linear take and use it for issue-watch publishing.
 - Use `internal/integrations/secretadapter` instead of writing your own upsert wrapper around `secrets.SecretStore`. The adapter satisfies any per-integration `SecretStore` interface shaped as `{Reveal, Set, Delete, Exists}`.
 - Use `internal/integrations/healthpoll` for the auth-health loop. Implement the `Prober` interface (`ListConfiguredWorkspaces` + `RecordAuthHealth`) on a small adapter and let `healthpoll.New("name", prober, log)` own Start/Stop/ticker. Keep integration-specific loops (JQL polling, webhook reconciliation, etc.) separate, like jira's issue-watch loop.
 - Wire the service via a per-domain `init<Name>Service(...)` helper in `cmd/kandev/services.go`, not inline in `provideServices`.
@@ -347,7 +377,7 @@ Jira and Linear are the model: per-workspace credentials, a 90s auth-health poll
 
 **Where Jira and Linear deliberately diverge:**
 - Issue model: Jira uses transitions + JQL; Linear uses state IDs + structured filters. Don't merge these schemas — the upstream APIs are genuinely different.
-- Event publishing: only Jira accepts `eventBus` and emits `NewJiraIssueEvent` from its issue-watch loop. Linear has no equivalent feature today.
+- Watch filter persistence: Jira stores the JQL string verbatim; Linear stores the structured `SearchFilter` as JSON in `filter_json` (Linear has no JQL equivalent). The orchestrator emits `NewJiraIssueEvent` / `NewLinearIssueEvent` respectively and dedups by issue key (Jira) vs identifier (Linear).
 - Health column extras: Linear's `linear_configs` row carries an `org_slug` captured from successful probes; Jira's row does not.
 
 ---
@@ -358,4 +388,4 @@ This file is read by AI coding agents (Claude Code via `CLAUDE.md` symlink, Code
 
 ---
 
-**Last Updated**: 2026-05-02
+**Last Updated**: 2026-05-03

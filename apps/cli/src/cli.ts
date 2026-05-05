@@ -7,16 +7,15 @@ import { runDev } from "./dev";
 import { runRelease } from "./run";
 import { runStart } from "./start";
 import { ensureValidPort } from "./ports";
-import { maybePromptForUpdate } from "./update";
 
 function printHelp() {
   console.log(`kandev launcher
 
 Usage:
-  kandev run [--version <tag>] [--port <port>] [--verbose] [--debug]
+  kandev run [--port <port>] [--verbose] [--debug]
   kandev dev [--port <port>]
   kandev start [--port <port>] [--verbose] [--debug]
-  kandev [--version <tag>] [--port <port>] [--verbose] [--debug]
+  kandev [--port <port>] [--verbose] [--debug]
   kandev --dev [--port <port>]
 
 Examples:
@@ -25,16 +24,16 @@ Examples:
   kandev --dev
   kandev dev
   kandev start
-  kandev --version v0.1.0
+  kandev --version
   kandev --port 3000
   kandev --debug
 
 Options:
   dev              Use local repo for dev (make dev + next dev) if available.
   start            Use local production build (make build + next start).
-  run              Use release bundles (default).
+  run              Use installed runtime bundle (default).
   --dev            Alias for "dev".
-  --version        Release tag to install (default: latest).
+  --version, -V    Print CLI version and exit.
   --port           Port for the Go backend (the URL kandev opens on in
                    start/run). Alias for --backend-port. Also reads
                    KANDEV_PORT or KANDEV_BACKEND_PORT.
@@ -43,11 +42,14 @@ Options:
   --help, -h       Show help.
 
 Advanced:
-  --backend-port       Same as --port.
-  --web-internal-port  Override the internal Next.js port. The Go backend
-                       reverse-proxies to it; users hit the backend port.
-                       Also reads KANDEV_WEB_PORT.
-  --web-port           Deprecated alias for --web-internal-port.
+  --backend-port         Same as --port.
+  --web-internal-port    Override the internal Next.js port. The Go backend
+                         reverse-proxies to it; users hit the backend port.
+                         Also reads KANDEV_WEB_PORT.
+  --web-port             Deprecated alias for --web-internal-port.
+  --runtime-version <tag>  Download and use a specific release tag instead of
+                           the installed runtime. For debugging only.
+                           Example: kandev --runtime-version v0.16.0
 `);
 }
 
@@ -76,6 +78,12 @@ function findRepoRoot(startDir: string): string | null {
 
 async function main(): Promise<void> {
   const { options, showHelp, deprecatedFlags } = parseArgs(process.argv.slice(2));
+
+  if (options.showVersion) {
+    console.log(pkg.version);
+    return;
+  }
+
   if (showHelp) {
     printHelp();
     return;
@@ -113,9 +121,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  await maybePromptForUpdate(pkg.version, process.argv.slice(2));
   await runRelease({
-    version: options.version,
+    runtimeVersion: options.runtimeVersion,
     backendPort,
     webPort,
     verbose: options.verbose,

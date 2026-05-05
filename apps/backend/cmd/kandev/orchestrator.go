@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	jirapkg "github.com/kandev/kandev/internal/jira"
+	linearpkg "github.com/kandev/kandev/internal/linear"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
@@ -265,6 +266,24 @@ func (a *jiraServiceAdapter) AssignIssueWatchTaskID(ctx context.Context, watchID
 
 func (a *jiraServiceAdapter) ReleaseIssueWatchTask(ctx context.Context, watchID, issueKey string) error {
 	return a.svc.Store().ReleaseIssueWatchTask(ctx, watchID, issueKey)
+}
+
+// linearServiceAdapter exposes the Linear service's issue-watch dedup methods
+// to the orchestrator without leaking the rest of the package surface area.
+type linearServiceAdapter struct {
+	svc *linearpkg.Service
+}
+
+func (a *linearServiceAdapter) ReserveIssueWatchTask(ctx context.Context, watchID, identifier, issueURL string) (bool, error) {
+	return a.svc.Store().ReserveIssueWatchTask(ctx, watchID, identifier, issueURL)
+}
+
+func (a *linearServiceAdapter) AssignIssueWatchTaskID(ctx context.Context, watchID, identifier, taskID string) error {
+	return a.svc.Store().AssignIssueWatchTaskID(ctx, watchID, identifier, taskID)
+}
+
+func (a *linearServiceAdapter) ReleaseIssueWatchTask(ctx context.Context, watchID, identifier string) error {
+	return a.svc.Store().ReleaseIssueWatchTask(ctx, watchID, identifier)
 }
 
 // repoLocalPathUpdater adapts the task service's UpdateRepository to the executor.RepoUpdater interface.

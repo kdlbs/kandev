@@ -6,17 +6,31 @@ import { getEnvLayout, getEnvMaximizeState } from "@/lib/local-storage";
 
 const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function sanitizeLayout(layout: any, validComponents: Set<string>): any {
+/* eslint-disable @typescript-eslint/no-explicit-any */
+export function sanitizeLayout(
+  layout: any,
+  validComponents: Set<string>,
+  options: { stripSessionPanels?: boolean } = {},
+): any {
   if (!isLayoutShapeHealthy(layout)) return null;
 
   const invalidIds = new Set<string>();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const validPanels: Record<string, any> = {};
   for (const [id, panel] of Object.entries(layout.panels)) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const comp = (panel as any).contentComponent;
-    if (comp && (validComponents.has(comp) || id.startsWith("session:"))) {
+    // Session panels are scoped to a specific environment; when restoring the
+    // global fallback (no envId yet), they belong to the previous task and
+    // would leak in as duplicate tabs. Strip them in that case. The session
+    // check must happen before component-validity, since session panels are
+    // serialized with contentComponent: "chat" (a valid component) and would
+    // otherwise short-circuit the strip guard.
+    if (id.startsWith("session:")) {
+      if (options.stripSessionPanels) {
+        invalidIds.add(id);
+      } else {
+        validPanels[id] = panel;
+      }
+    } else if (comp && validComponents.has(comp)) {
       validPanels[id] = panel;
     } else {
       invalidIds.add(id);
@@ -25,7 +39,6 @@ export function sanitizeLayout(layout: any, validComponents: Set<string>): any {
 
   if (invalidIds.size === 0) return layout;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function cleanNode(node: any): any {
     if (node.type === "leaf") {
       const views = (node.data.views as string[]).filter((v) => !invalidIds.has(v));
@@ -34,7 +47,6 @@ export function sanitizeLayout(layout: any, validComponents: Set<string>): any {
       return { ...node, data: { ...node.data, views, activeView } };
     }
     if (node.type === "branch") {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const children = (node.data as any[]).map(cleanNode).filter(Boolean);
       if (children.length === 0) return null;
       return { ...node, data: children };
@@ -51,6 +63,7 @@ export function sanitizeLayout(layout: any, validComponents: Set<string>): any {
     panels: validPanels,
   };
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 function applyFixupsWithMaximize(api: DockviewReadyEvent["api"], envId: string | null): void {
   const savedMax = envId ? getEnvMaximizeState(envId) : null;
@@ -97,15 +110,13 @@ export function tryRestoreLayout(
       const envLayout = getEnvLayout(currentEnvId);
       if (envLayout) {
         const sanitized = sanitizeLayout(envLayout, validComponents);
-        if (!sanitized) {
-          return false;
-        }
+        if (!sanitized) return false;
         api.fromJSON(sanitized as SerializedDockview);
         applyFixupsWithMaximize(api, currentEnvId);
         return true;
       }
     } catch {
-      // Per-env restore failed, try global
+      // fall through to maximize-only / global fallback
     }
     if (tryRestoreMaximizeOnly(api, currentEnvId)) return true;
   }
@@ -114,14 +125,16 @@ export function tryRestoreLayout(
     try {
       const saved = localStorage.getItem(LAYOUT_STORAGE_KEY);
       if (saved) {
-        const layout = sanitizeLayout(JSON.parse(saved), validComponents);
+        const layout = sanitizeLayout(JSON.parse(saved), validComponents, {
+          stripSessionPanels: true,
+        });
         if (!layout) return false;
         api.fromJSON(layout);
         useDockviewStore.setState(applyLayoutFixups(api));
         return true;
       }
     } catch {
-      // Global restore failed, build default
+      // fall through to default-build
     }
   }
 

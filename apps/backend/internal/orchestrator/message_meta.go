@@ -9,6 +9,9 @@ type UserMessageMeta struct {
 	HasReviewComments bool
 	Attachments       []v1.MessageAttachment
 	ContextFiles      []v1.ContextFileMeta
+	SenderTaskID      string
+	SenderTaskTitle   string
+	SenderSessionID   string
 }
 
 // NewUserMessageMeta creates a UserMessageMeta builder.
@@ -40,10 +43,20 @@ func (m *UserMessageMeta) WithContextFiles(files []v1.ContextFileMeta) *UserMess
 	return m
 }
 
+// WithSenderTask records that the message originated from another task's agent
+// (via the message_task_kandev MCP tool). Title is a snapshot at send time;
+// session ID is optional and identifies the sender's specific session.
+func (m *UserMessageMeta) WithSenderTask(taskID, taskTitle, sessionID string) *UserMessageMeta {
+	m.SenderTaskID = taskID
+	m.SenderTaskTitle = taskTitle
+	m.SenderSessionID = sessionID
+	return m
+}
+
 // ToMap returns the metadata as a map suitable for message creation.
 // Returns nil if no metadata fields are set.
 func (m *UserMessageMeta) ToMap() map[string]interface{} {
-	if !m.PlanMode && !m.HasReviewComments && len(m.Attachments) == 0 && len(m.ContextFiles) == 0 {
+	if !m.PlanMode && !m.HasReviewComments && len(m.Attachments) == 0 && len(m.ContextFiles) == 0 && m.SenderTaskID == "" {
 		return nil
 	}
 	meta := make(map[string]interface{})
@@ -59,5 +72,36 @@ func (m *UserMessageMeta) ToMap() map[string]interface{} {
 	if len(m.ContextFiles) > 0 {
 		meta["context_files"] = m.ContextFiles
 	}
+	if m.SenderTaskID != "" {
+		meta["sender_task_id"] = m.SenderTaskID
+		meta["sender_task_title"] = m.SenderTaskTitle
+		if m.SenderSessionID != "" {
+			meta["sender_session_id"] = m.SenderSessionID
+		}
+	}
 	return meta
+}
+
+// mergeMetadata returns a single metadata map combining base and extra. extra
+// values take precedence on key collision. Returns nil only when both inputs
+// are nil/empty so callers can keep the "no metadata" branch in the message
+// store.
+func mergeMetadata(base, extra map[string]interface{}) map[string]interface{} {
+	if len(base) == 0 && len(extra) == 0 {
+		return nil
+	}
+	if len(extra) == 0 {
+		return base
+	}
+	if len(base) == 0 {
+		return extra
+	}
+	merged := make(map[string]interface{}, len(base)+len(extra))
+	for k, v := range base {
+		merged[k] = v
+	}
+	for k, v := range extra {
+		merged[k] = v
+	}
+	return merged
 }
