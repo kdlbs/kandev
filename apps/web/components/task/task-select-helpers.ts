@@ -83,6 +83,15 @@ export async function prepareAndSwitchTask(
   // Capture before the async launch; WS events may update activeSessionId
   // before launchSession resolves, causing a layout switch with the wrong old session.
   const oldSessionId = store.getState().tasks.activeSessionId;
+  // Release the outgoing env BEFORE awaiting `launchSession`. Otherwise the
+  // old task's env-scoped panels (file-editor, diff-viewer, commit-detail,
+  // browser, vscode, pr-detail) stay mounted in the dockview for the entire
+  // round-trip + WS env-id propagation, leaking into the new (preparing)
+  // task as stray tabs.
+  const oldEnvId = oldSessionId
+    ? (store.getState().environmentIdBySessionId[oldSessionId] ?? null)
+    : null;
+  releaseLayoutToDefault(oldEnvId);
   try {
     const { request } = buildPrepareRequest(taskId);
     const resp = await launchSession(request);

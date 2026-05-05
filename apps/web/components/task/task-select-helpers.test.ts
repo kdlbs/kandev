@@ -1,5 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { finalizeNoSessionSelect, type FinalizeNoSessionSelectDeps } from "./task-select-helpers";
+import {
+  finalizeNoSessionSelect,
+  prepareAndSwitchTask,
+  type FinalizeNoSessionSelectDeps,
+} from "./task-select-helpers";
+
+vi.mock("@/lib/services/session-launch-service", () => ({
+  launchSession: vi.fn(),
+}));
+vi.mock("@/lib/services/session-launch-helpers", () => ({
+  buildPrepareRequest: vi.fn(() => ({ request: { taskId: "task-new" } })),
+}));
+vi.mock("@/lib/state/dockview-store", () => ({
+  releaseLayoutToDefault: vi.fn(),
+  useDockviewStore: { getState: () => ({ api: null, buildDefaultLayout: vi.fn() }) },
+}));
+vi.mock("@/lib/state/layout-manager", () => ({
+  INTENT_PR_REVIEW: "pr-review",
+}));
+vi.mock("@/lib/links", () => ({
+  replaceTaskUrl: vi.fn(),
+}));
+
+import { launchSession } from "@/lib/services/session-launch-service";
+import { releaseLayoutToDefault } from "@/lib/state/dockview-store";
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
 
 const NEW_TASK_ID = "task-new";
 const OLD_SESSION_ID = "old-session";
@@ -52,5 +78,64 @@ describe("finalizeNoSessionSelect", () => {
     });
     finalizeNoSessionSelect(NEW_TASK_ID, OLD_SESSION_ID, deps);
     expect(calls).toEqual(["release", "setActiveTask", "replaceTaskUrl"]);
+  });
+});
+
+/**
+ * Regression: switching from a task with env-scoped panels open (file-editor,
+ * diff-viewer, commit-detail, browser, vscode, pr-detail) to a task that
+ * needs an env prepared previously left those panels mounted in the dockview
+ * for the entire `await launchSession(...)` round trip. The user saw stray
+ * tabs (e.g. a diff panel) from the old task on the new task's page while the
+ * env was still being prepared.
+ *
+ * Fix: release the outgoing env (drops env-scoped portals + falls back to a
+ * default layout) BEFORE awaiting `launchSession`, so the user sees a clean
+ * slate during preparation. The new env is adopted in the usual way once
+ * its session id is known.
+ */
+describe("prepareAndSwitchTask — outgoing-env panel cleanup", () => {
+  function makeStore(activeSessionId: string | null): StoreApi<AppState> {
+    const state = {
+      tasks: { activeSessionId },
+      taskPRs: { byTaskId: {} as Record<string, unknown[]> },
+      environmentIdBySessionId: activeSessionId ? { [activeSessionId]: "env-old" } : {},
+    };
+    return {
+      getState: () => state as unknown as AppState,
+      setState: vi.fn(),
+      subscribe: vi.fn(),
+    } as unknown as StoreApi<AppState>;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("releases the outgoing env's panels before awaiting launchSession", async () => {
+    // Make launchSession return a deferred we control so we can observe
+    // synchronous side effects that happen before the await resolves.
+    let resolveLaunch: (v: { session_id: string }) => void = () => {};
+    vi.mocked(launchSession).mockImplementation(
+      () =>
+        new Promise((res) => {
+          resolveLaunch = res;
+        }),
+    );
+
+    const store = makeStore(OLD_SESSION_ID);
+    const switchToSession = vi.fn();
+    const setPreparingTaskId = vi.fn();
+
+    const promise = prepareAndSwitchTask(NEW_TASK_ID, store, switchToSession, setPreparingTaskId);
+
+    // The outgoing env release must have already happened — without this the
+    // diff/file-editor panels from the previous task stay visible until
+    // launchSession resolves and the WS env-id mapping arrives.
+    expect(releaseLayoutToDefault).toHaveBeenCalledTimes(1);
+    expect(switchToSession).not.toHaveBeenCalled();
+
+    resolveLaunch({ session_id: "new-session" });
+    await promise;
   });
 });
