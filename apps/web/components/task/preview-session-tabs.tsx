@@ -177,7 +177,7 @@ function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId:
 }
 
 function RunningSpinner() {
-  return <GridSpinner className="text-blue-500 shrink-0 text-[12px]" />;
+  return <GridSpinner className="text-muted-foreground shrink-0 text-[12px]" />;
 }
 
 function PreviewLoadingState({ label }: { label: string }) {

@@ -321,7 +321,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
             {agentName &&
               (isSessionActive(sessionState) ? (
                 <GridSpinner
-                  className={`ml-1.5 shrink-0 text-[14px] text-blue-500${isActive ? "" : " opacity-50"}`}
+                  className={`ml-1.5 shrink-0 text-[14px] text-muted-foreground${isActive ? "" : " opacity-50"}`}
                 />
               ) : (
                 <AgentLogo
