@@ -158,18 +158,27 @@ type CarouselShortcutArgs = {
   onSubmit: () => void;
 };
 
+// shouldIgnoreShortcut filters out events that the overlay must not handle:
+// keystrokes inside an input/textarea (the user is typing) and any modifier
+// combo (so we don't hijack browser shortcuts like Cmd/Ctrl+1..9 for tab
+// switching or Alt+ArrowLeft for back-navigation).
+function shouldIgnoreShortcut(e: KeyboardEvent): boolean {
+  if (
+    e.target instanceof HTMLElement &&
+    (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")
+  ) {
+    return true;
+  }
+  return e.metaKey || e.ctrlKey || e.altKey || e.shiftKey;
+}
+
 function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
   const optionsCount = args.meta.question.options.length;
   const isLast = args.activeIndex === args.total - 1;
   const { canSubmit, onPick, onPrev, onNext, onSkip, onSubmit } = args;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (
-        e.target instanceof HTMLElement &&
-        (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")
-      ) {
-        return;
-      }
+      if (shouldIgnoreShortcut(e)) return;
       if (e.key === "Escape") {
         e.preventDefault();
         onSkip();
