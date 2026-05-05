@@ -209,6 +209,38 @@ func TestCancelSession_CancelsMatchingRequests(t *testing.T) {
 	}
 }
 
+// TestCancelRequest unblocks WaitForResponse for a single pending entry.
+// Used by the create-message-failure recovery path so the agent doesn't
+// have to wait for the full MCP timeout when the bundle could not be
+// persisted.
+func TestCancelRequest(t *testing.T) {
+	s := NewStore(time.Minute)
+	id := s.CreateRequest(&Request{SessionID: "s1"})
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.WaitForResponse(context.Background(), id)
+		done <- err
+	}()
+
+	// Brief yield so WaitForResponse has parked on the channel.
+	time.Sleep(10 * time.Millisecond)
+	if !s.CancelRequest(id) {
+		t.Fatalf("CancelRequest returned false for known id")
+	}
+	if s.CancelRequest(id) {
+		t.Errorf("CancelRequest should return false the second time")
+	}
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Errorf("expected error from cancelled WaitForResponse")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("WaitForResponse did not return after CancelRequest")
+	}
+}
+
 func TestCancelSession_NoMatch(t *testing.T) {
 	s := NewStore(time.Minute)
 	s.CreateRequest(&Request{SessionID: "s1"})

@@ -23,6 +23,8 @@ const (
 	descriptionArg     = "description"
 	optionIDFieldName  = "option_id"
 	questionIDFieldKey = "question_id"
+	answeredFieldKey   = "answered"
+	rejectedFieldKey   = "rejected"
 )
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
@@ -436,7 +438,7 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 
 	out := make(map[string]interface{}, len(questions)+2)
 	if rejected {
-		out["rejected"] = true
+		out[rejectedFieldKey] = true
 		if rejectReason != "" {
 			out["reject_reason"] = rejectReason
 		}
@@ -465,7 +467,11 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 			out[qid] = entry
 			continue
 		}
-		out[qid] = map[string]interface{}{"answered": false}
+		stub := map[string]interface{}{answeredFieldKey: false}
+		if rejected {
+			stub[rejectedFieldKey] = true
+		}
+		out[qid] = stub
 	}
 
 	if len(out) == 0 {
@@ -500,10 +506,10 @@ func simplifyAnswer(ans map[string]interface{}, rejected bool) map[string]interf
 		out["custom_text"] = customText
 	}
 	if rejected && len(out) == 0 {
-		return map[string]interface{}{"answered": false, "rejected": true}
+		return map[string]interface{}{answeredFieldKey: false, rejectedFieldKey: true}
 	}
 	if len(out) == 0 {
-		return map[string]interface{}{"answered": false}
+		return map[string]interface{}{answeredFieldKey: false}
 	}
 	return out
 }

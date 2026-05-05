@@ -142,7 +142,9 @@ func (h *Handlers) httpCreateRequest(c *gin.Context) {
 
 	// Create one message per question in the database; all share the same
 	// pending_id and are rendered as a stacked group on the frontend. The
-	// session.message.added WebSocket event fires per message.
+	// session.message.added WebSocket event fires per message. On failure we
+	// also cancel the in-store pending entry so any blocking WaitForResponse
+	// caller unblocks immediately rather than waiting for the MCP timeout.
 	if h.messageCreator != nil {
 		_, err := h.messageCreator.CreateClarificationRequestMessages(
 			c.Request.Context(),
@@ -157,7 +159,11 @@ func (h *Handlers) httpCreateRequest(c *gin.Context) {
 				zap.String("pending_id", pendingID),
 				zap.String("session_id", sessionID),
 				zap.Error(err))
-			// Don't fail the request - the clarification is still created in the store
+			h.store.CancelRequest(pendingID)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "failed to create clarification messages: " + err.Error(),
+			})
+			return
 		}
 	}
 
@@ -400,7 +406,12 @@ func (h *Handlers) applyAnswersToMessages(c *gin.Context, pendingID string, reje
 	sessionID := h.lookupSessionForPending(c, pendingID)
 
 	if rejected {
-		// Mark every question in the bundle as rejected.
+		// Mark every question in the bundle as rejected. Guard h.repo for
+		// parity with the sibling expectedQuestionIDs path; production wires
+		// both, but unit tests sometimes pass a nil repo.
+		if h.repo == nil {
+			return
+		}
 		msgs, err := h.repo.FindMessagesByPendingID(c.Request.Context(), pendingID)
 		if err != nil || len(msgs) == 0 {
 			h.logger.Debug("rejected clarification: no messages to update",

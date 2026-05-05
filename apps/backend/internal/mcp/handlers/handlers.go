@@ -33,6 +33,7 @@ import (
 type ClarificationService interface {
 	CreateRequest(req *clarification.Request) string
 	WaitForResponse(ctx context.Context, pendingID string) (*clarification.Response, error)
+	CancelRequest(pendingID string) bool
 	CancelSession(sessionID string) []string
 }
 
@@ -961,6 +962,9 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	pendingID := h.clarificationSvc.CreateRequest(clarificationReq)
 
 	// Create one chat message per question (triggers WS events to frontend).
+	// If the create fails, the in-store pending entry must be cancelled too —
+	// otherwise the agent's WaitForResponse would block for the full 2-hour
+	// timeout while the user never sees clarification cards.
 	if h.messageCreator != nil {
 		if _, err := h.messageCreator.CreateClarificationRequestMessages(
 			ctx, taskID, req.SessionID, pendingID, req.Questions, req.Context,
@@ -969,6 +973,9 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 				zap.String("pending_id", pendingID),
 				zap.String("session_id", req.SessionID),
 				zap.Error(err))
+			h.clarificationSvc.CancelRequest(pendingID)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to create clarification messages: "+err.Error(), nil)
 		}
 	}
 

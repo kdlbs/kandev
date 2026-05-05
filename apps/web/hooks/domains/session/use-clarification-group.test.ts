@@ -157,4 +157,31 @@ describe("useClarificationGroup — submit + skip", () => {
     });
     expect(result.current.submitState).toBe("error");
   });
+
+  // 409 Conflict means a duplicate submit landed after the first one already
+  // resolved the bundle on the backend. Treat it as success so the overlay
+  // closes instead of getting stuck in an unrecoverable error state.
+  it("submitState transitions to 'ok' on 409 (duplicate submit)", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("conflict", { status: 409 }));
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    await act(async () => {
+      await result.current.submitCollected({
+        q1: { question_id: "q1", selected_options: ["o1"] },
+      });
+    });
+    expect(result.current.submitState).toBe("ok");
+  });
+
+  it("skipAll transitions to 'ok' on 409 too", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("conflict", { status: 409 }));
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    await act(async () => {
+      await result.current.skipAll();
+    });
+    expect(result.current.submitState).toBe("ok");
+  });
 });
