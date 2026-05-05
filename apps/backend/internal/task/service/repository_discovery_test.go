@@ -132,17 +132,84 @@ func TestNormalizeRootsDedupesAndCleans(t *testing.T) {
 	}
 }
 
-func TestReadGitDefaultBranch(t *testing.T) {
-	repoPath := t.TempDir()
+// seedBareGitDir creates a minimal .git directory at repoPath with HEAD set
+// to the given branch (or commit SHA for detached). Returns the gitDir path.
+func seedBareGitDir(t *testing.T, repoPath, headContent string) string {
+	t.Helper()
 	gitDir := filepath.Join(repoPath, ".git")
 	if err := os.MkdirAll(gitDir, 0o755); err != nil {
 		t.Fatalf("mkdir git: %v", err)
 	}
-
-	headPath := filepath.Join(gitDir, "HEAD")
-	if err := os.WriteFile(headPath, []byte("ref: refs/heads/develop\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte(headContent), 0o644); err != nil {
 		t.Fatalf("write HEAD: %v", err)
 	}
+	return gitDir
+}
+
+// TestReadGitDefaultBranch_PrefersOriginHEAD — the upstream's declared
+// default beats every other heuristic. Regression for the bug where the
+// repo's stored default_branch latched onto whatever feature branch the user
+// happened to be on at task-creation time.
+func TestReadGitDefaultBranch_PrefersOriginHEAD(t *testing.T) {
+	repoPath := t.TempDir()
+	gitDir := seedBareGitDir(t, repoPath, "ref: refs/heads/feature/x\n")
+	if err := os.MkdirAll(filepath.Join(gitDir, "refs", "remotes", "origin"), 0o755); err != nil {
+		t.Fatalf("mkdir origin: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(gitDir, "refs", "remotes", "origin", "HEAD"),
+		[]byte("ref: refs/remotes/origin/main\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write origin/HEAD: %v", err)
+	}
+	branch, err := readGitDefaultBranch(repoPath)
+	if err != nil {
+		t.Fatalf("readGitDefaultBranch error: %v", err)
+	}
+	if branch != "main" {
+		t.Fatalf("expected main, got %q", branch)
+	}
+}
+
+// TestReadGitDefaultBranch_FallsBackToRemoteCandidates — when origin/HEAD
+// isn't set (older clones, never run `git remote set-head`), the conventional
+// origin/main / origin/master refs win over local branches.
+func TestReadGitDefaultBranch_FallsBackToRemoteCandidates(t *testing.T) {
+	repoPath := t.TempDir()
+	gitDir := seedBareGitDir(t, repoPath, "ref: refs/heads/feature/y\n")
+	writeRef(t, filepath.Join(gitDir, "refs", "remotes", "origin", "main"))
+	branch, err := readGitDefaultBranch(repoPath)
+	if err != nil {
+		t.Fatalf("readGitDefaultBranch error: %v", err)
+	}
+	if branch != "main" {
+		t.Fatalf("expected main, got %q", branch)
+	}
+}
+
+// TestReadGitDefaultBranch_FallsBackToLocalCandidates — local-only repos
+// (no remotes) still produce the conventional integration branch when one
+// exists locally, even if the user is checked out on a feature branch.
+func TestReadGitDefaultBranch_FallsBackToLocalCandidates(t *testing.T) {
+	repoPath := t.TempDir()
+	gitDir := seedBareGitDir(t, repoPath, "ref: refs/heads/feature/z\n")
+	writeRef(t, filepath.Join(gitDir, "refs", "heads", "main"))
+	branch, err := readGitDefaultBranch(repoPath)
+	if err != nil {
+		t.Fatalf("readGitDefaultBranch error: %v", err)
+	}
+	if branch != "main" {
+		t.Fatalf("expected main, got %q", branch)
+	}
+}
+
+// TestReadGitDefaultBranch_FallsBackToHEAD — a brand-new repo with only
+// a feature branch checked out and no main/master falls back to HEAD so
+// callers still get *some* answer instead of an error.
+func TestReadGitDefaultBranch_FallsBackToHEAD(t *testing.T) {
+	repoPath := t.TempDir()
+	seedBareGitDir(t, repoPath, "ref: refs/heads/develop\n")
 	branch, err := readGitDefaultBranch(repoPath)
 	if err != nil {
 		t.Fatalf("readGitDefaultBranch error: %v", err)
@@ -150,21 +217,29 @@ func TestReadGitDefaultBranch(t *testing.T) {
 	if branch != "develop" {
 		t.Fatalf("expected develop, got %q", branch)
 	}
+}
 
-	if err := os.WriteFile(headPath, []byte("3a3f2d3b\n"), 0o644); err != nil {
-		t.Fatalf("write HEAD detached: %v", err)
-	}
-	branch, err = readGitDefaultBranch(repoPath)
+// TestReadGitDefaultBranch_DetachedHEADReturnsHEADLiteral — detached HEAD on
+// a repo with no integration branches yields the literal "HEAD" sentinel
+// (preserved from the previous behavior so callers depending on it don't
+// silently start failing).
+func TestReadGitDefaultBranch_DetachedHEADReturnsHEADLiteral(t *testing.T) {
+	repoPath := t.TempDir()
+	seedBareGitDir(t, repoPath, "3a3f2d3b\n")
+	branch, err := readGitDefaultBranch(repoPath)
 	if err != nil {
-		t.Fatalf("readGitDefaultBranch detached error: %v", err)
+		t.Fatalf("readGitDefaultBranch error: %v", err)
 	}
 	if branch != "HEAD" {
 		t.Fatalf("expected HEAD, got %q", branch)
 	}
+}
 
-	if err := os.WriteFile(headPath, []byte("\n"), 0o644); err != nil {
-		t.Fatalf("write HEAD empty: %v", err)
-	}
+// TestReadGitDefaultBranch_ErrorsOnEmptyHEAD — preserves the existing
+// contract: HEAD with no content is an unparseable repo.
+func TestReadGitDefaultBranch_ErrorsOnEmptyHEAD(t *testing.T) {
+	repoPath := t.TempDir()
+	seedBareGitDir(t, repoPath, "\n")
 	if _, err := readGitDefaultBranch(repoPath); err == nil {
 		t.Fatalf("expected error for empty HEAD")
 	}
