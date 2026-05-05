@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
+	spritesutil "github.com/kandev/kandev/internal/sprites"
 )
 
 type RemoteAuthAgentLister interface {
@@ -137,11 +139,21 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 		zap.String("sprite_name", spriteName),
 		zap.Bool("reconnect_required", reconnect))
 
-	// Step 0: Create or reconnect sprite
+	// Step 0: Create or reconnect sprite. On reconnect-then-not-found we fall
+	// through to fresh provisioning under a new name on the same branch.
 	sprite, err := r.stepCreateSprite(ctx, client, spriteName, reconnect, report)
 	if err != nil {
-		r.cleanupOnFailure(ctx, sprite, req.InstanceID, destroyOnFailure)
-		return nil, err
+		if reconnect && errors.Is(err, spritesutil.ErrSpriteNotFound) {
+			oldName := spriteName
+			spriteName = r.fallbackToFreshSandbox(req, progressPlan, report, oldName)
+			reconnect = false
+			destroyOnFailure = true
+			sprite, err = r.stepCreateSprite(ctx, client, spriteName, false, report)
+		}
+		if err != nil {
+			r.cleanupOnFailure(ctx, sprite, req.InstanceID, destroyOnFailure)
+			return nil, err
+		}
 	}
 
 	// Steps 1-3: Upload agentctl, credentials, prepare script
@@ -197,6 +209,62 @@ func (r *SpritesExecutor) resolveSpriteName(req *ExecutorCreateRequest, reconnec
 		suffix = suffix[:12]
 	}
 	return spritesNamePrefix + suffix
+}
+
+// fallbackToFreshSandbox flips a stalled reconnect into a fresh provision. It
+// emits a skipped "Reconnecting cloud sandbox" step carrying the user-facing
+// warning that explains why we're reprovisioning, then mutates the live plan
+// in place so the rest of CreateInstance streams the normal fresh-provision
+// progress rows. Returns the new sprite name. The user-visible explanation is
+// the only place we surface this transition.
+func (r *SpritesExecutor) fallbackToFreshSandbox(
+	req *ExecutorCreateRequest,
+	plan *spritesProgressPlan,
+	report func(spritesStepKey, PrepareStep),
+	oldName string,
+) string {
+	newName := spritesNamePrefix + req.InstanceID[:12]
+	branch := getMetadataString(req.Metadata, MetadataKeyWorktreeBranch)
+	if branch == "" {
+		branch = getMetadataString(req.Metadata, MetadataKeyBaseBranch)
+	}
+
+	r.logger.Info("sprite missing on reconnect, provisioning fresh",
+		zap.String("instance_id", req.InstanceID),
+		zap.String("old_sprite_name", oldName),
+		zap.String("new_sprite_name", newName),
+		zap.String("branch", branch))
+
+	plan.replacePlan([]spritesStepKey{
+		spriteStepCreateSprite,
+		spriteStepUploadAgentctl,
+		spriteStepUploadCredentials,
+		spriteStepRunPrepareScript,
+		spriteStepWaitHealthy,
+		spriteStepAgentInstance,
+		spriteStepApplyNetworkPolicy,
+	})
+
+	notice := beginStep("Reconnecting cloud sandbox")
+	notice.Warning = "Previous sandbox is no longer available — provisioning a fresh one for this branch."
+	notice.WarningDetail = fmt.Sprintf(
+		"The Sprites sandbox %s could not be reached (it was likely destroyed or expired). "+
+			"Kandev is starting a fresh sandbox %s on the same branch %s; this typically takes 30–60 seconds.",
+		oldName, newName, branchOrPlaceholder(branch),
+	)
+	notice.Output = fmt.Sprintf("Old sandbox: %s\nNew sandbox: %s\nBranch: %s",
+		oldName, newName, branchOrPlaceholder(branch))
+	completeStepSkipped(&notice)
+	report(spriteStepCreateSprite, notice)
+
+	return newName
+}
+
+func branchOrPlaceholder(branch string) string {
+	if branch == "" {
+		return "(unknown)"
+	}
+	return branch
 }
 
 func spritesShouldReconnect(req *ExecutorCreateRequest) bool {

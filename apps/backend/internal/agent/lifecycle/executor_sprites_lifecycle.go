@@ -18,7 +18,7 @@ func (r *SpritesExecutor) reconnectSprite(ctx context.Context, client *sprites.C
 	defer cancel()
 	sprite, err := client.GetSprite(stepCtx, name)
 	if err != nil {
-		return nil, fmt.Errorf("failed to reconnect sprite %q: %w", name, err)
+		return nil, fmt.Errorf("failed to reconnect sprite %q: %w", name, spritesutil.WrapNotFound(err))
 	}
 	return sprite, nil
 }

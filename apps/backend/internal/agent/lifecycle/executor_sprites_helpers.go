@@ -131,42 +131,61 @@ const (
 	spriteStepApplyNetworkPolicy spritesStepKey = "apply_network_policy"
 )
 
+// spritesProgressPlan is mutable so the reconnect path can swap to the fresh
+// plan mid-flight when a stale sandbox falls back to provisioning a new one.
+// The reporter created by newSpritesStepReporter resolves indexes lazily off
+// the live plan, so callers don't need to re-create it after replacePlan.
 type spritesProgressPlan struct {
 	steps   []spritesStepKey
 	indexes map[spritesStepKey]int
 }
 
-func newSpritesProgressPlan(reconnect bool) spritesProgressPlan {
-	steps := []spritesStepKey{spriteStepCreateSprite}
-	if !reconnect {
-		steps = append(steps,
-			spriteStepUploadAgentctl,
-			spriteStepUploadCredentials,
-			spriteStepRunPrepareScript,
-		)
+func newSpritesProgressPlan(reconnect bool) *spritesProgressPlan {
+	if reconnect {
+		return buildPlan([]spritesStepKey{
+			spriteStepCreateSprite,
+			spriteStepWaitHealthy,
+			spriteStepAgentInstance,
+		})
 	}
-	steps = append(steps, spriteStepWaitHealthy, spriteStepAgentInstance)
-	if !reconnect {
-		steps = append(steps, spriteStepApplyNetworkPolicy)
-	}
+	return buildPlan([]spritesStepKey{
+		spriteStepCreateSprite,
+		spriteStepUploadAgentctl,
+		spriteStepUploadCredentials,
+		spriteStepRunPrepareScript,
+		spriteStepWaitHealthy,
+		spriteStepAgentInstance,
+		spriteStepApplyNetworkPolicy,
+	})
+}
 
+func buildPlan(steps []spritesStepKey) *spritesProgressPlan {
 	indexes := make(map[spritesStepKey]int, len(steps))
 	for i, key := range steps {
 		indexes[key] = i
 	}
-	return spritesProgressPlan{steps: steps, indexes: indexes}
+	return &spritesProgressPlan{steps: steps, indexes: indexes}
 }
 
-func (p spritesProgressPlan) total() int {
+func (p *spritesProgressPlan) total() int {
+	if p == nil {
+		return 0
+	}
 	return len(p.steps)
 }
 
-func (p spritesProgressPlan) has(key spritesStepKey) bool {
+func (p *spritesProgressPlan) has(key spritesStepKey) bool {
+	if p == nil {
+		return false
+	}
 	_, ok := p.indexes[key]
 	return ok
 }
 
-func (p spritesProgressPlan) index(key spritesStepKey) int {
+func (p *spritesProgressPlan) index(key spritesStepKey) int {
+	if p == nil {
+		return -1
+	}
 	idx, ok := p.indexes[key]
 	if !ok {
 		return -1
@@ -174,8 +193,25 @@ func (p spritesProgressPlan) index(key spritesStepKey) int {
 	return idx
 }
 
-// newSpritesStepReporter creates a reporting function that calls OnProgress if non-nil.
-func newSpritesStepReporter(onProgress PrepareProgressCallback, plan spritesProgressPlan) func(spritesStepKey, PrepareStep) {
+// replacePlan swaps the active plan in place (used by the reconnect-fell-back-
+// to-fresh path). The reporter dispatches off the live indexes, so existing
+// closures keep working after replacement.
+func (p *spritesProgressPlan) replacePlan(steps []spritesStepKey) {
+	if p == nil {
+		return
+	}
+	indexes := make(map[spritesStepKey]int, len(steps))
+	for i, key := range steps {
+		indexes[key] = i
+	}
+	p.steps = steps
+	p.indexes = indexes
+}
+
+// newSpritesStepReporter creates a reporting function that calls OnProgress if
+// non-nil. Index/total are resolved against the live plan on each call so
+// replacePlan is reflected in subsequent reports.
+func newSpritesStepReporter(onProgress PrepareProgressCallback, plan *spritesProgressPlan) func(spritesStepKey, PrepareStep) {
 	return func(key spritesStepKey, step PrepareStep) {
 		if onProgress == nil {
 			return
