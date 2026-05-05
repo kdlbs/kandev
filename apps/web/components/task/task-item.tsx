@@ -15,6 +15,8 @@ import { IssueTaskIcon } from "@/components/github/issue-task-icon";
 import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
 import { DEBUG_UI } from "@/lib/config";
+import { useTaskColor } from "@/hooks/use-task-color";
+import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { shouldUseQuestionTaskIcon } from "@/lib/ui/state-icons";
 import type { SessionPollMode } from "@/lib/state/slices/session-runtime/types";
@@ -312,6 +314,7 @@ export const TaskItem = memo(function TaskItem({
   const isInProgress = computeIsInProgress(state, sessionState);
   const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
   const showSubtaskToggle = !!subtaskCount && subtaskCount > 0 && !!onToggleSubtasks;
+  const taskColor = useTaskColor(taskId);
 
   return (
     <div
@@ -327,12 +330,7 @@ export const TaskItem = memo(function TaskItem({
         isSubTask ? "pl-8" : "pl-3",
       )}
     >
-      <div
-        className={cn(
-          "absolute left-0 top-0 bottom-0 w-[2px] transition-opacity",
-          isSelected ? "bg-primary opacity-100" : "opacity-0",
-        )}
-      />
+      <SelectionBar isSelected={isSelected} color={taskColor} />
       {isSubTask && (
         <span className="absolute left-3.5 top-[10px] select-none text-[11px] text-muted-foreground/30">
           ↳
@@ -372,6 +370,27 @@ export const TaskItem = memo(function TaskItem({
     </div>
   );
 });
+
+function SelectionBar({ isSelected, color }: { isSelected: boolean; color: TaskColor | null }) {
+  if (color) {
+    return (
+      <div
+        className={cn(
+          "absolute left-0 top-0 bottom-0 w-[3px] opacity-100",
+          TASK_COLOR_BAR_CLASS[color],
+        )}
+      />
+    );
+  }
+  return (
+    <div
+      className={cn(
+        "absolute left-0 top-0 bottom-0 w-[2px] bg-primary transition-opacity",
+        isSelected ? "opacity-100" : "opacity-0",
+      )}
+    />
+  );
+}
 
 function SubtaskToggle({
   taskId,
