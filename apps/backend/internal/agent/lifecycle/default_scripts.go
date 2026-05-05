@@ -60,8 +60,16 @@ git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
 git clone --depth=1 --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}
 cd {{workspace.path}}
 
+# Switch to the kandev-managed feature branch. On resume after a destroyed
+# container, prefer the remote tip if the agent had previously pushed; fall
+# back to a fresh branch off the chosen base. -B is idempotent if the local
+# branch somehow already exists.
 if [ -n "{{worktree.branch}}" ] && [ "{{worktree.branch}}" != "{{repository.branch}}" ]; then
-  git checkout -b "{{worktree.branch}}"
+  if git fetch --depth=1 origin "{{worktree.branch}}" 2>/dev/null; then
+    git checkout -B "{{worktree.branch}}" "origin/{{worktree.branch}}"
+  else
+    git checkout -b "{{worktree.branch}}"
+  fi
 fi
 
 # Strip embedded token from remote URL to avoid persisting credentials in .git/config
@@ -104,6 +112,18 @@ chmod +x /usr/local/bin/pnpm
 echo "Cloning {{repository.clone_url}} (branch: {{repository.branch}})..."
 git clone --depth=1 --quiet --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}
 cd {{workspace.path}}
+
+# Switch to the kandev-managed feature branch. On resume after a destroyed
+# sandbox, prefer the remote tip if the agent had previously pushed; fall
+# back to a fresh branch off the chosen base. -B is idempotent if the local
+# branch somehow already exists.
+if [ -n "{{worktree.branch}}" ] && [ "{{worktree.branch}}" != "{{repository.branch}}" ]; then
+  if git fetch --depth=1 origin "{{worktree.branch}}" 2>/dev/null; then
+    git checkout -B "{{worktree.branch}}" "origin/{{worktree.branch}}"
+  else
+    git checkout -b "{{worktree.branch}}"
+  fi
+fi
 
 # Strip embedded token from remote URL to avoid persisting credentials in .git/config
 git remote set-url origin "$(git remote get-url origin | sed 's|https://[^@]*@github.com/|https://github.com/|')" 2>/dev/null || true
