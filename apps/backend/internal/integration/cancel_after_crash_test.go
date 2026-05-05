@@ -31,7 +31,7 @@ func TestOrchestratorCancelAfterAgentCrash_UnsticksSession(t *testing.T) {
 	defer client.Close()
 
 	// Start the task so a session is created and an execution is registered in the simulator.
-	startResp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
+	startResp, err := client.SendRequest("start-1", ws.ActionSessionLaunch, map[string]interface{}{
 		"task_id":          taskID,
 		"agent_profile_id": "augment-agent",
 	})
@@ -110,7 +110,7 @@ func TestOrchestratorCancelWhenAgentHangs_UnsticksSession(t *testing.T) {
 	client := NewOrchestratorWSClient(t, ts.Server.URL)
 	defer client.Close()
 
-	startResp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
+	startResp, err := client.SendRequest("start-1", ws.ActionSessionLaunch, map[string]interface{}{
 		"task_id":          taskID,
 		"agent_profile_id": "augment-agent",
 	})
