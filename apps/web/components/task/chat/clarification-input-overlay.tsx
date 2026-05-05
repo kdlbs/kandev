@@ -19,10 +19,7 @@ import {
 } from "./clarification-overlay-parts";
 
 type ClarificationInputOverlayProps = {
-  // Single message kept for legacy callers; the new multi-question UX uses
-  // `messages` to render every pending question in the bundle.
-  message?: Message | null;
-  messages?: readonly Message[] | null;
+  messages: readonly Message[] | null | undefined;
   onResolved: () => void;
 };
 
@@ -42,12 +39,8 @@ function readSingleQuestionMeta(message: Message | null | undefined): SingleQues
   return { message, metadata, question: metadata.question, questionId };
 }
 
-function resolveQuestionMessages(args: {
-  message?: Message | null;
-  messages?: readonly Message[] | null;
-}): Message[] {
-  if (args.messages && args.messages.length > 0) return [...args.messages];
-  if (args.message) return [args.message];
+function resolveQuestionMessages(messages: readonly Message[] | null | undefined): Message[] {
+  if (messages && messages.length > 0) return [...messages];
   return [];
 }
 
@@ -323,13 +316,13 @@ function ClarificationCarouselBody({
   );
 }
 
-export function ClarificationInputOverlay(props: ClarificationInputOverlayProps) {
-  const { onResolved, message, messages } = props;
-  // Depend on the actual array refs (not the surrounding props object) so
-  // the memo isn't invalidated on every parent render.
+export function ClarificationInputOverlay({
+  messages,
+  onResolved,
+}: ClarificationInputOverlayProps) {
   const sortedMessages = useMemo(
-    () => sortMessagesByQuestionIndex(resolveQuestionMessages({ message, messages })),
-    [message, messages],
+    () => sortMessagesByQuestionIndex(resolveQuestionMessages(messages)),
+    [messages],
   );
   const group = useClarificationGroup(sortedMessages);
   const [customDrafts, setCustomDrafts] = useState<Record<string, string>>({});
