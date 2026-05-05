@@ -44,7 +44,8 @@ async function createSeedTask(
       repository_ids: [seedData.repositoryId],
     },
   );
-  if (!task.session_id) throw new Error(`createTaskWithAgent did not return a session_id: ${title}`);
+  if (!task.session_id)
+    throw new Error(`createTaskWithAgent did not return a session_id: ${title}`);
   return { id: task.id, sessionId: task.session_id };
 }
 
