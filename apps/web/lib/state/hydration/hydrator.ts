@@ -206,7 +206,7 @@ function hydrateSessionRuntime(
 }
 
 /** Hydrate UI slices without overwriting active connection state. */
-function hydrateUI(draft: Draft<AppState>, state: Partial<AppState>): void {
+export function hydrateUI(draft: Draft<AppState>, state: Partial<AppState>): void {
   if (state.previewPanel) deepMerge(draft.previewPanel, state.previewPanel);
   if (state.rightPanel) deepMerge(draft.rightPanel, state.rightPanel);
   if (state.diffs) deepMerge(draft.diffs, state.diffs);

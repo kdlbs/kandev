@@ -4,7 +4,6 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { IconX } from "@tabler/icons-react";
 
 type QuickChatTabItemProps = {
-  sessionId: string;
   name: string;
   isActive: boolean;
   isRenameable: boolean;
@@ -68,7 +67,10 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              commit();
+              // Trigger blur instead of calling commit() directly: the input
+              // unmount on setIsEditing(false) would otherwise fire onBlur and
+              // call commit() a second time.
+              inputRef.current?.blur();
             } else if (e.key === "Escape") {
               e.preventDefault();
               cancel();

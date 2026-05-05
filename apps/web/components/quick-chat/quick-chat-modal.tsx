@@ -42,7 +42,6 @@ function QuickChatTabs({
           return (
             <QuickChatTabItem
               key={s.sessionId || `new-${index}`}
-              sessionId={s.sessionId}
               name={tabName}
               isActive={s.sessionId === activeSessionId}
               isRenameable={s.sessionId !== ""}
