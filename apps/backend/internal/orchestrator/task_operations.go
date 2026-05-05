@@ -753,7 +753,12 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	// hours or days ago. Zero-duration completion keeps analytics honest about
 	// the dead window. A failure here shouldn't block the resume; the next
 	// completeTurnForSession sweep will mop up.
+	//
+	// Drop the activeTurns cache entry first, mirroring completeTurnForSession.
+	// Otherwise a stale entry would let getActiveTurnID return the now-abandoned
+	// turn ID without re-reading the DB, tagging new messages to a closed turn.
 	if s.turnService != nil {
+		s.activeTurns.Delete(sessionID)
 		if err := s.turnService.AbandonOpenTurns(ctx, sessionID); err != nil {
 			s.logger.Warn("failed to abandon orphan turns on resume; continuing",
 				zap.String("session_id", sessionID),

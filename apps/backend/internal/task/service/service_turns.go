@@ -155,12 +155,15 @@ func (s *Service) AbandonOpenTurns(ctx context.Context, sessionID string) error 
 			zap.String("session_id", sessionID))
 		closed++
 	}
-	// Exited via cap — log so an operator can tell the sweep was incomplete.
-	// Caller swallows the returned error; nil here preserves that contract.
-	s.logger.Warn("AbandonOpenTurns hit iteration cap; some orphan turns may remain",
-		zap.String("session_id", sessionID),
-		zap.Int("closed", closed),
-		zap.Int("max_iterations", maxIterations))
+	// Only warn if turns are *still* accumulating after the cap. Closing
+	// exactly maxIterations turns and then finding the session clean is not a
+	// runaway — same shape as completeTurnForSession.
+	if turn, err := s.GetActiveTurn(ctx, sessionID); err == nil && turn != nil {
+		s.logger.Warn("AbandonOpenTurns hit iteration cap; some orphan turns may remain",
+			zap.String("session_id", sessionID),
+			zap.Int("closed", closed),
+			zap.Int("max_iterations", maxIterations))
+	}
 	return nil
 }
 
