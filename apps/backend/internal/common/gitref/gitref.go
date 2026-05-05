@@ -29,7 +29,11 @@ const headFile = "HEAD"
 //     feature branch still produce a value — callers that care about
 //     correctness can override.
 func DefaultBranch(repoPath string) (string, error) {
-	gitDir, err := ResolveGitDir(repoPath)
+	safe, err := guardRepoPath(repoPath)
+	if err != nil {
+		return "", err
+	}
+	gitDir, err := ResolveGitDir(safe)
 	if err != nil {
 		return "", err
 	}
@@ -41,6 +45,33 @@ func DefaultBranch(repoPath string) (string, error) {
 		return branch, nil
 	}
 	return readHEADBranchFallback(gitDir)
+}
+
+// guardRepoPath rejects relative paths and any path containing `..` segments
+// before passing the value into the file-reading helpers below. Callers
+// already validate against an allowlist (see service.resolveAllowedLocalPath),
+// but CodeQL's go/path-injection taint analysis doesn't trace that as a
+// sanitizer, so we re-check here at the I/O boundary. The check is also
+// genuinely useful: any caller — migration code, tests, future callers —
+// must hand us an absolute, traversal-free path or we refuse to read.
+func guardRepoPath(repoPath string) (string, error) {
+	if repoPath == "" {
+		return "", fmt.Errorf("repository path is required")
+	}
+	if !filepath.IsAbs(repoPath) {
+		return "", fmt.Errorf("repository path must be absolute")
+	}
+	cleaned := filepath.Clean(repoPath)
+	// After Clean, any surviving ".." segment means the cleaned path itself
+	// is a parent traversal (e.g. starting with "../") — reject. A legitimate
+	// branch name like "feature/..foo" never reaches this function; we deal
+	// in repo paths only.
+	for _, part := range strings.Split(cleaned, string(filepath.Separator)) {
+		if part == ".." {
+			return "", fmt.Errorf("repository path must not contain '..' segments")
+		}
+	}
+	return cleaned, nil
 }
 
 // ResolveGitDir returns the actual git directory for repoPath, following
