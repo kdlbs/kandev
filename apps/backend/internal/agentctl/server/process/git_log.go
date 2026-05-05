@@ -187,7 +187,12 @@ func (g *GitOperator) markPushedCommits(ctx context.Context, commits []*GitCommi
 	if upstreamSHA == "" {
 		return
 	}
-	output, err := g.runGitCommand(ctx, "rev-list", "HEAD", "^"+upstreamSHA)
+	// Cap the walk to the number of commits we're marking. Without this, a
+	// branch with many local-only commits would walk unbounded history per
+	// GetLog call. rev-list walks newest-first the same way GetLog does, so
+	// the N most recent unpushed SHAs cover the N commits in our result.
+	output, err := g.runGitCommand(ctx, "rev-list",
+		fmt.Sprintf("-n%d", len(commits)), "HEAD", "^"+upstreamSHA)
 	if err != nil {
 		return
 	}
