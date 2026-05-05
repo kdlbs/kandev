@@ -2,6 +2,16 @@
 
 All notable changes to Kandev.
 
+## 0.39.1 - 2026-05-05
+
+### Features
+
+- brew install + npm sibling channels via OIDC trusted publishing ([#806](https://github.com/kdlbs/kandev/pull/806))
+
+### Bug Fixes
+
+- restore PR-and-merge pattern ([#824](https://github.com/kdlbs/kandev/pull/824))
+
 ## 0.39 - 2026-05-04
 
 ### Features
