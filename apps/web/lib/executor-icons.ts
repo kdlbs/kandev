@@ -1,10 +1,10 @@
 import {
-  IconFolder,
-  IconFolders,
+  IconBox,
+  IconBoxOff,
   IconCloud,
   IconCloudOff,
-  IconContainer,
-  IconContainerOff,
+  IconFolder,
+  IconFolders,
   IconServer,
   IconServerOff,
 } from "@tabler/icons-react";
@@ -12,8 +12,8 @@ import {
 export const EXECUTOR_ICON_MAP: Record<string, typeof IconFolder> = {
   local: IconFolder,
   worktree: IconFolders,
-  local_docker: IconContainer,
-  remote_docker: IconContainer,
+  local_docker: IconBox,
+  remote_docker: IconBox,
   sprites: IconCloud,
 };
 
@@ -45,7 +45,7 @@ export function getExecutorStatusIcon(
 ): { Icon: typeof IconFolder; testId: string } {
   if (executorType === "local_docker" || executorType === "remote_docker") {
     return {
-      Icon: hasError ? IconContainerOff : IconContainer,
+      Icon: hasError ? IconBoxOff : IconBox,
       testId: "executor-status-container-icon",
     };
   }

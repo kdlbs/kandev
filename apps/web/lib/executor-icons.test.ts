@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { IconCloud, IconContainer, IconFolder, IconFolders } from "@tabler/icons-react";
+import { IconBox, IconCloud, IconFolder, IconFolders } from "@tabler/icons-react";
 
 import { EXECUTOR_ICON_MAP, getExecutorIcon, getExecutorLabel } from "./executor-icons";
 
 describe("executor icons", () => {
-  it("maps both docker variants to the container icon", () => {
-    expect(EXECUTOR_ICON_MAP.local_docker).toBe(IconContainer);
-    expect(EXECUTOR_ICON_MAP.remote_docker).toBe(IconContainer);
-    expect(getExecutorIcon("local_docker")).toBe(IconContainer);
-    expect(getExecutorIcon("remote_docker")).toBe(IconContainer);
+  it("maps both docker variants to the box icon", () => {
+    expect(EXECUTOR_ICON_MAP.local_docker).toBe(IconBox);
+    expect(EXECUTOR_ICON_MAP.remote_docker).toBe(IconBox);
+    expect(getExecutorIcon("local_docker")).toBe(IconBox);
+    expect(getExecutorIcon("remote_docker")).toBe(IconBox);
   });
 
   it("maps sprites to the cloud icon and local executors to folder icons", () => {
