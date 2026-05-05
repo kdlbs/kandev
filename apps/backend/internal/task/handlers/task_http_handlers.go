@@ -873,7 +873,7 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 		body.WorkflowID, body.WorkflowStepID, body.Position,
 	)
 	if err != nil {
-		handleNotFound(c, h.logger, err, "task not moved")
+		handleSelectedMoveError(c, h.logger, err)
 		return
 	}
 

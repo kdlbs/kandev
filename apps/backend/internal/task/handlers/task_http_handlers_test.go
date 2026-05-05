@@ -8,12 +8,15 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/service"
 )
 
 func newTestLogger(t *testing.T) *logger.Logger {
@@ -70,6 +73,49 @@ func TestHandleSelectedMoveError(t *testing.T) {
 			assert.Equal(t, tc.want, rec.Code)
 		})
 	}
+}
+
+type moveTaskConflictRepo struct {
+	mockRepository
+	task *models.Task
+}
+
+func (m *moveTaskConflictRepo) GetTask(ctx context.Context, id string) (*models.Task, error) {
+	return m.task, nil
+}
+
+func TestHTTPMoveTaskMapsMoveConflict(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+	archivedAt := time.Now().UTC()
+	repo := &moveTaskConflictRepo{task: &models.Task{
+		ID:             "task-archived",
+		WorkspaceID:    "workspace-1",
+		WorkflowID:     "wf-source",
+		WorkflowStepID: "step-source",
+		ArchivedAt:     &archivedAt,
+	}}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &TaskHandlers{service: svc, logger: log}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Params = gin.Params{{Key: "id", Value: "task-archived"}}
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks/task-archived/move", strings.NewReader(`{
+		"workflow_id": "wf-target",
+		"workflow_step_id": "step-target",
+		"position": 0
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpMoveTask(c)
+
+	assert.Equal(t, http.StatusConflict, rec.Code)
 }
 
 func TestResolveFreshBranchName(t *testing.T) {
