@@ -10,6 +10,7 @@ const SORT_OPTIONS: Array<{ key: SortKey; label: string }> = [
   { key: "updatedAt", label: "Updated" },
   { key: "createdAt", label: "Created" },
   { key: "title", label: "Title" },
+  { key: "custom", label: "Custom" },
 ];
 
 type Props = {
@@ -18,6 +19,9 @@ type Props = {
 };
 
 export function SortPicker({ value, onChange }: Props) {
+  // Direction has no meaning for the custom sort — its order is the user's
+  // drag, not an asc/desc field. Hide the toggle to avoid surprising flips.
+  const isCustom = value.key === "custom";
   return (
     <div className="flex items-center gap-1.5">
       <Select value={value.key} onValueChange={(v) => onChange({ ...value, key: v as SortKey })}>
@@ -32,24 +36,26 @@ export function SortPicker({ value, onChange }: Props) {
           ))}
         </SelectContent>
       </Select>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="h-7 cursor-pointer"
-        onClick={() =>
-          onChange({ ...value, direction: value.direction === "asc" ? "desc" : "asc" })
-        }
-        data-testid="sort-direction-toggle"
-        data-direction={value.direction}
-        aria-label={`Sort direction ${value.direction}`}
-      >
-        {value.direction === "asc" ? (
-          <IconArrowUp className="h-3.5 w-3.5" />
-        ) : (
-          <IconArrowDown className="h-3.5 w-3.5" />
-        )}
-      </Button>
+      {!isCustom && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 cursor-pointer"
+          onClick={() =>
+            onChange({ ...value, direction: value.direction === "asc" ? "desc" : "asc" })
+          }
+          data-testid="sort-direction-toggle"
+          data-direction={value.direction}
+          aria-label={`Sort direction ${value.direction}`}
+        >
+          {value.direction === "asc" ? (
+            <IconArrowUp className="h-3.5 w-3.5" />
+          ) : (
+            <IconArrowDown className="h-3.5 w-3.5" />
+          )}
+        </Button>
+      )}
     </div>
   );
 }

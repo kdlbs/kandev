@@ -100,6 +100,13 @@ export type BottomTerminalState = {
   pendingCommand: string | null;
 };
 
+export type SidebarTaskPrefsState = {
+  /** Pinned task IDs in display order (first ID renders highest within its group). */
+  pinnedTaskIds: string[];
+  /** Manual order. Tasks not present fall back to the active sort. */
+  orderedTaskIds: string[];
+};
+
 export type UISliceState = {
   previewPanel: PreviewPanelState;
   rightPanel: RightPanelState;
@@ -119,6 +126,8 @@ export type UISliceState = {
   collapsedSubtaskParents: string[];
   /** Task ID currently shown in the kanban preview side-panel, or null if closed. */
   kanbanPreviewedTaskId: string | null;
+  /** Sidebar pin + manual-order. Per-browser, persisted to localStorage. */
+  sidebarTaskPrefs: SidebarTaskPrefsState;
 };
 
 export type UISliceActions = {
@@ -171,6 +180,14 @@ export type UISliceActions = {
   clearSidebarSyncError: () => void;
   migrateLocalViewsToBackend: () => void;
   setKanbanPreviewedTaskId: (taskId: string | null) => void;
+  togglePinnedTask: (taskId: string) => void;
+  setSidebarTaskOrder: (orderedTaskIds: string[]) => void;
+  /**
+   * Drop a task ID from both pinned and ordered arrays in-memory and persist.
+   * Called on task deletion so the in-memory state doesn't out-of-date the
+   * already-cleaned localStorage and silently re-write the deleted ID back.
+   */
+  removeTaskFromSidebarPrefs: (taskId: string) => void;
 };
 
 export type { SidebarView, SidebarViewDraft };

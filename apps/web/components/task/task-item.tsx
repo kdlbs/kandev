@@ -8,6 +8,7 @@ import {
   IconDots,
   IconGitPullRequest,
   IconMessageQuestion,
+  IconPinFilled,
 } from "@tabler/icons-react";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { IssueTaskIcon } from "@/components/github/issue-task-icon";
@@ -55,6 +56,7 @@ type TaskItemProps = {
   repositories?: string[];
   prInfo?: { number: number; state: string };
   issueInfo?: { url: string; number: number };
+  isPinned?: boolean;
 };
 
 function formatRelativeTime(dateString: string): string {
@@ -221,6 +223,7 @@ function TaskItemContent({
   remoteExecutorName,
   primarySessionId,
   isArchived,
+  isPinned,
   repositories,
   updatedAt,
   prInfo,
@@ -234,6 +237,7 @@ function TaskItemContent({
   remoteExecutorName?: string;
   primarySessionId?: string | null;
   isArchived?: boolean;
+  isPinned?: boolean;
   repositories?: string[];
   updatedAt?: string;
   prInfo?: { number: number; state: string };
@@ -246,6 +250,12 @@ function TaskItemContent({
     >
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
         <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
+        {isPinned && (
+          <IconPinFilled
+            data-testid="task-pinned-icon"
+            className="h-3 w-3 shrink-0 text-muted-foreground/60"
+          />
+        )}
         <TaskPRIcon taskId={taskId} prInfo={prInfo} />
         {issueInfo && <IssueTaskIcon issueInfo={issueInfo} />}
         {isRemoteExecutor && (
@@ -296,6 +306,7 @@ export const TaskItem = memo(function TaskItem({
   repositories,
   prInfo,
   issueInfo,
+  isPinned,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
   const isInProgress = computeIsInProgress(state, sessionState);
@@ -341,6 +352,7 @@ export const TaskItem = memo(function TaskItem({
         remoteExecutorName={remoteExecutorName}
         primarySessionId={primarySessionId}
         isArchived={isArchived}
+        isPinned={isPinned}
         repositories={repositories}
         updatedAt={updatedAt}
         prInfo={prInfo}

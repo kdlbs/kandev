@@ -7,6 +7,8 @@ import { Button } from "@kandev/ui/button";
 import { TaskSwitcher } from "../task-switcher";
 import type { TaskSwitcherItem } from "../task-switcher";
 import { applyView } from "@/lib/sidebar/apply-view";
+import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-sidebar-view";
+import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
 import { WorkspaceSwitcher } from "../workspace-switcher";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { TaskArchiveConfirmDialog } from "../task-archive-confirm-dialog";
@@ -411,12 +413,13 @@ function MobileTaskList({
   deletingTaskId: string | null;
   isLoading?: boolean;
 }) {
-  const sidebarSlice = useAppStore((s) => s.sidebarViews);
-  const view = useMemo(() => {
-    const active = sidebarSlice.views.find((v) => v.id === sidebarSlice.activeViewId);
-    return active ?? sidebarSlice.views[0];
-  }, [sidebarSlice]);
-  const grouped = useMemo(() => applyView(tasks, view), [tasks, view]);
+  const view = useEffectiveSidebarView();
+  const { pinnedTaskIds, orderedTaskIds, togglePinnedTask, handleReorderGroup } =
+    useSidebarTaskPrefs();
+  const grouped = useMemo(
+    () => applyView(tasks, view, { pinnedTaskIds, orderedTaskIds }),
+    [tasks, view, pinnedTaskIds, orderedTaskIds],
+  );
   return (
     <TaskSwitcher
       grouped={grouped}
@@ -425,6 +428,9 @@ function MobileTaskList({
       onSelectTask={onSelectTask}
       onArchiveTask={onArchiveTask}
       onDeleteTask={onDeleteTask}
+      onTogglePin={togglePinnedTask}
+      onReorderGroup={handleReorderGroup}
+      pinnedTaskIds={pinnedTaskIds}
       deletingTaskId={deletingTaskId}
       isLoading={isLoading}
       totalTaskCount={tasks.length}

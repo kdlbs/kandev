@@ -634,6 +634,17 @@ export function cleanupTaskStorage(
     setStoredCollapsedSubtaskParents(collapsed.filter((id) => id !== taskId));
   }
 
+  // Sidebar pin + manual-order arrays. Strip the deleted task so the lists
+  // don't grow unboundedly across reloads.
+  const pinned = getStoredPinnedTaskIds();
+  if (pinned.includes(taskId)) {
+    setStoredPinnedTaskIds(pinned.filter((id) => id !== taskId));
+  }
+  const ordered = getStoredOrderedTaskIds();
+  if (ordered.includes(taskId)) {
+    setStoredOrderedTaskIds(ordered.filter((id) => id !== taskId));
+  }
+
   // Env-keyed storage — dockview layout + maximize live under task envs.
   for (const envId of envIds) {
     removeEnvMaximizeState(envId);
@@ -693,6 +704,33 @@ export function setStoredSidebarDraft<T>(draft: T): void {
 
 export function removeStoredSidebarDraft(): void {
   removeLocalStorage(SIDEBAR_DRAFT_KEY);
+}
+
+// --- Sidebar task prefs: pin + manual order (localStorage, global) ---
+
+const SIDEBAR_PINNED_TASKS_KEY = "kandev.sidebar.pinnedTaskIds";
+const SIDEBAR_TASK_ORDER_KEY = "kandev.sidebar.orderedTaskIds";
+
+function readStringArray(key: string): string[] {
+  const raw = getLocalStorage<string[]>(key, []) as unknown;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((id): id is string => typeof id === "string");
+}
+
+export function getStoredPinnedTaskIds(): string[] {
+  return readStringArray(SIDEBAR_PINNED_TASKS_KEY);
+}
+
+export function setStoredPinnedTaskIds(ids: string[]): void {
+  setLocalStorage(SIDEBAR_PINNED_TASKS_KEY, ids);
+}
+
+export function getStoredOrderedTaskIds(): string[] {
+  return readStringArray(SIDEBAR_TASK_ORDER_KEY);
+}
+
+export function setStoredOrderedTaskIds(ids: string[]): void {
+  setLocalStorage(SIDEBAR_TASK_ORDER_KEY, ids);
 }
 
 // --- Sidebar collapsed subtask parents (sessionStorage, tab-scoped) ---

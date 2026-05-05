@@ -22,7 +22,7 @@ export type FilterClause = {
   value: FilterValue;
 };
 
-export type SortKey = "state" | "updatedAt" | "createdAt" | "title";
+export type SortKey = "state" | "updatedAt" | "createdAt" | "title" | "custom";
 export type SortDirection = "asc" | "desc";
 export type SortSpec = { key: SortKey; direction: SortDirection };
 
