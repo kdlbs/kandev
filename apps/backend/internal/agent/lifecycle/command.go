@@ -57,35 +57,25 @@ func (cb *CommandBuilder) BuildContinueCommandString(ag agents.Agent, opts agent
 }
 
 // ExpandSessionDir resolves the host-side directory that should be bind-
-// mounted into the container at SessionDirTarget. When kandevHomeDir and
-// instanceID are non-empty, the path is the kandev-managed per-container
-// session dir (~/.kandev/agent-sessions/<instance_id>/<dotdir>) — isolated
-// from the user's actual ~/<dotdir> so the host's stale state DBs and
-// session caches stay out of the container.
+// mounted into the container at SessionDirTarget. The path is the kandev-
+// managed per-container session dir (~/.kandev/agent-sessions/<instance_id>/
+// <dotdir>) — isolated from the user's actual ~/<dotdir> so the host's stale
+// state DBs and session caches stay out of the container.
 //
-// Falls back to the legacy {home}/<dotdir> expansion only when kandev home
-// is unavailable (kept narrow on purpose; callers in production always have
-// a resolved kandev home).
-//
-// Returns empty string if no session directory is configured.
+// Returns empty string if no session directory is configured or if kandev
+// home / instance ID are unavailable. Production callers always supply a
+// resolved kandev home, so the empty-string path only fires in tests.
 func (cb *CommandBuilder) ExpandSessionDir(ag agents.Agent, kandevHomeDir, instanceID string) string {
 	template := ag.Runtime().SessionConfig.SessionDirTemplate
 	if template == "" {
 		return ""
 	}
-
-	if path := SessionDirHostPath(kandevHomeDir, instanceID, template); path != "" {
-		_ = os.MkdirAll(path, 0o755)
-		return path
+	path := SessionDirHostPath(kandevHomeDir, instanceID, template)
+	if path == "" {
+		return ""
 	}
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		homeDir = "/tmp"
-	}
-	result := strings.ReplaceAll(template, "{home}", homeDir)
-	_ = os.MkdirAll(result, 0o755)
-	return result
+	_ = os.MkdirAll(path, 0o755)
+	return path
 }
 
 // GetSessionDirTarget returns the container path for session directory mount.
