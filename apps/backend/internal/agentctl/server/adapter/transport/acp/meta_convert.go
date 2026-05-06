@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/coder/acp-go-sdk"
+
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
@@ -184,8 +185,113 @@ func extractConfigOptions(meta any) []streams.ConfigOption {
 	return result
 }
 
-// extractPromptUsage extracts token usage from ACP prompt response _meta.
-// Example _meta: {"usage": {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150}}
+// extractUsage pulls token usage out of a prompt response, walking the
+// three CLI-specific shapes observed in /tmp/acp-probe-*.jsonl in order:
+//
+//  1. Typed Usage on the prompt response (the ACP SDK parses claude-acp
+//     / opencode-acp's `result.usage` field directly). This is the
+//     authoritative source when present.
+//  2. `_meta.quota.token_count` (gemini). snake_case, no cached, no cost.
+//  3. `_meta.usage` (legacy / forward-compat). camelCase or snake_case.
+//
+// Returns nil when no usable counts are found.
+func extractUsage(resp *acp.PromptResponse) *streams.PromptUsage {
+	if resp == nil {
+		return nil
+	}
+	if u := fromTypedUsage(resp.Usage); u != nil {
+		return u
+	}
+	if u := fromGeminiQuotaMeta(resp.Meta); u != nil {
+		return u
+	}
+	return extractPromptUsage(resp.Meta)
+}
+
+// fromTypedUsage converts the SDK's typed Usage (parsed from
+// result.usage on claude-acp / opencode-acp) to streams.PromptUsage.
+// Returns nil when every count is zero.
+func fromTypedUsage(u *acp.Usage) *streams.PromptUsage {
+	if u == nil {
+		return nil
+	}
+	usage := &streams.PromptUsage{
+		InputTokens:  int64(u.InputTokens),
+		OutputTokens: int64(u.OutputTokens),
+		TotalTokens:  int64(u.TotalTokens),
+	}
+	if u.CachedReadTokens != nil {
+		usage.CachedReadTokens = int64(*u.CachedReadTokens)
+	}
+	if u.CachedWriteTokens != nil {
+		usage.CachedWriteTokens = int64(*u.CachedWriteTokens)
+	}
+	if u.ThoughtTokens != nil {
+		usage.ThoughtTokens = int64(*u.ThoughtTokens)
+	}
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.TotalTokens == 0 {
+		return nil
+	}
+	return usage
+}
+
+// fromGeminiQuotaMeta extracts gemini's `_meta.quota.token_count` shape.
+// The captured frame at /tmp/acp-probe-gemini.jsonl shows:
+//
+//	"_meta":{"quota":{"model_usage":[{
+//	   "model":"gemini-3-flash-preview",
+//	   "token_count":{"input_tokens":9796,"output_tokens":2}}]}}
+//
+// Tokens may also appear directly under `quota.token_count` without the
+// model_usage[] envelope (older builds); handle both.
+func fromGeminiQuotaMeta(meta map[string]any) *streams.PromptUsage {
+	if meta == nil {
+		return nil
+	}
+	quotaAny, ok := meta["quota"]
+	if !ok {
+		return nil
+	}
+	quota, ok := quotaAny.(map[string]any)
+	if !ok {
+		return nil
+	}
+	if u := geminiTokenCount(quota["token_count"]); u != nil {
+		return u
+	}
+	usages, _ := quota["model_usage"].([]any)
+	for _, item := range usages {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if u := geminiTokenCount(entry["token_count"]); u != nil {
+			return u
+		}
+	}
+	return nil
+}
+
+func geminiTokenCount(raw any) *streams.PromptUsage {
+	tc, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	usage := &streams.PromptUsage{
+		InputTokens:  getInt64(tc, "input_tokens"),
+		OutputTokens: getInt64(tc, "output_tokens"),
+	}
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 {
+		return nil
+	}
+	usage.TotalTokens = usage.InputTokens + usage.OutputTokens
+	return usage
+}
+
+// extractPromptUsage is the legacy `_meta.usage` reader retained for
+// forward compatibility. Most production CLIs put usage at `result.usage`
+// (parsed into the typed `resp.Usage` field) — extractUsage prefers that
+// path and only falls through to this one.
 func extractPromptUsage(meta any) *streams.PromptUsage {
 	m, ok := toAnyMap(meta)
 	if !ok {
@@ -206,7 +312,7 @@ func extractPromptUsage(meta any) *streams.PromptUsage {
 		CachedWriteTokens: getInt64(u, "cached_write_tokens"),
 		TotalTokens:       getInt64(u, "total_tokens"),
 	}
-	// Also check camelCase variants
+	// Also check camelCase variants.
 	if usage.InputTokens == 0 {
 		usage.InputTokens = getInt64(u, "inputTokens")
 	}
@@ -221,6 +327,9 @@ func extractPromptUsage(meta any) *streams.PromptUsage {
 	}
 	if usage.CachedWriteTokens == 0 {
 		usage.CachedWriteTokens = getInt64(u, "cachedWriteTokens")
+	}
+	if usage.ThoughtTokens == 0 {
+		usage.ThoughtTokens = getInt64(u, "thoughtTokens")
 	}
 	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.TotalTokens == 0 {
 		return nil

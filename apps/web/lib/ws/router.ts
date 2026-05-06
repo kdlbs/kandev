@@ -28,6 +28,8 @@ import { registerSecretsHandlers } from "@/lib/ws/handlers/secrets";
 import { registerUsersHandlers } from "@/lib/ws/handlers/users";
 import { registerWorkspacesHandlers } from "@/lib/ws/handlers/workspaces";
 import { registerGitHubHandlers } from "@/lib/ws/handlers/github";
+import { registerOfficeHandlers } from "@/lib/ws/handlers/office";
+import { registerRunHandlers } from "@/lib/ws/handlers/run";
 
 export function registerWsHandlers(store: StoreApi<AppState>) {
   return {
@@ -59,5 +61,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerSystemEventsHandlers(store),
     ...registerTurnsHandlers(store),
     ...registerGitHubHandlers(store),
+    ...registerOfficeHandlers(store),
+    ...registerRunHandlers(),
   };
 }

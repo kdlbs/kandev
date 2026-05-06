@@ -16,6 +16,7 @@ function stepFromPayload(step: any) {
     prompt: step.prompt,
     is_start_step: step.is_start_step,
     agent_profile_id: step.agent_profile_id,
+    stage_type: step.stage_type,
   };
 }
 
@@ -33,6 +34,7 @@ function applyWorkflowCreated(state: AppState, payload: WorkflowPayload): AppSta
           workspaceId: payload.workspace_id,
           name: payload.name,
           hidden: isHidden,
+          style: payload.style,
         },
         ...state.workflows.items,
       ],
@@ -49,6 +51,7 @@ function applyWorkflowUpdated(state: AppState, payload: WorkflowPayload): AppSta
           name: payload.name,
           agent_profile_id: payload.agent_profile_id,
           hidden: payload.hidden !== undefined ? Boolean(payload.hidden) : item.hidden,
+          style: payload.style ?? item.style,
         }
       : item,
   );

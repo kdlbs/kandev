@@ -60,6 +60,7 @@ type TaskTopBarProps = {
   isRemoteExecutor?: boolean;
   isAgentctlReady?: boolean;
   remoteExecutorType?: string | null;
+  officeTaskHref?: string | null;
 };
 
 type TopBarLeftProps = {
@@ -84,6 +85,7 @@ const TaskTopBar = memo(function TaskTopBar({
   isRemoteExecutor,
   isAgentctlReady,
   remoteExecutorType,
+  officeTaskHref,
 }: TaskTopBarProps) {
   return (
     <header
@@ -118,6 +120,7 @@ const TaskTopBar = memo(function TaskTopBar({
         isRemoteExecutor={isRemoteExecutor}
         isAgentctlReady={isAgentctlReady}
         taskTitle={taskTitle}
+        officeTaskHref={officeTaskHref}
       />
     </header>
   );
@@ -366,6 +369,7 @@ function TopBarRight({
   isRemoteExecutor,
   isAgentctlReady,
   taskTitle,
+  officeTaskHref,
 }: {
   taskId?: string | null;
   activeSessionId?: string | null;
@@ -376,8 +380,24 @@ function TopBarRight({
   isRemoteExecutor?: boolean;
   isAgentctlReady?: boolean;
   taskTitle?: string;
+  officeTaskHref?: string | null;
 }) {
   const items: TopbarOverflowItem[] = [];
+
+  if (officeTaskHref) {
+    items.push({
+      id: "office-view",
+      label: "Open in office view",
+      priority: 90,
+      content: (
+        <TopbarCluster label="Open in office view" className="[&_a]:h-8 [&_a]:text-xs">
+          <Button asChild size="sm" variant="outline" className="h-8 cursor-pointer px-2">
+            <Link href={officeTaskHref}>Open in office view</Link>
+          </Button>
+        </TopbarCluster>
+      ),
+    });
+  }
 
   if (!isArchived && workspaceId) {
     items.push({

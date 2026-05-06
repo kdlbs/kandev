@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -25,6 +26,11 @@ type testAgent struct {
 	runtime            *agents.RuntimeConfig
 	permissionSettings map[string]agents.PermissionSetting
 	logoData           []byte
+	// supportsMCP feeds the DiscoveryResult returned by IsInstalled so the
+	// E2E-mock discovery bypass can verify capability propagation. Most
+	// tests don't care and the zero value matches the legacy behaviour.
+	supportsMCP    bool
+	mcpConfigPaths []string
 }
 
 func (a *testAgent) ID() string          { return a.id }
@@ -37,7 +43,11 @@ func (a *testAgent) DisplayOrder() int   { return 0 }
 func (a *testAgent) Logo(v agents.LogoVariant) []byte { return a.logoData }
 
 func (a *testAgent) IsInstalled(ctx context.Context) (*agents.DiscoveryResult, error) {
-	return &agents.DiscoveryResult{Available: false}, nil
+	return &agents.DiscoveryResult{
+		Available:      false,
+		SupportsMCP:    a.supportsMCP,
+		MCPConfigPaths: a.mcpConfigPaths,
+	}, nil
 }
 
 // BuildCommand builds a command using runtime config and permission flags.
@@ -82,6 +92,7 @@ func (a *testAgent) PermissionSettings() map[string]agents.PermissionSetting {
 func (a *testAgent) Runtime() *agents.RuntimeConfig {
 	return a.runtime
 }
+func (a *testAgent) BillingType() usage.BillingType { return usage.BillingTypeAPIKey }
 func (a *testAgent) RemoteAuth() *agents.RemoteAuth { return nil }
 func (a *testAgent) InstallScript() string          { return "" }
 
@@ -516,5 +527,84 @@ func TestSyncAgentFromDiscovery_UnknownAgentSkipped(t *testing.T) {
 	}
 	if err := ctrl.syncAgentFromDiscovery(context.Background(), result); err != nil {
 		t.Errorf("expected nil error for unknown agent, got: %v", err)
+	}
+}
+
+// TestDetectAgents_E2EMockBypassesFilesystem verifies that when
+// KANDEV_E2E_MOCK=true, detectAgents returns results synthesised from the
+// registry without calling c.discovery.Detect (which would panic here
+// because c.discovery is nil). Every enabled agent must appear as Available.
+func TestDetectAgents_E2EMockBypassesFilesystem(t *testing.T) {
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+
+	ctrl := newTestController(map[string]agents.Agent{
+		"mock-agent": &testAgent{id: "mock-agent", name: "mock-agent", enabled: true},
+		"other-mock": &testAgent{id: "other-mock", name: "other-mock", enabled: true},
+	})
+
+	// c.discovery is nil — if detectAgents called it the test would panic.
+	results, err := ctrl.detectAgents(context.Background())
+	if err != nil {
+		t.Fatalf("detectAgents() error = %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	for _, r := range results {
+		if !r.Available {
+			t.Errorf("agent %q: Available = false, want true in E2E mock mode", r.Name)
+		}
+	}
+}
+
+// TestDetectAgents_E2EMockPropagatesSupportsMCP pins the regression
+// that broke plan mode in every E2E test: synthAvailabilityFromRegistry
+// was synthesising Availability records without calling IsInstalled, so
+// SupportsMCP defaulted to false. The frontend's useSessionMcp then
+// treated every agent as MCP-incapable, the plan-mode toggle took the
+// layout-only path, and `togglePlanMode()` tests timed out waiting for
+// `Continue working on the plan...`.
+func TestDetectAgents_E2EMockPropagatesSupportsMCP(t *testing.T) {
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+
+	ctrl := newTestController(map[string]agents.Agent{
+		"mock-mcp": &testAgent{
+			id:             "mock-mcp",
+			name:           "mock-mcp",
+			enabled:        true,
+			supportsMCP:    true,
+			mcpConfigPaths: []string{"/some/path/.mock-mcp.json"},
+		},
+		"mock-no-mcp": &testAgent{
+			id:          "mock-no-mcp",
+			name:        "mock-no-mcp",
+			enabled:     true,
+			supportsMCP: false,
+		},
+	})
+
+	results, err := ctrl.detectAgents(context.Background())
+	if err != nil {
+		t.Fatalf("detectAgents() error = %v", err)
+	}
+
+	byID := make(map[string]struct {
+		supportsMCP   bool
+		mcpConfigPath string
+	}, len(results))
+	for _, r := range results {
+		byID[r.Name] = struct {
+			supportsMCP   bool
+			mcpConfigPath string
+		}{r.SupportsMCP, r.MCPConfigPath}
+	}
+
+	if got := byID["mock-mcp"]; !got.supportsMCP {
+		t.Error("mock-mcp: SupportsMCP = false, want true (IsInstalled said yes)")
+	} else if got.mcpConfigPath != "/some/path/.mock-mcp.json" {
+		t.Errorf("mock-mcp: MCPConfigPath = %q, want first entry from IsInstalled", got.mcpConfigPath)
+	}
+	if got := byID["mock-no-mcp"]; got.supportsMCP {
+		t.Error("mock-no-mcp: SupportsMCP = true, want false (IsInstalled said no)")
 	}
 }

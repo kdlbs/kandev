@@ -11,7 +11,7 @@ import {
 import { useToast } from "@/components/toast-provider";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import type { Repository } from "@/lib/types/http";
-import type { useSubtaskFormState } from "./new-subtask-form-state";
+import type { SubtaskWorkspaceMode, useSubtaskFormState } from "./new-subtask-form-state";
 import { toContextItems, useDialogAttachments } from "./session-dialog-shared";
 
 type UseSubtaskSubmitOpts = {
@@ -26,6 +26,8 @@ type UseSubtaskSubmitOpts = {
   title: string;
   setIsCreating: (v: boolean) => void;
   onClose: () => void;
+  /** Workspace mode for the new subtask (handoffs phase 5). */
+  workspaceMode: SubtaskWorkspaceMode;
 };
 
 /**
@@ -46,6 +48,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
     title,
     setIsCreating,
     onClose,
+    workspaceMode,
   } = opts;
   const { toast } = useToast();
   const setActiveTask = useAppStore((s) => s.setActiveTask);
@@ -57,17 +60,20 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
 
   const performCreate = useCallback(
     async (trimmedTitle: string, prompt: string) => {
-      const repositories = buildRepositoriesPayload({
-        useGitHubUrl: fs.useGitHubUrl,
-        githubUrl: fs.githubUrl,
-        githubBranch: fs.githubBranch,
-        githubPrHeadBranch: fs.githubPrHeadBranch,
-        repositories: fs.repositories,
-        discoveredRepositories: fs.discoveredRepositories,
-        workspaceRepositories: availableRepositories,
-      });
-      const profileId = fs.agentProfileId || defaultProfileId || undefined;
-
+      // inherit_parent: omit repositories — backend inherits parent repos
+      // and records workspace-group membership for launch reuse.
+      const repositories =
+        workspaceMode === "inherit_parent"
+          ? undefined
+          : buildRepositoriesPayload({
+              useGitHubUrl: fs.useGitHubUrl,
+              githubUrl: fs.githubUrl,
+              githubBranch: fs.githubBranch,
+              githubPrHeadBranch: fs.githubPrHeadBranch,
+              repositories: fs.repositories,
+              discoveredRepositories: fs.discoveredRepositories,
+              workspaceRepositories: availableRepositories,
+            });
       const response = await createTask({
         workspace_id: workspaceId!,
         workflow_id: workflowId!,
@@ -75,30 +81,23 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
         description: prompt,
         repositories,
         start_agent: true,
-        agent_profile_id: profileId,
+        agent_profile_id: fs.agentProfileId || defaultProfileId || undefined,
         executor_profile_id: fs.executorProfileId || undefined,
         parent_id: parentTaskId,
         attachments: toMessageAttachments(attachments),
+        workspace_mode: workspaceMode,
       });
-
       const newSessionId = response.session_id ?? response.primary_session_id ?? null;
       if (newSessionId) {
         setActiveTask(response.id);
         setActiveSession(response.id, newSessionId);
-        // Layout switch is handled by useEnvSwitchCleanup when the new session's
-        // task_environment_id is present; the hook subscribes to env-id updates.
         replaceTaskUrl(response.id);
       }
     },
+    // The fs object is referenced as a whole so React's deep dependency
+    // tracking re-runs performCreate when any of its fields change.
     [
-      fs.useGitHubUrl,
-      fs.githubUrl,
-      fs.githubBranch,
-      fs.githubPrHeadBranch,
-      fs.repositories,
-      fs.discoveredRepositories,
-      fs.agentProfileId,
-      fs.executorProfileId,
+      fs,
       availableRepositories,
       defaultProfileId,
       workspaceId,
@@ -107,6 +106,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
       attachments,
       setActiveTask,
       setActiveSession,
+      workspaceMode,
     ],
   );
 

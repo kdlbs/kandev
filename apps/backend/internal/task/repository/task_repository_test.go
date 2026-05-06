@@ -32,7 +32,7 @@ func TestSQLiteRepository_TaskCRUD(t *testing.T) {
 		Title:          "Test Task",
 		Description:    "A test task",
 		State:          v1.TaskStateTODO,
-		Priority:       5,
+		Priority:       "high",
 		Metadata:       map[string]interface{}{"key": "value"},
 	}
 	if err := repo.CreateTask(ctx, task); err != nil {

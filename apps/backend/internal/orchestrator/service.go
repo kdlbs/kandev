@@ -149,6 +149,7 @@ type sessionExecutorStore interface {
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
+	GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error)
 	UpdateTaskSessionWorktreeBranch(ctx context.Context, sessionID, branch string) error
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
@@ -168,16 +169,19 @@ type sessionExecutorStore interface {
 	// Git snapshots and commits
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
+	DeleteLiveMonitorSnapshots(ctx context.Context, sessionID string) error
 	UpsertLatestLiveGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
 	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error
 	GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error)
 	DeleteSessionCommit(ctx context.Context, id string) error
 	// Session listing + delete
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	ListNonTerminalSessionsByAgentInstance(ctx context.Context, agentInstanceID string) ([]*models.TaskSession, error)
 	DeleteTaskSession(ctx context.Context, id string) error
 	// Workspace
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	// Task environment
+	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
@@ -217,9 +221,35 @@ type Service struct {
 	// Workflow engine for typed state-machine evaluation of step transitions
 	workflowEngine *engine.Engine
 	workflowStore  *workflowStore
+	// engineOptions are applied each time initWorkflowEngine runs. Wired
+	// from cmd/kandev (Phase 3.2) to plug Phase 2 ADR-0004 dependencies
+	// — RunQueueAdapter, ParticipantStore, DecisionStore, and the CEO /
+	// Primary agent resolvers — without coupling the orchestrator to
+	// the office or runs packages.
+	engineOptions []engine.Option
+
+	// Phase 2 (ADR-0004) callback dependencies, set via dedicated
+	// setters from cmd/kandev. When set, buildWorkflowCallbacks
+	// registers the queue_run / clear_decisions /
+	// queue_run_for_each_participant callbacks with these
+	// dependencies. Nil-safe: missing deps simply skip registration.
+	engineRunQueue     engine.RunQueueAdapter
+	engineParticipants engine.ParticipantStore
+	engineDecisions    engine.DecisionStore
+	enginePrimary      engine.PrimaryAgentResolver
+	engineCEOResolver  engine.CEOAgentResolver
+	// Phase 8 dependencies — also nil-safe.
+	engineTaskCreator      engine.TaskCreator
+	engineWorkflowSwitcher engine.WorkflowSwitcher
 
 	// GitHub service for PR auto-detection on push
 	githubService GitHubService
+
+	// Office task-handoffs materializer (phase 6 wiring) — invoked from
+	// PrepareTaskSession to flip workspace groups to materialized once
+	// their owner task has a session with worktree details. Optional;
+	// nil-safe.
+	workspaceMaterializer WorkspaceMaterializer
 
 	// Review task creator for auto-creating tasks from review watch PRs
 	reviewTaskCreator ReviewTaskCreator
@@ -484,7 +514,8 @@ func (s *Service) SetClarificationCanceller(c ClarificationCanceller) {
 }
 
 // initWorkflowEngine creates the workflow engine with store and callbacks.
-// Called after the workflow step getter is set. Safe to call multiple times.
+// Called after the workflow step getter is set. Safe to call multiple times —
+// previously-applied engine options are re-applied on reinit.
 func (s *Service) initWorkflowEngine() {
 	if s.workflowStepGetter == nil {
 		return
@@ -492,7 +523,79 @@ func (s *Service) initWorkflowEngine() {
 	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger)
 	callbacks := buildWorkflowCallbacks(s)
 	s.workflowStore = store
-	s.workflowEngine = engine.New(store, callbacks)
+	s.workflowEngine = engine.New(store, callbacks, s.engineOptions...)
+}
+
+// SetEngineRunQueue wires the engine's RunQueueAdapter dependency. Used
+// both as an engine option (so the engine can resolve queue_run targets)
+// and as a callback dependency (so QueueRunCallback can enqueue runs).
+func (s *Service) SetEngineRunQueue(adapter engine.RunQueueAdapter) {
+	s.engineRunQueue = adapter
+	s.engineOptions = append(s.engineOptions, engine.WithRunQueue(adapter))
+	s.reinitWorkflowEngine()
+}
+
+// SetEngineParticipantStore wires the engine's ParticipantStore.
+func (s *Service) SetEngineParticipantStore(store engine.ParticipantStore) {
+	s.engineParticipants = store
+	s.engineOptions = append(s.engineOptions, engine.WithParticipantStore(store))
+	s.reinitWorkflowEngine()
+}
+
+// SetEngineDecisionStore wires the engine's DecisionStore.
+func (s *Service) SetEngineDecisionStore(store engine.DecisionStore) {
+	s.engineDecisions = store
+	s.engineOptions = append(s.engineOptions, engine.WithDecisionStore(store))
+	s.reinitWorkflowEngine()
+}
+
+// SetEngineCEOResolver wires the engine's CEOAgentResolver.
+func (s *Service) SetEngineCEOResolver(resolver engine.CEOAgentResolver) {
+	s.engineCEOResolver = resolver
+	s.engineOptions = append(s.engineOptions, engine.WithCEOAgentResolver(resolver))
+	s.reinitWorkflowEngine()
+}
+
+// SetPrimaryAgentResolver wires the engine's PrimaryAgentResolver. The
+// engine has no constructor option for this — the resolver is consumed
+// by QueueRunCallback at registration time, so the orchestrator
+// re-runs initWorkflowEngine to pick it up.
+func (s *Service) SetPrimaryAgentResolver(resolver engine.PrimaryAgentResolver) {
+	s.enginePrimary = resolver
+	s.reinitWorkflowEngine()
+}
+
+// SetEngineTaskCreator wires the engine's TaskCreator dependency for
+// the create_child_task action. The orchestrator captures it both as an
+// engine option and as a callback dependency.
+func (s *Service) SetEngineTaskCreator(creator engine.TaskCreator) {
+	s.engineTaskCreator = creator
+	s.engineOptions = append(s.engineOptions, engine.WithTaskCreator(creator))
+	s.reinitWorkflowEngine()
+}
+
+// SetEngineWorkflowSwitcher wires the engine's WorkflowSwitcher for the
+// switch_workflow action.
+func (s *Service) SetEngineWorkflowSwitcher(switcher engine.WorkflowSwitcher) {
+	s.engineWorkflowSwitcher = switcher
+	s.engineOptions = append(s.engineOptions, engine.WithWorkflowSwitcher(switcher))
+	s.reinitWorkflowEngine()
+}
+
+func (s *Service) reinitWorkflowEngine() {
+	if s.workflowStepGetter != nil {
+		s.initWorkflowEngine()
+	}
+}
+
+// WorkflowEngine returns the workflow engine, or nil if it has not been
+// initialised yet (the workflow step getter must be set first).
+//
+// Exposed for cross-package wiring (e.g. office service plumbing the
+// engine into its dispatcher). The engine itself is safe for concurrent
+// HandleTrigger calls.
+func (s *Service) WorkflowEngine() *engine.Engine {
+	return s.workflowEngine
 }
 
 // startTurnForSession ensures the session has an active turn and returns its ID.
@@ -798,6 +901,22 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 		}
+		return
+	}
+
+	// IDLE is the office "between turns" resting state — agent process
+	// and executor are already torn down, conversation is preserved
+	// in the existing executors_running row for the next run. There
+	// is nothing to recover; flipping to WAITING_FOR_INPUT here would
+	// (a) lie about the session having pending user input and (b) make
+	// the chat UI render as "working" because the office session shape
+	// uses IDLE specifically to avoid that.
+	if previousState == models.TaskSessionStateIdle {
+		s.logger.Info("session reconciled for lazy recovery (idle, no state change)",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", running.TaskID),
+			zap.Bool("has_resume_token", running.ResumeToken != ""),
+			zap.Bool("has_worktree", running.WorktreePath != ""))
 		return
 	}
 

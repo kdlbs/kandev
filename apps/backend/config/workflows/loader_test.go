@@ -120,6 +120,8 @@ func TestLoadTemplates_ExpectedTemplateIDs(t *testing.T) {
 		"pr-review":      false,
 		"feature-dev":    false,
 		"improve-kandev": false,
+		"office-default": false,
+		"routine":        false,
 	}
 
 	for _, tmpl := range templates {

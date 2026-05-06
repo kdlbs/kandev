@@ -109,7 +109,7 @@ func (s *Service) createJiraIssueTask(ctx context.Context, evt *jira.NewJiraIssu
 	}
 	if _, err := s.StartTask(
 		ctx, task.ID, evt.AgentProfileID, "", evt.ExecutorProfileID,
-		0, task.Description, evt.WorkflowStepID, false, nil,
+		"", task.Description, evt.WorkflowStepID, false, nil,
 	); err != nil {
 		s.logger.Error("failed to auto-start jira issue task",
 			zap.String("task_id", task.ID), zap.Error(err))

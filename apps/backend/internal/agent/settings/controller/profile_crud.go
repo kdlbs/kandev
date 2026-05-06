@@ -279,6 +279,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		CLIFlags:         cliFlagsToDTO(profile.CLIFlags),
 		CLIPassthrough:   profile.CLIPassthrough,
 		UserModified:     profile.UserModified,
+		WorkspaceID:      profile.WorkspaceID,
 		CreatedAt:        profile.CreatedAt,
 		UpdatedAt:        profile.UpdatedAt,
 	}

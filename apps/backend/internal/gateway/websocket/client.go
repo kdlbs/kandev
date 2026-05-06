@@ -38,6 +38,7 @@ type Client struct {
 	sessionSubscriptions map[string]bool // Session IDs this client is subscribed to
 	sessionFocus         map[string]bool // Session IDs this client has focused (a strict subset of subscriptions, conceptually — see hub_session_mode.go)
 	userSubscriptions    map[string]bool // User IDs this client is subscribed to
+	runSubscriptions     map[string]bool // Office run IDs this client is subscribed to (for run.event.appended)
 	mu                   sync.RWMutex
 	closed               bool
 	logger               *logger.Logger
@@ -54,6 +55,7 @@ func NewClient(id string, conn *websocket.Conn, hub *Hub, log *logger.Logger) *C
 		sessionSubscriptions: make(map[string]bool),
 		sessionFocus:         make(map[string]bool),
 		userSubscriptions:    make(map[string]bool),
+		runSubscriptions:     make(map[string]bool),
 		logger:               log.WithFields(zap.String("client_id", id)),
 	}
 }
@@ -133,6 +135,12 @@ func (c *Client) handleMessage(ctx context.Context, msg *ws.Message) {
 		return
 	case ws.ActionUserUnsubscribe:
 		c.handleUserUnsubscribe(msg)
+		return
+	case ws.ActionRunSubscribe:
+		c.handleRunSubscribe(msg)
+		return
+	case ws.ActionRunUnsubscribe:
+		c.handleRunUnsubscribe(msg)
 		return
 	}
 
@@ -299,6 +307,53 @@ func (c *Client) handleUnsubscribe(msg *ws.Message) {
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success": true,
 		"task_id": req.TaskID,
+	})
+	c.sendMessage(resp)
+}
+
+// RunSubscribeRequest is the payload for run.subscribe / run.unsubscribe.
+type RunSubscribeRequest struct {
+	RunID string `json:"run_id"`
+}
+
+// handleRunSubscribe handles run.subscribe action — registers this
+// client on the per-run topic so it receives run.event.appended
+// notifications. Clients fetch the snapshot via REST and only need
+// the diff stream from this point forward; we deliberately replay no
+// state on subscribe.
+func (c *Client) handleRunSubscribe(msg *ws.Message) {
+	var req RunSubscribeRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return
+	}
+	if req.RunID == "" {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "run_id is required", nil)
+		return
+	}
+	c.hub.SubscribeToRun(c, req.RunID)
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success": true,
+		"run_id":  req.RunID,
+	})
+	c.sendMessage(resp)
+}
+
+// handleRunUnsubscribe handles run.unsubscribe action.
+func (c *Client) handleRunUnsubscribe(msg *ws.Message) {
+	var req RunSubscribeRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return
+	}
+	if req.RunID == "" {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "run_id is required", nil)
+		return
+	}
+	c.hub.UnsubscribeFromRun(c, req.RunID)
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success": true,
+		"run_id":  req.RunID,
 	})
 	c.sendMessage(resp)
 }

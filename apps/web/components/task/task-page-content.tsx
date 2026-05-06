@@ -39,6 +39,7 @@ type TaskPageContentProps = {
   initialTerminals?: Terminal[];
   defaultLayouts?: Record<string, Layout>;
   initialLayout?: string | null;
+  officeTaskHref?: string | null;
 };
 
 function resolveEffectiveTask(
@@ -209,6 +210,7 @@ type TaskPageInnerProps = {
   initialTerminals?: Terminal[];
   defaultLayouts: Record<string, Layout>;
   initialLayout?: string | null;
+  officeTaskHref?: string | null;
 };
 
 type RemoteExecutorStatus = {
@@ -261,6 +263,7 @@ function buildTaskTopBarProps(params: {
   remote: ReturnType<typeof resolveRemoteExecutor>;
   sessionWorkflowStepId: string | null;
   agentctlReady: boolean;
+  officeTaskHref?: string | null;
 }) {
   const { taskProps, agent, merged, workflowSteps, showDebugOverlay, onToggleDebugOverlay } =
     params;
@@ -282,6 +285,7 @@ function buildTaskTopBarProps(params: {
     isRemoteExecutor: params.remote.isRemoteExecutor,
     isAgentctlReady: params.agentctlReady,
     remoteExecutorType: params.remote.remoteExecutorType,
+    officeTaskHref: params.officeTaskHref,
   };
 }
 
@@ -366,6 +370,7 @@ function TaskPageInner({
   initialTerminals,
   defaultLayouts,
   initialLayout,
+  officeTaskHref,
 }: TaskPageInnerProps) {
   const taskProps = resolveTaskProps(task, repository);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
@@ -390,6 +395,7 @@ function TaskPageInner({
     remote,
     sessionWorkflowStepId: sessionPanel.sessionWorkflowStepId,
     agentctlReady: agentctlStatus.isReady,
+    officeTaskHref,
   });
   const layoutProps = buildTaskLayoutProps({
     taskProps,
@@ -534,6 +540,7 @@ export function TaskPageContent({
   initialTerminals,
   defaultLayouts = {},
   initialLayout,
+  officeTaskHref = null,
 }: TaskPageContentProps) {
   const [isMounted, setIsMounted] = useState(false);
   const [showDebugOverlay, setShowDebugOverlay] = useState(false);
@@ -583,6 +590,7 @@ export function TaskPageContent({
       initialTerminals={initialTerminals}
       defaultLayouts={defaultLayouts}
       initialLayout={initialLayout}
+      officeTaskHref={officeTaskHref}
     />
   );
 }

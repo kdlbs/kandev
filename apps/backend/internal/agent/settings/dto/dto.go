@@ -17,8 +17,16 @@ type AgentProfileDTO struct {
 	CLIFlags         []CLIFlagDTO `json:"cli_flags"`
 	CLIPassthrough   bool         `json:"cli_passthrough"`
 	UserModified     bool         `json:"user_modified"`
-	CreatedAt        time.Time    `json:"created_at"`
-	UpdatedAt        time.Time    `json:"updated_at"`
+	// WorkspaceID scopes the profile to an office workspace. Empty for
+	// shallow kanban-only profiles. Surfaced so consumers (e.g. test
+	// cleanup helpers) can distinguish office-owned profiles from
+	// kanban-only ones without a separate lookup.
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	// BillingType is computed at read time from credential files — not stored in the DB.
+	// Values: "api_key" | "subscription". Empty for agents that don't support billing type detection.
+	BillingType string    `json:"billing_type,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // CLIFlagDTO mirrors models.CLIFlag on the wire. Each entry is one user-facing

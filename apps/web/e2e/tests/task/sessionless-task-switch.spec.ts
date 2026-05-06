@@ -140,7 +140,11 @@ test.describe("Sessionless task switching", () => {
     await testPage.goto(`/t/${taskA.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    // Don't wait for the agent to go idle: the seed workflow auto-starts a
+    // second session as soon as the first turn completes, so the chat
+    // composer cycles Preparing → idle (briefly) → Preparing within the
+    // polling window. The test only needs the dockview layout to be ready.
+    await session.waitForDockviewReady();
     await session.expectLayoutHealthy();
 
     // Resolve A's task environment id so we can target the env-keyed layout.

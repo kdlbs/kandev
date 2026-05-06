@@ -175,7 +175,11 @@ type RepoCloneConfig struct {
 
 // DebugConfig holds debug/profiling configuration.
 type DebugConfig struct {
-	// PprofEnabled enables pprof endpoints at /debug/pprof/ and /api/v1/debug/memory.
+	// DevMode enables all developer-only endpoints (pprof, memory, debug export).
+	// Controlled via KANDEV_DEBUG_DEV_MODE env var. Default: false.
+	DevMode bool `mapstructure:"devMode"`
+
+	// PprofEnabled is a legacy alias — if set, it also enables DevMode.
 	// Controlled via KANDEV_DEBUG_PPROF_ENABLED env var. Default: false.
 	PprofEnabled bool `mapstructure:"pprofEnabled"`
 }
@@ -357,6 +361,7 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv("homeDir", "KANDEV_HOME_DIR")
 	_ = v.BindEnv("logging.level", "KANDEV_LOG_LEVEL")
 	_ = v.BindEnv("events.namespace", "KANDEV_EVENTS_NAMESPACE")
+	_ = v.BindEnv("debug.devMode", "KANDEV_DEBUG_DEV_MODE")
 	_ = v.BindEnv("debug.pprofEnabled", "KANDEV_DEBUG_PPROF_ENABLED")
 
 	// Configure config file

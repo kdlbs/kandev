@@ -8,9 +8,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
-	"github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -109,6 +109,17 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		RepoName:    req.RepoName,
 	}
 
+	if req.RouteOverride != nil {
+		launchReq.RouteOverride = &lifecycle.RouteOverride{
+			ProviderID: req.RouteOverride.ProviderID,
+			Model:      req.RouteOverride.Model,
+			Tier:       req.RouteOverride.Tier,
+			Mode:       req.RouteOverride.Mode,
+			Flags:      req.RouteOverride.Flags,
+			Env:        req.RouteOverride.Env,
+		}
+	}
+
 	// Multi-repo: forward the explicit repo list when the orchestrator built one.
 	if len(req.Repositories) > 0 {
 		specs := make([]lifecycle.RepoLaunchSpec, 0, len(req.Repositories))
@@ -175,6 +186,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		WorktreeID:       worktreeID,
 		WorktreePath:     worktreePath,
 		WorktreeBranch:   worktreeBranch,
+		WorkspacePath:    execution.WorkspacePath,
 		Metadata:         execution.Metadata,
 		PrepareResult:    execution.PrepareResult,
 		Worktrees:        worktrees,
@@ -213,6 +225,11 @@ func (a *lifecycleAdapter) RequiresCloneURL(executorType string) bool {
 // ShouldApplyPreferredShell implements executor.ExecutorTypeCapabilities.
 func (a *lifecycleAdapter) ShouldApplyPreferredShell(executorType string) bool {
 	return a.mgr.ShouldApplyPreferredShell(executorType)
+}
+
+// SetExecutionEnv updates per-run env vars in an existing execution.
+func (a *lifecycleAdapter) SetExecutionEnv(ctx context.Context, agentExecutionID string, env map[string]string) error {
+	return a.mgr.SetExecutionEnv(ctx, agentExecutionID, env)
 }
 
 // SetMcpMode changes the MCP tool mode on an existing execution's agentctl instance.
@@ -444,6 +461,19 @@ func (a *lifecycleAdapter) GetGitStatus(ctx context.Context, sessionID string) (
 		return nil, nil
 	}
 	return agentClient.GetGitStatus(ctx)
+}
+
+// GetGitStatusFresh retrieves a fresh (non-cached) git status for a session.
+func (a *lifecycleAdapter) GetGitStatusFresh(ctx context.Context, sessionID string) (*client.GitStatusResult, error) {
+	execution, ok := a.mgr.GetExecutionBySessionID(sessionID)
+	if !ok {
+		return nil, nil
+	}
+	agentClient := execution.GetAgentCtlClient()
+	if agentClient == nil {
+		return nil, nil
+	}
+	return agentClient.GetGitStatusFresh(ctx)
 }
 
 // WaitForAgentctlReady waits for the agentctl HTTP server to be ready for a session.
@@ -772,44 +802,4 @@ func (a *messageCreatorAdapter) CreateThinkingMessageStreaming(ctx context.Conte
 // AppendThinkingMessage appends additional content to an existing streaming thinking message.
 func (a *messageCreatorAdapter) AppendThinkingMessage(ctx context.Context, messageID, additionalContent string) error {
 	return a.svc.AppendThinkingContent(ctx, messageID, additionalContent)
-}
-
-// turnServiceAdapter adapts the task service to the orchestrator.TurnService interface
-type turnServiceAdapter struct {
-	svc *taskservice.Service
-}
-
-func (a *turnServiceAdapter) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
-	return a.svc.StartTurn(ctx, sessionID)
-}
-
-func (a *turnServiceAdapter) CompleteTurn(ctx context.Context, turnID string) error {
-	return a.svc.CompleteTurn(ctx, turnID)
-}
-
-func (a *turnServiceAdapter) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
-	return a.svc.GetActiveTurn(ctx, sessionID)
-}
-
-func (a *turnServiceAdapter) AbandonOpenTurns(ctx context.Context, sessionID string) error {
-	return a.svc.AbandonOpenTurns(ctx, sessionID)
-}
-
-func newTurnServiceAdapter(svc *taskservice.Service) *turnServiceAdapter {
-	return &turnServiceAdapter{svc: svc}
-}
-
-// taskSessionCheckerAdapter adapts the task repository for github.TaskSessionChecker.
-type taskSessionCheckerAdapter struct {
-	repo interface {
-		ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
-	}
-}
-
-func (a *taskSessionCheckerAdapter) HasTaskSessions(ctx context.Context, taskID string) (bool, error) {
-	sessions, err := a.repo.ListTaskSessions(ctx, taskID)
-	if err != nil {
-		return false, err
-	}
-	return len(sessions) > 0, nil
 }

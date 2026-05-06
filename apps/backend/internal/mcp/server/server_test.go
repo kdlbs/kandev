@@ -197,8 +197,8 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	tools := getRegisteredToolNames(s)
-	// 11 kanban + 1 interaction + 4 plan = 16
-	assert.Equal(t, 16, len(tools))
+	// 11 kanban + 1 interaction + 4 plan + 4 handoff = 20
+	assert.Equal(t, 20, len(tools))
 }
 
 func TestServerModeConfig_ToolCount(t *testing.T) {
@@ -226,10 +226,87 @@ func TestServerModeConfig_ToolDescriptions(t *testing.T) {
 	assert.Contains(t, toolsMap["get_mcp_config_kandev"].Tool.Description, "Get MCP server configuration")
 }
 
+func TestServerModeOffice_RegistersCorrectTools(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeOffice)
+	require.NotNil(t, s)
+
+	tools := getRegisteredToolNames(s)
+
+	// Office mode should have plan tools
+	assert.Contains(t, tools, "create_task_plan_kandev")
+	assert.Contains(t, tools, "get_task_plan_kandev")
+	assert.Contains(t, tools, "update_task_plan_kandev")
+	assert.Contains(t, tools, "delete_task_plan_kandev")
+
+	// Office mode should have interaction tools
+	assert.Contains(t, tools, "ask_user_question_kandev")
+
+	// delegate_task_kandev was removed from ModeOffice when the
+	// agentctl CLI started covering task creation/delegation via
+	// `agentctl kandev task create --parent $KANDEV_TASK_ID …`.
+	assert.NotContains(t, tools, "delegate_task_kandev")
+
+	// Office mode exposes the cross-task handoff tools.
+	assert.Contains(t, tools, "list_related_tasks_kandev")
+	assert.Contains(t, tools, "list_task_documents_kandev")
+	assert.Contains(t, tools, "get_task_document_kandev")
+	assert.Contains(t, tools, "write_task_document_kandev")
+
+	// Office mode should NOT have kanban tools
+	assert.NotContains(t, tools, "create_task_kandev")
+	assert.NotContains(t, tools, "list_tasks_kandev")
+	assert.NotContains(t, tools, "update_task_kandev")
+	assert.NotContains(t, tools, "list_workspaces_kandev")
+	assert.NotContains(t, tools, "list_workflows_kandev")
+	assert.NotContains(t, tools, "list_workflow_steps_kandev")
+	assert.NotContains(t, tools, "list_agents_kandev")
+	assert.NotContains(t, tools, "list_executor_profiles_kandev")
+
+	// Office mode should NOT have config tools
+	assert.NotContains(t, tools, "create_workflow_kandev")
+	assert.NotContains(t, tools, "update_workflow_kandev")
+	assert.NotContains(t, tools, "update_agent_kandev")
+}
+
+func TestServerModeOffice_ToolCount(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeOffice)
+	tools := getRegisteredToolNames(s)
+	// 4 plan + 1 interaction + 4 handoff = 9 (delegate_task_kandev
+	// retired in favour of `agentctl kandev task create …`).
+	assert.Equal(t, 9, len(tools))
+}
+
+func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", true, ModeOffice)
+	require.NotNil(t, s)
+
+	tools := getRegisteredToolNames(s)
+	assert.NotContains(t, tools, "ask_user_question_kandev")
+	assert.Contains(t, tools, "create_task_plan_kandev")
+	// delegate_task_kandev was retired from ModeOffice (now lives in
+	// the agentctl CLI as `agentctl kandev task create --parent …`).
+	assert.NotContains(t, tools, "delegate_task_kandev")
+	// 4 plan + 4 handoff = 8 (no ask_user_question, no delegate)
+	assert.Equal(t, 8, len(tools))
+}
+
 func TestServerModeConstants(t *testing.T) {
 	assert.Equal(t, "task", ModeTask)
 	assert.Equal(t, "config", ModeConfig)
 	assert.Equal(t, "external", ModeExternal)
+	assert.Equal(t, "office", ModeOffice)
 }
 
 func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {

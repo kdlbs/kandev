@@ -78,13 +78,7 @@ function buildAgentSettings(
   avail: AvailableAgent[],
   saved: {
     name: string;
-    profiles?: {
-      id: string;
-      name: string;
-      model?: string | null;
-      cli_passthrough?: boolean | null;
-      cli_flags?: AgentProfile["cli_flags"] | null;
-    }[];
+    profiles?: AgentProfile[];
   }[],
 ): Record<string, AgentSetting> {
   const settings: Record<string, AgentSetting> = {};
@@ -93,7 +87,7 @@ function buildAgentSettings(
     const profile = dbAgent?.profiles?.[0];
     if (profile) {
       const perms = profileToPermissionsMap(
-        profile as Partial<Pick<AgentProfile, "allow_indexing">>,
+        { allow_indexing: profile.allowIndexing },
         aa.permission_settings ?? {},
       );
       settings[aa.name] = {
@@ -101,9 +95,9 @@ function buildAgentSettings(
         formData: {
           name: profile.name,
           model: profile.model || aa.model_config.default_model,
-          mode: (profile as { mode?: string }).mode ?? aa.model_config.current_mode_id ?? "",
-          cli_passthrough: profile.cli_passthrough ?? false,
-          cli_flags: profile.cli_flags ?? [],
+          mode: profile.mode ?? aa.model_config.current_mode_id ?? "",
+          cli_passthrough: profile.cliPassthrough ?? false,
+          cli_flags: profile.cliFlags ?? [],
           ...perms,
         },
         dirty: false,

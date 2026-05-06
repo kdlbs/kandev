@@ -6,7 +6,7 @@
 
 ```
 apps/
-├── backend/          # Go backend (orchestrator, lifecycle, agentctl, WS gateway)
+├── backend/          # Go backend (orchestrator, agent runtime, agentctl, WS gateway)
 ├── web/              # Next.js frontend (SSR + WS + Zustand)
 ├── cli/              # CLI tool (TypeScript)
 ├── landing/          # Landing page
@@ -21,6 +21,7 @@ apps/
 - **UI**: Shadcn components via `@kandev/ui`
 - **GitHub repo**: `https://github.com/kdlbs/kandev`
 - **Container image**: `ghcr.io/kdlbs/kandev` (GitHub Container Registry)
+- **Dev mock providers**: In `KANDEV_MOCK_AGENT=true` dev mode the base `mock-agent` is enabled alongside the real CLIs. To exercise the office provider-routing UI without installing real CLIs, set `KANDEV_MOCK_PROVIDERS=claude-acp,codex-acp,opencode-acp` (or any subset of `RoutableProviderIDs`) when launching `make dev` — those canonicals are then replaced with MockAgent aliases.
 
 ---
 
@@ -36,7 +37,10 @@ apps/backend/
 │   └── mock-agent/       # Mock agent for testing
 ├── internal/
 │   ├── agent/
-│   │   ├── lifecycle/    # Agent instance management (see below)
+│   │   ├── runtime/      # Agent runtime: single seam for Launch/Resume/Stop/observe
+│   │   │   ├── lifecycle/    # Agent instance management (moved from agent/lifecycle)
+│   │   │   ├── agentctl/     # HTTP client for talking to agentctl (moved from agentctl/client)
+│   │   │   └── routingerr/   # Provider error classifier + sanitizer + ProviderProber registry
 │   │   ├── agents/       # Agent type implementations
 │   │   ├── controller/   # Agent control operations
 │   │   ├── credentials/  # Agent credential management
@@ -50,7 +54,6 @@ apps/backend/
 │   │   ├── mcpconfig/    # MCP server configuration
 │   │   └── remoteauth/   # Remote auth catalog and method IDs for remote executors/UI
 │   ├── agentctl/
-│   │   ├── client/       # HTTP client for talking to agentctl
 │   │   └── server/       # agentctl HTTP server
 │   │       ├── acp/      # ACP protocol implementation
 │   │       ├── adapter/  # Protocol adapters + transport/ (ACP, Codex, OpenCode, Copilot, Amp)
@@ -77,15 +80,31 @@ apps/backend/
 │   │   ├── models/       # Task, Session, Executor, Message models
 │   │   ├── repository/   # Database access (SQLite)
 │   │   └── service/      # Task business logic
-│   ├── analytics/        # Usage analytics
-│   ├── clarification/    # Agent clarification handling
-│   ├── common/           # Shared utilities
-│   ├── db/               # Database initialization
-│   ├── debug/            # Debug tooling
-│   ├── editors/          # Editor integration
+│   ├── office/           # Autonomous agent management (Office feature)
+│   │   ├── agents/       # Agent instance CRUD + auth guards
+│   │   ├── approvals/    # Approval requests and decisions
+│   │   ├── channels/     # External integration channels (webhooks)
+│   │   ├── config/       # Config sync (DB ↔ filesystem)
+│   │   ├── configloader/ # Filesystem config reader/writer
+│   │   ├── costs/        # Cost tracking and budget policies
+│   │   ├── dashboard/    # Dashboard API, issues, activity, live runs
+│   │   ├── infra/        # GC, reconciliation
+│   │   ├── labels/       # Task labels
+│   │   ├── onboarding/   # Workspace onboarding wizard API
+│   │   ├── projects/     # Project management
+│   │   ├── repository/   # Office SQLite persistence
+│   │   ├── runtime/      # Agent run context, capabilities, and runtime action surface
+│   │   ├── routines/     # Scheduled recurring tasks
+│   │   ├── routing/      # Provider routing: resolver, validators, catalogue, backoff, agent-overrides
+│   │   ├── scheduler/    # Wakeup scheduler (duplicate of service scheduler features)
+│   │   ├── service/      # Core office service (wakeups, event subscribers, execution policy)
+│   │   ├── shared/       # Shared interfaces and activity logging
+│   │   ├── skills/       # Skill injection and materialization
+│   │   └── workspaces/   # Workspace deletion handler
 │   ├── events/           # Event bus for internal pub/sub
 │   ├── gateway/          # WebSocket gateway
 │   ├── github/           # GitHub API integration (PRs, reviews, webhooks)
+│   ├── common/           # Shared utilities, config, logger
 │   ├── integration/      # External integrations
 │   ├── integrations/     # Shared shapes for third-party integrations
 │   │   ├── healthpoll/   # Reusable 90s auth-health Poller (used by jira, linear)
@@ -109,7 +128,7 @@ apps/backend/
 │   ├── user/             # User management
 │   ├── utility/          # Shared utility functions
 │   ├── workflow/         # Workflow engine
-│   │   ├── engine/       # Typed state-machine engine (trigger evaluation, action callbacks, transition store)
+│   │   ├── engine/       # Typed state-machine engine
 │   │   ├── models/       # Workflow step, template, and history models
 │   │   ├── repository/   # Workflow persistence (SQLite)
 │   │   └── service/      # Workflow CRUD and step resolution
@@ -133,7 +152,11 @@ apps/backend/
 - `RequiresApproval` on actions: transitions requiring review gating are skipped
 - Idempotent by `OperationID`; session-scoped data bag via `MachineState.Data`
 
-**Lifecycle Manager** (`internal/agent/lifecycle/`) manages agent instances:
+**Agent Runtime** (`internal/agent/runtime/`) is the single seam for launching, resuming, stopping, and observing agent executions. ADR 0004 introduced this in Phase 1 of task-model-unification. The public surface is `runtime.Runtime` (`runtime.go`); a thin facade (`facade.go`) delegates to a `Backend` (satisfied by `*lifecycle.Manager`).
+
+**Convention:** only `internal/agent/runtime/` (and code that pre-dates Phase 1 migration) may import `runtime/lifecycle` or `runtime/agentctl` directly. New consumers — workflow engine actions, cron-driven trigger handlers, future task-tier callers — should depend on `runtime.Runtime`. Existing call sites are migrated through later phases of task-model-unification.
+
+**Lifecycle Manager** (`internal/agent/runtime/lifecycle/`) manages agent instances under the runtime:
 - `Manager` (`manager.go`, `manager_*.go`) - central coordinator for agent lifecycle
 - `ExecutorBackend` interface (`executor_backend.go`) - abstracts execution environment (Docker, Standalone, Sprites, Remote Docker)
 - `ExecutionStore` (`execution_store.go`) - thread-safe in-memory execution tracking
@@ -141,6 +164,8 @@ apps/backend/
 - `streams.go` - WebSocket stream connections to agentctl
 - `process_runner.go` - agent process launch and management
 - `profile_resolver.go` - resolves agent profiles/settings
+
+**agentctl client** (`internal/agent/runtime/agentctl/`) is the HTTP/WS client used by the lifecycle manager to talk to a running agentctl instance. It is a runtime-tier package and should not be imported outside `internal/agent/runtime/`.
 
 **agentctl** is an HTTP server that:
 - Runs inside Docker containers or as standalone process
@@ -173,7 +198,7 @@ Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream update
 
 **Worktrees:** `internal/worktree/Manager` provides workspace isolation. Each session can have its own worktree (branch) to prevent conflicts between concurrent agents.
 
-**Executor default scripts:** Default prepare scripts are in `internal/agent/lifecycle/default_scripts.go`; `internal/scriptengine/` handles placeholder resolution.
+**Executor default scripts:** Default prepare scripts are in `internal/agent/runtime/lifecycle/default_scripts.go`; `internal/scriptengine/` handles placeholder resolution.
 
 ---
 
@@ -240,6 +265,7 @@ lib/state/
 │   ├── session-runtime/           # shell, processes, git, context
 │   ├── workspace/                 # workspaces, repos, branches
 │   ├── settings/                  # executors, agents, editors, prompts (incl. userSettings)
+│   ├── office/                    # office agents, skills, projects, dashboard, issues
 │   ├── comments/                  # code review diff comments
 │   ├── github/                    # GitHub PRs, reviews
 │   └── ui/                        # preview, connection, active state, sidebar views
@@ -249,6 +275,7 @@ hooks/domains/{kanban,session,workspace,settings,comments,github}/  # Domain-org
 lib/api/domains/                    # API clients
 ├── kanban-api, session-api, workspace-api, settings-api, process-api
 ├── plan-api, queue-api, workflow-api, stats-api, github-api
+├── office-api, office-extended-api, tree-api
 ├── user-shell-api, debug-api, secrets-api, sprites-api, vscode-api
 ├── health-api, utility-api
 ```
@@ -274,35 +301,9 @@ lib/api/domains/                    # API clients
 
 Commits to `main` **must** follow [Conventional Commits](https://www.conventionalcommits.org/) (`type: description`). PRs are squash-merged — the PR title becomes the commit, validated by CI. Changelog is auto-generated from these via git-cliff (`cliff.toml`). See `.agents/skills/commit/SKILL.md` for allowed types and examples.
 
-### Release & Versioning Convention
+### Release & Versioning
 
-Kandev uses a **single SemVer** `X.Y.Z` shared across all distribution channels:
-
-- `apps/cli/package.json` version → `X.Y.Z`
-- npm main package: `kandev@X.Y.Z`
-- npm runtime packages: `@kdlbs/runtime-{platform}@X.Y.Z` (5 platforms; declared as `optionalDependencies` in main package)
-- Git tag: `vX.Y.Z` (three-part; legacy `vM.m` tags normalize to `M.m.0`)
-- Homebrew formula: `kdlbs/homebrew-kandev` `Formula/kandev.rb` `version "X.Y.Z"`
-- GitHub release: `vX.Y.Z` with platform tarballs `kandev-{platform}.tar.gz` + `.sha256`
-
-**npm and Homebrew are sibling channels**, not chained. Both consume the same GitHub release artifacts; neither depends on the other.
-
-**Release flow** (entirely in CI via `.github/workflows/release.yml`, triggered by maintainer from GitHub Actions UI):
-
-1. Maintainer clicks "Run workflow" → picks `bump` (patch/minor/major) → optional `dry_run`.
-2. `prepare` job bumps version + regenerates CHANGELOG, opens release PR, squash-merges, tags `vX.Y.Z`.
-3. `build-web` + `build-cli` + `build-bundles` (5 platforms) build the release artifacts.
-4. `publish-release` creates the GitHub release with platform tarballs + sha256 + auto-generated notes.
-5. `publish-npm` publishes 5 `@kdlbs/runtime-*` packages + main `kandev` package to npmjs.
-6. `update-homebrew-tap` pushes updated `Formula/kandev.rb` to `kdlbs/homebrew-kandev` via SSH deploy key.
-
-There is no local release script — the entire flow runs in GHA.
-
-**Runtime resolution** (in `apps/cli/src/runtime.ts`):
-
-1. `KANDEV_BUNDLE_DIR` env var (set by Homebrew wrapper, used by tests).
-2. Installed `@kdlbs/runtime-{platform}` npm package via `require.resolve()`.
-3. `--runtime-version <tag>` cache fallback (debug only — downloads from GitHub).
+Kandev uses a **single SemVer** `X.Y.Z` across npm, Homebrew, and GitHub release; release flow runs entirely in CI via `.github/workflows/release.yml`. Full details in the `/release` skill — load it when cutting a release or debugging release artifacts.
 
 ### Code Quality (enforced by linters)
 
@@ -336,6 +337,7 @@ Every code change must include tests for new or changed logic. Backend: `*_test.
 - Provider pattern for DI; stderr for logs, stdout for ACP only
 - Pass context through chains; event bus for cross-component comm
 - **Execution access:** Workspace-oriented handlers (files, shell, inference, ports, vscode, LSP) MUST use `GetOrEnsureExecution(ctx, sessionID)` — it recovers from backend restarts by creating executions on-demand. Only use `GetExecutionBySessionID` for operations that require a running agent process (prompt, cancel, mode).
+- **Task lifecycle events:** Any code path that mutates a task row must publish via the event bus (`task.created` / `task.updated` / `task.deleted`) — either by going through `Service.CreateTask` / `UpdateTask` / `DeleteTask` / `ArchiveTask`, or by calling `publishTaskEvent` (or one of the `Publish*` helpers in `service_events.go`) directly. Walking `repository.TaskRepository` straight bypasses event publishing and breaks WS-driven UI like the All-Workflows kanban view. `HandoffService`'s cascade methods learned this the hard way — they now require a `TaskEventPublisher` wired via `SetTaskEventPublisher`. New cascade / bulk / cleanup paths must follow the same pattern.
 - **Testing:** Prefer `testing/synctest` (Go 1.24+) over `time.Sleep` for time-dependent tests. Use `synctest.Test` to wrap tests with tickers or timeouts — it advances fake time instantly when all goroutines are idle. When `synctest` is not feasible (e.g., tests spawning external processes like `git`), use channel-based synchronization (`<-started`, non-blocking `select`) instead of sleep-based waits. Reserve `time.Sleep` only for integration tests that need real subprocess execution time.
 
 ### Frontend
@@ -354,31 +356,15 @@ Every code change must include tests for new or changed logic. Backend: `*_test.
 ### Plan Implementation
 - After implementing a plan, run `make fmt` first to format code, then run `make typecheck test lint` to verify the changes. Formatting must come first because formatters may split lines, which can trigger complexity linter warnings.
 
+### Observability
+- In dev mode (`KANDEV_MOCK_AGENT=true` or `debug.pprofEnabled`), `/debug/vars` exposes the stdlib expvar handler. Office provider-routing metrics live under `routing_*` (route attempts, fallbacks, parked runs, provider degraded/recovered counters). The metrics are also still emitted as structured `routing.metric.*` zap logs for human debugging.
+
 ### GitHub Operations
 Skills use `gh` CLI by default. If a `gh` command fails (not installed, not authenticated, etc.), use whatever GitHub tools are available in the environment (MCP GitHub tools, API tools, etc.) to accomplish the same operation. The goal is the same — the tool may differ.
 
-### Adding a new third-party integration
+### Third-party integrations
 
-Jira and Linear are the model: per-workspace credentials, a 90s auth-health poller, a settings page with status banner + reconnect CTA, link/import buttons that gate on availability. New integrations should reuse the shared shapes rather than copying either.
-
-**Backend** (`apps/backend/internal/<name>/`):
-- Mirror the package layout: `service.go`, `store.go`, `client.go`, `provider.go`, `handlers.go`, `models.go`, `poller.go`. Expose `Provide(writer, reader *sqlx.DB, secrets SecretStore, eventBus bus.EventBus, log *logger.Logger) (*Service, func() error, error)`. Pass `nil` for `eventBus` when the integration doesn't publish events; both Jira and Linear take and use it for issue-watch publishing.
-- Use `internal/integrations/secretadapter` instead of writing your own upsert wrapper around `secrets.SecretStore`. The adapter satisfies any per-integration `SecretStore` interface shaped as `{Reveal, Set, Delete, Exists}`.
-- Use `internal/integrations/healthpoll` for the auth-health loop. Implement the `Prober` interface (`ListConfiguredWorkspaces` + `RecordAuthHealth`) on a small adapter and let `healthpoll.New("name", prober, log)` own Start/Stop/ticker. Keep integration-specific loops (JQL polling, webhook reconciliation, etc.) separate, like jira's issue-watch loop.
-- Wire the service via a per-domain `init<Name>Service(...)` helper in `cmd/kandev/services.go`, not inline in `provideServices`.
-- Ship a `mock_client.go` + `mock_controller.go` next to the real client. `Provide` branches on `KANDEV_MOCK_<NAME>=true` and returns the in-memory client; `RegisterMockRoutes(router, svc, log)` mounts `/api/v1/<name>/mock/*` only when the service was built with the mock. The e2e backend fixture sets the env var so Playwright tests drive the mock via `apiClient.mock<Name>*()` helpers — see jira/linear for the layout.
-
-**Frontend**:
-- Hooks live under `hooks/domains/<name>/`, **not** `components/<name>/`.
-- Use `hooks/domains/integrations/use-integration-availability.ts` and `use-integration-enabled.ts` — each integration's `useXAvailable` / `useXEnabled` should be a one-line wrapper passing the storage key + sync event + config-fetch function.
-- Settings page reuses `<IntegrationAuthStatusBanner>` (`components/integrations/auth-status-banner.tsx`).
-- "Auth required / reconnect" UI reuses `<IntegrationAuthErrorMessage>` (`components/integrations/auth-error-message.tsx`) — supply the integration's display name, regex check, and reconnect href.
-- Link / import popovers reuse `<ValidatedPopover>` (`components/integrations/validated-popover.tsx`) — supply the icon, label, key regex, fetch function, and success callback.
-
-**Where Jira and Linear deliberately diverge:**
-- Issue model: Jira uses transitions + JQL; Linear uses state IDs + structured filters. Don't merge these schemas — the upstream APIs are genuinely different.
-- Watch filter persistence: Jira stores the JQL string verbatim; Linear stores the structured `SearchFilter` as JSON in `filter_json` (Linear has no JQL equivalent). The orchestrator emits `NewJiraIssueEvent` / `NewLinearIssueEvent` respectively and dedups by issue key (Jira) vs identifier (Linear).
-- Health column extras: Linear's `linear_configs` row carries an `org_slug` captured from successful probes; Jira's row does not.
+Jira and Linear are the model (per-workspace credentials, 90s auth-health poller via `internal/integrations/healthpoll`, settings page with status banner). New integrations should **reuse the shared shapes** rather than copying either. Full layout, file conventions, and Jira-vs-Linear divergence notes in the `/add-integration` skill — load it when scaffolding a new integration.
 
 ---
 
@@ -388,4 +374,4 @@ This file is read by AI coding agents (Claude Code via `CLAUDE.md` symlink, Code
 
 ---
 
-**Last Updated**: 2026-05-03
+**Last Updated**: 2026-05-11

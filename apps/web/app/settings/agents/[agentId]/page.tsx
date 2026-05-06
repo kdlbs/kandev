@@ -46,15 +46,16 @@ const createDraftProfile = (
   permissionSettings?: Record<string, PermissionSetting>,
 ): DraftProfile => ({
   id: `draft-${generateUUID()}`,
-  agent_id: agentId,
+  agentId,
   name: "",
-  agent_display_name: agentDisplayName,
+  agentDisplayName,
   model: defaultModel,
+  allowIndexing: false,
   ...buildDefaultPermissions(permissionSettings ?? {}),
-  cli_passthrough: false,
-  cli_flags: seedDefaultCLIFlags(permissionSettings ?? {}),
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
+  cliPassthrough: false,
+  cliFlags: seedDefaultCLIFlags(permissionSettings ?? {}),
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
   isNew: true,
   mcp_config: { ...defaultMcpConfig },
 });
@@ -155,10 +156,10 @@ function useAgentStoreSync() {
       nextAgents.flatMap((agent) =>
         agent.profiles.map((profile) => ({
           id: profile.id,
-          label: `${profile.agent_display_name} • ${profile.name}`,
+          label: `${profile.agentDisplayName ?? ""} • ${profile.name}`,
           agent_id: agent.id,
           agent_name: agent.name,
-          cli_passthrough: profile.cli_passthrough,
+          cli_passthrough: profile.cliPassthrough ?? false,
         })),
       ),
     );
@@ -396,7 +397,7 @@ function AgentSetupForm({
     replaceRoute: (path: string) => router.replace(path),
   });
 
-  const displayName = draftAgent.profiles[0]?.agent_display_name ?? draftAgent.name;
+  const displayName = draftAgent.profiles[0]?.agentDisplayName ?? draftAgent.name;
 
   return (
     <div className="space-y-8">

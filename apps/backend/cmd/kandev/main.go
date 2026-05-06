@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -36,11 +37,14 @@ import (
 
 	// Agent infrastructure
 	"github.com/kandev/kandev/internal/agent/hostutility"
-	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	runtimeskill "github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
-	agentctlclient "github.com/kandev/kandev/internal/agentctl/client"
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 
 	// WebSocket gateway
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
@@ -52,7 +56,47 @@ import (
 	utilitycontroller "github.com/kandev/kandev/internal/utility/controller"
 
 	// Orchestrator
+	"github.com/kandev/kandev/internal/office/configloader"
+	officeservice "github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/orchestrator"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
+
+	// Office feature packages
+	office "github.com/kandev/kandev/internal/office"
+	officeagents "github.com/kandev/kandev/internal/office/agents"
+	officeapprovals "github.com/kandev/kandev/internal/office/approvals"
+	officechannels "github.com/kandev/kandev/internal/office/channels"
+	officeconfig "github.com/kandev/kandev/internal/office/config"
+	officecosts "github.com/kandev/kandev/internal/office/costs"
+	officemodelsdev "github.com/kandev/kandev/internal/office/costs/modelsdev"
+	officedashboard "github.com/kandev/kandev/internal/office/dashboard"
+	officeinfra "github.com/kandev/kandev/internal/office/infra"
+	officelabels "github.com/kandev/kandev/internal/office/labels"
+	officemodels "github.com/kandev/kandev/internal/office/models"
+	officeonboarding "github.com/kandev/kandev/internal/office/onboarding"
+	officeprojects "github.com/kandev/kandev/internal/office/projects"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	officeroutines "github.com/kandev/kandev/internal/office/routines"
+	"github.com/kandev/kandev/internal/office/routing"
+	officescheduler "github.com/kandev/kandev/internal/office/scheduler"
+	officeshared "github.com/kandev/kandev/internal/office/shared"
+	officeskills "github.com/kandev/kandev/internal/office/skills"
+	officewakeup "github.com/kandev/kandev/internal/office/wakeup"
+	orchexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
+
+	// Runs queue (Phase 3 of task-model-unification)
+	runsscheduler "github.com/kandev/kandev/internal/runs/scheduler"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
+
+	// Workflow engine adapters (Phase 3.2 of task-model-unification)
+	officeengineadapters "github.com/kandev/kandev/internal/office/engine_adapters"
+	officeenginedispatcher "github.com/kandev/kandev/internal/office/engine_dispatcher"
+	workflowadapters "github.com/kandev/kandev/internal/workflow/adapters"
+	workflowengine "github.com/kandev/kandev/internal/workflow/engine"
+
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
+	taskservice "github.com/kandev/kandev/internal/task/service"
+	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 
 	// Repository cloning
 	"github.com/kandev/kandev/internal/repoclone"
@@ -81,6 +125,14 @@ var (
 	Commit    = "unknown"
 	BuildTime = "unknown"
 )
+
+// ready is the readiness flag consulted by the GET /health handler.
+// Until it flips true, /health returns 503 — so callers polling for
+// readiness (Playwright fixtures, container orchestrators, manual
+// curl loops) keep waiting instead of racing ahead. main() flips it
+// after every route is mounted, the agent registry is seeded, and
+// the HTTP listener is accepting connections.
+var ready atomic.Bool
 
 func init() {
 	flag.Usage = func() {
@@ -235,32 +287,46 @@ func startServices( //nolint:cyclop
 	log.Info("Task Service initialized")
 
 	if err := runInitialAgentSetup(ctx, services.User, agentSettingsController, log); err != nil {
-		log.Warn("Failed to run initial agent setup", zap.Error(err))
+		// Agent registry seeding is a hard prerequisite for every
+		// HTTP surface that lists or operates on agents — including
+		// the e2e harness, the office onboarding wizard, and the
+		// task-create dialog. Letting startup continue with an empty
+		// registry produces silent flakes that look like "no agent
+		// profile available" with no log trail at the failure site.
+		// Fail loudly so the cause shows up in the backend log
+		// instead of cascading into downstream UI confusion.
+		log.Error("Failed to run initial agent setup — aborting startup", zap.Error(err))
+		return false
 	}
 	log.Info("ACP messages will be stored as comments")
 
 	// ============================================
 	// AGENTCTL LAUNCHER (for standalone mode)
 	// ============================================
-	agentctlCleanup, err := provideAgentctlLauncher(ctx, cfg, log)
+	agentctlResult, err := provideAgentctlLauncher(ctx, cfg, log)
 	if err != nil {
 		log.Error("Failed to start agentctl subprocess", zap.Error(err))
 		return false
 	}
-	if agentctlCleanup != nil {
-		addCleanup(agentctlCleanup)
+	var agentctlBinaryPath string
+	if agentctlResult != nil {
+		addCleanup(agentctlResult.cleanup)
 		defer func() {
 			if r := recover(); r != nil {
 				log.Error("panic recovered, stopping agentctl", zap.Any("panic", r))
-				if stopErr := agentctlCleanup(); stopErr != nil {
+				if stopErr := agentctlResult.cleanup(); stopErr != nil {
 					log.Error("failed to stop agentctl on panic", zap.Error(stopErr))
 				}
 				panic(r)
 			}
 		}()
+
+		// Capture the binary path so initOfficeServices can include it in the
+		// ServiceOptions when constructing the office service.
+		agentctlBinaryPath = agentctlResult.binaryPath
 	}
 
-	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, dbPool, repos, services, agentSettingsController, agentRegistry, runCleanups)
+	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, runCleanups)
 }
 
 // startAgentInfrastructure initializes the agent lifecycle manager, worktree, orchestrator,
@@ -276,6 +342,7 @@ func startAgentInfrastructure(
 	services *Services,
 	agentSettingsController *agentsettingscontroller.Controller,
 	agentRegistry *registry.Registry,
+	agentctlBinaryPath string,
 	runCleanups func(),
 ) bool {
 	// ============================================
@@ -303,6 +370,14 @@ func startAgentInfrastructure(
 
 	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
 	log.Info("Workspace info provider configured for session recovery")
+
+	// AGENT RUNTIME FACADE (Phase 1 of task-model-unification, ADR 0004).
+	// This is the single seam future workflow-engine and cron-driven trigger
+	// handlers will call. Phase 1 only introduces the seam; existing callers
+	// continue to use the lifecycle manager directly until later phases route
+	// them through `agentRuntime`.
+	agentRuntime := agentruntime.New(lifecycleMgr)
+	_ = agentRuntime
 
 	// Persistence writer for executors_running. This makes the lifecycle manager
 	// the sole writer of agent_execution_id / container_id / runtime / status —
@@ -396,7 +471,7 @@ func startAgentInfrastructure(
 	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, repos, services,
-		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, addCleanup, runCleanups)
+		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath, addCleanup, runCleanups)
 }
 
 // startGatewayAndServe sets up the WebSocket gateway, HTTP routes, starts the server,
@@ -414,6 +489,7 @@ func startGatewayAndServe(
 	orchestratorSvc *orchestrator.Service,
 	msgCreator *messageCreatorAdapter,
 	repoCloner *repoclone.Cloner,
+	agentctlBinaryPath string,
 	addCleanup func(func() error),
 	runCleanups func(),
 ) bool {
@@ -494,6 +570,18 @@ func startGatewayAndServe(
 	}
 	log.Info("Orchestrator initialized")
 
+	// ============================================
+	// ORCHESTRATE CONFIG LOADER + WAKEUP SCHEDULER
+	// ============================================
+	if ok := initOfficeServices(ctx, cfg, log, repos, services, orchestratorSvc, eventBus, agentctlBinaryPath, addCleanup, lifecycleMgr, agentRegistry); !ok {
+		return false
+	}
+
+	// Wire subscription usage provider into the office agents service so the
+	// /agents/:id/utilization endpoint can fetch live utilization data.
+	usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
+	services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
+
 	services.Task.StartAutoArchiveLoop(ctx)
 
 	// ============================================
@@ -519,8 +607,770 @@ func startGatewayAndServe(
 		zap.String("http", "/api/v1"),
 	)
 
+	// Flip the readiness flag once the HTTP listener is actually
+	// accepting connections, not just "spawned". ListenAndServe runs
+	// in a goroutine and may not have bound the socket yet by the time
+	// we reach this line. Probe the local listener with a short retry
+	// loop — once a single connect succeeds, the kernel queue is up
+	// and any subsequent /health call will land on a wired route.
+	go waitListenerThenMarkReady(port, log)
+
 	awaitShutdown(server, orchestratorSvc, lifecycleMgr, runCleanups, log)
 	return true
+}
+
+// waitListenerThenMarkReady probes the local HTTP listener until a
+// connect succeeds, then flips the package-level `ready` flag so the
+// /health handler stops returning 503. Runs in its own goroutine so
+// the caller can proceed into awaitShutdown.
+//
+// The probe budget is generous (30s) — under heavy parallel-suite
+// load the OS scheduler can delay the listen goroutine for a couple
+// of seconds. If the budget expires the flag still flips, so the
+// backend doesn't permanently advertise "not ready" if probing fails
+// for some unrelated reason (e.g. an iptables hiccup on a dev box).
+func waitListenerThenMarkReady(port int, log *logger.Logger) {
+	url := fmt.Sprintf("http://127.0.0.1:%d/health", port)
+	deadline := time.Now().Add(30 * time.Second)
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err == nil {
+			_ = resp.Body.Close()
+			// Even a 503 response proves the listener is bound and
+			// the route is wired — we're the ones returning the 503,
+			// after all. Flip ready and let subsequent /health
+			// requests see a 200.
+			ready.Store(true)
+			log.Info("backend ready", zap.Int("port", port))
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	log.Warn("backend readiness probe never connected; flipping ready anyway",
+		zap.Int("port", port))
+	ready.Store(true)
+}
+
+// initOfficeServices constructs the office service with all dependencies, then
+// sets up the reconciler, event subscribers, scheduler, and garbage collector.
+// Returns false if a fatal error prevents startup.
+func initOfficeServices(
+	ctx context.Context,
+	cfg *config.Config,
+	log *logger.Logger,
+	repos *Repositories,
+	services *Services,
+	orchestratorSvc *orchestrator.Service,
+	eventBus bus.EventBus,
+	agentctlBinaryPath string,
+	addCleanup func(func() error),
+	lifecycleMgr *lifecycle.Manager,
+	agentRegistry *registry.Registry,
+) bool {
+	configBasePath := cfg.ResolvedHomeDir()
+	cfgLoader, cfgWriter := initOfficeConfigLoader(configBasePath, log, addCleanup)
+
+	apiPort := cfg.Server.Port
+	if apiPort == 0 {
+		apiPort = ports.Backend
+	}
+
+	taskStarter := officeservice.TaskStarterWithEnvFunc(
+		func(ctx context.Context, taskID, agentProfileID, executorID,
+			executorProfileID string, priority string, prompt, workflowStepID string,
+			planMode bool, attachments []v1.MessageAttachment, env map[string]string) error {
+			_, err := orchestratorSvc.StartTaskWithEnv(ctx, taskID, agentProfileID,
+				executorID, executorProfileID, priority, prompt,
+				workflowStepID, planMode, attachments, env)
+			return err
+		},
+	)
+
+	// Construct the office service with all dependencies at once so the
+	// compiler catches missing fields rather than failing at runtime.
+	services.Office = officeservice.NewService(officeservice.ServiceOptions{
+		Repo:               repos.Office,
+		Logger:             log,
+		CfgLoader:          cfgLoader,
+		CfgWriter:          cfgWriter,
+		WorkspaceCreator:   &taskWorkspaceCreatorAdapter{taskSvc: services.Task},
+		TaskWorkspace:      services.Task,
+		TaskCreator:        &taskCreatorAdapter{taskSvc: services.Task},
+		TaskPRs:            &taskPRListerAdapter{gh: services.GitHub},
+		APIBaseURL:         fmt.Sprintf("http://localhost:%d/api/v1", apiPort),
+		TaskStarter:        taskStarter,
+		TaskCanceller:      orchestratorSvc,
+		AgentctlBinaryPath: agentctlBinaryPath,
+		EventBus:           eventBus,
+	})
+	log.Info("Office service constructed with all dependencies")
+
+	// office-costs Wave B: lazy models.dev pricing lookup. The Client
+	// allocates no resources at startup — the first non-claude-acp cost
+	// event triggers a disk read; the first missing cache file triggers
+	// a background fetch. Workspaces running only claude-acp stay
+	// untouched because Layer A handles every event before lookup.
+	modelsdevCachePath := filepath.Join(cfg.ResolvedHomeDir(), "cache", "models-dev.json")
+	pricingLookup := officemodelsdev.New(officemodelsdev.Config{
+		CachePath: modelsdevCachePath,
+	}, log)
+	services.Office.SetPricingLookup(pricingLookup)
+	services.Office.SetSessionUsageWriter(repos.Task)
+
+	// ADR 0005 Wave E: plug the runtime-tier skill deployer into the
+	// lifecycle manager. The deployer reads office's skills repo +
+	// instructions repo via small adapters; office no longer ships
+	// its own delivery code.
+	wireRuntimeSkillDeployer(lifecycleMgr, agentRegistry, repos.Office, services.Office, cfg.ResolvedHomeDir(), log)
+
+	// Wire office-owned repositories into the task service for cross-package operations.
+	services.Task.SetBlockerRepository(repos.Office)
+	services.Task.SetCommentRepository(repos.Office)
+
+	// Build feature-package services and wire all inter-service dependencies.
+	services.OfficeSvcs = buildOfficeFeatureServices(
+		repos.Office, repos.Task, repos.AgentSettings, cfgLoader, cfgWriter, configBasePath,
+		agentRegistry, log, services,
+	)
+	wireOfficeSvcsDependencies(services, repos, eventBus, orchestratorSvc, agentRegistry)
+
+	// Reconcile using the new infra package.
+	reconciler := officeinfra.NewReconciler(repos.Office, log)
+	reconciler.ReconcileAll(ctx)
+	log.Info("Office reconciliation complete")
+
+	// System skill sync. Upserts every embedded SKILL.md (the ones written
+	// to disk by EnsureBundledSkills above) into office_skills as
+	// is_system = true rows for each known workspace, removing system
+	// rows that no longer have a matching embed. Per-agent
+	// desired_skills references are preserved.
+	syncSystemSkills(ctx, repos.Office, services, log)
+	// Backfill default skills onto agents that pre-date the system-skill
+	// rollout. Idempotent: only agents whose `desired_skills` is empty
+	// receive defaults; curated lists are left alone.
+	backfillAgentDefaultSkills(ctx, services, log)
+
+	// Register event subscribers and start scheduler
+	if err := services.Office.RegisterEventSubscribers(eventBus); err != nil {
+		log.Error("Failed to register office event subscribers", zap.Error(err))
+		return false
+	}
+
+	startOfficeSchedulersAndGC(ctx, cfg, repos, services, eventBus, orchestratorSvc, log)
+	return true
+}
+
+// wireOfficeSvcsDependencies wires inter-service dependencies into the
+// OfficeSvcs feature package. Extracted to keep initOfficeServices within
+// funlen limits.
+func wireOfficeSvcsDependencies(
+	services *Services,
+	repos *Repositories,
+	eventBus bus.EventBus,
+	orchestratorSvc *orchestrator.Service,
+	agentRegistry *registry.Registry,
+) {
+	// Wire the workflow-domain decisions store so approve/request-changes
+	// route to workflow_step_decisions (ADR 0005 Wave E).
+	services.OfficeSvcs.Dashboard.SetDecisionStore(repos.Workflow)
+	// Wire the event bus into the dashboard service for status-change events.
+	services.OfficeSvcs.Dashboard.SetEventBus(eventBus)
+	services.OfficeSvcs.Channels.SetEventBus(eventBus)
+	// Wire the office service as the channel relay's run resolver so
+	// relayed-comment activity rows get tagged with the originating
+	// run id (Tasks Touched on the run detail page).
+	services.OfficeSvcs.Channels.SetRunResolver(services.Office)
+	// Wire the office service as the retry canceller for task reassignment.
+	services.OfficeSvcs.Dashboard.SetRetryCanceller(services.Office)
+	// Wire the office service as the task canceller for status→cancelled hard-cancels.
+	services.OfficeSvcs.Dashboard.SetTaskCanceller(services.Office)
+	// Wire the reactivity pipeline so property mutations queue downstream runs.
+	services.OfficeSvcs.Dashboard.SetReactivityApplier(
+		officescheduler.NewDashboardReactivityAdapter(services.OfficeSvcs.Scheduler),
+	)
+	// Wire the approval-flow run queuer so decisions trigger
+	// task_changes_requested / task_ready_to_close runs.
+	services.OfficeSvcs.Dashboard.SetApprovalReactivityQueuer(
+		officescheduler.NewDashboardApprovalAdapter(services.OfficeSvcs.Scheduler),
+	)
+	// Wire the office session terminator so participation removal flips the
+	// (task, agent) session row to COMPLETED.
+	officeSessionTerm := orchestratorSvc.OfficeSessionTerminator()
+	services.OfficeSvcs.Dashboard.SetSessionTerminator(officeSessionTerm)
+	services.OfficeSvcs.Agents.SetSessionTerminator(officeSessionTerm)
+	// Wire the failure notifier so reassignments auto-dismiss the
+	// prior (task, agent) inbox entry.
+	services.OfficeSvcs.Dashboard.SetFailureNotifier(services.Office)
+	// Wire the failure-tracking inbox source + dismiss handler so the
+	// inbox surfaces agent_run_failed / agent_paused_after_failures rows.
+	services.OfficeSvcs.Dashboard.SetFailureInboxSource(
+		newOfficeFailureInboxAdapter(services.Office),
+	)
+	services.OfficeSvcs.Dashboard.SetMarkFixedHandler(services.Office)
+	wireOfficeProviderRouting(services, repos, orchestratorSvc, eventBus, agentRegistry)
+}
+
+// wireOfficeProviderRouting builds the routing resolver + TaskStarter
+// adapter and wires the scheduler.SchedulerService as the office
+// service's routing dispatcher. No-op effect on non-routing launches
+// because the resolver short-circuits when no workspace has routing
+// enabled.
+func wireOfficeProviderRouting(
+	services *Services,
+	repos *Repositories,
+	orchestratorSvc *orchestrator.Service,
+	eventBus bus.EventBus,
+	agentRegistry *registry.Registry,
+) {
+	scheduler := services.OfficeSvcs.Scheduler
+	resolver := routing.NewResolver(&officeRoutingRepoAdapter{repo: repos.Office}, nil)
+	scheduler.SetResolver(resolver)
+	scheduler.SetTaskStarter(&schedulerTaskStarterAdapter{orch: orchestratorSvc})
+	scheduler.SetEventBus(eventBus)
+	services.Office.SetRoutingDispatcher(scheduler)
+
+	provider := routing.NewProvider(repos.Office, agentRegistry, resolver, scheduler)
+	services.OfficeSvcs.Dashboard.SetRoutingProvider(provider)
+	services.OfficeSvcs.Dashboard.SetRouteAttemptLister(repos.Office)
+	services.OfficeSvcs.Agents.SetKnownProvidersFn(func() []routing.ProviderID {
+		return routing.KnownProviders(agentRegistry)
+	})
+}
+
+// officeRoutingRepoAdapter satisfies routing.Repo over the office
+// sqlite repo. Lives here (not in the routing package) so the routing
+// package stays repo-agnostic.
+type officeRoutingRepoAdapter struct {
+	repo *officesqlite.Repository
+}
+
+func (a *officeRoutingRepoAdapter) GetWorkspaceRouting(
+	ctx context.Context, workspaceID string,
+) (*routing.WorkspaceConfig, error) {
+	return a.repo.GetWorkspaceRouting(ctx, workspaceID)
+}
+
+func (a *officeRoutingRepoAdapter) ListProviderHealth(
+	ctx context.Context, workspaceID string,
+) ([]officemodels.ProviderHealth, error) {
+	return a.repo.ListProviderHealth(ctx, workspaceID)
+}
+
+// schedulerTaskStarterAdapter satisfies scheduler.TaskStarter against
+// the orchestrator service.
+type schedulerTaskStarterAdapter struct {
+	orch *orchestrator.Service
+}
+
+func (a *schedulerTaskStarterAdapter) StartTask(
+	ctx context.Context,
+	taskID, agentProfileID, executorID, executorProfileID string,
+	priority, prompt, workflowStepID string,
+	planMode bool, attachments []interface{},
+) error {
+	_, err := a.orch.StartTask(ctx, taskID, agentProfileID,
+		executorID, executorProfileID, priority, prompt,
+		workflowStepID, planMode, nil)
+	return err
+}
+
+func (a *schedulerTaskStarterAdapter) StartTaskWithRoute(
+	ctx context.Context,
+	taskID, agentProfileID string,
+	launch officescheduler.LaunchContext,
+	route officescheduler.RouteOverride,
+) error {
+	return a.orch.StartTaskWithRoute(ctx, taskID, agentProfileID,
+		orchexecutor.LaunchContext{
+			ExecutorID:        launch.ExecutorID,
+			ExecutorProfileID: launch.ExecutorProfileID,
+			Priority:          launch.Priority,
+			Prompt:            launch.Prompt,
+			WorkflowStepID:    launch.WorkflowStepID,
+			PlanMode:          launch.PlanMode,
+			Attachments:       launch.Attachments,
+			Env:               launch.Env,
+		},
+		orchexecutor.RouteOverride{
+			ProviderID: route.ProviderID,
+			Model:      route.Model,
+			Tier:       route.Tier,
+			Mode:       route.Mode,
+			Flags:      route.Flags,
+			Env:        route.Env,
+		})
+}
+
+// startOfficeSchedulersAndGC wires the runs service, workflow engine dispatcher,
+// runs scheduler, cron scheduler, and GC sweep. Extracted to keep
+// initOfficeServices within funlen limits.
+func startOfficeSchedulersAndGC(
+	ctx context.Context,
+	cfg *config.Config,
+	repos *Repositories,
+	services *Services,
+	eventBus bus.EventBus,
+	orchestratorSvc *orchestrator.Service,
+	log *logger.Logger,
+) {
+	log.Info("Office scheduler wired to orchestrator StartTask")
+	orchScheduler := officeservice.NewSchedulerIntegration(
+		services.Office, runsscheduler.TickIntervalFromEnv(),
+	)
+	// Office task-handoffs prompt enrichment. The HandoffService is
+	// constructed alongside the HTTP routes (helpers.go); we stash the
+	// scheduler reference on the Services struct so registerRoutes can
+	// wire SetTaskContextProvider once both exist.
+	services.OrchScheduler = orchScheduler
+	// Wire the runs queue service so office.QueueRun delegates the
+	// insert + publish + signal to it (Phase 3 of task-model-unification).
+	runsSvc := runsservice.New(
+		repos.Office.RunsRepository(), eventBus, log, nil,
+	)
+	services.Office.SetRunsService(runsSvc)
+	// Phase 4 (ADR-0004): wire the workflow engine's dependencies and a
+	// dispatcher so office event subscribers route through the engine
+	// unconditionally.
+	engineDispatcher := wireWorkflowEngineForOffice(
+		orchestratorSvc, services.Office, services.Task, services.Workflow, repos, runsSvc, log,
+	)
+	// Start the runs scheduler (tick + signal listener). It drives
+	// orchScheduler.Tick on both periodic ticks and event-driven signals.
+	runScheduler := runsscheduler.New(
+		orchScheduler, runsSvc.SubscribeSignal(),
+		runsscheduler.TickIntervalFromEnv(), log,
+	)
+	go runScheduler.Start(ctx)
+	log.Info("Runs scheduler started",
+		zap.Duration("tick", runsscheduler.TickIntervalFromEnv()))
+	// Phase 5 (ADR-0004): start the shared cron loop.
+	startCronScheduler(ctx, repos, engineDispatcher, services.OfficeSvcs.Routines, log)
+	// Start GC sweep for orphaned worktrees and containers.
+	worktreeBase := filepath.Join(cfg.ResolvedHomeDir(), "tasks")
+	gc := officeinfra.NewGarbageCollector(
+		repos.Office, log, worktreeBase,
+		nil, // dockerClient - pass if Docker available
+		3*time.Hour,
+	)
+	go gc.Start(ctx)
+	log.Info("Office GC sweep started")
+}
+
+// wireWorkflowEngineForOffice composes the Phase 2 (ADR-0004)
+// dependencies the workflow engine needs to evaluate office triggers,
+// then builds an engine-dispatcher and hands it to the office service.
+//
+// Engine options wired here:
+//   - RunQueueAdapter        — runs service (Phase 3.1)
+//   - ParticipantStore       — workflow_step_participants
+//   - DecisionStore          — workflow_step_decisions
+//   - PrimaryAgentResolver   — workflow_steps.agent_profile_id
+//   - CEOAgentResolver       — agent_profiles WHERE role='ceo' AND workspace_id != ”
+//
+// The orchestrator's engine is rebuilt with these options applied, then
+// the office service is given a dispatcher pointing at it. The four
+// task-scoped event subscribers (comment, blockers_resolved,
+// children_completed, approval_resolved) route through the engine
+// unconditionally after Phase 4.
+func wireWorkflowEngineForOffice(
+	orchestratorSvc *orchestrator.Service,
+	officeSvc *officeservice.Service,
+	taskSvc *taskservice.Service,
+	workflowSvc *workflowservice.Service,
+	repos *Repositories,
+	runsSvc *runsservice.Service,
+	log *logger.Logger,
+) *officeenginedispatcher.Dispatcher {
+	// Build the workflow-domain adapters.
+	participants := workflowadapters.NewParticipantAdapter(repos.Workflow)
+	decisions := workflowadapters.NewDecisionAdapter(repos.Workflow)
+	primary := workflowadapters.NewPrimaryAgentAdapter(repos.Workflow)
+	// Office-domain CEO resolver.
+	ceo := officeengineadapters.NewCEOAgentAdapter(repos.Office)
+	// Phase 8 delegation adapters: task creator + workflow switcher.
+	taskCreator := officeengineadapters.NewTaskCreatorAdapter(
+		repos.Task, &childTaskCreatorAdapter{taskSvc: taskSvc})
+	workflowSwitcher := officeengineadapters.NewWorkflowSwitcherAdapter(
+		&startStepResolverAdapter{svc: workflowSvc}, repos.Task)
+	// Wire each dependency via its dedicated setter so the orchestrator
+	// captures it both for engine.With* options and for the Phase 2 / 8
+	// callback registry.
+	orchestratorSvc.SetEngineRunQueue(&runsServiceEngineAdapter{svc: runsSvc})
+	orchestratorSvc.SetEngineParticipantStore(participants)
+	orchestratorSvc.SetEngineDecisionStore(decisions)
+	orchestratorSvc.SetEngineCEOResolver(ceo)
+	orchestratorSvc.SetPrimaryAgentResolver(primary)
+	orchestratorSvc.SetEngineTaskCreator(taskCreator)
+	orchestratorSvc.SetEngineWorkflowSwitcher(workflowSwitcher)
+	eng := orchestratorSvc.WorkflowEngine()
+	if eng == nil {
+		log.Warn("workflow engine not initialised; office engine dispatcher disabled")
+		return nil
+	}
+	// Build the dispatcher. The session resolver is the task repo,
+	// which exposes GetActiveTaskSessionByTaskID.
+	dispatcher := officeenginedispatcher.New(eng, repos.Task, log)
+	officeSvc.SetWorkflowEngineDispatcher(dispatcher)
+	log.Info("workflow engine dispatcher wired for office")
+	return dispatcher
+}
+
+// runsServiceEngineAdapter bridges runs/service.Service.QueueRun (which
+// takes runs/service.QueueRunRequest) to engine.RunQueueAdapter (which
+// takes engine.QueueRunRequest). The two structs have identical fields
+// — they are intentionally duplicated so neither package imports the
+// other — so this adapter is a field-by-field copy.
+type runsServiceEngineAdapter struct {
+	svc *runsservice.Service
+}
+
+func (a *runsServiceEngineAdapter) QueueRun(ctx context.Context, req workflowengine.QueueRunRequest) error {
+	return a.svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: req.AgentProfileID,
+		TaskID:         req.TaskID,
+		WorkflowStepID: req.WorkflowStepID,
+		Reason:         req.Reason,
+		IdempotencyKey: req.IdempotencyKey,
+		Payload:        req.Payload,
+	})
+}
+
+// wireRuntimeSkillDeployer plugs the runtime-tier SkillDeployer into the
+// lifecycle manager (ADR 0005 Wave E). The deployer bridges office's
+// skills repo + instructions repo to the runtime via small adapters in
+// internal/office/skills, so kanban and office launches share a single
+// skill-deploy code path. A nil officeSvc / repo leaves the manager
+// with the Wave A no-op deployer.
+func wireRuntimeSkillDeployer(
+	lifecycleMgr *lifecycle.Manager,
+	agentRegistry *registry.Registry,
+	officeRepo *officesqlite.Repository,
+	officeSvc *officeservice.Service,
+	basePath string,
+	log *logger.Logger,
+) {
+	if lifecycleMgr == nil || officeSvc == nil || officeRepo == nil {
+		return
+	}
+	deployer, err := runtimeskill.New(runtimeskill.Config{
+		Logger:                  log,
+		BasePath:                basePath,
+		SkillReader:             officeskills.NewSkillReaderAdapter(officeSvc),
+		InstructionLister:       officeskills.NewInstructionListerAdapter(officeRepo),
+		ProjectSkillDirResolver: makeProjectSkillDirResolver(agentRegistry),
+		WorkspaceSlugFn:         makeWorkspaceSlugFn(officeRepo),
+	})
+	if err != nil {
+		log.Warn("failed to construct runtime skill deployer; launches will skip skill delivery",
+			zap.Error(err))
+		return
+	}
+	lifecycleMgr.SetSkillDeployer(lifecycle.NewSkillDeployerAdapter(deployer))
+	log.Info("Runtime skill deployer wired into lifecycle manager")
+}
+
+// makeProjectSkillDirResolver returns a runtimeskill.ProjectSkillDirResolver
+// backed by the agent registry. The agent type ID equals the agent_id on
+// the agent_profiles row after ADR 0005 — we look up the agent and read
+// its declared ProjectSkillDir, falling back to the runtime default.
+func makeProjectSkillDirResolver(reg *registry.Registry) runtimeskill.ProjectSkillDirResolver {
+	if reg == nil {
+		return nil
+	}
+	return func(agentTypeID string) string {
+		ag, ok := reg.Get(agentTypeID)
+		if !ok {
+			return ""
+		}
+		if rt := ag.Runtime(); rt != nil && rt.ProjectSkillDir != "" {
+			return rt.ProjectSkillDir
+		}
+		return ""
+	}
+}
+
+// makeUserSkillDirResolver returns a provider user-skill-dir resolver backed by
+// the agent registry. Providers that do not declare a user skill dir are omitted
+// from discovery.
+func makeUserSkillDirResolver(reg *registry.Registry) officeskills.UserSkillDirResolver {
+	if reg == nil {
+		return nil
+	}
+	return func(provider string) (string, bool) {
+		ag, ok := reg.Get(provider)
+		if !ok {
+			return "", false
+		}
+		if rt := ag.Runtime(); rt != nil && rt.UserSkillDir != "" {
+			return rt.UserSkillDir, true
+		}
+		return "", false
+	}
+}
+
+// makeWorkspaceSlugFn returns a slug-resolver that maps a workspace ID
+// to a slug used in on-host runtime paths. Today everything in the
+// office stack hardcodes "default" (single-workspace per install) so we
+// match that — when multi-workspace lands the resolver gets a real
+// lookup against the office repo.
+func makeWorkspaceSlugFn(_ *officesqlite.Repository) func(string) string {
+	return func(string) string { return "default" }
+}
+
+// initOfficeConfigLoader initialises the filesystem config loader, writes
+// officeFailureInboxAdapter forwards from the office Service (which
+// returns service-package row types) to the dashboard
+// FailureInboxSource interface (which expects dashboard-package row
+// types). Trivial conversion — dashboard intentionally avoids
+// importing the office repo or service so the package boundary stays
+// clean.
+type officeFailureInboxAdapter struct {
+	svc *officeservice.Service
+}
+
+func newOfficeFailureInboxAdapter(svc *officeservice.Service) *officeFailureInboxAdapter {
+	return &officeFailureInboxAdapter{svc: svc}
+}
+
+func (a *officeFailureInboxAdapter) ListFailedRunInboxRows(
+	ctx context.Context, workspaceID, userID string,
+) ([]officedashboard.FailureInboxRow, error) {
+	rows, err := a.svc.ListFailedRunInboxRows(ctx, workspaceID, userID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]officedashboard.FailureInboxRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, officedashboard.FailureInboxRow{
+			Kind:           "agent_run_failed",
+			ItemID:         r.RunID,
+			AgentProfileID: r.AgentProfileID,
+			AgentName:      r.AgentName,
+			TaskID:         r.TaskID,
+			ErrorMessage:   r.ErrorMessage,
+			FailedAt:       r.FailedAt,
+		})
+	}
+	return out, nil
+}
+
+func (a *officeFailureInboxAdapter) ListPausedAgentInboxRows(
+	ctx context.Context, workspaceID, userID string,
+) ([]officedashboard.FailureInboxRow, error) {
+	rows, err := a.svc.ListPausedAgentInboxRows(ctx, workspaceID, userID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]officedashboard.FailureInboxRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, officedashboard.FailureInboxRow{
+			Kind:                "agent_paused_after_failures",
+			ItemID:              r.AgentID,
+			AgentProfileID:      r.AgentID,
+			AgentName:           r.AgentName,
+			PauseReason:         r.PauseReason,
+			ConsecutiveFailures: r.ConsecutiveFailures,
+			FailedAt:            r.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
+// bundled skills, and registers shutdown cleanup for symlinks.
+func initOfficeConfigLoader(
+	basePath string, log *logger.Logger, addCleanup func(func() error),
+) (*configloader.ConfigLoader, *configloader.FileWriter) {
+	cfgLoader := configloader.NewConfigLoader(basePath)
+	if err := cfgLoader.Load(); err != nil {
+		log.Error("Failed to load office config from filesystem", zap.Error(err))
+	} else {
+		log.Info("Office config loaded from filesystem",
+			zap.String("base_path", basePath),
+			zap.Int("workspaces", len(cfgLoader.GetWorkspaces())))
+	}
+	if err := configloader.EnsureBundledSkills(basePath); err != nil {
+		log.Error("Failed to write bundled skills", zap.Error(err))
+	} else {
+		slugs, _ := configloader.BundledSkillSlugs()
+		log.Info("Bundled skills ensured", zap.Strings("slugs", slugs))
+	}
+	return cfgLoader, configloader.NewFileWriter(basePath, cfgLoader)
+}
+
+// syncSystemSkills reconciles the office_skills table against the
+// embedded bundled skill set for every known workspace. Pulls the
+// workspace list from the task service (workspace ids are shared
+// across task + office persistence). Failures are logged but do not
+// gate startup — system skills are surfaced lazily by the Skills
+// page, which simply shows an empty System group until a later
+// retry succeeds.
+func syncSystemSkills(
+	ctx context.Context,
+	repo *officesqlite.Repository,
+	services *Services,
+	log *logger.Logger,
+) {
+	workspaces, err := services.Task.ListWorkspaces(ctx)
+	if err != nil {
+		log.Error("system skill sync: list workspaces", zap.Error(err))
+		return
+	}
+	ids := make([]string, 0, len(workspaces))
+	for _, w := range workspaces {
+		ids = append(ids, w.ID)
+	}
+	if _, err := officeskills.SyncSystemSkills(ctx, repo, ids, nil, log); err != nil {
+		log.Error("system skill sync failed", zap.Error(err))
+	}
+}
+
+// backfillAgentDefaultSkills delegates to the agents service so each
+// workspace's existing agents inherit the system-skill defaults for
+// their role when their desired_skills array is empty. Errors per
+// workspace are absorbed inside the service call; startup must not
+// fail because of a curated-list edge case.
+func backfillAgentDefaultSkills(
+	ctx context.Context,
+	services *Services,
+	log *logger.Logger,
+) {
+	if services.OfficeSvcs == nil || services.OfficeSvcs.Agents == nil {
+		return
+	}
+	workspaces, err := services.Task.ListWorkspaces(ctx)
+	if err != nil {
+		log.Error("backfill default skills: list workspaces", zap.Error(err))
+		return
+	}
+	for _, w := range workspaces {
+		services.OfficeSvcs.Agents.BackfillDefaultSkillsForWorkspace(ctx, w.ID)
+	}
+}
+
+// buildOfficeFeatureServices creates the feature-level office services used by
+// the HTTP handler layer (office.RegisterAllRoutes). The monolithic
+// services.Office is passed for shared interfaces during the transition period.
+func buildOfficeFeatureServices(
+	repo *officesqlite.Repository,
+	taskRepo *tasksqlite.Repository,
+	settingsRepo settingsstore.Repository,
+	cfgLoader *configloader.ConfigLoader,
+	cfgWriter *configloader.FileWriter,
+	homeDir string,
+	agentRegistry *registry.Registry,
+	log *logger.Logger,
+	services *Services,
+) *office.Services {
+	activity := officeshared.NewActivityLogger(repo, log)
+
+	agentSvc := officeagents.NewAgentService(repo, log, activity)
+	agentSvc.SetAuth(officeagents.NewAgentAuth(""))
+	if services.Office != nil {
+		services.Office.SetAgentTokenMinter(agentSvc)
+	}
+	skillSvc := officeskills.NewSkillService(repo, log, activity, agentSvc, cfgLoader)
+	skillSvc.SetUserSkillDirResolver(makeUserSkillDirResolver(agentRegistry))
+	projectSvc := officeprojects.NewProjectService(repo, log, activity)
+	costSvc := officecosts.NewCostService(repo, log, activity, agentSvc, agentSvc)
+	// Office service delegates budget evaluation (pre-execution + post-event)
+	// to the costs feature — the only place that owns CRUD for budget policies.
+	if services.Office != nil {
+		services.Office.SetBudgetChecker(costSvc)
+	}
+	routineSvc := officeroutines.NewRoutineService(repo, log, activity)
+	// PR 3 of office-heartbeat-rework: wire routines into the wakeup
+	// dispatcher so the lightweight (taskless) flow enqueues a fresh
+	// taskless run, and into the task path so the heavy flow creates a
+	// real task in the routine system workflow.
+	routineWakeupDispatcher := officewakeup.NewDispatcher(repo, repo, log)
+	routineWakeupDispatcher.SetRoutineLookup(repo)
+	routineSvc.SetWakeupEnqueuer(&routineWakeupAdapter{
+		repo:       repo,
+		dispatcher: routineWakeupDispatcher,
+	})
+	routineSvc.SetWorkflowEnsurer(&workflowEnsurerAdapter{repo: taskRepo})
+	routineSvc.SetTaskCreator(&taskCreatorAdapter{taskSvc: services.Task})
+	approvalSvc := officeapprovals.NewApprovalService(repo, log, activity, services.Office)
+	approvalSvc.SetAgentWriter(agentSvc)
+	channelSvc := officechannels.NewChannelService(repo, log, activity, agentSvc)
+	configSvc := officeconfig.NewConfigService(repo, cfgLoader, cfgWriter, log, activity)
+	dashboardSvc := buildOfficeDashboardService(
+		repo, log, activity, agentSvc, costSvc,
+		skillSvc, routineSvc, approvalSvc,
+		cfgLoader, cfgWriter,
+	)
+	documentSvc := taskservice.NewDocumentService(taskRepo, log)
+	onboardingSvc := officeonboarding.NewOnboardingService(
+		repo, cfgLoader, cfgWriter, log,
+		agentSvc, settingsRepo, agentSvc,
+		&taskWorkspaceCreatorAdapter{taskSvc: services.Task},
+		&workflowEnsurerAdapter{repo: taskRepo},
+		&taskCreatorAdapter{taskSvc: services.Task},
+		services.Office,
+		&configSyncerAdapter{svc: configSvc},
+	)
+	onboardingSvc.SetCoordinatorRoutineInstaller(routineSvc)
+	schedulerSvc := officescheduler.NewSchedulerService(repo, log, services.Office)
+	labelSvc := officelabels.NewLabelService(repo)
+	gitMgr := configloader.NewGitManager(cfgLoader.BasePath(), cfgLoader, log)
+
+	return &office.Services{
+		Agents:       agentSvc,
+		Skills:       skillSvc,
+		Projects:     projectSvc,
+		Costs:        costSvc,
+		Routines:     routineSvc,
+		Approvals:    approvalSvc,
+		Channels:     channelSvc,
+		Config:       configSvc,
+		Dashboard:    dashboardSvc,
+		Documents:    documentSvc,
+		Labels:       labelSvc,
+		Onboarding:   onboardingSvc,
+		Scheduler:    schedulerSvc,
+		TreeControls: services.Office,
+		Workspaces:   services.Office,
+		Repo:         repo,
+		GitManager:   gitMgr,
+		KandevHome:   homeDir,
+	}
+}
+
+// buildOfficeDashboardService constructs the dashboard service and wires
+// all of its cross-service dependencies (governance, skill/routine listers,
+// settings provider, coordinator-routine installer). Extracted from
+// buildOfficeFeatureServices to keep the parent under funlen's 80-line cap.
+func buildOfficeDashboardService(
+	repo *officesqlite.Repository,
+	log *logger.Logger,
+	activity officeshared.ActivityLogger,
+	agentSvc *officeagents.AgentService,
+	costSvc *officecosts.CostService,
+	skillSvc *officeskills.SkillService,
+	routineSvc *officeroutines.RoutineService,
+	approvalSvc *officeapprovals.ApprovalService,
+	cfgLoader *configloader.ConfigLoader,
+	cfgWriter *configloader.FileWriter,
+) *officedashboard.DashboardService {
+	dashboardSvc := officedashboard.NewDashboardService(repo, log, activity, agentSvc, costSvc)
+	dashboardSvc.SetGovernanceStore(repo)
+	dashboardSvc.SetSkillLister(skillSvc)
+	dashboardSvc.SetRoutineLister(routineSvc)
+	agentSvc.SetGovernanceSettings(dashboardSvc)
+	agentSvc.SetGovernanceApproval(approvalSvc)
+	// office-heartbeat-as-routine: every coordinator agent (onboarding or
+	// post-onboarding via the agents API) gets a "Coordinator heartbeat"
+	// routine on creation. The routines service is the canonical owner;
+	// both creators delegate to it via a slim interface.
+	agentSvc.SetCoordinatorRoutineInstaller(routineSvc)
+	if cfgLoader != nil && cfgWriter != nil {
+		dashboardSvc.SetSettingsProvider(&workspaceSettingsProviderAdapter{
+			loader: cfgLoader,
+			writer: cfgWriter,
+		})
+	}
+	return dashboardSvc
 }
 
 // buildHTTPServer creates the HTTP server with all routes registered.
@@ -558,6 +1408,7 @@ func buildHTTPServer(
 		gateway:                 gateway,
 		taskSvc:                 services.Task,
 		taskRepo:                repos.Task,
+		officeRepo:              repos.Office,
 		analyticsRepo:           repos.Analytics,
 		orchestratorSvc:         orchestratorSvc,
 		lifecycleMgr:            lifecycleMgr,
@@ -565,6 +1416,7 @@ func buildHTTPServer(
 		eventBus:                eventBus,
 		services:                services,
 		agentSettingsController: agentSettingsController,
+		agentSettingsRepo:       repos.AgentSettings,
 		agentList:               agentRegistry,
 		agentRegistry:           agentRegistry,
 		userCtrl:                usercontroller.NewController(services.User),
@@ -580,7 +1432,7 @@ func buildHTTPServer(
 		repoCloner:              repoCloner,
 		version:                 Version,
 		webInternalURL:          cfg.Server.WebInternalURL,
-		pprofEnabled:            cfg.Debug.PprofEnabled,
+		devMode:                 cfg.Debug.DevMode || cfg.Debug.PprofEnabled,
 		httpPort:                port,
 		log:                     log,
 	})

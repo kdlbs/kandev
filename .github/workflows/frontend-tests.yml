@@ -37,7 +37,7 @@ concurrency:
 jobs:
   frontend:
     name: Run Frontend Lint, Tests, and Build
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-4x
     defaults:
       run:
         working-directory: apps

@@ -93,6 +93,11 @@ export type WorkflowStep = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
+  /**
+   * Phase 2 (ADR-0004) semantic UX hint. Backend code does not branch on this;
+   * frontend uses it to choose presentation (review/approval styling, etc).
+   */
+  stage_type?: "work" | "review" | "approval" | "custom";
   created_at: string;
   updated_at: string;
 };
@@ -130,6 +135,7 @@ export type TaskSessionState =
   | "CREATED"
   | "STARTING"
   | "RUNNING"
+  | "IDLE"
   | "WAITING_FOR_INPUT"
   | "COMPLETED"
   | "FAILED"
@@ -144,6 +150,11 @@ export type Workflow = {
   agent_profile_id?: string;
   sort_order?: number;
   hidden?: boolean;
+  /**
+   * Phase 2 (ADR-0004) UX hint. Frontend uses this to pick a presentation
+   * shell (kanban board, office task pane, etc). Backend does NOT branch on it.
+   */
+  style?: "kanban" | "office" | "custom";
   created_at: string;
   updated_at: string;
 };
@@ -157,6 +168,7 @@ export type Workspace = {
   default_environment_id?: string | null;
   default_agent_profile_id?: string | null;
   default_config_agent_profile_id?: string | null;
+  office_workflow_id?: string;
   created_at: string;
   updated_at: string;
 };
@@ -293,6 +305,7 @@ export type WorkflowStepDTO = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
+  stage_type?: "work" | "review" | "approval" | "custom";
   created_at?: string;
   updated_at?: string;
 };
@@ -306,9 +319,8 @@ export type MoveTaskResponse = {
 export type TaskSession = {
   id: string;
   task_id: string;
-  agent_instance_id?: string;
-  container_id?: string;
   agent_profile_id?: string;
+  container_id?: string;
   executor_id?: string;
   environment_id?: string;
   repository_id?: string;
@@ -332,6 +344,8 @@ export type TaskSession = {
   is_primary?: boolean;
   is_passthrough?: boolean;
   review_status?: WorkflowReviewStatus;
+  // Server-resolved tool_call count, populated by ListTaskSessions.
+  command_count?: number;
 };
 
 export type TaskSessionsResponse = {

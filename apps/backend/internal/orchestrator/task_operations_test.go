@@ -10,7 +10,7 @@ import (
 
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
@@ -1047,6 +1047,52 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 			t.Fatalf("expected ExecutorRunning to be preserved for resumable failed session, got error: %v", err)
 		}
 		if er.ResumeToken != "acp-session-abc" {
+			t.Fatalf("expected resume token to be preserved, got %q", er.ResumeToken)
+		}
+	})
+
+	// Pins office IDLE preservation: an office session sitting in IDLE
+	// (agent torn down between turns, conversation parked for the next
+	// run) MUST stay IDLE after backend restart. The previous code
+	// path flipped any non-WAITING_FOR_INPUT active state — including
+	// IDLE — to WAITING_FOR_INPUT, which made the chat UI render as
+	// "Agent working" on a restored task even when nothing was running.
+	t.Run("idle_office_session_state_preserved", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		seedTaskAndSession(t, repo, "task-idle", "session-idle", models.TaskSessionStateIdle)
+
+		err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:          "er-idle",
+			SessionID:   "session-idle",
+			TaskID:      "task-idle",
+			ResumeToken: "acp-session-xyz",
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+		if err != nil {
+			t.Fatalf("failed to upsert executor running: %v", err)
+		}
+
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+		svc.reconcileSessionsOnStartup(ctx)
+
+		session, err := repo.GetTaskSession(ctx, "session-idle")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		if session.State != models.TaskSessionStateIdle {
+			t.Fatalf("expected IDLE to be preserved, got %q", session.State)
+		}
+		// ExecutorRunning row must be preserved — the resume token is
+		// what powers the next run's session/load.
+		er, err := repo.GetExecutorRunningBySessionID(ctx, "session-idle")
+		if err != nil {
+			t.Fatalf("expected ExecutorRunning to be preserved for IDLE office session: %v", err)
+		}
+		if er.ResumeToken != "acp-session-xyz" {
 			t.Fatalf("expected resume token to be preserved, got %q", er.ResumeToken)
 		}
 	})

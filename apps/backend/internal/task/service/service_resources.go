@@ -224,6 +224,22 @@ func (s *Service) ListWorkflows(ctx context.Context, workspaceID string, include
 	return s.workflows.ListWorkflows(ctx, workspaceID, includeHidden)
 }
 
+// GetOfficeWorkflowIDs returns the set of workflow IDs that are office workflows
+// (referenced by any workspace's office_workflow_id column).
+func (s *Service) GetOfficeWorkflowIDs(ctx context.Context) map[string]struct{} {
+	workspaces, err := s.workspaces.ListWorkspaces(ctx)
+	if err != nil {
+		return nil
+	}
+	ids := make(map[string]struct{})
+	for _, ws := range workspaces {
+		if ws.OfficeWorkflowID != "" {
+			ids[ws.OfficeWorkflowID] = struct{}{}
+		}
+	}
+	return ids
+}
+
 // ReorderWorkflows updates sort_order for workflows within a workspace.
 func (s *Service) ReorderWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) error {
 	if err := s.workflows.ReorderWorkflows(ctx, workspaceID, workflowIDs); err != nil {

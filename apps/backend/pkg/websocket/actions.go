@@ -136,6 +136,8 @@ const (
 	ActionSessionUnfocus  = "session.unfocus"
 	ActionUserSubscribe   = "user.subscribe"
 	ActionUserUnsubscribe = "user.unsubscribe"
+	ActionRunSubscribe    = "run.subscribe"
+	ActionRunUnsubscribe  = "run.unsubscribe"
 
 	// Message actions
 	ActionMessageAdd    = "message.add"
@@ -319,6 +321,12 @@ const (
 	ActionMCPDeleteTaskPlan       = "mcp.delete_task_plan"
 	ActionMCPClarificationTimeout = "mcp.clarification_timeout"
 
+	// Office task handoffs (cross-task context).
+	ActionMCPListRelatedTasks  = "mcp.list_related_tasks"
+	ActionMCPListTaskDocuments = "mcp.list_task_documents"
+	ActionMCPGetTaskDocument   = "mcp.get_task_document"
+	ActionMCPWriteTaskDocument = "mcp.write_task_document"
+
 	// Config-mode MCP actions (agent-native configuration)
 	ActionMCPCreateWorkflow = "mcp.create_workflow"
 	ActionMCPUpdateWorkflow = "mcp.update_workflow"
@@ -420,6 +428,32 @@ const (
 	ActionSlackConfigSet    = "slack.config.set"
 	ActionSlackConfigDelete = "slack.config.delete"
 	ActionSlackConfigTest   = "slack.config.test"
+)
+
+// Office notification actions (server -> client)
+const (
+	ActionOfficeTaskUpdated      = "office.task.updated"
+	ActionOfficeTaskCreated      = "office.task.created"
+	ActionOfficeTaskMoved        = "office.task.moved"
+	ActionOfficeTaskStatus       = "office.task.status_changed"
+	ActionOfficeTaskDecision     = "office.task.decision_recorded"
+	ActionOfficeTaskReview       = "office.task.review_requested"
+	ActionOfficeCommentCreated   = "office.comment.created"
+	ActionOfficeAgentCompleted   = "office.agent.completed"
+	ActionOfficeAgentFailed      = "office.agent.failed"
+	ActionOfficeAgentUpdated     = "office.agent.updated"
+	ActionOfficeApprovalCreated  = "office.approval.created"
+	ActionOfficeApprovalResolved = "office.approval.resolved"
+	ActionOfficeCostRecorded     = "office.cost.recorded"
+	ActionOfficeRunQueued        = "office.run.queued"
+	ActionOfficeRunProcessed     = "office.run.processed"
+	ActionOfficeRoutineTriggered = "office.routine.triggered"
+	ActionOfficeActivityCreated  = "office.activity.created"
+	ActionRunEventAppended       = "run.event.appended"
+	// Office provider-routing events.
+	ActionOfficeProviderHealthChanged  = "office.provider.health_changed"
+	ActionOfficeRouteAttemptAppended   = "office.route_attempt.appended"
+	ActionOfficeRoutingSettingsUpdated = "office.routing.settings_updated"
 )
 
 // Error codes

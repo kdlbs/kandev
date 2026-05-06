@@ -11,10 +11,18 @@ import type {
   ListAgentDiscoveryResponse,
 } from "@/lib/types/http";
 import type { PermissionKey } from "@/lib/agent-permissions";
+import { normalizeAgentProfile } from "@/lib/api/domains/agent-profile-normalize";
 
 type ProfilePermissions = Record<PermissionKey, boolean>;
 
 const { apiBaseUrl } = getBackendConfig();
+
+function normalizeAgentInPlace(agent: Agent): Agent {
+  return {
+    ...agent,
+    profiles: (agent.profiles ?? []).map((profile) => normalizeAgentProfile(profile)),
+  };
+}
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -43,7 +51,8 @@ export async function listAgentDiscoveryAction(): Promise<ListAgentDiscoveryResp
 }
 
 export async function listAgentsAction(): Promise<ListAgentsResponse> {
-  return fetchJson<ListAgentsResponse>(`${apiBaseUrl}/api/v1/agents`);
+  const res = await fetchJson<ListAgentsResponse>(`${apiBaseUrl}/api/v1/agents`);
+  return { ...res, agents: (res.agents ?? []).map(normalizeAgentInPlace) };
 }
 
 export async function createAgentAction(payload: {
@@ -59,10 +68,11 @@ export async function createAgentAction(payload: {
     } & ProfilePermissions
   >;
 }): Promise<Agent> {
-  return fetchJson<Agent>(`${apiBaseUrl}/api/v1/agents`, {
+  const res = await fetchJson<Agent>(`${apiBaseUrl}/api/v1/agents`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
+  return normalizeAgentInPlace(res);
 }
 
 export async function updateAgentAction(
@@ -73,10 +83,11 @@ export async function updateAgentAction(
     mcp_config_path?: string | null;
   },
 ): Promise<Agent> {
-  return fetchJson<Agent>(`${apiBaseUrl}/api/v1/agents/${id}`, {
+  const res = await fetchJson<Agent>(`${apiBaseUrl}/api/v1/agents/${id}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+  return normalizeAgentInPlace(res);
 }
 
 export async function deleteAgentAction(id: string) {
@@ -93,25 +104,29 @@ export async function createAgentProfileAction(
     cli_flags?: CLIFlag[];
   } & ProfilePermissions,
 ): Promise<AgentProfile> {
-  return fetchJson<AgentProfile>(`${apiBaseUrl}/api/v1/agents/${agentId}/profiles`, {
+  const raw = await fetchJson<unknown>(`${apiBaseUrl}/api/v1/agents/${agentId}/profiles`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
+  return normalizeAgentProfile(raw);
 }
 
 export async function updateAgentProfileAction(
   id: string,
-  payload: Partial<
-    Pick<
-      AgentProfile,
-      "name" | "model" | "mode" | "allow_indexing" | "cli_passthrough" | "cli_flags"
-    >
-  >,
+  payload: {
+    name?: string;
+    model?: string;
+    mode?: string;
+    allow_indexing?: boolean;
+    cli_passthrough?: boolean;
+    cli_flags?: CLIFlag[];
+  },
 ): Promise<AgentProfile> {
-  return fetchJson<AgentProfile>(`${apiBaseUrl}/api/v1/agent-profiles/${id}`, {
+  const raw = await fetchJson<unknown>(`${apiBaseUrl}/api/v1/agent-profiles/${id}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+  return normalizeAgentProfile(raw);
 }
 
 import type { ActiveSessionInfo } from "@/lib/types/agent-profile-errors";

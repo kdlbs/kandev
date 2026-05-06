@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -84,11 +85,13 @@ func (a *OpenCodeACP) BuildCommand(opts CommandOptions) Command {
 func (a *OpenCodeACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd("opencode", "acp").Build(),
-		WorkingDir:     "{workspace}",
-		Env:            map[string]string{},
-		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Protocol:       agent.ProtocolACP,
+		Cmd:             Cmd("opencode", "acp").Build(),
+		WorkingDir:      "{workspace}",
+		Env:             map[string]string{},
+		ResourceLimits:  ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
+		Protocol:        agent.ProtocolACP,
+		ProjectSkillDir: ".agents/skills",
+		UserSkillDir:    ".config/opencode/skills",
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
@@ -102,6 +105,8 @@ func (a *OpenCodeACP) RemoteAuth() *RemoteAuth { return nil }
 func (a *OpenCodeACP) InstallScript() string {
 	return "npm install -g " + opencodeACPPkg
 }
+
+func (a *OpenCodeACP) BillingType() usage.BillingType { return defaultBillingType() }
 
 func (a *OpenCodeACP) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings

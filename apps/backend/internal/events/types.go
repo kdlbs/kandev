@@ -10,6 +10,12 @@ const (
 	TaskMoved        = "task.moved" // Manual step change via MoveTask
 )
 
+// Event types for office task tree controls.
+const (
+	OfficeTaskTreeHoldCreated  = "task.tree_hold_created"
+	OfficeTaskTreeHoldReleased = "task.tree_hold_released"
+)
+
 // Event types for workspaces
 const (
 	WorkspaceCreated = "workspace.created"
@@ -133,7 +139,8 @@ const (
 
 // Event types for agent stream messages
 const (
-	AgentStream = "agent.stream" // Base subject for agent stream events
+	AgentStream           = "agent.stream"             // Base subject for agent stream events
+	AgentTurnMessageSaved = "agent.turn.message_saved" // Agent text saved after a turn completes
 )
 
 // Event types for agent prompts
@@ -145,6 +152,7 @@ const (
 const (
 	ClarificationAnswered        = "clarification.answered"         // User answered agent's clarification question (fallback/new turn)
 	ClarificationPrimaryAnswered = "clarification.primary_answered" // User answered while agent is still waiting (same turn)
+	ClarificationCancelled       = "clarification.cancelled"        // User cancelled a pending clarification question
 )
 
 // Event types for workspace/git status
@@ -377,3 +385,49 @@ func BuildSessionPromptUsageSubject(sessionID string) string {
 func BuildSessionPromptUsageWildcardSubject() string {
 	return SessionPromptUsageUpdated + ".*"
 }
+
+// BuildOfficeRunEventSubject creates a per-run subject for run event
+// appends. The gateway subscribes to the wildcard form on startup so
+// each subscriber on a specific run id gets only its own events.
+func BuildOfficeRunEventSubject(runID string) string {
+	return OfficeRunEventAppended + "." + runID
+}
+
+// BuildOfficeRunEventWildcardSubject creates a wildcard subscription
+// for all run-event appends, used by the WS gateway to fan out per
+// run id.
+func BuildOfficeRunEventWildcardSubject() string {
+	return OfficeRunEventAppended + ".*"
+}
+
+// Event types for office domain
+const (
+	OfficeAgentCreated       = "office.agent.created"
+	OfficeAgentUpdated       = "office.agent.updated"
+	OfficeAgentStatusChanged = "office.agent.status_changed"
+	OfficeSkillCreated       = "office.skill.created"
+	OfficeSkillUpdated       = "office.skill.updated"
+	OfficeProjectCreated     = "office.project.created"
+	OfficeProjectUpdated     = "office.project.updated"
+	OfficeApprovalCreated    = "office.approval.created"
+	OfficeApprovalResolved   = "office.approval.resolved"
+	OfficeCommentCreated     = "office.comment.created"
+	OfficeCostRecorded       = "office.cost.recorded"
+	OfficeRunQueued          = "office.run.queued"
+	OfficeRunProcessed       = "office.run.processed"
+	// OfficeRunEventAppended is published after a row lands in
+	// office_run_events. Subjects are namespaced by run id so the
+	// gateway only delivers events for runs the client cares about.
+	OfficeRunEventAppended     = "office.run.event_appended"
+	OfficeRoutineTriggered     = "office.routine.triggered"
+	OfficeInboxItem            = "office.inbox.item"
+	OfficeTaskStatusChanged    = "office.task.status_changed"
+	OfficeTaskUpdated          = "office.task.updated"
+	OfficeTaskDecisionRecorded = "office.task.decision_recorded"
+	OfficeTaskReviewRequested  = "office.task.review_requested"
+	// Provider-routing events. Payloads are JSON-serialisable maps so the
+	// office WS broadcaster can forward them as-is to the frontend.
+	OfficeProviderHealthChanged  = "office.provider.health_changed"
+	OfficeRouteAttemptAppended   = "office.route_attempt.appended"
+	OfficeRoutingSettingsUpdated = "office.routing.settings_updated"
+)

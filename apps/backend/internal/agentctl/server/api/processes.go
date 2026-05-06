@@ -71,7 +71,7 @@ func (s *Server) handleGetProcess(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "process id is required"})
 		return
 	}
-	includeOutput := c.Query("include_output") == "true"
+	includeOutput := c.Query("include_output") == queryParamTrue
 	proc, ok := s.procMgr.GetProcess(id, includeOutput)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "process not found"})

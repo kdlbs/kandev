@@ -15,6 +15,7 @@ import {
   IconChartBar,
   IconTimeline,
   IconStethoscope,
+  IconBuildings,
 } from "@tabler/icons-react";
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
 import { IntegrationsTopbarLinks } from "@/components/integrations/integrations-menu";
@@ -136,11 +137,27 @@ function StatsTopbarButton() {
   );
 }
 
+function OfficeTopbarButton() {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button asChild variant="outline" size="icon-lg" className="cursor-pointer">
+          <Link href="/office" aria-label="Office">
+            <IconBuildings className="h-4 w-4" />
+          </Link>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Office</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function HomeLeftActions({ workspaceId }: { workspaceId?: string }) {
   return (
     <>
       <IntegrationsTopbarLinks />
       <StatsTopbarButton />
+      <OfficeTopbarButton />
       <ImproveKandevTopbarButton workspaceId={workspaceId} />
     </>
   );
@@ -150,6 +167,7 @@ function WorkspaceLeftActions({ workspaceId }: { workspaceId?: string }) {
   return (
     <>
       <IntegrationsTopbarLinks />
+      <OfficeTopbarButton />
       <ImproveKandevTopbarButton workspaceId={workspaceId} />
     </>
   );

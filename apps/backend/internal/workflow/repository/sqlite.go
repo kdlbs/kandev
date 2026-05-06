@@ -105,6 +105,19 @@ func (r *Repository) initSchema() error {
 	// Add agent_profile_id column to workflow_steps for per-step agent profile override (ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE workflow_steps ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
 
+	// Phase 2 (ADR-0004) — workflow_steps.stage_type, a UX hint for the
+	// frontend ("work" | "review" | "approval" | "custom"). Backend code
+	// MUST NOT branch on it. Idempotent ALTER; default keeps existing rows
+	// at "custom".
+	_, _ = r.db.Exec(`ALTER TABLE workflow_steps ADD COLUMN stage_type TEXT NOT NULL DEFAULT 'custom'`)
+
+	// Phase 2 — multi-agent participation tables. Empty rows for a step
+	// preserve today's single-agent behaviour, so existing kanban
+	// workflows are unaffected.
+	if err := r.initPhase2Schema(); err != nil {
+		return err
+	}
+
 	// Seed system templates
 	if err := r.seedSystemTemplates(); err != nil {
 		return fmt.Errorf("failed to seed system templates: %w", err)
@@ -543,13 +556,24 @@ func (r *Repository) CreateStep(ctx context.Context, step *models.WorkflowStep) 
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflow_steps (
 			id, workflow_id, name, position, color,
-			prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, stage_type, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), step.ID, step.WorkflowID, step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON), dialect.BoolToInt(step.AllowManualMove),
-		dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, step.CreatedAt, step.UpdatedAt)
+		dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, normalizeStageType(step.StageType), step.CreatedAt, step.UpdatedAt)
 
 	return err
+}
+
+// normalizeStageType returns a string fit for the workflow_steps.stage_type
+// column. Empty / invalid input collapses to "custom" so existing callers
+// who do not set the field stay schema-compliant.
+func normalizeStageType(s models.StageType) string {
+	switch s {
+	case models.StageTypeWork, models.StageTypeReview, models.StageTypeApproval, models.StageTypeCustom:
+		return string(s)
+	}
+	return string(models.StageTypeCustom)
 }
 
 // scanStep scans a single workflow step row including JSON events parsing.
@@ -559,10 +583,10 @@ func (r *Repository) scanStep(row interface {
 	step := &models.WorkflowStep{}
 	var allowManualMove, isStartStep, showInCommandPanel int
 	var autoArchiveAfterHours sql.NullInt64
-	var color, prompt, eventsJSON, agentProfileID sql.NullString
+	var color, prompt, eventsJSON, agentProfileID, stageType sql.NullString
 
 	err := row.Scan(&step.ID, &step.WorkflowID, &step.Name, &step.Position, &color,
-		&prompt, &eventsJSON, &allowManualMove, &isStartStep, &showInCommandPanel, &autoArchiveAfterHours, &agentProfileID, &step.CreatedAt, &step.UpdatedAt)
+		&prompt, &eventsJSON, &allowManualMove, &isStartStep, &showInCommandPanel, &autoArchiveAfterHours, &agentProfileID, &stageType, &step.CreatedAt, &step.UpdatedAt)
 
 	if err != nil {
 		return nil, err
@@ -576,6 +600,11 @@ func (r *Repository) scanStep(row interface {
 	}
 	if agentProfileID.Valid {
 		step.AgentProfileID = agentProfileID.String
+	}
+	if stageType.Valid && stageType.String != "" {
+		step.StageType = models.StageType(stageType.String)
+	} else {
+		step.StageType = models.StageTypeCustom
 	}
 	if color.Valid {
 		step.Color = color.String
@@ -592,7 +621,7 @@ func (r *Repository) scanStep(row interface {
 	return step, nil
 }
 
-const stepSelectColumns = `id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, created_at, updated_at`
+const stepSelectColumns = `id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, stage_type, created_at, updated_at`
 
 // GetStep retrieves a workflow step by ID.
 func (r *Repository) GetStep(ctx context.Context, id string) (*models.WorkflowStep, error) {
@@ -624,11 +653,11 @@ func (r *Repository) UpdateStep(ctx context.Context, step *models.WorkflowStep) 
 		UPDATE workflow_steps SET
 			name = ?, position = ?, color = ?,
 			prompt = ?, events = ?,
-			allow_manual_move = ?, is_start_step = ?, show_in_command_panel = ?, auto_archive_after_hours = ?, agent_profile_id = ?, updated_at = ?
+			allow_manual_move = ?, is_start_step = ?, show_in_command_panel = ?, auto_archive_after_hours = ?, agent_profile_id = ?, stage_type = ?, updated_at = ?
 		WHERE id = ?
 	`), step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON),
-		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, step.UpdatedAt, step.ID)
+		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, normalizeStageType(step.StageType), step.UpdatedAt, step.ID)
 	if err != nil {
 		return err
 	}
@@ -731,7 +760,7 @@ func (r *Repository) ListStepsByWorkflow(ctx context.Context, workflowID string)
 func (r *Repository) ListStepsByWorkspaceID(ctx context.Context, workspaceID string) ([]*models.WorkflowStep, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT ws.id, ws.workflow_id, ws.name, ws.position, ws.color, ws.prompt, ws.events,
-			ws.allow_manual_move, ws.is_start_step, ws.show_in_command_panel, ws.auto_archive_after_hours, ws.agent_profile_id, ws.created_at, ws.updated_at
+			ws.allow_manual_move, ws.is_start_step, ws.show_in_command_panel, ws.auto_archive_after_hours, ws.agent_profile_id, ws.stage_type, ws.created_at, ws.updated_at
 		FROM workflow_steps ws
 		JOIN workflows w ON ws.workflow_id = w.id
 		WHERE w.workspace_id = ?
@@ -743,6 +772,46 @@ func (r *Repository) ListStepsByWorkspaceID(ctx context.Context, workspaceID str
 	defer func() { _ = rows.Close() }()
 
 	return r.scanSteps(rows)
+}
+
+// StepEventsRow projects (step_id, workflow_id, raw events JSON) for a
+// single workflow step. Used by the Phase 5 heartbeat / budget cron
+// handlers (see internal/scheduler/cron) so they can detect new
+// trigger keys (on_heartbeat, on_budget_alert, …) that the Phase 2
+// StepEvents struct does not yet model. The handlers parse the raw
+// JSON themselves to keep the repository decoupled from the engine's
+// trigger taxonomy.
+type StepEventsRow struct {
+	StepID     string
+	WorkflowID string
+	EventsJSON string
+}
+
+// ListAllStepEventsJSON returns the raw events JSON for every workflow
+// step in the database. Cheap enough for the Phase 5 cron tick because
+// kanban deployments have on the order of tens to low hundreds of
+// steps; the SQL filter on `events LIKE '%on_heartbeat%'` keeps the
+// scan tight even as office workflows multiply.
+func (r *Repository) ListAllStepEventsJSON(ctx context.Context) ([]StepEventsRow, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT id, workflow_id, COALESCE(events, '')
+		FROM workflow_steps
+		WHERE events LIKE '%on_heartbeat%' OR events LIKE '%on_budget_alert%'
+	`))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []StepEventsRow
+	for rows.Next() {
+		var row StepEventsRow
+		if err := rows.Scan(&row.StepID, &row.WorkflowID, &row.EventsJSON); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 // scanSteps is a helper to scan multiple workflow step rows.

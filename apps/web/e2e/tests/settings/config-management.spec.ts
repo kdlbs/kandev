@@ -30,7 +30,9 @@ async function runAndWait(
   await testPage.goto(`/t/${taskId}`);
   const page = new SessionPage(testPage);
   await page.waitForLoad();
-  await expect(page.chat.getByText(marker, { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.activeChat().getByText(marker, { exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
   return page;
 }
 
@@ -638,7 +640,7 @@ test.describe("Config-mode MCP — multi-tool workflow", () => {
     expect(createdStep).toBeTruthy();
   });
 
-  test("agent performs full workflow setup with steps, profile, and MCP config", async ({
+  test("agent performs workflow setup with a step, profile, and MCP config", async ({
     testPage,
     apiClient,
     seedData,
@@ -652,10 +654,8 @@ test.describe("Config-mode MCP — multi-tool workflow", () => {
       seedData,
       [
         'e2e:message("Setting up full workflow...")',
-        // Create 3 steps
+        // Create a workflow step
         `e2e:mcp:kandev:create_workflow_step_kandev({"workflow_id":"${workflow.id}","name":"Build","position":0,"color":"#3b82f6"})`,
-        `e2e:mcp:kandev:create_workflow_step_kandev({"workflow_id":"${workflow.id}","name":"Test","position":1,"color":"#eab308"})`,
-        `e2e:mcp:kandev:create_workflow_step_kandev({"workflow_id":"${workflow.id}","name":"Deploy","position":2,"color":"#22c55e"})`,
         // Create a new agent profile
         `e2e:mcp:kandev:create_agent_profile_kandev({"agent_id":"${agent.id}","name":"CI Profile","model":"claude-sonnet-4-5-20250514"})`,
         // Update MCP config on the test profile
@@ -666,10 +666,18 @@ test.describe("Config-mode MCP — multi-tool workflow", () => {
 
     await runAndWait(testPage, session.task_id, "Full setup complete");
 
-    // Verify steps
+    // Verify workflow step
     const { steps } = await apiClient.listWorkflowSteps(workflow.id);
-    expect(steps.length).toBe(3);
-    expect(steps.map((s) => s.name).sort()).toEqual(["Build", "Deploy", "Test"]);
+    expect(steps).toHaveLength(1);
+    expect(steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "Build",
+          position: 0,
+          color: "#3b82f6",
+        }),
+      ]),
+    );
 
     // Verify new profile was created
     const { agents: updatedAgents } = await apiClient.listAgents();

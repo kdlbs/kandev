@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -96,10 +97,11 @@ func (a *Auggie) Runtime() *RuntimeConfig {
 		Mounts: []MountTemplate{
 			{Source: "{workspace}", Target: "/workspace"},
 		},
-		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Protocol:       agent.ProtocolACP,
-		WorkspaceFlag:  "--workspace-root",
-		AssumeMcpSse:   true,
+		ResourceLimits:  ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
+		Protocol:        agent.ProtocolACP,
+		WorkspaceFlag:   "--workspace-root",
+		AssumeMcpSse:    true,
+		ProjectSkillDir: ".agents/skills",
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
@@ -138,6 +140,8 @@ func (a *Auggie) LoginCommand() *LoginCommand {
 func (a *Auggie) InstallScript() string {
 	return "npm install -g " + auggiePkg
 }
+
+func (a *Auggie) BillingType() usage.BillingType { return defaultBillingType() }
 
 func (a *Auggie) PermissionSettings() map[string]PermissionSetting {
 	return auggiePermSettings

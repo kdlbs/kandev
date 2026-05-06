@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -149,6 +150,7 @@ func (m *mockInferenceAgent) BuildCommand(agents.CommandOptions) agents.Command 
 }
 func (m *mockInferenceAgent) PermissionSettings() map[string]agents.PermissionSetting { return nil }
 func (m *mockInferenceAgent) Runtime() *agents.RuntimeConfig                          { return &agents.RuntimeConfig{} }
+func (m *mockInferenceAgent) BillingType() usage.BillingType                          { return usage.BillingTypeAPIKey }
 func (m *mockInferenceAgent) RemoteAuth() *agents.RemoteAuth                          { return nil }
 func (m *mockInferenceAgent) InstallScript() string                                   { return "" }
 func (m *mockInferenceAgent) InferenceConfig() *agents.InferenceConfig {

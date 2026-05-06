@@ -15,6 +15,7 @@ const TASK_STATE_LABELS: Record<TaskState, string> = {
 
 const TASK_SESSION_STATE_LABELS: Record<TaskSessionState, string> = {
   CREATED: "Created",
+  IDLE: "Idle",
   STARTING: "Starting",
   RUNNING: "Running",
   WAITING_FOR_INPUT: "Waiting for input",

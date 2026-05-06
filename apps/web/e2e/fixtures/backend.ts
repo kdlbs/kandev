@@ -30,10 +30,11 @@ export type BackendContext = {
   tmpDir: string;
   /**
    * Kill the backend process and respawn with the same config (DB, ports,
-   * tmpDir persist). Optional `envOverrides` mutates the captured env *for the
-   * lifetime of the worker*; pass them again on a subsequent restart to
-   * revert. Only in-memory execution state (running agents, WS connections)
-   * is lost.
+   * tmpDir persist). The captured env is rebuilt from the baseline snapshot
+   * on every call, so `envOverrides` only apply to this restart — they do
+   * NOT leak into a subsequent restart. Call `restart()` with no args to
+   * revert to the baseline env. Only in-memory execution state (running
+   * agents, WS connections) is lost.
    */
   restart: (envOverrides?: Record<string, string>) => Promise<void>;
 };
@@ -83,6 +84,31 @@ function killProcess(proc: ChildProcess): Promise<void> {
       resolve();
     });
   });
+}
+
+/**
+ * Polls until the given TCP port is no longer accepting connections, or until
+ * timeoutMs elapses. Used after killProcessGroup to avoid a fixed sleep: the
+ * OS may hold the port in TIME_WAIT for up to 60 s under heavy load, and
+ * sleeping a fixed 2 s races against that window.
+ */
+async function waitForPortFree(port: number, timeoutMs = 10_000): Promise<void> {
+  const { createConnection } = await import("node:net");
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const free = await new Promise<boolean>((resolve) => {
+      const sock = createConnection({ port, host: "127.0.0.1" });
+      sock.once("connect", () => {
+        sock.destroy();
+        resolve(false); // port still occupied
+      });
+      sock.once("error", () => resolve(true)); // ECONNREFUSED → port is free
+    });
+    if (free) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  // Timeout expired — proceed anyway; the new process will fail-fast if the
+  // port is still held and waitForHealth will surface the error.
 }
 
 /**
@@ -257,9 +283,18 @@ exec git "$@"
         KANDEV_SERVER_PORT: String(backendPort),
         KANDEV_DATABASE_PATH: dbPath,
         KANDEV_MOCK_AGENT: "only",
+        // KANDEV_MOCK_PROVIDERS intentionally NOT set by default. When
+        // set, it registers the mock binary under additional canonical
+        // routing provider IDs (claude-acp, codex-acp, opencode-acp).
+        // That side effect leaks into every spec that counts agents
+        // (e.g. utility-agents listbox sees 4 instead of 1). The five
+        // office-routing-* specs that need multi-mock opt in by passing
+        // KANDEV_MOCK_PROVIDERS to backend.restart() — see
+        // registry.RoutableProviderIDs for the mapping.
         KANDEV_MOCK_GITHUB: "true",
         KANDEV_MOCK_JIRA: "true",
         KANDEV_MOCK_LINEAR: "true",
+        KANDEV_E2E_MOCK: "true",
         KANDEV_DOCKER_ENABLED: dockerEnabled ? "true" : "false",
         // When Docker is on, point the lifecycle resolvers at the linux/amd64
         // binaries the test runner pre-built, so containers can bind-mount them.
@@ -290,6 +325,11 @@ exec git "$@"
 
       const debug = !!process.env.E2E_DEBUG;
       const baseUrl = `http://localhost:${backendPort}`;
+
+      // Snapshot the baseline env so `restart(envOverrides)` rebuilds from
+      // a clean copy each call instead of accumulating leftover keys (e.g.
+      // KANDEV_MOCK_PROVIDERS, KANDEV_PROVIDER_FAILURES) from prior tests.
+      const baselineEnv = { ...backendEnv } as Record<string, string>;
 
       // --- Spawn backend ---
       let backendProc = spawnBackendProcess(backendEnv, debug, backendPort);
@@ -334,15 +374,23 @@ exec git "$@"
        * Only in-memory execution state (running agents, WS connections) is lost.
        */
       const restart = async (envOverrides?: Record<string, string>) => {
+        // Rebuild from the baseline snapshot so a previous restart's
+        // overrides don't leak into this one (e.g. KANDEV_MOCK_PROVIDERS
+        // set by the routing specs would otherwise stick for the rest of
+        // the worker's lifetime and register canonical agent IDs that
+        // sibling specs count).
+        const nextEnv: Record<string, string> = { ...baselineEnv };
         if (envOverrides) {
           for (const [k, v] of Object.entries(envOverrides)) {
-            (backendEnv as Record<string, string>)[k] = v;
+            nextEnv[k] = v;
           }
         }
         await killProcessGroup(backendProc);
-        // Wait for OS to release the TCP port — Linux TIME_WAIT can exceed 500ms under load
-        await new Promise((r) => setTimeout(r, 2_000));
-        backendProc = spawnBackendProcess(backendEnv, debug, backendPort);
+        // Poll until the OS releases the TCP port rather than sleeping a fixed
+        // 2 s. TIME_WAIT can linger for 30–120 s under load; the probe exits
+        // as soon as the port stops accepting connections (typically <200 ms).
+        await waitForPortFree(backendPort);
+        backendProc = spawnBackendProcess(nextEnv, debug, backendPort);
         // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use)
         await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS, backendProc);
       };

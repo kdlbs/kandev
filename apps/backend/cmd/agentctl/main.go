@@ -39,6 +39,13 @@ var (
 )
 
 func main() {
+	// Dispatch kandev CLI subcommands before flag parsing or server startup.
+	// When invoked as "agentctl kandev <cmd>", this runs the CLI and exits
+	// without starting the HTTP server.
+	if len(os.Args) > 1 && os.Args[1] == "kandev" {
+		os.Exit(runKandevCLI(os.Args[2:]))
+	}
+
 	flag.Parse()
 
 	// Load configuration

@@ -105,7 +105,6 @@ function generateCreateDiff(content: string, filePath: string): string {
 export function transformGitDiff(
   filePath: string,
   diff: string,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _status: "A" | "M" | "D" | "??" | string,
 ): FileDiffData {
   return {

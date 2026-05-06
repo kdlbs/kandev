@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -112,3 +113,5 @@ func (a *DroidACP) InferenceConfig() *InferenceConfig {
 		Command:   NewCommand("npx", "-y", droidACPPkg, "exec", "--output-format", "acp"),
 	}
 }
+
+func (a *DroidACP) BillingType() usage.BillingType { return defaultBillingType() }

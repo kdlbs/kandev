@@ -4,7 +4,7 @@ import (
 	"context"
 	"sort"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )

@@ -10,7 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
@@ -26,6 +26,9 @@ func (s *Service) subscribeClarificationEvents() {
 	}
 	if _, err := s.eventBus.Subscribe(events.ClarificationPrimaryAnswered, s.handleClarificationPrimaryAnswered); err != nil {
 		s.logger.Error("failed to subscribe to clarification.primary_answered events", zap.Error(err))
+	}
+	if _, err := s.eventBus.Subscribe(events.ClarificationCancelled, s.handleClarificationAnswered); err != nil {
+		s.logger.Error("failed to subscribe to clarification.cancelled events", zap.Error(err))
 	}
 }
 

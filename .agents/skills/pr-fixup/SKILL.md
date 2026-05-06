@@ -11,7 +11,8 @@ Wait for CI and code review to complete on a pull request, fix any failures or v
 
 ## Available skills and subagents
 
-- **`verify` subagent** — Run the full verification pipeline (format, typecheck, test, lint) before pushing fixes.
+- **`pr-poller` subagent (Sonnet)** — Polls CI checks and the 4 review bots until terminal, returns a compact structured report. Replaces the old steps 1-3 and the post-push re-check (step 6).
+- **`verify` subagent (Sonnet)** — Run the full verification pipeline (format, typecheck, test, lint) before pushing fixes.
 - **`/e2e`** — Read for debugging guidance when E2E tests fail in CI. Covers test patterns, run commands, failure triage, and local reproduction.
 - **`/commit`** — Use for staging and committing fixes with Conventional Commits format.
 
@@ -26,14 +27,13 @@ The first thing you do — before fetching PR state, before reading logs, before
 
 Create these tasks immediately (use your task/todo tracking tool if available):
 
-1. **Gather PR state** — Fetch checks, comments, and review status
-2. **Wait for CI checks** — Poll until all checks resolve
-3. **Wait for automated reviews** — Poll for CodeRabbit, Greptile, Claude, and cubic
-4. **Fix failing CI checks** — Read logs, fix issues, run E2E tests locally if needed
-5. **Triage review comments** — Classify each comment as valid, already addressed, nitpick, or wrong
-6. **Address each comment** — Fix or reply with reasoning
-7. **Verify, commit, and push** — Run verification pipeline, commit fixes, push
-8. **Summary** — Report what was done: CI fixes, comments addressed/skipped, pushed commit
+1. **Delegate to `pr-poller`** — Subagent gathers CI + bot review state, returns a compact report
+2. **Fix failing CI checks** — Read failing run logs (via `scripts/run-quiet gh-run -- gh run view ...`), fix issues, run E2E tests locally if needed
+3. **Triage review comments** — Classify each comment as valid, already addressed, nitpick, or wrong
+4. **Address each comment** — Fix or reply with reasoning, resolve threads
+5. **Verify, commit, push** — Delegate to `verify` subagent; commit fixes; push
+6. **Re-check** — Delegate to `pr-poller` again. If new failures, loop back to task 2
+7. **Summary** — Report what was done
 
 Then start with task 1. Mark each task in_progress when you begin it and completed when you finish it.
 
@@ -41,95 +41,40 @@ Then start with task 1. Mark each task in_progress when you begin it and complet
 
 ## Steps
 
-### 1. Gather PR state
+### 1. Delegate state-gathering to `pr-poller`
 
 Mark task 1 as in_progress.
 
-Get the PR number from context or the user. Fetch the current state:
+Invoke the `pr-poller` subagent with the PR number (or let it resolve via `gh pr view` against the current branch). The subagent:
+- Fetches the current CI/bot/comment state once
+- Polls (30s, 10min cap) until every CI check and every bot (CodeRabbit, Greptile, Claude, cubic) reaches a terminal state
+- Counts unresolved review threads and bot issue comments
+- Returns a structured report between `=== pr-poller report ===` and `=== end ===` markers
 
-```bash
-gh pr checks <number>
-gh pr view <number> --json comments
-gh api repos/:owner/:repo/pulls/<number>/comments
-```
+**Parse the report.** The fields you care about:
+
+- `ci_failed` — list of `{name, run_id, conclusion, url}`. Empty list ⇒ CI is green.
+- `ci_pending` — anything still running when the 10-min cap hit. Decide whether to re-invoke `pr-poller` after a short delay, or proceed with what you have and re-check at step 6.
+- `bots.<name>` — `done` / `rate_limited` / `pending` / `timeout`. Anything in `done` or `rate_limited` has had its chance; treat the rest as missing data, not a blocker.
+- `unresolved_review_threads` and `issue_comments_from_bots` — drive steps 3-4. If both are 0 and `ci_failed` is empty, skip to step 5 (still run verify + push if you have fixes from earlier).
+
+**Do not fetch poll output yourself** — that is what burns context. The report is the only thing that enters your context.
 
 Mark task 1 as completed.
 
-### 2. Wait for CI checks
+### 2. Fix failing CI checks
 
 Mark task 2 as in_progress.
 
-If any checks are still running (`pending` / `queued` / `in_progress`), poll until they all resolve:
+For each entry in the report's `ci_failed:` list:
 
-```bash
-gh pr checks <number>
-```
-
-- Poll every **30 seconds**
-- Cap at **10 minutes** (20 polls). If still running after 10 min, report which checks are stuck and proceed.
-- Once done, note which checks passed and which failed.
-
-Mark task 2 as completed.
-
-### 3. Wait for automated reviews
-
-Mark task 3 as in_progress.
-
-Check if CodeRabbit, Greptile, Claude, and cubic have posted or are generating reviews.
-
-**Bot usernames** (`gh pr view --json comments` uses GraphQL and returns `author.login` **without** the `[bot]` suffix; `gh api /.../reviews` and `/.../issues/<n>/comments` use REST and return `user.login` **with** the suffix — filters below use whichever form the invoked endpoint returns):
-- CodeRabbit: `coderabbitai[bot]`
-- Greptile: `greptile-apps[bot]`
-- Claude: `claude[bot]` on same-repo PRs (posts a real review with inline comments via the Claude GitHub App), or `github-actions[bot]` on fork PRs (posts findings as issue comments via `GITHUB_TOKEN`; identify by body markers — tracker starts with `**Claude finished `, findings comment starts with `## Code Review`).
-- cubic (cubic.dev): `cubic-dev-ai[bot]` (posts reviews via the GitHub review API, similar to Greptile; has its own `cubic · AI code reviewer` check).
-
-**CodeRabbit — stop waiting if:**
-- A comment contains `<!-- rate limited by coderabbit.ai -->` — rate-limited, won't review.
-- A comment contains `<!-- walkthrough_start -->` — review complete.
-
-**Greptile — stop waiting if:**
-- A review from `greptile-apps[bot]` exists (posts via the GitHub review API, not issue comments).
-
-**Claude — stop waiting if any of these holds:**
-- A review from `claude[bot]` exists (same-repo PR, App-authenticated path — has inline review comments).
-- An issue comment from `github-actions[bot]` whose body starts with `**Claude finished ` or `## Code Review` exists (fork PR, `GITHUB_TOKEN` fallback path — findings are issue comments, no GitHub Review object).
-- The `claude-review` check in `gh pr checks` has completed (regardless of conclusion).
-
-**cubic — stop waiting if any of these holds:**
-- A review from `cubic-dev-ai[bot]` exists (posts via the GitHub review API).
-- The `cubic · AI code reviewer` check in `gh pr checks` has completed (regardless of conclusion).
-
-**Keep polling if:**
-- A bot hasn't commented yet AND `gh pr checks` shows its check is still `pending`.
-
-Poll every **30 seconds**, cap at **10 minutes**. Fetch both issue comments and reviews each poll:
-```bash
-# CodeRabbit posts issue comments
-gh pr view <number> --json comments --jq '.comments[] | select(.author.login == "coderabbitai") | {author: .author.login, body: .body}'
-# Greptile posts reviews (with inline review comments)
-gh api repos/:owner/:repo/pulls/<number>/reviews --jq '.[] | select(.user.login == "greptile-apps[bot]") | {user: .user.login, state: .state}'
-# Claude — same-repo PRs: App-authenticated review + inline comments
-gh api repos/:owner/:repo/pulls/<number>/reviews --jq '.[] | select(.user.login == "claude[bot]") | {user: .user.login, state: .state}'
-# Claude — fork PRs: issue comments from github-actions[bot] (match by body marker)
-gh pr view <number> --json comments --jq '.comments[] | select(.author.login == "github-actions" and ((.body | startswith("**Claude finished ")) or (.body | startswith("## Code Review")))) | {author: .author.login, body_start: (.body[0:80])}'
-# cubic posts reviews (with inline review comments)
-gh api repos/:owner/:repo/pulls/<number>/reviews --jq '.[] | select(.user.login == "cubic-dev-ai[bot]") | {user: .user.login, state: .state}'
-```
-
-Mark task 3 as completed.
-
-### 4. Fix failing CI checks
-
-Mark task 4 as in_progress.
-
-If any CI checks failed:
-
-1. Identify the failed runs from the `gh pr checks` output (the URL column contains the run URL)
-2. Fetch the failed logs:
+1. Use the `run_id` from the report (the poller already extracted these — don't re-run `gh pr checks`).
+2. Fetch the failed logs via `scripts/run-quiet` — `gh run view --log-failed` dumps thousands of lines and will blow your context if it goes straight to stdout. The wrapper redirects to `/tmp/kandev-run.gh-run.<random>.log` and auto-greps for the relevant error lines:
    ```bash
-   gh run view <run-id> --log-failed
+   scripts/run-quiet gh-run -- gh run view <run-id> --log-failed
    ```
-3. Read the relevant source files at the failing lines
+   If the printed summary is enough, stop. Only `Read` specific line ranges from the printed log path if you need surrounding context.
+3. Read the relevant source files at the failing lines (use `Read` with `offset`/`limit`, not `cat`)
 4. Fix the issues (lint errors, test failures, type errors, etc.)
 
 **E2E test failures require special handling:**
@@ -139,24 +84,28 @@ If any failing check is an E2E test (Playwright):
 1. Read the `/e2e` skill (`SKILL.md`) for debugging guidance, test patterns, and run commands
 2. Follow the "Debugging failures" section — read error output, check failure screenshots in `e2e/test-results/`, classify the failure (test logic, frontend, backend)
 3. Fix the root cause. **Never increase timeouts to fix flaky tests** — find the real issue
-4. Confirm fixes pass locally before pushing:
+4. Confirm fixes pass locally before pushing. Wrap with `scripts/run-quiet`:
    ```bash
-   make build-backend build-web
-   cd apps && pnpm --filter @kandev/web e2e -- tests/path/to/failing.spec.ts
+   scripts/run-quiet build -- make build-backend build-web
+   scripts/run-quiet e2e -- bash -c 'cd apps && pnpm --filter @kandev/web e2e -- tests/path/to/failing.spec.ts'
    ```
-   Run the specific failing test file(s), not the full suite. Only proceed to step 7 after the test passes locally.
+   Run the specific failing test file(s), not the full suite. Only proceed to step 5 after the test passes locally.
 
-Mark task 4 as completed.
+Mark task 2 as completed.
 
-### 5. Triage review comments
+### 3. Triage review comments
 
-Mark task 5 as in_progress.
+Mark task 3 as in_progress.
 
-Fetch all review comments — human reviewers, CodeRabbit, Greptile, Claude, and cubic:
+Use the report's `unresolved_review_threads` and `issue_comments_from_bots` counts to know whether there's anything to triage. If both are 0, mark this step completed and move on.
+
+Otherwise, fetch the actual comment bodies on demand — one bot or one set at a time, not all at once:
 
 ```bash
-gh pr view <number> --json reviews,comments
+# Inline review threads (humans, Greptile, Claude same-repo, cubic):
 gh api repos/:owner/:repo/pulls/<number>/comments
+# Issue comments (CodeRabbit walkthrough, Claude fork findings):
+gh pr view <number> --json comments
 ```
 
 **Verify before implementing.** Do not blindly accept review feedback — evaluate each comment technically:
@@ -180,11 +129,11 @@ Then classify:
 - It's technically incorrect for this stack
 - It conflicts with architectural decisions
 
-Mark task 5 as completed.
+Mark task 3 as completed.
 
-### 6. Address each comment
+### 4. Address each comment
 
-Mark task 6 as in_progress.
+Mark task 4 as in_progress.
 
 Every comment must get a response — either a fix or a reply explaining why it was skipped.
 
@@ -193,7 +142,7 @@ Every comment must get a response — either a fix or a reply explaining why it 
 - **Never post a single summary issue comment in place of individual thread replies.** A top-level summary comment leaves every inline thread unresolved and unanswered; reviewers have to hunt for your response across the diff. The only acceptable use of a summary comment is as an *addition* to per-thread replies, not a substitute.
 - **Every unresolved review thread on the PR must receive a direct reply and be resolved**, even if that means 20+ thread interactions. Looping over threads programmatically is fine (and expected); batching into one summary is not.
 - **Reply to the comment that started the thread**, not a random later one. Get the first-comment ID from the GraphQL `reviewThreads(first: 100) { nodes { comments(first: 1) { nodes { databaseId } } } }` query.
-- **Do not mark task 6 completed until every previously-unresolved review thread is either resolved or has an explicit reason documented in a reply.** If you finish the pass and the `isResolved == false` set is still non-empty, you are not done.
+- **Do not mark task 4 completed until every previously-unresolved review thread is either resolved or has an explicit reason documented in a reply.** If you finish the pass and the `isResolved == false` set is still non-empty, you are not done.
 
 **Important: issue comments vs review comments use different APIs:**
 - **Review comments** (inline, from `gh api repos/:owner/:repo/pulls/<number>/comments`) — reply via `/pulls/<number>/comments/<comment_id>/replies`, react via `/pulls/comments/<comment_id>/reactions`
@@ -248,11 +197,11 @@ Then resolve using the thread `id`:
 gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<thread_node_id>"}) { thread { isResolved } } }'
 ```
 
-Mark task 6 as completed.
+Mark task 4 as completed.
 
-### 7. Verify, commit, and push
+### 5. Verify, commit, and push
 
-Mark task 7 as in_progress.
+Mark task 5 as in_progress.
 
 1. Delegate to the **`verify` sub-agent** to run the full verification pipeline (format, typecheck, test, lint). It will fix any issues it finds. Wait for it to complete.
 
@@ -268,16 +217,32 @@ Mark task 7 as in_progress.
    git push
    ```
 
-Mark task 7 as completed.
+Mark task 5 as completed.
 
-### 8. Summary
+### 6. Re-check via `pr-poller`
 
-Mark task 8 as in_progress.
+Mark task 6 as in_progress.
+
+After the push, CI restarts and bots may re-review. Delegate to `pr-poller` again — same subagent, same contract. Parse the new report:
+
+- If `ci_failed:` is empty AND `unresolved_review_threads: 0` AND `issue_comments_from_bots: 0` (no new bot comments to address) → mark task 6 completed and proceed to summary.
+- If new CI failures appeared from the latest commit → loop back to task 2 and reset task 2-5 to `in_progress` as needed.
+- If new review comments appeared after the push → loop back to task 3.
+- If the poller hit a polling timeout (`recommendation:` mentions "timed out") → decide whether to wait longer or surface to the user.
+
+Cap re-check loops at **3 iterations** to prevent runaway sessions. After 3, surface the remaining state to the user and stop.
+
+Mark task 6 as completed.
+
+### 7. Summary
+
+Mark task 7 as in_progress.
 
 Report what was done:
 - CI checks: which failed and how they were fixed
 - Comments addressed (with thumbs up)
 - Comments skipped and why
 - Link to the pushed commit
+- Re-check iteration count
 
-Mark task 8 as completed.
+Mark task 7 as completed.

@@ -5,8 +5,8 @@ import (
 	"context"
 
 	"github.com/kandev/kandev/internal/agent/dto"
-	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 )
 
 // Controller coordinates agent business logic

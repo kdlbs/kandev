@@ -67,15 +67,14 @@ export type BackendMessageType =
   | "secrets.deleted"
   | "message.queue.status_changed"
   | "github.task_pr.updated"
-  | "github.rate_limit.updated";
+  | "github.rate_limit.updated"
+  | OfficeEventType
+  | "run.event.appended";
 
-export type BackendMessage<T extends BackendMessageType, P> = {
-  id?: string;
-  type: "request" | "response" | "notification" | "error";
-  action: T;
-  payload: P;
-  timestamp?: string;
-};
+export type { BackendMessage } from "./backend-message";
+import type { BackendMessage } from "./backend-message";
+import type { OfficeEventType, OfficeBackendMessageMap } from "./office-events";
+export type { OfficeEventType, OfficeEventPayload } from "./office-events";
 
 import type {
   AvailableAgent,
@@ -94,6 +93,13 @@ import type {
   SessionPromptUsagePayload,
   SessionTodosPayload,
 } from "./session-runtime-payloads";
+import type {
+  ExecutorPayload,
+  ExecutorProfilePayload,
+  PrepareProgressPayload,
+  PrepareCompletedPayload,
+  EnvironmentPayload,
+} from "./executor-payloads";
 
 export type KanbanUpdatePayload = {
   workflowId: string;
@@ -206,6 +212,8 @@ export type WorkflowPayload = {
   description?: string;
   agent_profile_id?: string;
   hidden?: boolean;
+  /** Phase 2 (ADR-0004) UX hint — frontend-only. */
+  style?: "kanban" | "office" | "custom";
   created_at?: string;
   updated_at?: string;
 };
@@ -224,6 +232,8 @@ export type StepPayload = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
+  /** Phase 2 (ADR-0004) UX hint — frontend-only. */
+  stage_type?: "work" | "review" | "approval" | "custom";
   created_at?: string;
   updated_at?: string;
 };
@@ -252,6 +262,10 @@ export type TaskSessionStateChangedPayload = {
   session_id: string;
   old_state?: string;
   new_state?: string;
+  /**
+   * Agent profile id — drives the per-agent live-session selectors on the
+   * sidebar. Empty for sessions launched without a profile.
+   */
   agent_profile_id?: string;
   agent_profile_snapshot?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
@@ -315,81 +329,14 @@ export type ProcessStatusPayload = {
   timestamp?: string;
 };
 
-export type ExecutorPayload = {
-  id: string;
-  name: string;
-  type: string;
-  status: string;
-  is_system: boolean;
-  config?: Record<string, string>;
-  created_at?: string;
-  updated_at?: string;
-};
-
-export type ExecutorProfilePayload = {
-  id: string;
-  executor_id: string;
-  name: string;
-  mcp_policy?: string;
-  config?: Record<string, string>;
-  prepare_script: string;
-  cleanup_script: string;
-  created_at?: string;
-  updated_at?: string;
-};
-
-export type PrepareProgressPayload = {
-  task_id: string;
-  session_id: string;
-  execution_id: string;
-  step_name: string;
-  step_command?: string;
-  step_index: number;
-  total_steps: number;
-  status: string;
-  output?: string;
-  error?: string;
-  warning?: string;
-  warning_detail?: string;
-  started_at?: string;
-  ended_at?: string;
-  timestamp: string;
-};
-
-export type PrepareCompletedPayload = {
-  task_id: string;
-  session_id: string;
-  execution_id: string;
-  success: boolean;
-  error_message?: string;
-  duration_ms: number;
-  workspace_path?: string;
-  steps?: Array<{
-    name: string;
-    command?: string;
-    status: string;
-    output?: string;
-    error?: string;
-    warning?: string;
-    warning_detail?: string;
-    started_at?: string;
-    ended_at?: string;
-  }>;
-  timestamp: string;
-};
-
-export type EnvironmentPayload = {
-  id: string;
-  name: string;
-  kind: string;
-  is_system: boolean;
-  worktree_root?: string;
-  image_tag?: string;
-  dockerfile?: string;
-  build_config?: Record<string, string>;
-  created_at?: string;
-  updated_at?: string;
-};
+// Executor and environment payload types (extracted to reduce file size)
+export {
+  type ExecutorPayload,
+  type ExecutorProfilePayload,
+  type PrepareProgressPayload,
+  type PrepareCompletedPayload,
+  type EnvironmentPayload,
+} from "./executor-payloads";
 
 export type AgentProfilePayload = {
   id: string;
@@ -532,7 +479,7 @@ export type QueueStatusChangedPayload = {
   max?: number;
 };
 
-export type BackendMessageMap = {
+export type BackendMessageMap = OfficeBackendMessageMap & {
   "kanban.update": BackendMessage<"kanban.update", KanbanUpdatePayload>;
   "task.created": BackendMessage<"task.created", TaskEventPayload>;
   "task.updated": BackendMessage<"task.updated", TaskEventPayload>;
@@ -632,6 +579,22 @@ export type BackendMessageMap = {
   >;
   "github.task_pr.updated": BackendMessage<"github.task_pr.updated", TaskPR>;
   "github.rate_limit.updated": BackendMessage<"github.rate_limit.updated", GitHubRateLimitUpdate>;
+  "run.event.appended": BackendMessage<"run.event.appended", RunEventAppendedPayload>;
+};
+
+// Run event payload — the WS gateway forwards the bus event verbatim,
+// which means the run id sits at the top level and the full RunEvent
+// row sits under `event`. The handler dispatches to subscribers keyed
+// on `run_id`.
+export type RunEventAppendedPayload = {
+  run_id: string;
+  event: {
+    seq: number;
+    event_type: string;
+    level: string;
+    payload: string;
+    created_at: string;
+  };
 };
 
 // Workspace file types (extracted to reduce file size)

@@ -1,4 +1,4 @@
-import { fetchJson, type ApiRequestOptions } from "../client";
+import { fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client";
 import { getBackendConfig } from "@/lib/config";
 import type {
   Agent,
@@ -24,7 +24,7 @@ import type {
 
 // User settings
 export async function fetchUserSettings(options?: ApiRequestOptions) {
-  return fetchJson<UserSettingsResponse>("/api/v1/user/settings", options);
+  return fetchJsonWithRetry<UserSettingsResponse>("/api/v1/user/settings", options);
 }
 
 export async function updateUserSettings(
@@ -154,8 +154,18 @@ export async function deleteExecutorProfile(
 }
 
 // Agents
+import { normalizeAgentProfile } from "@/lib/api/domains/agent-profile-normalize";
+
+function normalizeAgentResponse(agent: Agent): Agent {
+  return {
+    ...agent,
+    profiles: (agent.profiles ?? []).map((profile) => normalizeAgentProfile(profile)),
+  };
+}
+
 export async function listAgents(options?: ApiRequestOptions): Promise<ListAgentsResponse> {
-  return fetchJson<ListAgentsResponse>("/api/v1/agents", options);
+  const res = await fetchJson<ListAgentsResponse>("/api/v1/agents", options);
+  return { ...res, agents: (res.agents ?? []).map(normalizeAgentResponse) };
 }
 
 export async function listAgentDiscovery(
@@ -316,10 +326,11 @@ export async function createCustomTUIAgent(
   payload: { display_name: string; model?: string; command: string; description?: string },
   options?: ApiRequestOptions,
 ): Promise<Agent> {
-  return fetchJson<Agent>("/api/v1/agents/tui", {
+  const res = await fetchJson<Agent>("/api/v1/agents/tui", {
     ...options,
     init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
+  return normalizeAgentResponse(res);
 }
 
 export async function fetchDynamicModels(

@@ -20,6 +20,7 @@ const STATE_CONFIG: Record<
   CREATED: { label: "", icon: null },
   STARTING: { label: "Agent is starting", dynamicLabel: true, icon: "spinner" },
   RUNNING: { label: "Agent is running", icon: "spinner" },
+  IDLE: { label: "", icon: null },
   WAITING_FOR_INPUT: { label: "", icon: null },
   COMPLETED: { label: "", icon: null },
   FAILED: { label: "Agent has encountered an error", icon: "error" },

@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -88,6 +89,14 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Repos
 	if _, err := worktree.NewSQLiteStore(sqlxDB, sqlxDB); err != nil {
 		t.Fatalf("failed to init worktree store: %v", err)
 	}
+	// Apply office migrations on top of the task schema. The office
+	// package adds CHECK constraints (notably tasks.priority) and
+	// enables foreign_keys=ON. Running both migrations here mirrors
+	// production startup so service-layer tests catch cross-package
+	// constraint regressions automatically.
+	if _, err := officesqlite.NewWithDB(sqlxDB, sqlxDB); err != nil {
+		t.Fatalf("failed to apply office migrations: %v", err)
+	}
 	t.Cleanup(func() {
 		if err := sqlxDB.Close(); err != nil {
 			t.Errorf("failed to close sqlite db: %v", err)
@@ -135,7 +144,7 @@ func TestService_CreateTask(t *testing.T) {
 		WorkflowStepID: "step-123",
 		Title:          "Test Task",
 		Description:    "A test task",
-		Priority:       5,
+		Priority:       "high",
 		Repositories: []TaskRepositoryInput{
 			{
 				RepositoryID: "repo-123",
@@ -166,6 +175,45 @@ func TestService_CreateTask(t *testing.T) {
 	}
 	if events[0].Type != "task.created" {
 		t.Errorf("expected event type 'task.created', got %s", events[0].Type)
+	}
+	// workspace_id MUST be in the event payload so the office WS handler
+	// can workspace-scope the dashboard refetch.
+	data, ok := events[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data is not map[string]interface{}, got %T", events[0].Data)
+	}
+	if got := data["workspace_id"]; got != "ws-1" {
+		t.Errorf("expected workspace_id 'ws-1' in event payload, got %v", got)
+	}
+}
+
+// TestService_CreateTask_DefaultsPriorityWhenEmpty pins the regression
+// from the office priority migration. The migration added a CHECK
+// constraint that the priority column must be one of {critical, high,
+// medium, low}; callers that don't set Priority on the request (e.g.
+// the onboarding adapter creating the CEO's first task) must still
+// produce a row that satisfies the constraint. buildTask defaults the
+// priority to "medium" exactly for this case.
+func TestService_CreateTask_DefaultsPriorityWhenEmpty(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+
+	req := &CreateTaskRequest{
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Title:          "Onboarding-style task with no priority",
+		// Priority intentionally omitted — caller didn't set it.
+	}
+	task, err := svc.CreateTask(ctx, req)
+	if err != nil {
+		t.Fatalf("CreateTask with empty priority should succeed, got %v", err)
+	}
+	if task.Priority != "medium" {
+		t.Errorf("expected default priority 'medium', got %q", task.Priority)
 	}
 }
 
@@ -340,7 +388,7 @@ func TestService_UpdateTask(t *testing.T) {
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Original"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Original", Priority: "medium"})
 	eventBus.ClearEvents()
 
 	newTitle := "Updated Title"
@@ -370,7 +418,7 @@ func TestService_DeleteTask(t *testing.T) {
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", Priority: "medium"})
 	eventBus.ClearEvents()
 
 	err := svc.DeleteTask(ctx, "task-123")
@@ -397,8 +445,8 @@ func TestService_ListTasks(t *testing.T) {
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Task 1"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Task 2"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Task 1", Priority: "medium"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Task 2", Priority: "medium"})
 
 	tasks, err := svc.ListTasks(ctx, "wf-123")
 	if err != nil {
@@ -415,7 +463,7 @@ func TestService_UpdateTaskState(t *testing.T) {
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
-	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", State: v1.TaskStateTODO}
+	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", State: v1.TaskStateTODO, Priority: "medium"}
 	_ = repo.CreateTask(ctx, task)
 	eventBus.ClearEvents()
 
@@ -444,7 +492,7 @@ func TestService_MoveTask(t *testing.T) {
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
 
-	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-todo", Title: "Test", State: v1.TaskStateTODO}
+	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-todo", Title: "Test", State: v1.TaskStateTODO, Priority: "medium"}
 	_ = repo.CreateTask(ctx, task)
 	eventBus.ClearEvents()
 
@@ -561,7 +609,7 @@ func setupTestTask(t *testing.T, repo *sqliterepo.Repository) {
 	ctx := context.Background()
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test Task"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test Task", Priority: "medium"})
 }
 
 func setupTestSession(t *testing.T, repo *sqliterepo.Repository) string {
@@ -765,7 +813,7 @@ func TestPublishTaskUpdated_FallbackRepositoryID(t *testing.T) {
 		t.Fatalf("CreateRepository: %v", err)
 	}
 	if err := repo.CreateTask(ctx, &models.Task{
-		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "T",
+		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "T", Priority: "medium",
 	}); err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}

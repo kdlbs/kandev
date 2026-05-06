@@ -25,7 +25,7 @@ concurrency:
 jobs:
   test:
     name: Run Backend Tests
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-4x
     defaults:
       run:
         working-directory: apps/backend
@@ -93,10 +93,14 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.9
+          version: v2.11.3
           args: ./...
           working-directory: apps/backend
-          only-new-issues: true
+          # Set to false on the office feature branch: the squashed PR has
+          # >300 changed files, exceeding GitHub's diff API cap that this
+          # action uses to filter to "new" issues. The whole codebase
+          # already lints clean (`make -C apps/backend lint`).
+          only-new-issues: false
 
       - name: Run tests
         run: |

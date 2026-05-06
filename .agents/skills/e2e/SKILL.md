@@ -21,9 +21,11 @@ Write E2E tests using TDD (Red-Green-Refactor). Always run the tests you create 
 apps/web/e2e/
 ├── fixtures/
 │   ├── backend.ts           # Worker-scoped backend + frontend process
-│   └── test-base.ts         # Extended fixture (apiClient, seedData, testPage)
+│   ├── test-base.ts         # Extended fixture (apiClient, seedData, testPage)
+│   └── office-fixture.ts    # Office fixtures (officeApi, officeSeed with workspace+agent)
 ├── helpers/
-│   └── api-client.ts        # HTTP client for seeding data (read for available methods)
+│   ├── api-client.ts        # HTTP client for seeding data (read for available methods)
+│   └── office-api-client.ts # Office-specific API client (onboarding, issues, agents)
 ├── pages/                   # Page objects (read for available pages and methods)
 └── tests/                   # Spec files (*.spec.ts), grouped by feature
     ├── task/                # Task creation, deletion, archiving, environment, subtasks
@@ -50,7 +52,13 @@ cd apps && pnpm --filter @kandev/web e2e -- tests/task/my-test.spec.ts  # single
 cd apps && pnpm --filter @kandev/web e2e -- --grep "task creation" # by name
 ```
 
-Prerequisites: `make build-backend build-web` (Make targets do this automatically).
+**CRITICAL: E2E tests run against the production build** (`.next/standalone/`), not dev mode. After any frontend code change, you **must** rebuild before running tests:
+
+```bash
+make build-web   # ~30s, required after every frontend change
+```
+
+Without this, tests run against stale code and failures are misleading. `make build-backend` is also required after Go changes. `make test-e2e` handles both automatically.
 
 ## Writing a test
 
@@ -194,8 +202,9 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
 When a test fails:
 
 1. **Read the error output** — the Playwright error message, expected vs. actual, and which locator timed out
-2. **Read the failure screenshot** from `e2e/test-results/` — see what the page actually rendered
-3. **Attach to the failure** for deeper debugging using `playwright-cli`:
+2. **Read `error-context.md`** from `test-results/<test-name>/` — contains a YAML DOM snapshot showing exactly what was rendered. Search for expected elements, check if the page is in the right state (e.g., simple mode vs advanced mode)
+3. **Read the failure screenshot** from `e2e/test-results/` — see what the page actually rendered
+4. **Attach to the failure** for deeper debugging using `playwright-cli`:
    ```bash
    cd apps && PLAYWRIGHT_HTML_OPEN=never pnpm --filter @kandev/web e2e -- tests/path.spec.ts --debug=cli &
    # Wait for "Debugging Instructions" with session name

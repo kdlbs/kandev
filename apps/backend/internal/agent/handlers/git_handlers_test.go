@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
-	"github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 

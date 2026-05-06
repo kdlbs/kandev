@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -108,3 +109,5 @@ func (a *KilocodeACP) InferenceConfig() *InferenceConfig {
 		Command:   NewCommand("npx", "-y", kilocodeACPPkg, "acp"),
 	}
 }
+
+func (a *KilocodeACP) BillingType() usage.BillingType { return defaultBillingType() }

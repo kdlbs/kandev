@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/kandev/kandev/pkg/agent"
@@ -80,5 +81,54 @@ func TestMockAgent_PassthroughConfig_ResumeFlags(t *testing.T) {
 	sessionArgs := pt.SessionResumeFlag.Args()
 	if len(sessionArgs) == 0 || sessionArgs[0] != "--resume" {
 		t.Errorf("expected SessionResumeFlag = --resume, got %v", sessionArgs)
+	}
+}
+
+func TestNewMockAgentWithID_AppliesIdentityOverrides(t *testing.T) {
+	a := NewMockAgentWithID("claude-acp", "Mock Claude", "Claude (Mock)")
+	if a.ID() != "claude-acp" {
+		t.Errorf("ID() = %q, want claude-acp", a.ID())
+	}
+	if a.Name() != "Mock Claude" {
+		t.Errorf("Name() = %q, want Mock Claude", a.Name())
+	}
+	if a.DisplayName() != "Claude (Mock)" {
+		t.Errorf("DisplayName() = %q, want Claude (Mock)", a.DisplayName())
+	}
+}
+
+func TestNewMockAgent_DefaultIdentity(t *testing.T) {
+	a := NewMockAgent()
+	if a.ID() != "mock-agent" {
+		t.Errorf("ID() = %q, want mock-agent", a.ID())
+	}
+	if a.Name() != "Mock Agent" {
+		t.Errorf("Name() = %q, want Mock Agent", a.Name())
+	}
+	if a.DisplayName() != "Mock" {
+		t.Errorf("DisplayName() = %q, want Mock", a.DisplayName())
+	}
+}
+
+func TestMockAgent_PassthroughConfig_PromptPattern(t *testing.T) {
+	a := NewMockAgent()
+	pattern := a.PassthroughConfig().PromptPattern
+	if pattern == "" {
+		t.Fatal("expected PromptPattern to be set for mock TUI passthrough")
+	}
+
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		t.Fatalf("expected PromptPattern to compile: %v", err)
+	}
+
+	readyPrompt := "\x1b[1;32m❯\x1b[0m "
+	if !re.MatchString(readyPrompt) {
+		t.Fatalf("expected PromptPattern to match ready prompt %q", readyPrompt)
+	}
+
+	initialPromptLine := "\x1b[1;32m❯\x1b[0m hello from stdin\r\n"
+	if re.MatchString(initialPromptLine) {
+		t.Fatalf("expected PromptPattern not to match prompt echo %q", initialPromptLine)
 	}
 }

@@ -6,7 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -231,6 +231,8 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 }
 
 // saveAgentTextIfPresent saves any accumulated agent text as an agent message
+// and publishes an AgentTurnMessageSaved event so subscribers (e.g. the office
+// comment bridge) can react without a direct dependency.
 func (s *Service) saveAgentTextIfPresent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	if payload.Data.Text == "" || payload.SessionID == "" {
 		return
@@ -246,6 +248,32 @@ func (s *Service) saveAgentTextIfPresent(ctx context.Context, payload *lifecycle
 				zap.String("task_id", payload.TaskID),
 				zap.Int("message_length", len(payload.Data.Text)))
 		}
+	}
+
+}
+
+// publishAgentTurnComplete publishes an event after an agent turn completes.
+// The subscriber (office comment bridge) uses the task/session IDs to look up
+// the agent's last message and auto-post it as a task comment.
+func (s *Service) publishAgentTurnComplete(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if s.eventBus == nil || payload.TaskID == "" || payload.SessionID == "" {
+		return
+	}
+
+	// Include the text if available (non-streaming agents flush into Data.Text).
+	// For streaming agents this will be empty — the subscriber falls back to
+	// querying the last session message from the DB.
+	data := map[string]string{
+		"task_id":    payload.TaskID,
+		"session_id": payload.SessionID,
+		"agent_text": payload.Data.Text,
+		"agent_id":   payload.AgentID,
+	}
+	event := bus.NewEvent(events.AgentTurnMessageSaved, "orchestrator", data)
+	if err := s.eventBus.Publish(ctx, events.AgentTurnMessageSaved, event); err != nil {
+		s.logger.Warn("publish agent_turn_message_saved failed",
+			zap.String("task_id", payload.TaskID),
+			zap.Error(err))
 	}
 }
 
@@ -382,13 +410,25 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 		zap.String("old_state", string(oldState)),
 		zap.String("new_state", string(nextState)))
 	if s.eventBus != nil {
+		// Resolve agent_profile_id for the office per-agent live indicators on
+		// the frontend. Prefer the value stored on the session row (post
+		// office-task-session-lifecycle, populated for office sessions); fall
+		// back to the task's assignee for legacy rows that pre-date that spec.
+		// Best-effort: a missed lookup just omits the field, it doesn't drop
+		// the rest of the event.
+		agentProfileID := session.AgentProfileID
+		if agentProfileID == "" {
+			if task, terr := s.repo.GetTask(ctx, taskID); terr == nil && task != nil {
+				agentProfileID = task.AssigneeAgentProfileID
+			}
+		}
 		eventData := map[string]interface{}{
 			"task_id":                taskID,
 			"session_id":             sessionID,
 			"old_state":              string(oldState),
 			"new_state":              string(nextState),
 			"error_message":          errorMessage,
-			"agent_profile_id":       session.AgentProfileID,
+			"agent_profile_id":       agentProfileID,
 			"agent_profile_snapshot": session.AgentProfileSnapshot,
 			"is_passthrough":         session.IsPassthrough,
 		}
@@ -507,6 +547,19 @@ func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID strin
 
 	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true, session)
 
+	// Office tasks do NOT transition to IN_PROGRESS when their agent's
+	// session enters RUNNING. The user-facing task status (todo /
+	// in_review / done / blocked) reflects workflow position, not the
+	// agent's runtime cycle — that's surfaced via the topbar Working
+	// spinner and the inline session timeline entry instead. Skipping
+	// the transition prevents the REVIEW → IN_PROGRESS → REVIEW flicker
+	// across follow-up comment turns.
+	if dbTask, err := s.repo.GetTask(ctx, taskID); err == nil && dbTask != nil && dbTask.AssigneeAgentProfileID != "" {
+		s.logger.Debug("skipping IN_PROGRESS transition for office task",
+			zap.String("task_id", taskID))
+		return
+	}
+
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
 		s.logger.Error("failed to update task state to IN_PROGRESS",
 			zap.String("task_id", taskID),
@@ -550,8 +603,15 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 
 	s.saveAgentTextIfPresent(ctx, payload)
 	s.publishAgentPlanIfPresent(ctx, payload)
-	s.publishPromptUsage(ctx, payload)
+	s.publishPromptUsage(ctx, payload, session)
 	s.completeTurnForSession(ctx, payload.SessionID)
+
+	// Publish agent turn message event so the office comment bridge can
+	// auto-post the agent's response as a task comment. Published here
+	// (not in saveAgentTextIfPresent) because for streaming agents the
+	// text is drained by message_chunk events and Data.Text is empty at
+	// complete time.
+	s.publishAgentTurnComplete(ctx, payload)
 
 	// Cancel any pending clarifications for this session so WaitForResponse
 	// unblocks and later user responses go through the event fallback path.
@@ -561,6 +621,37 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 				zap.String("session_id", payload.SessionID),
 				zap.Int("count", n))
 		}
+	}
+
+	// Capture a fresh git status snapshot on every turn completion so the sidebar
+	// diff badge stays current even when the agent remains running (the
+	// agent_completed path only fires on process exit). This also makes the
+	// badge resilient to backend restarts that kill the agent process before
+	// it can publish a completion event.
+	//
+	// We must use captureGitStatusSnapshotFresh (not the cached version) because
+	// the cached workspace tracker status may predate the agent's last commit.
+	// After turn completion the poll mode can drop to slow (30s) if the user
+	// navigates away, so the cached value could stay stale for a long time.
+	//
+	// This runs BEFORE the RUNNING-state guard so it fires regardless of which
+	// event (READY vs COMPLETE) will drive the session state transition.
+	//
+	// Capture synchronously so the snapshot is persisted before the handler
+	// returns. Running async risks the backend being killed (e.g. E2E restart)
+	// before the snapshot is written. Retries handle transient git lock
+	// contention between concurrent worktrees.
+	if payload.SessionID != "" {
+		s.captureGitStatusSnapshotWithRetry(ctx, payload.SessionID)
+	}
+
+	// Office sessions follow the fire-and-forget shutdown flow: every turn
+	// completion drops the session to IDLE and tears down the agent process +
+	// executor backend. The conversation is preserved via acp_session_id; the
+	// next run recreates everything and reloads. Kanban / quick-chat retains
+	// the warm WAITING_FOR_INPUT model below.
+	if session != nil && s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session) {
+		return
 	}
 
 	// READY events own workflow transitions and queued prompt execution.
@@ -573,6 +664,45 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	}
 
 	s.setSessionWaitingForInput(ctx, payload.TaskID, payload.SessionID, session)
+}
+
+// handleOfficeTurnComplete fires the fire-and-forget shutdown flow for office
+// sessions: state flips to IDLE *before* StopAgent so the workflow handler's
+// terminal-state guard short-circuits (mirrors completeAndStopSession).
+// Returns true when the session was handled as office (caller must not fall
+// through to the kanban WAITING_FOR_INPUT path).
+func (s *Service) handleOfficeTurnComplete(
+	ctx context.Context, taskID, sessionID string, session *models.TaskSession,
+) bool {
+	if session == nil || session.AgentProfileID == "" {
+		return false
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil || task.AssigneeAgentProfileID == "" {
+		return false
+	}
+
+	s.logger.Info("office turn complete — IDLE + tearing down execution",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("agent_profile_id", session.AgentProfileID))
+
+	// State flip first so the workflow handler doesn't ping-pong on the
+	// AgentStopped → handleAgentCompleted path.
+	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateIdle, "", false, session)
+
+	if s.agentManager != nil && session.AgentExecutionID != "" {
+		// Tears down the agent subprocess + executor backend + agentctl
+		// connection. The session's acp_session_id stays on the row for the
+		// next session/load on the next run.
+		if err := s.agentManager.StopAgent(ctx, session.AgentExecutionID, false); err != nil {
+			s.logger.Warn("failed to stop office agent on turn complete",
+				zap.String("session_id", sessionID),
+				zap.String("agent_execution_id", session.AgentExecutionID),
+				zap.Error(err))
+		}
+	}
+	return true
 }
 
 // handleAgentPlanEvent handles agent_plan events from tool calls (e.g. ExitPlanMode)
@@ -621,15 +751,39 @@ func (s *Service) publishAgentPlanIfPresent(ctx context.Context, payload *lifecy
 }
 
 // publishPromptUsage broadcasts prompt token usage to the WebSocket for the frontend.
-func (s *Service) publishPromptUsage(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+// Model and agent type (CLI engine slug) come from payload first; when absent
+// (which is the common case — CurrentModelID only travels on session_models
+// frames) we fall back to the session's AgentProfileSnapshot, populated at
+// session creation and refreshed by persistSessionModel on ACP model updates.
+func (s *Service) publishPromptUsage(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+	session *models.TaskSession,
+) {
 	sessionID := payload.SessionID
 	if sessionID == "" || s.eventBus == nil || payload.Data.Usage == nil {
 		return
 	}
+
+	model := payload.Data.CurrentModelID
+	agentType := ""
+	if session != nil && session.AgentProfileSnapshot != nil {
+		if model == "" {
+			if m, ok := session.AgentProfileSnapshot["model"].(string); ok {
+				model = m
+			}
+		}
+		if t, ok := session.AgentProfileSnapshot["agent_name"].(string); ok {
+			agentType = t
+		}
+	}
+
 	eventPayload := lifecycle.SessionPromptUsageEventPayload{
 		TaskID:    payload.TaskID,
 		SessionID: sessionID,
 		AgentID:   payload.AgentID,
+		AgentType: agentType,
+		Model:     model,
 		Usage:     payload.Data.Usage,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}

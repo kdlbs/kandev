@@ -88,6 +88,7 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
   const update: Record<string, unknown> = {};
   if (payload.new_state) update.state = payload.new_state;
   if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
+  if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
   if (payload.review_status !== undefined) update.review_status = payload.review_status;
   if (payload.error_message !== undefined) update.error_message = payload.error_message;
   if (payload.agent_profile_snapshot)
@@ -123,6 +124,23 @@ function upsertTaskSessionList(
     ...(payload.agent_profile_id ? { agent_profile_id: payload.agent_profile_id } : {}),
     ...sessionUpdate,
   });
+}
+
+// Fan out the office refetch trigger only when the session's state
+// actually changed. The WS layer fires `session.state_changed` for
+// several adjacent reasons (agentctl status, context window, model
+// updates) where `new_state` is undefined or unchanged; without this
+// gate every one of those storms the dashboard-card re-render path.
+function maybeFanOutOfficeRefetch(
+  store: StoreApi<AppState>,
+  newState: TaskSessionState | undefined,
+  prevState: TaskSessionState | undefined,
+): void {
+  if (!newState || newState === prevState) return;
+  const setOfficeTrigger = store.getState().setOfficeRefetchTrigger;
+  if (!setOfficeTrigger) return;
+  setOfficeTrigger("dashboard");
+  setOfficeTrigger("agents");
 }
 
 /** Extract context window data from payload metadata and store it. */
@@ -323,6 +341,8 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         payload,
         previousState: existingSession?.state,
       });
+
+      maybeFanOutOfficeRefetch(store, newState, existingSession?.state);
     },
     "session.agentctl_starting": (message) => {
       const payload = message.payload;

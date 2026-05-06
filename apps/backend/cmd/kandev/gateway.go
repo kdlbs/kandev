@@ -8,8 +8,8 @@ import (
 
 	agentcontroller "github.com/kandev/kandev/internal/agent/controller"
 	agenthandlers "github.com/kandev/kandev/internal/agent/handlers"
-	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
 	"github.com/kandev/kandev/internal/events"
@@ -199,6 +199,8 @@ func provideGateway(
 	go gateway.Hub.Run(ctx)
 	gateways.RegisterTaskNotifications(ctx, eventBus, gateway.Hub, log)
 	gateways.RegisterUserNotifications(ctx, eventBus, gateway.Hub, log)
+	gateways.RegisterOfficeNotifications(ctx, eventBus, gateway.Hub, log)
+	gateways.RegisterRunNotifications(ctx, eventBus, gateway.Hub, log)
 
 	// Route session focus/subscription transitions from the hub into the
 	// lifecycle manager so it can push poll-mode changes to agentctl.
@@ -244,6 +246,20 @@ func provideGateway(
 		})
 		if err != nil {
 			log.Error("Failed to subscribe to task session notifications", zap.Error(err))
+		}
+
+		_, err = eventBus.Subscribe(events.OfficeInboxItem, func(ctx context.Context, event *bus.Event) error {
+			data, ok := event.Data.(map[string]interface{})
+			if !ok {
+				return nil
+			}
+			itemType, _ := data["type"].(string)
+			title, _ := data["title"].(string)
+			notificationSvc.HandleInboxItem(ctx, itemType, title)
+			return nil
+		})
+		if err != nil {
+			log.Error("Failed to subscribe to office inbox notifications", zap.Error(err))
 		}
 	}
 

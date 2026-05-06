@@ -89,6 +89,7 @@ type DevBackendEnv = {
 export function resolveDevBackendEnv(repoRoot: string): DevBackendEnv {
   const baseExtra: Record<string, string> = {
     KANDEV_MOCK_AGENT: process.env.KANDEV_MOCK_AGENT || "true",
+    KANDEV_DEBUG_DEV_MODE: "true",
     KANDEV_DEBUG_PPROF_ENABLED: "true",
   };
   const devHome = devKandevHome(repoRoot);

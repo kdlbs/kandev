@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"time"
@@ -448,7 +449,15 @@ func (c *Controller) detectTools() []dto.ToolStatusDTO {
 }
 
 // detectAgents runs discovery and forces mock-agent available when enabled.
+//
+// In E2E mock mode (KANDEV_E2E_MOCK=true) the filesystem discovery walk is
+// skipped entirely: all enabled agents are synthesised as available. This
+// avoids the 15-second detectAll timeout under CPU contention and prevents
+// the "seedData fixture timeout: listAgents returned 0 agents" flake.
 func (c *Controller) detectAgents(ctx context.Context) ([]discovery.Availability, error) {
+	if os.Getenv("KANDEV_E2E_MOCK") == "true" {
+		return c.synthAvailabilityFromRegistry(), nil
+	}
 	results, err := c.discovery.Detect(ctx)
 	if err != nil {
 		return nil, err
@@ -464,4 +473,39 @@ func (c *Controller) detectAgents(ctx context.Context) ([]discovery.Availability
 		}
 	}
 	return results, nil
+}
+
+// synthAvailabilityFromRegistry builds Availability records for every enabled
+// agent without hitting the filesystem. All agents are marked Available=true
+// because in E2E mode only MockAgent instances are registered and they are
+// always available by definition.
+//
+// We still call IsInstalled() per-agent to copy over the agent's static
+// capability flags (SupportsMCP, MCPConfigPaths). Without those, downstream
+// code sees SupportsMCP=false for every mock agent — which silently disables
+// plan mode in the chat UI (planModeAvailable is false → the toggle only
+// flips the layout, not the chat input state).
+func (c *Controller) synthAvailabilityFromRegistry() []discovery.Availability {
+	enabled := c.agentRegistry.ListEnabled()
+	results := make([]discovery.Availability, 0, len(enabled))
+	for _, ag := range enabled {
+		av := discovery.Availability{
+			Name:      ag.ID(),
+			Available: true,
+			Capabilities: discovery.Capabilities{
+				SupportsSessionResume: true,
+			},
+		}
+		// IsInstalled is a pure local check on mock-agent (no filesystem walk),
+		// so it's safe to call here without contention. Pull the static
+		// SupportsMCP flag so the UI can offer plan mode in E2E runs.
+		if probe, err := ag.IsInstalled(context.Background()); err == nil && probe != nil {
+			av.SupportsMCP = probe.SupportsMCP
+			if len(probe.MCPConfigPaths) > 0 {
+				av.MCPConfigPath = probe.MCPConfigPaths[0]
+			}
+		}
+		results = append(results, av)
+	}
+	return results
 }

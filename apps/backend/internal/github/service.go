@@ -180,6 +180,16 @@ func (s *Service) TestStore() *Store {
 	return s.store
 }
 
+// ListTaskPRsByTaskIDs forwards to the underlying store. Exposed so other
+// packages (e.g. internal/office) can read PR associations without
+// importing internal/github/store.
+func (s *Service) ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*TaskPR, error) {
+	if s.store == nil {
+		return map[string][]*TaskPR{}, nil
+	}
+	return s.store.ListTaskPRsByTaskIDs(ctx, taskIDs)
+}
+
 // TestEventBus returns the event bus for test/mock use only.
 func (s *Service) TestEventBus() bus.EventBus {
 	return s.eventBus

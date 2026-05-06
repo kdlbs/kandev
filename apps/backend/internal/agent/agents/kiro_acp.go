@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -86,6 +87,7 @@ func (a *KiroACP) Runtime() *RuntimeConfig {
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
 		Protocol:       agent.ProtocolACP,
+		UserSkillDir:   ".kiro/skills",
 		SessionConfig: SessionConfig{
 			// TODO: set SessionDirTemplate once the Kiro session dir is
 			// confirmed (likely "{home}/.kiro"). Without it, the Docker
@@ -115,3 +117,5 @@ func (a *KiroACP) InferenceConfig() *InferenceConfig {
 		Command:   NewCommand(kiroACPBin, "acp"),
 	}
 }
+
+func (a *KiroACP) BillingType() usage.BillingType { return defaultBillingType() }

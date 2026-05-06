@@ -70,11 +70,24 @@ func (h *WorkflowHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionWorkflowReorder, h.wsReorderWorkflows)
 }
 
-func (h *WorkflowHandlers) listWorkflows(ctx context.Context, workspaceID string, includeHidden bool) (dto.ListWorkflowsResponse, error) {
+func (h *WorkflowHandlers) listWorkflows(ctx context.Context, workspaceID string, includeHidden, excludeOffice bool) (dto.ListWorkflowsResponse, error) {
 	workflows, err := h.service.ListWorkflows(ctx, workspaceID, includeHidden)
 	if err != nil {
 		return dto.ListWorkflowsResponse{}, err
 	}
+
+	// Filter out office workflows so they don't appear on the kanban board.
+	if excludeOffice {
+		officeIDs := h.service.GetOfficeWorkflowIDs(ctx)
+		filtered := make([]*models.Workflow, 0, len(workflows))
+		for _, w := range workflows {
+			if _, isOffice := officeIDs[w.ID]; !isOffice {
+				filtered = append(filtered, w)
+			}
+		}
+		workflows = filtered
+	}
+
 	result := dto.ListWorkflowsResponse{
 		Workflows: make([]dto.WorkflowDTO, 0, len(workflows)),
 		Total:     len(workflows),
@@ -98,7 +111,8 @@ func parseIncludeHidden(s string) bool {
 func (h *WorkflowHandlers) httpListWorkflows(c *gin.Context) {
 	workspaceID := c.Query("workspace_id")
 	includeHidden := parseIncludeHidden(c.Query("include_hidden"))
-	resp, err := h.listWorkflows(c.Request.Context(), workspaceID, includeHidden)
+	excludeOffice := c.Query("exclude_office") != "false" // exclude by default
+	resp, err := h.listWorkflows(c.Request.Context(), workspaceID, includeHidden, excludeOffice)
 	if err != nil {
 		h.logger.Error("failed to list workflows", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list workflows"})
@@ -110,7 +124,8 @@ func (h *WorkflowHandlers) httpListWorkflows(c *gin.Context) {
 func (h *WorkflowHandlers) httpListWorkflowsByWorkspace(c *gin.Context) {
 	workspaceID := c.Param("id")
 	includeHidden := parseIncludeHidden(c.Query("include_hidden"))
-	resp, err := h.listWorkflows(c.Request.Context(), workspaceID, includeHidden)
+	excludeOffice := c.Query("exclude_office") != "false"
+	resp, err := h.listWorkflows(c.Request.Context(), workspaceID, includeHidden, excludeOffice)
 	if err != nil {
 		h.logger.Error("failed to list workflows", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list workflows"})
@@ -307,25 +322,21 @@ func (h *WorkflowHandlers) wsListWorkflows(ctx context.Context, msg *ws.Message)
 	var req struct {
 		WorkspaceID   string `json:"workspace_id,omitempty"`
 		IncludeHidden bool   `json:"include_hidden,omitempty"`
+		ExcludeOffice *bool  `json:"exclude_office,omitempty"`
 	}
 	if msg.Payload != nil {
 		if err := msg.ParsePayload(&req); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 		}
 	}
-	workflows, err := h.service.ListWorkflows(ctx, req.WorkspaceID, req.IncludeHidden)
+	// Default to excluding office workflows unless explicitly set to false.
+	excludeOffice := req.ExcludeOffice == nil || *req.ExcludeOffice
+	resp, err := h.listWorkflows(ctx, req.WorkspaceID, req.IncludeHidden, excludeOffice)
 	if err != nil {
 		h.logger.Error("failed to list workflows", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list workflows", nil)
 	}
-	result := dto.ListWorkflowsResponse{
-		Workflows: make([]dto.WorkflowDTO, 0, len(workflows)),
-		Total:     len(workflows),
-	}
-	for _, w := range workflows {
-		result.Workflows = append(result.Workflows, dto.FromWorkflow(w))
-	}
-	return ws.NewResponse(msg.ID, msg.Action, result)
+	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
 type wsCreateWorkflowRequest struct {

@@ -71,6 +71,26 @@ func (r *sqliteRepository) initSchema() error {
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		deleted_at TIMESTAMP,
+		workspace_id TEXT NOT NULL DEFAULT '',
+		role TEXT NOT NULL DEFAULT '',
+		icon TEXT NOT NULL DEFAULT '',
+		reports_to TEXT NOT NULL DEFAULT '',
+		skill_ids TEXT NOT NULL DEFAULT '[]',
+		desired_skills TEXT NOT NULL DEFAULT '[]',
+		custom_prompt TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'idle'
+			CHECK (status IN ('idle','working','paused','stopped','pending_approval')),
+		pause_reason TEXT NOT NULL DEFAULT '',
+		last_run_finished_at TIMESTAMP,
+		max_concurrent_sessions INTEGER NOT NULL DEFAULT 1,
+		cooldown_sec INTEGER NOT NULL DEFAULT 0,
+		skip_idle_runs INTEGER NOT NULL DEFAULT 0,
+		consecutive_failures INTEGER NOT NULL DEFAULT 0,
+		failure_threshold INTEGER NOT NULL DEFAULT 3,
+		executor_preference TEXT NOT NULL DEFAULT '',
+		budget_monthly_cents INTEGER NOT NULL DEFAULT 0,
+		settings TEXT NOT NULL DEFAULT '{}',
+		permissions TEXT NOT NULL DEFAULT '{}',
 		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 	);
 
@@ -88,6 +108,10 @@ func (r *sqliteRepository) initSchema() error {
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
 	CREATE INDEX IF NOT EXISTS idx_agent_profiles_agent_id ON agent_profiles(agent_id);
 	`
+	// Note: indexes on new office-enrichment columns (workspace_id, role,
+	// reports_to) are created later in migrateOfficeEnrichmentColumns —
+	// after the columns themselves are added — so legacy databases don't
+	// fail at CREATE INDEX before the ALTER TABLE statements have run.
 	_, err := r.db.Exec(schema)
 	if err != nil {
 		return err
@@ -115,7 +139,48 @@ func (r *sqliteRepository) initSchema() error {
 		return fmt.Errorf("failed to migrate agent_profiles model constraint: %w", err)
 	}
 
+	// Migration: ADR 0005 Wave A — enrich agent_profiles with office columns.
+	// Each ALTER is idempotent — duplicate-column errors are swallowed.
+	r.migrateOfficeEnrichmentColumns()
+
 	return nil
+}
+
+// migrateOfficeEnrichmentColumns adds the office-enrichment columns introduced
+// in ADR 0005 Wave A. Each ALTER is idempotent: errors raised when the column
+// already exists are swallowed. Used both on first run after the upgrade and
+// on every subsequent boot — SQLite's idempotency guards make repeats safe.
+func (r *sqliteRepository) migrateOfficeEnrichmentColumns() {
+	stmts := []string{
+		`ALTER TABLE agent_profiles ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_profiles ADD COLUMN role TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_profiles ADD COLUMN icon TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_profiles ADD COLUMN reports_to TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_profiles ADD COLUMN skill_ids TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE agent_profiles ADD COLUMN desired_skills TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE agent_profiles ADD COLUMN custom_prompt TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_profiles ADD COLUMN status TEXT NOT NULL DEFAULT 'idle'`,
+		`ALTER TABLE agent_profiles ADD COLUMN pause_reason TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_profiles ADD COLUMN last_run_finished_at TIMESTAMP`,
+		`ALTER TABLE agent_profiles ADD COLUMN max_concurrent_sessions INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE agent_profiles ADD COLUMN cooldown_sec INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE agent_profiles ADD COLUMN skip_idle_runs INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE agent_profiles ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE agent_profiles ADD COLUMN failure_threshold INTEGER NOT NULL DEFAULT 3`,
+		`ALTER TABLE agent_profiles ADD COLUMN executor_preference TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_profiles ADD COLUMN budget_monthly_cents INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE agent_profiles ADD COLUMN settings TEXT NOT NULL DEFAULT '{}'`,
+		`ALTER TABLE agent_profiles ADD COLUMN permissions TEXT NOT NULL DEFAULT '{}'`,
+	}
+	for _, stmt := range stmts {
+		_, _ = r.db.Exec(stmt)
+	}
+	// Indexes are idempotent via IF NOT EXISTS, but the partial-index variant
+	// required for role/reports_to needs the column to exist first — so create
+	// here after the ALTERs to handle databases upgraded from older schemas.
+	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_profiles_workspace ON agent_profiles(workspace_id)`)
+	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_profiles_role ON agent_profiles(workspace_id, role) WHERE role != ''`)
+	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_profiles_reports_to ON agent_profiles(reports_to) WHERE reports_to != ''`)
 }
 
 // migrateDropModelCheckConstraint recreates agent_profiles without the legacy
@@ -378,14 +443,131 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	if err != nil {
 		return err
 	}
+	enrich, err := enrichmentValues(profile)
+	if err != nil {
+		return err
+	}
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, mode, migrated_from, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, cli_flags, created_at, updated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)
-	`), profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
+		INSERT INTO agent_profiles (
+			id, agent_id, name, agent_display_name, model, mode, migrated_from,
+			auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough,
+			user_modified, plan, cli_flags, created_at, updated_at, deleted_at,
+			workspace_id, role, icon, reports_to,
+			skill_ids, desired_skills, custom_prompt,
+			status, pause_reason, last_run_finished_at,
+			max_concurrent_sessions, cooldown_sec, skip_idle_runs,
+			consecutive_failures, failure_threshold,
+			executor_preference, budget_monthly_cents, settings, permissions
+		) VALUES (
+			?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?,
+			?, '', ?, ?, ?, ?,
+			?, ?, ?, ?,
+			?, ?, ?,
+			?, ?, ?,
+			?, ?, ?,
+			?, ?,
+			?, ?, ?, ?
+		)
+	`),
+		profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
 		dialect.BoolToInt(profile.AutoApprove),
-		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing), dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt)
+		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing), dialect.BoolToInt(profile.CLIPassthrough),
+		dialect.BoolToInt(profile.UserModified), cliFlagsJSON, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt,
+		enrich.workspaceID, enrich.role, enrich.icon, enrich.reportsTo,
+		enrich.skillIDs, enrich.desiredSkills, enrich.customPrompt,
+		enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
+		enrich.maxConcurrentSessions, profile.CooldownSec, dialect.BoolToInt(profile.SkipIdleRuns),
+		profile.ConsecutiveFailures, enrich.failureThreshold,
+		enrich.executorPreference, profile.BudgetMonthlyCents, enrich.settings, enrich.permissions,
+	)
 	return err
+}
+
+// defaultAgentProfileStatus is the canonical "idle" status default used when
+// a profile is created or read without an explicit status. Hoisted to a
+// constant so the goconst linter has a single shared source of truth.
+const defaultAgentProfileStatus = "idle"
+
+// profileEnrichmentValues holds the marshalled / defaulted office-enrichment
+// values that the Insert + Update statements share. Centralising this keeps
+// the SQL-bind ordering in one place and avoids duplicated default-fill logic.
+type profileEnrichmentValues struct {
+	workspaceID           string
+	role                  string
+	icon                  string
+	reportsTo             string
+	skillIDs              string
+	desiredSkills         string
+	customPrompt          string
+	status                string
+	pauseReason           string
+	maxConcurrentSessions int
+	failureThreshold      int
+	executorPreference    string
+	settings              string
+	permissions           string
+}
+
+// enrichmentValues fills in defaults for the office-enrichment columns. The
+// JSON-array fields (SkillIDs, DesiredSkills) are stored verbatim — empty
+// values normalise to "[]" so the NOT NULL constraint is satisfied.
+func enrichmentValues(profile *models.AgentProfile) (profileEnrichmentValues, error) {
+	status := string(profile.Status)
+	if status == "" {
+		status = defaultAgentProfileStatus
+	}
+	maxSessions := profile.MaxConcurrentSessions
+	if maxSessions <= 0 {
+		maxSessions = 1
+	}
+	settings := profile.Settings
+	if settings == "" {
+		settings = "{}"
+	}
+	permissions := profile.Permissions
+	if permissions == "" {
+		permissions = "{}"
+	}
+	return profileEnrichmentValues{
+		workspaceID:           profile.WorkspaceID,
+		role:                  string(profile.Role),
+		icon:                  profile.Icon,
+		reportsTo:             profile.ReportsTo,
+		skillIDs:              normalizeJSONArray(profile.SkillIDs),
+		desiredSkills:         normalizeJSONArray(profile.DesiredSkills),
+		customPrompt:          profile.CustomPrompt,
+		status:                status,
+		pauseReason:           profile.PauseReason,
+		maxConcurrentSessions: maxSessions,
+		failureThreshold:      failureThresholdToColumn(profile.FailureThreshold),
+		executorPreference:    profile.ExecutorPreference,
+		settings:              settings,
+		permissions:           permissions,
+	}, nil
+}
+
+// normalizeJSONArray returns "[]" for empty values; otherwise the input. Used
+// to satisfy the NOT NULL DEFAULT '[]' constraint on JSON-array TEXT columns
+// (skill_ids, desired_skills) without mandating callers always set a value.
+func normalizeJSONArray(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "[]"
+	}
+	return s
+}
+
+// failureThresholdToColumn maps the *int (NULL = use workspace default) onto
+// the merged column's INTEGER NOT NULL DEFAULT 3 semantics. We store 0 as
+// "use workspace default" and round-trip it back to nil on read; non-zero
+// values flow through verbatim.
+func failureThresholdToColumn(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 // nullableString converts an empty string to sql.NullString zero-value so the
@@ -450,14 +632,36 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 	if err != nil {
 		return err
 	}
+	enrich, err := enrichmentValues(profile)
+	if err != nil {
+		return err
+	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE agent_profiles
-		SET name = ?, agent_display_name = ?, model = ?, mode = ?, migrated_from = ?, auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?, cli_passthrough = ?, user_modified = ?, cli_flags = ?, updated_at = ?
+		SET name = ?, agent_display_name = ?, model = ?, mode = ?, migrated_from = ?,
+			auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?,
+			cli_passthrough = ?, user_modified = ?, cli_flags = ?, updated_at = ?,
+			workspace_id = ?, role = ?, icon = ?, reports_to = ?,
+			skill_ids = ?, desired_skills = ?, custom_prompt = ?,
+			status = ?, pause_reason = ?, last_run_finished_at = ?,
+			max_concurrent_sessions = ?, cooldown_sec = ?, skip_idle_runs = ?,
+			consecutive_failures = ?, failure_threshold = ?,
+			executor_preference = ?,
+			budget_monthly_cents = ?, settings = ?, permissions = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`), profile.Name, profile.AgentDisplayName, profile.Model,
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
 		dialect.BoolToInt(profile.AutoApprove),
-		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing), dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, profile.UpdatedAt, profile.ID)
+		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing),
+		dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, profile.UpdatedAt,
+		enrich.workspaceID, enrich.role, enrich.icon, enrich.reportsTo,
+		enrich.skillIDs, enrich.desiredSkills, enrich.customPrompt,
+		enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
+		enrich.maxConcurrentSessions, profile.CooldownSec, dialect.BoolToInt(profile.SkipIdleRuns),
+		profile.ConsecutiveFailures, enrich.failureThreshold,
+		enrich.executorPreference,
+		profile.BudgetMonthlyCents, enrich.settings, enrich.permissions,
+		profile.ID)
 	if err != nil {
 		return err
 	}
@@ -485,7 +689,20 @@ func (r *sqliteRepository) DeleteAgentProfile(ctx context.Context, id string) er
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, cli_flags, created_at, updated_at, deleted_at
+		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from,
+			auto_approve, dangerously_skip_permissions, allow_indexing,
+			cli_passthrough, user_modified, plan, cli_flags,
+			created_at, updated_at, deleted_at,
+			COALESCE(workspace_id, ''), COALESCE(role, ''), COALESCE(icon, ''),
+			COALESCE(reports_to, ''), COALESCE(skill_ids, '[]'),
+			COALESCE(desired_skills, '[]'), COALESCE(custom_prompt, ''),
+			COALESCE(status, 'idle'), COALESCE(pause_reason, ''),
+			last_run_finished_at,
+			COALESCE(max_concurrent_sessions, 1), COALESCE(cooldown_sec, 0),
+			COALESCE(skip_idle_runs, 0), COALESCE(consecutive_failures, 0),
+			COALESCE(failure_threshold, 3), COALESCE(executor_preference, ''),
+			COALESCE(budget_monthly_cents, 0),
+			COALESCE(settings, '{}'), COALESCE(permissions, '{}')
 		FROM agent_profiles WHERE id = ? AND deleted_at IS NULL
 	`), id)
 	profile, err := scanAgentProfile(row)
@@ -497,7 +714,20 @@ func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*mod
 
 func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, cli_flags, created_at, updated_at, deleted_at
+		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from,
+			auto_approve, dangerously_skip_permissions, allow_indexing,
+			cli_passthrough, user_modified, plan, cli_flags,
+			created_at, updated_at, deleted_at,
+			COALESCE(workspace_id, ''), COALESCE(role, ''), COALESCE(icon, ''),
+			COALESCE(reports_to, ''), COALESCE(skill_ids, '[]'),
+			COALESCE(desired_skills, '[]'), COALESCE(custom_prompt, ''),
+			COALESCE(status, 'idle'), COALESCE(pause_reason, ''),
+			last_run_finished_at,
+			COALESCE(max_concurrent_sessions, 1), COALESCE(cooldown_sec, 0),
+			COALESCE(skip_idle_runs, 0), COALESCE(consecutive_failures, 0),
+			COALESCE(failure_threshold, 3), COALESCE(executor_preference, ''),
+			COALESCE(budget_monthly_cents, 0),
+			COALESCE(settings, '{}'), COALESCE(permissions, '{}')
 		FROM agent_profiles WHERE agent_id = ? AND deleted_at IS NULL ORDER BY created_at DESC
 	`), agentID)
 	if err != nil {
@@ -620,6 +850,9 @@ func scanAgentProfile(scanner interface {
 	var userModified int
 	var plan string // unused, kept for backwards compatibility
 	var cliFlagsRaw sql.NullString
+	var role, status string
+	var skipIdleRuns int
+	var failureThreshold int
 	if err := scanner.Scan(
 		&profile.ID,
 		&profile.AgentID,
@@ -638,6 +871,25 @@ func scanAgentProfile(scanner interface {
 		&profile.CreatedAt,
 		&profile.UpdatedAt,
 		&profile.DeletedAt,
+		&profile.WorkspaceID,
+		&role,
+		&profile.Icon,
+		&profile.ReportsTo,
+		&profile.SkillIDs,
+		&profile.DesiredSkills,
+		&profile.CustomPrompt,
+		&status,
+		&profile.PauseReason,
+		&profile.LastRunFinishedAt,
+		&profile.MaxConcurrentSessions,
+		&profile.CooldownSec,
+		&skipIdleRuns,
+		&profile.ConsecutiveFailures,
+		&failureThreshold,
+		&profile.ExecutorPreference,
+		&profile.BudgetMonthlyCents,
+		&profile.Settings,
+		&profile.Permissions,
 	); err != nil {
 		return nil, err
 	}
@@ -652,6 +904,13 @@ func scanAgentProfile(scanner interface {
 	profile.AllowIndexing = allowIndexing == 1
 	profile.CLIPassthrough = cliPassthrough == 1
 	profile.UserModified = userModified == 1
+	profile.SkipIdleRuns = skipIdleRuns == 1
+	profile.Role = models.AgentRole(role)
+	profile.Status = models.AgentStatus(status)
+	if failureThreshold > 0 {
+		ft := failureThreshold
+		profile.FailureThreshold = &ft
+	}
 	if cliFlagsRaw.Valid && cliFlagsRaw.String != "" {
 		if err := json.Unmarshal([]byte(cliFlagsRaw.String), &profile.CLIFlags); err != nil {
 			return nil, fmt.Errorf("failed to parse cli_flags for profile %s: %w", profile.ID, err)

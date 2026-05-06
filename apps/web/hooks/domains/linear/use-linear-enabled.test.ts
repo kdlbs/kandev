@@ -1,15 +1,44 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { useLinearEnabled } from "./use-linear-enabled";
 
 const STORAGE_KEY = "kandev:linear:enabled:v1";
 
+// Provide a simple in-memory localStorage mock so the tests are not sensitive
+// to how the test runner exposes window.localStorage in happy-dom.
+function makeLocalStorageMock() {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      store.set(key, value);
+    },
+    removeItem: (key: string) => {
+      store.delete(key);
+    },
+    clear: () => {
+      store.clear();
+    },
+    get length() {
+      return store.size;
+    },
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+  };
+}
+
+const localStorageMock = makeLocalStorageMock();
+vi.stubGlobal("localStorage", localStorageMock);
+Object.defineProperty(window, "localStorage", {
+  value: localStorageMock,
+  configurable: true,
+});
+
 describe("useLinearEnabled", () => {
   beforeEach(() => {
-    window.localStorage.clear();
+    localStorageMock.clear();
   });
   afterEach(() => {
-    window.localStorage.clear();
+    localStorageMock.clear();
   });
 
   it("defaults to enabled=true when no localStorage entry exists", async () => {

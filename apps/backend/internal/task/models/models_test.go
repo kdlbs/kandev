@@ -56,7 +56,7 @@ func TestTaskStructInitialization(t *testing.T) {
 		Title:          "Test Task",
 		Description:    "A test task description",
 		State:          v1.TaskStateTODO,
-		Priority:       5,
+		Priority:       "high",
 		Position:       1,
 		Metadata:       map[string]interface{}{"key": "value"},
 		Repositories:   repos,
@@ -85,8 +85,8 @@ func TestTaskStructInitialization(t *testing.T) {
 	if task.State != v1.TaskStateTODO {
 		t.Errorf("expected State TODO, got %s", task.State)
 	}
-	if task.Priority != 5 {
-		t.Errorf("expected Priority 5, got %d", task.Priority)
+	if task.Priority != "high" {
+		t.Errorf("expected Priority high, got %s", task.Priority)
 	}
 	if len(task.Repositories) != 1 {
 		t.Fatalf("expected 1 repository, got %d", len(task.Repositories))
@@ -140,7 +140,7 @@ func TestTaskToAPI(t *testing.T) {
 		Title:          "Test Task",
 		Description:    "A test task description",
 		State:          v1.TaskStateInProgress,
-		Priority:       3,
+		Priority:       "medium",
 		Repositories: []*TaskRepository{
 			{
 				ID:           "task-repo-1",
@@ -180,7 +180,7 @@ func TestTaskToAPI(t *testing.T) {
 		t.Errorf("expected State %s, got %s", task.State, apiTask.State)
 	}
 	if apiTask.Priority != task.Priority {
-		t.Errorf("expected Priority %d, got %d", task.Priority, apiTask.Priority)
+		t.Errorf("expected Priority %s, got %s", task.Priority, apiTask.Priority)
 	}
 	if len(apiTask.Repositories) != 1 {
 		t.Fatalf("expected 1 repository, got %d", len(apiTask.Repositories))
@@ -206,7 +206,7 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 		Title:          "Test Task",
 		Description:    "A test task description",
 		State:          v1.TaskStateTODO,
-		Priority:       0,
+		Priority:       "medium",
 		Position:       0,
 		Metadata:       nil,
 		CreatedAt:      now,

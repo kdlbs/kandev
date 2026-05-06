@@ -81,6 +81,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		zap.String("workspace_path", req.WorkspacePath))
 
 	overrides := &config.InstanceOverrides{
+		InstanceID:         id,
 		Protocol:           agent.Protocol(req.Protocol),
 		AgentCommand:       agentCmd,
 		WorkDir:            req.WorkspacePath,
