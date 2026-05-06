@@ -84,10 +84,10 @@ export function setupLayoutPersistence(
       try {
         const json = api.toJSON();
         const envId = envIdRef.current;
-        console.log("[dockview-debug] setupLayoutPersistence: saving", {
-          envId,
-          json,
-        });
+        console.log(
+          "[dockview-debug] setupLayoutPersistence: saving",
+          JSON.stringify({ envId, json }),
+        );
         localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
         if (envId) {
           setEnvLayout(envId, json);

@@ -464,10 +464,10 @@ function saveOutgoingEnv(
         api.height,
         pinnedWidths,
       );
-      console.log("[dockview-debug] saveOutgoingEnv: serialized preMax to env slot", {
-        oldEnvId,
-        preMaxSerialized,
-      });
+      console.log(
+        "[dockview-debug] saveOutgoingEnv: serialized preMax to env slot",
+        JSON.stringify({ oldEnvId, preMaxSerialized }),
+      );
       setEnvLayout(oldEnvId, preMaxSerialized as unknown as object);
     } catch (err) {
       console.warn("[dockview-debug] saveOutgoingEnv: serialize failed", err);
@@ -477,10 +477,10 @@ function saveOutgoingEnv(
     removeEnvMaximizeState(oldEnvId);
     try {
       const json = api.toJSON();
-      console.log("[dockview-debug] saveOutgoingEnv: api.toJSON to env slot", {
-        oldEnvId,
-        json,
-      });
+      console.log(
+        "[dockview-debug] saveOutgoingEnv: api.toJSON to env slot",
+        JSON.stringify({ oldEnvId, json }),
+      );
       setEnvLayout(oldEnvId, json);
     } catch {
       /* ignore */
@@ -540,11 +540,15 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
       });
       set(ids);
       set({ isRestoringLayout: false });
-      console.log("[dockview-debug] after performEnvSwitch", {
-        newEnvId,
-        groups: api.groups.map((g) => ({ id: g.id, width: g.width })),
-        apiWidth: api.width,
-      });
+      console.log(
+        "[dockview-debug] after performEnvSwitch",
+        JSON.stringify({
+          newEnvId,
+          groups: api.groups.map((g) => ({ id: g.id, width: g.width, height: g.height })),
+          apiWidth: api.width,
+          apiHeight: api.height,
+        }),
+      );
       panelPortalManager.reconcile(new Set(api.panels.map((p) => p.id)));
     } catch {
       set({ isRestoringLayout: false });

@@ -157,20 +157,22 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
   if (fastResult) return fastResult;
 
   const saved = getHealthyEnvLayout(newEnvId);
-  console.log("[dockview-debug] performEnvSwitch slow path", {
-    newEnvId,
-    hasSavedLayout: !!saved,
-    savedLayout: saved,
-  });
+  console.log(
+    "[dockview-debug] performEnvSwitch slow path",
+    JSON.stringify({ newEnvId, hasSavedLayout: !!saved, savedLayout: saved }),
+  );
   if (saved) {
     try {
       api.fromJSON(saved as SerializedDockview);
       api.layout(safeWidth, safeHeight);
       const ids = applyLayoutFixups(api);
-      console.log("[dockview-debug] performEnvSwitch loaded saved", {
-        newEnvId,
-        groups: api.groups.map((g) => ({ id: g.id, width: g.width })),
-      });
+      console.log(
+        "[dockview-debug] performEnvSwitch loaded saved",
+        JSON.stringify({
+          newEnvId,
+          groups: api.groups.map((g) => ({ id: g.id, width: g.width })),
+        }),
+      );
       return ids;
     } catch (err) {
       console.warn("[dockview-debug] performEnvSwitch fromJSON threw", err);
