@@ -1,135 +1,19 @@
-import { spawnSync } from "node:child_process";
 import { test, expect } from "../../fixtures/docker-test-base";
 import { E2E_IMAGE_TAG } from "../../fixtures/docker-probe";
 import { SessionPage } from "../../pages/session-page";
-
-const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
-
-function dockerInspectExists(containerID: string): boolean {
-  const res = spawnSync("docker", ["inspect", containerID], { stdio: "ignore" });
-  return res.status === 0;
-}
-
-function dockerRemove(containerID: string): void {
-  spawnSync("docker", ["rm", "-f", containerID], { stdio: "ignore" });
-}
-
-function dockerStop(containerID: string): void {
-  const res = spawnSync("docker", ["stop", containerID], { stdio: "ignore" });
-  if (res.status !== 0) {
-    throw new Error(`failed to stop Docker container ${containerID}`);
-  }
-}
-
-function dockerState(containerID: string): string {
-  const res = spawnSync("docker", ["inspect", "-f", "{{.State.Status}}", containerID], {
-    encoding: "utf8",
-  });
-  if (res.status !== 0) return "missing";
-  return res.stdout.trim();
-}
-
-function dockerCurrentBranch(containerID: string): string {
-  const res = spawnSync(
-    "docker",
-    ["exec", containerID, "git", "-C", "/workspace", "branch", "--show-current"],
-    {
-      encoding: "utf8",
-    },
-  );
-  if (res.status !== 0) {
-    const diag = spawnSync(
-      "docker",
-      [
-        "exec",
-        containerID,
-        "sh",
-        "-lc",
-        "ls -la /workspace; git -C /workspace status --short --branch",
-      ],
-      { encoding: "utf8" },
-    );
-    const logs = spawnSync("docker", ["logs", "--tail", "40", containerID], { encoding: "utf8" });
-    return [
-      `ERR status=${res.status} state=${dockerState(containerID)}`,
-      `stderr=${res.stderr.trim()}`,
-      `diag=${diag.stdout.trim()} ${diag.stderr.trim()}`,
-      `logs=${logs.stdout.trim()} ${logs.stderr.trim()}`,
-    ].join("\n");
-  }
-  return res.stdout.trim();
-}
-
-async function waitForDockerContainerRemoved(containerID: string, message: string): Promise<void> {
-  await expect
-    .poll(() => dockerInspectExists(containerID), {
-      timeout: 60_000,
-      message,
-    })
-    .toBe(false);
-}
-
-async function waitForLatestSessionDone(
-  apiClient: import("../../helpers/api-client").ApiClient,
-  taskId: string,
-  expectedCount: number,
-  message: string,
-  timeout = 120_000,
-): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
-        if (sessions.length < expectedCount) return false;
-        // API returns sessions newest-first.
-        const latest = sessions[0];
-        return DONE_STATES.includes(latest?.state ?? "");
-      },
-      { timeout, message },
-    )
-    .toBe(true);
-}
-
-async function waitForSessionDone(
-  apiClient: import("../../helpers/api-client").ApiClient,
-  taskId: string,
-  sessionId: string,
-  message: string,
-  timeout = 120_000,
-): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
-        const session = sessions.find((s) => s.id === sessionId);
-        return DONE_STATES.includes(session?.state ?? "");
-      },
-      { timeout, message },
-    )
-    .toBe(true);
-}
-
-async function waitForSessionEnvironment(
-  apiClient: import("../../helpers/api-client").ApiClient,
-  options: {
-    taskId: string;
-    sessionId: string;
-    expectedEnvironmentId: string;
-    message: string;
-    timeout?: number;
-  },
-): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(options.taskId);
-        const session = sessions.find((s) => s.id === options.sessionId);
-        return session?.task_environment_id ?? "";
-      },
-      { timeout: options.timeout ?? 60_000, message: options.message },
-    )
-    .toBe(options.expectedEnvironmentId);
-}
+import {
+  dockerCurrentBranch,
+  dockerInspectExists,
+  dockerRemove,
+  dockerState,
+  dockerStop,
+  waitForDockerContainerRemoved,
+} from "../../helpers/docker";
+import {
+  waitForLatestSessionDone,
+  waitForSessionDone,
+  waitForSessionEnvironment,
+} from "../../helpers/session";
 
 test.describe("Docker executor — launch + reuse + recovery", () => {
   test("launches a session in a real container and exposes container_id", async ({
