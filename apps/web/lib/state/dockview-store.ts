@@ -460,12 +460,7 @@ function saveOutgoingEnv(
       // the live container, and serializing with stale dims would persist a
       // shrunken layout that resurfaces on the next reload.
       const { width, height } = measureDockviewContainer(api);
-      const preMaxSerialized = toSerializedDockview(
-        preMaximizeLayout,
-        width,
-        height,
-        pinnedWidths,
-      );
+      const preMaxSerialized = toSerializedDockview(preMaximizeLayout, width, height, pinnedWidths);
       setEnvLayout(oldEnvId, preMaxSerialized as unknown as object);
     } catch (err) {
       console.warn("saveOutgoingEnv: serialize failed", err);
