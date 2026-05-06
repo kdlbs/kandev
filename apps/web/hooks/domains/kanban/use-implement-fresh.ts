@@ -4,8 +4,22 @@ import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { setChatDraftContent } from "@/lib/local-storage";
 import { launchSession } from "@/lib/services/session-launch-service";
+import { getWebSocketClient } from "@/lib/ws/connection";
 import { buildImplementPlanContent } from "./use-plan-actions";
 import type { ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
+
+async function setupFreshSession(newSessionId: string): Promise<void> {
+  // Set the fresh session as primary
+  const client = getWebSocketClient();
+  if (client) {
+    try {
+      await client.request("session.set_primary", { session_id: newSessionId }, 10000);
+    } catch (err) {
+      console.error("Failed to set fresh session as primary:", err);
+      // Continue even if set_primary fails
+    }
+  }
+}
 
 /**
  * Launches a brand-new agent session that starts implementing the task plan
@@ -14,6 +28,9 @@ import type { ChatInputContainerHandle } from "@/components/task/chat/chat-input
  * in parallel. Reuses the same kandev-system block as the same-session
  * "Implement plan" path — both rely on get_task_plan_kandev to load the plan,
  * which is task-scoped.
+ *
+ * The newly created session is automatically set as primary and focused (active
+ * in the UI) so the user works with the fresh implementation context immediately.
  *
  * Context files from the planning session aren't forwarded — `launchSession`
  * doesn't support context_files yet, and the @ mentions inside the chat text
@@ -27,6 +44,7 @@ export function useImplementFresh(
   const planningSession = useAppStore((s) =>
     resolvedSessionId ? s.taskSessions.items[resolvedSessionId] : undefined,
   );
+  const setActiveSession = useAppStore((s) => s.setActiveSession);
   const { toast } = useToast();
 
   return useCallback(async () => {
@@ -41,11 +59,10 @@ export function useImplementFresh(
 
     const userText = chatInputRef.current?.getValue() ?? "";
     const attachments = chatInputRef.current?.getAttachments() ?? [];
-
     const prompt = buildImplementPlanContent(userText);
 
     try {
-      await launchSession({
+      const response = await launchSession({
         task_id: taskId,
         intent: "start",
         agent_profile_id: planningSession.agent_profile_id,
@@ -54,13 +71,19 @@ export function useImplementFresh(
         plan_mode: false,
         ...(attachments.length > 0 && { attachments }),
       });
-      // Clear composer + draft only on success so a failed launch leaves the
-      // user's input intact for retry.
+
+      const newSessionId = response.session_id;
+      if (newSessionId) {
+        await setupFreshSession(newSessionId);
+        setActiveSession(taskId, newSessionId);
+      }
+
+      // Clear composer + draft only on success
       chatInputRef.current?.clear();
       setChatDraftContent(resolvedSessionId, null);
     } catch (err) {
       console.error("Failed to launch fresh implementation session:", err);
       toast({ description: "Failed to start implementation session", variant: "error" });
     }
-  }, [taskId, resolvedSessionId, planningSession, chatInputRef, toast]);
+  }, [taskId, resolvedSessionId, planningSession, chatInputRef, setActiveSession, toast]);
 }

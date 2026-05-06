@@ -6,9 +6,15 @@ import type { MessageAttachment } from "@/components/task/chat/chat-input-contai
 const mockLaunchSession = vi.fn();
 const mockSetChatDraftContent = vi.fn();
 const mockToast = vi.fn();
+const mockWsRequest = vi.fn();
+const mockSetActiveSession = vi.fn();
 
-let mockStoreState: { taskSessions: { items: Record<string, TaskSession> } } = {
+let mockStoreState: {
+  taskSessions: { items: Record<string, TaskSession> };
+  setActiveSession: typeof mockSetActiveSession;
+} = {
   taskSessions: { items: {} },
+  setActiveSession: mockSetActiveSession,
 };
 
 vi.mock("@/components/state-provider", () => ({
@@ -23,6 +29,10 @@ vi.mock("@/lib/services/session-launch-service", () => ({
   launchSession: (...args: unknown[]) => mockLaunchSession(...args),
 }));
 
+vi.mock("@/lib/ws/connection", () => ({
+  getWebSocketClient: () => ({ request: mockWsRequest }),
+}));
+
 vi.mock("@/lib/local-storage", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
@@ -33,10 +43,14 @@ vi.mock("@/lib/local-storage", async (importOriginal) => {
 
 import { useImplementFresh } from "./use-implement-fresh";
 
+const TASK_ID = TASK_ID;
+const SESS_PLAN = SESS_PLAN;
+const SESS_FRESH = SESS_FRESH;
+
 function makeSession(overrides: Partial<TaskSession> = {}): TaskSession {
   return {
-    id: "sess-plan",
-    task_id: "task-1",
+    id: SESS_PLAN,
+    task_id: TASK_ID,
     state: "WAITING_FOR_INPUT",
     agent_profile_id: "ap-1",
     executor_id: "ex-1",
@@ -64,8 +78,17 @@ function makeChatRef(opts: { value?: string; attachments?: MessageAttachment[] }
 
 function setup(session: TaskSession | undefined = makeSession()) {
   vi.clearAllMocks();
-  mockLaunchSession.mockResolvedValue({ success: true, task_id: "task-1", state: "RUNNING" });
-  mockStoreState = { taskSessions: { items: session ? { [session.id]: session } : {} } };
+  mockLaunchSession.mockResolvedValue({
+    success: true,
+    task_id: TASK_ID,
+    session_id: SESS_FRESH,
+    state: "RUNNING",
+  });
+  mockWsRequest.mockResolvedValue({ success: true });
+  mockStoreState = {
+    taskSessions: { items: session ? { [session.id]: session } : {} },
+    setActiveSession: mockSetActiveSession,
+  };
 }
 
 describe("useImplementFresh", () => {
@@ -73,7 +96,7 @@ describe("useImplementFresh", () => {
 
   it("launches a fresh session inheriting agent + executor profile from the planning session", async () => {
     const { ref } = makeChatRef({ value: "double-check the migration" });
-    const { result } = renderHook(() => useImplementFresh("sess-plan", "task-1", ref));
+    const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));
 
     await act(async () => {
       await result.current();
@@ -82,7 +105,7 @@ describe("useImplementFresh", () => {
     expect(mockLaunchSession).toHaveBeenCalledTimes(1);
     expect(mockLaunchSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        task_id: "task-1",
+        task_id: TASK_ID,
         intent: "start",
         agent_profile_id: "ap-1",
         executor_id: "ex-1",
@@ -98,7 +121,7 @@ describe("useImplementFresh", () => {
       { type: "image", data: "base64data", mime_type: "image/png" },
     ];
     const { ref } = makeChatRef({ value: "look at this", attachments });
-    const { result } = renderHook(() => useImplementFresh("sess-plan", "task-1", ref));
+    const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));
 
     await act(async () => {
       await result.current();
@@ -109,7 +132,7 @@ describe("useImplementFresh", () => {
 
   it("omits attachments key when none are present", async () => {
     const { ref } = makeChatRef({ value: "just text" });
-    const { result } = renderHook(() => useImplementFresh("sess-plan", "task-1", ref));
+    const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));
 
     await act(async () => {
       await result.current();
@@ -118,22 +141,48 @@ describe("useImplementFresh", () => {
     expect(mockLaunchSession.mock.calls[0][0]).not.toHaveProperty("attachments");
   });
 
+  it("marks the fresh session as primary via WS after launch", async () => {
+    const { ref } = makeChatRef({ value: "implement" });
+    const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));
+
+    await act(async () => {
+      await result.current();
+    });
+
+    expect(mockWsRequest).toHaveBeenCalledWith(
+      "session.set_primary",
+      { session_id: SESS_FRESH },
+      10000,
+    );
+  });
+
+  it("focuses the fresh session as active in the UI after launch", async () => {
+    const { ref } = makeChatRef({ value: "implement" });
+    const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));
+
+    await act(async () => {
+      await result.current();
+    });
+
+    expect(mockSetActiveSession).toHaveBeenCalledWith(TASK_ID, SESS_FRESH);
+  });
+
   it("clears composer + draft only on successful launch", async () => {
     const { ref, clear } = makeChatRef({ value: "ship" });
-    const { result } = renderHook(() => useImplementFresh("sess-plan", "task-1", ref));
+    const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));
 
     await act(async () => {
       await result.current();
     });
 
     expect(clear).toHaveBeenCalledTimes(1);
-    expect(mockSetChatDraftContent).toHaveBeenCalledWith("sess-plan", null);
+    expect(mockSetChatDraftContent).toHaveBeenCalledWith(SESS_PLAN, null);
   });
 
   it("preserves composer + draft when launch fails so user can retry", async () => {
     mockLaunchSession.mockRejectedValueOnce(new Error("network down"));
     const { ref, clear } = makeChatRef({ value: "important" });
-    const { result } = renderHook(() => useImplementFresh("sess-plan", "task-1", ref));
+    const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));
 
     await act(async () => {
       await result.current();
@@ -146,13 +195,27 @@ describe("useImplementFresh", () => {
   it("shows an error toast when launch fails", async () => {
     mockLaunchSession.mockRejectedValueOnce(new Error("timeout"));
     const { ref } = makeChatRef({ value: "implement" });
-    const { result } = renderHook(() => useImplementFresh("sess-plan", "task-1", ref));
+    const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));
 
     await act(async () => {
       await result.current();
     });
 
     expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
+  });
+
+  it("continues on set_primary failure to avoid losing the launch", async () => {
+    mockWsRequest.mockRejectedValueOnce(new Error("WS unavailable"));
+    const { ref, clear } = makeChatRef({ value: "continue anyway" });
+    const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));
+
+    await act(async () => {
+      await result.current();
+    });
+
+    // Should still clear and set active even if set_primary fails
+    expect(clear).toHaveBeenCalledTimes(1);
+    expect(mockSetActiveSession).toHaveBeenCalledWith(TASK_ID, SESS_FRESH);
   });
 });
 
@@ -161,7 +224,7 @@ describe("useImplementFresh guards", () => {
 
   it("no-ops when session ID is missing", async () => {
     const { ref } = makeChatRef();
-    const { result } = renderHook(() => useImplementFresh(null, "task-1", ref));
+    const { result } = renderHook(() => useImplementFresh(null, TASK_ID, ref));
 
     await act(async () => {
       await result.current();
@@ -173,7 +236,7 @@ describe("useImplementFresh guards", () => {
   it("no-ops when planning session has no agent profile", async () => {
     setup(makeSession({ agent_profile_id: undefined }));
     const { ref } = makeChatRef();
-    const { result } = renderHook(() => useImplementFresh("sess-plan", "task-1", ref));
+    const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));
 
     await act(async () => {
       await result.current();
@@ -185,7 +248,7 @@ describe("useImplementFresh guards", () => {
   it("no-ops when planning session has no executor", async () => {
     setup(makeSession({ executor_id: undefined }));
     const { ref } = makeChatRef();
-    const { result } = renderHook(() => useImplementFresh("sess-plan", "task-1", ref));
+    const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));
 
     await act(async () => {
       await result.current();
@@ -195,16 +258,15 @@ describe("useImplementFresh guards", () => {
   });
 
   it("no-ops when planning session is not in the store", async () => {
-    mockStoreState = { taskSessions: { items: {} } }; // Empty store - no session with ID "sess-plan"
+    mockStoreState = { taskSessions: { items: {} }, setActiveSession: mockSetActiveSession }; // Empty store
     mockLaunchSession.mockClear();
     const { ref } = makeChatRef();
-    const { result } = renderHook(() => useImplementFresh("sess-plan", "task-1", ref));
+    const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));
 
     await act(async () => {
       await result.current();
     });
 
-    // When session not found, planningSession?.agent_profile_id is undefined, preventing the call
     expect(mockLaunchSession).not.toHaveBeenCalled();
   });
 });
