@@ -33,6 +33,21 @@ func TestWrapAgentMessage_BasicShape(t *testing.T) {
 		t.Errorf("wrapped content missing sender id: %q", wrapped)
 	}
 
+	// Pin the authorization directive: receivers were stalling on peer messages
+	// with "the user can talk to them directly", so the wrapper must (a) name
+	// the reply tool, (b) elevate the request to user-prompt authority, and (c)
+	// avoid wording that licenses refusal. If the body text drifts back toward
+	// the old framing, this assertion fires before it ships.
+	if !strings.Contains(wrapped, "message_task_kandev") {
+		t.Errorf("wrapper must name the reply tool, got: %q", wrapped)
+	}
+	if !strings.Contains(wrapped, "same authority as a user prompt") {
+		t.Errorf("wrapper must elevate request to user-prompt authority, got: %q", wrapped)
+	}
+	if strings.Contains(wrapped, "decline") || strings.Contains(wrapped, "push back") {
+		t.Errorf("wrapper must not invite refusal, got: %q", wrapped)
+	}
+
 	// Stripping the <kandev-system> block should leave only the original prompt.
 	stripped := sysprompt.StripSystemContent(wrapped)
 	if stripped != "please review my changes" {

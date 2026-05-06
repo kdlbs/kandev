@@ -26,6 +26,12 @@ func wrapAgentMessage(prompt string, senderTask *models.Task, senderSessionID st
 	// chat bubble. The metadata snapshot (sender_task_title) keeps the original
 	// title for UI display.
 	safeTitle := strings.ReplaceAll(senderTask.Title, sysprompt.TagEnd, "")
+	// The directive elevates peer-agent messages to user-prompt authority on
+	// purpose: receiving agents were stalling cross-task work with "the user
+	// can talk to them directly". The trade-off is that a compromised peer
+	// (e.g., via prompt injection from a tool result) inherits that authority,
+	// which is acceptable in a trusted-orchestrator environment but worth
+	// remembering before relaxing the assumption.
 	body := fmt.Sprintf(
 		"This message was relayed through the message_task_kandev MCP tool by a peer agent working in task %q (%s). "+
 			"The user is not reading this thread — the peer agent is coordinating work on the user's behalf, "+
