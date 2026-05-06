@@ -48,6 +48,23 @@ type actionYAML struct {
 	Config map[string]any `yaml:"config,omitempty"`
 }
 
+// HiddenTemplateIDs returns the set of template IDs marked `hidden: true`
+// in their embedded YAML. Hidden templates are system-only flows
+// (e.g. improve-kandev) that must not appear in management UI or pickers.
+func HiddenTemplateIDs() (map[string]bool, error) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		return nil, err
+	}
+	hidden := make(map[string]bool, len(templates))
+	for _, t := range templates {
+		if t.Hidden {
+			hidden[t.ID] = true
+		}
+	}
+	return hidden, nil
+}
+
 // LoadTemplates parses all embedded YAML files and returns workflow templates.
 func LoadTemplates() ([]*models.WorkflowTemplate, error) {
 	entries, err := embeddedFS.ReadDir(".")

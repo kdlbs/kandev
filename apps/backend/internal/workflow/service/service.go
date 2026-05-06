@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	workflowcfg "github.com/kandev/kandev/config/workflows"
 	"github.com/kandev/kandev/internal/common/logger"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/models"
@@ -54,14 +55,28 @@ func NewService(repo *repository.Repository, log *logger.Logger) *Service {
 // Template Operations
 // ============================================================================
 
-// ListTemplates returns all workflow templates.
+// ListTemplates returns user-pickable workflow templates. Templates marked
+// `hidden: true` in their embedded YAML (e.g. improve-kandev) are excluded
+// from the management UI and the create-workflow picker.
 func (s *Service) ListTemplates(ctx context.Context) ([]*models.WorkflowTemplate, error) {
 	templates, err := s.repo.ListTemplates(ctx)
 	if err != nil {
 		s.logger.Error("failed to list templates", zap.Error(err))
 		return nil, err
 	}
-	return templates, nil
+	hidden, err := workflowcfg.HiddenTemplateIDs()
+	if err != nil {
+		s.logger.Error("failed to load embedded template visibility", zap.Error(err))
+		return nil, err
+	}
+	result := make([]*models.WorkflowTemplate, 0, len(templates))
+	for _, t := range templates {
+		if hidden[t.ID] {
+			continue
+		}
+		result = append(result, t)
+	}
+	return result, nil
 }
 
 // GetTemplate retrieves a workflow template by ID.

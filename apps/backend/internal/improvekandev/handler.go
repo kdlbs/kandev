@@ -248,6 +248,13 @@ func (h *Handler) ensureWorkflow(ctx context.Context, workspaceID string) (*task
 	}
 	for _, w := range existing {
 		if w.WorkflowTemplateID != nil && *w.WorkflowTemplateID == templateID {
+			// Heal records created before the workflow honored Hidden on insert.
+			if !w.Hidden {
+				if err := h.taskSvc.SetWorkflowHidden(ctx, w.ID, true); err != nil {
+					return nil, err
+				}
+				w.Hidden = true
+			}
 			return w, nil
 		}
 	}

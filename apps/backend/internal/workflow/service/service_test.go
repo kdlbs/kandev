@@ -113,6 +113,20 @@ func createStep(t *testing.T, svc *Service, step *models.WorkflowStep) {
 	require.NoError(t, err)
 }
 
+// TestListTemplates_FiltersHidden verifies that templates marked
+// `hidden: true` in their embedded YAML (improve-kandev) are excluded
+// from the picker shown by the create-workflow dialog and the settings UI.
+func TestListTemplates_FiltersHidden(t *testing.T) {
+	svc, _ := setupTestService(t)
+
+	templates, err := svc.ListTemplates(context.Background())
+	require.NoError(t, err)
+
+	for _, tmpl := range templates {
+		assert.NotEqual(t, "improve-kandev", tmpl.ID, "hidden template must not be returned by ListTemplates")
+	}
+}
+
 func TestGetNextStepByPosition(t *testing.T) {
 	t.Run("middle step returns next step", func(t *testing.T) {
 		svc, db := setupTestService(t)
