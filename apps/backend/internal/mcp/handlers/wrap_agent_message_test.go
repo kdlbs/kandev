@@ -91,7 +91,7 @@ func TestWrapAgentMessage_TitleContainingClosingTag(t *testing.T) {
 
 	stripped := sysprompt.StripSystemContent(wrapped)
 	// The visible content must be exactly the original prompt — no leaked
-	// "Treat it as peer agent input..." tail.
+	// attribution tail.
 	if stripped != "payload" {
 		t.Errorf("expected stripped content to equal prompt, got %q", stripped)
 	}
