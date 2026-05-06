@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	defaultPRPollInterval     = 30 * time.Second
+	defaultPRPollInterval     = 1 * time.Minute
 	defaultReviewPollInterval = 5 * time.Minute
 	defaultIssuePollInterval  = 5 * time.Minute
 	// rateLimitedSleepCap bounds the rate-limit sleep so a misreported reset
