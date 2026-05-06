@@ -78,8 +78,3 @@ export function setTaskColor(taskId: string, color: TaskColor | null): void {
     writeAll({ ...all, [taskId]: color });
   }
 }
-
-/** Test-only: clears the in-memory cache so localStorage mutations from tests are observed. */
-export function __resetTaskColorsCacheForTests(): void {
-  cachedMap = null;
-}

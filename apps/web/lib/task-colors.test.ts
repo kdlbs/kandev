@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  __resetTaskColorsCacheForTests,
   getTaskColor,
   setTaskColor,
   TASK_COLORS_CHANGED_EVENT,
@@ -10,7 +9,9 @@ import {
 describe("task colors storage", () => {
   beforeEach(() => {
     window.localStorage.clear();
-    __resetTaskColorsCacheForTests();
+    // Synthesize a cross-tab storage event so the module-level cache invalidates,
+    // matching how a real browser would notify other tabs after localStorage.clear().
+    window.dispatchEvent(new StorageEvent("storage", { key: null }));
   });
 
   it("returns null when no color is stored", () => {
