@@ -73,12 +73,21 @@ export function setupLayoutPersistence(
       // bug this guard is meant to prevent.
       const live = useDockviewStore.getState();
       if (live.preMaximizeLayout !== null || live.isRestoringLayout) {
+        console.log("[dockview-debug] setupLayoutPersistence: bail at fire", {
+          envId: envIdRef.current,
+          hasPreMax: live.preMaximizeLayout !== null,
+          isRestoring: live.isRestoringLayout,
+        });
         saveTimerRef.current = null;
         return;
       }
       try {
         const json = api.toJSON();
         const envId = envIdRef.current;
+        console.log("[dockview-debug] setupLayoutPersistence: saving", {
+          envId,
+          json,
+        });
         localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
         if (envId) {
           setEnvLayout(envId, json);

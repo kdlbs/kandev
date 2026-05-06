@@ -403,6 +403,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
 /** Restore a saved maximize state from sessionStorage onto the dockview API. */
 function restoreMaximizeFromStorage(api: DockviewApi, envId: string, set: StoreSet): boolean {
   const saved = getEnvMaximizeState(envId);
+  console.log("[dockview-debug] restoreMaximizeFromStorage", { envId, hasSaved: !!saved });
   if (!saved) return false;
   try {
     api.fromJSON(saved.maximizedDockviewJson as SerializedDockview);
@@ -432,6 +433,19 @@ function saveOutgoingEnv(
   pinnedWidths: Map<string, number>,
 ): void {
   if (!oldEnvId) return;
+  console.log("[dockview-debug] saveOutgoingEnv", {
+    oldEnvId,
+    hasPreMax: !!preMaximizeLayout,
+    preMaxColumns: preMaximizeLayout?.columns.map((c) => ({
+      id: c.id,
+      width: c.width,
+      pinned: c.pinned,
+      groupCount: c.groups.length,
+    })),
+    apiWidth: api.width,
+    apiHeight: api.height,
+    pinnedWidths: Array.from(pinnedWidths.entries()),
+  });
   if (preMaximizeLayout) {
     // While maximized, `api.toJSON()` is the 2-column maximize overlay, NOT
     // the user's intended layout. Persist the pre-max layout under both keys:
@@ -450,14 +464,24 @@ function saveOutgoingEnv(
         api.height,
         pinnedWidths,
       );
+      console.log("[dockview-debug] saveOutgoingEnv: serialized preMax to env slot", {
+        oldEnvId,
+        preMaxSerialized,
+      });
       setEnvLayout(oldEnvId, preMaxSerialized as unknown as object);
-    } catch {
+    } catch (err) {
+      console.warn("[dockview-debug] saveOutgoingEnv: serialize failed", err);
       /* fall back: skip writing rather than overwrite with maximized JSON */
     }
   } else {
     removeEnvMaximizeState(oldEnvId);
     try {
-      setEnvLayout(oldEnvId, api.toJSON());
+      const json = api.toJSON();
+      console.log("[dockview-debug] saveOutgoingEnv: api.toJSON to env slot", {
+        oldEnvId,
+        json,
+      });
+      setEnvLayout(oldEnvId, json);
     } catch {
       /* ignore */
     }
@@ -468,6 +492,15 @@ function saveOutgoingEnv(
 function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
   return (oldEnvId: string | null, newEnvId: string, activeSessionId: string | null) => {
     const { api, currentLayoutEnvId, preMaximizeLayout } = get();
+    console.log("[dockview-debug] switchEnvLayout", {
+      oldEnvId,
+      newEnvId,
+      activeSessionId,
+      currentLayoutEnvId,
+      hasPreMax: !!preMaximizeLayout,
+      apiPanels: api?.panels.map((p) => p.id),
+      apiGroups: api?.groups.map((g) => ({ id: g.id, width: g.width })),
+    });
     if (!api) return;
     // Same-env switch (e.g. between sessions of the same task) is a no-op.
     // The layout, terminals, and env-scoped portals already belong to this env.
@@ -506,6 +539,11 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
       });
       set(ids);
       set({ isRestoringLayout: false });
+      console.log("[dockview-debug] after performEnvSwitch", {
+        newEnvId,
+        groups: api.groups.map((g) => ({ id: g.id, width: g.width })),
+        apiWidth: api.width,
+      });
       panelPortalManager.reconcile(new Set(api.panels.map((p) => p.id)));
     } catch {
       set({ isRestoringLayout: false });
@@ -525,6 +563,17 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
       const liveWidths = captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
       const current = fromDockviewApi(api);
+      console.log("[dockview-debug] maximizeGroup", {
+        groupId,
+        currentLayoutEnvId,
+        currentColumns: current.columns.map((c) => ({
+          id: c.id,
+          width: c.width,
+          pinned: c.pinned,
+          groupCount: c.groups.length,
+        })),
+        liveWidths: Array.from(liveWidths.entries()),
+      });
       let targetGroup: {
         panels: LayoutState["columns"][0]["groups"][0]["panels"];
         activePanel?: string;
