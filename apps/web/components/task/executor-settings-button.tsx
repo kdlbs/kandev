@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconBox, IconCopy, IconLoader, IconLoader2, IconTrash } from "@tabler/icons-react";
-import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { toast } from "sonner";
@@ -147,7 +147,7 @@ export function ExecutorSettingsButton({
   const prepare = usePrepareSummary(sessionId ?? null);
   const isPreparing = isPreparingPhase(prepare.phase);
   // Promote the foreground polling cadence while preparing so the icon flips
-  // to "ready" without the user opening the popover.
+  // to "ready" without the user hovering over the trigger.
   const { env, container, loading, isResetting, reset, status } = useTaskEnvironment(
     taskId,
     open || isPreparing,
@@ -171,22 +171,26 @@ export function ExecutorSettingsButton({
 
   return (
     <>
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className="relative cursor-pointer px-2"
-            disabled={disabled}
-            data-testid="executor-settings-button"
+      <HoverCard open={open} onOpenChange={setOpen} openDelay={150} closeDelay={250}>
+        <HoverCardTrigger asChild>
+          {/* Borderless info trigger: not a button — just an icon + status dot.
+              tabIndex makes it focusable so keyboard users can still surface
+              the popover via focus. */}
+          <span
+            tabIndex={disabled ? -1 : 0}
+            role="button"
+            aria-haspopup="dialog"
             aria-label={ariaLabel}
+            data-testid="executor-settings-button"
+            data-disabled={disabled || undefined}
+            className="relative inline-flex h-7 items-center gap-1 rounded px-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
           >
             <ExecutorButtonIcon executorType={executorType} preparing={isPreparing} />
             <ExecutorStatusDot status={status} loading={loading} />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent
-          align="end"
+          </span>
+        </HoverCardTrigger>
+        <HoverCardContent
+          align="start"
           className="w-[340px] p-0 text-sm"
           data-testid="executor-settings-popover"
         >
@@ -204,8 +208,8 @@ export function ExecutorSettingsButton({
               <IconTrash className="h-3.5 w-3.5 mr-1" /> Reset environment
             </Button>
           </div>
-        </PopoverContent>
-      </Popover>
+        </HoverCardContent>
+      </HoverCard>
 
       <TaskResetEnvConfirmDialog
         open={resetDialogOpen}

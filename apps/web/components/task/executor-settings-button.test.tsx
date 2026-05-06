@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
 
@@ -95,9 +95,9 @@ describe("ExecutorSettingsButton", () => {
 
     render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
 
-    // Open the popover by clicking the trigger.
-    const trigger = screen.getByTestId(SETTINGS_BUTTON_TESTID);
-    trigger.click();
+    // Open the hover card by hovering the trigger (not clicking — it's a
+    // borderless info surface, not a button).
+    fireEvent.pointerEnter(screen.getByTestId(SETTINGS_BUTTON_TESTID));
 
     expect(await screen.findByTestId(PREPARE_STATUS_TESTID)).toHaveProperty(
       "dataset.phase",
@@ -122,7 +122,7 @@ describe("ExecutorSettingsButton", () => {
     };
 
     render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
-    screen.getByTestId(SETTINGS_BUTTON_TESTID).click();
+    fireEvent.pointerEnter(screen.getByTestId(SETTINGS_BUTTON_TESTID));
 
     const status = await screen.findByTestId(PREPARE_STATUS_TESTID);
     expect(status.dataset.phase).toBe("preparing_fallback");
@@ -135,7 +135,7 @@ describe("ExecutorSettingsButton", () => {
     render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
 
     expect(screen.getByTestId("executor-settings-button-spinner")).toBeTruthy();
-    screen.getByTestId(SETTINGS_BUTTON_TESTID).click();
+    fireEvent.pointerEnter(screen.getByTestId(SETTINGS_BUTTON_TESTID));
 
     const status = await screen.findByTestId(PREPARE_STATUS_TESTID);
     expect(status.dataset.phase).toBe("resuming");
@@ -154,7 +154,7 @@ describe("ExecutorSettingsButton", () => {
     };
 
     render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
-    screen.getByTestId(SETTINGS_BUTTON_TESTID).click();
+    fireEvent.pointerEnter(screen.getByTestId(SETTINGS_BUTTON_TESTID));
 
     expect(screen.queryByTestId(PREPARE_STATUS_TESTID)).toBeNull();
     expect(screen.queryByText(/Environment ready/)).toBeNull();

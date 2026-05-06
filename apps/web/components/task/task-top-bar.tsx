@@ -63,7 +63,11 @@ type TaskTopBarProps = {
 };
 
 type TopBarLeftProps = {
+  taskId?: string | null;
+  activeSessionId?: string | null;
   taskTitle?: string;
+  remoteExecutorType?: string | null;
+  isArchived?: boolean;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
@@ -86,7 +90,13 @@ const TaskTopBar = memo(function TaskTopBar({
       data-testid="task-topbar"
       className="@container/topbar grid grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center gap-2 overflow-hidden px-3 py-1 border-b border-border"
     >
-      <TopBarLeft taskTitle={taskTitle} />
+      <TopBarLeft
+        taskId={taskId}
+        activeSessionId={activeSessionId}
+        taskTitle={taskTitle}
+        remoteExecutorType={remoteExecutorType}
+        isArchived={isArchived}
+      />
       <div className="min-w-0 justify-self-center overflow-hidden">
         {workflowSteps && workflowSteps.length > 0 && (
           <WorkflowStepper
@@ -106,7 +116,6 @@ const TaskTopBar = memo(function TaskTopBar({
         isArchived={isArchived}
         workspaceId={workspaceId}
         isRemoteExecutor={isRemoteExecutor}
-        remoteExecutorType={remoteExecutorType}
         isAgentctlReady={isAgentctlReady}
         taskTitle={taskTitle}
       />
@@ -148,8 +157,15 @@ function IssueTrackerButtons({
   );
 }
 
-/** Left section: home → task name breadcrumb, integrations menu */
-function TopBarLeft({ taskTitle }: TopBarLeftProps) {
+/** Left section: home → task name breadcrumb, integrations menu, executor info */
+function TopBarLeft({
+  taskId,
+  activeSessionId,
+  taskTitle,
+  remoteExecutorType,
+  isArchived,
+}: TopBarLeftProps) {
+  const showExecutorSettings = shouldShowExecutorEnvironmentControls(remoteExecutorType);
   return (
     <div className="flex items-center gap-2.5 min-w-0 overflow-hidden">
       <Breadcrumb className="min-w-0">
@@ -179,6 +195,10 @@ function TopBarLeft({ taskTitle }: TopBarLeftProps) {
       </Breadcrumb>
 
       <IntegrationsMenu />
+
+      {!isArchived && showExecutorSettings && (
+        <ExecutorSettingsButton taskId={taskId} sessionId={activeSessionId ?? null} />
+      )}
     </div>
   );
 }
@@ -272,7 +292,6 @@ function AttentionStatusGroup({
   isArchived,
   workspaceId,
   isRemoteExecutor,
-  remoteExecutorType,
   isAgentctlReady,
   taskTitle,
 }: {
@@ -281,19 +300,14 @@ function AttentionStatusGroup({
   isArchived?: boolean;
   workspaceId?: string | null;
   isRemoteExecutor?: boolean;
-  remoteExecutorType?: string | null;
   isAgentctlReady?: boolean;
   taskTitle?: string;
 }) {
-  const showExecutorSettings = shouldShowExecutorEnvironmentControls(remoteExecutorType);
   return (
     <TopbarCluster label="Task status and attention" className="[&_button]:h-8 [&_button]:text-xs">
       <DocumentControls activeSessionId={activeSessionId ?? null} />
       {!isArchived && (
         <>
-          {showExecutorSettings && (
-            <ExecutorSettingsButton taskId={taskId} sessionId={activeSessionId ?? null} />
-          )}
           <PortForwardButton
             isRemoteExecutor={isRemoteExecutor}
             sessionId={activeSessionId}
@@ -349,7 +363,6 @@ function TopBarRight({
   isArchived,
   workspaceId,
   isRemoteExecutor,
-  remoteExecutorType,
   isAgentctlReady,
   taskTitle,
 }: {
@@ -360,7 +373,6 @@ function TopBarRight({
   isArchived?: boolean;
   workspaceId?: string | null;
   isRemoteExecutor?: boolean;
-  remoteExecutorType?: string | null;
   isAgentctlReady?: boolean;
   taskTitle?: string;
 }) {
@@ -390,7 +402,6 @@ function TopBarRight({
         isArchived={isArchived}
         workspaceId={workspaceId}
         isRemoteExecutor={isRemoteExecutor}
-        remoteExecutorType={remoteExecutorType}
         isAgentctlReady={isAgentctlReady}
         taskTitle={taskTitle}
       />
