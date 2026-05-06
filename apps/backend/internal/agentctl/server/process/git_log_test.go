@@ -125,6 +125,87 @@ func TestGetLog_StaleLocalBranchScenario(t *testing.T) {
 	}
 }
 
+// TestGetLog_PushedReflectsRemoteState verifies that GetLog tags each commit
+// with Pushed = true iff it's reachable from the branch's upstream tracking
+// ref. This is the fix for the bug where commits showed as "not pushed" when
+// they were actually on the remote — sourcing the flag from PR commits broke
+// any flow without an open PR. Sourcing it from git's own remote tracking ref
+// keeps the answer correct regardless of PR state.
+func TestGetLog_PushedReflectsRemoteState(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	ctx := context.Background()
+
+	// setupTestRepo leaves us on main with one initial commit already pushed.
+	// Branch off and create one pushed + one unpushed commit so we exercise
+	// both states inside the same log range.
+	runGit(t, repoDir, "checkout", "-b", "feature/x")
+	writeFile(t, repoDir, "a.txt", "a\n")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "feat: a")
+	pushedSHA := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+	runGit(t, repoDir, "push", "-u", "origin", "feature/x")
+
+	writeFile(t, repoDir, "b.txt", "b\n")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "feat: b")
+	unpushedSHA := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+
+	gitOp := NewGitOperator(repoDir, log, nil)
+	result, err := gitOp.GetLog(ctx, "", 0)
+	if err != nil {
+		t.Fatalf("GetLog returned error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("GetLog failed: %s", result.Error)
+	}
+
+	got := make(map[string]bool, len(result.Commits))
+	for _, c := range result.Commits {
+		got[c.CommitSHA] = c.Pushed
+	}
+	if pushed, ok := got[pushedSHA]; !ok {
+		t.Fatalf("pushed commit %s missing from log", pushedSHA)
+	} else if !pushed {
+		t.Errorf("expected pushed commit %s to be Pushed=true, got false", pushedSHA)
+	}
+	if pushed, ok := got[unpushedSHA]; !ok {
+		t.Fatalf("unpushed commit %s missing from log", unpushedSHA)
+	} else if pushed {
+		t.Errorf("expected local-only commit %s to be Pushed=false, got true", unpushedSHA)
+	}
+}
+
+// TestGetLog_PushedFalseWhenNoUpstream guards against falsely marking commits
+// as pushed on branches that have never been pushed (no upstream configured).
+// The "safer default" path must keep Pushed=false rather than guessing.
+func TestGetLog_PushedFalseWhenNoUpstream(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	ctx := context.Background()
+
+	// Branch with no upstream — never pushed.
+	runGit(t, repoDir, "checkout", "-b", "feature/no-upstream")
+	writeFile(t, repoDir, "a.txt", "a\n")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "feat: a")
+
+	gitOp := NewGitOperator(repoDir, log, nil)
+	result, err := gitOp.GetLog(ctx, "", 0)
+	if err != nil {
+		t.Fatalf("GetLog returned error: %v", err)
+	}
+	for _, c := range result.Commits {
+		if c.Pushed {
+			t.Errorf("commit %s on branch with no upstream should be Pushed=false, got true", c.CommitSHA)
+		}
+	}
+}
+
 // TestGetLog_FirstParentSkipsMergedInCommits verifies that GetLog uses
 // --first-parent so commits brought in via a merge from main do not appear in
 // the branch's commit list. Without --first-parent, "git log <merge-base>..HEAD"

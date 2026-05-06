@@ -20,6 +20,8 @@ import { TaskArchiveConfirmDialog } from "./task-archive-confirm-dialog";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-sidebar-view";
+import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { buildSwitchToSession, selectTaskWithLayout } from "./task-select-helpers";
@@ -508,17 +510,6 @@ function useBulkGitStatusSubscription(primarySessionIds: string[]) {
   }, [primarySessionIds, connectionStatus, activeSessionId]);
 }
 
-function useEffectiveSidebarView() {
-  const sidebarSlice = useAppStore((state) => state.sidebarViews);
-  return useMemo(() => {
-    const active = sidebarSlice.views.find((v) => v.id === sidebarSlice.activeViewId);
-    if (!active) return sidebarSlice.views[0];
-    const d = sidebarSlice.draft;
-    if (!d || d.baseViewId !== active.id) return active;
-    return { ...active, filters: d.filters, sort: d.sort, group: d.group };
-  }, [sidebarSlice.views, sidebarSlice.activeViewId, sidebarSlice.draft]);
-}
-
 export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   workspaceId,
 }: TaskSessionSidebarProps) {
@@ -539,6 +530,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
 
   useBulkGitStatusSubscription(primarySessionIds);
 
+  const sidebarActions = useSidebarActions(store);
   const {
     deletingTaskId,
     preparingTaskId,
@@ -554,7 +546,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     setArchivingTask,
     isArchiving,
     handleArchiveConfirm,
-  } = useSidebarActions(store);
+  } = sidebarActions;
 
   const displayTasks = useMemo(() => {
     if (MOCK_SIDEBAR) return MOCK_ITEMS;
@@ -568,10 +560,12 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   const toggleSidebarGroupCollapsed = useAppStore((state) => state.toggleSidebarGroupCollapsed);
   const collapsedSubtaskParents = useAppStore((state) => state.collapsedSubtaskParents);
   const toggleSubtaskCollapsed = useAppStore((state) => state.toggleSubtaskCollapsed);
+  const { pinnedTaskIds, orderedTaskIds, togglePinnedTask, handleReorderGroup } =
+    useSidebarTaskPrefs();
   const effectiveView = useEffectiveSidebarView();
   const grouped = useMemo(
-    () => applyView(displayTasks, effectiveView),
-    [displayTasks, effectiveView],
+    () => applyView(displayTasks, effectiveView, { pinnedTaskIds, orderedTaskIds }),
+    [displayTasks, effectiveView, pinnedTaskIds, orderedTaskIds],
   );
 
   return (
@@ -593,6 +587,9 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
           onArchiveTask={handleArchiveTask}
           onDeleteTask={handleDeleteTask}
           onMoveToStep={handleMoveToStep}
+          onTogglePin={togglePinnedTask}
+          onReorderGroup={handleReorderGroup}
+          pinnedTaskIds={pinnedTaskIds}
           deletingTaskId={deletingTaskId}
           isLoading={isLoadingWorkflow}
           totalTaskCount={displayTasks.length}

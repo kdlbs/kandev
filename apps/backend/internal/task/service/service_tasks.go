@@ -13,6 +13,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -198,9 +199,25 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		if name == "" {
 			name = filepath.Base(repoInput.LocalPath)
 		}
+		// Resolve default_branch by probing the repo on disk so it's anchored
+		// to the integration branch (origin/HEAD or main/master) rather than
+		// whatever feature branch the user happens to have checked out. The
+		// frontend's `default_branch` hint wins when set; otherwise we probe
+		// directly. Falling back to repoInput.BaseBranch is wrong because in
+		// the local-executor flow that field carries the user's working
+		// branch, which would permanently pin repositories.default_branch to
+		// a feature branch and break every downstream merge-base lookup.
 		defaultBranch := repoInput.DefaultBranch
 		if defaultBranch == "" {
-			defaultBranch = repoInput.BaseBranch
+			// Probe must operate on a path validated against the discovery
+			// allowlist — repoInput.LocalPath comes straight from the HTTP body
+			// and feeds into os.Stat/ReadFile inside gitref.DefaultBranch, so
+			// without this guard a caller could traverse the filesystem.
+			if safePath, pathErr := s.resolveAllowedLocalPath(repoInput.LocalPath); pathErr == nil {
+				if probed, err := gitref.DefaultBranch(safePath); err == nil && probed != "" && probed != "HEAD" {
+					defaultBranch = probed
+				}
+			}
 		}
 		created, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
 			WorkspaceID:   workspaceID,

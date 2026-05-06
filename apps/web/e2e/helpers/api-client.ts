@@ -749,6 +749,14 @@ export class ApiClient {
     title: string;
     primary_session_id?: string | null;
     state?: string;
+    repositories?: Array<{
+      id: string;
+      task_id: string;
+      repository_id: string;
+      base_branch: string;
+      checkout_branch?: string;
+      position: number;
+    }>;
   }> {
     return this.request("GET", `/api/v1/tasks/${taskId}`);
   }

@@ -4,11 +4,12 @@ import { memo } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
-import { IconLoader2, IconMessageCircle, IconPlus, IconX } from "@tabler/icons-react";
+import { IconLoader2, IconMessageCircle, IconPlus } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { PassthroughTerminal } from "@/components/task/passthrough-terminal";
 import { QuickChatContent } from "./quick-chat-content";
 import { QuickChatDeleteDialog } from "./quick-chat-delete-dialog";
+import { QuickChatTabItem } from "./quick-chat-tab-item";
 import { useQuickChatModal } from "./use-quick-chat-modal";
 
 type QuickChatModalProps = {
@@ -21,12 +22,14 @@ function QuickChatTabs({
   onTabChange,
   onTabClose,
   onNewChat,
+  onRename,
 }: {
   sessions: Array<{ sessionId: string; workspaceId: string; name?: string }>;
   activeSessionId: string;
   onTabChange: (sessionId: string) => void;
   onTabClose: (sessionId: string) => void;
   onNewChat: () => void;
+  onRename: (sessionId: string, name: string) => void;
 }) {
   if (sessions.length === 0) return null;
 
@@ -34,34 +37,18 @@ function QuickChatTabs({
     <div className="flex items-center gap-1 px-2 py-1 border-b bg-muted/20">
       <div className="flex items-center gap-1 overflow-x-auto flex-1 scrollbar-hide">
         {sessions.map((s, index) => {
-          const isActive = s.sessionId === activeSessionId;
           // Show "New Chat" for empty session IDs (agent picker tabs)
           const tabName = s.sessionId === "" ? "New Chat" : s.name || `Chat ${index + 1}`;
           return (
-            <div
+            <QuickChatTabItem
               key={s.sessionId || `new-${index}`}
-              className={`flex items-center gap-1 rounded transition-colors whitespace-nowrap ${
-                isActive
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:bg-muted"
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => onTabChange(s.sessionId)}
-                className="flex items-center px-2.5 py-1 text-xs cursor-pointer"
-              >
-                <span className="truncate max-w-[100px]">{tabName}</span>
-              </button>
-              <button
-                type="button"
-                aria-label={`Close ${tabName}`}
-                className="p-1 cursor-pointer opacity-60 hover:opacity-100"
-                onClick={() => onTabClose(s.sessionId)}
-              >
-                <IconX className="h-3 w-3" />
-              </button>
-            </div>
+              name={tabName}
+              isActive={s.sessionId === activeSessionId}
+              isRenameable={s.sessionId !== ""}
+              onActivate={() => onTabChange(s.sessionId)}
+              onClose={() => onTabClose(s.sessionId)}
+              onRename={(name) => onRename(s.sessionId, name)}
+            />
           );
         })}
       </div>
@@ -172,6 +159,7 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
     handleSelectAgent,
     handleCloseTab,
     handleConfirmClose,
+    handleRename,
   } = useQuickChatModal(workspaceId);
 
   return (
@@ -189,6 +177,7 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
             onTabChange={setActiveQuickChatSession}
             onTabClose={handleCloseTab}
             onNewChat={handleNewChat}
+            onRename={handleRename}
           />
           {activeSessionId && !activeSessionNeedsAgent && (
             <QuickChatSessionView sessionId={activeSessionId} />

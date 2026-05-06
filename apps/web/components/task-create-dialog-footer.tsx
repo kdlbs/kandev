@@ -108,6 +108,7 @@ function StartTaskSplitButton({
             <DropdownMenuItem
               onClick={onAltAction}
               className="cursor-pointer whitespace-nowrap focus:bg-muted/80 hover:bg-muted/80"
+              data-testid="submit-create-without-agent"
             >
               <IconPlus className="h-3.5 w-3.5 mr-1.5" />
               {isEditMode ? "Update task" : "Create without starting agent"}

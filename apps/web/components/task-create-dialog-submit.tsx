@@ -33,6 +33,7 @@ export function useTaskSubmitHandlers({
   effectiveDefaultStepId,
   repositories,
   discoveredRepositories,
+  workspaceRepositories,
   useGitHubUrl,
   githubUrl,
   githubPrHeadBranch,
@@ -128,6 +129,8 @@ export function useTaskSubmitHandlers({
         githubPrHeadBranch,
         repositories,
         discoveredRepositories,
+        workspaceRepositories,
+        isLocalExecutor,
         freshBranch: buildFreshBranchPayload(consentedDirtyFiles),
       }),
     // buildFreshBranchPayload is a closure over current scope; lint exception kept narrow.
@@ -139,6 +142,8 @@ export function useTaskSubmitHandlers({
       githubPrHeadBranch,
       repositories,
       discoveredRepositories,
+      workspaceRepositories,
+      isLocalExecutor,
       isFreshBranchActive,
     ],
   );

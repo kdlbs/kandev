@@ -380,6 +380,10 @@ type GitCommitInfo struct {
 	FilesChanged  int    `json:"files_changed"`
 	Insertions    int    `json:"insertions"`
 	Deletions     int    `json:"deletions"`
+	// Pushed mirrors process.GitCommitInfo.Pushed — true when the commit is
+	// reachable from the branch's upstream tracking ref. Sourced from git, so
+	// it stays correct without an open PR and across multi-repo workspaces.
+	Pushed bool `json:"pushed"`
 	// RepositoryName tags commits when fetched from a multi-repo subpath. Empty
 	// for single-repo workspaces. Stamped client-side after the per-repo call
 	// so callers can fan out across repos and merge.

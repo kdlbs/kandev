@@ -1,30 +1,30 @@
 "use client";
 
-import { cloneElement, isValidElement, memo, useState } from "react";
+import { memo, useCallback, useMemo } from "react";
+import { IconChevronDown } from "@tabler/icons-react";
 import {
-  IconChevronDown,
-  IconPencil,
-  IconCopy,
-  IconArchive,
-  IconTrash,
-  IconLoader,
-} from "@tabler/icons-react";
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  type DragEndEvent,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
 import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@kandev/ui/context-menu";
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { cn } from "@/lib/utils";
 import { TaskItem } from "./task-item";
+import { TaskItemWithContextMenu, type StepDef } from "./task-switcher-context-menu";
 import type { GroupedSidebarList, SidebarGroup } from "@/lib/sidebar/apply-view";
-import {
-  TaskMoveContextMenuItems,
-  type TaskMoveWorkflow,
-} from "@/components/task/task-move-context-menu";
-import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
+import { type TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
+
+const DRAG_ACTIVATION_DISTANCE = 8;
 
 export type TaskSwitcherItem = {
   id: string;
@@ -55,13 +55,6 @@ export type TaskSwitcherItem = {
   issueInfo?: { url: string; number: number };
 };
 
-type StepDef = {
-  id: string;
-  title: string;
-  color?: string;
-  events?: { on_enter?: Array<{ type: string; config?: Record<string, unknown> }> };
-};
-
 type TaskSwitcherProps = {
   grouped: GroupedSidebarList;
   workflows?: TaskMoveWorkflow[];
@@ -77,6 +70,9 @@ type TaskSwitcherProps = {
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onTogglePin?: (taskId: string) => void;
+  onReorderGroup?: (groupTaskIds: string[]) => void;
+  pinnedTaskIds?: string[];
   deletingTaskId?: string | null;
   isLoading?: boolean;
   totalTaskCount?: number;
@@ -148,6 +144,8 @@ type TaskRowProps = {
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onTogglePin?: (taskId: string) => void;
+  isPinned?: boolean;
   deletingTaskId?: string | null;
 };
 
@@ -164,6 +162,8 @@ function TaskRow({
   onArchiveTask,
   onDeleteTask,
   onMoveToStep,
+  onTogglePin,
+  isPinned,
   deletingTaskId,
 }: TaskRowProps) {
   const isSelected = task.id === selectedTaskId || task.id === activeTaskId;
@@ -178,6 +178,8 @@ function TaskRow({
       onArchiveTask={onArchiveTask}
       onDeleteTask={onDeleteTask}
       onMoveToStep={onMoveToStep}
+      onTogglePin={onTogglePin}
+      isPinned={isPinned}
       isDeleting={deletingTaskId === task.id}
     >
       <TaskItem
@@ -203,8 +205,165 @@ function TaskRow({
         onToggleSubtasks={subtaskToggle?.onToggleSubtasks}
         onClick={() => onSelectTask(task.id)}
         isDeleting={deletingTaskId === task.id}
+        isPinned={isPinned}
       />
     </TaskItemWithContextMenu>
+  );
+}
+
+function SortableTaskBlock({
+  taskId,
+  parent,
+  subTasks,
+}: {
+  taskId: string;
+  parent: React.ReactNode;
+  subTasks?: React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: taskId,
+  });
+  const sortableAttributes = {
+    ...attributes,
+    role: undefined,
+    "aria-roledescription": undefined,
+  };
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : undefined,
+  };
+  // setNodeRef stays on the outer wrapper so the CSS transform applies to
+  // the parent row + its subtasks together. Drag listeners only attach to
+  // the parent row's wrapper, so a pointer-down on a subtask row does NOT
+  // trigger a drag of the parent block.
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      data-testid="sortable-task-block"
+      data-task-id={taskId}
+      className={cn(isDragging && "z-50")}
+    >
+      <div
+        {...sortableAttributes}
+        {...listeners}
+        // Strip dnd-kit's default tabIndex={0}: only PointerSensor is wired,
+        // so keyboard tab stops here lead nowhere. If KeyboardSensor is
+        // added later, drop this override.
+        tabIndex={undefined}
+        data-testid="sortable-task-handle"
+        className="cursor-grab active:cursor-grabbing"
+      >
+        {parent}
+      </div>
+      {subTasks}
+    </div>
+  );
+}
+
+type GroupSectionProps = {
+  group: SidebarGroup;
+  subTasksByParentId: Map<string, TaskSwitcherItem[]>;
+  workflows?: TaskMoveWorkflow[];
+  stepsByWorkflowId?: Record<string, StepDef[]>;
+  activeTaskId: string | null;
+  selectedTaskId: string | null;
+  isCollapsed: boolean;
+  onToggleCollapsed: () => void;
+  collapsedSubtaskParentIds?: string[];
+  onToggleSubtasks?: (parentTaskId: string) => void;
+  showHeader: boolean;
+  onSelectTask: (taskId: string) => void;
+  onRenameTask?: (taskId: string, currentTitle: string) => void;
+  onArchiveTask?: (taskId: string) => void;
+  onDeleteTask?: (taskId: string) => void;
+  onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onTogglePin?: (taskId: string) => void;
+  onReorderGroup?: (groupTaskIds: string[]) => void;
+  pinnedSet: Set<string>;
+  deletingTaskId?: string | null;
+};
+
+function useGroupDnd(
+  groupTasks: TaskSwitcherItem[],
+  onReorderGroup?: (groupTaskIds: string[]) => void,
+) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
+  );
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      if (!onReorderGroup) return;
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const ids = groupTasks.map((t) => t.id);
+      const oldIndex = ids.indexOf(String(active.id));
+      const newIndex = ids.indexOf(String(over.id));
+      if (oldIndex < 0 || newIndex < 0) return;
+      onReorderGroup(arrayMove(ids, oldIndex, newIndex));
+    },
+    [groupTasks, onReorderGroup],
+  );
+  const sortableIds = useMemo(() => groupTasks.map((t) => t.id), [groupTasks]);
+  return { sensors, handleDragEnd, sortableIds };
+}
+
+function GroupTaskList({
+  group,
+  subTasksByParentId,
+  collapsedSubs,
+  onToggleSubtasks,
+  pinnedSet,
+  rowProps,
+}: {
+  group: SidebarGroup;
+  subTasksByParentId: Map<string, TaskSwitcherItem[]>;
+  collapsedSubs: Set<string>;
+  onToggleSubtasks?: (parentTaskId: string) => void;
+  pinnedSet: Set<string>;
+  rowProps: Omit<TaskRowProps, "task" | "subtaskToggle" | "isPinned" | "isSubTask">;
+}) {
+  return (
+    <>
+      {group.tasks.map((task) => {
+        const subs = subTasksByParentId.get(task.id);
+        const hasSubs = !!subs?.length;
+        const subsHidden = hasSubs && !!onToggleSubtasks && collapsedSubs.has(task.id);
+        const toggleInfo: SubtaskToggleInfo | undefined =
+          hasSubs && onToggleSubtasks
+            ? {
+                subtaskCount: subs!.length,
+                subtasksCollapsed: subsHidden,
+                onToggleSubtasks: () => onToggleSubtasks(task.id),
+              }
+            : undefined;
+        return (
+          <SortableTaskBlock
+            key={task.id}
+            taskId={task.id}
+            parent={
+              <TaskRow
+                task={task}
+                subtaskToggle={toggleInfo}
+                isPinned={pinnedSet.has(task.id)}
+                {...rowProps}
+              />
+            }
+            subTasks={
+              !subsHidden &&
+              subs?.map((sub) => (
+                // Subtasks aren't independently sortable or pinnable — pinning
+                // would show an icon but `floatPinnedToTop` only operates on
+                // root tasks, so the row wouldn't move. Drop both props to
+                // avoid the misleading no-op menu item.
+                <TaskRow key={sub.id} task={sub} isSubTask {...rowProps} onTogglePin={undefined} />
+              ))
+            }
+          />
+        );
+      })}
+    </>
   );
 }
 
@@ -225,26 +384,11 @@ function GroupSection({
   onArchiveTask,
   onDeleteTask,
   onMoveToStep,
+  onTogglePin,
+  onReorderGroup,
+  pinnedSet,
   deletingTaskId,
-}: {
-  group: SidebarGroup;
-  subTasksByParentId: Map<string, TaskSwitcherItem[]>;
-  workflows?: TaskMoveWorkflow[];
-  stepsByWorkflowId?: Record<string, StepDef[]>;
-  activeTaskId: string | null;
-  selectedTaskId: string | null;
-  isCollapsed: boolean;
-  onToggleCollapsed: () => void;
-  collapsedSubtaskParentIds?: string[];
-  onToggleSubtasks?: (parentTaskId: string) => void;
-  showHeader: boolean;
-  onSelectTask: (taskId: string) => void;
-  onRenameTask?: (taskId: string, currentTitle: string) => void;
-  onArchiveTask?: (taskId: string) => void;
-  onDeleteTask?: (taskId: string) => void;
-  onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
-  deletingTaskId?: string | null;
-}) {
+}: GroupSectionProps) {
   const totalCount = group.tasks.reduce(
     (sum, t) => sum + 1 + (subTasksByParentId.get(t.id)?.length ?? 0),
     0,
@@ -260,8 +404,10 @@ function GroupSection({
     onArchiveTask,
     onDeleteTask,
     onMoveToStep,
+    onTogglePin,
     deletingTaskId,
   };
+  const { sensors, handleDragEnd, sortableIds } = useGroupDnd(group.tasks, onReorderGroup);
 
   return (
     <div>
@@ -274,136 +420,22 @@ function GroupSection({
           onToggle={onToggleCollapsed}
         />
       )}
-      {!isCollapsed &&
-        group.tasks.map((task) => {
-          const subs = subTasksByParentId.get(task.id);
-          const hasSubs = !!subs?.length;
-          const subsHidden = hasSubs && !!onToggleSubtasks && collapsedSubs.has(task.id);
-          const toggleInfo: SubtaskToggleInfo | undefined =
-            hasSubs && onToggleSubtasks
-              ? {
-                  subtaskCount: subs!.length,
-                  subtasksCollapsed: subsHidden,
-                  onToggleSubtasks: () => onToggleSubtasks(task.id),
-                }
-              : undefined;
-          return (
-            <div key={task.id}>
-              <TaskRow task={task} subtaskToggle={toggleInfo} {...rowProps} />
-              {!subsHidden &&
-                subs?.map((sub) => <TaskRow key={sub.id} task={sub} isSubTask {...rowProps} />)}
-            </div>
-          );
-        })}
+      {!isCollapsed && (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+            <GroupTaskList
+              group={group}
+              subTasksByParentId={subTasksByParentId}
+              collapsedSubs={collapsedSubs}
+              onToggleSubtasks={onToggleSubtasks}
+              pinnedSet={pinnedSet}
+              rowProps={rowProps}
+            />
+          </SortableContext>
+        </DndContext>
+      )}
     </div>
   );
-}
-
-function TaskItemWithContextMenu({
-  task,
-  workflows,
-  stepsByWorkflowId,
-  steps,
-  children,
-  onRenameTask,
-  onArchiveTask,
-  onDeleteTask,
-  onMoveToStep,
-  isDeleting,
-}: {
-  task: TaskSwitcherItem;
-  workflows?: TaskMoveWorkflow[];
-  stepsByWorkflowId?: Record<string, StepDef[]>;
-  steps?: StepDef[];
-  children: React.ReactElement<{ menuOpen?: boolean }>;
-  onRenameTask?: (taskId: string, currentTitle: string) => void;
-  onArchiveTask?: (taskId: string) => void;
-  onDeleteTask?: (taskId: string) => void;
-  onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
-  isDeleting?: boolean;
-}) {
-  const [contextOpen, setContextOpen] = useState(false);
-  const [menuKey, setMenuKey] = useState(0);
-  const moveTasks = useTaskWorkflowMove();
-  const menuOpen = contextOpen || isDeleting === true;
-  const closeMenu = () => {
-    setContextOpen(false);
-    setMenuKey((k) => k + 1);
-  };
-
-  return (
-    <ContextMenu key={menuKey} onOpenChange={setContextOpen}>
-      <ContextMenuTrigger asChild>
-        <div>{cloneWithMenuOpen(children, menuOpen)}</div>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="w-48">
-        {onRenameTask && (
-          <ContextMenuItem disabled={isDeleting} onClick={() => onRenameTask(task.id, task.title)}>
-            <IconPencil className="mr-2 h-4 w-4" />
-            Rename
-          </ContextMenuItem>
-        )}
-        <ContextMenuItem disabled>
-          <IconCopy className="mr-2 h-4 w-4" />
-          Duplicate
-        </ContextMenuItem>
-        {onArchiveTask && (
-          <ContextMenuItem disabled={isDeleting} onClick={() => onArchiveTask(task.id)}>
-            <IconArchive className="mr-2 h-4 w-4" />
-            Archive
-          </ContextMenuItem>
-        )}
-        {task.workflowId && (
-          <TaskMoveContextMenuItems
-            currentWorkflowId={task.workflowId}
-            currentStepId={task.workflowStepId}
-            workflows={workflows ?? []}
-            stepsByWorkflowId={stepsByWorkflowId ?? (steps ? { [task.workflowId]: steps } : {})}
-            disabled={isDeleting || task.isArchived}
-            onMoveToStep={
-              onMoveToStep
-                ? (stepId) => {
-                    closeMenu();
-                    onMoveToStep(task.id, task.workflowId!, stepId);
-                  }
-                : undefined
-            }
-            onSendToWorkflow={(workflowId, stepId) => {
-              closeMenu();
-              void moveTasks([task.id], workflowId, stepId).catch(() => {
-                // useTaskWorkflowMove already shows the failure toast.
-              });
-            }}
-          />
-        )}
-        {onDeleteTask && (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuItem
-              variant="destructive"
-              disabled={isDeleting}
-              onClick={() => onDeleteTask(task.id)}
-            >
-              {isDeleting ? (
-                <IconLoader className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <IconTrash className="mr-2 h-4 w-4" />
-              )}
-              Delete
-            </ContextMenuItem>
-          </>
-        )}
-      </ContextMenuContent>
-    </ContextMenu>
-  );
-}
-
-function cloneWithMenuOpen(
-  children: React.ReactElement<{ menuOpen?: boolean }>,
-  menuOpen: boolean,
-): React.ReactNode {
-  if (isValidElement(children)) return cloneElement(children, { menuOpen });
-  return children;
 }
 
 export const TaskSwitcher = memo(function TaskSwitcher({
@@ -421,10 +453,14 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   onArchiveTask,
   onDeleteTask,
   onMoveToStep,
+  onTogglePin,
+  onReorderGroup,
+  pinnedTaskIds,
   deletingTaskId,
   isLoading = false,
   totalTaskCount,
 }: TaskSwitcherProps) {
+  const pinnedSet = useMemo(() => new Set(pinnedTaskIds ?? []), [pinnedTaskIds]);
   if (isLoading) return <TaskSwitcherSkeleton />;
   const totalTasks = totalTaskCount ?? grouped.groups.reduce((sum, g) => sum + g.tasks.length, 0);
   if (totalTasks === 0) {
@@ -457,6 +493,9 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           onArchiveTask={onArchiveTask}
           onDeleteTask={onDeleteTask}
           onMoveToStep={onMoveToStep}
+          onTogglePin={onTogglePin}
+          onReorderGroup={onReorderGroup}
+          pinnedSet={pinnedSet}
           deletingTaskId={deletingTaskId}
         />
       ))}

@@ -42,6 +42,7 @@ function makeStore(initial: Partial<AppState> = {}) {
         },
       };
     }),
+    removeTaskFromSidebarPrefs: vi.fn(),
     ...initial,
   } as unknown as AppState;
 

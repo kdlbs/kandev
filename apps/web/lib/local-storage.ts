@@ -634,6 +634,17 @@ export function cleanupTaskStorage(
     setStoredCollapsedSubtaskParents(collapsed.filter((id) => id !== taskId));
   }
 
+  // Sidebar pin + manual-order arrays. Strip the deleted task so the lists
+  // don't grow unboundedly across reloads.
+  const pinned = getStoredPinnedTaskIds();
+  if (pinned.includes(taskId)) {
+    setStoredPinnedTaskIds(pinned.filter((id) => id !== taskId));
+  }
+  const ordered = getStoredOrderedTaskIds();
+  if (ordered.includes(taskId)) {
+    setStoredOrderedTaskIds(ordered.filter((id) => id !== taskId));
+  }
+
   // Env-keyed storage — dockview layout + maximize live under task envs.
   for (const envId of envIds) {
     removeEnvMaximizeState(envId);
@@ -642,6 +653,7 @@ export function cleanupTaskStorage(
 
   // Session-keyed storage — drafts, files panel state, scroll, etc.
   for (const sessionId of sessionIds) {
+    removeStoredQuickChatName(sessionId);
     removeSessionStorage(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_CONTENT_KEY}.${sessionId}`);
@@ -656,6 +668,36 @@ export function cleanupTaskStorage(
     removeSessionStorage(`kandev.contextFiles.${sessionId}`);
     removeSessionStorage(`kandev.comments.${sessionId}`);
   }
+}
+
+// --- Quick chat custom names (localStorage, global) ---
+//
+// Local-only: not persisted to the backend. Keyed by sessionId so the rename
+// follows the underlying chat across reloads but vanishes if the user clears
+// browser storage. The backend task title remains the auto-generated name.
+
+const QUICK_CHAT_NAMES_KEY = "kandev.quickChat.names";
+
+export function getStoredQuickChatNames(): Record<string, string> {
+  const raw = getLocalStorage<Record<string, string>>(QUICK_CHAT_NAMES_KEY, {});
+  if (!raw || typeof raw !== "object") return {};
+  return raw;
+}
+
+export function setStoredQuickChatName(sessionId: string, name: string): void {
+  if (!sessionId) return;
+  const all = getStoredQuickChatNames();
+  if (name) all[sessionId] = name;
+  else delete all[sessionId];
+  setLocalStorage(QUICK_CHAT_NAMES_KEY, all);
+}
+
+export function removeStoredQuickChatName(sessionId: string): void {
+  if (!sessionId) return;
+  const all = getStoredQuickChatNames();
+  if (!(sessionId in all)) return;
+  delete all[sessionId];
+  setLocalStorage(QUICK_CHAT_NAMES_KEY, all);
 }
 
 // --- Sidebar filter views (localStorage, global) ---
@@ -693,6 +735,33 @@ export function setStoredSidebarDraft<T>(draft: T): void {
 
 export function removeStoredSidebarDraft(): void {
   removeLocalStorage(SIDEBAR_DRAFT_KEY);
+}
+
+// --- Sidebar task prefs: pin + manual order (localStorage, global) ---
+
+const SIDEBAR_PINNED_TASKS_KEY = "kandev.sidebar.pinnedTaskIds";
+const SIDEBAR_TASK_ORDER_KEY = "kandev.sidebar.orderedTaskIds";
+
+function readStringArray(key: string): string[] {
+  const raw = getLocalStorage<string[]>(key, []) as unknown;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((id): id is string => typeof id === "string");
+}
+
+export function getStoredPinnedTaskIds(): string[] {
+  return readStringArray(SIDEBAR_PINNED_TASKS_KEY);
+}
+
+export function setStoredPinnedTaskIds(ids: string[]): void {
+  setLocalStorage(SIDEBAR_PINNED_TASKS_KEY, ids);
+}
+
+export function getStoredOrderedTaskIds(): string[] {
+  return readStringArray(SIDEBAR_TASK_ORDER_KEY);
+}
+
+export function setStoredOrderedTaskIds(ids: string[]): void {
+  setLocalStorage(SIDEBAR_TASK_ORDER_KEY, ids);
 }
 
 // --- Sidebar collapsed subtask parents (sessionStorage, tab-scoped) ---
