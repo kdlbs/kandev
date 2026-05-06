@@ -213,7 +213,7 @@ function ReadyRow({ summary }: { summary: PrepareSummary }) {
     <div
       data-testid="executor-prepare-status"
       data-phase="ready"
-      className="border-b border-border p-3 flex items-center gap-2 text-xs text-muted-foreground"
+      className="border-b border-border px-3 py-2 flex items-center gap-2 text-xs text-muted-foreground"
     >
       <IconCheck className="h-3.5 w-3.5 text-green-500" />
       <span>

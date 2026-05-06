@@ -313,7 +313,7 @@ function EnvironmentInfo({
   }
 
   return (
-    <div className="px-3 pt-2.5 pb-3 space-y-2">
+    <div className="px-3 py-2 space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <span className="font-medium text-foreground">{formatExecutorType(env.executor_type)}</span>
         <StatusBadge env={env} container={container} />
@@ -369,7 +369,7 @@ function EnvironmentFields({
     return <p className="text-xs text-muted-foreground">No resource details available.</p>;
   }
   return (
-    <dl className="space-y-1.5 text-xs">
+    <dl className="space-y-1 text-xs">
       {fields.map((f) => (
         <Field key={f.label} label={f.label} value={f.value} copy={f.copy} />
       ))}
