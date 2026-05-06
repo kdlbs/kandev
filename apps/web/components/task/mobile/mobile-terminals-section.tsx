@@ -168,7 +168,7 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
           size="sm"
           variant="outline"
           className="h-7 gap-1 cursor-pointer"
-          onClick={addTerminal}
+          onClick={() => addTerminal()}
           data-testid="mobile-add-terminal"
         >
           <IconPlus className="h-4 w-4" />

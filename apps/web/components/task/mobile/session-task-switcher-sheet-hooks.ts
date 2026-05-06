@@ -40,6 +40,17 @@ function mapSnapshotToKanban(snapshot: WorkflowSnapshot, newWorkflowId: string) 
       position: task.position ?? 0,
       state: task.state,
       repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
+      // Carry the full TaskRepository array so the mobile repo picker
+      // (useTaskRepoCount + MobileReposSection) keeps working after a
+      // workspace switch. Without this, the picker silently disappears for
+      // multi-repo tasks because length defaults to 0.
+      repositories: task.repositories?.map((r) => ({
+        id: r.id,
+        repository_id: r.repository_id,
+        base_branch: r.base_branch,
+        checkout_branch: r.checkout_branch,
+        position: r.position,
+      })),
       primarySessionId: task.primary_session_id ?? undefined,
       primarySessionState: task.primary_session_state ?? undefined,
       sessionCount: task.session_count ?? undefined,
@@ -247,6 +258,15 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
           position: task.position ?? 0,
           state: task.state,
           repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
+          // See mapSnapshotToKanban — keep the full repos array so the mobile
+          // repo picker shows up for newly created multi-repo tasks too.
+          repositories: task.repositories?.map((r) => ({
+            id: r.id,
+            repository_id: r.repository_id,
+            base_branch: r.base_branch,
+            checkout_branch: r.checkout_branch,
+            position: r.position,
+          })),
           updatedAt: task.updated_at,
           primaryExecutorId: task.primary_executor_id ?? undefined,
           primaryExecutorType: task.primary_executor_type ?? undefined,
