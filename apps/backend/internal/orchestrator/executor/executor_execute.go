@@ -452,8 +452,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}
 
 	// Check for an existing task environment to reuse worktree, container, or sandbox
-	e.applyExistingEnvironment(req, existingEnv)
-	e.applyExistingEnvironmentRuntimeMetadata(ctx, req, existingEnv)
+	e.reuseExistingEnvironment(ctx, req, existingEnv)
 
 	e.logger.Info("launching agent for prepared session",
 		zap.String("task_id", task.ID),
@@ -1084,16 +1083,25 @@ func (e *Executor) persistTaskEnvironmentRepos(ctx context.Context, envID string
 	}
 }
 
-// applyExistingEnvironment propagates worktree, container, and sandbox IDs from
-// an existing TaskEnvironment into the launch request so that executor backends
-// can reuse the existing execution environment.
+// reuseExistingEnvironment carries forward worktree, container, sandbox, and
+// runtime metadata from an existing TaskEnvironment into the launch request
+// so that executor backends can reuse the prior execution.
 //
 // Reuse is gated on the env's executor_type matching the launch request: if
 // the user switched the task's executor profile to a different type, we must
-// NOT pass stale `PreviousExecutionID`/container_id/sprite_name to the wrong
-// backend (it would either fail loudly or, worse, overwrite the persisted env
-// with mixed resource IDs on the next save).
-func (e *Executor) applyExistingEnvironment(req *LaunchAgentRequest, env *models.TaskEnvironment) {
+// NOT pass stale PreviousExecutionID / container_id / sprite_name to the
+// wrong backend (it would either fail loudly or, worse, overwrite the
+// persisted env with mixed resource IDs on the next save).
+//
+// Two layers of metadata feed in:
+//   - env-level (stable IDs: worktree id, container id, sandbox id, branch)
+//   - the latest matching ExecutorRunning row (live runtime metadata: agent
+//     execution id, secret references, anything in persistentMetadataKeys)
+//
+// applyExecutorRunningMetadata overwrites container_id with running.ContainerID
+// (running wins for live runtime values) but only adds keys that don't already
+// exist for the rest (env wins for sprite_name and other stable IDs).
+func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgentRequest, env *models.TaskEnvironment) {
 	if env == nil {
 		return
 	}
@@ -1105,7 +1113,6 @@ func (e *Executor) applyExistingEnvironment(req *LaunchAgentRequest, env *models
 		return
 	}
 
-	// Worktree reuse
 	if env.WorktreeID != "" && req.UseWorktree {
 		req.WorktreeID = env.WorktreeID
 		e.logger.Info("reusing existing task environment worktree",
@@ -1113,40 +1120,30 @@ func (e *Executor) applyExistingEnvironment(req *LaunchAgentRequest, env *models
 			zap.String("worktree_id", env.WorktreeID))
 	}
 
-	// Container/sandbox reuse
 	if env.ContainerID != "" || env.SandboxID != "" {
-		if req.Metadata == nil {
-			req.Metadata = make(map[string]interface{})
-		}
+		metadata := ensureLaunchMetadata(req)
 		if env.ContainerID != "" {
-			req.Metadata[lifecycle.MetadataKeyContainerID] = env.ContainerID
+			metadata[lifecycle.MetadataKeyContainerID] = env.ContainerID
 		}
 		if env.SandboxID != "" {
-			// Sprites executor reads "sprite_name" from metadata for reconnection
-			req.Metadata["sprite_name"] = env.SandboxID
+			metadata["sprite_name"] = env.SandboxID
 		}
 	}
 
-	// Forward the persisted feature branch so the in-sandbox prepare script can
-	// re-create or reuse it. Applies to every clone-based remote executor (the
-	// preparer is responsible for stamping env.WorktreeBranch in the first
-	// place); the host-side worktree path uses req.WorktreeID instead and
-	// doesn't need this metadata.
+	// Forward the persisted feature branch so the in-sandbox prepare script
+	// can re-create or reuse it. Applies to every clone-based remote executor
+	// (the preparer is responsible for stamping env.WorktreeBranch in the
+	// first place); the host-side worktree path uses req.WorktreeID instead.
 	if env.WorktreeBranch != "" && isContainerizedExecutor(req.ExecutorType) {
-		metadata := ensureLaunchMetadata(req)
-		metadata[lifecycle.MetadataKeyWorktreeBranch] = env.WorktreeBranch
+		ensureLaunchMetadata(req)[lifecycle.MetadataKeyWorktreeBranch] = env.WorktreeBranch
 	}
-}
 
-func (e *Executor) applyExistingEnvironmentRuntimeMetadata(ctx context.Context, req *LaunchAgentRequest, env *models.TaskEnvironment) {
-	if env == nil || env.ID == "" {
+	if env.ID == "" {
 		return
 	}
-	running := e.latestExecutorRunningForEnvironment(ctx, req.TaskID, env)
-	if running == nil {
-		return
+	if running := e.latestExecutorRunningForEnvironment(ctx, req.TaskID, env); running != nil {
+		applyExecutorRunningMetadata(req, running)
 	}
-	applyExecutorRunningMetadata(req, running)
 }
 
 func (e *Executor) latestExecutorRunningForEnvironment(ctx context.Context, taskID string, env *models.TaskEnvironment) *models.ExecutorRunning {

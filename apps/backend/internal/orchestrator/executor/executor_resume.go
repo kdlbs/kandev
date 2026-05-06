@@ -487,8 +487,7 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 		return nil, "", execConfig, nil, err
 	}
 
-	e.applyExistingEnvironment(req, existingEnv)
-	e.applyExistingEnvironmentRuntimeMetadata(ctx, req, existingEnv)
+	e.reuseExistingEnvironment(ctx, req, existingEnv)
 
 	// Activate config-mode MCP tools when config_mode is set in session metadata.
 	if isConfigModeSession(session) {

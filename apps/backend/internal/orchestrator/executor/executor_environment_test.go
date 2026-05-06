@@ -20,11 +20,11 @@ func newEnvTestExecutor(t *testing.T) *Executor {
 	return &Executor{logger: log}
 }
 
-func TestApplyExistingEnvironment_NilEnv(t *testing.T) {
+func TestReuseExistingEnvironment_NilEnv(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1"}
 
-	e.applyExistingEnvironment(req, nil)
+	e.reuseExistingEnvironment(context.Background(), req, nil)
 
 	if req.Metadata != nil {
 		t.Error("expected nil metadata for nil env")
@@ -34,21 +34,21 @@ func TestApplyExistingEnvironment_NilEnv(t *testing.T) {
 	}
 }
 
-func TestApplyExistingEnvironment_WorktreeReuse(t *testing.T) {
+func TestReuseExistingEnvironment_WorktreeReuse(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1", UseWorktree: true}
 	env := &models.TaskEnvironment{
 		WorktreeID: "wt-1",
 	}
 
-	e.applyExistingEnvironment(req, env)
+	e.reuseExistingEnvironment(context.Background(), req, env)
 
 	if req.WorktreeID != "wt-1" {
 		t.Errorf("expected WorktreeID=wt-1, got %s", req.WorktreeID)
 	}
 }
 
-func TestApplyExistingEnvironment_SkipsReuseOnExecutorTypeMismatch(t *testing.T) {
+func TestReuseExistingEnvironment_SkipsReuseOnExecutorTypeMismatch(t *testing.T) {
 	// Switching the task's executor profile to a different type must invalidate
 	// reuse: stale PreviousExecutionID/ContainerID/sprite_name from the old
 	// backend would otherwise leak into the new launch and overwrite the
@@ -65,7 +65,7 @@ func TestApplyExistingEnvironment_SkipsReuseOnExecutorTypeMismatch(t *testing.T)
 		WorktreeID:   "wt-1",
 	}
 
-	e.applyExistingEnvironment(req, env)
+	e.reuseExistingEnvironment(context.Background(), req, env)
 
 	if req.WorktreeID != "" {
 		t.Errorf("expected WorktreeID to be empty on executor mismatch, got %q", req.WorktreeID)
@@ -78,28 +78,28 @@ func TestApplyExistingEnvironment_SkipsReuseOnExecutorTypeMismatch(t *testing.T)
 	}
 }
 
-func TestApplyExistingEnvironment_WorktreeSkippedWhenNotRequested(t *testing.T) {
+func TestReuseExistingEnvironment_WorktreeSkippedWhenNotRequested(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1", UseWorktree: false}
 	env := &models.TaskEnvironment{
 		WorktreeID: "wt-1",
 	}
 
-	e.applyExistingEnvironment(req, env)
+	e.reuseExistingEnvironment(context.Background(), req, env)
 
 	if req.WorktreeID != "" {
 		t.Errorf("expected empty WorktreeID when UseWorktree=false, got %s", req.WorktreeID)
 	}
 }
 
-func TestApplyExistingEnvironment_ContainerReuse(t *testing.T) {
+func TestReuseExistingEnvironment_ContainerReuse(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1"}
 	env := &models.TaskEnvironment{
 		ContainerID: "container-abc",
 	}
 
-	e.applyExistingEnvironment(req, env)
+	e.reuseExistingEnvironment(context.Background(), req, env)
 
 	if req.PreviousExecutionID != "" {
 		t.Errorf("expected empty PreviousExecutionID, got %s", req.PreviousExecutionID)
@@ -109,7 +109,7 @@ func TestApplyExistingEnvironment_ContainerReuse(t *testing.T) {
 	}
 }
 
-func TestApplyExistingEnvironment_DockerBranchReuse(t *testing.T) {
+func TestReuseExistingEnvironment_DockerBranchReuse(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1", ExecutorType: "local_docker"}
 	env := &models.TaskEnvironment{
@@ -118,14 +118,14 @@ func TestApplyExistingEnvironment_DockerBranchReuse(t *testing.T) {
 		WorktreeBranch: "feature/existing-task-abc",
 	}
 
-	e.applyExistingEnvironment(req, env)
+	e.reuseExistingEnvironment(context.Background(), req, env)
 
 	if req.Metadata[lifecycle.MetadataKeyWorktreeBranch] != "feature/existing-task-abc" {
 		t.Fatalf("metadata worktree_branch = %v, want existing branch", req.Metadata[lifecycle.MetadataKeyWorktreeBranch])
 	}
 }
 
-func TestApplyExistingEnvironmentRuntimeMetadata_CarriesPersistentSecrets(t *testing.T) {
+func TestReuseExistingEnvironment_RuntimeMetadata_CarriesPersistentSecrets(t *testing.T) {
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	if err != nil {
 		t.Fatalf("failed to create logger: %v", err)
@@ -152,7 +152,7 @@ func TestApplyExistingEnvironmentRuntimeMetadata_CarriesPersistentSecrets(t *tes
 	e := &Executor{logger: log, repo: repo}
 	req := &LaunchAgentRequest{TaskID: "task-1"}
 
-	e.applyExistingEnvironmentRuntimeMetadata(context.Background(), req, &models.TaskEnvironment{
+	e.reuseExistingEnvironment(context.Background(), req, &models.TaskEnvironment{
 		ID: "env-1",
 	})
 
@@ -173,7 +173,7 @@ func TestApplyExistingEnvironmentRuntimeMetadata_CarriesPersistentSecrets(t *tes
 	}
 }
 
-func TestApplyExistingEnvironmentRuntimeMetadata_FallsBackToMatchingContainer(t *testing.T) {
+func TestReuseExistingEnvironment_RuntimeMetadata_FallsBackToMatchingContainer(t *testing.T) {
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	if err != nil {
 		t.Fatalf("failed to create logger: %v", err)
@@ -198,7 +198,7 @@ func TestApplyExistingEnvironmentRuntimeMetadata_FallsBackToMatchingContainer(t 
 	e := &Executor{logger: log, repo: repo}
 	req := &LaunchAgentRequest{TaskID: "task-1"}
 
-	e.applyExistingEnvironmentRuntimeMetadata(context.Background(), req, &models.TaskEnvironment{
+	e.reuseExistingEnvironment(context.Background(), req, &models.TaskEnvironment{
 		ID:          "env-1",
 		ContainerID: "container-old",
 	})
@@ -294,14 +294,14 @@ func TestBuildResumeRequest_ReusesTaskEnvironmentRuntimeMetadata(t *testing.T) {
 	}
 }
 
-func TestApplyExistingEnvironment_SandboxReuse(t *testing.T) {
+func TestReuseExistingEnvironment_SandboxReuse(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1"}
 	env := &models.TaskEnvironment{
 		SandboxID: "kandev-sprite-abc",
 	}
 
-	e.applyExistingEnvironment(req, env)
+	e.reuseExistingEnvironment(context.Background(), req, env)
 
 	if req.PreviousExecutionID != "" {
 		t.Errorf("expected empty PreviousExecutionID, got %s", req.PreviousExecutionID)
@@ -311,7 +311,7 @@ func TestApplyExistingEnvironment_SandboxReuse(t *testing.T) {
 	}
 }
 
-func TestApplyExistingEnvironment_WorktreeAndContainer(t *testing.T) {
+func TestReuseExistingEnvironment_WorktreeAndContainer(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1", UseWorktree: true}
 	env := &models.TaskEnvironment{
@@ -319,7 +319,7 @@ func TestApplyExistingEnvironment_WorktreeAndContainer(t *testing.T) {
 		ContainerID: "container-abc",
 	}
 
-	e.applyExistingEnvironment(req, env)
+	e.reuseExistingEnvironment(context.Background(), req, env)
 
 	if req.WorktreeID != "wt-1" {
 		t.Errorf("expected WorktreeID=wt-1, got %s", req.WorktreeID)
@@ -332,12 +332,12 @@ func TestApplyExistingEnvironment_WorktreeAndContainer(t *testing.T) {
 	}
 }
 
-func TestApplyExistingEnvironment_EmptyEnvFieldsDoNothing(t *testing.T) {
+func TestReuseExistingEnvironment_EmptyEnvFieldsDoNothing(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1"}
 	env := &models.TaskEnvironment{}
 
-	e.applyExistingEnvironment(req, env)
+	e.reuseExistingEnvironment(context.Background(), req, env)
 
 	if req.Metadata != nil {
 		t.Error("expected nil metadata when no container/sandbox IDs")
