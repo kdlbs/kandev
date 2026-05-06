@@ -119,6 +119,43 @@ func TestSpritesStopInstancePreservesSandboxOnSessionStop(t *testing.T) {
 	}
 }
 
+// TestSpritesStopThenResumeReconnects proves the end-to-end integration of
+// the resume-fast path: a preserving StopInstance leaves enough state on the
+// instance metadata for the next launch to (a) decide it's a reconnect and
+// (b) build the 3-step reconnect plan instead of the full 7-step bootstrap.
+// The pieces are unit-tested individually elsewhere; this test guards
+// against the wiring drifting (e.g. StopInstance accidentally stripping
+// sprite_name, or the reconnect predicate forgetting to look at metadata).
+func TestSpritesStopThenResumeReconnects(t *testing.T) {
+	r := newTestSpritesExecutor(nil)
+
+	stopped := &ExecutorInstance{
+		InstanceID: "inst-stop-resume",
+		Metadata:   map[string]interface{}{"sprite_name": "kandev-keep-me"},
+		StopReason: "stopped via API",
+	}
+	if err := r.StopInstance(context.Background(), stopped, false); err != nil {
+		t.Fatalf("StopInstance: %v", err)
+	}
+
+	// Mirror what executor_resume.go does: it carries forward the previous
+	// execution's sprite_name into the next launch request's Metadata. If
+	// StopInstance had cleared sprite_name, this map would be empty.
+	resume := &ExecutorCreateRequest{
+		Metadata:            map[string]interface{}{"sprite_name": stopped.Metadata["sprite_name"]},
+		PreviousExecutionID: "previous-exec",
+	}
+
+	if !spritesShouldReconnect(resume) {
+		t.Fatal("resume after preserving stop must be detected as a reconnect")
+	}
+
+	plan := newSpritesProgressPlan(spritesShouldReconnect(resume))
+	if plan.total() != 3 {
+		t.Fatalf("reconnect plan total = %d, want 3 (got: %v)", plan.total(), plan.steps)
+	}
+}
+
 func TestSpritesProgressPlanReconnectOmitsSetupAndNetworkSteps(t *testing.T) {
 	plan := newSpritesProgressPlan(true)
 
