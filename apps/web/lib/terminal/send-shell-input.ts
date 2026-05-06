@@ -25,7 +25,21 @@ export function sendShellInput(sessionId: string, data: string): void {
 
   const activeSender = getActiveTerminalSender();
   if (activeSender) {
-    activeSender(transformed);
+    try {
+      activeSender(transformed);
+    } catch (err) {
+      // A stale registry entry (e.g. xterm disposed mid-frame) shouldn't
+      // silently drop the keystroke nor consume modifiers. Fall through to
+      // the WS path so the input still has a chance of landing.
+      console.error("Active terminal sender threw, falling back to shell.input:", err);
+      const client = getWebSocketClient();
+      if (!client) return;
+      client.send({
+        type: "request",
+        action: "shell.input",
+        payload: { session_id: sessionId, data: transformed },
+      });
+    }
   } else {
     const client = getWebSocketClient();
     if (!client) return; // keep modifiers armed; user can retry once reconnected

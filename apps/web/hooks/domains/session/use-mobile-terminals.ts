@@ -33,7 +33,17 @@ export function useMobileTerminals(sessionId: string | null) {
       return;
     }
     autoCreatedRef.current = environmentId;
-    addTerminalRef.current();
+    // Reset the guard if creation fails so the user gets a retry on the next
+    // render cycle (e.g. after the WS reconnects). addTerminal returns void
+    // but its inner promise can still reject; guard defensively.
+    const result = addTerminalRef.current() as unknown;
+    if (result && typeof (result as Promise<unknown>).catch === "function") {
+      (result as Promise<unknown>).catch(() => {
+        if (autoCreatedRef.current === environmentId) {
+          autoCreatedRef.current = null;
+        }
+      });
+    }
   }, [environmentId, shellsLoaded, shells.length]);
 
   return { ...result, environmentId };

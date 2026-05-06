@@ -89,7 +89,6 @@ function StateBadge({ state }: { state: TaskSessionState | null }) {
 function SessionActionsMenu({
   state,
   isPrimary,
-  showCloseConfirm,
   onSetPrimary,
   onStop,
   onResume,
@@ -97,7 +96,6 @@ function SessionActionsMenu({
 }: {
   state: TaskSessionState | null;
   isPrimary: boolean;
-  showCloseConfirm: boolean;
   onSetPrimary: () => void;
   onStop: () => void;
   onResume: () => void;
@@ -140,7 +138,7 @@ function SessionActionsMenu({
             className="cursor-pointer text-destructive focus:text-destructive"
             onSelect={onAskDelete}
           >
-            {showCloseConfirm ? "Delete" : "Delete"}
+            Delete
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
@@ -246,7 +244,6 @@ function SessionRowItem({
         <SessionActionsMenu
           state={row.state}
           isPrimary={row.isPrimary}
-          showCloseConfirm
           onSetPrimary={() => void actions.setPrimary()}
           onStop={() => void actions.stop()}
           onResume={() => void actions.resume()}

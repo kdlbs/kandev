@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useState } from "react";
 import { PassthroughTerminal } from "../passthrough-terminal";
 import { useMobileTerminals } from "@/hooks/domains/session/use-mobile-terminals";
 import { setActiveTerminalSender } from "@/lib/terminal/mobile-active-terminal";
@@ -17,18 +17,20 @@ function TerminalSlot({
   environmentId: string | null;
   isActive: boolean;
 }) {
-  const xtermRef = useRef<XtermTerminal | null>(null);
+  // Track xterm in state so the registration effect re-runs when the instance
+  // becomes available. PassthroughTerminal initialises xterm asynchronously
+  // when the container starts at 0×0 (ResizeObserver fallback), so a ref-based
+  // dependency would silently miss that path on first mount.
+  const [xterm, setXterm] = useState<XtermTerminal | null>(null);
 
   // Register the active terminal sender so the mobile key-bar can target this
   // xterm via paste(), which routes through xterm.onData → AttachAddon → WS.
   useEffect(() => {
-    if (!isActive) return;
-    const xterm = xtermRef.current;
-    if (!xterm) return;
+    if (!isActive || !xterm) return;
     const sender = (data: string) => xterm.paste(data);
     setActiveTerminalSender(sender);
     return () => setActiveTerminalSender(null);
-  }, [isActive, terminal.id]);
+  }, [isActive, xterm]);
 
   return (
     <div className={`absolute inset-0 ${isActive ? "block" : "hidden"}`}>
@@ -39,9 +41,7 @@ function TerminalSlot({
         label={terminal.label}
         autoFocus={isActive}
         disableWebgl
-        onXtermReady={(x) => {
-          xtermRef.current = x;
-        }}
+        onXtermReady={setXterm}
       />
     </div>
   );

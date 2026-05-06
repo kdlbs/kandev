@@ -37,8 +37,11 @@ function useTaskActiveRepoName(taskId: string | null, workspaceId: string | null
   });
   return useMemo(() => {
     if (!activeRepoId) {
-      // Fallback to the first task repo when no session is active yet.
-      const fallback = taskRepos?.[0]?.repository_id;
+      // Fallback to the position-primary task repo when no session is active
+      // yet. Match the picker's ordering (mobile-repos-section sorts by
+      // position) so the pill label and the first sheet row agree.
+      const sorted = taskRepos ? [...taskRepos].sort((a, b) => a.position - b.position) : [];
+      const fallback = sorted[0]?.repository_id;
       if (!fallback) return null;
       const repo = workspaceRepos.find((r) => r.id === fallback);
       return repo?.name ?? repo?.local_path ?? null;

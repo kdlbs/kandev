@@ -209,14 +209,30 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
 }
 
 function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
-  const { workspaceId, store, setActiveSession, setActiveTask, onOpenChange } = opts;
+  const {
+    workspaceId,
+    store,
+    loadTaskSessionsForTask,
+    setActiveSession,
+    setActiveTask,
+    onOpenChange,
+  } = opts;
 
   const handleWorkspaceChange = useCallback(
     async (newWorkspaceId: string) => {
       if (newWorkspaceId === workspaceId) return;
-      await switchWorkspace(newWorkspaceId, opts);
+      await switchWorkspace(newWorkspaceId, {
+        workspaceId,
+        store,
+        loadTaskSessionsForTask,
+        setActiveSession,
+        setActiveTask,
+        onOpenChange,
+      });
     },
-    [workspaceId, opts],
+    // Spread the individual fields rather than the `opts` object so callers
+    // re-passing a fresh literal each render don't defeat memoization.
+    [workspaceId, store, loadTaskSessionsForTask, setActiveSession, setActiveTask, onOpenChange],
   );
 
   const handleTaskCreated = useCallback(
@@ -264,6 +280,42 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
   return { handleWorkspaceChange, handleTaskCreated };
 }
 
+type SelectTaskOptions = {
+  setActiveTask: (taskId: string) => void;
+  setActiveSession: (taskId: string, sessionId: string) => void;
+  loadTaskSessionsForTask: SheetNavOptions["loadTaskSessionsForTask"];
+  onOpenChange: (open: boolean) => void;
+};
+
+async function selectTaskWithoutPrimarySession(taskId: string, opts: SelectTaskOptions) {
+  const { setActiveTask, setActiveSession, loadTaskSessionsForTask, onOpenChange } = opts;
+  try {
+    const sessions = await loadTaskSessionsForTask(taskId);
+    const sessionId = sessions[0]?.id ?? null;
+    if (sessionId) {
+      setActiveSession(taskId, sessionId);
+      replaceTaskUrl(taskId);
+      onOpenChange(false);
+      return;
+    }
+    // No session — prepare workspace.
+    const { request } = buildPrepareRequest(taskId);
+    try {
+      const resp = await launchSession(request);
+      if (resp.session_id) setActiveSession(taskId, resp.session_id);
+    } catch {
+      // Fall through to default navigation.
+    }
+  } catch (error) {
+    // Loading sessions can reject (network / 5xx). Don't strand the user;
+    // fall back to plain task navigation so URL + state still align with tap.
+    console.error("Failed to load sessions for task:", error);
+  }
+  setActiveTask(taskId);
+  replaceTaskUrl(taskId);
+  onOpenChange(false);
+}
+
 export function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolean) => void) {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
@@ -284,27 +336,11 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
         onOpenChange(false);
         return;
       }
-      loadTaskSessionsForTask(taskId).then(async (sessions) => {
-        const sessionId = sessions[0]?.id ?? null;
-        if (sessionId) {
-          setActiveSession(taskId, sessionId);
-          replaceTaskUrl(taskId);
-          onOpenChange(false);
-          return;
-        }
-        // No session — prepare workspace.
-        const { request } = buildPrepareRequest(taskId);
-        try {
-          const resp = await launchSession(request);
-          if (resp.session_id) {
-            setActiveSession(taskId, resp.session_id);
-          }
-        } catch {
-          // Fall through to default behavior.
-        }
-        setActiveTask(taskId);
-        replaceTaskUrl(taskId);
-        onOpenChange(false);
+      void selectTaskWithoutPrimarySession(taskId, {
+        setActiveTask,
+        setActiveSession,
+        loadTaskSessionsForTask,
+        onOpenChange,
       });
     },
     [loadTaskSessionsForTask, setActiveSession, setActiveTask, store, onOpenChange],
