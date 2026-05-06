@@ -172,11 +172,23 @@ func TestSpritesProgressPlanReconnectOmitsSetupAndNetworkSteps(t *testing.T) {
 			t.Fatalf("reconnect runtime plan unexpectedly includes %s", key)
 		}
 	}
-	if got := plan.index(spriteStepWaitHealthy); got != 1 {
-		t.Fatalf("wait healthy index = %d, want 1", got)
+	// Assert ordering rather than absolute indexes — the plan can grow new
+	// steps without invalidating the contract this test guards (create →
+	// wait healthy → agent instance must run in that order).
+	for _, key := range []spritesStepKey{spriteStepCreateSprite, spriteStepWaitHealthy, spriteStepAgentInstance} {
+		if !plan.has(key) {
+			t.Fatalf("reconnect plan missing required step %s", key)
+		}
 	}
-	if got := plan.index(spriteStepAgentInstance); got != 2 {
-		t.Fatalf("agent instance index = %d, want 2", got)
+	assertPlanOrder(t, plan, spriteStepCreateSprite, spriteStepWaitHealthy)
+	assertPlanOrder(t, plan, spriteStepWaitHealthy, spriteStepAgentInstance)
+}
+
+func assertPlanOrder(t *testing.T, plan *spritesProgressPlan, before, after spritesStepKey) {
+	t.Helper()
+	if plan.index(before) >= plan.index(after) {
+		t.Fatalf("expected %s to run before %s, got indexes %d / %d",
+			before, after, plan.index(before), plan.index(after))
 	}
 }
 
