@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -177,6 +178,78 @@ func TestBuildContainerConfig_PublishesAgentctlPorts(t *testing.T) {
 	assertHasPortBinding(t, got.PortBindings, dockerAgentctlInstancePortMax)
 	assertEnvContains(t, got.Env, "AGENTCTL_INSTANCE_PORT_BASE=41001")
 	assertEnvContains(t, got.Env, "AGENTCTL_INSTANCE_PORT_MAX=41100")
+}
+
+// TestBuildContainerConfig_SessionDirIsKandevManagedForEveryAgent locks in
+// the agent-agnostic guarantee that bind sources for SessionDirTemplate
+// resolve to <kandev-home>/agent-sessions/<instance>/<dotdir> and never to
+// the user's host home — the codex bug was a leak of host state into the
+// container, and any agent with a SessionDirTemplate is at the same risk.
+func TestBuildContainerConfig_SessionDirIsKandevManagedForEveryAgent(t *testing.T) {
+	allAgents := []struct {
+		name string
+		ag   agents.Agent
+	}{
+		{"codex-acp", agents.NewCodexACP()},
+		{"claude-acp", agents.NewClaudeACP()},
+		{"opencode-acp", agents.NewOpenCodeACP()},
+		{"copilot-acp", agents.NewCopilotACP()},
+		{"amp-acp", agents.NewAmpACP()},
+		{"gemini", agents.NewGemini()},
+		{"auggie", agents.NewAuggie()},
+	}
+	const kandevHome = "/tmp/kandev-test-home"
+	const instanceID = "0123456789abcdef"
+	expectedRoot := filepath.Join(kandevHome, "agent-sessions", instanceID)
+
+	for _, tc := range allAgents {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := tc.ag.Runtime()
+			if rt == nil {
+				t.Skipf("%s has no Runtime", tc.name)
+			}
+			// expandMounts only adds the session-dir bind when BOTH fields
+			// are set; agents that omit one rely on the in-container
+			// SetupScript for auth and never bind-mount the host home in the
+			// first place. Skip those — the test guards the resolution shape
+			// only for agents that DO add the bind mount.
+			if rt.SessionConfig.SessionDirTemplate == "" || rt.SessionConfig.SessionDirTarget == "" {
+				t.Skipf("%s has no full SessionDirTemplate+SessionDirTarget pair (no bind mount today)", tc.name)
+			}
+
+			cm := newCMTest(t)
+			cm.kandevHomeDir = kandevHome
+			cfg := ContainerConfig{
+				AgentConfig: tc.ag,
+				InstanceID:  instanceID,
+				TaskID:      "task-1",
+			}
+
+			got, err := cm.buildContainerConfig(cfg)
+			if err != nil {
+				t.Fatalf("buildContainerConfig: %v", err)
+			}
+
+			target := rt.SessionConfig.SessionDirTarget
+			var found *docker.MountConfig
+			for i := range got.Mounts {
+				if got.Mounts[i].Target == target {
+					found = &got.Mounts[i]
+					break
+				}
+			}
+			if found == nil {
+				t.Fatalf("expected mount for SessionDirTarget %q, got %+v", target, got.Mounts)
+			}
+			if !strings.HasPrefix(found.Source, expectedRoot) {
+				t.Fatalf("session-dir mount source %q not under %q (host home leaked into container?)",
+					found.Source, expectedRoot)
+			}
+			if strings.Contains(found.Source, "{home}") {
+				t.Fatalf("session-dir mount source %q still references {home} placeholder", found.Source)
+			}
+		})
+	}
 }
 
 func TestBuildContainerConfig_MountsLocalClonePath(t *testing.T) {

@@ -51,8 +51,9 @@ func getMetadataBool(metadata map[string]interface{}, key string) bool {
 // DockerExecutor implements Runtime for Docker-based agent execution.
 // The Docker client is created lazily on first use (not at startup).
 type DockerExecutor struct {
-	cfg    config.DockerConfig
-	logger *logger.Logger
+	cfg           config.DockerConfig
+	kandevHomeDir string
+	logger        *logger.Logger
 
 	// newClientFunc creates the Docker client. Defaults to docker.NewClient.
 	// Override in tests to simulate failures.
@@ -69,10 +70,13 @@ type DockerExecutor struct {
 
 // NewDockerExecutor creates a new Docker runtime.
 // The Docker client is NOT created here — it is initialized lazily
-// when CreateInstance is called.
-func NewDockerExecutor(cfg config.DockerConfig, log *logger.Logger) *DockerExecutor {
+// when CreateInstance is called. kandevHomeDir is the resolved kandev root
+// directory used to host per-container agent session dirs (the replacement
+// for host home bind mounts that were leaking host state into containers).
+func NewDockerExecutor(cfg config.DockerConfig, kandevHomeDir string, log *logger.Logger) *DockerExecutor {
 	return &DockerExecutor{
 		cfg:           cfg,
+		kandevHomeDir: kandevHomeDir,
 		logger:        log.WithFields(zap.String("runtime", "docker")),
 		newClientFunc: docker.NewClient,
 	}
@@ -95,7 +99,7 @@ func (r *DockerExecutor) ensureClient() (*docker.Client, *ContainerManager, erro
 	}
 
 	r.docker = cli
-	r.containerMgr = NewContainerManager(cli, "", r.logger)
+	r.containerMgr = NewContainerManager(cli, "", r.kandevHomeDir, r.logger)
 	r.initialized = true
 
 	return r.docker, r.containerMgr, nil
@@ -155,6 +159,21 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 	// Extract runtime-specific values from metadata
 	worktreeID := getMetadataString(req.Metadata, MetadataKeyWorktreeID)
 	worktreeBranch := getMetadataString(req.Metadata, MetadataKeyWorktreeBranch)
+
+	// Seed the per-container agent session dir with the auth files the agent
+	// needs (auth.json / config.toml / etc.). This replaces the historical
+	// pattern of bind-mounting the user's whole ~/.<agent> into the container,
+	// which leaked host-absolute state-DB paths into the container and broke
+	// session resume on agents that cache them (codex's rollout DB).
+	if req.AgentConfig != nil && r.kandevHomeDir != "" {
+		instanceRoot := InstanceSessionRoot(r.kandevHomeDir, req.InstanceID)
+		if err := SeedAgentSessionDir(ctx, req.AgentConfig, instanceRoot, r.logger); err != nil {
+			r.logger.Warn("failed to seed agent session dir (continuing)",
+				zap.String("instance_id", req.InstanceID),
+				zap.String("agent_id", req.AgentConfig.ID()),
+				zap.Error(err))
+		}
+	}
 
 	// Resolve prepare script for cloning repo inside container
 	prepareScript := r.resolvePrepareScript(req)
@@ -465,6 +484,18 @@ func resolveDockerEndpoint(
 }
 
 func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
+	if instance == nil {
+		return nil
+	}
+
+	// On destructive stop reasons (task/session deleted/archived), clean up
+	// the kandev-managed per-container session dir so we don't leak GBs of
+	// agent state on disk. Plain stops preserve the dir so resume re-attaches
+	// to the same agent state, mirroring the Sprites preserve-on-stop rule.
+	if shouldRunExecutorCleanup(instance.StopReason) && r.kandevHomeDir != "" && instance.InstanceID != "" {
+		CleanupAgentSessionDir(InstanceSessionRoot(r.kandevHomeDir, instance.InstanceID), r.logger)
+	}
+
 	if instance.ContainerID == "" {
 		return nil // No container to stop
 	}

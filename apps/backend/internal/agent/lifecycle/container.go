@@ -54,6 +54,11 @@ type ContainerManager struct {
 	commandBuilder *CommandBuilder
 	logger         *logger.Logger
 	networkName    string
+	// kandevHomeDir is the resolved Kandev root dir, used to derive the
+	// per-container agent session dirs that replace host home bind-mounts.
+	// Empty means "fall back to legacy {home}/.<agent>" — production callers
+	// always pass a non-empty value.
+	kandevHomeDir string
 	// resolveAgentctlBinary returns the host path to a linux/amd64 agentctl
 	// binary. Indirected so tests can inject a stub.
 	resolveAgentctlBinary func() (string, error)
@@ -63,8 +68,11 @@ type ContainerManager struct {
 	resolveMockAgentBinary func() (string, error)
 }
 
-// NewContainerManager creates a new ContainerManager
-func NewContainerManager(dockerClient *docker.Client, networkName string, log *logger.Logger) *ContainerManager {
+// NewContainerManager creates a new ContainerManager. kandevHomeDir is the
+// resolved Kandev root dir used to host per-container agent session dirs;
+// pass "" only in legacy callers/tests that don't exercise the session-dir
+// mount path.
+func NewContainerManager(dockerClient *docker.Client, networkName, kandevHomeDir string, log *logger.Logger) *ContainerManager {
 	resolver := NewAgentctlResolver(log)
 	mockResolver := NewMockAgentResolver(log)
 	return &ContainerManager{
@@ -72,6 +80,7 @@ func NewContainerManager(dockerClient *docker.Client, networkName string, log *l
 		commandBuilder:         NewCommandBuilder(),
 		logger:                 log.WithFields(zap.String("component", "container-manager")),
 		networkName:            networkName,
+		kandevHomeDir:          kandevHomeDir,
 		resolveAgentctlBinary:  resolver.ResolveLinuxBinary,
 		resolveMockAgentBinary: mockResolver.ResolveLinuxBinary,
 	}
@@ -328,7 +337,7 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 
 	// Expand mounts using the host path so {workspace} substitutions in mount
 	// sources resolve to a real on-disk location.
-	mounts := cm.expandMounts(rt.Mounts, config.WorkspacePath, ag)
+	mounts := cm.expandMounts(rt.Mounts, config.WorkspacePath, ag, config.InstanceID)
 
 	// Add main repo .git directory mount for worktrees
 	if config.MainRepoGitDir != "" {
@@ -475,8 +484,15 @@ func newDockerPortBinding(containerPort int) docker.PortBindingConfig {
 	}
 }
 
-// expandMounts expands mount templates with actual paths
-func (cm *ContainerManager) expandMounts(templates []agents.MountTemplate, workspacePath string, ag agents.Agent) []docker.MountConfig {
+// expandMounts expands mount templates with actual paths.
+//
+// Per-agent session dirs (SessionConfig.SessionDirTemplate) are mapped to a
+// kandev-managed path under <kandev-home>/agent-sessions/<instance_id>/, NOT
+// the user's host home. The seeder (SeedAgentSessionDir) selectively copies
+// auth files from the host beforehand, so every agent gets a fresh, isolated
+// session dir per launch — host state DBs and session caches that contain
+// absolute host paths (e.g. codex's state.db) stay out of the container.
+func (cm *ContainerManager) expandMounts(templates []agents.MountTemplate, workspacePath string, ag agents.Agent, instanceID string) []docker.MountConfig {
 	mounts := make([]docker.MountConfig, 0, len(templates)+1) // +1 for potential session dir
 
 	for _, mt := range templates {
@@ -496,7 +512,7 @@ func (cm *ContainerManager) expandMounts(templates []agents.MountTemplate, works
 	}
 
 	// Add session directory mount from SessionConfig
-	sessionDirSource := cm.commandBuilder.ExpandSessionDir(ag)
+	sessionDirSource := cm.commandBuilder.ExpandSessionDir(ag, cm.kandevHomeDir, instanceID)
 	sessionDirTarget := cm.commandBuilder.GetSessionDirTarget(ag)
 	if sessionDirSource != "" && sessionDirTarget != "" {
 		mounts = append(mounts, docker.MountConfig{

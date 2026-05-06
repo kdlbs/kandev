@@ -28,7 +28,7 @@ func failingClientFactory(errMsg string) func(config.DockerConfig, *logger.Logge
 
 func TestNewDockerExecutor(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	if exec == nil {
 		t.Fatal("expected non-nil executor")
@@ -49,7 +49,7 @@ func TestNewDockerExecutor(t *testing.T) {
 
 func TestDockerExecutor_Name(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	if exec.Name() != executor.NameDocker {
 		t.Errorf("expected name %q, got %q", executor.NameDocker, exec.Name())
@@ -58,7 +58,7 @@ func TestDockerExecutor_Name(t *testing.T) {
 
 func TestDockerExecutor_HealthCheck(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	if err := exec.HealthCheck(context.Background()); err != nil {
 		t.Errorf("expected nil error, got: %v", err)
@@ -67,7 +67,7 @@ func TestDockerExecutor_HealthCheck(t *testing.T) {
 
 func TestDockerExecutor_RecoverInstances(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	instances, err := exec.RecoverInstances(context.Background())
 	if err != nil {
@@ -80,7 +80,7 @@ func TestDockerExecutor_RecoverInstances(t *testing.T) {
 
 func TestDockerExecutor_GetInteractiveRunner(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	if runner := exec.GetInteractiveRunner(); runner != nil {
 		t.Error("expected nil interactive runner for docker executor")
@@ -89,7 +89,7 @@ func TestDockerExecutor_GetInteractiveRunner(t *testing.T) {
 
 func TestDockerExecutor_EnsureClient_Success(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 	// Default factory uses docker.NewClient which succeeds even without Docker running
 
 	cli, cm, err := exec.ensureClient()
@@ -124,7 +124,7 @@ func TestDockerExecutor_EnsureClient_Success(t *testing.T) {
 
 func TestDockerExecutor_EnsureClient_RetriesOnFailure(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	var callCount atomic.Int32
 	exec.newClientFunc = func(_ config.DockerConfig, _ *logger.Logger) (*docker.Client, error) {
@@ -156,7 +156,7 @@ func TestDockerExecutor_EnsureClient_RetriesOnFailure(t *testing.T) {
 
 func TestDockerExecutor_EnsureClient_RecoversAfterTransientFailure(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	var callCount atomic.Int32
 	exec.newClientFunc = func(cfg config.DockerConfig, l *logger.Logger) (*docker.Client, error) {
@@ -191,7 +191,7 @@ func TestDockerExecutor_EnsureClient_RecoversAfterTransientFailure(t *testing.T)
 
 func TestDockerExecutor_Client_ReturnsNilOnFailure(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 	exec.newClientFunc = failingClientFactory("docker unavailable")
 
 	if cli := exec.Client(); cli != nil {
@@ -201,7 +201,7 @@ func TestDockerExecutor_Client_ReturnsNilOnFailure(t *testing.T) {
 
 func TestDockerExecutor_ContainerMgr_ReturnsNilOnFailure(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 	exec.newClientFunc = failingClientFactory("docker unavailable")
 
 	if cm := exec.ContainerMgr(); cm != nil {
@@ -211,7 +211,7 @@ func TestDockerExecutor_ContainerMgr_ReturnsNilOnFailure(t *testing.T) {
 
 func TestDockerExecutor_Client_ReturnsClientOnSuccess(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	cli := exec.Client()
 	if cli == nil {
@@ -223,7 +223,7 @@ func TestDockerExecutor_Client_ReturnsClientOnSuccess(t *testing.T) {
 
 func TestDockerExecutor_Close_BeforeInit(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	if err := exec.Close(); err != nil {
 		t.Errorf("expected nil error, got: %v", err)
@@ -232,7 +232,7 @@ func TestDockerExecutor_Close_BeforeInit(t *testing.T) {
 
 func TestDockerExecutor_Close_AfterInit(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	// Initialize the client
 	_, _, _ = exec.ensureClient()
@@ -257,7 +257,7 @@ func TestDockerExecutor_Close_AfterInit(t *testing.T) {
 
 func TestDockerExecutor_Close_AfterFailedInit(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 	exec.newClientFunc = failingClientFactory("docker unavailable")
 
 	// Trigger failed init
@@ -297,7 +297,7 @@ func TestDockerClientProvider_NoDockerExecutor(t *testing.T) {
 func TestDockerClientProvider_WithDockerExecutor(t *testing.T) {
 	log := newTestDockerLogger()
 	registry := NewExecutorRegistry(log)
-	dockerExec := NewDockerExecutor(config.DockerConfig{}, log)
+	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", log)
 	dockerExec.newClientFunc = failingClientFactory("docker unavailable")
 	registry.Register(dockerExec)
 	mgr := NewManager(nil, nil, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
@@ -311,7 +311,7 @@ func TestDockerClientProvider_WithDockerExecutor(t *testing.T) {
 func TestDockerClientProvider_WithWorkingDocker(t *testing.T) {
 	log := newTestDockerLogger()
 	registry := NewExecutorRegistry(log)
-	dockerExec := NewDockerExecutor(config.DockerConfig{}, log)
+	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", log)
 	registry.Register(dockerExec)
 	mgr := NewManager(nil, nil, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
 
@@ -329,7 +329,7 @@ func TestExecutorRegistry_CloseAll(t *testing.T) {
 		log := newTestDockerLogger()
 		registry := NewExecutorRegistry(log)
 
-		dockerExec := NewDockerExecutor(config.DockerConfig{}, log)
+		dockerExec := NewDockerExecutor(config.DockerConfig{}, "", log)
 		registry.Register(dockerExec)
 		registry.Register(&MockExecutor{name: executor.NameStandalone})
 
@@ -348,7 +348,7 @@ func TestExecutorRegistry_CloseAll(t *testing.T) {
 
 func TestInjectTokenIntoURL(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	tests := []struct {
 		name     string
@@ -418,7 +418,7 @@ func TestInjectTokenIntoURL(t *testing.T) {
 
 func TestReconnectToContainer_ValidationErrors(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	t.Run("short execution ID rejected", func(t *testing.T) {
 		req := &ExecutorCreateRequest{
@@ -557,7 +557,7 @@ func TestBuildReconnectCreateInstanceRequest(t *testing.T) {
 
 func TestResolvePrepareScript(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	t.Run("uses default docker script when no metadata", func(t *testing.T) {
 		req := &ExecutorCreateRequest{

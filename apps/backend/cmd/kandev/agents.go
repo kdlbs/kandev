@@ -60,7 +60,7 @@ func provideLifecycleManager(
 
 	// Register Docker runtime if enabled (client is created lazily on first use)
 	if cfg.Docker.Enabled {
-		dockerExec := lifecycle.NewDockerExecutor(cfg.Docker, log)
+		dockerExec := lifecycle.NewDockerExecutor(cfg.Docker, cfg.ResolvedHomeDir(), log)
 		executorRegistry.Register(dockerExec)
 		log.Info("Docker runtime registered (lazy initialization)")
 	}
