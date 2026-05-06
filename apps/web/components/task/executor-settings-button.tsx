@@ -22,11 +22,9 @@ import {
   type StatusTone,
   type EnvironmentStatusSnapshot,
 } from "./executor-environment-status";
-import {
-  isPreparingPhase,
-  PrepareStatusSection,
-  usePrepareSummary,
-} from "./executor-prepare-status";
+import { usePrepareSummary } from "@/hooks/domains/session/use-prepare-summary";
+import { isPreparingPhase } from "@/lib/prepare/summarize";
+import { PrepareStatusSection } from "./executor-prepare-status";
 
 type ExecutorSettingsButtonProps = {
   taskId?: string | null;

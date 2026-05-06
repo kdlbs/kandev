@@ -12,6 +12,7 @@ import {
 } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { ExpandableRow } from "@/components/task/chat/messages/expandable-row";
+import { isFallbackNoticeStep } from "@/lib/prepare/summarize";
 import { cn } from "@/lib/utils";
 import type {
   PrepareStepInfo,
@@ -273,14 +274,6 @@ function HeaderIcon({ status }: { status: EffectiveStatus }) {
     return <IconAlertTriangle className="h-4 w-4 text-amber-500" />;
   }
   return <IconTerminal2 className="h-4 w-4 text-muted-foreground" />;
-}
-
-// isFallbackNoticeStep returns true when a step is the "previous sandbox went
-// away, we provisioned a fresh one" notice. It carries a warning rather than
-// an error, so the only signal that the prepare succeeded *with a recovery*
-// (not just a generic warning) is matching this row by name + status.
-function isFallbackNoticeStep(step: PrepareStepInfo): boolean {
-  return step.status === "skipped" && step.name === "Reconnecting cloud sandbox";
 }
 
 function getHeaderLabel(status: EffectiveStatus, prepareState: SessionPrepareState): string {
