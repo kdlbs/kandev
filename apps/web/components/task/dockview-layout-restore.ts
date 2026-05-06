@@ -4,7 +4,7 @@ import { applyLayoutFixups } from "@/lib/state/dockview-layout-builders";
 import { isLayoutShapeHealthy } from "@/lib/state/dockview-layout-health";
 import { measureDockviewContainer } from "@/lib/state/dockview-measure";
 import type { LayoutState } from "@/lib/state/layout-manager";
-import { getEnvLayout, getEnvMaximizeState } from "@/lib/local-storage";
+import { getEnvLayout, getEnvMaximizeState, removeEnvMaximizeState } from "@/lib/local-storage";
 
 const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
 
@@ -103,6 +103,10 @@ function tryRestoreMaximizeOnly(api: DockviewReadyEvent["api"], envId: string): 
     applySavedMaximize(api, savedMax);
     return true;
   } catch {
+    // Drop the bad blob so subsequent page loads for this env don't keep
+    // re-attempting the same failing fromJSON. Mirrors the self-heal in
+    // dockview-store's restoreMaximizeFromStorage.
+    removeEnvMaximizeState(envId);
     return false;
   }
 }
