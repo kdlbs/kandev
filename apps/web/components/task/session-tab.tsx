@@ -21,21 +21,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useToast } from "@/components/toast-provider";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { useAppStore } from "@/components/state-provider";
+import {
+  useSessionActions,
+  isSessionStoppable as isStoppable,
+  isSessionDeletable as isDeletable,
+  isSessionResumable as isResumable,
+} from "@/hooks/domains/session/use-session-actions";
 import type { TaskSessionState } from "@/lib/types/http";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
-
-function isStoppable(s: TaskSessionState) {
-  return s === "RUNNING" || s === "STARTING" || s === "WAITING_FOR_INPUT";
-}
-function isDeletable(s: TaskSessionState) {
-  return s !== "RUNNING" && s !== "STARTING";
-}
-function isResumable(s: TaskSessionState) {
-  return s === "COMPLETED" || s === "FAILED" || s === "CANCELLED";
-}
 
 function useSessionTabState(sessionId: string | undefined) {
   const isPrimary = useAppStore((state) => {
@@ -98,86 +92,20 @@ function useSessionTabActions(
   api: IDockviewPanelHeaderProps["api"],
   containerApi: IDockviewPanelHeaderProps["containerApi"],
 ) {
-  const { toast, updateToast } = useToast();
-  const removeTaskSession = useAppStore((state) => state.removeTaskSession);
-  const appStoreApi = useAppStoreApi();
-
-  const wsAction = useCallback(
-    async (
-      action: string,
-      label: string,
-      payload: Record<string, unknown>,
-      timeout = 15000,
-    ): Promise<boolean> => {
-      const client = getWebSocketClient();
-      if (!client) return false;
-      const toastId = toast({ title: `${label}...`, variant: "loading" });
-      try {
-        await client.request(action, payload, timeout);
-        updateToast(toastId, { title: `${label} successful`, variant: "success" });
-        return true;
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : "Unknown error";
-        updateToast(toastId, { title: `${label} failed`, description: msg, variant: "error" });
-        return false;
-      }
-    },
-    [toast, updateToast],
-  );
-
-  const handleSetPrimary = useCallback(
-    () => sessionId && wsAction("session.set_primary", "Set primary", { session_id: sessionId }),
-    [sessionId, wsAction],
-  );
-  const handleStop = useCallback(
-    () => sessionId && wsAction("session.stop", "Stopping session", { session_id: sessionId }),
-    [sessionId, wsAction],
-  );
-  const handleResume = useCallback(
-    () =>
-      sessionId &&
-      taskId &&
-      wsAction(
-        "session.launch",
-        "Resuming session",
-        { task_id: taskId, intent: "resume", session_id: sessionId },
-        30000,
-      ),
-    [sessionId, taskId, wsAction],
-  );
-  const handleDelete = useCallback(async () => {
-    if (!sessionId || !taskId) return;
-    // Only mutate local state once the backend confirms the delete — otherwise
-    // a transient WS failure leaves the UI desynced from the server.
-    const ok = await wsAction("session.delete", "Deleting session", { session_id: sessionId });
-    if (!ok) return;
-
-    // Switch the active session BEFORE removing from the store so
-    // useAutoSessionTab doesn't re-create this panel with the deleted session's ID.
-    // Hand off to the most-recently-started remaining session — store ordering
-    // is unspecified, so sort explicitly rather than rely on array position.
-    const state = appStoreApi.getState();
-    if (state.tasks.activeSessionId === sessionId) {
-      const sessions = state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
-      const remaining = sessions
-        .filter((s) => s.id !== sessionId)
-        .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
-      if (remaining.length > 0) {
-        state.setActiveSessionAuto(taskId, remaining[0].id);
-      } else {
-        state.clearActiveSession();
-      }
-    }
-
-    removeTaskSession(taskId, sessionId);
+  const onDeleted = useCallback(() => {
     const panel = containerApi.getPanel(api.id);
     if (panel) containerApi.removePanel(panel);
-  }, [sessionId, taskId, wsAction, removeTaskSession, api.id, containerApi, appStoreApi]);
+  }, [api.id, containerApi]);
+  const {
+    setPrimary: handleSetPrimary,
+    stop: handleStop,
+    resume: handleResume,
+    remove: handleDelete,
+  } = useSessionActions({ sessionId, taskId, onDeleted });
   const handleCloseOthers = useCallback(() => {
     const toClose = api.group.panels.filter((p) => p.id !== api.id);
     for (const panel of toClose) containerApi.removePanel(panel);
   }, [api, containerApi]);
-
   return { handleSetPrimary, handleStop, handleResume, handleDelete, handleCloseOthers };
 }
 
