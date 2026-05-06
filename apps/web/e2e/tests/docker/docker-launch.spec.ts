@@ -565,6 +565,78 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
     expect(launchedSession?.task_environment_id).toBe(before!.id);
   });
 
+  // Regression: a stored prepare_script that pre-dates the worktree-branch
+  // checkout block must STILL land the agent on the kandev-managed feature
+  // branch. Until kandev moved the checkout into a non-overridable postlude,
+  // any profile created in the UI snapshotted the then-current default into
+  // its prepare_script field — and older snapshots clone main and stop. The
+  // empty-script e2e fixture papered over this because it falls through to
+  // the runtime default; this test forces a real stored script.
+  test("custom prepare_script without worktree checkout still lands on feature branch", async ({
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+
+    const { executors } = await apiClient.listExecutors();
+    const dockerExec = executors.find((e) => e.type === "local_docker");
+    expect(dockerExec?.id).toBeTruthy();
+
+    // Older Docker default kandev shipped: clone the chosen branch, run the
+    // user's repo setup, no kandev-managed feature-branch checkout. Any user
+    // who created a profile under that default has this stored verbatim. The
+    // safe.directory line is added so this test runs cleanly against the
+    // e2e file:// remote which has a UID-mismatched checkout; in production
+    // the user's actual stale script may or may not include it.
+    const staleScript = `#!/bin/sh
+set -eu
+{{git.identity_setup}}
+git config --global --add safe.directory '*'
+git config --global url."https://github.com/".insteadOf "git@github.com:"
+git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+{{github.auth_setup}}
+git clone --depth=1 --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}
+cd {{workspace.path}}
+git remote set-url origin "$(git remote get-url origin | sed 's|https://[^@]*@github.com/|https://github.com/|')" 2>/dev/null || true
+{{repository.setup_script}}
+`;
+
+    const profile = await apiClient.createExecutorProfile(dockerExec!.id, {
+      name: "E2E Docker Stale Script",
+      config: { image_tag: E2E_IMAGE_TAG },
+      prepare_script: staleScript,
+      cleanup_script: "",
+      env_vars: [],
+    });
+
+    try {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Docker Stale Prep",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+          executor_profile_id: profile.id,
+        },
+      );
+      await waitForLatestSessionDone(apiClient, task.id, 1, "Waiting for stale-prep session");
+
+      const env = await apiClient.getTaskEnvironment(task.id);
+      expect(env?.container_id).toBeTruthy();
+      // Even with a stored script that doesn't include the checkout block,
+      // kandev must end up on the feature branch — the kandev-managed
+      // checkout is an invariant, not something the user can drop.
+      expect(dockerCurrentBranch(env!.container_id!)).toMatch(
+        /^feature\/docker-stale-prep-[0-9a-f]{6}$/,
+      );
+    } finally {
+      await apiClient.deleteExecutorProfile(profile.id).catch(() => {});
+    }
+  });
+
   test("stops the agent then resumes onto the same container without re-cloning", async ({
     apiClient,
     seedData,

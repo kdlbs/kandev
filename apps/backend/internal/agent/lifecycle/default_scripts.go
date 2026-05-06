@@ -16,6 +16,46 @@ func DefaultPrepareScript(executorType string) string {
 	}
 }
 
+// KandevBranchCheckoutPostlude returns a kandev-managed shell snippet that
+// guarantees the session's feature branch is checked out inside the
+// workspace, no matter what the user's stored prepare_script does.
+//
+// Why a postlude instead of just relying on the default script: profiles
+// created in the UI snapshot the *then-current* default into their stored
+// prepare_script field. When kandev's default is updated to add a new
+// kandev-managed step (like the worktree-branch checkout), older profiles
+// silently miss it forever. Making the checkout an invariant — appended
+// after the user's script — keeps the contract regardless of which default
+// the user happens to have stored.
+//
+// The snippet is wrapped in a subshell + `|| true` so any failure (e.g. the
+// user's script never produced /workspace, or the branch is the same as the
+// base) is benign and doesn't block agentctl from starting.
+//
+//nolint:dupword // two `fi` tokens close two distinct shell blocks.
+func KandevBranchCheckoutPostlude() string {
+	return `
+
+# ---- kandev-managed: ensure session feature branch is checked out ----
+# Appended automatically after the user's prepare script. Idempotent —
+# safe to run even when the user's script already does the checkout.
+(
+  if [ -d "{{workspace.path}}/.git" ] \
+     && [ -n "{{worktree.branch}}" ] \
+     && [ "{{worktree.branch}}" != "{{repository.branch}}" ]; then
+    cd "{{workspace.path}}" || exit 0
+    if git fetch --depth=1 origin "{{worktree.branch}}" 2>/dev/null; then
+      git checkout -B "{{worktree.branch}}" "origin/{{worktree.branch}}"
+    elif git rev-parse --verify "{{worktree.branch}}" >/dev/null 2>&1; then
+      git checkout "{{worktree.branch}}"
+    else
+      git checkout -b "{{worktree.branch}}"
+    fi
+  fi
+) || true
+`
+}
+
 const defaultLocalPrepareScript = `#!/bin/bash
 # Prepare local environment
 # Runs before launching the local agent runtime.

@@ -554,6 +554,11 @@ func (r *DockerExecutor) IsAlwaysResumable() bool         { return true }
 
 // resolvePrepareScript builds the resolved prepare script using scriptengine.
 // This script clones the repository inside the container.
+//
+// The kandev-managed feature-branch checkout is appended as an invariant
+// postlude — older profiles that snapshot a then-current default lacked it,
+// so simply updating DefaultPrepareScript wouldn't reach those users. The
+// postlude runs after the user's prepare script and is idempotent.
 func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) string {
 	script := getMetadataString(req.Metadata, MetadataKeySetupScript)
 	if script == "" {
@@ -562,6 +567,7 @@ func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) string
 	if script == "" {
 		return ""
 	}
+	script += KandevBranchCheckoutPostlude()
 
 	resolver := scriptengine.NewResolver().
 		WithProvider(scriptengine.WorkspaceProvider(dockerWorkspacePath)).
