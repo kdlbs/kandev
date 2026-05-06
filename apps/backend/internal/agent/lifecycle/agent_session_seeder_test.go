@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -183,47 +184,61 @@ func TestCleanupAgentSessionDir_NoopOnEmptyPath(t *testing.T) {
 	CleanupAgentSessionDir("", newSeederTestLogger(t))
 }
 
-// TestDockerStopInstance_PreservesSessionDirOnPlainStop mirrors the Sprites
-// preserve-on-stop rule for Docker: a plain agent stop must leave the
-// per-container agent session dir alone so resume can re-attach to the same
-// state. Only destructive stops (task/session deleted/archived) clean up.
+// TestDockerStopInstance_PreservesSessionDirOnPlainStop drives the real
+// DockerExecutor.StopInstance for both preserve and destructive stop
+// reasons and asserts on the on-disk session dir. We pass instances with
+// ContainerID == "" so StopInstance returns before talking to the docker
+// daemon — the cleanup branch under test is the kandev-side dir teardown.
 func TestDockerStopInstance_PreservesSessionDirOnPlainStop(t *testing.T) {
 	hostHome := seedTestHostHome(t)
 	writeFile(t, hostHome, ".codex/auth.json", []byte(`{"token":"a"}`))
 
-	kandevHome := t.TempDir()
-	instanceID := "stop-test-instance"
-	root := InstanceSessionRoot(kandevHome, instanceID)
-	if err := SeedAgentSessionDir(context.Background(), agents.NewCodexACP(), root, newSeederTestLogger(t)); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, ".codex/auth.json")); err != nil {
-		t.Fatalf("seed precondition: %v", err)
-	}
-
-	// Plain stop reasons must NOT remove the dir. Only destructive reasons
-	// trigger CleanupAgentSessionDir from StopInstance, mirroring the
-	// shouldRunExecutorCleanup() rule used by Sprites.
-	preserveReasons := []string{"", "stopped via API", "agent crashed", "user requested"}
-	for _, reason := range preserveReasons {
-		if shouldRunExecutorCleanup(reason) {
-			t.Fatalf("preserve reason %q would unexpectedly trigger destructive cleanup", reason)
-		}
-	}
-	if _, err := os.Stat(root); err != nil {
-		t.Fatalf("session dir disappeared without a destructive reason: %v", err)
+	cases := []struct {
+		reason       string
+		expectExists bool
+	}{
+		{reason: "", expectExists: true},
+		{reason: "stopped via API", expectExists: true},
+		{reason: "agent crashed", expectExists: true},
+		{reason: "user requested", expectExists: true},
+		{reason: "task archived", expectExists: false},
+		{reason: "task deleted", expectExists: false},
+		{reason: "session archived", expectExists: false},
+		{reason: "session deleted", expectExists: false},
 	}
 
-	// Destructive reasons trigger cleanup.
-	destructive := []string{"task archived", "task deleted", "session archived", "session deleted"}
-	for _, reason := range destructive {
-		if !shouldRunExecutorCleanup(reason) {
-			t.Fatalf("destructive reason %q must opt into cleanup", reason)
-		}
-	}
+	log := newSeederTestLogger(t)
 
-	CleanupAgentSessionDir(root, newSeederTestLogger(t))
-	if _, err := os.Stat(root); !os.IsNotExist(err) {
-		t.Fatalf("expected dir removed after destructive cleanup, got err=%v", err)
+	for _, tc := range cases {
+		t.Run(tc.reason, func(t *testing.T) {
+			kandevHome := t.TempDir()
+			instanceID := "stop-test-instance"
+			root := InstanceSessionRoot(kandevHome, instanceID)
+			if err := SeedAgentSessionDir(context.Background(), agents.NewCodexACP(), root, log); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(root, ".codex/auth.json")); err != nil {
+				t.Fatalf("seed precondition: %v", err)
+			}
+
+			exec := NewDockerExecutor(config.DockerConfig{}, kandevHome, log)
+			instance := &ExecutorInstance{
+				InstanceID: instanceID,
+				StopReason: tc.reason,
+				// ContainerID intentionally empty so StopInstance returns
+				// before invoking the docker daemon — we're testing the
+				// kandev-side cleanup branch only.
+			}
+			if err := exec.StopInstance(context.Background(), instance, false); err != nil {
+				t.Fatalf("StopInstance returned error for reason=%q: %v", tc.reason, err)
+			}
+
+			_, statErr := os.Stat(root)
+			gotExists := statErr == nil
+			if gotExists != tc.expectExists {
+				t.Fatalf("session dir for reason=%q: exists=%v, want=%v (statErr=%v)",
+					tc.reason, gotExists, tc.expectExists, statErr)
+			}
+		})
 	}
 }

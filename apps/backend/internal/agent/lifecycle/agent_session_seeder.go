@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -73,10 +72,6 @@ func (localFileUploader) WriteFile(_ context.Context, path string, data []byte, 
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
 	return os.WriteFile(path, data, mode)
-}
-
-func (localFileUploader) RunCommand(ctx context.Context, name string, args ...string) error {
-	return exec.CommandContext(ctx, name, args...).Run()
 }
 
 // SeedAgentSessionDir copies the agent's RemoteAuth.SourceFiles from the host

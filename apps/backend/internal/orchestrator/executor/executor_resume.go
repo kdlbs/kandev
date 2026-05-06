@@ -173,19 +173,15 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 // persistLaunchState updates the session record after a successful agent launch.
 // The executors_running row is now written by the lifecycle manager itself in
 // lockstep with executionStore.Add (see lifecycle.persistExecutorRunning) — this
-// function no longer touches it. The lifecycle manager also owns the columns that
-// used to live on task_sessions (agent_execution_id, container_id); the orchestrator
-// stops writing them so the only remaining source of truth is executors_running.
+// function no longer touches it. The lifecycle manager also owns the columns
+// that used to live on task_sessions (agent_execution_id, container_id); the
+// orchestrator stops writing them so the only remaining source of truth is
+// executors_running.
 //
-// What remains here: state transitions (e.g., STARTING) and prepare-result metadata
-// merge, both of which are session-row concerns the lifecycle manager doesn't know
-// about. The execCfg / existingRunning parameters are kept on the signature for
-// historical call shape but are no longer used.
-func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, now time.Time, execCfg executorConfig, existingRunning *models.ExecutorRunning) {
-	_ = resp            // executors_running fields are written by lifecycle manager
-	_ = execCfg         // ditto
-	_ = existingRunning // ditto
-
+// What remains here: state transitions (e.g., STARTING) and prepare-result
+// metadata merge, both of which are session-row concerns the lifecycle manager
+// doesn't know about.
+func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, now time.Time) {
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
 	}
@@ -283,7 +279,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	}
 	defer unlock()
 
-	req, repositoryID, execCfg, existingRunning, err := e.buildResumeRequest(ctx, task, session, startAgent)
+	req, repositoryID, _, _, err := e.buildResumeRequest(ctx, task, session, startAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -343,7 +339,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		return nil, err
 	}
 
-	e.persistResumeState(ctx, task.ID, session, resp, startAgent, execCfg, existingRunning)
+	e.persistResumeState(ctx, task.ID, session, startAgent)
 	e.persistWorktreeAssociation(ctx, task.ID, session, repositoryID, resp)
 
 	worktreePath := resp.WorktreePath
@@ -703,14 +699,10 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 
 // persistResumeState updates the session row after a successful resume launch.
 // Like persistLaunchState, executors_running is owned by the lifecycle manager
-// and not touched here — see lifecycle.persistExecutorRunning. The orchestrator's
-// only remaining responsibility is the session-row state machine (STARTING /
-// CompletedAt-clear).
-func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig, existingRunning *models.ExecutorRunning) {
-	_ = resp
-	_ = execCfg
-	_ = existingRunning
-
+// and not touched here — see lifecycle.persistExecutorRunning. The
+// orchestrator's only remaining responsibility is the session-row state
+// machine (STARTING / CompletedAt-clear).
+func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, startAgent bool) {
 	session.ErrorMessage = ""
 	if startAgent {
 		session.State = models.TaskSessionStateStarting

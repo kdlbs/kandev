@@ -38,11 +38,6 @@ func (u *spriteFileUploader) WriteFile(ctx context.Context, path string, data []
 	return u.runtime.writeFileWithRetry(ctx, u.sprite, path, data, mode)
 }
 
-func (u *spriteFileUploader) RunCommand(ctx context.Context, name string, args ...string) error {
-	_, err := u.sprite.CommandContext(ctx, name, args...).Output()
-	return err
-}
-
 func (u *spriteFileUploader) RunCommandOutput(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return u.sprite.CommandContext(ctx, name, args...).Output()
 }

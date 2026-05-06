@@ -347,9 +347,6 @@ func TestExecutorRegistry_CloseAll(t *testing.T) {
 }
 
 func TestInjectTokenIntoURL(t *testing.T) {
-	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
-
 	tests := []struct {
 		name     string
 		url      string
@@ -408,7 +405,7 @@ func TestInjectTokenIntoURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := exec.injectTokenIntoURL(tt.url, tt.env)
+			got := injectGitHubTokenIntoCloneURL(tt.url, tt.env)
 			if got != tt.expected {
 				t.Errorf("injectTokenIntoURL(%q) = %q, want %q", tt.url, got, tt.expected)
 			}

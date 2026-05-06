@@ -105,7 +105,7 @@ func (r *SpritesExecutor) runTerminalCleanupScript(ctx context.Context, sprite *
 			instance.Metadata,
 			nil,
 			getGitRemoteURL,
-			r.injectTokenIntoURL,
+			injectGitHubTokenIntoCloneURL,
 		))
 	resolved := resolver.Resolve(script)
 	if strings.TrimSpace(resolved) == "" {

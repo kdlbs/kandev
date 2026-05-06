@@ -841,8 +841,7 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 		}
 		repo.sessions[session.ID] = session
 
-		resp := &LaunchAgentResponse{AgentExecutionID: "exec-1"}
-		executor.persistResumeState(context.Background(), "task-1", session, resp, true, executorConfig{}, nil)
+		executor.persistResumeState(context.Background(), "task-1", session, true)
 
 		if session.State != models.TaskSessionStateStarting {
 			t.Errorf("expected state STARTING, got %s", session.State)
@@ -861,8 +860,7 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 		}
 		repo.sessions[session.ID] = session
 
-		resp := &LaunchAgentResponse{AgentExecutionID: "exec-2"}
-		executor.persistResumeState(context.Background(), "task-1", session, resp, false, executorConfig{}, nil)
+		executor.persistResumeState(context.Background(), "task-1", session, false)
 
 		if session.State != models.TaskSessionStateWaitingForInput {
 			t.Errorf("expected state WAITING_FOR_INPUT, got %s", session.State)

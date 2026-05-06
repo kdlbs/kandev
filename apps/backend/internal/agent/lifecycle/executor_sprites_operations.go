@@ -169,7 +169,7 @@ func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) strin
 			req.Metadata,
 			req.Env,
 			getGitRemoteURL,
-			r.injectTokenIntoURL,
+			injectGitHubTokenIntoCloneURL,
 		))
 
 	return resolver.Resolve(script)

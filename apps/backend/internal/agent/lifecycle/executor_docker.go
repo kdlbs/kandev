@@ -34,20 +34,6 @@ func getMetadataString(metadata map[string]interface{}, key string) string {
 	return ""
 }
 
-func getMetadataBool(metadata map[string]interface{}, key string) bool {
-	if metadata == nil {
-		return false
-	}
-	switch raw := metadata[key].(type) {
-	case bool:
-		return raw
-	case string:
-		return strings.EqualFold(strings.TrimSpace(raw), boolStringTrue)
-	default:
-		return false
-	}
-}
-
 // DockerExecutor implements Runtime for Docker-based agent execution.
 // The Docker client is created lazily on first use (not at startup).
 type DockerExecutor struct {
@@ -584,7 +570,7 @@ func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) string
 			req.Metadata,
 			req.Env,
 			getGitRemoteURL,
-			r.injectTokenIntoURL,
+			injectGitHubTokenIntoCloneURL,
 		)).
 		// Docker image has agents and agentctl pre-installed;
 		// resolve these to empty so stored scripts with these placeholders don't break.
@@ -622,28 +608,4 @@ func localPathFromCloneURL(raw string) string {
 		return ""
 	}
 	return path
-}
-
-// injectTokenIntoURL adds a GitHub token to clone URLs for authentication.
-// Handles both HTTPS and SSH URLs (converting SSH to authenticated HTTPS).
-func (r *DockerExecutor) injectTokenIntoURL(cloneURL string, env map[string]string) string {
-	token := env["GITHUB_TOKEN"]
-	if token == "" {
-		token = env["GH_TOKEN"]
-	}
-	if token == "" {
-		return cloneURL
-	}
-
-	// Convert SSH URLs to HTTPS first
-	if strings.HasPrefix(cloneURL, "git@github.com:") {
-		path := strings.TrimPrefix(cloneURL, "git@github.com:")
-		cloneURL = "https://github.com/" + path
-	}
-
-	// Convert https://github.com/... to https://x-access-token:TOKEN@github.com/...
-	if strings.HasPrefix(cloneURL, "https://github.com/") {
-		return strings.Replace(cloneURL, "https://github.com/", "https://x-access-token:"+token+"@github.com/", 1)
-	}
-	return cloneURL
 }

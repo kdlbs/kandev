@@ -41,12 +41,8 @@ func (p *DockerPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, on
 		Steps:          steps,
 		WorkspacePath:  req.WorkspacePath,
 		Duration:       time.Since(start),
-		WorktreeBranch: dockerTaskBranch(req),
+		WorktreeBranch: nonWorktreeTaskBranch(req),
 	}, nil
-}
-
-func dockerTaskBranch(req *EnvPrepareRequest) string {
-	return nonWorktreeTaskBranch(req)
 }
 
 // nonWorktreeTaskBranch resolves the kandev-managed feature branch for executors

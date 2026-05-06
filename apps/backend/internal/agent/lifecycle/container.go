@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -528,21 +527,14 @@ func (cm *ContainerManager) expandMounts(templates []agents.MountTemplate, works
 	return mounts
 }
 
-// expandMountSource expands template variables in mount source paths
+// expandMountSource expands template variables in mount source paths.
+// Only `{workspace}` is honoured here — agent session dirs that used to use
+// `{home}/.<agent>` now route through the kandev-managed per-container
+// session dir (see SessionDirHostPath), which keeps host state DBs out of
+// the container. Production agents don't ship `{home}` in Mounts; codex_acp
+// has a regression test asserting this.
 func (cm *ContainerManager) expandMountSource(source, workspacePath string) string {
-	result := source
-	result = strings.ReplaceAll(result, "{workspace}", workspacePath)
-
-	// Expand {home} to user's home directory
-	if strings.Contains(result, "{home}") {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			homeDir = "/tmp"
-		}
-		result = strings.ReplaceAll(result, "{home}", homeDir)
-	}
-
-	return result
+	return strings.ReplaceAll(source, "{workspace}", workspacePath)
 }
 
 // buildEnvVars builds environment variables for the container

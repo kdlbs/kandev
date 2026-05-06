@@ -30,9 +30,11 @@ func isConfigModeSession(session *models.TaskSession) bool {
 	return ok && cm
 }
 
-// isContainerizedExecutor returns true for executor types that run in containers.
-// These executors need GitHub token injection for git operations since they don't
-// have access to the host's git credentials.
+// isContainerizedExecutor returns true for executor types that run agents in
+// containers or remote sandboxes (Docker variants + Sprites). These executors
+// need GitHub token injection for git operations since they don't have access
+// to the host's git credentials, and they're the same set that needs the
+// kandev-managed feature branch propagated through env metadata.
 func isContainerizedExecutor(executorType string) bool {
 	switch models.ExecutorType(executorType) {
 	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker, models.ExecutorTypeSprites:
@@ -513,8 +515,7 @@ func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID st
 // finalizeLaunch persists launch state and returns the resulting TaskExecution.
 func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, sessionID string, repoInfo *repoInfo, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig) (*TaskExecution, error) {
 	now := time.Now().UTC()
-	// On initial launch there is no existing ExecutorRunning record to carry forward.
-	e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now, execCfg, nil)
+	e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now)
 	e.persistWorktreeAssociation(ctx, task.ID, session, repoInfo.RepositoryID, resp)
 
 	sessionState := v1.TaskSessionStateCreated
@@ -1131,18 +1132,9 @@ func (e *Executor) applyExistingEnvironment(req *LaunchAgentRequest, env *models
 	// preparer is responsible for stamping env.WorktreeBranch in the first
 	// place); the host-side worktree path uses req.WorktreeID instead and
 	// doesn't need this metadata.
-	if env.WorktreeBranch != "" && isCloneBasedExecutorType(req.ExecutorType) {
+	if env.WorktreeBranch != "" && isContainerizedExecutor(req.ExecutorType) {
 		metadata := ensureLaunchMetadata(req)
 		metadata[lifecycle.MetadataKeyWorktreeBranch] = env.WorktreeBranch
-	}
-}
-
-func isCloneBasedExecutorType(executorType string) bool {
-	switch models.ExecutorType(executorType) {
-	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker, models.ExecutorTypeSprites:
-		return true
-	default:
-		return false
 	}
 }
 

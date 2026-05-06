@@ -173,21 +173,23 @@ export function ExecutorSettingsButton({
     <>
       <HoverCard open={open} onOpenChange={setOpen} openDelay={150} closeDelay={250}>
         <HoverCardTrigger asChild>
-          {/* Borderless info trigger: not a button — just an icon + status dot.
-              tabIndex makes it focusable so keyboard users can still surface
-              the popover via focus. */}
-          <span
-            tabIndex={disabled ? -1 : 0}
-            role="button"
+          {/* Real <button> for free Enter/Space activation, focus rings and
+              disabled semantics. variant="ghost" removes the outline so the
+              trigger reads as info, not as a clickable action — but we keep
+              the click→toggle behaviour the underlying HoverCard offers. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={disabled}
             aria-haspopup="dialog"
             aria-label={ariaLabel}
             data-testid="executor-settings-button"
-            data-disabled={disabled || undefined}
-            className="relative inline-flex h-7 items-center gap-1 rounded px-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+            className="relative h-7 cursor-default gap-1 px-1.5 text-muted-foreground hover:text-foreground"
           >
             <ExecutorButtonIcon executorType={executorType} preparing={isPreparing} />
             <ExecutorStatusDot status={status} loading={loading} />
-          </span>
+          </Button>
         </HoverCardTrigger>
         <HoverCardContent
           align="start"
