@@ -2,10 +2,12 @@ import { describe, it, expect } from "vitest";
 import { EXTERNAL_MCP_TOOL_GROUPS, countExternalMcpTools } from "./external-mcp-tools";
 
 describe("external MCP tool catalog", () => {
-  it("matches the backend ModeExternal tool count (29 tools)", () => {
-    // Backend: 10 workflow + 4 agent + 4 mcp + 5 executor + 5 task + 1 create_task = 29.
+  it("matches the backend ModeExternal tool count (46 tools)", () => {
+    // Backend ModeExternal registers 47 tool registrations, but list_repositories_kandev
+    // is registered twice (in registerConfigWorkflowTools and registerRepositoryTools),
+    // leaving 46 unique tools.
     // See apps/backend/internal/mcp/server/server.go (case ModeExternal).
-    expect(countExternalMcpTools()).toBe(29);
+    expect(countExternalMcpTools()).toBe(46);
   });
 
   it("every tool name is unique and ends with the kandev suffix", () => {
