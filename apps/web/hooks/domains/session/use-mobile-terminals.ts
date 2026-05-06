@@ -16,6 +16,11 @@ import { useAppStore } from "@/components/state-provider";
  */
 const autoCreatedEnvironments = new Set<string>();
 
+/** Test-only: reset the module-level guard so each test starts from scratch. */
+export function __resetAutoCreatedEnvironmentsForTest(): void {
+  autoCreatedEnvironments.clear();
+}
+
 /**
  * Mobile wrapper around `useTerminals`. Auto-creates a first shell when the
  * server-side shell list loads empty so the user always sees one terminal

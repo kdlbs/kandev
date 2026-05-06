@@ -11,23 +11,11 @@
 type Sender = (data: string) => void;
 
 let activeSender: Sender | null = null;
-const listeners = new Set<() => void>();
-
-function notify(): void {
-  for (const l of listeners) l();
-}
 
 export function setActiveTerminalSender(sender: Sender | null): void {
-  if (activeSender === sender) return;
   activeSender = sender;
-  notify();
 }
 
 export function getActiveTerminalSender(): Sender | null {
   return activeSender;
-}
-
-export function subscribeActiveTerminalSender(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
 }

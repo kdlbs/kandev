@@ -1,9 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import {
-  setActiveTerminalSender,
-  getActiveTerminalSender,
-  subscribeActiveTerminalSender,
-} from "./mobile-active-terminal";
+import { setActiveTerminalSender, getActiveTerminalSender } from "./mobile-active-terminal";
 
 describe("mobile active terminal sender registry", () => {
   beforeEach(() => {
@@ -34,20 +30,5 @@ describe("mobile active terminal sender registry", () => {
     setActiveTerminalSender(vi.fn());
     setActiveTerminalSender(null);
     expect(getActiveTerminalSender()).toBeNull();
-  });
-
-  it("notifies subscribers on changes only", () => {
-    const listener = vi.fn();
-    const unsubscribe = subscribeActiveTerminalSender(listener);
-    const sender = vi.fn();
-    setActiveTerminalSender(sender);
-    expect(listener).toHaveBeenCalledTimes(1);
-    setActiveTerminalSender(sender); // no-op (same value)
-    expect(listener).toHaveBeenCalledTimes(1);
-    setActiveTerminalSender(null);
-    expect(listener).toHaveBeenCalledTimes(2);
-    unsubscribe();
-    setActiveTerminalSender(vi.fn());
-    expect(listener).toHaveBeenCalledTimes(2);
   });
 });

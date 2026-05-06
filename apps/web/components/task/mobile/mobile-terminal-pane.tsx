@@ -2,9 +2,9 @@
 
 import { memo, useEffect, useState } from "react";
 import { PassthroughTerminal } from "../passthrough-terminal";
-import { useMobileTerminals } from "@/hooks/domains/session/use-mobile-terminals";
 import { setActiveTerminalSender } from "@/lib/terminal/mobile-active-terminal";
 import { MobileTerminalsPicker } from "./mobile-terminals-section";
+import { MobileTerminalsProvider, useMobileTerminalsContext } from "./mobile-terminals-context";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 
@@ -47,12 +47,8 @@ function TerminalSlot({
   );
 }
 
-export const MobileTerminalPane = memo(function MobileTerminalPane({
-  sessionId,
-}: {
-  sessionId: string | null;
-}) {
-  const { terminals, terminalTabValue, environmentId } = useMobileTerminals(sessionId);
+function MobileTerminalPaneInner({ sessionId }: { sessionId: string | null }) {
+  const { terminals, terminalTabValue, environmentId } = useMobileTerminalsContext();
   const activeId = terminals.find((t) => t.id === terminalTabValue)?.id ?? terminals[0]?.id;
 
   if (!sessionId || !environmentId) {
@@ -84,5 +80,17 @@ export const MobileTerminalPane = memo(function MobileTerminalPane({
         ))}
       </div>
     </div>
+  );
+}
+
+export const MobileTerminalPane = memo(function MobileTerminalPane({
+  sessionId,
+}: {
+  sessionId: string | null;
+}) {
+  return (
+    <MobileTerminalsProvider sessionId={sessionId}>
+      <MobileTerminalPaneInner sessionId={sessionId} />
+    </MobileTerminalsProvider>
   );
 });

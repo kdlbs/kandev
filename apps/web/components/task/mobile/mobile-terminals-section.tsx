@@ -14,11 +14,11 @@ import {
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
 import { useAppStore } from "@/components/state-provider";
-import { useMobileTerminals } from "@/hooks/domains/session/use-mobile-terminals";
 import { stopUserShell } from "@/lib/api/domains/user-shell-api";
 import { useUserShells } from "@/hooks/domains/session/use-user-shells";
 import { MobilePillButton } from "./mobile-pill-button";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
+import { useMobileTerminalsContext } from "./mobile-terminals-context";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 
 function TerminalRow({
@@ -118,7 +118,7 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
   onClose: () => void;
 }) {
   const { terminals, terminalTabValue, addTerminal, removeTerminal, environmentId } =
-    useMobileTerminals(sessionId);
+    useMobileTerminalsContext();
   const { shells } = useUserShells(environmentId);
   const setRightPanelActiveTab = useAppStore((s) => s.setRightPanelActiveTab);
   const [pendingClose, setPendingClose] = useState<Terminal | null>(null);
@@ -203,11 +203,8 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
   );
 });
 
-function useActiveTerminalPillLabel(sessionId: string | null): {
-  label: string;
-  count: string | undefined;
-} {
-  const { terminals, terminalTabValue } = useMobileTerminals(sessionId);
+function useActiveTerminalPillLabel(): { label: string; count: string | undefined } {
+  const { terminals, terminalTabValue } = useMobileTerminalsContext();
   const activeIdx = terminals.findIndex((t) => t.id === terminalTabValue);
   const idx = activeIdx >= 0 ? activeIdx : 0;
   const active = terminals[idx];
@@ -227,7 +224,7 @@ export const MobileTerminalsPicker = memo(function MobileTerminalsPicker({
   fullWidth?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const { label, count } = useActiveTerminalPillLabel(sessionId);
+  const { label, count } = useActiveTerminalPillLabel();
   if (!sessionId) return null;
   return (
     <>
