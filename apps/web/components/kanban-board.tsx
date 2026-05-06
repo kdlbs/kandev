@@ -16,6 +16,7 @@ import { MobileTaskSheet } from "./kanban/mobile-task-sheet";
 import { TaskMultiSelectToolbar } from "./kanban/task-multi-select-toolbar";
 import { useKanbanData, useKanbanActions, useKanbanNavigation } from "@/hooks/domains/kanban";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTaskMultiSelect } from "@/hooks/use-task-multi-select";
@@ -89,28 +90,6 @@ function useWorkflowSelection({
     store,
     workspaceState.activeId,
   ]);
-}
-
-function resolveDesiredWorkflowId({
-  activeWorkflowId,
-  settingsWorkflowId,
-  workspaceWorkflows,
-}: {
-  activeWorkflowId?: string | null;
-  settingsWorkflowId?: string | null;
-  workspaceWorkflows: WorkflowsState["items"];
-}): string | null {
-  const visibleWorkflows = workspaceWorkflows.filter((workflow) => !workflow.hidden);
-  if (activeWorkflowId && visibleWorkflows.some((workflow) => workflow.id === activeWorkflowId)) {
-    return activeWorkflowId;
-  }
-  if (
-    settingsWorkflowId &&
-    visibleWorkflows.some((workflow) => workflow.id === settingsWorkflowId)
-  ) {
-    return settingsWorkflowId;
-  }
-  return visibleWorkflows[0]?.id ?? null;
 }
 
 function useMoveErrorState(router: ReturnType<typeof useRouter>) {
