@@ -74,4 +74,13 @@ describe("resolveDesiredWorkflowId", () => {
     });
     expect(result).toBeNull();
   });
+
+  it("returns null when active id is stale and settings id is also null", () => {
+    const result = resolveDesiredWorkflowId({
+      activeWorkflowId: "wf-stale",
+      settingsWorkflowId: null,
+      workspaceWorkflows: [workflow("wf-1"), workflow("wf-2")],
+    });
+    expect(result).toBeNull();
+  });
 });
