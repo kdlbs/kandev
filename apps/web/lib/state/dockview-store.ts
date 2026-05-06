@@ -417,6 +417,9 @@ function restoreMaximizeFromStorage(api: DockviewApi, envId: string, set: StoreS
     // a half-restored maximize).
     set({ ...ids, preMaximizeLayout: preMax, maximizedGroupId: ids.centerGroupId });
   } catch {
+    // Drop the bad blob so the next switch/reload doesn't keep reattempting
+    // the same failing fromJSON before falling back. Self-healing.
+    removeEnvMaximizeState(envId);
     return false;
   }
   requestAnimationFrame(() => {
@@ -453,10 +456,17 @@ function saveOutgoingEnv(
     //  - env layout: pre-max serialized so a reload that misses the max state
     //    (e.g. cleared maximize) falls back to the user's real layout, not a
     //    truncated 2-column slice.
-    setEnvMaximizeState(oldEnvId, {
-      preMaximizeLayout: preMaximizeLayout as unknown as object,
-      maximizedDockviewJson: api.toJSON(),
-    });
+    // Wrapped in try/catch so a serialization throw can't skip releaseByEnv at
+    // the bottom (which would re-leak env-scoped portals).
+    try {
+      setEnvMaximizeState(oldEnvId, {
+        preMaximizeLayout: preMaximizeLayout as unknown as object,
+        maximizedDockviewJson: api.toJSON(),
+      });
+    } catch (err) {
+      removeEnvMaximizeState(oldEnvId);
+      console.warn("saveOutgoingEnv: failed to persist maximize state", err);
+    }
     try {
       const preMaxSerialized = toSerializedDockview(
         preMaximizeLayout,
