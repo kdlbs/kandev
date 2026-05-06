@@ -31,6 +31,14 @@ type BaseProps = {
   autoFocus?: boolean;
   pendingCommand?: string | null;
   onCommandSent?: () => void;
+  /** Called once the xterm instance is created. Mobile uses this to register
+   * the active key-bar input target. Desktop ignores. */
+  onXtermReady?: (xterm: Terminal) => void;
+  /** Skip the WebGL renderer addon and use xterm's canvas renderer instead.
+   * WebGL miscomputes glyph atlas scaling on mobile (notably after a
+   * desktop→mobile responsive switch) and renders text at multiples of the
+   * intended font size. Mobile callers should pass true. */
+  disableWebgl?: boolean;
 };
 type AgentTerminalProps = BaseProps & { mode: "agent"; sessionId?: string | null; label?: string };
 type ShellTerminalProps = BaseProps & {
@@ -119,7 +127,8 @@ function computeCanConnect(
 
 // eslint-disable-next-line max-lines-per-function -- wires many hooks + refs; each block is already its own hook
 export function PassthroughTerminal(props: PassthroughTerminalProps) {
-  const { mode, label, autoFocus, pendingCommand, onCommandSent } = props;
+  const { mode, label, autoFocus, pendingCommand, onCommandSent, onXtermReady, disableWebgl } =
+    props;
   const terminalId = mode === "shell" ? props.terminalId : undefined;
   const environmentId = mode === "shell" ? props.environmentId : undefined;
   const refs = useTerminalRefs();
@@ -137,7 +146,10 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const wsBaseUrl = useWsBaseUrl();
 
   const [isTerminalReady, setIsTerminalReady] = useState(false);
-  const onTerminalReady = useCallback(() => setIsTerminalReady(true), []);
+  const onTerminalReady = useCallback(() => {
+    setIsTerminalReady(true);
+    if (xtermRef.current) onXtermReady?.(xtermRef.current);
+  }, [onXtermReady, xtermRef]);
 
   // Track which terminal target has an active WebSocket connection. The loading
   // overlay resets on target switches without needing a separate setState effect.
@@ -186,6 +198,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     linkHandler,
     fontFamily: buildTerminalFontFamily(terminalFontFamily),
     fontSize: terminalFontSize ?? undefined,
+    disableWebgl,
     onToggleBottomTerminal: toggleBottomTerminal,
     sendInput,
     keyboardShortcutsRef,

@@ -134,6 +134,7 @@ function initTerminalInstance(
     linkHandler?: (event: MouseEvent, uri: string) => void;
     fontFamily?: string;
     fontSize?: number;
+    disableWebgl?: boolean;
   } & TerminalKeyHandlerOptions,
 ) {
   if (refs.isInitializedRef.current || refs.xtermRef.current) return undefined;
@@ -168,7 +169,7 @@ function initTerminalInstance(
   }
   refs.xtermRef.current = terminal;
   refs.fitAddonRef.current = fitAddon;
-  deferWebGLAddon(refs);
+  if (!options.disableWebgl) deferWebGLAddon(refs);
   exposeBufferReader(termContainer, terminal);
   const handleResize = () => {
     const rect = termContainer.getBoundingClientRect();
@@ -205,6 +206,7 @@ type TerminalInitHookOptions = TerminalInitOptions &
     linkHandler?: (event: MouseEvent, uri: string) => void;
     fontFamily?: string;
     fontSize?: number;
+    disableWebgl?: boolean;
   };
 
 export function useTerminalInit({
@@ -220,6 +222,7 @@ export function useTerminalInit({
   linkHandler,
   fontFamily,
   fontSize,
+  disableWebgl,
   onToggleBottomTerminal,
   sendInput,
   keyboardShortcutsRef,
@@ -254,6 +257,7 @@ export function useTerminalInit({
           linkHandler,
           fontFamily,
           fontSize,
+          disableWebgl,
           onToggleBottomTerminal,
           sendInput,
           keyboardShortcutsRef,
