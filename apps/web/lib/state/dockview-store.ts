@@ -523,6 +523,7 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
     // outgoing env rather than silently skipping it.
     const effectiveOld = oldEnvId ?? currentLayoutEnvId;
     saveOutgoingEnv(api, effectiveOld, preMaximizeLayout, get().pinnedWidths);
+    console.trace("[dockview-debug] switchEnvLayout: clearing preMax/maxGroupId");
     set({ preMaximizeLayout: null, maximizedGroupId: null });
     set({ isRestoringLayout: true, currentLayoutEnvId: newEnvId });
     try {
@@ -614,6 +615,7 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
     exitMaximizedLayout: () => {
       const { api, preMaximizeLayout, currentLayoutEnvId } = get();
       if (!api || !preMaximizeLayout) return;
+      console.trace("[dockview-debug] exitMaximizedLayout called", { currentLayoutEnvId });
       preserveChatScrollDuringLayout();
       const safeWidth = api.width;
       const safeHeight = api.height;
