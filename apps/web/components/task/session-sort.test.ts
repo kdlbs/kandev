@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentLabelsById,
+  isSessionActive,
   pickActiveSessionId,
   resolveAgentLabelFor,
   sortSessions,
@@ -81,5 +82,25 @@ describe("pickActiveSessionId", () => {
   it("falls back to the first session when no primary exists", () => {
     const sessions = [makeSession({ id: "a" }), makeSession({ id: "b" })];
     expect(pickActiveSessionId(sessions, null)).toBe("a");
+  });
+});
+
+describe("isSessionActive", () => {
+  it("is true while the agent is starting or running", () => {
+    expect(isSessionActive("RUNNING")).toBe(true);
+    expect(isSessionActive("STARTING")).toBe(true);
+  });
+
+  it("is false for terminal and idle states", () => {
+    expect(isSessionActive("WAITING_FOR_INPUT")).toBe(false);
+    expect(isSessionActive("COMPLETED")).toBe(false);
+    expect(isSessionActive("FAILED")).toBe(false);
+    expect(isSessionActive("CANCELLED")).toBe(false);
+    expect(isSessionActive("CREATED")).toBe(false);
+  });
+
+  it("is false for null/undefined", () => {
+    expect(isSessionActive(null)).toBe(false);
+    expect(isSessionActive(undefined)).toBe(false);
   });
 });
