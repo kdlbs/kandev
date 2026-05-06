@@ -367,7 +367,12 @@ async function selectTaskWithoutPrimarySession(taskId: string, opts: SelectTaskO
     const { request } = buildPrepareRequest(taskId);
     try {
       const resp = await launchSession(request);
-      if (resp.session_id) setActiveSession(taskId, resp.session_id);
+      if (resp.session_id) {
+        setActiveSession(taskId, resp.session_id);
+        replaceTaskUrl(taskId);
+        onOpenChange(false);
+        return;
+      }
     } catch {
       // Fall through to default navigation.
     }

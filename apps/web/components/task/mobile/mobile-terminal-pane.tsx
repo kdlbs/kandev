@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import { PassthroughTerminal } from "../passthrough-terminal";
 import { setActiveTerminalSender } from "@/lib/terminal/mobile-active-terminal";
 import { sendShellInput } from "@/lib/terminal/send-shell-input";
@@ -25,10 +25,18 @@ function TerminalSlot({
   // asynchronously when the container starts at 0×0). A ref-based dep would
   // silently miss those paths on first mount.
   const [xterm, setXterm] = useState<XtermTerminal | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [ws, setWs] = useState<WebSocket | null>(null);
 
-  const handleWsReady = useCallback((ws: WebSocket) => {
-    wsRef.current = ws;
+  const handleWsReady = useCallback((nextWs: WebSocket) => {
+    setWs(nextWs);
+    // Drop the registry sender if this socket closes — otherwise the key-bar
+    // would route taps into a dead WS during reconnect, instead of falling
+    // through to sendShellInput's WS-fallback path.
+    nextWs.addEventListener(
+      "close",
+      () => setWs((current) => (current === nextWs ? null : current)),
+      { once: true },
+    );
   }, []);
 
   // Forward OS-keyboard input through sendShellInput so the key-bar's sticky
@@ -41,21 +49,16 @@ function TerminalSlot({
     return () => disposable.dispose();
   }, [isActive, xterm, sessionId]);
 
-  // Register the active key-bar sender. It writes raw bytes directly to this
-  // terminal's dedicated WS so key-bar taps reach the right shell. The
-  // registry write happens via setActiveTerminalSender; sendShellInput reads
-  // it and applies modifiers before forwarding.
+  // Register the active key-bar sender only while the dedicated WS is open.
+  // sendShellInput's fallback path runs whenever no sender is registered, so
+  // skipping registration during connect/reconnect lets the key-bar still
+  // dispatch instead of silently dropping keystrokes.
   useEffect(() => {
-    if (!isActive) return;
-    const sender = (data: string) => {
-      const ws = wsRef.current;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(new TextEncoder().encode(data));
-      }
-    };
+    if (!isActive || !ws || ws.readyState !== WebSocket.OPEN) return;
+    const sender = (data: string) => ws.send(new TextEncoder().encode(data));
     setActiveTerminalSender(sender);
     return () => setActiveTerminalSender(null);
-  }, [isActive, terminal.id]);
+  }, [isActive, terminal.id, ws]);
 
   return (
     <div className={`absolute inset-0 ${isActive ? "block" : "hidden"}`}>

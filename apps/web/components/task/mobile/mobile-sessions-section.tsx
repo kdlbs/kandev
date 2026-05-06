@@ -118,7 +118,7 @@ function SessionActionsMenu({
         <DropdownMenuItem
           className="cursor-pointer"
           onSelect={onSetPrimary}
-          disabled={isPrimary || !state || !isSessionStoppable(state)}
+          disabled={isPrimary || !state}
         >
           Set as Primary
         </DropdownMenuItem>
