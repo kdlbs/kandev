@@ -37,6 +37,7 @@ import {
   type PreviewType,
 } from "./dockview-panel-actions";
 import { preserveChatScrollDuringLayout } from "./dockview-scroll-preserve";
+import { measureDockviewContainer } from "./dockview-measure";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 
 // Re-export types and constants used by other modules
@@ -244,9 +245,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
-      const __safe = measureDockviewContainer(api);
-      const safeWidth = __safe.width;
-      const safeHeight = __safe.height;
+      const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
       if (sidebarVisible) {
         const current = fromDockviewApi(api);
         const withoutSidebar: LayoutState = {
@@ -279,9 +278,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
-      const __safe = measureDockviewContainer(api);
-      const safeWidth = __safe.width;
-      const safeHeight = __safe.height;
+      const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
       if (rightPanelsVisible) {
         const current = fromDockviewApi(api);
         const withoutRight: LayoutState = {
@@ -337,9 +334,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       preserveChatScrollDuringLayout();
       // Capture dimensions before layout change — api.width can become stale
       // inside the rAF callback after dockview serialization
-      const __safe = measureDockviewContainer(api);
-      const safeWidth = __safe.width;
-      const safeHeight = __safe.height;
+      const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
       set({ isRestoringLayout: true });
       const presetState = getPresetLayout(preset);
       const state = mergeCurrentPanelsIntoPreset(api, presetState);
@@ -367,9 +362,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
-      const __safe = measureDockviewContainer(api);
-      const safeWidth = __safe.width;
-      const safeHeight = __safe.height;
+      const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
       set({ isRestoringLayout: true });
       const state = layout.layout as unknown as LayoutState;
       if (!state?.columns) {
@@ -402,28 +395,6 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       return filtered as unknown as Record<string, unknown>;
     },
   };
-}
-
-/**
- * Measure the live size of the dockview container element.
- *
- * `api.width` / `api.height` reflect dockview's *internal* grid dimensions,
- * which can drift out of sync with the actual DOM container — e.g. after a
- * `fromJSON` whose recorded `grid.width` differs from the live container, or
- * after a window/devtools resize that the library's ResizeObserver missed.
- * Reading `clientWidth/Height` of `.dv-dockview`'s parent element is the
- * source of truth and lets us recover from a drifted internal width.
- */
-function measureDockviewContainer(api: DockviewApi): { width: number; height: number } {
-  if (typeof document === "undefined") {
-    return { width: api.width, height: api.height };
-  }
-  const dv = document.querySelector(".dv-dockview") as HTMLElement | null;
-  const parent = dv?.parentElement;
-  if (!parent || parent.clientWidth <= 0 || parent.clientHeight <= 0) {
-    return { width: api.width, height: api.height };
-  }
-  return { width: parent.clientWidth, height: parent.clientHeight };
 }
 
 /** Restore a saved maximize state from sessionStorage onto the dockview API. */
@@ -485,10 +456,14 @@ function saveOutgoingEnv(
       console.warn("saveOutgoingEnv: failed to persist maximize state", err);
     }
     try {
+      // Use measured container size — `api.width/height` can be drifted from
+      // the live container, and serializing with stale dims would persist a
+      // shrunken layout that resurfaces on the next reload.
+      const { width, height } = measureDockviewContainer(api);
       const preMaxSerialized = toSerializedDockview(
         preMaximizeLayout,
-        api.width,
-        api.height,
+        width,
+        height,
         pinnedWidths,
       );
       setEnvLayout(oldEnvId, preMaxSerialized as unknown as object);
@@ -591,9 +566,7 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
       });
       const maximizedLayout: LayoutState = { columns };
       set({ isRestoringLayout: true, preMaximizeLayout: current, maximizedGroupId: groupId });
-      const __safe = measureDockviewContainer(api);
-      const safeWidth = __safe.width;
-      const safeHeight = __safe.height;
+      const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
       applyLayoutAndSet(api, maximizedLayout, liveWidths, set);
       requestAnimationFrame(() => {
         api.layout(safeWidth, safeHeight);
@@ -639,9 +612,7 @@ function performBuildDefault(
   const freshPinned = new Map<string, number>();
   // Capture dimensions before layout change — api.width can become stale
   // after fromJSON inside applyLayout
-  const __safe = measureDockviewContainer(api);
-  const safeWidth = __safe.width;
-  const safeHeight = __safe.height;
+  const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
   set({ isRestoringLayout: true, pinnedWidths: freshPinned });
 
   const basePreset = intent?.preset as BuiltInPreset | undefined;

@@ -459,6 +459,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   const setApi = useDockviewStore((s) => s.setApi);
   const buildDefaultLayout = useDockviewStore((s) => s.buildDefaultLayout);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const readyDisposersRef = useRef<Array<() => void>>([]);
   const appStore = useAppStoreApi();
 
   const effectiveSessionId =
@@ -494,12 +495,12 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
       useDockviewStore.setState({ currentLayoutEnvId: currentEnvId });
 
-      setupGroupTracking(api);
+      readyDisposersRef.current.push(setupGroupTracking(api));
       setupSessionTabSync(api, appStore);
       setupChatPanelSafetyNet(api, appStore);
       setupLayoutPersistence(api, saveTimerRef, envIdRef);
       setupPortalCleanup(api, appStore);
-      setupContainerResizeSync(api);
+      readyDisposersRef.current.push(setupContainerResizeSync(api));
     },
     [setApi, buildDefaultLayout, initialLayout, appStore],
   );
@@ -519,7 +520,9 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   // Clean up on unmount (e.g. navigating away from session page)
   useEffect(() => {
     const timerRef = saveTimerRef;
+    const disposersRef = readyDisposersRef;
     return () => {
+      for (const dispose of disposersRef.current.splice(0)) dispose();
       if (timerRef.current) clearTimeout(timerRef.current);
       panelPortalManager.releaseAll();
     };
