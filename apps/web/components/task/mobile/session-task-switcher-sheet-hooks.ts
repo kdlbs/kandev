@@ -31,6 +31,13 @@ function mapSnapshotToKanban(snapshot: WorkflowSnapshot, newWorkflowId: string) 
       color: step.color,
       position: step.position,
       events: step.events,
+      // Carry optional step capabilities forward so downstream UI doesn't see
+      // them as missing after a workspace switch (until a full reload).
+      allow_manual_move: step.allow_manual_move,
+      prompt: step.prompt,
+      is_start_step: step.is_start_step,
+      show_in_command_panel: step.show_in_command_panel,
+      agent_profile_id: step.agent_profile_id,
     })),
     tasks: snapshot.tasks.map((task) => ({
       id: task.id,
@@ -219,6 +226,63 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
   }
 }
 
+function mapTaskRepositories(
+  repositories: Task["repositories"],
+): KanbanState["tasks"][number]["repositories"] {
+  return repositories?.map((r) => ({
+    id: r.id,
+    repository_id: r.repository_id,
+    base_branch: r.base_branch,
+    checkout_branch: r.checkout_branch,
+    position: r.position,
+  }));
+}
+
+function mergeSessionFields(
+  task: Task,
+  existing: KanbanState["tasks"][number] | undefined,
+  taskSessionId: string | null,
+) {
+  return {
+    primarySessionId:
+      taskSessionId ?? task.primary_session_id ?? existing?.primarySessionId ?? undefined,
+    primarySessionState: task.primary_session_state ?? existing?.primarySessionState ?? undefined,
+    sessionCount: task.session_count ?? existing?.sessionCount ?? (taskSessionId ? 1 : undefined),
+    reviewStatus: task.review_status ?? existing?.reviewStatus ?? undefined,
+  };
+}
+
+/**
+ * Build the kanban-store representation of a task for an upsert. Session-
+ * derived fields (primarySessionId, sessionCount, etc.) fall through new
+ * DTO → existing entry → meta.taskSessionId — that way an "edit" call doesn't
+ * wipe sessions the existing entry carried, and "create with session" still
+ * sets the primary correctly.
+ */
+function buildKanbanTaskUpsert(
+  task: Task,
+  existing: KanbanState["tasks"][number] | undefined,
+  meta: { taskSessionId?: string | null } | undefined,
+): KanbanState["tasks"][number] {
+  const taskSessionId = meta?.taskSessionId ?? null;
+  return {
+    id: task.id,
+    workflowStepId: task.workflow_step_id,
+    title: task.title,
+    description: task.description,
+    position: task.position ?? 0,
+    state: task.state,
+    repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
+    repositories: mapTaskRepositories(task.repositories),
+    updatedAt: task.updated_at,
+    ...mergeSessionFields(task, existing, taskSessionId),
+    primaryExecutorId: task.primary_executor_id ?? undefined,
+    primaryExecutorType: task.primary_executor_type ?? undefined,
+    primaryExecutorName: task.primary_executor_name ?? undefined,
+    isRemoteExecutor: task.is_remote_executor ?? false,
+  };
+}
+
 function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
   const {
     workspaceId,
@@ -250,29 +314,10 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
     (task: Task, _mode: "create" | "edit", meta?: { taskSessionId?: string | null }) => {
       store.setState((state) => {
         if (state.kanban.workflowId !== task.workflow_id) return state;
-        const nextTask = {
-          id: task.id,
-          workflowStepId: task.workflow_step_id,
-          title: task.title,
-          description: task.description,
-          position: task.position ?? 0,
-          state: task.state,
-          repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
-          // See mapSnapshotToKanban — keep the full repos array so the mobile
-          // repo picker shows up for newly created multi-repo tasks too.
-          repositories: task.repositories?.map((r) => ({
-            id: r.id,
-            repository_id: r.repository_id,
-            base_branch: r.base_branch,
-            checkout_branch: r.checkout_branch,
-            position: r.position,
-          })),
-          updatedAt: task.updated_at,
-          primaryExecutorId: task.primary_executor_id ?? undefined,
-          primaryExecutorType: task.primary_executor_type ?? undefined,
-          primaryExecutorName: task.primary_executor_name ?? undefined,
-          isRemoteExecutor: task.is_remote_executor ?? false,
-        };
+        const existing = state.kanban.tasks.find(
+          (item: KanbanState["tasks"][number]) => item.id === task.id,
+        );
+        const nextTask = buildKanbanTaskUpsert(task, existing, meta);
         return {
           ...state,
           kanban: {

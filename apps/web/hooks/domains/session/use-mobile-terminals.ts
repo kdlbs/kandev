@@ -16,6 +16,16 @@ import { useAppStore } from "@/components/state-provider";
  */
 const autoCreatedEnvironments = new Set<string>();
 
+/**
+ * Release the auto-create guard for a specific environment so the next mount
+ * (or shell-list change) re-runs the auto-create effect. Call this when the
+ * user explicitly closes the last terminal in an env — otherwise the pane
+ * shows "Starting terminal…" forever because the guard prevents recreation.
+ */
+export function releaseAutoCreatedEnvironment(environmentId: string): void {
+  autoCreatedEnvironments.delete(environmentId);
+}
+
 /** Test-only: reset the module-level guard so each test starts from scratch. */
 export function __resetAutoCreatedEnvironmentsForTest(): void {
   autoCreatedEnvironments.clear();

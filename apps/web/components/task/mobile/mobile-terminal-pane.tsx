@@ -24,10 +24,14 @@ function TerminalSlot({
   const [xterm, setXterm] = useState<XtermTerminal | null>(null);
 
   // Register the active terminal sender so the mobile key-bar can target this
-  // xterm via paste(), which routes through xterm.onData → AttachAddon → WS.
+  // xterm and have its keystrokes flow through onData → AttachAddon → WS.
+  // Use Terminal.input(data, wasUserInput=true) — paste() would wrap control
+  // bytes in bracketed-paste sequences (\e[200~…\e[201~) under bash/zsh/fish,
+  // which would make ^C, arrow keys, Esc, etc. land in the shell as literal
+  // pasted text instead of as control signals.
   useEffect(() => {
     if (!isActive || !xterm) return;
-    const sender = (data: string) => xterm.paste(data);
+    const sender = (data: string) => xterm.input(data, true);
     setActiveTerminalSender(sender);
     return () => setActiveTerminalSender(null);
   }, [isActive, xterm]);

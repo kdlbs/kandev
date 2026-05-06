@@ -16,6 +16,7 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import { stopUserShell } from "@/lib/api/domains/user-shell-api";
 import { useUserShells } from "@/hooks/domains/session/use-user-shells";
+import { releaseAutoCreatedEnvironment } from "@/hooks/domains/session/use-mobile-terminals";
 import { MobilePillButton } from "./mobile-pill-button";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
 import { useMobileTerminalsContext } from "./mobile-terminals-context";
@@ -110,6 +111,63 @@ function CloseTerminalConfirmDialog({
   );
 }
 
+type CloseHandlerArgs = {
+  sessionId: string | null;
+  environmentId: string | null;
+  terminals: Terminal[];
+  terminalTabValue: string;
+  removeTerminal: (id: string) => void;
+  setRightPanelActiveTab: (sessionId: string, tab: string) => void;
+};
+
+function useTerminalCloseHandler({
+  sessionId,
+  environmentId,
+  terminals,
+  terminalTabValue,
+  removeTerminal,
+  setRightPanelActiveTab,
+}: CloseHandlerArgs) {
+  const [pendingClose, setPendingClose] = useState<Terminal | null>(null);
+
+  const handleConfirmClose = useCallback(async () => {
+    const t = pendingClose;
+    if (!t || !sessionId) return;
+    try {
+      // Stop the remote shell first; only mutate UI on success so a failed
+      // stop doesn't orphan the shell server-side while the picker hides it.
+      if (environmentId) await stopUserShell(environmentId, t.id);
+      // If the closed terminal was active, advance the active tab to a
+      // remaining one so the picker doesn't leave terminalTabValue pointing
+      // at a deleted id (which would render every row as inactive).
+      if (terminalTabValue === t.id) {
+        const next = terminals.find((row) => row.id !== t.id);
+        if (next) setRightPanelActiveTab(sessionId, next.id);
+      }
+      removeTerminal(t.id);
+      // If this was the last terminal, release the auto-create guard so the
+      // pane recreates a default shell on next render instead of getting
+      // stuck on the "Starting terminal…" placeholder forever.
+      if (environmentId && terminals.length <= 1) {
+        releaseAutoCreatedEnvironment(environmentId);
+      }
+      setPendingClose(null);
+    } catch (err) {
+      console.error("Failed to stop terminal:", err);
+    }
+  }, [
+    pendingClose,
+    sessionId,
+    environmentId,
+    terminals,
+    terminalTabValue,
+    removeTerminal,
+    setRightPanelActiveTab,
+  ]);
+
+  return { pendingClose, setPendingClose, handleConfirmClose };
+}
+
 const MobileTerminalsList = memo(function MobileTerminalsList({
   sessionId,
   onClose,
@@ -121,7 +179,14 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
     useMobileTerminalsContext();
   const { shells } = useUserShells(environmentId);
   const setRightPanelActiveTab = useAppStore((s) => s.setRightPanelActiveTab);
-  const [pendingClose, setPendingClose] = useState<Terminal | null>(null);
+  const { pendingClose, setPendingClose, handleConfirmClose } = useTerminalCloseHandler({
+    sessionId,
+    environmentId,
+    terminals,
+    terminalTabValue,
+    removeTerminal,
+    setRightPanelActiveTab,
+  });
 
   const isShellRunning = useCallback(
     (id: string) => shells.find((s) => s.terminalId === id)?.running ?? false,
@@ -136,21 +201,10 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
     [sessionId, setRightPanelActiveTab, onClose],
   );
 
-  const handleConfirmClose = useCallback(() => {
-    const t = pendingClose;
-    if (!t) return;
-    removeTerminal(t.id);
-    if (environmentId) {
-      stopUserShell(environmentId, t.id).catch((err) => {
-        console.error("Failed to stop terminal:", err);
-      });
-    }
-    setPendingClose(null);
-  }, [pendingClose, removeTerminal, environmentId]);
-
-  const handleAskClose = useCallback((terminal: Terminal) => {
-    setPendingClose(terminal);
-  }, []);
+  const handleAskClose = useCallback(
+    (terminal: Terminal) => setPendingClose(terminal),
+    [setPendingClose],
+  );
 
   if (!sessionId) {
     return (

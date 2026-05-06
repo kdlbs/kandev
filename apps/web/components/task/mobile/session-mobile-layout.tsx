@@ -40,13 +40,11 @@ function MobileChatPanelContent({
   activeTaskId,
   isPassthroughMode,
   effectiveSessionId,
-  sessionId,
   onOpenFile,
 }: {
   activeTaskId: string | null;
   isPassthroughMode: boolean;
   effectiveSessionId: string | null;
-  sessionId?: string | null;
   onOpenFile: (path: string) => void;
 }) {
   if (!activeTaskId) {
@@ -63,10 +61,14 @@ function MobileChatPanelContent({
       </div>
       {isPassthroughMode ? (
         <div className="flex-1 min-h-0">
-          <PassthroughTerminal key={effectiveSessionId} sessionId={sessionId} mode="agent" />
+          <PassthroughTerminal
+            key={effectiveSessionId}
+            sessionId={effectiveSessionId}
+            mode="agent"
+          />
         </div>
       ) : (
-        <TaskChatPanel sessionId={sessionId} onOpenFile={onOpenFile} />
+        <TaskChatPanel sessionId={effectiveSessionId} onOpenFile={onOpenFile} />
       )}
     </div>
   );
@@ -77,7 +79,6 @@ type MobilePanelAreaProps = {
   activeTaskId: string | null;
   isPassthroughMode: boolean;
   effectiveSessionId: string | null;
-  sessionId?: string | null;
   selectedDiff: { path: string; content?: string } | null;
   handleOpenFileFromChat: (path: string) => void;
   handleClearSelectedDiff: () => void;
@@ -92,7 +93,6 @@ function MobilePanelArea({
   activeTaskId,
   isPassthroughMode,
   effectiveSessionId,
-  sessionId,
   selectedDiff,
   handleOpenFileFromChat,
   handleClearSelectedDiff,
@@ -124,7 +124,6 @@ function MobilePanelArea({
             activeTaskId={activeTaskId}
             isPassthroughMode={isPassthroughMode}
             effectiveSessionId={effectiveSessionId}
-            sessionId={sessionId}
             onOpenFile={handleOpenFileFromChat}
           />
         </div>
@@ -314,7 +313,6 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         activeTaskId={activeTaskId}
         isPassthroughMode={isPassthroughMode}
         effectiveSessionId={effectiveSessionId}
-        sessionId={sessionId}
         selectedDiff={selectedDiff}
         handleOpenFileFromChat={handleOpenFileFromChat}
         handleClearSelectedDiff={handleClearSelectedDiff}
