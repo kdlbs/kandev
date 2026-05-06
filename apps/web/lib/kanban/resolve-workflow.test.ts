@@ -83,4 +83,13 @@ describe("resolveDesiredWorkflowId", () => {
     });
     expect(result).toBeNull();
   });
+
+  it("does not fall back to a hidden settings workflow", () => {
+    const result = resolveDesiredWorkflowId({
+      activeWorkflowId: null,
+      settingsWorkflowId: "wf-hidden",
+      workspaceWorkflows: [workflow("wf-hidden", { hidden: true }), workflow("wf-visible")],
+    });
+    expect(result).toBe("wf-visible");
+  });
 });
