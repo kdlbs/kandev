@@ -1,8 +1,9 @@
 "use client";
 
-import { memo, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { PassthroughTerminal } from "../passthrough-terminal";
 import { setActiveTerminalSender } from "@/lib/terminal/mobile-active-terminal";
+import { sendShellInput } from "@/lib/terminal/send-shell-input";
 import { MobileTerminalsPicker } from "./mobile-terminals-section";
 import { MobileTerminalsProvider, useMobileTerminalsContext } from "./mobile-terminals-context";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
@@ -10,31 +11,51 @@ import type { Terminal } from "@/hooks/domains/session/use-terminals";
 
 function TerminalSlot({
   terminal,
+  sessionId,
   environmentId,
   isActive,
 }: {
   terminal: Terminal;
+  sessionId: string;
   environmentId: string | null;
   isActive: boolean;
 }) {
-  // Track xterm in state so the registration effect re-runs when the instance
-  // becomes available. PassthroughTerminal initialises xterm asynchronously
-  // when the container starts at 0×0 (ResizeObserver fallback), so a ref-based
-  // dependency would silently miss that path on first mount.
+  // Track xterm + ws in state so the registration / data-routing effects
+  // re-run once each is ready (PassthroughTerminal initialises both
+  // asynchronously when the container starts at 0×0). A ref-based dep would
+  // silently miss those paths on first mount.
   const [xterm, setXterm] = useState<XtermTerminal | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
-  // Register the active terminal sender so the mobile key-bar can target this
-  // xterm and have its keystrokes flow through onData → AttachAddon → WS.
-  // Use Terminal.input(data, wasUserInput=true) — paste() would wrap control
-  // bytes in bracketed-paste sequences (\e[200~…\e[201~) under bash/zsh/fish,
-  // which would make ^C, arrow keys, Esc, etc. land in the shell as literal
-  // pasted text instead of as control signals.
+  const handleWsReady = useCallback((ws: WebSocket) => {
+    wsRef.current = ws;
+  }, []);
+
+  // Forward OS-keyboard input through sendShellInput so the key-bar's sticky
+  // Ctrl/Shift modifiers are applied before the bytes hit the wire. Without
+  // this, AttachAddon would auto-send raw onData and modifiers would be a
+  // no-op for OS-keyboard typing on mobile.
   useEffect(() => {
     if (!isActive || !xterm) return;
-    const sender = (data: string) => xterm.input(data, true);
+    const disposable = xterm.onData((data) => sendShellInput(sessionId, data));
+    return () => disposable.dispose();
+  }, [isActive, xterm, sessionId]);
+
+  // Register the active key-bar sender. It writes raw bytes directly to this
+  // terminal's dedicated WS so key-bar taps reach the right shell. The
+  // registry write happens via setActiveTerminalSender; sendShellInput reads
+  // it and applies modifiers before forwarding.
+  useEffect(() => {
+    if (!isActive) return;
+    const sender = (data: string) => {
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(new TextEncoder().encode(data));
+      }
+    };
     setActiveTerminalSender(sender);
     return () => setActiveTerminalSender(null);
-  }, [isActive, xterm]);
+  }, [isActive, terminal.id]);
 
   return (
     <div className={`absolute inset-0 ${isActive ? "block" : "hidden"}`}>
@@ -45,7 +66,9 @@ function TerminalSlot({
         label={terminal.label}
         autoFocus={isActive}
         disableWebgl
+        manualInputRouting
         onXtermReady={setXterm}
+        onWsReady={handleWsReady}
       />
     </div>
   );
@@ -78,6 +101,7 @@ function MobileTerminalPaneInner({ sessionId }: { sessionId: string | null }) {
           <TerminalSlot
             key={t.id}
             terminal={t}
+            sessionId={sessionId}
             environmentId={environmentId}
             isActive={t.id === activeId}
           />

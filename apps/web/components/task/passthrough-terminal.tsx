@@ -39,6 +39,15 @@ type BaseProps = {
    * desktop→mobile responsive switch) and renders text at multiples of the
    * intended font size. Mobile callers should pass true. */
   disableWebgl?: boolean;
+  /** When true, the AttachAddon is configured receive-only — incoming PTY
+   * data still flows to the terminal display, but the consumer is responsible
+   * for forwarding xterm.onData to the WebSocket. Mobile sets this so the
+   * key-bar's modifier transforms can run before bytes go on the wire. */
+  manualInputRouting?: boolean;
+  /** Fires when the dedicated terminal WebSocket reaches the OPEN state.
+   * Mobile uses this to register a key-bar sender that writes raw bytes
+   * directly to this terminal's socket. */
+  onWsReady?: (ws: WebSocket) => void;
 };
 type AgentTerminalProps = BaseProps & { mode: "agent"; sessionId?: string | null; label?: string };
 type ShellTerminalProps = BaseProps & {
@@ -127,8 +136,17 @@ function computeCanConnect(
 
 // eslint-disable-next-line max-lines-per-function -- wires many hooks + refs; each block is already its own hook
 export function PassthroughTerminal(props: PassthroughTerminalProps) {
-  const { mode, label, autoFocus, pendingCommand, onCommandSent, onXtermReady, disableWebgl } =
-    props;
+  const {
+    mode,
+    label,
+    autoFocus,
+    pendingCommand,
+    onCommandSent,
+    onXtermReady,
+    disableWebgl,
+    manualInputRouting,
+    onWsReady,
+  } = props;
   const terminalId = mode === "shell" ? props.terminalId : undefined;
   const environmentId = mode === "shell" ? props.environmentId : undefined;
   const refs = useTerminalRefs();
@@ -221,6 +239,8 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     wsRef,
     attachAddonRef,
     onConnected,
+    manualInputRouting,
+    onWsReady,
   });
 
   usePendingCommand(pendingCommand, isConnected, wsRef, onCommandSent);

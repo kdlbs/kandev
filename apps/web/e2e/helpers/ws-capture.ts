@@ -12,15 +12,29 @@ type ParsedFrame = {
 };
 
 /**
- * Resize frames sent by PassthroughTerminal start with this byte and carry a
- * JSON `{cols, rows}` body — they're not user input and must not show up as
- * shell input data in the captured frame list.
+ * PassthroughTerminal's resize frames start with a 0x01 tag byte followed by
+ * a JSON `{cols, rows}` body. A naive "first byte === 0x01" check would
+ * misclassify Ctrl+A (also 0x01) as a resize, so confirm the JSON shape
+ * before discarding.
  */
 const RESIZE_FRAME_TAG = 0x01;
 
+function isResizeFrame(payload: Buffer | Uint8Array): boolean {
+  if (payload.length < 2 || payload[0] !== RESIZE_FRAME_TAG) return false;
+  try {
+    const tail = new TextDecoder("utf-8", { fatal: false }).decode(
+      (payload as Uint8Array).slice(1),
+    );
+    const parsed = JSON.parse(tail) as { cols?: unknown; rows?: unknown };
+    return typeof parsed?.cols === "number" && typeof parsed?.rows === "number";
+  } catch {
+    return false;
+  }
+}
+
 function decodeBinaryFrame(payload: Buffer | Uint8Array): string | null {
   if (!payload || payload.length === 0) return null;
-  if (payload[0] === RESIZE_FRAME_TAG) return null;
+  if (isResizeFrame(payload)) return null;
   try {
     return new TextDecoder("utf-8", { fatal: false }).decode(payload as Uint8Array);
   } catch {
