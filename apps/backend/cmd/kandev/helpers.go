@@ -654,14 +654,42 @@ func registerSecondaryRoutes(
 // registerHealthRoutes sets up the system health endpoint with all health checkers.
 func registerHealthRoutes(p routeParams) {
 	var githubProvider health.GitHubStatusProvider
+	var githubRateProvider health.GitHubRateLimitProvider
 	if p.services.GitHub != nil {
 		githubProvider = p.services.GitHub
+		githubRateProvider = githubRateLimitAdapter{svc: p.services.GitHub}
+	}
+	githubChecker := health.NewGitHubChecker(githubProvider)
+	if githubRateProvider != nil {
+		githubChecker.WithRateLimitProvider(githubRateProvider)
 	}
 	healthSvc := health.NewService(p.log,
-		health.NewGitHubChecker(githubProvider),
+		githubChecker,
 		health.NewAgentChecker(p.agentSettingsController),
 	)
 	health.RegisterRoutes(p.router, healthSvc, p.log)
+}
+
+// githubRateLimitAdapter bridges the github.Service's per-resource exhaustion
+// snapshot to the structural shape consumed by the health package without
+// importing health into github (cycle).
+type githubRateLimitAdapter struct {
+	svc *github.Service
+}
+
+func (a githubRateLimitAdapter) ExhaustedRateLimits() []health.GitHubRateLimitStatus {
+	if a.svc == nil {
+		return nil
+	}
+	src := a.svc.ExhaustedRateLimits()
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]health.GitHubRateLimitStatus, len(src))
+	for i, s := range src {
+		out[i] = health.GitHubRateLimitStatus{Resource: s.Resource, ResetAt: s.ResetAt}
+	}
+	return out
 }
 
 // registerMCPAndDebugRoutes registers MCP and debug routes and wires the MCP handler.

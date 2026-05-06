@@ -18,6 +18,7 @@ import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useToast } from "@/components/toast-provider";
 import { configureGitHubToken, clearGitHubToken } from "@/lib/api/domains/github-api";
 import type { AuthDiagnostics } from "@/lib/types/github";
+import { GitHubRateLimitDisplay } from "./github-rate-limit";
 
 function DiagnosticsOutput({ diagnostics }: { diagnostics: AuthDiagnostics }) {
   return (
@@ -214,6 +215,7 @@ export function GitHubStatusCard() {
           Token stored in secrets. This token is used by remote agents for GitHub operations.
         </p>
       )}
+      <GitHubRateLimitDisplay info={status.rate_limit} />
     </div>
   );
 }

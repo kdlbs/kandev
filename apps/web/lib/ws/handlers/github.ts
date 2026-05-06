@@ -1,7 +1,7 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
-import type { TaskPR } from "@/lib/types/github";
+import type { GitHubRateLimitUpdate, TaskPR } from "@/lib/types/github";
 
 export function registerGitHubHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
@@ -9,6 +9,12 @@ export function registerGitHubHandlers(store: StoreApi<AppState>): WsHandlers {
       const pr = message.payload as TaskPR;
       if (pr.task_id) {
         store.getState().setTaskPR(pr.task_id, pr);
+      }
+    },
+    "github.rate_limit.updated": (message) => {
+      const update = message.payload as GitHubRateLimitUpdate;
+      if (update?.snapshots?.length) {
+        store.getState().applyGitHubRateLimitUpdate(update);
       }
     },
   };

@@ -262,3 +262,23 @@ func TestClearToken_NoSecretManager(t *testing.T) {
 		t.Error("expected error when secretManager is nil")
 	}
 }
+
+// Regression: PAT clients minted via the service must share the rate tracker.
+// ConfigureToken previously created a bare NewPATClient and dropped quota
+// signals on the floor, so the UI / health / poller throttling all went stale
+// after a token reconfigure.
+func TestService_NewPATClient_AttachesRateTracker(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	svc := &Service{
+		logger:      log,
+		rateTracker: NewRateTracker(nil, nil),
+	}
+
+	c := svc.newPATClient("ghp_x")
+	if c == nil {
+		t.Fatalf("newPATClient returned nil")
+	}
+	if c.rateTracker != svc.rateTracker {
+		t.Fatalf("expected rate tracker to be wired onto the new PAT client")
+	}
+}

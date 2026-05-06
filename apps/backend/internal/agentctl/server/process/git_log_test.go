@@ -79,7 +79,7 @@ func TestGetLog_StaleLocalBranchScenario(t *testing.T) {
 	// Reset local main back to staleLocalMain (simulates "didn't fetch").
 	runGit(t, repoDir, "reset", "--hard", staleLocalMain)
 	// Now refetch so origin/main is ahead but local main isn't.
-	runGit(t, repoDir, "fetch", "origin", "main:refs/remotes/origin/main")
+	runGit(t, repoDir, "fetch", "origin")
 
 	// Branch from origin/main (the current upstream tip).
 	runGit(t, repoDir, "checkout", "-b", "feature/x", advancedMain)
