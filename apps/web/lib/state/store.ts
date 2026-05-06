@@ -11,6 +11,7 @@ import type {
 } from "@/lib/types/http";
 import type {
   GitHubStatus,
+  GitHubRateLimitUpdate,
   TaskPR,
   PRWatch,
   ReviewWatch as GitHubReviewWatch,
@@ -262,6 +263,7 @@ export type AppState = {
   removeIssueWatch: (id: string) => void;
   setActionPresets: (workspaceId: string, presets: GitHubActionPresets) => void;
   setActionPresetsLoading: (workspaceId: string, loading: boolean) => void;
+  applyGitHubRateLimitUpdate: (update: GitHubRateLimitUpdate) => void;
 
   // JIRA actions
   setJiraIssueWatches: (watches: JiraIssueWatch[]) => void;

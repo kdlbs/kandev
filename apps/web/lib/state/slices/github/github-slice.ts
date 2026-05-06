@@ -157,6 +157,24 @@ function createActionPresetActions(
   };
 }
 
+function createRateLimitActions(set: ImmerSet): Pick<GitHubSlice, "applyGitHubRateLimitUpdate"> {
+  return {
+    applyGitHubRateLimitUpdate: (update) =>
+      set((draft) => {
+        const existing = draft.githubStatus.status;
+        if (!existing) {
+          // Status not yet hydrated; defer until the SSR/HTTP fetch lands.
+          return;
+        }
+        const rateLimit = { ...(existing.rate_limit ?? {}) };
+        for (const snap of update.snapshots) {
+          rateLimit[snap.resource] = snap;
+        }
+        draft.githubStatus.status = { ...existing, rate_limit: rateLimit };
+      }),
+  };
+}
+
 export const createGitHubSlice: StateCreator<
   GitHubSlice,
   [["zustand/immer", never]],
@@ -168,4 +186,5 @@ export const createGitHubSlice: StateCreator<
   ...createTaskPRActions(set),
   ...createWatchActions(set),
   ...createActionPresetActions(set),
+  ...createRateLimitActions(set),
 });

@@ -34,7 +34,7 @@ func TestComputeMergeBase_PrefersOriginOverStaleLocalBranch(t *testing.T) {
 	advancedMain := strings.TrimSpace(runGitAPI(t, repoDir, "rev-parse", "HEAD"))
 	runGitAPI(t, repoDir, "push", "origin", "main")
 	runGitAPI(t, repoDir, "reset", "--hard", staleLocalMain)
-	runGitAPI(t, repoDir, "fetch", "origin", "main:refs/remotes/origin/main")
+	runGitAPI(t, repoDir, "fetch", "origin")
 
 	// Branch from the (advanced) origin/main and add one commit.
 	runGitAPI(t, repoDir, "checkout", "-b", "feature/x", advancedMain)

@@ -237,3 +237,90 @@ func TestConvertGHRequestedReviewers(t *testing.T) {
 		t.Errorf("unexpected third reviewer: %#v", got[2])
 	}
 }
+
+func TestGHStderrIndicatesRateLimit(t *testing.T) {
+	cases := []struct {
+		stderr string
+		want   bool
+	}{
+		{"GraphQL: API rate limit already exceeded for user ID 12345.", true},
+		{"You have exceeded a secondary rate limit.", true},
+		{"abuse detection mechanism triggered", true},
+		{"network: connection refused", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := ghStderrIndicatesRateLimit(c.stderr); got != c.want {
+			t.Errorf("ghStderrIndicatesRateLimit(%q) = %v, want %v", c.stderr, got, c.want)
+		}
+	}
+}
+
+func TestGHClient_InspectRateStderr_MarksGraphQL(t *testing.T) {
+	tracker := NewRateTracker(nil, nil)
+	c := NewGHClient().WithRateTracker(tracker)
+	c.inspectRateStderr([]string{"pr", "view", "1"}, "GraphQL: API rate limit already exceeded")
+	if !tracker.IsExhausted(ResourceGraphQL) {
+		t.Errorf("expected graphql exhausted")
+	}
+}
+
+func TestGHClient_InspectRateStderr_MarksSearchForSearchEndpoints(t *testing.T) {
+	tracker := NewRateTracker(nil, nil)
+	c := NewGHClient().WithRateTracker(tracker)
+	c.inspectRateStderr([]string{"api", "search/issues"}, "API rate limit exceeded")
+	if !tracker.IsExhausted(ResourceSearch) {
+		t.Errorf("expected search exhausted")
+	}
+}
+
+func TestResourceForGHArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want Resource
+	}{
+		// REST endpoints under `gh api <path>` go to Core, not GraphQL.
+		// This is the regression: previously every gh api failure was
+		// attributed to GraphQL unless the path started with search/.
+		{"api repos REST", []string{"api", "repos/o/r/pulls/1"}, ResourceCore},
+		{"api user REST", []string{"api", "user"}, ResourceCore},
+		{"api rate_limit REST", []string{"api", "rate_limit"}, ResourceCore},
+
+		// Documented exceptions still resolve to their dedicated buckets.
+		{"api graphql", []string{"api", "graphql"}, ResourceGraphQL},
+		{"api search/issues", []string{"api", "search/issues"}, ResourceSearch},
+		{"api search/repositories", []string{"api", "search/repositories"}, ResourceSearch},
+
+		// Non-`api` subcommands are GraphQL — gh implements pr/issue/repo
+		// against the GraphQL API.
+		{"pr view", []string{"pr", "view", "1"}, ResourceGraphQL},
+		{"issue list", []string{"issue", "list"}, ResourceGraphQL},
+		{"repo view", []string{"repo", "view"}, ResourceGraphQL},
+
+		// Defensive defaults for malformed argv.
+		{"empty", nil, ResourceCore},
+		{"api only", []string{"api"}, ResourceCore},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resourceForGHArgs(tc.args); got != tc.want {
+				t.Errorf("resourceForGHArgs(%v) = %s, want %s", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+// Regression: a 429 on `gh api repos/...` (REST) must mark Core, not GraphQL.
+// Previously this would pause the GraphQL PR monitor incorrectly.
+func TestGHClient_InspectRateStderr_RestEndpointMarksCore(t *testing.T) {
+	tracker := NewRateTracker(nil, nil)
+	c := NewGHClient().WithRateTracker(tracker)
+	c.inspectRateStderr([]string{"api", "repos/o/r/pulls/1"}, "API rate limit exceeded")
+	if !tracker.IsExhausted(ResourceCore) {
+		t.Errorf("expected core bucket exhausted for REST endpoint")
+	}
+	if tracker.IsExhausted(ResourceGraphQL) {
+		t.Errorf("REST 429 must not pause graphql bucket")
+	}
+}

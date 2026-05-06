@@ -198,12 +198,13 @@ const (
 
 // Event types for GitHub integration
 const (
-	GitHubPRFeedback     = "github.pr_feedback"      // PR has new feedback (UI notification only)
-	GitHubPRStateChanged = "github.pr_state_changed" // PR state changed (merged, closed, etc.)
-	GitHubNewReviewPR    = "github.new_pr_to_review" // New PR found needing review
-	GitHubNewIssue       = "github.new_issue"        // New issue found matching issue watch
-	GitHubTaskPRUpdated  = "github.task_pr.updated"  // TaskPR record updated (for UI refresh)
-	GitHubWatchEvent     = "github.watch.event"      // Watch created/deleted
+	GitHubPRFeedback       = "github.pr_feedback"        // PR has new feedback (UI notification only)
+	GitHubPRStateChanged   = "github.pr_state_changed"   // PR state changed (merged, closed, etc.)
+	GitHubNewReviewPR      = "github.new_pr_to_review"   // New PR found needing review
+	GitHubNewIssue         = "github.new_issue"          // New issue found matching issue watch
+	GitHubTaskPRUpdated    = "github.task_pr.updated"    // TaskPR record updated (for UI refresh)
+	GitHubWatchEvent       = "github.watch.event"        // Watch created/deleted
+	GitHubRateLimitUpdated = "github.rate_limit.updated" // GitHub API rate-limit snapshot changed
 )
 
 // Event types for Jira integration

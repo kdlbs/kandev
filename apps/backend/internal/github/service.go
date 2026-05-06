@@ -71,6 +71,7 @@ type Service struct {
 	taskEventSubs      []bus.Subscription
 	searchCache        *ttlCache
 	prStatusCache      *ttlCache
+	rateTracker        *RateTracker
 }
 
 // NewService creates a new GitHub service.
@@ -84,7 +85,78 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		logger:        log,
 		searchCache:   newTTLCache(),
 		prStatusCache: newTTLCache(),
+		rateTracker:   NewRateTracker(eventBus, log),
 	}
+}
+
+// RateTracker exposes the service's rate-limit tracker so factory callers
+// can wire it into individual clients.
+func (s *Service) RateTracker() *RateTracker {
+	return s.rateTracker
+}
+
+// newPATClient builds a PATClient pre-wired with the service's shared rate
+// tracker. Centralizing this guards against forgetting the wiring on auth
+// flips (e.g. ConfigureToken), which would otherwise leave PAT calls
+// invisible to the rate-limit UI, health checks, and poller throttling.
+func (s *Service) newPATClient(token string) *PATClient {
+	c := NewPATClient(token)
+	attachRateTracker(c, s.rateTracker, s.logger)
+	return c
+}
+
+// ExhaustedRateLimit is a tiny DTO returned to the health package — the
+// health package can't import github (cycle), so it consumes a structural
+// shape via interface assertion.
+type ExhaustedRateLimit struct {
+	Resource string
+	ResetAt  time.Time
+}
+
+// ExhaustedRateLimits lists every resource bucket currently out of quota.
+// Returns an empty slice when none are exhausted, so callers can safely
+// `len()` the result.
+func (s *Service) ExhaustedRateLimits() []ExhaustedRateLimit {
+	if s.rateTracker == nil {
+		return nil
+	}
+	out := []ExhaustedRateLimit{}
+	for resource, snap := range s.rateTracker.All() {
+		if snap.Exhausted() {
+			out = append(out, ExhaustedRateLimit{
+				Resource: string(resource),
+				ResetAt:  snap.ResetAt,
+			})
+		}
+	}
+	return out
+}
+
+// rateLimitInfo materializes the tracker's snapshots into the DTO shape
+// returned by GetStatus and the rate-limit WS notification. Returns nil
+// when no buckets are known yet so the field stays omitted.
+func (s *Service) rateLimitInfo() *GitHubRateLimitInfo {
+	if s.rateTracker == nil {
+		return nil
+	}
+	all := s.rateTracker.All()
+	if len(all) == 0 {
+		return nil
+	}
+	info := &GitHubRateLimitInfo{}
+	if snap, ok := all[ResourceCore]; ok {
+		v := snap
+		info.Core = &v
+	}
+	if snap, ok := all[ResourceGraphQL]; ok {
+		v := snap
+		info.GraphQL = &v
+	}
+	if snap, ok := all[ResourceSearch]; ok {
+		v := snap
+		info.Search = &v
+	}
+	return info
 }
 
 // SetTaskDeleter sets the task deletion dependency for cleanup operations.
@@ -143,6 +215,7 @@ func (s *Service) GetStatus(ctx context.Context) (*GitHubStatus, error) {
 	status := &GitHubStatus{
 		AuthMethod:     authMethod,
 		RequiredScopes: RequiredGitHubScopes,
+		RateLimit:      s.rateLimitInfo(),
 	}
 
 	// Check if a GITHUB_TOKEN secret is configured
@@ -204,6 +277,7 @@ func (s *Service) retryClientCreation(ctx context.Context) {
 		s.logger.Debug("GitHub client retry failed", zap.Error(err))
 		return
 	}
+	attachRateTracker(client, s.rateTracker, s.logger)
 	s.client = client
 	s.authMethod = authMethod
 	s.logger.Info("GitHub client recovered after retry",
@@ -229,8 +303,10 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 		return fmt.Errorf("secret manager not configured")
 	}
 
-	// Validate the token by testing authentication
-	testClient := NewPATClient(token)
+	// Validate the token by testing authentication. Wire the rate tracker
+	// onto the test client up front so the validation request seeds the
+	// shared quota and subsequent PAT-backed calls keep feeding it.
+	testClient := s.newPATClient(token)
 	user, err := testClient.GetAuthenticatedUser(ctx)
 	if err != nil {
 		return fmt.Errorf("invalid token: %w", err)

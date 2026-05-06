@@ -1,5 +1,6 @@
 import type {
   GitHubStatus,
+  GitHubRateLimitUpdate,
   TaskPR,
   PRWatch,
   ReviewWatch,
@@ -70,6 +71,7 @@ export type GitHubSliceActions = {
   removeIssueWatch: (id: string) => void;
   setActionPresets: (workspaceId: string, presets: GitHubActionPresets) => void;
   setActionPresetsLoading: (workspaceId: string, loading: boolean) => void;
+  applyGitHubRateLimitUpdate: (update: GitHubRateLimitUpdate) => void;
 };
 
 export type GitHubSlice = GitHubSliceState & GitHubSliceActions;
