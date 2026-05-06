@@ -3,6 +3,7 @@
 import { memo, useCallback, useMemo } from "react";
 import { IconCheck, IconFolder, IconGitBranch } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
+import { useToast } from "@/components/toast-provider";
 import type { Repository, TaskSession } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
 
@@ -141,6 +142,7 @@ export const MobileReposSection = memo(function MobileReposSection({
     activeSessionId ? (s.taskSessions.items[activeSessionId]?.repository_id ?? null) : null,
   );
   const rows = useTaskRepoRows(taskId, workspaceId);
+  const { toast } = useToast();
 
   const handleSelect = useCallback(
     (row: RepoRow) => {
@@ -148,12 +150,17 @@ export const MobileReposSection = memo(function MobileReposSection({
       if (row.switchToSessionId) {
         setActiveSession(taskId, row.switchToSessionId);
         onClose();
+        return;
       }
-      // Without an existing session on this repo, the user can switch to the
-      // Sessions tab and launch one — we don't auto-launch here to avoid
-      // surprise side effects from a tap that looked like navigation.
+      // We don't auto-launch from a repo tap — that would create a side effect
+      // for what looks like navigation. Surface a hint so the tap doesn't
+      // appear silently broken.
+      toast({
+        title: "No session on this repo yet",
+        description: "Open the session picker to launch one.",
+      });
     },
-    [taskId, setActiveSession, onClose],
+    [taskId, setActiveSession, onClose, toast],
   );
 
   if (!taskId) {

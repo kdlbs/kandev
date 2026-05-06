@@ -6,6 +6,17 @@ import { useUserShells } from "./use-user-shells";
 import { useAppStore } from "@/components/state-provider";
 
 /**
+ * Module-level guard for the auto-create-first-shell effect, keyed by
+ * environmentId. `useMobileTerminals` is called from several places that all
+ * end up rendering the same terminal pane (the pane itself, the picker pill,
+ * the picker sheet content) — a per-instance ref guard would let each one
+ * fire `createUserShell` on first mount, racing into multiple shells. The
+ * Set is shared across instances so only the first effect to run for a given
+ * environment triggers creation.
+ */
+const autoCreatedEnvironments = new Set<string>();
+
+/**
  * Mobile wrapper around `useTerminals`. Auto-creates a first shell when the
  * server-side shell list loads empty so the user always sees one terminal
  * mounted by default. Returns the same interface as `useTerminals`.
@@ -15,33 +26,30 @@ export function useMobileTerminals(sessionId: string | null) {
     sessionId ? (s.environmentIdBySessionId[sessionId] ?? null) : null,
   );
   const result = useTerminals({ sessionId, environmentId });
-  // Read user-shell loaded flag directly so the auto-create trigger has a
-  // primitive dependency (depending on the result object would re-run the
-  // effect every render and continuously cancel the timer).
+  // Read user-shell loaded flag directly so the auto-create trigger has
+  // primitive dependencies — depending on `result` would re-run on every
+  // render and would also race against React's effect ordering.
   const { isLoaded: shellsLoaded, shells } = useUserShells(environmentId);
   const addTerminalRef = useRef(result.addTerminal);
   useEffect(() => {
     addTerminalRef.current = result.addTerminal;
   }, [result.addTerminal]);
-  const autoCreatedRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!environmentId || !shellsLoaded) return;
-    if (autoCreatedRef.current === environmentId) return;
+    if (autoCreatedEnvironments.has(environmentId)) return;
     if (shells.length > 0) {
-      autoCreatedRef.current = environmentId;
+      autoCreatedEnvironments.add(environmentId);
       return;
     }
-    autoCreatedRef.current = environmentId;
+    autoCreatedEnvironments.add(environmentId);
     // Reset the guard if creation fails so the user gets a retry on the next
-    // render cycle (e.g. after the WS reconnects). addTerminal returns void
+    // render cycle (e.g. after the WS reconnects). `addTerminal` returns void
     // but its inner promise can still reject; guard defensively.
-    const result = addTerminalRef.current() as unknown;
-    if (result && typeof (result as Promise<unknown>).catch === "function") {
-      (result as Promise<unknown>).catch(() => {
-        if (autoCreatedRef.current === environmentId) {
-          autoCreatedRef.current = null;
-        }
+    const promise = addTerminalRef.current() as unknown;
+    if (promise && typeof (promise as Promise<unknown>).catch === "function") {
+      (promise as Promise<unknown>).catch(() => {
+        autoCreatedEnvironments.delete(environmentId);
       });
     }
   }, [environmentId, shellsLoaded, shells.length]);
