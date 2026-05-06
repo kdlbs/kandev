@@ -12,6 +12,7 @@ import { themeKandev } from "@/lib/layout/dockview-theme";
 import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
 import { tryRestoreLayout } from "./dockview-layout-restore";
 import {
+  setupContainerResizeSync,
   setupGroupTracking,
   setupLayoutPersistence,
   setupPortalCleanup,
@@ -498,6 +499,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       setupChatPanelSafetyNet(api, appStore);
       setupLayoutPersistence(api, saveTimerRef, envIdRef);
       setupPortalCleanup(api, appStore);
+      setupContainerResizeSync(api);
     },
     [setApi, buildDefaultLayout, initialLayout, appStore],
   );

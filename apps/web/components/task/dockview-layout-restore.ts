@@ -73,9 +73,32 @@ type SavedMax = ReturnType<typeof getEnvMaximizeState>;
  * maximize state into the store. Single source of truth for both restore
  * call sites — keeping `preMaximizeLayout` and `maximizedGroupId` in lockstep.
  */
+/**
+ * Measure the real DOM container of the dockview instance.
+ *
+ * `api.width/height` reflect dockview's *internal* grid dims, which can be
+ * pinned to a stale value (e.g. the JSON's recorded width after a `fromJSON`
+ * whose recorded width differs from the live container, or a window resize
+ * the library's ResizeObserver missed). Reading the parent `clientWidth/
+ * Height` recovers the true size and unwedges a drifted internal width.
+ */
+function measureDockviewContainer(api: DockviewReadyEvent["api"]): {
+  width: number;
+  height: number;
+} {
+  if (typeof document === "undefined") return { width: api.width, height: api.height };
+  const dv = document.querySelector(".dv-dockview") as HTMLElement | null;
+  const parent = dv?.parentElement;
+  if (!parent || parent.clientWidth <= 0 || parent.clientHeight <= 0) {
+    return { width: api.width, height: api.height };
+  }
+  return { width: parent.clientWidth, height: parent.clientHeight };
+}
+
 function applySavedMaximize(api: DockviewReadyEvent["api"], savedMax: NonNullable<SavedMax>): void {
   api.fromJSON(savedMax.maximizedDockviewJson as SerializedDockview);
-  api.layout(api.width, api.height);
+  const { width, height } = measureDockviewContainer(api);
+  api.layout(width, height);
   const ids = applyLayoutFixups(api);
   useDockviewStore.setState({
     ...ids,

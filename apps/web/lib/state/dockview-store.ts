@@ -244,8 +244,9 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
-      const safeWidth = api.width;
-      const safeHeight = api.height;
+      const __safe = measureDockviewContainer(api);
+      const safeWidth = __safe.width;
+      const safeHeight = __safe.height;
       if (sidebarVisible) {
         const current = fromDockviewApi(api);
         const withoutSidebar: LayoutState = {
@@ -278,8 +279,9 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
-      const safeWidth = api.width;
-      const safeHeight = api.height;
+      const __safe = measureDockviewContainer(api);
+      const safeWidth = __safe.width;
+      const safeHeight = __safe.height;
       if (rightPanelsVisible) {
         const current = fromDockviewApi(api);
         const withoutRight: LayoutState = {
@@ -335,8 +337,9 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       preserveChatScrollDuringLayout();
       // Capture dimensions before layout change — api.width can become stale
       // inside the rAF callback after dockview serialization
-      const safeWidth = api.width;
-      const safeHeight = api.height;
+      const __safe = measureDockviewContainer(api);
+      const safeWidth = __safe.width;
+      const safeHeight = __safe.height;
       set({ isRestoringLayout: true });
       const presetState = getPresetLayout(preset);
       const state = mergeCurrentPanelsIntoPreset(api, presetState);
@@ -364,8 +367,9 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
-      const safeWidth = api.width;
-      const safeHeight = api.height;
+      const __safe = measureDockviewContainer(api);
+      const safeWidth = __safe.width;
+      const safeHeight = __safe.height;
       set({ isRestoringLayout: true });
       const state = layout.layout as unknown as LayoutState;
       if (!state?.columns) {
@@ -400,14 +404,40 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
   };
 }
 
+/**
+ * Measure the live size of the dockview container element.
+ *
+ * `api.width` / `api.height` reflect dockview's *internal* grid dimensions,
+ * which can drift out of sync with the actual DOM container — e.g. after a
+ * `fromJSON` whose recorded `grid.width` differs from the live container, or
+ * after a window/devtools resize that the library's ResizeObserver missed.
+ * Reading `clientWidth/Height` of `.dv-dockview`'s parent element is the
+ * source of truth and lets us recover from a drifted internal width.
+ */
+function measureDockviewContainer(api: DockviewApi): { width: number; height: number } {
+  if (typeof document === "undefined") {
+    return { width: api.width, height: api.height };
+  }
+  const dv = document.querySelector(".dv-dockview") as HTMLElement | null;
+  const parent = dv?.parentElement;
+  if (!parent || parent.clientWidth <= 0 || parent.clientHeight <= 0) {
+    return { width: api.width, height: api.height };
+  }
+  return { width: parent.clientWidth, height: parent.clientHeight };
+}
+
 /** Restore a saved maximize state from sessionStorage onto the dockview API. */
 function restoreMaximizeFromStorage(api: DockviewApi, envId: string, set: StoreSet): boolean {
   const saved = getEnvMaximizeState(envId);
-  console.log("[dockview-debug] restoreMaximizeFromStorage", { envId, hasSaved: !!saved });
   if (!saved) return false;
   try {
     api.fromJSON(saved.maximizedDockviewJson as SerializedDockview);
-    api.layout(api.width, api.height);
+    // After fromJSON, `api.width/height` reflect the JSON's recorded grid
+    // dims, which may not match the live container. Always lay out against
+    // the measured DOM size so a stale value can't pin the dockview at the
+    // wrong width on subsequent restores.
+    const { width, height } = measureDockviewContainer(api);
+    api.layout(width, height);
     const ids = applyLayoutFixups(api);
     const preMax = saved.preMaximizeLayout as unknown as LayoutState;
     // The maximized layout is `[sidebar?, maximized]` — the non-sidebar group
@@ -436,19 +466,6 @@ function saveOutgoingEnv(
   pinnedWidths: Map<string, number>,
 ): void {
   if (!oldEnvId) return;
-  console.log("[dockview-debug] saveOutgoingEnv", {
-    oldEnvId,
-    hasPreMax: !!preMaximizeLayout,
-    preMaxColumns: preMaximizeLayout?.columns.map((c) => ({
-      id: c.id,
-      width: c.width,
-      pinned: c.pinned,
-      groupCount: c.groups.length,
-    })),
-    apiWidth: api.width,
-    apiHeight: api.height,
-    pinnedWidths: Array.from(pinnedWidths.entries()),
-  });
   if (preMaximizeLayout) {
     // While maximized, `api.toJSON()` is the 2-column maximize overlay, NOT
     // the user's intended layout. Persist the pre-max layout under both keys:
@@ -474,24 +491,15 @@ function saveOutgoingEnv(
         api.height,
         pinnedWidths,
       );
-      console.log(
-        "[dockview-debug] saveOutgoingEnv: serialized preMax to env slot",
-        JSON.stringify({ oldEnvId, preMaxSerialized }),
-      );
       setEnvLayout(oldEnvId, preMaxSerialized as unknown as object);
     } catch (err) {
-      console.warn("[dockview-debug] saveOutgoingEnv: serialize failed", err);
+      console.warn("saveOutgoingEnv: serialize failed", err);
       /* fall back: skip writing rather than overwrite with maximized JSON */
     }
   } else {
     removeEnvMaximizeState(oldEnvId);
     try {
-      const json = api.toJSON();
-      console.log(
-        "[dockview-debug] saveOutgoingEnv: api.toJSON to env slot",
-        JSON.stringify({ oldEnvId, json }),
-      );
-      setEnvLayout(oldEnvId, json);
+      setEnvLayout(oldEnvId, api.toJSON());
     } catch {
       /* ignore */
     }
@@ -502,15 +510,6 @@ function saveOutgoingEnv(
 function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
   return (oldEnvId: string | null, newEnvId: string, activeSessionId: string | null) => {
     const { api, currentLayoutEnvId, preMaximizeLayout } = get();
-    console.log("[dockview-debug] switchEnvLayout", {
-      oldEnvId,
-      newEnvId,
-      activeSessionId,
-      currentLayoutEnvId,
-      hasPreMax: !!preMaximizeLayout,
-      apiPanels: api?.panels.map((p) => p.id),
-      apiGroups: api?.groups.map((g) => ({ id: g.id, width: g.width })),
-    });
     if (!api) return;
     // Same-env switch (e.g. between sessions of the same task) is a no-op.
     // The layout, terminals, and env-scoped portals already belong to this env.
@@ -533,32 +532,23 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
     // outgoing env rather than silently skipping it.
     const effectiveOld = oldEnvId ?? currentLayoutEnvId;
     saveOutgoingEnv(api, effectiveOld, preMaximizeLayout, get().pinnedWidths);
-    console.trace("[dockview-debug] switchEnvLayout: clearing preMax/maxGroupId");
     set({ preMaximizeLayout: null, maximizedGroupId: null });
     set({ isRestoringLayout: true, currentLayoutEnvId: newEnvId });
     try {
       if (restoreMaximizeFromStorage(api, newEnvId, set)) return;
+      const measured = measureDockviewContainer(api);
       const ids = performEnvSwitch({
         api,
         oldEnvId: effectiveOld,
         newEnvId,
         activeSessionId,
-        safeWidth: api.width,
-        safeHeight: api.height,
+        safeWidth: measured.width,
+        safeHeight: measured.height,
         buildDefault: (a) => get().buildDefaultLayout(a),
         getDefaultLayout: () => get().userDefaultLayout ?? getPresetLayout("default"),
       });
       set(ids);
       set({ isRestoringLayout: false });
-      console.log(
-        "[dockview-debug] after performEnvSwitch",
-        JSON.stringify({
-          newEnvId,
-          groups: api.groups.map((g) => ({ id: g.id, width: g.width, height: g.height })),
-          apiWidth: api.width,
-          apiHeight: api.height,
-        }),
-      );
       panelPortalManager.reconcile(new Set(api.panels.map((p) => p.id)));
     } catch {
       set({ isRestoringLayout: false });
@@ -578,17 +568,6 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
       const liveWidths = captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
       const current = fromDockviewApi(api);
-      console.log("[dockview-debug] maximizeGroup", {
-        groupId,
-        currentLayoutEnvId,
-        currentColumns: current.columns.map((c) => ({
-          id: c.id,
-          width: c.width,
-          pinned: c.pinned,
-          groupCount: c.groups.length,
-        })),
-        liveWidths: Array.from(liveWidths.entries()),
-      });
       let targetGroup: {
         panels: LayoutState["columns"][0]["groups"][0]["panels"];
         activePanel?: string;
@@ -612,8 +591,9 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
       });
       const maximizedLayout: LayoutState = { columns };
       set({ isRestoringLayout: true, preMaximizeLayout: current, maximizedGroupId: groupId });
-      const safeWidth = api.width;
-      const safeHeight = api.height;
+      const __safe = measureDockviewContainer(api);
+      const safeWidth = __safe.width;
+      const safeHeight = __safe.height;
       applyLayoutAndSet(api, maximizedLayout, liveWidths, set);
       requestAnimationFrame(() => {
         api.layout(safeWidth, safeHeight);
@@ -629,10 +609,10 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
     exitMaximizedLayout: () => {
       const { api, preMaximizeLayout, currentLayoutEnvId } = get();
       if (!api || !preMaximizeLayout) return;
-      console.trace("[dockview-debug] exitMaximizedLayout called", { currentLayoutEnvId });
       preserveChatScrollDuringLayout();
-      const safeWidth = api.width;
-      const safeHeight = api.height;
+      const measured = measureDockviewContainer(api);
+      const safeWidth = measured.width;
+      const safeHeight = measured.height;
       const liveWidths = get().pinnedWidths;
       set({ isRestoringLayout: true, preMaximizeLayout: null, maximizedGroupId: null });
       if (currentLayoutEnvId) {
@@ -659,8 +639,9 @@ function performBuildDefault(
   const freshPinned = new Map<string, number>();
   // Capture dimensions before layout change — api.width can become stale
   // after fromJSON inside applyLayout
-  const safeWidth = api.width;
-  const safeHeight = api.height;
+  const __safe = measureDockviewContainer(api);
+  const safeWidth = __safe.width;
+  const safeHeight = __safe.height;
   set({ isRestoringLayout: true, pinnedWidths: freshPinned });
 
   const basePreset = intent?.preset as BuiltInPreset | undefined;

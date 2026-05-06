@@ -38,6 +38,34 @@ function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
   }
 }
 
+/**
+ * Keep dockview's internal grid width in sync with the live DOM container.
+ *
+ * Dockview's own ResizeObserver occasionally drifts: a sequence of
+ * fromJSON calls (each carrying a recorded `grid.width`) plus a viewport
+ * change (devtools open/close, window resize) can leave `api.width` pinned
+ * at a value smaller than the actual container, after which every
+ * subsequent layout op pins it there. Observing the parent element and
+ * forcing `api.layout` on every resize is a cheap belt-and-suspenders fix.
+ */
+export function setupContainerResizeSync(api: DockviewReadyEvent["api"]): () => void {
+  if (typeof window === "undefined" || typeof ResizeObserver === "undefined") {
+    return () => {};
+  }
+  const dv = document.querySelector(".dv-dockview") as HTMLElement | null;
+  const parent = dv?.parentElement;
+  if (!parent) return () => {};
+  const ro = new ResizeObserver(() => {
+    const w = parent.clientWidth;
+    const h = parent.clientHeight;
+    if (w <= 0 || h <= 0) return;
+    if (w === api.width && h === api.height) return;
+    api.layout(w, h);
+  });
+  ro.observe(parent);
+  return () => ro.disconnect();
+}
+
 export function setupGroupTracking(api: DockviewReadyEvent["api"]): () => void {
   const d1 = api.onDidActiveGroupChange((group) => {
     useDockviewStore.setState({ activeGroupId: group?.id ?? null });
@@ -73,21 +101,12 @@ export function setupLayoutPersistence(
       // bug this guard is meant to prevent.
       const live = useDockviewStore.getState();
       if (live.preMaximizeLayout !== null || live.isRestoringLayout) {
-        console.log("[dockview-debug] setupLayoutPersistence: bail at fire", {
-          envId: envIdRef.current,
-          hasPreMax: live.preMaximizeLayout !== null,
-          isRestoring: live.isRestoringLayout,
-        });
         saveTimerRef.current = null;
         return;
       }
       try {
         const json = api.toJSON();
         const envId = envIdRef.current;
-        console.log(
-          "[dockview-debug] setupLayoutPersistence: saving",
-          JSON.stringify({ envId, json }),
-        );
         localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
         if (envId) {
           setEnvLayout(envId, json);

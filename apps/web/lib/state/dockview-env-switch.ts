@@ -148,34 +148,16 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
   const { api, newEnvId, safeWidth, safeHeight, buildDefault } = params;
 
   const fastResult = tryFastEnvSwitch(params);
-  console.log("[dockview-debug] performEnvSwitch", {
-    newEnvId,
-    safeWidth,
-    safeHeight,
-    fastPath: !!fastResult,
-  });
   if (fastResult) return fastResult;
 
   const saved = getHealthyEnvLayout(newEnvId);
-  console.log(
-    "[dockview-debug] performEnvSwitch slow path",
-    JSON.stringify({ newEnvId, hasSavedLayout: !!saved, savedLayout: saved }),
-  );
   if (saved) {
     try {
       api.fromJSON(saved as SerializedDockview);
       api.layout(safeWidth, safeHeight);
-      const ids = applyLayoutFixups(api);
-      console.log(
-        "[dockview-debug] performEnvSwitch loaded saved",
-        JSON.stringify({
-          newEnvId,
-          groups: api.groups.map((g) => ({ id: g.id, width: g.width })),
-        }),
-      );
-      return ids;
+      return applyLayoutFixups(api);
     } catch (err) {
-      console.warn("[dockview-debug] performEnvSwitch fromJSON threw", err);
+      console.warn("performEnvSwitch: fromJSON threw", err);
       /* fall through to default layout build */
     }
   }
