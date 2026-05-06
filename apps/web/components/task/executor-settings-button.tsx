@@ -192,7 +192,7 @@ export function ExecutorSettingsButton({
         >
           <PrepareStatusSection summary={prepare} />
           <EnvironmentInfo env={env} container={container} loading={loading} />
-          <div className="border-t border-border p-2 flex items-center justify-end">
+          <div className="border-t border-border px-2 py-1.5 flex items-center justify-end">
             <Button
               variant="destructive"
               size="sm"
@@ -313,7 +313,7 @@ function EnvironmentInfo({
   }
 
   return (
-    <div className="px-3 py-2 space-y-1.5">
+    <div className="px-3 pt-2 pb-1.5 space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <span className="font-medium text-foreground">{formatExecutorType(env.executor_type)}</span>
         <StatusBadge env={env} container={container} />
