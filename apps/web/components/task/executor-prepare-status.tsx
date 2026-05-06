@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { IconAlertTriangle, IconCheck, IconLoader2 } from "@tabler/icons-react";
+import { IconAlertTriangle, IconLoader2 } from "@tabler/icons-react";
 
 import { useAppStore } from "@/components/state-provider";
 import type {
@@ -129,13 +129,13 @@ function lastIndexWhere<T>(items: T[], pred: (item: T) => boolean): number {
 }
 
 export function PrepareStatusSection({ summary }: { summary: PrepareSummary }) {
-  if (summary.phase === "idle") return null;
+  if (summary.phase === "idle" || summary.phase === "ready") return null;
   if (summary.phase === "resuming") return <ResumingRow />;
   if (summary.phase === "preparing" || summary.phase === "preparing_fallback") {
     return <PreparingRow summary={summary} />;
   }
   if (summary.phase === "failed") return <FailedRow summary={summary} />;
-  return <ReadyRow summary={summary} />;
+  return null;
 }
 
 function ResumingRow() {
@@ -206,29 +206,4 @@ function FailedRow({ summary }: { summary: PrepareSummary }) {
       )}
     </div>
   );
-}
-
-function ReadyRow({ summary }: { summary: PrepareSummary }) {
-  return (
-    <div
-      data-testid="executor-prepare-status"
-      data-phase="ready"
-      className="border-b border-border px-3 py-2 flex items-center gap-2 text-xs text-muted-foreground"
-    >
-      <IconCheck className="h-3.5 w-3.5 text-green-500" />
-      <span>
-        Environment ready
-        {summary.durationMs ? ` · ${formatDuration(summary.durationMs)}` : ""}
-      </span>
-    </div>
-  );
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const secs = Math.round(ms / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  const remSecs = secs % 60;
-  return remSecs > 0 ? `${mins}m ${remSecs}s` : `${mins}m`;
 }

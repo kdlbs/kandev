@@ -143,7 +143,9 @@ describe("ExecutorSettingsButton", () => {
     expect(screen.getByText(/Reconnecting to the existing environment/)).toBeTruthy();
   });
 
-  it("shows an Environment ready row once preparation completes", async () => {
+  it("hides the prepare-status section once preparation completes", async () => {
+    // The READY badge next to the executor name conveys ready-state; the
+    // dedicated "Environment ready · 12s" row is redundant noise.
     mockPrepareState = {
       sessionId: SESSION_ID,
       status: "completed",
@@ -154,9 +156,7 @@ describe("ExecutorSettingsButton", () => {
     render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
     screen.getByTestId(SETTINGS_BUTTON_TESTID).click();
 
-    const status = await screen.findByTestId(PREPARE_STATUS_TESTID);
-    expect(status.dataset.phase).toBe("ready");
-    expect(screen.getByText(/Environment ready/)).toBeTruthy();
-    expect(screen.getByText(/13s/)).toBeTruthy();
+    expect(screen.queryByTestId(PREPARE_STATUS_TESTID)).toBeNull();
+    expect(screen.queryByText(/Environment ready/)).toBeNull();
   });
 });
