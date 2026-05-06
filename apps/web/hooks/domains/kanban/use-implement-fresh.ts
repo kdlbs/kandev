@@ -30,7 +30,14 @@ export function useImplementFresh(
   const { toast } = useToast();
 
   return useCallback(async () => {
-    if (!taskId || !resolvedSessionId || !planningSession?.agent_profile_id) return;
+    if (
+      !taskId ||
+      !resolvedSessionId ||
+      !planningSession?.agent_profile_id ||
+      !planningSession?.executor_id
+    ) {
+      return;
+    }
 
     const userText = chatInputRef.current?.getValue() ?? "";
     const attachments = chatInputRef.current?.getAttachments() ?? [];

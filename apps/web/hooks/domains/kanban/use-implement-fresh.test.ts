@@ -154,6 +154,10 @@ describe("useImplementFresh", () => {
 
     expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
   });
+});
+
+describe("useImplementFresh guards", () => {
+  beforeEach(() => setup());
 
   it("no-ops when session ID is missing", async () => {
     const { ref } = makeChatRef();
@@ -168,6 +172,18 @@ describe("useImplementFresh", () => {
 
   it("no-ops when planning session has no agent profile", async () => {
     setup(makeSession({ agent_profile_id: undefined }));
+    const { ref } = makeChatRef();
+    const { result } = renderHook(() => useImplementFresh("sess-plan", "task-1", ref));
+
+    await act(async () => {
+      await result.current();
+    });
+
+    expect(mockLaunchSession).not.toHaveBeenCalled();
+  });
+
+  it("no-ops when planning session has no executor", async () => {
+    setup(makeSession({ executor_id: undefined }));
     const { ref } = makeChatRef();
     const { result } = renderHook(() => useImplementFresh("sess-plan", "task-1", ref));
 
