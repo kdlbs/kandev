@@ -48,12 +48,7 @@ export function useImplementFresh(
   const { toast } = useToast();
 
   return useCallback(async () => {
-    if (
-      !taskId ||
-      !resolvedSessionId ||
-      !planningSession?.agent_profile_id ||
-      !planningSession?.executor_id
-    ) {
+    if (!taskId || !resolvedSessionId || !planningSession?.agent_profile_id) {
       return;
     }
 
@@ -66,19 +61,19 @@ export function useImplementFresh(
         task_id: taskId,
         intent: "start",
         agent_profile_id: planningSession.agent_profile_id,
-        executor_id: planningSession.executor_id,
+        ...(planningSession.executor_id && { executor_id: planningSession.executor_id }),
         prompt,
         plan_mode: false,
         ...(attachments.length > 0 && { attachments }),
       });
 
       const newSessionId = response.session_id;
-      if (newSessionId) {
-        await setupFreshSession(newSessionId);
-        setActiveSession(taskId, newSessionId);
-      }
+      if (!newSessionId) return;
 
-      // Clear composer + draft only on success
+      await setupFreshSession(newSessionId);
+      setActiveSession(taskId, newSessionId);
+
+      // Clear composer + draft only when a fresh session was actually created.
       chatInputRef.current?.clear();
       setChatDraftContent(resolvedSessionId, null);
     } catch (err) {

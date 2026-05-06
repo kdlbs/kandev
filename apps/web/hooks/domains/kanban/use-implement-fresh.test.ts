@@ -245,16 +245,31 @@ describe("useImplementFresh guards", () => {
     expect(mockLaunchSession).not.toHaveBeenCalled();
   });
 
-  it("no-ops when planning session has no executor", async () => {
+  it("launches without executor_id when planning session is missing one (backend resolves)", async () => {
     setup(makeSession({ executor_id: undefined }));
-    const { ref } = makeChatRef();
+    const { ref } = makeChatRef({ value: "go" });
     const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));
 
     await act(async () => {
       await result.current();
     });
 
-    expect(mockLaunchSession).not.toHaveBeenCalled();
+    expect(mockLaunchSession).toHaveBeenCalledTimes(1);
+    expect(mockLaunchSession.mock.calls[0][0]).not.toHaveProperty("executor_id");
+  });
+
+  it("does not clear composer when launchSession resolves without a session_id", async () => {
+    mockLaunchSession.mockResolvedValueOnce({ success: true, task_id: TASK_ID, state: "RUNNING" });
+    const { ref, clear } = makeChatRef({ value: "preserve me" });
+    const { result } = renderHook(() => useImplementFresh(SESS_PLAN, TASK_ID, ref));
+
+    await act(async () => {
+      await result.current();
+    });
+
+    expect(clear).not.toHaveBeenCalled();
+    expect(mockSetChatDraftContent).not.toHaveBeenCalled();
+    expect(mockSetActiveSession).not.toHaveBeenCalled();
   });
 
   it("no-ops when planning session is not in the store", async () => {
