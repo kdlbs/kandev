@@ -86,7 +86,6 @@ var persistentMetadataKeys = map[string]bool{
 	"sprite_state":      true,
 	"sprite_created_at": true,
 	"local_port":        true,
-	"instance_port":     true,
 
 	// Executor type marker
 	MetadataKeyIsRemote: true,
