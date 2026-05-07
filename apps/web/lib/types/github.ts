@@ -154,7 +154,16 @@ export type TaskPR = {
   mergeable_state: MergeableState;
   review_count: number;
   pending_review_count: number;
+  /** Number of approving reviews required by the base branch protection rule.
+   *  Null when no protection rule exists or the token lacks scope to read it. */
+  required_reviews?: number | null;
   comment_count: number;
+  /** Count of unresolved review threads. Surfaced in the CI hover popover. */
+  unresolved_review_threads: number;
+  /** Aggregate check counts. Used by the CI hover popover to render the
+   *  Passed/Failed/In-Progress count rows before the lazy PRFeedback loads. */
+  checks_total: number;
+  checks_passing: number;
   additions: number;
   deletions: number;
   created_at: string;

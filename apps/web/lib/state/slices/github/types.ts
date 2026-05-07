@@ -6,6 +6,7 @@ import type {
   ReviewWatch,
   IssueWatch,
   GitHubActionPresets,
+  PRFeedback,
 } from "@/lib/types/github";
 
 export type GitHubStatusState = {
@@ -42,6 +43,16 @@ export type ActionPresetsState = {
   loading: Record<string, boolean>;
 };
 
+export type PRFeedbackCacheEntry = {
+  feedback: PRFeedback;
+  lastUpdatedAt: number;
+};
+
+export type PRFeedbackCacheState = {
+  /** Keyed by `${owner}/${repo}#${pr_number}` so multi-PR tasks coexist. */
+  byKey: Record<string, PRFeedbackCacheEntry>;
+};
+
 export type GitHubSliceState = {
   githubStatus: GitHubStatusState;
   taskPRs: TaskPRsState;
@@ -49,6 +60,7 @@ export type GitHubSliceState = {
   reviewWatches: ReviewWatchesState;
   issueWatches: IssueWatchesState;
   actionPresets: ActionPresetsState;
+  prFeedbackCache: PRFeedbackCacheState;
 };
 
 export type GitHubSliceActions = {
@@ -72,6 +84,8 @@ export type GitHubSliceActions = {
   setActionPresets: (workspaceId: string, presets: GitHubActionPresets) => void;
   setActionPresetsLoading: (workspaceId: string, loading: boolean) => void;
   applyGitHubRateLimitUpdate: (update: GitHubRateLimitUpdate) => void;
+  setPRFeedbackCacheEntry: (key: string, feedback: PRFeedback) => void;
+  removePRFeedbackCacheEntry: (key: string) => void;
 };
 
 export type GitHubSlice = GitHubSliceState & GitHubSliceActions;

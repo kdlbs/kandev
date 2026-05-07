@@ -17,6 +17,7 @@ import type {
   ReviewWatch as GitHubReviewWatch,
   IssueWatch as GitHubIssueWatch,
   GitHubActionPresets,
+  PRFeedback,
 } from "@/lib/types/github";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
@@ -218,6 +219,7 @@ export type AppState = {
   reviewWatches: (typeof defaultGitHubState)["reviewWatches"];
   issueWatches: (typeof defaultGitHubState)["issueWatches"];
   actionPresets: (typeof defaultGitHubState)["actionPresets"];
+  prFeedbackCache: (typeof defaultGitHubState)["prFeedbackCache"];
 
   // JIRA slice
   jiraIssueWatches: (typeof defaultJiraState)["jiraIssueWatches"];
@@ -265,6 +267,8 @@ export type AppState = {
   setActionPresets: (workspaceId: string, presets: GitHubActionPresets) => void;
   setActionPresetsLoading: (workspaceId: string, loading: boolean) => void;
   applyGitHubRateLimitUpdate: (update: GitHubRateLimitUpdate) => void;
+  setPRFeedbackCacheEntry: (key: string, feedback: PRFeedback) => void;
+  removePRFeedbackCacheEntry: (key: string) => void;
 
   // JIRA actions
   setJiraIssueWatches: (watches: JiraIssueWatch[]) => void;
