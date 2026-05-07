@@ -1,5 +1,7 @@
 // Agent, model, clarification, plan, and stats types extracted from http.ts
 
+import type { ProfileEnvVar } from "./http";
+
 export type AgentProfile = {
   id: string;
   agent_id: string;
@@ -18,6 +20,11 @@ export type AgentProfile = {
    */
   cli_flags: CLIFlag[];
   cli_passthrough: boolean;
+  /**
+   * Environment variables forwarded to the agent subprocess. May reference
+   * secrets via `secret_id`. Resolved server-side at launch (and on resume).
+   */
+  env_vars?: ProfileEnvVar[];
   user_modified?: boolean;
   created_at: string;
   updated_at: string;

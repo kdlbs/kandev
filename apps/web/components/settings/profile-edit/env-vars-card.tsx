@@ -166,5 +166,11 @@ export function useEnvVarRows(initialEnvVars?: ProfileEnvVar[]) {
     setEnvVarRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: val } : row)));
   }, []);
 
-  return { envVarRows, addEnvVar, removeEnvVar, updateEnvVar };
+  // Replaces all rows; used after save to re-baseline against the freshly
+  // persisted profile so isDirty resets to false.
+  const resetEnvVars = useCallback((next?: ProfileEnvVar[]) => {
+    setEnvVarRows(envVarsToRows(next));
+  }, []);
+
+  return { envVarRows, addEnvVar, removeEnvVar, updateEnvVar, resetEnvVars };
 }

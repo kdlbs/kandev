@@ -104,7 +104,13 @@ export async function updateAgentProfileAction(
   payload: Partial<
     Pick<
       AgentProfile,
-      "name" | "model" | "mode" | "allow_indexing" | "cli_passthrough" | "cli_flags"
+      | "name"
+      | "model"
+      | "mode"
+      | "allow_indexing"
+      | "cli_passthrough"
+      | "cli_flags"
+      | "env_vars"
     >
   >,
 ): Promise<AgentProfile> {

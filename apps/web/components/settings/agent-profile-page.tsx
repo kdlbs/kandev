@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { IconTrash } from "@tabler/icons-react";
 import { areCLIFlagsEqual } from "@/lib/cli-flags";
+import { areEnvVarsEqual } from "@/lib/env-vars";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -12,6 +13,12 @@ import { Separator } from "@kandev/ui/separator";
 import { useToast } from "@/components/toast-provider";
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { ProfileFormFields } from "@/components/settings/profile-form-fields";
+import {
+  EnvVarsCard,
+  rowsToEnvVars,
+  useEnvVarRows,
+} from "@/components/settings/profile-edit/env-vars-card";
+import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import { deleteAgentProfileAction, updateAgentProfileAction } from "@/app/actions/agents";
 import type { ActiveSessionInfo } from "@/lib/types/agent-profile-errors";
 import {
@@ -178,6 +185,7 @@ function useProfileEditorState(profile: AgentProfile) {
   const [draft, setDraft] = useState<AgentProfile>({ ...profile });
   const [savedProfile, setSavedProfile] = useState<AgentProfile>(profile);
   const [saveStatus, setSaveStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const envVars = useEnvVarRows(profile.env_vars);
 
   const isDirty = useMemo(
     () =>
@@ -186,11 +194,12 @@ function useProfileEditorState(profile: AgentProfile) {
       (draft.mode ?? "") !== (savedProfile.mode ?? "") ||
       draft.allow_indexing !== savedProfile.allow_indexing ||
       draft.cli_passthrough !== savedProfile.cli_passthrough ||
-      !areCLIFlagsEqual(draft.cli_flags, savedProfile.cli_flags),
-    [draft, savedProfile],
+      !areCLIFlagsEqual(draft.cli_flags, savedProfile.cli_flags) ||
+      !areEnvVarsEqual(rowsToEnvVars(envVars.envVarRows), savedProfile.env_vars ?? null),
+    [draft, savedProfile, envVars.envVarRows],
   );
 
-  return { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty };
+  return { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty, envVars };
 }
 
 const FALLBACK_ERROR = "Request failed";
@@ -208,6 +217,7 @@ type ProfileEditorActionsOptions = {
   settingsAgents: Agent[];
   syncAgentsToStore: (agents: Agent[]) => void;
   toast: ReturnType<typeof useToast>["toast"];
+  envVars: ReturnType<typeof useEnvVarRows>;
 };
 
 function useProfileSave({
@@ -219,6 +229,7 @@ function useProfileSave({
   settingsAgents,
   syncAgentsToStore,
   toast,
+  envVars,
 }: ProfileEditorActionsOptions) {
   return async () => {
     if (!draft.name.trim()) {
@@ -240,9 +251,11 @@ function useProfileSave({
         allow_indexing: draft.allow_indexing,
         cli_passthrough: draft.cli_passthrough,
         cli_flags: draft.cli_flags,
+        env_vars: rowsToEnvVars(envVars.envVarRows),
       });
       setSavedProfile(updated);
       setDraft(updated);
+      envVars.resetEnvVars(updated.env_vars);
       const nextAgents = settingsAgents.map((agentItem: Agent) =>
         agentItem.id === agent.id
           ? {
@@ -337,8 +350,9 @@ function ProfileEditor({
   const { toast } = useToast();
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const syncAgentsToStore = useSyncAgentsToStore();
-  const { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty } =
+  const { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty, envVars } =
     useProfileEditorState(profile);
+  const { items: secrets } = useSecrets();
   const handleSave = useProfileSave({
     agent,
     draft,
@@ -348,6 +362,7 @@ function ProfileEditor({
     settingsAgents,
     syncAgentsToStore,
     toast,
+    envVars,
   });
   const {
     requestDelete,
@@ -380,6 +395,14 @@ function ProfileEditor({
         modelConfig={modelConfig}
         permissionSettings={permissionSettings}
         passthroughConfig={passthroughConfig}
+      />
+
+      <EnvVarsCard
+        rows={envVars.envVarRows}
+        secrets={secrets}
+        onAdd={envVars.addEnvVar}
+        onUpdate={envVars.updateEnvVar}
+        onRemove={envVars.removeEnvVar}
       />
 
       <CommandPreviewCard
