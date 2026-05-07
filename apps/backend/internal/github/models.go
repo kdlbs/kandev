@@ -103,6 +103,12 @@ type PRStatus struct {
 	// means "I didn't look, keep what's there."
 	ChecksPopulated         bool `json:"checks_populated,omitempty"`
 	UnresolvedReviewThreads int  `json:"unresolved_review_threads"`
+	// UnresolvedReviewThreadsPopulated mirrors ChecksPopulated for the
+	// review-threads field. The REST path (getPRStatus) doesn't fetch
+	// review threads, so it leaves the field at zero; SyncTaskPR uses
+	// this flag to avoid clobbering a non-zero value set by the GraphQL
+	// path during a subsequent REST sync.
+	UnresolvedReviewThreadsPopulated bool `json:"unresolved_review_threads_populated,omitempty"`
 }
 
 // PRSearchPage is a paginated slice of PR search results, with the total

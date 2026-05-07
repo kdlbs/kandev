@@ -977,6 +977,38 @@ func TestSyncTaskPR_ChecksPopulated_AcceptsRealZero(t *testing.T) {
 	}
 }
 
+// TestSyncTaskPR_UnresolvedThreads_PreservesOnLightweightSync verifies the
+// REST single-PR poller (which doesn't fetch review threads) does NOT
+// clobber the value set by the GraphQL batched poller. Without the
+// UnresolvedReviewThreadsPopulated guard, every REST sync would flip the
+// count to 0 and emit a spurious github.task_pr.updated event.
+func TestSyncTaskPR_UnresolvedThreads_PreservesOnLightweightSync(t *testing.T) {
+	svc, store, eb := setupSyncTest(t)
+	ctx := context.Background()
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 1, PRURL: "u",
+		HeadBranch: "feat", BaseBranch: "main", State: "open",
+		UnresolvedReviewThreads: 3,
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	status := &PRStatus{
+		PR:                               &PR{Number: 1, State: "open", RepoOwner: "o", RepoName: "r"},
+		UnresolvedReviewThreads:          0,
+		UnresolvedReviewThreadsPopulated: false, // REST path: didn't look
+	}
+	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	stored, _ := store.GetTaskPR(ctx, "t1")
+	if stored.UnresolvedReviewThreads != 3 {
+		t.Fatalf("threads clobbered: got %d, want 3", stored.UnresolvedReviewThreads)
+	}
+	if got := eb.publishedCount(); got != 0 {
+		t.Fatalf("expected no event when nothing changed, got %d", got)
+	}
+}
+
 // TestSyncTaskPR_BaseBranchRetarget covers the case where a PR is retargeted
 // to a different base branch upstream — the new branch must be persisted so
 // future branch-protection lookups key off the right value.
@@ -1020,8 +1052,9 @@ func TestSyncTaskPR_NewFieldsPublishEvent(t *testing.T) {
 			init: TaskPR{TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 1, PRURL: "u",
 				HeadBranch: "feat", BaseBranch: "main", State: "open"},
 			status: PRStatus{
-				PR:                      &PR{Number: 1, State: "open", RepoOwner: "o", RepoName: "r"},
-				UnresolvedReviewThreads: 3,
+				PR:                               &PR{Number: 1, State: "open", RepoOwner: "o", RepoName: "r"},
+				UnresolvedReviewThreads:          3,
+				UnresolvedReviewThreadsPopulated: true,
 			},
 		},
 		{

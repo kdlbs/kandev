@@ -98,9 +98,6 @@ type BranchProtectionFetcher interface {
 // Result is cached for branchProtectionCacheTTL. nil never gets cached so a
 // transient error is retried on the next sync.
 func (s *Service) fetchRequiredReviews(ctx context.Context, owner, repo, branch string) *int {
-	if s == nil || s.protectionCache == nil {
-		return nil
-	}
 	if owner == "" || repo == "" || branch == "" {
 		return nil
 	}
@@ -113,7 +110,7 @@ func (s *Service) fetchRequiredReviews(ctx context.Context, owner, repo, branch 
 		return &n
 	}
 	fetcher, ok := s.client.(BranchProtectionFetcher)
-	if !ok || fetcher == nil {
+	if !ok {
 		return nil
 	}
 	bp, err := fetcher.FetchBranchProtection(ctx, owner, repo, branch)

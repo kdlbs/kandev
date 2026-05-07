@@ -767,6 +767,13 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		nextChecksTotal = status.ChecksTotal
 		nextChecksPassing = status.ChecksPassing
 	}
+	// Same Populated/preserve dance for unresolved review threads — the
+	// REST path doesn't fetch them, so blindly writing status.UnresolvedReviewThreads
+	// would clobber the non-zero value set by the GraphQL path on every poll.
+	nextUnresolved := tp.UnresolvedReviewThreads
+	if status.UnresolvedReviewThreadsPopulated {
+		nextUnresolved = status.UnresolvedReviewThreads
+	}
 	// PRs can be retargeted to a different base branch; pick up the new
 	// branch from status.PR before resolving branch-protection so we don't
 	// indefinitely surface the wrong rule.
@@ -796,7 +803,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		!intPtrEqual(tp.RequiredReviews, nextRequiredReviews) ||
 		tp.ChecksTotal != nextChecksTotal ||
 		tp.ChecksPassing != nextChecksPassing ||
-		tp.UnresolvedReviewThreads != status.UnresolvedReviewThreads ||
+		tp.UnresolvedReviewThreads != nextUnresolved ||
 		tp.BaseBranch != nextBaseBranch ||
 		!timeEqual(tp.MergedAt, status.PR.MergedAt) ||
 		!timeEqual(tp.ClosedAt, status.PR.ClosedAt)
@@ -815,7 +822,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	tp.RequiredReviews = nextRequiredReviews
 	tp.ChecksTotal = nextChecksTotal
 	tp.ChecksPassing = nextChecksPassing
-	tp.UnresolvedReviewThreads = status.UnresolvedReviewThreads
+	tp.UnresolvedReviewThreads = nextUnresolved
 	tp.BaseBranch = nextBaseBranch
 	// CommentCount is no longer updated from polling -- only refreshed on-demand
 	now := time.Now().UTC()

@@ -261,11 +261,12 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		unresolved += total - len(raw.ReviewThreads.Nodes)
 	}
 	return &PRStatus{
-		PR:                      pr,
-		ReviewState:             reviewState,
-		ChecksState:             checksState,
-		MergeableState:          pr.MergeableState,
-		UnresolvedReviewThreads: unresolved,
+		PR:                               pr,
+		ReviewState:                      reviewState,
+		ChecksState:                      checksState,
+		MergeableState:                   pr.MergeableState,
+		UnresolvedReviewThreads:          unresolved,
+		UnresolvedReviewThreadsPopulated: true,
 	}
 }
 
