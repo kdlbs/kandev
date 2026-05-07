@@ -1,6 +1,7 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
+import type { WorkflowPayload } from "@/lib/types/backend";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function stepFromPayload(step: any) {
@@ -18,49 +19,55 @@ function stepFromPayload(step: any) {
   };
 }
 
+function applyWorkflowCreated(state: AppState, payload: WorkflowPayload): AppState {
+  if (state.workspaces.activeId !== payload.workspace_id) return state;
+  if (state.workflows.items.some((item) => item.id === payload.id)) return state;
+  const isHidden = Boolean(payload.hidden);
+  return {
+    ...state,
+    workflows: {
+      items: [
+        {
+          id: payload.id,
+          workspaceId: payload.workspace_id,
+          name: payload.name,
+          hidden: isHidden,
+        },
+        ...state.workflows.items,
+      ],
+      // Hidden workflows must never be promoted to the active selection;
+      // they are system-only and would surface in the workflow picker.
+      activeId: state.workflows.activeId ?? (isHidden ? null : payload.id),
+    },
+  };
+}
+
+function applyWorkflowUpdated(state: AppState, payload: WorkflowPayload): AppState {
+  return {
+    ...state,
+    workflows: {
+      ...state.workflows,
+      items: state.workflows.items.map((item) =>
+        item.id === payload.id
+          ? {
+              ...item,
+              name: payload.name,
+              agent_profile_id: payload.agent_profile_id,
+              hidden: payload.hidden !== undefined ? Boolean(payload.hidden) : item.hidden,
+            }
+          : item,
+      ),
+    },
+  };
+}
+
 export function registerWorkflowsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "workflow.created": (message) => {
-      store.setState((state) => {
-        if (state.workspaces.activeId !== message.payload.workspace_id) {
-          return state;
-        }
-        const exists = state.workflows.items.some((item) => item.id === message.payload.id);
-        if (exists) {
-          return state;
-        }
-        return {
-          ...state,
-          workflows: {
-            items: [
-              {
-                id: message.payload.id,
-                workspaceId: message.payload.workspace_id,
-                name: message.payload.name,
-              },
-              ...state.workflows.items,
-            ],
-            activeId: state.workflows.activeId ?? message.payload.id,
-          },
-        };
-      });
+      store.setState((state) => applyWorkflowCreated(state, message.payload));
     },
     "workflow.updated": (message) => {
-      store.setState((state) => ({
-        ...state,
-        workflows: {
-          ...state.workflows,
-          items: state.workflows.items.map((item) =>
-            item.id === message.payload.id
-              ? {
-                  ...item,
-                  name: message.payload.name,
-                  agent_profile_id: message.payload.agent_profile_id,
-                }
-              : item,
-          ),
-        },
-      }));
+      store.setState((state) => applyWorkflowUpdated(state, message.payload));
     },
     "workflow.deleted": (message) => {
       store.setState((state) => {

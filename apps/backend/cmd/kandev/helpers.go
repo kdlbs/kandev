@@ -648,7 +648,7 @@ func registerSecondaryRoutes(
 
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService)
 
-	registerE2EResetRoutes(p.router, p.taskRepo, p.log)
+	registerE2EResetRoutes(p.router, p.taskRepo, p.taskSvc, p.log)
 }
 
 // registerHealthRoutes sets up the system health endpoint with all health checkers.
