@@ -86,16 +86,23 @@ type PRFeedback struct {
 // PRStatus contains lightweight PR state used by the background poller.
 // Unlike PRFeedback, it skips comments to reduce API calls.
 type PRStatus struct {
-	PR                      *PR    `json:"pr"`
-	ReviewState             string `json:"review_state"`    // "approved", "changes_requested", "pending", ""
-	ChecksState             string `json:"checks_state"`    // "success", "failure", "pending", ""
-	MergeableState          string `json:"mergeable_state"` // "clean", "blocked", "behind", "dirty", "has_hooks", "unstable", "draft", "unknown", ""
-	ReviewCount             int    `json:"review_count"`
-	PendingReviewCount      int    `json:"pending_review_count"`
-	RequiredReviews         *int   `json:"required_reviews,omitempty"` // nil when no branch protection rule found
-	ChecksTotal             int    `json:"checks_total"`
-	ChecksPassing           int    `json:"checks_passing"`
-	UnresolvedReviewThreads int    `json:"unresolved_review_threads"`
+	PR                 *PR    `json:"pr"`
+	ReviewState        string `json:"review_state"`    // "approved", "changes_requested", "pending", ""
+	ChecksState        string `json:"checks_state"`    // "success", "failure", "pending", ""
+	MergeableState     string `json:"mergeable_state"` // "clean", "blocked", "behind", "dirty", "has_hooks", "unstable", "draft", "unknown", ""
+	ReviewCount        int    `json:"review_count"`
+	PendingReviewCount int    `json:"pending_review_count"`
+	RequiredReviews    *int   `json:"required_reviews,omitempty"` // nil when no branch protection rule found
+	ChecksTotal        int    `json:"checks_total"`
+	ChecksPassing      int    `json:"checks_passing"`
+	// ChecksPopulated reports whether the sync path actually computed
+	// ChecksTotal / ChecksPassing. The batched GraphQL poller doesn't (it
+	// only carries the rollup state), so SyncTaskPR uses this flag to
+	// decide whether to overwrite the persisted counts. A value of true
+	// with both counts at 0 is a real "no checks" answer; a value of false
+	// means "I didn't look, keep what's there."
+	ChecksPopulated         bool `json:"checks_populated,omitempty"`
+	UnresolvedReviewThreads int  `json:"unresolved_review_threads"`
 }
 
 // PRSearchPage is a paginated slice of PR search results, with the total

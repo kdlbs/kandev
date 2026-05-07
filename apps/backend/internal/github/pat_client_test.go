@@ -297,6 +297,80 @@ func TestPATClient_MarksExhaustedFromRateLimitBody(t *testing.T) {
 	}
 }
 
+func TestPATClient_FetchBranchProtection(t *testing.T) {
+	cases := []struct {
+		name         string
+		status       int
+		body         string
+		wantHasRule  bool
+		wantRequired int
+		wantErr      bool
+	}{
+		{
+			name:         "200 with required reviews",
+			status:       http.StatusOK,
+			body:         `{"required_pull_request_reviews":{"required_approving_review_count":2}}`,
+			wantHasRule:  true,
+			wantRequired: 2,
+		},
+		{
+			name:        "200 with rule but no required reviews block",
+			status:      http.StatusOK,
+			body:        `{"required_pull_request_reviews":null}`,
+			wantHasRule: true,
+		},
+		{
+			name:        "404 maps to no rule",
+			status:      http.StatusNotFound,
+			body:        `{"message":"Branch not protected"}`,
+			wantHasRule: false,
+		},
+		{
+			name:        "403 (no admin scope) maps to no rule",
+			status:      http.StatusForbidden,
+			body:        `{"message":"Resource not accessible by integration"}`,
+			wantHasRule: false,
+		},
+		{
+			name:    "500 propagates as error",
+			status:  http.StatusInternalServerError,
+			body:    `{"message":"server error"}`,
+			wantErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				wantPath := "/repos/o/r/branches/main/protection"
+				if r.URL.Path != wantPath {
+					t.Fatalf("path = %q, want %q", r.URL.Path, wantPath)
+				}
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			t.Cleanup(srv.Close)
+			c := newPATClientPointingAt(t, srv.URL)
+			bp, err := c.FetchBranchProtection(context.Background(), "o", "r", "main")
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("want error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if bp.HasRule != tc.wantHasRule {
+				t.Fatalf("HasRule = %v, want %v", bp.HasRule, tc.wantHasRule)
+			}
+			if bp.RequiredApprovingReviewCount != tc.wantRequired {
+				t.Fatalf("RequiredApprovingReviewCount = %d, want %d",
+					bp.RequiredApprovingReviewCount, tc.wantRequired)
+			}
+		})
+	}
+}
+
 // newPATClientPointingAt builds a PATClient whose underlying HTTP client
 // reroutes any github API URL to the given test server.
 func newPATClientPointingAt(t *testing.T, baseURL string) *PATClient {

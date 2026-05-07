@@ -99,6 +99,9 @@ func getPRStatus(ctx context.Context, c Client, owner, repo string, number int) 
 		PendingReviewCount: pendingReviewCount,
 		ChecksTotal:        total,
 		ChecksPassing:      passing,
+		// REST path actually counted check runs — distinguish from the
+		// batched-GraphQL path that only carries the rollup state.
+		ChecksPopulated: true,
 	}, nil
 }
 

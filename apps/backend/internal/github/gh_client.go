@@ -506,15 +506,16 @@ func (c *GHClient) GetPRStatus(ctx context.Context, owner, repo string, number i
 }
 
 // FetchBranchProtection looks up branch protection via `gh api`. A 404 from
-// `gh` is reported as a non-zero exit with "HTTP 404" or "404 Not Found" in
-// the error text — both are treated as "no rule" so callers cache the
-// negative result. The match is permissive across formats so a future `gh`
-// CLI release that tweaks the wording doesn't silently break the cache.
+// `gh` (no rule) and a 403 (token lacks Administration: Read scope) are both
+// treated as "no rule we can see" so callers cache the negative result and
+// don't burn rate-limit quota on every poll. The string match is permissive
+// across formats so a future `gh` CLI release that tweaks the wording
+// doesn't silently break the cache.
 func (c *GHClient) FetchBranchProtection(ctx context.Context, owner, repo, branch string) (BranchProtection, error) {
 	out, err := c.run(ctx, "api",
 		fmt.Sprintf("repos/%s/%s/branches/%s/protection", owner, repo, branch))
 	if err != nil {
-		if isNotFoundErr(err) {
+		if isNotFoundErr(err) || isForbiddenErr(err) {
 			return BranchProtection{HasRule: false}, nil
 		}
 		return BranchProtection{}, err
@@ -548,6 +549,19 @@ func isNotFoundErr(err error) bool {
 	return strings.Contains(s, "HTTP 404") ||
 		strings.Contains(s, "404 Not Found") ||
 		strings.Contains(s, "status: 404")
+}
+
+// isForbiddenErr matches the formats the `gh` CLI uses to report a 403, used
+// by the branch-protection lookup to silently fall back to "no rule" when
+// the token lacks Administration: Read scope.
+func isForbiddenErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "HTTP 403") ||
+		strings.Contains(s, "403 Forbidden") ||
+		strings.Contains(s, "status: 403")
 }
 
 func (c *GHClient) ListPRFiles(ctx context.Context, owner, repo string, number int) ([]PRFile, error) {

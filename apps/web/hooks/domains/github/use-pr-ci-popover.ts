@@ -55,17 +55,20 @@ export function usePRCIPopover(pr: TaskPR | null, enabled: boolean): Result {
       });
   }, [pr, enabled, setEntry]);
 
-  // Refetch every time the popover gains its `enabled` flag (i.e. opens) or
-  // when the underlying TaskPR's updated_at changes (the WS handler in
-  // lib/ws/handlers/github.ts has already applied the change to the store
-  // by the time this fires). queueMicrotask defers the setState (inside
-  // refetch's setIsFetching) so the lint's "no setState in effect" rule
-  // is satisfied — we're really subscribing to an external system.
+  // Refetch on (a) every popover-open transition and (b) every time the
+  // underlying TaskPR's updated_at changes while open. The wasEnabledRef
+  // tracks the previous enabled value so we don't miss the first open
+  // (when both `enabled` and `lastSyncedAt` are stable but the popover is
+  // newly visible). queueMicrotask defers the setState (inside refetch's
+  // setIsFetching) so the lint's "no setState in effect" rule is satisfied.
   const lastSyncedAt = pr?.updated_at ?? null;
   const lastSyncedRef = useRef<string | null>(null);
+  const wasEnabledRef = useRef(false);
   useEffect(() => {
+    const opened = enabled && !wasEnabledRef.current;
+    wasEnabledRef.current = enabled;
     if (!enabled) return;
-    if (lastSyncedRef.current === lastSyncedAt) return;
+    if (!opened && lastSyncedRef.current === lastSyncedAt) return;
     lastSyncedRef.current = lastSyncedAt;
     queueMicrotask(refetch);
   }, [enabled, lastSyncedAt, refetch]);

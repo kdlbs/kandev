@@ -756,13 +756,23 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	}
 
 	// Some sync paths (notably the batched GraphQL poller) don't populate
-	// ChecksTotal / ChecksPassing — they only carry the rollup state. Preserve
-	// existing counts when status reports zeroes so the popover doesn't flap
-	// to "0/0" between a rich REST sync and a lightweight GraphQL one.
+	// ChecksTotal / ChecksPassing — they only carry the rollup state. The
+	// caller sets status.ChecksPopulated=true when it actually counted
+	// checks; otherwise we preserve the persisted values so the popover
+	// doesn't flap to "0/0" between a rich REST sync and a lightweight
+	// GraphQL one. When the populated counter says 0/0 it really is 0/0
+	// (e.g. all workflows were removed from the PR), so we honor it.
 	nextChecksTotal, nextChecksPassing := tp.ChecksTotal, tp.ChecksPassing
-	if status.ChecksTotal > 0 || status.ChecksPassing > 0 {
+	if status.ChecksPopulated {
 		nextChecksTotal = status.ChecksTotal
 		nextChecksPassing = status.ChecksPassing
+	}
+	// PRs can be retargeted to a different base branch; pick up the new
+	// branch from status.PR before resolving branch-protection so we don't
+	// indefinitely surface the wrong rule.
+	nextBaseBranch := tp.BaseBranch
+	if status.PR.BaseBranch != "" && status.PR.BaseBranch != tp.BaseBranch {
+		nextBaseBranch = status.PR.BaseBranch
 	}
 	// RequiredReviews comes from branch protection, fetched separately.
 	// Treat nil as "unknown — don't touch"; only write when the caller has it
@@ -770,7 +780,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	nextRequiredReviews := tp.RequiredReviews
 	if status.RequiredReviews != nil {
 		nextRequiredReviews = status.RequiredReviews
-	} else if fetched := s.fetchRequiredReviews(ctx, tp.Owner, tp.Repo, tp.BaseBranch); fetched != nil {
+	} else if fetched := s.fetchRequiredReviews(ctx, tp.Owner, tp.Repo, nextBaseBranch); fetched != nil {
 		nextRequiredReviews = fetched
 	}
 
@@ -787,6 +797,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		tp.ChecksTotal != nextChecksTotal ||
 		tp.ChecksPassing != nextChecksPassing ||
 		tp.UnresolvedReviewThreads != status.UnresolvedReviewThreads ||
+		tp.BaseBranch != nextBaseBranch ||
 		!timeEqual(tp.MergedAt, status.PR.MergedAt) ||
 		!timeEqual(tp.ClosedAt, status.PR.ClosedAt)
 
@@ -805,6 +816,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	tp.ChecksTotal = nextChecksTotal
 	tp.ChecksPassing = nextChecksPassing
 	tp.UnresolvedReviewThreads = status.UnresolvedReviewThreads
+	tp.BaseBranch = nextBaseBranch
 	// CommentCount is no longer updated from polling -- only refreshed on-demand
 	now := time.Now().UTC()
 	tp.LastSyncedAt = &now

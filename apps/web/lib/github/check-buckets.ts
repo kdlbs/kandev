@@ -115,6 +115,12 @@ export function groupChecksByWorkflow(checks: CheckRun[]): WorkflowGroup[] {
     if (g.failed > 0) g.bucket = "failed";
     else if (g.inProgress > 0) g.bucket = "in_progress";
     else g.bucket = "passed";
+    // Prefer the URL of the first job that matches the group's bucket so
+    // clicking a "failed" workflow row navigates to a failing job, not an
+    // earlier passing one. Falls back to the first job's URL when no
+    // matching job has html_url set.
+    const target = g.jobs.find((j) => bucketCheck(j) === g.bucket && j.html_url);
+    if (target) g.htmlUrl = target.html_url;
   }
   return order.map((w) => map.get(w)!);
 }

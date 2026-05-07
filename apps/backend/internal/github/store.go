@@ -750,13 +750,13 @@ func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 		UPDATE github_task_prs SET state = ?, review_state = ?, checks_state = ?, mergeable_state = ?,
 			review_count = ?, pending_review_count = ?, required_reviews = ?, comment_count = ?,
 			unresolved_review_threads = ?, checks_total = ?, checks_passing = ?,
-			additions = ?, deletions = ?, pr_title = ?,
+			additions = ?, deletions = ?, pr_title = ?, base_branch = ?,
 			merged_at = ?, closed_at = ?, last_synced_at = ?, updated_at = ?
 		WHERE id = ?`,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState,
 		tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
 		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing,
-		tp.Additions, tp.Deletions, tp.PRTitle,
+		tp.Additions, tp.Deletions, tp.PRTitle, tp.BaseBranch,
 		tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt, tp.ID)
 	return err
 }
