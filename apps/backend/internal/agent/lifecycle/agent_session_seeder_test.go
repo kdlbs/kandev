@@ -166,6 +166,45 @@ func TestSessionDirHostPath_TrimsHomeTemplate(t *testing.T) {
 	}
 }
 
+// TestLocalFileUploader_RejectsTraversal locks in the path-injection
+// sanitiser: even when an internal caller hands the uploader a malformed
+// path that escapes the kandev session root, the write is refused before it
+// touches the host filesystem.
+func TestLocalFileUploader_RejectsTraversal(t *testing.T) {
+	root := t.TempDir()
+	uploader := localFileUploader{root: root}
+
+	cases := []struct {
+		name string
+		path string
+	}{
+		{name: "parent traversal", path: filepath.Join(root, "..", "outside.txt")},
+		{name: "absolute outside", path: "/etc/passwd-kandev-test"},
+		{name: "deep traversal", path: filepath.Join(root, "a", "..", "..", "outside.txt")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := uploader.WriteFile(context.Background(), tc.path, []byte("nope"), 0o600)
+			if err == nil {
+				t.Fatalf("expected traversal %q to be refused", tc.path)
+			}
+		})
+	}
+}
+
+func TestLocalFileUploader_AllowsContainedPath(t *testing.T) {
+	root := t.TempDir()
+	uploader := localFileUploader{root: root}
+	target := filepath.Join(root, "sub", "auth.json")
+
+	if err := uploader.WriteFile(context.Background(), target, []byte("ok"), 0o600); err != nil {
+		t.Fatalf("contained write should succeed: %v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("expected file at %s: %v", target, err)
+	}
+}
+
 func TestCleanupAgentSessionDir_RemovesTree(t *testing.T) {
 	tmp := t.TempDir()
 	root := filepath.Join(tmp, "instance-x")

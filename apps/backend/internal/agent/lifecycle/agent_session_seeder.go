@@ -64,14 +64,42 @@ func SessionDirHostPath(kandevHomeDir, instanceID, sessionDirTemplate string) st
 
 // localFileUploader implements FileUploader for the host filesystem. Used by
 // the docker session seeder to copy auth files from ~/<src> into the
-// kandev-managed per-container session dir.
-type localFileUploader struct{}
+// kandev-managed per-container session dir. The uploader is bound to a
+// session root and refuses any write that resolves outside it: instanceID
+// flows into that root from internal callers, but the containment check
+// keeps a malformed input from escaping into ~/.ssh, /etc, etc.
+type localFileUploader struct {
+	root string
+}
 
-func (localFileUploader) WriteFile(_ context.Context, path string, data []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
+func (u localFileUploader) WriteFile(_ context.Context, path string, data []byte, mode os.FileMode) error {
+	cleanPath, err := containedPath(u.root, path)
+	if err != nil {
+		return err
 	}
-	return os.WriteFile(path, data, mode)
+	if err := os.MkdirAll(filepath.Dir(cleanPath), 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(cleanPath), err)
+	}
+	return os.WriteFile(cleanPath, data, mode)
+}
+
+// containedPath returns a cleaned absolute path guaranteed to be inside root,
+// or an error if the path escapes via traversal or absolute-path injection.
+// Used as the sanitiser between caller-supplied paths and host writes.
+func containedPath(root, path string) (string, error) {
+	if root == "" {
+		return "", fmt.Errorf("session root is empty")
+	}
+	cleanRoot := filepath.Clean(root)
+	cleanPath := filepath.Clean(path)
+	rel, err := filepath.Rel(cleanRoot, cleanPath)
+	if err != nil {
+		return "", fmt.Errorf("path %q outside session root %q: %w", path, root, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path %q escapes session root %q", path, root)
+	}
+	return cleanPath, nil
 }
 
 // SeedAgentSessionDir copies the agent's RemoteAuth.SourceFiles from the host
@@ -127,7 +155,7 @@ func SeedAgentSessionDir(
 		return nil
 	}
 
-	return UploadCredentialFiles(ctx, localFileUploader{}, methods, instanceSessionRoot, log)
+	return UploadCredentialFiles(ctx, localFileUploader{root: instanceSessionRoot}, methods, instanceSessionRoot, log)
 }
 
 // selectAuthSourceFiles picks the SourceFiles list to use for the host OS,
