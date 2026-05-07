@@ -94,6 +94,11 @@ type batchedPRResult struct {
 	ReviewRequests struct {
 		TotalCount int `json:"totalCount"`
 	} `json:"reviewRequests"`
+	ReviewThreads struct {
+		Nodes []struct {
+			IsResolved bool `json:"isResolved"`
+		} `json:"nodes"`
+	} `json:"reviewThreads"`
 	Commits struct {
 		Nodes []struct {
 			Commit struct {
@@ -184,6 +189,7 @@ func prFieldsBlock() string {
 		`author { login } createdAt updatedAt mergedAt closedAt ` +
 		`reviews(last: 100) { nodes { state author { login } submittedAt } } ` +
 		`reviewRequests(first: 0) { totalCount } ` +
+		`reviewThreads(first: 100) { nodes { isResolved } } ` +
 		`commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`
 }
 
@@ -236,11 +242,18 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 	if len(raw.Commits.Nodes) > 0 && raw.Commits.Nodes[0].Commit.StatusCheckRollup != nil {
 		checksState = strings.ToLower(raw.Commits.Nodes[0].Commit.StatusCheckRollup.State)
 	}
+	unresolved := 0
+	for _, t := range raw.ReviewThreads.Nodes {
+		if !t.IsResolved {
+			unresolved++
+		}
+	}
 	return &PRStatus{
-		PR:             pr,
-		ReviewState:    reviewState,
-		ChecksState:    checksState,
-		MergeableState: pr.MergeableState,
+		PR:                      pr,
+		ReviewState:             reviewState,
+		ChecksState:             checksState,
+		MergeableState:          pr.MergeableState,
+		UnresolvedReviewThreads: unresolved,
 	}
 }
 

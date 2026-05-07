@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -549,6 +550,33 @@ func parseNextLink(header string) string {
 		return link
 	}
 	return ""
+}
+
+// FetchBranchProtection looks up the branch protection rule on a repo's base
+// branch via the REST API. A 404 is treated as "no rule configured" (returns
+// zero value with HasRule=false, no error). Other errors propagate so callers
+// can decide whether to retry vs. cache the negative result.
+func (c *PATClient) FetchBranchProtection(ctx context.Context, owner, repo, branch string) (BranchProtection, error) {
+	endpoint := fmt.Sprintf("/repos/%s/%s/branches/%s/protection", owner, repo, branch)
+	var raw struct {
+		RequiredPullRequestReviews *struct {
+			RequiredApprovingReviewCount int `json:"required_approving_review_count"`
+		} `json:"required_pull_request_reviews"`
+	}
+	if err := c.get(ctx, endpoint, &raw); err != nil {
+		var apiErr *GitHubAPIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+			return BranchProtection{HasRule: false}, nil
+		}
+		return BranchProtection{}, err
+	}
+	if raw.RequiredPullRequestReviews == nil {
+		return BranchProtection{HasRule: true}, nil
+	}
+	return BranchProtection{
+		HasRule:                      true,
+		RequiredApprovingReviewCount: raw.RequiredPullRequestReviews.RequiredApprovingReviewCount,
+	}, nil
 }
 
 // patPR is the JSON shape from the GitHub REST API for PRs.

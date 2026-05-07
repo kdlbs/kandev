@@ -505,6 +505,35 @@ func (c *GHClient) GetPRStatus(ctx context.Context, owner, repo string, number i
 	return getPRStatus(ctx, c, owner, repo, number)
 }
 
+// FetchBranchProtection looks up branch protection via `gh api`. A 404 from
+// gh is reported in stderr as "HTTP 404"; we treat that as "no rule" rather
+// than an error so callers can cache the negative result.
+func (c *GHClient) FetchBranchProtection(ctx context.Context, owner, repo, branch string) (BranchProtection, error) {
+	out, err := c.run(ctx, "api",
+		fmt.Sprintf("repos/%s/%s/branches/%s/protection", owner, repo, branch))
+	if err != nil {
+		if strings.Contains(err.Error(), "HTTP 404") {
+			return BranchProtection{HasRule: false}, nil
+		}
+		return BranchProtection{}, err
+	}
+	var raw struct {
+		RequiredPullRequestReviews *struct {
+			RequiredApprovingReviewCount int `json:"required_approving_review_count"`
+		} `json:"required_pull_request_reviews"`
+	}
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return BranchProtection{}, fmt.Errorf("decode branch protection: %w", err)
+	}
+	if raw.RequiredPullRequestReviews == nil {
+		return BranchProtection{HasRule: true}, nil
+	}
+	return BranchProtection{
+		HasRule:                      true,
+		RequiredApprovingReviewCount: raw.RequiredPullRequestReviews.RequiredApprovingReviewCount,
+	}, nil
+}
+
 func (c *GHClient) ListPRFiles(ctx context.Context, owner, repo string, number int) ([]PRFile, error) {
 	out, err := c.run(ctx, "api",
 		fmt.Sprintf("repos/%s/%s/pulls/%d/files", owner, repo, number),

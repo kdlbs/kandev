@@ -71,21 +71,23 @@ type Service struct {
 	taskEventSubs      []bus.Subscription
 	searchCache        *ttlCache
 	prStatusCache      *ttlCache
+	protectionCache    *branchProtectionCache
 	rateTracker        *RateTracker
 }
 
 // NewService creates a new GitHub service.
 func NewService(client Client, authMethod string, secrets SecretProvider, store *Store, eventBus bus.EventBus, log *logger.Logger) *Service {
 	return &Service{
-		client:        client,
-		authMethod:    authMethod,
-		secrets:       secrets,
-		store:         store,
-		eventBus:      eventBus,
-		logger:        log,
-		searchCache:   newTTLCache(),
-		prStatusCache: newTTLCache(),
-		rateTracker:   NewRateTracker(eventBus, log),
+		client:          client,
+		authMethod:      authMethod,
+		secrets:         secrets,
+		store:           store,
+		eventBus:        eventBus,
+		logger:          log,
+		searchCache:     newTTLCache(),
+		prStatusCache:   newTTLCache(),
+		protectionCache: newBranchProtectionCache(),
+		rateTracker:     NewRateTracker(eventBus, log),
 	}
 }
 
@@ -753,6 +755,25 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		return err
 	}
 
+	// Some sync paths (notably the batched GraphQL poller) don't populate
+	// ChecksTotal / ChecksPassing — they only carry the rollup state. Preserve
+	// existing counts when status reports zeroes so the popover doesn't flap
+	// to "0/0" between a rich REST sync and a lightweight GraphQL one.
+	nextChecksTotal, nextChecksPassing := tp.ChecksTotal, tp.ChecksPassing
+	if status.ChecksTotal > 0 || status.ChecksPassing > 0 {
+		nextChecksTotal = status.ChecksTotal
+		nextChecksPassing = status.ChecksPassing
+	}
+	// RequiredReviews comes from branch protection, fetched separately.
+	// Treat nil as "unknown — don't touch"; only write when the caller has it
+	// or our cache resolves the rule for this base branch.
+	nextRequiredReviews := tp.RequiredReviews
+	if status.RequiredReviews != nil {
+		nextRequiredReviews = status.RequiredReviews
+	} else if fetched := s.fetchRequiredReviews(ctx, tp.Owner, tp.Repo, tp.BaseBranch); fetched != nil {
+		nextRequiredReviews = fetched
+	}
+
 	changed := tp.State != status.PR.State ||
 		tp.PRTitle != status.PR.Title ||
 		tp.Additions != status.PR.Additions ||
@@ -762,6 +783,10 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		tp.MergeableState != status.MergeableState ||
 		tp.ReviewCount != status.ReviewCount ||
 		tp.PendingReviewCount != status.PendingReviewCount ||
+		!intPtrEqual(tp.RequiredReviews, nextRequiredReviews) ||
+		tp.ChecksTotal != nextChecksTotal ||
+		tp.ChecksPassing != nextChecksPassing ||
+		tp.UnresolvedReviewThreads != status.UnresolvedReviewThreads ||
 		!timeEqual(tp.MergedAt, status.PR.MergedAt) ||
 		!timeEqual(tp.ClosedAt, status.PR.ClosedAt)
 
@@ -776,6 +801,10 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	tp.MergeableState = status.MergeableState
 	tp.ReviewCount = status.ReviewCount
 	tp.PendingReviewCount = status.PendingReviewCount
+	tp.RequiredReviews = nextRequiredReviews
+	tp.ChecksTotal = nextChecksTotal
+	tp.ChecksPassing = nextChecksPassing
+	tp.UnresolvedReviewThreads = status.UnresolvedReviewThreads
 	// CommentCount is no longer updated from polling -- only refreshed on-demand
 	now := time.Now().UTC()
 	tp.LastSyncedAt = &now
@@ -802,6 +831,17 @@ func timeEqual(a, b *time.Time) bool {
 		return false
 	}
 	return a.Equal(*b)
+}
+
+// intPtrEqual compares two nullable int pointers for equality.
+func intPtrEqual(a, b *int) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 // --- PR info and feedback (live) ---
