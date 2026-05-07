@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -579,5 +581,134 @@ func TestWsUserShellStop_NoInteractiveRunner(t *testing.T) {
 	}
 	if err.Error() != "interactive runner not available" {
 		t.Errorf("expected 'interactive runner not available', got: %v", err)
+	}
+}
+
+// stubShellLifecycle satisfies shellLifecycle for ensureShellExecution
+// tests so the recovery branch can be driven without a real
+// lifecycle.Manager. Each call records its argument and returns the next
+// scripted return value.
+type stubShellLifecycle struct {
+	getResults   []*lifecycle.AgentExecution
+	getErrors    []error
+	getCalls     []string
+	cleanupErr   error
+	cleanupCalls []string
+}
+
+func (s *stubShellLifecycle) GetOrEnsureExecution(_ context.Context, sessionID string) (*lifecycle.AgentExecution, error) {
+	idx := len(s.getCalls)
+	s.getCalls = append(s.getCalls, sessionID)
+	if idx >= len(s.getResults) {
+		return nil, errors.New("stub exhausted")
+	}
+	return s.getResults[idx], s.getErrors[idx]
+}
+
+func (s *stubShellLifecycle) CleanupStaleExecutionBySessionID(_ context.Context, sessionID string) error {
+	s.cleanupCalls = append(s.cleanupCalls, sessionID)
+	return s.cleanupErr
+}
+
+func TestEnsureShellExecution_HappyPath(t *testing.T) {
+	stub := &stubShellLifecycle{
+		getResults: []*lifecycle.AgentExecution{{ID: "exec-1", Status: v1.AgentStatusRunning}},
+		getErrors:  []error{nil},
+	}
+
+	got, err := ensureShellExecution(context.Background(), stub, newTestLogger(), "session-1")
+	if err != nil {
+		t.Fatalf("happy-path returned error: %v", err)
+	}
+	if got.ID != "exec-1" {
+		t.Errorf("got execution %q, want exec-1", got.ID)
+	}
+	if len(stub.getCalls) != 1 {
+		t.Errorf("expected 1 GetOrEnsureExecution call, got %d", len(stub.getCalls))
+	}
+	if len(stub.cleanupCalls) != 0 {
+		t.Errorf("running execution should not trigger cleanup, got %d calls", len(stub.cleanupCalls))
+	}
+}
+
+func TestEnsureShellExecution_RecoversStaleExecution(t *testing.T) {
+	// First call returns a Failed execution → cleanup → second call returns
+	// a healthy one. This is the recovery path that survives a crashed
+	// agent: the user retries shell ops, kandev cleans the stale row, and
+	// re-launches transparently.
+	stub := &stubShellLifecycle{
+		getResults: []*lifecycle.AgentExecution{
+			{ID: "exec-stale", Status: v1.AgentStatusFailed},
+			{ID: "exec-fresh", Status: v1.AgentStatusRunning},
+		},
+		getErrors: []error{nil, nil},
+	}
+
+	got, err := ensureShellExecution(context.Background(), stub, newTestLogger(), "session-1")
+	if err != nil {
+		t.Fatalf("recovery path returned error: %v", err)
+	}
+	if got.ID != "exec-fresh" {
+		t.Errorf("got %q, want exec-fresh after recovery", got.ID)
+	}
+	if len(stub.cleanupCalls) != 1 || stub.cleanupCalls[0] != "session-1" {
+		t.Errorf("expected exactly one CleanupStaleExecutionBySessionID(session-1), got %v", stub.cleanupCalls)
+	}
+	if len(stub.getCalls) != 2 {
+		t.Errorf("expected 2 GetOrEnsureExecution calls (initial + recovery), got %d", len(stub.getCalls))
+	}
+}
+
+func TestEnsureShellExecution_InitialErrorWrapped(t *testing.T) {
+	stub := &stubShellLifecycle{
+		getResults: []*lifecycle.AgentExecution{nil},
+		getErrors:  []error{errors.New("manager unavailable")},
+	}
+
+	_, err := ensureShellExecution(context.Background(), stub, newTestLogger(), "session-1")
+	if err == nil {
+		t.Fatal("expected error when initial GetOrEnsureExecution fails")
+	}
+	if !strings.Contains(err.Error(), "no agent running for session session-1") {
+		t.Errorf("error message does not surface session id: %v", err)
+	}
+}
+
+func TestEnsureShellExecution_CleanupErrorPropagates(t *testing.T) {
+	stub := &stubShellLifecycle{
+		getResults: []*lifecycle.AgentExecution{{ID: "exec-stale", Status: v1.AgentStatusFailed}},
+		getErrors:  []error{nil},
+		cleanupErr: errors.New("cleanup denied"),
+	}
+
+	_, err := ensureShellExecution(context.Background(), stub, newTestLogger(), "session-1")
+	if err == nil {
+		t.Fatal("expected cleanup failure to surface")
+	}
+	if !strings.Contains(err.Error(), "cleanup stale execution") || !strings.Contains(err.Error(), "session-1") {
+		t.Errorf("cleanup error not propagated cleanly: %v", err)
+	}
+	// Second GetOrEnsureExecution must NOT fire when cleanup fails: re-
+	// launching on a stuck stale row would loop forever.
+	if len(stub.getCalls) != 1 {
+		t.Errorf("expected exactly 1 GetOrEnsureExecution call when cleanup fails, got %d", len(stub.getCalls))
+	}
+}
+
+func TestEnsureShellExecution_RecoveryRelaunchFailureWrapped(t *testing.T) {
+	stub := &stubShellLifecycle{
+		getResults: []*lifecycle.AgentExecution{
+			{ID: "exec-stale", Status: v1.AgentStatusFailed},
+			nil,
+		},
+		getErrors: []error{nil, errors.New("relaunch failed")},
+	}
+
+	_, err := ensureShellExecution(context.Background(), stub, newTestLogger(), "session-1")
+	if err == nil {
+		t.Fatal("expected error when recovery re-launch fails")
+	}
+	if !strings.Contains(err.Error(), "recover execution") {
+		t.Errorf("recovery error not labeled clearly: %v", err)
 	}
 }
