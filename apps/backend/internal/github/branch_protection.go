@@ -22,9 +22,12 @@ type BranchProtection struct {
 const branchProtectionCacheTTL = time.Hour
 
 // branchProtectionCache is an in-memory TTL cache keyed by
-// "owner/repo@base_branch". Concurrent reads share the lookup; concurrent
-// writes for the same key are serialized via singleflight semantics inside
-// the service helper.
+// "owner/repo@base_branch". Concurrent reads share the RLock; concurrent
+// cache misses for the same key may each issue their own GitHub fetch and
+// race to set() the result — values are deterministic so the loser's
+// write is harmless, and the extra round-trips are bounded by the 1h TTL.
+// Stale entries are evicted on read so the map cannot grow unbounded over
+// a long-running process: callers always observe an active TTL window.
 type branchProtectionCache struct {
 	mu  sync.RWMutex
 	m   map[string]BranchProtection
@@ -40,15 +43,24 @@ func newBranchProtectionCache() *branchProtectionCache {
 
 func (c *branchProtectionCache) get(key string) (BranchProtection, bool) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
 	bp, ok := c.m[key]
+	c.mu.RUnlock()
 	if !ok {
 		return BranchProtection{}, false
 	}
-	if time.Since(bp.FetchedAt) > c.ttl {
-		return BranchProtection{}, false
+	if time.Since(bp.FetchedAt) <= c.ttl {
+		return bp, true
 	}
-	return bp, true
+	// Evict the stale entry so the map doesn't grow unbounded across
+	// long-running deployments with many distinct (owner, repo, branch)
+	// keys. Recheck under the write lock so a concurrent set() that just
+	// landed isn't clobbered.
+	c.mu.Lock()
+	if cur, present := c.m[key]; present && time.Since(cur.FetchedAt) > c.ttl {
+		delete(c.m, key)
+	}
+	c.mu.Unlock()
+	return BranchProtection{}, false
 }
 
 func (c *branchProtectionCache) set(key string, bp BranchProtection) {

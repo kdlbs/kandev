@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   IconCheck,
   IconCircleCheck,
@@ -306,8 +306,8 @@ function PRReviewRow({ pr }: { pr: TaskPR }) {
   const requested = pr.pending_review_count;
   if (!pr.review_state && approved === 0 && requested === 0 && required == null) return null;
 
-  let label = "";
-  let icon = <IconCircleDot className="h-3.5 w-3.5 text-muted-foreground" />;
+  let label: string;
+  let icon: ReactNode;
   if (pr.review_state === "approved") {
     icon = <IconCheck className="h-3.5 w-3.5 text-emerald-500" />;
     label =
@@ -480,22 +480,31 @@ function useAddCheckToContext(pr: TaskPR): ((message: string) => void) | null {
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
   const addComment = useCommentsStore((s) => s.addComment);
   const { toast } = useToast();
-  if (!sessionId) return null;
-  return (message: string) => {
-    const comment: PRFeedbackComment = {
-      id: `pr-feedback-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      sessionId,
-      text: message,
-      createdAt: new Date().toISOString(),
-      status: "pending",
-      source: "pr-feedback",
-      prNumber: pr.pr_number,
-      feedbackType: "check",
-      content: message,
-    };
-    addComment(comment);
-    toast({ description: "Added to chat context" });
-  };
+  const prNumber = pr.pr_number;
+  // Always call useCallback (rules-of-hooks) before bailing out, so the
+  // returned callback identity is stable across renders unless its inputs
+  // change. Without memoization the popover would create a new function
+  // every parent render, defeating PRWorkflowRow's cheap reference equality.
+  const handler = useCallback(
+    (message: string) => {
+      if (!sessionId) return;
+      const comment: PRFeedbackComment = {
+        id: `pr-feedback-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        sessionId,
+        text: message,
+        createdAt: new Date().toISOString(),
+        status: "pending",
+        source: "pr-feedback",
+        prNumber,
+        feedbackType: "check",
+        content: message,
+      };
+      addComment(comment);
+      toast({ description: "Added to chat context" });
+    },
+    [sessionId, prNumber, addComment, toast],
+  );
+  return sessionId ? handler : null;
 }
 
 // --- Multi-PR aggregate ---

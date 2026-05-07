@@ -72,14 +72,11 @@ export const PRTopbarButton = memo(function PRTopbarButton() {
 });
 
 /**
- * Hook for the hover+pin Popover behavior used by both the single and
- * multi-PR buttons. On touch devices the popover is suppressed entirely so
- * the button click falls through to the existing detail-panel handler.
- */
-/**
  * Manages the hover-driven popover lifecycle. Click on the button is left
  * to the caller — desktop preserves the existing "open the PR detail panel"
- * behavior, and hover is what reveals the CI popover.
+ * behavior, and hover is what reveals the CI popover. On touch devices the
+ * popover is suppressed entirely so the button click falls through to the
+ * existing detail-panel handler.
  */
 function usePopoverInteractions() {
   const isMobile = useIsMobile();

@@ -95,7 +95,8 @@ type batchedPRResult struct {
 		TotalCount int `json:"totalCount"`
 	} `json:"reviewRequests"`
 	ReviewThreads struct {
-		Nodes []struct {
+		TotalCount int `json:"totalCount"`
+		Nodes      []struct {
 			IsResolved bool `json:"isResolved"`
 		} `json:"nodes"`
 	} `json:"reviewThreads"`
@@ -189,7 +190,7 @@ func prFieldsBlock() string {
 		`author { login } createdAt updatedAt mergedAt closedAt ` +
 		`reviews(last: 100) { nodes { state author { login } submittedAt } } ` +
 		`reviewRequests(first: 0) { totalCount } ` +
-		`reviewThreads(first: 100) { nodes { isResolved } } ` +
+		`reviewThreads(first: 100) { totalCount nodes { isResolved } } ` +
 		`commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`
 }
 
@@ -242,11 +243,22 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 	if len(raw.Commits.Nodes) > 0 && raw.Commits.Nodes[0].Commit.StatusCheckRollup != nil {
 		checksState = strings.ToLower(raw.Commits.Nodes[0].Commit.StatusCheckRollup.State)
 	}
+	// Count unresolved threads from the fetched nodes. When the page is
+	// capped (totalCount > nodes), fall back to totalCount for the
+	// resolved-vs-unresolved estimate so the popover doesn't undercount on
+	// busy PRs. The fallback is conservative: we have no way to tell from
+	// the truncated page how many of the un-fetched threads are resolved,
+	// so attribute the unseen tail to "unresolved" — the popover's value
+	// is meant to be actionable, not exact, and over-reporting is safer
+	// than silently hiding open feedback.
 	unresolved := 0
 	for _, t := range raw.ReviewThreads.Nodes {
 		if !t.IsResolved {
 			unresolved++
 		}
+	}
+	if total := raw.ReviewThreads.TotalCount; total > len(raw.ReviewThreads.Nodes) {
+		unresolved += total - len(raw.ReviewThreads.Nodes)
 	}
 	return &PRStatus{
 		PR:                      pr,

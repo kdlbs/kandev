@@ -506,13 +506,15 @@ func (c *GHClient) GetPRStatus(ctx context.Context, owner, repo string, number i
 }
 
 // FetchBranchProtection looks up branch protection via `gh api`. A 404 from
-// gh is reported in stderr as "HTTP 404"; we treat that as "no rule" rather
-// than an error so callers can cache the negative result.
+// `gh` is reported as a non-zero exit with "HTTP 404" or "404 Not Found" in
+// the error text — both are treated as "no rule" so callers cache the
+// negative result. The match is permissive across formats so a future `gh`
+// CLI release that tweaks the wording doesn't silently break the cache.
 func (c *GHClient) FetchBranchProtection(ctx context.Context, owner, repo, branch string) (BranchProtection, error) {
 	out, err := c.run(ctx, "api",
 		fmt.Sprintf("repos/%s/%s/branches/%s/protection", owner, repo, branch))
 	if err != nil {
-		if strings.Contains(err.Error(), "HTTP 404") {
+		if isNotFoundErr(err) {
 			return BranchProtection{HasRule: false}, nil
 		}
 		return BranchProtection{}, err
@@ -532,6 +534,20 @@ func (c *GHClient) FetchBranchProtection(ctx context.Context, owner, repo, branc
 		HasRule:                      true,
 		RequiredApprovingReviewCount: raw.RequiredPullRequestReviews.RequiredApprovingReviewCount,
 	}, nil
+}
+
+// isNotFoundErr matches the formats the `gh` CLI uses to report a 404 across
+// recent versions: "HTTP 404", "HTTP 404: ...", and "404 Not Found".
+// Restrictive enough that an unrelated 404 substring (e.g. inside a JSON
+// payload accidentally rendered into stderr) is unlikely to false-match.
+func isNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "HTTP 404") ||
+		strings.Contains(s, "404 Not Found") ||
+		strings.Contains(s, "status: 404")
 }
 
 func (c *GHClient) ListPRFiles(ctx context.Context, owner, repo string, number int) ([]PRFile, error) {
