@@ -34,6 +34,22 @@ async function selectWorkflowFilter(page: Page, optionLabel: string): Promise<vo
 test.describe("Kanban workflow filter", () => {
   let workflowBId: string | null = null;
 
+  test.beforeEach(async ({ apiClient, seedData }) => {
+    const workflowB = await apiClient.createWorkflow(seedData.workspaceId, "Workflow B", "simple");
+    workflowBId = workflowB.id;
+    const stepsB = (await apiClient.listWorkflowSteps(workflowB.id)).steps;
+    const startB = stepsB.find((s) => s.is_start_step) ?? stepsB[0];
+
+    await apiClient.createTask(seedData.workspaceId, ALPHA_TASK, {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await apiClient.createTask(seedData.workspaceId, BETA_TASK, {
+      workflow_id: workflowB.id,
+      workflow_step_id: startB.id,
+    });
+  });
+
   test.afterEach(async ({ apiClient, seedData }) => {
     if (workflowBId) {
       await apiClient.deleteWorkflow(workflowBId).catch(() => {});
@@ -52,25 +68,7 @@ test.describe("Kanban workflow filter", () => {
   // overwrote a freshly-picked "All Workflows" choice on the next render.
   // The /tasks list page does not run that effect, so the existing
   // task-list-filters spec missed this — pin the kanban path explicitly.
-  test("'All Workflows' selection persists on the kanban board", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const workflowB = await apiClient.createWorkflow(seedData.workspaceId, "Workflow B", "simple");
-    workflowBId = workflowB.id;
-    const stepsB = (await apiClient.listWorkflowSteps(workflowB.id)).steps;
-    const startB = stepsB.find((s) => s.is_start_step) ?? stepsB[0];
-
-    await apiClient.createTask(seedData.workspaceId, ALPHA_TASK, {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-    });
-    await apiClient.createTask(seedData.workspaceId, BETA_TASK, {
-      workflow_id: workflowB.id,
-      workflow_step_id: startB.id,
-    });
-
+  test("'All Workflows' selection persists on the kanban board", async ({ testPage }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
@@ -98,20 +96,6 @@ test.describe("Kanban workflow filter", () => {
     apiClient,
     seedData,
   }) => {
-    const workflowB = await apiClient.createWorkflow(seedData.workspaceId, "Workflow B", "simple");
-    workflowBId = workflowB.id;
-    const stepsB = (await apiClient.listWorkflowSteps(workflowB.id)).steps;
-    const startB = stepsB.find((s) => s.is_start_step) ?? stepsB[0];
-
-    await apiClient.createTask(seedData.workspaceId, ALPHA_TASK, {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-    });
-    await apiClient.createTask(seedData.workspaceId, BETA_TASK, {
-      workflow_id: workflowB.id,
-      workflow_step_id: startB.id,
-    });
-
     // Persist "All Workflows" directly via the API to mimic the post-selection
     // state, then load the kanban page from scratch (no in-flight client state).
     await apiClient.saveUserSettings({
