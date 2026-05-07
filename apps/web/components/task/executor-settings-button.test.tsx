@@ -2,6 +2,18 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
 
+// Constants declared *above* the vi.mock factories so the mocks can reference
+// them without relying on vitest's hoisting capturing TDZ-undefined closures.
+// The previous layout worked by accident (factories aren't invoked until the
+// test imports the module under test, by which time the const initialization
+// has run), but a refactor that imports the module earlier — for example, a
+// shared test helper — would break the closure silently.
+const SESSION_ID = "session-1";
+const TASK_ID = "task-1";
+const STEP_CREATE_SANDBOX = "Creating cloud sandbox";
+const PREPARE_STATUS_TESTID = "executor-prepare-status";
+const SETTINGS_BUTTON_TESTID = "executor-settings-button";
+
 let mockPrepareState: SessionPrepareState | null = null;
 let mockSessionState: string | null = null;
 let mockEnv: { executor_type: string; sandbox_id?: string; container_id?: string } | null = null;
@@ -33,12 +45,6 @@ vi.mock("./task-reset-env-confirm-dialog", () => ({
 }));
 
 import { ExecutorSettingsButton } from "./executor-settings-button";
-
-const SESSION_ID = "session-1";
-const TASK_ID = "task-1";
-const STEP_CREATE_SANDBOX = "Creating cloud sandbox";
-const PREPARE_STATUS_TESTID = "executor-prepare-status";
-const SETTINGS_BUTTON_TESTID = "executor-settings-button";
 
 describe("ExecutorSettingsButton", () => {
   afterEach(() => {
