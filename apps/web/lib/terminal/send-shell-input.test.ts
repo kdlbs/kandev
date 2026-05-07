@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useShellModifiersStore } from "./shell-modifiers";
+import { setActiveTerminalSender } from "./mobile-active-terminal";
 
 const sendMock = vi.fn();
 let clientFactory: () => { send: typeof sendMock } | null = () => ({ send: sendMock });
@@ -17,6 +18,7 @@ beforeEach(() => {
   sendMock.mockReset();
   clientFactory = () => ({ send: sendMock });
   useShellModifiersStore.getState().reset();
+  setActiveTerminalSender(null);
 });
 
 function lastFrameData(): string | undefined {
@@ -76,5 +78,38 @@ describe("sendShellInput", () => {
     sendShellInput(SESSION, "c");
     expect(sendMock).not.toHaveBeenCalled();
     expect(useShellModifiersStore.getState().ctrl).toEqual({ latched: true, sticky: false });
+  });
+
+  describe("with an active mobile terminal sender registered", () => {
+    it("routes input through the active sender and bypasses WS", () => {
+      const sender = vi.fn();
+      setActiveTerminalSender(sender);
+      sendShellInput(SESSION, "ls");
+      expect(sender).toHaveBeenCalledWith("ls");
+      expect(sendMock).not.toHaveBeenCalled();
+    });
+
+    it("applies modifiers and consumes them after a successful sender call", () => {
+      const sender = vi.fn();
+      setActiveTerminalSender(sender);
+      useShellModifiersStore.getState().toggleCtrl();
+      sendShellInput(SESSION, "c");
+      expect(sender).toHaveBeenCalledWith("\x03");
+      expect(useShellModifiersStore.getState().ctrl).toEqual({ latched: false, sticky: false });
+    });
+
+    it("falls back to WS when the sender throws", () => {
+      const sender = vi.fn(() => {
+        throw new Error("xterm gone");
+      });
+      setActiveTerminalSender(sender);
+      sendShellInput(SESSION, "ls");
+      expect(sender).toHaveBeenCalledWith("ls");
+      expect(sendMock).toHaveBeenCalledWith({
+        type: "request",
+        action: "shell.input",
+        payload: { session_id: SESSION, data: "ls" },
+      });
+    });
   });
 });

@@ -20,6 +20,7 @@ import type {
 } from "@/lib/types/github";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
+import type * as UISliceTypes from "./slices/ui/types";
 import { mergeInitialState } from "./default-state";
 import {
   createKanbanSlice,
@@ -361,16 +362,10 @@ export type AppState = {
   setConnectionStatus: (status: ConnectionState["status"], error?: string | null) => void;
   setMobileKanbanColumnIndex: (index: number) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
-  setMobileSessionPanel: (
-    sessionId: string,
-    panel: import("./slices/ui/types").MobileSessionPanel,
-  ) => void;
+  setMobileSessionPanel: (sessionId: string, panel: UISliceTypes.MobileSessionPanel) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
-  setActiveDocument: (
-    sessionId: string,
-    doc: import("./slices/ui/types").ActiveDocument | null,
-  ) => void;
+  setActiveDocument: (sessionId: string, doc: UISliceTypes.ActiveDocument | null) => void;
   setSystemHealth: (response: SystemHealthResponse) => void;
   setSystemHealthLoading: (loading: boolean) => void;
   invalidateSystemHealth: () => void;
@@ -385,9 +380,7 @@ export type AppState = {
   closeConfigChatSession: (sessionId: string) => void;
   setActiveConfigChatSession: (sessionId: string) => void;
   renameConfigChatSession: (sessionId: string, name: string) => void;
-  setSessionFailureNotification: (
-    n: import("./slices/ui/types").SessionFailureNotification | null,
-  ) => void;
+  setSessionFailureNotification: (n: UISliceTypes.SessionFailureNotification | null) => void;
   toggleBottomTerminal: () => void;
   openBottomTerminalWithCommand: (command: string) => void;
   clearBottomTerminalCommand: () => void;

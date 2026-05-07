@@ -6,7 +6,7 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { getTerminalTheme } from "@/lib/theme/terminal-theme";
-import { startReconnectLoop } from "./ws-reconnect";
+import { startReconnectLoop, teardownWebSocket } from "./ws-reconnect";
 import { matchesShortcut } from "@/lib/keyboard/utils";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { getShortcut, type StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
@@ -134,6 +134,7 @@ function initTerminalInstance(
     linkHandler?: (event: MouseEvent, uri: string) => void;
     fontFamily?: string;
     fontSize?: number;
+    disableWebgl?: boolean;
   } & TerminalKeyHandlerOptions,
 ) {
   if (refs.isInitializedRef.current || refs.xtermRef.current) return undefined;
@@ -168,7 +169,7 @@ function initTerminalInstance(
   }
   refs.xtermRef.current = terminal;
   refs.fitAddonRef.current = fitAddon;
-  deferWebGLAddon(refs);
+  if (!options.disableWebgl) deferWebGLAddon(refs);
   exposeBufferReader(termContainer, terminal);
   const handleResize = () => {
     const rect = termContainer.getBoundingClientRect();
@@ -205,6 +206,7 @@ type TerminalInitHookOptions = TerminalInitOptions &
     linkHandler?: (event: MouseEvent, uri: string) => void;
     fontFamily?: string;
     fontSize?: number;
+    disableWebgl?: boolean;
   };
 
 export function useTerminalInit({
@@ -220,6 +222,7 @@ export function useTerminalInit({
   linkHandler,
   fontFamily,
   fontSize,
+  disableWebgl,
   onToggleBottomTerminal,
   sendInput,
   keyboardShortcutsRef,
@@ -254,6 +257,7 @@ export function useTerminalInit({
           linkHandler,
           fontFamily,
           fontSize,
+          disableWebgl,
           onToggleBottomTerminal,
           sendInput,
           keyboardShortcutsRef,
@@ -324,6 +328,13 @@ export type WebSocketConnectionOptions = {
   wsRef: React.MutableRefObject<WebSocket | null>;
   attachAddonRef: React.MutableRefObject<AttachAddon | null>;
   onConnected: () => void;
+  /** When true, AttachAddon is created in receive-only mode so callers can
+   * intercept onData themselves (used by mobile to route input through the
+   * key-bar's modifier transform). Defaults to bidirectional. */
+  manualInputRouting?: boolean;
+  /** Fires when the WebSocket reaches the OPEN state. Use to register a sender
+   * that bypasses xterm.onData (mobile key-bar registry). */
+  onWsReady?: (ws: WebSocket) => void;
 };
 
 export function buildTerminalWsUrl(
@@ -365,6 +376,8 @@ type ConnectWebSocketOptions = {
   onTimeout: (id: ReturnType<typeof setTimeout>) => void;
   onConnected: () => void;
   onSocketClose: (event: CloseEvent) => void;
+  manualInputRouting?: boolean;
+  onWsReady?: (ws: WebSocket) => void;
 };
 
 function connectWebSocket({
@@ -382,6 +395,8 @@ function connectWebSocket({
   onTimeout,
   onConnected,
   onSocketClose,
+  manualInputRouting,
+  onWsReady,
 }: ConnectWebSocketOptions) {
   if (attachAddonRef.current) {
     attachAddonRef.current.dispose();
@@ -413,9 +428,13 @@ function connectWebSocket({
       return;
     }
     log("WebSocket connected");
-    const attachAddon = new AttachAddon(ws, { bidirectional: true });
+    // Mobile passes manualInputRouting=true so the consumer can intercept
+    // onData and apply key-bar modifier transforms before the bytes go on the
+    // wire — AttachAddon's auto-send would otherwise bypass that path.
+    const attachAddon = new AttachAddon(ws, { bidirectional: !manualInputRouting });
     terminal.loadAddon(attachAddon);
     attachAddonRef.current = attachAddon;
+    onWsReady?.(ws);
     onConnected();
     // Send initial resize (forced) so the backend knows our terminal dimensions,
     // then one deferred resize to catch layout settling + force a full redraw.
@@ -469,6 +488,8 @@ export function useWebSocketConnection({
   wsRef,
   attachAddonRef,
   onConnected,
+  manualInputRouting,
+  onWsReady,
 }: WebSocketConnectionOptions) {
   const taskIdRef = useRef(taskId);
 
@@ -528,27 +549,11 @@ export function useWebSocketConnection({
       attachAddonRef,
       onConnected,
       connectWebSocket,
+      manualInputRouting,
+      onWsReady,
     });
-    return () => {
-      log("WebSocket cleanup");
-      stopReconnectLoop();
-      if (attachAddonRef.current) {
-        attachAddonRef.current.dispose();
-        attachAddonRef.current = null;
-      }
-      if (wsRef.current) {
-        // Only close if the connection is actually open or has completed
-        // opening. Closing a CONNECTING WebSocket triggers a browser warning
-        // ("WebSocket is closed before the connection is established").
-        if (
-          wsRef.current.readyState === WebSocket.OPEN ||
-          wsRef.current.readyState === WebSocket.CLOSING
-        ) {
-          wsRef.current.close();
-        }
-        wsRef.current = null;
-      }
-    };
+    return () => teardownWebSocket(stopReconnectLoop, attachAddonRef, wsRef);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- manualInputRouting/onWsReady should not retrigger reconnect
   }, [
     sessionId,
     environmentId,

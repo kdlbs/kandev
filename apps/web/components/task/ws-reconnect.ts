@@ -2,6 +2,27 @@ import { Terminal } from "@xterm/xterm";
 import { AttachAddon } from "@xterm/addon-attach";
 import { log } from "./use-passthrough-terminal";
 
+export function teardownWebSocket(
+  stopReconnectLoop: () => void,
+  attachAddonRef: React.MutableRefObject<AttachAddon | null>,
+  wsRef: React.MutableRefObject<WebSocket | null>,
+): void {
+  log("WebSocket cleanup");
+  stopReconnectLoop();
+  if (attachAddonRef.current) {
+    attachAddonRef.current.dispose();
+    attachAddonRef.current = null;
+  }
+  // Only close if the connection is actually open or has completed opening.
+  // Closing a CONNECTING WebSocket triggers a browser warning ("WebSocket is
+  // closed before the connection is established").
+  const ws = wsRef.current;
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CLOSING)) {
+    ws.close();
+  }
+  wsRef.current = null;
+}
+
 const STABLE_CONNECTION_MS = 500;
 
 export function reconnectDelayMs(attempt: number): number {
@@ -24,6 +45,8 @@ type ConnectWebSocketFn = (opts: {
   onTimeout: (id: ReturnType<typeof setTimeout>) => void;
   onConnected: () => void;
   onSocketClose: (event: CloseEvent) => void;
+  manualInputRouting?: boolean;
+  onWsReady?: (ws: WebSocket) => void;
 }) => void;
 
 export type ReconnectLoopOptions = {
@@ -39,6 +62,8 @@ export type ReconnectLoopOptions = {
   attachAddonRef: React.MutableRefObject<AttachAddon | null>;
   onConnected: () => void;
   connectWebSocket: ConnectWebSocketFn;
+  manualInputRouting?: boolean;
+  onWsReady?: (ws: WebSocket) => void;
 };
 
 export function startReconnectLoop({
@@ -54,6 +79,8 @@ export function startReconnectLoop({
   attachAddonRef,
   onConnected,
   connectWebSocket,
+  manualInputRouting,
+  onWsReady,
 }: ReconnectLoopOptions): () => void {
   let isMounted = true;
   let connectTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -77,6 +104,8 @@ export function startReconnectLoop({
         fitAndResize,
         wsRef,
         attachAddonRef,
+        manualInputRouting,
+        onWsReady,
         isMountedCheck: () => isMounted,
         onTimeout: (id) => {
           settleTimeout = id;

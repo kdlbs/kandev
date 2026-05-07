@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -314,5 +315,205 @@ func TestGetWorkspaceInfoForSession_MultiRepoReturnsTaskRoot(t *testing.T) {
 	if info.WorkspacePath != "/tmp/tasks/do-nothing_mvo" {
 		t.Errorf("expected WorkspacePath '/tmp/tasks/do-nothing_mvo' (task root), got %q",
 			info.WorkspacePath)
+	}
+}
+
+// AbandonOpenTurns: turns left open by a previous crash must close with
+// completed_at = started_at so analytics' active_duration_ms doesn't get
+// poisoned with the dead window and the UI's running timer doesn't count
+// from a stale start.
+func TestAbandonOpenTurns_ZeroesDuration(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+
+	stale := &models.Turn{
+		ID:            "turn-stale",
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		StartedAt:     time.Now().Add(-90 * time.Hour).UTC(),
+	}
+	if err := repo.CreateTurn(ctx, stale); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+
+	if err := svc.AbandonOpenTurns(ctx, sessionID); err != nil {
+		t.Fatalf("AbandonOpenTurns: %v", err)
+	}
+
+	got, err := repo.GetTurn(ctx, stale.ID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if got.CompletedAt == nil {
+		t.Fatal("expected completed_at to be set")
+	}
+	if !got.CompletedAt.Equal(got.StartedAt) {
+		t.Fatalf("expected completed_at == started_at (zero duration), got started=%v completed=%v",
+			got.StartedAt, *got.CompletedAt)
+	}
+}
+
+// AbandonOpenTurns sweeps the same pending tool calls that CompleteTurn does:
+// otherwise the UI would show "running" tool calls forever on an abandoned turn.
+func TestAbandonOpenTurns_CompletesPendingToolCalls(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+
+	turn := &models.Turn{
+		ID:            "turn-with-tool",
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		StartedAt:     time.Now().UTC(),
+	}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+
+	toolMsg := &models.Message{
+		ID:            "msg-tool-1",
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		TurnID:        turn.ID,
+		AuthorType:    models.MessageAuthorAgent,
+		Type:          models.MessageTypeToolCall,
+		Content:       "running tool",
+		Metadata: map[string]interface{}{
+			"tool_call_id": "tc-1",
+			"status":       "running",
+		},
+	}
+	if err := repo.CreateMessage(ctx, toolMsg); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	if err := svc.AbandonOpenTurns(ctx, sessionID); err != nil {
+		t.Fatalf("AbandonOpenTurns: %v", err)
+	}
+
+	got, err := repo.GetMessageByToolCallID(ctx, sessionID, "tc-1")
+	if err != nil {
+		t.Fatalf("GetMessageByToolCallID: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected tool call message to exist")
+	}
+	if status, _ := got.Metadata["status"].(string); status != "complete" {
+		t.Fatalf("expected tool call status='complete', got %q", status)
+	}
+}
+
+// AbandonOpenTurns publishes turn.completed for each closed turn so the WS
+// gateway can broadcast the state change and the frontend clears its
+// activeBySession entry.
+func TestAbandonOpenTurns_PublishesTurnCompletedEvent(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+
+	turn := &models.Turn{
+		ID:            "turn-event",
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		StartedAt:     time.Now().UTC(),
+	}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+
+	eventBus.ClearEvents()
+	if err := svc.AbandonOpenTurns(ctx, sessionID); err != nil {
+		t.Fatalf("AbandonOpenTurns: %v", err)
+	}
+
+	var found bool
+	for _, ev := range eventBus.GetPublishedEvents() {
+		if ev.Type == events.TurnCompleted {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected turn.completed event to be published")
+	}
+}
+
+// AbandonOpenTurns is a no-op when no open turn exists (e.g. resume called on
+// a session whose previous turn already completed cleanly).
+func TestAbandonOpenTurns_NoOpenTurns(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+
+	eventBus.ClearEvents()
+	if err := svc.AbandonOpenTurns(ctx, sessionID); err != nil {
+		t.Fatalf("AbandonOpenTurns: %v", err)
+	}
+
+	if got := len(eventBus.GetPublishedEvents()); got != 0 {
+		t.Fatalf("expected no events when nothing to abandon, got %d", got)
+	}
+}
+
+// AbandonOpenTurns iteration cap: with more than maxIterations open turns,
+// the function still returns nil (caller swallows the error and the next
+// completeTurnForSession sweep mops up the remainder).
+func TestAbandonOpenTurns_IterationCap(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+
+	const seeded = 20 // > maxIterations (16)
+	for i := 0; i < seeded; i++ {
+		turn := &models.Turn{
+			ID:            fmt.Sprintf("turn-cap-%d", i),
+			TaskSessionID: sessionID,
+			TaskID:        "task-123",
+			StartedAt:     time.Now().UTC(),
+		}
+		if err := repo.CreateTurn(ctx, turn); err != nil {
+			t.Fatalf("seed turn %d: %v", i, err)
+		}
+	}
+
+	if err := svc.AbandonOpenTurns(ctx, sessionID); err != nil {
+		t.Fatalf("AbandonOpenTurns: %v", err)
+	}
+
+	// First sweep closes exactly maxIterations; remainder still open.
+	turns, err := repo.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListTurnsBySession: %v", err)
+	}
+	open := 0
+	for _, turn := range turns {
+		if turn.CompletedAt == nil {
+			open++
+		}
+	}
+	if open != seeded-16 {
+		t.Fatalf("expected %d open turns after first sweep (cap=16), got %d", seeded-16, open)
+	}
+
+	// Second sweep finishes the job.
+	if err := svc.AbandonOpenTurns(ctx, sessionID); err != nil {
+		t.Fatalf("second AbandonOpenTurns: %v", err)
+	}
+	turns, _ = repo.ListTurnsBySession(ctx, sessionID)
+	for _, turn := range turns {
+		if turn.CompletedAt == nil {
+			t.Fatalf("expected all turns closed after second sweep, %s still open", turn.ID)
+		}
 	}
 }

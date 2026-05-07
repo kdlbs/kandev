@@ -747,6 +747,25 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
 	}
 
+	// Bury any open turns from the previous run before relaunching. Without
+	// this, startTurnForSession adopts the orphan on the next prompt and the
+	// UI's running timer counts from the orphan's started_at — which can be
+	// hours or days ago. Zero-duration completion keeps analytics honest about
+	// the dead window. A failure here shouldn't block the resume; the next
+	// completeTurnForSession sweep will mop up.
+	//
+	// Drop the activeTurns cache entry first, mirroring completeTurnForSession.
+	// Otherwise a stale entry would let getActiveTurnID return the now-abandoned
+	// turn ID without re-reading the DB, tagging new messages to a closed turn.
+	if s.turnService != nil {
+		s.activeTurns.Delete(sessionID)
+		if err := s.turnService.AbandonOpenTurns(ctx, sessionID); err != nil {
+			s.logger.Warn("failed to abandon orphan turns on resume; continuing",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}
+
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
 	// Session resume can take time and shouldn't be tied to the WS request lifecycle.
 	resumeCtx := context.WithoutCancel(ctx)

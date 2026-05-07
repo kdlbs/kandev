@@ -15,9 +15,11 @@ import {
   computeUncommittedStats,
   useMobileGitActions,
 } from "./session-mobile-top-bar-git-controls";
+import { MobileRepoPill } from "./mobile-repo-pill";
 
 type SessionMobileTopBarProps = {
   taskId?: string | null;
+  workspaceId?: string | null;
   taskTitle?: string;
   sessionId?: string | null;
   baseBranch?: string;
@@ -63,6 +65,7 @@ function MobileTaskTitle({
 
 type MobileTopBarActionsProps = {
   taskId?: string | null;
+  workspaceId?: string | null;
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string | null;
   remoteExecutorName?: string | null;
@@ -87,6 +90,7 @@ type MobileTopBarActionsProps = {
 
 function MobileTopBarActions({
   taskId,
+  workspaceId,
   isRemoteExecutor,
   remoteExecutorType,
   remoteExecutorName,
@@ -110,6 +114,7 @@ function MobileTopBarActions({
 }: MobileTopBarActionsProps) {
   return (
     <div className="flex items-center gap-1">
+      <MobileRepoPill taskId={taskId ?? null} workspaceId={workspaceId ?? null} />
       {isRemoteExecutor && (
         <RemoteCloudTooltip
           taskId={taskId ?? ""}
@@ -156,6 +161,7 @@ function MobileTopBarActions({
 
 export const SessionMobileTopBar = memo(function SessionMobileTopBar({
   taskId,
+  workspaceId,
   taskTitle,
   sessionId,
   baseBranch,
@@ -212,6 +218,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar({
       </div>
       <MobileTopBarActions
         taskId={taskId}
+        workspaceId={workspaceId}
         isRemoteExecutor={isRemoteExecutor}
         remoteExecutorType={remoteExecutorType}
         remoteExecutorName={remoteExecutorName}
