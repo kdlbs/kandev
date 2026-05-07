@@ -121,6 +121,7 @@ func TestListTemplates_FiltersHidden(t *testing.T) {
 
 	templates, err := svc.ListTemplates(context.Background())
 	require.NoError(t, err)
+	require.NotEmpty(t, templates, "ListTemplates returned no templates; the assertion below would vacuously pass")
 
 	for _, tmpl := range templates {
 		assert.NotEqual(t, "improve-kandev", tmpl.ID, "hidden template must not be returned by ListTemplates")

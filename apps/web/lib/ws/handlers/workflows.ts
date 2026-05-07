@@ -43,20 +43,30 @@ function applyWorkflowCreated(state: AppState, payload: WorkflowPayload): AppSta
 }
 
 function applyWorkflowUpdated(state: AppState, payload: WorkflowPayload): AppState {
+  const items = state.workflows.items.map((item) =>
+    item.id === payload.id
+      ? {
+          ...item,
+          name: payload.name,
+          agent_profile_id: payload.agent_profile_id,
+          hidden: payload.hidden !== undefined ? Boolean(payload.hidden) : item.hidden,
+        }
+      : item,
+  );
+  // If the active workflow just became hidden, fall back to the next visible
+  // entry so the kanban / picker isn't left bound to a workflow the user can
+  // no longer reach (the backend fires `workflow.updated`, not `workflow.deleted`,
+  // when `SetWorkflowHidden` flips the flag).
+  const activeBecameHidden = state.workflows.activeId === payload.id && payload.hidden === true;
+  const nextActiveId = activeBecameHidden
+    ? (items.find((item) => !item.hidden)?.id ?? null)
+    : state.workflows.activeId;
   return {
     ...state,
     workflows: {
       ...state.workflows,
-      items: state.workflows.items.map((item) =>
-        item.id === payload.id
-          ? {
-              ...item,
-              name: payload.name,
-              agent_profile_id: payload.agent_profile_id,
-              hidden: payload.hidden !== undefined ? Boolean(payload.hidden) : item.hidden,
-            }
-          : item,
-      ),
+      activeId: nextActiveId,
+      items,
     },
   };
 }
