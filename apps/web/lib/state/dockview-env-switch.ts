@@ -156,7 +156,8 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
       api.fromJSON(saved as SerializedDockview);
       api.layout(safeWidth, safeHeight);
       return applyLayoutFixups(api);
-    } catch {
+    } catch (err) {
+      console.warn("performEnvSwitch: fromJSON threw", err);
       /* fall through to default layout build */
     }
   }
