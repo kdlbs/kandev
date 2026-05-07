@@ -49,6 +49,11 @@ type Config struct {
 
 	// AssumeMcpSse overrides MCP capability filtering to assume SSE support.
 	AssumeMcpSse bool
+
+	// CLIFlagTokens are the resolved profile CLI flag argv tokens. Already
+	// included in the launch command's argv; surfaced here so transport
+	// adapters can route them out-of-band (e.g. ACP _meta).
+	CLIFlagTokens []string
 }
 
 // GetPermissionTimeout returns the configured permission timeout or the default.

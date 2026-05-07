@@ -391,6 +391,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		AgentConfig:         agentConfig,
 		Metadata:            info.Metadata,
 		PreviousExecutionID: info.AgentExecutionID,
+		CLIFlagTokens:       m.resolveCLIFlagTokens(ctx, info.AgentProfileID),
 	}
 
 	runtimeInstance, err := rt.CreateInstance(ctx, req)

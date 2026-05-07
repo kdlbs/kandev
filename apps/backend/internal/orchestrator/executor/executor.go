@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -224,6 +225,10 @@ type AgentProfileInfo struct {
 	CLIPassthrough             bool
 	NativeSessionResume        bool // Agent supports ACP session/load for resume
 	SupportsMCP                bool
+	// EnvVars are the user-configured environment variables on the profile.
+	// Secret IDs are unresolved here — Executor.resolveAgentEnvVars dereferences
+	// them via the secret store at launch time.
+	EnvVars []settingsmodels.EnvVar
 }
 
 // LaunchAgentRequest contains parameters for launching an agent

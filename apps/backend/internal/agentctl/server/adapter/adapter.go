@@ -267,6 +267,11 @@ type Config struct {
 
 	// AssumeMcpSse overrides MCP capability filtering to assume SSE support.
 	AssumeMcpSse bool
+
+	// CLIFlagTokens are the resolved profile CLI flag argv tokens. Already
+	// included in the launch command's argv; surfaced separately so transport
+	// adapters can route them out-of-band (e.g. ACP _meta).
+	CLIFlagTokens []string
 }
 
 // ToSharedConfig converts this Config to the shared.Config used by transport adapters.
@@ -296,5 +301,6 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		Headers:        c.Headers,
 		Extra:          c.Extra,
 		AssumeMcpSse:   c.AssumeMcpSse,
+		CLIFlagTokens:  c.CLIFlagTokens,
 	}
 }

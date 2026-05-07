@@ -35,13 +35,17 @@ type AgentExecution struct {
 	ACPSessionID      string // ACP session ID to resume, if available
 	AgentCommand      string // Command to start the agent subprocess
 	ContinueCommand   string // Command for follow-up prompts (one-shot agents like Amp)
-	RuntimeName       string // Name of the runtime used (e.g., "docker", "standalone")
-	Status            v1.AgentStatus
-	StartedAt         time.Time
-	FinishedAt        *time.Time
-	ExitCode          *int
-	ErrorMessage      string
-	Metadata          map[string]interface{}
+	// CLIFlagTokens are the resolved profile CLI flag argv tokens. Already
+	// included in AgentCommand; surfaced here so CreateInstance can forward
+	// them out-of-band (ACP _meta.claudeCode.options.extraArgs etc.).
+	CLIFlagTokens []string
+	RuntimeName   string // Name of the runtime used (e.g., "docker", "standalone")
+	Status        v1.AgentStatus
+	StartedAt     time.Time
+	FinishedAt    *time.Time
+	ExitCode      *int
+	ErrorMessage  string
+	Metadata      map[string]interface{}
 
 	// PrepareResult carries the environment preparation result back to the caller
 	// so it can be persisted synchronously before UpdateTaskSession clobbers metadata.
@@ -380,6 +384,11 @@ type AgentProfileInfo struct {
 	// CLIFlags is the resolved user-configurable list of CLI flags for this
 	// profile. Passed verbatim to cliflags.Resolve at launch time.
 	CLIFlags []settingsmodels.CLIFlag
+
+	// EnvVars is the resolved user-configurable list of environment variables
+	// for this profile. Secret references are not resolved here — the
+	// orchestrator resolves SecretIDs via the secret store at launch time.
+	EnvVars []settingsmodels.EnvVar
 
 	// Deprecated: legacy permission fields, no longer consulted by the launch
 	// path. Kept so existing call sites compile during the transition.

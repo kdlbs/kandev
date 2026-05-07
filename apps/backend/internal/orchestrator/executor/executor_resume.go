@@ -501,6 +501,23 @@ func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *
 	req.ExecutorType = execConfig.ExecutorType
 	req.ExecutorConfig = execConfig.ExecutorCfg
 	req.SetupScript = execConfig.SetupScript
+
+	// Merge AgentProfile.EnvVars first (workspace-level/general).
+	// ExecutorProfile.ProfileEnv merges below and overrides on key collision.
+	if req.AgentProfileID != "" {
+		if profileInfo, perr := e.agentManager.ResolveAgentProfile(ctx, req.AgentProfileID); perr == nil && profileInfo != nil && len(profileInfo.EnvVars) > 0 {
+			agentEnv := e.resolveAgentEnvVars(ctx, profileInfo.EnvVars)
+			if len(agentEnv) > 0 {
+				if req.Env == nil {
+					req.Env = make(map[string]string)
+				}
+				for k, v := range agentEnv {
+					req.Env[k] = v
+				}
+			}
+		}
+	}
+
 	if len(execConfig.ProfileEnv) > 0 {
 		if req.Env == nil {
 			req.Env = make(map[string]string)

@@ -564,13 +564,29 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		IsEphemeral:       task.IsEphemeral,
 	}
 
+	// Merge AgentProfile.EnvVars into req.Env first (workspace-level/general).
+	// ExecutorProfile.ProfileEnv merges below and overrides on key collision.
+	if agentProfileID != "" {
+		if profileInfo, perr := e.agentManager.ResolveAgentProfile(ctx, agentProfileID); perr == nil && profileInfo != nil && len(profileInfo.EnvVars) > 0 {
+			agentEnv := e.resolveAgentEnvVars(ctx, profileInfo.EnvVars)
+			if len(agentEnv) > 0 {
+				if req.Env == nil {
+					req.Env = make(map[string]string)
+				}
+				for k, v := range agentEnv {
+					req.Env[k] = v
+				}
+			}
+		}
+	}
+
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
 	if execConfig.ExecutorID != "" {
 		metadata = execConfig.Metadata
 		req.ExecutorType = execConfig.ExecutorType
 		req.ExecutorConfig = execConfig.ExecutorCfg
 		req.SetupScript = execConfig.SetupScript
-		// Merge profile env vars into request env
+		// Merge profile env vars into request env (overrides AgentProfile.EnvVars on collision)
 		if len(execConfig.ProfileEnv) > 0 {
 			if req.Env == nil {
 				req.Env = make(map[string]string)

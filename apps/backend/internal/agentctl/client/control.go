@@ -53,6 +53,10 @@ type CreateInstanceRequest struct {
 	DisableAskQuestion bool              `json:"disable_ask_question,omitempty"` // Disable ask_user_question MCP tool (TUI agents)
 	AssumeMcpSse       bool              `json:"assume_mcp_sse,omitempty"`       // Assume agent supports SSE MCP servers
 	McpMode            string            `json:"mcp_mode,omitempty"`             // MCP tool mode: "task" (default) or "config"
+	// CLIFlagTokens are the resolved profile CLI flag argv tokens. Already
+	// included in AgentCommand; passed separately so adapters can route them
+	// out-of-band (e.g. ACP _meta.claudeCode.options.extraArgs for claude-acp).
+	CLIFlagTokens []string `json:"cli_flag_tokens,omitempty"`
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.

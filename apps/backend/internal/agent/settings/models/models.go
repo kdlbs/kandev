@@ -57,6 +57,13 @@ type AgentProfile struct {
 	// reach the subprocess argv.
 	CLIFlags []CLIFlag `json:"cli_flags"`
 
+	// EnvVars is the user-configurable list of environment variables forwarded
+	// to the agent subprocess. Each entry holds either an inline Value or a
+	// SecretID reference (resolved via the secret store at launch time). When
+	// this profile is the workspace's Default Agent Profile, every task
+	// launched in that workspace inherits these variables.
+	EnvVars []EnvVar `json:"env_vars"`
+
 	// Deprecated legacy permission fields: retained in the DB schema so rows
 	// load cleanly, but no longer read by the launch path. ACP session modes
 	// and interactive permission_request prompts replace them.
@@ -76,4 +83,15 @@ type CLIFlag struct {
 	Description string `json:"description"`
 	Flag        string `json:"flag"`
 	Enabled     bool   `json:"enabled"`
+}
+
+// EnvVar is a single environment variable entry on an AgentProfile.
+// Mirrors the shape of task/models.ProfileEnvVar (defined separately to avoid
+// cross-package coupling between settings and task models). Either Value or
+// SecretID should be set, not both: SecretID is resolved against the global
+// secret store at launch time; Value is used verbatim.
+type EnvVar struct {
+	Key      string `json:"key"`
+	Value    string `json:"value,omitempty"`
+	SecretID string `json:"secret_id,omitempty"`
 }

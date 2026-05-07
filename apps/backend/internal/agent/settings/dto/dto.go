@@ -15,6 +15,7 @@ type AgentProfileDTO struct {
 	Mode             string       `json:"mode,omitempty"`
 	AllowIndexing    bool         `json:"allow_indexing"` // Deprecated: use CLIFlags. Retained for legacy clients.
 	CLIFlags         []CLIFlagDTO `json:"cli_flags"`
+	EnvVars          []EnvVarDTO  `json:"env_vars"`
 	CLIPassthrough   bool         `json:"cli_passthrough"`
 	UserModified     bool         `json:"user_modified"`
 	CreatedAt        time.Time    `json:"created_at"`
@@ -28,6 +29,16 @@ type CLIFlagDTO struct {
 	Description string `json:"description"`
 	Flag        string `json:"flag"`
 	Enabled     bool   `json:"enabled"`
+}
+
+// EnvVarDTO mirrors models.EnvVar on the wire. Each entry is one user-facing
+// environment variable forwarded to the agent subprocess. Either `value`
+// (inline plaintext) or `secret_id` (reference resolved against the secret
+// store at launch time) should be set, not both.
+type EnvVarDTO struct {
+	Key      string `json:"key"`
+	Value    string `json:"value,omitempty"`
+	SecretID string `json:"secret_id,omitempty"`
 }
 
 type TUIConfigDTO struct {

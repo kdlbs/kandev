@@ -71,6 +71,10 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 type agentCommands struct {
 	initial   string
 	continue_ string // continue command for one-shot agents (empty if not applicable)
+	// cliFlagTokens are the resolved profile CLI flag argv tokens. Already
+	// appended to initial/continue via command.go; surfaced here so callers
+	// can also forward them out-of-band (ACP _meta for claude-acp etc.).
+	cliFlagTokens []string
 }
 
 // buildAgentCommand builds the agent command strings for the execution.
@@ -113,9 +117,32 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 		CLIFlagTokens:    cliFlagTokens,
 	}
 	return agentCommands{
-		initial:   m.commandBuilder.BuildCommandString(agentConfig, cmdOpts),
-		continue_: m.commandBuilder.BuildContinueCommandString(agentConfig, cmdOpts),
+		initial:       m.commandBuilder.BuildCommandString(agentConfig, cmdOpts),
+		continue_:     m.commandBuilder.BuildContinueCommandString(agentConfig, cmdOpts),
+		cliFlagTokens: cliFlagTokens,
 	}
+}
+
+// resolveCLIFlagTokens looks up the agent profile by ID and resolves its
+// CLIFlags to argv tokens. Returns nil for empty profileID, missing profiles,
+// or empty/disabled flag lists. Failures are logged at warn-level and surface
+// as nil — never block launch.
+func (m *Manager) resolveCLIFlagTokens(ctx context.Context, profileID string) []string {
+	if profileID == "" || m.profileResolver == nil {
+		return nil
+	}
+	info, err := m.profileResolver.ResolveProfile(ctx, profileID)
+	if err != nil || info == nil {
+		return nil
+	}
+	tokens, err := cliflags.Resolve(info.CLIFlags)
+	if err != nil {
+		m.logger.Warn("failed to resolve cli_flags for profile, omitting from out-of-band channel",
+			zap.String("profile_id", profileID),
+			zap.Error(err))
+		return nil
+	}
+	return tokens
 }
 
 // launchResolveWorkspacePath resolves the effective workspace path for non-worktree executors.
@@ -304,6 +331,11 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 
 	metadata := buildLaunchMetadata(reqWithWorktree, mainRepoGitDir, worktreeID, worktreeBranch)
 
+	// Resolve user-configured CLI flag tokens for adapters that route them
+	// out-of-band (claude-acp ACP _meta). Already inside the launch command
+	// via command.go for argv consumers — duplicated lookup here is cheap.
+	cliFlagTokens := m.resolveCLIFlagTokens(ctx, reqWithWorktree.AgentProfileID)
+
 	execReq := &ExecutorCreateRequest{
 		InstanceID:          executionID,
 		TaskID:              reqWithWorktree.TaskID,
@@ -318,6 +350,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpServers:          mcpServers,
 		PreviousExecutionID: reqWithWorktree.PreviousExecutionID,
 		McpMode:             reqWithWorktree.McpMode,
+		CLIFlagTokens:       cliFlagTokens,
 		OnProgress:          m.newProgressCallback(reqWithWorktree.TaskID, reqWithWorktree.SessionID),
 	}
 
@@ -532,6 +565,7 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		cmds := m.buildAgentCommand(req, profileInfo, agentConfig)
 		execution.AgentCommand = cmds.initial
 		execution.ContinueCommand = cmds.continue_
+		execution.CLIFlagTokens = cmds.cliFlagTokens
 		if req.ACPSessionID != "" && execution.ACPSessionID == "" {
 			execution.ACPSessionID = req.ACPSessionID
 		}
@@ -669,6 +703,7 @@ func (m *Manager) buildExecutionFromInstance(
 	cmds := m.buildAgentCommand(req, profileInfo, agentConfig)
 	execution.AgentCommand = cmds.initial
 	execution.ContinueCommand = cmds.continue_
+	execution.CLIFlagTokens = cmds.cliFlagTokens
 	return execution
 }
 

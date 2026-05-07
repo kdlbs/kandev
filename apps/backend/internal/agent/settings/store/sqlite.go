@@ -68,6 +68,7 @@ func (r *sqliteRepository) initSchema() error {
 		user_modified INTEGER NOT NULL DEFAULT 0,
 		plan TEXT DEFAULT '',
 		cli_flags TEXT DEFAULT NULL,
+		env_vars TEXT DEFAULT NULL,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		deleted_at TIMESTAMP,
@@ -103,6 +104,10 @@ func (r *sqliteRepository) initSchema() error {
 	// Migration: add cli_flags column on agent_profiles (idempotent).
 	// Rows where cli_flags IS NULL are backfilled on first read — see scanAgentProfile.
 	_, _ = r.db.Exec(`ALTER TABLE agent_profiles ADD COLUMN cli_flags TEXT DEFAULT NULL`)
+
+	// Migration: add env_vars column on agent_profiles (idempotent).
+	// Rows where env_vars IS NULL are read as empty list — see scanAgentProfile.
+	_, _ = r.db.Exec(`ALTER TABLE agent_profiles ADD COLUMN env_vars TEXT DEFAULT NULL`)
 
 	// Migration: drop CHECK(model != '') constraint from agent_profiles.
 	//
@@ -169,10 +174,12 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// The old table does not have cli_flags yet (the ADD COLUMN ran earlier in
-	// initSchema but on the old table, which is about to be dropped). So we
-	// include it in the copy only when it exists on the source table.
+	// The old table may not have cli_flags / env_vars yet (the ADD COLUMNs ran
+	// earlier in initSchema but on the old table, which is about to be
+	// dropped). Include each column in the copy only when it exists on the
+	// source table.
 	srcHasCLIFlags := columnExists(tx, "agent_profiles", "cli_flags")
+	srcHasEnvVars := columnExists(tx, "agent_profiles", "env_vars")
 	srcCols := `id, agent_id, name, agent_display_name, model, mode, migrated_from,
 		auto_approve, dangerously_skip_permissions, allow_indexing,
 		cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at`
@@ -180,6 +187,10 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 	if srcHasCLIFlags {
 		srcCols += ", cli_flags"
 		dstCols += ", cli_flags"
+	}
+	if srcHasEnvVars {
+		srcCols += ", env_vars"
+		dstCols += ", env_vars"
 	}
 
 	if _, err := tx.Exec(`CREATE TABLE agent_profiles_new (
@@ -197,6 +208,7 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 		user_modified INTEGER NOT NULL DEFAULT 0,
 		plan TEXT DEFAULT '',
 		cli_flags TEXT DEFAULT NULL,
+		env_vars TEXT DEFAULT NULL,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		deleted_at TIMESTAMP,
@@ -378,13 +390,17 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	if err != nil {
 		return err
 	}
+	envVarsJSON, err := envVarsToJSON(profile.EnvVars)
+	if err != nil {
+		return err
+	}
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, mode, migrated_from, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, cli_flags, created_at, updated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)
+		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, mode, migrated_from, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, cli_flags, env_vars, created_at, updated_at, deleted_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?)
 	`), profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
 		dialect.BoolToInt(profile.AutoApprove),
-		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing), dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt)
+		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing), dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt)
 	return err
 }
 
@@ -444,20 +460,38 @@ func cliFlagsToJSON(flags []models.CLIFlag) (string, error) {
 	return string(data), nil
 }
 
+// envVarsToJSON marshals the profile's EnvVars list into a JSON string
+// suitable for the env_vars TEXT column. Mirrors cliFlagsToJSON: nil slices
+// serialise to "[]" so we always store a well-formed JSON array.
+func envVarsToJSON(envVars []models.EnvVar) (string, error) {
+	if envVars == nil {
+		envVars = []models.EnvVar{}
+	}
+	data, err := json.Marshal(envVars)
+	if err != nil {
+		return "", fmt.Errorf("marshal env_vars: %w", err)
+	}
+	return string(data), nil
+}
+
 func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {
 	profile.UpdatedAt = time.Now().UTC()
 	cliFlagsJSON, err := cliFlagsToJSON(profile.CLIFlags)
 	if err != nil {
 		return err
 	}
+	envVarsJSON, err := envVarsToJSON(profile.EnvVars)
+	if err != nil {
+		return err
+	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE agent_profiles
-		SET name = ?, agent_display_name = ?, model = ?, mode = ?, migrated_from = ?, auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?, cli_passthrough = ?, user_modified = ?, cli_flags = ?, updated_at = ?
+		SET name = ?, agent_display_name = ?, model = ?, mode = ?, migrated_from = ?, auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?, cli_passthrough = ?, user_modified = ?, cli_flags = ?, env_vars = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`), profile.Name, profile.AgentDisplayName, profile.Model,
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
 		dialect.BoolToInt(profile.AutoApprove),
-		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing), dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, profile.UpdatedAt, profile.ID)
+		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing), dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.UpdatedAt, profile.ID)
 	if err != nil {
 		return err
 	}
@@ -485,7 +519,7 @@ func (r *sqliteRepository) DeleteAgentProfile(ctx context.Context, id string) er
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, cli_flags, created_at, updated_at, deleted_at
+		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, cli_flags, env_vars, created_at, updated_at, deleted_at
 		FROM agent_profiles WHERE id = ? AND deleted_at IS NULL
 	`), id)
 	profile, err := scanAgentProfile(row)
@@ -497,7 +531,7 @@ func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*mod
 
 func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, cli_flags, created_at, updated_at, deleted_at
+		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, cli_flags, env_vars, created_at, updated_at, deleted_at
 		FROM agent_profiles WHERE agent_id = ? AND deleted_at IS NULL ORDER BY created_at DESC
 	`), agentID)
 	if err != nil {
@@ -620,6 +654,7 @@ func scanAgentProfile(scanner interface {
 	var userModified int
 	var plan string // unused, kept for backwards compatibility
 	var cliFlagsRaw sql.NullString
+	var envVarsRaw sql.NullString
 	if err := scanner.Scan(
 		&profile.ID,
 		&profile.AgentID,
@@ -635,6 +670,7 @@ func scanAgentProfile(scanner interface {
 		&userModified,
 		&plan,
 		&cliFlagsRaw,
+		&envVarsRaw,
 		&profile.CreatedAt,
 		&profile.UpdatedAt,
 		&profile.DeletedAt,
@@ -662,5 +698,13 @@ func scanAgentProfile(scanner interface {
 	// Leaving CLIFlags as nil here is deliberate: non-nil vs nil discriminates
 	// "stored empty list" from "never written". applyLegacyBackfill rewrites
 	// nil → []CLIFlag{} so downstream code never sees a nil slice.
+	if envVarsRaw.Valid && envVarsRaw.String != "" {
+		if err := json.Unmarshal([]byte(envVarsRaw.String), &profile.EnvVars); err != nil {
+			return nil, fmt.Errorf("failed to parse env_vars for profile %s: %w", profile.ID, err)
+		}
+	}
+	if profile.EnvVars == nil {
+		profile.EnvVars = []models.EnvVar{}
+	}
 	return profile, nil
 }

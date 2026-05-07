@@ -26,6 +26,10 @@ type CreateProfileRequest struct {
 	// profile opens with the agent's recommended flags (all disabled by
 	// default unless the curated entry specifies Default: true).
 	CLIFlags []dto.CLIFlagDTO
+	// EnvVars is the explicit list to persist. When nil, the profile is
+	// created with no env vars — there is no agent-curated catalogue to seed
+	// from (env vars are user-driven, not per-agent recommendations).
+	EnvVars []dto.EnvVarDTO
 }
 
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -50,6 +54,9 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	} else if err := validateCLIFlagDTOs(req.CLIFlags); err != nil {
 		return nil, err
 	}
+	if err := validateEnvVarDTOs(req.EnvVars); err != nil {
+		return nil, err
+	}
 	profile := &models.AgentProfile{
 		AgentID:          req.AgentID,
 		Name:             req.Name,
@@ -59,6 +66,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		AllowIndexing:    req.AllowIndexing,
 		CLIPassthrough:   req.CLIPassthrough,
 		CLIFlags:         cliFlags,
+		EnvVars:          envVarsFromDTO(req.EnvVars),
 		UserModified:     true,
 	}
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
@@ -110,6 +118,9 @@ type UpdateProfileRequest struct {
 	// CLIFlags replaces the entire list when non-nil. Nil means "leave
 	// unchanged" — the UI always sends the full desired list on save.
 	CLIFlags *[]dto.CLIFlagDTO
+	// EnvVars replaces the entire list when non-nil. Nil means "leave
+	// unchanged"; an empty slice clears all env vars.
+	EnvVars *[]dto.EnvVarDTO
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -142,6 +153,12 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 			return nil, err
 		}
 		profile.CLIFlags = cliFlagsFromDTO(*req.CLIFlags)
+	}
+	if req.EnvVars != nil {
+		if err := validateEnvVarDTOs(*req.EnvVars); err != nil {
+			return nil, err
+		}
+		profile.EnvVars = envVarsFromDTO(*req.EnvVars)
 	}
 	profile.UserModified = true
 	if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
@@ -277,6 +294,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		Mode:             profile.Mode,
 		AllowIndexing:    profile.AllowIndexing,
 		CLIFlags:         cliFlagsToDTO(profile.CLIFlags),
+		EnvVars:          envVarsToDTO(profile.EnvVars),
 		CLIPassthrough:   profile.CLIPassthrough,
 		UserModified:     profile.UserModified,
 		CreatedAt:        profile.CreatedAt,
@@ -292,12 +310,51 @@ func cliFlagsToDTO(in []models.CLIFlag) []dto.CLIFlagDTO {
 	return out
 }
 
+func envVarsToDTO(in []models.EnvVar) []dto.EnvVarDTO {
+	out := make([]dto.EnvVarDTO, len(in))
+	for i, e := range in {
+		out[i] = dto.EnvVarDTO{Key: e.Key, Value: e.Value, SecretID: e.SecretID}
+	}
+	return out
+}
+
 func cliFlagsFromDTO(in []dto.CLIFlagDTO) []models.CLIFlag {
 	out := make([]models.CLIFlag, len(in))
 	for i, f := range in {
 		out[i] = models.CLIFlag{Description: f.Description, Flag: f.Flag, Enabled: f.Enabled}
 	}
 	return out
+}
+
+func envVarsFromDTO(in []dto.EnvVarDTO) []models.EnvVar {
+	out := make([]models.EnvVar, len(in))
+	for i, e := range in {
+		out[i] = models.EnvVar{Key: e.Key, Value: e.Value, SecretID: e.SecretID}
+	}
+	return out
+}
+
+// validateEnvVarDTOs rejects malformed env var entries: empty key, key with
+// '=' (would confuse downstream consumers), key over 256 chars, or both
+// Value and SecretID set. An entry with neither Value nor SecretID is
+// allowed (treated as an empty-value env var and resolved at launch).
+func validateEnvVarDTOs(in []dto.EnvVarDTO) error {
+	for i, e := range in {
+		key := strings.TrimSpace(e.Key)
+		if key == "" {
+			return fmt.Errorf("env_vars[%d].key is required", i)
+		}
+		if strings.ContainsRune(key, '=') {
+			return fmt.Errorf("env_vars[%d].key must not contain '='", i)
+		}
+		if len(key) > 256 {
+			return fmt.Errorf("env_vars[%d].key exceeds 256 characters", i)
+		}
+		if e.Value != "" && e.SecretID != "" {
+			return fmt.Errorf("env_vars[%d]: only one of value or secret_id may be set", i)
+		}
+	}
+	return nil
 }
 
 // resolveProfileNameForModel looks up the agent by ID, fetches its model list (using cache),

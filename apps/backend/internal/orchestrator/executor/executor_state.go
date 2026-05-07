@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -245,6 +246,34 @@ func (e *Executor) resolveProfileEnvVars(ctx context.Context, envVars []models.P
 			value, err := e.secretStore.Reveal(ctx, ev.SecretID)
 			if err != nil {
 				e.logger.Warn("failed to resolve secret for profile env var",
+					zap.String("key", ev.Key),
+					zap.String("secret_id", ev.SecretID),
+					zap.Error(err))
+				continue
+			}
+			resolved[ev.Key] = value
+		} else if ev.Value != "" {
+			resolved[ev.Key] = ev.Value
+		}
+	}
+	return resolved
+}
+
+// resolveAgentEnvVars mirrors resolveProfileEnvVars for AgentProfile.EnvVars.
+// The shape of settingsmodels.EnvVar is identical to models.ProfileEnvVar; the
+// types are intentionally separate to avoid coupling between the agent
+// settings package and task models. Secret IDs are dereferenced via the
+// secret store. Failures are logged and the offending key is skipped.
+func (e *Executor) resolveAgentEnvVars(ctx context.Context, envVars []settingsmodels.EnvVar) map[string]string {
+	if len(envVars) == 0 {
+		return nil
+	}
+	resolved := make(map[string]string, len(envVars))
+	for _, ev := range envVars {
+		if ev.SecretID != "" && e.secretStore != nil {
+			value, err := e.secretStore.Reveal(ctx, ev.SecretID)
+			if err != nil {
+				e.logger.Warn("failed to resolve secret for agent profile env var",
 					zap.String("key", ev.Key),
 					zap.String("secret_id", ev.SecretID),
 					zap.Error(err))

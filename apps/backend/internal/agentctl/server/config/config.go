@@ -188,6 +188,12 @@ type InstanceConfig struct {
 	// "task" (default) registers kanban/plan tools; "config" registers config tools.
 	McpMode string
 
+	// CLIFlagTokens are the resolved profile CLI flag argv tokens. Already part
+	// of AgentArgs; carried separately so adapters can route them out-of-band
+	// (e.g. ACP _meta.claudeCode.options.extraArgs for claude-acp) rather than
+	// re-parsing argv.
+	CLIFlagTokens []string
+
 	// AuthToken is a shared secret for authenticating requests.
 	// Inherited from the parent Config at instance creation time.
 	AuthToken string
@@ -340,6 +346,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.McpMode != "" {
 		cfg.McpMode = overrides.McpMode
 	}
+	if len(overrides.CLIFlagTokens) > 0 {
+		cfg.CLIFlagTokens = overrides.CLIFlagTokens
+	}
 }
 
 // InstanceOverrides allows overriding default values when creating an instance
@@ -357,6 +366,7 @@ type InstanceOverrides struct {
 	DisableAskQuestion bool
 	AssumeMcpSse       bool
 	McpMode            string
+	CLIFlagTokens      []string
 }
 
 // ParseCommand splits a command string into arguments

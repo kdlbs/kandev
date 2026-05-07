@@ -97,6 +97,11 @@ type CreateRequest struct {
 
 	// McpMode controls which MCP tools are registered: "task" (default) or "config".
 	McpMode string `json:"mcp_mode,omitempty"`
+
+	// CLIFlagTokens are the resolved profile CLI flag argv tokens. Already
+	// included in AgentCommand; passed separately so adapters can route them
+	// out-of-band (e.g. ACP _meta.claudeCode.options.extraArgs for claude-acp).
+	CLIFlagTokens []string `json:"cli_flag_tokens,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.

@@ -179,6 +179,10 @@ type ExecutorCreateRequest struct {
 	AgentConfig         agents.Agent // Agent type info needed by runtimes
 	PreviousExecutionID string       // Non-empty when reconnecting to a previous execution
 	McpMode             string       // MCP tool mode: "task" (default) or "config"
+	// CLIFlagTokens are the resolved profile CLI flag argv tokens, forwarded
+	// to agentctl alongside the launch command so adapters can route them
+	// out-of-band (e.g. ACP _meta.claudeCode.options.extraArgs).
+	CLIFlagTokens []string
 
 	// OnProgress is an optional callback for streaming preparation progress.
 	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can

@@ -315,6 +315,7 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        a.cfg.WorkDir,
 		McpServers: toACPMcpServers(filteredServers),
+		Meta:       a.buildSessionMeta(),
 	})
 	if err != nil {
 		span.RecordError(err)
