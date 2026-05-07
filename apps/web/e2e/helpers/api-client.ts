@@ -688,8 +688,56 @@ export class ApiClient {
     mergeable_state?: string;
     additions?: number;
     deletions?: number;
+    review_count?: number;
+    pending_review_count?: number;
+    required_reviews?: number;
+    checks_total?: number;
+    checks_passing?: number;
+    unresolved_review_threads?: number;
   }): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/task-prs", data);
+  }
+
+  async mockGitHubSeedPRFeedback(data: {
+    owner: string;
+    repo: string;
+    pr_number: number;
+    checks?: Array<{
+      name: string;
+      source?: string;
+      status?: string;
+      conclusion?: string;
+      html_url?: string;
+      output?: string;
+      started_at?: string | null;
+      completed_at?: string | null;
+    }>;
+    reviews?: Array<{
+      id: number;
+      author: string;
+      author_avatar?: string;
+      state: string;
+      body?: string;
+      created_at?: string;
+    }>;
+    comments?: Array<{
+      id: number;
+      author: string;
+      author_avatar?: string;
+      body: string;
+      path?: string;
+      line?: number;
+      side?: string;
+      comment_type?: string;
+      created_at?: string;
+      updated_at?: string;
+    }>;
+  }): Promise<void> {
+    await this.request("POST", "/api/v1/github/mock/pr-feedback", data);
+  }
+
+  async mockGitHubSetAuthHealth(data: { authenticated: boolean; error?: string }): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/auth-health", data);
   }
 
   async mockGitHubGetStatus(): Promise<{
