@@ -34,7 +34,11 @@ async function selectWorkflowFilter(page: Page, optionLabel: string): Promise<vo
 test.describe("Kanban workflow filter", () => {
   let workflowBId: string | null = null;
 
-  test.beforeEach(async ({ apiClient, seedData }) => {
+  // Pull `testPage` so its fixture (which runs `e2eReset` and resets user
+  // settings) is set up before this hook seeds workflows/tasks — otherwise
+  // the reset wipes the seed data the moment a test first reads testPage.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  test.beforeEach(async ({ apiClient, seedData, testPage }) => {
     const workflowB = await apiClient.createWorkflow(seedData.workspaceId, "Workflow B", "simple");
     workflowBId = workflowB.id;
     const stepsB = (await apiClient.listWorkflowSteps(workflowB.id)).steps;
