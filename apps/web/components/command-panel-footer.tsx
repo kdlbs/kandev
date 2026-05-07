@@ -22,8 +22,8 @@ import type { Task } from "@/lib/types/http";
 import { FileIcon } from "@/components/ui/file-icon";
 
 const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
-const MODE_COMMANDS: CommandPanelMode = "commands";
-const MODE_SEARCH_FILES: CommandPanelMode = "search-files";
+export const MODE_COMMANDS: CommandPanelMode = "commands";
+export const MODE_SEARCH_FILES: CommandPanelMode = "search-files";
 
 const STEP_COLOR_MAP: Record<string, string> = {
   "bg-slate-500": "#64748b",
@@ -41,7 +41,7 @@ function getFileName(filePath: string) {
   return filePath.split("/").pop() ?? filePath;
 }
 
-export function getCommandValue(cmd: CommandItemType) {
+function getCommandValue(cmd: CommandItemType) {
   return cmd.id + " " + cmd.label + " " + (cmd.keywords?.join(" ") ?? "");
 }
 

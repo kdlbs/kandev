@@ -17,6 +17,8 @@ import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import {
   CommandPanelView,
+  MODE_COMMANDS,
+  MODE_SEARCH_FILES,
   getFileResultValue,
   getTaskResultValue,
 } from "@/components/command-panel-footer";
@@ -24,9 +26,6 @@ import {
 function getFileName(filePath: string) {
   return filePath.split("/").pop() ?? filePath;
 }
-
-const MODE_COMMANDS: CommandPanelMode = "commands";
-const MODE_SEARCH_FILES: CommandPanelMode = "search-files";
 
 function useCommandPanelState() {
   const [mode, setMode] = useState<CommandPanelMode>(MODE_COMMANDS);
@@ -299,6 +298,7 @@ function useCommandPanelEffects(
 function useFirstResultSelection(open: boolean, state: ReturnType<typeof useCommandPanelState>) {
   const { mode, search, taskResults, fileResults, setSelectedValue } = state;
 
+  // `search` intentionally re-applies the first result while debounced results are loading.
   useEffect(() => {
     if (!open) return;
 
