@@ -1,5 +1,7 @@
 import type { WorkflowsState } from "@/lib/state/slices";
 
+type WorkflowLike = { id: string; hidden?: boolean };
+
 /**
  * Resolve the workflow id that should be active given the current store state
  * and persisted user settings.
@@ -16,7 +18,7 @@ export function resolveDesiredWorkflowId({
 }: {
   activeWorkflowId?: string | null;
   settingsWorkflowId?: string | null;
-  workspaceWorkflows: WorkflowsState["items"];
+  workspaceWorkflows: WorkflowsState["items"] | WorkflowLike[];
 }): string | null {
   const visibleWorkflows = workspaceWorkflows.filter((workflow) => !workflow.hidden);
   if (activeWorkflowId && visibleWorkflows.some((workflow) => workflow.id === activeWorkflowId)) {
@@ -30,3 +32,4 @@ export function resolveDesiredWorkflowId({
   }
   return visibleWorkflows.length === 1 ? visibleWorkflows[0].id : null;
 }
+

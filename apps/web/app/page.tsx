@@ -12,6 +12,7 @@ import {
 import { listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
 import { snapshotToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
 import type { AppState } from "@/lib/state/store";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 
@@ -158,13 +159,13 @@ export default async function Page({ searchParams }: PageProps) {
       listQuickChatSessions(activeWorkspaceId, { cache: "no-store" }).catch(() => ({ tasks: [] })),
     ]);
 
-    // Active workflow defaults to the first non-hidden workflow when no preference is set,
-    // so hidden workflows (e.g., improve-kandev) never auto-select on load.
-    const workflowId = resolveActiveId(
-      workflowList.workflows.filter((w) => !w.hidden),
-      workflowIdParam,
+    // null preserves the user's "All Workflows" choice when more than one
+    // workflow is visible — only auto-pick when there's exactly one.
+    const workflowId = resolveDesiredWorkflowId({
+      activeWorkflowId: workflowIdParam ?? null,
       settingsWorkflowId,
-    );
+      workspaceWorkflows: workflowList.workflows,
+    });
 
     // Map quick chat tasks to sessions
     const quickChatSessions = quickChatResponse.tasks

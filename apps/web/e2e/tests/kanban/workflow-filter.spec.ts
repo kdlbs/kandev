@@ -79,4 +79,43 @@ test.describe("Kanban workflow filter", () => {
     await testPage.getByTestId("display-button").click();
     await expect(testPage.getByTestId("display-workflow-filter")).toContainText("All Workflows");
   });
+
+  // Regression: SSR resolveActiveId in app/page.tsx fell back to the first
+  // visible workflow when settings.workflow_filter_id was empty, so a saved
+  // "All Workflows" preference reverted on hard refresh.
+  test("'All Workflows' selection survives a hard refresh", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflowB = await apiClient.createWorkflow(seedData.workspaceId, "Workflow B", "simple");
+    const stepsB = (await apiClient.listWorkflowSteps(workflowB.id)).steps;
+    const startB = stepsB.find((s) => s.is_start_step) ?? stepsB[0];
+
+    await apiClient.createTask(seedData.workspaceId, "Alpha task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await apiClient.createTask(seedData.workspaceId, "Beta task", {
+      workflow_id: workflowB.id,
+      workflow_step_id: startB.id,
+    });
+
+    // Persist "All Workflows" directly via the API to mimic the post-selection
+    // state, then load the kanban page from scratch (no in-flight client state).
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: "",
+      repository_ids: [],
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await expect(testPage.getByText("Alpha task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
+    await expect(testPage.getByText("Beta task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
+
+    await testPage.getByTestId("display-button").click();
+    await expect(testPage.getByTestId("display-workflow-filter")).toContainText("All Workflows");
+  });
 });
