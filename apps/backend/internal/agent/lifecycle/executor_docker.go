@@ -227,87 +227,33 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 	if err != nil {
 		return nil, err
 	}
-	prevID := req.PreviousExecutionID
-
-	info, err := dockerClient.GetContainerInfo(ctx, containerRef)
+	info, containerIP, err := r.ensureContainerRunning(ctx, dockerClient, containerRef)
 	if err != nil {
-		return nil, fmt.Errorf("failed to inspect container %s: %w", containerRef, err)
-	}
-	if shouldStartExistingDockerContainer(info.State) {
-		r.logger.Info("starting stopped docker container for reconnect",
-			zap.String("container_id", info.ID),
-			zap.String("state", info.State))
-		if err := dockerClient.StartContainer(ctx, info.ID); err != nil {
-			return nil, fmt.Errorf("failed to start container %s: %w", info.ID, err)
-		}
-		info, err = dockerClient.GetContainerInfo(ctx, info.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to inspect started container %s: %w", containerRef, err)
-		}
-	}
-	if info.State != containerStateRunning {
-		return nil, fmt.Errorf("container %s is %s, not %s", containerRef, info.State, containerStateRunning)
+		return nil, err
 	}
 
-	// Get the container IP
-	containerIP, err := dockerClient.GetContainerIP(ctx, info.ID)
+	conn, err := r.bringupAgentctl(ctx, dockerClient, info.ID, containerIP, req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get IP for container %s: %w", info.ID, err)
+		return nil, err
 	}
 
-	controlHost, controlPort := resolveDockerEndpoint(ctx, dockerClient, info.ID, AgentCtlPort, containerIP, r.logger)
-
-	// Check if agentctl is healthy
-	ctl := agentctl.NewControlClient(controlHost, controlPort, r.logger,
-		agentctl.WithControlAuthToken(req.AuthToken))
-	if err := r.waitForAgentctlHealth(ctx, ctl); err != nil {
-		return nil, fmt.Errorf("agentctl not healthy in container %s: %w", info.ID, err)
-	}
-
-	// Check if the previous instance is still alive
-	authToken := req.AuthToken
-	instanceID := reconnectInstanceID(req, prevID)
-	instancePort, reusingProcess, err := r.findExistingInstance(ctx, dockerClient, ctl, req, info.ID, containerIP, instanceID, authToken)
-	if err != nil && req.BootstrapNonce != "" && isAgentctlAuthError(err) {
-		var handshakeErr error
-		authToken, handshakeErr = ctl.Handshake(ctx, req.BootstrapNonce)
-		if handshakeErr != nil {
-			return nil, fmt.Errorf("agentctl auth failed and re-handshake failed in container %s: %w", info.ID, handshakeErr)
-		}
-		instancePort, reusingProcess, err = r.findExistingInstance(ctx, dockerClient, ctl, req, info.ID, containerIP, instanceID, authToken)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to find instance in container %s: %w", info.ID, err)
-	}
-	instanceHost, resolvedInstancePort := resolveDockerEndpoint(ctx, dockerClient, info.ID, instancePort, containerIP, r.logger)
-
-	// Create client pointing to the instance port
-	client := agentctl.NewClient(instanceHost, resolvedInstancePort, r.logger,
+	client := agentctl.NewClient(conn.instanceHost, conn.instancePort, r.logger,
 		agentctl.WithExecutionID(req.InstanceID),
 		agentctl.WithSessionID(req.SessionID),
-		agentctl.WithAuthToken(authToken))
-
-	metadata := map[string]interface{}{
-		MetadataKeyIsRemote:      true,
-		MetadataKeyContainerID:   info.ID,
-		"reuse_existing_process": reusingProcess,
-	}
-
-	refreshedAuthToken := ""
-	if authToken != "" && authToken != req.AuthToken {
-		refreshedAuthToken = authToken
-	}
+		agentctl.WithAuthToken(conn.authToken))
 
 	r.logger.Info("reconnected to existing docker container",
 		zap.String("container_ref", containerRef),
 		zap.String("container_id", info.ID),
 		zap.String("container_ip", containerIP),
-		zap.String("control_host", controlHost),
-		zap.Int("control_port", controlPort),
-		zap.String("instance_host", instanceHost),
-		zap.Int("instance_port", resolvedInstancePort),
-		zap.Bool("reusing_process", reusingProcess))
+		zap.String("instance_host", conn.instanceHost),
+		zap.Int("instance_port", conn.instancePort),
+		zap.Bool("reusing_process", conn.reusingProcess))
 
+	refreshedAuthToken := ""
+	if conn.authToken != "" && conn.authToken != req.AuthToken {
+		refreshedAuthToken = conn.authToken
+	}
 	return &ExecutorInstance{
 		InstanceID:    req.InstanceID,
 		TaskID:        req.TaskID,
@@ -317,8 +263,88 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 		ContainerID:   info.ID,
 		ContainerIP:   containerIP,
 		WorkspacePath: dockerWorkspacePath,
-		Metadata:      metadata,
-		AuthToken:     refreshedAuthToken,
+		Metadata: map[string]interface{}{
+			MetadataKeyIsRemote:      true,
+			MetadataKeyContainerID:   info.ID,
+			"reuse_existing_process": conn.reusingProcess,
+		},
+		AuthToken: refreshedAuthToken,
+	}, nil
+}
+
+// ensureContainerRunning inspects containerRef, starts it if it's stopped,
+// re-inspects, and returns the live container info and IP. Errors out if the
+// container can't be brought to a running state — the caller can't reconnect
+// to a container that isn't alive.
+func (r *DockerExecutor) ensureContainerRunning(ctx context.Context, dockerClient *docker.Client, containerRef string) (*docker.ContainerInfo, string, error) {
+	info, err := dockerClient.GetContainerInfo(ctx, containerRef)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to inspect container %s: %w", containerRef, err)
+	}
+	if shouldStartExistingDockerContainer(info.State) {
+		r.logger.Info("starting stopped docker container for reconnect",
+			zap.String("container_id", info.ID),
+			zap.String("state", info.State))
+		if err := dockerClient.StartContainer(ctx, info.ID); err != nil {
+			return nil, "", fmt.Errorf("failed to start container %s: %w", info.ID, err)
+		}
+		info, err = dockerClient.GetContainerInfo(ctx, info.ID)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to inspect started container %s: %w", containerRef, err)
+		}
+	}
+	if info.State != containerStateRunning {
+		return nil, "", fmt.Errorf("container %s is %s, not %s", containerRef, info.State, containerStateRunning)
+	}
+	containerIP, err := dockerClient.GetContainerIP(ctx, info.ID)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get IP for container %s: %w", info.ID, err)
+	}
+	return info, containerIP, nil
+}
+
+// reconnectAgentctlConn captures the resolved endpoint state needed by the
+// caller after agentctl has been brought up: the instance-level host:port for
+// the user-facing client, the auth token in effect (which may have been
+// refreshed via re-handshake), and whether the agent subprocess is reusable.
+type reconnectAgentctlConn struct {
+	instanceHost   string
+	instancePort   int
+	authToken      string
+	reusingProcess bool
+}
+
+// bringupAgentctl health-checks agentctl on the container, finds (or creates)
+// the agent instance, transparently re-handshakes on a 401, and returns the
+// resolved instance endpoint for the user-facing client.
+func (r *DockerExecutor) bringupAgentctl(ctx context.Context, dockerClient *docker.Client, containerID, containerIP string, req *ExecutorCreateRequest) (reconnectAgentctlConn, error) {
+	controlHost, controlPort := resolveDockerEndpoint(ctx, dockerClient, containerID, AgentCtlPort, containerIP, r.logger)
+	ctl := agentctl.NewControlClient(controlHost, controlPort, r.logger,
+		agentctl.WithControlAuthToken(req.AuthToken))
+	if err := r.waitForAgentctlHealth(ctx, ctl); err != nil {
+		return reconnectAgentctlConn{}, fmt.Errorf("agentctl not healthy in container %s: %w", containerID, err)
+	}
+
+	authToken := req.AuthToken
+	instanceID := reconnectInstanceID(req, req.PreviousExecutionID)
+	instancePort, reusingProcess, err := r.findExistingInstance(ctx, dockerClient, ctl, req, containerID, containerIP, instanceID, authToken)
+	if err != nil && req.BootstrapNonce != "" && isAgentctlAuthError(err) {
+		var handshakeErr error
+		authToken, handshakeErr = ctl.Handshake(ctx, req.BootstrapNonce)
+		if handshakeErr != nil {
+			return reconnectAgentctlConn{}, fmt.Errorf("agentctl auth failed and re-handshake failed in container %s: %w", containerID, handshakeErr)
+		}
+		instancePort, reusingProcess, err = r.findExistingInstance(ctx, dockerClient, ctl, req, containerID, containerIP, instanceID, authToken)
+	}
+	if err != nil {
+		return reconnectAgentctlConn{}, fmt.Errorf("failed to find instance in container %s: %w", containerID, err)
+	}
+	instanceHost, resolvedInstancePort := resolveDockerEndpoint(ctx, dockerClient, containerID, instancePort, containerIP, r.logger)
+	return reconnectAgentctlConn{
+		instanceHost:   instanceHost,
+		instancePort:   resolvedInstancePort,
+		authToken:      authToken,
+		reusingProcess: reusingProcess,
 	}, nil
 }
 
@@ -424,10 +450,26 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 	}
 }
 
-func (r *DockerExecutor) waitForAgentctlHealth(ctx context.Context, ctl *agentctl.ControlClient) error {
-	const maxRetries = 240
-	const retryDelay = 500 * time.Millisecond
+// healthChecker is the narrow interface waitForAgentctlHealth needs from the
+// agentctl control client. *agentctl.ControlClient satisfies it; tests can
+// stub it without spinning up an HTTP server.
+type healthChecker interface {
+	Health(ctx context.Context) error
+}
 
+const (
+	agentctlHealthMaxRetries = 240
+	agentctlHealthRetryDelay = 500 * time.Millisecond
+)
+
+func (r *DockerExecutor) waitForAgentctlHealth(ctx context.Context, ctl healthChecker) error {
+	return waitForAgentctlHealthWith(ctx, ctl, agentctlHealthMaxRetries, agentctlHealthRetryDelay)
+}
+
+// waitForAgentctlHealthWith is the parameterised body — exposed for tests so
+// they can drive the retry loop without a 2-minute wait. The production path
+// always calls it with the package constants.
+func waitForAgentctlHealthWith(ctx context.Context, ctl healthChecker, maxRetries int, retryDelay time.Duration) error {
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
 		if err := ctl.Health(ctx); err == nil {
@@ -449,9 +491,16 @@ func (r *DockerExecutor) waitForAgentctlHealth(ctx context.Context, ctl *agentct
 		time.Duration(maxRetries)*retryDelay)
 }
 
+// hostPortLookup is the narrow interface resolveDockerEndpoint needs from the
+// docker client. *docker.Client satisfies it; tests can stub it without
+// having to spin up a docker daemon.
+type hostPortLookup interface {
+	GetContainerHostPort(ctx context.Context, containerID string, containerPort int) (string, int, error)
+}
+
 func resolveDockerEndpoint(
 	ctx context.Context,
-	dockerClient *docker.Client,
+	dockerClient hostPortLookup,
 	containerID string,
 	containerPort int,
 	fallbackHost string,

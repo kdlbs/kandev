@@ -180,6 +180,43 @@ func TestBuildContainerConfig_PublishesAgentctlPorts(t *testing.T) {
 	assertEnvContains(t, got.Env, "AGENTCTL_INSTANCE_PORT_MAX=41100")
 }
 
+// TestDockerAgentctlPortBindings is a direct test for the helper that
+// generates the published-port set for every kandev-managed Docker agent
+// container. A regression here (wrong port range, missing agentctl port,
+// non-loopback host IP) would silently break container reconnect, since
+// `resolveDockerEndpoint` falls back to the container IP when the published
+// port lookup fails.
+func TestDockerAgentctlPortBindings(t *testing.T) {
+	bindings := dockerAgentctlPortBindings()
+
+	wantTotal := 1 + (dockerAgentctlInstancePortMax - dockerAgentctlInstancePortBase + 1)
+	if len(bindings) != wantTotal {
+		t.Fatalf("got %d bindings, want %d (control + instance range)", len(bindings), wantTotal)
+	}
+
+	// Control port must be present.
+	assertHasPortBinding(t, bindings, AgentCtlPort)
+
+	// Every port in the instance range must be present and bound to loopback
+	// with a kernel-assigned host port.
+	have := make(map[int]docker.PortBindingConfig, len(bindings))
+	for _, b := range bindings {
+		have[b.ContainerPort] = b
+	}
+	for port := dockerAgentctlInstancePortBase; port <= dockerAgentctlInstancePortMax; port++ {
+		b, ok := have[port]
+		if !ok {
+			t.Fatalf("missing instance port %d in published bindings", port)
+		}
+		if b.HostIP != "127.0.0.1" {
+			t.Errorf("port %d host_ip = %q, want 127.0.0.1", port, b.HostIP)
+		}
+		if b.HostPort != "0" {
+			t.Errorf("port %d host_port = %q, want kernel-assigned (\"0\")", port, b.HostPort)
+		}
+	}
+}
+
 // TestBuildContainerConfig_SessionDirIsKandevManagedForEveryAgent locks in
 // the agent-agnostic guarantee that bind sources for SessionDirTemplate
 // resolve to <kandev-home>/agent-sessions/<instance>/<dotdir> and never to
