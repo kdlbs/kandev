@@ -51,6 +51,8 @@ type repoKey struct {
 type MockClient struct {
 	mu               sync.RWMutex
 	user             string
+	authenticated    bool
+	authError        string
 	prs              map[prKey]*PR
 	prsByBranch      map[branchKey]*PR
 	orgs             []GitHubOrg
@@ -67,23 +69,26 @@ type MockClient struct {
 // NewMockClient creates a new MockClient with default values.
 func NewMockClient() *MockClient {
 	return &MockClient{
-		user:        mockDefaultUser,
-		prs:         make(map[prKey]*PR),
-		prsByBranch: make(map[branchKey]*PR),
-		repos:       make(map[string][]GitHubRepo),
-		branches:    make(map[repoKey][]RepoBranch),
-		reviews:     make(map[prKey][]PRReview),
-		comments:    make(map[prKey][]PRComment),
-		checks:      make(map[checkKey][]CheckRun),
-		files:       make(map[prKey][]PRFile),
-		commits:     make(map[prKey][]PRCommitInfo),
+		user:          mockDefaultUser,
+		authenticated: true,
+		prs:           make(map[prKey]*PR),
+		prsByBranch:   make(map[branchKey]*PR),
+		repos:         make(map[string][]GitHubRepo),
+		branches:      make(map[repoKey][]RepoBranch),
+		reviews:       make(map[prKey][]PRReview),
+		comments:      make(map[prKey][]PRComment),
+		checks:        make(map[checkKey][]CheckRun),
+		files:         make(map[prKey][]PRFile),
+		commits:       make(map[prKey][]PRCommitInfo),
 	}
 }
 
 // --- Client interface implementation ---
 
 func (m *MockClient) IsAuthenticated(context.Context) (bool, error) {
-	return true, nil
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.authenticated, nil
 }
 
 func (m *MockClient) GetAuthenticatedUser(context.Context) (string, error) {
@@ -270,6 +275,16 @@ func (m *MockClient) SetUser(username string) {
 	m.user = username
 }
 
+// SetAuthHealth toggles the authenticated state for the e2e auth-lost test.
+// When authenticated=false the popover renders the "Reconnect GitHub" branch.
+// authError is an opaque message preserved for diagnostics.
+func (m *MockClient) SetAuthHealth(authenticated bool, authError string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.authenticated = authenticated
+	m.authError = authError
+}
+
 // AddPR adds a PR to the mock data store, indexed by owner/repo/number and branch.
 func (m *MockClient) AddPR(pr *PR) {
 	m.mu.Lock()
@@ -327,6 +342,34 @@ func (m *MockClient) AddCheckRuns(owner, repo, ref string, checks []CheckRun) {
 	m.checks[k] = append(m.checks[k], checks...)
 }
 
+// ReplaceCheckRuns overwrites the check runs for a ref. Used by the e2e mock
+// controller so a follow-up seed call yields deterministic state.
+func (m *MockClient) ReplaceCheckRuns(owner, repo, ref string, checks []CheckRun) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]CheckRun, len(checks))
+	copy(cp, checks)
+	m.checks[checkKey{owner, repo, ref}] = cp
+}
+
+// ReplaceReviews overwrites the reviews for a PR.
+func (m *MockClient) ReplaceReviews(owner, repo string, number int, reviews []PRReview) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]PRReview, len(reviews))
+	copy(cp, reviews)
+	m.reviews[prKey{owner, repo, number}] = cp
+}
+
+// ReplaceComments overwrites the comments for a PR.
+func (m *MockClient) ReplaceComments(owner, repo string, number int, comments []PRComment) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]PRComment, len(comments))
+	copy(cp, comments)
+	m.comments[prKey{owner, repo, number}] = cp
+}
+
 // AddPRFiles appends files for a PR.
 func (m *MockClient) AddPRFiles(owner, repo string, number int, files []PRFile) {
 	m.mu.Lock()
@@ -348,6 +391,8 @@ func (m *MockClient) Reset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.user = mockDefaultUser
+	m.authenticated = true
+	m.authError = ""
 	m.prs = make(map[prKey]*PR)
 	m.prsByBranch = make(map[branchKey]*PR)
 	m.orgs = nil

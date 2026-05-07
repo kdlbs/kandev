@@ -1,6 +1,7 @@
 package github
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -41,6 +42,8 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.POST("/commits", c.addPRCommits)
 	api.POST("/branches", c.addBranches)
 	api.POST("/task-prs", c.associateTaskPR)
+	api.POST("/pr-feedback", c.seedPRFeedback)
+	api.PUT("/auth-health", c.setAuthHealth)
 	api.DELETE("/reset", c.reset)
 }
 
@@ -188,24 +191,33 @@ func (c *MockController) addBranches(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"added": len(req.Branches)})
 }
 
-// associateTaskPR directly creates a github_task_prs record for E2E testing.
+// associateTaskPR directly creates (or replaces) a github_task_prs record for
+// E2E testing. Repeating the call with the same (task_id, owner, repo,
+// pr_number) updates the row so tests can drive the live-refresh
+// scenario by re-POSTing with new aggregate counts.
 func (c *MockController) associateTaskPR(ctx *gin.Context) {
 	var req struct {
-		TaskID         string `json:"task_id"`
-		Owner          string `json:"owner"`
-		Repo           string `json:"repo"`
-		PRNumber       int    `json:"pr_number"`
-		PRURL          string `json:"pr_url"`
-		PRTitle        string `json:"pr_title"`
-		HeadBranch     string `json:"head_branch"`
-		BaseBranch     string `json:"base_branch"`
-		AuthorLogin    string `json:"author_login"`
-		State          string `json:"state"`
-		ReviewState    string `json:"review_state"`
-		ChecksState    string `json:"checks_state"`
-		MergeableState string `json:"mergeable_state"`
-		Additions      int    `json:"additions"`
-		Deletions      int    `json:"deletions"`
+		TaskID                  string `json:"task_id"`
+		Owner                   string `json:"owner"`
+		Repo                    string `json:"repo"`
+		PRNumber                int    `json:"pr_number"`
+		PRURL                   string `json:"pr_url"`
+		PRTitle                 string `json:"pr_title"`
+		HeadBranch              string `json:"head_branch"`
+		BaseBranch              string `json:"base_branch"`
+		AuthorLogin             string `json:"author_login"`
+		State                   string `json:"state"`
+		ReviewState             string `json:"review_state"`
+		ChecksState             string `json:"checks_state"`
+		MergeableState          string `json:"mergeable_state"`
+		Additions               int    `json:"additions"`
+		Deletions               int    `json:"deletions"`
+		ReviewCount             *int   `json:"review_count,omitempty"`
+		PendingReviewCount      *int   `json:"pending_review_count,omitempty"`
+		RequiredReviews         *int   `json:"required_reviews,omitempty"`
+		ChecksTotal             *int   `json:"checks_total,omitempty"`
+		ChecksPassing           *int   `json:"checks_passing,omitempty"`
+		UnresolvedReviewThreads *int   `json:"unresolved_review_threads,omitempty"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
@@ -233,9 +245,51 @@ func (c *MockController) associateTaskPR(ctx *gin.Context) {
 		Deletions:      req.Deletions,
 		CreatedAt:      now,
 	}
-	if err := c.store.CreateTaskPR(ctx.Request.Context(), tp); err != nil {
+	if req.ReviewCount != nil {
+		tp.ReviewCount = *req.ReviewCount
+	}
+	if req.PendingReviewCount != nil {
+		tp.PendingReviewCount = *req.PendingReviewCount
+	}
+	if req.RequiredReviews != nil {
+		v := *req.RequiredReviews
+		tp.RequiredReviews = &v
+	}
+	if req.ChecksTotal != nil {
+		tp.ChecksTotal = *req.ChecksTotal
+	}
+	if req.ChecksPassing != nil {
+		tp.ChecksPassing = *req.ChecksPassing
+	}
+	if req.UnresolvedReviewThreads != nil {
+		tp.UnresolvedReviewThreads = *req.UnresolvedReviewThreads
+	}
+	if err := c.store.ReplaceTaskPR(ctx.Request.Context(), tp); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	// Only synthesize a PR in the mock client when one isn't already seeded by
+	// a prior addPRs call. Tests that explicitly seeded a PR (with their own
+	// head_sha for matching check_runs) must not have it overwritten — that
+	// would break the (owner, repo, head_sha) check-run lookup path.
+	if existing, _ := c.mock.GetPR(ctx.Request.Context(), req.Owner, req.Repo, req.PRNumber); existing == nil {
+		c.mock.AddPR(&PR{
+			Number:      req.PRNumber,
+			Title:       req.PRTitle,
+			URL:         req.PRURL,
+			HTMLURL:     req.PRURL,
+			State:       req.State,
+			HeadBranch:  req.HeadBranch,
+			HeadSHA:     mockHeadSHA(req.Owner, req.Repo, req.PRNumber),
+			BaseBranch:  req.BaseBranch,
+			AuthorLogin: req.AuthorLogin,
+			RepoOwner:   req.Owner,
+			RepoName:    req.Repo,
+			Additions:   req.Additions,
+			Deletions:   req.Deletions,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
 	}
 	// Publish the event so the frontend Zustand store picks up the new PR
 	// without requiring a page reload — mirrors real AssociatePRWithTask.
@@ -246,6 +300,75 @@ func (c *MockController) associateTaskPR(ctx *gin.Context) {
 		}
 	}
 	ctx.JSON(http.StatusCreated, tp)
+}
+
+// seedPRFeedback registers checks (and optionally reviews / comments) for a
+// specific PR. The PR must already exist in the mock client (associateTaskPR
+// synthesizes one). The check ref is the PR's HeadSHA so getPRFeedback
+// resolves them via ListCheckRuns.
+func (c *MockController) seedPRFeedback(ctx *gin.Context) {
+	var req struct {
+		Owner    string      `json:"owner"`
+		Repo     string      `json:"repo"`
+		PRNumber int         `json:"pr_number"`
+		Checks   []CheckRun  `json:"checks"`
+		Reviews  []PRReview  `json:"reviews"`
+		Comments []PRComment `json:"comments"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if req.Owner == "" || req.Repo == "" || req.PRNumber == 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "owner, repo, pr_number are required"})
+		return
+	}
+	headSHA := mockHeadSHA(req.Owner, req.Repo, req.PRNumber)
+	// If associateTaskPR ran first, an underlying PR row exists with this
+	// HeadSHA. Otherwise synthesize a minimal one so getPRFeedback's GetPR
+	// call doesn't fail.
+	if pr, err := c.mock.GetPR(ctx.Request.Context(), req.Owner, req.Repo, req.PRNumber); err != nil || pr == nil {
+		c.mock.AddPR(&PR{
+			Number:    req.PRNumber,
+			RepoOwner: req.Owner,
+			RepoName:  req.Repo,
+			HeadSHA:   headSHA,
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+		})
+	}
+	// Replace prior seeded checks/reviews/comments so a follow-up call gives
+	// deterministic state; helpful for tests that drive a "then a check
+	// finishes" transition.
+	c.mock.ReplaceCheckRuns(req.Owner, req.Repo, headSHA, req.Checks)
+	c.mock.ReplaceReviews(req.Owner, req.Repo, req.PRNumber, req.Reviews)
+	c.mock.ReplaceComments(req.Owner, req.Repo, req.PRNumber, req.Comments)
+	ctx.JSON(http.StatusOK, gin.H{
+		"checks":   len(req.Checks),
+		"reviews":  len(req.Reviews),
+		"comments": len(req.Comments),
+	})
+}
+
+// setAuthHealth toggles the mock client's authenticated state so e2e tests
+// can drive the "Reconnect GitHub" branch in the popover.
+func (c *MockController) setAuthHealth(ctx *gin.Context) {
+	var req struct {
+		Authenticated bool   `json:"authenticated"`
+		Error         string `json:"error"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	c.mock.SetAuthHealth(req.Authenticated, req.Error)
+	ctx.JSON(http.StatusOK, gin.H{"authenticated": req.Authenticated})
+}
+
+// mockHeadSHA produces a deterministic synthetic head SHA for a (owner, repo,
+// pr_number) tuple so test seed calls can compute the same key.
+func mockHeadSHA(owner, repo string, prNumber int) string {
+	return fmt.Sprintf("mocksha-%s-%s-%d", owner, repo, prNumber)
 }
 
 func (c *MockController) reset(ctx *gin.Context) {
