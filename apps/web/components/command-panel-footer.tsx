@@ -41,6 +41,18 @@ function getFileName(filePath: string) {
   return filePath.split("/").pop() ?? filePath;
 }
 
+export function getCommandValue(cmd: CommandItemType) {
+  return cmd.id + " " + cmd.label + " " + (cmd.keywords?.join(" ") ?? "");
+}
+
+export function getTaskResultValue(task: Task) {
+  return `__task:${task.id} ${task.title}`;
+}
+
+export function getFileResultValue(filePath: string) {
+  return `__file:${filePath}`;
+}
+
 function CommandItemRow({
   cmd,
   onSelect,
@@ -49,11 +61,7 @@ function CommandItemRow({
   onSelect: (cmd: CommandItemType) => void;
 }) {
   return (
-    <CommandItem
-      key={cmd.id}
-      value={cmd.id + " " + cmd.label + " " + (cmd.keywords?.join(" ") ?? "")}
-      onSelect={() => onSelect(cmd)}
-    >
+    <CommandItem key={cmd.id} value={getCommandValue(cmd)} onSelect={() => onSelect(cmd)}>
       {cmd.icon && <span className="text-muted-foreground">{cmd.icon}</span>}
       <span>{cmd.label}</span>
       {cmd.shortcut && <CommandShortcut>{formatShortcut(cmd.shortcut)}</CommandShortcut>}
@@ -90,7 +98,7 @@ function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProp
   return (
     <CommandItem
       key={task.id}
-      value={`__task:${task.id} ${task.title}`}
+      value={getTaskResultValue(task)}
       onSelect={() => onSelect(task)}
       className={isArchived ? "opacity-60" : ""}
       forceMount
@@ -213,7 +221,7 @@ function FileSearchContent({ files, isSearching, search, onSelect }: FileSearchC
         return (
           <CommandItem
             key={filePath}
-            value={`__file:${filePath}`}
+            value={getFileResultValue(filePath)}
             onSelect={() => onSelect(filePath)}
             forceMount
           >

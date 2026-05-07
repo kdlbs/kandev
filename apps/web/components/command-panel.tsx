@@ -15,14 +15,21 @@ import type { Task } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { useDockviewStore } from "@/lib/state/dockview-store";
-import { CommandPanelView } from "@/components/command-panel-footer";
+import {
+  CommandPanelView,
+  getFileResultValue,
+  getTaskResultValue,
+} from "@/components/command-panel-footer";
 
 function getFileName(filePath: string) {
   return filePath.split("/").pop() ?? filePath;
 }
 
+const MODE_COMMANDS: CommandPanelMode = "commands";
+const MODE_SEARCH_FILES: CommandPanelMode = "search-files";
+
 function useCommandPanelState() {
-  const [mode, setMode] = useState<CommandPanelMode>("commands");
+  const [mode, setMode] = useState<CommandPanelMode>(MODE_COMMANDS);
   const [search, setSearch] = useState("");
   const [inputCommand, setInputCommand] = useState<CommandItemType | null>(null);
   const [taskResults, setTaskResults] = useState<Task[]>([]);
@@ -63,22 +70,14 @@ type FileSearchEffectOptions = {
   activeSessionId: string | null;
   setFileResults: (files: string[]) => void;
   setIsSearchingFiles: (searching: boolean) => void;
-  setSelectedValue: (value: string) => void;
   fileDebounceRef: React.RefObject<ReturnType<typeof setTimeout> | null>;
 };
 
 function useFileSearchEffect(opts: FileSearchEffectOptions) {
-  const {
-    mode,
-    search,
-    activeSessionId,
-    setFileResults,
-    setIsSearchingFiles,
-    setSelectedValue,
-    fileDebounceRef,
-  } = opts;
+  const { mode, search, activeSessionId, setFileResults, setIsSearchingFiles, fileDebounceRef } =
+    opts;
   useEffect(() => {
-    if (mode !== "search-files" || !search.trim() || !activeSessionId) {
+    if (mode !== MODE_SEARCH_FILES || !search.trim() || !activeSessionId) {
       setFileResults([]);
       setIsSearchingFiles(false);
       return;
@@ -97,7 +96,6 @@ function useFileSearchEffect(opts: FileSearchEffectOptions) {
         if (!cancelled) {
           const files = res.files ?? [];
           setFileResults(files);
-          if (files.length > 0) setSelectedValue(`__file:${files[0]}`);
         }
       } catch {
         if (!cancelled) setFileResults([]);
@@ -109,15 +107,7 @@ function useFileSearchEffect(opts: FileSearchEffectOptions) {
       cancelled = true;
       if (fileDebounceRef.current) clearTimeout(fileDebounceRef.current);
     };
-  }, [
-    activeSessionId,
-    fileDebounceRef,
-    mode,
-    search,
-    setFileResults,
-    setIsSearchingFiles,
-    setSelectedValue,
-  ]);
+  }, [activeSessionId, fileDebounceRef, mode, search, setFileResults, setIsSearchingFiles]);
 }
 
 const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
@@ -154,7 +144,7 @@ function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
   const { visibleStepIds, stepPositionMap } = useStepMaps(steps);
 
   useEffect(() => {
-    if (mode !== "commands") return;
+    if (mode !== MODE_COMMANDS) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     abortRef.current?.abort();
 
@@ -275,7 +265,7 @@ function useCommandPanelEffects(
   useEffect(() => {
     if (!open) {
       const t = setTimeout(() => {
-        setMode("commands");
+        setMode(MODE_COMMANDS);
         setSearch("");
         setInputCommand(null);
         setTaskResults([]);
@@ -302,9 +292,34 @@ function useCommandPanelEffects(
     activeSessionId,
     setFileResults,
     setIsSearchingFiles,
-    setSelectedValue,
     fileDebounceRef,
   });
+}
+
+function useFirstResultSelection(open: boolean, state: ReturnType<typeof useCommandPanelState>) {
+  const { mode, search, taskResults, fileResults, setSelectedValue } = state;
+
+  useEffect(() => {
+    if (!open) return;
+
+    if (mode === MODE_COMMANDS) {
+      const firstTask = taskResults[0];
+      if (firstTask) {
+        setSelectedValue(getTaskResultValue(firstTask));
+        return;
+      }
+      setSelectedValue((current) => (current.startsWith("__task:") ? "" : current));
+      return;
+    }
+
+    if (mode === MODE_SEARCH_FILES) {
+      const firstFile = fileResults[0];
+      setSelectedValue(firstFile ? getFileResultValue(firstFile) : "");
+      return;
+    }
+
+    setSelectedValue("");
+  }, [fileResults, mode, open, search, setSelectedValue, taskResults]);
 }
 
 function useCommandPanelHandlers(
@@ -382,9 +397,9 @@ function useCommandPanelHandlers(
         inputCommand.onInputSubmit(search.trim());
         return;
       }
-      if (mode !== "commands" && e.key === "Backspace" && !search) {
+      if (mode !== MODE_COMMANDS && e.key === "Backspace" && !search) {
         e.preventDefault();
-        setMode("commands");
+        setMode(MODE_COMMANDS);
         setSearch("");
         setInputCommand(null);
       }
@@ -393,7 +408,7 @@ function useCommandPanelHandlers(
   );
 
   const goBack = useCallback(() => {
-    setMode("commands");
+    setMode(MODE_COMMANDS);
     setSearch("");
     setInputCommand(null);
   }, [setMode, setSearch, setInputCommand]);
@@ -434,6 +449,7 @@ export function CommandPanel() {
   } = state;
 
   useCommandPanelEffects(open, state, workspaceId, activeSessionId, kanbanSteps);
+  useFirstResultSelection(open, state);
 
   const openRef = useRef(open);
   useEffect(() => {
@@ -443,10 +459,10 @@ export function CommandPanel() {
   const toggleCommands = useCallback(() => setOpen(!openRef.current), [setOpen]);
 
   const openFileSearch = useCallback(() => {
-    if (openRef.current && state.mode === "search-files") {
+    if (openRef.current && state.mode === MODE_SEARCH_FILES) {
       setOpen(false);
     } else {
-      state.setMode("search-files");
+      state.setMode(MODE_SEARCH_FILES);
       state.setSearch("");
       setOpen(true);
     }
