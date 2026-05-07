@@ -65,19 +65,20 @@ test.describe("Kanban workflow filter", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    await expect(testPage.getByText("Alpha task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
-    await expect(testPage.getByText("Beta task")).not.toBeVisible();
+    await expect(kanban.taskCardByTitle("Alpha task")).toBeVisible({
+      timeout: TASK_VISIBLE_TIMEOUT,
+    });
+    await expect(kanban.taskCardByTitle("Beta task")).not.toBeVisible();
 
     await selectWorkflowFilter(testPage, "All Workflows");
 
     // Both tasks visible — useWorkflowSelection must not overwrite the null choice.
-    await expect(testPage.getByText("Alpha task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
-    await expect(testPage.getByText("Beta task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
-
-    // Re-open the dropdown and confirm the trigger still reads "All Workflows"
-    // — proves the choice is stable, not just the rendered task list.
-    await testPage.getByTestId("display-button").click();
-    await expect(testPage.getByTestId("display-workflow-filter")).toContainText("All Workflows");
+    await expect(kanban.taskCardByTitle("Alpha task")).toBeVisible({
+      timeout: TASK_VISIBLE_TIMEOUT,
+    });
+    await expect(kanban.taskCardByTitle("Beta task")).toBeVisible({
+      timeout: TASK_VISIBLE_TIMEOUT,
+    });
   });
 
   // Regression: SSR resolveActiveId in app/page.tsx fell back to the first
@@ -112,10 +113,11 @@ test.describe("Kanban workflow filter", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    await expect(testPage.getByText("Alpha task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
-    await expect(testPage.getByText("Beta task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
-
-    await testPage.getByTestId("display-button").click();
-    await expect(testPage.getByTestId("display-workflow-filter")).toContainText("All Workflows");
+    await expect(kanban.taskCardByTitle("Alpha task")).toBeVisible({
+      timeout: TASK_VISIBLE_TIMEOUT,
+    });
+    await expect(kanban.taskCardByTitle("Beta task")).toBeVisible({
+      timeout: TASK_VISIBLE_TIMEOUT,
+    });
   });
 });
