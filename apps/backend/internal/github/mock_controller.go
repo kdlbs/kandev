@@ -1,6 +1,7 @@
 package github
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -191,34 +192,39 @@ func (c *MockController) addBranches(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"added": len(req.Branches)})
 }
 
+// associateTaskPRRequest is the JSON body for the mock-controller's
+// associateTaskPR endpoint. Pointer fields are optional — leave them nil
+// to skip the corresponding TaskPR column update.
+type associateTaskPRRequest struct {
+	TaskID                  string `json:"task_id"`
+	Owner                   string `json:"owner"`
+	Repo                    string `json:"repo"`
+	PRNumber                int    `json:"pr_number"`
+	PRURL                   string `json:"pr_url"`
+	PRTitle                 string `json:"pr_title"`
+	HeadBranch              string `json:"head_branch"`
+	BaseBranch              string `json:"base_branch"`
+	AuthorLogin             string `json:"author_login"`
+	State                   string `json:"state"`
+	ReviewState             string `json:"review_state"`
+	ChecksState             string `json:"checks_state"`
+	MergeableState          string `json:"mergeable_state"`
+	Additions               int    `json:"additions"`
+	Deletions               int    `json:"deletions"`
+	ReviewCount             *int   `json:"review_count,omitempty"`
+	PendingReviewCount      *int   `json:"pending_review_count,omitempty"`
+	RequiredReviews         *int   `json:"required_reviews,omitempty"`
+	ChecksTotal             *int   `json:"checks_total,omitempty"`
+	ChecksPassing           *int   `json:"checks_passing,omitempty"`
+	UnresolvedReviewThreads *int   `json:"unresolved_review_threads,omitempty"`
+}
+
 // associateTaskPR directly creates (or replaces) a github_task_prs record for
 // E2E testing. Repeating the call with the same (task_id, owner, repo,
 // pr_number) updates the row so tests can drive the live-refresh
 // scenario by re-POSTing with new aggregate counts.
 func (c *MockController) associateTaskPR(ctx *gin.Context) {
-	var req struct {
-		TaskID                  string `json:"task_id"`
-		Owner                   string `json:"owner"`
-		Repo                    string `json:"repo"`
-		PRNumber                int    `json:"pr_number"`
-		PRURL                   string `json:"pr_url"`
-		PRTitle                 string `json:"pr_title"`
-		HeadBranch              string `json:"head_branch"`
-		BaseBranch              string `json:"base_branch"`
-		AuthorLogin             string `json:"author_login"`
-		State                   string `json:"state"`
-		ReviewState             string `json:"review_state"`
-		ChecksState             string `json:"checks_state"`
-		MergeableState          string `json:"mergeable_state"`
-		Additions               int    `json:"additions"`
-		Deletions               int    `json:"deletions"`
-		ReviewCount             *int   `json:"review_count,omitempty"`
-		PendingReviewCount      *int   `json:"pending_review_count,omitempty"`
-		RequiredReviews         *int   `json:"required_reviews,omitempty"`
-		ChecksTotal             *int   `json:"checks_total,omitempty"`
-		ChecksPassing           *int   `json:"checks_passing,omitempty"`
-		UnresolvedReviewThreads *int   `json:"unresolved_review_threads,omitempty"`
-	}
+	var req associateTaskPRRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
@@ -227,6 +233,26 @@ func (c *MockController) associateTaskPR(ctx *gin.Context) {
 		req.State = defaultPRState
 	}
 	now := time.Now().UTC()
+	tp := buildTaskPRFromRequest(&req, now)
+	if err := c.store.ReplaceTaskPR(ctx.Request.Context(), tp); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.ensureMockPRForRequest(ctx.Request.Context(), &req, now)
+	// Publish the event so the frontend Zustand store picks up the new PR
+	// without requiring a page reload — mirrors real AssociatePRWithTask.
+	if c.eventBus != nil {
+		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", tp)
+		if err := c.eventBus.Publish(ctx.Request.Context(), events.GitHubTaskPRUpdated, event); err != nil {
+			c.logger.Debug("mock: failed to publish task PR updated event", zap.Error(err))
+		}
+	}
+	ctx.JSON(http.StatusCreated, tp)
+}
+
+// buildTaskPRFromRequest copies the required fields from the JSON body into
+// a TaskPR and applies the optional pointer fields when present.
+func buildTaskPRFromRequest(req *associateTaskPRRequest, now time.Time) *TaskPR {
 	tp := &TaskPR{
 		TaskID:         req.TaskID,
 		Owner:          req.Owner,
@@ -264,42 +290,34 @@ func (c *MockController) associateTaskPR(ctx *gin.Context) {
 	if req.UnresolvedReviewThreads != nil {
 		tp.UnresolvedReviewThreads = *req.UnresolvedReviewThreads
 	}
-	if err := c.store.ReplaceTaskPR(ctx.Request.Context(), tp); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	return tp
+}
+
+// ensureMockPRForRequest seeds a synthetic PR in the mock client so the lazy
+// PRFeedback path can resolve check runs by HeadSHA. Skipped when the PR was
+// already seeded explicitly via addPRs (tests that pin a head_sha for
+// matching check_runs must not have it overwritten).
+func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associateTaskPRRequest, now time.Time) {
+	if existing, _ := c.mock.GetPR(ctx, req.Owner, req.Repo, req.PRNumber); existing != nil {
 		return
 	}
-	// Only synthesize a PR in the mock client when one isn't already seeded by
-	// a prior addPRs call. Tests that explicitly seeded a PR (with their own
-	// head_sha for matching check_runs) must not have it overwritten — that
-	// would break the (owner, repo, head_sha) check-run lookup path.
-	if existing, _ := c.mock.GetPR(ctx.Request.Context(), req.Owner, req.Repo, req.PRNumber); existing == nil {
-		c.mock.AddPR(&PR{
-			Number:      req.PRNumber,
-			Title:       req.PRTitle,
-			URL:         req.PRURL,
-			HTMLURL:     req.PRURL,
-			State:       req.State,
-			HeadBranch:  req.HeadBranch,
-			HeadSHA:     mockHeadSHA(req.Owner, req.Repo, req.PRNumber),
-			BaseBranch:  req.BaseBranch,
-			AuthorLogin: req.AuthorLogin,
-			RepoOwner:   req.Owner,
-			RepoName:    req.Repo,
-			Additions:   req.Additions,
-			Deletions:   req.Deletions,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		})
-	}
-	// Publish the event so the frontend Zustand store picks up the new PR
-	// without requiring a page reload — mirrors real AssociatePRWithTask.
-	if c.eventBus != nil {
-		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", tp)
-		if err := c.eventBus.Publish(ctx.Request.Context(), events.GitHubTaskPRUpdated, event); err != nil {
-			c.logger.Debug("mock: failed to publish task PR updated event", zap.Error(err))
-		}
-	}
-	ctx.JSON(http.StatusCreated, tp)
+	c.mock.AddPR(&PR{
+		Number:      req.PRNumber,
+		Title:       req.PRTitle,
+		URL:         req.PRURL,
+		HTMLURL:     req.PRURL,
+		State:       req.State,
+		HeadBranch:  req.HeadBranch,
+		HeadSHA:     mockHeadSHA(req.Owner, req.Repo, req.PRNumber),
+		BaseBranch:  req.BaseBranch,
+		AuthorLogin: req.AuthorLogin,
+		RepoOwner:   req.Owner,
+		RepoName:    req.Repo,
+		Additions:   req.Additions,
+		Deletions:   req.Deletions,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
 }
 
 // seedPRFeedback registers checks (and optionally reviews / comments) for a
