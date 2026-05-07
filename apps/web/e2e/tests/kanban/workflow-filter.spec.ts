@@ -3,6 +3,8 @@ import { KanbanPage } from "../../pages/kanban-page";
 import type { Page } from "@playwright/test";
 
 const TASK_VISIBLE_TIMEOUT = 10_000;
+const ALPHA_TASK = "Alpha task";
+const BETA_TASK = "Beta task";
 
 async function pickListboxOption(page: Page, optionLabel: string): Promise<void> {
   // Radix Select renders the currently-selected item twice (once in the trigger
@@ -30,7 +32,13 @@ async function selectWorkflowFilter(page: Page, optionLabel: string): Promise<vo
 }
 
 test.describe("Kanban workflow filter", () => {
+  let workflowBId: string | null = null;
+
   test.afterEach(async ({ apiClient, seedData }) => {
+    if (workflowBId) {
+      await apiClient.deleteWorkflow(workflowBId).catch(() => {});
+      workflowBId = null;
+    }
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,
@@ -50,14 +58,15 @@ test.describe("Kanban workflow filter", () => {
     seedData,
   }) => {
     const workflowB = await apiClient.createWorkflow(seedData.workspaceId, "Workflow B", "simple");
+    workflowBId = workflowB.id;
     const stepsB = (await apiClient.listWorkflowSteps(workflowB.id)).steps;
     const startB = stepsB.find((s) => s.is_start_step) ?? stepsB[0];
 
-    await apiClient.createTask(seedData.workspaceId, "Alpha task", {
+    await apiClient.createTask(seedData.workspaceId, ALPHA_TASK, {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
-    await apiClient.createTask(seedData.workspaceId, "Beta task", {
+    await apiClient.createTask(seedData.workspaceId, BETA_TASK, {
       workflow_id: workflowB.id,
       workflow_step_id: startB.id,
     });
@@ -65,18 +74,18 @@ test.describe("Kanban workflow filter", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    await expect(kanban.taskCardByTitle("Alpha task")).toBeVisible({
+    await expect(kanban.taskCardByTitle(ALPHA_TASK)).toBeVisible({
       timeout: TASK_VISIBLE_TIMEOUT,
     });
-    await expect(kanban.taskCardByTitle("Beta task")).not.toBeVisible();
+    await expect(kanban.taskCardByTitle(BETA_TASK)).not.toBeVisible();
 
     await selectWorkflowFilter(testPage, "All Workflows");
 
     // Both tasks visible — useWorkflowSelection must not overwrite the null choice.
-    await expect(kanban.taskCardByTitle("Alpha task")).toBeVisible({
+    await expect(kanban.taskCardByTitle(ALPHA_TASK)).toBeVisible({
       timeout: TASK_VISIBLE_TIMEOUT,
     });
-    await expect(kanban.taskCardByTitle("Beta task")).toBeVisible({
+    await expect(kanban.taskCardByTitle(BETA_TASK)).toBeVisible({
       timeout: TASK_VISIBLE_TIMEOUT,
     });
   });
@@ -90,14 +99,15 @@ test.describe("Kanban workflow filter", () => {
     seedData,
   }) => {
     const workflowB = await apiClient.createWorkflow(seedData.workspaceId, "Workflow B", "simple");
+    workflowBId = workflowB.id;
     const stepsB = (await apiClient.listWorkflowSteps(workflowB.id)).steps;
     const startB = stepsB.find((s) => s.is_start_step) ?? stepsB[0];
 
-    await apiClient.createTask(seedData.workspaceId, "Alpha task", {
+    await apiClient.createTask(seedData.workspaceId, ALPHA_TASK, {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
-    await apiClient.createTask(seedData.workspaceId, "Beta task", {
+    await apiClient.createTask(seedData.workspaceId, BETA_TASK, {
       workflow_id: workflowB.id,
       workflow_step_id: startB.id,
     });
@@ -113,10 +123,10 @@ test.describe("Kanban workflow filter", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    await expect(kanban.taskCardByTitle("Alpha task")).toBeVisible({
+    await expect(kanban.taskCardByTitle(ALPHA_TASK)).toBeVisible({
       timeout: TASK_VISIBLE_TIMEOUT,
     });
-    await expect(kanban.taskCardByTitle("Beta task")).toBeVisible({
+    await expect(kanban.taskCardByTitle(BETA_TASK)).toBeVisible({
       timeout: TASK_VISIBLE_TIMEOUT,
     });
   });
