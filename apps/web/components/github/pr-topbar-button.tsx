@@ -136,11 +136,9 @@ function PRSingleButton({ pr }: { pr: TaskPR }) {
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   const tooltip = `${pr.owner}/${pr.repo} #${pr.pr_number} — ${pr.pr_title}`;
   const { isMobile, open, onOpenChange, handleEnter, handleLeave } = usePopoverInteractions();
-  const anchorRef = useRef<HTMLButtonElement>(null);
 
   const button = (
     <Button
-      ref={anchorRef}
       data-testid="pr-topbar-button"
       data-pr-number={pr.pr_number}
       data-pr-state={pr.state}

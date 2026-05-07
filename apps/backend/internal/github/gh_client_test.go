@@ -1,9 +1,56 @@
 package github
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
+
+func TestIsNotFoundErr(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"HTTP 404", errors.New("gh api: HTTP 404"), true},
+		{"HTTP 404 with suffix", errors.New("gh: HTTP 404: Not Found (404)"), true},
+		{"404 Not Found", errors.New("404 Not Found"), true},
+		{"status: 404", errors.New("request failed (status: 404)"), true},
+		{"unrelated 500", errors.New("HTTP 500: server error"), false},
+		{"unrelated text", errors.New("connection refused"), false},
+		{"403 not 404", errors.New("HTTP 403: Forbidden"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isNotFoundErr(tc.err); got != tc.want {
+				t.Fatalf("isNotFoundErr(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsForbiddenErr(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"HTTP 403", errors.New("gh api: HTTP 403"), true},
+		{"403 Forbidden", errors.New("403 Forbidden"), true},
+		{"status: 403", errors.New("request failed (status: 403)"), true},
+		{"404 not 403", errors.New("HTTP 404"), false},
+		{"500 not 403", errors.New("HTTP 500"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isForbiddenErr(tc.err); got != tc.want {
+				t.Fatalf("isForbiddenErr(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
 
 func TestParseTimePtr(t *testing.T) {
 	tests := []struct {
