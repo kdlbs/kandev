@@ -41,15 +41,7 @@ export function useSubtaskFormState(): DialogFormState {
 
   return useMemo<DialogFormState>(
     () => ({
-      // Title is owned by the subtask dialog directly — these are inert.
-      taskName: "",
-      setTaskName: NOOP,
-      hasTitle: false,
-      setHasTitle: NOOP,
-      hasDescription: false,
-      setHasDescription: NOOP,
-      draftDescription: "",
-      openCycle: 0,
+      ...INERT_TITLE_DRAFT,
       currentDefaults: EMPTY_DEFAULTS,
       descriptionInputRef,
       // Repo chip row — what RepoChipsRow + useDialogHandlers actually drive.
@@ -96,14 +88,7 @@ export function useSubtaskFormState(): DialogFormState {
       workflowAgentProfileId: "",
       setWorkflowAgentProfileId: NOOP,
       clearDraft: NOOP,
-      // Fresh-branch flow is local-executor-only, single-row, and not
-      // surfaced here — keep the toggles wired but always inert.
-      freshBranchEnabled: false,
-      setFreshBranchEnabled: NOOP,
-      currentLocalBranch: "",
-      setCurrentLocalBranch: NOOP,
-      currentLocalBranchLoading: false,
-      setCurrentLocalBranchLoading: NOOP,
+      ...INERT_FRESH_BRANCH_AND_NOREPO,
     }),
     [
       repos.repositories,
@@ -130,3 +115,33 @@ export function useSubtaskFormState(): DialogFormState {
 const NOOP = () => undefined;
 const EMPTY_DEFAULTS = { name: "", description: "" };
 const EMPTY_STEPS: StepType[] | null = null;
+
+// Title / draft / openCycle are inert in the subtask flow — the dialog renders
+// its own title input directly and doesn't restore drafts. Extracted so the
+// useMemo body stays under the function-length lint cap.
+const INERT_TITLE_DRAFT = {
+  taskName: "",
+  setTaskName: NOOP,
+  hasTitle: false,
+  setHasTitle: NOOP,
+  hasDescription: false,
+  setHasDescription: NOOP,
+  draftDescription: "",
+  openCycle: 0,
+} as const;
+
+// Fresh-branch (local-executor-only) and no-repo / scratch workspace mode are
+// top-level create-task features; subtasks inherit their parent's repo
+// context, so these are kept inert.
+const INERT_FRESH_BRANCH_AND_NOREPO = {
+  freshBranchEnabled: false,
+  setFreshBranchEnabled: NOOP,
+  currentLocalBranch: "",
+  setCurrentLocalBranch: NOOP,
+  currentLocalBranchLoading: false,
+  setCurrentLocalBranchLoading: NOOP,
+  noRepository: false,
+  setNoRepository: NOOP,
+  workspacePath: "",
+  setWorkspacePath: NOOP,
+} as const;
