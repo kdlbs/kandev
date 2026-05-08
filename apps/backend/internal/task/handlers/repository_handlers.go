@@ -137,13 +137,18 @@ func (h *RepositoryHandlers) httpDiscoverRepositories(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// httpListDirectory lists the immediate subdirectories of ?path= (defaults to
-// $HOME when path is empty). Used by the folder picker for repo-less tasks.
-// Hidden directories are excluded.
+// httpListDirectory lists the immediate subdirectories of ?path= (defaults
+// to the first configured discovery root, typically $HOME). The path must
+// sit inside one of the configured discovery roots; anything outside is
+// rejected with 403. Hidden (dotfile) directories are excluded.
 func (h *RepositoryHandlers) httpListDirectory(c *gin.Context) {
 	path := c.Query("path")
 	result, err := h.service.ListDirectory(c.Request.Context(), path)
 	if err != nil {
+		if errors.Is(err, service.ErrPathNotAllowed) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "path is not within allowed roots"})
+			return
+		}
 		h.logger.Warn("failed to list directory", zap.String("path", path), zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
