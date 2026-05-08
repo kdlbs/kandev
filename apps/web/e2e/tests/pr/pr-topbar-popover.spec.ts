@@ -239,7 +239,8 @@ test.describe("PR top-bar CI popover", () => {
     await session.hoverPRTopbar();
 
     await expect(session.prReviewRow()).toBeVisible();
-    await expect(session.prReviewRow()).toContainText("Approved 1 / 2 required");
+    await expect(session.prReviewRow()).toContainText("Approved");
+    await expect(session.prReviewRow()).toContainText("1 / 2");
     await expect(session.prCommentsRow()).toBeVisible();
     await expect(session.prCommentsRow()).toContainText("3 unresolved comments");
   });

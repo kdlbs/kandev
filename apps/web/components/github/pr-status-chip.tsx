@@ -64,7 +64,7 @@ function PRStatusChipInner({ pr }: { pr: TaskPR }) {
           data-status={status}
           data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
           aria-label={`Pull request #${pr.pr_number} CI status`}
-          className="cursor-pointer inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs hover:bg-accent/50"
+          className="cursor-pointer inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs"
         >
           <IconListCheck className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
           <ChipStatusGlyph status={status} />

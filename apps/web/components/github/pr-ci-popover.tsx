@@ -367,30 +367,35 @@ function PRReviewRow({ pr }: { pr: TaskPR }) {
   let icon: ReactNode;
   if (pr.review_state === "approved") {
     icon = <IconCheck className="h-3.5 w-3.5 text-emerald-500" />;
-    label =
-      required != null ? `Approved ${approved} / ${required} required` : `Approved (${approved})`;
+    label = "Approved";
   } else if (pr.review_state === "changes_requested") {
     icon = <IconCircleX className="h-3.5 w-3.5 text-red-500" />;
     label = "Changes requested";
   } else {
     // Default branch covers "no reviews yet", "review pending", and any
     // unknown state. Always rendered (no early-return) so a fresh PR
-    // still surfaces its review status — "Awaiting review" with the
-    // required-minimum tail when known.
+    // still surfaces its review status.
     icon = <IconCircleDot className="h-3.5 w-3.5 text-muted-foreground" />;
-    if (required != null) {
-      label = `Awaiting review (${approved}/${required})`;
-    } else if (approved > 0) {
-      label = `${approved} review${approved === 1 ? "" : "s"}`;
-    } else {
-      label = "Awaiting review";
-    }
+    label = "Awaiting review";
   }
-  const suffix = requested > 0 ? ` (${requested} requested)` : "";
+  // Counts live on the right edge, mirroring the check-group rows.
+  // Use "K / M" when a required-minimum is known, otherwise just the
+  // approved count. The "(K requested)" suffix slides in when reviewers
+  // have been pinged but haven't submitted a review.
+  let countText: string;
+  if (required != null) countText = `${approved} / ${required}`;
+  else countText = `${approved}`;
+  if (requested > 0) countText += ` · ${requested} requested`;
   return (
-    <div data-testid="pr-review-row" className="flex items-center gap-1.5 px-1 py-1 text-xs">
-      {icon}
-      <span>{label + suffix}</span>
+    <div
+      data-testid="pr-review-row"
+      className="flex items-center justify-between gap-2 px-1 py-1 text-xs"
+    >
+      <div className="flex items-center gap-1.5 min-w-0">
+        {icon}
+        <span className="truncate">{label}</span>
+      </div>
+      <span className="shrink-0 text-muted-foreground tabular-nums">{countText}</span>
     </div>
   );
 }
