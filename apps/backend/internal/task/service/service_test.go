@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -241,6 +242,9 @@ func TestService_CreateTask_RejectsRepositoryFromOtherWorkspace(t *testing.T) {
 	_, err := svc.CreateTask(ctx, req)
 	if err == nil {
 		t.Fatal("expected cross-workspace repository error, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not belong to workspace") {
+		t.Errorf("expected workspace-ownership error, got: %v", err)
 	}
 }
 
