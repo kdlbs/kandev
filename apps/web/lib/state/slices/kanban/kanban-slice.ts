@@ -17,6 +17,7 @@ export const createKanbanSlice: StateCreator<
   ...defaultKanbanState,
   setActiveWorkflow: (workflowId) =>
     set((draft) => {
+      if (draft.workflows.activeId === workflowId) return;
       draft.workflows.activeId = workflowId;
     }),
   setWorkflows: (workflows) =>
