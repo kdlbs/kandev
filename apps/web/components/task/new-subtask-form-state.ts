@@ -106,7 +106,6 @@ export function useSubtaskFormState(): DialogFormState {
       setCurrentLocalBranchLoading: NOOP,
     }),
     [
-      descriptionInputRef,
       repos.repositories,
       repos.setRepositories,
       repos.addRepository,
