@@ -25,26 +25,7 @@ import { usePlanPanelAutoOpen } from "@/hooks/use-plan-panel-auto-open";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
-import { useTask } from "@/hooks/use-task";
-
-/**
- * Repo-status of the active task, distinguishing three states:
- *   - `null`   — unknown (no active task, or task hasn't loaded into the
- *                store yet); callers must not act on this.
- *   - `true`   — task has at least one repository.
- *   - `false`  — task is confirmed repo-less.
- *
- * Returning a boolean here would conflate "loading" with "no repos", and
- * the auto-close effect below would tear down the Changes panel on first
- * render before the task data arrives — `removePanel` is permanent within
- * a session, so the user couldn't recover it.
- */
-function useActiveTaskHasRepos(): boolean | null {
-  const taskId = useAppStore((s) => s.tasks.activeTaskId);
-  const task = useTask(taskId);
-  if (!task) return null;
-  return Boolean(task.repositories && task.repositories.length > 0);
-}
+import { useActiveTaskHasRepos } from "@/hooks/domains/kanban/use-active-task-has-repos";
 
 // Panel components (rendered via portals, not directly by dockview)
 import { TaskSessionSidebar } from "./task-session-sidebar";
