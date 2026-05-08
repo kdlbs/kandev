@@ -487,11 +487,6 @@ export class SessionPage {
     return this.prTopbarPopover().getByTestId("pr-popover-updated-at");
   }
 
-  /** Footer fetch-progress bar (visible only while a PRFeedback fetch is in flight). */
-  prPopoverProgress(): Locator {
-    return this.prTopbarPopover().getByTestId("pr-popover-progress");
-  }
-
   /** Empty-state row when the PR has no checks yet. */
   prChecksEmpty(): Locator {
     return this.prTopbarPopover().getByTestId("pr-checks-empty");

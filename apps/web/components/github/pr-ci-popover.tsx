@@ -347,13 +347,7 @@ function elapsedLabel(elapsed: number | null): string {
   return `updated ${formatElapsedShort(elapsed)} ago`;
 }
 
-function PRPopoverFooter({
-  isFetching,
-  lastUpdatedAt,
-}: {
-  isFetching: boolean;
-  lastUpdatedAt: number | null;
-}) {
+function PRPopoverFooter({ lastUpdatedAt }: { lastUpdatedAt: number | null }) {
   // Capture a "now" snapshot only inside the setInterval callback (an event
   // handler — no impurity in render, no setState during commit). When no
   // tick has fired yet, fall back to lastUpdatedAt so the rendered elapsed
@@ -368,21 +362,12 @@ function PRPopoverFooter({
     lastUpdatedAt == null
       ? null
       : Math.max(0, Math.floor(((now ?? lastUpdatedAt) - lastUpdatedAt) / 1000));
+  if (lastUpdatedAt == null) return null;
   return (
     <div
       data-testid="pr-popover-footer"
-      className="flex items-center gap-2 border-t border-border/50 pt-1.5"
+      className="flex items-center justify-end border-t border-border/50 pt-1.5"
     >
-      {isFetching ? (
-        <div
-          data-testid="pr-popover-progress"
-          className="h-0.5 flex-1 bg-muted overflow-hidden rounded-full relative"
-        >
-          <div className="absolute inset-y-0 -left-1/3 w-1/3 bg-primary animate-[progress_1.2s_ease-in-out_infinite]" />
-        </div>
-      ) : (
-        <div className="h-0.5 flex-1" />
-      )}
       <span
         data-testid="pr-popover-updated-at"
         className="text-[10px] text-muted-foreground tabular-nums"
@@ -470,7 +455,7 @@ export function PRCIPopover({
           <span>Open PR details</span>
         </Button>
       )}
-      <PRPopoverFooter isFetching={isFetching} lastUpdatedAt={lastUpdatedAt} />
+      <PRPopoverFooter lastUpdatedAt={lastUpdatedAt} />
     </div>
   );
 }
