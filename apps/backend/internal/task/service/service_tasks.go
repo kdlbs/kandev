@@ -160,6 +160,15 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 	repositoryID = repoInput.RepositoryID
 	baseBranch = repoInput.BaseBranch
 	if repositoryID != "" {
+		// Verify the repository belongs to the target workspace. Without this
+		// check, an agent that knows a repository UUID from another workspace
+		// could associate it with a task in this workspace via the MCP tool's
+		// repository_id fast path (the github_url and local_path branches both
+		// scope through FindOrCreateRepository, which is workspace-bound).
+		repo, err := s.repoEntities.GetRepository(ctx, repositoryID)
+		if err != nil || repo == nil || repo.WorkspaceID != workspaceID {
+			return "", "", fmt.Errorf("repository %q does not belong to workspace %q", repositoryID, workspaceID)
+		}
 		return repositoryID, baseBranch, nil
 	}
 
