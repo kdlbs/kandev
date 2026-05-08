@@ -52,13 +52,22 @@ function PRStatusChipInner({ pr }: { pr: TaskPR }) {
 }
 
 /**
- * Background colour token mirroring `getPRStatusColor` (which returns a
- * `text-*` class). Doing the mapping inline keeps the chip's styling
- * (`bg-*` on a filled circle) consistent with the icon colour without
- * round-tripping through a foreground token.
+ * Background colour mapping that mirrors `getPRStatusColor` (which returns
+ * a `text-*` class). Tailwind's content scanner only sees literal class
+ * strings, so we keep this as a static lookup instead of building it via
+ * string replacement at runtime — otherwise the bundle drops the bg-*
+ * styles and the chip renders without colour.
  */
+const CHIP_BG_BY_TEXT_CLASS: Record<string, string> = {
+  "text-red-500": "bg-red-500",
+  "text-yellow-500": "bg-yellow-500",
+  "text-sky-400": "bg-sky-400",
+  "text-emerald-400": "bg-emerald-400",
+  "text-green-500": "bg-green-500",
+  "text-purple-500": "bg-purple-500",
+  "text-muted-foreground": "bg-muted-foreground",
+};
+
 function chipBg(pr: TaskPR): string {
-  // Reuse the canonical mapping; the text-class string is stable so we
-  // can swap "text-" → "bg-" and pick up the same colour.
-  return getPRStatusColor(pr).replace(/\btext-/g, "bg-");
+  return CHIP_BG_BY_TEXT_CLASS[getPRStatusColor(pr)] ?? "bg-muted-foreground";
 }
