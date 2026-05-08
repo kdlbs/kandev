@@ -62,11 +62,12 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 		state = *req.State
 	}
 	metadata := req.Metadata
-	if req.WorkspacePath != "" {
+	workspacePath := strings.TrimSpace(req.WorkspacePath)
+	if workspacePath != "" {
 		if metadata == nil {
 			metadata = make(map[string]interface{})
 		}
-		metadata["workspace_path"] = req.WorkspacePath
+		metadata[models.MetaKeyWorkspacePath] = workspacePath
 	}
 	task := &models.Task{
 		ID:             uuid.New().String(),

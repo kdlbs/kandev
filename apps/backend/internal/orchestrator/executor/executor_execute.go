@@ -254,7 +254,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 
 	// Create agent session in database. WorkspacePath is propagated from task
 	// metadata for repo-less tasks where the user picked a starting folder.
-	workspacePath, _ := task.Metadata["workspace_path"].(string)
+	workspacePath, _ := task.Metadata[models.MetaKeyWorkspacePath].(string)
 	sessionID := uuid.New().String()
 	now := time.Now().UTC()
 	session := &models.TaskSession{

@@ -38,6 +38,10 @@ type SearchMessagesOptions struct {
 const (
 	MetaKeyAgentProfileID    = "agent_profile_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
+	// MetaKeyWorkspacePath is the optional host folder for repo-less tasks
+	// (set by CreateTask, read by the orchestrator when building a session).
+	// Centralised here so the set/read sites can't drift apart.
+	MetaKeyWorkspacePath = "workspace_path"
 )
 
 // Task represents a task in the database

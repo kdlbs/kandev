@@ -303,7 +303,11 @@ export function useTaskSubmitHandlers({
           planMode: opts.planMode,
           attachments: opts.attachments,
           parentId: parentTaskId,
-          workspacePath: noRepository ? workspacePath.trim() : undefined,
+          // Pass undefined (not "") for an empty trimmed path so the JSON
+          // payload omits the key entirely — matches the noRepository=false
+          // case and keeps "no path provided" semantically distinct from
+          // "empty path string" on the wire.
+          workspacePath: noRepository ? workspacePath.trim() || undefined : undefined,
         });
       const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, opts.consented);
       if (!taskResponse) return;

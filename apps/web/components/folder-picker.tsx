@@ -113,7 +113,15 @@ function useDirectoryListing(open: boolean, value: string) {
   }, []);
 
   useEffect(() => {
-    if (!open || listing) return;
+    // Reset cached listing when the popover closes so the next open reloads
+    // from `value`. Without this, a user who browsed deep into the tree,
+    // closed without committing, and reopened would still see the stale
+    // last-browsed directory instead of their picked folder (or the root).
+    if (!open) {
+      setListing(null);
+      return;
+    }
+    if (listing) return;
     void load(value || "");
   }, [open, listing, load, value]);
 
