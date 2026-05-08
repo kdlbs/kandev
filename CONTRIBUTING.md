@@ -40,4 +40,4 @@ make typecheck  # TypeScript type checking
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the [AGPL-3.0](LICENSE) license.
+By contributing, you agree that your contributions will be licensed under the [Apache-2.0](LICENSE) license.

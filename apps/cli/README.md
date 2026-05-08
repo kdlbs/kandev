@@ -78,4 +78,4 @@ See the [GitHub repository](https://github.com/kdlbs/kandev) for architecture, v
 
 ## License
 
-[AGPL-3.0](https://github.com/kdlbs/kandev/blob/main/LICENSE)
+[Apache-2.0](https://github.com/kdlbs/kandev/blob/main/LICENSE)
