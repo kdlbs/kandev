@@ -517,6 +517,7 @@ export function useTaskSubmitHandlers({
           executorId,
           executorProfileId,
           withAgent: false,
+          workspacePath: noRepository ? workspacePath.trim() || undefined : undefined,
         });
         p.workflow_step_id = effectiveDefaultStepId;
         return p;
@@ -543,6 +544,8 @@ export function useTaskSubmitHandlers({
     effectiveDefaultStepId,
     executorId,
     executorProfileId,
+    noRepository,
+    workspacePath,
     validateForCreate,
     getRepositoriesPayload,
     ensureFreshBranchConsent,
