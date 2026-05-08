@@ -9,7 +9,6 @@ import { useToast } from "@/components/toast-provider";
 import { createTask } from "@/lib/api/domains/kanban-api";
 import { replaceTaskUrl } from "@/lib/links";
 
-
 import {
   useAgentProfileOptions,
   useExecutorProfileOptions,
@@ -36,11 +35,7 @@ import {
 } from "@/components/task-create-dialog-helpers";
 import { useSubtaskFormState } from "./new-subtask-form-state";
 import { WorktreeBadge, SelectorsRow, PromptZone } from "./new-subtask-form-parts";
-import {
-  ContextSelect,
-  useDialogAttachments,
-  toContextItems,
-} from "./session-dialog-shared";
+import { ContextSelect, useDialogAttachments, toContextItems } from "./session-dialog-shared";
 
 type NewSubtaskDialogProps = {
   open: boolean;
@@ -500,7 +495,6 @@ function NewSubtaskForm({
     </form>
   );
 }
-
 
 export function NewSubtaskDialog({
   open,
