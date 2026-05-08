@@ -1,19 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
-import { Button } from "@kandev/ui/button";
-import { Input } from "@kandev/ui/input";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
-import { createTask } from "@/lib/api/domains/kanban-api";
-import { replaceTaskUrl } from "@/lib/links";
 
 import {
   useAgentProfileOptions,
   useExecutorProfileOptions,
 } from "@/components/task-create-dialog-options";
-import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
 import { useDialogHandlers } from "@/components/task-create-dialog-handlers";
 import {
   useDiscoverReposEffect,
@@ -22,20 +17,15 @@ import {
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
-import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import type { ExecutorProfile, Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
-import {
-  buildRepositoriesPayload,
-  toMessageAttachments,
-} from "@/components/task-create-dialog-helpers";
 import { useSubtaskFormState } from "./new-subtask-form-state";
-import { WorktreeBadge, SelectorsRow, PromptZone } from "./new-subtask-form-parts";
-import { ContextSelect, useDialogAttachments, toContextItems } from "./session-dialog-shared";
+import { PromptZone, SubtaskFormBody } from "./new-subtask-form-parts";
+import { useSubtaskPromptZone, useSubtaskSubmit } from "./use-subtask-submit";
 
 type NewSubtaskDialogProps = {
   open: boolean;
@@ -131,19 +121,6 @@ function useAutoSelectExecutorProfile(
   }, [allProfiles, executorProfileId, setExecutorProfileId]);
 }
 
-function activateSubtaskSession(opts: {
-  sessionId: string;
-  taskId: string;
-  setActiveTask: (taskId: string) => void;
-  setActiveSession: (taskId: string, sessionId: string) => void;
-}) {
-  opts.setActiveTask(opts.taskId);
-  opts.setActiveSession(opts.taskId, opts.sessionId);
-  // Layout switch is handled by useEnvSwitchCleanup when the new session's
-  // task_environment_id is present; the hook subscribes to env-id updates.
-  replaceTaskUrl(opts.taskId);
-}
-
 /**
  * Seeds the chip row with the parent task's repo + branch when the form
  * mounts. Form parent passes `key={open}` so each dialog open remounts the
@@ -236,7 +213,6 @@ type SubtaskFormProps = {
   onClose: () => void;
 };
 
-// eslint-disable-next-line max-lines-per-function
 function NewSubtaskForm({
   parentTaskId,
   defaultTitle,
@@ -254,8 +230,6 @@ function NewSubtaskForm({
   onClose,
 }: SubtaskFormProps) {
   const { toast } = useToast();
-  const setActiveTask = useAppStore((s) => s.setActiveTask);
-  const setActiveSession = useAppStore((s) => s.setActiveSession);
   const isUtilityConfigured = useIsUtilityConfigured();
   const { summarize, isSummarizing } = useSummarizeSession();
   const [isCreating, setIsCreating] = useState(false);
@@ -272,227 +246,71 @@ function NewSubtaskForm({
   // Fetch on-disk repos so the chip dropdown shows "on disk" entries
   // (matches the create-task dialog's RepoChipsRow behavior).
   useDiscoverReposEffect(fs, isOpen, workspaceId, false, toast);
-  const promptRef = useRef<HTMLTextAreaElement>(null);
-  const {
-    attachments,
-    isDragging,
-    fileInputRef,
-    handleRemoveAttachment,
-    handlePaste,
-    handleDragOver,
-    handleDragLeave,
-    handleDrop,
-    handleAttachClick,
-    handleFileInputChange,
-  } = useDialogAttachments(isCreating || isSummarizing);
-  const contextItems = useMemo(
-    () => toContextItems(attachments, handleRemoveAttachment),
-    [attachments, handleRemoveAttachment],
-  );
   const profileOptions = useAgentProfileOptions(agentProfiles);
   const sessionOptions = useSessionOptions(parentTaskId);
-  const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
-    sessionId: null,
-    taskTitle: title,
-  });
-  const handleEnhancePrompt = useCallback(() => {
-    const current = promptRef.current?.value?.trim();
-    if (!current) return;
-    enhancePrompt(current, (enhanced) => {
-      if (promptRef.current) {
-        promptRef.current.value = enhanced;
-        setHasPrompt(true);
-      }
-    });
-  }, [enhancePrompt]);
-
   const allExecutorProfiles = useExecutorProfiles(executors);
   const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles);
   useAutoSelectExecutorProfile(allExecutorProfiles, fs.executorProfileId, fs.setExecutorProfileId);
-
+  const promptZone = useSubtaskPromptZone({
+    taskTitle: title,
+    inputDisabled: isCreating || isSummarizing,
+    contextValue,
+    initialPrompt,
+    setHasPrompt,
+  });
   const handleContextChange = useContextChangeHandler({
     setContextValue,
     setHasPrompt,
-    promptRef,
+    promptRef: promptZone.promptRef,
     initialPrompt,
     summarize,
   });
-
-  const resolvePrompt = useCallback(() => {
-    const typed = promptRef.current?.value?.trim() ?? "";
-    if (contextValue === "copy_prompt" && !typed && initialPrompt) return initialPrompt;
-    return typed;
-  }, [contextValue, initialPrompt]);
-
-  const performCreate = useCallback(
-    async (trimmedTitle: string, prompt: string) => {
-      const repositories = buildRepositoriesPayload({
-        useGitHubUrl: fs.useGitHubUrl,
-        githubUrl: fs.githubUrl,
-        githubBranch: fs.githubBranch,
-        githubPrHeadBranch: fs.githubPrHeadBranch,
-        repositories: fs.repositories,
-        discoveredRepositories: fs.discoveredRepositories,
-        workspaceRepositories: availableRepositories,
-      });
-      const profileId = fs.agentProfileId || defaultProfileId || undefined;
-
-      const response = await createTask({
-        workspace_id: workspaceId!,
-        workflow_id: workflowId!,
-        title: trimmedTitle,
-        description: prompt,
-        repositories,
-        start_agent: true,
-        agent_profile_id: profileId,
-        executor_profile_id: fs.executorProfileId || undefined,
-        parent_id: parentTaskId,
-        attachments: toMessageAttachments(attachments),
-      });
-
-      const newSessionId = response.session_id ?? response.primary_session_id ?? null;
-      if (newSessionId) {
-        activateSubtaskSession({
-          sessionId: newSessionId,
-          taskId: response.id,
-          setActiveTask,
-          setActiveSession,
-        });
-      }
-    },
-    [
-      fs.useGitHubUrl,
-      fs.githubUrl,
-      fs.githubBranch,
-      fs.githubPrHeadBranch,
-      fs.repositories,
-      fs.discoveredRepositories,
-      fs.agentProfileId,
-      fs.executorProfileId,
-      availableRepositories,
-      defaultProfileId,
-      workspaceId,
-      workflowId,
-      parentTaskId,
-      attachments,
-      setActiveTask,
-      setActiveSession,
-    ],
-  );
-
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      const trimmedTitle = title.trim();
-      if (!trimmedTitle || !workspaceId || !workflowId) return;
-      const prompt = resolvePrompt();
-      if (!prompt) return;
-
-      setIsCreating(true);
-      try {
-        await performCreate(trimmedTitle, prompt);
-        onClose();
-      } catch (error) {
-        toast({
-          title: "Failed to create subtask",
-          description: error instanceof Error ? error.message : "Unknown error",
-          variant: "error",
-        });
-      } finally {
-        setIsCreating(false);
-      }
-    },
-    [title, workspaceId, workflowId, resolvePrompt, performCreate, onClose, toast],
-  );
-
-  const showSessions = isUtilityConfigured ? sessionOptions : [];
-  // Worktree badge is only meaningful when the subtask still targets the
-  // parent's repo (single chip, same id). Adding repos or pasting a URL makes
-  // it ambiguous, so hide.
-  const onlyChipIsParent =
-    fs.repositories.length === 1 &&
-    fs.repositories[0]?.repositoryId === parentRepositoryId &&
-    !fs.useGitHubUrl;
-  const showWorktreeBadge = !!worktreeBranch && onlyChipIsParent;
-
+  const { handleSubmit } = useSubtaskSubmit({
+    fs,
+    parentTaskId,
+    defaultProfileId,
+    workspaceId,
+    workflowId,
+    availableRepositories,
+    attachments: promptZone.attachments.attachments,
+    resolvePrompt: promptZone.resolvePrompt,
+    title,
+    setIsCreating,
+    onClose,
+  });
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium text-muted-foreground">Title</label>
-        <Input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Subtask title"
-          className="text-sm"
-          data-testid="subtask-title-input"
-          disabled={isCreating}
+    <SubtaskFormBody
+      fs={fs}
+      handlers={handlers}
+      title={title}
+      setTitle={setTitle}
+      workspaceId={workspaceId}
+      availableRepositories={availableRepositories}
+      parentRepositoryId={parentRepositoryId}
+      worktreeBranch={worktreeBranch}
+      profileOptions={profileOptions}
+      executorProfileOptions={executorProfileOptions}
+      agentProfileId={fs.agentProfileId || defaultProfileId}
+      contextValue={contextValue}
+      onContextChange={handleContextChange}
+      hasInitialPrompt={!!initialPrompt}
+      sessionOptions={isUtilityConfigured ? sessionOptions : []}
+      promptZone={
+        <PromptZone
+          {...promptZone}
+          isCreating={isCreating}
+          isSummarizing={isSummarizing}
+          isUtilityConfigured={isUtilityConfigured}
+          setHasPrompt={setHasPrompt}
+          onSubmitShortcut={handleSubmit}
         />
-      </div>
-      <RepoChipsRow
-        fs={fs}
-        repositories={availableRepositories}
-        isTaskStarted={false}
-        workspaceId={workspaceId}
-        onRowRepositoryChange={handlers.handleRowRepositoryChange}
-        onRowBranchChange={handlers.handleRowBranchChange}
-        onToggleGitHubUrl={handlers.handleToggleGitHubUrl}
-        onGitHubUrlChange={handlers.handleGitHubUrlChange}
-      />
-      <WorktreeBadge show={showWorktreeBadge} branch={worktreeBranch} />
-      <SelectorsRow
-        profileOptions={profileOptions}
-        executorProfileOptions={executorProfileOptions}
-        agentProfileId={fs.agentProfileId || defaultProfileId}
-        executorProfileId={fs.executorProfileId}
-        onAgentProfileChange={handlers.handleAgentProfileChange}
-        onExecutorProfileChange={handlers.handleExecutorProfileChange}
-        disabled={isCreating}
-      />
-      <ContextSelect
-        value={contextValue}
-        onValueChange={handleContextChange}
-        hasInitialPrompt={!!initialPrompt}
-        sessionOptions={showSessions}
-        isSummarizing={isSummarizing}
-      />
-      <PromptZone
-        promptRef={promptRef}
-        contextItems={contextItems}
-        fileInputRef={fileInputRef}
-        isDragging={isDragging}
-        isCreating={isCreating}
-        isSummarizing={isSummarizing}
-        isEnhancingPrompt={isEnhancingPrompt}
-        isUtilityConfigured={isUtilityConfigured}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        onPaste={handlePaste}
-        onFileInputChange={handleFileInputChange}
-        onAttachClick={handleAttachClick}
-        onEnhancePrompt={handleEnhancePrompt}
-        setHasPrompt={setHasPrompt}
-        onSubmitShortcut={handleSubmit}
-      />
-      <DialogFooter>
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={onClose}
-          disabled={isCreating}
-          className="cursor-pointer"
-        >
-          Cancel
-        </Button>
-        <Button
-          type="submit"
-          disabled={isCreating || isSummarizing || !hasPrompt}
-          className="cursor-pointer"
-        >
-          {isCreating ? "Creating..." : "Create Subtask"}
-        </Button>
-      </DialogFooter>
-    </form>
+      }
+      isCreating={isCreating}
+      isSummarizing={isSummarizing}
+      hasPrompt={hasPrompt}
+      onClose={onClose}
+      onSubmit={handleSubmit}
+    />
   );
 }
 
