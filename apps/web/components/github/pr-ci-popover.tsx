@@ -343,7 +343,7 @@ function PRCommentsRow({ pr }: { pr: TaskPR }) {
 
 function elapsedLabel(elapsed: number | null): string {
   if (elapsed == null) return "";
-  if (elapsed === 0) return "just now";
+  if (elapsed === 0) return "updated just now";
   return `updated ${formatElapsedShort(elapsed)} ago`;
 }
 
