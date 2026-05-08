@@ -12,33 +12,26 @@ export function prFeedbackKey(pr: { owner: string; repo: string; pr_number: numb
 type Result = {
   /** Last cached PRFeedback (may be stale while a refetch is in flight). */
   feedback: PRFeedback | null;
-  /** True while a fetch is in flight. Drives the popover progress bar. */
+  /** True while a fetch is in flight. Drives the popover loading state. */
   isFetching: boolean;
   /** Wallclock ms when the cache entry was last updated. */
   lastUpdatedAt: number | null;
-  /** Trigger a refetch immediately (used on hover-open and on WS update). */
+  /** Trigger a refetch immediately (used as a hover-open safety net). */
   refetch: () => void;
 };
 
 /**
- * SWR-style hook for the CI popover: keeps a per-PR cache of PRFeedback, and
- * exposes refetch/loading state. The popover refetches on every open and
- * subscribes to `github.task_pr.updated` (already broadcast by the backend
- * poller / mock controller) while open so a check finishing mid-stare still
- * lands.
- *
- * Pass `enabled=false` to fully disable the hook (e.g. when no PR is
- * associated, or on touch devices where the popover is suppressed).
+ * Internal: fetch + cache one PR's feedback. Used by the background-sync hook
+ * (always-on, mounted at the top-bar button) and by the popover hook (gated
+ * on hover-open). Keeping the fetch logic shared means the request-counter
+ * dedup is preserved across both call sites.
  */
-export function usePRCIPopover(pr: TaskPR | null, enabled: boolean): Result {
-  const key = pr ? prFeedbackKey(pr) : null;
-  const cached = useAppStore((state) => (key ? (state.prFeedbackCache.byKey[key] ?? null) : null));
+function useFeedbackFetch(pr: TaskPR | null) {
   const setEntry = useAppStore((state) => state.setPRFeedbackCacheEntry);
   const [isFetching, setIsFetching] = useState(false);
   const requestRef = useRef(0);
-
   const refetch = useCallback(() => {
-    if (!pr || !enabled) return;
+    if (!pr) return;
     const requestId = ++requestRef.current;
     setIsFetching(true);
     getPRFeedback(pr.owner, pr.repo, pr.pr_number, { cache: "no-store" })
@@ -48,30 +41,55 @@ export function usePRCIPopover(pr: TaskPR | null, enabled: boolean): Result {
       })
       .catch(() => {
         // Swallow errors — the popover keeps showing the stale cached value
-        // (Q4: stale-while-revalidate). A future refetch may succeed.
+        // (stale-while-revalidate). A future refetch may succeed.
       })
       .finally(() => {
         if (requestRef.current === requestId) setIsFetching(false);
       });
-  }, [pr, enabled, setEntry]);
+  }, [pr, setEntry]);
+  return { refetch, isFetching };
+}
 
-  // Refetch on (a) every popover-open transition and (b) every time the
-  // underlying TaskPR's updated_at changes while open. The wasEnabledRef
-  // tracks the previous enabled value so we don't miss the first open
-  // (when both `enabled` and `lastSyncedAt` are stable but the popover is
-  // newly visible). queueMicrotask defers the setState (inside refetch's
-  // setIsFetching) so the lint's "no setState in effect" rule is satisfied.
+/**
+ * Always-on background sync for the active task's PR. Mounted at the
+ * PRTopbarButton so the popover cache stays fresh at the same cadence as
+ * the button icon: every time `pr.updated_at` changes (the WS push that
+ * already drives the icon color), refetch PRFeedback into the cache.
+ *
+ * Without this, hover-open had to wait for the on-demand fetch to land
+ * before showing fresh data — the user sees a stale popover for ~150ms
+ * + network latency.
+ */
+export function usePRFeedbackBackgroundSync(pr: TaskPR | null): void {
+  const { refetch } = useFeedbackFetch(pr);
   const lastSyncedAt = pr?.updated_at ?? null;
   const lastSyncedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (lastSyncedAt == null) return;
+    if (lastSyncedRef.current === lastSyncedAt) return;
+    lastSyncedRef.current = lastSyncedAt;
+    queueMicrotask(refetch);
+  }, [lastSyncedAt, refetch]);
+}
+
+/**
+ * Popover-side reader: returns the cached feedback + fires an on-demand
+ * refetch whenever the popover transitions from closed to open. The
+ * background-sync hook keeps the cache fresh in the meantime, so this
+ * mostly serves as a safety net for the very first hover (before any
+ * sync has fired).
+ */
+export function usePRCIPopover(pr: TaskPR | null, enabled: boolean): Result {
+  const key = pr ? prFeedbackKey(pr) : null;
+  const cached = useAppStore((state) => (key ? (state.prFeedbackCache.byKey[key] ?? null) : null));
+  const { refetch, isFetching } = useFeedbackFetch(pr);
+
   const wasEnabledRef = useRef(false);
   useEffect(() => {
     const opened = enabled && !wasEnabledRef.current;
     wasEnabledRef.current = enabled;
-    if (!enabled) return;
-    if (!opened && lastSyncedRef.current === lastSyncedAt) return;
-    lastSyncedRef.current = lastSyncedAt;
-    queueMicrotask(refetch);
-  }, [enabled, lastSyncedAt, refetch]);
+    if (opened) queueMicrotask(refetch);
+  }, [enabled, refetch]);
 
   return {
     feedback: cached?.feedback ?? null,

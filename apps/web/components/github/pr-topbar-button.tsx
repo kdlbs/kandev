@@ -29,6 +29,7 @@ import {
 } from "@/components/github/pr-task-icon";
 import { prTaskKey } from "@/components/github/pr-detail-panel";
 import { PRCIPopover } from "@/components/github/pr-ci-popover";
+import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
@@ -136,6 +137,10 @@ function PRSingleButton({ pr }: { pr: TaskPR }) {
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   const tooltip = `${pr.owner}/${pr.repo} #${pr.pr_number} — ${pr.pr_title}`;
   const { isMobile, open, onOpenChange, handleEnter, handleLeave } = usePopoverInteractions();
+  // Keep the popover cache fresh at the same cadence as the icon
+  // (driven by github.task_pr.updated WS pushes), so a hover doesn't have
+  // to wait for the on-demand refetch to land before showing fresh data.
+  usePRFeedbackBackgroundSync(isMobile ? null : pr);
 
   const button = (
     <Button
