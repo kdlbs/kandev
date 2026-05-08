@@ -91,18 +91,61 @@ func getPRStatus(ctx context.Context, c Client, owner, repo string, number int) 
 	reviewState, pendingReviewCount := deriveReviewSyncState(pr, reviews)
 	total, passing := countCheckResults(checks)
 	return &PRStatus{
-		PR:                 pr,
-		ReviewState:        reviewState,
-		ChecksState:        computeOverallCheckStatus(checks),
-		MergeableState:     pr.MergeableState,
-		ReviewCount:        len(reviews),
+		PR:             pr,
+		ReviewState:    reviewState,
+		ChecksState:    computeOverallCheckStatus(checks),
+		MergeableState: pr.MergeableState,
+		// ReviewCount is the number of distinct reviewers whose latest review
+		// state is APPROVED — it's the value the popover renders as
+		// "Approved (N)" / "Approved N / M required". Counting raw review
+		// entries (`len(reviews)`) double-counts authors who left multiple
+		// reviews and also includes COMMENTED / CHANGES_REQUESTED rows.
+		ReviewCount:        countApprovedReviewers(reviews),
 		PendingReviewCount: pendingReviewCount,
 		ChecksTotal:        total,
 		ChecksPassing:      passing,
-		// REST path actually counted check runs — distinguish from the
-		// batched-GraphQL path that only carries the rollup state.
-		ChecksPopulated: true,
+		// REST path actually counted check runs + reviews — distinguish
+		// from the batched-GraphQL path that only carries rollup state.
+		ChecksPopulated:       true,
+		ReviewCountsPopulated: true,
 	}, nil
+}
+
+// countApprovedReviewers returns the number of distinct authors whose latest
+// review state is APPROVED. Mirrors the dedup logic in summarizeReviewState
+// (GraphQL path) so REST and GraphQL agree on what "Approved (N)" means.
+func countApprovedReviewers(reviews []PRReview) int {
+	type latest struct {
+		state string
+		at    time.Time
+	}
+	byAuthor := make(map[string]latest)
+	for _, r := range reviews {
+		key := r.Author
+		if key == "" {
+			key = "<anon>:" + r.CreatedAt.UTC().Format(time.RFC3339Nano)
+		}
+		state := strings.ToUpper(r.State)
+		// COMMENTED / PENDING are non-binding and shouldn't replace a prior
+		// APPROVED / CHANGES_REQUESTED for the same reviewer (mirrors the
+		// GraphQL summarizeReviewState dedup rule).
+		if state != reviewStateApproved && state != reviewStateChangesRequested {
+			if _, ok := byAuthor[key]; ok {
+				continue
+			}
+		}
+		prev, ok := byAuthor[key]
+		if !ok || !r.CreatedAt.Before(prev.at) {
+			byAuthor[key] = latest{state: state, at: r.CreatedAt}
+		}
+	}
+	count := 0
+	for _, l := range byAuthor {
+		if l.state == reviewStateApproved {
+			count++
+		}
+	}
+	return count
 }
 
 // countCheckResults returns (total, passing) counts using the same logic as

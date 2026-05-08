@@ -774,6 +774,15 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	if status.UnresolvedReviewThreadsPopulated {
 		nextUnresolved = status.UnresolvedReviewThreads
 	}
+	// Review counts: only overwrite when the caller actually computed them.
+	// Both REST and GraphQL paths now populate these, but a partial sync
+	// path that doesn't would otherwise reset the popover's "Approved (N)"
+	// to zero.
+	nextReviewCount, nextPendingReviewCount := tp.ReviewCount, tp.PendingReviewCount
+	if status.ReviewCountsPopulated {
+		nextReviewCount = status.ReviewCount
+		nextPendingReviewCount = status.PendingReviewCount
+	}
 	// PRs can be retargeted to a different base branch; pick up the new
 	// branch from status.PR before resolving branch-protection so we don't
 	// indefinitely surface the wrong rule.
@@ -798,8 +807,8 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		tp.ReviewState != status.ReviewState ||
 		tp.ChecksState != status.ChecksState ||
 		tp.MergeableState != status.MergeableState ||
-		tp.ReviewCount != status.ReviewCount ||
-		tp.PendingReviewCount != status.PendingReviewCount ||
+		tp.ReviewCount != nextReviewCount ||
+		tp.PendingReviewCount != nextPendingReviewCount ||
 		!intPtrEqual(tp.RequiredReviews, nextRequiredReviews) ||
 		tp.ChecksTotal != nextChecksTotal ||
 		tp.ChecksPassing != nextChecksPassing ||
@@ -817,8 +826,8 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	tp.ReviewState = status.ReviewState
 	tp.ChecksState = status.ChecksState
 	tp.MergeableState = status.MergeableState
-	tp.ReviewCount = status.ReviewCount
-	tp.PendingReviewCount = status.PendingReviewCount
+	tp.ReviewCount = nextReviewCount
+	tp.PendingReviewCount = nextPendingReviewCount
 	tp.RequiredReviews = nextRequiredReviews
 	tp.ChecksTotal = nextChecksTotal
 	tp.ChecksPassing = nextChecksPassing

@@ -265,9 +265,46 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		ReviewState:                      reviewState,
 		ChecksState:                      checksState,
 		MergeableState:                   pr.MergeableState,
+		ReviewCount:                      countApprovedReviewerNodes(raw.Reviews.Nodes),
+		PendingReviewCount:               raw.ReviewRequests.TotalCount,
+		ReviewCountsPopulated:            true,
 		UnresolvedReviewThreads:          unresolved,
 		UnresolvedReviewThreadsPopulated: true,
 	}
+}
+
+// countApprovedReviewerNodes mirrors countApprovedReviewers (REST path) on
+// the GraphQL reviewNode shape. Returns the number of distinct authors
+// whose latest review state is APPROVED.
+func countApprovedReviewerNodes(nodes []reviewNode) int {
+	type latest struct {
+		state string
+		at    time.Time
+	}
+	byAuthor := make(map[string]latest)
+	for _, n := range nodes {
+		key := n.Author.Login
+		if key == "" {
+			key = "<anon>:" + n.SubmittedAt.UTC().Format(time.RFC3339Nano)
+		}
+		state := strings.ToUpper(n.State)
+		if state != reviewStateApproved && state != reviewStateChangesRequested {
+			if _, ok := byAuthor[key]; ok {
+				continue
+			}
+		}
+		prev, ok := byAuthor[key]
+		if !ok || !n.SubmittedAt.Before(prev.at) {
+			byAuthor[key] = latest{state: state, at: n.SubmittedAt}
+		}
+	}
+	count := 0
+	for _, l := range byAuthor {
+		if l.state == reviewStateApproved {
+			count++
+		}
+	}
+	return count
 }
 
 // summarizeReviewState collapses the review history to a single

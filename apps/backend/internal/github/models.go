@@ -109,6 +109,12 @@ type PRStatus struct {
 	// this flag to avoid clobbering a non-zero value set by the GraphQL
 	// path during a subsequent REST sync.
 	UnresolvedReviewThreadsPopulated bool `json:"unresolved_review_threads_populated,omitempty"`
+	// ReviewCountsPopulated covers ReviewCount + PendingReviewCount. Both
+	// REST and GraphQL paths compute these now, but historically only the
+	// REST path did, so without the guard a GraphQL poll would clobber
+	// the REST value back to 0 (the popover's "Approved (1)" turning
+	// into "Approved (0)" until a new REST call landed).
+	ReviewCountsPopulated bool `json:"review_counts_populated,omitempty"`
 }
 
 // PRSearchPage is a paginated slice of PR search results, with the total
