@@ -236,6 +236,59 @@ function PRCheckGroup({
   );
 }
 
+/**
+ * Stacked progress bar mirroring TodoIndicator's bar but split into three
+ * segments — green (passed), yellow (in_progress), red (failed) — each
+ * sized proportionally to its count. The leading "pass rate" label gives
+ * the same at-a-glance number TodoIndicator shows ("6/10 (60%)").
+ *
+ * Skipped/cancelled-but-not-failed jobs aren't counted toward the total
+ * (they never enter any bucket), so the bar always reflects the actionable
+ * picture: how close are we to "all green".
+ */
+function PRChecksProgressBar({ counts }: { counts: CountsView }) {
+  const total = counts.passed + counts.inProgress + counts.failed;
+  if (total === 0) return null;
+  const pct = (n: number) => (n / total) * 100;
+  const passedPct = pct(counts.passed);
+  const inProgressPct = pct(counts.inProgress);
+  const failedPct = pct(counts.failed);
+  const completePct = Math.round(passedPct);
+  return (
+    <div data-testid="pr-checks-progress" className="flex flex-col gap-1.5 px-1 pt-1 pb-1.5">
+      <div className="flex items-center justify-between text-xs">
+        <span className="font-medium text-foreground">Pass rate</span>
+        <span className="text-muted-foreground tabular-nums">
+          {counts.passed}/{total} ({completePct}%)
+        </span>
+      </div>
+      <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted/70">
+        {passedPct > 0 && (
+          <div
+            data-segment="passed"
+            className="h-full bg-green-500 transition-[width]"
+            style={{ width: `${passedPct}%` }}
+          />
+        )}
+        {inProgressPct > 0 && (
+          <div
+            data-segment="in_progress"
+            className="h-full bg-yellow-500 transition-[width]"
+            style={{ width: `${inProgressPct}%` }}
+          />
+        )}
+        {failedPct > 0 && (
+          <div
+            data-segment="failed"
+            className="h-full bg-red-500 transition-[width]"
+            style={{ width: `${failedPct}%` }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PRChecksSection({
   pr,
   feedback,
@@ -287,6 +340,7 @@ function PRChecksSection({
   }
   return (
     <div data-testid="pr-checks-section" className="flex flex-col gap-1">
+      <PRChecksProgressBar counts={counts} />
       {CHECK_GROUP_ORDER.map((kind) => {
         const value = countForBucket(counts, kind);
         return (
