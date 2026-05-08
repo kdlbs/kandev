@@ -290,8 +290,8 @@ function ChatStatusBar({
       data-testid="chat-status-bar"
       className="flex items-center gap-1.5 py-1 text-xs text-muted-foreground"
     >
-      <PRStatusChip taskId={taskId} />
       {showTodos && <TodoIndicator todos={todoItems} />}
+      <PRStatusChip taskId={taskId} />
       {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
       {showProceed && (
         <Tooltip>

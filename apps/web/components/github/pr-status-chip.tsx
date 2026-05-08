@@ -1,23 +1,46 @@
 "use client";
 
+import {
+  IconCircleCheckFilled,
+  IconCircleXFilled,
+  IconClipboardCheck,
+  IconLoader2,
+  IconPointFilled,
+} from "@tabler/icons-react";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
 import { PRCIPopover } from "@/components/github/pr-ci-popover";
-import { getPRStatusColor, isPRReadyToMerge } from "@/components/github/pr-task-icon";
+import { isPRReadyToMerge } from "@/components/github/pr-task-icon";
 import type { TaskPR } from "@/lib/types/github";
 
 const HOVER_OPEN_DELAY_MS = 150;
 const HOVER_CLOSE_DELAY_MS = 150;
 
+type ChipStatus = "passed" | "failed" | "in_progress" | "merged" | "closed" | "neutral";
+
+function chipStatus(pr: TaskPR): ChipStatus {
+  if (pr.state === "merged") return "merged";
+  if (pr.state === "closed") return "closed";
+  if (pr.review_state === "changes_requested" || pr.checks_state === "failure") return "failed";
+  if (pr.checks_state === "success") return "passed";
+  if (pr.checks_state === "pending" || pr.review_state === "pending") return "in_progress";
+  return "neutral";
+}
+
 /**
- * Compact PR-status indicator for the chat status bar — a small colored
- * circle that opens the same CI popover as the top-bar button on hover.
- * The popover anchors to the top of the chip so it expands upward (the
- * chip lives near the bottom of the chat panel, just above the input).
+ * Compact CI indicator for the chat status bar — a "CI" prefix icon plus a
+ * status glyph that mirrors the popover's bucket colors:
+ *   passed  → green check
+ *   failed  → red X
+ *   in progress → yellow spinner
+ *   merged  → purple dot
+ *   neutral → muted dot
  *
- * Returns null when the task has no PR yet, so the chip simply doesn't
- * show until a PR is associated.
+ * Hovering opens the full PRCIPopover anchored to the top edge so the card
+ * expands upward (the chip sits just above the chat input).
+ *
+ * Returns null when the task has no PR yet.
  */
 export function PRStatusChip({ taskId }: { taskId: string | null }) {
   const { pr } = useTaskPR(taskId);
@@ -29,11 +52,7 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
 }
 
 function PRStatusChipInner({ pr }: { pr: TaskPR }) {
-  // Reuse getPRStatusColor's text-* class on the wrapper and let an SVG
-  // circle pick up `currentColor` for its fill. The text-* utilities are
-  // already compiled (used elsewhere by PRTaskIcon), so we sidestep any
-  // bg-* variant that might be missing and the chip is guaranteed
-  // to render with colour.
+  const status = chipStatus(pr);
   return (
     <HoverCard openDelay={HOVER_OPEN_DELAY_MS} closeDelay={HOVER_CLOSE_DELAY_MS}>
       <HoverCardTrigger asChild>
@@ -42,13 +61,13 @@ function PRStatusChipInner({ pr }: { pr: TaskPR }) {
           data-testid="pr-status-chip"
           data-pr-number={pr.pr_number}
           data-pr-state={pr.state}
+          data-status={status}
           data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
           aria-label={`Pull request #${pr.pr_number} CI status`}
-          className={`cursor-pointer inline-flex items-center justify-center rounded-full p-0.5 hover:bg-accent/50 ${getPRStatusColor(pr)}`}
+          className="cursor-pointer inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs hover:bg-accent/50"
         >
-          <svg viewBox="0 0 10 10" className="h-2.5 w-2.5" aria-hidden="true" focusable="false">
-            <circle cx="5" cy="5" r="5" fill="currentColor" />
-          </svg>
+          <IconClipboardCheck className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          <ChipStatusGlyph status={status} />
         </button>
       </HoverCardTrigger>
       <HoverCardContent side="top" align="start" sideOffset={8} className="w-80 p-2.5">
@@ -56,4 +75,23 @@ function PRStatusChipInner({ pr }: { pr: TaskPR }) {
       </HoverCardContent>
     </HoverCard>
   );
+}
+
+function ChipStatusGlyph({ status }: { status: ChipStatus }) {
+  switch (status) {
+    case "passed":
+      return <IconCircleCheckFilled className="h-3.5 w-3.5 text-green-500" aria-hidden="true" />;
+    case "failed":
+      return <IconCircleXFilled className="h-3.5 w-3.5 text-red-500" aria-hidden="true" />;
+    case "in_progress":
+      return (
+        <IconLoader2 className="h-3.5 w-3.5 text-yellow-500 animate-spin" aria-hidden="true" />
+      );
+    case "merged":
+      return <IconPointFilled className="h-3.5 w-3.5 text-purple-500" aria-hidden="true" />;
+    case "closed":
+      return <IconPointFilled className="h-3.5 w-3.5 text-red-500" aria-hidden="true" />;
+    default:
+      return <IconPointFilled className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />;
+  }
 }
