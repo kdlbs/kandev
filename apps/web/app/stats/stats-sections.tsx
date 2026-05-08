@@ -436,11 +436,12 @@ export function RepoLeaders({ repositoryStats }: { repositoryStats: RepositorySt
 
 function TaskDurationList({ tasks, sortDirection, emptyLabel }: TaskDurationListProps) {
   const filtered = [...tasks].filter((t) => t.active_duration_ms > 0);
-  const sorted =
+  filtered.sort((a, b) =>
     sortDirection === "desc"
-      ? filtered.sort((a, b) => b.active_duration_ms - a.active_duration_ms)
-      : filtered.sort((a, b) => a.active_duration_ms - b.active_duration_ms);
-  const top3 = sorted.slice(0, 3);
+      ? b.active_duration_ms - a.active_duration_ms
+      : a.active_duration_ms - b.active_duration_ms,
+  );
+  const top3 = filtered.slice(0, 3);
 
   return (
     <div className="space-y-3">
