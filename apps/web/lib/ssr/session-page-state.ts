@@ -22,6 +22,7 @@ import type {
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import { snapshotToState, taskToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import type { AppState } from "@/lib/state/store";
 
 function buildWorktreeState(allSessions: TaskSession[]) {
   const sessionsWithWorktrees = allSessions.filter((s) => s.worktree_id);
@@ -104,6 +105,13 @@ function buildResourceState(p: BuildSessionPageStateParams) {
       })),
       activeId: task.workspace_id,
     },
+    // Only hydrate `workflows.items` from the task page; never write
+    // `activeId`. That field is the homepage workflow filter (with `null`
+    // meaning "All Workflows"), and overwriting it from a task page would
+    // silently change the user's filter when they return home. The task's
+    // own workflow context lives in `kanban.workflowId`, populated from
+    // the snapshot. `deepMerge` correctly preserves the existing
+    // `activeId` when it is omitted from the source.
     workflows: {
       items: workflows.map((w) => ({
         id: w.id,
@@ -111,8 +119,7 @@ function buildResourceState(p: BuildSessionPageStateParams) {
         name: w.name,
         hidden: w.hidden,
       })),
-      activeId: task.workflow_id,
-    },
+    } as Partial<AppState>["workflows"],
     repositories: {
       itemsByWorkspaceId: { [task.workspace_id]: repositories },
       loadingByWorkspaceId: { [task.workspace_id]: false },

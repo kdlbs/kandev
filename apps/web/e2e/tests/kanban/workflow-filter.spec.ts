@@ -33,6 +33,7 @@ async function selectWorkflowFilter(page: Page, optionLabel: string): Promise<vo
 
 test.describe("Kanban workflow filter", () => {
   let workflowBId: string | null = null;
+  let betaTaskId: string | null = null;
 
   // Pull `testPage` so its fixture (which runs `e2eReset` and resets user
   // settings) is set up before this hook seeds workflows/tasks — otherwise
@@ -48,10 +49,11 @@ test.describe("Kanban workflow filter", () => {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
-    await apiClient.createTask(seedData.workspaceId, BETA_TASK, {
+    const beta = await apiClient.createTask(seedData.workspaceId, BETA_TASK, {
       workflow_id: workflowB.id,
       workflow_step_id: startB.id,
     });
+    betaTaskId = beta.id;
   });
 
   test.afterEach(async ({ apiClient, seedData }) => {
@@ -59,6 +61,7 @@ test.describe("Kanban workflow filter", () => {
       await apiClient.deleteWorkflow(workflowBId).catch(() => {});
       workflowBId = null;
     }
+    betaTaskId = null;
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,
@@ -110,6 +113,51 @@ test.describe("Kanban workflow filter", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
+
+    await expect(kanban.taskCardByTitle(ALPHA_TASK)).toBeVisible({
+      timeout: TASK_VISIBLE_TIMEOUT,
+    });
+    await expect(kanban.taskCardByTitle(BETA_TASK)).toBeVisible({
+      timeout: TASK_VISIBLE_TIMEOUT,
+    });
+  });
+
+  // Regression: the task page's SSR (`buildResourceState` in
+  // `lib/ssr/session-page-state.ts`) used to set `workflows.activeId` to the
+  // task's `workflow_id`. On hydration, `deepMerge` overwrote the user's
+  // "All Workflows" (`null`) selection with that id, so returning to the
+  // homepage silently changed the filter to whichever workflow the visited
+  // task belonged to. Pin the cross-page flow so any future SSR regression
+  // (or a similar over-write from a WS handler / hook) gets caught here.
+  test("'All Workflows' selection survives navigating into a task and back", async ({
+    testPage,
+  }) => {
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await selectWorkflowFilter(testPage, "All Workflows");
+
+    await expect(kanban.taskCardByTitle(ALPHA_TASK)).toBeVisible({
+      timeout: TASK_VISIBLE_TIMEOUT,
+    });
+    await expect(kanban.taskCardByTitle(BETA_TASK)).toBeVisible({
+      timeout: TASK_VISIBLE_TIMEOUT,
+    });
+
+    // Visit a task that belongs to Workflow B — the SSR build path that used
+    // to poison the global filter.
+    if (!betaTaskId) throw new Error("beta task was not seeded");
+    await testPage.goto(`/t/${betaTaskId}`);
+    await expect(testPage).toHaveURL(new RegExp(`/t/${betaTaskId}`));
+
+    // Return via the in-app home breadcrumb (Next.js Link → client-side
+    // navigation). A full `goto("/")` would re-run the homepage SSR which
+    // re-resolves activeId from user_settings and masks the bug; the
+    // client-side path keeps the in-memory store and exposes any task-page
+    // SSR poisoning (the original repro).
+    await testPage.getByTestId("task-breadcrumb-home").click();
+    await expect(testPage).toHaveURL(/\/$|\?/);
+    await expect(kanban.board).toBeVisible();
 
     await expect(kanban.taskCardByTitle(ALPHA_TASK)).toBeVisible({
       timeout: TASK_VISIBLE_TIMEOUT,

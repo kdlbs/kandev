@@ -23,6 +23,10 @@ function applyWorkflowCreated(state: AppState, payload: WorkflowPayload): AppSta
   if (state.workspaces.activeId !== payload.workspace_id) return state;
   if (state.workflows.items.some((item) => item.id === payload.id)) return state;
   const isHidden = Boolean(payload.hidden);
+  // Never auto-promote a newly-created workflow over the user's filter:
+  // `null` is a valid "All Workflows" selection, and using `??` here would
+  // treat it as "no selection" and silently switch the kanban to the new
+  // workflow. Workflow selection is the user's choice.
   return {
     ...state,
     workflows: {
@@ -35,9 +39,7 @@ function applyWorkflowCreated(state: AppState, payload: WorkflowPayload): AppSta
         },
         ...state.workflows.items,
       ],
-      // Hidden workflows must never be promoted to the active selection;
-      // they are system-only and would surface in the workflow picker.
-      activeId: state.workflows.activeId ?? (isHidden ? null : payload.id),
+      activeId: state.workflows.activeId,
     },
   };
 }

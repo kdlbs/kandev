@@ -30,5 +30,6 @@ export function resolveDesiredWorkflowId({
   ) {
     return settingsWorkflowId;
   }
-  return visibleWorkflows.length === 1 ? visibleWorkflows[0].id : null;
+  if (visibleWorkflows.length === 1) return visibleWorkflows[0].id;
+  return null;
 }

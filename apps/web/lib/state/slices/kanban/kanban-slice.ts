@@ -13,16 +13,12 @@ export const createKanbanSlice: StateCreator<
   [["zustand/immer", never]],
   [],
   KanbanSlice
-> = (set, get) => ({
+> = (set) => ({
   ...defaultKanbanState,
-  setActiveWorkflow: (workflowId) => {
-    if (get().workflows.activeId === workflowId) {
-      return;
-    }
+  setActiveWorkflow: (workflowId) =>
     set((draft) => {
       draft.workflows.activeId = workflowId;
-    });
-  },
+    }),
   setWorkflows: (workflows) =>
     set((draft) => {
       draft.workflows.items = workflows;

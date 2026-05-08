@@ -199,6 +199,7 @@ function TopBarLeft({
               <Link
                 href="/"
                 className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+                data-testid="task-breadcrumb-home"
               >
                 <IconHome className="h-4 w-4" />
               </Link>

@@ -35,6 +35,47 @@ function updatedMessage(payload: WorkflowPayload): BackendMessageMap["workflow.u
   };
 }
 
+function createdMessage(payload: WorkflowPayload): BackendMessageMap["workflow.created"] {
+  return {
+    id: "msg-1",
+    type: "notification",
+    action: "workflow.created",
+    payload,
+    timestamp: "2026-01-01T00:00:00Z",
+  };
+}
+
+describe("workflow.created handler — preserves user filter", () => {
+  it("does not promote a new workflow when activeId is null ('All Workflows')", () => {
+    const store = makeStore(
+      [{ id: "wf-1", workspaceId: "ws-1", name: "Existing", hidden: false }],
+      null,
+    );
+    const handlers = registerWorkflowsHandlers(store);
+
+    handlers["workflow.created"]?.(
+      createdMessage({ id: "wf-2", workspace_id: "ws-1", name: "Brand New" }),
+    );
+
+    expect(store.getState().workflows.activeId).toBeNull();
+    expect(store.getState().workflows.items.map((i) => i.id)).toEqual(["wf-2", "wf-1"]);
+  });
+
+  it("leaves an existing activeId untouched when a new workflow appears", () => {
+    const store = makeStore(
+      [{ id: "wf-1", workspaceId: "ws-1", name: "Existing", hidden: false }],
+      "wf-1",
+    );
+    const handlers = registerWorkflowsHandlers(store);
+
+    handlers["workflow.created"]?.(
+      createdMessage({ id: "wf-2", workspace_id: "ws-1", name: "Brand New" }),
+    );
+
+    expect(store.getState().workflows.activeId).toBe("wf-1");
+  });
+});
+
 describe("workflow.updated handler — hidden flag reconciles activeId", () => {
   it("clears activeId to next visible workflow when active becomes hidden", () => {
     const store = makeStore(
