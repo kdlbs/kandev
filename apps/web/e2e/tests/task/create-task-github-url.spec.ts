@@ -897,18 +897,26 @@ test.describe("Task creation from GitHub URL", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
 
-    // Initially the toggle says "or paste a GitHub URL"
-    const toggleBtn = testPage.getByTestId("toggle-github-url");
-    await expect(toggleBtn).toHaveText("or paste a GitHub URL");
+    // The source-mode segmented control: Repo (workspace), URL, None (scratch).
+    // The URL button keeps the legacy `toggle-github-url` testid for backward
+    // compat with the rest of this suite.
+    const urlModeBtn = testPage.getByTestId("toggle-github-url");
+    const repoModeBtn = testPage.getByTestId("source-mode-workspace");
 
-    // Toggle to GitHub URL mode
-    await toggleBtn.click();
-    await expect(testPage.getByTestId("github-url-input")).toBeVisible();
-    await expect(toggleBtn).toHaveText("use a workspace repository");
-
-    // Toggle back to repository selector
-    await toggleBtn.click();
+    // Default state: workspace mode, URL input not rendered.
+    await expect(repoModeBtn).toHaveAttribute("aria-checked", "true");
     await expect(testPage.getByTestId("github-url-input")).not.toBeVisible();
-    await expect(toggleBtn).toHaveText("or paste a GitHub URL");
+
+    // Switch to URL mode — input becomes visible, URL button is selected.
+    await urlModeBtn.click();
+    await expect(testPage.getByTestId("github-url-input")).toBeVisible();
+    await expect(urlModeBtn).toHaveAttribute("aria-checked", "true");
+    await expect(repoModeBtn).toHaveAttribute("aria-checked", "false");
+
+    // Switch back to workspace mode — input disappears.
+    await repoModeBtn.click();
+    await expect(testPage.getByTestId("github-url-input")).not.toBeVisible();
+    await expect(repoModeBtn).toHaveAttribute("aria-checked", "true");
+    await expect(urlModeBtn).toHaveAttribute("aria-checked", "false");
   });
 });
