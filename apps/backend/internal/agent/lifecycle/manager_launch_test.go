@@ -197,7 +197,7 @@ func TestLaunchResolveWorkspacePath_EphemeralCreatesQuickChatDir(t *testing.T) {
 
 func TestLaunchResolveWorkspacePath_NonEphemeralRepoLessGetsScratchDir(t *testing.T) {
 	mgr := newTestManager()
-	mgr.dataDir = filepath.Join(t.TempDir(), "data")
+	mgr.dataDir = t.TempDir()
 
 	req := &LaunchRequest{
 		SessionID:   "session-xyz",
@@ -215,7 +215,7 @@ func TestLaunchResolveWorkspacePath_NonEphemeralRepoLessGetsScratchDir(t *testin
 
 func TestLaunchResolveWorkspacePath_NonEphemeralWithoutWorkspaceIDReturnsEmpty(t *testing.T) {
 	mgr := newTestManager()
-	mgr.dataDir = filepath.Join(t.TempDir(), "data")
+	mgr.dataDir = t.TempDir()
 
 	// Non-ephemeral repo-less task missing workspace_id should not get a path
 	// (scratch path requires workspace + task IDs to namespace correctly).
@@ -245,7 +245,7 @@ func TestLaunchResolveWorkspacePath_PickedFolderUsedDirectly(t *testing.T) {
 
 func TestLaunchResolveWorkspacePath_WorktreeWithoutRepoFallsBackToScratch(t *testing.T) {
 	mgr := newTestManager()
-	mgr.dataDir = filepath.Join(t.TempDir(), "data")
+	mgr.dataDir = t.TempDir()
 
 	// UseWorktree=true but no RepositoryPath — should not return empty,
 	// should fall through to the scratch workspace path.

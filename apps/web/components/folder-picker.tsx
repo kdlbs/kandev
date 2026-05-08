@@ -28,7 +28,7 @@ export function FolderPicker({ value, onChange, placeholder }: FolderPickerProps
   const hasValue = !!value;
 
   const triggerClass = cn(
-    "h-7 inline-flex items-center gap-1.5 rounded-md px-2.5 text-xs",
+    "h-7 inline-flex items-center gap-1.5 rounded-md px-2.5 text-xs cursor-pointer",
     "border border-border/60 transition-colors",
     hasValue
       ? "bg-primary/10 text-foreground hover:bg-primary/15"
