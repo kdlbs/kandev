@@ -2,39 +2,45 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
-import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
-import { Textarea } from "@kandev/ui/textarea";
-import { IconGitBranch } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { createTask } from "@/lib/api/domains/kanban-api";
 import { replaceTaskUrl } from "@/lib/links";
-import { AgentSelector, ExecutorProfileSelector } from "@/components/task-create-dialog-selectors";
+
+
 import {
   useAgentProfileOptions,
   useExecutorProfileOptions,
 } from "@/components/task-create-dialog-options";
+import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
+import { useDialogHandlers } from "@/components/task-create-dialog-handlers";
+import {
+  useDiscoverReposEffect,
+  useGitHubUrlBranchesEffect,
+} from "@/components/task-create-dialog-effects";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
-import { EnhancePromptButton } from "@/components/enhance-prompt-button";
+import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
-import type { ExecutorProfile } from "@/lib/types/http";
+import type { ExecutorProfile, Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
-import { IconLoader2 } from "@tabler/icons-react";
-import { toMessageAttachments } from "@/components/task-create-dialog-helpers";
+import {
+  buildRepositoriesPayload,
+  toMessageAttachments,
+} from "@/components/task-create-dialog-helpers";
+import { useSubtaskFormState } from "./new-subtask-form-state";
+import { WorktreeBadge, SelectorsRow, PromptZone } from "./new-subtask-form-parts";
 import {
   ContextSelect,
   useDialogAttachments,
-  AttachButton,
   toContextItems,
 } from "./session-dialog-shared";
-import { ContextZone } from "./chat/context-items/context-zone";
 
 type NewSubtaskDialogProps = {
   open: boolean;
@@ -143,6 +149,78 @@ function activateSubtaskSession(opts: {
   replaceTaskUrl(opts.taskId);
 }
 
+/**
+ * Seeds the chip row with the parent task's repo + branch when the form
+ * mounts. Form parent passes `key={open}` so each dialog open remounts the
+ * form, which is when this fires. The user can still change or add repos
+ * after seeding.
+ */
+function useSeedParentRepository(
+  fs: ReturnType<typeof useSubtaskFormState>,
+  parentRepositoryId: string | null,
+  baseBranch: string | null,
+) {
+  useEffect(() => {
+    if (!parentRepositoryId) return;
+    fs.setRepositories([
+      { key: "subtask-row-1", repositoryId: parentRepositoryId, branch: baseBranch ?? "" },
+    ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
+
+/** Pre-fills the agent profile with the parent session's profile on mount. */
+function useSeedAgentProfileId(
+  fs: ReturnType<typeof useSubtaskFormState>,
+  defaultProfileId: string,
+) {
+  useEffect(() => {
+    if (defaultProfileId) fs.setAgentProfileId(defaultProfileId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
+
+/**
+ * Centralizes the Context selector's branching logic (Blank / Copy parent
+ * prompt / Summarize session N) so the form component stays under the
+ * complexity cap.
+ */
+function useContextChangeHandler(opts: {
+  setContextValue: (v: string) => void;
+  setHasPrompt: (v: boolean) => void;
+  promptRef: React.RefObject<HTMLTextAreaElement | null>;
+  initialPrompt: string | null;
+  summarize: (sessionId: string) => Promise<string | null>;
+}) {
+  const { setContextValue, setHasPrompt, promptRef, initialPrompt, summarize } = opts;
+  return useCallback(
+    async (value: string) => {
+      if (!value) return;
+      setContextValue(value);
+      const ta = promptRef.current;
+      if (!ta) return;
+      if (value === "copy_prompt" && initialPrompt) {
+        ta.value = initialPrompt;
+        setHasPrompt(true);
+        return;
+      }
+      if (value === "blank") {
+        ta.value = "";
+        setHasPrompt(false);
+        return;
+      }
+      if (value.startsWith("summarize:")) {
+        const result = await summarize(value.slice("summarize:".length));
+        if (result && promptRef.current) {
+          promptRef.current.value = result;
+          setHasPrompt(true);
+        }
+      }
+    },
+    [setContextValue, setHasPrompt, promptRef, initialPrompt, summarize],
+  );
+}
+
 type SubtaskFormProps = {
   parentTaskId: string;
   defaultTitle: string;
@@ -153,8 +231,13 @@ type SubtaskFormProps = {
   executors: Array<{ id: string; type: string; name: string; profiles?: ExecutorProfile[] }>;
   workspaceId: string | null;
   workflowId: string | null;
-  repositoryId: string | null;
+  /** The parent task's repository — used as the default for the subtask. */
+  parentRepositoryId: string | null;
   baseBranch: string | null;
+  /** Workspace repositories the user can pick from to override the default. */
+  availableRepositories: Repository[];
+  /** Whether the parent dialog is open — required for the GitHub URL effect. */
+  isOpen: boolean;
   onClose: () => void;
 };
 
@@ -169,8 +252,10 @@ function NewSubtaskForm({
   executors,
   workspaceId,
   workflowId,
-  repositoryId,
+  parentRepositoryId,
   baseBranch,
+  availableRepositories,
+  isOpen,
   onClose,
 }: SubtaskFormProps) {
   const { toast } = useToast();
@@ -182,8 +267,16 @@ function NewSubtaskForm({
   const [title, setTitle] = useState(defaultTitle);
   const [hasPrompt, setHasPrompt] = useState(false);
   const [contextValue, setContextValue] = useState("blank");
-  const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId);
-  const [executorProfileId, setExecutorProfileId] = useState("");
+  // Shim DialogFormState shared with the create-task dialog so RepoChipsRow,
+  // useDialogHandlers, and the GitHub URL branches effect work unchanged.
+  const fs = useSubtaskFormState();
+  useSeedParentRepository(fs, parentRepositoryId, baseBranch);
+  useSeedAgentProfileId(fs, defaultProfileId);
+  const handlers = useDialogHandlers(fs, availableRepositories);
+  useGitHubUrlBranchesEffect(fs, isOpen);
+  // Fetch on-disk repos so the chip dropdown shows "on disk" entries
+  // (matches the create-task dialog's RepoChipsRow behavior).
+  useDiscoverReposEffect(fs, isOpen, workspaceId, false, toast);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const {
     attachments,
@@ -220,29 +313,15 @@ function NewSubtaskForm({
 
   const allExecutorProfiles = useExecutorProfiles(executors);
   const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles);
-  useAutoSelectExecutorProfile(allExecutorProfiles, executorProfileId, setExecutorProfileId);
+  useAutoSelectExecutorProfile(allExecutorProfiles, fs.executorProfileId, fs.setExecutorProfileId);
 
-  const handleContextChange = useCallback(
-    async (value: string) => {
-      if (!value) return;
-      setContextValue(value);
-      if (value === "copy_prompt" && initialPrompt && promptRef.current) {
-        promptRef.current.value = initialPrompt;
-        setHasPrompt(true);
-      } else if (value === "blank" && promptRef.current) {
-        promptRef.current.value = "";
-        setHasPrompt(false);
-      } else if (value.startsWith("summarize:")) {
-        const sessionId = value.slice("summarize:".length);
-        const result = await summarize(sessionId);
-        if (result && promptRef.current) {
-          promptRef.current.value = result;
-          setHasPrompt(true);
-        }
-      }
-    },
-    [initialPrompt, summarize],
-  );
+  const handleContextChange = useContextChangeHandler({
+    setContextValue,
+    setHasPrompt,
+    promptRef,
+    initialPrompt,
+    summarize,
+  });
 
   const resolvePrompt = useCallback(() => {
     const typed = promptRef.current?.value?.trim() ?? "";
@@ -252,10 +331,16 @@ function NewSubtaskForm({
 
   const performCreate = useCallback(
     async (trimmedTitle: string, prompt: string) => {
-      const repositories = repositoryId
-        ? [{ repository_id: repositoryId, base_branch: baseBranch || undefined }]
-        : [];
-      const profileId = selectedProfileId || defaultProfileId || undefined;
+      const repositories = buildRepositoriesPayload({
+        useGitHubUrl: fs.useGitHubUrl,
+        githubUrl: fs.githubUrl,
+        githubBranch: fs.githubBranch,
+        githubPrHeadBranch: fs.githubPrHeadBranch,
+        repositories: fs.repositories,
+        discoveredRepositories: fs.discoveredRepositories,
+        workspaceRepositories: availableRepositories,
+      });
+      const profileId = fs.agentProfileId || defaultProfileId || undefined;
 
       const response = await createTask({
         workspace_id: workspaceId!,
@@ -265,7 +350,7 @@ function NewSubtaskForm({
         repositories,
         start_agent: true,
         agent_profile_id: profileId,
-        executor_profile_id: executorProfileId || undefined,
+        executor_profile_id: fs.executorProfileId || undefined,
         parent_id: parentTaskId,
         attachments: toMessageAttachments(attachments),
       });
@@ -281,13 +366,18 @@ function NewSubtaskForm({
       }
     },
     [
-      repositoryId,
-      baseBranch,
-      selectedProfileId,
+      fs.useGitHubUrl,
+      fs.githubUrl,
+      fs.githubBranch,
+      fs.githubPrHeadBranch,
+      fs.repositories,
+      fs.discoveredRepositories,
+      fs.agentProfileId,
+      fs.executorProfileId,
+      availableRepositories,
       defaultProfileId,
       workspaceId,
       workflowId,
-      executorProfileId,
       parentTaskId,
       attachments,
       setActiveTask,
@@ -321,6 +411,14 @@ function NewSubtaskForm({
   );
 
   const showSessions = isUtilityConfigured ? sessionOptions : [];
+  // Worktree badge is only meaningful when the subtask still targets the
+  // parent's repo (single chip, same id). Adding repos or pasting a URL makes
+  // it ambiguous, so hide.
+  const onlyChipIsParent =
+    fs.repositories.length === 1 &&
+    fs.repositories[0]?.repositoryId === parentRepositoryId &&
+    !fs.useGitHubUrl;
+  const showWorktreeBadge = !!worktreeBranch && onlyChipIsParent;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -335,37 +433,26 @@ function NewSubtaskForm({
           disabled={isCreating}
         />
       </div>
-      {worktreeBranch && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Badge variant="outline" className="text-xs font-normal gap-1">
-            <IconGitBranch className="h-3 w-3" />
-            {worktreeBranch}
-          </Badge>
-          <span>Same branch as current session</span>
-        </div>
-      )}
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium text-muted-foreground">Executor</label>
-        <ExecutorProfileSelector
-          options={executorProfileOptions}
-          value={executorProfileId}
-          onValueChange={setExecutorProfileId}
-          disabled={isCreating}
-          placeholder="Select executor profile"
-        />
-      </div>
-      {profileOptions.length > 1 && (
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Agent Profile</label>
-          <AgentSelector
-            options={profileOptions}
-            value={selectedProfileId || defaultProfileId}
-            onValueChange={setSelectedProfileId}
-            disabled={isCreating}
-            placeholder="Select agent profile"
-          />
-        </div>
-      )}
+      <RepoChipsRow
+        fs={fs}
+        repositories={availableRepositories}
+        isTaskStarted={false}
+        workspaceId={workspaceId}
+        onRowRepositoryChange={handlers.handleRowRepositoryChange}
+        onRowBranchChange={handlers.handleRowBranchChange}
+        onToggleGitHubUrl={handlers.handleToggleGitHubUrl}
+        onGitHubUrlChange={handlers.handleGitHubUrlChange}
+      />
+      <WorktreeBadge show={showWorktreeBadge} branch={worktreeBranch} />
+      <SelectorsRow
+        profileOptions={profileOptions}
+        executorProfileOptions={executorProfileOptions}
+        agentProfileId={fs.agentProfileId || defaultProfileId}
+        executorProfileId={fs.executorProfileId}
+        onAgentProfileChange={handlers.handleAgentProfileChange}
+        onExecutorProfileChange={handlers.handleExecutorProfileChange}
+        disabled={isCreating}
+      />
       <ContextSelect
         value={contextValue}
         onValueChange={handleContextChange}
@@ -373,61 +460,25 @@ function NewSubtaskForm({
         sessionOptions={showSessions}
         isSummarizing={isSummarizing}
       />
-      <div
-        className="relative"
+      <PromptZone
+        promptRef={promptRef}
+        contextItems={contextItems}
+        fileInputRef={fileInputRef}
+        isDragging={isDragging}
+        isCreating={isCreating}
+        isSummarizing={isSummarizing}
+        isEnhancingPrompt={isEnhancingPrompt}
+        isUtilityConfigured={isUtilityConfigured}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-      >
-        <div className="rounded-md border border-input bg-transparent">
-          <ContextZone items={contextItems} />
-          <Textarea
-            ref={promptRef}
-            placeholder="What should the agent work on?"
-            className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
-            autoFocus
-            disabled={isCreating || isSummarizing}
-            data-testid="subtask-prompt-input"
-            onInput={(e) => setHasPrompt((e.target as HTMLTextAreaElement).value.trim().length > 0)}
-            onPaste={handlePaste}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                handleSubmit(e);
-              }
-            }}
-          />
-          <div className="flex items-center px-1 pb-1">
-            <AttachButton onClick={handleAttachClick} disabled={isCreating || isSummarizing} />
-            <EnhancePromptButton
-              onClick={handleEnhancePrompt}
-              isLoading={isEnhancingPrompt}
-              isConfigured={isUtilityConfigured}
-            />
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={handleFileInputChange}
-            tabIndex={-1}
-          />
-        </div>
-        {isDragging && (
-          <div className="absolute inset-0 flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary rounded-md pointer-events-none">
-            <span className="text-sm text-primary font-medium">Drop files here</span>
-          </div>
-        )}
-        {isSummarizing && (
-          <div className="absolute inset-0 flex items-center justify-center rounded-md bg-background/80">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <IconLoader2 className="h-4 w-4 animate-spin" />
-              <span>Generating summary...</span>
-            </div>
-          </div>
-        )}
-      </div>
+        onPaste={handlePaste}
+        onFileInputChange={handleFileInputChange}
+        onAttachClick={handleAttachClick}
+        onEnhancePrompt={handleEnhancePrompt}
+        setHasPrompt={setHasPrompt}
+        onSubmitShortcut={handleSubmit}
+      />
       <DialogFooter>
         <Button
           type="button"
@@ -450,6 +501,7 @@ function NewSubtaskForm({
   );
 }
 
+
 export function NewSubtaskDialog({
   open,
   onOpenChange,
@@ -468,6 +520,8 @@ export function NewSubtaskDialog({
 
   // Ensure executor/agent data is loaded when dialog opens
   useSettingsData(open);
+  // Load workspace repositories so the subtask repo override picker has options.
+  const { repositories: availableRepositories } = useRepositories(workspaceId, open);
 
   const siblingCount = useAppStore(
     (s) => s.kanban.tasks.filter((t) => t.parentTaskId === parentTaskId).length,
@@ -480,7 +534,10 @@ export function NewSubtaskDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[520px]">
+      <DialogContent
+        data-testid="new-subtask-dialog"
+        className="w-full h-full max-w-full max-h-full rounded-none sm:w-[800px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
+      >
         <DialogHeader>
           <DialogTitle className="text-sm font-medium">
             New subtask for <span className="text-foreground">{parentTaskTitle}</span>
@@ -497,8 +554,10 @@ export function NewSubtaskDialog({
           executors={executors}
           workspaceId={workspaceId}
           workflowId={workflowId}
-          repositoryId={currentSession?.repository_id ?? null}
+          parentRepositoryId={currentSession?.repository_id ?? null}
           baseBranch={currentSession?.base_branch ?? null}
+          availableRepositories={availableRepositories}
+          isOpen={open}
           onClose={() => onOpenChange(false)}
         />
       </DialogContent>

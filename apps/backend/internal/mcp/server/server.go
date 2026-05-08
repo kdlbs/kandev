@@ -434,6 +434,7 @@ WHEN TO USE parent_id='self':
 - Breaking down your current task into phases/steps → use parent_id='self'
 - Creating tasks from a plan → use parent_id='self' (inherits repo, workspace, workflow)
 - Delegating work to another agent → use parent_id='self'
+- Delegating work that lives in a sibling repo → use parent_id='self' AND pass repository_url / repository_id / local_path to point the subtask at that repo
 
 WHEN TO OMIT parent_id (top-level task):
 - Creating an unrelated, standalone task
@@ -441,7 +442,8 @@ WHEN TO OMIT parent_id (top-level task):
 - workspace_id and workflow_id are auto-resolved if only one exists; provide explicitly if ambiguous
 
 IMPORTANT:
-- Subtasks inherit repositories, workspace, workflow, agent profile, and executor from parent
+- Subtasks inherit workspace, workflow, agent profile, and executor from the parent
+- Subtasks inherit the parent's repository unless you supply repository_url, repository_id, or local_path — in which case the subtask targets that repo instead (must live in the parent's workspace)
 - Top-level tasks need a repository via repository_url, repository_id, or local_path
 - 'description' is the sub-agent's initial prompt — be specific and detailed
 - Set start_agent=false to create without starting an agent`
@@ -471,9 +473,9 @@ IMPORTANT:
 			mcp.WithString("agent_profile_id", mcp.Description("Agent profile ID to use. For subtasks, inherited from the parent session. For top-level tasks, ask the user which agent profile they want (e.g. Claude Code, OpenCode) if not already known.")),
 			mcp.WithString("executor_profile_id", mcp.Description("Executor profile ID to use (determines the runtime environment: local, worktree, docker, etc.). For subtasks, inherited from the parent session. For top-level tasks, ask the user which executor profile they want if not already known.")),
 			mcp.WithBoolean("start_agent", mcp.Description("Whether to auto-start an agent on the created task. Default: true. Set to false to create the task without starting an agent.")),
-			mcp.WithString("repository_id", mcp.Description("Repository ID for top-level tasks. Not needed for subtasks (inherited from parent).")),
-			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo') for top-level tasks. Will create/find the repository automatically. Preferred for local worktree flow.")),
-			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo') for top-level tasks. The repository will be cloned automatically on first use. Not needed for subtasks (inherited from parent).")),
+			mcp.WithString("repository_id", mcp.Description("Repository ID. Required for top-level tasks unless local_path or repository_url is provided. For subtasks: optional — supply only when the subtask should target a different repo than the parent.")),
+			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Will create/find the repository automatically. Preferred for local worktree flow. For subtasks: supply only when the subtask should target a different repo than the parent.")),
+			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo'). The repository will be cloned automatically on first use. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional, defaults to repository's default branch.")),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),

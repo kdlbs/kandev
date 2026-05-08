@@ -436,24 +436,43 @@ type taskRepoResult struct {
 }
 
 // resolveTaskRepositories builds the repository list for a new task.
-// Priority: explicit repositories > parent task repos > source task repos.
-// When inheriting from a parent, it also returns the parent's workspace/workflow IDs.
+//
+// For subtasks (parentID set) workspace and workflow always come from the
+// parent. Explicit repositories override the parent's repos when supplied,
+// otherwise the parent's repos are inherited verbatim — letting an agent
+// spin up a subtask that targets a sibling repo while staying in the same
+// workspace/workflow.
+//
+// For top-level tasks (parentID empty) explicit repos win over source-task
+// inheritance; workspace falls back to the source task when available.
 func (h *Handlers) resolveTaskRepositories(
 	ctx context.Context,
 	parentID, sourceTaskID string,
 	explicit []mcpRepositoryInput,
 ) (taskRepoResult, error) {
-	if len(explicit) > 0 {
-		var repos []service.TaskRepositoryInput
-		for _, r := range explicit {
-			repos = append(repos, service.TaskRepositoryInput{
-				RepositoryID: r.RepositoryID,
-				LocalPath:    r.LocalPath,
-				GitHubURL:    r.GitHubURL,
-				BaseBranch:   r.BaseBranch,
-			})
+	explicitRepos := explicitRepoInputs(explicit)
+
+	if parentID != "" {
+		parent, err := h.taskSvc.GetTask(ctx, parentID)
+		if err != nil {
+			return taskRepoResult{}, fmt.Errorf("invalid parent_id: %w", err)
 		}
-		result := taskRepoResult{Repos: repos}
+		if parent.IsEphemeral {
+			return taskRepoResult{}, fmt.Errorf("cannot create subtasks of an ephemeral task (quick chat); omit parent_id to create a top-level task")
+		}
+		repos := explicitRepos
+		if repos == nil {
+			repos = inheritedRepoInputs(parent.Repositories)
+		}
+		return taskRepoResult{
+			Repos:       repos,
+			WorkspaceID: parent.WorkspaceID,
+			WorkflowID:  parent.WorkflowID,
+		}, nil
+	}
+
+	if explicitRepos != nil {
+		result := taskRepoResult{Repos: explicitRepos}
 		// Inherit workspace from source task so multi-workspace installs don't
 		// fail auto-resolution when the agent supplies an explicit repository.
 		if sourceTaskID != "" && h.taskSvc != nil {
@@ -468,29 +487,6 @@ func (h *Handlers) resolveTaskRepositories(
 		return result, nil
 	}
 
-	if parentID != "" {
-		parent, err := h.taskSvc.GetTask(ctx, parentID)
-		if err != nil {
-			return taskRepoResult{}, fmt.Errorf("invalid parent_id: %w", err)
-		}
-		if parent.IsEphemeral {
-			return taskRepoResult{}, fmt.Errorf("cannot create subtasks of an ephemeral task (quick chat); omit parent_id to create a top-level task")
-		}
-		var repos []service.TaskRepositoryInput
-		for _, r := range parent.Repositories {
-			repos = append(repos, service.TaskRepositoryInput{
-				RepositoryID:   r.RepositoryID,
-				BaseBranch:     r.BaseBranch,
-				CheckoutBranch: r.CheckoutBranch,
-			})
-		}
-		return taskRepoResult{
-			Repos:       repos,
-			WorkspaceID: parent.WorkspaceID,
-			WorkflowID:  parent.WorkflowID,
-		}, nil
-	}
-
 	// For top-level tasks, inherit repos and workspace from the calling agent's current task.
 	if sourceTaskID != "" {
 		sourceTask, err := h.taskSvc.GetTask(ctx, sourceTaskID)
@@ -499,21 +495,52 @@ func (h *Handlers) resolveTaskRepositories(
 				zap.String("source_task_id", sourceTaskID), zap.Error(err))
 			return taskRepoResult{}, nil
 		}
-		var repos []service.TaskRepositoryInput
-		for _, r := range sourceTask.Repositories {
-			repos = append(repos, service.TaskRepositoryInput{
-				RepositoryID:   r.RepositoryID,
-				BaseBranch:     r.BaseBranch,
-				CheckoutBranch: r.CheckoutBranch,
-			})
-		}
 		return taskRepoResult{
-			Repos:       repos,
+			Repos:       inheritedRepoInputs(sourceTask.Repositories),
 			WorkspaceID: sourceTask.WorkspaceID,
 		}, nil
 	}
 
 	return taskRepoResult{}, nil
+}
+
+// explicitRepoInputs maps the MCP-side explicit repo list to service inputs.
+// Returns nil when no explicit repos were supplied so callers can distinguish
+// "agent didn't pass repos" from "agent passed an empty list".
+func explicitRepoInputs(explicit []mcpRepositoryInput) []service.TaskRepositoryInput {
+	if len(explicit) == 0 {
+		return nil
+	}
+	repos := make([]service.TaskRepositoryInput, 0, len(explicit))
+	for _, r := range explicit {
+		repos = append(repos, service.TaskRepositoryInput{
+			RepositoryID: r.RepositoryID,
+			LocalPath:    r.LocalPath,
+			GitHubURL:    r.GitHubURL,
+			BaseBranch:   r.BaseBranch,
+		})
+	}
+	return repos
+}
+
+// inheritedRepoInputs maps an existing task's repository list onto service
+// inputs for a new task that inherits from it.
+func inheritedRepoInputs(src []*models.TaskRepository) []service.TaskRepositoryInput {
+	if len(src) == 0 {
+		return nil
+	}
+	repos := make([]service.TaskRepositoryInput, 0, len(src))
+	for _, r := range src {
+		if r == nil {
+			continue
+		}
+		repos = append(repos, service.TaskRepositoryInput{
+			RepositoryID:   r.RepositoryID,
+			BaseBranch:     r.BaseBranch,
+			CheckoutBranch: r.CheckoutBranch,
+		})
+	}
+	return repos
 }
 
 // autoStartTask launches an agent session for a newly created task in the background.
