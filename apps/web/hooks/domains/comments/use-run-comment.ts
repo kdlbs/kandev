@@ -135,7 +135,7 @@ export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
             10000,
           );
           if (created && created.id && created.session_id) {
-            state.addMessage(created);
+            storeApi.getState().addMessage(created);
           }
         }
 
