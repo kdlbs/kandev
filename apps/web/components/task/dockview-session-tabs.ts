@@ -265,11 +265,16 @@ function prepareLayoutForSessionPanels(api: DockviewApi): boolean {
  *
  * - It was just created by `ensureSessionPanel` (no prior dockview state
  *   to honor), or
+ * - The hook is mounting for the first time (initial page load) — preserve
+ *   the long-standing behavior of focusing the agent tab so the chat is
+ *   visible immediately, even when a saved layout had a different center
+ *   tab active, or
  * - The user switched sessions within the same task (intra-task switch
  *   where dockview hasn't re-activated the new session for us).
  *
- * After an env (task) switch, fromJSON has already restored the saved
- * active panel for that task — calling setActive here would override it
+ * After an env (task) switch the prev refs are populated and the task
+ * changed — `restoreSavedActiveViews` has already applied the saved active
+ * panel for the incoming task, so calling setActive here would override it
  * and force the agent tab on top of whatever the user had focused.
  */
 function shouldActivateSessionPanel(args: {
@@ -282,8 +287,10 @@ function shouldActivateSessionPanel(args: {
   const { sessionPanelExistedBefore, prevTaskId, prevSessionId, currentTaskId, currentSessionId } =
     args;
   if (!sessionPanelExistedBefore) return true;
-  const taskChanged = prevTaskId !== null && prevTaskId !== currentTaskId;
-  const sessionChanged = prevSessionId !== null && prevSessionId !== currentSessionId;
+  const isFirstMount = prevTaskId === null && prevSessionId === null;
+  if (isFirstMount) return true;
+  const taskChanged = prevTaskId !== currentTaskId;
+  const sessionChanged = prevSessionId !== currentSessionId;
   return sessionChanged && !taskChanged;
 }
 
