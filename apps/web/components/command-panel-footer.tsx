@@ -1,5 +1,6 @@
 "use client";
 
+import type { Dispatch, SetStateAction } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { IconArchive, IconArrowRight, IconHammer, IconLoader2 } from "@tabler/icons-react";
 import {
@@ -296,7 +297,7 @@ export type CommandPanelViewProps = {
   mode: CommandPanelMode;
   inputCommand: CommandItemType | null;
   selectedValue: string;
-  setSelectedValue: (value: string) => void;
+  setSelectedValue: Dispatch<SetStateAction<string>>;
   search: string;
   setSearch: (value: string) => void;
   handleKeyDown: (e: React.KeyboardEvent) => void;
