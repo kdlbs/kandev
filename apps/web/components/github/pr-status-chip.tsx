@@ -3,7 +3,7 @@
 import {
   IconCircleCheckFilled,
   IconCircleXFilled,
-  IconListCheck,
+  IconChecklist,
   IconLoader2,
   IconPointFilled,
 } from "@tabler/icons-react";
@@ -66,7 +66,7 @@ function PRStatusChipInner({ pr }: { pr: TaskPR }) {
           aria-label={`Pull request #${pr.pr_number} CI status`}
           className="cursor-pointer inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs"
         >
-          <IconListCheck className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
           <ChipStatusGlyph status={status} />
         </button>
       </HoverCardTrigger>
