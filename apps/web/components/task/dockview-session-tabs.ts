@@ -243,6 +243,51 @@ function reconcileRemovedSessionPanels(
 const EMPTY_SESSION_IDS_KEY = "";
 
 /**
+ * Drop the generic "chat" placeholder once a real session is active.
+ * Skips removal in maximized state to preserve the saved maximize layout.
+ * Returns true when callers should continue ensuring session panels;
+ * false when the maximized state intentionally suppresses them.
+ */
+function prepareLayoutForSessionPanels(api: DockviewApi): boolean {
+  const preMaximizeLayout = useDockviewStore.getState().preMaximizeLayout;
+  const chatPanel = api.getPanel("chat");
+  if (chatPanel && !preMaximizeLayout) {
+    api.removePanel(chatPanel);
+  }
+  // In maximized state, session panels are intentionally absent from the
+  // layout — they'll be restored when the user exits maximize.
+  return preMaximizeLayout === null;
+}
+
+/**
+ * Decide whether to force-activate the session panel after it (and any
+ * sibling tabs) have been ensured.
+ *
+ * - It was just created by `ensureSessionPanel` (no prior dockview state
+ *   to honor), or
+ * - The user switched sessions within the same task (intra-task switch
+ *   where dockview hasn't re-activated the new session for us).
+ *
+ * After an env (task) switch, fromJSON has already restored the saved
+ * active panel for that task — calling setActive here would override it
+ * and force the agent tab on top of whatever the user had focused.
+ */
+function shouldActivateSessionPanel(args: {
+  sessionPanelExistedBefore: boolean;
+  prevTaskId: string | null;
+  prevSessionId: string | null;
+  currentTaskId: string | null;
+  currentSessionId: string;
+}): boolean {
+  const { sessionPanelExistedBefore, prevTaskId, prevSessionId, currentTaskId, currentSessionId } =
+    args;
+  if (!sessionPanelExistedBefore) return true;
+  const taskChanged = prevTaskId !== null && prevTaskId !== currentTaskId;
+  const sessionChanged = prevSessionId !== null && prevSessionId !== currentSessionId;
+  return sessionChanged && !taskChanged;
+}
+
+/**
  * Open a dockview tab for every session of the active task and keep them in sync
  * with the store.
  *
@@ -256,6 +301,8 @@ const EMPTY_SESSION_IDS_KEY = "";
  */
 export function useAutoSessionTab(effectiveSessionId: string | null) {
   const sessionTabCreatedRef = useRef<Set<string>>(new Set());
+  const prevTaskIdRef = useRef<string | null>(null);
+  const prevSessionIdRef = useRef<string | null>(null);
   const appStore = useAppStoreApi();
 
   // Key-based dependency so the effect re-runs when the task's session list
@@ -298,17 +345,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     // be re-created by ensureSessionPanel.
     if (!currentSessionIds.includes(effectiveSessionId)) return;
 
-    // Remove the generic "chat" placeholder as soon as a real session is
-    // active — per-session tabs replace it. Skip in maximized state to
-    // preserve the saved maximize layout.
-    const chatPanel = api.getPanel("chat");
-    if (chatPanel && !useDockviewStore.getState().preMaximizeLayout) {
-      api.removePanel(chatPanel);
-    }
-
-    // In maximized state, session panels are intentionally absent from the
-    // layout — they'll be restored when the user exits maximize.
-    if (useDockviewStore.getState().preMaximizeLayout !== null) {
+    if (!prepareLayoutForSessionPanels(api)) {
       sessionTabCreatedRef.current.add(effectiveSessionId);
       return;
     }
@@ -316,6 +353,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     const initialPosition = resolveInitialPosition(api);
 
     // Active panel first so its group becomes the anchor for siblings.
+    const sessionPanelExistedBefore = !!api.getPanel(`session:${effectiveSessionId}`);
     ensureSessionPanel(
       api,
       effectiveSessionId,
@@ -325,7 +363,16 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     );
     const activePanel = api.getPanel(`session:${effectiveSessionId}`);
     if (activePanel) {
-      activePanel.api.setActive();
+      const shouldActivate = shouldActivateSessionPanel({
+        sessionPanelExistedBefore,
+        prevTaskId: prevTaskIdRef.current,
+        prevSessionId: prevSessionIdRef.current,
+        currentTaskId: tid ?? null,
+        currentSessionId: effectiveSessionId,
+      });
+      if (shouldActivate) {
+        activePanel.api.setActive();
+      }
       useDockviewStore.setState({ centerGroupId: activePanel.group.id });
     }
 
@@ -337,5 +384,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
       if (sid === effectiveSessionId) continue;
       ensureSessionPanel(api, sid, siblingAnchor, true, sessionTabCreatedRef.current);
     }
+    prevTaskIdRef.current = tid ?? null;
+    prevSessionIdRef.current = effectiveSessionId;
   }, [effectiveSessionId, sessionIdsKey, appStore]);
 }

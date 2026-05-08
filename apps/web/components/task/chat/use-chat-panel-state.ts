@@ -31,6 +31,13 @@ import type { BuiltInPreset } from "@/lib/state/layout-manager/presets";
 const EMPTY_CONTEXT_FILES: ContextFile[] = [];
 const PLAN_CONTEXT_PATH = "plan:context";
 
+// Tracks sessions for which the plan layout has already been auto-applied.
+// Module-scoped so it survives TaskChatPanel remounts (dockview's fromJSON
+// tears down and rebuilds the portal-hosted panel, which would otherwise
+// reset a component-local ref and cause the plan preset to be re-applied —
+// clobbering the just-restored saved layout on env switch).
+const autoAppliedPlanSessions = new Set<string>();
+
 export type CommentsState = {
   planComments: PlanComment[];
   pendingCommentsByFile: Record<string, DiffComment[]>;
@@ -82,21 +89,20 @@ function useAutoApplyPlanLayout(opts: AutoApplyPlanLayoutOpts) {
     setPlanMode,
     addContextFile,
   } = opts;
-  const autoAppliedPlanSessionRef = useRef<string | null>(null);
   useEffect(() => {
     if (!resolvedSessionId || !taskId) return;
     // Reset the guard when plan mode is disabled so future plan-mode steps
     // in the same session can be auto-applied (e.g. after proceeding away and back).
-    if (!sessionMetaPlanMode && autoAppliedPlanSessionRef.current === resolvedSessionId) {
-      autoAppliedPlanSessionRef.current = null;
+    if (!sessionMetaPlanMode && autoAppliedPlanSessions.has(resolvedSessionId)) {
+      autoAppliedPlanSessions.delete(resolvedSessionId);
       return;
     }
-    if (autoAppliedPlanSessionRef.current === resolvedSessionId) return;
+    if (autoAppliedPlanSessions.has(resolvedSessionId)) return;
     // Only auto-apply if both the session metadata AND the current step agree on plan mode.
     // sessionMetaPlanMode can be stale (deepMerge hydration preserves deleted keys),
     // so we cross-check with the step's actual configuration.
     if (sessionMetaPlanMode && currentStepHasPlanMode) {
-      autoAppliedPlanSessionRef.current = resolvedSessionId;
+      autoAppliedPlanSessions.add(resolvedSessionId);
       setActiveDocument(resolvedSessionId, { type: "plan", taskId });
       applyBuiltInPreset("plan");
       setPlanMode(resolvedSessionId, true);

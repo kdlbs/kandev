@@ -40,6 +40,60 @@ function savedLayoutHasEphemeralPanels(serialized: SerializedDockview): boolean 
   return Object.values(panels).some((p) => EPHEMERAL_COMPONENTS.has(p.contentComponent ?? ""));
 }
 
+/** Walk the serialized grid tree collecting (groupId, activeView) for each leaf. */
+function collectSavedActiveViews(
+  saved: SerializedDockview,
+): Array<{ groupId: string; activeView: string }> {
+  const out: Array<{ groupId: string; activeView: string }> = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const walk = (node: any): void => {
+    if (!node) return;
+    if (Array.isArray(node.data)) {
+      for (const child of node.data) walk(child);
+      return;
+    }
+    const data = node.data;
+    if (data?.id && data.activeView) out.push({ groupId: data.id, activeView: data.activeView });
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  walk((saved as any).grid?.root);
+  return out;
+}
+
+/**
+ * Restore each group's `activeView` from the saved layout. The fast path
+ * doesn't call `fromJSON`, so per-group active tabs would otherwise carry
+ * over from the outgoing env (e.g. Task B left "changes" focused in the
+ * right group, and switching back to Task A would still show "changes"
+ * even though Task A had "plan" active when it was last saved).
+ *
+ * The saved `activeGroup` is applied last so the resulting global focus
+ * matches what was persisted.
+ */
+function restoreSavedActiveViews(api: DockviewApi, saved: SerializedDockview): void {
+  const entries = collectSavedActiveViews(saved);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const savedActiveGroup = (saved as any).activeGroup as string | undefined;
+  const ordered = savedActiveGroup
+    ? [
+        ...entries.filter((e) => e.groupId !== savedActiveGroup),
+        ...entries.filter((e) => e.groupId === savedActiveGroup),
+      ]
+    : entries;
+  for (const { groupId, activeView } of ordered) {
+    const group = api.groups.find((g) => g.id === groupId);
+    if (!group) continue;
+    const panel = group.panels.find((p) => p.id === activeView);
+    if (panel) {
+      try {
+        panel.api.setActive();
+      } catch {
+        /* panel may be in a transient state */
+      }
+    }
+  }
+}
+
 export type EnvSwitchParams = {
   api: DockviewApi;
   oldEnvId: string | null;
@@ -53,30 +107,37 @@ export type EnvSwitchParams = {
 };
 
 /**
- * Remove ephemeral panels (file-editors, diffs, commit-details) from the
- * live layout. These are env-scoped panels that shouldn't carry over.
+ * Predicate matching panels that `removeEphemeralPanels` will close.
  *
- * When `keepSessionId` is provided, session chat panels whose ID does not
- * match `session:{keepSessionId}` are also removed. This handles cross-env
- * (cross-task) switches where the fast path is taken: without this, session
- * tabs from the old env's task remain visible alongside the new task's tab.
+ * Ephemeral panels (file-editors, diffs, commit-details, etc.) are env-scoped
+ * and never carry across switches. When `keepSessionId` is provided, chat
+ * panels for any other session are also removed so the old env's session tab
+ * doesn't bleed into the new env. Pulled out so `computeSurvivingIndex` can
+ * reuse the same survival rules without duplicating them.
+ */
+function shouldRemoveDuringSwitch(
+  panel: { id: string; api: { component: string } },
+  keepSessionId: string | null,
+): boolean {
+  const comp = panel.api.component;
+  if (EPHEMERAL_COMPONENTS.has(comp)) return true;
+  if (
+    keepSessionId !== null &&
+    comp === "chat" &&
+    panel.id.startsWith("session:") &&
+    panel.id !== `session:${keepSessionId}`
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Close every panel that matches `shouldRemoveDuringSwitch`. Used to clear
+ * env-scoped ephemerals before the new env's panels are restored.
  */
 function removeEphemeralPanels(api: DockviewApi, keepSessionId: string | null): void {
-  const toRemove = api.panels.filter((p) => {
-    const comp = p.api.component;
-    if (EPHEMERAL_COMPONENTS.has(comp)) {
-      return true;
-    }
-    if (
-      keepSessionId !== null &&
-      comp === "chat" &&
-      p.id.startsWith("session:") &&
-      p.id !== `session:${keepSessionId}`
-    ) {
-      return true;
-    }
-    return false;
-  });
+  const toRemove = api.panels.filter((p) => shouldRemoveDuringSwitch(p, keepSessionId));
   for (const p of toRemove) {
     try {
       p.api.close();
@@ -84,6 +145,26 @@ function removeEphemeralPanels(api: DockviewApi, keepSessionId: string | null): 
       /* panel may already be gone */
     }
   }
+}
+
+/**
+ * Given the panels of a group and the id of the panel being replaced, return
+ * the target tab index for the replacement among the siblings that will
+ * survive `removeEphemeralPanels`. Returns -1 if the panel isn't in the group.
+ */
+function computeSurvivingIndex(
+  groupPanels: readonly { id: string; api: { component: string } }[],
+  outgoingPanelId: string | undefined,
+  keepSessionId: string | null,
+): number {
+  if (!outgoingPanelId) return -1;
+  const idx = groupPanels.findIndex((p) => p.id === outgoingPanelId);
+  if (idx < 0) return -1;
+  let count = 0;
+  for (let i = 0; i < idx; i++) {
+    if (!shouldRemoveDuringSwitch(groupPanels[i], keepSessionId)) count++;
+  }
+  return count;
 }
 
 /**
@@ -109,30 +190,57 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
   const outgoingSessionPanel = api.panels.find(
     (p) => p.id.startsWith("session:") || p.api.component === "chat",
   );
-  const outgoingGroupId = outgoingSessionPanel?.group?.id;
+  const outgoingGroup = outgoingSessionPanel?.group;
+  const outgoingGroupId = outgoingGroup?.id;
+  // Capture the session's index among siblings that will survive
+  // `removeEphemeralPanels`, so the new session panel lands in the same tab
+  // slot. Without this, dockview appends and the agent tab drifts to the end
+  // of the group on every cross-task fast-path switch.
+  const outgoingIndex = outgoingGroup
+    ? computeSurvivingIndex(outgoingGroup.panels, outgoingSessionPanel?.id, activeSessionId)
+    : -1;
 
   removeEphemeralPanels(api, activeSessionId);
-
   if (activeSessionId && !api.getPanel(`session:${activeSessionId}`)) {
-    const sidebarPanel = api.getPanel("sidebar");
-    let position: import("dockview-react").AddPanelOptions["position"];
-    if (outgoingGroupId && api.groups.some((g) => g.id === outgoingGroupId)) {
-      position = { referenceGroup: outgoingGroupId };
-    } else if (sidebarPanel) {
-      position = { direction: "right" as const, referencePanel: "sidebar" };
-    }
-    api.addPanel({
-      id: `session:${activeSessionId}`,
-      component: "chat",
-      tabComponent: "sessionTab",
-      title: "Agent",
-      params: { sessionId: activeSessionId },
-      position,
-    });
+    addIncomingSessionPanel(api, activeSessionId, outgoingGroupId, outgoingIndex);
   }
+
+  // The fast path skips `fromJSON`, so per-group active tabs from the
+  // outgoing env would otherwise persist into the incoming env. Reapply
+  // them from the saved layout to match what `fromJSON` would have done.
+  if (saved) restoreSavedActiveViews(api, saved as SerializedDockview);
 
   api.layout(params.safeWidth, params.safeHeight);
   return applyLayoutFixups(api);
+}
+
+/**
+ * Add the incoming task's session chat panel, restoring it to the same tab
+ * slot the outgoing session occupied within `outgoingGroupId` when possible.
+ */
+function addIncomingSessionPanel(
+  api: DockviewApi,
+  sessionId: string,
+  outgoingGroupId: string | undefined,
+  outgoingIndex: number,
+): void {
+  let position: import("dockview-react").AddPanelOptions["position"];
+  if (outgoingGroupId && api.groups.some((g) => g.id === outgoingGroupId)) {
+    position =
+      outgoingIndex >= 0
+        ? { referenceGroup: outgoingGroupId, index: outgoingIndex }
+        : { referenceGroup: outgoingGroupId };
+  } else if (api.getPanel("sidebar")) {
+    position = { direction: "right" as const, referencePanel: "sidebar" };
+  }
+  api.addPanel({
+    id: `session:${sessionId}`,
+    component: "chat",
+    tabComponent: "sessionTab",
+    title: "Agent",
+    params: { sessionId },
+    position,
+  });
 }
 
 /**
