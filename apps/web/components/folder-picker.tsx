@@ -144,7 +144,7 @@ function Breadcrumb({ path, onNavigate }: { path: string; onNavigate: (p: string
         const last = i === segs.length - 1;
         return (
           <Fragment key={seg.path}>
-            {i > 0 && i > 1 && (
+            {i > 0 && (
               <IconChevronRight className="h-3 w-3 flex-shrink-0 text-muted-foreground/60" />
             )}
             <button

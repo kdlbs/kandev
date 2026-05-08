@@ -27,14 +27,22 @@ import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useTask } from "@/hooks/use-task";
 
 /**
- * Active task has at least one repository. Drives the auto-close of repo-bound
- * panels (Changes, etc.) for repo-less tasks where they would never have
- * content.
+ * Repo-status of the active task, distinguishing three states:
+ *   - `null`   — unknown (no active task, or task hasn't loaded into the
+ *                store yet); callers must not act on this.
+ *   - `true`   — task has at least one repository.
+ *   - `false`  — task is confirmed repo-less.
+ *
+ * Returning a boolean here would conflate "loading" with "no repos", and
+ * the auto-close effect below would tear down the Changes panel on first
+ * render before the task data arrives — `removePanel` is permanent within
+ * a session, so the user couldn't recover it.
  */
-function useActiveTaskHasRepos(): boolean {
+function useActiveTaskHasRepos(): boolean | null {
   const taskId = useAppStore((s) => s.tasks.activeTaskId);
   const task = useTask(taskId);
-  return Boolean(task?.repositories && task.repositories.length > 0);
+  if (!task) return null;
+  return Boolean(task.repositories && task.repositories.length > 0);
 }
 
 // Panel components (rendered via portals, not directly by dockview)
@@ -320,10 +328,12 @@ function ChangesContent({ panelId }: { panelId: string }) {
   const totalCount = fileCount + commits.length;
 
   // Repo-less tasks have no git changes ever — auto-close the panel so users
-  // don't see a permanently empty Changes tab.
+  // don't see a permanently empty Changes tab. Gate on a confirmed `false`:
+  // `null` means the task hasn't loaded yet, and removing the panel during
+  // that window is unrecoverable in the same session.
   const taskHasRepos = useActiveTaskHasRepos();
   useEffect(() => {
-    if (taskHasRepos) return;
+    if (taskHasRepos !== false) return;
     const dockApi = useDockviewStore.getState().api;
     const panel = dockApi?.getPanel(panelId);
     if (dockApi && panel) dockApi.removePanel(panel);

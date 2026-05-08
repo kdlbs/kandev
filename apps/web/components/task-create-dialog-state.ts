@@ -91,6 +91,8 @@ type FormResetters = {
   setDiscoverReposLoaded: (v: boolean) => void;
   setUseGitHubUrl: (v: boolean) => void;
   setGitHubUrl: (v: string) => void;
+  setNoRepository: (v: boolean) => void;
+  setWorkspacePath: (v: string) => void;
   setGitHubBranches: (v: Branch[]) => void;
   setGitHubUrlError: (v: string | null) => void;
   setGitHubPrHeadBranch: (v: string | null) => void;
@@ -214,6 +216,10 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   resetters.setGitHubPrHeadBranch(iv?.checkoutBranch ?? null);
   resetters.setFreshBranchEnabled(false);
   resetters.setCurrentLocalBranch("");
+  // Source-mode toggle resets — without these, opening the dialog in "None"
+  // mode and reopening for a different task would land in None mode again.
+  resetters.setNoRepository(false);
+  resetters.setWorkspacePath("");
 }
 
 /** Hook to manage draft persistence for task creation dialog */
@@ -440,6 +446,8 @@ export function useDialogFormState(
       setGitHubPrHeadBranch: ghUrl.setGitHubPrHeadBranch,
       setFreshBranchEnabled: freshBranch.setFreshBranchEnabled,
       setCurrentLocalBranch: freshBranch.setCurrentLocalBranch,
+      setNoRepository: form.setNoRepository,
+      setWorkspacePath: form.setWorkspacePath,
     },
   });
 

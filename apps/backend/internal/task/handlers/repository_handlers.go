@@ -149,8 +149,11 @@ func (h *RepositoryHandlers) httpListDirectory(c *gin.Context) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "path is not within allowed roots"})
 			return
 		}
+		// Log the raw OS error for debugging but return a generic message —
+		// otherwise we leak host paths and access patterns to the client (e.g.
+		// "open /home/user/private: permission denied").
 		h.logger.Warn("failed to list directory", zap.String("path", path), zap.Error(err))
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to list directory"})
 		return
 	}
 	entries := make([]gin.H, 0, len(result.Entries))

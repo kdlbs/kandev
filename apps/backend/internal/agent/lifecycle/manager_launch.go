@@ -238,8 +238,12 @@ func (m *Manager) scratchWorkspacePath(req *LaunchRequest) string {
 			zap.String("workspace_id", req.WorkspaceID))
 		return ""
 	}
-	homeDir := filepath.Dir(m.dataDir)
-	return filepath.Join(homeDir, "tasks", req.WorkspaceID, req.TaskID)
+	// dataDir is always <kandevHome>/data (see config.ResolvedDataDir — single
+	// source of truth: relocate via KANDEV_HOME_DIR, never an independent knob),
+	// so filepath.Dir reliably inverts to the kandev home regardless of where
+	// the user configured it (~/.kandev, ~/.config/kandev, /var/lib/kandev, …).
+	kandevHome := filepath.Dir(m.dataDir)
+	return filepath.Join(kandevHome, "tasks", req.WorkspaceID, req.TaskID)
 }
 
 // launchPrepareRequest copies the launch request, sets the resolved workspace path,
