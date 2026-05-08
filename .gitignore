@@ -109,3 +109,4 @@ normalized-*.jsonl
 
 # playwright-cli snapshots/console logs
 .playwright-cli/
+/.claude/scheduled_tasks.lock
