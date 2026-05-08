@@ -121,9 +121,13 @@ function PRWorkflowRow({
   group: WorkflowGroup;
   onAddAsContext: ((message: string) => void) | null;
 }) {
+  // For an in-progress workflow, "0/1 ran" reads as "nothing finished"
+  // and confuses people: did it start? It's clearer to just report how
+  // many jobs are running. (Failed workflows go to a different bucket,
+  // so an in_progress group never has failed jobs.)
   const badge =
     group.bucket === "in_progress"
-      ? `${group.passed + group.failed}/${group.total} ran`
+      ? `${group.inProgress} running`
       : `${group.passed}/${group.total} passed`;
   return (
     <div
@@ -208,7 +212,7 @@ function PRCheckGroup({
     <div data-testid="pr-check-group" data-kind={kind} className="flex flex-col">
       <CheckGroupHeader kind={kind} count={count} />
       {showRows && (
-        <div className="flex flex-col">
+        <div className="flex flex-col pl-5">
           {hasWorkflows &&
             workflows!.map((g) => (
               <PRWorkflowRow
@@ -222,7 +226,7 @@ function PRCheckGroup({
                 <div
                   key={`skel-${i}`}
                   data-testid="pr-workflow-row-skeleton"
-                  className="h-5 mx-2 my-0.5 rounded-sm bg-muted animate-pulse"
+                  className="h-5 my-0.5 rounded-sm bg-muted animate-pulse"
                 />
               ))
             : null}
@@ -304,7 +308,6 @@ function PRReviewRow({ pr }: { pr: TaskPR }) {
   const required = pr.required_reviews ?? null;
   const approved = pr.review_count;
   const requested = pr.pending_review_count;
-  if (!pr.review_state && approved === 0 && requested === 0 && required == null) return null;
 
   let label: string;
   let icon: ReactNode;
@@ -316,8 +319,18 @@ function PRReviewRow({ pr }: { pr: TaskPR }) {
     icon = <IconCircleX className="h-3.5 w-3.5 text-red-500" />;
     label = "Changes requested";
   } else {
-    icon = <IconCircleDot className="h-3.5 w-3.5 text-yellow-500" />;
-    label = required != null ? `Awaiting review (${approved}/${required})` : "Awaiting review";
+    // Default branch covers "no reviews yet", "review pending", and any
+    // unknown state. Always rendered (no early-return) so a fresh PR
+    // still surfaces its review status — "Awaiting review" with the
+    // required-minimum tail when known.
+    icon = <IconCircleDot className="h-3.5 w-3.5 text-muted-foreground" />;
+    if (required != null) {
+      label = `Awaiting review (${approved}/${required})`;
+    } else if (approved > 0) {
+      label = `${approved} review${approved === 1 ? "" : "s"}`;
+    } else {
+      label = "Awaiting review";
+    }
   }
   const suffix = requested > 0 ? ` (${requested} requested)` : "";
   return (
