@@ -29,6 +29,11 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
 }
 
 function PRStatusChipInner({ pr }: { pr: TaskPR }) {
+  // Reuse getPRStatusColor's text-* class on the wrapper and let an SVG
+  // circle pick up `currentColor` for its fill. The text-* utilities are
+  // already compiled (used elsewhere by PRTaskIcon), so we sidestep any
+  // bg-* variant that might be missing and the chip is guaranteed
+  // to render with colour.
   return (
     <HoverCard openDelay={HOVER_OPEN_DELAY_MS} closeDelay={HOVER_CLOSE_DELAY_MS}>
       <HoverCardTrigger asChild>
@@ -39,9 +44,11 @@ function PRStatusChipInner({ pr }: { pr: TaskPR }) {
           data-pr-state={pr.state}
           data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
           aria-label={`Pull request #${pr.pr_number} CI status`}
-          className="cursor-pointer rounded-full p-0.5 hover:bg-accent/50"
+          className={`cursor-pointer inline-flex items-center justify-center rounded-full p-0.5 hover:bg-accent/50 ${getPRStatusColor(pr)}`}
         >
-          <span className={`block h-2.5 w-2.5 rounded-full ${chipBg(pr)}`} aria-hidden />
+          <svg viewBox="0 0 10 10" className="h-2.5 w-2.5" aria-hidden="true" focusable="false">
+            <circle cx="5" cy="5" r="5" fill="currentColor" />
+          </svg>
         </button>
       </HoverCardTrigger>
       <HoverCardContent side="top" align="start" sideOffset={8} className="w-80 p-2.5">
@@ -49,25 +56,4 @@ function PRStatusChipInner({ pr }: { pr: TaskPR }) {
       </HoverCardContent>
     </HoverCard>
   );
-}
-
-/**
- * Background colour mapping that mirrors `getPRStatusColor` (which returns
- * a `text-*` class). Tailwind's content scanner only sees literal class
- * strings, so we keep this as a static lookup instead of building it via
- * string replacement at runtime — otherwise the bundle drops the bg-*
- * styles and the chip renders without colour.
- */
-const CHIP_BG_BY_TEXT_CLASS: Record<string, string> = {
-  "text-red-500": "bg-red-500",
-  "text-yellow-500": "bg-yellow-500",
-  "text-sky-400": "bg-sky-400",
-  "text-emerald-400": "bg-emerald-400",
-  "text-green-500": "bg-green-500",
-  "text-purple-500": "bg-purple-500",
-  "text-muted-foreground": "bg-muted-foreground",
-};
-
-function chipBg(pr: TaskPR): string {
-  return CHIP_BG_BY_TEXT_CLASS[getPRStatusColor(pr)] ?? "bg-muted-foreground";
 }
