@@ -15,6 +15,7 @@ import type {
   FileEditorComment,
   PRFeedbackComment,
 } from "@/lib/state/slices/comments";
+import type { Message } from "@/lib/types/http";
 
 /**
  * Format a single comment into markdown suitable for sending to the agent.
@@ -125,11 +126,17 @@ export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
         } else {
           const client = getWebSocketClient();
           if (!client) throw new Error("WebSocket client unavailable");
-          await client.request(
+          // Add the returned message to the store directly so the chat updates
+          // even if the session.message.added broadcast is missed (subscription
+          // gap, dropped frame, etc.). addMessage is idempotent on id.
+          const created = await client.request<Message | undefined>(
             "message.add",
             buildMessagePayload(sessionId, taskId, content, planModeEnabled, comment),
             10000,
           );
+          if (created && created.id && created.session_id) {
+            state.addMessage(created);
+          }
         }
 
         markCommentsSent([comment.id]);
