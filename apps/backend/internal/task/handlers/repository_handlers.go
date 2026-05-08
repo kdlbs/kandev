@@ -48,6 +48,7 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	// flow on the local executor. Path-only — fresh-branch is local-only.
 	api.GET("/workspaces/:id/repositories/local-status", h.httpLocalRepositoryStatus)
 	api.GET("/workspaces/:id/repositories/validate", h.httpValidateRepositoryPath)
+	api.GET("/fs/list-dir", h.httpListDirectory)
 	api.GET("/repositories/:id", h.httpGetRepository)
 	api.GET("/repositories/:id/branches", h.httpListRepositoryBranches)
 	api.PATCH("/repositories/:id", h.httpUpdateRepository)
@@ -134,6 +135,28 @@ func (h *RepositoryHandlers) httpDiscoverRepositories(c *gin.Context) {
 		resp.Repositories = append(resp.Repositories, dto.FromLocalRepository(repo))
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// httpListDirectory lists the immediate subdirectories of ?path= (defaults to
+// $HOME when path is empty). Used by the folder picker for repo-less tasks.
+// Hidden directories are excluded.
+func (h *RepositoryHandlers) httpListDirectory(c *gin.Context) {
+	path := c.Query("path")
+	result, err := h.service.ListDirectory(c.Request.Context(), path)
+	if err != nil {
+		h.logger.Warn("failed to list directory", zap.String("path", path), zap.Error(err))
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	entries := make([]gin.H, 0, len(result.Entries))
+	for _, e := range result.Entries {
+		entries = append(entries, gin.H{"name": e.Name, "path": e.Path})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"path":    result.Path,
+		"parent":  result.Parent,
+		"entries": entries,
+	})
 }
 
 func (h *RepositoryHandlers) httpValidateRepositoryPath(c *gin.Context) {

@@ -19,6 +19,8 @@ import {
   type PillOption,
 } from "@/components/task-create-dialog-pill";
 import { GitHubUrlSection } from "@/components/task-create-dialog-github-url";
+import { FolderPicker } from "@/components/folder-picker";
+import { SourceModeSwitch } from "@/components/task-create-dialog-source-mode";
 import {
   computeBranchPrefix,
   computeBranchTooltip,
@@ -97,6 +99,9 @@ type RepoChipsRowProps = {
    * mode is independent: it creates a new branch from a chosen base.
    */
   isLocalExecutor?: boolean;
+  /** "No repository" mode: replace the chip row with a folder picker. */
+  onToggleNoRepository?: () => void;
+  onWorkspacePathChange?: (value: string) => void;
 };
 
 export function RepoChipsRow({
@@ -112,6 +117,8 @@ export function RepoChipsRow({
   freshBranchEnabled,
   onToggleFreshBranch,
   isLocalExecutor,
+  onToggleNoRepository,
+  onWorkspacePathChange,
 }: RepoChipsRowProps) {
   // Local executor branch behavior:
   //   - chip is clickable (user can switch to any existing branch on disk)
@@ -138,47 +145,104 @@ export function RepoChipsRow({
 
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="repo-chips-row">
-      {fs.useGitHubUrl ? (
-        <GitHubUrlSection
-          githubUrl={fs.githubUrl}
-          githubUrlError={fs.githubUrlError}
-          githubBranch={fs.githubBranch}
-          githubBranches={fs.githubBranches}
-          githubBranchesLoading={fs.githubBranchesLoading}
-          onGitHubUrlChange={onGitHubUrlChange}
-          onGitHubBranchChange={fs.setGitHubBranch}
-        />
-      ) : (
-        <ChipsList
-          fs={fs}
-          repositories={repositories}
-          workspaceId={workspaceId}
-          branchLocked={branchLocked}
-          isLocalExecutor={!!isLocalExecutor}
-          canAddMore={canAddMore}
-          addHint={addHint}
-          onRowRepositoryChange={onRowRepositoryChange}
-          onRowBranchChange={onRowBranchChange}
-          freshBranchToggle={
-            // Multi-repo runs use worktrees, so the existing-vs-fork choice
-            // is irrelevant — only surface the toggle for single-repo flows.
-            freshBranchAvailable && onToggleFreshBranch && fs.repositories.length === 1 ? (
-              <FreshBranchToggle enabled={!!freshBranchEnabled} onToggle={onToggleFreshBranch} />
-            ) : null
-          }
-        />
-      )}
-      {onToggleGitHubUrl && (
-        <button
-          type="button"
-          onClick={onToggleGitHubUrl}
-          className="ml-auto text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
-          data-testid="toggle-github-url"
-        >
-          {fs.useGitHubUrl ? "use a workspace repository" : "or paste a GitHub URL"}
-        </button>
-      )}
+      <ModeBody
+        fs={fs}
+        repositories={repositories}
+        workspaceId={workspaceId}
+        branchLocked={branchLocked}
+        isLocalExecutor={!!isLocalExecutor}
+        canAddMore={canAddMore}
+        addHint={addHint}
+        freshBranchAvailable={freshBranchAvailable}
+        freshBranchEnabled={freshBranchEnabled}
+        onRowRepositoryChange={onRowRepositoryChange}
+        onRowBranchChange={onRowBranchChange}
+        onGitHubUrlChange={onGitHubUrlChange}
+        onToggleFreshBranch={onToggleFreshBranch}
+        onWorkspacePathChange={onWorkspacePathChange}
+      />
+      <SourceModeSwitch
+        useGitHubUrl={fs.useGitHubUrl}
+        noRepository={fs.noRepository}
+        onToggleGitHubUrl={onToggleGitHubUrl}
+        onToggleNoRepository={onToggleNoRepository}
+      />
     </div>
+  );
+}
+
+function ModeBody({
+  fs,
+  repositories,
+  workspaceId,
+  branchLocked,
+  isLocalExecutor,
+  canAddMore,
+  addHint,
+  freshBranchAvailable,
+  freshBranchEnabled,
+  onRowRepositoryChange,
+  onRowBranchChange,
+  onGitHubUrlChange,
+  onToggleFreshBranch,
+  onWorkspacePathChange,
+}: {
+  fs: DialogFormState;
+  repositories: Repository[];
+  workspaceId: string | null;
+  branchLocked: boolean;
+  isLocalExecutor: boolean;
+  canAddMore: boolean;
+  addHint: string | undefined;
+  freshBranchAvailable?: boolean;
+  freshBranchEnabled?: boolean;
+  onRowRepositoryChange: (key: string, value: string) => void;
+  onRowBranchChange: (key: string, value: string) => void;
+  onGitHubUrlChange?: (value: string) => void;
+  onToggleFreshBranch?: (enabled: boolean) => void;
+  onWorkspacePathChange?: (value: string) => void;
+}) {
+  if (fs.noRepository) {
+    return (
+      <FolderPicker
+        value={fs.workspacePath}
+        onChange={onWorkspacePathChange ?? (() => {})}
+        placeholder="pick a starting folder (optional)"
+      />
+    );
+  }
+  if (fs.useGitHubUrl) {
+    return (
+      <GitHubUrlSection
+        githubUrl={fs.githubUrl}
+        githubUrlError={fs.githubUrlError}
+        githubBranch={fs.githubBranch}
+        githubBranches={fs.githubBranches}
+        githubBranchesLoading={fs.githubBranchesLoading}
+        onGitHubUrlChange={onGitHubUrlChange}
+        onGitHubBranchChange={fs.setGitHubBranch}
+      />
+    );
+  }
+  return (
+    <ChipsList
+      fs={fs}
+      repositories={repositories}
+      workspaceId={workspaceId}
+      branchLocked={branchLocked}
+      isLocalExecutor={isLocalExecutor}
+      canAddMore={canAddMore}
+      addHint={addHint}
+      onRowRepositoryChange={onRowRepositoryChange}
+      onRowBranchChange={onRowBranchChange}
+      freshBranchToggle={
+        // Multi-repo runs use worktrees, so the existing-vs-fork choice
+        // is irrelevant — only surface the toggle for single-repo flows.
+        freshBranchAvailable && onToggleFreshBranch && fs.repositories.length === 1 ? (
+          <FreshBranchToggle enabled={!!freshBranchEnabled} onToggle={onToggleFreshBranch} />
+        ) : null
+      }
+    />
   );
 }
 

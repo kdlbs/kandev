@@ -229,6 +229,7 @@ type AgentProfileInfo struct {
 // LaunchAgentRequest contains parameters for launching an agent
 type LaunchAgentRequest struct {
 	TaskID              string
+	WorkspaceID         string // Kandev workspace ID — used to build scratch dir for repo-less tasks
 	SessionID           string
 	TaskEnvironmentID   string // Env owning this session (shared across sessions in the same task)
 	TaskTitle           string // Human-readable task title for semantic worktree naming
@@ -247,6 +248,7 @@ type LaunchAgentRequest struct {
 	PreviousExecutionID string            // Previous execution ID for runtime reconnect
 	McpMode             string            // MCP tool mode: "config" activates config-mode tools
 	IsEphemeral         bool              // Ephemeral task (quick chat) — enables fallback workspace creation
+	WorkspacePath       string            // Optional host folder for repo-less tasks (overrides scratch fallback)
 
 	// Setup script from executor profile (runs in execution environment before agent starts)
 	SetupScript string

@@ -54,6 +54,12 @@ temp/
 # production ~/.kandev when developing kandev using kandev.
 /.kandev-dev/
 
+# Runtime scratch workspaces created for repo-less tasks. The lifecycle
+# manager places them at <homeDir>/tasks/<workspaceID>/<taskID>; in dev mode
+# (homeDir = .kandev-dev/) they're already covered above, but a misconfigured
+# homeDir could land them at the project root.
+/tasks/
+
 # Build artifacts
 dist/
 build/

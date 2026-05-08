@@ -200,6 +200,8 @@ function useSubmitHandlersWiring({
     freshBranchEnabled: fs.freshBranchEnabled,
     isLocalExecutor: computed.isLocalExecutor,
     repositoryLocalPath,
+    noRepository: fs.noRepository,
+    workspacePath: fs.workspacePath,
     transformDescriptionBeforeSubmit: props.transformDescriptionBeforeSubmit,
   });
 }

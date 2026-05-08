@@ -24,6 +24,18 @@ import { usePlanPanelAutoOpen } from "@/hooks/use-plan-panel-auto-open";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
+import { useTask } from "@/hooks/use-task";
+
+/**
+ * Active task has at least one repository. Drives the auto-close of repo-bound
+ * panels (Changes, etc.) for repo-less tasks where they would never have
+ * content.
+ */
+function useActiveTaskHasRepos(): boolean {
+  const taskId = useAppStore((s) => s.tasks.activeTaskId);
+  const task = useTask(taskId);
+  return Boolean(task?.repositories && task.repositories.length > 0);
+}
 
 // Panel components (rendered via portals, not directly by dockview)
 import { TaskSessionSidebar } from "./task-session-sidebar";
@@ -306,6 +318,16 @@ function ChangesContent({ panelId }: { panelId: string }) {
   const { commits } = useSessionCommits(activeSessionId);
   const fileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
   const totalCount = fileCount + commits.length;
+
+  // Repo-less tasks have no git changes ever — auto-close the panel so users
+  // don't see a permanently empty Changes tab.
+  const taskHasRepos = useActiveTaskHasRepos();
+  useEffect(() => {
+    if (taskHasRepos) return;
+    const dockApi = useDockviewStore.getState().api;
+    const panel = dockApi?.getPanel(panelId);
+    if (dockApi && panel) dockApi.removePanel(panel);
+  }, [taskHasRepos, panelId]);
 
   useEffect(() => {
     const title = totalCount > 0 ? `Changes (${totalCount})` : "Changes";

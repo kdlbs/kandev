@@ -62,6 +62,8 @@ export function useTaskSubmitHandlers({
   freshBranchEnabled,
   isLocalExecutor,
   repositoryLocalPath,
+  noRepository,
+  workspacePath,
   transformDescriptionBeforeSubmit,
 }: SubmitHandlersDeps) {
   const router = useRouter();
@@ -91,8 +93,9 @@ export function useTaskSubmitHandlers({
         repositories,
         githubUrl,
         agentProfileId,
+        noRepository,
       }),
-    [workspaceId, effectiveWorkflowId, repositories, githubUrl, agentProfileId],
+    [workspaceId, effectiveWorkflowId, repositories, githubUrl, agentProfileId, noRepository],
   );
 
   const resetForm = useCallback(() => {
@@ -120,8 +123,9 @@ export function useTaskSubmitHandlers({
   ]);
 
   const getRepositoriesPayload = useCallback(
-    (consentedDirtyFiles: string[] = []) =>
-      buildRepositoriesPayload({
+    (consentedDirtyFiles: string[] = []) => {
+      if (noRepository) return [];
+      return buildRepositoriesPayload({
         useGitHubUrl,
         githubUrl,
         githubBranch,
@@ -129,10 +133,12 @@ export function useTaskSubmitHandlers({
         repositories,
         discoveredRepositories,
         freshBranch: buildFreshBranchPayload(consentedDirtyFiles),
-      }),
+      });
+    },
     // buildFreshBranchPayload is a closure over current scope; lint exception kept narrow.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
+      noRepository,
       useGitHubUrl,
       githubUrl,
       githubBranch,
@@ -297,6 +303,7 @@ export function useTaskSubmitHandlers({
           planMode: opts.planMode,
           attachments: opts.attachments,
           parentId: parentTaskId,
+          workspacePath: noRepository ? workspacePath.trim() : undefined,
         });
       const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, opts.consented);
       if (!taskResponse) return;
@@ -324,6 +331,8 @@ export function useTaskSubmitHandlers({
       executorProfileId,
       isPassthroughProfile,
       parentTaskId,
+      noRepository,
+      workspacePath,
       onSuccess,
       onOpenChange,
       clearDraft,

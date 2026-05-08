@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -194,17 +195,70 @@ func TestLaunchResolveWorkspacePath_EphemeralCreatesQuickChatDir(t *testing.T) {
 	require.Contains(t, workspacePath, "session-abc")
 }
 
-func TestLaunchResolveWorkspacePath_NonEphemeralSkipsQuickChatDir(t *testing.T) {
+func TestLaunchResolveWorkspacePath_NonEphemeralRepoLessGetsScratchDir(t *testing.T) {
 	mgr := newTestManager()
-	mgr.dataDir = t.TempDir()
+	mgr.dataDir = filepath.Join(t.TempDir(), "data")
 
 	req := &LaunchRequest{
 		SessionID:   "session-xyz",
+		TaskID:      "task-xyz",
+		WorkspaceID: "ws-xyz",
 		IsEphemeral: false,
 	}
 
 	workspacePath, _, _, _ := mgr.launchResolveWorkspacePath(context.Background(), req)
-	require.Empty(t, workspacePath, "non-ephemeral task without repo should NOT get a quick-chat workspace")
+	require.NotEmpty(t, workspacePath, "non-ephemeral task without repo should still get a scratch workspace")
+	// New layout: <homeDir>/tasks/<workspaceID>/<taskID> (sibling to worktree task dirs).
+	require.Contains(t, workspacePath, filepath.Join("tasks", "ws-xyz", "task-xyz"))
+	require.NotContains(t, workspacePath, "quick-chat")
+}
+
+func TestLaunchResolveWorkspacePath_NonEphemeralWithoutWorkspaceIDReturnsEmpty(t *testing.T) {
+	mgr := newTestManager()
+	mgr.dataDir = filepath.Join(t.TempDir(), "data")
+
+	// Non-ephemeral repo-less task missing workspace_id should not get a path
+	// (scratch path requires workspace + task IDs to namespace correctly).
+	req := &LaunchRequest{
+		SessionID:   "session-no-ws",
+		TaskID:      "task-1",
+		IsEphemeral: false,
+	}
+
+	workspacePath, _, _, _ := mgr.launchResolveWorkspacePath(context.Background(), req)
+	require.Empty(t, workspacePath)
+}
+
+func TestLaunchResolveWorkspacePath_PickedFolderUsedDirectly(t *testing.T) {
+	mgr := newTestManager()
+	mgr.dataDir = t.TempDir()
+	picked := t.TempDir() // some existing folder the user picked
+
+	req := &LaunchRequest{
+		SessionID:     "session-pick",
+		WorkspacePath: picked,
+	}
+
+	workspacePath, _, _, _ := mgr.launchResolveWorkspacePath(context.Background(), req)
+	require.Equal(t, picked, workspacePath, "picked workspace_path should be used as-is, not replaced by scratch")
+}
+
+func TestLaunchResolveWorkspacePath_WorktreeWithoutRepoFallsBackToScratch(t *testing.T) {
+	mgr := newTestManager()
+	mgr.dataDir = filepath.Join(t.TempDir(), "data")
+
+	// UseWorktree=true but no RepositoryPath — should not return empty,
+	// should fall through to the scratch workspace path.
+	req := &LaunchRequest{
+		SessionID:   "session-wt",
+		TaskID:      "task-wt",
+		WorkspaceID: "ws-wt",
+		UseWorktree: true,
+	}
+
+	workspacePath, _, _, _ := mgr.launchResolveWorkspacePath(context.Background(), req)
+	require.NotEmpty(t, workspacePath, "worktree-mode task without repo should fall through to scratch")
+	require.Contains(t, workspacePath, filepath.Join("tasks", "ws-wt", "task-wt"))
 }
 
 // TestLaunch_PromotesWorkspaceOnlyExecution verifies that when Launch finds an

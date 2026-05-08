@@ -34,6 +34,7 @@ type CreateTaskRequest struct {
 	PlanMode       bool                   `json:"plan_mode,omitempty"`
 	IsEphemeral    bool                   `json:"is_ephemeral,omitempty"` // Ephemeral tasks are hidden from kanban, used for quick chat
 	ParentID       string                 `json:"parent_id,omitempty"`
+	WorkspacePath  string                 `json:"workspace_path,omitempty"` // Optional host folder for repo-less tasks
 }
 
 // UpdateTaskRequest contains the data for updating a task

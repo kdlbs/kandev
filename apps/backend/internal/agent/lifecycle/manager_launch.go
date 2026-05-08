@@ -153,10 +153,13 @@ func (m *Manager) resolveWorkspaceFromProvider(ctx context.Context, req *LaunchR
 }
 
 func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchRequest) (workspacePath, mainRepoGitDir, worktreeID, worktreeBranch string) {
-	if req.UseWorktree && req.ACPSessionID == "" {
+	// Worktree mode requires a repository. Repo-less tasks fall through to the
+	// scratch workspace path below — even if the executor type was worktree.
+	useWorktree := req.UseWorktree && req.RepositoryPath != ""
+	if useWorktree && req.ACPSessionID == "" {
 		return "", "", "", ""
 	}
-	if req.UseWorktree && req.ACPSessionID != "" {
+	if useWorktree && req.ACPSessionID != "" {
 		return m.resolveResumeWorktreePath(ctx, req)
 	}
 	workspacePath = req.WorkspacePath
@@ -168,55 +171,75 @@ func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchReq
 			return resolved, "", "", ""
 		}
 	}
-	// For ephemeral tasks without repositories (e.g., quick chat), create a workspace in ~/.kandev/quick-chat/
-	// These directories are cleaned up when the ephemeral task is deleted (see task service performTaskCleanup).
-	// Non-ephemeral tasks should not receive a fallback workspace — they should fail loudly
-	// if no repository is configured (the MCP handler validates this for auto-start tasks).
+	// For tasks without a repository, create a scratch workspace.
+	// - Non-ephemeral repo-less tasks: <homeDir>/tasks/<workspaceID>/<taskID>/
+	//   (task-scoped, persists across sessions, mirrors the worktree task layout).
+	// - Ephemeral tasks (slack triage / quick chat): <dataDir>/quick-chat/<sessionID>/
+	//   (session-scoped, cleaned up on task delete via performTaskCleanup).
 	if workspacePath == "" && req.SessionID != "" && m.dataDir != "" {
-		if !req.IsEphemeral {
-			m.logger.Warn("non-ephemeral task has no workspace path; skipping quick-chat fallback",
-				zap.String("task_id", req.TaskID),
-				zap.String("session_id", req.SessionID))
-			return "", "", "", ""
-		}
-		quickChatDir := filepath.Join(m.dataDir, "quick-chat")
-		if err := os.MkdirAll(quickChatDir, 0755); err != nil {
-			m.logger.Warn("failed to create quick-chat directory, continuing without workspace",
-				zap.String("session_id", req.SessionID),
-				zap.String("quick_chat_dir", quickChatDir),
-				zap.Error(err))
-			return "", "", "", ""
-		}
-		// Validate SessionID doesn't contain path separators (security: prevent path traversal)
+		workspacePath = m.resolveScratchWorkspace(ctx, req)
+	}
+	return
+}
+
+// resolveScratchWorkspace creates and returns the scratch workspace path for a
+// repo-less task. Returns empty string when the path could not be created.
+func (m *Manager) resolveScratchWorkspace(ctx context.Context, req *LaunchRequest) string {
+	scratchPath := m.scratchWorkspacePath(req)
+	if scratchPath == "" {
+		return ""
+	}
+	if err := os.MkdirAll(scratchPath, 0755); err != nil {
+		m.logger.Warn("failed to create scratch workspace, continuing without workspace",
+			zap.String("session_id", req.SessionID),
+			zap.String("workspace_path", scratchPath),
+			zap.Error(err))
+		return ""
+	}
+	if err := m.initGitRepo(ctx, scratchPath); err != nil {
+		m.logger.Warn("failed to initialize git repository in scratch workspace",
+			zap.String("session_id", req.SessionID),
+			zap.String("workspace_path", scratchPath),
+			zap.Error(err))
+		// Continue anyway - git is optional for repo-less workspaces.
+	}
+	m.logger.Info("created scratch workspace",
+		zap.String("session_id", req.SessionID),
+		zap.String("task_id", req.TaskID),
+		zap.String("workspace_path", scratchPath))
+	return scratchPath
+}
+
+// scratchWorkspacePath computes the scratch workspace path for a launch request.
+// Returns empty string if the inputs are invalid (path traversal guard, missing IDs).
+func (m *Manager) scratchWorkspacePath(req *LaunchRequest) string {
+	if req.IsEphemeral {
+		// Legacy quick-chat path — session-scoped, kept for backward compat with
+		// slack triage and other ephemeral one-shot flows.
 		if strings.ContainsAny(req.SessionID, `/\`) {
 			m.logger.Warn("session ID contains path separator, rejecting",
 				zap.String("session_id", req.SessionID))
-			return "", "", "", ""
+			return ""
 		}
-		// Use session ID as directory name for easy cleanup
-		workspacePath = filepath.Join(quickChatDir, req.SessionID)
-		if err := os.MkdirAll(workspacePath, 0755); err != nil {
-			m.logger.Warn("failed to create session workspace, continuing without workspace",
-				zap.String("session_id", req.SessionID),
-				zap.String("workspace_path", workspacePath),
-				zap.Error(err))
-			return "", "", "", ""
-		}
-
-		// Initialize git repository in the workspace (if not already initialized)
-		if err := m.initGitRepo(ctx, workspacePath); err != nil {
-			m.logger.Warn("failed to initialize git repository in quick chat workspace",
-				zap.String("session_id", req.SessionID),
-				zap.String("workspace_path", workspacePath),
-				zap.Error(err))
-			// Continue anyway - git is optional for quick chat
-		}
-
-		m.logger.Info("created quick chat workspace",
-			zap.String("session_id", req.SessionID),
-			zap.String("workspace_path", workspacePath))
+		return filepath.Join(m.dataDir, "quick-chat", req.SessionID)
 	}
-	return
+	// Non-ephemeral repo-less task: place under <homeDir>/tasks/<workspaceID>/<taskID>/
+	// so it sits alongside repo-bound worktrees and persists across sessions.
+	if req.TaskID == "" || req.WorkspaceID == "" {
+		m.logger.Warn("scratch workspace requires task_id and workspace_id",
+			zap.String("session_id", req.SessionID),
+			zap.String("task_id", req.TaskID),
+			zap.String("workspace_id", req.WorkspaceID))
+		return ""
+	}
+	if strings.ContainsAny(req.TaskID, `/\`) || strings.ContainsAny(req.WorkspaceID, `/\`) {
+		m.logger.Warn("task or workspace ID contains path separator, rejecting",
+			zap.String("task_id", req.TaskID),
+			zap.String("workspace_id", req.WorkspaceID))
+		return ""
+	}
+	homeDir := filepath.Dir(m.dataDir)
+	return filepath.Join(homeDir, "tasks", req.WorkspaceID, req.TaskID)
 }
 
 // launchPrepareRequest copies the launch request, sets the resolved workspace path,

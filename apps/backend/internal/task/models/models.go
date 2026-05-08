@@ -281,6 +281,7 @@ type TaskSession struct {
 	RepositoryID         string                 `json:"repository_id"`       // Primary repository (for backward compatibility)
 	BaseBranch           string                 `json:"base_branch"`         // Primary base branch (for backward compatibility)
 	BaseCommitSHA        string                 `json:"base_commit_sha"`     // Git commit SHA at session start (for cumulative diff)
+	WorkspacePath        string                 `json:"workspace_path"`      // Optional host folder for repo-less tasks (when user picked a starting folder)
 	Worktrees            []*TaskSessionWorktree `json:"worktrees,omitempty"` // Associated worktrees
 	AgentProfileSnapshot map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
 	ExecutorSnapshot     map[string]interface{} `json:"executor_snapshot,omitempty"`
