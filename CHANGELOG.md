@@ -2,6 +2,36 @@
 
 All notable changes to Kandev.
 
+## 0.40.0 - 2026-05-08
+
+### Features
+
+- show grid spinner on agent tab while session is working ([#836](https://github.com/kdlbs/kandev/pull/836))
+- mobile parity (session/terminal/repo pickers + multi-terminal) ([#840](https://github.com/kdlbs/kandev/pull/840))
+- per-task color indicator in sidebar ([#835](https://github.com/kdlbs/kandev/pull/835))
+- rate-limit awareness, poller throttling, and GraphQL batching ([#821](https://github.com/kdlbs/kandev/pull/821))
+- pin tasks and drag-to-reorder in sidebar ([#829](https://github.com/kdlbs/kandev/pull/829))
+- allow renaming quick-chat tabs locally ([#830](https://github.com/kdlbs/kandev/pull/830))
+- multi-question support for ask_user_question_kandev ([#828](https://github.com/kdlbs/kandev/pull/828))
+- allow moving tasks across workflows ([#822](https://github.com/kdlbs/kandev/pull/822))
+- double-click tab to toggle maximize ([#823](https://github.com/kdlbs/kandev/pull/823))
+- cookie-mode integration that triages threads via a utility agent ([#775](https://github.com/kdlbs/kandev/pull/775))
+- add Linear issue watchers ([#805](https://github.com/kdlbs/kandev/pull/805))
+
+### Bug Fixes
+
+- respect "All Workflows" selection with multiple workflows ([#844](https://github.com/kdlbs/kandev/pull/844))
+- stop dockview layout corruption when switching between maximized / sessionless tasks ([#838](https://github.com/kdlbs/kandev/pull/838))
+- hide improve-kandev system workflow from settings UI ([#842](https://github.com/kdlbs/kandev/pull/842))
+- abandon orphan turns on session resume ([#837](https://github.com/kdlbs/kandev/pull/837))
+- source commit pushed status from git remote, not PR commits ([#833](https://github.com/kdlbs/kandev/pull/833))
+- preserve commits in changes panel after refresh ([#834](https://github.com/kdlbs/kandev/pull/834))
+
+### Refactoring
+
+- reframe cross-task message wrapper to authorize action ([#841](https://github.com/kdlbs/kandev/pull/841))
+- drop legacy orchestrator WS handlers superseded by session.launch ([#803](https://github.com/kdlbs/kandev/pull/803))
+
 ## 0.39.2 - 2026-05-05
 
 ### Bug Fixes
