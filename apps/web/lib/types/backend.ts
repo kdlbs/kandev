@@ -185,6 +185,7 @@ export type WorkflowPayload = {
   name: string;
   description?: string;
   agent_profile_id?: string;
+  hidden?: boolean;
   created_at?: string;
   updated_at?: string;
 };
