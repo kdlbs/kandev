@@ -112,6 +112,14 @@ export type SessionCommit = {
   created_at: string;
   /** Multi-repo: name of the repo this commit was made in. Empty for single-repo. */
   repository_name?: string;
+  /**
+   * True when the commit is reachable from the branch's upstream tracking ref.
+   * Sourced from git on the backend so it stays correct without an open PR.
+   * Optional because incremental commit_created notifications don't carry it
+   * (newly-made commits are always unpushed); the next full refetch fills it
+   * in with the real value.
+   */
+  pushed?: boolean;
 };
 
 export type CumulativeDiff = {

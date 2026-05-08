@@ -4,6 +4,7 @@ import { useCallback, useMemo } from "react";
 import { IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { AgentLogo } from "@/components/agent-logo";
+import { GridSpinner } from "@/components/grid-spinner";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -11,12 +12,13 @@ import { useSessionResumption } from "@/hooks/domains/session/use-session-resump
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import type { AgentProfileOption } from "@/lib/state/slices";
-import type { TaskSession, TaskSessionState } from "@/lib/types/http";
+import type { TaskSession } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { PassthroughTerminal } from "./passthrough-terminal";
 import { TaskChatPanel } from "./task-chat-panel";
 import {
   buildAgentLabelsById,
+  isSessionActive,
   pickActiveSessionId,
   resolveAgentLabelFor,
   sortSessions,
@@ -174,12 +176,8 @@ function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId:
   );
 }
 
-function isSessionActive(state: TaskSessionState): boolean {
-  return state === "RUNNING" || state === "STARTING";
-}
-
 function RunningSpinner() {
-  return <IconLoader2 className="h-3 w-3 shrink-0 text-blue-500 animate-spin" />;
+  return <GridSpinner className="text-muted-foreground shrink-0 text-[12px]" />;
 }
 
 function PreviewLoadingState({ label }: { label: string }) {

@@ -1,7 +1,10 @@
 import { useMemo } from "react";
 import type { Message, ClarificationRequestMetadata, MessageType } from "@/lib/types/http";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
-import { findPendingClarification } from "@/lib/utils/pending-clarification";
+import {
+  findPendingClarification,
+  findPendingClarificationGroup,
+} from "@/lib/utils/pending-clarification";
 
 const ACTIVITY_MESSAGE_TYPES: Set<MessageType> = new Set([
   "thinking",
@@ -247,6 +250,10 @@ export function useProcessedMessages(
     [childrenByParentToolCallId],
   );
   const pendingClarification = useMemo(() => findPendingClarification(messages), [messages]);
+  const pendingClarificationGroup = useMemo(
+    () => findPendingClarificationGroup(messages),
+    [messages],
+  );
 
   const visibleMessages = useMemo(
     () => filterVisibleMessages(messages, toolCallIds, subagentChildIds),
@@ -323,5 +330,6 @@ export function useProcessedMessages(
     todoItems,
     agentMessageCount,
     pendingClarification,
+    pendingClarificationGroup,
   };
 }

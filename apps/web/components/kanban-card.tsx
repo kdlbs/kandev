@@ -1,40 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
-import { CSS } from "@dnd-kit/utilities";
+import { KanbanCardContextMenu } from "@/components/kanban-card-context-menu";
+import { KanbanCardShell } from "@/components/kanban-card-content";
 import {
-  IconDots,
-  IconArrowsMaximize,
-  IconLoader,
-  IconAlertCircle,
-  IconSubtask,
-} from "@tabler/icons-react";
-import { Checkbox } from "@kandev/ui/checkbox";
-import { Card, CardContent } from "@kandev/ui/card";
-import { Badge } from "@kandev/ui/badge";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
-  DropdownMenuPortal,
-  DropdownMenuSeparator,
-} from "@kandev/ui/dropdown-menu";
-import type { TaskState, Repository } from "@/lib/types/http";
-import { cn, getRepositoryDisplayName } from "@/lib/utils";
-import { getTaskStateIcon, shouldUseQuestionTaskIcon } from "@/lib/ui/state-icons";
-import { needsAction } from "@/lib/utils/needs-action";
+  buildKanbanCardMenuEntries,
+  useKanbanCardMoveTargets,
+} from "@/components/kanban-card-menu-items";
 import { useAppStore } from "@/components/state-provider";
-import { PRTaskIcon } from "@/components/github/pr-task-icon";
-import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
-import { useTaskPendingClarification } from "@/hooks/use-task-pending-clarification";
+import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
+import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
+import { getRepositoryDisplayName } from "@/lib/utils";
+import type { Repository, TaskState } from "@/lib/types/http";
 
 export interface Task {
   id: string;
@@ -46,7 +25,6 @@ export interface Task {
   repositoryId?: string;
   /** All repositories linked to the task; used to render a "+N" chip for multi-repo. */
   repositories?: Array<{ id: string; repository_id: string; position: number }>;
-  // Workflow fields
   sessionCount?: number | null;
   primarySessionId?: string | null;
   reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
@@ -63,6 +41,12 @@ export interface WorkflowStep {
   id: string;
   title: string;
   color: string;
+  events?: {
+    on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
+    on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
+    on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
+    on_exit?: Array<{ type: string; config?: Record<string, unknown> }>;
+  };
 }
 
 interface KanbanCardProps {
@@ -80,383 +64,100 @@ interface KanbanCardProps {
   isDeleting?: boolean;
   isArchiving?: boolean;
   isSelected?: boolean;
+  selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
   isMultiSelectMode?: boolean;
 }
 
-const REPO_CHIPS_VISIBLE = 2;
-
-function RepoChipRow({ repoNames }: { repoNames: string[] }) {
-  if (repoNames.length === 0) return null;
-  const visible = repoNames.slice(0, REPO_CHIPS_VISIBLE);
-  const overflow = repoNames.slice(REPO_CHIPS_VISIBLE);
-  const row = (
-    <div className="mb-1 flex items-center gap-1 min-w-0 overflow-hidden">
-      {visible.map((name) => (
-        <span
-          key={name}
-          className="shrink-0 rounded-sm bg-muted/60 px-1 py-px text-[9px] font-medium text-muted-foreground leading-tight max-w-[8rem] truncate"
-        >
-          {name}
-        </span>
-      ))}
-      {overflow.length > 0 && (
-        <span className="shrink-0 rounded-sm bg-muted px-1 py-px text-[9px] font-medium text-muted-foreground/80">
-          +{overflow.length}
-        </span>
-      )}
-    </div>
-  );
-  if (repoNames.length <= 1) return row;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{row}</TooltipTrigger>
-      <TooltipContent side="top" align="start">
-        <div className="flex flex-col gap-0.5 text-xs">
-          {repoNames.map((name) => (
-            <span key={name}>{name}</span>
-          ))}
-        </div>
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-function KanbanCardBody({
+function useKanbanCardMenus({
   task,
-  repoNames,
-  actions,
-}: {
-  task: Task;
-  repoNames: string[];
-  actions?: React.ReactNode;
-}) {
-  return (
-    <>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <RepoChipRow repoNames={repoNames} />
-          <div className="flex items-center gap-1 min-w-0">
-            <p
-              data-testid="task-card-title"
-              className="text-sm font-medium leading-tight line-clamp-1 min-w-0"
-            >
-              {task.title}
-            </p>
-            <PRTaskIcon taskId={task.id} />
-          </div>
-        </div>
-        {task.isRemoteExecutor && (
-          <RemoteCloudTooltip
-            taskId={task.id}
-            sessionId={task.primarySessionId ?? null}
-            fallbackName={task.primaryExecutorName ?? task.primaryExecutorType}
-          />
-        )}
-        {actions}
-      </div>
-      {task.description && (
-        <p className="text-xs text-muted-foreground mt-1 leading-tight line-clamp-1">
-          {task.description}
-        </p>
-      )}
-      <KanbanCardBadges task={task} />
-    </>
-  );
-}
-
-function KanbanCardBadges({ task }: { task: Task }) {
-  const parentTitle = useAppStore((s) => {
-    if (!task.parentTaskId) return null;
-    return s.kanban.tasks.find((t) => t.id === task.parentTaskId)?.title ?? null;
-  });
-
-  const showRow =
-    (task.sessionCount && task.sessionCount > 1) ||
-    task.reviewStatus === "changes_requested" ||
-    task.reviewStatus === "pending" ||
-    task.parentTaskId;
-
-  if (!showRow) return null;
-
-  return (
-    <div className="flex flex-wrap items-center justify-end gap-2 mt-1 min-w-0">
-      {task.parentTaskId && (
-        <Badge variant="outline" className="text-xs h-5 gap-1 max-w-[160px] min-w-0">
-          <IconSubtask className="h-3 w-3 shrink-0" />
-          <span className="truncate">{parentTitle ?? "Subtask"}</span>
-        </Badge>
-      )}
-      {task.sessionCount && task.sessionCount > 1 && (
-        <Badge variant="secondary" className="text-xs h-5">
-          {task.sessionCount} sessions
-        </Badge>
-      )}
-      {task.reviewStatus === "pending" && task.state !== "IN_PROGRESS" && (
-        <div className="flex items-center gap-1 text-amber-700 dark:text-amber-600">
-          <IconAlertCircle className="h-3.5 w-3.5" />
-          <span className="text-[10px] font-medium">Approval Required</span>
-        </div>
-      )}
-      {task.reviewStatus === "changes_requested" && (
-        <Badge
-          variant="outline"
-          className="border-amber-500 text-amber-600 bg-amber-50 dark:bg-amber-950/50 text-xs h-5"
-        >
-          Changes Requested
-        </Badge>
-      )}
-    </div>
-  );
-}
-
-function KanbanCardLayout({
-  task,
-  repositoryNames,
-  className,
-}: KanbanCardProps & { className?: string }) {
-  return (
-    <Card size="sm" className={cn("w-full py-0", className)}>
-      <CardContent className="px-2 py-1">
-        <KanbanCardBody task={task} repoNames={repositoryNames ?? []} />
-      </CardContent>
-    </Card>
-  );
-}
-
-function KanbanCardActions({
-  task,
-  showMaximizeButton,
-  onOpenFullPage,
+  steps,
+  isDeleting,
+  isArchiving,
+  isSelected,
+  selectedIds,
   onEdit,
   onDelete,
   onArchive,
   onMove,
-  steps,
-  isDeleting,
-  isArchiving,
 }: Pick<
   KanbanCardProps,
   | "task"
-  | "showMaximizeButton"
-  | "onOpenFullPage"
+  | "steps"
+  | "isDeleting"
+  | "isArchiving"
+  | "isSelected"
+  | "selectedIds"
   | "onEdit"
   | "onDelete"
   | "onArchive"
   | "onMove"
-  | "steps"
-  | "isDeleting"
-  | "isArchiving"
 >) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const effectiveMenuOpen = menuOpen || Boolean(isDeleting) || Boolean(isArchiving);
-  const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId);
-  const showQuestionIcon = shouldUseQuestionTaskIcon(task.state, hasPendingClarificationRequest);
-  const statusIcon = getTaskStateIcon(task.state, "h-4 w-4", hasPendingClarificationRequest);
-  const hasKnownSession =
-    Boolean(task.primarySessionId) || Boolean(task.sessionCount && task.sessionCount > 0);
-
-  return (
-    <div className="flex items-center gap-2">
-      {(task.state === "IN_PROGRESS" || task.state === "SCHEDULING" || showQuestionIcon) &&
-        statusIcon}
-      {showMaximizeButton && onOpenFullPage && hasKnownSession && (
-        <button
-          type="button"
-          className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-sm p-1 -m-1 transition-colors cursor-pointer"
-          onClick={(event) => {
-            event.stopPropagation();
-            onOpenFullPage(task);
-          }}
-          onPointerDown={(event) => event.stopPropagation()}
-          aria-label="Open full page"
-          title="Open full page"
-        >
-          <IconArrowsMaximize className="h-4 w-4" />
-        </button>
-      )}
-      <KanbanCardMenu
-        task={task}
-        effectiveMenuOpen={effectiveMenuOpen}
-        setMenuOpen={setMenuOpen}
-        isDeleting={isDeleting}
-        isArchiving={isArchiving}
-        onEdit={onEdit}
-        onDelete={onDelete}
-        onArchive={onArchive}
-        onMove={onMove}
-        steps={steps}
-      />
-    </div>
-  );
-}
-
-function MoveToSubmenu({
-  task,
-  steps,
-  disabled,
-  onMove,
-}: {
-  task: Task;
-  steps: WorkflowStep[];
-  disabled?: boolean;
-  onMove: (task: Task, targetStepId: string) => void;
-}) {
-  return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger
-        disabled={disabled}
-        onClick={(event) => event.stopPropagation()}
-        onPointerDown={(event) => event.stopPropagation()}
-      >
-        Move to
-      </DropdownMenuSubTrigger>
-      <DropdownMenuPortal>
-        <DropdownMenuSubContent>
-          {steps
-            .filter((col) => col.id !== task.workflowStepId)
-            .map((col) => (
-              <DropdownMenuItem
-                key={col.id}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onMove(task, col.id);
-                }}
-              >
-                <div className={cn("w-2 h-2 rounded-full mr-2", col.color)} />
-                {col.title}
-              </DropdownMenuItem>
-            ))}
-        </DropdownMenuSubContent>
-      </DropdownMenuPortal>
-    </DropdownMenuSub>
-  );
-}
-
-type KanbanCardMenuProps = {
-  task: Task;
-  effectiveMenuOpen: boolean;
-  setMenuOpen: (open: boolean) => void;
-  isDeleting?: boolean;
-  isArchiving?: boolean;
-  onEdit?: (task: Task) => void;
-  onDelete?: (task: Task) => void;
-  onArchive?: (task: Task) => void;
-  onMove?: (task: Task, targetStepId: string) => void;
-  steps?: WorkflowStep[];
-};
-
-function KanbanCardMenu(props: KanbanCardMenuProps) {
-  const { task, effectiveMenuOpen, setMenuOpen, isDeleting, isArchiving } = props;
-  const { onEdit, onDelete, onArchive, onMove, steps } = props;
+  const moveTargets = useKanbanCardMoveTargets(task.id, steps);
+  const moveTasks = useTaskWorkflowMove();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
-  const isProcessing = isDeleting || isArchiving;
+  const disabled = Boolean(isDeleting || isArchiving);
 
-  return (
-    <>
-      <DropdownMenu
-        open={effectiveMenuOpen}
-        onOpenChange={(open) => {
-          if (!open && isProcessing) return;
-          setMenuOpen(open);
-        }}
-      >
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-sm p-1 -m-1 transition-colors cursor-pointer"
-            onClick={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-            aria-label="More options"
-          >
-            <IconDots className="h-4 w-4" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem
-            disabled={isProcessing}
-            onClick={(e) => {
-              e.stopPropagation();
-              onEdit?.(task);
-            }}
-          >
-            Edit
-          </DropdownMenuItem>
-          {steps && steps.length > 1 && onMove && (
-            <MoveToSubmenu task={task} steps={steps} disabled={isProcessing} onMove={onMove} />
-          )}
-          {onArchive && (
-            <DropdownMenuItem
-              disabled={isProcessing}
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowArchiveConfirm(true);
-              }}
-            >
-              {isArchiving ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Archive
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            disabled={isProcessing}
-            className="text-destructive focus:text-destructive"
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowDeleteConfirm(true);
-            }}
-          >
-            Delete
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <TaskDeleteConfirmDialog
-        open={showDeleteConfirm}
-        onOpenChange={setShowDeleteConfirm}
-        taskTitle={task.title}
-        isDeleting={isDeleting}
-        onConfirm={() => onDelete?.(task)}
-      />
-      <TaskArchiveConfirmDialog
-        open={showArchiveConfirm}
-        onOpenChange={setShowArchiveConfirm}
-        taskTitle={task.title}
-        isArchiving={isArchiving}
-        onConfirm={() => {
-          onArchive?.(task);
-          setShowArchiveConfirm(false);
-        }}
-      />
-    </>
-  );
-}
+  const runMoveTasks = (taskIds: string[], workflowId: string, stepId: string) => {
+    void moveTasks(taskIds, workflowId, stepId).catch(() => {
+      // useTaskWorkflowMove already shows the failure toast.
+    });
+  };
 
-function KanbanCardCheckbox({
-  taskId,
-  taskTitle,
-  isSelected,
-  onCheckboxClick,
-}: {
-  taskId: string;
-  taskTitle: string;
-  isSelected?: boolean;
-  onCheckboxClick: (e: React.MouseEvent) => void;
-}) {
-  return (
-    <div
-      className="mt-0.5 shrink-0"
-      onClick={onCheckboxClick}
-      onPointerDown={(e) => e.stopPropagation()}
-      data-testid={`task-select-checkbox-${taskId}`}
-    >
-      <Checkbox
-        checked={!!isSelected}
-        aria-label={`Select task ${taskTitle}`}
-        className="cursor-pointer border-muted-foreground/50"
-      />
-    </div>
-  );
+  const moveToStepFromDropdown = (stepId: string) => {
+    if (onMove) {
+      onMove(task, stepId);
+      return;
+    }
+    if (moveTargets.currentWorkflowId) {
+      runMoveTasks([task.id], moveTargets.currentWorkflowId, stepId);
+    }
+  };
+
+  const selectedTaskIds = isSelected && selectedIds?.size ? [...selectedIds] : [task.id];
+  const moveSelectedToStep = (stepId: string) => {
+    if (selectedTaskIds.length === 1 && selectedTaskIds[0] === task.id && onMove) {
+      onMove(task, stepId);
+      return;
+    }
+    if (!moveTargets.currentWorkflowId) return;
+    runMoveTasks(selectedTaskIds, moveTargets.currentWorkflowId, stepId);
+  };
+
+  const menuBase = {
+    currentWorkflowId: moveTargets.currentWorkflowId,
+    currentStepId: task.workflowStepId,
+    workflows: moveTargets.workflowItems,
+    stepsByWorkflowId: moveTargets.stepsByWorkflowId,
+    disabled,
+    isDeleting,
+    isArchiving,
+    onEdit: onEdit ? () => onEdit(task) : undefined,
+    onArchive: onArchive ? () => setShowArchiveConfirm(true) : undefined,
+    onDelete: onDelete ? () => setShowDeleteConfirm(true) : undefined,
+  };
+
+  return {
+    dropdownMenuEntries: buildKanbanCardMenuEntries({
+      ...menuBase,
+      onMoveToStep: moveToStepFromDropdown,
+      onSendToWorkflow: (workflowId, stepId) => {
+        runMoveTasks([task.id], workflowId, stepId);
+      },
+    }),
+    contextMenuEntries: buildKanbanCardMenuEntries({
+      ...menuBase,
+      onMoveToStep: moveSelectedToStep,
+      onSendToWorkflow: (workflowId, stepId) => {
+        runMoveTasks(selectedTaskIds, workflowId, stepId);
+      },
+    }),
+    showDeleteConfirm,
+    setShowDeleteConfirm,
+    showArchiveConfirm,
+    setShowArchiveConfirm,
+  };
 }
 
 export function KanbanCard({
@@ -473,6 +174,7 @@ export function KanbanCard({
   isDeleting,
   isArchiving,
   isSelected,
+  selectedIds,
   onToggleSelect,
   isMultiSelectMode,
 }: KanbanCardProps) {
@@ -480,14 +182,26 @@ export function KanbanCard({
     id: task.id,
     disabled: isMultiSelectMode,
   });
-
   const isPreviewed = useAppStore((state) => state.kanbanPreviewedTaskId === task.id);
-
-  const style = {
-    transform: CSS.Translate.toString(transform),
-    transition: "none",
-    willChange: isDragging ? "transform" : undefined,
-  };
+  const {
+    dropdownMenuEntries,
+    contextMenuEntries,
+    showDeleteConfirm,
+    setShowDeleteConfirm,
+    showArchiveConfirm,
+    setShowArchiveConfirm,
+  } = useKanbanCardMenus({
+    task,
+    steps,
+    isDeleting,
+    isArchiving,
+    isSelected,
+    selectedIds,
+    onEdit,
+    onDelete,
+    onArchive,
+    onMove,
+  });
 
   const handleClick = () => {
     if (isMultiSelectMode) {
@@ -502,76 +216,44 @@ export function KanbanCard({
     onToggleSelect?.(task.id);
   };
 
-  const showCheckbox = isMultiSelectMode || !!isSelected;
-
   return (
-    <Card
-      size="sm"
-      ref={setNodeRef}
-      style={style}
-      data-testid={`task-card-${task.id}`}
-      className={cn(
-        "group max-h-48 bg-card rounded-sm data-[size=sm]:py-1 cursor-pointer mb-2 w-full py-0 relative border border-border overflow-visible shadow-none ring-0",
-        needsAction(task) && !isSelected && "border-l-2 border-l-amber-500",
-        isDragging && "opacity-50 z-50",
-        isSelected && "ring-1 ring-primary/60 border-primary/60",
-        isPreviewed && !isSelected && "ring-2 ring-primary border-primary",
-      )}
-      onClick={handleClick}
-      {...(!isMultiSelectMode ? listeners : {})}
-      {...(!isMultiSelectMode ? attributes : {})}
-    >
-      <CardContent className="px-2 py-1">
-        <div className="flex items-start gap-1.5">
-          {showCheckbox && (
-            <KanbanCardCheckbox
-              taskId={task.id}
-              taskTitle={task.title}
-              isSelected={isSelected}
-              onCheckboxClick={handleCheckboxClick}
-            />
-          )}
-          <div className="min-w-0 flex-1">
-            <KanbanCardBody
-              task={task}
-              repoNames={repositoryNames ?? []}
-              actions={
-                !isMultiSelectMode ? (
-                  <KanbanCardActions
-                    task={task}
-                    showMaximizeButton={showMaximizeButton}
-                    onOpenFullPage={onOpenFullPage}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onArchive={onArchive}
-                    onMove={onMove}
-                    steps={steps}
-                    isDeleting={isDeleting}
-                    isArchiving={isArchiving}
-                  />
-                ) : undefined
-              }
-            />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-export function KanbanCardPreview({ task }: KanbanCardProps) {
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
-  const repositoryNames = useMemo(
-    () => resolveTaskRepositoryNames(task, Object.values(repositoriesByWorkspace).flat()),
-    [repositoriesByWorkspace, task],
-  );
-
-  return (
-    <KanbanCardLayout
-      task={task}
-      repositoryNames={repositoryNames}
-      className="cursor-grabbing shadow-lg ring-0 pointer-events-none border border-border"
-    />
+    <>
+      <KanbanCardContextMenu entries={contextMenuEntries}>
+        <KanbanCardShell
+          task={task}
+          repositoryNames={repositoryNames}
+          attributes={attributes}
+          listeners={listeners}
+          setNodeRef={setNodeRef}
+          transform={transform}
+          isDragging={isDragging}
+          isPreviewed={isPreviewed}
+          isSelected={isSelected}
+          isMultiSelectMode={isMultiSelectMode}
+          showMaximizeButton={showMaximizeButton}
+          isDeleting={isDeleting}
+          isArchiving={isArchiving}
+          menuEntries={dropdownMenuEntries}
+          onClick={handleClick}
+          onCheckboxClick={handleCheckboxClick}
+          onOpenFullPage={onOpenFullPage}
+        />
+      </KanbanCardContextMenu>
+      <TaskDeleteConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        taskTitle={task.title}
+        isDeleting={isDeleting}
+        onConfirm={() => onDelete?.(task)}
+      />
+      <TaskArchiveConfirmDialog
+        open={showArchiveConfirm}
+        onOpenChange={setShowArchiveConfirm}
+        taskTitle={task.title}
+        isArchiving={isArchiving}
+        onConfirm={() => onArchive?.(task)}
+      />
+    </>
   );
 }
 

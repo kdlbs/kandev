@@ -121,6 +121,16 @@ export async function moveTask(
   });
 }
 
+export async function bulkMoveSelectedTasks(
+  payload: { task_ids: string[]; target_workflow_id: string; target_step_id: string },
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ moved_count: number }>("/api/v1/tasks/bulk-move", {
+    ...options,
+    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
 export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, options);
 }

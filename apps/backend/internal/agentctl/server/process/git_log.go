@@ -37,6 +37,11 @@ type GitCommitInfo struct {
 	FilesChanged  int    `json:"files_changed"`
 	Insertions    int    `json:"insertions"`
 	Deletions     int    `json:"deletions"`
+	// Pushed is true when the commit is reachable from the branch's upstream
+	// tracking ref (i.e. present on the remote). Sourced from git itself —
+	// not from any PR API — so it stays correct when no PR exists yet, after
+	// rebases, and across multi-repo workspaces.
+	Pushed bool `json:"pushed"`
 	// RepositoryName tags commits returned from a multi-repo log fan-out.
 	// Empty for single-repo workspaces. Set by the API layer after the call.
 	RepositoryName string `json:"repository_name,omitempty"`
@@ -151,8 +156,58 @@ func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int) 
 		})
 	}
 
+	g.markPushedCommits(ctx, result.Commits)
+
 	result.Success = true
 	return result, nil
+}
+
+// markPushedCommits sets Pushed on each commit by looking up which commits in
+// HEAD's history are NOT reachable from the upstream tracking ref. A commit is
+// pushed iff it is not in that "ahead" set. When the branch has no upstream
+// (never been pushed) or the lookup fails, all commits stay Pushed=false — the
+// safer default than falsely claiming a commit is on the remote.
+func (g *GitOperator) markPushedCommits(ctx context.Context, commits []*GitCommitInfo) {
+	if len(commits) == 0 {
+		return
+	}
+	upstream := g.getUpstreamRef(ctx)
+	if upstream == "" {
+		return
+	}
+	// Resolve to a SHA so we can pass it to rev-list as `^<sha>`. The caret
+	// prefix means the arg doesn't match LooksLikeCommitSHA; it falls through
+	// to the non-branch catch-all in runGitCommand, which passes it unchanged.
+	// Safe: upstreamSHA is local rev-parse output, not user input.
+	upstreamSHA, err := g.runGitCommand(ctx, "rev-parse", upstream)
+	if err != nil {
+		return
+	}
+	upstreamSHA = strings.TrimSpace(upstreamSHA)
+	if upstreamSHA == "" {
+		return
+	}
+	// Cap the walk to the number of commits we're marking. Without this, a
+	// branch with many local-only commits would walk unbounded history per
+	// GetLog call. rev-list walks newest-first the same way GetLog does, so
+	// the N most recent unpushed SHAs cover the N commits in our result.
+	output, err := g.runGitCommand(ctx, "rev-list",
+		fmt.Sprintf("-n%d", len(commits)), "HEAD", "^"+upstreamSHA)
+	if err != nil {
+		return
+	}
+	unpushed := make(map[string]struct{})
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		sha := strings.TrimSpace(line)
+		if sha != "" {
+			unpushed[sha] = struct{}{}
+		}
+	}
+	for _, c := range commits {
+		if _, isUnpushed := unpushed[c.CommitSHA]; !isUnpushed {
+			c.Pushed = true
+		}
+	}
 }
 
 // GetCumulativeDiff returns the cumulative diff from baseCommit to the working tree

@@ -263,20 +263,62 @@ func TestResolveTaskRepositories_NoInputs_ReturnsEmpty(t *testing.T) {
 	assert.Empty(t, result.Repos)
 }
 
-func TestResolveTaskRepositories_ExplicitRepos_SkipsParentLookup(t *testing.T) {
-	log := testLogger(t)
-	h := &Handlers{logger: log.WithFields()}
+// --- Integration tests using real task service ---
 
-	// Even with a parentID, explicit repos should be used without looking up the parent
-	// (taskSvc is nil — if it tried to call GetTask it would panic).
-	explicit := []mcpRepositoryInput{{RepositoryID: "repo-explicit"}}
-	result, err := h.resolveTaskRepositories(context.Background(), "some-parent", "some-source", explicit)
+// seedParentWithRepo creates a workspace, workflow, repository, and a parent
+// task linked to that repository. Returns the parent task ID.
+func seedParentWithRepo(t *testing.T, svc *service.Service, repo *sqliterepo.Repository) string {
+	t.Helper()
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{ID: "repo-parent", WorkspaceID: "ws-1", Name: "Parent Repo"}))
+	parent, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Parent task",
+		Repositories: []service.TaskRepositoryInput{
+			{RepositoryID: "repo-parent", BaseBranch: "main"},
+		},
+	})
 	require.NoError(t, err)
-	require.Len(t, result.Repos, 1)
-	assert.Equal(t, "repo-explicit", result.Repos[0].RepositoryID)
+	return parent.ID
 }
 
-// --- Integration tests using real task service ---
+func TestResolveTaskRepositories_ParentWithoutExplicitRepos_InheritsAll(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parentID := seedParentWithRepo(t, svc, repo)
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	result, err := h.resolveTaskRepositories(context.Background(), parentID, "", nil)
+	require.NoError(t, err)
+	require.Len(t, result.Repos, 1, "subtask without explicit repos inherits parent's repos")
+	assert.Equal(t, "repo-parent", result.Repos[0].RepositoryID)
+	assert.Equal(t, "ws-1", result.WorkspaceID)
+	assert.Equal(t, "wf-1", result.WorkflowID)
+}
+
+func TestResolveTaskRepositories_ParentWithExplicitRepos_OverridesRepoButInheritsWorkspace(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parentID := seedParentWithRepo(t, svc, repo)
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	explicit := []mcpRepositoryInput{
+		{GitHubURL: "https://github.com/acme/sibling", BaseBranch: "develop"},
+	}
+	result, err := h.resolveTaskRepositories(context.Background(), parentID, "", explicit)
+	require.NoError(t, err)
+	require.Len(t, result.Repos, 1, "explicit repos override parent's repos")
+	assert.Equal(t, "https://github.com/acme/sibling", result.Repos[0].GitHubURL)
+	assert.Equal(t, "develop", result.Repos[0].BaseBranch)
+	assert.Empty(t, result.Repos[0].RepositoryID, "explicit repo should not be conflated with parent's RepositoryID")
+	assert.Equal(t, "ws-1", result.WorkspaceID, "subtask still inherits parent's workspace")
+	assert.Equal(t, "wf-1", result.WorkflowID, "subtask still inherits parent's workflow")
+}
 
 func TestResolveTaskRepositories_EphemeralParent_Rejected(t *testing.T) {
 	svc, repo := newTestTaskService(t)

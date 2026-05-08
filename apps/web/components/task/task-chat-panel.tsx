@@ -191,6 +191,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     agentMessageCount,
     cancelQueue,
     pendingClarification,
+    pendingClarificationGroup,
     isQueued,
     queuedMessage,
     updateQueueContent,
@@ -262,7 +263,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       {pendingClarification && !isArchived && (
         <div className="flex-shrink-0 border-t border-sky-400/30 bg-card px-1">
           <ClarificationInputOverlay
-            message={pendingClarification}
+            messages={pendingClarificationGroup}
             onResolved={handleClarificationResolved}
           />
         </div>

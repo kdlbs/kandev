@@ -13,6 +13,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -167,6 +168,18 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 	repositoryID = repoInput.RepositoryID
 	baseBranch = repoInput.BaseBranch
 	if repositoryID != "" {
+		// Verify the repository belongs to the target workspace. Without this
+		// check, an agent that knows a repository UUID from another workspace
+		// could associate it with a task in this workspace via the MCP tool's
+		// repository_id fast path (the github_url and local_path branches both
+		// scope through FindOrCreateRepository, which is workspace-bound).
+		repo, lookupErr := s.repoEntities.GetRepository(ctx, repositoryID)
+		if lookupErr != nil {
+			return "", "", fmt.Errorf("looking up repository %q: %w", repositoryID, lookupErr)
+		}
+		if repo == nil || repo.WorkspaceID != workspaceID {
+			return "", "", fmt.Errorf("repository %q does not belong to workspace %q", repositoryID, workspaceID)
+		}
 		return repositoryID, baseBranch, nil
 	}
 
@@ -206,9 +219,25 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		if name == "" {
 			name = filepath.Base(repoInput.LocalPath)
 		}
+		// Resolve default_branch by probing the repo on disk so it's anchored
+		// to the integration branch (origin/HEAD or main/master) rather than
+		// whatever feature branch the user happens to have checked out. The
+		// frontend's `default_branch` hint wins when set; otherwise we probe
+		// directly. Falling back to repoInput.BaseBranch is wrong because in
+		// the local-executor flow that field carries the user's working
+		// branch, which would permanently pin repositories.default_branch to
+		// a feature branch and break every downstream merge-base lookup.
 		defaultBranch := repoInput.DefaultBranch
 		if defaultBranch == "" {
-			defaultBranch = repoInput.BaseBranch
+			// Probe must operate on a path validated against the discovery
+			// allowlist — repoInput.LocalPath comes straight from the HTTP body
+			// and feeds into os.Stat/ReadFile inside gitref.DefaultBranch, so
+			// without this guard a caller could traverse the filesystem.
+			if safePath, pathErr := s.resolveAllowedLocalPath(repoInput.LocalPath); pathErr == nil {
+				if probed, err := gitref.DefaultBranch(safePath); err == nil && probed != "" && probed != "HEAD" {
+					defaultBranch = probed
+				}
+			}
 		}
 		created, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
 			WorkspaceID:   workspaceID,

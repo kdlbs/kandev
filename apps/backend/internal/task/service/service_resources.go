@@ -181,6 +181,27 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 	return workflow, nil
 }
 
+// SetWorkflowHidden flips the hidden flag on a workflow. Used by system
+// flows (e.g. improve-kandev) to heal records created before Hidden was
+// honored on insert.
+func (s *Service) SetWorkflowHidden(ctx context.Context, id string, hidden bool) error {
+	workflow, err := s.workflows.GetWorkflow(ctx, id)
+	if err != nil {
+		return err
+	}
+	if workflow.Hidden == hidden {
+		return nil
+	}
+	workflow.Hidden = hidden
+	workflow.UpdatedAt = time.Now().UTC()
+	if err := s.workflows.UpdateWorkflow(ctx, workflow); err != nil {
+		s.logger.Error("failed to update workflow hidden flag", zap.String("workflow_id", id), zap.Error(err))
+		return err
+	}
+	s.publishWorkflowEvent(ctx, events.WorkflowUpdated, workflow)
+	return nil
+}
+
 // DeleteWorkflow deletes a workflow
 func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 	workflow, err := s.workflows.GetWorkflow(ctx, id)

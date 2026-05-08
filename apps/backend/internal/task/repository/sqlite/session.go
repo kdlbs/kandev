@@ -122,6 +122,21 @@ func (r *Repository) CompleteTurn(ctx context.Context, id string) error {
 	return err
 }
 
+// AbandonTurn marks a turn as completed with completed_at = started_at, giving it
+// zero duration. Used when a turn was orphaned by an interruption (backend
+// restart, agent crash) and the previous "running" window was not real work —
+// recording `now` would inflate analytics and the UI's last-turn duration with
+// hours of dead time.
+func (r *Repository) AbandonTurn(ctx context.Context, id string) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_session_turns
+		SET completed_at = started_at, updated_at = ?
+		WHERE id = ? AND completed_at IS NULL
+	`), now, id)
+	return err
+}
+
 // ListTurnsBySession returns all turns for a session ordered by start time
 func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTurnsBySession")

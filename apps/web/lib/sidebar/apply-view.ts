@@ -23,6 +23,11 @@ export type GroupedSidebarList = {
   subTasksByParentId: Map<string, TaskSwitcherItem[]>;
 };
 
+export type SidebarTaskPrefs = {
+  pinnedTaskIds: string[];
+  orderedTaskIds: string[];
+};
+
 type DimensionExtractor = (task: TaskSwitcherItem) => FilterValue | undefined;
 
 const STATE_BUCKET_ORDER: Record<TaskBucket, number> = {
@@ -93,7 +98,9 @@ export function applyFilters(
   return tasks.filter((task) => clauses.every((clause) => evaluateClause(task, clause)));
 }
 
-const SORT_COMPARATORS: Record<SortKey, (a: TaskSwitcherItem, b: TaskSwitcherItem) => number> = {
+type SortComparator = (a: TaskSwitcherItem, b: TaskSwitcherItem) => number;
+
+const SORT_COMPARATORS: Record<Exclude<SortKey, "custom">, SortComparator> = {
   state: (a, b) => {
     const bucket = STATE_BUCKET_ORDER[getStateBucket(a)] - STATE_BUCKET_ORDER[getStateBucket(b)];
     if (bucket !== 0) return bucket;
@@ -105,9 +112,32 @@ const SORT_COMPARATORS: Record<SortKey, (a: TaskSwitcherItem, b: TaskSwitcherIte
   title: (a, b) => (a.title ?? "").localeCompare(b.title ?? ""),
 };
 
-export function applySort(tasks: TaskSwitcherItem[], spec: SortSpec): TaskSwitcherItem[] {
-  const cmp = SORT_COMPARATORS[spec.key];
-  const sign = spec.direction === "desc" ? -1 : 1;
+function customComparator(orderedTaskIds: string[]): SortComparator {
+  const order = new Map<string, number>();
+  for (let i = 0; i < orderedTaskIds.length; i++) order.set(orderedTaskIds[i], i);
+  return (a, b) => {
+    const ai = order.get(a.id);
+    const bi = order.get(b.id);
+    if (ai !== undefined && bi !== undefined) return ai - bi;
+    if (ai !== undefined) return -1;
+    if (bi !== undefined) return 1;
+    // Fallback for tasks the user hasn't placed yet: newest createdAt first.
+    return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
+  };
+}
+
+export function applySort(
+  tasks: TaskSwitcherItem[],
+  spec: SortSpec,
+  orderedTaskIds: string[] = [],
+): TaskSwitcherItem[] {
+  const cmp: SortComparator =
+    spec.key === "custom" ? customComparator(orderedTaskIds) : SORT_COMPARATORS[spec.key];
+  // "Custom" is a manual order — reversing it on direction=desc would flip
+  // the user's drag, which has no intuitive meaning. The picker hides the
+  // direction toggle for custom; this guard keeps the data layer consistent
+  // even if a stored view ends up with desc direction.
+  const sign = spec.key !== "custom" && spec.direction === "desc" ? -1 : 1;
   const withIndex = tasks.map((t, i) => ({ t, i }));
   withIndex.sort((a, b) => {
     const primary = cmp(a.t, b.t) * sign;
@@ -221,10 +251,80 @@ function sortRepoGroups(groups: SidebarGroup[]): void {
   });
 }
 
-export function applyView(tasks: TaskSwitcherItem[], view: SidebarView): GroupedSidebarList {
+/**
+ * Float pinned tasks to the top within a group, preserving the order the user
+ * pinned them in. The active sort still determines the order of unpinned
+ * tasks (and acts as a tiebreaker among pinned tasks not in pinIndex).
+ */
+function floatPinnedToTop(
+  tasks: TaskSwitcherItem[],
+  pinnedSet: Set<string>,
+  pinIndex: Map<string, number>,
+): TaskSwitcherItem[] {
+  if (pinnedSet.size === 0) return tasks;
+  const withSortIndex = tasks.map((t, i) => ({ t, sortIdx: i }));
+  withSortIndex.sort((a, b) => {
+    const ap = pinnedSet.has(a.t.id);
+    const bp = pinnedSet.has(b.t.id);
+    if (ap !== bp) return ap ? -1 : 1;
+    if (ap && bp) {
+      const ai = pinIndex.get(a.t.id) ?? 0;
+      const bi = pinIndex.get(b.t.id) ?? 0;
+      if (ai !== bi) return ai - bi;
+    }
+    return a.sortIdx - b.sortIdx;
+  });
+  return withSortIndex.map((x) => x.t);
+}
+
+/**
+ * Splice a group's reordered task IDs back into the global manual-order list,
+ * preserving the position of *other* groups. Without an anchor, repeatedly
+ * appending the dragged group to the end shuffles section headers (the next
+ * `applyGroup` pass keys section order off first encounter, so the dragged
+ * group always ends up last).
+ *
+ * Anchor: index of the first existing group task in `current`. If the group
+ * is being placed for the first time (`firstIdx === -1`), append at the end —
+ * subsequent drags will pin its position via the anchor.
+ */
+export function mergeGroupOrder(current: string[], groupTaskIds: string[]): string[] {
+  const groupSet = new Set(groupTaskIds);
+  let firstIdx = -1;
+  for (let i = 0; i < current.length; i++) {
+    if (groupSet.has(current[i])) {
+      firstIdx = i;
+      break;
+    }
+  }
+  const remaining = current.filter((id) => !groupSet.has(id));
+  if (firstIdx === -1) return [...remaining, ...groupTaskIds];
+  // Items before `firstIdx` in `current` are all non-group (firstIdx is the
+  // first group occurrence), so translation to `remaining` is identity.
+  return [...remaining.slice(0, firstIdx), ...groupTaskIds, ...remaining.slice(firstIdx)];
+}
+
+function buildIndex(ids: string[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (let i = 0; i < ids.length; i++) m.set(ids[i], i);
+  return m;
+}
+
+export function applyView(
+  tasks: TaskSwitcherItem[],
+  view: SidebarView,
+  prefs?: SidebarTaskPrefs,
+): GroupedSidebarList {
   const filtered = applyFilters(tasks, view.filters);
-  const sorted = applySort(filtered, view.sort);
-  return applyGroup(sorted, view.group);
+  const sorted = applySort(filtered, view.sort, prefs?.orderedTaskIds);
+  const grouped = applyGroup(sorted, view.group);
+  if (!prefs || prefs.pinnedTaskIds.length === 0) return grouped;
+  const pinnedSet = new Set(prefs.pinnedTaskIds);
+  const pinIndex = buildIndex(prefs.pinnedTaskIds);
+  for (const group of grouped.groups) {
+    group.tasks = floatPinnedToTop(group.tasks, pinnedSet, pinIndex);
+  }
+  return grouped;
 }
 
 export function opIsNegative(op: FilterOp): boolean {

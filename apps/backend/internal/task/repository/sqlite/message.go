@@ -312,8 +312,10 @@ func (r *Repository) GetMessageByPendingID(ctx context.Context, sessionID, pendi
 	return r.getMessageByMetadataField(ctx, sessionID, "pending_id", pendingID, "")
 }
 
-// FindMessageByPendingID finds a message by pending_id alone (without requiring session ID).
+// FindMessageByPendingID finds the most-recent message by pending_id alone.
 // This is useful when we only have the pending ID (e.g., from expired clarification responses).
+// For multi-question clarification requests, prefer FindMessagesByPendingID to retrieve
+// every related message in one shot.
 func (r *Repository) FindMessageByPendingID(ctx context.Context, pendingID string) (*models.Message, error) {
 	message := &models.Message{}
 	var requestsInput int
@@ -327,6 +329,62 @@ func (r *Repository) FindMessageByPendingID(ctx context.Context, pendingID strin
 	`, dialect.JSONExtract(drv, "metadata", "pending_id"))
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), pendingID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	message.RequestsInput = requestsInput == 1
+	message.Type = models.MessageType(messageType)
+	if metadataJSON != "" {
+		_ = json.Unmarshal([]byte(metadataJSON), &message.Metadata)
+	}
+	return message, nil
+}
+
+// FindMessagesByPendingID returns every message that carries the given pending_id
+// in its metadata, ordered by creation time (oldest first). Multi-question
+// clarification requests emit one message per question, all sharing the same
+// pending_id; this lookup lets the canceller / status-update path touch all of
+// them without N round-trips.
+func (r *Repository) FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*models.Message, error) {
+	drv := r.ro.DriverName()
+	query := fmt.Sprintf(`
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		FROM task_session_messages WHERE %s = ?
+		ORDER BY created_at ASC
+	`, dialect.JSONExtract(drv, "metadata", "pending_id"))
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), pendingID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	result, _, err := scanMessageRows(rows, 0)
+	return result, err
+}
+
+// FindMessageByPendingIDAndQuestion finds the message for a specific (pending_id,
+// question_id) pair within a session. Used to flip per-question status (answered /
+// rejected) on multi-question clarification bundles. The persistence layer stores
+// the question id at metadata.question_id (flat, alongside metadata.question) so
+// the JSON path lookup works on both SQLite and Postgres.
+func (r *Repository) FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error) {
+	drv := r.ro.DriverName()
+	query := fmt.Sprintf(`
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		FROM task_session_messages
+		WHERE task_session_id = ? AND %s = ? AND %s = ?
+		ORDER BY created_at ASC LIMIT 1
+	`,
+		dialect.JSONExtract(drv, "metadata", "pending_id"),
+		dialect.JSONExtract(drv, "metadata", "question_id"),
+	)
+	message := &models.Message{}
+	var requestsInput int
+	var messageType string
+	var metadataJSON string
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID, pendingID, questionID).Scan(
+		&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
+		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt,
+	)
 	if err != nil {
 		return nil, err
 	}

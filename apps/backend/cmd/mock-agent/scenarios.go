@@ -28,6 +28,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"untracked-file-setup":    scenarioUntrackedFileSetup,
 	"untracked-file-modify":   scenarioUntrackedFileModify,
 	"clarification":           scenarioClarification,
+	"clarification-multi":     scenarioClarificationMulti,
 	"clarification-timeout":   scenarioClarificationTimeout,
 	"multi-permission":        scenarioMultiPermission,
 	"review-cumulative-setup": scenarioReviewCumulativeSetup,
@@ -420,15 +421,72 @@ func scenarioUntrackedFileModify(e *emitter) {
 	e.text("untracked-file-modify complete: untracked_test.txt now has MODIFIED_CONTENT")
 }
 
-// clarificationQuestionArgs returns the MCP arguments for the clarification question.
+// MCP argument keys used by the clarification scenarios. Pulled out so goconst
+// stays happy when the same string would otherwise repeat across both helpers.
+const (
+	clarificationOptionsKey = "options"
+	clarificationLabelKey   = "label"
+	clarificationDescKey    = "description"
+	clarificationPromptKey  = "prompt"
+	clarificationIDKey      = "id"
+)
+
+func mockOption(label, description string) map[string]any {
+	return map[string]any{clarificationLabelKey: label, clarificationDescKey: description}
+}
+
+// clarificationQuestionArgs returns the MCP arguments for a single-question
+// clarification call. Used by the simplest e2e scenario where a one-question
+// bundle exercises the same code path as multi-question.
 func clarificationQuestionArgs() map[string]any {
 	return map[string]any{
-		"prompt": "Which database should we use for this project?",
-		"options": []map[string]any{
-			{"label": "PostgreSQL", "description": "Relational database with strong consistency"},
-			{"label": "MongoDB", "description": "Document database for flexible schemas"},
-			{"label": "SQLite", "description": "Embedded database for simplicity"},
+		"questions": []map[string]any{
+			{
+				clarificationIDKey:     "db",
+				clarificationPromptKey: "Which database should we use for this project?",
+				clarificationOptionsKey: []map[string]any{
+					mockOption("PostgreSQL", "Relational database with strong consistency"),
+					mockOption("MongoDB", "Document database for flexible schemas"),
+					mockOption("SQLite", "Embedded database for simplicity"),
+				},
+			},
 		},
+	}
+}
+
+// clarificationMultiQuestionArgs returns the MCP arguments for a 3-question
+// clarification bundle that exercises the multi-question UI flow.
+func clarificationMultiQuestionArgs() map[string]any {
+	return map[string]any{
+		"questions": []map[string]any{
+			{
+				clarificationIDKey:     "db",
+				clarificationPromptKey: "Which database should we use?",
+				clarificationOptionsKey: []map[string]any{
+					mockOption("PostgreSQL", "Relational database with strong consistency"),
+					mockOption("MongoDB", "Document database for flexible schemas"),
+					mockOption("SQLite", "Embedded database for simplicity"),
+				},
+			},
+			{
+				clarificationIDKey:     "language",
+				clarificationPromptKey: "Which language should we use?",
+				clarificationOptionsKey: []map[string]any{
+					mockOption("Go", "Strong typing, fast compile"),
+					mockOption("TypeScript", "Familiar to the team"),
+					mockOption("Rust", "Best for systems work"),
+				},
+			},
+			{
+				clarificationIDKey:     "deploy",
+				clarificationPromptKey: "How should we deploy?",
+				clarificationOptionsKey: []map[string]any{
+					mockOption("Docker", "Containerized deploy"),
+					mockOption("Bare metal", "Run directly on hosts"),
+				},
+			},
+		},
+		"context": "Picking the foundational stack — answer all three so we can move forward.",
 	}
 }
 
@@ -440,6 +498,22 @@ func scenarioClarification(e *emitter) {
 	result, err := callMCPTool("kandev", "ask_user_question_kandev", clarificationQuestionArgs())
 	if err != nil {
 		e.text(fmt.Sprintf("Question failed: %s", err))
+		return
+	}
+
+	fixedDelay(50)
+	e.text(fmt.Sprintf("You answered: %s", result))
+}
+
+// scenarioClarificationMulti: stress the multi-question path — 3 questions in
+// one bundle, all required, single MCP call.
+func scenarioClarificationMulti(e *emitter) {
+	fixedDelay(100)
+	e.text("Let me ask you a few questions about the project setup.")
+
+	result, err := callMCPTool("kandev", "ask_user_question_kandev", clarificationMultiQuestionArgs())
+	if err != nil {
+		e.text(fmt.Sprintf("Questions failed: %s", err))
 		return
 	}
 

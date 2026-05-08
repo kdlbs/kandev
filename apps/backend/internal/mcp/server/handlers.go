@@ -11,10 +11,21 @@ import (
 	"go.uber.org/zap"
 )
 
-// promptArg is the name of the MCP tool argument that carries the user-facing
-// prompt text. Repeated across tool handlers; pulled out here so goconst stays
-// happy and renames stay safe.
-const promptArg = "prompt"
+// Argument-name constants used across the ask_user_question_kandev handler.
+// Pulled out so goconst stays happy and renames stay safe.
+const (
+	promptArg          = "prompt"
+	questionsArg       = "questions"
+	optionsArg         = "options"
+	idArg              = "id"
+	titleArg           = "title"
+	labelArg           = "label"
+	descriptionArg     = "description"
+	optionIDFieldName  = "option_id"
+	questionIDFieldKey = "question_id"
+	answeredFieldKey   = "answered"
+	rejectedFieldKey   = "rejected"
+)
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -135,15 +146,13 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"start_agent":         startAgent,
 		}
 
-		// Add repository info (only valid for top-level tasks)
+		// Add repository info. For subtasks an explicit repo overrides the
+		// parent's; if omitted the backend inherits from the parent.
 		repositoryID := req.GetString("repository_id", "")
 		localPath := req.GetString("local_path", "")
 		repositoryURL := req.GetString("repository_url", "")
 		baseBranch := req.GetString("base_branch", "")
 		hasRepo := repositoryID != "" || localPath != "" || repositoryURL != ""
-		if hasRepo && parentID != "" {
-			return mcp.NewToolResultError("repository_id, local_path, and repository_url are only valid for top-level tasks; subtasks inherit their repository from the parent"), nil
-		}
 		if hasRepo {
 			repo := map[string]string{}
 			if repositoryID != "" {
@@ -291,26 +300,15 @@ func copyOptionalMessageTypesArg(payload map[string]interface{}, req mcp.CallToo
 
 func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		prompt, err := req.RequireString(promptArg)
-		if err != nil {
-			return mcp.NewToolResultError("prompt is required"), nil
-		}
-
-		options, errResult := parseQuestionOptions(req)
+		questions, errResult := parseQuestions(req)
 		if errResult != nil {
 			return errResult, nil
 		}
 
 		questionCtx := req.GetString("context", "")
-		question := map[string]interface{}{
-			"id":      "q1",
-			"title":   "Question",
-			promptArg: prompt,
-			"options": options,
-		}
 		payload := map[string]interface{}{
 			"session_id": s.sessionID,
-			"question":   question,
+			questionsArg: questions,
 			"context":    questionCtx,
 		}
 
@@ -327,90 +325,208 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return extractQuestionAnswer(result), nil
+		return extractQuestionAnswers(result, questions), nil
 	}
 }
 
-// parseQuestionOptions extracts and validates the "options" argument from the request.
-// Returns (options, nil) on success or (nil, *mcp.CallToolResult) on validation failure.
-func parseQuestionOptions(req mcp.CallToolRequest) ([]map[string]interface{}, *mcp.CallToolResult) {
-	args := req.GetArguments()
-	optionsRaw, ok := args["options"]
-	if !ok {
-		return nil, mcp.NewToolResultError("options is required")
-	}
-
-	optionsJSON, err := json.Marshal(optionsRaw)
-	if err != nil {
-		return nil, mcp.NewToolResultError(fmt.Sprintf("failed to parse options: %v", err))
-	}
-
-	var options []map[string]interface{}
-	if err := json.Unmarshal(optionsJSON, &options); err != nil {
-		return nil, mcp.NewToolResultError("options must be an array of objects with 'label' and 'description' fields. Example: [{\"label\": \"Option A\", \"description\": \"Description of option A\"}]")
-	}
-
-	if len(options) < 2 {
-		return nil, mcp.NewToolResultError("options must contain at least 2 choices")
-	}
-	if len(options) > 6 {
-		return nil, mcp.NewToolResultError("options must contain at most 6 choices")
-	}
-
-	if errResult := validateAndNormalizeOptions(options); errResult != nil {
+// parseQuestions extracts and validates the "questions" array from the request.
+// Returns the normalized question payloads (with auto-assigned ids) on success
+// or a tool-result error describing the first validation failure.
+func parseQuestions(req mcp.CallToolRequest) ([]map[string]interface{}, *mcp.CallToolResult) {
+	questions, errResult := decodeQuestionsArg(req)
+	if errResult != nil {
 		return nil, errResult
 	}
 
+	seenIDs := map[string]bool{}
+	for i, q := range questions {
+		if errResult := normalizeAndValidateQuestion(q, i, seenIDs); errResult != nil {
+			return nil, errResult
+		}
+		questions[i] = q
+	}
+	return questions, nil
+}
+
+// decodeQuestionsArg unmarshals the raw "questions" argument and enforces
+// the bundle-size invariants (1..4 questions).
+func decodeQuestionsArg(req mcp.CallToolRequest) ([]map[string]interface{}, *mcp.CallToolResult) {
+	args := req.GetArguments()
+	questionsRaw, ok := args[questionsArg]
+	if !ok {
+		return nil, mcp.NewToolResultError("questions is required (array of 1-4 question objects)")
+	}
+	questionsJSON, err := json.Marshal(questionsRaw)
+	if err != nil {
+		return nil, mcp.NewToolResultError(fmt.Sprintf("failed to parse questions: %v", err))
+	}
+	var questions []map[string]interface{}
+	if err := json.Unmarshal(questionsJSON, &questions); err != nil {
+		return nil, mcp.NewToolResultError(`questions must be an array of objects with "prompt" and "options". Example: [{"prompt": "...", "options": [{"label": "A", "description": "..."}, {"label": "B", "description": "..."}]}]`)
+	}
+	if len(questions) < 1 {
+		return nil, mcp.NewToolResultError("questions must contain at least 1 question")
+	}
+	if len(questions) > 4 {
+		return nil, mcp.NewToolResultError("questions must contain at most 4 questions")
+	}
+	return questions, nil
+}
+
+// normalizeAndValidateQuestion mutates a question payload in place: assigns a
+// default id, parses options, and reports the first validation failure.
+func normalizeAndValidateQuestion(q map[string]interface{}, index int, seenIDs map[string]bool) *mcp.CallToolResult {
+	prompt, hasPrompt := q[promptArg].(string)
+	if !hasPrompt || prompt == "" {
+		return mcp.NewToolResultError(fmt.Sprintf("question %d is missing required 'prompt' field", index+1))
+	}
+	id, _ := q[idArg].(string)
+	if id == "" {
+		id = fmt.Sprintf("q%d", index+1)
+		q[idArg] = id
+	}
+	if seenIDs[id] {
+		return mcp.NewToolResultError(fmt.Sprintf("question %d has duplicate id %q", index+1, id))
+	}
+	seenIDs[id] = true
+
+	options, errResult := decodeOptionsForQuestion(q, index)
+	if errResult != nil {
+		return errResult
+	}
+	if errResult := validateAndNormalizeOptions(options, index+1); errResult != nil {
+		return errResult
+	}
+	q[optionsArg] = options
+	return nil
+}
+
+func decodeOptionsForQuestion(q map[string]interface{}, index int) ([]map[string]interface{}, *mcp.CallToolResult) {
+	optionsRaw, hasOptions := q[optionsArg]
+	if !hasOptions {
+		return nil, mcp.NewToolResultError(fmt.Sprintf("question %d is missing required 'options' field", index+1))
+	}
+	optionsJSON, err := json.Marshal(optionsRaw)
+	if err != nil {
+		return nil, mcp.NewToolResultError(fmt.Sprintf("question %d: failed to parse options: %v", index+1, err))
+	}
+	var options []map[string]interface{}
+	if err := json.Unmarshal(optionsJSON, &options); err != nil {
+		return nil, mcp.NewToolResultError(fmt.Sprintf("question %d: options must be an array of objects with 'label' and 'description' fields", index+1))
+	}
+	if len(options) < 2 {
+		return nil, mcp.NewToolResultError(fmt.Sprintf("question %d must have at least 2 options", index+1))
+	}
+	if len(options) > 6 {
+		return nil, mcp.NewToolResultError(fmt.Sprintf("question %d must have at most 6 options", index+1))
+	}
 	return options, nil
 }
 
 // validateAndNormalizeOptions checks each option for required fields and assigns a default option_id.
-func validateAndNormalizeOptions(options []map[string]interface{}) *mcp.CallToolResult {
+func validateAndNormalizeOptions(options []map[string]interface{}, questionNum int) *mcp.CallToolResult {
 	for i, opt := range options {
-		label, hasLabel := opt["label"].(string)
+		label, hasLabel := opt[labelArg].(string)
 		if !hasLabel || label == "" {
-			return mcp.NewToolResultError(fmt.Sprintf("option %d is missing required 'label' field (1-5 words describing the choice)", i+1))
+			return mcp.NewToolResultError(fmt.Sprintf("question %d option %d is missing required 'label' field (1-5 words describing the choice)", questionNum, i+1))
 		}
-		description, hasDesc := opt["description"].(string)
+		description, hasDesc := opt[descriptionArg].(string)
 		if !hasDesc || description == "" {
-			return mcp.NewToolResultError(fmt.Sprintf("option %d is missing required 'description' field (explanation of what this option means)", i+1))
+			return mcp.NewToolResultError(fmt.Sprintf("question %d option %d is missing required 'description' field (explanation of what this option means)", questionNum, i+1))
 		}
 		// Generate option_id if not provided
-		if _, hasID := opt["option_id"].(string); !hasID {
-			opt["option_id"] = fmt.Sprintf("opt_%d", i+1)
+		if _, hasID := opt[optionIDFieldName].(string); !hasID {
+			opt[optionIDFieldName] = fmt.Sprintf("q%d_opt%d", questionNum, i+1)
 		}
 	}
 	return nil
 }
 
-// extractQuestionAnswer converts the backend question response into an MCP tool result.
-func extractQuestionAnswer(result map[string]interface{}) *mcp.CallToolResult {
-	if answer, ok := result["answer"]; ok {
-		if res := extractAnswerMap(answer); res != nil {
-			return res
+// extractQuestionAnswers converts the backend response into a JSON tool result
+// keyed by question id. The shape is consistent across happy / rejected paths
+// so the agent can always parse the response as a JSON object — rejected
+// bundles emit an envelope { "rejected": true, "reject_reason": "..." } as
+// well as per-question stub entries.
+func extractQuestionAnswers(result map[string]interface{}, questions []map[string]interface{}) *mcp.CallToolResult {
+	rejected, _ := result["rejected"].(bool)
+	rejectReason, _ := result["reject_reason"].(string)
+
+	out := make(map[string]interface{}, len(questions)+2)
+	if rejected {
+		out[rejectedFieldKey] = true
+		if rejectReason != "" {
+			out["reject_reason"] = rejectReason
 		}
 	}
-	if rejected, ok := result["rejected"].(bool); ok && rejected {
-		reason, _ := result["reject_reason"].(string)
-		return mcp.NewToolResultText(fmt.Sprintf("User rejected the question: %s", reason))
+
+	answers, _ := result["answers"].([]interface{})
+	answersByID := make(map[string]map[string]interface{}, len(answers))
+	for _, raw := range answers {
+		ans, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		qid, _ := ans[questionIDFieldKey].(string)
+		if qid == "" {
+			continue
+		}
+		answersByID[qid] = simplifyAnswer(ans, rejected)
 	}
-	data, _ := json.MarshalIndent(result, "", "  ")
+
+	for _, q := range questions {
+		qid, _ := q[idArg].(string)
+		if qid == "" {
+			continue
+		}
+		if entry, ok := answersByID[qid]; ok {
+			out[qid] = entry
+			continue
+		}
+		stub := map[string]interface{}{answeredFieldKey: false}
+		if rejected {
+			stub[rejectedFieldKey] = true
+		}
+		out[qid] = stub
+	}
+
+	if len(out) == 0 {
+		// Nothing matched by id — surface the raw payload so the agent can still inspect it.
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data))
+	}
+
+	data, _ := json.MarshalIndent(out, "", "  ")
 	return mcp.NewToolResultText(string(data))
 }
 
-// extractAnswerMap inspects an answer map for selected options or custom text.
-func extractAnswerMap(answer interface{}) *mcp.CallToolResult {
-	answerMap, ok := answer.(map[string]interface{})
-	if !ok {
-		return nil
+// simplifyAnswer normalizes the answer map. Single-choice per question, but
+// the user can also type a custom text alongside an option pick — we preserve
+// both fields so the agent gets the full context. When the bundle was
+// rejected we annotate the entry to make the partial-answer scenario explicit.
+//
+// Output shape (one or more keys may be set):
+//
+//	{"selected_option": "<id>"}
+//	{"custom_text": "<text>"}
+//	{"selected_option": "<id>", "custom_text": "<text>"}
+//	{"answered": false}
+func simplifyAnswer(ans map[string]interface{}, rejected bool) map[string]interface{} {
+	out := map[string]interface{}{}
+	if selected, ok := ans["selected_options"].([]interface{}); ok && len(selected) > 0 {
+		if first, ok := selected[0].(string); ok && first != "" {
+			out["selected_option"] = first
+		}
 	}
-	if selectedOptions, ok := answerMap["selected_options"].([]interface{}); ok && len(selectedOptions) > 0 {
-		return mcp.NewToolResultText(fmt.Sprintf("User selected: %v", selectedOptions[0]))
+	if customText, ok := ans["custom_text"].(string); ok && customText != "" {
+		out["custom_text"] = customText
 	}
-	if customText, ok := answerMap["custom_text"].(string); ok && customText != "" {
-		return mcp.NewToolResultText(fmt.Sprintf("User answered: %s", customText))
+	if rejected && len(out) == 0 {
+		return map[string]interface{}{answeredFieldKey: false, rejectedFieldKey: true}
 	}
-	return nil
+	if len(out) == 0 {
+		return map[string]interface{}{answeredFieldKey: false}
+	}
+	return out
 }
 
 // notifyClarificationTimeout sends a fire-and-forget notification to the backend

@@ -139,6 +139,12 @@ func (m *mockRepository) GetMessageByPendingID(ctx context.Context, sessionID, p
 func (m *mockRepository) FindMessageByPendingID(ctx context.Context, pendingID string) (*models.Message, error) {
 	return nil, nil
 }
+func (m *mockRepository) FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*models.Message, error) {
+	return nil, nil
+}
+func (m *mockRepository) FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error) {
+	return nil, nil
+}
 func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	return nil
 }
@@ -167,6 +173,9 @@ func (m *mockRepository) UpdateTurn(ctx context.Context, turn *models.Turn) erro
 	return nil
 }
 func (m *mockRepository) CompleteTurn(ctx context.Context, id string) error {
+	return nil
+}
+func (m *mockRepository) AbandonTurn(ctx context.Context, id string) error {
 	return nil
 }
 func (m *mockRepository) CompletePendingToolCallsForTurn(ctx context.Context, turnID string) (int64, error) {

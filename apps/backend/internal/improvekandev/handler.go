@@ -248,6 +248,17 @@ func (h *Handler) ensureWorkflow(ctx context.Context, workspaceID string) (*task
 	}
 	for _, w := range existing {
 		if w.WorkflowTemplateID != nil && *w.WorkflowTemplateID == templateID {
+			// Heal records created before the workflow honored Hidden on insert.
+			// Best-effort: a DB failure here must not block the caller from getting
+			// their workflow ID, since the workflow itself is already usable.
+			if !w.Hidden {
+				if err := h.taskSvc.SetWorkflowHidden(ctx, w.ID, true); err != nil {
+					h.log.Warn("improve-kandev: failed to heal hidden flag on stale record",
+						zap.String("workflow_id", w.ID), zap.Error(err))
+				} else {
+					w.Hidden = true
+				}
+			}
 			return w, nil
 		}
 	}

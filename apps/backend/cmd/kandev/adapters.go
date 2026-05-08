@@ -629,51 +629,86 @@ func (a *messageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, ses
 	return a.svc.UpdatePermissionMessage(ctx, sessionID, pendingID, status)
 }
 
-// CreateClarificationRequestMessage creates a message for a clarification request.
-// This allows clarification requests to appear in the chat as messages.
-func (a *messageCreatorAdapter) CreateClarificationRequestMessage(ctx context.Context, taskID, sessionID, pendingID string, question clarification.Question, clarificationContext string) (string, error) {
-	// Convert question options to interface{} for metadata storage
-	options := make([]interface{}, len(question.Options))
-	for j, opt := range question.Options {
-		options[j] = map[string]interface{}{
-			"option_id":   opt.ID,
-			"label":       opt.Label,
-			"description": opt.Description,
+// CreateClarificationRequestMessages emits one chat message per question in a
+// clarification request bundle, all sharing the given pending_id. The frontend
+// renders them as a stacked group; only the last message sets RequestsInput=true
+// so the chat scrolls to the bottom of the group when the bundle arrives.
+// Returns the created message IDs in the same order as the input questions.
+//
+// If any individual CreateMessage call fails, every previously created message
+// in the bundle is deleted so we don't leave a half-rendered group dangling in
+// the chat. Best-effort: if cleanup itself fails the caller still receives the
+// original error and the orphan messages stay (logged at warn-level).
+func (a *messageCreatorAdapter) CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []clarification.Question, clarificationContext string) ([]string, error) {
+	ids := make([]string, 0, len(questions))
+	total := len(questions)
+	for i, question := range questions {
+		options := make([]interface{}, len(question.Options))
+		for j, opt := range question.Options {
+			options[j] = map[string]interface{}{
+				"option_id":   opt.ID,
+				"label":       opt.Label,
+				"description": opt.Description,
+			}
 		}
-	}
 
-	questionData := map[string]interface{}{
-		"id":      question.ID,
-		"title":   question.Title,
-		"prompt":  question.Prompt,
-		"options": options,
-	}
+		questionData := map[string]interface{}{
+			"id":      question.ID,
+			"title":   question.Title,
+			"prompt":  question.Prompt,
+			"options": options,
+		}
 
-	metadata := map[string]interface{}{
-		"pending_id": pendingID,
-		"question":   questionData,
-		"context":    clarificationContext,
-		"status":     "pending",
-	}
+		metadata := map[string]interface{}{
+			"pending_id":     pendingID,
+			"question_id":    question.ID,
+			"question":       questionData,
+			"question_index": i,
+			"question_total": total,
+			"context":        clarificationContext,
+			"status":         "pending",
+		}
 
-	msg, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
-		TaskSessionID: sessionID,
-		TaskID:        taskID,
-		Content:       question.Prompt,
-		AuthorType:    "agent",
-		Type:          "clarification_request",
-		Metadata:      metadata,
-		RequestsInput: true, // This marks the session as waiting for input
-	})
-	if err != nil {
-		return "", err
+		// Only the last message marks the session as waiting for input so the
+		// chat scrolls to the end of the group when the bundle arrives.
+		requestsInput := i == total-1
+
+		msg, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+			TaskSessionID: sessionID,
+			TaskID:        taskID,
+			Content:       question.Prompt,
+			AuthorType:    "agent",
+			Type:          "clarification_request",
+			Metadata:      metadata,
+			RequestsInput: requestsInput,
+		})
+		if err != nil {
+			a.rollbackPartialBundle(ctx, ids, pendingID)
+			return nil, err
+		}
+		ids = append(ids, msg.ID)
 	}
-	return msg.ID, nil
+	return ids, nil
 }
 
-// UpdateClarificationMessage updates a clarification message's status and response
-func (a *messageCreatorAdapter) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, status string, answer *clarification.Answer) error {
-	return a.svc.UpdateClarificationMessage(ctx, sessionID, pendingID, status, answer)
+// rollbackPartialBundle removes the messages already created when later writes
+// in a multi-question bundle fail. Best-effort — failures are logged but do
+// not bubble up because the caller already has a more useful error.
+func (a *messageCreatorAdapter) rollbackPartialBundle(ctx context.Context, ids []string, pendingID string) {
+	for _, id := range ids {
+		if err := a.svc.DeleteMessage(ctx, id); err != nil {
+			a.logger.Warn("failed to roll back partial clarification bundle message",
+				zap.String("pending_id", pendingID),
+				zap.String("message_id", id),
+				zap.Error(err))
+		}
+	}
+}
+
+// UpdateClarificationMessage updates a clarification message's status and answer
+// for a specific (pending_id, question_id) pair within the session.
+func (a *messageCreatorAdapter) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, questionID, status string, answer *clarification.Answer) error {
+	return a.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, questionID, status, answer)
 }
 
 // CreateAgentMessageStreaming creates a new agent message with a pre-generated ID.
@@ -740,6 +775,10 @@ func (a *turnServiceAdapter) CompleteTurn(ctx context.Context, turnID string) er
 
 func (a *turnServiceAdapter) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
 	return a.svc.GetActiveTurn(ctx, sessionID)
+}
+
+func (a *turnServiceAdapter) AbandonOpenTurns(ctx context.Context, sessionID string) error {
+	return a.svc.AbandonOpenTurns(ctx, sessionID)
 }
 
 func newTurnServiceAdapter(svc *taskservice.Service) *turnServiceAdapter {

@@ -33,6 +33,7 @@ export function useTaskSubmitHandlers({
   effectiveDefaultStepId,
   repositories,
   discoveredRepositories,
+  workspaceRepositories,
   useGitHubUrl,
   githubUrl,
   githubPrHeadBranch,
@@ -132,6 +133,8 @@ export function useTaskSubmitHandlers({
         githubPrHeadBranch,
         repositories,
         discoveredRepositories,
+        workspaceRepositories,
+        isLocalExecutor,
         freshBranch: buildFreshBranchPayload(consentedDirtyFiles),
       });
     },
@@ -145,6 +148,8 @@ export function useTaskSubmitHandlers({
       githubPrHeadBranch,
       repositories,
       discoveredRepositories,
+      workspaceRepositories,
+      isLocalExecutor,
       isFreshBranchActive,
     ],
   );

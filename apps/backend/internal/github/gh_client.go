@@ -13,11 +13,77 @@ import (
 )
 
 // GHClient implements Client using the gh CLI.
-type GHClient struct{}
+type GHClient struct {
+	rateTracker *RateTracker
+}
 
 // NewGHClient creates a new gh CLI-based client.
 func NewGHClient() *GHClient {
 	return &GHClient{}
+}
+
+// WithRateTracker attaches a rate tracker so stderr output is inspected for
+// rate-limit signals after every gh invocation. Returns the client for
+// chaining; safe to call before any commands run.
+func (c *GHClient) WithRateTracker(t *RateTracker) *GHClient {
+	c.rateTracker = t
+	return c
+}
+
+// reGHRateLimit matches the prose gh prints when a request hit a primary or
+// secondary rate limit. The exact text varies by gh version and locale, but
+// "rate limit" / "API rate limit" appear consistently.
+var ghRateLimitMarkers = []string{"rate limit", "abuse detection"}
+
+func ghStderrIndicatesRateLimit(stderr string) bool {
+	if stderr == "" {
+		return false
+	}
+	lower := strings.ToLower(stderr)
+	for _, marker := range ghRateLimitMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// inspectRateStderr inspects the stderr from a failed `gh` invocation and
+// flags the appropriate resource bucket as exhausted. `gh api <path>` is REST
+// (Core) by default, with `api graphql` and `api search/*` as the documented
+// exceptions; non-`api` subcommands like `pr`, `issue`, and `repo` are
+// implemented against GraphQL by gh itself, so they map to the GraphQL bucket.
+func (c *GHClient) inspectRateStderr(args []string, stderr string) {
+	if c.rateTracker == nil {
+		return
+	}
+	if !ghStderrIndicatesRateLimit(stderr) {
+		return
+	}
+	c.rateTracker.markRateExhausted(resourceForGHArgs(args), time.Time{})
+}
+
+// resourceForGHArgs maps a `gh` argv to the rate-limit bucket the call hits.
+// Exposed at package scope so the table-driven test can pin every branch.
+func resourceForGHArgs(args []string) Resource {
+	if len(args) == 0 {
+		return ResourceCore
+	}
+	if args[0] != "api" {
+		// `gh pr`, `gh issue`, `gh repo`, etc. are all GraphQL under the hood.
+		return ResourceGraphQL
+	}
+	if len(args) < 2 {
+		return ResourceCore
+	}
+	switch {
+	case args[1] == "graphql":
+		return ResourceGraphQL
+	case strings.HasPrefix(args[1], "search/"):
+		return ResourceSearch
+	default:
+		return ResourceCore
+	}
 }
 
 // GHAvailable checks if the gh CLI is installed and accessible.
@@ -516,9 +582,60 @@ func (c *GHClient) run(ctx context.Context, args ...string) (string, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		c.inspectRateStderr(args, stderr.String())
 		return stdout.String(), fmt.Errorf("gh %s: %w: %s", args[0], err, stderr.String())
 	}
 	return stdout.String(), nil
+}
+
+// ghRateLimitResponse mirrors the GET /rate_limit JSON shape so we can seed
+// the tracker on startup and after CLI failures without parsing prose.
+type ghRateLimitResponse struct {
+	Resources struct {
+		Core    ghRateLimitBucket `json:"core"`
+		GraphQL ghRateLimitBucket `json:"graphql"`
+		Search  ghRateLimitBucket `json:"search"`
+	} `json:"resources"`
+}
+
+type ghRateLimitBucket struct {
+	Limit     int   `json:"limit"`
+	Remaining int   `json:"remaining"`
+	Reset     int64 `json:"reset"`
+}
+
+// FetchRateLimit calls `gh api rate_limit` and seeds the tracker with the
+// returned snapshots. Best-effort: a failure (e.g. CLI absent, network) is
+// logged and ignored.
+func (c *GHClient) FetchRateLimit(ctx context.Context) error {
+	if c.rateTracker == nil {
+		return nil
+	}
+	out, err := c.run(ctx, "api", "rate_limit")
+	if err != nil {
+		return fmt.Errorf("fetch rate limit: %w", err)
+	}
+	var raw ghRateLimitResponse
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return fmt.Errorf("parse rate_limit response: %w", err)
+	}
+	now := time.Now().UTC()
+	record := func(resource Resource, b ghRateLimitBucket) {
+		if b.Limit == 0 && b.Remaining == 0 && b.Reset == 0 {
+			return
+		}
+		c.rateTracker.Record(RateSnapshot{
+			Resource:  resource,
+			Limit:     b.Limit,
+			Remaining: b.Remaining,
+			ResetAt:   time.Unix(b.Reset, 0).UTC(),
+			UpdatedAt: now,
+		})
+	}
+	record(ResourceCore, raw.Resources.Core)
+	record(ResourceGraphQL, raw.Resources.GraphQL)
+	record(ResourceSearch, raw.Resources.Search)
+	return nil
 }
 
 func (c *GHClient) parsePRList(data string, owner, repo string) ([]*PR, error) {

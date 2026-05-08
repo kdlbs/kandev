@@ -119,6 +119,43 @@ test.describe("Command Panel", () => {
     await expect(taskOption.getByText(startStep.name)).toBeVisible({ timeout: 5_000 });
   });
 
+  test("inline task search selects the first matching task after loading", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.createTask(seedData.workspaceId, "Palette Selection Alpha", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await apiClient.createTask(seedData.workspaceId, "Palette Selection Beta", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await expect(kanban.taskCardByTitle("Palette Selection Alpha")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(kanban.taskCardByTitle("Palette Selection Beta")).toBeVisible({
+      timeout: 10_000,
+    });
+
+    await openCommandPanel(testPage);
+    const dialog = commandDialog(testPage);
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
+
+    const input = dialog.getByRole("combobox");
+    await input.fill("Palette Selection");
+
+    const taskOptions = dialog.getByRole("option").filter({ hasText: /Palette Selection/ });
+    await expect(taskOptions.first()).toBeVisible({ timeout: 10_000 });
+    await expect(taskOptions.first()).toHaveAttribute("data-selected", "true", {
+      timeout: 5_000,
+    });
+  });
+
   test("Escape closes the command panel", async ({ testPage }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();

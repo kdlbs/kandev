@@ -1,5 +1,6 @@
 "use client";
 
+import type { Dispatch, SetStateAction } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { IconArchive, IconArrowRight, IconHammer, IconLoader2 } from "@tabler/icons-react";
 import {
@@ -22,8 +23,8 @@ import type { Task } from "@/lib/types/http";
 import { FileIcon } from "@/components/ui/file-icon";
 
 const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
-const MODE_COMMANDS: CommandPanelMode = "commands";
-const MODE_SEARCH_FILES: CommandPanelMode = "search-files";
+export const MODE_COMMANDS: CommandPanelMode = "commands";
+export const MODE_SEARCH_FILES: CommandPanelMode = "search-files";
 
 const STEP_COLOR_MAP: Record<string, string> = {
   "bg-slate-500": "#64748b",
@@ -41,6 +42,18 @@ function getFileName(filePath: string) {
   return filePath.split("/").pop() ?? filePath;
 }
 
+function getCommandValue(cmd: CommandItemType) {
+  return cmd.id + " " + cmd.label + " " + (cmd.keywords?.join(" ") ?? "");
+}
+
+export function getTaskResultValue(task: Task) {
+  return `__task:${task.id} ${task.title}`;
+}
+
+export function getFileResultValue(filePath: string) {
+  return `__file:${filePath}`;
+}
+
 function CommandItemRow({
   cmd,
   onSelect,
@@ -49,11 +62,7 @@ function CommandItemRow({
   onSelect: (cmd: CommandItemType) => void;
 }) {
   return (
-    <CommandItem
-      key={cmd.id}
-      value={cmd.id + " " + cmd.label + " " + (cmd.keywords?.join(" ") ?? "")}
-      onSelect={() => onSelect(cmd)}
-    >
+    <CommandItem key={cmd.id} value={getCommandValue(cmd)} onSelect={() => onSelect(cmd)}>
       {cmd.icon && <span className="text-muted-foreground">{cmd.icon}</span>}
       <span>{cmd.label}</span>
       {cmd.shortcut && <CommandShortcut>{formatShortcut(cmd.shortcut)}</CommandShortcut>}
@@ -90,7 +99,7 @@ function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProp
   return (
     <CommandItem
       key={task.id}
-      value={`__task:${task.id} ${task.title}`}
+      value={getTaskResultValue(task)}
       onSelect={() => onSelect(task)}
       className={isArchived ? "opacity-60" : ""}
       forceMount
@@ -213,7 +222,7 @@ function FileSearchContent({ files, isSearching, search, onSelect }: FileSearchC
         return (
           <CommandItem
             key={filePath}
-            value={`__file:${filePath}`}
+            value={getFileResultValue(filePath)}
             onSelect={() => onSelect(filePath)}
             forceMount
           >
@@ -288,7 +297,7 @@ export type CommandPanelViewProps = {
   mode: CommandPanelMode;
   inputCommand: CommandItemType | null;
   selectedValue: string;
-  setSelectedValue: (value: string) => void;
+  setSelectedValue: Dispatch<SetStateAction<string>>;
   search: string;
   setSearch: (value: string) => void;
   handleKeyDown: (e: React.KeyboardEvent) => void;

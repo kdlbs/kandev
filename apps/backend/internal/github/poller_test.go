@@ -3,6 +3,9 @@ package github
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -531,5 +534,338 @@ func TestRefreshStaleBranches_SkipsWhenResolverReturnsEmpty(t *testing.T) {
 	updated, _ := store.GetPRWatchBySession(ctx, "s1")
 	if updated.Branch != "old-branch" {
 		t.Errorf("expected branch unchanged when resolver returns empty, got %q", updated.Branch)
+	}
+}
+
+// graphQLMockClient wraps MockClient with a canned GraphQL executor so tests
+// exercise the batched poll path without hitting the network.
+type graphQLMockClient struct {
+	*MockClient
+	prResponses     []string // FIFO; one entry consumed per ExecuteGraphQL call carrying "Batch"
+	branchResponses []string // FIFO; consumed for "Branches" queries
+	prErr           error    // returned for the next "Batch" call
+	branchErr       error    // returned for the next "Branches" call
+	prQueries       []string
+	branchQueries   []string
+}
+
+func (m *graphQLMockClient) ExecuteGraphQL(_ context.Context, query string, _ map[string]any, out any) error {
+	if strings.Contains(query, "query Branches") {
+		m.branchQueries = append(m.branchQueries, query)
+		if m.branchErr != nil {
+			return m.branchErr
+		}
+		if len(m.branchResponses) == 0 {
+			return errors.New("no canned branch response")
+		}
+		resp := m.branchResponses[0]
+		m.branchResponses = m.branchResponses[1:]
+		return json.Unmarshal([]byte(resp), out)
+	}
+	m.prQueries = append(m.prQueries, query)
+	if m.prErr != nil {
+		return m.prErr
+	}
+	if len(m.prResponses) == 0 {
+		return errors.New("no canned PR response")
+	}
+	resp := m.prResponses[0]
+	m.prResponses = m.prResponses[1:]
+	return json.Unmarshal([]byte(resp), out)
+}
+
+func setupBatchedPollerTest(t *testing.T) (*Poller, *Service, *graphQLMockClient, *Store) {
+	t.Helper()
+	poller, svc, mockClient, store := setupPollerTest(t)
+	wrapped := &graphQLMockClient{MockClient: mockClient}
+	svc.client = wrapped
+	return poller, svc, wrapped, store
+}
+
+func TestTryBatchedPRWatchCheck_NumberedWatch_AppliesStatus(t *testing.T) {
+	poller, _, gh, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+
+	gh.prResponses = []string{`{
+		"data": {
+			"repo0": {
+				"pr0": {
+					"state": "OPEN", "title": "Test PR", "url": "https://x/1",
+					"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+					"headRefName": "feat", "baseRefName": "main", "headRefOid": "abc",
+					"author": {"login": "alice"},
+					"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+					"reviews": {"nodes": [{"state": "APPROVED", "author": {"login": "bob"}, "submittedAt": "2026-01-02T00:00:00Z"}]},
+					"reviewRequests": {"totalCount": 0},
+					"commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}
+				}
+			}
+		}
+	}`}
+
+	watch := &PRWatch{
+		SessionID: "s1", TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 42, Branch: "feat",
+		LastCheckStatus: "pending", LastReviewState: "",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+	taskPR := &TaskPR{
+		TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 42,
+		PRURL: "https://x/1", PRTitle: "Test PR", HeadBranch: "feat", BaseBranch: "main", State: "open",
+	}
+	if err := store.CreateTaskPR(ctx, taskPR); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	if !poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+		t.Fatalf("expected batched path to succeed")
+	}
+
+	updated, err := store.GetTaskPR(ctx, "t1")
+	if err != nil || updated == nil {
+		t.Fatalf("get task PR: err=%v, pr=%v", err, updated)
+	}
+	if updated.ChecksState != "success" {
+		t.Errorf("ChecksState = %q, want success", updated.ChecksState)
+	}
+	if updated.ReviewState != "approved" {
+		t.Errorf("ReviewState = %q, want approved", updated.ReviewState)
+	}
+}
+
+func TestTryBatchedPRWatchCheck_SearchingWatch_DetectsPR(t *testing.T) {
+	poller, _, gh, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+
+	gh.branchResponses = []string{`{
+		"data": {
+			"b0": {
+				"ref": {
+					"associatedPullRequests": {
+						"nodes": [{
+							"number": 7,
+							"state": "OPEN", "title": "branch PR", "url": "https://x/7",
+							"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+							"headRefName": "feat", "baseRefName": "main", "headRefOid": "deadbeef",
+							"author": {"login": "alice"},
+							"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+							"reviews": {"nodes": []}, "reviewRequests": {"totalCount": 0},
+							"commits": {"nodes": []}
+						}]
+					}
+				}
+			}
+		}
+	}`}
+
+	watch := &PRWatch{
+		SessionID: "s2", TaskID: "t2", Owner: "o", Repo: "r", PRNumber: 0, Branch: "feat",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+
+	if !poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+		t.Fatalf("expected batched path to succeed")
+	}
+
+	updated, err := store.GetPRWatchBySession(ctx, "s2")
+	if err != nil || updated == nil {
+		t.Fatalf("get PR watch: err=%v, w=%v", err, updated)
+	}
+	if updated.PRNumber != 7 {
+		t.Errorf("PRNumber = %d, want 7 (PR should be detected and recorded)", updated.PRNumber)
+	}
+}
+
+func TestTryBatchedPRWatchCheck_FallsBackOnUnsupportedClient(t *testing.T) {
+	// MockClient does not implement GraphQLExecutor, so the batched path must
+	// return false to trigger per-watch fallback.
+	poller, _, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	watch := &PRWatch{SessionID: "s1", TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 1, Branch: "feat"}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+	if poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+		t.Errorf("expected false when client does not implement GraphQLExecutor")
+	}
+}
+
+func TestFetchBatchedStatuses_NumberedQueryError_ReturnsNilFalse(t *testing.T) {
+	poller, _, gh, _ := setupBatchedPollerTest(t)
+	ctx := context.Background()
+	gh.prErr = errors.New("graphql 500")
+
+	numbered := []*PRWatch{{Owner: "o", Repo: "r", PRNumber: 1}}
+	got, ok := poller.fetchBatchedStatuses(ctx, gh, numbered, nil)
+	if ok || got != nil {
+		t.Errorf("expected (nil, false) on numbered query error, got (%v, %v)", got, ok)
+	}
+}
+
+func TestFetchBatchedStatuses_BranchQueryError_TriggersFallback(t *testing.T) {
+	// Greptile P2: when only branch query fails (no numbered watches), the
+	// previous return of an empty non-nil map silently absorbed the failure.
+	// The fix returns (nil, false) so the caller falls back per-watch.
+	poller, _, gh, _ := setupBatchedPollerTest(t)
+	ctx := context.Background()
+	gh.branchErr = errors.New("graphql 500")
+
+	searching := []*PRWatch{{Owner: "o", Repo: "r", PRNumber: 0, Branch: "feat"}}
+	got, ok := poller.fetchBatchedStatuses(ctx, gh, nil, searching)
+	if ok || got != nil {
+		t.Errorf("expected (nil, false) on branch query error, got (%v, %v)", got, ok)
+	}
+}
+
+func TestApplyPRStatus_MergedPR_ResetsWatch(t *testing.T) {
+	poller, _, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	mergedAt := time.Now().UTC().Add(-time.Hour)
+	watch := &PRWatch{
+		SessionID: "s1", TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 99, Branch: "feat",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+	taskPR := &TaskPR{
+		TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 99,
+		PRURL: "https://x/99", PRTitle: "Merged PR", HeadBranch: "feat", BaseBranch: "main", State: "open",
+	}
+	if err := store.CreateTaskPR(ctx, taskPR); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	status := &PRStatus{
+		PR: &PR{
+			Number: 99, State: prStateMerged, RepoOwner: "o", RepoName: "r",
+			HeadBranch: "feat", BaseBranch: "main", MergedAt: &mergedAt, URL: "https://x/99", Title: "Merged PR",
+		},
+	}
+	poller.applyPRStatus(ctx, watch, status)
+
+	updated, err := store.GetPRWatchBySession(ctx, "s1")
+	if err != nil || updated == nil {
+		t.Fatalf("get PR watch: err=%v, w=%v", err, updated)
+	}
+	if updated.PRNumber != 0 {
+		t.Errorf("expected watch reset to PRNumber=0 after merge, got %d", updated.PRNumber)
+	}
+}
+
+func TestWaitForRateLimit_SkipsWhenHealthy(t *testing.T) {
+	poller, _, _, _ := setupPollerTest(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if !poller.waitForRateLimit(ctx, ResourceGraphQL, "test") {
+		t.Errorf("expected true when no exhaustion recorded")
+	}
+}
+
+func TestSearchBucketExhausted(t *testing.T) {
+	poller, svc, _, _ := setupPollerTest(t)
+
+	if poller.searchBucketExhausted("test") {
+		t.Errorf("expected false when no exhaustion recorded")
+	}
+
+	// Mark the search bucket exhausted with a future reset.
+	svc.RateTracker().Record(RateSnapshot{
+		Resource:  ResourceSearch,
+		Limit:     30,
+		Remaining: 0,
+		ResetAt:   time.Now().Add(5 * time.Minute),
+		UpdatedAt: time.Now(),
+	})
+
+	if !poller.searchBucketExhausted("test") {
+		t.Errorf("expected true when search bucket exhausted")
+	}
+
+	// Other buckets exhausting must not trip the search guard.
+	poller2, svc2, _, _ := setupPollerTest(t)
+	svc2.RateTracker().Record(RateSnapshot{
+		Resource:  ResourceCore,
+		Remaining: 0,
+		ResetAt:   time.Now().Add(5 * time.Minute),
+		UpdatedAt: time.Now(),
+	})
+	if poller2.searchBucketExhausted("test") {
+		t.Errorf("expected false when only core (not search) is exhausted")
+	}
+}
+
+// Regression: when the search bucket trips mid-cycle, checkReviewWatches must
+// stop iterating so the remaining watches don't issue doomed search requests
+// that deepen the secondary-limit penalty.
+func TestCheckReviewWatches_BailsOutWhenSearchExhaustedMidCycle(t *testing.T) {
+	poller, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	// Pre-exhaust the search bucket so the very first iteration short-circuits.
+	svc.RateTracker().Record(RateSnapshot{
+		Resource:  ResourceSearch,
+		Remaining: 0,
+		ResetAt:   time.Now().Add(5 * time.Minute),
+		UpdatedAt: time.Now(),
+	})
+
+	for _, id := range []string{"rw1", "rw2", "rw3"} {
+		if err := store.CreateReviewWatch(ctx, &ReviewWatch{
+			ID:          id,
+			WorkspaceID: "ws1",
+			Enabled:     true,
+		}); err != nil {
+			t.Fatalf("seed review watch %s: %v", id, err)
+		}
+	}
+
+	// Should return cleanly without panic / without errors despite N watches
+	// being enabled.
+	poller.checkReviewWatches(ctx)
+}
+
+func TestCheckIssueWatches_BailsOutWhenSearchExhaustedMidCycle(t *testing.T) {
+	poller, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	svc.RateTracker().Record(RateSnapshot{
+		Resource:  ResourceSearch,
+		Remaining: 0,
+		ResetAt:   time.Now().Add(5 * time.Minute),
+		UpdatedAt: time.Now(),
+	})
+
+	for _, id := range []string{"iw1", "iw2"} {
+		if err := store.CreateIssueWatch(ctx, &IssueWatch{
+			ID:          id,
+			WorkspaceID: "ws1",
+			Enabled:     true,
+		}); err != nil {
+			t.Fatalf("seed issue watch %s: %v", id, err)
+		}
+	}
+
+	poller.checkIssueWatches(ctx)
+}
+
+func TestWaitForRateLimit_ReturnsFalseOnContextCancel(t *testing.T) {
+	poller, svc, _, _ := setupPollerTest(t)
+	// Force exhaustion with a far-future reset.
+	svc.RateTracker().Record(RateSnapshot{
+		Resource:  ResourceGraphQL,
+		Limit:     5000,
+		Remaining: 0,
+		ResetAt:   time.Now().Add(time.Hour),
+		UpdatedAt: time.Now(),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately so the timer select returns ctx.Done first
+	if poller.waitForRateLimit(ctx, ResourceGraphQL, "test") {
+		t.Errorf("expected false when context cancelled during sleep")
 	}
 }

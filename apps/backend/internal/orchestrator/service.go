@@ -91,6 +91,11 @@ type TurnService interface {
 	StartTurn(ctx context.Context, sessionID string) (*models.Turn, error)
 	CompleteTurn(ctx context.Context, turnID string) error
 	GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error)
+	// AbandonOpenTurns buries any open turns for a session by setting
+	// completed_at = started_at (zero duration), so a subsequent prompt starts
+	// a fresh turn instead of adopting one that was orphaned by a crash or
+	// restart. Used on session resume.
+	AbandonOpenTurns(ctx context.Context, sessionID string) error
 }
 
 // TaskEventPublisher is the orchestrator's collaborator for publishing

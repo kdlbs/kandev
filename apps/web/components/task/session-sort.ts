@@ -57,3 +57,7 @@ export function pickActiveSessionId(
   const primary = sessions.find((s) => s.is_primary);
   return (primary ?? sessions[0]).id;
 }
+
+export function isSessionActive(state: TaskSessionState | null | undefined): boolean {
+  return state === "RUNNING" || state === "STARTING";
+}

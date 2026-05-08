@@ -273,4 +273,50 @@ test.describe("Seed protection", () => {
     expect(postKanban).toHaveLength(kanbanSteps.length);
     expect(postPR).toHaveLength(prSteps.length);
   });
+
+  test("hidden system workflows do not appear in the settings list", async ({
+    testPage,
+    seedData,
+    apiClient,
+  }) => {
+    // Reproduces the original "Improve Kandev" leak: while the user is on
+    // the workspace workflow settings page, a hidden system workflow gets
+    // created (e.g. via the Improve Kandev dialog). The backend fires a
+    // `workflow.created` WS event with hidden=true; the frontend receives
+    // it and previously surfaced the entry as a manageable card in the
+    // settings list. Verify the new hidden entry never appears as a card.
+    const hiddenName = "Improve Kandev";
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    // The seeded visible workflow is rendered before the leak attempt.
+    const visibleCard = await page.findWorkflowCard("E2E Workflow");
+    await expect(visibleCard).toBeVisible();
+    const baselineCount = await testPage.locator('[data-testid^="workflow-card-"]').count();
+
+    // Trigger the leak path: a hidden workflow is created and the
+    // `workflow.created` WS event arrives at the open settings page.
+    await apiClient.e2eCreateHiddenWorkflow(seedData.workspaceId, hiddenName);
+
+    // Allow the WS event to propagate and the React effect in
+    // useWorkflowSettings a chance to (incorrectly) add a card.
+    await testPage.waitForTimeout(500);
+
+    // No new card appeared and the hidden entry is not in the list.
+    const allCards = testPage.locator('[data-testid^="workflow-card-"]');
+    const newCount = await allCards.count();
+    const cardNames: string[] = [];
+    for (let i = 0; i < newCount; i++) {
+      const value = await allCards
+        .nth(i)
+        .locator("input")
+        .first()
+        .inputValue({ timeout: 500 })
+        .catch(() => "");
+      cardNames.push(value);
+    }
+    expect(cardNames).not.toContain(hiddenName);
+    expect(newCount).toBe(baselineCount);
+  });
 });

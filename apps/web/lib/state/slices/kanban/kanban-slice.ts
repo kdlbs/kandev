@@ -26,9 +26,6 @@ export const createKanbanSlice: StateCreator<
   setWorkflows: (workflows) =>
     set((draft) => {
       draft.workflows.items = workflows;
-      if (!draft.workflows.activeId && workflows.length) {
-        draft.workflows.activeId = workflows[0].id;
-      }
     }),
   reorderWorkflowItems: (workflowIds) =>
     set((draft) => {

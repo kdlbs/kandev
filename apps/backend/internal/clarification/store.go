@@ -132,6 +132,23 @@ func (s *Store) Respond(pendingID string, resp *Response) error {
 	}
 }
 
+// CancelRequest cancels a single pending clarification by id, unblocking any
+// WaitForResponse caller that is currently parked on it. Returns true if the
+// entry existed (and was removed), false otherwise. Used by callers that need
+// to surface a creation-side failure immediately rather than wait for the
+// 2-hour MCP timeout.
+func (s *Store) CancelRequest(pendingID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending, ok := s.pending[pendingID]
+	if !ok {
+		return false
+	}
+	close(pending.CancelCh)
+	delete(s.pending, pendingID)
+	return true
+}
+
 // CancelSession cancels all pending clarification requests for a given session.
 // It closes the CancelCh to unblock any WaitForResponse callers and removes entries.
 // Returns the list of cancelled pending IDs.

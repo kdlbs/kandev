@@ -150,6 +150,29 @@ export class SessionPage {
     return this.sidebar.getByText(title, { exact: false });
   }
 
+  sidebarTaskItem(title: string): Locator {
+    return this.sidebar.getByTestId("sidebar-task-item").filter({
+      has: this.page.getByText(title, { exact: false }),
+    });
+  }
+
+  async openSidebarTaskContextMenu(title: string): Promise<void> {
+    const taskRow = this.sidebarTaskItem(title).first();
+    await taskRow.waitFor({ state: "visible" });
+    await taskRow.click({ button: "right" });
+  }
+
+  async sendSidebarTaskToWorkflow(
+    title: string,
+    workflowId: string,
+    stepId: string,
+  ): Promise<void> {
+    await this.openSidebarTaskContextMenu(title);
+    await this.page.getByTestId("task-context-send-to-workflow").hover();
+    await this.page.getByTestId(`task-context-workflow-${workflowId}`).hover();
+    await this.page.getByTestId(`task-context-step-${stepId}`).click();
+  }
+
   /**
    * Sidebar state indicator — returns the first icon matching the given state label.
    * Accepts "Turn Finished" (review/completed), "Running" (in-progress), or "Backlog".
@@ -240,6 +263,67 @@ export class SessionPage {
   /** Description span inside a clarification option (hidden when option has none). */
   clarificationOptionDescriptions(): Locator {
     return this.clarificationOverlay().getByTestId("clarification-option-description");
+  }
+
+  /** All question cards rendered for the active clarification bundle. */
+  clarificationQuestionCards(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-question-card");
+  }
+
+  /** A single question card by its question id (matches metadata.question_id). */
+  clarificationQuestionCardById(questionId: string): Locator {
+    return this.clarificationOverlay().locator(
+      `[data-testid="clarification-question-card"][data-question-id="${questionId}"]`,
+    );
+  }
+
+  /** Group-wide progress chip "N of M answered" — only shown for bundles >1. */
+  clarificationGroupProgress(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-group-progress");
+  }
+
+  /** Per-question "Question N of M" progress chip. */
+  clarificationProgressChips(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-progress-chip");
+  }
+
+  /** Custom text input within a specific question card. */
+  clarificationInputForQuestion(questionId: string): Locator {
+    return this.clarificationQuestionCardById(questionId).getByTestId("clarification-input");
+  }
+
+  /** Option button (by visible label text) inside a specific question card. */
+  clarificationOptionForQuestion(questionId: string, text: string): Locator {
+    return this.clarificationQuestionCardById(questionId)
+      .getByTestId("clarification-option")
+      .filter({ hasText: text });
+  }
+
+  /** All step buttons in the horizontal stepper. */
+  clarificationSteps(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-step");
+  }
+
+  /** A single step in the stepper, by its 0-based index. */
+  clarificationStep(index: number): Locator {
+    return this.clarificationOverlay().locator(
+      `[data-testid="clarification-step"][data-step-index="${index}"]`,
+    );
+  }
+
+  /** Back button inside the carousel nav. */
+  clarificationPrev(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-prev");
+  }
+
+  /** Next button inside the carousel nav. */
+  clarificationNext(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-next");
+  }
+
+  /** Final "Submit answers" button (rendered only on the last step). */
+  clarificationSubmit(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-submit");
   }
 
   /** All visible "Approve / Deny" rows for pending permission requests. */

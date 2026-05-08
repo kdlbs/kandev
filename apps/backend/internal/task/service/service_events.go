@@ -22,7 +22,7 @@ func (s *Service) PublishTaskUpdated(ctx context.Context, task *models.Task) {
 }
 
 // publishTaskEvent publishes task events to the event bus
-func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState) {
+func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, oldWorkflowIDs ...string) {
 	if s.eventBus == nil {
 		return
 	}
@@ -65,6 +65,9 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 	if oldState != nil {
 		data["old_state"] = string(*oldState)
 		data["new_state"] = string(task.State)
+	}
+	if len(oldWorkflowIDs) > 0 && oldWorkflowIDs[0] != "" && oldWorkflowIDs[0] != task.WorkflowID {
+		data["old_workflow_id"] = oldWorkflowIDs[0]
 	}
 
 	event := bus.NewEvent(eventType, "task-service", data)
@@ -154,12 +157,14 @@ func serializeTaskRepositories(repos []*models.TaskRepository) []map[string]inte
 
 // publishTaskMovedEvent publishes a task.moved event so the orchestrator can process
 // on_exit/on_enter actions for the new workflow step.
-func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, fromStepID, toStepID, sessionID string) {
+func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, fromWorkflowID, fromStepID, toStepID, sessionID string) {
 	if s.eventBus == nil {
 		return
 	}
 	data := map[string]interface{}{
 		"task_id":          task.ID,
+		"from_workflow_id": fromWorkflowID,
+		"to_workflow_id":   task.WorkflowID,
 		"from_step_id":     fromStepID,
 		"to_step_id":       toStepID,
 		"session_id":       sessionID,
@@ -216,6 +221,7 @@ func (s *Service) publishWorkflowEvent(ctx context.Context, eventType string, wo
 		"name":             workflow.Name,
 		"description":      workflow.Description,
 		"agent_profile_id": workflow.AgentProfileID,
+		"hidden":           workflow.Hidden,
 		"created_at":       workflow.CreatedAt.Format(time.RFC3339),
 		"updated_at":       workflow.UpdatedAt.Format(time.RFC3339),
 	}
