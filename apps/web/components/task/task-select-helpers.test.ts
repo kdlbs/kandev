@@ -18,7 +18,7 @@ vi.mock("@/lib/links", () => ({
   replaceTaskUrl: vi.fn(),
 }));
 
-import { launchSession } from "@/lib/services/session-launch-service";
+import { launchSession, type LaunchSessionResponse } from "@/lib/services/session-launch-service";
 import { releaseLayoutToDefault } from "@/lib/state/dockview-store";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
@@ -60,7 +60,7 @@ describe("prepareAndSwitchTask — outgoing-env panel cleanup", () => {
   it("releases the outgoing env's panels before awaiting launchSession", async () => {
     // Make launchSession return a deferred we control so we can observe
     // synchronous side effects that happen before the await resolves.
-    let resolveLaunch: (v: { session_id: string }) => void = () => {};
+    let resolveLaunch: (v: LaunchSessionResponse) => void = () => {};
     vi.mocked(launchSession).mockImplementation(
       () =>
         new Promise((res) => {
@@ -80,7 +80,12 @@ describe("prepareAndSwitchTask — outgoing-env panel cleanup", () => {
     expect(releaseLayoutToDefault).toHaveBeenCalledTimes(1);
     expect(switchToSession).not.toHaveBeenCalled();
 
-    resolveLaunch({ session_id: "new-session" });
+    resolveLaunch({
+      success: true,
+      task_id: NEW_TASK_ID,
+      session_id: "new-session",
+      state: "ready",
+    });
     const result = await promise;
 
     // Happy-path coverage: switchToSession must run with the new session id and
