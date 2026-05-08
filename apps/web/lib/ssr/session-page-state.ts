@@ -105,13 +105,7 @@ function buildResourceState(p: BuildSessionPageStateParams) {
       })),
       activeId: task.workspace_id,
     },
-    // Only hydrate `workflows.items` from the task page; never write
-    // `activeId`. That field is the homepage workflow filter (with `null`
-    // meaning "All Workflows"), and overwriting it from a task page would
-    // silently change the user's filter when they return home. The task's
-    // own workflow context lives in `kanban.workflowId`, populated from
-    // the snapshot. `deepMerge` correctly preserves the existing
-    // `activeId` when it is omitted from the source.
+    // Don't write activeId — null means "All Workflows"; task context lives in kanban.workflowId.
     workflows: {
       items: workflows.map((w) => ({
         id: w.id,
