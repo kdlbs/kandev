@@ -96,12 +96,18 @@ function ModeButton({
   onSelect: (m: SourceMode) => void;
 }) {
   const isActive = active === mode;
+  // The previous design used a single text-link with `data-testid="toggle-github-url"`
+  // and the e2e suite still selects by that testid; keep it as an alias on the
+  // URL-mode button so create-task-github-url.spec.ts and subtask.spec.ts keep
+  // passing without a sweep across all e2e files. The clicks are "enter URL mode"
+  // — semantics unchanged.
+  const legacyTestId = mode === "url" ? "toggle-github-url" : undefined;
   return (
     <button
       type="button"
       role="radio"
       aria-checked={isActive}
-      data-testid={`source-mode-${mode}`}
+      data-testid={legacyTestId ?? `source-mode-${mode}`}
       onClick={() => onSelect(mode)}
       className={cn(
         "rounded-sm px-2 py-0.5 text-[11px] font-medium transition-colors cursor-pointer",
