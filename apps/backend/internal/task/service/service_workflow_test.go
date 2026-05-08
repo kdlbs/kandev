@@ -38,6 +38,45 @@ func (testStepNotFound) Error() string { return "step not found" }
 
 var errStepNotFoundForTest = testStepNotFound{}
 
+// TestService_SetWorkflowHidden_HealsStaleRecord verifies the helper used by
+// the improve-kandev bootstrap to flip Hidden=true on workflows created
+// before the flag was honored on insert.
+func TestService_SetWorkflowHidden_HealsStaleRecord(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-stale", WorkspaceID: "ws-1", Name: "Improve Kandev", Hidden: false})
+
+	if err := svc.SetWorkflowHidden(ctx, "wf-stale", true); err != nil {
+		t.Fatalf("SetWorkflowHidden: %v", err)
+	}
+
+	visible, err := svc.ListWorkflows(ctx, "ws-1", false)
+	if err != nil {
+		t.Fatalf("ListWorkflows: %v", err)
+	}
+	for _, wf := range visible {
+		if wf.ID == "wf-stale" {
+			t.Fatalf("hidden workflow leaked into default listing: %+v", wf)
+		}
+	}
+
+	all, err := svc.ListWorkflows(ctx, "ws-1", true)
+	if err != nil {
+		t.Fatalf("ListWorkflows(includeHidden): %v", err)
+	}
+	var found *models.Workflow
+	for _, wf := range all {
+		if wf.ID == "wf-stale" {
+			found = wf
+		}
+	}
+	if found == nil || !found.Hidden {
+		t.Fatalf("expected wf-stale to be hidden after heal, got %+v", found)
+	}
+}
+
 func TestService_MoveTaskRejectsInvalidWorkflowTargets(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

@@ -14,11 +14,15 @@ import type { Workflow } from "@/lib/types/http";
  */
 export function useWorkflowSettings(initialWorkflows: Workflow[], workspaceId?: string) {
   const storeWorkflows = useAppStore((state) => state.workflows.items);
-  const scopedStoreWorkflows = useMemo(
-    () =>
-      workspaceId ? storeWorkflows.filter((w) => w.workspaceId === workspaceId) : storeWorkflows,
-    [storeWorkflows, workspaceId],
-  );
+  // Hidden workflows (e.g. the system "Improve Kandev" template) are loaded
+  // into the global store with `includeHidden: true` so the kanban can resolve
+  // them when a task references one, but they must never surface in the
+  // settings management UI. Filter them out at the store boundary so all
+  // downstream merging logic remains hidden-agnostic.
+  const scopedStoreWorkflows = useMemo(() => {
+    const visible = storeWorkflows.filter((w) => !w.hidden);
+    return workspaceId ? visible.filter((w) => w.workspaceId === workspaceId) : visible;
+  }, [storeWorkflows, workspaceId]);
   const [workflowItems, setWorkflowItems] = useState<Workflow[]>(initialWorkflows);
   const [savedWorkflowItems, setSavedWorkflowItems] = useState<Workflow[]>(initialWorkflows);
 

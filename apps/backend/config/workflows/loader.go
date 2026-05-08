@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/workflow/models"
@@ -47,6 +48,37 @@ type actionYAML struct {
 	Type   string         `yaml:"type"`
 	Config map[string]any `yaml:"config,omitempty"`
 }
+
+// HiddenTemplateIDs returns the set of template IDs marked `hidden: true`
+// in their embedded YAML. Hidden templates are system-only flows
+// (e.g. improve-kandev) that must not appear in management UI or pickers.
+//
+// The result is cached for the lifetime of the binary; the embedded YAML is
+// static, and ListTemplates (the only caller) is on a hot path served on
+// every picker / settings page load.
+func HiddenTemplateIDs() (map[string]bool, error) {
+	hiddenOnce.Do(func() {
+		templates, err := LoadTemplates()
+		if err != nil {
+			hiddenErr = err
+			return
+		}
+		m := make(map[string]bool, len(templates))
+		for _, t := range templates {
+			if t.Hidden {
+				m[t.ID] = true
+			}
+		}
+		hiddenIDs = m
+	})
+	return hiddenIDs, hiddenErr
+}
+
+var (
+	hiddenOnce sync.Once
+	hiddenIDs  map[string]bool
+	hiddenErr  error
+)
 
 // LoadTemplates parses all embedded YAML files and returns workflow templates.
 func LoadTemplates() ([]*models.WorkflowTemplate, error) {

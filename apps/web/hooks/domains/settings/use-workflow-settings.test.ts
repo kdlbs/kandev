@@ -7,6 +7,7 @@ type StoreWorkflow = {
   workspaceId: string;
   name: string;
   description?: string | null;
+  hidden?: boolean;
 };
 
 type MockState = { workflows: { items: StoreWorkflow[] } };
@@ -117,6 +118,46 @@ describe("useWorkflowSettings", () => {
     });
 
     expect(result.current.workflowItems[0].name).toEqual("Renamed B1");
+  });
+
+  it("excludes hidden system workflows from the settings list", () => {
+    // System workflows like "Improve Kandev" live in the global store with
+    // hidden=true so the kanban can resolve task references, but they must
+    // never appear in the management UI.
+    const HIDDEN_SYSTEM: StoreWorkflow = {
+      id: "wf-improve-kandev",
+      workspaceId: "ws-b",
+      name: "Improve Kandev",
+      hidden: true,
+    };
+    setStore([STORE_B1, HIDDEN_SYSTEM]);
+
+    const { result } = renderHook(() => useWorkflowSettings([], "ws-b"));
+
+    expect(result.current.workflowItems.map((w) => w.id)).toEqual(["wf-b1"]);
+    expect(result.current.savedWorkflowItems.map((w) => w.id)).toEqual(["wf-b1"]);
+  });
+
+  it("drops a workflow from the settings list once it becomes hidden", () => {
+    const initial = [wf("wf-b1", "ws-b", NAME_B1)];
+    setStore([STORE_B1]);
+
+    const { result, rerender } = renderHook(
+      ({ store }: { store: StoreWorkflow[] }) => {
+        setStore(store);
+        return useWorkflowSettings(initial, "ws-b");
+      },
+      { initialProps: { store: [STORE_B1] } },
+    );
+
+    expect(result.current.workflowItems.map((w) => w.id)).toEqual(["wf-b1"]);
+
+    // Backend flips hidden=true (e.g. healing the improve-kandev record).
+    act(() => {
+      rerender({ store: [{ ...STORE_B1, hidden: true }] });
+    });
+
+    expect(result.current.workflowItems.map((w) => w.id)).toEqual([]);
   });
 
   it("starts scoping store entries once a workspaceId becomes defined", () => {
