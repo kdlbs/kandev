@@ -122,13 +122,7 @@ test.describe("Kanban workflow filter", () => {
     });
   });
 
-  // Regression: the task page's SSR (`buildResourceState` in
-  // `lib/ssr/session-page-state.ts`) used to set `workflows.activeId` to the
-  // task's `workflow_id`. On hydration, `deepMerge` overwrote the user's
-  // "All Workflows" (`null`) selection with that id, so returning to the
-  // homepage silently changed the filter to whichever workflow the visited
-  // task belonged to. Pin the cross-page flow so any future SSR regression
-  // (or a similar over-write from a WS handler / hook) gets caught here.
+  // Regression: SSR wrote workflows.activeId from the task's workflow_id, clobbering the "All Workflows" filter on return. Pins the cross-page flow.
   test("'All Workflows' selection survives navigating into a task and back", async ({
     testPage,
   }) => {
@@ -150,11 +144,7 @@ test.describe("Kanban workflow filter", () => {
     await testPage.goto(`/t/${betaTaskId}`);
     await expect(testPage).toHaveURL(new RegExp(`/t/${betaTaskId}`));
 
-    // Return via the in-app home breadcrumb (Next.js Link → client-side
-    // navigation). A full `goto("/")` would re-run the homepage SSR which
-    // re-resolves activeId from user_settings and masks the bug; the
-    // client-side path keeps the in-memory store and exposes any task-page
-    // SSR poisoning (the original repro).
+    // Breadcrumb = client-side nav: goto("/") re-runs SSR and re-resolves activeId, masking the bug.
     await testPage.getByTestId("task-breadcrumb-home").click();
     await expect(testPage).toHaveURL(/\/$|\?/);
     await expect(kanban.board).toBeVisible();

@@ -252,8 +252,7 @@ export function RightHeaderActions(props: IDockviewHeaderActionsProps) {
 function SidebarRightActions() {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const kanban = useAppStore((state) => state.kanban);
-  // Read the task's workflow from the kanban snapshot rather than the
-  // homepage filter so opening a task doesn't poison "All Workflows".
+  // Use kanban.workflowId (task context) not workflows.activeId so "All Workflows" isn't clobbered when viewing a task.
   const workflowId = kanban.workflowId;
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeTaskTitle = useAppStore((state) => {
