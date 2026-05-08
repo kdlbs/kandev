@@ -165,8 +165,11 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		// could associate it with a task in this workspace via the MCP tool's
 		// repository_id fast path (the github_url and local_path branches both
 		// scope through FindOrCreateRepository, which is workspace-bound).
-		repo, err := s.repoEntities.GetRepository(ctx, repositoryID)
-		if err != nil || repo == nil || repo.WorkspaceID != workspaceID {
+		repo, lookupErr := s.repoEntities.GetRepository(ctx, repositoryID)
+		if lookupErr != nil {
+			return "", "", fmt.Errorf("looking up repository %q: %w", repositoryID, lookupErr)
+		}
+		if repo == nil || repo.WorkspaceID != workspaceID {
 			return "", "", fmt.Errorf("repository %q does not belong to workspace %q", repositoryID, workspaceID)
 		}
 		return repositoryID, baseBranch, nil

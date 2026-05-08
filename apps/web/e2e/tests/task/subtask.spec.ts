@@ -502,9 +502,10 @@ test.describe("Subtask dialog feature parity", () => {
     await urlInput.fill("https://github.com/subtask-owner/subtask-repo");
 
     // Wait for branch list to resolve so the payload carries `base_branch`.
-    // The subtask submit button isn't gated on this (only on prompt presence),
-    // but giving the effect time to settle keeps the assertion deterministic.
-    await expect(testPage.getByTestId("github-url-error")).not.toBeVisible({ timeout: 10_000 });
+    // The branch pill is disabled while branches are loading and re-enables
+    // once the resolver returns options, so this is a positive signal that
+    // the URL was parsed and branches were fetched.
+    await expect(testPage.getByTestId("branch-chip-trigger")).toBeEnabled({ timeout: 10_000 });
 
     // 4. Submit.
     const subtaskTitle = `Subtask GH URL ${Date.now()}`;

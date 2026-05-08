@@ -31,8 +31,7 @@ type UseSubtaskSubmitOpts = {
 /**
  * Encapsulates the subtask creation flow: builds the repositories payload,
  * calls createTask, and activates the new session. Returns `handleSubmit`
- * (form submit handler) and `isCreating` (loading flag) so the surrounding
- * component stays under the per-function complexity cap.
+ * so the surrounding component stays under the per-function complexity cap.
  */
 export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
   const {
@@ -51,6 +50,10 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
   const { toast } = useToast();
   const setActiveTask = useAppStore((s) => s.setActiveTask);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
+  // Synchronous guard: setIsCreating(true) won't reflect into the disabled
+  // submit button until React commits, so a fast double-submit (Enter + click,
+  // double-click) can re-enter handleSubmit and call createTask twice.
+  const isSubmittingRef = useRef(false);
 
   const performCreate = useCallback(
     async (trimmedTitle: string, prompt: string) => {
@@ -110,11 +113,13 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
+      if (isSubmittingRef.current) return;
       const trimmedTitle = title.trim();
       if (!trimmedTitle || !workspaceId || !workflowId) return;
       const prompt = resolvePrompt();
       if (!prompt) return;
 
+      isSubmittingRef.current = true;
       setIsCreating(true);
       try {
         await performCreate(trimmedTitle, prompt);
@@ -126,6 +131,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
           variant: "error",
         });
       } finally {
+        isSubmittingRef.current = false;
         setIsCreating(false);
       }
     },

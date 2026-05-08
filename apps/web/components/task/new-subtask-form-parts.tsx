@@ -238,8 +238,11 @@ export function SubtaskFormBody({
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="space-y-1.5">
-        <label className="text-xs font-medium text-muted-foreground">Title</label>
+        <label htmlFor="subtask-title-input" className="text-xs font-medium text-muted-foreground">
+          Title
+        </label>
         <Input
+          id="subtask-title-input"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Subtask title"
