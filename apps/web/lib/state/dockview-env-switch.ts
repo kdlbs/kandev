@@ -187,9 +187,13 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
   if (!structuresMatch) return null;
   if (saved && savedLayoutHasEphemeralPanels(saved as SerializedDockview)) return null;
 
-  const outgoingSessionPanel = api.panels.find(
-    (p) => p.id.startsWith("session:") || p.api.component === "chat",
-  );
+  // Prefer the active session panel so multi-session tasks anchor the
+  // incoming panel to the group the user was looking at, not whichever
+  // session tab happens to come first in `api.panels` iteration order.
+  const isSessionPanel = (p: (typeof api.panels)[number]) =>
+    p.id.startsWith("session:") || p.api.component === "chat";
+  const outgoingSessionPanel =
+    api.panels.find((p) => isSessionPanel(p) && p.api.isActive) ?? api.panels.find(isSessionPanel);
   const outgoingGroup = outgoingSessionPanel?.group;
   const outgoingGroupId = outgoingGroup?.id;
   // Capture the session's index among siblings that will survive

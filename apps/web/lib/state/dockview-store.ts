@@ -664,6 +664,10 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
       api.onDidActivePanelChange((event) => {
         set({ activeFilePath: resolveFilePath(event?.id) });
       });
+      // Track per-panel param-change subscriptions so they can be disposed when
+      // the panel is removed (e.g. across env switches that re-create the
+      // preview panel) instead of relying on dockview's internal cleanup.
+      const paramSubs = new Map<string, { dispose: () => void }>();
       api.onDidAddPanel((panel) => {
         // The preview file-editor panel reuses a single dockview panel and swaps
         // its `params.path` via `updateParameters` when the user previews a
@@ -671,10 +675,19 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
         // params-only updates on an already-active panel, so subscribe to the
         // panel's own parameter-change event and refresh `activeFilePath`.
         if (panel.id !== "preview:file-editor") return;
-        panel.api.onDidParametersChange(() => {
+        paramSubs.get(panel.id)?.dispose();
+        const sub = panel.api.onDidParametersChange(() => {
           if (!panel.api.isActive) return;
           set({ activeFilePath: resolveFilePath(panel.id) });
         });
+        paramSubs.set(panel.id, sub);
+      });
+      api.onDidRemovePanel((panel) => {
+        const sub = paramSubs.get(panel.id);
+        if (sub) {
+          sub.dispose();
+          paramSubs.delete(panel.id);
+        }
       });
     }
   },
