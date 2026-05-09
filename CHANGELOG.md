@@ -2,6 +2,20 @@
 
 All notable changes to Kandev.
 
+## 0.41.0 - 2026-05-09
+
+### Features
+
+- allow subtasks to target a sibling repository ([#852](https://github.com/kdlbs/kandev/pull/852))
+
+### Bug Fixes
+
+- preserve dockview state across task and plan-mode switches ([#855](https://github.com/kdlbs/kandev/pull/855))
+- show sent message in chat without waiting for ws broadcast ([#851](https://github.com/kdlbs/kandev/pull/851))
+- rank longest/quickest tasks by active duration ([#849](https://github.com/kdlbs/kandev/pull/849))
+- keep "All Workflows" filter on task nav and workflow.created ([#854](https://github.com/kdlbs/kandev/pull/854))
+- keep command palette selection on first result ([#845](https://github.com/kdlbs/kandev/pull/845))
+
 ## 0.40.0 - 2026-05-08
 
 ### Features
