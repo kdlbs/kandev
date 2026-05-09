@@ -651,17 +651,42 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
       (window as unknown as { __dockviewApi__: DockviewApi | null }).__dockviewApi__ = api;
     }
     if (api) {
+      const resolveFilePath = (panelId: string | undefined): string | null => {
+        if (!panelId) return null;
+        if (panelId.startsWith("file:")) return panelId.slice(5);
+        if (panelId === "preview:file-editor") {
+          const path = (api.getPanel(panelId)?.params as Record<string, unknown> | undefined)
+            ?.path as string | undefined;
+          return path ?? null;
+        }
+        return null;
+      };
       api.onDidActivePanelChange((event) => {
-        const id = event?.id;
-        if (id?.startsWith("file:")) {
-          set({ activeFilePath: id.slice(5) });
-        } else if (id === "preview:file-editor") {
-          const path = (api.getPanel(id)?.params as Record<string, unknown> | undefined)?.path as
-            | string
-            | undefined;
-          set({ activeFilePath: path ?? null });
-        } else {
-          set({ activeFilePath: null });
+        set({ activeFilePath: resolveFilePath(event?.id) });
+      });
+      // Track per-panel param-change subscriptions so they can be disposed when
+      // the panel is removed (e.g. across env switches that re-create the
+      // preview panel) instead of relying on dockview's internal cleanup.
+      const paramSubs = new Map<string, { dispose: () => void }>();
+      api.onDidAddPanel((panel) => {
+        // The preview file-editor panel reuses a single dockview panel and swaps
+        // its `params.path` via `updateParameters` when the user previews a
+        // different file. Dockview does not refire `onDidActivePanelChange` for
+        // params-only updates on an already-active panel, so subscribe to the
+        // panel's own parameter-change event and refresh `activeFilePath`.
+        if (panel.id !== "preview:file-editor") return;
+        paramSubs.get(panel.id)?.dispose();
+        const sub = panel.api.onDidParametersChange(() => {
+          if (!panel.api.isActive) return;
+          set({ activeFilePath: resolveFilePath(panel.id) });
+        });
+        paramSubs.set(panel.id, sub);
+      });
+      api.onDidRemovePanel((panel) => {
+        const sub = paramSubs.get(panel.id);
+        if (sub) {
+          sub.dispose();
+          paramSubs.delete(panel.id);
         }
       });
     }

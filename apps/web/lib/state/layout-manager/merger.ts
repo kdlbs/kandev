@@ -5,6 +5,12 @@ import { fromDockviewApi } from "./serializer";
 /** Panel IDs that always come from the preset and should never be merged. */
 const PRESET_ONLY_PANELS = new Set(["sidebar"]);
 
+/** Panel IDs that, when surviving as extras, belong next to the chat in the
+ *  center column rather than in the side column. The plan panel is paired
+ *  with the chat conceptually, so toggling off plan mode keeps it visible
+ *  in the center group rather than dumping it into the right column. */
+const CENTER_EXTRA_PANELS = new Set(["plan"]);
+
 /** Collect all panels from a LayoutState, flattened. */
 function collectAllPanels(state: LayoutState): LayoutPanel[] {
   const panels: LayoutPanel[] = [];
@@ -23,10 +29,36 @@ function collectPanelIds(state: LayoutState): Set<string> {
   return new Set(collectAllPanels(state).map((p) => p.id));
 }
 
+/** Identify the column that should receive non-session extras. Prefer the last
+ *  non-sidebar, non-center column (e.g. "right", "plan", "preview", "vscode"),
+ *  falling back to "center" when the preset has no such side column. */
+function pickExtrasColumnId(targetPreset: LayoutState): string {
+  const sideCols = targetPreset.columns.filter((c) => c.id !== "sidebar" && c.id !== "center");
+  return sideCols[sideCols.length - 1]?.id ?? "center";
+}
+
+/** Append `toAdd` panels to a group's first leaf, preserving identity when no-op. */
+function appendToFirstGroup(
+  groups: LayoutState["columns"][number]["groups"],
+  toAdd: LayoutPanel[],
+  filterExisting?: (p: LayoutPanel) => boolean,
+): LayoutState["columns"][number]["groups"] {
+  return groups.map((group, idx) => {
+    if (idx !== 0) return group;
+    const basePanels = filterExisting ? group.panels.filter(filterExisting) : group.panels;
+    const existingIds = new Set(basePanels.map((p) => p.id));
+    const additions = toAdd.filter((p) => !existingIds.has(p.id));
+    if (additions.length === 0 && basePanels.length === group.panels.length) return group;
+    return { ...group, panels: [...basePanels, ...additions] };
+  });
+}
+
 /**
  * Pure merge logic: merge extra panels from the current state into a target
- * preset layout.  Session panels (`session:*`) replace the generic `chat`
- * panel rather than coexisting alongside it.
+ * preset layout. Session panels (`session:*`) replace the generic `chat`
+ * panel in the center column. Other extras (files, changes, terminal, etc.)
+ * are appended to the side column when one exists (e.g. "right"/"plan"/
+ * "preview"/"vscode"), otherwise they fall back to the center column.
  */
 export function mergePanelsIntoPreset(
   currentState: LayoutState,
@@ -43,36 +75,29 @@ export function mergePanelsIntoPreset(
     return targetPreset;
   }
 
-  const hasSessionPanels = extraPanels.some((p) => p.id.startsWith("session:"));
-
-  console.debug(
-    "[layout-merger] merging extra panels into preset:",
-    extraPanels.map((p) => p.id),
+  const sessionExtras = extraPanels.filter((p) => p.id.startsWith("session:"));
+  const centerExtras = extraPanels.filter((p) => CENTER_EXTRA_PANELS.has(p.id));
+  const sideExtras = extraPanels.filter(
+    (p) => !p.id.startsWith("session:") && !CENTER_EXTRA_PANELS.has(p.id),
   );
+  const hasSessionPanels = sessionExtras.length > 0;
+  const extrasColumnId = pickExtrasColumnId(targetPreset);
 
   const mergedColumns = targetPreset.columns.map((col) => {
-    if (col.id !== "center") return col;
-
-    const groups = col.groups.map((group, idx) => {
-      if (idx !== 0) return group;
-
-      // If extra panels include session tabs, drop the generic "chat"
-      // placeholder — session panels replace it.
-      const basePanels = hasSessionPanels
-        ? group.panels.filter((p) => p.id !== "chat")
-        : group.panels;
-
-      const existingIds = new Set(basePanels.map((p) => p.id));
-      const toAdd = extraPanels.filter((p) => !existingIds.has(p.id));
-      if (toAdd.length === 0 && basePanels.length === group.panels.length) return group;
-
-      return {
-        ...group,
-        panels: [...basePanels, ...toAdd],
-      };
-    });
-
-    return { ...col, groups };
+    if (col.id === "center") {
+      // Sessions always replace the generic "chat" placeholder in center.
+      // Center-affinity extras (e.g. "plan") sit alongside the chat. When
+      // the side column doesn't exist, side extras land here too.
+      const fallbackSide = extrasColumnId === "center" ? sideExtras : [];
+      const filterChat = hasSessionPanels ? (p: LayoutPanel) => p.id !== "chat" : undefined;
+      const additions = [...sessionExtras, ...centerExtras, ...fallbackSide];
+      if (additions.length === 0 && !filterChat) return col;
+      return { ...col, groups: appendToFirstGroup(col.groups, additions, filterChat) };
+    }
+    if (col.id === extrasColumnId && sideExtras.length > 0) {
+      return { ...col, groups: appendToFirstGroup(col.groups, sideExtras) };
+    }
+    return col;
   });
 
   return { columns: mergedColumns };
