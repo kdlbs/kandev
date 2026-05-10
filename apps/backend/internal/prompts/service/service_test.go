@@ -2,11 +2,14 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/prompts/models"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
 )
 
@@ -126,5 +129,47 @@ func TestService_UpdatePromptSameName(t *testing.T) {
 	}
 	if updated.Content != newContent {
 		t.Fatalf("expected content %q, got %q", newContent, updated.Content)
+	}
+}
+
+// raceRepo simulates a TOCTOU loss against the SQLite UNIQUE index: the
+// pre-check sees no row, but the write fails because a concurrent insert
+// landed first. The service must translate that into ErrPromptAlreadyExists
+// rather than letting the raw driver error fall through to a 500.
+type raceRepo struct {
+	promptstore.Repository
+	createErr error
+	updateErr error
+}
+
+func (r *raceRepo) GetPromptByID(_ context.Context, id string) (*models.Prompt, error) {
+	return &models.Prompt{ID: id, Name: "old", Content: "x"}, nil
+}
+
+func (r *raceRepo) GetPromptByName(_ context.Context, _ string) (*models.Prompt, error) {
+	return nil, sql.ErrNoRows
+}
+
+func (r *raceRepo) CreatePrompt(_ context.Context, _ *models.Prompt) error { return r.createErr }
+func (r *raceRepo) UpdatePrompt(_ context.Context, _ *models.Prompt) error { return r.updateErr }
+
+func TestService_CreatePrompt_TranslatesUniqueConstraintRace(t *testing.T) {
+	svc := NewService(&raceRepo{
+		createErr: errors.New("UNIQUE constraint failed: custom_prompts.name"),
+	})
+
+	if _, err := svc.CreatePrompt(context.Background(), "any", "content"); err != ErrPromptAlreadyExists {
+		t.Fatalf("expected ErrPromptAlreadyExists, got %v", err)
+	}
+}
+
+func TestService_UpdatePrompt_TranslatesUniqueConstraintRace(t *testing.T) {
+	svc := NewService(&raceRepo{
+		updateErr: errors.New("UNIQUE constraint failed: custom_prompts.name"),
+	})
+
+	rename := "new-name"
+	if _, err := svc.UpdatePrompt(context.Background(), "id-1", &rename, nil); err != ErrPromptAlreadyExists {
+		t.Fatalf("expected ErrPromptAlreadyExists, got %v", err)
 	}
 }

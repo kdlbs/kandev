@@ -42,9 +42,21 @@ func (s *Service) CreatePrompt(ctx context.Context, name, content string) (*mode
 		Content: content,
 	}
 	if err := s.repo.CreatePrompt(ctx, prompt); err != nil {
-		return nil, err
+		return nil, translateNameConflict(err)
 	}
 	return prompt, nil
+}
+
+// translateNameConflict closes the TOCTOU window between assertNameAvailable
+// and the write: the SQLite UNIQUE index on custom_prompts.name is the only
+// authoritative guard, and a concurrent write that loses the race surfaces a
+// "UNIQUE constraint failed" driver error which would otherwise fall through
+// to a generic 500.
+func translateNameConflict(err error) error {
+	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		return ErrPromptAlreadyExists
+	}
+	return err
 }
 
 // assertNameAvailable returns ErrPromptAlreadyExists if a different prompt with
@@ -58,7 +70,7 @@ func (s *Service) assertNameAvailable(ctx context.Context, name, excludeID strin
 		}
 		return err
 	}
-	if existing == nil || existing.ID == excludeID {
+	if existing.ID == excludeID {
 		return nil
 	}
 	return ErrPromptAlreadyExists
@@ -89,7 +101,7 @@ func (s *Service) UpdatePrompt(ctx context.Context, promptID string, name *strin
 		prompt.Content = trimmed
 	}
 	if err := s.repo.UpdatePrompt(ctx, prompt); err != nil {
-		return nil, err
+		return nil, translateNameConflict(err)
 	}
 	return prompt, nil
 }
