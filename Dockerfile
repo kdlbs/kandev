@@ -29,7 +29,8 @@ RUN go build -ldflags "-s -w" -o /out/kandev ./cmd/kandev && \
 # ---------------------------------------------------------------------------
 FROM node:24-slim AS web-builder
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+ARG PNPM_VERSION=9.15.9
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 
 WORKDIR /build/apps
 
