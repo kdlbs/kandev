@@ -95,4 +95,31 @@ describe("useWorkflowSnapshot — kanban.isLoading", () => {
     expect(mockFetchWorkflowSnapshot).not.toHaveBeenCalled();
     expect(mockState.kanban.isLoading).toBe(false);
   });
+
+  it("does not clear isLoading when an old fetch settles after workflowId changes", async () => {
+    // First fetch never settles synchronously — we resolve it manually
+    // *after* re-rendering with a new workflowId, simulating the race where
+    // the user switches workflows mid-fetch.
+    let resolveFirst!: (snapshot: { steps: unknown[]; tasks: unknown[] }) => void;
+    const firstFetch = new Promise<{ steps: unknown[]; tasks: unknown[] }>((r) => {
+      resolveFirst = r;
+    });
+    const secondFetch = new Promise<{ steps: unknown[]; tasks: unknown[] }>(() => {});
+    mockFetchWorkflowSnapshot.mockReturnValueOnce(firstFetch).mockReturnValueOnce(secondFetch);
+
+    const { rerender } = renderHook(({ id }: { id: string | null }) => useWorkflowSnapshot(id), {
+      initialProps: { id: "wf-1" as string | null },
+    });
+    expect(mockState.kanban.isLoading).toBe(true);
+
+    // User switches to wf-2 before wf-1 finishes loading
+    rerender({ id: "wf-2" });
+    expect(mockState.kanban.isLoading).toBe(true);
+
+    // Old fetch lands now; its `.finally` must not clear the flag the new
+    // effect just set.
+    resolveFirst({ steps: [], tasks: [] });
+    await waitFor(() => expect(mockHydrate).not.toHaveBeenCalled());
+    expect(mockState.kanban.isLoading).toBe(true);
+  });
 });

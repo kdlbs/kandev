@@ -91,7 +91,6 @@ export function useSheetData(workspaceId: string | null, workflowId: string | nu
   const steps = useAppStore((state) => state.kanban.steps);
   const workspaces = useAppStore((state) => state.workspaces.items);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
-  const kanbanIsLoading = useAppStore((state) => state.kanban.isLoading ?? false);
 
   const selectedTaskId = useMemo(() => {
     if (activeSessionId) return sessionsById[activeSessionId]?.task_id ?? activeTaskId;
@@ -160,7 +159,7 @@ export function useSheetData(workspaceId: string | null, workflowId: string | nu
     // Sheet should show a skeleton while the workflow snapshot hydrates the
     // kanban slice — without this it briefly (or permanently, on fetch error)
     // shows "No tasks yet." even when tasks exist server-side.
-    tasksLoading: tasksLoading || kanbanIsLoading,
+    tasksLoading,
     tasksWithRepositories,
     dialogSteps,
   };

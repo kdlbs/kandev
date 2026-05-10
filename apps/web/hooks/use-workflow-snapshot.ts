@@ -25,9 +25,11 @@ export function useWorkflowSnapshot(workflowId: string | null) {
         console.warn("[useWorkflowSnapshot] failed to load snapshot:", error);
       })
       .finally(() => {
-        // Always settle the loading flag, even after unmount — otherwise the
-        // sheet/sidebar can be stuck on a skeleton if the component unmounted
-        // mid-fetch.
+        // Skip when the effect was superseded — otherwise an in-flight fetch
+        // for an old workflowId would clear the loading flag the new effect
+        // just set, briefly flashing the empty-state UI. The next effect's
+        // finally settles isLoading for the active workflow.
+        if (cancelled) return;
         store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
       });
     return () => {

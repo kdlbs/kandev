@@ -22,7 +22,13 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
   useAppStoreApi: () => ({
     getState: () => mockState,
-    setState: (updater: (s: MockState) => MockState) => mockSetState(updater(mockState)),
+    setState: (updater: (s: MockState) => MockState) => {
+      // Apply the updater so useWorkflowSnapshot's isLoading transitions are
+      // visible to subsequent reads in the same render cycle. Without this
+      // the mock would silently swallow side effects.
+      mockState = updater(mockState);
+      mockSetState(mockState);
+    },
   }),
 }));
 
