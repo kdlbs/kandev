@@ -1,5 +1,5 @@
 const KANDEV_TOOL_RE = /^[a-z][a-z0-9_]*_kandev$/;
-const ACRONYMS = new Set(["mcp", "id", "url", "api", "ui", "vs", "ide", "cli"]);
+const ACRONYMS = new Set(["mcp"]);
 
 export function prettifyToolTitle(raw: string): string {
   if (!raw) return raw;
