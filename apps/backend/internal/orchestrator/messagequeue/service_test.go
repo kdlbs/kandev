@@ -288,7 +288,7 @@ func TestTransferSession(t *testing.T) {
 		require.NoError(t, err)
 		svc.SetPendingMove(ctx, "old", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"})
 
-		svc.TransferSession(ctx, "old", "new")
+		require.NoError(t, svc.TransferSession(ctx, "old", "new"))
 
 		_, ok := svc.TakeQueued(ctx, "old")
 		assert.False(t, ok)
@@ -308,7 +308,7 @@ func TestTransferSession(t *testing.T) {
 	t.Run("no-op when source empty", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
-		svc.TransferSession(ctx, "empty", "new")
+		require.NoError(t, svc.TransferSession(ctx, "empty", "new"))
 		_, ok := svc.TakeQueued(ctx, "new")
 		assert.False(t, ok)
 	})
