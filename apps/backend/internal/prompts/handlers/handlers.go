@@ -51,12 +51,15 @@ func (h *Handlers) httpCreatePrompt(c *gin.Context) {
 	}
 	resp, err := h.controller.CreatePrompt(c.Request.Context(), req)
 	if err != nil {
-		status := http.StatusInternalServerError
-		if err == service.ErrInvalidPrompt {
-			status = http.StatusBadRequest
+		status, message := http.StatusInternalServerError, "failed to create prompt"
+		switch err {
+		case service.ErrInvalidPrompt:
+			status, message = http.StatusBadRequest, err.Error()
+		case service.ErrPromptAlreadyExists:
+			status, message = http.StatusConflict, err.Error()
 		}
 		h.logger.Error("failed to create prompt", zap.Error(err))
-		c.JSON(status, gin.H{"error": "failed to create prompt"})
+		c.JSON(status, gin.H{"error": message})
 		return
 	}
 	c.JSON(http.StatusOK, resp)
@@ -70,15 +73,17 @@ func (h *Handlers) httpUpdatePrompt(c *gin.Context) {
 	}
 	resp, err := h.controller.UpdatePrompt(c.Request.Context(), c.Param("id"), req)
 	if err != nil {
-		status := http.StatusInternalServerError
+		status, message := http.StatusInternalServerError, "failed to update prompt"
 		switch err {
 		case service.ErrInvalidPrompt:
-			status = http.StatusBadRequest
+			status, message = http.StatusBadRequest, err.Error()
 		case service.ErrPromptNotFound:
-			status = http.StatusNotFound
+			status, message = http.StatusNotFound, err.Error()
+		case service.ErrPromptAlreadyExists:
+			status, message = http.StatusConflict, err.Error()
 		}
 		h.logger.Error("failed to update prompt", zap.Error(err))
-		c.JSON(status, gin.H{"error": "failed to update prompt"})
+		c.JSON(status, gin.H{"error": message})
 		return
 	}
 	c.JSON(http.StatusOK, resp)

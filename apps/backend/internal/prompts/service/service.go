@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 
@@ -10,8 +11,9 @@ import (
 )
 
 var (
-	ErrPromptNotFound = errors.New("prompt not found")
-	ErrInvalidPrompt  = errors.New("invalid prompt")
+	ErrPromptNotFound      = errors.New("prompt not found")
+	ErrInvalidPrompt       = errors.New("invalid prompt")
+	ErrPromptAlreadyExists = errors.New("prompt with this name already exists")
 )
 
 type Service struct {
@@ -32,6 +34,9 @@ func (s *Service) CreatePrompt(ctx context.Context, name, content string) (*mode
 	if name == "" || content == "" {
 		return nil, ErrInvalidPrompt
 	}
+	if err := s.assertNameAvailable(ctx, name, ""); err != nil {
+		return nil, err
+	}
 	prompt := &models.Prompt{
 		Name:    name,
 		Content: content,
@@ -40,6 +45,23 @@ func (s *Service) CreatePrompt(ctx context.Context, name, content string) (*mode
 		return nil, err
 	}
 	return prompt, nil
+}
+
+// assertNameAvailable returns ErrPromptAlreadyExists if a different prompt with
+// the given name already exists. excludeID lets callers exclude the prompt
+// being updated so unchanged-name saves do not falsely trip.
+func (s *Service) assertNameAvailable(ctx context.Context, name, excludeID string) error {
+	existing, err := s.repo.GetPromptByName(ctx, name)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if existing == nil || existing.ID == excludeID {
+		return nil
+	}
+	return ErrPromptAlreadyExists
 }
 
 func (s *Service) UpdatePrompt(ctx context.Context, promptID string, name *string, content *string) (*models.Prompt, error) {
@@ -51,6 +73,11 @@ func (s *Service) UpdatePrompt(ctx context.Context, promptID string, name *strin
 		trimmed := strings.TrimSpace(*name)
 		if trimmed == "" {
 			return nil, ErrInvalidPrompt
+		}
+		if trimmed != prompt.Name {
+			if err := s.assertNameAvailable(ctx, trimmed, prompt.ID); err != nil {
+				return nil, err
+			}
 		}
 		prompt.Name = trimmed
 	}
