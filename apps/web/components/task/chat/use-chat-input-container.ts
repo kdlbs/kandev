@@ -18,8 +18,11 @@ type UseChatInputContainerParams = {
   isStarting: boolean;
   /** True only during a real Docker/Sprites prepare phase. Different from
    * `isStarting`, which fires for every session that's transitioning
-   * through STARTING (including local quick-chat). Submit gating uses
-   * this narrower flag so quick-chat sessions aren't blocked. */
+   * through STARTING (including local quick-chat). Drives the "agent still
+   * being set up" submit-disabled tooltip so it only appears when a
+   * container/sandbox is genuinely bootstrapping; the disabled state
+   * itself is still gated on the broader `isStarting` to keep e2e
+   * Cmd+Enter from racing the not-yet-ready agent. */
   isPreparingEnvironment: boolean;
   isMoving: boolean;
   isFailed: boolean;
