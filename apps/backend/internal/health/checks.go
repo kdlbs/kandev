@@ -153,7 +153,7 @@ func (c *AgentChecker) Check(ctx context.Context) []Issue {
 			ID:       "no_agents",
 			Category: "agents",
 			Title:    "No AI agents detected",
-			Message:  "Install an AI coding agent (e.g. Claude Code, Codex) to start using KanDev.",
+			Message:  "Install an AI coding agent (e.g. Claude Code, Codex) to start using Kandev.",
 			Severity: SeverityWarning,
 			FixURL:   "/settings/agents",
 			FixLabel: "Configure Agents",

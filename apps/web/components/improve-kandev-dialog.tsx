@@ -251,7 +251,7 @@ function IntroExplanation({
   return (
     <div className="space-y-5 py-2">
       <p className="text-sm leading-relaxed text-muted-foreground">
-        KanDev is open source, and you can help make it better.
+        Kandev is open source, and you can help make it better.
       </p>
 
       <p className="text-sm leading-relaxed text-muted-foreground">

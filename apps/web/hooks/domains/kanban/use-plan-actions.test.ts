@@ -38,7 +38,9 @@ describe("readContextFilesMeta", () => {
   const appFilePath = "src/app.ts";
   const appFileName = "app.ts";
 
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
   it("returns an empty array when the session has no context files", () => {
     mockGetState.mockReturnValue({ filesBySessionId: {} });

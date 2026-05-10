@@ -109,7 +109,7 @@ function TokenConfigForm({ onSuccess }: { onSuccess: () => void }) {
       <p className="text-xs text-muted-foreground">
         Create a{" "}
         <a
-          href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=KanDev"
+          href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=Kandev"
           target="_blank"
           rel="noopener noreferrer"
           className="underline cursor-pointer"

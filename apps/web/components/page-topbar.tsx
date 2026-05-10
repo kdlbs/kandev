@@ -21,7 +21,7 @@ type PageTopbarProps = {
   icon?: ReactNode;
   /** Where the back link navigates to (default: "/") */
   backHref?: string;
-  /** Label for the parent breadcrumb (default: "KanDev") */
+  /** Label for the parent breadcrumb (default: "Kandev") */
   backLabel?: string;
   /** Optional content rendered before the breadcrumb */
   leading?: ReactNode;
@@ -43,7 +43,7 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
     subtitle,
     icon,
     backHref = "/",
-    backLabel = "KanDev",
+    backLabel = "Kandev",
     leading,
     center,
     leftActions,
