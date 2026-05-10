@@ -34,6 +34,19 @@ async function runAndWait(
   return page;
 }
 
+/**
+ * After a turn completes, consecutive tool calls collapse into a "{N} tool
+ * call(s)" group header. Click each header so the per-tool-call titles below
+ * are rendered and assertions can target them.
+ */
+async function expandToolCallGroups(page: SessionPage) {
+  const headers = page.chat.getByRole("button", { name: /\d+ tool calls?$/ });
+  const count = await headers.count();
+  for (let i = 0; i < count; i++) {
+    await headers.nth(i).click();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Workflow management
 // ---------------------------------------------------------------------------
@@ -52,8 +65,9 @@ test.describe("Config-mode MCP — workflow management", () => {
     );
 
     const page = await runAndWait(testPage, session.task_id, "Done listing");
-    await expect(page.chat.getByText("list_workspaces_kandev")).toBeVisible({ timeout: 10_000 });
-    await expect(page.chat.getByText("list_workflows_kandev")).toBeVisible({ timeout: 10_000 });
+    await expandToolCallGroups(page);
+    await expect(page.chat.getByText("Kandev: List Workspaces")).toBeVisible({ timeout: 10_000 });
+    await expect(page.chat.getByText("Kandev: List Workflows")).toBeVisible({ timeout: 10_000 });
   });
 
   test("agent can create and list workflow steps", async ({ testPage, apiClient, seedData }) => {
@@ -254,8 +268,9 @@ test.describe("Config-mode MCP — agent management", () => {
     );
 
     const page = await runAndWait(testPage, session.task_id, "Agents listed");
-    await expect(page.chat.getByText("list_agents_kandev")).toBeVisible({ timeout: 10_000 });
-    await expect(page.chat.getByText("list_agent_profiles_kandev")).toBeVisible({
+    await expandToolCallGroups(page);
+    await expect(page.chat.getByText("Kandev: List Agents")).toBeVisible({ timeout: 10_000 });
+    await expect(page.chat.getByText("Kandev: List Agent Profiles")).toBeVisible({
       timeout: 10_000,
     });
   });
@@ -403,8 +418,9 @@ test.describe("Config-mode MCP — MCP server configuration", () => {
     );
 
     const page = await runAndWait(testPage, session.task_id, "MCP config updated");
-    await expect(page.chat.getByText("get_mcp_config_kandev")).toBeVisible({ timeout: 10_000 });
-    await expect(page.chat.getByText("update_mcp_config_kandev")).toBeVisible({ timeout: 10_000 });
+    await expandToolCallGroups(page);
+    await expect(page.chat.getByText("Kandev: Get MCP Config")).toBeVisible({ timeout: 10_000 });
+    await expect(page.chat.getByText("Kandev: Update MCP Config")).toBeVisible({ timeout: 10_000 });
 
     // Verify via API
     const config = await apiClient.getAgentProfileMcpConfig(seedData.agentProfileId);
@@ -436,7 +452,10 @@ test.describe("Config-mode MCP — task management", () => {
     );
 
     const page = await runAndWait(testPage, session.task_id, "Tasks listed");
-    await expect(page.chat.getByText("list_tasks_kandev").first()).toBeVisible({ timeout: 10_000 });
+    await expandToolCallGroups(page);
+    await expect(page.chat.getByText("Kandev: List Tasks").first()).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
   test("agent can move a task to a different step", async ({ testPage, apiClient, seedData }) => {
@@ -532,7 +551,8 @@ test.describe("Config-mode MCP — executor management", () => {
     );
 
     const page = await runAndWait(testPage, session.task_id, "Executors listed");
-    await expect(page.chat.getByText("list_executors_kandev", { exact: true })).toBeVisible({
+    await expandToolCallGroups(page);
+    await expect(page.chat.getByText("Kandev: List Executors", { exact: true })).toBeVisible({
       timeout: 10_000,
     });
   });
