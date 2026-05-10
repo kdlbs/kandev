@@ -691,7 +691,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	if err != nil {
 		var qfErr *queueFullDispatchError
 		if errors.As(err, &qfErr) {
-			return ws.NewError(msg.ID, msg.Action, queueFullErrorCode,
+			return ws.NewError(msg.ID, msg.Action, messagequeue.QueueFullErrorCode,
 				fmt.Sprintf("target task has %d queued messages (max %d) — retry after the next turn completes", qfErr.queueSize, qfErr.max),
 				qfErr.toPayload())
 		}
@@ -863,7 +863,7 @@ func (e *queueFullDispatchError) toPayload() map[string]interface{} {
 	// callers reading the structured details body still see it without parsing
 	// the envelope. Tests assert on details.error directly.
 	return map[string]interface{}{
-		errorField:        queueFullErrorCode,
+		errorField:        messagequeue.QueueFullErrorCode,
 		"queue_size":      e.queueSize,
 		"max":             e.max,
 		"retry_after":     "next_turn",
@@ -874,11 +874,6 @@ func (e *queueFullDispatchError) toPayload() map[string]interface{} {
 // errorField names the well-known structured details key used to surface error
 // codes in MCP tool responses (extracted to satisfy goconst's repeated-string rule).
 const errorField = "error"
-
-// queueFullErrorCode is the well-known code surfaced both as the WS error code
-// and inside the structured details body so LLM tool callers can branch on it
-// without parsing prose.
-const queueFullErrorCode = "queue_full"
 
 // dispatchTaskMessage routes a message to the right delivery path based on session state.
 // Returns the action taken: "queued", "sent", or "started".
@@ -901,7 +896,7 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 		if queue == nil {
 			return "", errors.New("message queue not available")
 		}
-		if _, err := queue.QueueMessageWithMetadata(ctx, session.ID, taskID, prompt, "", "agent", false, nil, metadata); err != nil {
+		if _, err := queue.QueueMessageWithMetadata(ctx, session.ID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata); err != nil {
 			if errors.Is(err, messagequeue.ErrQueueFull) {
 				status := queue.GetStatus(ctx, session.ID)
 				return "", &queueFullDispatchError{

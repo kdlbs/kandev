@@ -2,10 +2,12 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { IconCheck, IconClock, IconEdit, IconRobot, IconUser, IconX } from "@tabler/icons-react";
+import { toast } from "sonner";
 import { Button } from "@kandev/ui";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { QueueEntryNotFoundError } from "@/lib/api/domains/queue-api";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 
 /** Strip internal <kandev-system>...</kandev-system> blocks from display text. */
@@ -22,11 +24,9 @@ type SenderKind = "user" | "agent" | "system";
 
 function senderKindOf(entry: QueuedMessage): SenderKind {
   if (!entry.queued_by) return "system";
+  // Inter-task messages dispatched via dispatchTaskMessage hardcode
+  // queued_by="agent"; that's the only signal needed.
   if (entry.queued_by === "agent") return "agent";
-  // Inter-task messages carry sender_task_id in metadata even though queued_by is "agent".
-  if (entry.metadata && (entry.metadata.sender_task_id || entry.metadata.sender_task_title)) {
-    return "agent";
-  }
   return "user";
 }
 
@@ -147,25 +147,27 @@ function DisplayView({ entry, canEdit, onStartEdit, onRemove }: DisplayViewProps
       </div>
       <div className="flex items-center gap-0.5 flex-shrink-0">
         {canEdit && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
-            onClick={onStartEdit}
-            title="Edit queued message"
-          >
-            <IconEdit className="h-3.5 w-3.5" />
-          </Button>
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
+              onClick={onStartEdit}
+              title="Edit queued message"
+            >
+              <IconEdit className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
+              onClick={onRemove}
+              title="Remove queued message"
+            >
+              <IconX className="h-4 w-4" />
+            </Button>
+          </>
         )}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
-          onClick={onRemove}
-          title="Remove queued message"
-        >
-          <IconX className="h-4 w-4" />
-        </Button>
       </div>
     </div>
   );
@@ -231,6 +233,16 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
         onEditComplete?.();
       } catch (err) {
         console.error("Failed to update queued entry:", err);
+        // Exit edit mode so the user sees the current state instead of being
+        // stuck in a textarea with no signal that the save failed (drain race
+        // or transient network error).
+        if (err instanceof QueueEntryNotFoundError) {
+          toast.error("Message already sent — agent picked it up before your edit landed.");
+        } else {
+          toast.error("Failed to save edit. Please try again.");
+        }
+        setEditing(false);
+        onEditComplete?.();
       } finally {
         setSaving(false);
       }

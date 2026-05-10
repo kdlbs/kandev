@@ -18,7 +18,7 @@ func setupService(t *testing.T) *Service {
 	log, err := logger.NewLogger(logger.LoggingConfig{
 		Level:      "error",
 		Format:     "console",
-		OutputPath: "stdout",
+		OutputPath: "stderr",
 	})
 	require.NoError(t, err)
 	return NewServiceMemory(log)

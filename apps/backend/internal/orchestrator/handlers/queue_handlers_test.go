@@ -37,7 +37,7 @@ func setupQueueHandlers(t *testing.T) (*QueueHandlers, *messagequeue.Service) {
 	log, err := logger.NewLogger(logger.LoggingConfig{
 		Level:      "error",
 		Format:     "console",
-		OutputPath: "stdout",
+		OutputPath: "stderr",
 	})
 	require.NoError(t, err)
 	svc := messagequeue.NewServiceMemory(log)

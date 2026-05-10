@@ -13,8 +13,6 @@ import (
 )
 
 const (
-	// queueErrorCodeFull is surfaced when an enqueue would exceed the per-session cap.
-	queueErrorCodeFull = "queue_full"
 	// queueErrorCodeEntryNotFound is surfaced when an edit/remove targets an entry
 	// that has already been drained (atomic-take won the race).
 	queueErrorCodeEntryNotFound = "entry_not_found"
@@ -89,11 +87,18 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content or attachments are required", nil)
 	}
 
-	queued, err := h.queueService.QueueMessage(ctx, req.SessionID, req.TaskID, req.Content, req.Model, req.UserID, req.PlanMode, req.Attachments)
+	// Default empty user_id to QueuedByUser so the entry has a non-empty owner;
+	// the UpdateMessage handler relies on this so its filter against agent
+	// entries (queued_by="agent") is always meaningful.
+	queuedBy := req.UserID
+	if queuedBy == "" {
+		queuedBy = messagequeue.QueuedByUser
+	}
+	queued, err := h.queueService.QueueMessage(ctx, req.SessionID, req.TaskID, req.Content, req.Model, queuedBy, req.PlanMode, req.Attachments)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
 			status := h.queueService.GetStatus(ctx, req.SessionID)
-			return ws.NewError(msg.ID, msg.Action, queueErrorCodeFull, "Queue is full",
+			return ws.NewError(msg.ID, msg.Action, messagequeue.QueueFullErrorCode, "Queue is full",
 				map[string]interface{}{
 					fieldQueueSize: status.Count,
 					fieldMax:       status.Max,
@@ -171,7 +176,15 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content or attachments are required", nil)
 	}
 
-	if err := h.queueService.UpdateMessage(ctx, req.EntryID, req.Content, req.Attachments, req.UserID); err != nil {
+	// Default user_id to messagequeue.QueuedByUser so the UpdateContent guard
+	// always runs against a non-empty owner. Agent-authored (inter-task)
+	// entries have queued_by="agent" and the guard rejects them — the frontend
+	// canEdit gate is mirrored in the WS API rather than relying on UI alone.
+	queuedBy := req.UserID
+	if queuedBy == "" {
+		queuedBy = messagequeue.QueuedByUser
+	}
+	if err := h.queueService.UpdateMessage(ctx, req.EntryID, req.Content, req.Attachments, queuedBy); err != nil {
 		if errors.Is(err, messagequeue.ErrEntryNotFound) {
 			return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained or not owned by caller", nil)
 		}
@@ -236,11 +249,15 @@ func (h *QueueHandlers) wsAppendToQueue(ctx context.Context, msg *ws.Message) (*
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content is required", nil)
 	}
 
-	queued, appended, err := h.queueService.AppendContent(ctx, req.SessionID, req.TaskID, req.Content, req.Model, req.UserID, req.PlanMode, nil)
+	queuedBy := req.UserID
+	if queuedBy == "" {
+		queuedBy = messagequeue.QueuedByUser
+	}
+	queued, appended, err := h.queueService.AppendContent(ctx, req.SessionID, req.TaskID, req.Content, req.Model, queuedBy, req.PlanMode, nil)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
 			status := h.queueService.GetStatus(ctx, req.SessionID)
-			return ws.NewError(msg.ID, msg.Action, queueErrorCodeFull, "Queue is full",
+			return ws.NewError(msg.ID, msg.Action, messagequeue.QueueFullErrorCode, "Queue is full",
 				map[string]interface{}{
 					fieldQueueSize: status.Count,
 					fieldMax:       status.Max,

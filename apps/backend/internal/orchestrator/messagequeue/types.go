@@ -9,6 +9,21 @@ import (
 // when the env var KANDEV_QUEUE_MAX_PER_SESSION is unset or invalid.
 const DefaultMaxPerSession = 10
 
+// Sender identities written to QueuedMessage.QueuedBy. The handlers default
+// any empty user-supplied identity to QueuedByUser so the UpdateMessage
+// ownership guard always runs against a non-empty value, and inter-task
+// dispatch hardcodes QueuedByAgent so user clients can never overwrite an
+// agent-authored entry.
+const (
+	QueuedByUser  = "user"
+	QueuedByAgent = "agent"
+)
+
+// QueueFullErrorCode is the well-known WS / MCP error code surfaced when an
+// insert would exceed the per-session cap. Shared between the user-side WS
+// handlers and the inter-task MCP handler so the wire contract stays in sync.
+const QueueFullErrorCode = "queue_full"
+
 // Errors returned by the queue service / repository.
 var (
 	// ErrQueueFull is returned when an insert would exceed the per-session cap.

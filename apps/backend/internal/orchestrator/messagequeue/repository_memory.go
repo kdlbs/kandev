@@ -30,7 +30,11 @@ func NewMemoryRepository() Repository {
 func (r *memoryRepository) Insert(_ context.Context, msg *QueuedMessage, maxPerSession int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.insertLocked(msg, maxPerSession)
+}
 
+// insertLocked performs the actual insert. Caller must already hold r.mu.
+func (r *memoryRepository) insertLocked(msg *QueuedMessage, maxPerSession int) error {
 	list := r.entries[msg.SessionID]
 	if maxPerSession > 0 && len(list) >= maxPerSession {
 		return ErrQueueFull
@@ -48,19 +52,23 @@ func (r *memoryRepository) Insert(_ context.Context, msg *QueuedMessage, maxPerS
 	return nil
 }
 
-func (r *memoryRepository) AppendOrInsertTail(ctx context.Context, sessionID, taskID, content, model, queuedBy string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, bool, error) {
+// AppendOrInsertTail must hold the lock for the entire check-then-insert path
+// so two concurrent same-sender callers can't both observe "no matching tail"
+// and race to insert separate entries (which would violate the
+// append-or-insert semantics the SQLite repo achieves with a transaction).
+func (r *memoryRepository) AppendOrInsertTail(_ context.Context, sessionID, taskID, content, model, queuedBy string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, bool, error) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	list := r.entries[sessionID]
 	if len(list) > 0 {
 		tail := list[len(list)-1]
 		if tail.QueuedBy == queuedBy {
 			tail.Content = tail.Content + "\n\n---\n\n" + content
 			out := *tail
-			r.mu.Unlock()
 			return &out, true, nil
 		}
 	}
-	r.mu.Unlock()
 
 	msg := &QueuedMessage{
 		SessionID:   sessionID,
@@ -72,7 +80,7 @@ func (r *memoryRepository) AppendOrInsertTail(ctx context.Context, sessionID, ta
 		Metadata:    metadata,
 		QueuedBy:    queuedBy,
 	}
-	if err := r.Insert(ctx, msg, maxPerSession); err != nil {
+	if err := r.insertLocked(msg, maxPerSession); err != nil {
 		return nil, false, err
 	}
 	return msg, false, nil
@@ -164,16 +172,25 @@ func (r *memoryRepository) TransferSession(_ context.Context, oldSessionID, newS
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if list, ok := r.entries[oldSessionID]; ok {
+		// Mirror the SQLite repo: shift transferred positions past the
+		// destination's max so source entries always sort *after* anything
+		// already queued there. Without this, a transfer into a non-empty
+		// destination would mix orderings and break FIFO drain.
+		var destMax int64
+		for _, m := range r.entries[newSessionID] {
+			if m.Position > destMax {
+				destMax = m.Position
+			}
+		}
 		for _, m := range list {
 			m.SessionID = newSessionID
+			m.Position += destMax
 		}
-		// Merge into destination preserving original order.
 		r.entries[newSessionID] = append(r.entries[newSessionID], list...)
-		dest := r.entries[newSessionID]
 		// Recompute nextPosition for the destination so future inserts keep
 		// monotonic ordering.
 		var maxPos int64
-		for _, m := range dest {
+		for _, m := range r.entries[newSessionID] {
 			if m.Position > maxPos {
 				maxPos = m.Position
 			}

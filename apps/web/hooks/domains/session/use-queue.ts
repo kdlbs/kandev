@@ -41,7 +41,6 @@ type QueueActionsArgs = {
   removeQueueEntry: ReturnType<typeof useQueueState>["removeQueueEntry"];
   setQueueLoading: ReturnType<typeof useQueueState>["setQueueLoading"];
   metaMax: number | undefined;
-  entriesLength: number;
 };
 
 /** Build an action set bound to the supplied session + slice setters. */
@@ -51,7 +50,6 @@ function useQueueActions({
   removeQueueEntry,
   setQueueLoading,
   metaMax,
-  entriesLength,
 }: QueueActionsArgs) {
   const refetch = useCallback(
     async (sid: string) => {
@@ -98,11 +96,15 @@ function useQueueActions({
     setQueueLoading(sessionId, true);
     try {
       await clearQueue(sessionId);
-      setQueueEntries(sessionId, [], { count: 0, max: metaMax ?? entriesLength });
+      // Reset to a neutral capacity snapshot; the next status_changed event
+      // will replace it with the authoritative server value. Using the
+      // pre-clear entry count as a fallback for `max` was wrong (it would
+      // pretend the cap equals "however many were queued").
+      setQueueEntries(sessionId, [], { count: 0, max: metaMax ?? 0 });
     } finally {
       setQueueLoading(sessionId, false);
     }
-  }, [sessionId, setQueueEntries, setQueueLoading, metaMax, entriesLength]);
+  }, [sessionId, setQueueEntries, setQueueLoading, metaMax]);
 
   const editEntry = useCallback(
     async (entryId: string, content: string, attachments?: MessageAttachment[]) => {
@@ -160,7 +162,6 @@ export function useQueue(sessionId: string | null) {
     removeQueueEntry: state.removeQueueEntry,
     setQueueLoading: state.setQueueLoading,
     metaMax: meta?.max,
-    entriesLength: entries.length,
   });
 
   useEffect(() => {

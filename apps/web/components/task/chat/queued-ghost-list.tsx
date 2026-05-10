@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { IconLayoutList, IconTrash } from "@tabler/icons-react";
+import { toast } from "sonner";
 import { Button } from "@kandev/ui";
 import { cn } from "@/lib/utils";
 import { useQueue } from "@/hooks/domains/session/use-queue";
@@ -40,6 +41,7 @@ export function QueuedGhostList({ sessionId, isArchived }: QueuedGhostListProps)
         await removeEntry(entryId);
       } catch (err) {
         console.error("Failed to remove queued entry:", err);
+        toast.error("Failed to remove queued message.");
       }
     },
     [removeEntry],
@@ -76,7 +78,10 @@ type QueueCountPillProps = {
 
 function QueueCountPill({ count, max, isFull, onClear }: QueueCountPillProps) {
   const handleClear = useCallback(() => {
-    void onClear();
+    onClear().catch((err) => {
+      console.error("Failed to clear queued messages:", err);
+      toast.error("Failed to clear queued messages.");
+    });
   }, [onClear]);
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground">
