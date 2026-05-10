@@ -20,16 +20,12 @@ export function useWorkflowSnapshot(workflowId: string | null) {
         store.getState().hydrate(snapshotToState(snapshot));
       })
       .catch((error) => {
-        // Suppress noise from a superseded fetch — only the active effect
-        // should surface the failure. Retry happens on WS reconnect.
+        // Suppress superseded-fetch noise; retry happens on WS reconnect.
         if (cancelled) return;
         console.warn("[useWorkflowSnapshot] failed to load snapshot:", error);
       })
       .finally(() => {
-        // Only clear what this effect set. Skipping when cancelled avoids
-        // collapsing the new effect's skeleton; skipping when !setLoading
-        // avoids stomping on a flag a concurrent caller (e.g. workspace
-        // switch) raised independently.
+        // Only clear the flag this effect raised; skip when cancelled or when a concurrent caller owns it.
         if (cancelled || !setLoading) return;
         store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
       });

@@ -156,9 +156,7 @@ export function useSheetData(workspaceId: string | null, workflowId: string | nu
     selectedTaskId,
     steps,
     workspaces,
-    // Sheet should show a skeleton while the workflow snapshot hydrates the
-    // kanban slice — without this it briefly (or permanently, on fetch error)
-    // shows "No tasks yet." even when tasks exist server-side.
+    // Skeleton while snapshot hydrates kanban — otherwise shows "No tasks yet." even when tasks exist.
     tasksLoading,
     tasksWithRepositories,
     dialogSteps,
