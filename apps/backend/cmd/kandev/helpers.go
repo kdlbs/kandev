@@ -36,6 +36,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/health"
 	"github.com/kandev/kandev/internal/improvekandev"
 	"github.com/kandev/kandev/internal/jira"
@@ -613,6 +614,11 @@ func registerSecondaryRoutes(
 		github.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.GitHub, p.log)
 		github.RegisterMockRoutes(p.router, p.services.GitHub, p.log)
 		p.log.Debug("Registered GitHub handlers (HTTP + WebSocket)")
+	}
+
+	if p.services.GitLab != nil {
+		gitlab.RegisterRoutes(p.router, p.services.GitLab, p.log)
+		p.log.Debug("Registered GitLab handlers (HTTP)")
 	}
 
 	if p.services.Jira != nil {
