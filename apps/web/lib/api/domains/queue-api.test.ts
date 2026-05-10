@@ -11,6 +11,7 @@ describe("rethrowQueueError", () => {
       }),
     ).toThrow(QueueFullError);
 
+    expect.assertions(5);
     try {
       rethrowQueueError({
         code: "queue_full",
@@ -18,6 +19,7 @@ describe("rethrowQueueError", () => {
       });
     } catch (err) {
       const qf = err as QueueFullError;
+      expect(qf).toBeInstanceOf(QueueFullError);
       expect(qf.queueSize).toBe(9);
       expect(qf.max).toBe(10);
       expect(qf.code).toBe("queue_full");
@@ -25,10 +27,12 @@ describe("rethrowQueueError", () => {
   });
 
   it("defaults missing queue_size / max to 0 when details are sparse", () => {
+    expect.assertions(3);
     try {
       rethrowQueueError({ code: "queue_full" });
     } catch (err) {
       const qf = err as QueueFullError;
+      expect(qf).toBeInstanceOf(QueueFullError);
       expect(qf.queueSize).toBe(0);
       expect(qf.max).toBe(0);
     }

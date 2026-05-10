@@ -568,7 +568,13 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 	// and gets delivered to the wrong agent the next time that previous
 	// session is reused (e.g. on the on_turn_complete bounce back).
 	if s.messageQueue != nil {
-		s.messageQueue.TransferSession(ctx, currentSession.ID, existing.ID)
+		if err := s.messageQueue.TransferSession(ctx, currentSession.ID, existing.ID); err != nil {
+			// Fail closed: the workflow switch reuses an existing session, but
+			// orphaning a queued hand-off prompt on the previous session would
+			// silently misroute the next prompt. Stop here and surface the
+			// error so the caller can decide whether to retry.
+			return nil, fmt.Errorf("transfer queued state to reused session: %w", err)
+		}
 	}
 
 	s.completeAndStopSession(ctx, taskID, currentSession)
@@ -650,7 +656,17 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 	// pending move from the old session to the new one — the queue is keyed by
 	// session ID, and without this the prompt would never reach the new agent.
 	if s.messageQueue != nil {
-		s.messageQueue.TransferSession(ctx, currentSession.ID, newSession.ID)
+		if err := s.messageQueue.TransferSession(ctx, currentSession.ID, newSession.ID); err != nil {
+			s.logger.Error("transfer queue to new session failed; queued prompts on the previous session will not be drained",
+				zap.String("from_session_id", currentSession.ID),
+				zap.String("to_session_id", newSession.ID),
+				zap.Error(err))
+			// Continue anyway: the new session is already created and committed
+			// upstream. Failing closed here would leave the workflow in a
+			// half-switched state (new session exists but caller thinks it
+			// failed). The error is surfaced via logs and the orphaned entries
+			// stay safely in the old session for manual recovery.
+		}
 	}
 
 	// Promote the new session to primary so it's loaded when navigating back to this task.

@@ -33,7 +33,14 @@ type WSError = {
 };
 
 function asWSError(err: unknown): WSError | undefined {
-  if (typeof err === "object" && err !== null && "code" in err) {
+  // Some WS error payloads omit `code` and only carry `message`/`details`;
+  // narrowing on `code` alone would drop those and stringify the whole object
+  // as the eventual Error message ("[object Object]"). Real Error instances
+  // are skipped so they pass through unchanged in `rethrowQueueError`.
+  if (typeof err !== "object" || err === null || err instanceof Error) {
+    return undefined;
+  }
+  if ("code" in err || "message" in err || "details" in err) {
     return err as WSError;
   }
   return undefined;

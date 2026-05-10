@@ -176,19 +176,22 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 }
 
 // TransferSession moves any queued messages and pending move from one session
-// to another. Used by workflow session switches (when a target step has a
-// different agent profile and switchSessionForStep creates a new session).
-func (s *Service) TransferSession(ctx context.Context, oldSessionID, newSessionID string) {
+// to another. Used by workflow session switches. Returns an error so the
+// caller can fail closed instead of silently leaving entries orphaned on the
+// old session — a transfer that no-ops without a signal would let the workflow
+// step move forward while the queue sticks behind.
+func (s *Service) TransferSession(ctx context.Context, oldSessionID, newSessionID string) error {
 	if err := s.repo.TransferSession(ctx, oldSessionID, newSessionID); err != nil {
 		s.logger.Error("transfer session failed",
 			zap.String("from_session_id", oldSessionID),
 			zap.String("to_session_id", newSessionID),
 			zap.Error(err))
-		return
+		return err
 	}
 	s.logger.Info("transferred queue between sessions",
 		zap.String("from_session_id", oldSessionID),
 		zap.String("to_session_id", newSessionID))
+	return nil
 }
 
 // SetPendingMove records a pending move for a session (replaces any existing one).
