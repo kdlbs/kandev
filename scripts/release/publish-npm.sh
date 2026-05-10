@@ -33,6 +33,17 @@ yellow(){ printf '\033[33m%s\033[0m' "$*"; }
 log()    { echo "  >> $*"; }
 log_ok() { echo "  $(green "ok") $*"; }
 
+package_already_published() {
+  local pkg="$1"
+  npm view "${pkg}@${VERSION}" version --silent >/dev/null 2>&1
+}
+
+record_already_published() {
+  local pkg="$1"
+  echo "  $(yellow "skip") $pkg@$VERSION already published (treated as idempotent success)" >&2
+  ALREADY_PUBLISHED+=("$pkg")
+}
+
 die() {
   echo "$(red "Error:") $*" >&2
   exit 1
@@ -97,6 +108,11 @@ for pkg in "${RUNTIME_PACKAGES[@]}"; do
     continue
   fi
 
+  if package_already_published "$pkg"; then
+    record_already_published "$pkg"
+    continue
+  fi
+
   log "Publishing $pkg@$VERSION..."
   # Capture full npm output so we can show the real error on failure rather
   # than just a generic warning. Distinguish "already published" (idempotent
@@ -104,8 +120,7 @@ for pkg in "${RUNTIME_PACKAGES[@]}"; do
   if output="$(cd "$pkg_dir" && npm publish --access public --provenance 2>&1)"; then
     log_ok "$pkg@$VERSION published"
   elif echo "$output" | grep -qE "EPUBLISHCONFLICT|cannot publish over the previously published versions|You cannot publish over"; then
-    echo "  $(yellow "skip") $pkg@$VERSION already published (treated as idempotent success)" >&2
-    ALREADY_PUBLISHED+=("$pkg")
+    record_already_published "$pkg"
   else
     echo "  $(red "FAIL") Failed to publish $pkg@$VERSION:" >&2
     echo "$output" | sed 's/^/      /' >&2
@@ -157,11 +172,12 @@ echo "$(bold "Publishing kandev@$VERSION...")"
 # Same idempotency handling as the runtime packages: capture output, treat
 # "already published" as success so partial-failure re-runs converge.
 # `prepublishOnly` (in package.json) runs `pnpm build` automatically.
-if main_output="$(cd "$ROOT_DIR/apps/cli" && npm publish --access public --provenance 2>&1)"; then
+if package_already_published "kandev"; then
+  record_already_published "kandev"
+elif main_output="$(cd "$ROOT_DIR/apps/cli" && npm publish --access public --provenance 2>&1)"; then
   log_ok "kandev@$VERSION published"
 elif echo "$main_output" | grep -qE "EPUBLISHCONFLICT|cannot publish over the previously published versions|You cannot publish over"; then
-  echo "  $(yellow "skip") kandev@$VERSION already published (treated as idempotent success)" >&2
-  ALREADY_PUBLISHED+=("kandev")
+  record_already_published "kandev"
 else
   echo "  $(red "FAIL") Failed to publish kandev@$VERSION:" >&2
   echo "$main_output" | sed 's/^/      /' >&2
@@ -174,7 +190,7 @@ fi
 echo
 echo "$(green "$(bold "All npm packages published successfully!")")"
 if [[ "${#ALREADY_PUBLISHED[@]}" -gt 0 ]]; then
-  echo "  $(yellow "note") The following runtime packages were already published at $VERSION:"
+  echo "  $(yellow "note") The following npm packages were already published at $VERSION:"
   for pkg in "${ALREADY_PUBLISHED[@]}"; do
     echo "    - $pkg"
   done

@@ -153,3 +153,19 @@ describe("release package manager version", () => {
     expect(workflowSetupCount).toBeGreaterThan(0);
   });
 });
+
+describe("release npm publishing", () => {
+  it("skips packages that are already published on npm", () => {
+    const script = readRepoFile("scripts/release/publish-npm.sh");
+
+    expect(script).toContain('npm view "${pkg}@${VERSION}" version --silent');
+    expect(script).toMatch(
+      /if package_already_published "\$pkg"; then\s+record_already_published "\$pkg"\s+continue\s+fi/,
+    );
+    expect(script).toMatch(
+      /if package_already_published "kandev"; then\s+record_already_published "kandev"/,
+    );
+    expect(script).toContain("EPUBLISHCONFLICT");
+    expect(script).toContain("treated as idempotent success");
+  });
+});
