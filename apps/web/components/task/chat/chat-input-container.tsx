@@ -57,6 +57,11 @@ type ChatInputContainerProps = {
   onPlanModeChange: (enabled: boolean) => void;
   isAgentBusy: boolean;
   isStarting: boolean;
+  /** True only while a containerized executor is bootstrapping (Docker
+   * prepare, Sprites sandbox spin-up). Distinct from the brief STARTING
+   * state every session — including local quick-chat — passes through;
+   * see useSessionState. */
+  isPreparingEnvironment?: boolean;
   isMoving?: boolean;
   isSending: boolean;
   onCancel: () => void;
@@ -292,6 +297,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       sessionId,
       isSending,
       isStarting,
+      isPreparingEnvironment: props.isPreparingEnvironment ?? false,
       isMoving,
       isFailed: p.isFailed,
       needsRecovery: props.needsRecovery ?? false,

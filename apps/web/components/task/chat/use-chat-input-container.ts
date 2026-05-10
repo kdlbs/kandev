@@ -16,6 +16,11 @@ type UseChatInputContainerParams = {
   sessionId: string | null;
   isSending: boolean;
   isStarting: boolean;
+  /** True only during a real Docker/Sprites prepare phase. Different from
+   * `isStarting`, which fires for every session that's transitioning
+   * through STARTING (including local quick-chat). Submit gating uses
+   * this narrower flag so quick-chat sessions aren't blocked. */
+  isPreparingEnvironment: boolean;
   isMoving: boolean;
   isFailed: boolean;
   needsRecovery: boolean;
@@ -82,6 +87,7 @@ function getInputPlaceholder(
 
 function computeDerivedState(params: {
   isStarting: boolean;
+  isPreparingEnvironment: boolean;
   isMoving: boolean;
   isSending: boolean;
   isFailed: boolean;
@@ -102,8 +108,15 @@ function computeDerivedState(params: {
     params.isFailed ||
     params.needsRecovery ||
     params.executorUnavailable;
-  const submitDisabled = params.isStarting || isDisabled;
-  const submitDisabledReason = params.isStarting ? "The agent is still being set up." : undefined;
+  // Only an active container/sandbox prepare blocks the submit and surfaces
+  // the "agent still being set up" tooltip. The brief STARTING transition
+  // every session passes through (including local quick-chat) intentionally
+  // does NOT block — the e2e suite presses Cmd+Enter as soon as the editor
+  // becomes editable, and a STARTING-only block silently dropped messages.
+  const submitDisabled = params.isPreparingEnvironment || isDisabled;
+  const submitDisabledReason = params.isPreparingEnvironment
+    ? "The agent is still being set up."
+    : undefined;
   const hasClarification = !!(params.pendingClarification && params.onClarificationResolved);
   const hasPendingComments = !!(
     params.pendingCommentsByFile && Object.keys(params.pendingCommentsByFile).length > 0
@@ -129,26 +142,11 @@ function computeDerivedState(params: {
 }
 
 export function useChatInputContainer(params: UseChatInputContainerParams) {
-  const {
-    ref,
-    sessionId,
-    isSending,
-    isStarting,
-    isMoving,
-    isFailed,
-    needsRecovery,
-    executorUnavailable,
-    isAgentBusy,
-    hasAgentCommands,
-    placeholder,
-    contextItems,
-    pendingClarification,
-    onClarificationResolved,
-    pendingCommentsByFile,
-    showRequestChangesTooltip,
-    onRequestChangesTooltipDismiss,
-    onSubmit,
-  } = params;
+  const { ref, sessionId, isSending, isStarting, isPreparingEnvironment, isMoving } = params;
+  const { isFailed, needsRecovery, executorUnavailable, isAgentBusy, hasAgentCommands } = params;
+  const { placeholder, contextItems, pendingClarification, onClarificationResolved } = params;
+  const { pendingCommentsByFile, showRequestChangesTooltip } = params;
+  const { onRequestChangesTooltipDismiss, onSubmit } = params;
 
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
@@ -202,6 +200,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
 
   const derived = computeDerivedState({
     isStarting,
+    isPreparingEnvironment,
     isMoving,
     isSending,
     isFailed,

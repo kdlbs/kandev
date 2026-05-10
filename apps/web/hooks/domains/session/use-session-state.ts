@@ -48,5 +48,11 @@ export function useSessionState(sessionId: string | null) {
     ...flags,
     isStarting: flags.isStarting || isPreparingEnvironment,
     isWorking: flags.isWorking || isPreparingEnvironment,
+    // Exposed separately so consumers that gate on "is the executor still
+    // bootstrapping" (e.g. the chat input "agent is still being set up"
+    // tooltip) can distinguish a brief STARTING transition — which every
+    // session passes through, including local quick-chat — from an active
+    // Docker / Sprites prepare-environment phase.
+    isPreparingEnvironment,
   };
 }

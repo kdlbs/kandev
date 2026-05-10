@@ -413,6 +413,7 @@ export function ChatInputArea({
         onPlanModeChange={handlePlanModeChange}
         isAgentBusy={isAgentBusy}
         isStarting={panelState.isStarting}
+        isPreparingEnvironment={panelState.isPreparingEnvironment}
         isMoving={isMoving}
         isSending={isSending}
         onCancel={handleCancelTurn}

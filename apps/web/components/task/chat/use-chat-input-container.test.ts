@@ -11,6 +11,7 @@ function renderInputState(overrides: Partial<Parameters<typeof useChatInputConta
       sessionId: "session-1",
       isSending: false,
       isStarting: false,
+      isPreparingEnvironment: false,
       isMoving: false,
       isFailed: false,
       needsRecovery: false,
