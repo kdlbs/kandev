@@ -15,9 +15,9 @@ import { calculateHash } from "@/lib/utils/file-diff";
 import { useToast } from "@/components/toast-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import type { FileContentResponse } from "@/lib/types/backend";
-import type { FileInfo } from "@/lib/state/store";
-import { useSaveDeleteActions, updatePanelAfterSave } from "./use-file-save-delete";
+import { useSaveDeleteActions } from "./use-file-save-delete";
 import { PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
+import { useOpenFileWorkspaceSync } from "./file-editors-sync";
 
 // Module-level guard: ensures restoration only runs once across all hook instances
 let _restoredSessionId: string | null = null;
@@ -84,83 +84,6 @@ function buildPersistedTabs(
   });
 }
 
-function buildGitFileSignature(file: FileInfo | undefined): string {
-  if (!file) return "__clean__";
-  return [
-    file.status ?? "",
-    file.staged ? "1" : "0",
-    String(file.additions ?? 0),
-    String(file.deletions ?? 0),
-    file.old_path ?? "",
-    file.diff ?? "",
-  ].join("|");
-}
-
-type SyncOpenFileArgs = {
-  client: ReturnType<typeof getWebSocketClient>;
-  sessionId: string;
-  path: string;
-  updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
-};
-
-async function syncOpenFileFromWorkspace({
-  client,
-  sessionId,
-  path,
-  updateFileState,
-}: SyncOpenFileArgs): Promise<void> {
-  if (!client) return;
-  try {
-    const response = await requestFileContent(client, sessionId, path);
-    const latest = getOpenFiles().get(path);
-    if (!latest) return;
-    const remoteHash = await calculateHash(response.content);
-
-    if (latest.isDirty) {
-      if (response.content === latest.content) {
-        updateFileState(path, {
-          originalContent: response.content,
-          originalHash: remoteHash,
-          isDirty: false,
-          hasRemoteUpdate: false,
-          remoteContent: undefined,
-          remoteOriginalHash: undefined,
-        });
-        updatePanelAfterSave(path, latest.name);
-        return;
-      }
-      if (latest.hasRemoteUpdate && latest.remoteContent === response.content) return;
-      updateFileState(path, {
-        hasRemoteUpdate: true,
-        remoteContent: response.content,
-        remoteOriginalHash: remoteHash,
-      });
-      return;
-    }
-
-    if (
-      latest.content === response.content &&
-      latest.originalHash === remoteHash &&
-      !latest.hasRemoteUpdate
-    ) {
-      return;
-    }
-
-    updateFileState(path, {
-      content: response.content,
-      originalContent: response.content,
-      originalHash: remoteHash,
-      isDirty: false,
-      isBinary: response.is_binary,
-      hasRemoteUpdate: false,
-      remoteContent: undefined,
-      remoteOriginalHash: undefined,
-    });
-  } catch {
-    // Ignore sync failures; user can continue editing.
-  }
-}
-
 type RestoreTabsParams = {
   activeSessionId: string;
   savedTabs: Array<{ path: string; name: string; markdownPreview?: boolean; pinned?: boolean }>;
@@ -172,6 +95,25 @@ type RestoreTabsParams = {
     opts?: { quiet?: boolean; pin?: boolean },
   ) => void;
 };
+
+/**
+ * Skip persisted tabs the dockview snapshot already restored (preview slot or
+ * existing pinned panel). Re-adding with `pin: true` here would create a
+ * duplicate `file:<path>` alongside the existing `preview:file-editor` —
+ * see the round-trip task switch where a promoted preview was persisted as
+ * pinned in localStorage and then re-opened on top of the restored preview.
+ */
+function isAlreadyRestored(
+  dockApi: ReturnType<typeof useDockviewStore.getState>["api"],
+  path: string,
+): boolean {
+  if (!dockApi) return false;
+  if (dockApi.getPanel(`file:${path}`)) return true;
+  const previewParams = dockApi.getPanel(PREVIEW_FILE_EDITOR_ID)?.params as
+    | Record<string, unknown>
+    | undefined;
+  return previewParams?.previewItemId === path;
+}
 
 async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Promise<void> {
   const { activeSessionId, savedTabs, savedActiveTab, setFileState, addFileEditorPanel } = params;
@@ -191,7 +133,9 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
   // Create all panels immediately so tabs are visible right away.
   // Content is fetched afterwards; if it fails, `useFileLoader` in
   // FileEditorPanel retries when the executor becomes available.
+  const dockApi = useDockviewStore.getState().api;
   for (const savedTab of savedTabs) {
+    if (isAlreadyRestored(dockApi, savedTab.path)) continue;
     addFileEditorPanel(savedTab.path, savedTab.name, {
       quiet: true,
       pin: savedTab.pinned,
@@ -215,11 +159,8 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
       /* useFileLoader will retry when executor is ready */
     }
   }
-  const dockApi = useDockviewStore.getState().api;
-  if (dockApi) {
-    const targetPanel = dockApi.getPanel(savedActiveTab);
-    if (targetPanel) targetPanel.api.setActive();
-  }
+  const targetPanel = dockApi?.getPanel(savedActiveTab);
+  if (targetPanel) targetPanel.api.setActive();
   _restorationInProgress = false;
 }
 
@@ -309,53 +250,6 @@ function useFileEditorEffects({
     });
     return () => disposable.dispose();
   }, [api, removeFileState]);
-}
-
-type OpenFileWorkspaceSyncParams = {
-  gitStatus: ReturnType<typeof useSessionGitStatus>;
-  openFiles: ReturnType<typeof useDockviewStore.getState>["openFiles"];
-  updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
-  activeSessionIdRef: React.MutableRefObject<string | null>;
-  gitFileSignaturesRef: React.MutableRefObject<Map<string, string>>;
-};
-
-function useOpenFileWorkspaceSync({
-  gitStatus,
-  openFiles,
-  updateFileState,
-  activeSessionIdRef,
-  gitFileSignaturesRef,
-}: OpenFileWorkspaceSyncParams) {
-  useEffect(() => {
-    const sigMap = gitFileSignaturesRef.current;
-    for (const path of Array.from(sigMap.keys())) {
-      if (!openFiles.has(path)) sigMap.delete(path);
-    }
-  }, [openFiles, gitFileSignaturesRef]);
-
-  useEffect(() => {
-    const client = getWebSocketClient();
-    const sessionId = activeSessionIdRef.current;
-    if (!client || !sessionId) return;
-
-    const gitFiles = gitStatus?.files ?? {};
-    const sigMap = gitFileSignaturesRef.current;
-    for (const [path, file] of openFiles.entries()) {
-      // For symlinks, also check the resolved target path in git status
-      const gitFileInfo = (gitFiles[path] ??
-        (file.resolvedPath ? gitFiles[file.resolvedPath] : undefined)) as FileInfo | undefined;
-      const nextSignature = buildGitFileSignature(gitFileInfo);
-      const prevSignature = sigMap.get(path);
-      if (prevSignature === undefined) {
-        sigMap.set(path, nextSignature);
-        continue;
-      }
-      if (prevSignature === nextSignature) continue;
-
-      sigMap.set(path, nextSignature);
-      void syncOpenFileFromWorkspace({ client, sessionId, path, updateFileState });
-    }
-  }, [gitStatus, openFiles, updateFileState, activeSessionIdRef, gitFileSignaturesRef]);
 }
 
 type FileEditorActionsParams = {

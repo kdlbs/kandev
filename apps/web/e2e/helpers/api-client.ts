@@ -571,6 +571,21 @@ export class ApiClient {
     await this.request("DELETE", `/api/v1/e2e/reset/${workspaceId}${params}`);
   }
 
+  /**
+   * Creates a hidden (system-only) workflow. Mirrors the path that
+   * improve-kandev's bootstrap takes when ensuring its workflow exists,
+   * without depending on the gh CLI or repo cloning.
+   */
+  async e2eCreateHiddenWorkflow(
+    workspaceId: string,
+    name: string,
+  ): Promise<{ id: string; workspace_id: string; name: string; hidden: boolean }> {
+    return this.request("POST", "/api/v1/e2e/hidden-workflow", {
+      workspace_id: workspaceId,
+      name,
+    });
+  }
+
   // --- GitHub Mock Control ---
 
   async mockGitHubReset(): Promise<void> {

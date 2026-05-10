@@ -223,7 +223,7 @@ export function WorkloadSection({ task_stats }: WorkloadSectionProps) {
       <Card className="rounded-sm">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground">Longest Tasks</CardTitle>
-          <p className="text-xs text-muted-foreground">Ranked by elapsed span</p>
+          <p className="text-xs text-muted-foreground">Ranked by active duration</p>
         </CardHeader>
         <CardContent>
           <TaskDurationList
@@ -240,7 +240,7 @@ export function WorkloadSection({ task_stats }: WorkloadSectionProps) {
           <CardTitle className="text-sm font-medium text-muted-foreground">
             Quickest Tasks
           </CardTitle>
-          <p className="text-xs text-muted-foreground">Ranked by elapsed span</p>
+          <p className="text-xs text-muted-foreground">Ranked by active duration</p>
         </CardHeader>
         <CardContent>
           <TaskDurationList
@@ -435,12 +435,13 @@ export function RepoLeaders({ repositoryStats }: { repositoryStats: RepositorySt
 }
 
 function TaskDurationList({ tasks, sortDirection, emptyLabel }: TaskDurationListProps) {
-  const filtered = [...tasks].filter((t) => t.active_duration_ms > 0 || t.elapsed_span_ms > 0);
-  const sorted =
+  const filtered = [...tasks].filter((t) => t.active_duration_ms > 0);
+  filtered.sort((a, b) =>
     sortDirection === "desc"
-      ? filtered.sort((a, b) => b.elapsed_span_ms - a.elapsed_span_ms)
-      : filtered.sort((a, b) => a.elapsed_span_ms - b.elapsed_span_ms);
-  const top3 = sorted.slice(0, 3);
+      ? b.active_duration_ms - a.active_duration_ms
+      : a.active_duration_ms - b.active_duration_ms,
+  );
+  const top3 = filtered.slice(0, 3);
 
   return (
     <div className="space-y-3">

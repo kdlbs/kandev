@@ -25,6 +25,9 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"diff-expansion-setup":    scenarioDiffExpansionSetup,
 	"diff-update-setup":       scenarioDiffUpdateSetup,
 	"diff-update-modify":      scenarioDiffUpdateModify,
+	"diff-update-streaming":   scenarioDiffUpdateStreaming,
+	"multi-file-setup":        scenarioMultiFileSetup,
+	"multi-file-modify":       scenarioMultiFileModify,
 	"untracked-file-setup":    scenarioUntrackedFileSetup,
 	"untracked-file-modify":   scenarioUntrackedFileModify,
 	"clarification":           scenarioClarification,
@@ -385,6 +388,114 @@ func scenarioDiffUpdateModify(e *emitter) {
 
 	fixedDelay(100)
 	e.text("diff-update-modify complete: diff_update_test.txt now has SECOND_MODIFICATION")
+}
+
+// scenarioDiffUpdateStreaming modifies the file mid-turn, emitting text both
+// before and after the write so the agent's turn stays active for several
+// seconds. Used to assert that open file editor / diff panels auto-update
+// while the agent is still streaming.
+func scenarioDiffUpdateStreaming(e *emitter) {
+	fixedDelay(50)
+	e.text("diff-update-streaming: starting work")
+
+	fixedDelay(1000)
+
+	filePath := "diff_update_test.txt"
+	modifiedContent := "line 1: SECOND_MODIFICATION\nline 2: unchanged\nline 3: ALSO_CHANGED\n"
+	if err := os.WriteFile(filePath, []byte(modifiedContent), 0o644); err != nil {
+		e.text("diff-update-streaming: write failed: " + err.Error())
+		return
+	}
+
+	fixedDelay(500)
+	e.text("diff-update-streaming: file written, continuing")
+
+	// Long tail keeps the turn active long enough for polling+sync to fire.
+	fixedDelay(6000)
+	e.text("diff-update-streaming complete")
+}
+
+// scenarioMultiFileSetup commits three tracked files, then modifies all three
+// so each shows up in git status with FIRST_MODIFICATION. Used to test the
+// case where the user has multiple file editors / diff panels open at once.
+func scenarioMultiFileSetup(e *emitter) {
+	fixedDelay(50)
+
+	wd, err := os.Getwd()
+	if err != nil {
+		e.text("multi-file-setup: getwd failed: " + err.Error())
+		return
+	}
+
+	runGitCmd := makeGitRunner(wd)
+	files := []string{"multi_a.txt", "multi_b.txt", "multi_c.txt"}
+
+	// Cleanup any leftovers from a prior run.
+	for _, f := range files {
+		_ = runGitCmd("rm", "--force", f)
+	}
+	_ = runGitCmd("commit", "-m", "cleanup multi-file fixtures")
+
+	// Commit pristine versions.
+	for _, f := range files {
+		original := fmt.Sprintf("%s line 1: original\n%s line 2: unchanged\n%s line 3: original\n", f, f, f)
+		if err := os.WriteFile(f, []byte(original), 0o644); err != nil {
+			e.text("multi-file-setup: write failed: " + err.Error())
+			return
+		}
+		if err := runGitCmd("add", f); err != nil {
+			e.text("multi-file-setup: git add failed for " + f)
+			return
+		}
+	}
+	if err := runGitCmd("commit", "-m", "add multi-file fixtures"); err != nil {
+		e.text("multi-file-setup: git commit failed")
+		return
+	}
+
+	// Modify all three so each appears in git status with FIRST_MODIFICATION.
+	for _, f := range files {
+		modified := fmt.Sprintf("%s line 1: FIRST_MODIFICATION\n%s line 2: unchanged\n%s line 3: original\n", f, f, f)
+		if err := os.WriteFile(f, []byte(modified), 0o644); err != nil {
+			e.text("multi-file-setup: write modified failed: " + err.Error())
+			return
+		}
+	}
+
+	fixedDelay(100)
+	e.text("multi-file-setup complete: 3 files have FIRST_MODIFICATION")
+}
+
+// scenarioMultiFileModify modifies all three multi-file fixtures within a
+// single turn, with a long trailing delay so the panels must auto-update
+// while the agent is still streaming. Reproduces the user's reported case
+// where multiple open editor / diff panels go stale on a real edit.
+func scenarioMultiFileModify(e *emitter) {
+	fixedDelay(50)
+	e.text("multi-file-modify: starting work")
+
+	fixedDelay(800)
+
+	files := []string{"multi_a.txt", "multi_b.txt", "multi_c.txt"}
+	for i, f := range files {
+		modified := fmt.Sprintf(
+			"%s line 1: SECOND_MODIFICATION\n%s line 2: unchanged\n%s line 3: ALSO_CHANGED_%d\n",
+			f, f, f, i,
+		)
+		if err := os.WriteFile(f, []byte(modified), 0o644); err != nil {
+			e.text("multi-file-modify: write failed: " + err.Error())
+			return
+		}
+		// Stagger the writes slightly to mimic a real agent doing one tool
+		// call per file rather than all writes in a single instant.
+		fixedDelay(250)
+	}
+
+	e.text("multi-file-modify: writes done, continuing")
+
+	// Long tail keeps the turn active so we can assert mid-turn updates.
+	fixedDelay(5000)
+	e.text("multi-file-modify complete")
 }
 
 // scenarioUntrackedFileSetup creates a new untracked file.

@@ -8,9 +8,10 @@ import { TaskChatPanel } from "../task-chat-panel";
 import { TaskPlanPanel } from "../task-plan-panel";
 import { TaskChangesPanel } from "../task-changes-panel";
 import { TaskFilesPanel } from "../task-files-panel";
-import { ShellTerminal } from "../shell-terminal";
 import { PassthroughTerminal } from "../passthrough-terminal";
 import { MobileTerminalKeybar, KEYBAR_HEIGHT_PX } from "./mobile-terminal-keybar";
+import { MobileTerminalPane } from "./mobile-terminal-pane";
+import { MobileSessionsPicker } from "./mobile-sessions-section";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import { useSessionLayoutState } from "@/hooks/use-session-layout-state";
 import { useVisualViewportOffset } from "@/hooks/use-visual-viewport-offset";
@@ -39,28 +40,36 @@ function MobileChatPanelContent({
   activeTaskId,
   isPassthroughMode,
   effectiveSessionId,
-  sessionId,
   onOpenFile,
 }: {
   activeTaskId: string | null;
   isPassthroughMode: boolean;
   effectiveSessionId: string | null;
-  sessionId?: string | null;
   onOpenFile: (path: string) => void;
 }) {
-  if (activeTaskId && isPassthroughMode) {
+  if (!activeTaskId) {
     return (
-      <div className="flex-1 min-h-0">
-        <PassthroughTerminal key={effectiveSessionId} sessionId={sessionId} mode="agent" />
+      <div className="flex-1 flex items-center justify-center text-muted-foreground">
+        No task selected
       </div>
     );
   }
-  if (activeTaskId) {
-    return <TaskChatPanel sessionId={sessionId} onOpenFile={onOpenFile} />;
-  }
   return (
-    <div className="flex-1 flex items-center justify-center text-muted-foreground">
-      No task selected
+    <div className="flex-1 min-h-0 flex flex-col">
+      <div className="flex items-center px-1 py-2">
+        <MobileSessionsPicker taskId={activeTaskId} fullWidth />
+      </div>
+      {isPassthroughMode ? (
+        <div className="flex-1 min-h-0">
+          <PassthroughTerminal
+            key={effectiveSessionId}
+            sessionId={effectiveSessionId}
+            mode="agent"
+          />
+        </div>
+      ) : (
+        <TaskChatPanel sessionId={effectiveSessionId} onOpenFile={onOpenFile} />
+      )}
     </div>
   );
 }
@@ -70,7 +79,6 @@ type MobilePanelAreaProps = {
   activeTaskId: string | null;
   isPassthroughMode: boolean;
   effectiveSessionId: string | null;
-  sessionId?: string | null;
   selectedDiff: { path: string; content?: string } | null;
   handleOpenFileFromChat: (path: string) => void;
   handleClearSelectedDiff: () => void;
@@ -85,7 +93,6 @@ function MobilePanelArea({
   activeTaskId,
   isPassthroughMode,
   effectiveSessionId,
-  sessionId,
   selectedDiff,
   handleOpenFileFromChat,
   handleClearSelectedDiff,
@@ -112,12 +119,11 @@ function MobilePanelArea({
       }}
     >
       {currentMobilePanel === "chat" && (
-        <div className="flex-1 min-h-0 flex flex-col p-2">
+        <div className="flex-1 min-h-0 flex flex-col px-2 pb-2">
           <MobileChatPanelContent
             activeTaskId={activeTaskId}
             isPassthroughMode={isPassthroughMode}
             effectiveSessionId={effectiveSessionId}
-            sessionId={sessionId}
             onOpenFile={handleOpenFileFromChat}
           />
         </div>
@@ -147,14 +153,61 @@ function MobilePanelArea({
       {currentMobilePanel === "terminal" && (
         <div
           data-testid="terminal-panel"
-          className="flex-1 min-h-0 flex flex-col p-2"
+          className="flex-1 min-h-0 flex flex-col px-2"
           style={{ paddingBottom: terminalPaddingBottom }}
         >
-          <SessionPanelContent className="p-0 flex-1 min-h-0">
-            <ShellTerminal key={effectiveSessionId} sessionId={effectiveSessionId ?? undefined} />
+          <SessionPanelContent className="p-0 flex-1 min-h-0 flex flex-col">
+            <MobileTerminalPane key={effectiveSessionId} sessionId={effectiveSessionId} />
           </SessionPanelContent>
         </div>
       )}
+    </div>
+  );
+}
+
+type MobileTopBarStickyProps = {
+  activeTaskId: string | null;
+  workspaceId: string | null;
+  taskTitle?: string;
+  effectiveSessionId: string | null;
+  baseBranch?: string;
+  worktreeBranch?: string | null;
+  onMenuClick: () => void;
+  showApproveButton: boolean;
+  onApprove: () => void;
+  isRemoteExecutor?: boolean;
+  remoteExecutorType?: string | null;
+  remoteExecutorName?: string | null;
+  remoteState?: string | null;
+  remoteCreatedAt?: string | null;
+  remoteCheckedAt?: string | null;
+  remoteStatusError?: string | null;
+};
+
+function MobileTopBarSticky(props: MobileTopBarStickyProps) {
+  return (
+    <div
+      className="fixed top-0 left-0 right-0 z-40 bg-background border-b border-border"
+      style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
+    >
+      <SessionMobileTopBar
+        taskId={props.activeTaskId}
+        workspaceId={props.workspaceId}
+        taskTitle={props.taskTitle}
+        sessionId={props.effectiveSessionId}
+        baseBranch={props.baseBranch}
+        worktreeBranch={props.worktreeBranch}
+        onMenuClick={props.onMenuClick}
+        showApproveButton={props.showApproveButton}
+        onApprove={props.onApprove}
+        isRemoteExecutor={props.isRemoteExecutor}
+        remoteExecutorType={props.remoteExecutorType}
+        remoteExecutorName={props.remoteExecutorName}
+        remoteState={props.remoteState}
+        remoteCreatedAt={props.remoteCreatedAt}
+        remoteCheckedAt={props.remoteCheckedAt}
+        remoteStatusError={props.remoteStatusError}
+      />
     </div>
   );
 }
@@ -235,29 +288,24 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
 
   return (
     <div className="h-dvh relative bg-background">
-      {/* Fixed Top Bar */}
-      <div
-        className="fixed top-0 left-0 right-0 z-40 bg-background border-b border-border"
-        style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
-      >
-        <SessionMobileTopBar
-          taskId={activeTaskId}
-          taskTitle={taskTitle}
-          sessionId={effectiveSessionId}
-          baseBranch={baseBranch}
-          worktreeBranch={worktreeBranch}
-          onMenuClick={handleMenuClick}
-          showApproveButton={showApproveButton}
-          onApprove={handleApprove}
-          isRemoteExecutor={isRemoteExecutor}
-          remoteExecutorType={remoteExecutorType}
-          remoteExecutorName={remoteExecutorName}
-          remoteState={remoteState}
-          remoteCreatedAt={remoteCreatedAt}
-          remoteCheckedAt={remoteCheckedAt}
-          remoteStatusError={remoteStatusError}
-        />
-      </div>
+      <MobileTopBarSticky
+        activeTaskId={activeTaskId}
+        workspaceId={workspaceId}
+        taskTitle={taskTitle}
+        effectiveSessionId={effectiveSessionId}
+        baseBranch={baseBranch}
+        worktreeBranch={worktreeBranch}
+        onMenuClick={handleMenuClick}
+        showApproveButton={showApproveButton}
+        onApprove={handleApprove}
+        isRemoteExecutor={isRemoteExecutor}
+        remoteExecutorType={remoteExecutorType}
+        remoteExecutorName={remoteExecutorName}
+        remoteState={remoteState}
+        remoteCreatedAt={remoteCreatedAt}
+        remoteCheckedAt={remoteCheckedAt}
+        remoteStatusError={remoteStatusError}
+      />
 
       {/* Content Area - fixed height panels that manage their own scrolling */}
       <MobilePanelArea
@@ -265,7 +313,6 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         activeTaskId={activeTaskId}
         isPassthroughMode={isPassthroughMode}
         effectiveSessionId={effectiveSessionId}
-        sessionId={sessionId}
         selectedDiff={selectedDiff}
         handleOpenFileFromChat={handleOpenFileFromChat}
         handleClearSelectedDiff={handleClearSelectedDiff}

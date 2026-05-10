@@ -22,6 +22,7 @@ import type {
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import { snapshotToState, taskToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import type { AppState } from "@/lib/state/store";
 
 function buildWorktreeState(allSessions: TaskSession[]) {
   const sessionsWithWorktrees = allSessions.filter((s) => s.worktree_id);
@@ -104,6 +105,7 @@ function buildResourceState(p: BuildSessionPageStateParams) {
       })),
       activeId: task.workspace_id,
     },
+    // Don't write activeId — null means "All Workflows"; task context lives in kanban.workflowId.
     workflows: {
       items: workflows.map((w) => ({
         id: w.id,
@@ -111,8 +113,7 @@ function buildResourceState(p: BuildSessionPageStateParams) {
         name: w.name,
         hidden: w.hidden,
       })),
-      activeId: task.workflow_id,
-    },
+    } as Partial<AppState>["workflows"],
     repositories: {
       itemsByWorkspaceId: { [task.workspace_id]: repositories },
       loadingByWorkspaceId: { [task.workspace_id]: false },

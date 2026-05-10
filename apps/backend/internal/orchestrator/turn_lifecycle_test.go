@@ -49,6 +49,18 @@ func (a *repoTurnService) GetActiveTurn(ctx context.Context, sessionID string) (
 	return turn, err
 }
 
+func (a *repoTurnService) AbandonOpenTurns(ctx context.Context, sessionID string) error {
+	for {
+		turn, err := a.GetActiveTurn(ctx, sessionID)
+		if err != nil || turn == nil {
+			return err
+		}
+		if err := a.repo.AbandonTurn(ctx, turn.ID); err != nil {
+			return err
+		}
+	}
+}
+
 func openTurnCount(t *testing.T, repo *sqliterepo.Repository, sessionID string) int {
 	t.Helper()
 	turns, err := repo.ListTurnsBySession(context.Background(), sessionID)
@@ -228,5 +240,63 @@ func TestCompleteTurnIsIdempotent(t *testing.T) {
 	}
 	if len(turns) != 1 {
 		t.Fatalf("expected exactly 1 turn (no phantom), got %d", len(turns))
+	}
+}
+
+// TestAbandonOpenTurnsZeroesDuration covers the resume-orphan path: turns
+// left open by a previous crash must close with completed_at = started_at so
+// the UI's running timer doesn't count from a stale start, and analytics
+// doesn't accumulate hours of dead time.
+func TestAbandonOpenTurnsZeroesDuration(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+
+	stale, err := svc.turnService.StartTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("seed turn: %v", err)
+	}
+
+	if err := svc.turnService.AbandonOpenTurns(ctx, "session1"); err != nil {
+		t.Fatalf("AbandonOpenTurns: %v", err)
+	}
+
+	if open := openTurnCount(t, repo, "session1"); open != 0 {
+		t.Fatalf("expected 0 open turns after abandon, got %d", open)
+	}
+
+	got, err := repo.GetTurn(ctx, stale.ID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if got.CompletedAt == nil {
+		t.Fatal("expected completed_at to be set after abandon")
+	}
+	if !got.CompletedAt.Equal(got.StartedAt) {
+		t.Fatalf("expected completed_at == started_at (zero duration), got started=%v completed=%v",
+			got.StartedAt, *got.CompletedAt)
+	}
+}
+
+// TestAbandonOpenTurnsHandlesMultipleZombies verifies the loop closes every
+// open turn for the session, mirroring the behavior of completeTurnForSession.
+func TestAbandonOpenTurnsHandlesMultipleZombies(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+
+	for i := 0; i < 4; i++ {
+		if _, err := svc.turnService.StartTurn(ctx, "session1"); err != nil {
+			t.Fatalf("seed turn %d: %v", i, err)
+		}
+	}
+	if open := openTurnCount(t, repo, "session1"); open != 4 {
+		t.Fatalf("expected 4 open turns before abandon, got %d", open)
+	}
+
+	if err := svc.turnService.AbandonOpenTurns(ctx, "session1"); err != nil {
+		t.Fatalf("AbandonOpenTurns: %v", err)
+	}
+
+	if open := openTurnCount(t, repo, "session1"); open != 0 {
+		t.Fatalf("expected 0 open turns after abandon, got %d", open)
 	}
 }

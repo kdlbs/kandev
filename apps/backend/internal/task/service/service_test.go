@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -217,6 +218,33 @@ func TestService_CreateTask_AcceptsMultipleDistinctRepositories(t *testing.T) {
 	}
 	if len(task.Repositories) != 2 {
 		t.Errorf("expected 2 task repositories, got %d", len(task.Repositories))
+	}
+}
+
+func TestService_CreateTask_RejectsRepositoryFromOtherWorkspace(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-a", Name: "A"})
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-b", Name: "B"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-a", WorkspaceID: "ws-a", Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-b", WorkspaceID: "ws-b", Name: "B repo"})
+
+	req := &CreateTaskRequest{
+		WorkspaceID:    "ws-a",
+		WorkflowID:     "wf-a",
+		WorkflowStepID: "step-1",
+		Title:          "cross-ws",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: "repo-b", BaseBranch: "main"},
+		},
+	}
+	_, err := svc.CreateTask(ctx, req)
+	if err == nil {
+		t.Fatal("expected cross-workspace repository error, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not belong to workspace") {
+		t.Errorf("expected workspace-ownership error, got: %v", err)
 	}
 }
 

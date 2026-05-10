@@ -1,12 +1,13 @@
 import { useCallback } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { useAppStoreApi } from "@/components/state-provider";
 import { useQueue } from "./domains/session/use-queue";
 import type { MessageAttachment } from "@/components/task/chat/chat-input-container";
 import type { ActiveDocument } from "@/lib/state/slices/ui/types";
 import type { PlanComment } from "@/lib/state/slices/comments";
 import { toBlockquote } from "@/lib/state/slices/comments/format";
 import type { ContextFile } from "@/lib/state/context-files-store";
-import type { CustomPrompt } from "@/lib/types/http";
+import type { CustomPrompt, Message } from "@/lib/types/http";
 
 function buildDocumentContext(
   activeDocument: ActiveDocument | null,
@@ -92,9 +93,9 @@ type SendMessagePayload = {
   contextFilesMeta?: Array<{ path: string; name: string }>;
 };
 
-async function sendMessageRequest(payload: SendMessagePayload): Promise<void> {
+async function sendMessageRequest(payload: SendMessagePayload): Promise<Message | undefined> {
   const client = getWebSocketClient();
-  if (!client) return;
+  if (!client) return undefined;
 
   const {
     taskId,
@@ -108,7 +109,7 @@ async function sendMessageRequest(payload: SendMessagePayload): Promise<void> {
   } = payload;
   const hasAttachments = attachments && attachments.length > 0;
 
-  await client.request(
+  return client.request<Message | undefined>(
     "message.add",
     {
       task_id: taskId,
@@ -137,6 +138,7 @@ export function useMessageHandler({
   prompts = [],
 }: UseMessageHandlerParams) {
   const { queue } = useQueue(resolvedSessionId);
+  const storeApi = useAppStoreApi();
 
   const buildFinalMessage = useCallback(
     (message: string, inlineMentions?: ContextFile[]) => {
@@ -182,7 +184,10 @@ export function useMessageHandler({
         return;
       }
 
-      await sendMessageRequest({
+      // Add the returned message to the store directly so the chat updates
+      // even if the session.message.added broadcast is missed (subscription
+      // gap, dropped frame, etc.). addMessage is idempotent on id.
+      const created = await sendMessageRequest({
         taskId,
         resolvedSessionId,
         finalMessage,
@@ -192,6 +197,9 @@ export function useMessageHandler({
         attachments,
         contextFilesMeta,
       });
+      if (created && created.id && created.session_id) {
+        storeApi.getState().addMessage(created);
+      }
     },
     [
       resolvedSessionId,
@@ -202,6 +210,7 @@ export function useMessageHandler({
       isAgentBusy,
       queue,
       buildFinalMessage,
+      storeApi,
     ],
   );
 

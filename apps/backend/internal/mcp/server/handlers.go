@@ -146,15 +146,13 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"start_agent":         startAgent,
 		}
 
-		// Add repository info (only valid for top-level tasks)
+		// Add repository info. For subtasks an explicit repo overrides the
+		// parent's; if omitted the backend inherits from the parent.
 		repositoryID := req.GetString("repository_id", "")
 		localPath := req.GetString("local_path", "")
 		repositoryURL := req.GetString("repository_url", "")
 		baseBranch := req.GetString("base_branch", "")
 		hasRepo := repositoryID != "" || localPath != "" || repositoryURL != ""
-		if hasRepo && parentID != "" {
-			return mcp.NewToolResultError("repository_id, local_path, and repository_url are only valid for top-level tasks; subtasks inherit their repository from the parent"), nil
-		}
 		if hasRepo {
 			repo := map[string]string{}
 			if repositoryID != "" {

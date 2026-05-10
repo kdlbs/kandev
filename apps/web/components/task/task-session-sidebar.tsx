@@ -567,7 +567,6 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     () => applyView(displayTasks, effectiveView, { pinnedTaskIds, orderedTaskIds }),
     [displayTasks, effectiveView, pinnedTaskIds, orderedTaskIds],
   );
-
   return (
     <PanelRoot data-testid="task-sidebar">
       <SidebarFilterBar />

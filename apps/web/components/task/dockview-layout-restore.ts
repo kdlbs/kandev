@@ -2,7 +2,9 @@ import type { DockviewReadyEvent, SerializedDockview } from "dockview-react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { applyLayoutFixups } from "@/lib/state/dockview-layout-builders";
 import { isLayoutShapeHealthy } from "@/lib/state/dockview-layout-health";
-import { getEnvLayout, getEnvMaximizeState } from "@/lib/local-storage";
+import { measureDockviewContainer } from "@/lib/state/dockview-measure";
+import type { LayoutState } from "@/lib/state/layout-manager";
+import { getEnvLayout, getEnvMaximizeState, removeEnvMaximizeState } from "@/lib/local-storage";
 
 const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
 
@@ -65,17 +67,29 @@ export function sanitizeLayout(
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
+type SavedMax = ReturnType<typeof getEnvMaximizeState>;
+
+/**
+ * Apply a saved maximize blob onto the live dockview api and mirror the full
+ * maximize state into the store. Single source of truth for both restore
+ * call sites — keeping `preMaximizeLayout` and `maximizedGroupId` in lockstep.
+ */
+function applySavedMaximize(api: DockviewReadyEvent["api"], savedMax: NonNullable<SavedMax>): void {
+  api.fromJSON(savedMax.maximizedDockviewJson as SerializedDockview);
+  const { width, height } = measureDockviewContainer(api);
+  api.layout(width, height);
+  const ids = applyLayoutFixups(api);
+  useDockviewStore.setState({
+    ...ids,
+    preMaximizeLayout: savedMax.preMaximizeLayout as unknown as LayoutState,
+    maximizedGroupId: ids.centerGroupId,
+  });
+}
+
 function applyFixupsWithMaximize(api: DockviewReadyEvent["api"], envId: string | null): void {
   const savedMax = envId ? getEnvMaximizeState(envId) : null;
   if (savedMax) {
-    api.fromJSON(savedMax.maximizedDockviewJson as SerializedDockview);
-    api.layout(api.width, api.height);
-    const ids = applyLayoutFixups(api);
-    type LM = import("@/lib/state/layout-manager").LayoutState;
-    useDockviewStore.setState({
-      ...ids,
-      preMaximizeLayout: savedMax.preMaximizeLayout as unknown as LM,
-    });
+    applySavedMaximize(api, savedMax);
   } else {
     const ids = applyLayoutFixups(api);
     useDockviewStore.setState(ids);
@@ -86,16 +100,13 @@ function tryRestoreMaximizeOnly(api: DockviewReadyEvent["api"], envId: string): 
   const savedMax = getEnvMaximizeState(envId);
   if (!savedMax) return false;
   try {
-    api.fromJSON(savedMax.maximizedDockviewJson as SerializedDockview);
-    api.layout(api.width, api.height);
-    const ids = applyLayoutFixups(api);
-    type LM = import("@/lib/state/layout-manager").LayoutState;
-    useDockviewStore.setState({
-      ...ids,
-      preMaximizeLayout: savedMax.preMaximizeLayout as unknown as LM,
-    });
+    applySavedMaximize(api, savedMax);
     return true;
   } catch {
+    // Drop the bad blob so subsequent page loads for this env don't keep
+    // re-attempting the same failing fromJSON. Mirrors the self-heal in
+    // dockview-store's restoreMaximizeFromStorage.
+    removeEnvMaximizeState(envId);
     return false;
   }
 }

@@ -1,4 +1,8 @@
+import { execSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
+import { makeGitEnv } from "../../helpers/git-helper";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
@@ -271,6 +275,433 @@ test.describe("MCP subtask creation", () => {
     await kanban.goto();
     const subtaskCard = kanban.taskCardByTitle(/Subtask Button Parent \/ Subtask \d+/);
     await expect(subtaskCard).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("user creates subtask in a different repository via the repo chooser", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(90_000);
+
+    // 1. Add a second workspace repository so the New Subtask dialog's
+    //    repo chip can be switched to a different repo.
+    const otherRepoName = "UI Subtask Override Target";
+    const otherRepoDir = path.join(backend.tmpDir, "repos", "ui-subtask-override");
+    fs.mkdirSync(otherRepoDir, { recursive: true });
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync("git init -b main", { cwd: otherRepoDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: otherRepoDir, env: gitEnv });
+    const otherRepo = await apiClient.createRepository(seedData.workspaceId, otherRepoDir, "main", {
+      name: otherRepoName,
+    });
+
+    // 2. Create a parent task on repo A with a simple agent script so we can
+    //    open its session and reach the subtask split-button.
+    const parentTask = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "UI Override Parent",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${parentTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+    // 3. Open the New Subtask dialog from the split-button.
+    await testPage.getByTestId("new-task-chevron").click();
+    await testPage.getByTestId("new-subtask-button").click();
+
+    const titleInput = testPage.getByTestId("subtask-title-input");
+    await expect(titleInput).toBeVisible({ timeout: 5_000 });
+
+    // 4. Open the repo chip and switch the parent's repo for repo B. The
+    //    subtask dialog now uses the same chip-row UX as the create-task
+    //    dialog (RepoChipsRow), so we drive it via repo-chip-trigger and
+    //    the combobox option role.
+    const repoChip = testPage.getByTestId("repo-chip-trigger").first();
+    await expect(repoChip).toBeVisible({ timeout: 5_000 });
+    await repoChip.click();
+    // The combobox option label includes a truncated-path badge alongside the
+    // repo name, so match by name substring rather than exact.
+    await testPage.getByRole("option", { name: new RegExp(otherRepoName) }).click();
+    // After selection, the chip should now show repo B's name.
+    await expect(repoChip).toContainText(otherRepoName);
+
+    // 5. Submit. Use a unique title so the listTasks poll can find this row.
+    const subtaskTitle = `UI Override Subtask ${Date.now()}`;
+    await titleInput.fill(subtaskTitle);
+    await testPage.getByTestId("subtask-prompt-input").fill("/e2e:simple-message");
+    await testPage.getByRole("button", { name: "Create Subtask" }).click();
+    await expect(titleInput).not.toBeVisible({ timeout: 10_000 });
+
+    // 6. Find the subtask via API and verify it landed on the override repo,
+    //    not the parent's repo.
+    type TaskEntry = { id: string; title: string };
+    let subtask: TaskEntry | undefined;
+    await expect
+      .poll(
+        async () => {
+          const allTasks = await apiClient.listTasks(seedData.workspaceId);
+          subtask = allTasks.tasks.find((t: TaskEntry) => t.title === subtaskTitle);
+          return subtask;
+        },
+        { timeout: 30_000, message: "Subtask should be created from the dialog" },
+      )
+      .toBeDefined();
+
+    const subtaskRaw = await apiClient.rawRequest("GET", `/api/v1/tasks/${subtask!.id}`);
+    const subtaskData = (await subtaskRaw.json()) as TaskWithRepos;
+    const repoIds = subtaskData.repositories?.map((r) => r.repository_id) ?? [];
+    expect(
+      repoIds,
+      `subtask should target the override repository (${otherRepo.id}), not the parent's (${seedData.repositoryId}); got: ${JSON.stringify(repoIds)}`,
+    ).toContain(otherRepo.id);
+    expect(repoIds).not.toContain(seedData.repositoryId);
+  });
+
+  test("MCP-created subtask can override parent task repository", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(90_000);
+
+    // 1. Create a second workspace repository so the subtask has somewhere
+    //    different to point at than the parent's repository.
+    const otherRepoDir = path.join(backend.tmpDir, "repos", "e2e-cross-repo");
+    fs.mkdirSync(otherRepoDir, { recursive: true });
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync("git init -b main", { cwd: otherRepoDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: otherRepoDir, env: gitEnv });
+    const otherRepo = await apiClient.createRepository(seedData.workspaceId, otherRepoDir, "main", {
+      name: "E2E Cross-Repo Target",
+    });
+
+    const subtaskTitle = "Cross-Repo Subtask E2E";
+    const script = [
+      'e2e:thinking("Creating cross-repo subtask...")',
+      "e2e:delay(100)",
+      `e2e:mcp:kandev:create_task_kandev({"parent_id":"self","title":"${subtaskTitle}","description":"E2E subtask: verify repository override","repository_id":"${otherRepo.id}"})`,
+      "e2e:delay(100)",
+      'e2e:message("Done.")',
+    ].join("\n");
+
+    // 2. Parent task lives in repoA (seedData.repositoryId). The agent script
+    //    asks the MCP tool to create a subtask in repoB instead.
+    const parentTask = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Cross-Repo Parent Task",
+      seedData.agentProfileId,
+      {
+        description: script,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    expect(parentTask.id).toBeTruthy();
+
+    // 3. Navigate so the parent execution stays alive while the agent runs.
+    await testPage.goto(`/t/${parentTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    // 4. Poll for the subtask the agent is about to create.
+    type TaskEntry = { id: string; title: string };
+    let subtask: TaskEntry | undefined;
+    await expect
+      .poll(
+        async () => {
+          const allTasks = await apiClient.listTasks(seedData.workspaceId);
+          subtask = allTasks.tasks.find((t: TaskEntry) => t.title === subtaskTitle);
+          return subtask;
+        },
+        { timeout: 60_000, message: "Subtask should be created by the agent's MCP call" },
+      )
+      .toBeDefined();
+
+    // 5. Verify the subtask landed on the OTHER repository, not the parent's.
+    const subtaskRaw = await apiClient.rawRequest("GET", `/api/v1/tasks/${subtask!.id}`);
+    const subtaskData = (await subtaskRaw.json()) as TaskWithRepos;
+    const repoIds = subtaskData.repositories?.map((r) => r.repository_id) ?? [];
+    expect(
+      repoIds,
+      `subtask should target the override repository (${otherRepo.id}), not the parent's (${seedData.repositoryId}); got: ${JSON.stringify(repoIds)}`,
+    ).toContain(otherRepo.id);
+    expect(repoIds).not.toContain(seedData.repositoryId);
+  });
+});
+
+/**
+ * Verifies the New Subtask dialog mirrors the create-task dialog's repo/URL
+ * features: GitHub URL paste, on-disk discovered repos, and multi-repo rows.
+ * These tests exercise the shared `RepoChipsRow` + handlers/effects through
+ * the subtask form-state shim in `new-subtask-form-state.ts`.
+ */
+test.describe("Subtask dialog feature parity", () => {
+  test("user creates subtask via pasted GitHub URL", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(90_000);
+
+    // 1. Pre-seed a GitHub-backed repo + branches so the GitHub URL flow
+    //    resolves to a known repository_id without performing a real clone.
+    const repoDir = path.join(backend.tmpDir, "repos", "subtask-gh-url-target");
+    fs.mkdirSync(repoDir, { recursive: true });
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync("git init -b main", { cwd: repoDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
+    const ghRepo = await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
+      name: "subtask-owner/subtask-repo",
+      provider: "github",
+      provider_owner: "subtask-owner",
+      provider_name: "subtask-repo",
+    });
+    await apiClient.mockGitHubAddBranches("subtask-owner", "subtask-repo", [{ name: "main" }]);
+
+    // 2. Parent task on the seed repo.
+    const parentTask = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Subtask GH URL Parent",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${parentTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+    // 3. Open the subtask dialog and toggle to GitHub URL mode.
+    await testPage.getByTestId("new-task-chevron").click();
+    await testPage.getByTestId("new-subtask-button").click();
+    const titleInput = testPage.getByTestId("subtask-title-input");
+    await expect(titleInput).toBeVisible({ timeout: 5_000 });
+
+    await testPage.getByTestId("toggle-github-url").click();
+    const urlInput = testPage.getByTestId("github-url-input");
+    await expect(urlInput).toBeVisible({ timeout: 5_000 });
+    await urlInput.fill("https://github.com/subtask-owner/subtask-repo");
+
+    // Wait for branch list to resolve so the payload carries `base_branch`.
+    // The branch pill is disabled while branches are loading and re-enables
+    // once the resolver returns options, so this is a positive signal that
+    // the URL was parsed and branches were fetched.
+    await expect(testPage.getByTestId("branch-chip-trigger")).toBeEnabled({ timeout: 10_000 });
+
+    // 4. Submit.
+    const subtaskTitle = `Subtask GH URL ${Date.now()}`;
+    await titleInput.fill(subtaskTitle);
+    await testPage.getByTestId("subtask-prompt-input").fill("/e2e:simple-message");
+    await testPage.getByRole("button", { name: "Create Subtask" }).click();
+    await expect(titleInput).not.toBeVisible({ timeout: 10_000 });
+
+    // 5. Verify the subtask resolved to the GitHub-backed repo, not the parent's.
+    type TaskEntry = { id: string; title: string };
+    let subtask: TaskEntry | undefined;
+    await expect
+      .poll(
+        async () => {
+          const allTasks = await apiClient.listTasks(seedData.workspaceId);
+          subtask = allTasks.tasks.find((t: TaskEntry) => t.title === subtaskTitle);
+          return subtask;
+        },
+        { timeout: 30_000, message: "Subtask should be created from a GitHub URL" },
+      )
+      .toBeDefined();
+
+    const subtaskRaw = await apiClient.rawRequest("GET", `/api/v1/tasks/${subtask!.id}`);
+    const subtaskData = (await subtaskRaw.json()) as TaskWithRepos;
+    const repoIds = subtaskData.repositories?.map((r) => r.repository_id) ?? [];
+    expect(
+      repoIds,
+      `subtask should resolve to the GitHub URL's repository (${ghRepo.id}); got: ${JSON.stringify(repoIds)}`,
+    ).toContain(ghRepo.id);
+    expect(repoIds).not.toContain(seedData.repositoryId);
+  });
+
+  test("subtask repo dropdown lists on-disk discovered repositories", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(60_000);
+
+    // 1. Create a git repo on disk (under HOME=tmpDir, where the backend's
+    //    discovery roots default scans) but do NOT register it as a workspace
+    //    repo. The chip dropdown's "on disk" section is fed by the discovery
+    //    endpoint and should pick this up.
+    const discoveredName = "subtask-discovered-only";
+    const discoveredDir = path.join(backend.tmpDir, "repos", discoveredName);
+    fs.mkdirSync(discoveredDir, { recursive: true });
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync("git init -b main", { cwd: discoveredDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: discoveredDir, env: gitEnv });
+
+    // 2. Parent task so we can open the subtask dialog from its session.
+    const parentTask = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Subtask Discovered Parent",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${parentTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+    // 3. Sanity-check via the API that backend discovery actually finds the
+    //    on-disk directory. If this fails, the issue is the backend scan, not
+    //    the dialog wiring — tells us where to look when debugging.
+    const discoverRaw = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/workspaces/${seedData.workspaceId}/repositories/discover`,
+    );
+    const discoverData = (await discoverRaw.json()) as {
+      repositories: Array<{ path: string; name: string }>;
+    };
+    expect(
+      discoverData.repositories.some((r) => r.path === discoveredDir),
+      `backend discovery should include ${discoveredDir}; got: ${JSON.stringify(discoverData.repositories.map((r) => r.path))}`,
+    ).toBe(true);
+
+    // 4. Open the subtask dialog. The discover effect fires on mount via a
+    //    Next.js server action, so we can't await a direct backend response
+    //    here. Use poll-then-open: poll for the chip option to appear,
+    //    reopening the popover each tick because cmdk's listbox snapshots
+    //    options at open time and won't update if discovery resolves while
+    //    the popover is already showing.
+    await testPage.getByTestId("new-task-chevron").click();
+    await testPage.getByTestId("new-subtask-button").click();
+    await expect(testPage.getByTestId("subtask-title-input")).toBeVisible({ timeout: 5_000 });
+
+    const discoveredOption = testPage
+      .getByRole("option", { name: new RegExp(discoveredName, "i") })
+      .first();
+    const repoChip = testPage.getByTestId("repo-chip-trigger").first();
+    await expect
+      .poll(
+        async () => {
+          await repoChip.click();
+          const visible = await discoveredOption.isVisible().catch(() => false);
+          if (!visible) {
+            // Close so the next tick reopens against fresh state.
+            await testPage.keyboard.press("Escape");
+          }
+          return visible;
+        },
+        { timeout: 15_000, intervals: [500, 1000, 1500] },
+      )
+      .toBe(true);
+    await expect(discoveredOption).toContainText("on disk");
+  });
+
+  test("user creates subtask spanning multiple repositories", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(90_000);
+
+    // 1. Add a second workspace repository so the chip row can hold two rows.
+    const otherRepoName = "Subtask MultiRepo Target";
+    const otherRepoDir = path.join(backend.tmpDir, "repos", "subtask-multi-repo");
+    fs.mkdirSync(otherRepoDir, { recursive: true });
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync("git init -b main", { cwd: otherRepoDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: otherRepoDir, env: gitEnv });
+    const otherRepo = await apiClient.createRepository(seedData.workspaceId, otherRepoDir, "main", {
+      name: otherRepoName,
+    });
+
+    // 2. Parent task on repo A so we can open the subtask dialog from there.
+    const parentTask = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Subtask MultiRepo Parent",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${parentTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+    // 3. Open the subtask dialog. The first chip is seeded with the parent's
+    //    repo. Click the "+ add repository" button to append a second chip,
+    //    then point that chip at repo B.
+    await testPage.getByTestId("new-task-chevron").click();
+    await testPage.getByTestId("new-subtask-button").click();
+    const titleInput = testPage.getByTestId("subtask-title-input");
+    await expect(titleInput).toBeVisible({ timeout: 5_000 });
+
+    await testPage.getByTestId("add-repository").click();
+    const chipTriggers = testPage.getByTestId("repo-chip-trigger");
+    await expect(chipTriggers).toHaveCount(2, { timeout: 5_000 });
+    await chipTriggers.nth(1).click();
+    await testPage.getByRole("option", { name: new RegExp(otherRepoName) }).click();
+    await expect(chipTriggers.nth(1)).toContainText(otherRepoName);
+
+    // 4. Submit.
+    const subtaskTitle = `Subtask MultiRepo ${Date.now()}`;
+    await titleInput.fill(subtaskTitle);
+    await testPage.getByTestId("subtask-prompt-input").fill("/e2e:simple-message");
+    await testPage.getByRole("button", { name: "Create Subtask" }).click();
+    await expect(titleInput).not.toBeVisible({ timeout: 10_000 });
+
+    // 5. Verify the subtask carries BOTH repos.
+    type TaskEntry = { id: string; title: string };
+    let subtask: TaskEntry | undefined;
+    await expect
+      .poll(
+        async () => {
+          const allTasks = await apiClient.listTasks(seedData.workspaceId);
+          subtask = allTasks.tasks.find((t: TaskEntry) => t.title === subtaskTitle);
+          return subtask;
+        },
+        { timeout: 30_000, message: "Multi-repo subtask should be created from the dialog" },
+      )
+      .toBeDefined();
+
+    const subtaskRaw = await apiClient.rawRequest("GET", `/api/v1/tasks/${subtask!.id}`);
+    const subtaskData = (await subtaskRaw.json()) as TaskWithRepos;
+    const repoIds = subtaskData.repositories?.map((r) => r.repository_id) ?? [];
+    expect(
+      repoIds,
+      `subtask should target both the parent's repo and the override repo; got: ${JSON.stringify(repoIds)}`,
+    ).toEqual(expect.arrayContaining([seedData.repositoryId, otherRepo.id]));
+    expect(repoIds).toHaveLength(2);
   });
 });
 

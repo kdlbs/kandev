@@ -251,8 +251,9 @@ export function RightHeaderActions(props: IDockviewHeaderActionsProps) {
 
 function SidebarRightActions() {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const workflowId = useAppStore((state) => state.workflows.activeId);
   const kanban = useAppStore((state) => state.kanban);
+  // Use kanban.workflowId (task context) not workflows.activeId so "All Workflows" isn't clobbered when viewing a task.
+  const workflowId = kanban.workflowId;
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeTaskTitle = useAppStore((state) => {
     const id = state.tasks.activeTaskId;
