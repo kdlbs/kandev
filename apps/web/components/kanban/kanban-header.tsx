@@ -109,7 +109,7 @@ function ImproveKandevTopbarButton({
             <IconStethoscope className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Improve KanDev</TooltipContent>
+        <TooltipContent>Improve Kandev</TooltipContent>
       </Tooltip>
       <ImproveKandevDialog
         open={open}

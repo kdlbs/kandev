@@ -293,7 +293,7 @@ function buildStatsSummary(
     ? `${git_stats.total_commits} commits, +${git_stats.total_insertions.toLocaleString()}/-${git_stats.total_deletions.toLocaleString()}`
     : "no git activity";
   return [
-    `*KanDev Stats — ${rangeLabel}*`,
+    `*Kandev Stats — ${rangeLabel}*`,
     `- Tasks: ${global.total_tasks} total (${global.completed_tasks} done, ${global.in_progress_tasks} in progress) · ${completion} completion`,
     `- Completed (${rangeLabel}): ${completedInRange}`,
     `- Time: ${formatDuration(global.total_duration_ms)} total · ${formatDuration(global.avg_duration_ms_per_task)} avg/task`,

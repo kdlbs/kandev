@@ -191,7 +191,7 @@ function McpServersEditor({
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="text-xs rounded-full border border-primary/50 bg-primary/10 px-2 py-1 text-primary">
-              ✓ KanDev MCP
+              ✓ Kandev MCP
             </span>
           </TooltipTrigger>
           <TooltipContent side="bottom" className="max-w-[320px] text-xs">
