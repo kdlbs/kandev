@@ -79,17 +79,40 @@ function findPnpmSetupVersion(
   return undefined;
 }
 
+function matchPnpmSetupUsesLine(line: string): RegExpMatchArray | null {
+  return line.match(/^(\s*)(?:-\s*)?uses:\s*["']?pnpm\/action-setup@v\d+["']?\s*(?:#.*)?$/);
+}
+
+function findStepIndent(lines: string[], usesLineIndex: number, usesIndent: number): number {
+  if (lines[usesLineIndex].trimStart().startsWith("- ")) {
+    return usesIndent;
+  }
+
+  for (let index = usesLineIndex - 1; index >= 0; index -= 1) {
+    const line = lines[index];
+    if (isBlankOrComment(line)) {
+      continue;
+    }
+
+    const lineIndent = indentation(line);
+    if (lineIndent < usesIndent && line.slice(lineIndent).startsWith("- ")) {
+      return lineIndent;
+    }
+  }
+
+  return Math.max(0, usesIndent - 2);
+}
+
 function extractWorkflowPnpmVersions(workflow: string): Array<string | undefined> {
   const lines = workflow.split(/\r?\n/);
   const versions: Array<string | undefined> = [];
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    const setupMatch = line.match(
-      /^(\s*)-\s+uses:\s*["']?pnpm\/action-setup@v\d+["']?\s*(?:#.*)?$/,
-    );
+    const setupMatch = matchPnpmSetupUsesLine(line);
     if (setupMatch !== null) {
-      versions.push(findPnpmSetupVersion(lines, index + 1, setupMatch[1].length));
+      const stepIndent = findStepIndent(lines, index, setupMatch[1].length);
+      versions.push(findPnpmSetupVersion(lines, index + 1, stepIndent));
     }
   }
 
