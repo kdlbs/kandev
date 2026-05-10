@@ -162,7 +162,7 @@ func TestUpdateMessage(t *testing.T) {
 		msg, err := svc.QueueMessage(ctx, "s", "t", "original", "", "user-1", false, nil)
 		require.NoError(t, err)
 
-		require.NoError(t, svc.UpdateMessage(ctx, msg.ID, "edited", nil, "user-1"))
+		require.NoError(t, svc.UpdateMessage(ctx, "s", msg.ID, "edited", nil, "user-1"))
 
 		status := svc.GetStatus(ctx, "s")
 		require.Equal(t, 1, status.Count)
@@ -177,35 +177,64 @@ func TestUpdateMessage(t *testing.T) {
 		msg, err := svc.QueueMessage(ctx, "s", "t", "x", "", "user-1", false, nil)
 		require.NoError(t, err)
 
-		err = svc.UpdateMessage(ctx, msg.ID, "intruder", nil, "user-2")
+		err = svc.UpdateMessage(ctx, "s", msg.ID, "intruder", nil, "user-2")
+		assert.ErrorIs(t, err, ErrEntryNotFound)
+	})
+
+	t.Run("rejects update from foreign session", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		msg, err := svc.QueueMessage(ctx, "s-victim", "t", "x", "", "user-1", false, nil)
+		require.NoError(t, err)
+
+		err = svc.UpdateMessage(ctx, "s-attacker", msg.ID, "hijack", nil, "user-1")
 		assert.ErrorIs(t, err, ErrEntryNotFound)
 	})
 
 	t.Run("returns ErrEntryNotFound for missing id", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
-		err := svc.UpdateMessage(ctx, "missing", "x", nil, "")
+		err := svc.UpdateMessage(ctx, "s", "missing", "x", nil, "")
 		assert.ErrorIs(t, err, ErrEntryNotFound)
 	})
 }
 
 func TestRemoveEntry(t *testing.T) {
-	svc := setupService(t)
-	ctx := context.Background()
+	t.Run("removes the targeted entry", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
 
-	_, _ = svc.QueueMessage(ctx, "s", "t", "a", "", "u", false, nil)
-	b, _ := svc.QueueMessage(ctx, "s", "t", "b", "", "u", false, nil)
-	_, _ = svc.QueueMessage(ctx, "s", "t", "c", "", "u", false, nil)
+		_, _ = svc.QueueMessage(ctx, "s", "t", "a", "", "u", false, nil)
+		b, _ := svc.QueueMessage(ctx, "s", "t", "b", "", "u", false, nil)
+		_, _ = svc.QueueMessage(ctx, "s", "t", "c", "", "u", false, nil)
 
-	require.NoError(t, svc.RemoveEntry(ctx, b.ID))
+		require.NoError(t, svc.RemoveEntry(ctx, "s", b.ID))
 
-	status := svc.GetStatus(ctx, "s")
-	assert.Equal(t, 2, status.Count)
-	assert.Equal(t, "a", status.Entries[0].Content)
-	assert.Equal(t, "c", status.Entries[1].Content)
+		status := svc.GetStatus(ctx, "s")
+		assert.Equal(t, 2, status.Count)
+		assert.Equal(t, "a", status.Entries[0].Content)
+		assert.Equal(t, "c", status.Entries[1].Content)
 
-	err := svc.RemoveEntry(ctx, b.ID)
-	assert.ErrorIs(t, err, ErrEntryNotFound)
+		err := svc.RemoveEntry(ctx, "s", b.ID)
+		assert.ErrorIs(t, err, ErrEntryNotFound)
+	})
+
+	t.Run("rejects deletion from a foreign session", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		victim, _ := svc.QueueMessage(ctx, "s-victim", "t", "victim entry", "", "u", false, nil)
+
+		// Attacker knows the entry id (e.g. leaked via queue_full payload from
+		// a sibling task) and tries to remove it scoped to a different session.
+		err := svc.RemoveEntry(ctx, "s-attacker", victim.ID)
+		assert.ErrorIs(t, err, ErrEntryNotFound)
+
+		// Victim entry must still be present.
+		status := svc.GetStatus(ctx, "s-victim")
+		assert.Equal(t, 1, status.Count)
+	})
 }
 
 func TestCancelAll(t *testing.T) {

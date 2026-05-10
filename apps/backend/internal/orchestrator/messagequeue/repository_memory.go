@@ -121,40 +121,44 @@ func (r *memoryRepository) TakeHead(_ context.Context, sessionID string) (*Queue
 	return &out, nil
 }
 
-func (r *memoryRepository) UpdateContent(_ context.Context, entryID, content string, attachments []MessageAttachment, queuedBy string) error {
+func (r *memoryRepository) UpdateContent(_ context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, list := range r.entries {
-		for _, m := range list {
-			if m.ID != entryID {
-				continue
-			}
-			if queuedBy != "" && m.QueuedBy != queuedBy {
-				return ErrEntryNotFound
-			}
-			m.Content = content
-			m.Attachments = attachments
-			return nil
+	list, ok := r.entries[sessionID]
+	if !ok {
+		return ErrEntryNotFound
+	}
+	for _, m := range list {
+		if m.ID != entryID {
+			continue
 		}
+		if queuedBy != "" && m.QueuedBy != queuedBy {
+			return ErrEntryNotFound
+		}
+		m.Content = content
+		m.Attachments = attachments
+		return nil
 	}
 	return ErrEntryNotFound
 }
 
-func (r *memoryRepository) DeleteByID(_ context.Context, entryID string) error {
+func (r *memoryRepository) DeleteByID(_ context.Context, sessionID, entryID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for sid, list := range r.entries {
-		for i, m := range list {
-			if m.ID != entryID {
-				continue
-			}
-			r.entries[sid] = append(list[:i], list[i+1:]...)
-			if len(r.entries[sid]) == 0 {
-				delete(r.entries, sid)
-				delete(r.nextPosition, sid)
-			}
-			return nil
+	list, ok := r.entries[sessionID]
+	if !ok {
+		return ErrEntryNotFound
+	}
+	for i, m := range list {
+		if m.ID != entryID {
+			continue
 		}
+		r.entries[sessionID] = append(list[:i], list[i+1:]...)
+		if len(r.entries[sessionID]) == 0 {
+			delete(r.entries, sessionID)
+			delete(r.nextPosition, sessionID)
+		}
+		return nil
 	}
 	return ErrEntryNotFound
 }

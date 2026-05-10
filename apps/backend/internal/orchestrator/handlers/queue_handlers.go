@@ -29,8 +29,8 @@ const (
 type QueueService interface {
 	QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error)
 	AppendContent(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, bool, error)
-	UpdateMessage(ctx context.Context, entryID, content string, attachments []messagequeue.MessageAttachment, queuedBy string) error
-	RemoveEntry(ctx context.Context, entryID string) error
+	UpdateMessage(ctx context.Context, sessionID, entryID, content string, attachments []messagequeue.MessageAttachment, queuedBy string) error
+	RemoveEntry(ctx context.Context, sessionID, entryID string) error
 	CancelAll(ctx context.Context, sessionID string) (int, error)
 	GetStatus(ctx context.Context, sessionID string) *messagequeue.QueueStatus
 }
@@ -199,7 +199,7 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 	if queuedBy == "" {
 		queuedBy = messagequeue.QueuedByUser
 	}
-	if err := h.queueService.UpdateMessage(ctx, req.EntryID, req.Content, req.Attachments, queuedBy); err != nil {
+	if err := h.queueService.UpdateMessage(ctx, req.SessionID, req.EntryID, req.Content, req.Attachments, queuedBy); err != nil {
 		if errors.Is(err, messagequeue.ErrEntryNotFound) {
 			return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained or not owned by caller", nil)
 		}
@@ -228,7 +228,7 @@ func (h *QueueHandlers) wsRemoveEntry(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "entry_id is required", nil)
 	}
 
-	if err := h.queueService.RemoveEntry(ctx, req.EntryID); err != nil {
+	if err := h.queueService.RemoveEntry(ctx, req.SessionID, req.EntryID); err != nil {
 		if errors.Is(err, messagequeue.ErrEntryNotFound) {
 			return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained", nil)
 		}

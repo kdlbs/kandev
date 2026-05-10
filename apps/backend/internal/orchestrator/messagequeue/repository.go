@@ -25,13 +25,19 @@ type Repository interface {
 	// session. Returns nil, nil if the queue is empty.
 	TakeHead(ctx context.Context, sessionID string) (*QueuedMessage, error)
 
-	// UpdateContent replaces the content/attachments of an entry by id. Returns
-	// ErrEntryNotFound if the entry no longer exists. If queuedBy is non-empty,
-	// the update only succeeds when the entry's queued_by matches.
-	UpdateContent(ctx context.Context, entryID, content string, attachments []MessageAttachment, queuedBy string) error
+	// UpdateContent replaces the content/attachments of an entry. The session
+	// scope (`AND session_id = ?`) is mandatory so a caller can't update an
+	// entry by guessing its UUID across sessions. If queuedBy is non-empty the
+	// update only succeeds when the entry's queued_by also matches. Returns
+	// ErrEntryNotFound when no row matches all guards.
+	UpdateContent(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error
 
-	// DeleteByID removes a single entry by id. Returns ErrEntryNotFound if absent.
-	DeleteByID(ctx context.Context, entryID string) error
+	// DeleteByID removes a single entry. The session scope (`AND session_id = ?`)
+	// is mandatory so a caller can't delete an entry by guessing its UUID across
+	// sessions — the queue_full MCP payload deliberately discloses sibling-task
+	// entry IDs, so without this guard a hostile agent could prune another
+	// task's queue. Returns ErrEntryNotFound when no row matches.
+	DeleteByID(ctx context.Context, sessionID, entryID string) error
 
 	// DeleteAllBySession removes every entry for a session. Returns the count of
 	// rows removed.

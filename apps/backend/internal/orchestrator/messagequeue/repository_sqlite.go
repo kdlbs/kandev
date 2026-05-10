@@ -259,18 +259,18 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 	return msg, nil
 }
 
-func (r *sqliteRepository) UpdateContent(ctx context.Context, entryID, content string, attachments []MessageAttachment, queuedBy string) error {
+func (r *sqliteRepository) UpdateContent(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error {
 	attachmentsJSON, err := marshalAttachments(attachments)
 	if err != nil {
 		return err
 	}
 	var query string
-	args := []interface{}{content, attachmentsJSON, entryID}
+	args := []interface{}{content, attachmentsJSON, entryID, sessionID}
 	if queuedBy != "" {
-		query = `UPDATE queued_messages SET content = ?, attachments_json = ? WHERE id = ? AND queued_by = ?`
+		query = `UPDATE queued_messages SET content = ?, attachments_json = ? WHERE id = ? AND session_id = ? AND queued_by = ?`
 		args = append(args, queuedBy)
 	} else {
-		query = `UPDATE queued_messages SET content = ?, attachments_json = ? WHERE id = ?`
+		query = `UPDATE queued_messages SET content = ?, attachments_json = ? WHERE id = ? AND session_id = ?`
 	}
 	res, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
@@ -286,8 +286,8 @@ func (r *sqliteRepository) UpdateContent(ctx context.Context, entryID, content s
 	return nil
 }
 
-func (r *sqliteRepository) DeleteByID(ctx context.Context, entryID string) error {
-	res, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ?`), entryID)
+func (r *sqliteRepository) DeleteByID(ctx context.Context, sessionID, entryID string) error {
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ? AND session_id = ?`), entryID, sessionID)
 	if err != nil {
 		return fmt.Errorf("delete queued: %w", err)
 	}

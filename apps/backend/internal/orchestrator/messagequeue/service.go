@@ -116,22 +116,30 @@ func (s *Service) TakeQueued(ctx context.Context, sessionID string) (*QueuedMess
 }
 
 // UpdateMessage replaces the content (and optionally attachments) of a queued
-// entry. Returns ErrEntryNotFound when the entry was already drained or
-// when the queuedBy guard rejects the caller.
-func (s *Service) UpdateMessage(ctx context.Context, entryID, content string, attachments []MessageAttachment, queuedBy string) error {
-	if err := s.repo.UpdateContent(ctx, entryID, content, attachments, queuedBy); err != nil {
+// entry. The sessionID scope is mandatory — callers can't update an entry by
+// guessing its UUID across sessions. Returns ErrEntryNotFound when the entry
+// was already drained, the session doesn't own it, or the queuedBy guard
+// rejects the caller.
+func (s *Service) UpdateMessage(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error {
+	if err := s.repo.UpdateContent(ctx, sessionID, entryID, content, attachments, queuedBy); err != nil {
 		return err
 	}
-	s.logger.Info("queued entry updated", zap.String("entry_id", entryID))
+	s.logger.Info("queued entry updated",
+		zap.String("session_id", sessionID),
+		zap.String("entry_id", entryID))
 	return nil
 }
 
-// RemoveEntry deletes a single entry by id. Returns ErrEntryNotFound if absent.
-func (s *Service) RemoveEntry(ctx context.Context, entryID string) error {
-	if err := s.repo.DeleteByID(ctx, entryID); err != nil {
+// RemoveEntry deletes a single entry. The sessionID scope is mandatory — see
+// the rationale on the Repository.DeleteByID contract for why. Returns
+// ErrEntryNotFound when no entry matches.
+func (s *Service) RemoveEntry(ctx context.Context, sessionID, entryID string) error {
+	if err := s.repo.DeleteByID(ctx, sessionID, entryID); err != nil {
 		return err
 	}
-	s.logger.Info("queued entry removed", zap.String("entry_id", entryID))
+	s.logger.Info("queued entry removed",
+		zap.String("session_id", sessionID),
+		zap.String("entry_id", entryID))
 	return nil
 }
 

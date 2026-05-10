@@ -121,7 +121,7 @@ export async function appendToQueue(params: {
 
 /** Replace the content/attachments of a queued entry. Throws QueueEntryNotFoundError if drained. */
 export async function updateQueuedMessage(params: {
-  session_id?: string;
+  session_id: string;
   entry_id: string;
   content: string;
   attachments?: Array<{ type: string; data: string; mime_type: string }>;
@@ -140,7 +140,7 @@ export async function updateQueuedMessage(params: {
 
 /** Remove a single queued entry by id. Throws QueueEntryNotFoundError if drained. */
 export async function removeQueuedEntry(params: {
-  session_id?: string;
+  session_id: string;
   entry_id: string;
 }): Promise<{ entry_id: string }> {
   const client = getWebSocketClient();

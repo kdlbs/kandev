@@ -162,7 +162,7 @@ func TestSQLiteRepository_UpdateContent(t *testing.T) {
 		t.Fatalf("insert: %v", err)
 	}
 
-	if err := repo.UpdateContent(ctx, msg.ID, "updated", nil, "user-1"); err != nil {
+	if err := repo.UpdateContent(ctx, "s1", msg.ID, "updated", nil, "user-1"); err != nil {
 		t.Fatalf("update (matching sender): %v", err)
 	}
 	entries, _ := repo.ListBySession(ctx, "s1")
@@ -170,12 +170,18 @@ func TestSQLiteRepository_UpdateContent(t *testing.T) {
 		t.Errorf("content after update: got %q", entries[0].Content)
 	}
 
-	err := repo.UpdateContent(ctx, msg.ID, "intruder", nil, "user-2")
+	err := repo.UpdateContent(ctx, "s1", msg.ID, "intruder", nil, "user-2")
 	if !errors.Is(err, ErrEntryNotFound) {
 		t.Errorf("expected ErrEntryNotFound for non-matching sender, got %v", err)
 	}
 
-	err = repo.UpdateContent(ctx, "nonexistent", "x", nil, "")
+	// Cross-session: same entry id but a different session must not match.
+	err = repo.UpdateContent(ctx, "s-attacker", msg.ID, "hijack", nil, "user-1")
+	if !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("expected ErrEntryNotFound for cross-session update, got %v", err)
+	}
+
+	err = repo.UpdateContent(ctx, "s1", "nonexistent", "x", nil, "")
 	if !errors.Is(err, ErrEntryNotFound) {
 		t.Errorf("expected ErrEntryNotFound for unknown id, got %v", err)
 	}
@@ -189,10 +195,20 @@ func TestSQLiteRepository_DeleteByID(t *testing.T) {
 	if err := repo.Insert(ctx, msg, 0); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
-	if err := repo.DeleteByID(ctx, msg.ID); err != nil {
+
+	// Cross-session deletion attempt: must not affect the row.
+	if err := repo.DeleteByID(ctx, "s-attacker", msg.ID); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("expected ErrEntryNotFound for cross-session delete, got %v", err)
+	}
+	count, _ := repo.CountBySession(ctx, "s1")
+	if count != 1 {
+		t.Errorf("entry should survive cross-session delete attempt, got count=%d", count)
+	}
+
+	if err := repo.DeleteByID(ctx, "s1", msg.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if err := repo.DeleteByID(ctx, msg.ID); !errors.Is(err, ErrEntryNotFound) {
+	if err := repo.DeleteByID(ctx, "s1", msg.ID); !errors.Is(err, ErrEntryNotFound) {
 		t.Errorf("expected ErrEntryNotFound on second delete, got %v", err)
 	}
 }
