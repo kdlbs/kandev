@@ -10,8 +10,8 @@ export function useWorkflowSnapshot(workflowId: string | null) {
   useEffect(() => {
     if (!workflowId) return;
     let cancelled = false;
-    const alreadyHydrated = store.getState().kanban.workflowId === workflowId;
-    if (!alreadyHydrated) {
+    const setLoading = store.getState().kanban.workflowId !== workflowId;
+    if (setLoading) {
       store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: true } }));
     }
     fetchWorkflowSnapshot(workflowId, { cache: "no-store" })
@@ -25,11 +25,11 @@ export function useWorkflowSnapshot(workflowId: string | null) {
         console.warn("[useWorkflowSnapshot] failed to load snapshot:", error);
       })
       .finally(() => {
-        // Skip when the effect was superseded — otherwise an in-flight fetch
-        // for an old workflowId would clear the loading flag the new effect
-        // just set, briefly flashing the empty-state UI. The next effect's
-        // finally settles isLoading for the active workflow.
-        if (cancelled) return;
+        // Only clear what this effect set. Skipping when cancelled avoids
+        // collapsing the new effect's skeleton; skipping when !setLoading
+        // avoids stomping on a flag a concurrent caller (e.g. workspace
+        // switch) raised independently.
+        if (cancelled || !setLoading) return;
         store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
       });
     return () => {

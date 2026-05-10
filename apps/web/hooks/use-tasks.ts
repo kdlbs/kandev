@@ -12,10 +12,7 @@ export function useTasks(workflowId: string | null) {
   const matchesActive = !!workflowId && kanbanWorkflowId === workflowId;
   const workflowTasks = useMemo(() => (matchesActive ? tasks : []), [matchesActive, tasks]);
 
-  // Skeleton shows only while a snapshot fetch is actively in flight. Once the
-  // fetch settles (success or failure) `kanban.isLoading` drops to false, so
-  // a failed fetch falls back to the empty-state UI rather than spinning
-  // forever. See `useWorkflowSnapshot` for the in-flight signal.
+  // Loading only while a snapshot fetch is in-flight; settles to false on success/error to avoid an infinite skeleton.
   const isLoading = !!workflowId && kanbanIsLoading;
 
   return { tasks: workflowTasks, isLoading };
