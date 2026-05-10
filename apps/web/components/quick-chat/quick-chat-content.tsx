@@ -3,10 +3,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
-import {
-  QueuedMessageIndicator,
-  type QueuedMessageIndicatorHandle,
-} from "@/components/task/chat/queued-message-indicator";
+import { QueuedGhostList } from "@/components/task/chat/queued-ghost-list";
 import { MessageList } from "@/components/task/chat/message-list";
 import { useChatPanelState } from "@/components/task/chat/use-chat-panel-state";
 import {
@@ -26,7 +23,6 @@ type QuickChatContentProps = {
 
 function useQuickChatState(sessionId: string) {
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
-  const queuedMessageRef = useRef<QueuedMessageIndicatorHandle>(null);
 
   useSettingsData(true);
   const panelState = useChatPanelState({
@@ -35,22 +31,19 @@ function useQuickChatState(sessionId: string) {
     onOpenFileAtLine: undefined,
   });
   const { isSending, handleSubmit } = useSubmitHandler(panelState, undefined);
-  const { cancelQueue } = panelState;
-  const { handleCancelTurn, handleCancelQueue, handleQueueEditComplete } = useChatPanelHandlers(
+  const { clearQueue } = panelState;
+  const { handleCancelTurn } = useChatPanelHandlers(
     panelState.resolvedSessionId,
-    cancelQueue,
+    clearQueue,
     chatInputRef,
   );
 
   return {
     chatInputRef,
-    queuedMessageRef,
     panelState,
     isSending,
     handleSubmit,
     handleCancelTurn,
-    handleCancelQueue,
-    handleQueueEditComplete,
   };
 }
 
@@ -64,24 +57,8 @@ export const QuickChatContent = memo(function QuickChatContent({
   const [clarificationKey, setClarificationKey] = useState(0);
   const initialPromptSent = useRef(false);
   const state = useQuickChatState(sessionId);
-  const {
-    chatInputRef,
-    queuedMessageRef,
-    panelState,
-    isSending,
-    handleSubmit,
-    handleCancelTurn,
-    handleCancelQueue,
-    handleQueueEditComplete,
-  } = state;
-  const {
-    taskId,
-    pendingClarification,
-    pendingClarificationGroup,
-    isQueued,
-    queuedMessage,
-    updateQueueContent,
-  } = panelState;
+  const { chatInputRef, panelState, isSending, handleSubmit, handleCancelTurn } = state;
+  const { taskId, pendingClarification, pendingClarificationGroup } = panelState;
 
   useEffect(() => {
     const timer = setTimeout(() => chatInputRef.current?.focusInput(), 50);
@@ -123,18 +100,7 @@ export const QuickChatContent = memo(function QuickChatContent({
           />
         </div>
       )}
-      {isQueued && queuedMessage && (
-        <div className="flex-shrink-0 bg-card px-3 pt-1.5">
-          <QueuedMessageIndicator
-            ref={queuedMessageRef}
-            content={queuedMessage.content}
-            onCancel={handleCancelQueue}
-            onUpdate={updateQueueContent}
-            isVisible={true}
-            onEditComplete={handleQueueEditComplete}
-          />
-        </div>
-      )}
+      <QueuedGhostList sessionId={panelState.resolvedSessionId} isArchived={false} />
       <ChatInputArea
         chatInputRef={chatInputRef}
         clarificationKey={clarificationKey}

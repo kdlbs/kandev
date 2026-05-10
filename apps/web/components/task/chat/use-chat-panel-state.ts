@@ -399,8 +399,9 @@ function useSessionData(
     resolvedSessionId ? state.availableCommands.bySessionId[resolvedSessionId] : undefined,
   );
   const {
-    cancel: cancelQueue,
-    updateContent: updateQueueContent,
+    clearAll: clearQueue,
+    editEntry: editQueueEntry,
+    removeEntry: removeQueueEntry,
     ...queueRest
   } = useQueue(resolvedSessionId);
   return {
@@ -411,8 +412,9 @@ function useSessionData(
     activeModel,
     chatSubmitKey,
     agentCommands,
-    cancelQueue,
-    updateQueueContent,
+    clearQueue,
+    editQueueEntry,
+    removeQueueEntry,
     ...queueRest,
   };
 }
