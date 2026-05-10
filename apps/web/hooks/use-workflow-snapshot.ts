@@ -20,8 +20,9 @@ export function useWorkflowSnapshot(workflowId: string | null) {
         store.getState().hydrate(snapshotToState(snapshot));
       })
       .catch((error) => {
-        // Surface the failure so users see it rather than an indefinite empty
-        // list. Retry happens on WS reconnect.
+        // Suppress noise from a superseded fetch — only the active effect
+        // should surface the failure. Retry happens on WS reconnect.
+        if (cancelled) return;
         console.warn("[useWorkflowSnapshot] failed to load snapshot:", error);
       })
       .finally(() => {
