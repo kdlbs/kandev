@@ -127,10 +127,13 @@ describe("useWorkflowSnapshot — kanban.isLoading", () => {
     rerender({ id: "wf-2" });
     expect(mockState.kanban.isLoading).toBe(true);
 
-    // Old fetch lands now; its `.finally` must not clear the flag the new
-    // effect just set.
+    // Old fetch lands now; flush its .then/.finally microtask chain so we
+    // can assert the negatives without relying on waitFor (which would
+    // resolve immediately for never-true assertions).
     resolveFirst({ steps: [], tasks: [] });
-    await waitFor(() => expect(mockHydrate).not.toHaveBeenCalled());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockHydrate).not.toHaveBeenCalled();
     expect(mockState.kanban.isLoading).toBe(true);
   });
 });
