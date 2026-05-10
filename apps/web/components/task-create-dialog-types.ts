@@ -227,6 +227,8 @@ export type SubmitHandlersDeps = {
   repositories: TaskRepoRow[];
   /** All on-machine discovered repos — used to look up `default_branch` for `localPath` rows. */
   discoveredRepositories: LocalRepository[];
+  /** Workspace repositories — used to look up `default_branch` for `repositoryId` rows. */
+  workspaceRepositories: Repository[];
   useGitHubUrl: boolean;
   githubUrl: string;
   githubPrHeadBranch: string | null;

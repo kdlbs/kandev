@@ -9,6 +9,7 @@ import type { DiffComment, PlanComment } from "@/lib/state/slices/comments";
 const mockRequest = vi.fn();
 const mockAppendToQueue = vi.fn();
 const mockMarkCommentsSent = vi.fn();
+const mockAddMessage = vi.fn();
 const mockGetWebSocketClient = vi.fn(() => ({ request: mockRequest }));
 let mockStoreState: Record<string, unknown> = {};
 
@@ -49,6 +50,7 @@ function makeStoreState(sessionState: string, planMode = false) {
     chatInput: {
       planModeBySessionId: { "sess-1": planMode },
     },
+    addMessage: mockAddMessage,
   };
 }
 
@@ -147,6 +149,44 @@ describe("useRunComment — idle agent sends directly", () => {
     ).rejects.toThrow("WS timeout");
 
     expect(mockMarkCommentsSent).not.toHaveBeenCalled();
+  });
+
+  // Regression: comments sent via "Run" sometimes did not appear in the chat
+  // until a page refresh, because the hook depended entirely on the
+  // session.message.added broadcast — which can be missed if the client's
+  // session subscription is briefly absent or its send buffer drops.
+  // The message returned in the message.add response must be added to the
+  // store optimistically; addMessage is idempotent so a later broadcast for
+  // the same id is a no-op.
+  it("adds returned message to the store so chat updates without waiting for broadcast", async () => {
+    const returnedMessage = {
+      id: "msg-42",
+      session_id: "sess-1",
+      task_id: "task-1",
+      author_type: "user",
+      content: "[diff] fix this",
+      type: "message",
+      created_at: "2026-05-08T00:00:00Z",
+    };
+    mockRequest.mockResolvedValueOnce(returnedMessage);
+    const { result } = renderCommentHook();
+
+    await act(async () => {
+      await result.current.runComment(makeDiffComment());
+    });
+
+    expect(mockAddMessage).toHaveBeenCalledWith(returnedMessage);
+  });
+
+  it("does not call addMessage when message.add returns no message", async () => {
+    mockRequest.mockResolvedValueOnce(undefined);
+    const { result } = renderCommentHook();
+
+    await act(async () => {
+      await result.current.runComment(makeDiffComment());
+    });
+
+    expect(mockAddMessage).not.toHaveBeenCalled();
   });
 });
 

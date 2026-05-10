@@ -74,7 +74,14 @@ export const QuickChatContent = memo(function QuickChatContent({
     handleCancelQueue,
     handleQueueEditComplete,
   } = state;
-  const { taskId, pendingClarification, isQueued, queuedMessage, updateQueueContent } = panelState;
+  const {
+    taskId,
+    pendingClarification,
+    pendingClarificationGroup,
+    isQueued,
+    queuedMessage,
+    updateQueueContent,
+  } = panelState;
 
   useEffect(() => {
     const timer = setTimeout(() => chatInputRef.current?.focusInput(), 50);
@@ -111,7 +118,7 @@ export const QuickChatContent = memo(function QuickChatContent({
       {pendingClarification && (
         <div className="flex-shrink-0 border-t border-sky-400/30 bg-card px-1">
           <ClarificationInputOverlay
-            message={pendingClarification}
+            messages={pendingClarificationGroup}
             onResolved={handleClarificationResolved}
           />
         </div>

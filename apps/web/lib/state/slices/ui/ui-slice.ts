@@ -2,16 +2,20 @@ import type { StateCreator } from "zustand";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import {
   getStoredCollapsedSubtaskParents,
+  getStoredOrderedTaskIds,
+  getStoredPinnedTaskIds,
   getStoredSidebarActiveViewId,
   getStoredSidebarDraft,
   getStoredSidebarUserViews,
   removeStoredSidebarDraft,
   setLocalStorage,
   setStoredCollapsedSubtaskParents,
+  setStoredQuickChatName,
   setStoredSidebarActiveViewId,
   setStoredSidebarDraft,
   setStoredSidebarUserViews,
 } from "@/lib/local-storage";
+import { buildSidebarTaskPrefsActions } from "./sidebar-task-prefs-actions";
 import { DEFAULT_ACTIVE_VIEW_ID, DEFAULT_VIEW } from "./sidebar-view-builtins";
 import type {
   FilterClause,
@@ -48,7 +52,13 @@ export const KNOWN_DIMENSIONS = new Set<string>([
   "titleMatch",
 ]);
 
-export const KNOWN_SORT_KEYS = new Set<string>(["state", "updatedAt", "createdAt", "title"]);
+export const KNOWN_SORT_KEYS = new Set<string>([
+  "state",
+  "updatedAt",
+  "createdAt",
+  "title",
+  "custom",
+]);
 
 // Drops clauses whose dimension is no longer known (e.g. renamed or removed in an upgrade),
 // and resets stale sort keys, so the popover does not crash when rendering stored views.
@@ -110,6 +120,7 @@ export const defaultUIState: UISliceState = {
   sidebarViews: loadSidebarState(),
   collapsedSubtaskParents: [],
   kanbanPreviewedTaskId: null,
+  sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [] },
 };
 
 type ImmerSet = Parameters<typeof createUISlice>[0];
@@ -510,11 +521,16 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   // Hydrate from sessionStorage at slice creation (runs in the browser, after
   // the default static state) so tests and SSR both see a fresh read.
   collapsedSubtaskParents: getStoredCollapsedSubtaskParents(),
+  sidebarTaskPrefs: {
+    pinnedTaskIds: getStoredPinnedTaskIds(),
+    orderedTaskIds: getStoredOrderedTaskIds(),
+  },
   ...buildPreviewActions(set),
   ...buildMobileActions(set),
   ...buildBottomTerminalActions(set),
   ...buildConfigChatActions(set),
   ...buildSidebarViewActions(set, get),
+  ...buildSidebarTaskPrefsActions(set),
   ...buildCollapsedSubtaskActions(set, get),
   ...buildSystemHealthActions(set),
   setRightPanelActiveTab: (sessionId, tab) =>
@@ -584,13 +600,17 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
     set((draft) => {
       draft.quickChat.activeSessionId = sessionId;
     }),
-  renameQuickChatSession: (sessionId, name) =>
+  renameQuickChatSession: (sessionId, name) => {
+    let renamed = false;
     set((draft) => {
       const session = draft.quickChat.sessions.find((s) => s.sessionId === sessionId);
       if (session) {
         session.name = name;
+        renamed = true;
       }
-    }),
+    });
+    if (renamed) setStoredQuickChatName(sessionId, name);
+  },
   setSessionFailureNotification: (n) =>
     set((draft) => {
       draft.sessionFailureNotification = n;

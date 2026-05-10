@@ -33,12 +33,13 @@ import (
 type ClarificationService interface {
 	CreateRequest(req *clarification.Request) string
 	WaitForResponse(ctx context.Context, pendingID string) (*clarification.Response, error)
+	CancelRequest(pendingID string) bool
 	CancelSession(sessionID string) []string
 }
 
 // MessageCreator creates messages for clarification requests.
 type MessageCreator interface {
-	CreateClarificationRequestMessage(ctx context.Context, taskID, sessionID, pendingID string, question clarification.Question, clarificationContext string) (string, error)
+	CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []clarification.Question, clarificationContext string) ([]string, error)
 }
 
 // SessionRepository interface for updating session state.
@@ -144,6 +145,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPListWorkspaces, h.handleListWorkspaces)
 	d.RegisterFunc(ws.ActionMCPListWorkflows, h.handleListWorkflows)
 	d.RegisterFunc(ws.ActionMCPListWorkflowSteps, h.handleListWorkflowSteps)
+	d.RegisterFunc(ws.ActionMCPListRepositories, h.handleListRepositories)
 	d.RegisterFunc(ws.ActionMCPListTasks, h.handleListTasks)
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
@@ -155,7 +157,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPDeleteTaskPlan, h.handleDeleteTaskPlan)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 14
+	count := 15
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
@@ -294,6 +296,25 @@ func (h *Handlers) handleListWorkflowSteps(ctx context.Context, msg *ws.Message)
 		})
 }
 
+// handleListRepositories lists repositories for a workspace. Exposes the same
+// data the kanban "Edit task → Repositories" picker reads, so an MCP-driven
+// agent (e.g. the Slack triage runner) can match a request against an actual
+// repo instead of guessing or making up an ID.
+func (h *Handlers) handleListRepositories(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return h.handleListByField(ctx, msg, "workspace_id", "failed to list repositories", "Failed to list repositories",
+		func(ctx context.Context, workspaceID string) (any, error) {
+			repos, err := h.taskSvc.ListRepositories(ctx, workspaceID)
+			if err != nil {
+				return nil, err
+			}
+			dtos := make([]dto.RepositoryDTO, 0, len(repos))
+			for _, r := range repos {
+				dtos = append(dtos, dto.FromRepository(r))
+			}
+			return dto.ListRepositoriesResponse{Repositories: dtos, Total: len(dtos)}, nil
+		})
+}
+
 // handleListTasks lists tasks for a workflow.
 func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return h.handleListByField(ctx, msg, "workflow_id", "failed to list tasks", "Failed to list tasks",
@@ -415,24 +436,43 @@ type taskRepoResult struct {
 }
 
 // resolveTaskRepositories builds the repository list for a new task.
-// Priority: explicit repositories > parent task repos > source task repos.
-// When inheriting from a parent, it also returns the parent's workspace/workflow IDs.
+//
+// For subtasks (parentID set) workspace and workflow always come from the
+// parent. Explicit repositories override the parent's repos when supplied,
+// otherwise the parent's repos are inherited verbatim — letting an agent
+// spin up a subtask that targets a sibling repo while staying in the same
+// workspace/workflow.
+//
+// For top-level tasks (parentID empty) explicit repos win over source-task
+// inheritance; workspace falls back to the source task when available.
 func (h *Handlers) resolveTaskRepositories(
 	ctx context.Context,
 	parentID, sourceTaskID string,
 	explicit []mcpRepositoryInput,
 ) (taskRepoResult, error) {
-	if len(explicit) > 0 {
-		var repos []service.TaskRepositoryInput
-		for _, r := range explicit {
-			repos = append(repos, service.TaskRepositoryInput{
-				RepositoryID: r.RepositoryID,
-				LocalPath:    r.LocalPath,
-				GitHubURL:    r.GitHubURL,
-				BaseBranch:   r.BaseBranch,
-			})
+	explicitRepos := explicitRepoInputs(explicit)
+
+	if parentID != "" {
+		parent, err := h.taskSvc.GetTask(ctx, parentID)
+		if err != nil {
+			return taskRepoResult{}, fmt.Errorf("invalid parent_id: %w", err)
 		}
-		result := taskRepoResult{Repos: repos}
+		if parent.IsEphemeral {
+			return taskRepoResult{}, fmt.Errorf("cannot create subtasks of an ephemeral task (quick chat); omit parent_id to create a top-level task")
+		}
+		repos := explicitRepos
+		if repos == nil {
+			repos = inheritedRepoInputs(parent.Repositories)
+		}
+		return taskRepoResult{
+			Repos:       repos,
+			WorkspaceID: parent.WorkspaceID,
+			WorkflowID:  parent.WorkflowID,
+		}, nil
+	}
+
+	if explicitRepos != nil {
+		result := taskRepoResult{Repos: explicitRepos}
 		// Inherit workspace from source task so multi-workspace installs don't
 		// fail auto-resolution when the agent supplies an explicit repository.
 		if sourceTaskID != "" && h.taskSvc != nil {
@@ -447,29 +487,6 @@ func (h *Handlers) resolveTaskRepositories(
 		return result, nil
 	}
 
-	if parentID != "" {
-		parent, err := h.taskSvc.GetTask(ctx, parentID)
-		if err != nil {
-			return taskRepoResult{}, fmt.Errorf("invalid parent_id: %w", err)
-		}
-		if parent.IsEphemeral {
-			return taskRepoResult{}, fmt.Errorf("cannot create subtasks of an ephemeral task (quick chat); omit parent_id to create a top-level task")
-		}
-		var repos []service.TaskRepositoryInput
-		for _, r := range parent.Repositories {
-			repos = append(repos, service.TaskRepositoryInput{
-				RepositoryID:   r.RepositoryID,
-				BaseBranch:     r.BaseBranch,
-				CheckoutBranch: r.CheckoutBranch,
-			})
-		}
-		return taskRepoResult{
-			Repos:       repos,
-			WorkspaceID: parent.WorkspaceID,
-			WorkflowID:  parent.WorkflowID,
-		}, nil
-	}
-
 	// For top-level tasks, inherit repos and workspace from the calling agent's current task.
 	if sourceTaskID != "" {
 		sourceTask, err := h.taskSvc.GetTask(ctx, sourceTaskID)
@@ -478,21 +495,52 @@ func (h *Handlers) resolveTaskRepositories(
 				zap.String("source_task_id", sourceTaskID), zap.Error(err))
 			return taskRepoResult{}, nil
 		}
-		var repos []service.TaskRepositoryInput
-		for _, r := range sourceTask.Repositories {
-			repos = append(repos, service.TaskRepositoryInput{
-				RepositoryID:   r.RepositoryID,
-				BaseBranch:     r.BaseBranch,
-				CheckoutBranch: r.CheckoutBranch,
-			})
-		}
 		return taskRepoResult{
-			Repos:       repos,
+			Repos:       inheritedRepoInputs(sourceTask.Repositories),
 			WorkspaceID: sourceTask.WorkspaceID,
 		}, nil
 	}
 
 	return taskRepoResult{}, nil
+}
+
+// explicitRepoInputs maps the MCP-side explicit repo list to service inputs.
+// Returns nil when no explicit repos were supplied so callers can distinguish
+// "agent didn't pass repos" from "agent passed an empty list".
+func explicitRepoInputs(explicit []mcpRepositoryInput) []service.TaskRepositoryInput {
+	if len(explicit) == 0 {
+		return nil
+	}
+	repos := make([]service.TaskRepositoryInput, 0, len(explicit))
+	for _, r := range explicit {
+		repos = append(repos, service.TaskRepositoryInput{
+			RepositoryID: r.RepositoryID,
+			LocalPath:    r.LocalPath,
+			GitHubURL:    r.GitHubURL,
+			BaseBranch:   r.BaseBranch,
+		})
+	}
+	return repos
+}
+
+// inheritedRepoInputs maps an existing task's repository list onto service
+// inputs for a new task that inherits from it.
+func inheritedRepoInputs(src []*models.TaskRepository) []service.TaskRepositoryInput {
+	if len(src) == 0 {
+		return nil
+	}
+	repos := make([]service.TaskRepositoryInput, 0, len(src))
+	for _, r := range src {
+		if r == nil {
+			continue
+		}
+		repos = append(repos, service.TaskRepositoryInput{
+			RepositoryID:   r.RepositoryID,
+			BaseBranch:     r.BaseBranch,
+			CheckoutBranch: r.CheckoutBranch,
+		})
+	}
+	return repos
 }
 
 // autoStartTask launches an agent session for a newly created task in the background.
@@ -920,10 +968,10 @@ func (h *Handlers) publishQueueStatusEvent(ctx context.Context, sessionID string
 // the event-based fallback in the orchestrator handles resuming with a new turn.
 func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		SessionID string                 `json:"session_id"`
-		TaskID    string                 `json:"task_id"`
-		Question  clarification.Question `json:"question"`
-		Context   string                 `json:"context"`
+		SessionID string                   `json:"session_id"`
+		TaskID    string                   `json:"task_id"`
+		Questions []clarification.Question `json:"questions"`
+		Context   string                   `json:"context"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -931,19 +979,11 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
-	if req.Question.Prompt == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "question.prompt is required", nil)
-	}
-
-	// Generate question ID if missing
-	if req.Question.ID == "" {
-		req.Question.ID = "q1"
-	}
-	// Generate option IDs if missing
-	for i := range req.Question.Options {
-		if req.Question.Options[i].ID == "" {
-			req.Question.Options[i].ID = generateOptionID(0, i)
-		}
+	// Single source of truth — same validator the HTTP handler uses, so
+	// duplicate IDs / bad option counts / empty prompts can't slip through
+	// either path.
+	if errMsg := clarification.NormalizeAndValidateQuestions(req.Questions); errMsg != "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, errMsg, nil)
 	}
 
 	// Look up task ID from session if not provided
@@ -963,20 +1003,26 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	clarificationReq := &clarification.Request{
 		SessionID: req.SessionID,
 		TaskID:    taskID,
-		Question:  req.Question,
+		Questions: req.Questions,
 		Context:   req.Context,
 	}
 	pendingID := h.clarificationSvc.CreateRequest(clarificationReq)
 
-	// Create the message in the database (triggers WS event to frontend)
+	// Create one chat message per question (triggers WS events to frontend).
+	// If the create fails, the in-store pending entry must be cancelled too —
+	// otherwise the agent's WaitForResponse would block for the full 2-hour
+	// timeout while the user never sees clarification cards.
 	if h.messageCreator != nil {
-		if _, err := h.messageCreator.CreateClarificationRequestMessage(
-			ctx, taskID, req.SessionID, pendingID, req.Question, req.Context,
+		if _, err := h.messageCreator.CreateClarificationRequestMessages(
+			ctx, taskID, req.SessionID, pendingID, req.Questions, req.Context,
 		); err != nil {
-			h.logger.Error("failed to create clarification request message",
+			h.logger.Error("failed to create clarification request messages",
 				zap.String("pending_id", pendingID),
 				zap.String("session_id", req.SessionID),
 				zap.Error(err))
+			h.clarificationSvc.CancelRequest(pendingID)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to create clarification messages: "+err.Error(), nil)
 		}
 	}
 
@@ -1075,11 +1121,6 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 			eventData,
 		))
 	}
-}
-
-// generateOptionID generates an option ID for a question.
-func generateOptionID(questionIndex, optionIndex int) string {
-	return fmt.Sprintf("q%d_opt%d", questionIndex+1, optionIndex+1)
 }
 
 // handleCreateTaskPlan creates a new task plan.

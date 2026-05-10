@@ -91,6 +91,11 @@ type TurnService interface {
 	StartTurn(ctx context.Context, sessionID string) (*models.Turn, error)
 	CompleteTurn(ctx context.Context, turnID string) error
 	GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error)
+	// AbandonOpenTurns buries any open turns for a session by setting
+	// completed_at = started_at (zero duration), so a subsequent prompt starts
+	// a fresh turn instead of adopting one that was orphaned by a crash or
+	// restart. Used on session resume.
+	AbandonOpenTurns(ctx context.Context, sessionID string) error
 }
 
 // TaskEventPublisher is the orchestrator's collaborator for publishing
@@ -224,6 +229,9 @@ type Service struct {
 
 	// Jira service for issue watch dedup operations
 	jiraService JiraService
+
+	// Linear service for issue watch dedup operations
+	linearService LinearService
 
 	// Repository resolver for cloning + finding/creating repos for review tasks
 	repositoryResolver RepositoryResolver
@@ -661,6 +669,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Subscribe to JIRA integration events
 	s.subscribeJiraEvents()
+
+	// Subscribe to Linear integration events
+	s.subscribeLinearEvents()
 
 	// Subscribe to clarification events (cancel-and-resume flow)
 	s.subscribeClarificationEvents()

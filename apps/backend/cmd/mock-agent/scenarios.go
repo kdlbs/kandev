@@ -25,9 +25,13 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"diff-expansion-setup":    scenarioDiffExpansionSetup,
 	"diff-update-setup":       scenarioDiffUpdateSetup,
 	"diff-update-modify":      scenarioDiffUpdateModify,
+	"diff-update-streaming":   scenarioDiffUpdateStreaming,
+	"multi-file-setup":        scenarioMultiFileSetup,
+	"multi-file-modify":       scenarioMultiFileModify,
 	"untracked-file-setup":    scenarioUntrackedFileSetup,
 	"untracked-file-modify":   scenarioUntrackedFileModify,
 	"clarification":           scenarioClarification,
+	"clarification-multi":     scenarioClarificationMulti,
 	"clarification-timeout":   scenarioClarificationTimeout,
 	"multi-permission":        scenarioMultiPermission,
 	"review-cumulative-setup": scenarioReviewCumulativeSetup,
@@ -386,6 +390,114 @@ func scenarioDiffUpdateModify(e *emitter) {
 	e.text("diff-update-modify complete: diff_update_test.txt now has SECOND_MODIFICATION")
 }
 
+// scenarioDiffUpdateStreaming modifies the file mid-turn, emitting text both
+// before and after the write so the agent's turn stays active for several
+// seconds. Used to assert that open file editor / diff panels auto-update
+// while the agent is still streaming.
+func scenarioDiffUpdateStreaming(e *emitter) {
+	fixedDelay(50)
+	e.text("diff-update-streaming: starting work")
+
+	fixedDelay(1000)
+
+	filePath := "diff_update_test.txt"
+	modifiedContent := "line 1: SECOND_MODIFICATION\nline 2: unchanged\nline 3: ALSO_CHANGED\n"
+	if err := os.WriteFile(filePath, []byte(modifiedContent), 0o644); err != nil {
+		e.text("diff-update-streaming: write failed: " + err.Error())
+		return
+	}
+
+	fixedDelay(500)
+	e.text("diff-update-streaming: file written, continuing")
+
+	// Long tail keeps the turn active long enough for polling+sync to fire.
+	fixedDelay(6000)
+	e.text("diff-update-streaming complete")
+}
+
+// scenarioMultiFileSetup commits three tracked files, then modifies all three
+// so each shows up in git status with FIRST_MODIFICATION. Used to test the
+// case where the user has multiple file editors / diff panels open at once.
+func scenarioMultiFileSetup(e *emitter) {
+	fixedDelay(50)
+
+	wd, err := os.Getwd()
+	if err != nil {
+		e.text("multi-file-setup: getwd failed: " + err.Error())
+		return
+	}
+
+	runGitCmd := makeGitRunner(wd)
+	files := []string{"multi_a.txt", "multi_b.txt", "multi_c.txt"}
+
+	// Cleanup any leftovers from a prior run.
+	for _, f := range files {
+		_ = runGitCmd("rm", "--force", f)
+	}
+	_ = runGitCmd("commit", "-m", "cleanup multi-file fixtures")
+
+	// Commit pristine versions.
+	for _, f := range files {
+		original := fmt.Sprintf("%s line 1: original\n%s line 2: unchanged\n%s line 3: original\n", f, f, f)
+		if err := os.WriteFile(f, []byte(original), 0o644); err != nil {
+			e.text("multi-file-setup: write failed: " + err.Error())
+			return
+		}
+		if err := runGitCmd("add", f); err != nil {
+			e.text("multi-file-setup: git add failed for " + f)
+			return
+		}
+	}
+	if err := runGitCmd("commit", "-m", "add multi-file fixtures"); err != nil {
+		e.text("multi-file-setup: git commit failed")
+		return
+	}
+
+	// Modify all three so each appears in git status with FIRST_MODIFICATION.
+	for _, f := range files {
+		modified := fmt.Sprintf("%s line 1: FIRST_MODIFICATION\n%s line 2: unchanged\n%s line 3: original\n", f, f, f)
+		if err := os.WriteFile(f, []byte(modified), 0o644); err != nil {
+			e.text("multi-file-setup: write modified failed: " + err.Error())
+			return
+		}
+	}
+
+	fixedDelay(100)
+	e.text("multi-file-setup complete: 3 files have FIRST_MODIFICATION")
+}
+
+// scenarioMultiFileModify modifies all three multi-file fixtures within a
+// single turn, with a long trailing delay so the panels must auto-update
+// while the agent is still streaming. Reproduces the user's reported case
+// where multiple open editor / diff panels go stale on a real edit.
+func scenarioMultiFileModify(e *emitter) {
+	fixedDelay(50)
+	e.text("multi-file-modify: starting work")
+
+	fixedDelay(800)
+
+	files := []string{"multi_a.txt", "multi_b.txt", "multi_c.txt"}
+	for i, f := range files {
+		modified := fmt.Sprintf(
+			"%s line 1: SECOND_MODIFICATION\n%s line 2: unchanged\n%s line 3: ALSO_CHANGED_%d\n",
+			f, f, f, i,
+		)
+		if err := os.WriteFile(f, []byte(modified), 0o644); err != nil {
+			e.text("multi-file-modify: write failed: " + err.Error())
+			return
+		}
+		// Stagger the writes slightly to mimic a real agent doing one tool
+		// call per file rather than all writes in a single instant.
+		fixedDelay(250)
+	}
+
+	e.text("multi-file-modify: writes done, continuing")
+
+	// Long tail keeps the turn active so we can assert mid-turn updates.
+	fixedDelay(5000)
+	e.text("multi-file-modify complete")
+}
+
 // scenarioUntrackedFileSetup creates a new untracked file.
 func scenarioUntrackedFileSetup(e *emitter) {
 	fixedDelay(50)
@@ -420,15 +532,72 @@ func scenarioUntrackedFileModify(e *emitter) {
 	e.text("untracked-file-modify complete: untracked_test.txt now has MODIFIED_CONTENT")
 }
 
-// clarificationQuestionArgs returns the MCP arguments for the clarification question.
+// MCP argument keys used by the clarification scenarios. Pulled out so goconst
+// stays happy when the same string would otherwise repeat across both helpers.
+const (
+	clarificationOptionsKey = "options"
+	clarificationLabelKey   = "label"
+	clarificationDescKey    = "description"
+	clarificationPromptKey  = "prompt"
+	clarificationIDKey      = "id"
+)
+
+func mockOption(label, description string) map[string]any {
+	return map[string]any{clarificationLabelKey: label, clarificationDescKey: description}
+}
+
+// clarificationQuestionArgs returns the MCP arguments for a single-question
+// clarification call. Used by the simplest e2e scenario where a one-question
+// bundle exercises the same code path as multi-question.
 func clarificationQuestionArgs() map[string]any {
 	return map[string]any{
-		"prompt": "Which database should we use for this project?",
-		"options": []map[string]any{
-			{"label": "PostgreSQL", "description": "Relational database with strong consistency"},
-			{"label": "MongoDB", "description": "Document database for flexible schemas"},
-			{"label": "SQLite", "description": "Embedded database for simplicity"},
+		"questions": []map[string]any{
+			{
+				clarificationIDKey:     "db",
+				clarificationPromptKey: "Which database should we use for this project?",
+				clarificationOptionsKey: []map[string]any{
+					mockOption("PostgreSQL", "Relational database with strong consistency"),
+					mockOption("MongoDB", "Document database for flexible schemas"),
+					mockOption("SQLite", "Embedded database for simplicity"),
+				},
+			},
 		},
+	}
+}
+
+// clarificationMultiQuestionArgs returns the MCP arguments for a 3-question
+// clarification bundle that exercises the multi-question UI flow.
+func clarificationMultiQuestionArgs() map[string]any {
+	return map[string]any{
+		"questions": []map[string]any{
+			{
+				clarificationIDKey:     "db",
+				clarificationPromptKey: "Which database should we use?",
+				clarificationOptionsKey: []map[string]any{
+					mockOption("PostgreSQL", "Relational database with strong consistency"),
+					mockOption("MongoDB", "Document database for flexible schemas"),
+					mockOption("SQLite", "Embedded database for simplicity"),
+				},
+			},
+			{
+				clarificationIDKey:     "language",
+				clarificationPromptKey: "Which language should we use?",
+				clarificationOptionsKey: []map[string]any{
+					mockOption("Go", "Strong typing, fast compile"),
+					mockOption("TypeScript", "Familiar to the team"),
+					mockOption("Rust", "Best for systems work"),
+				},
+			},
+			{
+				clarificationIDKey:     "deploy",
+				clarificationPromptKey: "How should we deploy?",
+				clarificationOptionsKey: []map[string]any{
+					mockOption("Docker", "Containerized deploy"),
+					mockOption("Bare metal", "Run directly on hosts"),
+				},
+			},
+		},
+		"context": "Picking the foundational stack — answer all three so we can move forward.",
 	}
 }
 
@@ -440,6 +609,22 @@ func scenarioClarification(e *emitter) {
 	result, err := callMCPTool("kandev", "ask_user_question_kandev", clarificationQuestionArgs())
 	if err != nil {
 		e.text(fmt.Sprintf("Question failed: %s", err))
+		return
+	}
+
+	fixedDelay(50)
+	e.text(fmt.Sprintf("You answered: %s", result))
+}
+
+// scenarioClarificationMulti: stress the multi-question path — 3 questions in
+// one bundle, all required, single MCP call.
+func scenarioClarificationMulti(e *emitter) {
+	fixedDelay(100)
+	e.text("Let me ask you a few questions about the project setup.")
+
+	result, err := callMCPTool("kandev", "ask_user_question_kandev", clarificationMultiQuestionArgs())
+	if err != nil {
+		e.text(fmt.Sprintf("Questions failed: %s", err))
 		return
 	}
 

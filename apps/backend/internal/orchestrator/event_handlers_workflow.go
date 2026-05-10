@@ -255,7 +255,10 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		zap.Bool("trigger_on_enter", triggerOnEnter))
 
 	if triggerOnEnter {
-		s.finalizeStepEnter(ctx, taskID, sessionID, targetStep, task.Description)
+		// Automated transitions always clear review: the agent just completed
+		// a turn, so any pending review from a prior step is stale regardless
+		// of whether the new step has auto_start_agent.
+		s.finalizeStepEnter(ctx, taskID, sessionID, targetStep, task.Description, true)
 	} else {
 		// on_turn_start transitions: user is about to send a message, no on_enter needed.
 		// However, we still need to switch the agent profile if the target step requires
@@ -396,17 +399,20 @@ func (s *Service) processStepExitAndEnter(ctx context.Context, taskID string, se
 		return
 	}
 
-	s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription)
+	clearReview := targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)
+	s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview)
 }
 
-// finalizeStepEnter clears review status, reloads the session, and processes on_enter
-// actions for the target step. Shared by executeStepTransition and processStepExitAndEnter.
-func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID string, targetStep *wfmodels.WorkflowStep, taskDescription string) {
-	// Clear review status when moving to a new step
-	if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
-		s.logger.Warn("failed to clear session review status",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
+// finalizeStepEnter optionally clears review status, reloads the session, and
+// processes on_enter actions for the target step. Shared by executeStepTransition
+// and processStepExitAndEnter.
+func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID string, targetStep *wfmodels.WorkflowStep, taskDescription string, clearReview bool) {
+	if clearReview {
+		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
+			s.logger.Warn("failed to clear session review status",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 	}
 
 	// Reload session after on_exit may have changed metadata

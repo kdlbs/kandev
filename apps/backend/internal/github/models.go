@@ -234,13 +234,22 @@ type RepoBranch struct {
 
 // GitHubStatus represents GitHub connection status.
 type GitHubStatus struct {
-	Authenticated   bool             `json:"authenticated"`
-	Username        string           `json:"username"`
-	AuthMethod      string           `json:"auth_method"` // "gh_cli", "pat", "none"
-	TokenConfigured bool             `json:"token_configured"`
-	TokenSecretID   string           `json:"token_secret_id,omitempty"`
-	RequiredScopes  []string         `json:"required_scopes"`
-	Diagnostics     *AuthDiagnostics `json:"diagnostics,omitempty"`
+	Authenticated   bool                 `json:"authenticated"`
+	Username        string               `json:"username"`
+	AuthMethod      string               `json:"auth_method"` // "gh_cli", "pat", "none"
+	TokenConfigured bool                 `json:"token_configured"`
+	TokenSecretID   string               `json:"token_secret_id,omitempty"`
+	RequiredScopes  []string             `json:"required_scopes"`
+	Diagnostics     *AuthDiagnostics     `json:"diagnostics,omitempty"`
+	RateLimit       *GitHubRateLimitInfo `json:"rate_limit,omitempty"`
+}
+
+// GitHubRateLimitInfo bundles known rate-limit snapshots per resource bucket
+// for surfacing in the UI.
+type GitHubRateLimitInfo struct {
+	Core    *RateSnapshot `json:"core,omitempty"`
+	GraphQL *RateSnapshot `json:"graphql,omitempty"`
+	Search  *RateSnapshot `json:"search,omitempty"`
 }
 
 // ConfigureTokenRequest is the request body for configuring a GitHub token.

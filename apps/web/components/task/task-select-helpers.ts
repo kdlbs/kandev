@@ -23,31 +23,6 @@ export type SwitchToSessionFn = (
   oldSessionId: string | null | undefined,
 ) => void;
 
-export type FinalizeNoSessionSelectDeps = {
-  /** Set the new active task in the kanban store (also clears activeSessionId). */
-  setActiveTask: (taskId: string) => void;
-  /** Save the outgoing env's layout, release its portals, then build the default layout. */
-  releaseLayoutToDefault: (oldEnvId: string | null) => void;
-  /** Push the new task id into the URL without reloading. */
-  replaceTaskUrl: (taskId: string) => void;
-};
-
-/**
- * Finalize a sidebar task selection when no session could be resolved or
- * launched for the new task. Releasing the dockview to default first ensures
- * portal cleanup targets the still-active outgoing env before
- * `setActiveTask` clears `activeSessionId` to null.
- */
-export function finalizeNoSessionSelect(
-  taskId: string,
-  oldEnvId: string | null,
-  deps: FinalizeNoSessionSelectDeps,
-): void {
-  deps.releaseLayoutToDefault(oldEnvId);
-  deps.setActiveTask(taskId);
-  deps.replaceTaskUrl(taskId);
-}
-
 export function resolveLoadedSessionId(
   sessions: TaskSession[],
   preferredSessionId: string,
@@ -83,11 +58,25 @@ export async function prepareAndSwitchTask(
   // Capture before the async launch; WS events may update activeSessionId
   // before launchSession resolves, causing a layout switch with the wrong old session.
   const oldSessionId = store.getState().tasks.activeSessionId;
+  // Release the outgoing env BEFORE awaiting `launchSession`. Otherwise the
+  // old task's env-scoped panels (file-editor, diff-viewer, commit-detail,
+  // browser, vscode, pr-detail) stay mounted in the dockview for the entire
+  // round-trip + WS env-id propagation, leaking into the new (preparing)
+  // task as stray tabs.
+  const oldEnvId = oldSessionId
+    ? (store.getState().environmentIdBySessionId[oldSessionId] ?? null)
+    : null;
+  releaseLayoutToDefault(oldEnvId);
   try {
     const { request } = buildPrepareRequest(taskId);
     const resp = await launchSession(request);
     if (resp.session_id) {
-      switchToSession(taskId, resp.session_id, oldSessionId);
+      // Pass `null` instead of the original oldSessionId — releaseLayoutToDefault
+      // already saved + released the outgoing env, and the dockview now holds the
+      // default layout. If we forwarded oldSessionId, the subsequent
+      // switchEnvLayout would call saveOutgoingEnv(envA) a second time and
+      // overwrite envA's correctly-persisted layout with the default.
+      switchToSession(taskId, resp.session_id, null);
       if ((store.getState().taskPRs.byTaskId[taskId]?.length ?? 0) > 0) {
         const { api, buildDefaultLayout } = useDockviewStore.getState();
         if (api) buildDefaultLayout(api, INTENT_PR_REVIEW);
@@ -150,13 +139,12 @@ export function selectTaskWithLayout(params: {
       return;
     }
 
-    const currentOldEnvId = currentOldSessionId
-      ? (store.getState().environmentIdBySessionId[currentOldSessionId] ?? null)
-      : null;
-    finalizeNoSessionSelect(taskId, currentOldEnvId, {
-      setActiveTask: params.setActiveTask,
-      releaseLayoutToDefault,
-      replaceTaskUrl,
-    });
+    // Failure path: prepareAndSwitchTask already called releaseLayoutToDefault
+    // before awaiting, so the outgoing env's layout is already saved and the
+    // dockview is showing the default layout. A second release here would
+    // overwrite the just-saved env layout with `api.toJSON()` (the default),
+    // losing the user's real layout for the originating task.
+    params.setActiveTask(taskId);
+    replaceTaskUrl(taskId);
   });
 }

@@ -252,17 +252,56 @@ func TestCreateTask_WithRepositoryURL(t *testing.T) {
 	assert.Equal(t, "main", repos[0]["base_branch"])
 }
 
-func TestCreateTask_RepositoryURL_RejectedForSubtasks(t *testing.T) {
-	backend := &testBackend{}
+func TestCreateTask_RepositoryURL_AllowedForSubtasks(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "task-new", "title": "Subtask with URL"},
+	}
 	s := newTaskModeServer(t, backend, "task-current")
 
 	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
 		"title":          "Subtask with URL",
 		"parent_id":      "self",
+		"description":    "Fix the upstream review-eligibility check",
 		"repository_url": "https://github.com/acme/widgets",
+		"base_branch":    "main",
 	})
 
-	assert.True(t, result.IsError, "repository_url should be rejected for subtasks")
+	assert.False(t, result.IsError, "repository_url should be accepted for subtasks (cross-repo subtask)")
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-current", payload["parent_id"], "self resolves to current task id")
+
+	repos, ok := payload["repositories"].([]map[string]string)
+	require.True(t, ok, "repositories should be a slice")
+	require.Len(t, repos, 1)
+	assert.Equal(t, "https://github.com/acme/widgets", repos[0]["github_url"])
+	assert.Equal(t, "main", repos[0]["base_branch"])
+}
+
+func TestCreateTask_LocalPath_AllowedForSubtasks(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "task-new", "title": "Subtask with local path"},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":       "Subtask with local path",
+		"parent_id":   "self",
+		"description": "Patch the sibling repo",
+		"local_path":  "/Users/me/projects/sibling",
+	})
+
+	assert.False(t, result.IsError, "local_path should be accepted for subtasks (cross-repo subtask)")
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-current", payload["parent_id"])
+
+	repos, ok := payload["repositories"].([]map[string]string)
+	require.True(t, ok)
+	require.Len(t, repos, 1)
+	assert.Equal(t, "/Users/me/projects/sibling", repos[0]["local_path"])
 }
 
 func TestMessageTask_ForwardsToBackend(t *testing.T) {

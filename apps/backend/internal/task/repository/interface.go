@@ -66,6 +66,8 @@ type MessageRepository interface {
 	GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error)
 	GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error)
 	FindMessageByPendingID(ctx context.Context, pendingID string) (*models.Message, error)
+	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*models.Message, error)
+	FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error)
 	UpdateMessage(ctx context.Context, message *models.Message) error
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error)
@@ -80,6 +82,7 @@ type TurnRepository interface {
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 	UpdateTurn(ctx context.Context, turn *models.Turn) error
 	CompleteTurn(ctx context.Context, id string) error
+	AbandonTurn(ctx context.Context, id string) error
 	CompletePendingToolCallsForTurn(ctx context.Context, turnID string) (int64, error)
 	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
 }

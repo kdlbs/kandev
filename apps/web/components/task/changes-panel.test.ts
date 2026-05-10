@@ -71,7 +71,36 @@ describe("mergeCommits", () => {
     ]);
   });
 
-  it("marks local commits as pushed when they match PR commits", () => {
+  it("trusts the backend pushed flag even with no PR (the bug fix)", () => {
+    // The original bug: local commits were marked unpushed whenever no PR
+    // existed, because pushed was derived from PR-SHA matching alone.
+    // Sourcing pushed from git on the backend means commits pushed to a
+    // branch without a PR show as pushed.
+    const local = [
+      { ...makeLocal("aaa1111", "pushed"), pushed: true },
+      { ...makeLocal("bbb2222", "local"), pushed: false },
+    ];
+    const result = mergeCommits(local, []);
+    expect(result[0]).toMatchObject({ commit_sha: "bbb2222", pushed: false });
+    expect(result[1]).toMatchObject({ commit_sha: "aaa1111", pushed: true });
+  });
+
+  it("backend pushed flag wins over PR-SHA mismatch (post-rebase scenario)", () => {
+    // After a rebase the local SHA no longer matches the PR's SHA, but the
+    // commit IS on the remote (force-pushed). The backend's pushed=true
+    // must override the missing PR match.
+    const local = [{ ...makeLocal("rebased1", "rebased"), pushed: true }];
+    const pr = [makePRFull("oldsha9999", "rebased")];
+    const result = mergeCommits(local, pr);
+    expect(result[0]).toMatchObject({ commit_sha: "rebased1", pushed: true });
+    // PR-only SHA still appears, since it isn't matched.
+    expect(result).toHaveLength(2);
+    expect(result[1]).toMatchObject({ commit_sha: "oldsha9999", pushed: true });
+  });
+
+  it("falls back to PR-SHA matching when backend pushed flag is absent", () => {
+    // Older commit_created notifications don't carry the pushed flag.
+    // PR matching kicks in as a backstop.
     const local = [makeLocal("aaa1111", "first")];
     const pr = [makePRFull("aaa1111bbbccc", "first", "user")];
     const result = mergeCommits(local, pr);

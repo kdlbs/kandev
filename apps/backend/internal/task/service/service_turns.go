@@ -100,6 +100,73 @@ func (s *Service) GetActiveTurn(ctx context.Context, sessionID string) (*models.
 	return turn, err
 }
 
+// AbandonOpenTurns closes any open turns for a session by setting their
+// completed_at = started_at. Used on session resume to bury orphan turns left
+// behind by a previous crash/restart so a fresh prompt starts a fresh turn
+// (preventing the UI from showing the orphan's stale started_at as the running
+// timer, and preventing the orphan from poisoning analytics with hours of dead
+// time).
+//
+// Mirrors the iteration shape of orchestrator.completeTurnForSession: the DB is
+// authoritative, so we loop GetActiveTurn → AbandonTurn until none remain, with
+// a sanity cap to break runaway loops.
+func (s *Service) AbandonOpenTurns(ctx context.Context, sessionID string) error {
+	const maxIterations = 16
+	closed := 0
+	for closed < maxIterations {
+		turn, err := s.GetActiveTurn(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if turn == nil {
+			return nil
+		}
+		if err := s.turns.AbandonTurn(ctx, turn.ID); err != nil {
+			s.logger.Error("failed to abandon turn",
+				zap.String("turn_id", turn.ID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			return err
+		}
+		// Same safety net as CompleteTurn: any tool calls left in a non-terminal
+		// state belong to a turn that is no longer running, so flip them to
+		// "complete" instead of leaving them to spin forever in the UI.
+		if affected, err := s.turns.CompletePendingToolCallsForTurn(ctx, turn.ID); err != nil {
+			s.logger.Warn("failed to complete pending tool calls for abandoned turn",
+				zap.String("turn_id", turn.ID),
+				zap.Error(err))
+		} else if affected > 0 {
+			s.logger.Info("completed pending tool calls on abandoned turn",
+				zap.String("turn_id", turn.ID),
+				zap.Int64("affected", affected))
+		}
+		// Re-fetch so the published event carries the persisted completed_at
+		// (= started_at) rather than a synthesized one.
+		refreshed, err := s.turns.GetTurn(ctx, turn.ID)
+		if err != nil {
+			s.logger.Debug("failed to refetch abandoned turn",
+				zap.String("turn_id", turn.ID),
+				zap.Error(err))
+		} else {
+			s.publishTurnEvent(events.TurnCompleted, refreshed)
+		}
+		s.logger.Info("abandoned orphan turn on session resume",
+			zap.String("turn_id", turn.ID),
+			zap.String("session_id", sessionID))
+		closed++
+	}
+	// Only warn if turns are *still* accumulating after the cap. Closing
+	// exactly maxIterations turns and then finding the session clean is not a
+	// runaway — same shape as completeTurnForSession.
+	if turn, err := s.GetActiveTurn(ctx, sessionID); err == nil && turn != nil {
+		s.logger.Warn("AbandonOpenTurns hit iteration cap; some orphan turns may remain",
+			zap.String("session_id", sessionID),
+			zap.Int("closed", closed),
+			zap.Int("max_iterations", maxIterations))
+	}
+	return nil
+}
+
 // getOrStartTurn returns the active turn for a session, or starts a new one if none exists.
 // This is used to ensure messages always have a valid turn ID.
 func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {

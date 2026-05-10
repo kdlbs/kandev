@@ -3,7 +3,9 @@ package health
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 )
 
 // --- GitHubChecker tests ---
@@ -52,6 +54,41 @@ func TestGitHubChecker_Authenticated(t *testing.T) {
 	issues := checker.Check(context.Background())
 	if len(issues) != 0 {
 		t.Errorf("expected 0 issues, got %d", len(issues))
+	}
+}
+
+type stubRateLimitProvider struct {
+	exhausted []GitHubRateLimitStatus
+}
+
+func (s *stubRateLimitProvider) ExhaustedRateLimits() []GitHubRateLimitStatus {
+	return s.exhausted
+}
+
+func TestGitHubChecker_AuthenticatedButRateLimited(t *testing.T) {
+	rate := &stubRateLimitProvider{exhausted: []GitHubRateLimitStatus{
+		{Resource: "graphql", ResetAt: time.Now().Add(15 * time.Minute)},
+	}}
+	checker := NewGitHubChecker(&mockGitHubProvider{authenticated: true, authMethod: "gh_cli"})
+	checker.WithRateLimitProvider(rate)
+	issues := checker.Check(context.Background())
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue, got %d", len(issues))
+	}
+	if issues[0].ID != "github_rate_limit_graphql" {
+		t.Errorf("ID = %q, want github_rate_limit_graphql", issues[0].ID)
+	}
+	if !strings.Contains(issues[0].Message, "resets in") {
+		t.Errorf("message should include reset countdown, got %q", issues[0].Message)
+	}
+}
+
+func TestGitHubChecker_AuthenticatedRateProviderEmpty(t *testing.T) {
+	rate := &stubRateLimitProvider{}
+	checker := NewGitHubChecker(&mockGitHubProvider{authenticated: true})
+	checker.WithRateLimitProvider(rate)
+	if got := checker.Check(context.Background()); len(got) != 0 {
+		t.Errorf("expected 0 issues when rate provider empty, got %d", len(got))
 	}
 }
 

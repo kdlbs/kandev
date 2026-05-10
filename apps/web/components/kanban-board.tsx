@@ -16,6 +16,7 @@ import { MobileTaskSheet } from "./kanban/mobile-task-sheet";
 import { TaskMultiSelectToolbar } from "./kanban/task-multi-select-toolbar";
 import { useKanbanData, useKanbanActions, useKanbanNavigation } from "@/hooks/domains/kanban";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTaskMultiSelect } from "@/hooks/use-task-multi-select";
@@ -69,14 +70,11 @@ function useWorkflowSelection({
       (workflow: WorkflowsState["items"][number]) => workflow.workspaceId === workspaceId,
     );
 
-    const hasSettingsWorkflow =
-      settings.workflowId &&
-      workspaceWorkflows.some(
-        (workflow: WorkflowsState["items"][number]) => workflow.id === settings.workflowId,
-      );
-    const fallbackWorkflowId = workspaceWorkflows.length === 1 ? workspaceWorkflows[0].id : null;
-    const desiredWorkflowId =
-      (hasSettingsWorkflow ? settings.workflowId : fallbackWorkflowId) ?? null;
+    const desiredWorkflowId = resolveDesiredWorkflowId({
+      activeWorkflowId: workflowsState.activeId,
+      settingsWorkflowId: settings.workflowId,
+      workspaceWorkflows,
+    });
     setActiveWorkflow(desiredWorkflowId);
     if (!desiredWorkflowId) {
       store.getState().hydrate({

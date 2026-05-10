@@ -276,7 +276,7 @@ func (s *Server) registerTools() {
 	switch s.mode {
 	case ModeConfig:
 		s.registerConfigWorkflowTools()
-		count += 10
+		count += 11
 		s.registerConfigAgentTools()
 		count += 4
 		s.registerConfigMcpTools()
@@ -294,7 +294,7 @@ func (s *Server) registerTools() {
 		// they can both manage Kandev configuration and spawn new tasks.
 		// No interaction or plan tools (no live session to attach them to).
 		s.registerConfigWorkflowTools()
-		count += 10
+		count += 11
 		s.registerConfigAgentTools()
 		count += 4
 		s.registerConfigMcpTools()
@@ -434,6 +434,7 @@ WHEN TO USE parent_id='self':
 - Breaking down your current task into phases/steps → use parent_id='self'
 - Creating tasks from a plan → use parent_id='self' (inherits repo, workspace, workflow)
 - Delegating work to another agent → use parent_id='self'
+- Delegating work that lives in a sibling repo → use parent_id='self' AND pass repository_url / repository_id / local_path to point the subtask at that repo
 
 WHEN TO OMIT parent_id (top-level task):
 - Creating an unrelated, standalone task
@@ -441,7 +442,8 @@ WHEN TO OMIT parent_id (top-level task):
 - workspace_id and workflow_id are auto-resolved if only one exists; provide explicitly if ambiguous
 
 IMPORTANT:
-- Subtasks inherit repositories, workspace, workflow, agent profile, and executor from parent
+- Subtasks inherit workspace, workflow, agent profile, and executor from the parent
+- Subtasks inherit the parent's repository unless you supply repository_url, repository_id, or local_path — in which case the subtask targets that repo instead (must live in the parent's workspace)
 - Top-level tasks need a repository via repository_url, repository_id, or local_path
 - 'description' is the sub-agent's initial prompt — be specific and detailed
 - Set start_agent=false to create without starting an agent`
@@ -471,9 +473,9 @@ IMPORTANT:
 			mcp.WithString("agent_profile_id", mcp.Description("Agent profile ID to use. For subtasks, inherited from the parent session. For top-level tasks, ask the user which agent profile they want (e.g. Claude Code, OpenCode) if not already known.")),
 			mcp.WithString("executor_profile_id", mcp.Description("Executor profile ID to use (determines the runtime environment: local, worktree, docker, etc.). For subtasks, inherited from the parent session. For top-level tasks, ask the user which executor profile they want if not already known.")),
 			mcp.WithBoolean("start_agent", mcp.Description("Whether to auto-start an agent on the created task. Default: true. Set to false to create the task without starting an agent.")),
-			mcp.WithString("repository_id", mcp.Description("Repository ID for top-level tasks. Not needed for subtasks (inherited from parent).")),
-			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo') for top-level tasks. Will create/find the repository automatically. Preferred for local worktree flow.")),
-			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo') for top-level tasks. The repository will be cloned automatically on first use. Not needed for subtasks (inherited from parent).")),
+			mcp.WithString("repository_id", mcp.Description("Repository ID. Required for top-level tasks unless local_path or repository_url is provided. For subtasks: optional — supply only when the subtask should target a different repo than the parent.")),
+			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Will create/find the repository automatically. Preferred for local worktree flow. For subtasks: supply only when the subtask should target a different repo than the parent.")),
+			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo'). The repository will be cloned automatically on first use. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional, defaults to repository's default branch.")),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
@@ -483,54 +485,70 @@ IMPORTANT:
 func (s *Server) registerInteractionTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("ask_user_question_kandev",
-			mcp.WithDescription(`Ask the user a clarifying question with multiple choice options.
+			mcp.WithDescription(`Ask the user one or more clarifying questions in a single tool call.
 
-Use this tool when you need user input to proceed. The user will see the prompt and can select one of the options or provide a custom text response.
+Use this tool when you need user input to proceed. Bundle related questions
+together in one call so the user answers them all in one back-and-forth instead
+of sequential round-trips. Each question is rendered as its own card; the user
+selects an option or provides a custom text response per question, and the
+agent receives a map keyed by question id once every question has been answered.
 
-IMPORTANT: Each option must be a concrete, actionable choice - NOT meta-text like "Answer questions below".
-
-Options format - array of objects with:
-- "label": Short text (1-5 words) shown as the clickable option
-- "description": Brief explanation of what this option means
+IMPORTANT:
+- Provide 1 to 4 questions per call.
+- Each question must have 2 to 6 concrete, actionable options.
+- Each option must have a short "label" (1-5 words) and a "description"
+  explaining what selecting it means. NEVER use meta-text like "Answer below".
+- Only call this tool when you genuinely need information you cannot infer.
 
 Example usage:
 {
-  "prompt": "Which database should I use for this project?",
-  "options": [
-    {"label": "PostgreSQL", "description": "Relational database, good for complex queries"},
-    {"label": "MongoDB", "description": "Document database, flexible schema"},
-    {"label": "SQLite", "description": "Embedded database, simple setup"}
+  "questions": [
+    {
+      "id": "db",
+      "prompt": "Which database should I use for this project?",
+      "options": [
+        {"label": "PostgreSQL", "description": "Relational, good for complex queries"},
+        {"label": "MongoDB", "description": "Document database, flexible schema"},
+        {"label": "SQLite", "description": "Embedded, simple setup"}
+      ]
+    },
+    {
+      "id": "migration",
+      "prompt": "How should I handle the existing user data during migration?",
+      "options": [
+        {"label": "Migrate all", "description": "Keep all existing records"},
+        {"label": "Archive old", "description": "Archive records older than 1 year"},
+        {"label": "Fresh start", "description": "Delete existing data and start fresh"}
+      ]
+    }
   ],
-  "context": "The project requires storing user profiles and relationships between entities."
+  "context": "Backend redesign — picking the persistence layer and migration policy together."
 }
 
-Another example:
+The response is a JSON object keyed by each question id. Each entry may include
+"selected_option" (the option_id the user picked), "custom_text" (the user's
+free-form answer; can co-exist with a selected option), or "answered": false
+when the user did not respond to that question. When the user skipped the entire
+bundle, the envelope also carries "rejected": true and an optional
+"reject_reason". Example success response:
 {
-  "prompt": "How should I handle the existing user data during migration?",
-  "options": [
-    {"label": "Migrate all", "description": "Keep all existing records"},
-    {"label": "Archive old", "description": "Archive records older than 1 year"},
-    {"label": "Fresh start", "description": "Delete existing data and start fresh"}
-  ]
+  "db": {"selected_option": "q1_opt1"},
+  "migration": {"custom_text": "Migrate all but flag rows older than 2 years"}
+}
+Example rejection:
+{
+  "rejected": true,
+  "reject_reason": "User skipped",
+  "db": {"answered": false, "rejected": true},
+  "migration": {"answered": false, "rejected": true}
 }`),
-			mcp.WithString("prompt", mcp.Required(), mcp.Description("The question to ask the user. Be specific and clear.")),
-			mcp.WithArray("options", mcp.Required(), mcp.Description(`Array of option objects. Each option must have: "label" (1-5 words, the clickable choice) and "description" (explanation of the option). Provide 2-4 concrete, actionable options.`),
-				mcp.Items(map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"label": map[string]any{
-							"type":        "string",
-							"description": "Short text (1-5 words) shown as the clickable option",
-						},
-						"description": map[string]any{
-							"type":        "string",
-							"description": "Brief explanation of what this option means",
-						},
-					},
-					"required": []string{"label", "description"},
-				}),
+			mcp.WithArray(questionsArg, mcp.Required(),
+				mcp.Description(`Array of 1-4 question objects. Each question must have a "prompt" (the question text) and an "options" array (2-6 entries with label + description). Optional fields: "id" (stable identifier in the response map; auto-generated if omitted), "title" (≤12 chars short label).`),
+				mcp.MinItems(1),
+				mcp.MaxItems(4),
+				mcp.Items(buildQuestionSchemaItem()),
 			),
-			mcp.WithString("context", mcp.Description("Optional background information to help the user understand why you're asking this question.")),
+			mcp.WithString("context", mcp.Description("Optional shared background information to help the user understand why you're asking these questions.")),
 		),
 		s.wrapHandler("ask_user_question_kandev", s.askUserQuestionHandler()),
 	)
@@ -569,4 +587,44 @@ func (s *Server) registerPlanTools() {
 		),
 		s.wrapHandler("delete_task_plan_kandev", s.deleteTaskPlanHandler()),
 	)
+}
+
+// buildQuestionSchemaItem describes the shape of a single question object in
+// the ask_user_question_kandev tool schema. Hoisted out of registerInteractionTools
+// to keep the registration body short and to deduplicate the JSON-schema
+// keyword strings (linter goconst rules).
+func buildQuestionSchemaItem() map[string]any {
+	const typeKey = "type"
+	const propsKey = "properties"
+	const reqKey = "required"
+	const objType = "object"
+	const stringType = "string"
+
+	str := func(desc string) map[string]any {
+		return map[string]any{typeKey: stringType, descriptionArg: desc}
+	}
+
+	return map[string]any{
+		typeKey: objType,
+		propsKey: map[string]any{
+			idArg:     str("Stable identifier used as the key in the response map. Auto-assigned (q1, q2, ...) if omitted."),
+			titleArg:  str("Optional short label (≤12 chars) shown above the prompt."),
+			promptArg: str("The question text shown to the user."),
+			optionsArg: map[string]any{
+				typeKey:        "array",
+				descriptionArg: "2-6 concrete, actionable choices.",
+				"minItems":     2,
+				"maxItems":     6,
+				"items": map[string]any{
+					typeKey: objType,
+					propsKey: map[string]any{
+						labelArg:       str("Short text (1-5 words) shown as the clickable option."),
+						descriptionArg: str("Brief explanation of what this option means."),
+					},
+					reqKey: []string{labelArg, descriptionArg},
+				},
+			},
+		},
+		reqKey: []string{promptArg, optionsArg},
+	}
 }

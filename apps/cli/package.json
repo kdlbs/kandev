@@ -1,9 +1,14 @@
 {
   "name": "kandev",
-  "version": "0.16.0",
+  "version": "0.41.0",
   "private": false,
-  "description": "NPX launcher for Kandev",
+  "description": "Launcher for Kandev — manage tasks, orchestrate agents, review changes, and ship value",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kdlbs/kandev.git"
+  },
+  "homepage": "https://github.com/kdlbs/kandev",
   "type": "commonjs",
   "bin": {
     "kandev": "bin/cli.js"
@@ -13,12 +18,23 @@
     "bin",
     "dist"
   ],
+  "engines": {
+    "npm": ">=7"
+  },
+  "optionalDependencies": {
+    "@kdlbs/runtime-linux-x64": "0.0.0-bootstrap",
+    "@kdlbs/runtime-linux-arm64": "0.0.0-bootstrap",
+    "@kdlbs/runtime-darwin-x64": "0.0.0-bootstrap",
+    "@kdlbs/runtime-darwin-arm64": "0.0.0-bootstrap",
+    "@kdlbs/runtime-win32-x64": "0.0.0-bootstrap"
+  },
   "dependencies": {
     "tar": "^7.5.11",
     "tree-kill": "^1.2.2"
   },
   "devDependencies": {
     "@types/node": "^20",
+    "esbuild": "^0.24.0",
     "tsx": "^4.15.7",
     "typescript": "^5",
     "vitest": "^1.6.0"
@@ -26,6 +42,7 @@
   "scripts": {
     "dev": "unset npm_config_prefix && tsx src/cli.ts",
     "build": "tsc -p tsconfig.json",
+    "bundle": "esbuild dist/cli.js --bundle --platform=node --format=cjs --outfile=dist/cli.bundle.js",
     "start": "node dist/cli.js",
     "test": "vitest run",
     "prepublishOnly": "pnpm build"

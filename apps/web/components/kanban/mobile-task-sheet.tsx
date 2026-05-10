@@ -12,6 +12,7 @@ import {
 import { Badge } from "@kandev/ui/badge";
 import { IconArrowRight, IconEdit, IconTrash } from "@tabler/icons-react";
 import type { Task } from "@/components/kanban-card";
+import { formatTaskStateLabel } from "@/lib/ui/state-labels";
 
 type MobileTaskSheetProps = {
   task: Task | null;
@@ -42,7 +43,7 @@ export function MobileTaskSheet({
           )}
           <div className="flex items-center gap-2 mt-1">
             <Badge variant="secondary" className="text-xs">
-              {task.state ?? "not_started"}
+              {formatTaskStateLabel(task.state)}
             </Badge>
           </div>
         </DrawerHeader>

@@ -343,6 +343,7 @@ type SubmitWiringArgs = {
   props: TaskCreateDialogProps;
   fs: ReturnType<typeof useDialogFormState>;
   computed: ReturnType<typeof useTaskCreateDialogData>["computed"];
+  workspaceRepositories: ReturnType<typeof useTaskCreateDialogData>["repositories"];
   repositoryLocalPath: string;
   isSessionMode: boolean;
   isEditMode: boolean;
@@ -352,6 +353,7 @@ function useSubmitHandlersWiring({
   props,
   fs,
   computed,
+  workspaceRepositories,
   repositoryLocalPath,
   isSessionMode,
   isEditMode,
@@ -370,6 +372,7 @@ function useSubmitHandlersWiring({
     effectiveDefaultStepId: computed.effectiveDefaultStepId,
     repositories: fs.repositories,
     discoveredRepositories: fs.discoveredRepositories,
+    workspaceRepositories,
     useGitHubUrl: fs.useGitHubUrl,
     githubUrl: fs.githubUrl,
     githubPrHeadBranch: fs.githubPrHeadBranch,
@@ -460,6 +463,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     props,
     fs,
     computed,
+    workspaceRepositories: repositories,
     repositoryLocalPath,
     isSessionMode,
     isEditMode,

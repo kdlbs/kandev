@@ -11,6 +11,7 @@ import type {
 } from "@/lib/types/http";
 import type {
   GitHubStatus,
+  GitHubRateLimitUpdate,
   TaskPR,
   PRWatch,
   ReviewWatch as GitHubReviewWatch,
@@ -19,6 +20,7 @@ import type {
 } from "@/lib/types/github";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
+import type * as UISliceTypes from "./slices/ui/types";
 import { mergeInitialState } from "./default-state";
 import {
   createKanbanSlice,
@@ -29,6 +31,7 @@ import {
   createUISlice,
   createGitHubSlice,
   createJiraSlice,
+  createLinearSlice,
   defaultKanbanState,
   defaultWorkspaceState,
   defaultSettingsState,
@@ -37,6 +40,7 @@ import {
   defaultUIState,
   defaultGitHubState,
   defaultJiraState,
+  defaultLinearState,
   type WorkspaceState,
   type WorkflowsState,
   type ExecutorsState,
@@ -139,8 +143,13 @@ export type {
   JiraSliceState,
   JiraSliceActions,
   JiraIssueWatchesState,
+  LinearSlice,
+  LinearSliceState,
+  LinearSliceActions,
+  LinearIssueWatchesState,
 } from "./slices";
 import type { JiraIssueWatch } from "@/lib/types/jira";
+import type { LinearIssueWatch } from "@/lib/types/linear";
 
 // Combined AppState type
 export type AppState = {
@@ -213,6 +222,9 @@ export type AppState = {
   // JIRA slice
   jiraIssueWatches: (typeof defaultJiraState)["jiraIssueWatches"];
 
+  // Linear slice
+  linearIssueWatches: (typeof defaultLinearState)["linearIssueWatches"];
+
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
   rightPanel: (typeof defaultUIState)["rightPanel"];
@@ -230,6 +242,7 @@ export type AppState = {
   sidebarViews: (typeof defaultUIState)["sidebarViews"];
   collapsedSubtaskParents: (typeof defaultUIState)["collapsedSubtaskParents"];
   kanbanPreviewedTaskId: (typeof defaultUIState)["kanbanPreviewedTaskId"];
+  sidebarTaskPrefs: (typeof defaultUIState)["sidebarTaskPrefs"];
 
   // GitHub actions
   setGitHubStatus: (status: GitHubStatus | null) => void;
@@ -251,6 +264,7 @@ export type AppState = {
   removeIssueWatch: (id: string) => void;
   setActionPresets: (workspaceId: string, presets: GitHubActionPresets) => void;
   setActionPresetsLoading: (workspaceId: string, loading: boolean) => void;
+  applyGitHubRateLimitUpdate: (update: GitHubRateLimitUpdate) => void;
 
   // JIRA actions
   setJiraIssueWatches: (watches: JiraIssueWatch[]) => void;
@@ -259,6 +273,14 @@ export type AppState = {
   updateJiraIssueWatch: (watch: JiraIssueWatch) => void;
   removeJiraIssueWatch: (id: string) => void;
   resetJiraIssueWatches: () => void;
+
+  // Linear actions
+  setLinearIssueWatches: (watches: LinearIssueWatch[]) => void;
+  setLinearIssueWatchesLoading: (loading: boolean) => void;
+  addLinearIssueWatch: (watch: LinearIssueWatch) => void;
+  updateLinearIssueWatch: (watch: LinearIssueWatch) => void;
+  removeLinearIssueWatch: (id: string) => void;
+  resetLinearIssueWatches: () => void;
 
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
@@ -340,16 +362,10 @@ export type AppState = {
   setConnectionStatus: (status: ConnectionState["status"], error?: string | null) => void;
   setMobileKanbanColumnIndex: (index: number) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
-  setMobileSessionPanel: (
-    sessionId: string,
-    panel: import("./slices/ui/types").MobileSessionPanel,
-  ) => void;
+  setMobileSessionPanel: (sessionId: string, panel: UISliceTypes.MobileSessionPanel) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
-  setActiveDocument: (
-    sessionId: string,
-    doc: import("./slices/ui/types").ActiveDocument | null,
-  ) => void;
+  setActiveDocument: (sessionId: string, doc: UISliceTypes.ActiveDocument | null) => void;
   setSystemHealth: (response: SystemHealthResponse) => void;
   setSystemHealthLoading: (loading: boolean) => void;
   invalidateSystemHealth: () => void;
@@ -364,9 +380,7 @@ export type AppState = {
   closeConfigChatSession: (sessionId: string) => void;
   setActiveConfigChatSession: (sessionId: string) => void;
   renameConfigChatSession: (sessionId: string, name: string) => void;
-  setSessionFailureNotification: (
-    n: import("./slices/ui/types").SessionFailureNotification | null,
-  ) => void;
+  setSessionFailureNotification: (n: UISliceTypes.SessionFailureNotification | null) => void;
   toggleBottomTerminal: () => void;
   openBottomTerminalWithCommand: (command: string) => void;
   clearBottomTerminalCommand: () => void;
@@ -480,6 +494,9 @@ export type AppState = {
   clearSidebarSyncError: UIA["clearSidebarSyncError"];
   migrateLocalViewsToBackend: UIA["migrateLocalViewsToBackend"];
   setKanbanPreviewedTaskId: UIA["setKanbanPreviewedTaskId"];
+  togglePinnedTask: UIA["togglePinnedTask"];
+  setSidebarTaskOrder: UIA["setSidebarTaskOrder"];
+  removeTaskFromSidebarPrefs: UIA["removeTaskFromSidebarPrefs"];
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
@@ -505,6 +522,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       ...createGitHubSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createJiraSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createLinearSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createUISlice(set as any, get as any, api as any),
       // Override state with merged initial state
@@ -558,6 +577,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       issueWatches: merged.issueWatches,
       actionPresets: merged.actionPresets,
       jiraIssueWatches: merged.jiraIssueWatches,
+      linearIssueWatches: merged.linearIssueWatches,
       previewPanel: merged.previewPanel,
       rightPanel: merged.rightPanel,
       diffs: merged.diffs,

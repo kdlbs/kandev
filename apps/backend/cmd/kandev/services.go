@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/discovery"
+	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
+	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -19,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/linear"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/slack"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
@@ -86,7 +90,8 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 
 	githubSvc := initGitHubService(dbPool, eventBus, repos.Secrets, log)
 	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
-	linearSvc := initLinearService(dbPool, repos.Secrets, log)
+	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
+	slackSvc := initSlackService(dbPool, repos.Secrets, log)
 
 	return &Services{
 		Task:     taskSvc,
@@ -98,6 +103,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		GitHub:   githubSvc,
 		Jira:     jiraSvc,
 		Linear:   linearSvc,
+		Slack:    slackSvc,
 		// Notification service is initialized after gateway is available.
 		Notification: nil,
 	}, agentSettingsController, nil
@@ -238,14 +244,66 @@ func initJiraService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secret
 }
 
 // initLinearService wires up the Linear integration. Failures are non-fatal.
-// Linear doesn't publish events today so it doesn't take an eventBus —
-// adding one would be speculative until a feature actually needs it.
-func initLinearService(dbPool *db.Pool, secretsStore secrets.SecretStore, log *logger.Logger) *linear.Service {
-	svc, _, err := linear.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), log)
+func initLinearService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *linear.Service {
+	svc, _, err := linear.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
 	if err != nil {
 		log.Warn("Linear service initialization failed (non-fatal)", zap.Error(err))
 	}
 	return svc
+}
+
+// initSlackService wires up the Slack integration. Failures are non-fatal.
+// The agent runner is wired post-construction by main.go once hostutility +
+// utility services exist.
+func initSlackService(dbPool *db.Pool, secretsStore secrets.SecretStore, log *logger.Logger) *slack.Service {
+	svc, _, err := slack.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), log)
+	if err != nil {
+		log.Warn("Slack service initialization failed (non-fatal)", zap.Error(err))
+	}
+	return svc
+}
+
+// buildKandevMCPURL is the URL passed to the Slack triage agent for the
+// Kandev MCP server. The MCP server is mounted on the same port as the rest
+// of the backend's HTTP API; this just centralises the path so it stays in
+// sync with internal/mcp/server's mount point ("/mcp").
+func buildKandevMCPURL(port int) string {
+	if port == 0 {
+		port = portsBackendDefault
+	}
+	return fmt.Sprintf("http://localhost:%d/mcp", port)
+}
+
+// portsBackendDefault is the default backend HTTP port. We don't import
+// internal/common/ports here to avoid pulling its transitive deps into
+// services.go's import graph; the value is duplicated only as a fallback for
+// when cfg.Server.Port is left at zero (which shouldn't happen in practice).
+const portsBackendDefault = 38429
+
+// slackHostUtilityAdapter adapts *hostutility.Manager to slack.HostUtilityRunner.
+// The slack package can't import hostutility without a transitive cycle (it
+// would need to import agentctl + lifecycle), so we shim through the agentctl
+// utility DTO here in the cmd package where both are already imported.
+type slackHostUtilityAdapter struct {
+	mgr *hostutility.Manager
+}
+
+func (a slackHostUtilityAdapter) ExecutePromptWithMCP(
+	ctx context.Context,
+	agentType, model, mode, prompt string,
+	mcpServers []agentctlutil.MCPServerDTO,
+) (slack.HostPromptResult, error) {
+	res, err := a.mgr.ExecutePromptWithMCP(ctx, agentType, model, mode, prompt, mcpServers)
+	if err != nil {
+		return slack.HostPromptResult{}, err
+	}
+	return slack.HostPromptResult{
+		Response:       res.Response,
+		Model:          res.Model,
+		PromptTokens:   res.PromptTokens,
+		ResponseTokens: res.ResponseTokens,
+		DurationMs:     res.DurationMs,
+	}, nil
 }
 
 // workflowProviderAdapter adapts task service to workflow service's WorkflowProvider interface.

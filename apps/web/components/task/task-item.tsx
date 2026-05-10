@@ -8,12 +8,15 @@ import {
   IconDots,
   IconGitPullRequest,
   IconMessageQuestion,
+  IconPinFilled,
 } from "@tabler/icons-react";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { IssueTaskIcon } from "@/components/github/issue-task-icon";
 import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
 import { DEBUG_UI } from "@/lib/config";
+import { useTaskColor } from "@/hooks/use-task-color";
+import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { shouldUseQuestionTaskIcon } from "@/lib/ui/state-icons";
 import type { SessionPollMode } from "@/lib/state/slices/session-runtime/types";
@@ -55,6 +58,7 @@ type TaskItemProps = {
   repositories?: string[];
   prInfo?: { number: number; state: string };
   issueInfo?: { url: string; number: number };
+  isPinned?: boolean;
 };
 
 function formatRelativeTime(dateString: string): string {
@@ -221,6 +225,7 @@ function TaskItemContent({
   remoteExecutorName,
   primarySessionId,
   isArchived,
+  isPinned,
   repositories,
   updatedAt,
   prInfo,
@@ -234,6 +239,7 @@ function TaskItemContent({
   remoteExecutorName?: string;
   primarySessionId?: string | null;
   isArchived?: boolean;
+  isPinned?: boolean;
   repositories?: string[];
   updatedAt?: string;
   prInfo?: { number: number; state: string };
@@ -246,6 +252,12 @@ function TaskItemContent({
     >
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
         <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
+        {isPinned && (
+          <IconPinFilled
+            data-testid="task-pinned-icon"
+            className="h-3 w-3 shrink-0 text-muted-foreground/60"
+          />
+        )}
         <TaskPRIcon taskId={taskId} prInfo={prInfo} />
         {issueInfo && <IssueTaskIcon issueInfo={issueInfo} />}
         {isRemoteExecutor && (
@@ -297,11 +309,13 @@ export const TaskItem = memo(function TaskItem({
   repositories,
   prInfo,
   issueInfo,
+  isPinned,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
   const isInProgress = computeIsInProgress(state, sessionState);
   const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
   const showSubtaskToggle = !!subtaskCount && subtaskCount > 0 && !!onToggleSubtasks;
+  const taskColor = useTaskColor(taskId);
 
   return (
     <div
@@ -317,12 +331,7 @@ export const TaskItem = memo(function TaskItem({
         isSubTask ? "pl-8" : "pl-3",
       )}
     >
-      <div
-        className={cn(
-          "absolute left-0 top-0 bottom-0 w-[2px] transition-opacity",
-          isSelected ? "bg-primary opacity-100" : "opacity-0",
-        )}
-      />
+      <SelectionBar isSelected={isSelected} color={taskColor} />
       {isSubTask && (
         <span className="absolute left-3.5 top-[10px] select-none text-[11px] text-muted-foreground/30">
           ↳
@@ -342,6 +351,7 @@ export const TaskItem = memo(function TaskItem({
         remoteExecutorName={remoteExecutorName}
         primarySessionId={primarySessionId}
         isArchived={isArchived}
+        isPinned={isPinned}
         repositories={repositories}
         updatedAt={updatedAt}
         prInfo={prInfo}
@@ -361,6 +371,28 @@ export const TaskItem = memo(function TaskItem({
     </div>
   );
 });
+
+function SelectionBar({ isSelected, color }: { isSelected: boolean; color: TaskColor | null }) {
+  if (color) {
+    return (
+      <div
+        className={cn(
+          "absolute left-0 top-0 bottom-0 w-[3px] transition-opacity",
+          TASK_COLOR_BAR_CLASS[color],
+          isSelected ? "opacity-100" : "opacity-60",
+        )}
+      />
+    );
+  }
+  return (
+    <div
+      className={cn(
+        "absolute left-0 top-0 bottom-0 w-[2px] bg-primary transition-opacity",
+        isSelected ? "opacity-100" : "opacity-0",
+      )}
+    />
+  );
+}
 
 function SubtaskToggle({
   taskId,

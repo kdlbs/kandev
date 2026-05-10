@@ -12,6 +12,7 @@ import { themeKandev } from "@/lib/layout/dockview-theme";
 import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
 import { tryRestoreLayout } from "./dockview-layout-restore";
 import {
+  setupContainerResizeSync,
   setupGroupTracking,
   setupLayoutPersistence,
   setupPortalCleanup,
@@ -42,6 +43,7 @@ import { ChangesTab } from "./changes-tab";
 import { PlanTab } from "./plan-tab";
 import { PreviewFileTab, PreviewDiffTab, PreviewCommitTab, PinnedDefaultTab } from "./preview-tab";
 import { SessionTab } from "./session-tab";
+import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import {
   setupSessionTabSync,
   setupChatPanelSafetyNet,
@@ -152,7 +154,15 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
 
 // --- TAB COMPONENTS ---
 function PermanentTab(props: IDockviewPanelHeaderProps) {
-  return <DockviewDefaultTab {...props} hideClose />;
+  const onDoubleClick = useTabMaximizeOnDoubleClick(props.api);
+  return (
+    <div
+      className="flex h-full items-center cursor-pointer select-none"
+      onDoubleClick={onDoubleClick}
+    >
+      <DockviewDefaultTab {...props} hideClose />
+    </div>
+  );
 }
 
 /** Sync the user's default saved layout from settings into the dockview store. */
@@ -188,7 +198,8 @@ const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeader
 
 function SidebarContent({ panelId }: { panelId: string }) {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const workflowId = useAppStore((state) => state.workflows.activeId);
+  // Read kanban.workflowId (task snapshot), not workflows.activeId (homepage filter), to preserve "All Workflows" across task navigation.
+  const workflowId = useAppStore((state) => state.kanban.workflowId);
   const workspaceName = useAppStore((state) => {
     const ws = state.workspaces.items.find((w: { id: string }) => w.id === workspaceId);
     return ws?.name ?? "Workspace";
@@ -449,6 +460,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   const setApi = useDockviewStore((s) => s.setApi);
   const buildDefaultLayout = useDockviewStore((s) => s.buildDefaultLayout);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const readyDisposersRef = useRef<Array<() => void>>([]);
   const appStore = useAppStoreApi();
 
   const effectiveSessionId =
@@ -484,11 +496,12 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
       useDockviewStore.setState({ currentLayoutEnvId: currentEnvId });
 
-      setupGroupTracking(api);
+      readyDisposersRef.current.push(setupGroupTracking(api));
       setupSessionTabSync(api, appStore);
       setupChatPanelSafetyNet(api, appStore);
       setupLayoutPersistence(api, saveTimerRef, envIdRef);
       setupPortalCleanup(api, appStore);
+      readyDisposersRef.current.push(setupContainerResizeSync(api));
     },
     [setApi, buildDefaultLayout, initialLayout, appStore],
   );
@@ -508,7 +521,9 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   // Clean up on unmount (e.g. navigating away from session page)
   useEffect(() => {
     const timerRef = saveTimerRef;
+    const disposersRef = readyDisposersRef;
     return () => {
+      for (const dispose of disposersRef.current.splice(0)) dispose();
       if (timerRef.current) clearTimeout(timerRef.current);
       panelPortalManager.releaseAll();
     };

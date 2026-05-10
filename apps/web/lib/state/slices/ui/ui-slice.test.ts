@@ -73,6 +73,76 @@ describe("toggleSubtaskCollapsed", () => {
   });
 });
 
+describe("sidebar task prefs (pin + manual order)", () => {
+  const PINNED_KEY = "kandev.sidebar.pinnedTaskIds";
+  const ORDER_KEY = "kandev.sidebar.orderedTaskIds";
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("hydrates pinned + ordered from localStorage", () => {
+    window.localStorage.setItem(PINNED_KEY, JSON.stringify(["t1"]));
+    window.localStorage.setItem(ORDER_KEY, JSON.stringify(["t2", "t1"]));
+    const store = makeStore();
+    expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t1"]);
+    expect(store.getState().sidebarTaskPrefs.orderedTaskIds).toEqual(["t2", "t1"]);
+  });
+
+  it("togglePinnedTask adds, removes, and persists", () => {
+    const store = makeStore();
+    store.getState().togglePinnedTask("t1");
+    expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t1"]);
+    expect(JSON.parse(window.localStorage.getItem(PINNED_KEY) ?? "null")).toEqual(["t1"]);
+
+    store.getState().togglePinnedTask("t2");
+    expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t1", "t2"]);
+
+    store.getState().togglePinnedTask("t1");
+    expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t2"]);
+    expect(JSON.parse(window.localStorage.getItem(PINNED_KEY) ?? "null")).toEqual(["t2"]);
+  });
+
+  it("setSidebarTaskOrder replaces and persists", () => {
+    const store = makeStore();
+    store.getState().setSidebarTaskOrder(["a", "b", "c"]);
+    expect(store.getState().sidebarTaskPrefs.orderedTaskIds).toEqual(["a", "b", "c"]);
+    expect(JSON.parse(window.localStorage.getItem(ORDER_KEY) ?? "null")).toEqual(["a", "b", "c"]);
+
+    store.getState().setSidebarTaskOrder(["c", "a"]);
+    expect(store.getState().sidebarTaskPrefs.orderedTaskIds).toEqual(["c", "a"]);
+    expect(JSON.parse(window.localStorage.getItem(ORDER_KEY) ?? "null")).toEqual(["c", "a"]);
+  });
+
+  it("removeTaskFromSidebarPrefs strips the id from both arrays and persists", () => {
+    const store = makeStore();
+    store.getState().togglePinnedTask("t1");
+    store.getState().togglePinnedTask("t2");
+    store.getState().setSidebarTaskOrder(["t1", "t2", "t3"]);
+
+    store.getState().removeTaskFromSidebarPrefs("t1");
+
+    expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t2"]);
+    expect(store.getState().sidebarTaskPrefs.orderedTaskIds).toEqual(["t2", "t3"]);
+    expect(JSON.parse(window.localStorage.getItem(PINNED_KEY) ?? "null")).toEqual(["t2"]);
+    expect(JSON.parse(window.localStorage.getItem(ORDER_KEY) ?? "null")).toEqual(["t2", "t3"]);
+
+    // Subsequent togglePinnedTask must NOT bring "t1" back from a stale draft.
+    store.getState().togglePinnedTask("t3");
+    expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t2", "t3"]);
+    expect(JSON.parse(window.localStorage.getItem(PINNED_KEY) ?? "null")).toEqual(["t2", "t3"]);
+  });
+
+  it("removeTaskFromSidebarPrefs is a no-op for unknown ids", () => {
+    const store = makeStore();
+    store.getState().togglePinnedTask("t1");
+    const before = window.localStorage.getItem(PINNED_KEY);
+    store.getState().removeTaskFromSidebarPrefs("ghost");
+    expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t1"]);
+    expect(window.localStorage.getItem(PINNED_KEY)).toBe(before);
+  });
+});
+
 describe("reorderSidebarViews", () => {
   beforeEach(() => {
     window.localStorage.clear();

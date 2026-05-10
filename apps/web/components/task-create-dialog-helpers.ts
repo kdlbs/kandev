@@ -1,5 +1,5 @@
 import type { useRouter } from "next/navigation";
-import type { Task, Branch, LocalRepository } from "@/lib/types/http";
+import type { Task, Branch, LocalRepository, Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { AppState } from "@/lib/state/store";
 import type { StepType, TaskRepoRow } from "@/components/task-create-dialog-types";
@@ -172,6 +172,18 @@ export function buildRepositoriesPayload(opts: {
   repositories: TaskRepoRow[];
   /** Used to look up `default_branch` for `localPath` rows. */
   discoveredRepositories: LocalRepository[];
+  /** Workspace repositories — used to look up `default_branch` for `repositoryId` rows. */
+  workspaceRepositories?: Repository[];
+  /**
+   * For the local executor (no worktree), the chip's branch field represents
+   * the working branch on disk, not the parent integration branch. Send it as
+   * `checkout_branch` so the session's `base_branch` stays anchored to the
+   * repo's `default_branch` (which is what git log / cumulative diff use as
+   * the merge-base reference). Without this, "new branch on local executor"
+   * collapses the merge-base recomputation to HEAD and the changes panel
+   * goes empty after a refresh.
+   */
+  isLocalExecutor?: boolean;
   /**
    * Optional fresh-branch metadata. The UI gates this to single-row + local
    * executor; when present we apply it to every row (which is at most one).
@@ -195,23 +207,81 @@ export function buildRepositoriesPayload(opts: {
         consented_dirty_files: opts.freshBranch.consentedDirtyFiles,
       }
     : {};
+  // Fresh-branch flow inverts the chip's semantics: instead of "the working
+  // branch I'm on", row.branch becomes "the base I want to fork from". The
+  // backend then creates a new branch and rewrites repos[i].BaseBranch to it.
+  // Splitting here would force `base_branch=default_branch, checkout_branch=
+  // <picked-base>` and the backend would fork from the wrong base. Skip the
+  // split entirely when fresh-branch is active.
+  const isLocalExecutor = !!opts.isLocalExecutor && !opts.freshBranch;
   return opts.repositories
     .filter((row) => row.repositoryId || row.localPath)
     .map((row) => {
+      const defaultBranch = resolveRowDefaultBranch(row, opts);
+      const branches = splitLocalExecutorBranches({
+        rowBranch: row.branch,
+        defaultBranch,
+        isLocalExecutor,
+      });
       if (row.repositoryId) {
         return {
           repository_id: row.repositoryId,
-          base_branch: row.branch || undefined,
+          base_branch: branches.base_branch,
+          checkout_branch: branches.checkout_branch,
           ...fresh,
         };
       }
-      const local = opts.discoveredRepositories.find((d) => d.path === row.localPath);
       return {
         repository_id: "",
-        base_branch: row.branch || undefined,
+        base_branch: branches.base_branch,
+        checkout_branch: branches.checkout_branch,
         local_path: row.localPath,
-        default_branch: local?.default_branch || undefined,
+        default_branch: defaultBranch || undefined,
         ...fresh,
       };
     });
+}
+
+function resolveRowDefaultBranch(
+  row: TaskRepoRow,
+  opts: {
+    discoveredRepositories: LocalRepository[];
+    workspaceRepositories?: Repository[];
+  },
+): string | undefined {
+  if (row.repositoryId) {
+    return opts.workspaceRepositories?.find((r) => r.id === row.repositoryId)?.default_branch;
+  }
+  return opts.discoveredRepositories.find((d) => d.path === row.localPath)?.default_branch;
+}
+
+/**
+ * For the local executor: return `base_branch=defaultBranch`,
+ * `checkout_branch=rowBranch` so the session anchors merge-base to the repo's
+ * integration branch while the preparer still checks out the user's working
+ * branch. When `rowBranch === defaultBranch` we omit checkout_branch — the
+ * preparer treats matching values as "use current state" and skips git ops.
+ *
+ * For non-local executors (worktree-based): keep the historical shape where
+ * `base_branch=rowBranch` (the worktree creates a new branch off of it).
+ */
+function splitLocalExecutorBranches(args: {
+  rowBranch?: string;
+  defaultBranch?: string;
+  isLocalExecutor: boolean;
+}): { base_branch: string | undefined; checkout_branch: string | undefined } {
+  // Without a known default_branch we can't anchor base_branch to the
+  // integration ref — and using rowBranch as a stand-in reproduces the
+  // exact bug this PR fixes (changes panel collapses to HEAD on refresh).
+  // Fall through to the legacy non-split shape: a workspace repo with an
+  // unset default_branch is no worse off than before, and the backend's
+  // resolveRepoInput probe will populate it on the next CreateRepository
+  // call. Wait for that probe rather than synthesizing a guess here.
+  if (!args.isLocalExecutor || !args.defaultBranch) {
+    return { base_branch: args.rowBranch || undefined, checkout_branch: undefined };
+  }
+  const base = args.defaultBranch;
+  const checkout =
+    args.rowBranch && args.rowBranch !== args.defaultBranch ? args.rowBranch : undefined;
+  return { base_branch: base, checkout_branch: checkout };
 }

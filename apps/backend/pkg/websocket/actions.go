@@ -73,10 +73,8 @@ const (
 	ActionTaskPlanRevisionGet   = "task.plan.revision.get"
 	ActionTaskPlanRevert        = "task.plan.revert"
 
-	ActionTaskSessionList    = "task.session.list"
-	ActionTaskSessionResume  = "task.session.resume"
-	ActionTaskSessionStatus  = "task.session.status"
-	ActionTaskSessionPrepare = "task.session.prepare"
+	ActionTaskSessionList   = "task.session.list"
+	ActionTaskSessionStatus = "task.session.status"
 
 	// Unified session launch
 	ActionSessionLaunch       = "session.launch"
@@ -104,15 +102,9 @@ const (
 	ActionAgentResize = "agent.resize" // Resize agent PTY (passthrough mode)
 
 	// Orchestrator actions
-	ActionOrchestratorStatus   = "orchestrator.status"
-	ActionOrchestratorQueue    = "orchestrator.queue"
-	ActionOrchestratorTrigger  = "orchestrator.trigger"
-	ActionOrchestratorStart    = "orchestrator.start"
-	ActionOrchestratorStop     = "orchestrator.stop"
-	ActionOrchestratorPause    = "orchestrator.pause"
-	ActionOrchestratorResume   = "orchestrator.resume"
-	ActionOrchestratorPrompt   = "orchestrator.prompt"
-	ActionOrchestratorComplete = "orchestrator.complete"
+	ActionOrchestratorStatus = "orchestrator.status"
+	ActionOrchestratorQueue  = "orchestrator.queue"
+	ActionOrchestratorStop   = "orchestrator.stop"
 
 	// Message Queue actions
 	ActionMessageQueueAdd           = "message.queue.add"
@@ -311,6 +303,7 @@ const (
 	ActionMCPListWorkspaces       = "mcp.list_workspaces"
 	ActionMCPListWorkflows        = "mcp.list_workflows"
 	ActionMCPListWorkflowSteps    = "mcp.list_workflow_steps"
+	ActionMCPListRepositories     = "mcp.list_repositories"
 	ActionMCPListTasks            = "mcp.list_tasks"
 	ActionMCPCreateTask           = "mcp.create_task"
 	ActionMCPUpdateTask           = "mcp.update_task"
@@ -372,6 +365,7 @@ const (
 	ActionGitHubPRFilesGet        = "github.pr_files.get"
 	ActionGitHubPRCommitsGet      = "github.pr_commits.get"
 	ActionGitHubTaskPRUpdated     = "github.task_pr.updated"      // Notification
+	ActionGitHubRateLimitUpdated  = "github.rate_limit.updated"   // Notification
 	ActionGitHubPRFeedbackNotify  = "github.pr_feedback.notify"   // Notification
 	ActionGitHubNewReviewPRNotify = "github.new_review_pr.notify" // Notification
 	ActionGitHubTaskPRSync        = "github.task_pr.sync"
@@ -413,6 +407,14 @@ const (
 	ActionLinearIssueGet        = "linear.issue.get"
 	ActionLinearIssueTransition = "linear.issue.transition"
 	ActionLinearTeamsList       = "linear.teams.list"
+)
+
+// Slack integration actions
+const (
+	ActionSlackConfigGet    = "slack.config.get"
+	ActionSlackConfigSet    = "slack.config.set"
+	ActionSlackConfigDelete = "slack.config.delete"
+	ActionSlackConfigTest   = "slack.config.test"
 )
 
 // Error codes

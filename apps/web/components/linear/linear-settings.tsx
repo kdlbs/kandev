@@ -26,6 +26,7 @@ import {
   listLinearTeams,
 } from "@/lib/api/domains/linear-api";
 import type { LinearConfig, LinearTeam, TestLinearConnectionResult } from "@/lib/types/linear";
+import { LinearIssueWatchersSection } from "./linear-issue-watchers-section";
 
 type FormState = {
   defaultTeamKey: string;
@@ -432,6 +433,7 @@ export function LinearIntegrationPage() {
   return (
     <div className="space-y-8">
       <LinearConnectionSection />
+      <LinearIssueWatchersSection />
     </div>
   );
 }
