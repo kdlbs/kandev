@@ -114,7 +114,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
             onArchiveTask={actions.handleArchiveTask}
             onDeleteTask={actions.handleDeleteTask}
             deletingTaskId={actions.deletingTaskId}
-            isLoading={data.kanbanIsLoading}
+            isLoading={data.tasksLoading}
           />
         </div>
       </SheetContent>

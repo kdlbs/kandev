@@ -9,12 +9,29 @@ export function useWorkflowSnapshot(workflowId: string | null) {
 
   useEffect(() => {
     if (!workflowId) return;
+    let cancelled = false;
+    const alreadyHydrated = store.getState().kanban.workflowId === workflowId;
+    if (!alreadyHydrated) {
+      store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: true } }));
+    }
     fetchWorkflowSnapshot(workflowId, { cache: "no-store" })
       .then((snapshot) => {
+        if (cancelled) return;
         store.getState().hydrate(snapshotToState(snapshot));
       })
-      .catch(() => {
-        // Ignore snapshot errors — will retry on WS reconnect.
+      .catch((error) => {
+        // Surface the failure so users see it rather than an indefinite empty
+        // list. Retry happens on WS reconnect.
+        console.warn("[useWorkflowSnapshot] failed to load snapshot:", error);
+      })
+      .finally(() => {
+        // Always settle the loading flag, even after unmount — otherwise the
+        // sheet/sidebar can be stuck on a skeleton if the component unmounted
+        // mid-fetch.
+        store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
       });
+    return () => {
+      cancelled = true;
+    };
   }, [workflowId, store, connectionStatus]);
 }
