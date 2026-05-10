@@ -181,5 +181,32 @@ func TestToolEventsWakeSessionAndTaskTogether(t *testing.T) {
 			require.Equal(t, v1.TaskStateInProgress, taskRepo.updatedStates["t1"],
 				"task must move to IN_PROGRESS in lockstep — leaving it at REVIEW is the bug")
 		})
+
+		t.Run(tc.name+" does not clobber terminal session", func(t *testing.T) {
+			// Inverse edge case: a buffered tool event arriving after the
+			// session is already terminal must NOT silently flip tasks.state
+			// to IN_PROGRESS while the session itself stays terminal.
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "step1")
+
+			session, err := repo.GetTaskSession(ctx, "s1")
+			require.NoError(t, err)
+			session.State = models.TaskSessionStateCancelled
+			require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+			taskRepo := newMockTaskRepo()
+			svc := createTestService(repo, newMockStepGetter(), taskRepo)
+			svc.messageCreator = &mockMessageCreator{}
+
+			tc.fire(svc)
+
+			updatedSession, err := repo.GetTaskSession(ctx, "s1")
+			require.NoError(t, err)
+			require.Equal(t, models.TaskSessionStateCancelled, updatedSession.State,
+				"terminal session must not be revived by a stale tool event")
+			_, taskWritten := taskRepo.updatedStates["t1"]
+			require.False(t, taskWritten,
+				"task state must not be clobbered when session is terminal")
+		})
 	}
 }

@@ -487,7 +487,25 @@ func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, session
 }
 
 func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID string, preloadedSession ...*models.TaskSession) {
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true, preloadedSession...)
+	// Resolve session up front so we can guard the task write against terminal
+	// states. updateTaskSessionState silently no-ops for terminal sessions, so
+	// without this guard a buffered tool event arriving after a CANCELLED /
+	// FAILED / COMPLETED session would still clobber tasks.state to IN_PROGRESS.
+	var session *models.TaskSession
+	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
+		session = preloadedSession[0]
+	} else {
+		var err error
+		session, err = s.repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return
+		}
+	}
+	if isTerminalSessionState(session.State) {
+		return
+	}
+
+	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true, session)
 
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
 		s.logger.Error("failed to update task state to IN_PROGRESS",
