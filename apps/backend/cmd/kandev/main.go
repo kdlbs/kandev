@@ -133,8 +133,9 @@ func realMain() int {
 
 	// 2. Initialize logger
 	log, err := logger.NewLogger(logger.LoggingConfig{
-		Level:  cfg.Logging.Level,
-		Format: cfg.Logging.Format,
+		Level:      cfg.Logging.Level,
+		Format:     cfg.Logging.Format,
+		OutputPath: cfg.Logging.OutputPath,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
