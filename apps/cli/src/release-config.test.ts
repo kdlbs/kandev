@@ -85,7 +85,9 @@ function extractWorkflowPnpmVersions(workflow: string): Array<string | undefined
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    const setupMatch = line.match(/^(\s*)-\s+uses:\s*["']?pnpm\/action-setup@v4["']?\s*(?:#.*)?$/);
+    const setupMatch = line.match(
+      /^(\s*)-\s+uses:\s*["']?pnpm\/action-setup@v\d+["']?\s*(?:#.*)?$/,
+    );
     if (setupMatch !== null) {
       versions.push(findPnpmSetupVersion(lines, index + 1, setupMatch[1].length));
     }
@@ -94,18 +96,37 @@ function extractWorkflowPnpmVersions(workflow: string): Array<string | undefined
   return versions;
 }
 
+function assertWorkflowPnpmVersions(file: string, expectedVersion: string): number {
+  const versions = extractWorkflowPnpmVersions(readRepoFile(file));
+  for (const version of versions) {
+    if (version === undefined) {
+      expect(version, `${file}: pnpm/action-setup step is missing a version pin`).toBeDefined();
+      continue;
+    }
+
+    expect(version, `${file}: pnpm/action-setup version must match Dockerfile PNPM_VERSION`).toBe(
+      expectedVersion,
+    );
+  }
+
+  return versions.length;
+}
+
 describe("release package manager version", () => {
   it("pins pnpm consistently for Docker and GitHub Actions", () => {
     const dockerfile = readRepoFile("Dockerfile");
     const dockerPnpmVersion = extractDockerPnpmVersion(dockerfile);
-    const workflowVersions = workflowFiles().flatMap((file) =>
-      extractWorkflowPnpmVersions(readRepoFile(file)),
-    );
 
     expect(dockerfile).not.toContain("pnpm@latest");
-    expect(dockerPnpmVersion).toBeDefined();
-    expect(workflowVersions.length).toBeGreaterThan(0);
-    expect(workflowVersions).not.toContain(undefined);
-    expect(new Set(workflowVersions)).toEqual(new Set([dockerPnpmVersion]));
+    expect(dockerPnpmVersion, "Dockerfile: PNPM_VERSION must be pinned").toBeDefined();
+    if (dockerPnpmVersion === undefined) {
+      throw new Error("Dockerfile: PNPM_VERSION must be pinned");
+    }
+
+    const workflowSetupCount = workflowFiles().reduce(
+      (count, file) => count + assertWorkflowPnpmVersions(file, dockerPnpmVersion),
+      0,
+    );
+    expect(workflowSetupCount).toBeGreaterThan(0);
   });
 });
