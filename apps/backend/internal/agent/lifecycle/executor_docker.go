@@ -119,92 +119,107 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 	}
 
 	if req.OnProgress != nil {
-		step := beginStep("Waiting for Docker container")
+		defer reportCreateInstanceProgress(req, &err)()
+	}
+
+	if reconnected, ok := r.tryReconnect(ctx, dockerClient, req); ok {
+		return reconnected, nil
+	}
+
+	r.seedSessionDir(ctx, req)
+
+	containerCfg := r.buildContainerLaunchConfig(req)
+	result, err := containerMgr.LaunchContainer(ctx, containerCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to launch container: %w", err)
+	}
+
+	containerIP, _ := dockerClient.GetContainerIP(ctx, result.ContainerID)
+	r.logger.Info("docker instance created",
+		zap.String("instance_id", req.InstanceID),
+		zap.String("container_id", result.ContainerID),
+		zap.String("container_ip", containerIP))
+
+	return r.buildCreatedInstance(req, result, containerIP), nil
+}
+
+// reportCreateInstanceProgress wires the "Waiting for Docker container" step
+// into the caller's OnProgress callback. The returned closure must run after
+// CreateInstance finishes (deferred) so it sees the final err state.
+func reportCreateInstanceProgress(req *ExecutorCreateRequest, errPtr *error) func() {
+	step := beginStep("Waiting for Docker container")
+	reportProgress(req.OnProgress, step, 0, 1)
+	return func() {
+		if *errPtr != nil {
+			completeStepError(&step, (*errPtr).Error())
+		} else {
+			completeStepSuccess(&step)
+		}
 		reportProgress(req.OnProgress, step, 0, 1)
-		defer func() {
-			if err != nil {
-				completeStepError(&step, err.Error())
-			} else {
-				completeStepSuccess(&step)
-			}
-			reportProgress(req.OnProgress, step, 0, 1)
-		}()
 	}
+}
 
-	// On resume, try to reconnect to the existing container
-	if req.PreviousExecutionID != "" {
-		reconnected, reconnectErr := r.reconnectToContainer(ctx, dockerClient, req)
-		if reconnectErr == nil {
-			return reconnected, nil
-		}
-		r.logger.Info("could not reconnect to previous container, creating new one",
-			zap.String("previous_execution_id", req.PreviousExecutionID),
-			zap.Error(reconnectErr))
+// tryReconnect returns (instance, true) if the request points at an existing
+// container that's healthy enough to resume; otherwise (nil, false) and the
+// caller falls back to provisioning a fresh container.
+func (r *DockerExecutor) tryReconnect(ctx context.Context, dockerClient *docker.Client, req *ExecutorCreateRequest) (*ExecutorInstance, bool) {
+	if req.PreviousExecutionID == "" {
+		return nil, false
 	}
-
-	// Extract runtime-specific values from metadata
-	worktreeID := getMetadataString(req.Metadata, MetadataKeyWorktreeID)
-	worktreeBranch := getMetadataString(req.Metadata, MetadataKeyWorktreeBranch)
-
-	// Seed the per-container agent session dir with the auth files the agent
-	// needs (auth.json / config.toml / etc.). This replaces the historical
-	// pattern of bind-mounting the user's whole ~/.<agent> into the container,
-	// which leaked host-absolute state-DB paths into the container and broke
-	// session resume on agents that cache them (codex's rollout DB).
-	if req.AgentConfig != nil && r.kandevHomeDir != "" {
-		instanceRoot := InstanceSessionRoot(r.kandevHomeDir, req.InstanceID)
-		if err := SeedAgentSessionDir(ctx, req.AgentConfig, instanceRoot, r.logger); err != nil {
-			r.logger.Warn("failed to seed agent session dir (continuing)",
-				zap.String("instance_id", req.InstanceID),
-				zap.String("agent_id", req.AgentConfig.ID()),
-				zap.Error(err))
-		}
+	reconnected, reconnectErr := r.reconnectToContainer(ctx, dockerClient, req)
+	if reconnectErr == nil {
+		return reconnected, true
 	}
+	r.logger.Info("could not reconnect to previous container, creating new one",
+		zap.String("previous_execution_id", req.PreviousExecutionID),
+		zap.Error(reconnectErr))
+	return nil, false
+}
 
-	// Resolve prepare script for cloning repo inside container
-	prepareScript := r.resolvePrepareScript(req)
+// seedSessionDir copies the agent's auth files (auth.json / config.toml /
+// etc.) into the per-container session dir. Replaces the older pattern of
+// bind-mounting the host's whole ~/.<agent>, which leaked absolute host
+// paths into agent state DBs and broke resume on codex.
+func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreateRequest) {
+	if req.AgentConfig == nil || r.kandevHomeDir == "" {
+		return
+	}
+	instanceRoot := InstanceSessionRoot(r.kandevHomeDir, req.InstanceID)
+	if err := SeedAgentSessionDir(ctx, req.AgentConfig, instanceRoot, r.logger); err != nil {
+		r.logger.Warn("failed to seed agent session dir (continuing)",
+			zap.String("instance_id", req.InstanceID),
+			zap.String("agent_id", req.AgentConfig.ID()),
+			zap.Error(err))
+	}
+}
 
-	// Convert ExecutorCreateRequest to ContainerConfig
-	// Note: WorkspacePath is empty to skip mounting - we clone inside container
-	containerCfg := ContainerConfig{
+func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) ContainerConfig {
+	return ContainerConfig{
 		AgentConfig:       req.AgentConfig,
-		WorkspacePath:     "", // Empty = no workspace mount, we'll clone instead
+		WorkspacePath:     "", // Empty = no workspace mount; we clone inside container.
 		TaskID:            req.TaskID,
 		TaskTitle:         req.TaskTitle,
 		TaskEnvironmentID: req.TaskEnvironmentID,
 		SessionID:         req.SessionID,
 		ExecutorProfileID: getMetadataString(req.Metadata, "executor_profile_id"),
 		InstanceID:        req.InstanceID,
-		Credentials:       req.Env, // Env contains credentials from the caller
+		Credentials:       req.Env,
 		McpServers:        req.McpServers,
-		PrepareScript:     prepareScript,
+		PrepareScript:     r.resolvePrepareScript(req),
 		ImageTagOverride:  getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
 		LocalClonePath:    localCloneMountPath(req.Metadata),
 	}
+}
 
-	// Use ContainerManager to launch container (includes nonce handshake)
-	result, err := containerMgr.LaunchContainer(ctx, containerCfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to launch container: %w", err)
+func (r *DockerExecutor) buildCreatedInstance(req *ExecutorCreateRequest, result *LaunchResult, containerIP string) *ExecutorInstance {
+	metadata := map[string]interface{}{
+		MetadataKeyIsRemote: true,
 	}
-
-	// Get container IP for logging
-	containerIP, _ := dockerClient.GetContainerIP(ctx, result.ContainerID)
-
-	// Build metadata
-	metadata := make(map[string]interface{})
-	metadata[MetadataKeyIsRemote] = true // Mark as remote for shell handling
-	if worktreeID != "" {
+	if worktreeID := getMetadataString(req.Metadata, MetadataKeyWorktreeID); worktreeID != "" {
 		metadata["worktree_id"] = worktreeID
 		metadata["worktree_path"] = dockerWorkspacePath
-		metadata["worktree_branch"] = worktreeBranch
+		metadata["worktree_branch"] = getMetadataString(req.Metadata, MetadataKeyWorktreeBranch)
 	}
-
-	r.logger.Info("docker instance created",
-		zap.String("instance_id", req.InstanceID),
-		zap.String("container_id", result.ContainerID),
-		zap.String("container_ip", containerIP))
-
 	return &ExecutorInstance{
 		InstanceID:     req.InstanceID,
 		TaskID:         req.TaskID,
@@ -217,7 +232,7 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		Metadata:       metadata,
 		AuthToken:      result.AuthToken,
 		BootstrapNonce: result.BootstrapNonce,
-	}, nil
+	}
 }
 
 // reconnectToContainer attempts to reconnect to an existing Docker container

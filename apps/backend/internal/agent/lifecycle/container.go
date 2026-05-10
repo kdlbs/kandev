@@ -417,6 +417,8 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	// can't kill the bootstrap before exec'ing agentctl. If prepare fails, we
 	// still bring agentctl up so the host can connect, surface the failure, and
 	// the user can debug from the Executor Settings popover.
+	//
+	//nolint:dupword // two `fi` tokens close two distinct shell blocks.
 	bootstrap := []string{
 		"sh", "-c",
 		`if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then
