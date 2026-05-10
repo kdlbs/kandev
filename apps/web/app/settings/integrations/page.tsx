@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { IconBrandGithub, IconBrandSlack, IconHexagon, IconTicket } from "@tabler/icons-react";
+import {
+  IconBrandGithub,
+  IconBrandGitlab,
+  IconBrandSlack,
+  IconHexagon,
+  IconTicket,
+} from "@tabler/icons-react";
 import { Card, CardContent } from "@kandev/ui/card";
 
 const INTEGRATIONS = [
@@ -8,6 +14,12 @@ const INTEGRATIONS = [
     label: "GitHub",
     description: "PR review queues, issue watchers, and OAuth credentials.",
     Icon: IconBrandGithub,
+  },
+  {
+    href: "/settings/integrations/gitlab",
+    label: "GitLab",
+    description: "Merge request creation, discussion replies, and self-managed hosts.",
+    Icon: IconBrandGitlab,
   },
   {
     href: "/settings/integrations/jira",

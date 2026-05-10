@@ -63,6 +63,50 @@ func TestCloneURL(t *testing.T) {
 	}
 }
 
+func TestCloneURLWithHost(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		host     string
+		owner    string
+		repo     string
+		protocol string
+		want     string
+	}{
+		{
+			"gitlab self-managed SSH",
+			"gitlab", "https://gitlab.acme.corp", "team", "service", ProtocolSSH,
+			"git@gitlab.acme.corp:team/service.git",
+		},
+		{
+			"gitlab self-managed HTTPS",
+			"gitlab", "https://gitlab.acme.corp/", "team", "service", ProtocolHTTPS,
+			"https://gitlab.acme.corp/team/service.git",
+		},
+		{
+			"empty host falls back to provider default",
+			"gitlab", "", "team", "service", ProtocolSSH,
+			"git@gitlab.com:team/service.git",
+		},
+		{
+			"http scheme honored",
+			"gitlab", "http://gitlab.local", "team", "service", ProtocolHTTPS,
+			"https://gitlab.local/team/service.git",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := CloneURLWithHost(tt.provider, tt.host, tt.owner, tt.repo, tt.protocol)
+			if err != nil {
+				t.Fatalf("err = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestProviderHost(t *testing.T) {
 	tests := []struct {
 		provider string

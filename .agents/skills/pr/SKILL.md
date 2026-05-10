@@ -5,7 +5,13 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
 
 # PR
 
-> **GitHub tool selection:** This skill uses `gh` CLI commands by default. If `gh` is unavailable or fails, use any available GitHub tools in the environment (e.g. MCP GitHub tools) to create, edit, and view the PR. The goal is the same — the tool may differ.
+> **Host detection:** This skill works on both GitHub and GitLab repositories. Detect the host before step 4 by inspecting `git remote get-url origin`:
+> - URL contains `github.com` (or any host you have configured for GitHub) → use the **GitHub flow** below.
+> - URL contains `gitlab` (e.g. `gitlab.com`, `gitlab.acme.corp`) → use the **GitLab flow** at the bottom of this file.
+> - For self-managed hosts, the user's repository configuration determines the host.
+>
+> **GitHub tool selection:** The GitHub flow uses `gh` CLI by default. If `gh` is unavailable or fails, use any available GitHub tools in the environment (e.g. MCP GitHub tools).
+> **GitLab tool selection:** The GitLab flow prefers `glab` CLI when available; otherwise it shells `curl` against the REST v4 API using `$GITLAB_TOKEN` (which the agent runtime injects from the user's secrets store).
 
 ## Available skills
 
@@ -65,3 +71,51 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
    - Tell the user to drag and drop the image files from `.pr-assets/` into the PR description on GitHub for the images to render
 
 7. **Return the PR URL** when done.
+
+## GitLab flow (Merge Requests)
+
+When `git remote get-url origin` points at a GitLab host, the steps are the same up through **Push** (1–3). For step 4, create a Merge Request instead of a PR:
+
+**MR title** still follows Conventional Commits — the squash-merge commit message is built from it the same way.
+
+**MR description** uses the same template as the PR body above (Summary, Validation, etc.).
+
+Prefer the `glab` CLI when it is on the agent's `PATH`:
+
+```bash
+glab mr create [--draft] \
+  --title "type: description" \
+  --description "$(cat <<'EOF'
+<filled template>
+EOF
+)" \
+  --target-branch main \
+  --remove-source-branch \
+  --yes
+```
+
+If `glab` is unavailable but `$GITLAB_TOKEN` is set, fall back to the REST API. Use `$CI_SERVER_URL` if defined (set by GitLab runners), otherwise default to `https://gitlab.com`. The project path is `<namespace>/<repo>` — read it from the remote URL.
+
+```bash
+PROJECT="namespace/repo"   # adjust from `git remote get-url origin`
+HOST="${CI_SERVER_URL:-https://gitlab.com}"
+SOURCE_BRANCH="$(git branch --show-current)"
+TARGET_BRANCH="main"
+PROJECT_ENC="$(printf '%s' "$PROJECT" | jq -sRr @uri)"
+
+curl --fail -X POST \
+  -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data @- \
+  "$HOST/api/v4/projects/$PROJECT_ENC/merge_requests" <<EOF
+{
+  "source_branch": "$SOURCE_BRANCH",
+  "target_branch": "$TARGET_BRANCH",
+  "title": "type: description",
+  "description": "<filled template>",
+  "remove_source_branch": true
+}
+EOF
+```
+
+To address review comments on a GitLab MR, use the **discussions** API rather than individual review comments — discussions are GitLab's threading primitive. List with `GET /projects/:id/merge_requests/:iid/discussions`, reply with `POST /projects/:id/merge_requests/:iid/discussions/:discussion_id/notes`, and resolve a thread with `PUT /projects/:id/merge_requests/:iid/discussions/:discussion_id?resolved=true`. The `glab` equivalent is `glab mr note` for replies.
