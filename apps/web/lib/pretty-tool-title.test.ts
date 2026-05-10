@@ -26,6 +26,14 @@ describe("prettifyToolTitle", () => {
     expect(prettifyToolTitle("Bash")).toBe("Bash");
   });
 
+  it("strips namespace prefixes used by different agents", () => {
+    // Codex passes `<server>/<tool>`.
+    expect(prettifyToolTitle("kandev/get_task_plan_kandev")).toBe("Kandev: Get Task Plan");
+    expect(prettifyToolTitle("kandev/update_mcp_config_kandev")).toBe("Kandev: Update MCP Config");
+    // Claude-style `mcp__<server>__<tool>` prefix.
+    expect(prettifyToolTitle("mcp__kandev__create_task_kandev")).toBe("Kandev: Create Task");
+  });
+
   it("leaves Claude-supplied human titles unchanged", () => {
     expect(prettifyToolTitle("Reading file foo.ts")).toBe("Reading file foo.ts");
     expect(prettifyToolTitle("Running `git status`")).toBe("Running `git status`");
