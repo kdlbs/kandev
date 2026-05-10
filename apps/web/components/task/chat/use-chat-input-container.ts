@@ -102,18 +102,23 @@ function computeDerivedState(params: {
   isAgentBusy: boolean;
   hasAgentCommands: boolean;
 }) {
+  // STARTING is included so the editor itself stays uneditable until the
+  // session reaches RUNNING. Without this, the e2e suite's wait-for-
+  // contenteditable would fire mid-STARTING, the test would press Cmd+Enter,
+  // and the backend would reject with "Failed to send message to agent"
+  // before the agent process is ready to receive prompts.
   const isDisabled =
+    params.isStarting ||
     params.isMoving ||
     params.isSending ||
     params.isFailed ||
     params.needsRecovery ||
     params.executorUnavailable;
-  // Only an active container/sandbox prepare blocks the submit and surfaces
-  // the "agent still being set up" tooltip. The brief STARTING transition
-  // every session passes through (including local quick-chat) intentionally
-  // does NOT block — the e2e suite presses Cmd+Enter as soon as the editor
-  // becomes editable, and a STARTING-only block silently dropped messages.
-  const submitDisabled = params.isPreparingEnvironment || isDisabled;
+  const submitDisabled = isDisabled;
+  // The "agent still being set up" tooltip is only meaningful while a
+  // container/sandbox is actively bootstrapping. The brief STARTING
+  // transition for local quick-chat sessions doesn't deserve its own
+  // tooltip — the editor is disabled, that's the signal.
   const submitDisabledReason = params.isPreparingEnvironment
     ? "The agent is still being set up."
     : undefined;

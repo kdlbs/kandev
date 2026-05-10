@@ -33,9 +33,25 @@ function renderInputState(overrides: Partial<Parameters<typeof useChatInputConta
 }
 
 describe("useChatInputContainer", () => {
-  it("keeps the editor enabled while setup is still blocking submit", () => {
+  it("disables the editor while the session is still STARTING", () => {
+    // The editor must stay uneditable until the agent reaches RUNNING — if
+    // the user can press Cmd+Enter mid-startup, the backend rejects with
+    // "Failed to send message to agent" because the agent process isn't
+    // ready yet. This is the regression from earlier rounds where the e2e
+    // quick-chat suite kept failing on race conditions.
     const { result } = renderInputState({ isStarting: true });
 
-    expect(result.current.isDisabled).toBe(false);
+    expect(result.current.isDisabled).toBe(true);
+    expect(result.current.submitDisabled).toBe(true);
+    expect(result.current.submitDisabledReason).toBeUndefined();
+  });
+
+  it("surfaces the setup tooltip only while a container/sandbox is preparing", () => {
+    const { result } = renderInputState({
+      isStarting: true,
+      isPreparingEnvironment: true,
+    });
+
+    expect(result.current.submitDisabledReason).toBe("The agent is still being set up.");
   });
 });
