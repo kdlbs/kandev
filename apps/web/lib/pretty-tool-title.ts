@@ -4,7 +4,7 @@ const ACRONYMS = new Set(["mcp", "id", "url", "api", "ui", "vs", "ide", "cli"]);
 export function prettifyToolTitle(raw: string): string {
   if (!raw) return raw;
   const trimmed = raw.trim();
-  if (!KANDEV_TOOL_RE.test(trimmed)) return raw;
+  if (!KANDEV_TOOL_RE.test(trimmed)) return trimmed;
   const stem = trimmed.slice(0, -"_kandev".length);
   const words = stem
     .split("_")

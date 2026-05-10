@@ -15,8 +15,9 @@ describe("prettifyToolTitle", () => {
     expect(prettifyToolTitle("get_mcp_config_kandev")).toBe("Kandev: Get MCP Config");
   });
 
-  it("trims surrounding whitespace before matching", () => {
+  it("trims surrounding whitespace, both for matches and pass-through", () => {
     expect(prettifyToolTitle("  create_task_kandev  ")).toBe("Kandev: Create Task");
+    expect(prettifyToolTitle("  Reading foo.ts  ")).toBe("Reading foo.ts");
   });
 
   it("leaves non-kandev MCP tool names unchanged", () => {
