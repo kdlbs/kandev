@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -11,23 +12,39 @@ import (
 	"go.uber.org/zap"
 )
 
-// QueueService defines the interface for message queue operations
+const (
+	// queueErrorCodeFull is surfaced when an enqueue would exceed the per-session cap.
+	queueErrorCodeFull = "queue_full"
+	// queueErrorCodeEntryNotFound is surfaced when an edit/remove targets an entry
+	// that has already been drained (atomic-take won the race).
+	queueErrorCodeEntryNotFound = "entry_not_found"
+
+	// Payload field names — extracted to satisfy goconst (≥3 occurrences).
+	fieldSessionID = "session_id"
+	fieldEntryID   = "entry_id"
+	fieldQueueSize = "queue_size"
+	fieldMax       = "max"
+)
+
+// QueueService is the surface the handlers depend on. Real implementation lives
+// in messagequeue.Service.
 type QueueService interface {
 	QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error)
-	CancelQueued(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, error)
+	AppendContent(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, bool, error)
+	UpdateMessage(ctx context.Context, entryID, content string, attachments []messagequeue.MessageAttachment, queuedBy string) error
+	RemoveEntry(ctx context.Context, entryID string) error
+	CancelAll(ctx context.Context, sessionID string) (int, error)
 	GetStatus(ctx context.Context, sessionID string) *messagequeue.QueueStatus
-	UpdateMessage(ctx context.Context, sessionID, content string) error
-	AppendContent(ctx context.Context, sessionID, content string) error
 }
 
-// QueueHandlers handles message queue operations
+// QueueHandlers handles WebSocket message-queue operations.
 type QueueHandlers struct {
 	queueService QueueService
 	eventBus     bus.EventBus
 	logger       *logger.Logger
 }
 
-// NewQueueHandlers creates a new QueueHandlers instance
+// NewQueueHandlers creates a new QueueHandlers instance.
 func NewQueueHandlers(queueService QueueService, eventBus bus.EventBus, log *logger.Logger) *QueueHandlers {
 	return &QueueHandlers{
 		queueService: queueService,
@@ -36,16 +53,15 @@ func NewQueueHandlers(queueService QueueService, eventBus bus.EventBus, log *log
 	}
 }
 
-// RegisterHandlers registers queue handlers with the dispatcher
+// RegisterHandlers registers queue handlers with the dispatcher.
 func (h *QueueHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMessageQueueAdd, h.wsQueueMessage)
-	d.RegisterFunc(ws.ActionMessageQueueCancel, h.wsCancelQueue)
+	d.RegisterFunc(ws.ActionMessageQueueCancel, h.wsCancelAll)
 	d.RegisterFunc(ws.ActionMessageQueueGet, h.wsGetQueueStatus)
 	d.RegisterFunc(ws.ActionMessageQueueUpdate, h.wsUpdateMessage)
 	d.RegisterFunc(ws.ActionMessageQueueAppend, h.wsAppendToQueue)
+	d.RegisterFunc(ws.ActionMessageQueueRemove, h.wsRemoveEntry)
 }
-
-// WebSocket Handlers
 
 type wsQueueMessageRequest struct {
 	SessionID   string                           `json:"session_id"`
@@ -75,34 +91,28 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 
 	queued, err := h.queueService.QueueMessage(ctx, req.SessionID, req.TaskID, req.Content, req.Model, req.UserID, req.PlanMode, req.Attachments)
 	if err != nil {
+		if errors.Is(err, messagequeue.ErrQueueFull) {
+			status := h.queueService.GetStatus(ctx, req.SessionID)
+			return ws.NewError(msg.ID, msg.Action, queueErrorCodeFull, "Queue is full",
+				map[string]interface{}{
+					fieldQueueSize: status.Count,
+					fieldMax:       status.Max,
+				})
+		}
 		h.logger.Error("failed to queue message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue message", nil)
 	}
 
-	// Publish queue status changed event for real-time updates
-	if h.eventBus != nil {
-		status := h.queueService.GetStatus(ctx, req.SessionID)
-		eventData := map[string]interface{}{
-			"session_id": req.SessionID,
-			"is_queued":  status.IsQueued,
-			"message":    status.Message,
-		}
-		_ = h.eventBus.Publish(ctx, events.MessageQueueStatusChanged, bus.NewEvent(
-			events.MessageQueueStatusChanged,
-			"queue-handlers",
-			eventData,
-		))
-	}
-
+	h.publishStatus(ctx, req.SessionID)
 	return ws.NewResponse(msg.ID, msg.Action, queued)
 }
 
-type wsCancelQueueRequest struct {
+type wsCancelAllRequest struct {
 	SessionID string `json:"session_id"`
 }
 
-func (h *QueueHandlers) wsCancelQueue(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsCancelQueueRequest
+func (h *QueueHandlers) wsCancelAll(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsCancelAllRequest
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
@@ -111,27 +121,16 @@ func (h *QueueHandlers) wsCancelQueue(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
 
-	cancelled, err := h.queueService.CancelQueued(ctx, req.SessionID)
+	removed, err := h.queueService.CancelAll(ctx, req.SessionID)
 	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
 
-	// Publish queue status changed event
-	if h.eventBus != nil {
-		status := h.queueService.GetStatus(ctx, req.SessionID)
-		eventData := map[string]interface{}{
-			"session_id": req.SessionID,
-			"is_queued":  status.IsQueued,
-			"message":    status.Message,
-		}
-		_ = h.eventBus.Publish(ctx, events.MessageQueueStatusChanged, bus.NewEvent(
-			events.MessageQueueStatusChanged,
-			"queue-handlers",
-			eventData,
-		))
-	}
-
-	return ws.NewResponse(msg.ID, msg.Action, cancelled)
+	h.publishStatus(ctx, req.SessionID)
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		fieldSessionID: req.SessionID,
+		"removed":      removed,
+	})
 }
 
 type wsGetQueueStatusRequest struct {
@@ -153,8 +152,11 @@ func (h *QueueHandlers) wsGetQueueStatus(ctx context.Context, msg *ws.Message) (
 }
 
 type wsUpdateMessageRequest struct {
-	SessionID string `json:"session_id"`
-	Content   string `json:"content"`
+	SessionID   string                           `json:"session_id"`
+	EntryID     string                           `json:"entry_id"`
+	Content     string                           `json:"content"`
+	Attachments []messagequeue.MessageAttachment `json:"attachments,omitempty"`
+	UserID      string                           `json:"user_id,omitempty"`
 }
 
 func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -162,37 +164,51 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-
-	if req.SessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	if req.EntryID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "entry_id is required", nil)
+	}
+	if req.Content == "" && len(req.Attachments) == 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content or attachments are required", nil)
 	}
 
-	// Don't allow updating to empty content - user should cancel instead
-	if req.Content == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content cannot be empty", nil)
-	}
-
-	if err := h.queueService.UpdateMessage(ctx, req.SessionID, req.Content); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
-	}
-
-	status := h.queueService.GetStatus(ctx, req.SessionID)
-
-	// Publish queue status changed event
-	if h.eventBus != nil {
-		eventData := map[string]interface{}{
-			"session_id": req.SessionID,
-			"is_queued":  status.IsQueued,
-			"message":    status.Message,
+	if err := h.queueService.UpdateMessage(ctx, req.EntryID, req.Content, req.Attachments, req.UserID); err != nil {
+		if errors.Is(err, messagequeue.ErrEntryNotFound) {
+			return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained or not owned by caller", nil)
 		}
-		_ = h.eventBus.Publish(ctx, events.MessageQueueStatusChanged, bus.NewEvent(
-			events.MessageQueueStatusChanged,
-			"queue-handlers",
-			eventData,
-		))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, status)
+	if req.SessionID != "" {
+		h.publishStatus(ctx, req.SessionID)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: req.EntryID})
+}
+
+type wsRemoveEntryRequest struct {
+	SessionID string `json:"session_id"`
+	EntryID   string `json:"entry_id"`
+}
+
+func (h *QueueHandlers) wsRemoveEntry(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsRemoveEntryRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.EntryID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "entry_id is required", nil)
+	}
+
+	if err := h.queueService.RemoveEntry(ctx, req.EntryID); err != nil {
+		if errors.Is(err, messagequeue.ErrEntryNotFound) {
+			return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+	}
+
+	if req.SessionID != "" {
+		h.publishStatus(ctx, req.SessionID)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: req.EntryID})
 }
 
 type wsAppendToQueueRequest struct {
@@ -220,32 +236,42 @@ func (h *QueueHandlers) wsAppendToQueue(ctx context.Context, msg *ws.Message) (*
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content is required", nil)
 	}
 
-	// Try to append to existing queued message; if none exists, create a new one
-	if err := h.queueService.AppendContent(ctx, req.SessionID, req.Content); err != nil {
-		_, queueErr := h.queueService.QueueMessage(
-			ctx, req.SessionID, req.TaskID, req.Content, req.Model, req.UserID, req.PlanMode, nil,
-		)
-		if queueErr != nil {
-			h.logger.Error("failed to queue message on append fallback", zap.Error(queueErr))
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue message", nil)
+	queued, appended, err := h.queueService.AppendContent(ctx, req.SessionID, req.TaskID, req.Content, req.Model, req.UserID, req.PlanMode, nil)
+	if err != nil {
+		if errors.Is(err, messagequeue.ErrQueueFull) {
+			status := h.queueService.GetStatus(ctx, req.SessionID)
+			return ws.NewError(msg.ID, msg.Action, queueErrorCodeFull, "Queue is full",
+				map[string]interface{}{
+					fieldQueueSize: status.Count,
+					fieldMax:       status.Max,
+				})
 		}
+		h.logger.Error("failed to append to queue", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue message", nil)
 	}
 
-	status := h.queueService.GetStatus(ctx, req.SessionID)
+	h.publishStatus(ctx, req.SessionID)
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		fieldEntryID: queued.ID,
+		"was_append": appended,
+	})
+}
 
-	// Publish queue status changed event
-	if h.eventBus != nil {
-		eventData := map[string]interface{}{
-			"session_id": req.SessionID,
-			"is_queued":  status.IsQueued,
-			"message":    status.Message,
-		}
-		_ = h.eventBus.Publish(ctx, events.MessageQueueStatusChanged, bus.NewEvent(
-			events.MessageQueueStatusChanged,
-			"queue-handlers",
-			eventData,
-		))
+// publishStatus emits the latest QueueStatus on the event bus so the frontend
+// updates its store after every mutation.
+func (h *QueueHandlers) publishStatus(ctx context.Context, sessionID string) {
+	if h.eventBus == nil {
+		return
 	}
-
-	return ws.NewResponse(msg.ID, msg.Action, status)
+	status := h.queueService.GetStatus(ctx, sessionID)
+	_ = h.eventBus.Publish(ctx, events.MessageQueueStatusChanged, bus.NewEvent(
+		events.MessageQueueStatusChanged,
+		"queue-handlers",
+		map[string]interface{}{
+			fieldSessionID: sessionID,
+			"entries":      status.Entries,
+			"count":        status.Count,
+			fieldMax:       status.Max,
+		},
+	))
 }

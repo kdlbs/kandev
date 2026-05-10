@@ -1,91 +1,51 @@
+// Package messagequeue persists per-session FIFO message queues and deferred
+// workflow moves. The queue lets a user (or another agent via the
+// message_task_kandev MCP tool) enqueue follow-up prompts while the target
+// session is still busy with a turn; handleAgentReady drains one entry per
+// turn after each turn completes.
+//
+// Storage is abstracted behind Repository (SQLite in production, in-memory
+// for tests). The service enforces a per-session cap (default 10) and surfaces
+// overflow as ErrQueueFull rather than silently dropping the new message.
 package messagequeue
 
 import (
 	"context"
-	"fmt"
-	"sync"
-	"time"
+	"errors"
 
-	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
 
-// Service manages queued messages for sessions.
-// Uses in-memory storage as queued messages are best-effort and transient.
+// Service manages queued messages for sessions, backed by Repository.
 type Service struct {
-	// In-memory storage: sessionID -> QueuedMessage
-	queued map[string]*QueuedMessage
-	// In-memory storage: sessionID -> PendingMove (deferred move_task_kandev moves)
-	pendingMoves map[string]*PendingMove
-	mu           sync.RWMutex
-	logger       *logger.Logger
+	repo          Repository
+	maxPerSession int
+	logger        *logger.Logger
 }
 
-// NewService creates a new message queue service
-func NewService(log *logger.Logger) *Service {
+// NewService creates a Service backed by the supplied repository. maxPerSession
+// is the per-session cap (entries beyond this return ErrQueueFull on insert);
+// pass 0 to disable the cap.
+func NewService(repo Repository, maxPerSession int, log *logger.Logger) *Service {
 	return &Service{
-		queued:       make(map[string]*QueuedMessage),
-		pendingMoves: make(map[string]*PendingMove),
-		logger:       log.WithFields(zap.String("component", "message-queue")),
+		repo:          repo,
+		maxPerSession: maxPerSession,
+		logger:        log.WithFields(zap.String("component", "message-queue")),
 	}
 }
 
-// TransferSession moves any queued message and pending move from one session
-// to another. Used by workflow session switches (when a target step has a
-// different agent profile and switchSessionForStep creates a new session) so
-// a prompt queued by move_task_kandev on the old session reaches the new one.
-// Existing entries on the destination session are preserved if no source entry
-// is present; otherwise the source entry replaces the destination entry.
-func (s *Service) TransferSession(ctx context.Context, oldSessionID, newSessionID string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if msg, ok := s.queued[oldSessionID]; ok {
-		msg.SessionID = newSessionID
-		s.queued[newSessionID] = msg
-		delete(s.queued, oldSessionID)
-		s.logger.Info("transferred queued message between sessions",
-			zap.String("from_session_id", oldSessionID),
-			zap.String("to_session_id", newSessionID),
-			zap.String("queue_id", msg.ID))
-	}
-
-	if move, ok := s.pendingMoves[oldSessionID]; ok {
-		s.pendingMoves[newSessionID] = move
-		delete(s.pendingMoves, oldSessionID)
-		s.logger.Info("transferred pending move between sessions",
-			zap.String("from_session_id", oldSessionID),
-			zap.String("to_session_id", newSessionID))
-	}
+// NewServiceMemory returns a Service backed by an in-memory repository.
+// Convenience constructor for tests; cap defaults to 10 for parity with prod.
+func NewServiceMemory(log *logger.Logger) *Service {
+	return NewService(NewMemoryRepository(), DefaultMaxPerSession, log)
 }
 
-// SetPendingMove records a pending move for a session (replaces any existing one).
-// The move is applied by handleAgentReady when the agent's current turn completes.
-func (s *Service) SetPendingMove(ctx context.Context, sessionID string, move *PendingMove) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	move.QueuedAt = time.Now()
-	s.pendingMoves[sessionID] = move
-	s.logger.Info("pending move recorded",
-		zap.String("session_id", sessionID),
-		zap.String("task_id", move.TaskID),
-		zap.String("workflow_step_id", move.WorkflowStepID))
-}
+// MaxPerSession returns the configured per-session cap.
+func (s *Service) MaxPerSession() int { return s.maxPerSession }
 
-// TakePendingMove retrieves and removes the pending move for a session.
-func (s *Service) TakePendingMove(ctx context.Context, sessionID string) (*PendingMove, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	move, exists := s.pendingMoves[sessionID]
-	if !exists {
-		return nil, false
-	}
-	delete(s.pendingMoves, sessionID)
-	return move, true
-}
-
-// QueueMessage queues a message for a session (replaces existing queued message)
+// QueueMessage appends a new entry to the session's FIFO queue. Returns
+// ErrQueueFull when the cap is exceeded.
 func (s *Service) QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment) (*QueuedMessage, error) {
 	return s.QueueMessageWithMetadata(ctx, sessionID, taskID, content, model, userID, planMode, attachments, nil)
 }
@@ -94,11 +54,7 @@ func (s *Service) QueueMessage(ctx context.Context, sessionID, taskID, content, 
 // is propagated to the resulting Message row when the queued message is
 // drained (e.g. sender_task_id for messages sent via message_task_kandev).
 func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}) (*QueuedMessage, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	msg := &QueuedMessage{
-		ID:          uuid.New().String(),
 		SessionID:   sessionID,
 		TaskID:      taskID,
 		Content:     content,
@@ -106,101 +62,153 @@ func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskI
 		PlanMode:    planMode,
 		Attachments: attachments,
 		Metadata:    metadata,
-		QueuedAt:    time.Now(),
 		QueuedBy:    userID,
 	}
-
-	s.queued[sessionID] = msg
+	if err := s.repo.Insert(ctx, msg, s.maxPerSession); err != nil {
+		if errors.Is(err, ErrQueueFull) {
+			s.logger.Info("queue full",
+				zap.String("session_id", sessionID),
+				zap.Int("max", s.maxPerSession))
+		}
+		return nil, err
+	}
 	s.logger.Info("message queued",
 		zap.String("session_id", sessionID),
 		zap.String("task_id", taskID),
+		zap.String("entry_id", msg.ID),
+		zap.Int64("position", msg.Position),
 		zap.Int("content_length", len(content)))
-
 	return msg, nil
 }
 
-// TakeQueued retrieves and removes the queued message for a session
-func (s *Service) TakeQueued(ctx context.Context, sessionID string) (*QueuedMessage, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// AppendContent appends content onto the session's tail entry when the tail's
+// queued_by matches userID. Otherwise inserts a new entry. Returns
+// ErrQueueFull when an insert would exceed the cap.
+func (s *Service) AppendContent(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment) (*QueuedMessage, bool, error) {
+	msg, appended, err := s.repo.AppendOrInsertTail(ctx, sessionID, taskID, content, model, userID, planMode, attachments, nil, s.maxPerSession)
+	if err != nil {
+		return nil, false, err
+	}
+	s.logger.Info("queue append-or-insert",
+		zap.String("session_id", sessionID),
+		zap.String("entry_id", msg.ID),
+		zap.Bool("appended", appended))
+	return msg, appended, nil
+}
 
-	msg, exists := s.queued[sessionID]
-	if !exists {
+// TakeQueued atomically removes and returns the head entry. Returns nil, false
+// when the queue is empty.
+func (s *Service) TakeQueued(ctx context.Context, sessionID string) (*QueuedMessage, bool) {
+	msg, err := s.repo.TakeHead(ctx, sessionID)
+	if err != nil {
+		s.logger.Error("take head failed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 		return nil, false
 	}
-
-	delete(s.queued, sessionID)
+	if msg == nil {
+		return nil, false
+	}
 	s.logger.Info("message dequeued",
 		zap.String("session_id", sessionID),
-		zap.String("queue_id", msg.ID))
-
+		zap.String("entry_id", msg.ID))
 	return msg, true
 }
 
-// CancelQueued removes a queued message without consuming it
-func (s *Service) CancelQueued(ctx context.Context, sessionID string) (*QueuedMessage, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	msg, exists := s.queued[sessionID]
-	if !exists {
-		return nil, fmt.Errorf("no queued message for session %s", sessionID)
+// UpdateMessage replaces the content (and optionally attachments) of a queued
+// entry. Returns ErrEntryNotFound when the entry was already drained or
+// when the queuedBy guard rejects the caller.
+func (s *Service) UpdateMessage(ctx context.Context, entryID, content string, attachments []MessageAttachment, queuedBy string) error {
+	if err := s.repo.UpdateContent(ctx, entryID, content, attachments, queuedBy); err != nil {
+		return err
 	}
-
-	delete(s.queued, sessionID)
-	s.logger.Info("message queue cancelled",
-		zap.String("session_id", sessionID),
-		zap.String("queue_id", msg.ID))
-
-	return msg, nil
+	s.logger.Info("queued entry updated", zap.String("entry_id", entryID))
+	return nil
 }
 
-// GetStatus returns the queue status for a session
+// RemoveEntry deletes a single entry by id. Returns ErrEntryNotFound if absent.
+func (s *Service) RemoveEntry(ctx context.Context, entryID string) error {
+	if err := s.repo.DeleteByID(ctx, entryID); err != nil {
+		return err
+	}
+	s.logger.Info("queued entry removed", zap.String("entry_id", entryID))
+	return nil
+}
+
+// CancelAll clears every queued entry for a session. Returns the number of
+// rows removed.
+func (s *Service) CancelAll(ctx context.Context, sessionID string) (int, error) {
+	n, err := s.repo.DeleteAllBySession(ctx, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	s.logger.Info("queue cancel-all",
+		zap.String("session_id", sessionID),
+		zap.Int("removed", n))
+	return n, nil
+}
+
+// GetStatus returns the full pending list and capacity info for a session.
 func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	msg, exists := s.queued[sessionID]
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		s.logger.Error("list queued failed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return &QueueStatus{Entries: nil, Count: 0, Max: s.maxPerSession}
+	}
+	if entries == nil {
+		entries = []QueuedMessage{}
+	}
 	return &QueueStatus{
-		IsQueued: exists,
-		Message:  msg,
+		Entries: entries,
+		Count:   len(entries),
+		Max:     s.maxPerSession,
 	}
 }
 
-// AppendContent appends content to an existing queued message.
-// Returns an error if no message is queued (caller should use QueueMessage instead).
-func (s *Service) AppendContent(ctx context.Context, sessionID, content string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	msg, exists := s.queued[sessionID]
-	if !exists {
-		return fmt.Errorf("no queued message for session %s", sessionID)
+// TransferSession moves any queued messages and pending move from one session
+// to another. Used by workflow session switches (when a target step has a
+// different agent profile and switchSessionForStep creates a new session).
+func (s *Service) TransferSession(ctx context.Context, oldSessionID, newSessionID string) {
+	if err := s.repo.TransferSession(ctx, oldSessionID, newSessionID); err != nil {
+		s.logger.Error("transfer session failed",
+			zap.String("from_session_id", oldSessionID),
+			zap.String("to_session_id", newSessionID),
+			zap.Error(err))
+		return
 	}
-
-	msg.Content = msg.Content + "\n\n---\n\n" + content
-	s.logger.Info("content appended to queued message",
-		zap.String("session_id", sessionID),
-		zap.Int("appended_length", len(content)),
-		zap.Int("total_length", len(msg.Content)))
-
-	return nil
+	s.logger.Info("transferred queue between sessions",
+		zap.String("from_session_id", oldSessionID),
+		zap.String("to_session_id", newSessionID))
 }
 
-// UpdateMessage updates an existing queued message (for arrow up editing)
-func (s *Service) UpdateMessage(ctx context.Context, sessionID, content string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	msg, exists := s.queued[sessionID]
-	if !exists {
-		return fmt.Errorf("no queued message for session %s", sessionID)
+// SetPendingMove records a pending move for a session (replaces any existing one).
+// The move is applied by handleAgentReady when the agent's current turn completes.
+func (s *Service) SetPendingMove(ctx context.Context, sessionID string, move *PendingMove) {
+	if err := s.repo.SetPendingMove(ctx, sessionID, move); err != nil {
+		s.logger.Error("set pending move failed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
 	}
-
-	msg.Content = content
-	s.logger.Info("queued message updated",
+	s.logger.Info("pending move recorded",
 		zap.String("session_id", sessionID),
-		zap.Int("new_length", len(content)))
+		zap.String("task_id", move.TaskID),
+		zap.String("workflow_step_id", move.WorkflowStepID))
+}
 
-	return nil
+// TakePendingMove retrieves and removes the pending move for a session.
+func (s *Service) TakePendingMove(ctx context.Context, sessionID string) (*PendingMove, bool) {
+	move, err := s.repo.TakePendingMove(ctx, sessionID)
+	if err != nil {
+		s.logger.Error("take pending move failed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil, false
+	}
+	if move == nil {
+		return nil, false
+	}
+	return move, true
 }

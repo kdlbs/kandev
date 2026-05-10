@@ -1,38 +1,56 @@
 package messagequeue
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
-// QueuedMessage represents a message queued for a session
+// DefaultMaxPerSession is the default cap for queued messages per session
+// when the env var KANDEV_QUEUE_MAX_PER_SESSION is unset or invalid.
+const DefaultMaxPerSession = 10
+
+// Errors returned by the queue service / repository.
+var (
+	// ErrQueueFull is returned when an insert would exceed the per-session cap.
+	ErrQueueFull = errors.New("queue full")
+	// ErrEntryNotFound is returned when an operation targets an entry that no
+	// longer exists (e.g. it was drained between fetch and update).
+	ErrEntryNotFound = errors.New("queue entry not found")
+)
+
+// QueuedMessage represents a single FIFO entry queued for a session.
 type QueuedMessage struct {
-	ID          string                 `json:"id"`                 // Unique queue entry ID
-	SessionID   string                 `json:"session_id"`         // Task session ID
-	TaskID      string                 `json:"task_id"`            // Task ID
-	Content     string                 `json:"content"`            // Message content
-	Model       string                 `json:"model"`              // Optional model override
-	PlanMode    bool                   `json:"plan_mode"`          // Plan mode enabled
-	Attachments []MessageAttachment    `json:"attachments"`        // Image attachments
-	Metadata    map[string]interface{} `json:"metadata,omitempty"` // Extra metadata (e.g. sender_task_id) merged into the resulting Message
-	QueuedAt    time.Time              `json:"queued_at"`          // When queued
-	QueuedBy    string                 `json:"queued_by"`          // User ID who queued
+	ID          string                 `json:"id"`
+	SessionID   string                 `json:"session_id"`
+	TaskID      string                 `json:"task_id"`
+	Position    int64                  `json:"position"` // FIFO order (lower = head)
+	Content     string                 `json:"content"`
+	Model       string                 `json:"model"`
+	PlanMode    bool                   `json:"plan_mode"`
+	Attachments []MessageAttachment    `json:"attachments"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	QueuedAt    time.Time              `json:"queued_at"`
+	QueuedBy    string                 `json:"queued_by"`
 }
 
-// MessageAttachment represents an attachment (image) in a queued message
+// MessageAttachment represents an attachment (image) in a queued message.
 type MessageAttachment struct {
-	Type     string `json:"type"`      // "image"
-	Data     string `json:"data"`      // Base64 data
-	MimeType string `json:"mime_type"` // MIME type
+	Type     string `json:"type"`
+	Data     string `json:"data"`
+	MimeType string `json:"mime_type"`
 }
 
-// QueueStatus represents the queue status for a session
+// QueueStatus is the per-session view returned to clients: full ordered list of
+// pending entries plus capacity info.
 type QueueStatus struct {
-	IsQueued bool           `json:"is_queued"` // Whether a message is queued
-	Message  *QueuedMessage `json:"message"`   // The queued message (nil if not queued)
+	Entries []QueuedMessage `json:"entries"`
+	Count   int             `json:"count"`
+	Max     int             `json:"max"`
 }
 
 // PendingMove represents a workflow step move requested by an agent (via
 // move_task_kandev) while its turn is still active. Applied by handleAgentReady
-// once the turn ends, to avoid racing the on_enter processing against the
-// agent's running turn.
+// once the turn ends.
 type PendingMove struct {
 	TaskID         string    `json:"task_id"`
 	WorkflowID     string    `json:"workflow_id"`

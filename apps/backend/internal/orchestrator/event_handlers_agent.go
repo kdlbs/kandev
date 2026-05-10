@@ -55,13 +55,14 @@ func (s *Service) publishQueueStatusEvent(ctx context.Context, sessionID string)
 	queueStatus := s.messageQueue.GetStatus(ctx, sessionID)
 	eventData := map[string]interface{}{
 		"session_id": sessionID,
-		"is_queued":  queueStatus.IsQueued,
-		"message":    queueStatus.Message,
+		"entries":    queueStatus.Entries,
+		"count":      queueStatus.Count,
+		"max":        queueStatus.Max,
 	}
 
 	s.logger.Debug("publishing queue status changed event",
 		zap.String("session_id", sessionID),
-		zap.Bool("is_queued", queueStatus.IsQueued))
+		zap.Int("count", queueStatus.Count))
 
 	_ = s.eventBus.Publish(ctx, events.MessageQueueStatusChanged, bus.NewEvent(
 		events.MessageQueueStatusChanged,
@@ -242,8 +243,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	queueStatus := s.messageQueue.GetStatus(ctx, data.SessionID)
 	s.logger.Info("checking for queued messages",
 		zap.String("session_id", data.SessionID),
-		zap.Bool("is_queued", queueStatus.IsQueued),
-		zap.Any("message", queueStatus.Message))
+		zap.Int("count", queueStatus.Count))
 
 	// Passthrough sessions: deliver queued messages via PTY stdin instead of ACP.
 	if s.agentManager.IsPassthroughSession(ctx, data.SessionID) {
