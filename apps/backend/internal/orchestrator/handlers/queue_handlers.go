@@ -86,6 +86,9 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	if req.Content == "" && len(req.Attachments) == 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content or attachments are required", nil)
 	}
+	if req.UserID == messagequeue.QueuedByAgent {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "user_id may not impersonate the agent identity", nil)
+	}
 
 	// Default empty user_id to QueuedByUser so the entry has a non-empty owner;
 	// the UpdateMessage handler relies on this so its filter against agent
@@ -169,6 +172,11 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
+	if req.SessionID == "" {
+		// Required so publishStatus can broadcast the post-update list to other
+		// connected clients; without it they'd be left with a stale view.
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
 	if req.EntryID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "entry_id is required", nil)
 	}
@@ -176,10 +184,17 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content or attachments are required", nil)
 	}
 
-	// Default user_id to messagequeue.QueuedByUser so the UpdateContent guard
-	// always runs against a non-empty owner. Agent-authored (inter-task)
-	// entries have queued_by="agent" and the guard rejects them — the frontend
-	// canEdit gate is mirrored in the WS API rather than relying on UI alone.
+	// Reject any client-supplied identity that would impersonate the agent.
+	// Without this guard a hostile WS client could send user_id="agent" to
+	// satisfy the `WHERE queued_by = ?` filter on inter-task entries and
+	// overwrite their content. The reserved sentinel must be settable only
+	// from the inter-task dispatch path inside the backend.
+	if req.UserID == messagequeue.QueuedByAgent {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "user_id may not impersonate the agent identity", nil)
+	}
+	// Default empty user_id to QueuedByUser so the UpdateContent guard always
+	// runs against a non-empty owner. Agent entries (queued_by="agent") then
+	// fail the filter, mirroring the canEdit UI gate at the WS layer.
 	queuedBy := req.UserID
 	if queuedBy == "" {
 		queuedBy = messagequeue.QueuedByUser
@@ -191,9 +206,7 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
 
-	if req.SessionID != "" {
-		h.publishStatus(ctx, req.SessionID)
-	}
+	h.publishStatus(ctx, req.SessionID)
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: req.EntryID})
 }
 
@@ -207,6 +220,10 @@ func (h *QueueHandlers) wsRemoveEntry(ctx context.Context, msg *ws.Message) (*ws
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
+	if req.SessionID == "" {
+		// Required so publishStatus can broadcast the post-removal list.
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
 	if req.EntryID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "entry_id is required", nil)
 	}
@@ -218,9 +235,7 @@ func (h *QueueHandlers) wsRemoveEntry(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
 
-	if req.SessionID != "" {
-		h.publishStatus(ctx, req.SessionID)
-	}
+	h.publishStatus(ctx, req.SessionID)
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: req.EntryID})
 }
 
@@ -247,6 +262,9 @@ func (h *QueueHandlers) wsAppendToQueue(ctx context.Context, msg *ws.Message) (*
 	}
 	if req.Content == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content is required", nil)
+	}
+	if req.UserID == messagequeue.QueuedByAgent {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "user_id may not impersonate the agent identity", nil)
 	}
 
 	queuedBy := req.UserID

@@ -193,11 +193,9 @@ func TestRemoveEntry(t *testing.T) {
 	svc := setupService(t)
 	ctx := context.Background()
 
-	a, _ := svc.QueueMessage(ctx, "s", "t", "a", "", "u", false, nil)
+	_, _ = svc.QueueMessage(ctx, "s", "t", "a", "", "u", false, nil)
 	b, _ := svc.QueueMessage(ctx, "s", "t", "b", "", "u", false, nil)
-	c, _ := svc.QueueMessage(ctx, "s", "t", "c", "", "u", false, nil)
-	_ = a
-	_ = c
+	_, _ = svc.QueueMessage(ctx, "s", "t", "c", "", "u", false, nil)
 
 	require.NoError(t, svc.RemoveEntry(ctx, b.ID))
 

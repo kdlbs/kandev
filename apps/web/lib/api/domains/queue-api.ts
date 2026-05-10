@@ -39,7 +39,7 @@ function asWSError(err: unknown): WSError | undefined {
   return undefined;
 }
 
-function rethrowQueueError(err: unknown): never {
+export function rethrowQueueError(err: unknown): never {
   const wsErr = asWSError(err);
   if (wsErr?.code === "queue_full") {
     const size = typeof wsErr.details?.queue_size === "number" ? wsErr.details.queue_size : 0;
@@ -48,6 +48,9 @@ function rethrowQueueError(err: unknown): never {
   }
   if (wsErr?.code === "entry_not_found") {
     throw new QueueEntryNotFoundError();
+  }
+  if (wsErr?.message) {
+    throw new Error(wsErr.message);
   }
   throw err instanceof Error ? err : new Error(String(err));
 }

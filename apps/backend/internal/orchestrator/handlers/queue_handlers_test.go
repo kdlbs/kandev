@@ -235,10 +235,19 @@ func TestWsUpdateMessage(t *testing.T) {
 		assert.Equal(t, "entry_not_found", parseError(t, response).Code)
 	})
 
+	t.Run("rejects missing session_id", func(t *testing.T) {
+		handlers, _ := setupQueueHandlers(t)
+		response, err := handlers.wsUpdateMessage(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{"entry_id": "e", "content": "x"}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Contains(t, parseError(t, response).Message, "session_id is required")
+	})
+
 	t.Run("rejects missing entry_id", func(t *testing.T) {
 		handlers, _ := setupQueueHandlers(t)
 		response, err := handlers.wsUpdateMessage(context.Background(),
-			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{"content": "x"}))
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{"session_id": "s", "content": "x"}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
 		assert.Contains(t, parseError(t, response).Message, "entry_id is required")
@@ -247,10 +256,32 @@ func TestWsUpdateMessage(t *testing.T) {
 	t.Run("rejects when content and attachments missing", func(t *testing.T) {
 		handlers, _ := setupQueueHandlers(t)
 		response, err := handlers.wsUpdateMessage(context.Background(),
-			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{"entry_id": "e"}))
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{"session_id": "s", "entry_id": "e"}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
 		assert.Contains(t, parseError(t, response).Message, "content or attachments are required")
+	})
+
+	t.Run("rejects user_id impersonating the agent identity", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		ctx := context.Background()
+		queued, _ := svc.QueueMessageWithMetadata(ctx, "s", "t", "agent prompt", "", messagequeue.QueuedByAgent, false, nil, nil)
+
+		response, err := handlers.wsUpdateMessage(ctx,
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
+				"session_id": "s",
+				"entry_id":   queued.ID,
+				"content":    "hijack",
+				"user_id":    messagequeue.QueuedByAgent,
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Contains(t, parseError(t, response).Message, "may not impersonate the agent identity")
+
+		// And confirm the agent entry was not overwritten.
+		entries := svc.GetStatus(ctx, "s").Entries
+		require.Len(t, entries, 1)
+		assert.Equal(t, "agent prompt", entries[0].Content)
 	})
 }
 
@@ -277,10 +308,22 @@ func TestWsRemoveEntry(t *testing.T) {
 	t.Run("returns entry_not_found when missing", func(t *testing.T) {
 		handlers, _ := setupQueueHandlers(t)
 		response, err := handlers.wsRemoveEntry(context.Background(),
-			createTestMessage(t, ws.ActionMessageQueueRemove, map[string]interface{}{"entry_id": "ghost"}))
+			createTestMessage(t, ws.ActionMessageQueueRemove, map[string]interface{}{
+				"session_id": "s",
+				"entry_id":   "ghost",
+			}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
 		assert.Equal(t, "entry_not_found", parseError(t, response).Code)
+	})
+
+	t.Run("rejects missing session_id", func(t *testing.T) {
+		handlers, _ := setupQueueHandlers(t)
+		response, err := handlers.wsRemoveEntry(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueRemove, map[string]interface{}{"entry_id": "e"}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Contains(t, parseError(t, response).Message, "session_id is required")
 	})
 }
 

@@ -155,7 +155,7 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 		s.logger.Error("list queued failed",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return &QueueStatus{Entries: nil, Count: 0, Max: s.maxPerSession}
+		return &QueueStatus{Entries: []QueuedMessage{}, Count: 0, Max: s.maxPerSession}
 	}
 	if entries == nil {
 		entries = []QueuedMessage{}

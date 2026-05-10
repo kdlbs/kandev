@@ -236,8 +236,22 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 		}
 		return nil, fmt.Errorf("take head: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ?`), msg.ID); err != nil {
+	// Two concurrent TakeHead calls can both observe the same head row in
+	// their respective DEFERRED transactions; one wins the DELETE, the other
+	// finds RowsAffected()==0 after waiting on the writer lock. Returning the
+	// already-drained message in that case would let the orchestrator dispatch
+	// it twice. Treat the lost race as "queue empty for now" so the caller
+	// retries on the next agent.ready instead.
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ?`), msg.ID)
+	if err != nil {
 		return nil, fmt.Errorf("delete head: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("delete head rows affected: %w", err)
+	}
+	if affected == 0 {
+		return nil, nil
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
