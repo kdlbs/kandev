@@ -294,6 +294,23 @@ export class ApiClient {
     await this.request("PATCH", `/api/v1/agent-profiles/${profileId}`, patch);
   }
 
+  async listPrompts(): Promise<{
+    prompts: Array<{ id: string; name: string; content: string; builtin: boolean }>;
+  }> {
+    return this.request("GET", "/api/v1/prompts");
+  }
+
+  async createPrompt(
+    name: string,
+    content: string,
+  ): Promise<{ id: string; name: string; content: string; builtin: boolean }> {
+    return this.request("POST", "/api/v1/prompts", { name, content });
+  }
+
+  async deletePrompt(promptId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/prompts/${promptId}`);
+  }
+
   async createTaskWithAgent(
     workspaceId: string,
     title: string,

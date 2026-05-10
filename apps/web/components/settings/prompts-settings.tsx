@@ -15,6 +15,7 @@ import {
 import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
+import { useToast } from "@/components/toast-provider";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useAppStore } from "@/components/state-provider";
 import { createPrompt, deletePrompt, updatePrompt } from "@/lib/api";
@@ -25,6 +26,10 @@ const defaultFormState = {
   name: "",
   content: "",
 };
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Request failed";
+}
 
 type PromptFormState = typeof defaultFormState;
 
@@ -46,12 +51,16 @@ function PromptCreateForm({
   isBusy,
 }: PromptCreateFormProps) {
   return (
-    <div className="rounded-lg border border-border/70 bg-background p-4 space-y-3">
+    <div
+      className="rounded-lg border border-border/70 bg-background p-4 space-y-3"
+      data-testid="prompt-create-form"
+    >
       <div className="text-sm font-medium text-foreground">Add prompt</div>
       <Input
         value={formState.name}
         onChange={(event) => onFormChange({ name: event.target.value })}
         placeholder="Prompt name"
+        data-testid="prompt-name-input"
       />
       <Textarea
         value={formState.content}
@@ -59,9 +68,10 @@ function PromptCreateForm({
         placeholder="Prompt content"
         rows={5}
         className="resize-y max-h-60 overflow-auto"
+        data-testid="prompt-content-input"
       />
       <div className="flex items-center gap-2">
-        <Button onClick={onSubmit} disabled={!isValid || isBusy}>
+        <Button onClick={onSubmit} disabled={!isValid || isBusy} data-testid="prompt-submit">
           Add prompt
         </Button>
         <Button variant="ghost" onClick={onCancel} disabled={isBusy}>
@@ -109,6 +119,8 @@ function PromptListItem({
     <div
       className="rounded-lg border border-border/70 bg-background p-4 flex flex-col gap-3"
       ref={isEditing ? editingRef : null}
+      data-testid="prompt-list-item"
+      data-prompt-name={prompt.name}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -127,6 +139,7 @@ function PromptListItem({
             onClick={() => onStartEditing(prompt)}
             disabled={isBusy || showCreate}
             className="cursor-pointer"
+            data-testid="prompt-edit-button"
           >
             <IconEdit className="h-4 w-4" />
           </Button>
@@ -147,6 +160,7 @@ function PromptListItem({
             value={formState.name}
             onChange={(event) => onFormChange({ name: event.target.value })}
             placeholder="Prompt name"
+            data-testid="prompt-name-input"
           />
           <Textarea
             value={formState.content}
@@ -154,9 +168,10 @@ function PromptListItem({
             placeholder="Prompt content"
             rows={5}
             className="resize-y max-h-60 overflow-auto"
+            data-testid="prompt-content-input"
           />
           <div className="flex items-center gap-2">
-            <Button onClick={onUpdate} disabled={!isValid || isBusy}>
+            <Button onClick={onUpdate} disabled={!isValid || isBusy} data-testid="prompt-submit">
               Save changes
             </Button>
             <Button variant="ghost" onClick={onCancel} disabled={isBusy}>
@@ -319,6 +334,7 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
     deleteTarget,
     formState,
   } = state;
+  const { toast } = useToast();
 
   const resetForm = useCallback(() => {
     setEditingId(null);
@@ -364,13 +380,15 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
   });
 
   const isBusy = createRequest.isLoading || updateRequest.isLoading || deleteRequest.isLoading;
+  const toastError = (title: string) => (err: unknown) =>
+    toast({ title, description: errorMessage(err), variant: "error" });
   const handleCreate = () => {
     if (!isValid || isBusy) return;
-    createRequest.run(formState).catch(() => undefined);
+    createRequest.run(formState).catch(toastError("Couldn't create prompt"));
   };
   const handleUpdate = () => {
     if (!isValid || isBusy || !editingId) return;
-    updateRequest.run(editingId, formState).catch(() => undefined);
+    updateRequest.run(editingId, formState).catch(toastError("Couldn't save prompt"));
   };
   const startEditing = (prompt: CustomPrompt) => {
     setEditingId(prompt.id);
@@ -390,7 +408,7 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
   };
   const confirmDelete = () => {
     if (!deleteTarget) return;
-    deleteRequest.run(deleteTarget.id).catch(() => undefined);
+    deleteRequest.run(deleteTarget.id).catch(toastError("Couldn't delete prompt"));
     closeDeleteDialog();
   };
 
@@ -455,7 +473,11 @@ export function PromptsSettings() {
       <div className="space-y-6 mt-4">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium text-foreground">Custom prompts</div>
-          <Button onClick={startCreate} disabled={isBusy || isEditing || showCreate}>
+          <Button
+            onClick={startCreate}
+            disabled={isBusy || isEditing || showCreate}
+            data-testid="prompt-create-button"
+          >
             Add prompt
           </Button>
         </div>
