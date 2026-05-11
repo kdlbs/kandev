@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { buildWebEnv, type PortConfig } from "./shared";
 
@@ -10,6 +10,15 @@ const ports: PortConfig = {
 };
 
 describe("buildWebEnv", () => {
+  const originalApiPort = process.env.NEXT_PUBLIC_KANDEV_API_PORT;
+  afterEach(() => {
+    if (originalApiPort === undefined) {
+      delete process.env.NEXT_PUBLIC_KANDEV_API_PORT;
+    } else {
+      process.env.NEXT_PUBLIC_KANDEV_API_PORT = originalApiPort;
+    }
+  });
+
   it("sets NEXT_PUBLIC_KANDEV_API_PORT in dev mode so the browser knows the backend port", () => {
     const env = buildWebEnv({ ports });
 
@@ -25,6 +34,17 @@ describe("buildWebEnv", () => {
 
     expect(env.NEXT_PUBLIC_KANDEV_API_PORT).toBeUndefined();
     expect(env.NODE_ENV).toBe("production");
+  });
+
+  it("strips a host-level NEXT_PUBLIC_KANDEV_API_PORT in production", () => {
+    // If an operator has the var in their shell/Docker env, the process.env
+    // spread would otherwise leak it into the Next.js process and reintroduce
+    // the cross-origin URL problem this fix addresses.
+    process.env.NEXT_PUBLIC_KANDEV_API_PORT = "99999";
+
+    const env = buildWebEnv({ ports, production: true });
+
+    expect(env.NEXT_PUBLIC_KANDEV_API_PORT).toBeUndefined();
   });
 
   it("always sets KANDEV_API_BASE_URL for SSR fetches", () => {

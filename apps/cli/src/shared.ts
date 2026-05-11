@@ -93,6 +93,10 @@ export function buildWebEnv(options: WebEnvOptions): NodeJS.ProcessEnv {
 
   if (production) {
     (env as Record<string, string>).NODE_ENV = "production";
+    // Explicitly unset so a host-level NEXT_PUBLIC_KANDEV_API_PORT (from a .env
+    // file, Docker env, or CI variable) cannot leak through the process.env
+    // spread above and reintroduce the cross-origin URL problem.
+    delete env.NEXT_PUBLIC_KANDEV_API_PORT;
   } else {
     // Dev mode only: browser hits the web port directly, so the client needs to
     // know the backend port for API calls. In production the Go backend
