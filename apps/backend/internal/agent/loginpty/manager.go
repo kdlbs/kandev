@@ -258,6 +258,7 @@ type Session struct {
 
 	subMu       sync.Mutex
 	subscribers map[chan<- []byte]struct{}
+	subClosed   bool // set under subMu by broadcastClose; once true, Subscribe closes the channel immediately
 
 	bufMu  sync.Mutex
 	buffer []byte
@@ -343,13 +344,15 @@ func (s *Session) BufferedOutput() []byte {
 // If the session has already ended (broadcastClose ran), the channel is
 // closed immediately so the caller's reader returns rather than blocking
 // forever on a channel that nothing will ever send to or close.
+//
+// Both the close-check and the map insertion happen under subMu so a
+// concurrent broadcastClose cannot race in between (which would otherwise
+// leave the late subscriber registered in a fresh empty map with nothing
+// to ever close it).
 func (s *Session) Subscribe(ch chan<- []byte) {
-	s.mu.Lock()
-	running := s.running
-	s.mu.Unlock()
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
-	if !running {
+	if s.subClosed {
 		close(ch)
 		return
 	}
@@ -375,11 +378,14 @@ func (s *Session) broadcast(data []byte) {
 }
 
 // broadcastClose closes any remaining subscriber channels — used to wake WS
-// loops on session exit.
+// loops on session exit. subClosed is set under subMu so any concurrent
+// Subscribe taking subMu after this either observes subClosed and closes
+// its own channel, or completed before us and is already in the snapshot.
 func (s *Session) broadcastClose() {
 	s.subMu.Lock()
 	subs := s.subscribers
 	s.subscribers = map[chan<- []byte]struct{}{}
+	s.subClosed = true
 	s.subMu.Unlock()
 	for ch := range subs {
 		close(ch)

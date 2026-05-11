@@ -280,23 +280,36 @@ func (h *Handlers) handleStream(c *gin.Context) {
 	defer sess.Unsubscribe(out)
 
 	done := make(chan struct{})
+	// disconnect is closed by the reader on client disconnect so the writer
+	// can exit even when the PTY is silent (e.g. idle browser-OAuth flows).
+	// Without this, an abrupt client disconnect during an idle session leaks
+	// the writer goroutine for up to IdleTimeout.
+	disconnect := make(chan struct{})
 
 	// Writer: forward PTY output → client.
 	go func() {
 		defer close(done)
-		for data := range out {
-			if err := conn.WriteMessage(gorillaws.BinaryMessage, data); err != nil {
+		for {
+			select {
+			case data, ok := <-out:
+				if !ok {
+					// Channel closed: session ended. Send a final exit notice.
+					status := sess.Status()
+					payload := map[string]any{"type": "exit"}
+					if status.ExitCode != nil {
+						payload["exit_code"] = *status.ExitCode
+					}
+					b, _ := json.Marshal(payload)
+					_ = conn.WriteMessage(gorillaws.TextMessage, b)
+					return
+				}
+				if err := conn.WriteMessage(gorillaws.BinaryMessage, data); err != nil {
+					return
+				}
+			case <-disconnect:
 				return
 			}
 		}
-		// Channel closed: session ended. Send a final exit notice.
-		status := sess.Status()
-		payload := map[string]any{"type": "exit"}
-		if status.ExitCode != nil {
-			payload["exit_code"] = *status.ExitCode
-		}
-		b, _ := json.Marshal(payload)
-		_ = conn.WriteMessage(gorillaws.TextMessage, b)
 	}()
 
 	// Reader: forward client → PTY (binary = input, text = JSON control).
@@ -314,6 +327,7 @@ func (h *Handlers) handleStream(c *gin.Context) {
 			h.handleControlMessage(sess, data)
 		}
 	}
+	close(disconnect)
 	<-done
 }
 
