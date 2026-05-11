@@ -2,6 +2,26 @@
 
 All notable changes to Kandev.
 
+## 0.42.0 - 2026-05-11
+
+### Features
+
+- streaming agent install, PTY login terminal, docker container UX ([#869](https://github.com/kdlbs/kandev/pull/869))
+- add CI hover popover on PR top-bar button ([#846](https://github.com/kdlbs/kandev/pull/846))
+- prettify Kandev MCP tool titles in chat ([#858](https://github.com/kdlbs/kandev/pull/858))
+- show repo name and enable multi-select in pipeline view ([#831](https://github.com/kdlbs/kandev/pull/831))
+- extend implement plan button with fresh-agent path and server-side plan mode ([#832](https://github.com/kdlbs/kandev/pull/832))
+
+### Bug Fixes
+
+- keep task and session state in sync on tool-event wake ([#865](https://github.com/kdlbs/kandev/pull/865))
+- close kanban preview when opening the edit dialog ([#868](https://github.com/kdlbs/kandev/pull/868))
+- wire logging.outputPath from config to logger ([#866](https://github.com/kdlbs/kandev/pull/866))
+- harden release package publishing ([#862](https://github.com/kdlbs/kandev/pull/862))
+- unify Kandev branding ([#863](https://github.com/kdlbs/kandev/pull/863))
+- warn on duplicate custom prompt name instead of 500 ([#859](https://github.com/kdlbs/kandev/pull/859))
+- mobile task switcher sheet skeleton while snapshot loads ([#860](https://github.com/kdlbs/kandev/pull/860))
+
 ## 0.41.0 - 2026-05-09
 
 ### Features

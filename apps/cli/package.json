@@ -1,6 +1,6 @@
 {
   "name": "kandev",
-  "version": "0.41.0",
+  "version": "0.42.0",
   "private": false,
   "description": "Launcher for Kandev — manage tasks, orchestrate agents, review changes, and ship value",
   "license": "AGPL-3.0-only",
