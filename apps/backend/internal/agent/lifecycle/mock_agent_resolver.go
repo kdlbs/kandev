@@ -33,11 +33,19 @@ func NewMockAgentResolver(log *logger.Logger) *MockAgentResolver {
 // env var path is invalid.
 func (r *MockAgentResolver) ResolveLinuxBinary() (string, error) {
 	if envPath := os.Getenv("KANDEV_MOCK_AGENT_LINUX_BINARY"); envPath != "" {
-		if _, err := os.Stat(envPath); err == nil {
-			r.logger.Debug("using mock-agent from env var", zap.String("path", envPath))
-			return envPath, nil
+		info, err := os.Stat(envPath)
+		if err != nil {
+			return "", fmt.Errorf("KANDEV_MOCK_AGENT_LINUX_BINARY=%q does not exist", envPath)
 		}
-		return "", fmt.Errorf("KANDEV_MOCK_AGENT_LINUX_BINARY=%q does not exist", envPath)
+		// Reject directories (and anything that isn't a regular file) up
+		// front. Otherwise the path slips through to the bind-mount + exec
+		// step and surfaces as a less actionable "permission denied" or
+		// "exec format error" deep inside container startup.
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("KANDEV_MOCK_AGENT_LINUX_BINARY=%q is not a regular file", envPath)
+		}
+		r.logger.Debug("using mock-agent from env var", zap.String("path", envPath))
+		return envPath, nil
 	}
 
 	exePath, err := os.Executable()
