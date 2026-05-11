@@ -144,7 +144,11 @@ export function RepoChipsRow({
   const addHint = computeAddHint(canAddMore, repositories.length);
 
   return (
-    <div className="flex flex-wrap items-center gap-2" data-testid="repo-chips-row">
+    // min-h-9 reserves enough vertical space for the tallest mode body so the
+    // modal doesn't jump when the user toggles between Repo / URL / None
+    // (None renders a single pill, Repo can render chips + branch + add and
+    // sometimes wraps when the segmented control crowds the row).
+    <div className="flex min-h-9 flex-wrap items-center gap-2" data-testid="repo-chips-row">
       <ModeBody
         fs={fs}
         repositories={repositories}
