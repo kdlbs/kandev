@@ -17,7 +17,7 @@ import { SidebarViewsSyncBridge } from "@/components/sidebar-views-sync-bridge";
 import { LogBufferBridge } from "@/components/log-buffer-bridge";
 
 export const metadata: Metadata = {
-  title: "KanDev - AI Kanban",
+  title: "Kandev - AI Kanban",
   description: "AI-powered workflow management for developers",
 };
 
@@ -43,7 +43,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <meta name="apple-mobile-web-app-title" content="KanDev" />
+        <meta name="apple-mobile-web-app-title" content="Kandev" />
       </head>
       <body className="antialiased font-sans">
         {apiPort || debugMode ? (

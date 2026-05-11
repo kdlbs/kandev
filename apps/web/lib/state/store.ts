@@ -17,6 +17,7 @@ import type {
   ReviewWatch as GitHubReviewWatch,
   IssueWatch as GitHubIssueWatch,
   GitHubActionPresets,
+  PRFeedback,
 } from "@/lib/types/github";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
@@ -171,6 +172,7 @@ export type AppState = {
   agentDiscovery: (typeof defaultSettingsState)["agentDiscovery"];
   availableAgents: (typeof defaultSettingsState)["availableAgents"];
   agentProfiles: (typeof defaultSettingsState)["agentProfiles"];
+  installJobs: (typeof defaultSettingsState)["installJobs"];
   editors: (typeof defaultSettingsState)["editors"];
   prompts: (typeof defaultSettingsState)["prompts"];
   secrets: (typeof defaultSettingsState)["secrets"];
@@ -218,6 +220,7 @@ export type AppState = {
   reviewWatches: (typeof defaultGitHubState)["reviewWatches"];
   issueWatches: (typeof defaultGitHubState)["issueWatches"];
   actionPresets: (typeof defaultGitHubState)["actionPresets"];
+  prFeedbackCache: (typeof defaultGitHubState)["prFeedbackCache"];
 
   // JIRA slice
   jiraIssueWatches: (typeof defaultJiraState)["jiraIssueWatches"];
@@ -265,6 +268,8 @@ export type AppState = {
   setActionPresets: (workspaceId: string, presets: GitHubActionPresets) => void;
   setActionPresetsLoading: (workspaceId: string, loading: boolean) => void;
   applyGitHubRateLimitUpdate: (update: GitHubRateLimitUpdate) => void;
+  setPRFeedbackCacheEntry: (key: string, feedback: PRFeedback) => void;
+  removePRFeedbackCacheEntry: (key: string) => void;
 
   // JIRA actions
   setJiraIssueWatches: (watches: JiraIssueWatch[]) => void;
@@ -310,6 +315,10 @@ export type AppState = {
   ) => void;
   setAvailableAgentsLoading: (loading: boolean) => void;
   setAgentProfiles: (profiles: AgentProfilesState["items"]) => void;
+  setInstallJobs: (jobs: import("@/lib/state/slices/settings/types").InstallJob[]) => void;
+  upsertInstallJob: (job: import("@/lib/state/slices/settings/types").InstallJob) => void;
+  appendInstallOutput: (agentName: string, chunk: string) => void;
+  clearInstallJob: (agentName: string) => void;
   setRepositories: (workspaceId: string, repositories: Repository[]) => void;
   setRepositoriesLoading: (workspaceId: string, loading: boolean) => void;
   setRepositoryBranches: (
@@ -450,7 +459,12 @@ export type AppState = {
   toggleComparePair: (taskId: string, revisionId: string) => void;
   clearComparePair: (taskId: string) => void;
   // Queue actions
-  setQueueStatus: (sessionId: string, status: import("./slices/session/types").QueueStatus) => void;
+  setQueueEntries: (
+    sessionId: string,
+    entries: import("./slices/session/types").QueuedMessage[],
+    meta: import("./slices/session/types").QueueMeta,
+  ) => void;
+  removeQueueEntry: (sessionId: string, entryId: string) => void;
   setQueueLoading: (sessionId: string, loading: boolean) => void;
   clearQueueStatus: (sessionId: string) => void;
   // Available commands actions

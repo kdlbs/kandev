@@ -136,6 +136,8 @@ function useKanbanBoardStore() {
 interface KanbanBoardProps {
   onPreviewTask?: (task: Task) => void;
   onOpenTask?: (task: Task) => void;
+  /** Fired before the edit dialog opens so the preview panel can close itself. */
+  onBeforeEdit?: () => void;
 }
 
 function useKanbanBoardHooks(
@@ -227,6 +229,7 @@ function useMultiSelectDerived(
 function useKanbanBoardSetup(
   onPreviewTask: KanbanBoardProps["onPreviewTask"],
   onOpenTask: KanbanBoardProps["onOpenTask"],
+  onBeforeEdit: KanbanBoardProps["onBeforeEdit"],
 ) {
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
@@ -251,6 +254,15 @@ function useKanbanBoardSetup(
     onPreviewTask,
     onOpenTask,
   });
+  // Close preview before the edit dialog opens; destructure for stable useCallback dep.
+  const { handleEdit } = hooks;
+  const handleEditWithCleanup = useCallback(
+    (task: Task) => {
+      onBeforeEdit?.();
+      handleEdit(task);
+    },
+    [onBeforeEdit, handleEdit],
+  );
 
   const multiSelect = useTaskMultiSelect(kanban.workflowId);
   const { isMultiSelectMode, toggleSelect } = multiSelect;
@@ -299,6 +311,7 @@ function useKanbanBoardSetup(
     searchQuery,
     setSearchQuery,
     ...hooks,
+    handleEdit: handleEditWithCleanup,
     ...automation,
     handleOpenTask,
     handleCardClick: handleCardClickOrSelect,
@@ -310,8 +323,8 @@ function useKanbanBoardSetup(
   };
 }
 
-export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}) {
-  const s = useKanbanBoardSetup(onPreviewTask, onOpenTask);
+export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanBoardProps = {}) {
+  const s = useKanbanBoardSetup(onPreviewTask, onOpenTask, onBeforeEdit);
 
   if (!s.isMounted) {
     return <div className="h-dvh w-full bg-background" />;

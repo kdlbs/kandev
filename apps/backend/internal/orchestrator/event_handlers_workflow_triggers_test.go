@@ -402,8 +402,8 @@ func TestProcessOnEnter(t *testing.T) {
 			t.Fatalf("agent received %q, want %q", got, "user queued msg")
 		}
 
-		if status := svc.messageQueue.GetStatus(ctx, "s1"); status.IsQueued {
-			t.Fatalf("expected queue to be drained, still queued: %+v", status.Message)
+		if status := svc.messageQueue.GetStatus(ctx, "s1"); status.Count != 0 {
+			t.Fatalf("expected queue to be drained, count=%d entries=%+v", status.Count, status.Entries)
 		}
 	})
 
@@ -429,14 +429,11 @@ func TestProcessOnEnter(t *testing.T) {
 		deadline := time.Now().Add(2 * time.Second)
 		for {
 			status := svc.messageQueue.GetStatus(ctx, "s1")
-			if status.IsQueued {
-				if status.Message == nil {
-					t.Fatal("expected queued message payload")
+			if status.Count > 0 {
+				if status.Entries[0].TaskID != "t1" {
+					t.Fatalf("expected queued task_id t1, got %s", status.Entries[0].TaskID)
 				}
-				if status.Message.TaskID != "t1" {
-					t.Fatalf("expected queued task_id t1, got %s", status.Message.TaskID)
-				}
-				if status.Message.Content == "" {
+				if status.Entries[0].Content == "" {
 					t.Fatal("expected queued content to be populated")
 				}
 				break
@@ -586,6 +583,69 @@ func TestProcessOnExit(t *testing.T) {
 		}
 		if pm, ok := updated.Metadata["plan_mode"].(bool); !ok || !pm {
 			t.Error("expected plan_mode to remain true for passthrough session")
+		}
+	})
+}
+
+func TestSetSessionPlanModeByID(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("clears plan mode when enabled=false", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		_ = repo.UpdateSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true})
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+		if err := svc.SetSessionPlanModeByID(ctx, "s1", false); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if pm, _ := updated.Metadata["plan_mode"].(bool); pm {
+			t.Error("expected plan_mode to be cleared")
+		}
+	})
+
+	t.Run("sets plan mode when enabled=true", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+		if err := svc.SetSessionPlanModeByID(ctx, "s1", true); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if pm, ok := updated.Metadata["plan_mode"].(bool); !ok || !pm {
+			t.Error("expected plan_mode to be true")
+		}
+	})
+
+	t.Run("no-op for passthrough session", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		_ = repo.UpdateSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true})
+
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isPassthrough: true})
+
+		if err := svc.SetSessionPlanModeByID(ctx, "s1", false); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if pm, ok := updated.Metadata["plan_mode"].(bool); !ok || !pm {
+			t.Error("expected plan_mode to remain true for passthrough session")
+		}
+	})
+
+	t.Run("propagates session lookup error", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+		if err := svc.SetSessionPlanModeByID(ctx, "missing", false); err == nil {
+			t.Error("expected error for missing session")
 		}
 	})
 }

@@ -8,7 +8,10 @@ export const defaultGitHubState: GitHubSliceState = {
   reviewWatches: { items: [], loaded: false, loading: false },
   issueWatches: { items: [], loaded: false, loading: false },
   actionPresets: { byWorkspaceId: {}, loading: {} },
+  prFeedbackCache: { byKey: {} },
 };
+
+const PR_FEEDBACK_CACHE_LIMIT = 20;
 
 type ImmerSet = Parameters<
   StateCreator<GitHubSlice, [["zustand/immer", never]], [], GitHubSlice>
@@ -157,6 +160,31 @@ function createActionPresetActions(
   };
 }
 
+function createPRFeedbackCacheActions(
+  set: ImmerSet,
+): Pick<GitHubSlice, "setPRFeedbackCacheEntry" | "removePRFeedbackCacheEntry"> {
+  return {
+    setPRFeedbackCacheEntry: (key, feedback) =>
+      set((draft) => {
+        draft.prFeedbackCache.byKey[key] = { feedback, lastUpdatedAt: Date.now() };
+        // Bound cache size: drop the oldest entries when over the limit so a
+        // user opening many PRs doesn't grow the slice unboundedly.
+        const entries = Object.entries(draft.prFeedbackCache.byKey);
+        if (entries.length > PR_FEEDBACK_CACHE_LIMIT) {
+          entries.sort((a, b) => a[1].lastUpdatedAt - b[1].lastUpdatedAt);
+          const drop = entries.length - PR_FEEDBACK_CACHE_LIMIT;
+          for (let i = 0; i < drop; i++) {
+            delete draft.prFeedbackCache.byKey[entries[i][0]];
+          }
+        }
+      }),
+    removePRFeedbackCacheEntry: (key) =>
+      set((draft) => {
+        delete draft.prFeedbackCache.byKey[key];
+      }),
+  };
+}
+
 function createRateLimitActions(set: ImmerSet): Pick<GitHubSlice, "applyGitHubRateLimitUpdate"> {
   return {
     applyGitHubRateLimitUpdate: (update) =>
@@ -187,4 +215,5 @@ export const createGitHubSlice: StateCreator<
   ...createWatchActions(set),
   ...createActionPresetActions(set),
   ...createRateLimitActions(set),
+  ...createPRFeedbackCacheActions(set),
 });

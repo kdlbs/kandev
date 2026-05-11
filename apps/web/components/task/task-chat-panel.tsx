@@ -4,10 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
-import {
-  QueuedMessageIndicator,
-  type QueuedMessageIndicatorHandle,
-} from "@/components/task/chat/queued-message-indicator";
+import { QueuedGhostList } from "@/components/task/chat/queued-ghost-list";
 import { MessageList } from "@/components/task/chat/message-list";
 import { useIsTaskArchived } from "./task-archived-context";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
@@ -19,40 +16,6 @@ import { usePanelSearch } from "@/hooks/use-panel-search";
 import { useSessionSearch } from "@/hooks/domains/session/use-session-search";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import { useAppStore } from "@/components/state-provider";
-
-type QueuedOverlayProps = {
-  isQueued: boolean;
-  queuedMessage: { content: string } | null | undefined;
-  isArchived: boolean;
-  indicatorRef: React.RefObject<QueuedMessageIndicatorHandle | null>;
-  onCancel: () => void;
-  onUpdate: (content: string) => Promise<void>;
-  onEditComplete: () => void;
-};
-
-function QueuedMessageOverlay({
-  isQueued,
-  queuedMessage,
-  isArchived,
-  indicatorRef,
-  onCancel,
-  onUpdate,
-  onEditComplete,
-}: QueuedOverlayProps) {
-  if (!isQueued || !queuedMessage || isArchived) return null;
-  return (
-    <div className="flex-shrink-0 bg-card px-3 pt-1.5">
-      <QueuedMessageIndicator
-        ref={indicatorRef}
-        content={queuedMessage.content}
-        onCancel={onCancel}
-        onUpdate={onUpdate}
-        isVisible={true}
-        onEditComplete={onEditComplete}
-      />
-    </div>
-  );
-}
 
 function useClarificationKey(agentMessageCount: number) {
   const lastCountRef = useRef(agentMessageCount);
@@ -171,7 +134,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
 }: TaskChatPanelProps) {
   const isArchived = useIsTaskArchived();
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
-  const queuedMessageRef = useRef<QueuedMessageIndicatorHandle>(null);
 
   useSettingsData(true);
   const panelState = useChatPanelState({ sessionId, onOpenFile, onOpenFileAtLine });
@@ -189,18 +151,11 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     permissionsByToolCallId,
     childrenByParentToolCallId,
     agentMessageCount,
-    cancelQueue,
+    clearQueue,
     pendingClarification,
     pendingClarificationGroup,
-    isQueued,
-    queuedMessage,
-    updateQueueContent,
   } = panelState;
-  const { handleCancelTurn, handleCancelQueue, handleQueueEditComplete } = useChatPanelHandlers(
-    resolvedSessionId,
-    cancelQueue,
-    chatInputRef,
-  );
+  const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, clearQueue, chatInputRef);
   const { clarificationKey, handleClarificationResolved } = useClarificationKey(agentMessageCount);
 
   const panelRef = useRef<HTMLDivElement>(null);
@@ -268,15 +223,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           />
         </div>
       )}
-      <QueuedMessageOverlay
-        isQueued={isQueued}
-        queuedMessage={queuedMessage}
-        isArchived={isArchived}
-        indicatorRef={queuedMessageRef}
-        onCancel={handleCancelQueue}
-        onUpdate={updateQueueContent}
-        onEditComplete={handleQueueEditComplete}
-      />
+      <QueuedGhostList sessionId={resolvedSessionId} isArchived={isArchived} />
       {isArchived ? (
         <div className="bg-muted/50 flex-shrink-0 px-4 py-3 text-center text-sm text-muted-foreground border-t">
           This task is archived and read-only.

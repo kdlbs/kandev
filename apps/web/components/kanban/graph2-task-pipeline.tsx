@@ -8,10 +8,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
+import { Checkbox } from "@kandev/ui/checkbox";
 import { cn } from "@kandev/ui/lib/utils";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { needsAction } from "@/lib/utils/needs-action";
+import { useAppStore } from "@/components/state-provider";
 import { Graph2StepNode } from "./graph2-step-node";
 import { Graph2Connector } from "./graph2-connector";
 import type { Task } from "@/components/kanban-card";
@@ -46,6 +48,9 @@ export type Graph2TaskPipelineProps = {
   isMoving?: boolean;
   isDeleting?: boolean;
   isArchiving?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (taskId: string) => void;
+  isMultiSelectMode?: boolean;
 };
 
 function getStepPhase(index: number, currentStepIndex: number): "past" | "current" | "future" {
@@ -173,6 +178,69 @@ function TaskActions({
   );
 }
 
+function TaskButton({
+  task,
+  repoName,
+  isSelected,
+  onClick,
+}: {
+  task: Task;
+  repoName: string | undefined;
+  isSelected?: boolean;
+  onClick: () => void;
+}) {
+  const hasAction = needsAction(task);
+  const sessionCount = task.sessionCount ?? 0;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "w-[200px] shrink-0 rounded-md px-2.5 py-1.5 text-left transition-colors cursor-pointer",
+        "hover:bg-accent/60 active:bg-accent/80",
+        "border border-transparent hover:border-border/50",
+        hasAction && !isSelected && "border-l-2 !border-l-amber-500",
+        isSelected && "ring-1 ring-primary/60 border-primary/60",
+      )}
+    >
+      <span className="text-xs font-medium truncate block text-foreground/80">{task.title}</span>
+      {repoName && (
+        <span
+          data-testid={`pipeline-task-repo-${task.id}`}
+          className="text-xs text-muted-foreground/60 truncate block"
+        >
+          {repoName}
+        </span>
+      )}
+      <div className="flex items-center gap-1.5 mt-0.5">
+        {task.updatedAt && (
+          <span className="text-[10px] text-muted-foreground/60">
+            {formatRelativeTime(task.updatedAt)}
+          </span>
+        )}
+        {sessionCount > 0 && (
+          <span className="text-[10px] text-muted-foreground/60">
+            {sessionCount} {sessionCount === 1 ? "session" : "sessions"}
+          </span>
+        )}
+      </div>
+    </button>
+  );
+}
+
+function useTaskRepoName(task: Task): string | undefined {
+  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  return useMemo(() => {
+    const primaryRepoId = task.repositories?.[0]?.repository_id;
+    if (!primaryRepoId) return undefined;
+    for (const repos of Object.values(repositoriesByWorkspace)) {
+      const repo = repos.find((r) => r.id === primaryRepoId);
+      if (repo) return repo.name;
+    }
+    return undefined;
+  }, [repositoriesByWorkspace, task.repositories]);
+}
+
 export function Graph2TaskPipeline({
   task,
   steps,
@@ -184,43 +252,55 @@ export function Graph2TaskPipeline({
   isMoving,
   isDeleting,
   isArchiving,
+  isSelected,
+  onToggleSelect,
+  isMultiSelectMode,
 }: Graph2TaskPipelineProps) {
   const currentStepIndex = useMemo(
     () => steps.findIndex((s) => s.id === task.workflowStepId),
     [steps, task.workflowStepId],
   );
-  const hasAction = needsAction(task);
-  const sessionCount = task.sessionCount ?? 0;
+  const repoName = useTaskRepoName(task);
+  const showCheckbox = isMultiSelectMode || !!isSelected;
+
+  const handleTaskClick = () => {
+    if (isMultiSelectMode || isSelected) {
+      onToggleSelect?.(task.id);
+      return;
+    }
+    onOpenTask(task);
+  };
+
+  const handleCheckboxClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onToggleSelect?.(task.id);
+  };
 
   return (
-    <div className="flex items-center justify-center rounded-lg hover:bg-muted/30 transition-colors px-3 py-2">
+    <div
+      data-testid={`pipeline-task-${task.id}`}
+      className="flex items-center justify-center rounded-lg hover:bg-muted/30 transition-colors px-3 py-2"
+    >
       <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => onOpenTask(task)}
-          className={cn(
-            "w-[160px] shrink-0 rounded-md px-2.5 py-1.5 text-left transition-colors cursor-pointer",
-            "hover:bg-accent/60 active:bg-accent/80",
-            "border border-transparent hover:border-border/50",
-            hasAction && "border-l-2 !border-l-amber-500",
-          )}
-        >
-          <span className="text-xs font-medium truncate block text-foreground/80">
-            {task.title}
-          </span>
-          <div className="flex items-center gap-1.5 mt-0.5">
-            {task.updatedAt && (
-              <span className="text-[10px] text-muted-foreground/60">
-                {formatRelativeTime(task.updatedAt)}
-              </span>
-            )}
-            {sessionCount > 0 && (
-              <span className="text-[10px] text-muted-foreground/60">
-                {sessionCount} {sessionCount === 1 ? "session" : "sessions"}
-              </span>
-            )}
+        {showCheckbox && (
+          <div
+            className="shrink-0"
+            onClick={handleCheckboxClick}
+            data-testid={`task-select-checkbox-${task.id}`}
+          >
+            <Checkbox
+              checked={!!isSelected}
+              aria-label={`Select task ${task.title}`}
+              className="cursor-pointer border-muted-foreground/50"
+            />
           </div>
-        </button>
+        )}
+        <TaskButton
+          task={task}
+          repoName={repoName}
+          isSelected={isSelected}
+          onClick={handleTaskClick}
+        />
         <PipelineStepNodes
           steps={steps}
           currentStepIndex={currentStepIndex}
@@ -229,13 +309,15 @@ export function Graph2TaskPipeline({
           onPreviewTask={onPreviewTask}
           isMoving={isMoving}
         />
-        <TaskActions
-          task={task}
-          onDeleteTask={onDeleteTask}
-          onArchiveTask={onArchiveTask}
-          isDeleting={isDeleting}
-          isArchiving={isArchiving}
-        />
+        {!isMultiSelectMode && (
+          <TaskActions
+            task={task}
+            onDeleteTask={onDeleteTask}
+            onArchiveTask={onArchiveTask}
+            isDeleting={isDeleting}
+            isArchiving={isArchiving}
+          />
+        )}
       </div>
     </div>
   );

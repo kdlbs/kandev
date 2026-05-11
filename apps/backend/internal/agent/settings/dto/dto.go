@@ -63,12 +63,21 @@ type ListAgentsResponse struct {
 }
 
 type AgentDiscoveryDTO struct {
-	Name              string   `json:"name"`
-	SupportsMCP       bool     `json:"supports_mcp"`
-	MCPConfigPath     string   `json:"mcp_config_path,omitempty"`
-	InstallationPaths []string `json:"installation_paths,omitempty"`
-	Available         bool     `json:"available"`
-	MatchedPath       string   `json:"matched_path,omitempty"`
+	Name              string           `json:"name"`
+	SupportsMCP       bool             `json:"supports_mcp"`
+	MCPConfigPath     string           `json:"mcp_config_path,omitempty"`
+	InstallationPaths []string         `json:"installation_paths,omitempty"`
+	Available         bool             `json:"available"`
+	MatchedPath       string           `json:"matched_path,omitempty"`
+	LoginCommand      *LoginCommandDTO `json:"login_command,omitempty"`
+}
+
+// LoginCommandDTO describes an interactive login command surfaced to the UI.
+// The frontend uses it to render a "Login" button that opens a PTY terminal
+// running the named command.
+type LoginCommandDTO struct {
+	Cmd         []string `json:"cmd"`
+	Description string   `json:"description,omitempty"`
 }
 
 type ListDiscoveryResponse struct {
@@ -150,6 +159,7 @@ type AvailableAgentDTO struct {
 	ModelConfig        ModelConfigDTO                  `json:"model_config"`
 	PermissionSettings map[string]PermissionSettingDTO `json:"permission_settings,omitempty"`
 	PassthroughConfig  *PassthroughConfigDTO           `json:"passthrough_config,omitempty"`
+	LoginCommand       *LoginCommandDTO                `json:"login_command,omitempty"`
 	UpdatedAt          time.Time                       `json:"updated_at"`
 }
 
@@ -157,6 +167,41 @@ type ListAvailableAgentsResponse struct {
 	Agents []AvailableAgentDTO `json:"agents"`
 	Tools  []ToolStatusDTO     `json:"tools,omitempty"`
 	Total  int                 `json:"total"`
+}
+
+// InstallJobStatus represents the state of an install job.
+type InstallJobStatus string
+
+const (
+	InstallJobStatusQueued    InstallJobStatus = "queued"
+	InstallJobStatusRunning   InstallJobStatus = "running"
+	InstallJobStatusSucceeded InstallJobStatus = "succeeded"
+	InstallJobStatusFailed    InstallJobStatus = "failed"
+)
+
+// InstallJobDTO is the snapshot of an install job returned via HTTP and
+// broadcast via WS.
+type InstallJobDTO struct {
+	JobID      string           `json:"job_id"`
+	Name       string           `json:"agent_name"`
+	Status     InstallJobStatus `json:"status"`
+	Output     string           `json:"output,omitempty"`
+	Error      string           `json:"error,omitempty"`
+	ExitCode   *int             `json:"exit_code,omitempty"`
+	StartedAt  time.Time        `json:"started_at"`
+	FinishedAt *time.Time       `json:"finished_at,omitempty"`
+}
+
+// EnqueueInstallResponse is returned by POST /agent-install/:agentName.
+// The install runs asynchronously; clients subscribe to WS notifications
+// (agent.install.started/output/finished) or poll GET /agent-install/jobs.
+type EnqueueInstallResponse struct {
+	JobID string `json:"job_id"`
+}
+
+// ListInstallJobsResponse wraps the snapshot list for the jobs endpoint.
+type ListInstallJobsResponse struct {
+	Jobs []InstallJobDTO `json:"jobs"`
 }
 
 type AgentProfileMcpConfigDTO struct {

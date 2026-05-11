@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import {
   IconGitPullRequest,
   IconCheck,
@@ -9,6 +9,7 @@ import {
   IconChevronDown,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   DropdownMenu,
@@ -20,14 +21,19 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { useIsMobile } from "@/hooks/use-mobile";
 import {
   aggregatePRStatusColor,
   getPRStatusColor,
   isPRReadyToMerge,
 } from "@/components/github/pr-task-icon";
 import { prTaskKey } from "@/components/github/pr-detail-panel";
+import { PRCIPopover } from "@/components/github/pr-ci-popover";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
+
+const POPOVER_OPEN_DELAY_MS = 150;
+const POPOVER_CLOSE_DELAY_MS = 150;
 
 function PRStatusIcon({ pr }: { pr: TaskPR }) {
   // Terminal states take priority
@@ -65,33 +71,132 @@ export const PRTopbarButton = memo(function PRTopbarButton() {
   return <PRMultiButton prs={prs} />;
 });
 
+/**
+ * Manages the hover-driven popover lifecycle. Click on the button is left
+ * to the caller — desktop preserves the existing "open the PR detail panel"
+ * behavior, and hover is what reveals the CI popover. On touch devices the
+ * popover is suppressed entirely so the button click falls through to the
+ * existing detail-panel handler.
+ */
+function usePopoverInteractions() {
+  const isMobile = useIsMobile();
+  const [open, setOpen] = useState(false);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearOpen = useCallback(() => {
+    if (openTimer.current) {
+      clearTimeout(openTimer.current);
+      openTimer.current = null;
+    }
+  }, []);
+  const clearClose = useCallback(() => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }, []);
+
+  const handleEnter = useCallback(() => {
+    if (isMobile) return;
+    clearClose();
+    openTimer.current = setTimeout(() => setOpen(true), POPOVER_OPEN_DELAY_MS);
+  }, [isMobile, clearClose]);
+
+  const handleLeave = useCallback(() => {
+    if (isMobile) return;
+    clearOpen();
+    closeTimer.current = setTimeout(() => setOpen(false), POPOVER_CLOSE_DELAY_MS);
+  }, [isMobile, clearOpen]);
+
+  useEffect(
+    () => () => {
+      clearOpen();
+      clearClose();
+    },
+    [clearOpen, clearClose],
+  );
+
+  return {
+    isMobile,
+    open,
+    onOpenChange: (next: boolean) => {
+      if (!next) {
+        clearOpen();
+        clearClose();
+        setOpen(false);
+      }
+    },
+    handleEnter,
+    handleLeave,
+  };
+}
+
 function PRSingleButton({ pr }: { pr: TaskPR }) {
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   const tooltip = `${pr.owner}/${pr.repo} #${pr.pr_number} — ${pr.pr_title}`;
+  const { isMobile, open, onOpenChange, handleEnter, handleLeave } = usePopoverInteractions();
+  // Background sync lives on PRStatusChip (always mounted in the chat
+  // input area); the chip and this popover share prFeedbackCache so a
+  // single subscription warms both.
+
+  const button = (
+    <Button
+      data-testid="pr-topbar-button"
+      data-pr-number={pr.pr_number}
+      data-pr-state={pr.state}
+      data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
+      size="sm"
+      variant="outline"
+      className="cursor-pointer gap-1.5 px-2"
+      onMouseEnter={handleEnter}
+      onMouseLeave={handleLeave}
+      onClick={() => {
+        addPRPanel(prTaskKey(pr));
+        onOpenChange(false);
+      }}
+    >
+      <IconGitPullRequest className={`h-4 w-4 ${getPRStatusColor(pr)}`} />
+      <span className="text-xs font-medium">#{pr.pr_number}</span>
+      <PRStatusIcon pr={pr} />
+    </Button>
+  );
+
+  if (isMobile) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipContent>{tooltip}</TooltipContent>
+      </Tooltip>
+    );
+  }
+
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          data-testid="pr-topbar-button"
-          data-pr-number={pr.pr_number}
-          data-pr-state={pr.state}
-          data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
-          size="sm"
-          variant="outline"
-          className="cursor-pointer gap-1.5 px-2"
-          onClick={() => addPRPanel(prTaskKey(pr))}
-        >
-          <IconGitPullRequest className={`h-4 w-4 ${getPRStatusColor(pr)}`} />
-          <span className="text-xs font-medium">#{pr.pr_number}</span>
-          <PRStatusIcon pr={pr} />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{tooltip}</TooltipContent>
-    </Tooltip>
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverAnchor asChild>{button}</PopoverAnchor>
+      <PopoverContent
+        data-testid="pr-topbar-popover"
+        align="end"
+        sideOffset={4}
+        className="w-80"
+        onMouseEnter={handleEnter}
+        onMouseLeave={handleLeave}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <PRCIPopover pr={pr} enabled={open} />
+      </PopoverContent>
+    </Popover>
   );
 }
 
 function PRMultiButton({ prs }: { prs: TaskPR[] }) {
+  // Multi-PR keeps the original dropdown semantics on every form factor —
+  // the popover lives inside the dropdown trigger via hover only, and the
+  // per-PR rows are the click targets that addPRPanel.
+  return <PRMultiDropdown prs={prs} />;
+}
+
+function PRMultiDropdown({ prs }: { prs: TaskPR[] }) {
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   const aggColor = aggregatePRStatusColor(prs);
   return (

@@ -443,7 +443,7 @@ func createTestServiceWithAgent(repo *sqliterepo.Repository, stepGetter *mockSte
 		workflowStepGetter: stepGetter,
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewService(log),
+		messageQueue:       messagequeue.NewServiceMemory(log),
 	}
 }
 
@@ -574,7 +574,7 @@ func TestHandleAgentReadyGuards(t *testing.T) {
 			t.Fatalf("expected workflow step to remain step1, got %q", updatedTask.WorkflowStepID)
 		}
 		status := svc.messageQueue.GetStatus(ctx, "s1")
-		if !status.IsQueued {
+		if status.Count == 0 {
 			t.Fatalf("expected queued message to remain queued")
 		}
 	})
@@ -680,11 +680,11 @@ func TestExecuteQueuedMessage_RequeuesTransientPromptFailure(t *testing.T) {
 	svc.executeQueuedMessage("s1", queuedMsg)
 
 	status := svc.messageQueue.GetStatus(ctx, "s1")
-	if !status.IsQueued || status.Message == nil {
-		t.Fatalf("expected queued message to be requeued after transient failure")
+	if status.Count != 1 {
+		t.Fatalf("expected queued message to be requeued after transient failure, count=%d", status.Count)
 	}
-	if status.Message.Content != "hello" {
-		t.Fatalf("expected queued content to be preserved, got %q", status.Message.Content)
+	if status.Entries[0].Content != "hello" {
+		t.Fatalf("expected queued content to be preserved, got %q", status.Entries[0].Content)
 	}
 }
 
@@ -729,7 +729,7 @@ func TestExecuteQueuedMessage_FiresOnTurnStart(t *testing.T) {
 		repo:         repo,
 		taskRepo:     taskRepo,
 		agentManager: agentMgr,
-		messageQueue: messagequeue.NewService(log),
+		messageQueue: messagequeue.NewServiceMemory(log),
 	}
 	svc.SetWorkflowStepGetter(stepGetter)
 	svc.executor = executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
@@ -784,7 +784,7 @@ func TestExecuteQueuedMessage_NoOnTurnStart_StepUnchanged(t *testing.T) {
 		repo:         repo,
 		taskRepo:     taskRepo,
 		agentManager: agentMgr,
-		messageQueue: messagequeue.NewService(log),
+		messageQueue: messagequeue.NewServiceMemory(log),
 	}
 	svc.SetWorkflowStepGetter(stepGetter)
 	svc.executor = executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
@@ -819,7 +819,7 @@ func createTestServiceWithScheduler(repo *sqliterepo.Repository, stepGetter *moc
 		workflowStepGetter: stepGetter,
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewService(log),
+		messageQueue:       messagequeue.NewServiceMemory(log),
 		executor:           exec,
 		scheduler:          sched,
 	}
@@ -1074,8 +1074,8 @@ func TestHandleAgentReady_PassthroughQueuedMessage(t *testing.T) {
 
 		// Queue should be empty after delivery
 		status := svc.messageQueue.GetStatus(ctx, "s1")
-		if status.IsQueued {
-			t.Error("expected queue to be empty after delivery")
+		if status.Count != 0 {
+			t.Errorf("expected queue to be empty after delivery, count=%d", status.Count)
 		}
 	})
 

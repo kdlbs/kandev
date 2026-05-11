@@ -53,6 +53,8 @@ steps:
       on_enter:
         - type: enable_plan_mode
         - type: auto_start_agent
+      on_exit:
+        - type: disable_plan_mode
 
   - id: implementation
     name: Implementation

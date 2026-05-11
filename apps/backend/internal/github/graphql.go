@@ -94,6 +94,12 @@ type batchedPRResult struct {
 	ReviewRequests struct {
 		TotalCount int `json:"totalCount"`
 	} `json:"reviewRequests"`
+	ReviewThreads struct {
+		TotalCount int `json:"totalCount"`
+		Nodes      []struct {
+			IsResolved bool `json:"isResolved"`
+		} `json:"nodes"`
+	} `json:"reviewThreads"`
 	Commits struct {
 		Nodes []struct {
 			Commit struct {
@@ -184,6 +190,7 @@ func prFieldsBlock() string {
 		`author { login } createdAt updatedAt mergedAt closedAt ` +
 		`reviews(last: 100) { nodes { state author { login } submittedAt } } ` +
 		`reviewRequests(first: 0) { totalCount } ` +
+		`reviewThreads(first: 100) { totalCount nodes { isResolved } } ` +
 		`commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`
 }
 
@@ -236,59 +243,61 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 	if len(raw.Commits.Nodes) > 0 && raw.Commits.Nodes[0].Commit.StatusCheckRollup != nil {
 		checksState = strings.ToLower(raw.Commits.Nodes[0].Commit.StatusCheckRollup.State)
 	}
+	// Count unresolved threads from the fetched nodes. When the page is
+	// capped (totalCount > nodes), fall back to totalCount for the
+	// resolved-vs-unresolved estimate so the popover doesn't undercount on
+	// busy PRs. The fallback is conservative: we have no way to tell from
+	// the truncated page how many of the un-fetched threads are resolved,
+	// so attribute the unseen tail to "unresolved" — the popover's value
+	// is meant to be actionable, not exact, and over-reporting is safer
+	// than silently hiding open feedback.
+	unresolved := 0
+	for _, t := range raw.ReviewThreads.Nodes {
+		if !t.IsResolved {
+			unresolved++
+		}
+	}
+	if total := raw.ReviewThreads.TotalCount; total > len(raw.ReviewThreads.Nodes) {
+		unresolved += total - len(raw.ReviewThreads.Nodes)
+	}
 	return &PRStatus{
-		PR:             pr,
-		ReviewState:    reviewState,
-		ChecksState:    checksState,
-		MergeableState: pr.MergeableState,
+		PR:                               pr,
+		ReviewState:                      reviewState,
+		ChecksState:                      checksState,
+		MergeableState:                   pr.MergeableState,
+		ReviewCount:                      countApprovedReviewerNodes(raw.Reviews.Nodes),
+		PendingReviewCount:               raw.ReviewRequests.TotalCount,
+		ReviewCountsPopulated:            true,
+		UnresolvedReviewThreads:          unresolved,
+		UnresolvedReviewThreadsPopulated: true,
 	}
 }
 
+// reviewNodesToSamples converts the GraphQL reviewNode shape to the shared
+// reviewSample slice used by the dedup helpers in client_helpers.go.
+func reviewNodesToSamples(nodes []reviewNode) []reviewSample {
+	samples := make([]reviewSample, len(nodes))
+	for i, n := range nodes {
+		samples[i] = reviewSample{author: n.Author.Login, state: n.State, at: n.SubmittedAt}
+	}
+	return samples
+}
+
+// countApprovedReviewerNodes returns the number of distinct authors whose
+// latest review state is APPROVED, on the GraphQL reviewNode shape. Thin
+// adapter over countApprovedAuthors so REST and GraphQL agree on what
+// "Approved (N)" means.
+func countApprovedReviewerNodes(nodes []reviewNode) int {
+	return countApprovedAuthors(reviewNodesToSamples(nodes))
+}
+
 // summarizeReviewState collapses the review history to a single
-// "approved"/"changes_requested"/"" value matching the existing
-// service-side summary. Per-reviewer dedup: each reviewer's most-recent
-// review wins, so a CHANGES_REQUESTED followed by an APPROVED from the
-// same author resolves to APPROVED. CHANGES_REQUESTED beats APPROVED across
-// distinct reviewers.
+// "approved"/"changes_requested"/"" value. Per-reviewer dedup: each
+// reviewer's most-recent binding review wins, so a CHANGES_REQUESTED
+// followed by APPROVED from the same author resolves to APPROVED.
+// CHANGES_REQUESTED beats APPROVED across distinct reviewers.
 func summarizeReviewState(nodes []reviewNode) string {
-	type latest struct {
-		state string
-		at    time.Time
-	}
-	byAuthor := map[string]latest{}
-	for _, n := range nodes {
-		// Anonymous reviewers (deleted users) get a unique bucket so each
-		// review still counts independently.
-		key := n.Author.Login
-		if key == "" {
-			key = "<anon>:" + n.SubmittedAt.UTC().Format(time.RFC3339Nano)
-		}
-		state := strings.ToUpper(n.State)
-		// COMMENTED and PENDING are non-binding states and shouldn't replace
-		// a prior APPROVED / CHANGES_REQUESTED for the same reviewer.
-		if state != reviewStateApproved && state != reviewStateChangesRequested {
-			if _, ok := byAuthor[key]; ok {
-				continue
-			}
-		}
-		prev, ok := byAuthor[key]
-		if !ok || !n.SubmittedAt.Before(prev.at) {
-			byAuthor[key] = latest{state: state, at: n.SubmittedAt}
-		}
-	}
-	hasApproval := false
-	for _, l := range byAuthor {
-		switch l.state {
-		case reviewStateChangesRequested:
-			return computedReviewStateChangesRequested
-		case reviewStateApproved:
-			hasApproval = true
-		}
-	}
-	if hasApproval {
-		return computedReviewStateApproved
-	}
-	return ""
+	return reduceReviewSummary(reviewNodesToSamples(nodes))
 }
 
 // PATClient.ExecuteGraphQL satisfies GraphQLExecutor by POSTing to /graphql.

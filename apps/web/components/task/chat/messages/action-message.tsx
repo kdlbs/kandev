@@ -19,6 +19,7 @@ import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { deleteTask } from "@/lib/api/domains/kanban-api";
 import { AuthMethodsPanel, GenericAuthPanel } from "./auth-methods-panel";
+import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { MessageAction, RecoveryAuthMethod } from "@/components/task/chat/types";
 
@@ -82,14 +83,23 @@ export const ActionMessage = memo(function ActionMessage({
 });
 
 function ActionMessageDetails({ metadata }: { metadata: ActionMeta | undefined }) {
-  const store = useAppStoreApi();
-  const openTerminalWithCommand = useCallback(
-    (command: string) => store.getState().openBottomTerminalWithCommand(command),
-    [store],
-  );
-  const openBottomTerminal = useCallback(() => {
-    if (!store.getState().bottomTerminal.isOpen) store.getState().toggleBottomTerminal();
-  }, [store]);
+  const [hostShellOpen, setHostShellOpen] = useState(false);
+  const [hostShellCommand, setHostShellCommand] = useState<string | undefined>(undefined);
+
+  // Auth recovery uses the kandev host shell (where the agent CLIs are
+  // installed), not the task environment shell - the task env often isn't
+  // ready when an auth error fires (no workspace path yet), and the user's
+  // agent auth state lives in their home dir on the host anyway.
+  const openHostShellWithCommand = useCallback((command: string) => {
+    // Trailing newline runs the command immediately. Drop it if you'd rather
+    // let the user review first.
+    setHostShellCommand(command + "\n");
+    setHostShellOpen(true);
+  }, []);
+  const openHostShell = useCallback(() => {
+    setHostShellCommand(undefined);
+    setHostShellOpen(true);
+  }, []);
 
   if (!metadata) return null;
   return (
@@ -102,12 +112,17 @@ function ActionMessageDetails({ metadata }: { metadata: ActionMeta | undefined }
       {metadata.is_auth_error && metadata.auth_methods && metadata.auth_methods.length > 0 && (
         <AuthMethodsPanel
           methods={metadata.auth_methods}
-          onOpenTerminal={openTerminalWithCommand}
+          onOpenTerminal={openHostShellWithCommand}
         />
       )}
       {metadata.is_auth_error && (!metadata.auth_methods || metadata.auth_methods.length === 0) && (
-        <GenericAuthPanel onOpenTerminal={openBottomTerminal} />
+        <GenericAuthPanel onOpenTerminal={openHostShell} />
       )}
+      <HostShellDialog
+        open={hostShellOpen}
+        onOpenChange={setHostShellOpen}
+        initialInput={hostShellCommand}
+      />
     </>
   );
 }

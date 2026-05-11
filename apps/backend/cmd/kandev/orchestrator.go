@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"go.uber.org/zap"
@@ -15,10 +16,12 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
 	jirapkg "github.com/kandev/kandev/internal/jira"
 	linearpkg "github.com/kandev/kandev/internal/linear"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -34,6 +37,7 @@ const defaultEventNamespace = "default"
 func provideOrchestrator(
 	cfg *config.Config,
 	log *logger.Logger,
+	pool *db.Pool,
 	eventBus bus.EventBus,
 	taskRepo *sqliterepo.Repository,
 	taskSvc *taskservice.Service,
@@ -63,7 +67,17 @@ func provideOrchestrator(
 		zap.String("event_namespace", namespace),
 		zap.String("queue_group", serviceCfg.QueueGroup),
 		zap.Int("agent_standalone_port", cfg.Agent.StandalonePort))
-	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, log)
+
+	queueRepo, err := messagequeue.NewSQLiteRepository(pool.Writer(), pool.Reader())
+	if err != nil {
+		return nil, nil, fmt.Errorf("init message queue repo: %w", err)
+	}
+	maxPerSession := resolveQueueMaxPerSession(log)
+	msgQueue := messagequeue.NewService(queueRepo, maxPerSession, log)
+	log.Info("Message queue initialized",
+		zap.Int("max_per_session", maxPerSession))
+
+	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
 	taskSvc.SetExecutionStopper(orchestratorSvc)
 	taskSvc.SetGitArchiveCapture(orchestratorSvc)
 
@@ -115,6 +129,25 @@ func provideOrchestrator(
 	}
 
 	return orchestratorSvc, msgCreator, nil
+}
+
+// resolveQueueMaxPerSession honors the KANDEV_QUEUE_MAX_PER_SESSION env var,
+// falling back to messagequeue.DefaultMaxPerSession (10) when unset or invalid.
+// Values <= 0 disable the cap entirely (callers can still flood queues — only
+// useful in tests / specialized deployments).
+func resolveQueueMaxPerSession(log *logger.Logger) int {
+	raw := strings.TrimSpace(os.Getenv("KANDEV_QUEUE_MAX_PER_SESSION"))
+	if raw == "" {
+		return messagequeue.DefaultMaxPerSession
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		log.Warn("KANDEV_QUEUE_MAX_PER_SESSION is not a number, using default",
+			zap.String("value", raw),
+			zap.Int("default", messagequeue.DefaultMaxPerSession))
+		return messagequeue.DefaultMaxPerSession
+	}
+	return n
 }
 
 func resolveEventNamespace(cfg *config.Config) string {

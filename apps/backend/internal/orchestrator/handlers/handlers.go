@@ -41,6 +41,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionSessionStop, h.wsStopSession)
 	d.RegisterFunc(ws.ActionSessionDelete, h.wsDeleteSession)
 	d.RegisterFunc(ws.ActionSessionSetPrimary, h.wsSetPrimarySession)
+	d.RegisterFunc(ws.ActionSessionSetPlanMode, h.wsSetPlanMode)
 	d.RegisterFunc(ws.ActionGitHubCheckSessionPR, h.wsCheckSessionPR)
 }
 
@@ -144,6 +145,34 @@ func (h *Handlers) wsResetContext(ctx context.Context, msg *ws.Message) (*ws.Mes
 	return ws.NewResponse(msg.ID, msg.Action, map[string]any{
 		"success":    true,
 		"session_id": req.SessionID,
+	})
+}
+
+type wsSetPlanModeRequest struct {
+	SessionID string `json:"session_id"`
+	Enabled   bool   `json:"enabled"`
+}
+
+func (h *Handlers) wsSetPlanMode(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsSetPlanModeRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+
+	if err := h.service.SetSessionPlanModeByID(ctx, req.SessionID, req.Enabled); err != nil {
+		h.logger.Error("failed to set session plan mode",
+			zap.String("session_id", req.SessionID),
+			zap.Bool("enabled", req.Enabled),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to set plan mode: "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]any{
+		"success":    true,
+		"session_id": req.SessionID,
+		"enabled":    req.Enabled,
 	})
 }
 

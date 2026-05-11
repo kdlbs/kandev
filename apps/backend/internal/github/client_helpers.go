@@ -91,15 +91,101 @@ func getPRStatus(ctx context.Context, c Client, owner, repo string, number int) 
 	reviewState, pendingReviewCount := deriveReviewSyncState(pr, reviews)
 	total, passing := countCheckResults(checks)
 	return &PRStatus{
-		PR:                 pr,
-		ReviewState:        reviewState,
-		ChecksState:        computeOverallCheckStatus(checks),
-		MergeableState:     pr.MergeableState,
-		ReviewCount:        len(reviews),
+		PR:             pr,
+		ReviewState:    reviewState,
+		ChecksState:    computeOverallCheckStatus(checks),
+		MergeableState: pr.MergeableState,
+		// ReviewCount is the number of distinct reviewers whose latest review
+		// state is APPROVED — it's the value the popover renders as
+		// "Approved (N)" / "Approved N / M required". Counting raw review
+		// entries (`len(reviews)`) double-counts authors who left multiple
+		// reviews and also includes COMMENTED / CHANGES_REQUESTED rows.
+		ReviewCount:        countApprovedReviewers(reviews),
 		PendingReviewCount: pendingReviewCount,
 		ChecksTotal:        total,
 		ChecksPassing:      passing,
+		// REST path actually counted check runs + reviews — distinguish
+		// from the batched-GraphQL path that only carries rollup state.
+		ChecksPopulated:       true,
+		ReviewCountsPopulated: true,
 	}, nil
+}
+
+// reviewSample is a normalized review row consumed by latestReviewStateByAuthor.
+// Adapter functions below convert PRReview (REST) and reviewNode (GraphQL)
+// to this shape so the per-reviewer dedup rule is only spelled out once.
+type reviewSample struct {
+	author string
+	state  string
+	at     time.Time
+}
+
+// latestReviewStateByAuthor reduces a list of reviews to "one entry per
+// reviewer, latest binding state wins". COMMENTED and PENDING never
+// override a prior APPROVED / CHANGES_REQUESTED for the same author so a
+// reviewer who approved-then-commented still counts as approved.
+// Anonymous reviewers (deleted users) get a unique synthetic key so each
+// review still counts independently.
+func latestReviewStateByAuthor(samples []reviewSample) map[string]reviewSample {
+	byAuthor := make(map[string]reviewSample, len(samples))
+	for _, s := range samples {
+		key := s.author
+		if key == "" {
+			key = "<anon>:" + s.at.UTC().Format(time.RFC3339Nano)
+		}
+		state := strings.ToUpper(s.state)
+		if state != reviewStateApproved && state != reviewStateChangesRequested {
+			if _, ok := byAuthor[key]; ok {
+				continue
+			}
+		}
+		prev, ok := byAuthor[key]
+		if !ok || !s.at.Before(prev.at) {
+			byAuthor[key] = reviewSample{author: s.author, state: state, at: s.at}
+		}
+	}
+	return byAuthor
+}
+
+// countApprovedAuthors counts distinct reviewers whose latest binding state is
+// APPROVED. Shared between the REST and GraphQL count helpers.
+func countApprovedAuthors(samples []reviewSample) int {
+	count := 0
+	for _, s := range latestReviewStateByAuthor(samples) {
+		if s.state == reviewStateApproved {
+			count++
+		}
+	}
+	return count
+}
+
+// reduceReviewSummary collapses the per-author map into a single overall
+// review state. CHANGES_REQUESTED wins across authors; APPROVED otherwise;
+// "" when nothing is binding. Shared between REST and GraphQL paths.
+func reduceReviewSummary(samples []reviewSample) string {
+	hasApproval := false
+	for _, l := range latestReviewStateByAuthor(samples) {
+		switch l.state {
+		case reviewStateChangesRequested:
+			return computedReviewStateChangesRequested
+		case reviewStateApproved:
+			hasApproval = true
+		}
+	}
+	if hasApproval {
+		return computedReviewStateApproved
+	}
+	return ""
+}
+
+// countApprovedReviewers returns the number of distinct authors whose latest
+// review state is APPROVED. REST-path adapter over the shared helper.
+func countApprovedReviewers(reviews []PRReview) int {
+	samples := make([]reviewSample, len(reviews))
+	for i, r := range reviews {
+		samples[i] = reviewSample{author: r.Author, state: r.State, at: r.CreatedAt}
+	}
+	return countApprovedAuthors(samples)
 }
 
 // countCheckResults returns (total, passing) counts using the same logic as

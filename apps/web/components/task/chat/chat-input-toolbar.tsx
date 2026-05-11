@@ -11,8 +11,9 @@ import {
   IconPlugConnected,
   IconPlugConnectedX,
   IconPaperclip,
-  IconRocket,
 } from "@tabler/icons-react";
+
+
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 import { GridSpinner } from "@/components/grid-spinner";
 import { Button } from "@kandev/ui/button";
@@ -30,6 +31,7 @@ import { ModelSelector } from "@/components/task/model-selector";
 import { ModeSelector } from "@/components/task/mode-selector";
 import { ContextPopover } from "./context-popover";
 import { ResetContextButton } from "./reset-context-button";
+import { ImplementPlanButton } from "./implement-plan-button";
 import type { ContextFile } from "@/lib/state/context-files-store";
 
 export type ChatInputToolbarProps = {
@@ -57,7 +59,7 @@ export type ChatInputToolbarProps = {
   planContextEnabled?: boolean;
   contextFiles?: ContextFile[];
   onToggleFile?: (file: ContextFile) => void;
-  onImplementPlan?: () => void;
+  onImplementPlan?: (fresh: boolean) => void;
   /** Callback to enhance the current prompt with AI */
   onEnhancePrompt?: () => void;
   /** Whether prompt enhancement is in progress */
@@ -233,26 +235,6 @@ function PlanToggleButton({
   );
 }
 
-function ImplementPlanButton({ onClick }: { onClick: () => void }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 text-violet-400"
-          onClick={onClick}
-        >
-          <IconRocket className="h-4 w-4" />
-          <span className="text-xs">Implement</span>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Implement the plan</TooltipContent>
-    </Tooltip>
-  );
-}
-
 function McpIndicator({ mcpServers }: { mcpServers: string[] }) {
   const hasMcp = mcpServers.length > 0;
   const tooltipText = hasMcp
@@ -332,7 +314,7 @@ function ToolbarRightSection({
   planModeEnabled: boolean;
   isAgentBusy: boolean;
   hasContent: boolean;
-  onImplementPlan?: () => void;
+  onImplementPlan?: (fresh: boolean) => void;
   isDisabled: boolean;
   submitDisabledReason?: string;
   isSending: boolean;

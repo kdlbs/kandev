@@ -96,6 +96,20 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
         },
       }));
     },
+    "agent.install.started": (message) => {
+      // Payload is the full job snapshot (queued → running transitions both emit this).
+      store.getState().upsertInstallJob(message.payload);
+    },
+    "agent.install.output": (message) => {
+      const { agent_name, chunk } = message.payload as {
+        agent_name: string;
+        chunk: string;
+      };
+      store.getState().appendInstallOutput(agent_name, chunk);
+    },
+    "agent.install.finished": (message) => {
+      store.getState().upsertInstallJob(message.payload);
+    },
     "agent.updated": (message) => {
       store.setState((state) => ({
         ...state,

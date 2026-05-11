@@ -89,7 +89,7 @@ test.describe("Improve Kandev dialog", () => {
     // Intro screen
     const introDialog = testPage.getByRole("dialog", { name: "Improve Kandev" });
     await expect(introDialog).toBeVisible();
-    await expect(introDialog.getByText(/KanDev is open source/)).toBeVisible();
+    await expect(introDialog.getByText(/Kandev is open source/)).toBeVisible();
     await expect(introDialog.getByText(/forks .* to your GitHub account/)).toBeVisible();
 
     const contribute = testPage.getByTestId("improve-kandev-proceed");

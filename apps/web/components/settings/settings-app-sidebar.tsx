@@ -301,7 +301,7 @@ export function SettingsAppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link href="/">
-                <span className="text-2xl font-bold">KanDev</span>
+                <span className="text-2xl font-bold">Kandev</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

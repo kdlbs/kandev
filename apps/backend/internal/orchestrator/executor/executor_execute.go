@@ -654,6 +654,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			spec.RepoName = info.Repository.Name
 			spec.RepoSetupScript = info.Repository.SetupScript
 			spec.RepoCleanupScript = info.Repository.CleanupScript
+			spec.DefaultBranch = info.Repository.DefaultBranch
 		}
 		// Containerized executors need a clone URL; reuse the same helper as
 		// the single-repo path (best-effort — skipped if Repository is nil).
@@ -676,6 +677,9 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.CheckoutBranch = repoInfo.CheckoutBranch
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
+		if repoInfo.Repository != nil {
+			req.DefaultBranch = repoInfo.Repository.DefaultBranch
+		}
 		// Task directory mode: place worktree inside per-task directory
 		if req.UseWorktree && repoInfo.Repository != nil && repoInfo.Repository.Name != "" {
 			req.TaskDirName = worktree.SemanticWorktreeName(task.Title, worktree.SmallSuffix(3))

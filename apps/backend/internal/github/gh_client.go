@@ -505,6 +505,65 @@ func (c *GHClient) GetPRStatus(ctx context.Context, owner, repo string, number i
 	return getPRStatus(ctx, c, owner, repo, number)
 }
 
+// FetchBranchProtection looks up branch protection via `gh api`. A 404 from
+// `gh` (no rule) and a 403 (token lacks Administration: Read scope) are both
+// treated as "no rule we can see" so callers cache the negative result and
+// don't burn rate-limit quota on every poll. The string match is permissive
+// across formats so a future `gh` CLI release that tweaks the wording
+// doesn't silently break the cache.
+func (c *GHClient) FetchBranchProtection(ctx context.Context, owner, repo, branch string) (BranchProtection, error) {
+	out, err := c.run(ctx, "api",
+		fmt.Sprintf("repos/%s/%s/branches/%s/protection", owner, repo, branch))
+	if err != nil {
+		if isNotFoundErr(err) || isForbiddenErr(err) {
+			return BranchProtection{HasRule: false}, nil
+		}
+		return BranchProtection{}, err
+	}
+	var raw struct {
+		RequiredPullRequestReviews *struct {
+			RequiredApprovingReviewCount int `json:"required_approving_review_count"`
+		} `json:"required_pull_request_reviews"`
+	}
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return BranchProtection{}, fmt.Errorf("decode branch protection: %w", err)
+	}
+	if raw.RequiredPullRequestReviews == nil {
+		return BranchProtection{HasRule: true}, nil
+	}
+	return BranchProtection{
+		HasRule:                      true,
+		RequiredApprovingReviewCount: raw.RequiredPullRequestReviews.RequiredApprovingReviewCount,
+	}, nil
+}
+
+// isNotFoundErr matches the formats the `gh` CLI uses to report a 404 across
+// recent versions: "HTTP 404", "HTTP 404: ...", and "404 Not Found".
+// Restrictive enough that an unrelated 404 substring (e.g. inside a JSON
+// payload accidentally rendered into stderr) is unlikely to false-match.
+func isNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "HTTP 404") ||
+		strings.Contains(s, "404 Not Found") ||
+		strings.Contains(s, "status: 404")
+}
+
+// isForbiddenErr matches the formats the `gh` CLI uses to report a 403, used
+// by the branch-protection lookup to silently fall back to "no rule" when
+// the token lacks Administration: Read scope.
+func isForbiddenErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "HTTP 403") ||
+		strings.Contains(s, "403 Forbidden") ||
+		strings.Contains(s, "status: 403")
+}
+
 func (c *GHClient) ListPRFiles(ctx context.Context, owner, repo string, number int) ([]PRFile, error) {
 	out, err := c.run(ctx, "api",
 		fmt.Sprintf("repos/%s/%s/pulls/%d/files", owner, repo, number),

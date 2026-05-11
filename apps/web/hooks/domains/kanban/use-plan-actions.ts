@@ -7,6 +7,7 @@ import { moveTask } from "@/lib/api/domains/kanban-api";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useImplementFresh } from "./use-implement-fresh";
 import type { ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
 
 const PLAN_CONTEXT_PATH = "plan:context";
@@ -86,6 +87,27 @@ function useNextWorkflowStep(taskId: string | null) {
   return { proceedStepName, nextStepIsWorkStep, proceed, isMoving };
 }
 
+const IMPLEMENT_PLAN_SYSTEM_BLOCK = `<kandev-system>
+IMPLEMENT PLAN: The user has approved the plan and wants you to implement it now.
+Read the current plan using the get_task_plan_kandev MCP tool.
+Implement all changes described in the plan step by step.
+After completing the implementation, provide a summary of what was done.
+</kandev-system>`;
+
+export function buildImplementPlanContent(userText: string): string {
+  const visibleText = userText.trim() || "Implement the plan";
+  return `${visibleText}\n\n${IMPLEMENT_PLAN_SYSTEM_BLOCK}`;
+}
+
+/** Reads context files for the session, dropping the special plan:context and prompt: paths
+ *  that are only meaningful in-session and not as standalone file references. */
+export function readContextFilesMeta(sessionId: string): Array<{ path: string; name: string }> {
+  const files = useContextFilesStore.getState().filesBySessionId[sessionId] ?? [];
+  return files
+    .filter((f) => !f.path.startsWith("prompt:") && f.path !== PLAN_CONTEXT_PATH)
+    .map((f) => ({ path: f.path, name: f.name }));
+}
+
 function useImplementPlan(
   resolvedSessionId: string | null,
   taskId: string | null,
@@ -99,18 +121,10 @@ function useImplementPlan(
     if (!client) return;
 
     const userText = chatInputRef.current?.getValue() ?? "";
-    chatInputRef.current?.clear();
-    if (resolvedSessionId) {
-      setChatDraftContent(resolvedSessionId, null);
-    }
+    const attachments = chatInputRef.current?.getAttachments() ?? [];
+    const contextFilesMeta = readContextFilesMeta(resolvedSessionId);
 
-    const visibleText = userText.trim() || "Implement the plan";
-    const content = `${visibleText}\n\n<kandev-system>
-IMPLEMENT PLAN: The user has approved the plan and wants you to implement it now.
-Read the current plan using the get_task_plan_kandev MCP tool.
-Implement all changes described in the plan step by step.
-After completing the implementation, provide a summary of what was done.
-</kandev-system>`;
+    const content = buildImplementPlanContent(userText);
 
     client
       .request(
@@ -120,12 +134,28 @@ After completing the implementation, provide a summary of what was done.
           session_id: resolvedSessionId,
           content,
           plan_mode: false,
+          ...(attachments.length > 0 && { attachments }),
+          ...(contextFilesMeta.length > 0 && { context_files: contextFilesMeta }),
         },
-        10000,
+        attachments.length > 0 ? 30000 : 10000,
       )
+      .then(() => {
+        // Exit plan mode + clear composer only on success so a failed send
+        // leaves the layout and input intact for retry.
+        handlePlanModeChange(false);
+        chatInputRef.current?.clear();
+        setChatDraftContent(resolvedSessionId, null);
+        // Authoritatively clear plan_mode in session metadata so a refresh
+        // mid-implementation cannot re-hydrate plan mode from the server.
+        // Run as a separate request with its own catch so a set_plan_mode
+        // failure doesn't masquerade as a message send failure.
+        client
+          .request("session.set_plan_mode", { session_id: resolvedSessionId, enabled: false }, 5000)
+          .catch((err: unknown) =>
+            console.error("Failed to clear plan mode after implement:", err),
+          );
+      })
       .catch((err: unknown) => console.error("Failed to send implement plan message:", err));
-
-    handlePlanModeChange(false);
   }, [resolvedSessionId, taskId, handlePlanModeChange, chatInputRef]);
 }
 
@@ -167,6 +197,11 @@ export function usePlanActions(opts: {
     opts.handlePlanModeChange,
     opts.chatInputRef,
   );
+  const handleImplementFresh = useImplementFresh(
+    opts.resolvedSessionId,
+    opts.taskId,
+    opts.chatInputRef,
+  );
   const {
     proceedStepName,
     nextStepIsWorkStep,
@@ -185,7 +220,9 @@ export function usePlanActions(opts: {
     rawProceed();
   }, [planModeEnabled, disablePlanMode, rawProceed]);
 
-  const implementPlanHandler =
-    opts.planModeEnabled && !nextStepIsWorkStep ? handleImplementPlan : undefined;
+  const showImplement = opts.planModeEnabled && !nextStepIsWorkStep;
+  const implementPlanHandler = showImplement
+    ? (fresh: boolean) => (fresh ? handleImplementFresh() : handleImplementPlan())
+    : undefined;
   return { implementPlanHandler, proceedStepName, proceed, isMoving };
 }

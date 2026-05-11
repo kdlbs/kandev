@@ -444,6 +444,10 @@ WHEN TO OMIT parent_id (top-level task):
 IMPORTANT:
 - Subtasks inherit workspace, workflow, agent profile, and executor from the parent
 - Subtasks inherit the parent's repository unless you supply repository_url, repository_id, or local_path — in which case the subtask targets that repo instead (must live in the parent's workspace)
+- base_branch behaviour:
+  - Same repo as parent (no repo args): subtask inherits the parent's base_branch (sibling branches off the same starting point — useful for PR stacks)
+  - Different repo (you passed repository_url / repository_id / local_path): subtask defaults to that repo's default_branch
+  - Pass base_branch explicitly to override either default. Use list_repositories_kandev to see each repo's default_branch.
 - Top-level tasks need a repository via repository_url, repository_id, or local_path
 - 'description' is the sub-agent's initial prompt — be specific and detailed
 - Set start_agent=false to create without starting an agent`
@@ -476,7 +480,7 @@ IMPORTANT:
 			mcp.WithString("repository_id", mcp.Description("Repository ID. Required for top-level tasks unless local_path or repository_url is provided. For subtasks: optional — supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Will create/find the repository automatically. Preferred for local worktree flow. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo'). The repository will be cloned automatically on first use. For subtasks: supply only when the subtask should target a different repo than the parent.")),
-			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional, defaults to repository's default branch.")),
+			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional. Defaults: same-repo subtasks inherit the parent's base_branch; cross-repo subtasks and top-level tasks fall back to the repository's default_branch (visible via list_repositories_kandev).")),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
 	)

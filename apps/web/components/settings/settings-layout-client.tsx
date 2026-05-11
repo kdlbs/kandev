@@ -10,7 +10,7 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
   const pathname = usePathname();
   const isAgentDetail = pathname.startsWith("/settings/agents/") && pathname !== "/settings/agents";
   const backHref = isAgentDetail ? "/settings/agents" : "/";
-  const backLabel = isAgentDetail ? "Agents" : "KanDev";
+  const backLabel = isAgentDetail ? "Agents" : "Kandev";
   const title = isAgentDetail ? "Agent" : "Settings";
 
   return (

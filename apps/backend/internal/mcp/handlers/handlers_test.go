@@ -266,26 +266,37 @@ func TestResolveTaskRepositories_NoInputs_ReturnsEmpty(t *testing.T) {
 // --- Integration tests using real task service ---
 
 // seedParentWithRepo creates a workspace, workflow, repository, and a parent
-// task linked to that repository. Returns the parent task ID.
+// task linked to that repository. Returns the parent task ID. The parent's
+// task_repository row is anchored to a non-default branch ("pr-metrics") on
+// purpose so inheritance tests can assert what subtasks do with the parent's
+// branch (same-repo subtasks inherit it for stacked-PR ergonomics; the
+// worktree manager's fallback rescues launches if the branch went stale).
 func seedParentWithRepo(t *testing.T, svc *service.Service, repo *sqliterepo.Repository) string {
 	t.Helper()
 	ctx := context.Background()
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
-	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{ID: "repo-parent", WorkspaceID: "ws-1", Name: "Parent Repo"}))
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-parent", WorkspaceID: "ws-1", Name: "Parent Repo", DefaultBranch: "main",
+	}))
 	parent, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Parent task",
 		Repositories: []service.TaskRepositoryInput{
-			{RepositoryID: "repo-parent", BaseBranch: "main"},
+			{RepositoryID: "repo-parent", BaseBranch: "pr-metrics"},
 		},
 	})
 	require.NoError(t, err)
 	return parent.ID
 }
 
-func TestResolveTaskRepositories_ParentWithoutExplicitRepos_InheritsAll(t *testing.T) {
+// TestResolveTaskRepositories_ParentWithoutExplicitRepos_InheritsRepoAndBaseBranch
+// asserts the same-repo subtask path: the parent's RepositoryID and
+// BaseBranch carry over so the subtask branches off the same starting point
+// (sibling branches, ergonomic for stacked PRs). CheckoutBranch is dropped
+// because two worktrees cannot share a working branch.
+func TestResolveTaskRepositories_ParentWithoutExplicitRepos_InheritsRepoAndBaseBranch(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	parentID := seedParentWithRepo(t, svc, repo)
 
@@ -296,8 +307,77 @@ func TestResolveTaskRepositories_ParentWithoutExplicitRepos_InheritsAll(t *testi
 	require.NoError(t, err)
 	require.Len(t, result.Repos, 1, "subtask without explicit repos inherits parent's repos")
 	assert.Equal(t, "repo-parent", result.Repos[0].RepositoryID)
+	assert.Equal(t, "pr-metrics", result.Repos[0].BaseBranch, "same-repo subtask should inherit parent's base_branch for stacked-PR ergonomics")
+	assert.Empty(t, result.Repos[0].CheckoutBranch, "subtask must not inherit parent's checkout_branch (worktrees cannot share a branch)")
 	assert.Equal(t, "ws-1", result.WorkspaceID)
 	assert.Equal(t, "wf-1", result.WorkflowID)
+}
+
+// TestCreateSubtaskFromParent_SameRepoInheritsParentBaseBranch is the
+// end-to-end check that the parent's base_branch is persisted onto the
+// subtask's task_repository row when the subtask targets the same repo.
+// This is the desired behaviour: agents stacking work on top of a parent
+// PR get a subtask anchored to the same starting point. The worktree
+// manager's fallback (covered in worktree tests) is the safety net for
+// cases where the inherited branch later goes stale.
+func TestCreateSubtaskFromParent_SameRepoInheritsParentBaseBranch(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	resolved, err := h.resolveTaskRepositories(ctx, parentID, "", nil)
+	require.NoError(t, err)
+
+	subtask, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID:  resolved.WorkspaceID,
+		WorkflowID:   resolved.WorkflowID,
+		ParentID:     parentID,
+		Title:        "Child",
+		Description:  "do the thing",
+		Repositories: resolved.Repos,
+	})
+	require.NoError(t, err)
+	require.Len(t, subtask.Repositories, 1)
+	assert.Equal(t, "repo-parent", subtask.Repositories[0].RepositoryID)
+	assert.Equal(t, "pr-metrics", subtask.Repositories[0].BaseBranch, "same-repo subtask should inherit parent's base_branch")
+}
+
+// TestCreateSubtaskFromParent_DifferentRepoUsesNewRepoDefault verifies the
+// cross-repo path: when the agent points the subtask at a different repo
+// (via repository_id / repository_url / local_path) without an explicit
+// base_branch, the subtask anchors to that repo's default_branch — never
+// the parent's branch.
+func TestCreateSubtaskFromParent_DifferentRepoUsesNewRepoDefault(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-sibling", WorkspaceID: "ws-1", Name: "Sibling", DefaultBranch: "trunk",
+	}))
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	explicit := []mcpRepositoryInput{{RepositoryID: "repo-sibling"}}
+	resolved, err := h.resolveTaskRepositories(ctx, parentID, "", explicit)
+	require.NoError(t, err)
+
+	subtask, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID:  resolved.WorkspaceID,
+		WorkflowID:   resolved.WorkflowID,
+		ParentID:     parentID,
+		Title:        "Cross-repo child",
+		Description:  "do the thing",
+		Repositories: resolved.Repos,
+	})
+	require.NoError(t, err)
+	require.Len(t, subtask.Repositories, 1)
+	assert.Equal(t, "repo-sibling", subtask.Repositories[0].RepositoryID)
+	assert.Equal(t, "trunk", subtask.Repositories[0].BaseBranch, "cross-repo subtask should anchor to the new repo's default_branch, not parent's pr-metrics")
 }
 
 func TestResolveTaskRepositories_ParentWithExplicitRepos_OverridesRepoButInheritsWorkspace(t *testing.T) {

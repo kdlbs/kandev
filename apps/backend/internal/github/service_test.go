@@ -910,6 +910,253 @@ func TestSyncTaskPR_PublishesEventOnMergeableStateChange(t *testing.T) {
 	}
 }
 
+// TestSyncTaskPR_ChecksPopulated_PreservesOnLightweightSync verifies the
+// "preserve when batch sync didn't populate" path: a PRStatus with
+// ChecksPopulated=false must NOT clobber the persisted ChecksTotal /
+// ChecksPassing, even when status carries 0/0.
+func TestSyncTaskPR_ChecksPopulated_PreservesOnLightweightSync(t *testing.T) {
+	svc, store, _ := setupSyncTest(t)
+	ctx := context.Background()
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID:        "t1",
+		Owner:         "owner",
+		Repo:          "repo",
+		PRNumber:      1,
+		PRURL:         "https://github.com/owner/repo/pull/1",
+		HeadBranch:    "feat",
+		BaseBranch:    "main",
+		State:         "open",
+		ChecksTotal:   10,
+		ChecksPassing: 7,
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	status := &PRStatus{
+		PR:              &PR{Number: 1, State: "open", RepoOwner: "owner", RepoName: "repo"},
+		ChecksTotal:     0,
+		ChecksPassing:   0,
+		ChecksPopulated: false, // batched GraphQL path: didn't count
+	}
+	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	stored, err := store.GetTaskPR(ctx, "t1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if stored.ChecksTotal != 10 || stored.ChecksPassing != 7 {
+		t.Fatalf("counts clobbered: total=%d passing=%d (want 10/7)", stored.ChecksTotal, stored.ChecksPassing)
+	}
+}
+
+// TestSyncTaskPR_ChecksPopulated_AcceptsRealZero verifies the design fix:
+// when the rich sync path explicitly reports 0/0 (workflows removed from
+// the PR), we DO honor the new value instead of clinging to stale totals.
+func TestSyncTaskPR_ChecksPopulated_AcceptsRealZero(t *testing.T) {
+	svc, store, _ := setupSyncTest(t)
+	ctx := context.Background()
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 1, PRURL: "u",
+		HeadBranch: "feat", BaseBranch: "main", State: "open",
+		ChecksTotal: 5, ChecksPassing: 5,
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	status := &PRStatus{
+		PR:              &PR{Number: 1, State: "open", RepoOwner: "o", RepoName: "r"},
+		ChecksTotal:     0,
+		ChecksPassing:   0,
+		ChecksPopulated: true, // REST path: counted to zero
+	}
+	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	stored, _ := store.GetTaskPR(ctx, "t1")
+	if stored.ChecksTotal != 0 || stored.ChecksPassing != 0 {
+		t.Fatalf("real-zero not honored: total=%d passing=%d", stored.ChecksTotal, stored.ChecksPassing)
+	}
+}
+
+// TestSyncTaskPR_ReviewCounts_PreservesOnLightweightSync covers the same
+// preserve-on-not-populated dance for ReviewCount/PendingReviewCount as the
+// checks/threads variants. A partial sync path (status.ReviewCountsPopulated
+// = false) must not reset the popover's "Approved (N)" line to zero.
+func TestSyncTaskPR_ReviewCounts_PreservesOnLightweightSync(t *testing.T) {
+	svc, store, eb := setupSyncTest(t)
+	ctx := context.Background()
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 1, PRURL: "u",
+		HeadBranch: "feat", BaseBranch: "main", State: "open",
+		ReviewCount: 2, PendingReviewCount: 1,
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	status := &PRStatus{
+		PR:                    &PR{Number: 1, State: "open", RepoOwner: "o", RepoName: "r"},
+		ReviewCount:           0,
+		PendingReviewCount:    0,
+		ReviewCountsPopulated: false,
+	}
+	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	stored, _ := store.GetTaskPR(ctx, "t1")
+	if stored.ReviewCount != 2 || stored.PendingReviewCount != 1 {
+		t.Fatalf("review counts clobbered: review=%d pending=%d (want 2/1)",
+			stored.ReviewCount, stored.PendingReviewCount)
+	}
+	if got := eb.publishedCount(); got != 0 {
+		t.Fatalf("expected no event when nothing changed, got %d", got)
+	}
+}
+
+// TestSyncTaskPR_ReviewCounts_AcceptsRealZero is the symmetric case: when the
+// caller actually counted reviewers and reports zero, we honor it (e.g. all
+// approvals dismissed) instead of clinging to the previous non-zero values.
+func TestSyncTaskPR_ReviewCounts_AcceptsRealZero(t *testing.T) {
+	svc, store, _ := setupSyncTest(t)
+	ctx := context.Background()
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 1, PRURL: "u",
+		HeadBranch: "feat", BaseBranch: "main", State: "open",
+		ReviewCount: 2, PendingReviewCount: 1,
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	status := &PRStatus{
+		PR:                    &PR{Number: 1, State: "open", RepoOwner: "o", RepoName: "r"},
+		ReviewCount:           0,
+		PendingReviewCount:    0,
+		ReviewCountsPopulated: true,
+	}
+	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	stored, _ := store.GetTaskPR(ctx, "t1")
+	if stored.ReviewCount != 0 || stored.PendingReviewCount != 0 {
+		t.Fatalf("real-zero not honored: review=%d pending=%d",
+			stored.ReviewCount, stored.PendingReviewCount)
+	}
+}
+
+// TestSyncTaskPR_UnresolvedThreads_PreservesOnLightweightSync verifies the
+// REST single-PR poller (which doesn't fetch review threads) does NOT
+// clobber the value set by the GraphQL batched poller. Without the
+// UnresolvedReviewThreadsPopulated guard, every REST sync would flip the
+// count to 0 and emit a spurious github.task_pr.updated event.
+func TestSyncTaskPR_UnresolvedThreads_PreservesOnLightweightSync(t *testing.T) {
+	svc, store, eb := setupSyncTest(t)
+	ctx := context.Background()
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 1, PRURL: "u",
+		HeadBranch: "feat", BaseBranch: "main", State: "open",
+		UnresolvedReviewThreads: 3,
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	status := &PRStatus{
+		PR:                               &PR{Number: 1, State: "open", RepoOwner: "o", RepoName: "r"},
+		UnresolvedReviewThreads:          0,
+		UnresolvedReviewThreadsPopulated: false, // REST path: didn't look
+	}
+	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	stored, _ := store.GetTaskPR(ctx, "t1")
+	if stored.UnresolvedReviewThreads != 3 {
+		t.Fatalf("threads clobbered: got %d, want 3", stored.UnresolvedReviewThreads)
+	}
+	if got := eb.publishedCount(); got != 0 {
+		t.Fatalf("expected no event when nothing changed, got %d", got)
+	}
+}
+
+// TestSyncTaskPR_BaseBranchRetarget covers the case where a PR is retargeted
+// to a different base branch upstream — the new branch must be persisted so
+// future branch-protection lookups key off the right value.
+func TestSyncTaskPR_BaseBranchRetarget(t *testing.T) {
+	svc, store, _ := setupSyncTest(t)
+	ctx := context.Background()
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 1, PRURL: "u",
+		HeadBranch: "feat", BaseBranch: "main", State: "open",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	status := &PRStatus{
+		PR: &PR{
+			Number: 1, State: "open", RepoOwner: "o", RepoName: "r",
+			BaseBranch: "develop",
+		},
+	}
+	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	stored, _ := store.GetTaskPR(ctx, "t1")
+	if stored.BaseBranch != "develop" {
+		t.Fatalf("base branch not updated: got %q want develop", stored.BaseBranch)
+	}
+}
+
+// TestSyncTaskPR_NewFieldsPublishEvent guards that a change to any of the
+// CI-popover-relevant fields (UnresolvedReviewThreads, RequiredReviews,
+// ChecksTotal, ChecksPassing) triggers a github.task_pr.updated event so the
+// frontend popover refreshes via WS.
+func TestSyncTaskPR_NewFieldsPublishEvent(t *testing.T) {
+	required2 := 2
+	cases := []struct {
+		name   string
+		init   TaskPR
+		status PRStatus
+	}{
+		{
+			name: "unresolved threads change",
+			init: TaskPR{TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 1, PRURL: "u",
+				HeadBranch: "feat", BaseBranch: "main", State: "open"},
+			status: PRStatus{
+				PR:                               &PR{Number: 1, State: "open", RepoOwner: "o", RepoName: "r"},
+				UnresolvedReviewThreads:          3,
+				UnresolvedReviewThreadsPopulated: true,
+			},
+		},
+		{
+			name: "required reviews change",
+			init: TaskPR{TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 1, PRURL: "u",
+				HeadBranch: "feat", BaseBranch: "main", State: "open"},
+			status: PRStatus{
+				PR:              &PR{Number: 1, State: "open", RepoOwner: "o", RepoName: "r"},
+				RequiredReviews: &required2,
+			},
+		},
+		{
+			name: "checks total change",
+			init: TaskPR{TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 1, PRURL: "u",
+				HeadBranch: "feat", BaseBranch: "main", State: "open"},
+			status: PRStatus{
+				PR:              &PR{Number: 1, State: "open", RepoOwner: "o", RepoName: "r"},
+				ChecksTotal:     5,
+				ChecksPassing:   3,
+				ChecksPopulated: true,
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, store, eb := setupSyncTest(t)
+			ctx := context.Background()
+			if err := store.CreateTaskPR(ctx, &tc.init); err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			if err := svc.SyncTaskPR(ctx, "t1", &tc.status); err != nil {
+				t.Fatalf("sync: %v", err)
+			}
+			if got := eb.publishedCount(); got != 1 {
+				t.Fatalf("expected 1 event, got %d", got)
+			}
+		})
+	}
+}
+
 func TestTimeEqual(t *testing.T) {
 	now := time.Now()
 	later := now.Add(time.Second)

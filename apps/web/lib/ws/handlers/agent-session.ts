@@ -294,9 +294,10 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         return;
       }
       const sessionId = payload.session_id;
-      const isQueued = payload.is_queued as boolean;
-      const queuedMessage = payload.message as QueuedMessage | null | undefined;
-      store.getState().setQueueStatus(sessionId, { is_queued: isQueued, message: queuedMessage });
+      const entries = (payload.entries as QueuedMessage[] | null | undefined) ?? [];
+      const count = typeof payload.count === "number" ? payload.count : entries.length;
+      const max = typeof payload.max === "number" ? payload.max : 0;
+      store.getState().setQueueEntries(sessionId, entries, { count, max });
     },
     "session.state_changed": (message) => {
       const payload = message.payload;

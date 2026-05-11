@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { getLocalStorage } from "@/lib/local-storage";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { usePanelActions } from "@/hooks/use-panel-actions";
@@ -151,15 +150,6 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
   });
   const planModeEnabled = planModeFromStore;
   const planLayoutVisible = activeDocument?.type === "plan";
-
-  useEffect(() => {
-    if (!resolvedSessionId) return;
-    const stored = getLocalStorage(`plan-mode-${resolvedSessionId}`, false);
-    if (stored) {
-      setPlanMode(resolvedSessionId, true);
-      addContextFile(resolvedSessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
-    }
-  }, [resolvedSessionId, setPlanMode, addContextFile]);
 
   useAutoApplyPlanLayout({
     resolvedSessionId,
@@ -405,8 +395,9 @@ function useSessionData(
     resolvedSessionId ? state.availableCommands.bySessionId[resolvedSessionId] : undefined,
   );
   const {
-    cancel: cancelQueue,
-    updateContent: updateQueueContent,
+    clearAll: clearQueue,
+    editEntry: editQueueEntry,
+    removeEntry: removeQueueEntry,
     ...queueRest
   } = useQueue(resolvedSessionId);
   return {
@@ -417,8 +408,9 @@ function useSessionData(
     activeModel,
     chatSubmitKey,
     agentCommands,
-    cancelQueue,
-    updateQueueContent,
+    clearQueue,
+    editQueueEntry,
+    removeQueueEntry,
     ...queueRest,
   };
 }

@@ -74,7 +74,11 @@ const createTablesSQL = `
 		mergeable_state TEXT NOT NULL DEFAULT '',
 		review_count INTEGER DEFAULT 0,
 		pending_review_count INTEGER DEFAULT 0,
+		required_reviews INTEGER,
 		comment_count INTEGER DEFAULT 0,
+		unresolved_review_threads INTEGER DEFAULT 0,
+		checks_total INTEGER DEFAULT 0,
+		checks_passing INTEGER DEFAULT 0,
 		additions INTEGER DEFAULT 0,
 		deletions INTEGER DEFAULT 0,
 		created_at DATETIME NOT NULL,
@@ -163,6 +167,13 @@ func (s *Store) initSchema() error {
 	// Phase 4 (multi-repo): per-repo PR association on github_task_prs.
 	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE github_pr_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`)
+	// CI popover: aggregate counts + branch protection's required_approving_review_count
+	// + unresolved review-threads, surfaced in the PR top-bar hover popover so the
+	// frontend can render the counts row without a second round-trip.
+	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN required_reviews INTEGER`)
+	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN unresolved_review_threads INTEGER DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN checks_total INTEGER DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN checks_passing INTEGER DEFAULT 0`)
 	if err := s.migratePRTablesForMultiRepo(); err != nil {
 		return fmt.Errorf("migrate PR tables for multi-repo: %w", err)
 	}
@@ -360,7 +371,11 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			mergeable_state TEXT NOT NULL DEFAULT '',
 			review_count INTEGER DEFAULT 0,
 			pending_review_count INTEGER DEFAULT 0,
+			required_reviews INTEGER,
 			comment_count INTEGER DEFAULT 0,
+			unresolved_review_threads INTEGER DEFAULT 0,
+			checks_total INTEGER DEFAULT 0,
+			checks_passing INTEGER DEFAULT 0,
 			additions INTEGER DEFAULT 0,
 			deletions INTEGER DEFAULT 0,
 			created_at DATETIME NOT NULL,
@@ -580,11 +595,13 @@ func (s *Store) CreateTaskPR(ctx context.Context, tp *TaskPR) error {
 	tp.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO github_task_prs (id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
-			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, comment_count, additions, deletions,
+			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
+			unresolved_review_threads, checks_total, checks_passing, additions, deletions,
 			created_at, merged_at, closed_at, last_synced_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tp.ID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
-		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.CommentCount, tp.Additions, tp.Deletions,
+		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
+		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing, tp.Additions, tp.Deletions,
 		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt)
 	return err
 }
@@ -713,11 +730,13 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR) error {
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO github_task_prs (id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
-			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, comment_count, additions, deletions,
+			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
+			unresolved_review_threads, checks_total, checks_passing, additions, deletions,
 			created_at, merged_at, closed_at, last_synced_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tp.ID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
-		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.CommentCount, tp.Additions, tp.Deletions,
+		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
+		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing, tp.Additions, tp.Deletions,
 		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt); err != nil {
 		return err
 	}
@@ -729,13 +748,15 @@ func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 	tp.UpdatedAt = time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE github_task_prs SET state = ?, review_state = ?, checks_state = ?, mergeable_state = ?,
-			review_count = ?, pending_review_count = ?, comment_count = ?,
-			additions = ?, deletions = ?, pr_title = ?,
+			review_count = ?, pending_review_count = ?, required_reviews = ?, comment_count = ?,
+			unresolved_review_threads = ?, checks_total = ?, checks_passing = ?,
+			additions = ?, deletions = ?, pr_title = ?, base_branch = ?,
 			merged_at = ?, closed_at = ?, last_synced_at = ?, updated_at = ?
 		WHERE id = ?`,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState,
-		tp.ReviewCount, tp.PendingReviewCount, tp.CommentCount,
-		tp.Additions, tp.Deletions, tp.PRTitle,
+		tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
+		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing,
+		tp.Additions, tp.Deletions, tp.PRTitle, tp.BaseBranch,
 		tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt, tp.ID)
 	return err
 }

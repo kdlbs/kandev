@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 	"time"
 
@@ -15,102 +14,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mockQueueService is a simple mock implementation of QueueService
-type mockQueueService struct {
-	queueMessageFunc  func(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error)
-	cancelQueuedFunc  func(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, error)
-	getStatusFunc     func(ctx context.Context, sessionID string) *messagequeue.QueueStatus
-	updateMessageFunc func(ctx context.Context, sessionID, content string) error
-	appendContentFunc func(ctx context.Context, sessionID, content string) error
-}
+// mockEventBus is a no-op event bus for handler tests.
+type mockEventBus struct{}
 
-func (m *mockQueueService) QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error) {
-	if m.queueMessageFunc != nil {
-		return m.queueMessageFunc(ctx, sessionID, taskID, content, model, userID, planMode, attachments)
-	}
-	return nil, nil
-}
-
-func (m *mockQueueService) CancelQueued(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, error) {
-	if m.cancelQueuedFunc != nil {
-		return m.cancelQueuedFunc(ctx, sessionID)
-	}
-	return nil, nil
-}
-
-func (m *mockQueueService) GetStatus(ctx context.Context, sessionID string) *messagequeue.QueueStatus {
-	if m.getStatusFunc != nil {
-		return m.getStatusFunc(ctx, sessionID)
-	}
-	return &messagequeue.QueueStatus{}
-}
-
-func (m *mockQueueService) UpdateMessage(ctx context.Context, sessionID, content string) error {
-	if m.updateMessageFunc != nil {
-		return m.updateMessageFunc(ctx, sessionID, content)
-	}
+func (m *mockEventBus) Publish(_ context.Context, _ string, _ *bus.Event) error {
 	return nil
 }
-
-func (m *mockQueueService) AppendContent(ctx context.Context, sessionID, content string) error {
-	if m.appendContentFunc != nil {
-		return m.appendContentFunc(ctx, sessionID, content)
-	}
-	return errors.New("no queued message")
-}
-
-// mockEventBus is a simple mock event bus
-type mockEventBus struct {
-	publishFunc   func(ctx context.Context, subject string, event *bus.Event) error
-	subscribeFunc func(subject string, handler bus.EventHandler) (bus.Subscription, error)
-}
-
-func (m *mockEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
-	if m.publishFunc != nil {
-		return m.publishFunc(ctx, subject, event)
-	}
-	return nil
-}
-
-func (m *mockEventBus) Subscribe(subject string, handler bus.EventHandler) (bus.Subscription, error) {
-	if m.subscribeFunc != nil {
-		return m.subscribeFunc(subject, handler)
-	}
+func (m *mockEventBus) Subscribe(_ string, _ bus.EventHandler) (bus.Subscription, error) {
 	return nil, nil
 }
-
-func (m *mockEventBus) QueueSubscribe(subject, queue string, handler bus.EventHandler) (bus.Subscription, error) {
+func (m *mockEventBus) QueueSubscribe(_, _ string, _ bus.EventHandler) (bus.Subscription, error) {
 	return nil, nil
 }
-
-func (m *mockEventBus) Request(ctx context.Context, subject string, event *bus.Event, timeout time.Duration) (*bus.Event, error) {
+func (m *mockEventBus) Request(_ context.Context, _ string, _ *bus.Event, _ time.Duration) (*bus.Event, error) {
 	return nil, nil
 }
+func (m *mockEventBus) Close()            {}
+func (m *mockEventBus) IsConnected() bool { return true }
 
-func (m *mockEventBus) Close() {
-	// no-op
-}
-
-func (m *mockEventBus) IsConnected() bool {
-	return true
-}
-
-func setupQueueHandlers(t *testing.T) (*QueueHandlers, *mockQueueService, *mockEventBus) {
+func setupQueueHandlers(t *testing.T) (*QueueHandlers, *messagequeue.Service) {
+	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{
 		Level:      "error",
 		Format:     "console",
-		OutputPath: "stdout",
+		OutputPath: "stderr",
 	})
 	require.NoError(t, err)
-
-	mockQueue := &mockQueueService{}
-	mockBus := &mockEventBus{}
-	handlers := NewQueueHandlers(mockQueue, mockBus, log)
-
-	return handlers, mockQueue, mockBus
+	svc := messagequeue.NewServiceMemory(log)
+	return NewQueueHandlers(svc, &mockEventBus{}, log), svc
 }
 
 func createTestMessage(t *testing.T, action string, payload interface{}) *ws.Message {
+	t.Helper()
 	data, err := json.Marshal(payload)
 	require.NoError(t, err)
 	return &ws.Message{
@@ -121,472 +56,324 @@ func createTestMessage(t *testing.T, action string, payload interface{}) *ws.Mes
 	}
 }
 
+func parseError(t *testing.T, response *ws.Message) ws.ErrorPayload {
+	t.Helper()
+	var errorPayload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(response.Payload, &errorPayload))
+	return errorPayload
+}
+
 func TestWsQueueMessage(t *testing.T) {
-	t.Run("successfully queues a message", func(t *testing.T) {
-		handlers, mockQueue, mockBus := setupQueueHandlers(t)
+	t.Run("queues a message", func(t *testing.T) {
+		handlers, _ := setupQueueHandlers(t)
 		ctx := context.Background()
-
-		queuedMsg := &messagequeue.QueuedMessage{
-			ID:        "queue-1",
-			SessionID: "session-1",
-			TaskID:    "task-1",
-			Content:   "test message",
-		}
-
-		mockQueue.queueMessageFunc = func(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error) {
-			assert.Equal(t, "session-1", sessionID)
-			assert.Equal(t, "task-1", taskID)
-			assert.Equal(t, "test message", content)
-			return queuedMsg, nil
-		}
-
-		mockQueue.getStatusFunc = func(ctx context.Context, sessionID string) *messagequeue.QueueStatus {
-			return &messagequeue.QueueStatus{
-				IsQueued: true,
-				Message:  queuedMsg,
-			}
-		}
-
-		mockBus.publishFunc = func(ctx context.Context, subject string, event *bus.Event) error {
-			return nil
-		}
 
 		msg := createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
 			"session_id": "session-1",
 			"task_id":    "task-1",
 			"content":    "test message",
-			"model":      "model-1",
 			"user_id":    "user-1",
-			"plan_mode":  false,
 		})
 
 		response, err := handlers.wsQueueMessage(ctx, msg)
-
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeResponse, response.Type)
 	})
 
-	t.Run("returns error when session_id missing", func(t *testing.T) {
-		handlers, _, _ := setupQueueHandlers(t)
-		ctx := context.Background()
-
-		msg := createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
-			"task_id": "task-1",
-			"content": "test",
-		})
-
-		response, err := handlers.wsQueueMessage(ctx, msg)
-
+	t.Run("rejects missing session_id", func(t *testing.T) {
+		handlers, _ := setupQueueHandlers(t)
+		response, err := handlers.wsQueueMessage(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{"task_id": "t", "content": "x"}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
-
-		var errorPayload ws.ErrorPayload
-		err = json.Unmarshal(response.Payload, &errorPayload)
-		require.NoError(t, err)
-		assert.Contains(t, errorPayload.Message, "session_id is required")
+		assert.Contains(t, parseError(t, response).Message, "session_id is required")
 	})
 
-	t.Run("returns error when task_id missing", func(t *testing.T) {
-		handlers, _, _ := setupQueueHandlers(t)
-		ctx := context.Background()
-
-		msg := createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
-			"session_id": "session-1",
-			"content":    "test",
-		})
-
-		response, err := handlers.wsQueueMessage(ctx, msg)
-
+	t.Run("rejects missing task_id", func(t *testing.T) {
+		handlers, _ := setupQueueHandlers(t)
+		response, err := handlers.wsQueueMessage(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{"session_id": "s", "content": "x"}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
-
-		var errorPayload ws.ErrorPayload
-		err = json.Unmarshal(response.Payload, &errorPayload)
-		require.NoError(t, err)
-		assert.Contains(t, errorPayload.Message, "task_id is required")
+		assert.Contains(t, parseError(t, response).Message, "task_id is required")
 	})
 
-	t.Run("returns error when both content and attachments missing", func(t *testing.T) {
-		handlers, _, _ := setupQueueHandlers(t)
-		ctx := context.Background()
-
-		msg := createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
-			"session_id": "session-1",
-			"task_id":    "task-1",
-		})
-
-		response, err := handlers.wsQueueMessage(ctx, msg)
-
+	t.Run("rejects missing content and attachments", func(t *testing.T) {
+		handlers, _ := setupQueueHandlers(t)
+		response, err := handlers.wsQueueMessage(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{"session_id": "s", "task_id": "t"}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
-
-		var errorPayload ws.ErrorPayload
-		err = json.Unmarshal(response.Payload, &errorPayload)
-		require.NoError(t, err)
-		assert.Contains(t, errorPayload.Message, "content or attachments are required")
+		assert.Contains(t, parseError(t, response).Message, "content or attachments are required")
 	})
 
-	t.Run("handles service error", func(t *testing.T) {
-		handlers, mockQueue, _ := setupQueueHandlers(t)
+	t.Run("returns queue_full when over cap", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()
 
-		mockQueue.queueMessageFunc = func(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error) {
-			return nil, errors.New("service error")
+		// Saturate the queue.
+		for i := 0; i < messagequeue.DefaultMaxPerSession; i++ {
+			_, err := svc.QueueMessage(ctx, "s", "t", "x", "", "u", false, nil)
+			require.NoError(t, err)
 		}
 
-		msg := createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
-			"session_id": "session-1",
-			"task_id":    "task-1",
-			"content":    "test",
-		})
-
-		response, err := handlers.wsQueueMessage(ctx, msg)
-
+		response, err := handlers.wsQueueMessage(ctx, createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
+			"session_id": "s",
+			"task_id":    "t",
+			"content":    "overflow",
+			"user_id":    "u",
+		}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
-
-		var errorPayload ws.ErrorPayload
-		err = json.Unmarshal(response.Payload, &errorPayload)
-		require.NoError(t, err)
-		assert.Contains(t, errorPayload.Message, "Failed to queue message")
+		errPayload := parseError(t, response)
+		assert.Equal(t, "queue_full", errPayload.Code)
+		assert.EqualValues(t, messagequeue.DefaultMaxPerSession, errPayload.Details["queue_size"])
+		assert.EqualValues(t, messagequeue.DefaultMaxPerSession, errPayload.Details["max"])
 	})
 }
 
-func TestWsCancelQueue(t *testing.T) {
-	t.Run("successfully cancels queued message", func(t *testing.T) {
-		handlers, mockQueue, mockBus := setupQueueHandlers(t)
+func TestWsCancelAll(t *testing.T) {
+	t.Run("clears the queue", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()
 
-		cancelledMsg := &messagequeue.QueuedMessage{
-			ID:        "queue-1",
-			SessionID: "session-1",
-			Content:   "cancelled",
+		for i := 0; i < 3; i++ {
+			_, err := svc.QueueMessage(ctx, "s", "t", "x", "", "u", false, nil)
+			require.NoError(t, err)
 		}
 
-		mockQueue.cancelQueuedFunc = func(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, error) {
-			return cancelledMsg, nil
-		}
-
-		mockQueue.getStatusFunc = func(ctx context.Context, sessionID string) *messagequeue.QueueStatus {
-			return &messagequeue.QueueStatus{
-				IsQueued: false,
-				Message:  nil,
-			}
-		}
-
-		mockBus.publishFunc = func(ctx context.Context, subject string, event *bus.Event) error {
-			return nil
-		}
-
-		msg := createTestMessage(t, ws.ActionMessageQueueCancel, map[string]interface{}{
-			"session_id": "session-1",
-		})
-
-		response, err := handlers.wsCancelQueue(ctx, msg)
-
+		response, err := handlers.wsCancelAll(ctx,
+			createTestMessage(t, ws.ActionMessageQueueCancel, map[string]interface{}{"session_id": "s"}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+
+		var payload map[string]interface{}
+		require.NoError(t, json.Unmarshal(response.Payload, &payload))
+		assert.EqualValues(t, 3, payload["removed"])
+
+		assert.Equal(t, 0, svc.GetStatus(ctx, "s").Count)
 	})
 
-	t.Run("returns error when session_id missing", func(t *testing.T) {
-		handlers, _, _ := setupQueueHandlers(t)
-		ctx := context.Background()
-
-		msg := createTestMessage(t, ws.ActionMessageQueueCancel, map[string]interface{}{})
-
-		response, err := handlers.wsCancelQueue(ctx, msg)
-
+	t.Run("rejects missing session_id", func(t *testing.T) {
+		handlers, _ := setupQueueHandlers(t)
+		response, err := handlers.wsCancelAll(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueCancel, map[string]interface{}{}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
-
-		var errorPayload ws.ErrorPayload
-		err = json.Unmarshal(response.Payload, &errorPayload)
-		require.NoError(t, err)
-		assert.Contains(t, errorPayload.Message, "session_id is required")
-	})
-
-	t.Run("handles service error", func(t *testing.T) {
-		handlers, mockQueue, _ := setupQueueHandlers(t)
-		ctx := context.Background()
-
-		mockQueue.cancelQueuedFunc = func(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, error) {
-			return nil, errors.New("no message")
-		}
-
-		msg := createTestMessage(t, ws.ActionMessageQueueCancel, map[string]interface{}{
-			"session_id": "session-1",
-		})
-
-		response, err := handlers.wsCancelQueue(ctx, msg)
-
-		require.NoError(t, err)
-		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Contains(t, parseError(t, response).Message, "session_id is required")
 	})
 }
 
 func TestWsGetQueueStatus(t *testing.T) {
-	t.Run("successfully gets queue status", func(t *testing.T) {
-		handlers, mockQueue, _ := setupQueueHandlers(t)
+	t.Run("returns ordered list", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()
 
-		status := &messagequeue.QueueStatus{
-			IsQueued: true,
-			Message: &messagequeue.QueuedMessage{
-				ID:      "queue-1",
-				Content: "test",
-			},
+		for _, body := range []string{"a", "b", "c"} {
+			_, err := svc.QueueMessage(ctx, "s", "t", body, "", "u", false, nil)
+			require.NoError(t, err)
 		}
 
-		mockQueue.getStatusFunc = func(ctx context.Context, sessionID string) *messagequeue.QueueStatus {
-			return status
-		}
-
-		msg := createTestMessage(t, ws.ActionMessageQueueGet, map[string]interface{}{
-			"session_id": "session-1",
-		})
-
-		response, err := handlers.wsGetQueueStatus(ctx, msg)
-
+		response, err := handlers.wsGetQueueStatus(ctx,
+			createTestMessage(t, ws.ActionMessageQueueGet, map[string]interface{}{"session_id": "s"}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+
+		var status messagequeue.QueueStatus
+		require.NoError(t, json.Unmarshal(response.Payload, &status))
+		assert.Equal(t, 3, status.Count)
+		assert.Equal(t, "a", status.Entries[0].Content)
+		assert.Equal(t, "c", status.Entries[2].Content)
 	})
 
-	t.Run("returns error when session_id missing", func(t *testing.T) {
-		handlers, _, _ := setupQueueHandlers(t)
-		ctx := context.Background()
-
-		msg := createTestMessage(t, ws.ActionMessageQueueGet, map[string]interface{}{})
-
-		response, err := handlers.wsGetQueueStatus(ctx, msg)
-
+	t.Run("rejects missing session_id", func(t *testing.T) {
+		handlers, _ := setupQueueHandlers(t)
+		response, err := handlers.wsGetQueueStatus(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueGet, map[string]interface{}{}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
-
-		var errorPayload ws.ErrorPayload
-		err = json.Unmarshal(response.Payload, &errorPayload)
-		require.NoError(t, err)
-		assert.Contains(t, errorPayload.Message, "session_id is required")
+		assert.Contains(t, parseError(t, response).Message, "session_id is required")
 	})
 }
 
 func TestWsUpdateMessage(t *testing.T) {
-	t.Run("successfully updates message", func(t *testing.T) {
-		handlers, mockQueue, mockBus := setupQueueHandlers(t)
+	t.Run("updates an entry", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()
 
-		mockQueue.updateMessageFunc = func(ctx context.Context, sessionID, content string) error {
-			assert.Equal(t, "session-1", sessionID)
-			assert.Equal(t, "updated content", content)
-			return nil
-		}
+		queued, err := svc.QueueMessage(ctx, "s", "t", "original", "", "u", false, nil)
+		require.NoError(t, err)
 
-		mockQueue.getStatusFunc = func(ctx context.Context, sessionID string) *messagequeue.QueueStatus {
-			return &messagequeue.QueueStatus{
-				IsQueued: true,
-				Message: &messagequeue.QueuedMessage{
-					ID:      "queue-1",
-					Content: "updated content",
-				},
-			}
-		}
-
-		mockBus.publishFunc = func(ctx context.Context, subject string, event *bus.Event) error {
-			return nil
-		}
-
-		msg := createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
-			"session_id": "session-1",
-			"content":    "updated content",
-		})
-
-		response, err := handlers.wsUpdateMessage(ctx, msg)
-
+		response, err := handlers.wsUpdateMessage(ctx,
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
+				"session_id": "s",
+				"entry_id":   queued.ID,
+				"content":    "edited",
+				"user_id":    "u",
+			}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+		assert.Equal(t, "edited", svc.GetStatus(ctx, "s").Entries[0].Content)
 	})
 
-	t.Run("returns error when session_id missing", func(t *testing.T) {
-		handlers, _, _ := setupQueueHandlers(t)
+	t.Run("returns entry_not_found when drained", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()
 
-		msg := createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
-			"content": "test",
-		})
+		queued, _ := svc.QueueMessage(ctx, "s", "t", "x", "", "u", false, nil)
+		_, _ = svc.TakeQueued(ctx, "s")
 
-		response, err := handlers.wsUpdateMessage(ctx, msg)
-
+		response, err := handlers.wsUpdateMessage(ctx,
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
+				"session_id": "s",
+				"entry_id":   queued.ID,
+				"content":    "edit",
+				"user_id":    "u",
+			}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
-
-		var errorPayload ws.ErrorPayload
-		err = json.Unmarshal(response.Payload, &errorPayload)
-		require.NoError(t, err)
-		assert.Contains(t, errorPayload.Message, "session_id is required")
+		assert.Equal(t, "entry_not_found", parseError(t, response).Code)
 	})
 
-	t.Run("returns error when content is empty", func(t *testing.T) {
-		handlers, _, _ := setupQueueHandlers(t)
-		ctx := context.Background()
-
-		msg := createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
-			"session_id": "session-1",
-			"content":    "",
-		})
-
-		response, err := handlers.wsUpdateMessage(ctx, msg)
-
+	t.Run("rejects missing session_id", func(t *testing.T) {
+		handlers, _ := setupQueueHandlers(t)
+		response, err := handlers.wsUpdateMessage(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{"entry_id": "e", "content": "x"}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
-
-		var errorPayload ws.ErrorPayload
-		err = json.Unmarshal(response.Payload, &errorPayload)
-		require.NoError(t, err)
-		assert.Contains(t, errorPayload.Message, "content cannot be empty")
+		assert.Contains(t, parseError(t, response).Message, "session_id is required")
 	})
 
-	t.Run("handles service error", func(t *testing.T) {
-		handlers, mockQueue, _ := setupQueueHandlers(t)
-		ctx := context.Background()
-
-		mockQueue.updateMessageFunc = func(ctx context.Context, sessionID, content string) error {
-			return errors.New("no message")
-		}
-
-		msg := createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
-			"session_id": "session-1",
-			"content":    "test",
-		})
-
-		response, err := handlers.wsUpdateMessage(ctx, msg)
-
+	t.Run("rejects missing entry_id", func(t *testing.T) {
+		handlers, _ := setupQueueHandlers(t)
+		response, err := handlers.wsUpdateMessage(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{"session_id": "s", "content": "x"}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Contains(t, parseError(t, response).Message, "entry_id is required")
+	})
+
+	t.Run("rejects when content and attachments missing", func(t *testing.T) {
+		handlers, _ := setupQueueHandlers(t)
+		response, err := handlers.wsUpdateMessage(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{"session_id": "s", "entry_id": "e"}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Contains(t, parseError(t, response).Message, "content or attachments are required")
+	})
+
+	t.Run("rejects user_id impersonating the agent identity", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		ctx := context.Background()
+		queued, _ := svc.QueueMessageWithMetadata(ctx, "s", "t", "agent prompt", "", messagequeue.QueuedByAgent, false, nil, nil)
+
+		response, err := handlers.wsUpdateMessage(ctx,
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
+				"session_id": "s",
+				"entry_id":   queued.ID,
+				"content":    "hijack",
+				"user_id":    messagequeue.QueuedByAgent,
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Contains(t, parseError(t, response).Message, "may not impersonate the agent identity")
+
+		// And confirm the agent entry was not overwritten.
+		entries := svc.GetStatus(ctx, "s").Entries
+		require.Len(t, entries, 1)
+		assert.Equal(t, "agent prompt", entries[0].Content)
+	})
+}
+
+func TestWsRemoveEntry(t *testing.T) {
+	t.Run("removes a single entry", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		ctx := context.Background()
+
+		a, _ := svc.QueueMessage(ctx, "s", "t", "a", "", "u", false, nil)
+		_, _ = svc.QueueMessage(ctx, "s", "t", "b", "", "u", false, nil)
+
+		response, err := handlers.wsRemoveEntry(ctx,
+			createTestMessage(t, ws.ActionMessageQueueRemove, map[string]interface{}{
+				"session_id": "s",
+				"entry_id":   a.ID,
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+		status := svc.GetStatus(ctx, "s")
+		assert.Equal(t, 1, status.Count)
+		assert.Equal(t, "b", status.Entries[0].Content)
+	})
+
+	t.Run("returns entry_not_found when missing", func(t *testing.T) {
+		handlers, _ := setupQueueHandlers(t)
+		response, err := handlers.wsRemoveEntry(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueRemove, map[string]interface{}{
+				"session_id": "s",
+				"entry_id":   "ghost",
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, "entry_not_found", parseError(t, response).Code)
+	})
+
+	t.Run("rejects missing session_id", func(t *testing.T) {
+		handlers, _ := setupQueueHandlers(t)
+		response, err := handlers.wsRemoveEntry(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueRemove, map[string]interface{}{"entry_id": "e"}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Contains(t, parseError(t, response).Message, "session_id is required")
 	})
 }
 
 func TestWsAppendToQueue(t *testing.T) {
-	t.Run("appends to existing queued message", func(t *testing.T) {
-		handlers, mockQueue, mockBus := setupQueueHandlers(t)
+	t.Run("appends to tail when same sender", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()
 
-		mockQueue.appendContentFunc = func(ctx context.Context, sessionID, content string) error {
-			assert.Equal(t, "session-1", sessionID)
-			assert.Equal(t, "new comment", content)
-			return nil
-		}
+		_, err := svc.QueueMessage(ctx, "s", "t", "first", "", "user-1", false, nil)
+		require.NoError(t, err)
 
-		mockQueue.getStatusFunc = func(ctx context.Context, sessionID string) *messagequeue.QueueStatus {
-			return &messagequeue.QueueStatus{
-				IsQueued: true,
-				Message: &messagequeue.QueuedMessage{
-					ID:      "queue-1",
-					Content: "original\n\n---\n\nnew comment",
-				},
-			}
-		}
-
-		mockBus.publishFunc = func(ctx context.Context, subject string, event *bus.Event) error {
-			return nil
-		}
-
-		msg := createTestMessage(t, ws.ActionMessageQueueAppend, map[string]interface{}{
-			"session_id": "session-1",
-			"task_id":    "task-1",
-			"content":    "new comment",
-		})
-
-		response, err := handlers.wsAppendToQueue(ctx, msg)
-
+		response, err := handlers.wsAppendToQueue(ctx,
+			createTestMessage(t, ws.ActionMessageQueueAppend, map[string]interface{}{
+				"session_id": "s",
+				"task_id":    "t",
+				"content":    "second",
+				"user_id":    "user-1",
+			}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+		assert.Equal(t, 1, svc.GetStatus(ctx, "s").Count)
+		assert.Contains(t, svc.GetStatus(ctx, "s").Entries[0].Content, "first\n\n---\n\nsecond")
 	})
 
-	t.Run("creates new queued message when none exists", func(t *testing.T) {
-		handlers, mockQueue, mockBus := setupQueueHandlers(t)
+	t.Run("inserts when queue empty", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()
 
-		// AppendContent returns error (no existing message)
-		mockQueue.appendContentFunc = func(ctx context.Context, sessionID, content string) error {
-			return errors.New("no queued message")
-		}
-
-		// Falls back to QueueMessage
-		mockQueue.queueMessageFunc = func(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error) {
-			assert.Equal(t, "session-1", sessionID)
-			assert.Equal(t, "task-1", taskID)
-			assert.Equal(t, "new comment", content)
-			return &messagequeue.QueuedMessage{ID: "queue-1", Content: content}, nil
-		}
-
-		mockQueue.getStatusFunc = func(ctx context.Context, sessionID string) *messagequeue.QueueStatus {
-			return &messagequeue.QueueStatus{
-				IsQueued: true,
-				Message:  &messagequeue.QueuedMessage{ID: "queue-1", Content: "new comment"},
-			}
-		}
-
-		mockBus.publishFunc = func(ctx context.Context, subject string, event *bus.Event) error {
-			return nil
-		}
-
-		msg := createTestMessage(t, ws.ActionMessageQueueAppend, map[string]interface{}{
-			"session_id": "session-1",
-			"task_id":    "task-1",
-			"content":    "new comment",
-		})
-
-		response, err := handlers.wsAppendToQueue(ctx, msg)
-
+		response, err := handlers.wsAppendToQueue(ctx,
+			createTestMessage(t, ws.ActionMessageQueueAppend, map[string]interface{}{
+				"session_id": "s",
+				"task_id":    "t",
+				"content":    "fresh",
+				"user_id":    "u",
+			}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+		assert.Equal(t, 1, svc.GetStatus(ctx, "s").Count)
 	})
 
-	t.Run("returns error when content is empty", func(t *testing.T) {
-		handlers, _, _ := setupQueueHandlers(t)
-		ctx := context.Background()
-
-		msg := createTestMessage(t, ws.ActionMessageQueueAppend, map[string]interface{}{
-			"session_id": "session-1",
-			"task_id":    "task-1",
-			"content":    "",
-		})
-
-		response, err := handlers.wsAppendToQueue(ctx, msg)
-
+	t.Run("rejects missing fields", func(t *testing.T) {
+		handlers, _ := setupQueueHandlers(t)
+		response, err := handlers.wsAppendToQueue(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueAppend, map[string]interface{}{
+				"session_id": "s",
+				"task_id":    "t",
+				"content":    "",
+			}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
-
-		var errorPayload ws.ErrorPayload
-		err = json.Unmarshal(response.Payload, &errorPayload)
-		require.NoError(t, err)
-		assert.Contains(t, errorPayload.Message, "content is required")
-	})
-
-	t.Run("returns error when session_id missing", func(t *testing.T) {
-		handlers, _, _ := setupQueueHandlers(t)
-		ctx := context.Background()
-
-		msg := createTestMessage(t, ws.ActionMessageQueueAppend, map[string]interface{}{
-			"task_id": "task-1",
-			"content": "test",
-		})
-
-		response, err := handlers.wsAppendToQueue(ctx, msg)
-
-		require.NoError(t, err)
-		assert.Equal(t, ws.MessageTypeError, response.Type)
-	})
-}
-
-func TestRegisterHandlers(t *testing.T) {
-	t.Run("registers all queue handlers", func(t *testing.T) {
-		handlers, _, _ := setupQueueHandlers(t)
-		dispatcher := ws.NewDispatcher()
-
-		handlers.RegisterHandlers(dispatcher)
-
-		// Verify handlers are registered by checking we can access them
-		// This is a basic smoke test
-		assert.NotNil(t, dispatcher)
+		assert.Contains(t, parseError(t, response).Message, "content is required")
 	})
 }

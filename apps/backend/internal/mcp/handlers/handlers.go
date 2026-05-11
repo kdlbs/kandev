@@ -450,7 +450,7 @@ func (h *Handlers) resolveTaskRepositories(
 	parentID, sourceTaskID string,
 	explicit []mcpRepositoryInput,
 ) (taskRepoResult, error) {
-	explicitRepos := explicitRepoInputs(explicit)
+	explicitRepos := h.explicitRepoInputsWithDefaults(ctx, explicit)
 
 	if parentID != "" {
 		parent, err := h.taskSvc.GetTask(ctx, parentID)
@@ -504,27 +504,47 @@ func (h *Handlers) resolveTaskRepositories(
 	return taskRepoResult{}, nil
 }
 
-// explicitRepoInputs maps the MCP-side explicit repo list to service inputs.
-// Returns nil when no explicit repos were supplied so callers can distinguish
-// "agent didn't pass repos" from "agent passed an empty list".
-func explicitRepoInputs(explicit []mcpRepositoryInput) []service.TaskRepositoryInput {
+// explicitRepoInputsWithDefaults maps the MCP-side explicit repo list to
+// service inputs. Returns nil when no explicit repos were supplied so callers
+// can distinguish "agent didn't pass repos" from "agent passed an empty list".
+//
+// When an explicit entry pins a repository_id without a base_branch, the
+// repository's default_branch is filled in. This anchors cross-repo subtasks
+// (a parent on feature/foo creating a child in another repo) to a known-good
+// branch instead of an empty value that would force every downstream consumer
+// to recompute the default.
+func (h *Handlers) explicitRepoInputsWithDefaults(ctx context.Context, explicit []mcpRepositoryInput) []service.TaskRepositoryInput {
 	if len(explicit) == 0 {
 		return nil
 	}
 	repos := make([]service.TaskRepositoryInput, 0, len(explicit))
 	for _, r := range explicit {
+		baseBranch := r.BaseBranch
+		if baseBranch == "" && r.RepositoryID != "" && h.taskSvc != nil {
+			if repo, err := h.taskSvc.GetRepository(ctx, r.RepositoryID); err == nil && repo != nil {
+				baseBranch = repo.DefaultBranch
+			}
+		}
 		repos = append(repos, service.TaskRepositoryInput{
 			RepositoryID: r.RepositoryID,
 			LocalPath:    r.LocalPath,
 			GitHubURL:    r.GitHubURL,
-			BaseBranch:   r.BaseBranch,
+			BaseBranch:   baseBranch,
 		})
 	}
 	return repos
 }
 
 // inheritedRepoInputs maps an existing task's repository list onto service
-// inputs for a new task that inherits from it.
+// inputs for a new task that inherits from it. RepositoryID and BaseBranch
+// carry over so a same-repo subtask branches off the same point as the
+// parent (sibling branches off the same base, ergonomically aligned for
+// stacked PRs). CheckoutBranch is dropped on purpose: two worktrees cannot
+// share a working branch, so the subtask's session generates a fresh one.
+// Agents that need a different base for a same-repo subtask must pass
+// base_branch explicitly. If the inherited base_branch is missing on the
+// remote at launch time, the worktree manager's fallback recovers to the
+// repository's default_branch and surfaces a warning.
 func inheritedRepoInputs(src []*models.TaskRepository) []service.TaskRepositoryInput {
 	if len(src) == 0 {
 		return nil
@@ -535,9 +555,8 @@ func inheritedRepoInputs(src []*models.TaskRepository) []service.TaskRepositoryI
 			continue
 		}
 		repos = append(repos, service.TaskRepositoryInput{
-			RepositoryID:   r.RepositoryID,
-			BaseBranch:     r.BaseBranch,
-			CheckoutBranch: r.CheckoutBranch,
+			RepositoryID: r.RepositoryID,
+			BaseBranch:   r.BaseBranch,
 		})
 	}
 	return repos
@@ -716,6 +735,12 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 
 	status, err := h.dispatchTaskMessage(ctx, req.TaskID, session, wrappedPrompt, senderMeta)
 	if err != nil {
+		var qfErr *queueFullDispatchError
+		if errors.As(err, &qfErr) {
+			return ws.NewError(msg.ID, msg.Action, messagequeue.QueueFullErrorCode,
+				fmt.Sprintf("target task has %d queued messages (max %d) — retry after the next turn completes", qfErr.queueSize, qfErr.max),
+				qfErr.toPayload())
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
 
@@ -852,6 +877,50 @@ func conversationCursor(messages []*models.Message) string {
 	return messages[len(messages)-1].ID
 }
 
+// queueFullDispatchError is returned by dispatchTaskMessage when an inter-task
+// message can't be queued because the target session's queue is full. It
+// carries enough metadata for handleMessageTask to surface a structured
+// "queue_full" error to the calling agent so its LLM can decide whether to
+// retry, abort, or message a different task.
+type queueFullDispatchError struct {
+	sessionID string
+	queueSize int
+	max       int
+	entries   []messagequeue.QueuedMessage
+}
+
+func (e *queueFullDispatchError) Error() string {
+	return fmt.Sprintf("queue full: %d/%d messages pending for session %s", e.queueSize, e.max, e.sessionID)
+}
+
+// toPayload builds the structured "data" body for the MCP error response.
+// Sender / queued_at fields surface enough context for the LLM to reason about
+// the wedge state without leaking the queued message contents.
+func (e *queueFullDispatchError) toPayload() map[string]interface{} {
+	queued := make([]map[string]interface{}, 0, len(e.entries))
+	for _, entry := range e.entries {
+		queued = append(queued, map[string]interface{}{
+			"id":        entry.ID,
+			"sender":    entry.QueuedBy,
+			"queued_at": entry.QueuedAt,
+		})
+	}
+	// The WS error envelope already carries the code; we duplicate it here so
+	// callers reading the structured details body still see it without parsing
+	// the envelope. Tests assert on details.error directly.
+	return map[string]interface{}{
+		errorField:        messagequeue.QueueFullErrorCode,
+		"queue_size":      e.queueSize,
+		"max":             e.max,
+		"retry_after":     "next_turn",
+		"queued_messages": queued,
+	}
+}
+
+// errorField names the well-known structured details key used to surface error
+// codes in MCP tool responses (extracted to satisfy goconst's repeated-string rule).
+const errorField = "error"
+
 // dispatchTaskMessage routes a message to the right delivery path based on session state.
 // Returns the action taken: "queued", "sent", or "started".
 //
@@ -873,7 +942,16 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 		if queue == nil {
 			return "", errors.New("message queue not available")
 		}
-		if _, err := queue.QueueMessageWithMetadata(ctx, session.ID, taskID, prompt, "", "agent", false, nil, metadata); err != nil {
+		if _, err := queue.QueueMessageWithMetadata(ctx, session.ID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata); err != nil {
+			if errors.Is(err, messagequeue.ErrQueueFull) {
+				status := queue.GetStatus(ctx, session.ID)
+				return "", &queueFullDispatchError{
+					sessionID: session.ID,
+					queueSize: status.Count,
+					max:       status.Max,
+					entries:   status.Entries,
+				}
+			}
 			return "", fmt.Errorf("failed to queue message: %w", err)
 		}
 		h.publishQueueStatusEvent(ctx, session.ID, queue)
@@ -957,8 +1035,9 @@ func (h *Handlers) publishQueueStatusEvent(ctx context.Context, sessionID string
 		"mcp-handlers",
 		map[string]interface{}{
 			"session_id": sessionID,
-			"is_queued":  status.IsQueued,
-			"message":    status.Message,
+			"entries":    status.Entries,
+			"count":      status.Count,
+			"max":        status.Max,
 		},
 	))
 }

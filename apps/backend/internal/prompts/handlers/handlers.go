@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -51,12 +52,15 @@ func (h *Handlers) httpCreatePrompt(c *gin.Context) {
 	}
 	resp, err := h.controller.CreatePrompt(c.Request.Context(), req)
 	if err != nil {
-		status := http.StatusInternalServerError
-		if err == service.ErrInvalidPrompt {
-			status = http.StatusBadRequest
+		status, message := http.StatusInternalServerError, "failed to create prompt"
+		switch {
+		case errors.Is(err, service.ErrInvalidPrompt):
+			status, message = http.StatusBadRequest, err.Error()
+		case errors.Is(err, service.ErrPromptAlreadyExists):
+			status, message = http.StatusConflict, err.Error()
 		}
-		h.logger.Error("failed to create prompt", zap.Error(err))
-		c.JSON(status, gin.H{"error": "failed to create prompt"})
+		logRejection(h.logger, "create prompt rejected", "failed to create prompt", err, status)
+		c.JSON(status, gin.H{"error": message})
 		return
 	}
 	c.JSON(http.StatusOK, resp)
@@ -70,18 +74,30 @@ func (h *Handlers) httpUpdatePrompt(c *gin.Context) {
 	}
 	resp, err := h.controller.UpdatePrompt(c.Request.Context(), c.Param("id"), req)
 	if err != nil {
-		status := http.StatusInternalServerError
-		switch err {
-		case service.ErrInvalidPrompt:
-			status = http.StatusBadRequest
-		case service.ErrPromptNotFound:
-			status = http.StatusNotFound
+		status, message := http.StatusInternalServerError, "failed to update prompt"
+		switch {
+		case errors.Is(err, service.ErrInvalidPrompt):
+			status, message = http.StatusBadRequest, err.Error()
+		case errors.Is(err, service.ErrPromptNotFound):
+			status, message = http.StatusNotFound, err.Error()
+		case errors.Is(err, service.ErrPromptAlreadyExists):
+			status, message = http.StatusConflict, err.Error()
 		}
-		h.logger.Error("failed to update prompt", zap.Error(err))
-		c.JSON(status, gin.H{"error": "failed to update prompt"})
+		logRejection(h.logger, "update prompt rejected", "failed to update prompt", err, status)
+		c.JSON(status, gin.H{"error": message})
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// logRejection keeps the error-rate dashboard clean by logging client-driven
+// 4xx outcomes at Info level and reserving Error for unexpected 500s.
+func logRejection(log *logger.Logger, infoMsg, errorMsg string, err error, status int) {
+	if status >= http.StatusInternalServerError {
+		log.Error(errorMsg, zap.Error(err))
+		return
+	}
+	log.Info(infoMsg, zap.Error(err), zap.Int("status", status))
 }
 
 func (h *Handlers) httpDeletePrompt(c *gin.Context) {

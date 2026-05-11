@@ -87,11 +87,10 @@ export function useSheetData(workspaceId: string | null, workflowId: string | nu
   const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
   const envIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
   const messagesBySession = useAppStore((state) => state.messages.bySession);
-  const { tasks } = useTasks(workflowId);
+  const { tasks, isLoading: tasksLoading } = useTasks(workflowId);
   const steps = useAppStore((state) => state.kanban.steps);
   const workspaces = useAppStore((state) => state.workspaces.items);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
-  const kanbanIsLoading = useAppStore((state) => state.kanban.isLoading ?? false);
 
   const selectedTaskId = useMemo(() => {
     if (activeSessionId) return sessionsById[activeSessionId]?.task_id ?? activeTaskId;
@@ -157,7 +156,8 @@ export function useSheetData(workspaceId: string | null, workflowId: string | nu
     selectedTaskId,
     steps,
     workspaces,
-    kanbanIsLoading,
+    // Skeleton while snapshot hydrates kanban — otherwise shows "No tasks yet." even when tasks exist.
+    tasksLoading,
     tasksWithRepositories,
     dialogSteps,
   };

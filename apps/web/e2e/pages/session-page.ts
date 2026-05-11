@@ -428,6 +428,88 @@ export class SessionPage {
     return this.page.getByTestId("pr-detail-panel");
   }
 
+  // --- CI hover popover accessors (kept here so the spec stays declarative) ---
+
+  /** The single-PR hover popover content (visible after hovering the topbar button). */
+  prTopbarPopover(): Locator {
+    return this.page.getByTestId("pr-topbar-popover");
+  }
+
+  /** Multi-PR aggregate popover content. */
+  prTopbarPopoverAggregate(): Locator {
+    return this.page.getByTestId("pr-topbar-popover-aggregate");
+  }
+
+  /** A specific bucket group inside the popover by kind. */
+  prCheckGroup(kind: "passed" | "in_progress" | "failed"): Locator {
+    return this.prTopbarPopover().locator(`[data-testid='pr-check-group'][data-kind='${kind}']`);
+  }
+
+  /** Count number rendered inside a bucket group's header. */
+  prCheckGroupCount(kind: "passed" | "in_progress" | "failed"): Locator {
+    return this.prCheckGroup(kind).getByTestId("pr-check-group-count");
+  }
+
+  /** A workflow row by its workflow name (the part before " / " in CheckRun.name). */
+  prWorkflowRow(workflow: string): Locator {
+    return this.prTopbarPopover().locator(
+      `[data-testid='pr-workflow-row'][data-workflow='${workflow}']`,
+    );
+  }
+
+  /** Open-on-GitHub button inside a workflow row. */
+  prWorkflowOpenButton(workflow: string): Locator {
+    return this.prWorkflowRow(workflow).getByTestId("pr-workflow-open");
+  }
+
+  /** "+ ctx" button inside a (failed) workflow row. */
+  prWorkflowAddContextButton(workflow: string): Locator {
+    return this.prWorkflowRow(workflow).getByTestId("pr-workflow-add-context");
+  }
+
+  /** Review state line ("Approved 1 / 2 required" etc.). */
+  prReviewRow(): Locator {
+    return this.prTopbarPopover().getByTestId("pr-review-row");
+  }
+
+  /** Unresolved-comments row inside the popover. */
+  prCommentsRow(): Locator {
+    return this.prTopbarPopover().getByTestId("pr-comments-row");
+  }
+
+  /** Header external-link icon (top-right corner of the popover). */
+  prPopoverExternalLink(): Locator {
+    return this.prTopbarPopover().getByTestId("pr-popover-external-link");
+  }
+
+  /** Footer "updated Ns ago" timestamp text. */
+  prPopoverUpdatedAt(): Locator {
+    return this.prTopbarPopover().getByTestId("pr-popover-updated-at");
+  }
+
+  /** Empty-state row when the PR has no checks yet. */
+  prChecksEmpty(): Locator {
+    return this.prTopbarPopover().getByTestId("pr-checks-empty");
+  }
+
+  /** "Reconnect GitHub" link rendered when auth health is unhealthy. */
+  prPopoverReconnectLink(): Locator {
+    return this.prTopbarPopover().getByTestId("pr-popover-reconnect-link");
+  }
+
+  /**
+   * Open the popover by hovering the topbar button. Waits for the open delay
+   * (~150ms in PRTopbarButton) plus a small buffer.
+   *
+   * To keep the popover open while interacting with rows, the test should
+   * hover the popover content directly afterwards (Playwright hover() over a
+   * row inside the popover keeps the cursor in the open region).
+   */
+  async hoverPRTopbar(): Promise<void> {
+    await this.prTopbarButton().hover();
+    await expect(this.prTopbarPopover()).toBeVisible({ timeout: 5_000 });
+  }
+
   /**
    * Assert the `pr-detail` panel's dockview group contains at least one
    * `session:{sessionId}` panel — i.e. the PR opened as a tab next to a

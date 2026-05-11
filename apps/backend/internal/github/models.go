@@ -92,8 +92,29 @@ type PRStatus struct {
 	MergeableState     string `json:"mergeable_state"` // "clean", "blocked", "behind", "dirty", "has_hooks", "unstable", "draft", "unknown", ""
 	ReviewCount        int    `json:"review_count"`
 	PendingReviewCount int    `json:"pending_review_count"`
+	RequiredReviews    *int   `json:"required_reviews,omitempty"` // nil when no branch protection rule found
 	ChecksTotal        int    `json:"checks_total"`
 	ChecksPassing      int    `json:"checks_passing"`
+	// ChecksPopulated reports whether the sync path actually computed
+	// ChecksTotal / ChecksPassing. The batched GraphQL poller doesn't (it
+	// only carries the rollup state), so SyncTaskPR uses this flag to
+	// decide whether to overwrite the persisted counts. A value of true
+	// with both counts at 0 is a real "no checks" answer; a value of false
+	// means "I didn't look, keep what's there."
+	ChecksPopulated         bool `json:"checks_populated,omitempty"`
+	UnresolvedReviewThreads int  `json:"unresolved_review_threads"`
+	// UnresolvedReviewThreadsPopulated mirrors ChecksPopulated for the
+	// review-threads field. The REST path (getPRStatus) doesn't fetch
+	// review threads, so it leaves the field at zero; SyncTaskPR uses
+	// this flag to avoid clobbering a non-zero value set by the GraphQL
+	// path during a subsequent REST sync.
+	UnresolvedReviewThreadsPopulated bool `json:"unresolved_review_threads_populated,omitempty"`
+	// ReviewCountsPopulated covers ReviewCount + PendingReviewCount. Both
+	// REST and GraphQL paths compute these now, but historically only the
+	// REST path did, so without the guard a GraphQL poll would clobber
+	// the REST value back to 0 (the popover's "Approved (1)" turning
+	// into "Approved (0)" until a new REST call landed).
+	ReviewCountsPopulated bool `json:"review_counts_populated,omitempty"`
 }
 
 // PRSearchPage is a paginated slice of PR search results, with the total
@@ -137,31 +158,37 @@ type PRWatch struct {
 // repository this PR belongs to (multi-repo tasks can have one PR per repo).
 // Empty for legacy rows persisted before multi-repo support.
 type TaskPR struct {
-	ID                 string     `json:"id" db:"id"`
-	TaskID             string     `json:"task_id" db:"task_id"`
-	RepositoryID       string     `json:"repository_id,omitempty" db:"repository_id"`
-	Owner              string     `json:"owner" db:"owner"`
-	Repo               string     `json:"repo" db:"repo"`
-	PRNumber           int        `json:"pr_number" db:"pr_number"`
-	PRURL              string     `json:"pr_url" db:"pr_url"`
-	PRTitle            string     `json:"pr_title" db:"pr_title"`
-	HeadBranch         string     `json:"head_branch" db:"head_branch"`
-	BaseBranch         string     `json:"base_branch" db:"base_branch"`
-	AuthorLogin        string     `json:"author_login" db:"author_login"`
-	State              string     `json:"state" db:"state"`                     // open, closed, merged
-	ReviewState        string     `json:"review_state" db:"review_state"`       // approved, changes_requested, pending, ""
-	ChecksState        string     `json:"checks_state" db:"checks_state"`       // success, failure, pending, ""
-	MergeableState     string     `json:"mergeable_state" db:"mergeable_state"` // clean, blocked, behind, dirty, has_hooks, unstable, draft, unknown, ""
-	ReviewCount        int        `json:"review_count" db:"review_count"`
-	PendingReviewCount int        `json:"pending_review_count" db:"pending_review_count"`
-	CommentCount       int        `json:"comment_count" db:"comment_count"`
-	Additions          int        `json:"additions" db:"additions"`
-	Deletions          int        `json:"deletions" db:"deletions"`
-	CreatedAt          time.Time  `json:"created_at" db:"created_at"`
-	MergedAt           *time.Time `json:"merged_at,omitempty" db:"merged_at"`
-	ClosedAt           *time.Time `json:"closed_at,omitempty" db:"closed_at"`
-	LastSyncedAt       *time.Time `json:"last_synced_at,omitempty" db:"last_synced_at"`
-	UpdatedAt          time.Time  `json:"updated_at" db:"updated_at"`
+	ID                 string `json:"id" db:"id"`
+	TaskID             string `json:"task_id" db:"task_id"`
+	RepositoryID       string `json:"repository_id,omitempty" db:"repository_id"`
+	Owner              string `json:"owner" db:"owner"`
+	Repo               string `json:"repo" db:"repo"`
+	PRNumber           int    `json:"pr_number" db:"pr_number"`
+	PRURL              string `json:"pr_url" db:"pr_url"`
+	PRTitle            string `json:"pr_title" db:"pr_title"`
+	HeadBranch         string `json:"head_branch" db:"head_branch"`
+	BaseBranch         string `json:"base_branch" db:"base_branch"`
+	AuthorLogin        string `json:"author_login" db:"author_login"`
+	State              string `json:"state" db:"state"`                     // open, closed, merged
+	ReviewState        string `json:"review_state" db:"review_state"`       // approved, changes_requested, pending, ""
+	ChecksState        string `json:"checks_state" db:"checks_state"`       // success, failure, pending, ""
+	MergeableState     string `json:"mergeable_state" db:"mergeable_state"` // clean, blocked, behind, dirty, has_hooks, unstable, draft, unknown, ""
+	ReviewCount        int    `json:"review_count" db:"review_count"`
+	PendingReviewCount int    `json:"pending_review_count" db:"pending_review_count"`
+	// RequiredReviews is the branch protection's required_approving_review_count.
+	// Nil when no protection rule exists or the token lacks scope to read it.
+	RequiredReviews         *int       `json:"required_reviews,omitempty" db:"required_reviews"`
+	CommentCount            int        `json:"comment_count" db:"comment_count"`
+	UnresolvedReviewThreads int        `json:"unresolved_review_threads" db:"unresolved_review_threads"`
+	ChecksTotal             int        `json:"checks_total" db:"checks_total"`
+	ChecksPassing           int        `json:"checks_passing" db:"checks_passing"`
+	Additions               int        `json:"additions" db:"additions"`
+	Deletions               int        `json:"deletions" db:"deletions"`
+	CreatedAt               time.Time  `json:"created_at" db:"created_at"`
+	MergedAt                *time.Time `json:"merged_at,omitempty" db:"merged_at"`
+	ClosedAt                *time.Time `json:"closed_at,omitempty" db:"closed_at"`
+	LastSyncedAt            *time.Time `json:"last_synced_at,omitempty" db:"last_synced_at"`
+	UpdatedAt               time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // RepoFilter identifies a GitHub repository for review watch filtering.

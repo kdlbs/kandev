@@ -11,6 +11,9 @@ export type BackendMessageType =
   | "task.plan.reverted"
   | "agent.updated"
   | "agent.available.updated"
+  | "agent.install.started"
+  | "agent.install.output"
+  | "agent.install.finished"
   | "terminal.output"
   | "diff.update"
   | "session.git.event"
@@ -143,6 +146,23 @@ export type AgentUpdatePayload = {
 export type AgentAvailableUpdatedPayload = {
   agents: AvailableAgent[];
   tools?: ToolStatus[];
+};
+
+export type AgentInstallJobPayload = {
+  job_id: string;
+  agent_name: string;
+  status: "queued" | "running" | "succeeded" | "failed";
+  output?: string;
+  error?: string;
+  exit_code?: number;
+  started_at: string;
+  finished_at?: string;
+};
+
+export type AgentInstallOutputPayload = {
+  job_id: string;
+  agent_name: string;
+  chunk: string;
 };
 
 export type TerminalOutputPayload = {
@@ -507,8 +527,9 @@ export type QueuedMessagePayload = {
 
 export type QueueStatusChangedPayload = {
   session_id: string;
-  is_queued: boolean;
-  message?: QueuedMessagePayload | null;
+  entries?: QueuedMessagePayload[] | null;
+  count?: number;
+  max?: number;
 };
 
 export type BackendMessageMap = {
@@ -530,6 +551,9 @@ export type BackendMessageMap = {
     "agent.available.updated",
     AgentAvailableUpdatedPayload
   >;
+  "agent.install.started": BackendMessage<"agent.install.started", AgentInstallJobPayload>;
+  "agent.install.output": BackendMessage<"agent.install.output", AgentInstallOutputPayload>;
+  "agent.install.finished": BackendMessage<"agent.install.finished", AgentInstallJobPayload>;
   "terminal.output": BackendMessage<"terminal.output", TerminalOutputPayload>;
   "diff.update": BackendMessage<"diff.update", DiffUpdatePayload>;
   "session.git.event": BackendMessage<"session.git.event", GitEventPayload>;

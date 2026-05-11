@@ -13,6 +13,7 @@ import {
 } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { cn, transformPathsInText } from "@/lib/utils";
+import { prettifyToolTitle } from "@/lib/pretty-tool-title";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { Message } from "@/lib/types/http";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
@@ -267,7 +268,7 @@ export const ToolCallMessage = memo(function ToolCallMessage({
 
   const metadata = comment.metadata as ToolCallMetadata | undefined;
   const rawTitle = metadata?.title ?? comment.content ?? "Tool call";
-  const title = transformPathsInText(rawTitle, worktreePath);
+  const title = transformPathsInText(prettifyToolTitle(rawTitle), worktreePath);
 
   const formattedOutput = hasOutput && !inlineOutput ? formatToolOutput(output) : null;
 

@@ -111,7 +111,21 @@ func (a *MockAgent) Runtime() *RuntimeConfig {
 // requires no credentials. The empty methods list signals "no auth needed".
 func (a *MockAgent) RemoteAuth() *RemoteAuth { return &RemoteAuth{} }
 
-func (a *MockAgent) InstallScript() string { return "" }
+// InstallScript returns a deterministic short-lived shell script so e2e tests
+// can exercise the install streaming endpoint without depending on npm.
+func (a *MockAgent) InstallScript() string {
+	return "echo mock-install: step 1 && echo mock-install: step 2 && echo mock-install: done"
+}
+
+// LoginCommand exposes a deterministic interactive command for e2e PTY tests.
+// `cat` echoes any input back to the user; tests send "exit\n" or kill the
+// session to terminate.
+func (a *MockAgent) LoginCommand() *LoginCommand {
+	return &LoginCommand{
+		Cmd:         []string{"cat"},
+		Description: "Mock login (echoes input).",
+	}
+}
 
 func (a *MockAgent) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings

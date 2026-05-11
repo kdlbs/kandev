@@ -54,7 +54,7 @@ func (c *GitHubChecker) Check(_ context.Context) []Issue {
 			Title:    "GitHub integration unavailable",
 			Message:  "Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",
 			Severity: SeverityWarning,
-			FixURL:   "/settings/workspace/{workspaceId}/github",
+			FixURL:   "/settings/integrations/github",
 			FixLabel: "Configure GitHub",
 		}}
 	}
@@ -65,7 +65,7 @@ func (c *GitHubChecker) Check(_ context.Context) []Issue {
 			Title:    "GitHub not authenticated",
 			Message:  "Run 'gh auth login' or add a GITHUB_TOKEN secret.",
 			Severity: SeverityWarning,
-			FixURL:   "/settings/workspace/{workspaceId}/github",
+			FixURL:   "/settings/integrations/github",
 			FixLabel: "Configure GitHub",
 		}}
 	}
@@ -91,7 +91,7 @@ func (c *GitHubChecker) rateLimitIssues() []Issue {
 			Title:    fmt.Sprintf("GitHub API rate limit exhausted (%s)", status.Resource),
 			Message:  rateLimitMessage(status),
 			Severity: SeverityWarning,
-			FixURL:   "/settings/workspace/{workspaceId}/github",
+			FixURL:   "/settings/integrations/github",
 			FixLabel: "View status",
 		})
 	}
@@ -153,7 +153,7 @@ func (c *AgentChecker) Check(ctx context.Context) []Issue {
 			ID:       "no_agents",
 			Category: "agents",
 			Title:    "No AI agents detected",
-			Message:  "Install an AI coding agent (e.g. Claude Code, Codex) to start using KanDev.",
+			Message:  "Install an AI coding agent (e.g. Claude Code, Codex) to start using Kandev.",
 			Severity: SeverityWarning,
 			FixURL:   "/settings/agents",
 			FixLabel: "Configure Agents",

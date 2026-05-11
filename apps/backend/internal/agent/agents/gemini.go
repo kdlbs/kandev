@@ -114,6 +114,16 @@ func (a *Gemini) RemoteAuth() *RemoteAuth {
 	}
 }
 
+// Gemini has no dedicated login subcommand — the first run of `gemini` drops
+// the user into the TUI's "Sign in with Google" flow. Spawn the bare CLI
+// under the PTY so the user can complete that flow inline.
+func (a *Gemini) LoginCommand() *LoginCommand {
+	return &LoginCommand{
+		Cmd:         []string{"gemini"},
+		Description: "Sign in with your Google account (use the TUI's Sign in option, then quit).",
+	}
+}
+
 func (a *Gemini) InstallScript() string {
 	return "npm install -g " + geminiPkg
 }

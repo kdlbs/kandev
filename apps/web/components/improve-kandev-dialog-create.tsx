@@ -267,7 +267,7 @@ function BootstrapStatusSlot({
               </button>
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed">
-              KanDev keeps a small in-memory ring buffer of the most recent backend logs and browser
+              Kandev keeps a small in-memory ring buffer of the most recent backend logs and browser
               console events. When enabled, those logs are written to a temporary folder on your
               machine, and the file paths are appended to the task description so the agent can read
               them while investigating.

@@ -49,6 +49,7 @@ type UseChatInputContainerParams = {
 function useInputHandle(
   ref: React.ForwardedRef<ChatInputContainerHandle>,
   inputRef: React.RefObject<TipTapInputHandle | null>,
+  getAttachments: () => MessageAttachment[],
 ) {
   useImperativeHandle(
     ref,
@@ -61,8 +62,9 @@ function useInputHandle(
         inputRef.current?.insertText(text, from, to);
       },
       clear: () => inputRef.current?.clear(),
+      getAttachments,
     }),
-    [inputRef],
+    [inputRef, getAttachments],
   );
 }
 
@@ -167,20 +169,21 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     getContentElement,
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { value, inputRef, addFiles, handleChange, handleSubmit, allItems } = useChatInputState({
-    sessionId,
-    isSending,
-    contextItems,
-    pendingCommentsByFile,
-    hasContextComments: params.hasContextComments,
-    showRequestChangesTooltip,
-    onRequestChangesTooltipDismiss,
-    onSubmit,
-  });
+  const { value, inputRef, addFiles, handleChange, handleSubmit, allItems, getAttachments } =
+    useChatInputState({
+      sessionId,
+      isSending,
+      contextItems,
+      pendingCommentsByFile,
+      hasContextComments: params.hasContextComments,
+      showRequestChangesTooltip,
+      onRequestChangesTooltipDismiss,
+      onSubmit,
+    });
 
   useSyncTipTapRef(tiptapRef, inputRef);
 
-  useInputHandle(ref, inputRef);
+  useInputHandle(ref, inputRef, getAttachments);
 
   // Auto-expand the input container as the user types more lines
   const handleChangeWithAutoExpand = useCallback(
@@ -195,12 +198,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     if (showRequestChangesTooltip && inputRef.current) inputRef.current.focus();
   }, [showRequestChangesTooltip, inputRef]);
 
-  const handleAgentCommand = useCallback(
-    (commandName: string) => {
-      onSubmit(`/${commandName}`);
-    },
-    [onSubmit],
-  );
+  const handleAgentCommand = useCallback((cmd: string) => onSubmit(`/${cmd}`), [onSubmit]);
   const handleSubmitWithReset = useCallback(
     () => handleSubmit(resetHeight),
     [handleSubmit, resetHeight],

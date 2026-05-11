@@ -13,6 +13,9 @@ export class KanbanPage {
 
   readonly multiSelectToggle: Locator;
 
+  readonly viewTogglePipeline: Locator;
+  readonly viewToggleKanban: Locator;
+
   constructor(private page: Page) {
     this.board = page.getByTestId("kanban-board");
     this.createTaskButton = page.getByTestId("create-task-button");
@@ -24,6 +27,8 @@ export class KanbanPage {
     this.bulkClearButton = page.getByTestId("bulk-clear-selection");
     this.bulkDeleteConfirm = page.getByTestId("bulk-delete-confirm");
     this.bulkArchiveConfirm = page.getByTestId("bulk-archive-confirm");
+    this.viewTogglePipeline = page.getByTestId("view-toggle-pipeline");
+    this.viewToggleKanban = page.getByTestId("view-toggle-kanban");
   }
 
   async goto() {
@@ -125,6 +130,27 @@ export class KanbanPage {
   async selectTask(taskId: string) {
     const card = this.taskCard(taskId);
     await card.waitFor({ state: "visible" });
+    await this.enableMultiSelect();
+    await this.taskSelectCheckbox(taskId).click();
+  }
+
+  pipelineTask(taskId: string): Locator {
+    return this.page.getByTestId(`pipeline-task-${taskId}`);
+  }
+
+  pipelineTaskRepoName(taskId: string): Locator {
+    return this.page.getByTestId(`pipeline-task-repo-${taskId}`);
+  }
+
+  async switchToPipelineView() {
+    await this.viewTogglePipeline.first().click();
+    // Wait for a pipeline-specific element — swimlane-container is shared with the kanban view.
+    await this.page.locator('[data-testid^="pipeline-task-"]').first().waitFor();
+  }
+
+  async selectPipelineTask(taskId: string) {
+    const row = this.pipelineTask(taskId);
+    await row.waitFor({ state: "visible" });
     await this.enableMultiSelect();
     await this.taskSelectCheckbox(taskId).click();
   }

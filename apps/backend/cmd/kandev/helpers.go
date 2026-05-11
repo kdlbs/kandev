@@ -20,7 +20,9 @@ import (
 	agenthandlers "github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/loginpty"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentsettingshandlers "github.com/kandev/kandev/internal/agent/settings/handlers"
 	"github.com/kandev/kandev/internal/agentctl/client"
@@ -415,6 +417,7 @@ type routeParams struct {
 	services                *Services
 	agentSettingsController *agentsettingscontroller.Controller
 	agentList               taskhandlers.AgentLister
+	agentRegistry           *registry.Registry
 	userCtrl                *usercontroller.Controller
 	notificationCtrl        *notificationcontroller.Controller
 	editorCtrl              *editorcontroller.Controller
@@ -577,6 +580,18 @@ func registerSecondaryRoutes(
 
 	agentsettingshandlers.RegisterRoutes(p.router, p.agentSettingsController, p.gateway.Hub, p.log)
 	p.log.Debug("Registered Agent Settings handlers (HTTP)")
+
+	// Login PTY: spawns agent login commands under a PTY on the kandev host
+	// (claude auth login, auggie login, ...). The user explicitly closes the
+	// dialog when done, so invalidate the discovery cache on every session
+	// end regardless of exit code — rescanning is cheap and correctly picks
+	// up new auth state for agents whose login flow lives inside the TUI
+	// (e.g. gemini) where the process keeps running after auth completes.
+	loginMgr := loginpty.NewManager(p.log, func(_ string, _ int, _ error) {
+		p.agentSettingsController.InvalidateDiscoveryCache()
+	})
+	loginpty.NewHandlers(loginMgr, p.agentRegistry, p.log.Zap(), nil).RegisterRoutes(p.router)
+	p.log.Debug("Registered Login PTY handlers (HTTP + WebSocket)")
 
 	userhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, p.userCtrl, p.log)
 	p.log.Debug("Registered User handlers (HTTP + WebSocket)")

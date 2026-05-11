@@ -6,14 +6,14 @@ export function useTasks(workflowId: string | null) {
   useWorkflowSnapshot(workflowId);
 
   const kanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
+  const kanbanIsLoading = useAppStore((state) => state.kanban.isLoading ?? false);
   const tasks = useAppStore((state) => state.kanban.tasks);
 
-  const workflowTasks = useMemo(() => {
-    if (!workflowId || kanbanWorkflowId !== workflowId) {
-      return [];
-    }
-    return tasks;
-  }, [workflowId, kanbanWorkflowId, tasks]);
+  const matchesActive = !!workflowId && kanbanWorkflowId === workflowId;
+  const workflowTasks = useMemo(() => (matchesActive ? tasks : []), [matchesActive, tasks]);
 
-  return { tasks: workflowTasks };
+  // Loading only while a snapshot fetch is in-flight; settles to false on success/error to avoid an infinite skeleton.
+  const isLoading = !!workflowId && kanbanIsLoading;
+
+  return { tasks: workflowTasks, isLoading };
 }

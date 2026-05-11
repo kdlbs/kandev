@@ -274,9 +274,44 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		baseRef = m.pullBaseBranch(ctx, req.RepositoryPath, req.BaseBranch, req.OnSyncProgress)
 	}
 
-	// Check base branch exists
+	// Check base branch exists. When the requested branch is missing and the
+	// caller supplied a FallbackBaseBranch (typically the repo's default_branch)
+	// that does exist, recover automatically and surface a non-fatal warning on
+	// the resulting worktree. This handles the common case where a parent task
+	// was anchored to a PR head or fresh branch that has been deleted upstream
+	// or never existed in a sibling repo.
+	fallbackWarning, fallbackDetail := "", ""
 	if !m.branchExists(ctx, req.RepositoryPath, baseRef) {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidBaseBranch, baseRef)
+		fallback := strings.TrimSpace(req.FallbackBaseBranch)
+		if fallback == "" || fallback == baseRef {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidBaseBranch, baseRef)
+		}
+		// Best-effort fetch of the fallback so it is available locally in
+		// containerized / shallow-clone environments where the fallback may
+		// only exist on the remote. pullBaseBranch may resolve the name to a
+		// remote-tracking ref (e.g. "main" -> "origin/main") which we must use
+		// for the existence check and downstream git operations.
+		resolvedFallback := fallback
+		if req.PullBeforeWorktree {
+			resolvedFallback = m.pullBaseBranch(ctx, req.RepositoryPath, fallback, nil)
+		}
+		if !m.branchExists(ctx, req.RepositoryPath, resolvedFallback) {
+			return nil, fmt.Errorf("%w: %s (fallback %q also not found)", ErrInvalidBaseBranch, baseRef, fallback)
+		}
+		m.logger.Warn("requested base branch not found, falling back",
+			zap.String("repository_path", req.RepositoryPath),
+			zap.String("requested_branch", baseRef),
+			zap.String("fallback_branch", fallback))
+		// Use req.BaseBranch (the user-supplied name) in the user-facing warning
+		// rather than baseRef, which may carry an internal "origin/<x>" form
+		// produced by pullBaseBranch when PullBeforeWorktree is set.
+		fallbackWarning = fmt.Sprintf("Requested base branch %q not found, used %q instead", req.BaseBranch, fallback)
+		fallbackDetail = fmt.Sprintf("git rev-parse --verify %s failed; recovered using fallback branch %q (typically the repository's default_branch)", baseRef, fallback)
+		baseRef = resolvedFallback
+		// Reflect the resolved branch in the persisted worktree record so
+		// downstream consumers (UI, queries, debug logs) see the actual base
+		// rather than the requested-but-missing one.
+		req.BaseBranch = fallback
 	}
 
 	// Worktrees are always placed under ~/.kandev/tasks/{taskDir}/{repo}/.
@@ -285,7 +320,15 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	if req.TaskDirName == "" || req.RepoName == "" {
 		return nil, ErrTaskDirRequired
 	}
-	return m.createInTaskDir(ctx, req, baseRef)
+	wt, err := m.createInTaskDir(ctx, req, baseRef)
+	if err != nil {
+		return nil, err
+	}
+	if fallbackWarning != "" {
+		wt.BaseBranchFallbackWarning = fallbackWarning
+		wt.BaseBranchFallbackDetail = fallbackDetail
+	}
+	return wt, nil
 }
 
 // createInTaskDir creates a worktree inside the task directory structure:

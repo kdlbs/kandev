@@ -133,8 +133,13 @@ func realMain() int {
 
 	// 2. Initialize logger
 	log, err := logger.NewLogger(logger.LoggingConfig{
-		Level:  cfg.Logging.Level,
-		Format: cfg.Logging.Format,
+		Level:      cfg.Logging.Level,
+		Format:     cfg.Logging.Format,
+		OutputPath: cfg.Logging.OutputPath,
+		MaxSizeMB:  cfg.Logging.MaxSizeMB,
+		MaxBackups: cfg.Logging.MaxBackups,
+		MaxAgeDays: cfg.Logging.MaxAgeDays,
+		Compress:   cfg.Logging.Compress,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
@@ -326,7 +331,7 @@ func startAgentInfrastructure(
 	// ============================================
 	log.Info("Initializing Orchestrator...")
 
-	orchestratorSvc, msgCreator, err := provideOrchestrator(cfg, log, eventBus, repos.Task, services.Task, services.User,
+	orchestratorSvc, msgCreator, err := provideOrchestrator(cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
 		lifecycleMgr, agentRegistry, services.Workflow, repos.Secrets, repoCloner)
 	if err != nil {
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
@@ -554,6 +559,7 @@ func buildHTTPServer(
 		services:                services,
 		agentSettingsController: agentSettingsController,
 		agentList:               agentRegistry,
+		agentRegistry:           agentRegistry,
 		userCtrl:                usercontroller.NewController(services.User),
 		notificationCtrl:        notificationCtrl,
 		editorCtrl:              editorcontroller.NewController(services.Editor),

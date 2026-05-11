@@ -257,6 +257,7 @@ type LaunchAgentRequest struct {
 	RepositoryID         string // Repository ID for worktree tracking
 	RepositoryPath       string // Path to the main repository (for worktree creation)
 	BaseBranch           string // Base branch for the worktree (e.g., "main")
+	DefaultBranch        string // Repository's default_branch, used as a fallback when BaseBranch is missing
 	CheckoutBranch       string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	WorktreeBranchPrefix string // Branch prefix for worktree branches
 	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
@@ -282,6 +283,7 @@ type RepoSpec struct {
 	RepositoryURL        string
 	RepoName             string
 	BaseBranch           string
+	DefaultBranch        string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch       string
 	WorktreeID           string
 	WorktreeBranchPrefix string

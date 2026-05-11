@@ -108,25 +108,36 @@ function buildCreateTaskBody(
   return body;
 }
 
-/** Build the optional fields object for createTaskWithAgent requests. */
-function buildOptionalAgentTaskFields(opts?: {
+type OptionalAgentTaskOpts = {
   workflow_id?: string;
   workflow_step_id?: string;
   repository_ids?: string[];
+  repositories?: Array<{ repository_id: string; base_branch?: string; checkout_branch?: string }>;
   executor_id?: string;
   executor_profile_id?: string;
   metadata?: Record<string, unknown>;
   parent_id?: string;
-}): Record<string, unknown> {
+};
+
+/** `repositories` (with per-entry branches) takes precedence over the shorthand
+ * `repository_ids` so callers can pin a non-default base_branch. */
+function pickRepositories(opts: OptionalAgentTaskOpts): unknown {
+  if (opts.repositories) return opts.repositories;
+  if (opts.repository_ids) return opts.repository_ids.map((id) => ({ repository_id: id }));
+  return undefined;
+}
+
+/** Build the optional fields object for createTaskWithAgent requests. */
+function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<string, unknown> {
   const fields: Record<string, unknown> = {};
-  if (opts?.workflow_id) fields.workflow_id = opts.workflow_id;
-  if (opts?.workflow_step_id) fields.workflow_step_id = opts.workflow_step_id;
-  if (opts?.repository_ids)
-    fields.repositories = opts.repository_ids.map((id) => ({ repository_id: id }));
-  if (opts?.executor_id) fields.executor_id = opts.executor_id;
-  if (opts?.executor_profile_id) fields.executor_profile_id = opts.executor_profile_id;
-  if (opts?.metadata) fields.metadata = opts.metadata;
-  if (opts?.parent_id) fields.parent_id = opts.parent_id;
+  if (!opts) return fields;
+  setIf(fields, "workflow_id", opts.workflow_id);
+  setIf(fields, "workflow_step_id", opts.workflow_step_id);
+  setIf(fields, "repositories", pickRepositories(opts));
+  setIf(fields, "executor_id", opts.executor_id);
+  setIf(fields, "executor_profile_id", opts.executor_profile_id);
+  setIf(fields, "metadata", opts.metadata);
+  setIf(fields, "parent_id", opts.parent_id);
   return fields;
 }
 
@@ -294,6 +305,23 @@ export class ApiClient {
     await this.request("PATCH", `/api/v1/agent-profiles/${profileId}`, patch);
   }
 
+  async listPrompts(): Promise<{
+    prompts: Array<{ id: string; name: string; content: string; builtin: boolean }>;
+  }> {
+    return this.request("GET", "/api/v1/prompts");
+  }
+
+  async createPrompt(
+    name: string,
+    content: string,
+  ): Promise<{ id: string; name: string; content: string; builtin: boolean }> {
+    return this.request("POST", "/api/v1/prompts", { name, content });
+  }
+
+  async deletePrompt(promptId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/prompts/${promptId}`);
+  }
+
   async createTaskWithAgent(
     workspaceId: string,
     title: string,
@@ -303,6 +331,12 @@ export class ApiClient {
       workflow_id?: string;
       workflow_step_id?: string;
       repository_ids?: string[];
+      /** Full repository entries with optional checkout_branch / base_branch. */
+      repositories?: Array<{
+        repository_id: string;
+        base_branch?: string;
+        checkout_branch?: string;
+      }>;
       executor_id?: string;
       executor_profile_id?: string;
       metadata?: Record<string, unknown>;
@@ -728,8 +762,56 @@ export class ApiClient {
     mergeable_state?: string;
     additions?: number;
     deletions?: number;
+    review_count?: number;
+    pending_review_count?: number;
+    required_reviews?: number;
+    checks_total?: number;
+    checks_passing?: number;
+    unresolved_review_threads?: number;
   }): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/task-prs", data);
+  }
+
+  async mockGitHubSeedPRFeedback(data: {
+    owner: string;
+    repo: string;
+    pr_number: number;
+    checks?: Array<{
+      name: string;
+      source?: string;
+      status?: string;
+      conclusion?: string;
+      html_url?: string;
+      output?: string;
+      started_at?: string | null;
+      completed_at?: string | null;
+    }>;
+    reviews?: Array<{
+      id: number;
+      author: string;
+      author_avatar?: string;
+      state: string;
+      body?: string;
+      created_at?: string;
+    }>;
+    comments?: Array<{
+      id: number;
+      author: string;
+      author_avatar?: string;
+      body: string;
+      path?: string;
+      line?: number;
+      side?: string;
+      comment_type?: string;
+      created_at?: string;
+      updated_at?: string;
+    }>;
+  }): Promise<void> {
+    await this.request("POST", "/api/v1/github/mock/pr-feedback", data);
+  }
+
+  async mockGitHubSetAuthHealth(data: { authenticated: boolean; error?: string }): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/auth-health", data);
   }
 
   async mockGitHubGetStatus(): Promise<{

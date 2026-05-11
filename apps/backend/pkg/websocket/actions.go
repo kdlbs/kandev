@@ -84,6 +84,7 @@ const (
 	ActionSessionStop         = "session.stop"
 	ActionSessionDelete       = "session.delete"
 	ActionSessionSetPrimary   = "session.set_primary"
+	ActionSessionSetPlanMode  = "session.set_plan_mode"
 
 	// Agent actions
 	ActionAgentList   = "agent.list"
@@ -108,10 +109,11 @@ const (
 
 	// Message Queue actions
 	ActionMessageQueueAdd           = "message.queue.add"
-	ActionMessageQueueCancel        = "message.queue.cancel"
+	ActionMessageQueueCancel        = "message.queue.cancel" // Clears the entire queue for a session
 	ActionMessageQueueGet           = "message.queue.get"
 	ActionMessageQueueUpdate        = "message.queue.update"
 	ActionMessageQueueAppend        = "message.queue.append"
+	ActionMessageQueueRemove        = "message.queue.remove"         // Delete a single entry by id
 	ActionMessageQueueStatusChanged = "message.queue.status_changed" // Notification: queue status changed
 
 	// Workflow template/step actions
@@ -159,6 +161,9 @@ const (
 	ActionTaskPlanReverted         = "task.plan.reverted"
 	ActionAgentUpdated             = "agent.updated"
 	ActionAgentAvailableUpdated    = "agent.available.updated"
+	ActionAgentInstallStarted      = "agent.install.started"
+	ActionAgentInstallOutput       = "agent.install.output"
+	ActionAgentInstallFinished     = "agent.install.finished"
 	ActionWorkspaceCreated         = "workspace.created"
 	ActionWorkspaceUpdated         = "workspace.updated"
 	ActionWorkspaceDeleted         = "workspace.deleted"
