@@ -172,6 +172,13 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		if repo == nil || repo.WorkspaceID != workspaceID {
 			return "", "", fmt.Errorf("repository %q does not belong to workspace %q", repositoryID, workspaceID)
 		}
+		// Default to the repository's default branch when no explicit base is
+		// provided so the task_repositories row is anchored to a known-good
+		// branch instead of an empty value. Mirrors the github_url and
+		// local_path branches below.
+		if baseBranch == "" {
+			baseBranch = repo.DefaultBranch
+		}
 		return repositoryID, baseBranch, nil
 	}
 

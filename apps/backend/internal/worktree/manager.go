@@ -274,9 +274,29 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		baseRef = m.pullBaseBranch(ctx, req.RepositoryPath, req.BaseBranch, req.OnSyncProgress)
 	}
 
-	// Check base branch exists
+	// Check base branch exists. When the requested branch is missing and the
+	// caller supplied a FallbackBaseBranch (typically the repo's default_branch)
+	// that does exist, recover automatically and surface a non-fatal warning on
+	// the resulting worktree. This handles the common case where a parent task
+	// was anchored to a PR head or fresh branch that has been deleted upstream
+	// or never existed in a sibling repo.
+	fallbackWarning, fallbackDetail := "", ""
 	if !m.branchExists(ctx, req.RepositoryPath, baseRef) {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidBaseBranch, baseRef)
+		fallback := strings.TrimSpace(req.FallbackBaseBranch)
+		if fallback == "" || fallback == baseRef || !m.branchExists(ctx, req.RepositoryPath, fallback) {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidBaseBranch, baseRef)
+		}
+		m.logger.Warn("requested base branch not found, falling back",
+			zap.String("repository_path", req.RepositoryPath),
+			zap.String("requested_branch", baseRef),
+			zap.String("fallback_branch", fallback))
+		fallbackWarning = fmt.Sprintf("Requested base branch %q not found, used %q instead", baseRef, fallback)
+		fallbackDetail = fmt.Sprintf("git rev-parse --verify %s failed; recovered using fallback branch %q (typically the repository's default_branch)", baseRef, fallback)
+		baseRef = fallback
+		// Reflect the resolved branch in the persisted worktree record so
+		// downstream consumers (UI, queries, debug logs) see the actual base
+		// rather than the requested-but-missing one.
+		req.BaseBranch = fallback
 	}
 
 	// Worktrees are always placed under ~/.kandev/tasks/{taskDir}/{repo}/.
@@ -285,7 +305,15 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	if req.TaskDirName == "" || req.RepoName == "" {
 		return nil, ErrTaskDirRequired
 	}
-	return m.createInTaskDir(ctx, req, baseRef)
+	wt, err := m.createInTaskDir(ctx, req, baseRef)
+	if err != nil {
+		return nil, err
+	}
+	if fallbackWarning != "" {
+		wt.BaseBranchFallbackWarning = fallbackWarning
+		wt.BaseBranchFallbackDetail = fallbackDetail
+	}
+	return wt, nil
 }
 
 // createInTaskDir creates a worktree inside the task directory structure:

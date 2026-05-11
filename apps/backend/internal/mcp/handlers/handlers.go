@@ -524,7 +524,15 @@ func explicitRepoInputs(explicit []mcpRepositoryInput) []service.TaskRepositoryI
 }
 
 // inheritedRepoInputs maps an existing task's repository list onto service
-// inputs for a new task that inherits from it.
+// inputs for a new task that inherits from it. RepositoryID and BaseBranch
+// carry over so a same-repo subtask branches off the same point as the
+// parent (sibling branches off the same base, ergonomically aligned for
+// stacked PRs). CheckoutBranch is dropped on purpose: two worktrees cannot
+// share a working branch, so the subtask's session generates a fresh one.
+// Agents that need a different base for a same-repo subtask must pass
+// base_branch explicitly. If the inherited base_branch is missing on the
+// remote at launch time, the worktree manager's fallback recovers to the
+// repository's default_branch and surfaces a warning.
 func inheritedRepoInputs(src []*models.TaskRepository) []service.TaskRepositoryInput {
 	if len(src) == 0 {
 		return nil
@@ -535,9 +543,8 @@ func inheritedRepoInputs(src []*models.TaskRepository) []service.TaskRepositoryI
 			continue
 		}
 		repos = append(repos, service.TaskRepositoryInput{
-			RepositoryID:   r.RepositoryID,
-			BaseBranch:     r.BaseBranch,
-			CheckoutBranch: r.CheckoutBranch,
+			RepositoryID: r.RepositoryID,
+			BaseBranch:   r.BaseBranch,
 		})
 	}
 	return repos

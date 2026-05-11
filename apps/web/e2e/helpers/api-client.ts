@@ -108,25 +108,36 @@ function buildCreateTaskBody(
   return body;
 }
 
-/** Build the optional fields object for createTaskWithAgent requests. */
-function buildOptionalAgentTaskFields(opts?: {
+type OptionalAgentTaskOpts = {
   workflow_id?: string;
   workflow_step_id?: string;
   repository_ids?: string[];
+  repositories?: Array<{ repository_id: string; base_branch?: string; checkout_branch?: string }>;
   executor_id?: string;
   executor_profile_id?: string;
   metadata?: Record<string, unknown>;
   parent_id?: string;
-}): Record<string, unknown> {
+};
+
+/** `repositories` (with per-entry branches) takes precedence over the shorthand
+ * `repository_ids` so callers can pin a non-default base_branch. */
+function pickRepositories(opts: OptionalAgentTaskOpts): unknown {
+  if (opts.repositories) return opts.repositories;
+  if (opts.repository_ids) return opts.repository_ids.map((id) => ({ repository_id: id }));
+  return undefined;
+}
+
+/** Build the optional fields object for createTaskWithAgent requests. */
+function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<string, unknown> {
   const fields: Record<string, unknown> = {};
-  if (opts?.workflow_id) fields.workflow_id = opts.workflow_id;
-  if (opts?.workflow_step_id) fields.workflow_step_id = opts.workflow_step_id;
-  if (opts?.repository_ids)
-    fields.repositories = opts.repository_ids.map((id) => ({ repository_id: id }));
-  if (opts?.executor_id) fields.executor_id = opts.executor_id;
-  if (opts?.executor_profile_id) fields.executor_profile_id = opts.executor_profile_id;
-  if (opts?.metadata) fields.metadata = opts.metadata;
-  if (opts?.parent_id) fields.parent_id = opts.parent_id;
+  if (!opts) return fields;
+  setIf(fields, "workflow_id", opts.workflow_id);
+  setIf(fields, "workflow_step_id", opts.workflow_step_id);
+  setIf(fields, "repositories", pickRepositories(opts));
+  setIf(fields, "executor_id", opts.executor_id);
+  setIf(fields, "executor_profile_id", opts.executor_profile_id);
+  setIf(fields, "metadata", opts.metadata);
+  setIf(fields, "parent_id", opts.parent_id);
   return fields;
 }
 
@@ -320,6 +331,12 @@ export class ApiClient {
       workflow_id?: string;
       workflow_step_id?: string;
       repository_ids?: string[];
+      /** Full repository entries with optional checkout_branch / base_branch. */
+      repositories?: Array<{
+        repository_id: string;
+        base_branch?: string;
+        checkout_branch?: string;
+      }>;
       executor_id?: string;
       executor_profile_id?: string;
       metadata?: Record<string, unknown>;

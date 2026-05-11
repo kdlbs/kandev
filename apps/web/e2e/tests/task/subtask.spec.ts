@@ -12,7 +12,7 @@ const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
 type TaskWithRepos = {
   id: string;
-  repositories?: Array<{ repository_id: string }>;
+  repositories?: Array<{ repository_id: string; base_branch?: string }>;
 };
 
 type SessionInfo = {
@@ -439,6 +439,159 @@ test.describe("MCP subtask creation", () => {
       `subtask should target the override repository (${otherRepo.id}), not the parent's (${seedData.repositoryId}); got: ${JSON.stringify(repoIds)}`,
     ).toContain(otherRepo.id);
     expect(repoIds).not.toContain(seedData.repositoryId);
+  });
+
+  test("MCP-created same-repo subtask inherits parent's base_branch (stacked PR ergonomics)", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(90_000);
+
+    // 1. Set up a repo with a non-default branch the parent will be pinned to.
+    //    A same-repo subtask should inherit that branch so its work stacks on
+    //    the same starting point as the parent (sibling PRs off the same
+    //    base, useful for stacked PR workflows).
+    const repoDir = path.join(backend.tmpDir, "repos", "subtask-same-repo-inherit");
+    fs.mkdirSync(repoDir, { recursive: true });
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync("git init -b main", { cwd: repoDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
+    execSync("git branch feature/parent-branch", { cwd: repoDir, env: gitEnv });
+    const repo = await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
+      name: "Subtask Same Repo Inherit",
+    });
+
+    const subtaskTitle = `Same-Repo Subtask ${Date.now()}`;
+    const script = [
+      'e2e:thinking("Creating subtask...")',
+      "e2e:delay(100)",
+      `e2e:mcp:kandev:create_task_kandev({"parent_id":"self","title":"${subtaskTitle}","description":"E2E subtask: verify base_branch is inherited from parent in same repo"})`,
+      "e2e:delay(100)",
+      'e2e:message("Done.")',
+    ].join("\n");
+
+    // 2. Create the parent pinned to a non-default branch.
+    const parentTask = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Same-Repo Parent Task",
+      seedData.agentProfileId,
+      {
+        description: script,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repositories: [{ repository_id: repo.id, base_branch: "feature/parent-branch" }],
+      },
+    );
+
+    // Sanity: parent persisted the pin.
+    const parentRaw = await apiClient.rawRequest("GET", `/api/v1/tasks/${parentTask.id}`);
+    const parentData = (await parentRaw.json()) as TaskWithRepos;
+    expect(parentData.repositories?.[0]?.base_branch).toBe("feature/parent-branch");
+
+    // 3. Open the parent so the execution stays alive while the script runs.
+    await testPage.goto(`/t/${parentTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    // 4. Poll for the subtask.
+    type TaskEntry = { id: string; title: string };
+    let subtask: TaskEntry | undefined;
+    await expect
+      .poll(
+        async () => {
+          const allTasks = await apiClient.listTasks(seedData.workspaceId);
+          subtask = allTasks.tasks.find((t: TaskEntry) => t.title === subtaskTitle);
+          return subtask;
+        },
+        { timeout: 60_000, message: "Subtask should be created by the agent's MCP call" },
+      )
+      .toBeDefined();
+
+    // 5. The same-repo subtask should inherit the parent's base_branch so the
+    //    agent can stack work on top of the parent's PR. The worktree
+    //    manager's fallback (covered separately in worktree unit tests) is
+    //    the safety net if the inherited branch later goes stale on the
+    //    remote — it is not the primary mechanism.
+    const subtaskRaw = await apiClient.rawRequest("GET", `/api/v1/tasks/${subtask!.id}`);
+    const subtaskData = (await subtaskRaw.json()) as TaskWithRepos;
+    expect(
+      subtaskData.repositories?.[0]?.repository_id,
+      "same-repo subtask should inherit the parent's repository_id",
+    ).toBe(repo.id);
+    expect(
+      subtaskData.repositories?.[0]?.base_branch,
+      `same-repo subtask base_branch should inherit parent's 'feature/parent-branch'; got: ${subtaskData.repositories?.[0]?.base_branch}`,
+    ).toBe("feature/parent-branch");
+  });
+
+  test("MCP-created cross-repo subtask uses the new repo's default_branch", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(90_000);
+
+    // Parent lives in the seed repo on a non-default branch. The subtask
+    // explicitly retargets a different repo via repository_id and supplies
+    // no base_branch. The subtask must anchor to the new repo's
+    // default_branch ("trunk") and never carry the parent's branch over.
+    const otherRepoDir = path.join(backend.tmpDir, "repos", "subtask-cross-repo");
+    fs.mkdirSync(otherRepoDir, { recursive: true });
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync("git init -b trunk", { cwd: otherRepoDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: otherRepoDir, env: gitEnv });
+    const otherRepo = await apiClient.createRepository(seedData.workspaceId, otherRepoDir, "trunk", {
+      name: "Subtask Cross Repo",
+    });
+
+    const subtaskTitle = `Cross-Repo Subtask ${Date.now()}`;
+    const script = [
+      'e2e:thinking("Creating cross-repo subtask...")',
+      "e2e:delay(100)",
+      `e2e:mcp:kandev:create_task_kandev({"parent_id":"self","title":"${subtaskTitle}","description":"E2E cross-repo subtask","repository_id":"${otherRepo.id}"})`,
+      "e2e:delay(100)",
+      'e2e:message("Done.")',
+    ].join("\n");
+
+    const parentTask = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Cross-Repo Parent Task",
+      seedData.agentProfileId,
+      {
+        description: script,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${parentTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    type TaskEntry = { id: string; title: string };
+    let subtask: TaskEntry | undefined;
+    await expect
+      .poll(
+        async () => {
+          const allTasks = await apiClient.listTasks(seedData.workspaceId);
+          subtask = allTasks.tasks.find((t: TaskEntry) => t.title === subtaskTitle);
+          return subtask;
+        },
+        { timeout: 60_000, message: "Cross-repo subtask should be created by the agent's MCP call" },
+      )
+      .toBeDefined();
+
+    const subtaskRaw = await apiClient.rawRequest("GET", `/api/v1/tasks/${subtask!.id}`);
+    const subtaskData = (await subtaskRaw.json()) as TaskWithRepos;
+    expect(subtaskData.repositories?.[0]?.repository_id).toBe(otherRepo.id);
+    expect(
+      subtaskData.repositories?.[0]?.base_branch,
+      `cross-repo subtask base_branch should anchor to new repo's default 'trunk'; got: ${subtaskData.repositories?.[0]?.base_branch}`,
+    ).toBe("trunk");
   });
 });
 
