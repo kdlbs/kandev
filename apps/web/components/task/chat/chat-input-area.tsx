@@ -158,7 +158,7 @@ export function useSubmitHandler(
 
 export function useChatPanelHandlers(
   resolvedSessionId: string | null,
-  cancelQueue: () => Promise<void>,
+  clearQueue: () => Promise<void>,
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>,
 ) {
   const handleCancelTurn = useCallback(async () => {
@@ -172,13 +172,13 @@ export function useChatPanelHandlers(
     }
   }, [resolvedSessionId]);
 
-  const handleCancelQueue = useCallback(async () => {
+  const handleClearQueue = useCallback(async () => {
     try {
-      await cancelQueue();
+      await clearQueue();
     } catch (error) {
-      console.error("Failed to cancel queued message:", error);
+      console.error("Failed to clear queue:", error);
     }
-  }, [cancelQueue]);
+  }, [clearQueue]);
 
   const handleQueueEditComplete = useCallback(() => {
     chatInputRef.current?.focusInput();
@@ -206,7 +206,7 @@ export function useChatPanelHandlers(
     { enabled: true, preventDefault: false },
   );
 
-  return { handleCancelTurn, handleCancelQueue, handleQueueEditComplete };
+  return { handleCancelTurn, handleClearQueue, handleQueueEditComplete };
 }
 
 function PRMergedBanner({ taskId }: { taskId: string }) {

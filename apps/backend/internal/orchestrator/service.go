@@ -297,7 +297,10 @@ type Status struct {
 	LastHeartbeat  time.Time `json:"last_heartbeat"`
 }
 
-// NewService creates a new orchestrator service
+// NewService creates a new orchestrator service. msgQueue is the persistent
+// message queue service (constructed externally so cmd/kandev can wire it to
+// the shared SQLite pool); pass nil to default to an in-memory queue, which
+// suits tests but loses entries on restart.
 func NewService(
 	cfg ServiceConfig,
 	eventBus bus.EventBus,
@@ -306,6 +309,7 @@ func NewService(
 	repo repoStore,
 	shellPrefs executor.ShellPreferenceProvider,
 	secretStore secrets.SecretStore,
+	msgQueue *messagequeue.Service,
 	log *logger.Logger,
 ) *Service {
 	svcLogger := log.WithFields(zap.String("component", "orchestrator"))
@@ -323,8 +327,9 @@ func NewService(
 	// Create the scheduler with queue, executor, and task repository
 	sched := scheduler.NewScheduler(taskQueue, exec, taskRepo, log, cfg.Scheduler)
 
-	// Create the message queue service
-	msgQueue := messagequeue.NewService(log)
+	if msgQueue == nil {
+		msgQueue = messagequeue.NewServiceMemory(log)
+	}
 
 	// Create the service (watcher will be created after we have handlers)
 	s := &Service{

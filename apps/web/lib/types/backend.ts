@@ -527,8 +527,9 @@ export type QueuedMessagePayload = {
 
 export type QueueStatusChangedPayload = {
   session_id: string;
-  is_queued: boolean;
-  message?: QueuedMessagePayload | null;
+  entries?: QueuedMessagePayload[] | null;
+  count?: number;
+  max?: number;
 };
 
 export type BackendMessageMap = {

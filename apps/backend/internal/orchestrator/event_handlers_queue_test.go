@@ -42,11 +42,11 @@ func TestExecuteQueuedMessage_RequeuesWhenResetInProgress(t *testing.T) {
 	svc.executeQueuedMessage("s1", queuedMsg)
 
 	status := svc.messageQueue.GetStatus(ctx, "s1")
-	if !status.IsQueued || status.Message == nil {
-		t.Fatalf("expected queued message to be requeued when reset is in progress")
+	if status.Count != 1 {
+		t.Fatalf("expected queued message to be requeued when reset is in progress, count=%d", status.Count)
 	}
-	if status.Message.Content != "hello" {
-		t.Fatalf("expected queued content to be preserved, got %q", status.Message.Content)
+	if status.Entries[0].Content != "hello" {
+		t.Fatalf("expected queued content to be preserved, got %q", status.Entries[0].Content)
 	}
 }
 

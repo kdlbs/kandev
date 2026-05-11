@@ -459,7 +459,12 @@ export type AppState = {
   toggleComparePair: (taskId: string, revisionId: string) => void;
   clearComparePair: (taskId: string) => void;
   // Queue actions
-  setQueueStatus: (sessionId: string, status: import("./slices/session/types").QueueStatus) => void;
+  setQueueEntries: (
+    sessionId: string,
+    entries: import("./slices/session/types").QueuedMessage[],
+    meta: import("./slices/session/types").QueueMeta,
+  ) => void;
+  removeQueueEntry: (sessionId: string, entryId: string) => void;
   setQueueLoading: (sessionId: string, loading: boolean) => void;
   clearQueueStatus: (sessionId: string) => void;
   // Available commands actions

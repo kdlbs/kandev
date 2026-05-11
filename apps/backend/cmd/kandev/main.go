@@ -331,7 +331,7 @@ func startAgentInfrastructure(
 	// ============================================
 	log.Info("Initializing Orchestrator...")
 
-	orchestratorSvc, msgCreator, err := provideOrchestrator(cfg, log, eventBus, repos.Task, services.Task, services.User,
+	orchestratorSvc, msgCreator, err := provideOrchestrator(cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
 		lifecycleMgr, agentRegistry, services.Workflow, repos.Secrets, repoCloner)
 	if err != nil {
 		log.Error("Failed to initialize orchestrator", zap.Error(err))

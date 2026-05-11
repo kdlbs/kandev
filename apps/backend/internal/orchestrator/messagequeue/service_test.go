@@ -2,7 +2,9 @@ package messagequeue
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,53 +14,56 @@ import (
 )
 
 func setupService(t *testing.T) *Service {
+	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{
 		Level:      "error",
 		Format:     "console",
-		OutputPath: "stdout",
+		OutputPath: "stderr",
 	})
 	require.NoError(t, err)
-	return NewService(log)
+	return NewServiceMemory(log)
 }
 
 func TestQueueMessage(t *testing.T) {
-	t.Run("successfully queues a message", func(t *testing.T) {
+	t.Run("appends new entries", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
 		msg, err := svc.QueueMessage(ctx, "session-1", "task-1", "test content", "model-1", "user-1", false, nil)
-
 		require.NoError(t, err)
 		assert.NotEmpty(t, msg.ID)
 		assert.Equal(t, "session-1", msg.SessionID)
-		assert.Equal(t, "task-1", msg.TaskID)
 		assert.Equal(t, "test content", msg.Content)
-		assert.Equal(t, "model-1", msg.Model)
 		assert.Equal(t, "user-1", msg.QueuedBy)
-		assert.False(t, msg.PlanMode)
 		assert.NotZero(t, msg.QueuedAt)
+		assert.Equal(t, int64(1), msg.Position)
 	})
 
-	t.Run("replaces existing queued message for same session", func(t *testing.T) {
+	t.Run("multiple messages produce ordered list", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		// Queue first message
-		msg1, err := svc.QueueMessage(ctx, "session-1", "task-1", "first message", "model-1", "user-1", false, nil)
-		require.NoError(t, err)
-
-		// Queue second message for same session
-		msg2, err := svc.QueueMessage(ctx, "session-1", "task-1", "second message", "model-1", "user-1", false, nil)
-		require.NoError(t, err)
-
-		// IDs should be different
-		assert.NotEqual(t, msg1.ID, msg2.ID)
-
-		// Only the second message should be queued
+		for _, body := range []string{"first", "second", "third"} {
+			_, err := svc.QueueMessage(ctx, "session-1", "task-1", body, "", "user-1", false, nil)
+			require.NoError(t, err)
+		}
 		status := svc.GetStatus(ctx, "session-1")
-		assert.True(t, status.IsQueued)
-		assert.Equal(t, msg2.ID, status.Message.ID)
-		assert.Equal(t, "second message", status.Message.Content)
+		require.Equal(t, 3, status.Count)
+		assert.Equal(t, "first", status.Entries[0].Content)
+		assert.Equal(t, "second", status.Entries[1].Content)
+		assert.Equal(t, "third", status.Entries[2].Content)
+	})
+
+	t.Run("rejects overflow with ErrQueueFull", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		for i := 0; i < DefaultMaxPerSession; i++ {
+			_, err := svc.QueueMessage(ctx, "s", "t", "x", "", "u", false, nil)
+			require.NoError(t, err)
+		}
+		_, err := svc.QueueMessage(ctx, "s", "t", "x", "", "u", false, nil)
+		assert.ErrorIs(t, err, ErrQueueFull)
 	})
 
 	t.Run("queues messages with attachments", func(t *testing.T) {
@@ -68,461 +73,344 @@ func TestQueueMessage(t *testing.T) {
 		attachments := []MessageAttachment{
 			{Type: "image", Data: "base64data", MimeType: "image/png"},
 		}
-
-		msg, err := svc.QueueMessage(ctx, "session-1", "task-1", "message with attachment", "model-1", "user-1", false, attachments)
-
+		msg, err := svc.QueueMessage(ctx, "session-1", "task-1", "with attachment", "", "user-1", false, attachments)
 		require.NoError(t, err)
 		assert.Len(t, msg.Attachments, 1)
 		assert.Equal(t, "image", msg.Attachments[0].Type)
 	})
-
-	t.Run("supports plan mode flag", func(t *testing.T) {
-		svc := setupService(t)
-		ctx := context.Background()
-
-		msg, err := svc.QueueMessage(ctx, "session-1", "task-1", "plan mode message", "model-1", "user-1", true, nil)
-
-		require.NoError(t, err)
-		assert.True(t, msg.PlanMode)
-	})
 }
 
-func TestTransferSession(t *testing.T) {
-	t.Run("moves queued message and pending move from old to new session", func(t *testing.T) {
+func TestAppendContent(t *testing.T) {
+	t.Run("appends to tail when same sender", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		_, err := svc.QueueMessage(ctx, "old-sess", "task-1", "hand-off prompt", "", "mcp-move-task", false, nil)
+		_, err := svc.QueueMessage(ctx, "s", "t", "first", "", "user", false, nil)
 		require.NoError(t, err)
-		svc.SetPendingMove(ctx, "old-sess", &PendingMove{
-			TaskID:         "task-1",
-			WorkflowStepID: "step-b",
-		})
 
-		svc.TransferSession(ctx, "old-sess", "new-sess")
+		_, appended, err := svc.AppendContent(ctx, "s", "t", "second", "", "user", false, nil)
+		require.NoError(t, err)
+		assert.True(t, appended)
 
-		// Old session is empty.
-		_, exists := svc.TakeQueued(ctx, "old-sess")
-		assert.False(t, exists)
-		_, exists = svc.TakePendingMove(ctx, "old-sess")
-		assert.False(t, exists)
-
-		// New session has both.
-		msg, exists := svc.TakeQueued(ctx, "new-sess")
-		require.True(t, exists)
-		assert.Equal(t, "hand-off prompt", msg.Content)
-		assert.Equal(t, "new-sess", msg.SessionID)
-
-		move, exists := svc.TakePendingMove(ctx, "new-sess")
-		require.True(t, exists)
-		assert.Equal(t, "step-b", move.WorkflowStepID)
+		status := svc.GetStatus(ctx, "s")
+		require.Equal(t, 1, status.Count)
+		assert.Equal(t, "first\n\n---\n\nsecond", status.Entries[0].Content)
 	})
 
-	t.Run("no-op when source session is empty", func(t *testing.T) {
+	t.Run("inserts new entry when tail is different sender", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		svc.TransferSession(ctx, "empty-sess", "new-sess")
+		_, err := svc.QueueMessage(ctx, "s", "t", "from user", "", "user", false, nil)
+		require.NoError(t, err)
 
-		_, exists := svc.TakeQueued(ctx, "new-sess")
-		assert.False(t, exists)
+		_, appended, err := svc.AppendContent(ctx, "s", "t", "from agent", "", "agent", false, nil)
+		require.NoError(t, err)
+		assert.False(t, appended)
+
+		status := svc.GetStatus(ctx, "s")
+		assert.Equal(t, 2, status.Count)
 	})
-}
 
-func TestPendingMove(t *testing.T) {
-	t.Run("set then take returns the move and clears it", func(t *testing.T) {
+	t.Run("inserts new entry when queue empty", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		svc.SetPendingMove(ctx, "session-1", &PendingMove{
-			TaskID:         "task-1",
-			WorkflowID:     "wf-1",
-			WorkflowStepID: "step-2",
-			Position:       3,
-		})
+		_, appended, err := svc.AppendContent(ctx, "s", "t", "fresh", "", "user", false, nil)
+		require.NoError(t, err)
+		assert.False(t, appended)
 
-		got, exists := svc.TakePendingMove(ctx, "session-1")
-		require.True(t, exists)
-		assert.Equal(t, "task-1", got.TaskID)
-		assert.Equal(t, "step-2", got.WorkflowStepID)
-		assert.Equal(t, 3, got.Position)
-		assert.NotZero(t, got.QueuedAt)
-
-		// Idempotent — second take returns nothing.
-		_, exists = svc.TakePendingMove(ctx, "session-1")
-		assert.False(t, exists)
-	})
-
-	t.Run("setting twice replaces the previous move", func(t *testing.T) {
-		svc := setupService(t)
-		ctx := context.Background()
-
-		svc.SetPendingMove(ctx, "session-1", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-a"})
-		svc.SetPendingMove(ctx, "session-1", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"})
-
-		got, exists := svc.TakePendingMove(ctx, "session-1")
-		require.True(t, exists)
-		assert.Equal(t, "step-b", got.WorkflowStepID)
+		status := svc.GetStatus(ctx, "s")
+		require.Equal(t, 1, status.Count)
+		assert.Equal(t, "fresh", status.Entries[0].Content)
 	})
 }
 
 func TestTakeQueued(t *testing.T) {
-	t.Run("retrieves and removes queued message", func(t *testing.T) {
+	t.Run("returns entries in FIFO order", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		// Queue a message
-		original, err := svc.QueueMessage(ctx, "session-1", "task-1", "test content", "model-1", "user-1", false, nil)
-		require.NoError(t, err)
-
-		// Take the message
-		msg, exists := svc.TakeQueued(ctx, "session-1")
-
-		assert.True(t, exists)
-		assert.Equal(t, original.ID, msg.ID)
-		assert.Equal(t, "test content", msg.Content)
-
-		// Should be removed after taking
-		status := svc.GetStatus(ctx, "session-1")
-		assert.False(t, status.IsQueued)
-		assert.Nil(t, status.Message)
+		for _, body := range []string{"first", "second", "third"} {
+			_, err := svc.QueueMessage(ctx, "s", "t", body, "", "u", false, nil)
+			require.NoError(t, err)
+		}
+		for _, want := range []string{"first", "second", "third"} {
+			msg, ok := svc.TakeQueued(ctx, "s")
+			require.True(t, ok, "queue empty before %q", want)
+			assert.Equal(t, want, msg.Content)
+		}
+		_, ok := svc.TakeQueued(ctx, "s")
+		assert.False(t, ok)
 	})
 
-	t.Run("returns false when no message queued", func(t *testing.T) {
+	t.Run("returns false when empty", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		msg, exists := svc.TakeQueued(ctx, "session-1")
-
-		assert.False(t, exists)
+		msg, ok := svc.TakeQueued(ctx, "s")
+		assert.False(t, ok)
 		assert.Nil(t, msg)
-	})
-
-	t.Run("is idempotent - second take returns false", func(t *testing.T) {
-		svc := setupService(t)
-		ctx := context.Background()
-
-		// Queue and take once
-		_, err := svc.QueueMessage(ctx, "session-1", "task-1", "test", "model-1", "user-1", false, nil)
-		require.NoError(t, err)
-		_, exists := svc.TakeQueued(ctx, "session-1")
-		require.True(t, exists)
-
-		// Second take should return false
-		_, exists = svc.TakeQueued(ctx, "session-1")
-		assert.False(t, exists)
-	})
-}
-
-func TestCancelQueued(t *testing.T) {
-	t.Run("cancels and removes queued message", func(t *testing.T) {
-		svc := setupService(t)
-		ctx := context.Background()
-
-		// Queue a message
-		original, err := svc.QueueMessage(ctx, "session-1", "task-1", "test content", "model-1", "user-1", false, nil)
-		require.NoError(t, err)
-
-		// Cancel it
-		cancelled, err := svc.CancelQueued(ctx, "session-1")
-
-		require.NoError(t, err)
-		assert.Equal(t, original.ID, cancelled.ID)
-
-		// Should be removed
-		status := svc.GetStatus(ctx, "session-1")
-		assert.False(t, status.IsQueued)
-	})
-
-	t.Run("returns error when no message queued", func(t *testing.T) {
-		svc := setupService(t)
-		ctx := context.Background()
-
-		_, err := svc.CancelQueued(ctx, "session-1")
-
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no queued message")
-	})
-}
-
-func TestGetStatus(t *testing.T) {
-	t.Run("returns queued status with message", func(t *testing.T) {
-		svc := setupService(t)
-		ctx := context.Background()
-
-		msg, err := svc.QueueMessage(ctx, "session-1", "task-1", "test", "model-1", "user-1", false, nil)
-		require.NoError(t, err)
-
-		status := svc.GetStatus(ctx, "session-1")
-
-		assert.True(t, status.IsQueued)
-		assert.NotNil(t, status.Message)
-		assert.Equal(t, msg.ID, status.Message.ID)
-	})
-
-	t.Run("returns not queued status when no message", func(t *testing.T) {
-		svc := setupService(t)
-		ctx := context.Background()
-
-		status := svc.GetStatus(ctx, "session-1")
-
-		assert.False(t, status.IsQueued)
-		assert.Nil(t, status.Message)
-	})
-}
-
-func TestAppendContent(t *testing.T) {
-	t.Run("appends content to existing queued message", func(t *testing.T) {
-		svc := setupService(t)
-		ctx := context.Background()
-
-		_, err := svc.QueueMessage(ctx, "session-1", "task-1", "original content", "model-1", "user-1", false, nil)
-		require.NoError(t, err)
-
-		err = svc.AppendContent(ctx, "session-1", "appended content")
-		require.NoError(t, err)
-
-		status := svc.GetStatus(ctx, "session-1")
-		assert.True(t, status.IsQueued)
-		assert.Equal(t, "original content\n\n---\n\nappended content", status.Message.Content)
-	})
-
-	t.Run("appends multiple times", func(t *testing.T) {
-		svc := setupService(t)
-		ctx := context.Background()
-
-		_, err := svc.QueueMessage(ctx, "session-1", "task-1", "first", "model-1", "user-1", false, nil)
-		require.NoError(t, err)
-
-		require.NoError(t, svc.AppendContent(ctx, "session-1", "second"))
-		require.NoError(t, svc.AppendContent(ctx, "session-1", "third"))
-
-		status := svc.GetStatus(ctx, "session-1")
-		assert.Equal(t, "first\n\n---\n\nsecond\n\n---\n\nthird", status.Message.Content)
-	})
-
-	t.Run("returns error when no message queued", func(t *testing.T) {
-		svc := setupService(t)
-		ctx := context.Background()
-
-		err := svc.AppendContent(ctx, "session-1", "content")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no queued message")
-	})
-
-	t.Run("preserves message ID after append", func(t *testing.T) {
-		svc := setupService(t)
-		ctx := context.Background()
-
-		msg, err := svc.QueueMessage(ctx, "session-1", "task-1", "original", "model-1", "user-1", false, nil)
-		require.NoError(t, err)
-		originalID := msg.ID
-
-		require.NoError(t, svc.AppendContent(ctx, "session-1", "extra"))
-
-		status := svc.GetStatus(ctx, "session-1")
-		assert.Equal(t, originalID, status.Message.ID)
 	})
 }
 
 func TestUpdateMessage(t *testing.T) {
-	t.Run("updates existing queued message content", func(t *testing.T) {
+	t.Run("updates content and survives in list", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		// Queue a message
-		msg, err := svc.QueueMessage(ctx, "session-1", "task-1", "original content", "model-1", "user-1", false, nil)
-		require.NoError(t, err)
-		originalID := msg.ID
-
-		// Update it
-		err = svc.UpdateMessage(ctx, "session-1", "updated content")
-
+		msg, err := svc.QueueMessage(ctx, "s", "t", "original", "", "user-1", false, nil)
 		require.NoError(t, err)
 
-		// Verify update
-		status := svc.GetStatus(ctx, "session-1")
-		assert.True(t, status.IsQueued)
-		assert.Equal(t, originalID, status.Message.ID)
-		assert.Equal(t, "updated content", status.Message.Content)
+		require.NoError(t, svc.UpdateMessage(ctx, "s", msg.ID, "edited", nil, "user-1"))
+
+		status := svc.GetStatus(ctx, "s")
+		require.Equal(t, 1, status.Count)
+		assert.Equal(t, "edited", status.Entries[0].Content)
+		assert.Equal(t, msg.ID, status.Entries[0].ID)
 	})
 
-	t.Run("returns error when no message queued", func(t *testing.T) {
+	t.Run("rejects update from foreign sender", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		err := svc.UpdateMessage(ctx, "session-1", "new content")
+		msg, err := svc.QueueMessage(ctx, "s", "t", "x", "", "user-1", false, nil)
+		require.NoError(t, err)
 
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no queued message")
+		err = svc.UpdateMessage(ctx, "s", msg.ID, "intruder", nil, "user-2")
+		assert.ErrorIs(t, err, ErrEntryNotFound)
 	})
 
-	t.Run("allows empty content updates", func(t *testing.T) {
+	t.Run("rejects update from foreign session", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		// Queue a message
-		_, err := svc.QueueMessage(ctx, "session-1", "task-1", "original", "model-1", "user-1", false, nil)
+		msg, err := svc.QueueMessage(ctx, "s-victim", "t", "x", "", "user-1", false, nil)
 		require.NoError(t, err)
 
-		// Update to empty (validation happens at handler level)
-		err = svc.UpdateMessage(ctx, "session-1", "")
+		err = svc.UpdateMessage(ctx, "s-attacker", msg.ID, "hijack", nil, "user-1")
+		assert.ErrorIs(t, err, ErrEntryNotFound)
+	})
 
-		require.NoError(t, err)
-		status := svc.GetStatus(ctx, "session-1")
-		assert.Equal(t, "", status.Message.Content)
+	t.Run("returns ErrEntryNotFound for missing id", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+		err := svc.UpdateMessage(ctx, "s", "missing", "x", nil, "")
+		assert.ErrorIs(t, err, ErrEntryNotFound)
 	})
 }
 
-func TestConcurrentAccess(t *testing.T) {
-	t.Run("handles concurrent queue operations safely", func(t *testing.T) {
+func TestRemoveEntry(t *testing.T) {
+	t.Run("removes the targeted entry", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		var wg sync.WaitGroup
-		numGoroutines := 100
+		_, _ = svc.QueueMessage(ctx, "s", "t", "a", "", "u", false, nil)
+		b, _ := svc.QueueMessage(ctx, "s", "t", "b", "", "u", false, nil)
+		_, _ = svc.QueueMessage(ctx, "s", "t", "c", "", "u", false, nil)
 
-		// Concurrently queue messages to different sessions
-		for i := 0; i < numGoroutines; i++ {
-			wg.Add(1)
-			go func(idx int) {
-				defer wg.Done()
-				sessionID := "session-" + string(rune('A'+idx%26))
-				_, err := svc.QueueMessage(ctx, sessionID, "task-1", "content", "model-1", "user-1", false, nil)
-				assert.NoError(t, err)
-			}(i)
-		}
+		require.NoError(t, svc.RemoveEntry(ctx, "s", b.ID))
 
-		wg.Wait()
+		status := svc.GetStatus(ctx, "s")
+		assert.Equal(t, 2, status.Count)
+		assert.Equal(t, "a", status.Entries[0].Content)
+		assert.Equal(t, "c", status.Entries[1].Content)
 
-		// Verify all sessions have messages
-		sessionIDs := make(map[string]bool)
-		for i := 0; i < numGoroutines; i++ {
-			sessionID := "session-" + string(rune('A'+i%26))
-			sessionIDs[sessionID] = true
-		}
-
-		for sessionID := range sessionIDs {
-			status := svc.GetStatus(ctx, sessionID)
-			assert.True(t, status.IsQueued, "session %s should be queued", sessionID)
-		}
+		err := svc.RemoveEntry(ctx, "s", b.ID)
+		assert.ErrorIs(t, err, ErrEntryNotFound)
 	})
 
-	t.Run("handles concurrent take operations safely", func(t *testing.T) {
+	t.Run("rejects deletion from a foreign session", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		// Queue a message
-		_, err := svc.QueueMessage(ctx, "session-1", "task-1", "test", "model-1", "user-1", false, nil)
-		require.NoError(t, err)
+		victim, _ := svc.QueueMessage(ctx, "s-victim", "t", "victim entry", "", "u", false, nil)
 
-		var wg sync.WaitGroup
-		successCount := 0
-		var mu sync.Mutex
+		// Attacker knows the entry id (e.g. leaked via queue_full payload from
+		// a sibling task) and tries to remove it scoped to a different session.
+		err := svc.RemoveEntry(ctx, "s-attacker", victim.ID)
+		assert.ErrorIs(t, err, ErrEntryNotFound)
 
-		// Try to take the message from multiple goroutines
-		for i := 0; i < 10; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				_, exists := svc.TakeQueued(ctx, "session-1")
-				if exists {
-					mu.Lock()
-					successCount++
-					mu.Unlock()
-				}
-			}()
-		}
-
-		wg.Wait()
-
-		// Only one should succeed
-		assert.Equal(t, 1, successCount, "only one goroutine should successfully take the message")
-
-		// Message should be gone
-		status := svc.GetStatus(ctx, "session-1")
-		assert.False(t, status.IsQueued)
-	})
-
-	t.Run("handles concurrent updates and reads safely", func(t *testing.T) {
-		svc := setupService(t)
-		ctx := context.Background()
-
-		// Queue initial message
-		_, err := svc.QueueMessage(ctx, "session-1", "task-1", "initial", "model-1", "user-1", false, nil)
-		require.NoError(t, err)
-
-		var wg sync.WaitGroup
-		numUpdates := 50
-		numReads := 50
-
-		// Concurrent updates
-		for i := 0; i < numUpdates; i++ {
-			wg.Add(1)
-			go func(idx int) {
-				defer wg.Done()
-				_ = svc.UpdateMessage(ctx, "session-1", "update-"+string(rune('0'+idx%10)))
-			}(i)
-		}
-
-		// Concurrent reads
-		for i := 0; i < numReads; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				status := svc.GetStatus(ctx, "session-1")
-				assert.True(t, status.IsQueued)
-			}()
-		}
-
-		wg.Wait()
-
-		// Final state should be consistent
-		status := svc.GetStatus(ctx, "session-1")
-		assert.True(t, status.IsQueued)
-		assert.NotEmpty(t, status.Message.Content)
+		// Victim entry must still be present.
+		status := svc.GetStatus(ctx, "s-victim")
+		assert.Equal(t, 1, status.Count)
 	})
 }
 
-func TestMultipleSessionsIsolation(t *testing.T) {
-	t.Run("sessions are isolated from each other", func(t *testing.T) {
+func TestCancelAll(t *testing.T) {
+	svc := setupService(t)
+	ctx := context.Background()
+
+	for i := 0; i < 4; i++ {
+		_, err := svc.QueueMessage(ctx, "s", "t", "x", "", "u", false, nil)
+		require.NoError(t, err)
+	}
+	n, err := svc.CancelAll(ctx, "s")
+	require.NoError(t, err)
+	assert.Equal(t, 4, n)
+
+	status := svc.GetStatus(ctx, "s")
+	assert.Equal(t, 0, status.Count)
+}
+
+func TestGetStatus(t *testing.T) {
+	t.Run("empty queue returns zero count and configured max", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		// Queue messages for multiple sessions
-		_, err := svc.QueueMessage(ctx, "session-1", "task-1", "message-1", "model-1", "user-1", false, nil)
-		require.NoError(t, err)
+		status := svc.GetStatus(ctx, "s")
+		assert.Equal(t, 0, status.Count)
+		assert.Empty(t, status.Entries)
+		assert.Equal(t, DefaultMaxPerSession, status.Max)
+	})
 
-		_, err = svc.QueueMessage(ctx, "session-2", "task-2", "message-2", "model-1", "user-1", false, nil)
-		require.NoError(t, err)
+	t.Run("returns ordered entries", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
 
-		// Take from session-1
-		msg1, exists := svc.TakeQueued(ctx, "session-1")
-		require.True(t, exists)
-		assert.Equal(t, "message-1", msg1.Content)
-
-		// session-2 should still have its message
-		status2 := svc.GetStatus(ctx, "session-2")
-		assert.True(t, status2.IsQueued)
-		assert.Equal(t, "message-2", status2.Message.Content)
-
-		// session-1 should be empty
-		status1 := svc.GetStatus(ctx, "session-1")
-		assert.False(t, status1.IsQueued)
+		for _, body := range []string{"a", "b", "c"} {
+			_, err := svc.QueueMessage(ctx, "s", "t", body, "", "u", false, nil)
+			require.NoError(t, err)
+		}
+		status := svc.GetStatus(ctx, "s")
+		require.Equal(t, 3, status.Count)
+		assert.Equal(t, "a", status.Entries[0].Content)
+		assert.Equal(t, "c", status.Entries[2].Content)
 	})
 }
 
-func TestQueuedMessageTimestamp(t *testing.T) {
-	t.Run("sets queued timestamp correctly", func(t *testing.T) {
+func TestTransferSession(t *testing.T) {
+	t.Run("moves entries and pending move", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		before := time.Now()
-		msg, err := svc.QueueMessage(ctx, "session-1", "task-1", "test", "model-1", "user-1", false, nil)
-		after := time.Now()
-
+		_, err := svc.QueueMessage(ctx, "old", "task-1", "hand-off", "", "u", false, nil)
 		require.NoError(t, err)
-		assert.True(t, msg.QueuedAt.After(before) || msg.QueuedAt.Equal(before))
-		assert.True(t, msg.QueuedAt.Before(after) || msg.QueuedAt.Equal(after))
+		svc.SetPendingMove(ctx, "old", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"})
+
+		require.NoError(t, svc.TransferSession(ctx, "old", "new"))
+
+		_, ok := svc.TakeQueued(ctx, "old")
+		assert.False(t, ok)
+		_, ok = svc.TakePendingMove(ctx, "old")
+		assert.False(t, ok)
+
+		msg, ok := svc.TakeQueued(ctx, "new")
+		require.True(t, ok)
+		assert.Equal(t, "hand-off", msg.Content)
+		assert.Equal(t, "new", msg.SessionID)
+
+		move, ok := svc.TakePendingMove(ctx, "new")
+		require.True(t, ok)
+		assert.Equal(t, "step-b", move.WorkflowStepID)
 	})
+
+	t.Run("no-op when source empty", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+		require.NoError(t, svc.TransferSession(ctx, "empty", "new"))
+		_, ok := svc.TakeQueued(ctx, "new")
+		assert.False(t, ok)
+	})
+}
+
+func TestPendingMove(t *testing.T) {
+	t.Run("set then take returns and clears", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-2", Position: 3})
+
+		got, ok := svc.TakePendingMove(ctx, "s")
+		require.True(t, ok)
+		assert.Equal(t, "t1", got.TaskID)
+		assert.Equal(t, "step-2", got.WorkflowStepID)
+		assert.Equal(t, 3, got.Position)
+		assert.NotZero(t, got.QueuedAt)
+
+		_, ok = svc.TakePendingMove(ctx, "s")
+		assert.False(t, ok)
+	})
+
+	t.Run("setting twice replaces previous", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowStepID: "a"})
+		svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowStepID: "b"})
+
+		got, ok := svc.TakePendingMove(ctx, "s")
+		require.True(t, ok)
+		assert.Equal(t, "b", got.WorkflowStepID)
+	})
+}
+
+func TestConcurrentInsertCap(t *testing.T) {
+	svc := setupService(t)
+	ctx := context.Background()
+
+	const goroutines = 50
+	var (
+		wg   sync.WaitGroup
+		ok   atomic.Int32
+		full atomic.Int32
+		bad  atomic.Int32
+	)
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			_, err := svc.QueueMessage(ctx, "s", "t", "x", "", "u", false, nil)
+			switch {
+			case err == nil:
+				ok.Add(1)
+			case errors.Is(err, ErrQueueFull):
+				full.Add(1)
+			default:
+				bad.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	assert.Equal(t, int32(0), bad.Load())
+	assert.Equal(t, int32(DefaultMaxPerSession), ok.Load())
+	assert.Equal(t, int32(goroutines-DefaultMaxPerSession), full.Load())
+}
+
+func TestConcurrentTakeIdempotent(t *testing.T) {
+	svc := setupService(t)
+	ctx := context.Background()
+
+	_, err := svc.QueueMessage(ctx, "s", "t", "single", "", "u", false, nil)
+	require.NoError(t, err)
+
+	var (
+		wg   sync.WaitGroup
+		hits atomic.Int32
+	)
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, ok := svc.TakeQueued(ctx, "s"); ok {
+				hits.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	assert.Equal(t, int32(1), hits.Load())
+}
+
+func TestQueuedTimestamp(t *testing.T) {
+	svc := setupService(t)
+	ctx := context.Background()
+
+	before := time.Now().Add(-time.Second)
+	msg, err := svc.QueueMessage(ctx, "s", "t", "x", "", "u", false, nil)
+	after := time.Now().Add(time.Second)
+
+	require.NoError(t, err)
+	assert.True(t, msg.QueuedAt.After(before))
+	assert.True(t, msg.QueuedAt.Before(after))
 }
