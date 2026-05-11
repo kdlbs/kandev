@@ -316,7 +316,11 @@ function FloatingPreviewLayout({
   return (
     <>
       <div className="flex-1 overflow-hidden" style={{ width: `${kanbanWidth}px` }}>
-        <KanbanBoard onPreviewTask={onPreviewTask} onOpenTask={onNavigateToTask} />
+        <KanbanBoard
+          onPreviewTask={onPreviewTask}
+          onOpenTask={onNavigateToTask}
+          onBeforeEdit={onClose}
+        />
       </div>
       <div
         className="fixed inset-0 bg-black/30 z-30"
@@ -362,7 +366,11 @@ function InlinePreviewLayout({
   return (
     <div className="flex-1 flex overflow-hidden">
       <div className="overflow-hidden" style={{ width: `${kanbanWidth}px` }}>
-        <KanbanBoard onPreviewTask={onPreviewTask} onOpenTask={onNavigateToTask} />
+        <KanbanBoard
+          onPreviewTask={onPreviewTask}
+          onOpenTask={onNavigateToTask}
+          onBeforeEdit={onClose}
+        />
       </div>
       {isOpen && (
         <div

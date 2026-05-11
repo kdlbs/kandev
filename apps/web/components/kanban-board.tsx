@@ -136,6 +136,13 @@ function useKanbanBoardStore() {
 interface KanbanBoardProps {
   onPreviewTask?: (task: Task) => void;
   onOpenTask?: (task: Task) => void;
+  /**
+   * Fired just before the edit dialog opens. The kanban preview panel
+   * subscribes to this to close itself — otherwise the dialog renders on top
+   * of the preview, leaving the task content visible behind the dialog and
+   * making the page look broken ("everything out of place").
+   */
+  onBeforeEdit?: () => void;
 }
 
 function useKanbanBoardHooks(
@@ -227,6 +234,7 @@ function useMultiSelectDerived(
 function useKanbanBoardSetup(
   onPreviewTask: KanbanBoardProps["onPreviewTask"],
   onOpenTask: KanbanBoardProps["onOpenTask"],
+  onBeforeEdit: KanbanBoardProps["onBeforeEdit"],
 ) {
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
@@ -251,6 +259,15 @@ function useKanbanBoardSetup(
     onPreviewTask,
     onOpenTask,
   });
+  // Close the preview panel (if open) before showing the edit dialog so the
+  // task content doesn't render alongside the dialog.
+  const handleEditWithCleanup = useCallback(
+    (task: Task) => {
+      onBeforeEdit?.();
+      hooks.handleEdit(task);
+    },
+    [onBeforeEdit, hooks],
+  );
 
   const multiSelect = useTaskMultiSelect(kanban.workflowId);
   const { isMultiSelectMode, toggleSelect } = multiSelect;
@@ -299,6 +316,7 @@ function useKanbanBoardSetup(
     searchQuery,
     setSearchQuery,
     ...hooks,
+    handleEdit: handleEditWithCleanup,
     ...automation,
     handleOpenTask,
     handleCardClick: handleCardClickOrSelect,
@@ -310,8 +328,8 @@ function useKanbanBoardSetup(
   };
 }
 
-export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}) {
-  const s = useKanbanBoardSetup(onPreviewTask, onOpenTask);
+export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanBoardProps = {}) {
+  const s = useKanbanBoardSetup(onPreviewTask, onOpenTask, onBeforeEdit);
 
   if (!s.isMounted) {
     return <div className="h-dvh w-full bg-background" />;
