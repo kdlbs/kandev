@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import {
   IconCircleCheckFilled,
   IconCircleXFilled,
@@ -57,10 +58,12 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
 
 function PRStatusChipInner({ pr }: { pr: TaskPR }) {
   const status = chipStatus(pr);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   return (
     <HoverCard openDelay={HOVER_OPEN_DELAY_MS} closeDelay={HOVER_CLOSE_DELAY_MS}>
       <HoverCardTrigger asChild>
         <button
+          ref={triggerRef}
           type="button"
           data-testid="pr-status-chip"
           data-pr-number={pr.pr_number}
@@ -74,7 +77,21 @@ function PRStatusChipInner({ pr }: { pr: TaskPR }) {
           <ChipStatusGlyph status={status} />
         </button>
       </HoverCardTrigger>
-      <HoverCardContent side="top" align="start" sideOffset={8} className="w-80 p-2.5">
+      <HoverCardContent
+        side="top"
+        align="start"
+        sideOffset={8}
+        className="w-80 p-2.5"
+        onPointerDownOutside={(e) => {
+          // Radix HoverCard treats the trigger as outside the content's
+          // bounding box, so a click on the chip would auto-close the
+          // popover. Filter out trigger clicks so clicking the chip is
+          // a no-op while the popover stays open via hover.
+          if (triggerRef.current && triggerRef.current.contains(e.target as Node)) {
+            e.preventDefault();
+          }
+        }}
+      >
         <PRCIPopover pr={pr} enabled={true} />
       </HoverCardContent>
     </HoverCard>
