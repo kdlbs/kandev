@@ -115,5 +115,8 @@ test.describe("Create-task URL flow - branches after reopen", () => {
 async function selectWorktreeExecutor(page: import("@playwright/test").Page): Promise<void> {
   const selector = page.getByTestId("executor-profile-selector");
   await selector.click();
-  await page.getByRole("option", { name: /Worktree/i }).first().click();
+  await page
+    .getByRole("option", { name: /Worktree/i })
+    .first()
+    .click();
 }
