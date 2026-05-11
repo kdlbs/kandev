@@ -272,6 +272,7 @@ type RepoLaunchSpec struct {
 	RepositoryURL        string // Clone URL for remote executors that need to clone
 	RepoName             string // Repository name used as subdirectory inside TaskDirName
 	BaseBranch           string
+	DefaultBranch        string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch       string
 	WorktreeID           string // Existing worktree ID to reuse (skip creation if set)
 	WorktreeBranchPrefix string
@@ -314,6 +315,7 @@ type LaunchRequest struct {
 	RepositoryID         string // Repository ID for worktree tracking
 	RepositoryPath       string // Path to the main repository (for worktree creation)
 	BaseBranch           string // Base branch for the worktree (e.g., "main")
+	DefaultBranch        string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch       string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	WorktreeBranchPrefix string // Branch prefix for worktree branches
 	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
@@ -345,6 +347,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		RepositoryPath:       r.RepositoryPath,
 		RepoName:             r.RepoName,
 		BaseBranch:           r.BaseBranch,
+		DefaultBranch:        r.DefaultBranch,
 		CheckoutBranch:       r.CheckoutBranch,
 		WorktreeID:           r.WorktreeID,
 		WorktreeBranchPrefix: r.WorktreeBranchPrefix,

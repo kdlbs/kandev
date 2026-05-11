@@ -72,6 +72,17 @@ type Worktree struct {
 	// FetchWarningDetail contains the raw git command output for debugging.
 	// Shown as collapsible content alongside the user-friendly FetchWarning.
 	FetchWarningDetail string `json:"fetch_warning_detail,omitempty"`
+
+	// BaseBranchFallbackWarning is set when the requested BaseBranch did not
+	// exist in the repository and the worktree was created from a fallback
+	// branch (typically the repository's default_branch) instead. Empty when
+	// the original BaseBranch was used.
+	BaseBranchFallbackWarning string `json:"base_branch_fallback_warning,omitempty"`
+
+	// BaseBranchFallbackDetail mirrors FetchWarningDetail: a longer message
+	// describing why the original branch was not used. Surfaced as collapsible
+	// detail alongside BaseBranchFallbackWarning.
+	BaseBranchFallbackDetail string `json:"base_branch_fallback_detail,omitempty"`
 }
 
 // CreateRequest contains the parameters for creating a new worktree.
@@ -96,6 +107,12 @@ type CreateRequest struct {
 	// BaseBranch is the branch to base the worktree on (required).
 	// Typically "main" or "master".
 	BaseBranch string
+
+	// FallbackBaseBranch is an optional branch to retry with when BaseBranch
+	// does not exist in the repository. Typically populated with the
+	// repository's default_branch by the caller. When empty, a missing
+	// BaseBranch returns ErrInvalidBaseBranch as before.
+	FallbackBaseBranch string
 
 	// CheckoutBranch is a branch to fetch from origin and check out directly in the
 	// worktree. If the branch is already checked out in another worktree, a unique

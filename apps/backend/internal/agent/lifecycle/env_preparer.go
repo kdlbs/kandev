@@ -29,6 +29,7 @@ type RepoPrepareSpec struct {
 	RepositoryPath       string
 	RepoName             string
 	BaseBranch           string
+	DefaultBranch        string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch       string
 	WorktreeID           string
 	WorktreeBranch       string
@@ -51,6 +52,7 @@ type EnvPrepareRequest struct {
 	SetupScript     string
 	RepoSetupScript string // Repository-level setup script (e.g. "make install")
 	BaseBranch      string
+	DefaultBranch   string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch  string
 	WorktreeID      string
 	WorktreeBranch  string
@@ -86,6 +88,7 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		RepositoryPath:       r.RepositoryPath,
 		RepoName:             r.RepoName,
 		BaseBranch:           r.BaseBranch,
+		DefaultBranch:        r.DefaultBranch,
 		CheckoutBranch:       r.CheckoutBranch,
 		WorktreeID:           r.WorktreeID,
 		WorktreeBranch:       r.WorktreeBranch,
