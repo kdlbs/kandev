@@ -399,6 +399,10 @@ func validate(cfg *Config) error {
 	}
 
 	// Database validation
+	validDrivers := map[string]bool{"sqlite": true, "postgres": true}
+	if !validDrivers[strings.ToLower(cfg.Database.Driver)] {
+		errs = append(errs, "database.driver must be one of: sqlite, postgres")
+	}
 	if cfg.Database.Driver == "postgres" {
 		if cfg.Database.Port <= 0 || cfg.Database.Port > 65535 {
 			errs = append(errs, "database.port must be between 1 and 65535")
@@ -408,6 +412,12 @@ func validate(cfg *Config) error {
 		}
 		if cfg.Database.DBName == "" {
 			errs = append(errs, "database.dbName is required for postgres driver")
+		}
+		validSSLModes := map[string]bool{
+			"disable": true, "require": true, "verify-ca": true, "verify-full": true,
+		}
+		if !validSSLModes[strings.ToLower(cfg.Database.SSLMode)] {
+			errs = append(errs, "database.sslMode must be one of: disable, require, verify-ca, verify-full")
 		}
 	}
 

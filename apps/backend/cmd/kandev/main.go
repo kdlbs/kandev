@@ -605,7 +605,7 @@ func awaitShutdown(
 	go func() {
 		second := <-quit
 		log.Warn("Received second shutdown signal, forcing exit", zap.String("signal", second.String()))
-		_ = log.Sync()
+		_ = log.Close()
 		os.Exit(1)
 	}()
 

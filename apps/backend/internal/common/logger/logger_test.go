@@ -76,6 +76,28 @@ func TestNewLogger_FileOutputUsesRotator(t *testing.T) {
 	}
 }
 
+func TestWithFields_PropagatesRotator(t *testing.T) {
+	dir := t.TempDir()
+	log, err := NewLogger(LoggingConfig{
+		Level:      "info",
+		Format:     "json",
+		OutputPath: filepath.Join(dir, "kandev.log"),
+	})
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+
+	derived := log.WithFields(zap.String("k", "v"))
+	if derived.rotator != log.rotator {
+		t.Fatalf("WithFields dropped rotator: got %p, want %p", derived.rotator, log.rotator)
+	}
+
+	// Derived helpers all funnel through WithFields, so spot-check one.
+	if log.WithTaskID("t1").rotator != log.rotator {
+		t.Fatal("WithTaskID dropped rotator")
+	}
+}
+
 func TestLoggerClose_IsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	log, err := NewLogger(LoggingConfig{
