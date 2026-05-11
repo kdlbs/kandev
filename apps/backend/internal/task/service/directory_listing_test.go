@@ -2,20 +2,10 @@ package service
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
-
-// svcWithRoot returns a Service whose discovery roots contain only `root`.
-// All ListDirectory tests need this — the production service defaults to
-// $HOME, but tests have to operate inside a t.TempDir to stay hermetic.
-func svcWithRoot(root string) *Service {
-	return &Service{
-		discoveryConfig: RepositoryDiscoveryConfig{Roots: []string{root}},
-	}
-}
 
 func TestListDirectory_ListsImmediateSubdirsOnly(t *testing.T) {
 	root := t.TempDir()
@@ -37,7 +27,8 @@ func TestListDirectory_ListsImmediateSubdirsOnly(t *testing.T) {
 		t.Fatalf("mkdir nested: %v", err)
 	}
 
-	got, err := svcWithRoot(root).ListDirectory(context.Background(), root)
+	svc := &Service{}
+	got, err := svc.ListDirectory(context.Background(), root)
 	if err != nil {
 		t.Fatalf("ListDirectory: %v", err)
 	}
@@ -51,20 +42,21 @@ func TestListDirectory_ListsImmediateSubdirsOnly(t *testing.T) {
 			t.Errorf("entry[%d].Name = %q; want %q", i, e.Name, want[i])
 		}
 	}
-	// At the discovery root: parent should be "" (no escape past the allowed root).
-	if got.Parent != "" {
-		t.Errorf("expected empty parent at root, got %q", got.Parent)
+	// A t.TempDir is not the filesystem root, so the parent should be set.
+	if got.Parent == "" {
+		t.Errorf("expected parent to be set for nested path, got empty")
 	}
 }
 
-func TestListDirectory_DefaultsToFirstRoot(t *testing.T) {
-	root := t.TempDir()
-	got, err := svcWithRoot(root).ListDirectory(context.Background(), "")
+func TestListDirectory_DefaultsToHome(t *testing.T) {
+	svc := &Service{}
+	got, err := svc.ListDirectory(context.Background(), "")
 	if err != nil {
 		t.Fatalf("ListDirectory: %v", err)
 	}
-	if got.Path != filepath.Clean(root) {
-		t.Errorf("got Path = %q; want %q", got.Path, root)
+	home, _ := os.UserHomeDir()
+	if got.Path != filepath.Clean(home) {
+		t.Errorf("got Path = %q; want home %q", got.Path, home)
 	}
 }
 
@@ -74,43 +66,35 @@ func TestListDirectory_RejectsNonDirectory(t *testing.T) {
 	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	_, err := svcWithRoot(root).ListDirectory(context.Background(), file)
+	svc := &Service{}
+	_, err := svc.ListDirectory(context.Background(), file)
 	if err == nil {
 		t.Fatalf("expected error for non-directory path, got nil")
 	}
 }
 
-func TestListDirectory_RejectsPathOutsideRoot(t *testing.T) {
-	root := t.TempDir()
-	outside := t.TempDir() // separate temp dir, not inside root
-	_, err := svcWithRoot(root).ListDirectory(context.Background(), outside)
-	if !errors.Is(err, ErrPathNotAllowed) {
-		t.Fatalf("expected ErrPathNotAllowed for path outside allowed roots, got %v", err)
-	}
-}
-
-func TestListDirectory_RejectsTraversalEscape(t *testing.T) {
-	root := t.TempDir()
-	// "../" attempt — should not be able to escape via path traversal.
-	traversal := filepath.Join(root, "..")
-	_, err := svcWithRoot(root).ListDirectory(context.Background(), traversal)
-	if !errors.Is(err, ErrPathNotAllowed) {
-		t.Fatalf("expected ErrPathNotAllowed for traversal, got %v", err)
-	}
-}
-
-func TestListDirectory_ParentSetForNestedPathInsideRoot(t *testing.T) {
-	root := t.TempDir()
-	nested := filepath.Join(root, "child")
-	if err := os.Mkdir(nested, 0o755); err != nil {
-		t.Fatalf("mkdir nested: %v", err)
-	}
-	got, err := svcWithRoot(root).ListDirectory(context.Background(), nested)
+func TestListDirectory_BrowsesOutsideHome(t *testing.T) {
+	// The picker deliberately lets users browse any directory the kandev
+	// process has read access to, not just $HOME or the discoveryRoots.
+	// /tmp is the canonical "outside $HOME but accessible" path on most
+	// Unix CI runners; assert we can list it without error.
+	svc := &Service{}
+	got, err := svc.ListDirectory(context.Background(), "/tmp")
 	if err != nil {
-		t.Fatalf("ListDirectory: %v", err)
+		t.Fatalf("ListDirectory(/tmp): %v", err)
 	}
-	// Parent is the root — still inside the allowed prefix, so it's exposed.
-	if got.Parent != filepath.Clean(root) {
-		t.Errorf("got Parent = %q; want %q", got.Parent, root)
+	if got.Path != "/tmp" {
+		t.Errorf("got Path = %q; want /tmp", got.Path)
+	}
+}
+
+func TestListDirectory_ParentEmptyAtFilesystemRoot(t *testing.T) {
+	svc := &Service{}
+	got, err := svc.ListDirectory(context.Background(), "/")
+	if err != nil {
+		t.Fatalf("ListDirectory(/): %v", err)
+	}
+	if got.Parent != "" {
+		t.Errorf("expected empty parent at /, got %q", got.Parent)
 	}
 }

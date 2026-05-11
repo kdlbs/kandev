@@ -138,17 +138,14 @@ func (h *RepositoryHandlers) httpDiscoverRepositories(c *gin.Context) {
 }
 
 // httpListDirectory lists the immediate subdirectories of ?path= (defaults
-// to the first configured discovery root, typically $HOME). The path must
-// sit inside one of the configured discovery roots; anything outside is
-// rejected with 403. Hidden (dotfile) directories are excluded.
+// to $HOME). The picker deliberately allows browsing any directory the
+// kandev process has read access to — kandev runs locally on the user's
+// own machine, and the repo-less starting-folder flow legitimately wants
+// /tmp, /var/log/foo, etc. Hidden (dotfile) directories are excluded.
 func (h *RepositoryHandlers) httpListDirectory(c *gin.Context) {
 	path := c.Query("path")
 	result, err := h.service.ListDirectory(c.Request.Context(), path)
 	if err != nil {
-		if errors.Is(err, service.ErrPathNotAllowed) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "path is not within allowed roots"})
-			return
-		}
 		// Log the raw OS error for debugging but return a generic message —
 		// otherwise we leak host paths and access patterns to the client (e.g.
 		// "open /home/user/private: permission denied").
