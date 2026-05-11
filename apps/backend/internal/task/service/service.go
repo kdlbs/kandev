@@ -202,7 +202,7 @@ func (s *Service) SetQuickChatDir(dir string) {
 // RemoteBranchLister fetches branches from a provider's remote (e.g. GitHub
 // API) without needing a local clone. Used by ListBranches so a repo that is
 // registered as remote ("Remote" badge in the UI) can serve branches before
-// before, or even without, the orchestrator finishing its clone.
+// or even without the orchestrator finishing its clone.
 type RemoteBranchLister interface {
 	ListRepoBranches(ctx context.Context, owner, repo string) ([]Branch, error)
 }
