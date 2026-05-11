@@ -288,12 +288,14 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		}
 		// Best-effort fetch of the fallback so it is available locally in
 		// containerized / shallow-clone environments where the fallback may
-		// only exist on the remote. Errors here are intentionally swallowed
-		// — branchExists below is the source of truth.
+		// only exist on the remote. pullBaseBranch may resolve the name to a
+		// remote-tracking ref (e.g. "main" -> "origin/main") which we must use
+		// for the existence check and downstream git operations.
+		resolvedFallback := fallback
 		if req.PullBeforeWorktree {
-			_ = m.pullBaseBranch(ctx, req.RepositoryPath, fallback, nil)
+			resolvedFallback = m.pullBaseBranch(ctx, req.RepositoryPath, fallback, nil)
 		}
-		if !m.branchExists(ctx, req.RepositoryPath, fallback) {
+		if !m.branchExists(ctx, req.RepositoryPath, resolvedFallback) {
 			return nil, fmt.Errorf("%w: %s (fallback %q also not found)", ErrInvalidBaseBranch, baseRef, fallback)
 		}
 		m.logger.Warn("requested base branch not found, falling back",
@@ -302,7 +304,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 			zap.String("fallback_branch", fallback))
 		fallbackWarning = fmt.Sprintf("Requested base branch %q not found, used %q instead", baseRef, fallback)
 		fallbackDetail = fmt.Sprintf("git rev-parse --verify %s failed; recovered using fallback branch %q (typically the repository's default_branch)", baseRef, fallback)
-		baseRef = fallback
+		baseRef = resolvedFallback
 		// Reflect the resolved branch in the persisted worktree record so
 		// downstream consumers (UI, queries, debug logs) see the actual base
 		// rather than the requested-but-missing one.
