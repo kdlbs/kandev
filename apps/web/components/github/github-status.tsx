@@ -293,7 +293,7 @@ function CLIUnavailableHint() {
           href="https://cli.github.com"
           target="_blank"
           rel="noopener noreferrer"
-          className="underline hover:text-foreground"
+          className="underline hover:text-foreground cursor-pointer"
         >
           cli.github.com
         </a>

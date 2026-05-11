@@ -70,21 +70,39 @@ func defaultStreamingInstallRunner(
 		return err
 	}
 
+	errCh := make(chan error, 2)
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go pumpLines(stdout, onChunk, &wg)
-	go pumpLines(stderr, onChunk, &wg)
+	go pumpLines(stdout, onChunk, &wg, errCh)
+	go pumpLines(stderr, onChunk, &wg, errCh)
 	wg.Wait()
-	return cmd.Wait()
+	close(errCh)
+
+	waitErr := cmd.Wait()
+	if waitErr != nil {
+		return waitErr
+	}
+	// If cmd.Wait succeeded but a scanner failed (e.g. token too long),
+	// surface the read error so the job is marked failed rather than
+	// silently succeeded with truncated output.
+	for scanErr := range errCh {
+		if scanErr != nil {
+			return scanErr
+		}
+	}
+	return nil
 }
 
-func pumpLines(r io.Reader, onChunk func(string), wg *sync.WaitGroup) {
+func pumpLines(r io.Reader, onChunk func(string), wg *sync.WaitGroup, errCh chan<- error) {
 	defer wg.Done()
 	scanner := bufio.NewScanner(r)
 	// Lift the default 64KB limit — npm output can have long lines.
 	scanner.Buffer(make([]byte, 0, 64*1024), 1*1024*1024)
 	for scanner.Scan() {
 		onChunk(scanner.Text() + "\n")
+	}
+	if err := scanner.Err(); err != nil {
+		errCh <- err
 	}
 }
 
@@ -200,6 +218,11 @@ func (s *JobStore) run(job *InstallJob, script string) {
 			job.ExitCode = &exit
 		}
 	}
+	// Free the per-agent slot before notifying so a retry/auto-rescan
+	// triggered from onSuccess or the WS broadcast starts a fresh job
+	// instead of being deduped against this finished one.
+	delete(s.activeByAgt, job.AgentName)
+	jobID := job.ID
 	s.mu.Unlock()
 
 	if err == nil && s.onSuccess != nil {
@@ -207,13 +230,6 @@ func (s *JobStore) run(job *InstallJob, script string) {
 	}
 
 	s.broadcast(ws.ActionAgentInstallFinished, job.snapshot())
-
-	// Free the per-agent slot so a Retry can start a fresh job; keep the
-	// finished snapshot under jobs[id] for the retention window.
-	s.mu.Lock()
-	delete(s.activeByAgt, job.AgentName)
-	jobID := job.ID
-	s.mu.Unlock()
 
 	// Evict the finished job after retention.
 	time.AfterFunc(jobRetention, func() {
