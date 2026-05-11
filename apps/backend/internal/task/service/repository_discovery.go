@@ -58,6 +58,11 @@ var ErrPathNotAllowed = errors.New("path is not within an allowed root")
 // gitHEAD is the HEAD git ref.
 const gitHEAD = "HEAD"
 
+// sourceTypeLocal is the Repository.SourceType value for on-machine repos
+// (a path the user discovered or added manually). Provider-backed repos use
+// other values like "provider".
+const sourceTypeLocal = "local"
+
 func (s *Service) DiscoverLocalRepositories(ctx context.Context, root string) (RepositoryDiscoveryResult, error) {
 	roots := s.discoveryRoots()
 	if root != "" {
@@ -201,15 +206,22 @@ func (s *Service) ListBranchesWithCurrent(ctx context.Context, repoID, path stri
 // source_type (i.e. is provider-backed), and the provider has a registered
 // remote lister. The local-path arm of ListBranches stays untouched; this
 // only widens the answer for the existing repository-id arm.
+//
+// Errors from GetRepository propagate with handled=true so callers
+// short-circuit instead of falling through to resolveBranchListingPath,
+// which would re-issue the same DB lookup. Repo-not-found falls through.
 func (s *Service) listRemoteBranchesIfApplicable(ctx context.Context, repoID string) ([]Branch, bool, error) {
 	if repoID == "" || s.remoteBranchLister == nil {
 		return nil, false, nil
 	}
 	repo, err := s.repoEntities.GetRepository(ctx, repoID)
-	if err != nil || repo == nil {
-		return nil, false, err
+	if err != nil {
+		return nil, true, err
 	}
-	if repo.SourceType == "local" || repo.ProviderOwner == "" || repo.ProviderName == "" {
+	if repo == nil {
+		return nil, false, nil
+	}
+	if repo.SourceType == sourceTypeLocal || repo.ProviderOwner == "" || repo.ProviderName == "" {
 		return nil, false, nil
 	}
 	branches, err := s.remoteBranchLister.ListRepoBranches(ctx, repo.ProviderOwner, repo.ProviderName)

@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 )
 
@@ -636,4 +637,180 @@ func newDiscoveryService(t *testing.T, root string) *Service {
 		Roots:    []string{root},
 		MaxDepth: 6,
 	})
+}
+
+// --- listRemoteBranchesIfApplicable + discoveryRoots routing ---
+
+// stubRemoteLister captures the call args and returns canned branches/err.
+type stubRemoteLister struct {
+	branches []Branch
+	err      error
+	calls    int
+}
+
+func (s *stubRemoteLister) ListRepoBranches(_ context.Context, _, _ string) ([]Branch, error) {
+	s.calls++
+	return s.branches, s.err
+}
+
+// stubRepoErrors embeds a real RepositoryEntityRepository and overrides
+// GetRepository to return a forced error - lets us cover the DB-error
+// branch without standing up a broken sqlite.
+type stubRepoErrors struct {
+	repository.RepositoryEntityRepository
+	getErr error
+}
+
+func (s *stubRepoErrors) GetRepository(_ context.Context, _ string) (*models.Repository, error) {
+	return nil, s.getErr
+}
+
+func TestListBranches_RoutesProviderRepoToRemoteLister(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "ws"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	mustCreateRepo(t, repo, &models.Repository{
+		ID:            "remote-1",
+		WorkspaceID:   "ws-1",
+		Name:          "owner/repo",
+		SourceType:    "provider",
+		Provider:      "github",
+		ProviderOwner: "owner",
+		ProviderName:  "repo",
+	})
+	lister := &stubRemoteLister{branches: []Branch{{Name: "main", Type: "remote"}, {Name: "develop", Type: "remote"}}}
+	svc.SetRemoteBranchLister(lister)
+
+	got, err := svc.ListBranches(ctx, "remote-1", "")
+	if err != nil {
+		t.Fatalf("ListBranches: %v", err)
+	}
+	if lister.calls != 1 {
+		t.Fatalf("remote lister calls = %d, want 1", lister.calls)
+	}
+	if len(got) != 2 || got[0].Name != "main" || got[1].Name != "develop" {
+		t.Fatalf("unexpected branches: %+v", got)
+	}
+}
+
+func TestListBranches_FallsThroughWhenNoRemoteListerWired(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "ws"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	mustCreateRepo(t, repo, &models.Repository{
+		ID: "remote-2", WorkspaceID: "ws-1", Name: "o/r",
+		SourceType: "provider", Provider: "github", ProviderOwner: "o", ProviderName: "r",
+	})
+	// No SetRemoteBranchLister call. listRemoteBranchesIfApplicable should
+	// return ok=false and the call falls through to the local-path arm,
+	// which errors out on empty local_path.
+	_, err := svc.ListBranches(ctx, "remote-2", "")
+	if err == nil {
+		t.Fatal("expected local-path error when remote lister unwired")
+	}
+}
+
+func TestListBranches_FallsThroughForLocalSourceType(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "ws"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	mustCreateRepo(t, repo, &models.Repository{
+		ID: "local-1", WorkspaceID: "ws-1", Name: "local",
+		SourceType: sourceTypeLocal, Provider: "github", ProviderOwner: "o", ProviderName: "r",
+	})
+	lister := &stubRemoteLister{branches: []Branch{{Name: "main"}}}
+	svc.SetRemoteBranchLister(lister)
+
+	// Local source-type repos must use the local-path arm even with provider
+	// info populated. local_path is empty here, so we expect an error - what
+	// matters for the test is that the remote lister is never consulted.
+	_, _ = svc.ListBranches(ctx, "local-1", "")
+	if lister.calls != 0 {
+		t.Fatalf("remote lister called for source_type=local: calls = %d", lister.calls)
+	}
+}
+
+func TestListBranches_FallsThroughOnMissingProviderInfo(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "ws"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	mustCreateRepo(t, repo, &models.Repository{
+		ID: "remote-3", WorkspaceID: "ws-1", Name: "no-owner",
+		SourceType: "provider", Provider: "github", ProviderOwner: "", ProviderName: "repo",
+	})
+	lister := &stubRemoteLister{branches: []Branch{{Name: "main"}}}
+	svc.SetRemoteBranchLister(lister)
+
+	_, _ = svc.ListBranches(ctx, "remote-3", "")
+	if lister.calls != 0 {
+		t.Fatalf("remote lister called for repo with no owner: calls = %d", lister.calls)
+	}
+}
+
+func TestListBranches_PropagatesRemoteListerError(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "ws"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	mustCreateRepo(t, repo, &models.Repository{
+		ID: "remote-4", WorkspaceID: "ws-1", Name: "o/r",
+		SourceType: "provider", Provider: "github", ProviderOwner: "o", ProviderName: "r",
+	})
+	wantErr := errors.New("rate limited")
+	svc.SetRemoteBranchLister(&stubRemoteLister{err: wantErr})
+
+	if _, err := svc.ListBranches(ctx, "remote-4", ""); !errors.Is(err, wantErr) {
+		t.Fatalf("ListBranches err = %v, want %v", err, wantErr)
+	}
+}
+
+func TestListBranches_PropagatesGetRepositoryError(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	wrapped := &stubRepoErrors{RepositoryEntityRepository: repo, getErr: errors.New("db down")}
+	// Swap repoEntities for the wrapper to force the error path. Direct field
+	// access stays inside the package, which is fine for a white-box test.
+	svc.repoEntities = wrapped
+	svc.SetRemoteBranchLister(&stubRemoteLister{})
+
+	_, err := svc.ListBranches(context.Background(), "repo-id", "")
+	if err == nil || err.Error() != "db down" {
+		t.Fatalf("ListBranches err = %v, want db down", err)
+	}
+}
+
+// --- discoveryRoots extension ---
+
+type stubCloneLocation struct{ path string }
+
+func (s stubCloneLocation) ExpandedBasePath() (string, error) { return s.path, nil }
+
+func TestDiscoveryRoots_IncludesCloneBasePath(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	cloneDir := t.TempDir()
+	svc.SetRepoCloneLocation(stubCloneLocation{path: cloneDir})
+
+	roots := svc.discoveryRoots()
+	normalizedClone := filepath.Clean(cloneDir)
+	for _, r := range roots {
+		if r == normalizedClone {
+			return
+		}
+	}
+	t.Fatalf("clone base path %q missing from discoveryRoots %v", normalizedClone, roots)
+}
+
+func mustCreateRepo(t *testing.T, repo repository.RepositoryEntityRepository, r *models.Repository) {
+	t.Helper()
+	if err := repo.CreateRepository(context.Background(), r); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
 }
