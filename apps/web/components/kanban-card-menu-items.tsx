@@ -360,6 +360,9 @@ function ContextEntry({ entry }: { entry: KanbanCardMenuEntry }) {
       data-testid={entry.testId}
       disabled={entry.disabled}
       className={entry.destructive ? "text-destructive focus:text-destructive" : undefined}
+      // Same React-portal-bubbling guard as DropdownEntry: without this the
+      // click leaks to the underlying card and triggers a task-page navigate.
+      onClick={(event) => event.stopPropagation()}
       onSelect={() => {
         if (!entry.disabled) entry.onSelect?.();
       }}
@@ -402,6 +405,10 @@ function DropdownEntry({ entry }: { entry: KanbanCardMenuEntry }) {
       data-testid={entry.testId}
       disabled={entry.disabled}
       className={entry.destructive ? "text-destructive focus:text-destructive" : undefined}
+      // React events bubble through the React tree even from a portal, so
+      // without this the click propagates up to the kanban card's onClick
+      // and navigates to the task page right after Archive / Delete fire.
+      onClick={(event) => event.stopPropagation()}
       onSelect={(event) => {
         event.stopPropagation();
         if (!entry.disabled) entry.onSelect?.();

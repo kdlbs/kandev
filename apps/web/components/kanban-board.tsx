@@ -260,13 +260,16 @@ function useKanbanBoardSetup(
     onOpenTask,
   });
   // Close the preview panel (if open) before showing the edit dialog so the
-  // task content doesn't render alongside the dialog.
+  // task content doesn't render alongside the dialog. Destructure `handleEdit`
+  // so the dep array tracks the stable callback rather than the freshly-built
+  // `hooks` wrapper object.
+  const { handleEdit } = hooks;
   const handleEditWithCleanup = useCallback(
     (task: Task) => {
       onBeforeEdit?.();
-      hooks.handleEdit(task);
+      handleEdit(task);
     },
-    [onBeforeEdit, hooks],
+    [onBeforeEdit, handleEdit],
   );
 
   const multiSelect = useTaskMultiSelect(kanban.workflowId);
