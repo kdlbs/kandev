@@ -177,9 +177,10 @@ func (l *Logger) Close() error {
 // The rotator reference is propagated so Close() on a derived logger
 // still releases the underlying file handle.
 func (l *Logger) WithFields(fields ...zap.Field) *Logger {
+	z := l.zap.With(fields...)
 	return &Logger{
-		zap:     l.zap.With(fields...),
-		sugar:   l.zap.With(fields...).Sugar(),
+		zap:     z,
+		sugar:   z.Sugar(),
 		fields:  append(l.fields, fields...),
 		rotator: l.rotator,
 	}

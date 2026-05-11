@@ -398,9 +398,12 @@ func validate(cfg *Config) error {
 		errs = append(errs, "server.port must be between 1 and 65535")
 	}
 
-	// Database validation
+	// Database validation. Normalize the driver in place so downstream
+	// case-sensitive comparisons (and the postgres-only branch below) see
+	// a canonical value.
+	cfg.Database.Driver = strings.ToLower(cfg.Database.Driver)
 	validDrivers := map[string]bool{"sqlite": true, "postgres": true}
-	if !validDrivers[strings.ToLower(cfg.Database.Driver)] {
+	if !validDrivers[cfg.Database.Driver] {
 		errs = append(errs, "database.driver must be one of: sqlite, postgres")
 	}
 	if cfg.Database.Driver == "postgres" {

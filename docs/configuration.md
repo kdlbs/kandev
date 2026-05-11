@@ -136,7 +136,7 @@ Validated value sets (any other value is a startup error):
 | `server.port` | `1`-`65535` |
 | `database.driver` | `sqlite`, `postgres` |
 | `database.port` | `1`-`65535` (only validated when `driver=postgres`) |
-| `database.sslMode` | `disable`, `require`, `verify-ca`, `verify-full` |
+| `database.sslMode` | `disable`, `require`, `verify-ca`, `verify-full` (only validated when `driver=postgres`) |
 | `logging.level` | `debug`, `info`, `warn`, `error` |
 | `logging.format` | `json`, `text` |
 
