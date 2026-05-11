@@ -70,6 +70,25 @@ type PassthroughAgent interface {
 	BuildPassthroughCommand(opts PassthroughOptions) Command
 }
 
+// LoginCommand describes an interactive CLI command for authenticating with
+// an agent. The kandev backend runs this under a PTY so the UI can render a
+// terminal and route keystrokes to the underlying process.
+type LoginCommand struct {
+	// Cmd is the command + args to spawn, e.g. []string{"claude", "/login"}.
+	Cmd []string
+	// Description renders above the terminal as a one-line hint, e.g.
+	// "Authenticate with your Anthropic account."
+	Description string
+}
+
+// LoginAgent is an optional capability for agents that need an interactive
+// login flow (browser OAuth callback, token prompt, etc.). Implement it to
+// surface a "Login" button in the UI that opens a PTY-backed terminal running
+// LoginCommand().
+type LoginAgent interface {
+	LoginCommand() *LoginCommand
+}
+
 // IsPassthroughOnly returns true if the agent only supports passthrough mode
 // and should not have interactive MCP tools (e.g. ask_user_question) registered.
 func IsPassthroughOnly(a Agent) bool {

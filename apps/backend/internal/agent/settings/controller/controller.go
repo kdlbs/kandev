@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/discovery"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
@@ -14,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
 	"github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
+	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
@@ -50,6 +52,8 @@ type Controller struct {
 	mcpService     *mcpconfig.Service
 	modelCache     *modelfetcher.Cache
 	hostUtility    *hostutility.Manager
+	jobStore       *JobStore
+	hub            JobBroadcaster
 	logger         *logger.Logger
 }
 
@@ -87,4 +91,54 @@ func NewController(repo store.Repository, discoveryRegistry *discovery.Registry,
 // unset simply causes the model endpoints to report "not_configured".
 func (c *Controller) SetHostUtility(h *hostutility.Manager) {
 	c.hostUtility = h
+}
+
+// SetJobBroadcaster initializes the install job store with a WS broadcaster
+// for streaming install progress. Called once during handler registration.
+// If unset, the streaming install API returns ErrJobStoreUnavailable.
+func (c *Controller) SetJobBroadcaster(hub JobBroadcaster) {
+	c.hub = hub
+	c.jobStore = NewJobStore(hub, c.logger.Zap(), func(agentName string) {
+		c.InvalidateDiscoveryCache()
+		// Kick a fresh capability probe immediately so the UI doesn't sit on
+		// stale "not_installed" until the next periodic poll. When the probe
+		// finishes, re-broadcast the updated availability so any open profile
+		// page transitions out of "Probing…" without a manual refresh.
+		if c.hostUtility != nil {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if _, err := c.hostUtility.Refresh(ctx, agentName); err != nil {
+					c.logger.Debug("post-install capability refresh failed",
+						zap.String("agent", agentName), zap.Error(err))
+				}
+				c.BroadcastAvailableAgents()
+			}()
+		}
+		c.logger.Info("install succeeded", zap.String("agent", agentName))
+	})
+}
+
+// BroadcastAvailableAgents fetches the current available-agents snapshot and
+// pushes it over WS as `agent.available.updated`. Used after install + probe
+// so the UI flips from "probing" to the resolved status without a refresh.
+func (c *Controller) BroadcastAvailableAgents() {
+	if c.hub == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	resp, err := c.ListAvailableAgents(ctx)
+	if err != nil {
+		c.logger.Debug("broadcast available agents: list failed", zap.Error(err))
+		return
+	}
+	msg, err := ws.NewNotification(ws.ActionAgentAvailableUpdated, map[string]any{
+		"agents": resp.Agents,
+		"tools":  resp.Tools,
+	})
+	if err != nil {
+		return
+	}
+	c.hub.Broadcast(msg)
 }

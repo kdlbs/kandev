@@ -171,6 +171,7 @@ export type AppState = {
   agentDiscovery: (typeof defaultSettingsState)["agentDiscovery"];
   availableAgents: (typeof defaultSettingsState)["availableAgents"];
   agentProfiles: (typeof defaultSettingsState)["agentProfiles"];
+  installJobs: (typeof defaultSettingsState)["installJobs"];
   editors: (typeof defaultSettingsState)["editors"];
   prompts: (typeof defaultSettingsState)["prompts"];
   secrets: (typeof defaultSettingsState)["secrets"];
@@ -310,6 +311,10 @@ export type AppState = {
   ) => void;
   setAvailableAgentsLoading: (loading: boolean) => void;
   setAgentProfiles: (profiles: AgentProfilesState["items"]) => void;
+  setInstallJobs: (jobs: import("@/lib/state/slices/settings/types").InstallJob[]) => void;
+  upsertInstallJob: (job: import("@/lib/state/slices/settings/types").InstallJob) => void;
+  appendInstallOutput: (agentName: string, chunk: string) => void;
+  clearInstallJob: (agentName: string) => void;
   setRepositories: (workspaceId: string, repositories: Repository[]) => void;
   setRepositoriesLoading: (workspaceId: string, loading: boolean) => void;
   setRepositoryBranches: (

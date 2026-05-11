@@ -119,8 +119,22 @@ func (a *CodexACP) RemoteAuth() *RemoteAuth {
 	}
 }
 
+// Verified against `codex --help`: `codex login --device-auth` is the
+// dedicated sign-in subcommand. Device-auth prints a code + URL that works
+// even when the kandev process can't open a browser (containers, SSH,
+// headless dev boxes), and falls back to a local browser flow otherwise.
+func (a *CodexACP) LoginCommand() *LoginCommand {
+	return &LoginCommand{
+		Cmd:         []string{"codex", "login", "--device-auth"},
+		Description: "Sign in with your OpenAI account.",
+	}
+}
+
+// Install both the user-facing OpenAI codex CLI (which `codex login` runs
+// against) and the ACP bridge package — the bridge wraps codex internally
+// and depends on it being on PATH.
 func (a *CodexACP) InstallScript() string {
-	return "npm install -g " + codexACPPkg
+	return "npm install -g @openai/codex " + codexACPPkg
 }
 
 func (a *CodexACP) PermissionSettings() map[string]PermissionSetting {

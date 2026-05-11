@@ -87,6 +87,7 @@ export type AgentDiscovery = {
   installation_paths: string[];
   available: boolean;
   matched_path?: string | null;
+  login_command?: LoginCommand;
 };
 
 export type AgentCapabilities = {
@@ -183,6 +184,11 @@ export type ToolStatus = {
   info_url?: string;
 };
 
+export type LoginCommand = {
+  cmd: string[];
+  description?: string;
+};
+
 export type AvailableAgent = {
   name: string;
   display_name: string;
@@ -197,6 +203,7 @@ export type AvailableAgent = {
   model_config: ModelConfig;
   permission_settings?: Record<string, PermissionSetting>;
   passthrough_config?: PassthroughConfig;
+  login_command?: LoginCommand;
   updated_at: string;
 };
 

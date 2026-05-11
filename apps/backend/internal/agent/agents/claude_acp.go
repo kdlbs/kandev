@@ -127,8 +127,20 @@ chmod 600 "${HOME}/.claude.json"`,
 	}
 }
 
+// Verified: `claude --help` documents `claude auth login` as the dedicated
+// sign-in subcommand (also `claude auth logout` / `claude auth status`).
+// Source: https://code.claude.com/docs/en/cli-reference
+func (a *ClaudeACP) LoginCommand() *LoginCommand {
+	return &LoginCommand{
+		Cmd:         []string{"claude", "auth", "login"},
+		Description: "Sign in with your Anthropic account.",
+	}
+}
+
 func (a *ClaudeACP) InstallScript() string {
-	return "npm install -g " + claudeACPPkg
+	// Install both the user-facing Anthropic CLI (which IsInstalled probes for
+	// and which `claude /login` runs against) and the ACP bridge package.
+	return "npm install -g @anthropic-ai/claude-code " + claudeACPPkg
 }
 
 func (a *ClaudeACP) PermissionSettings() map[string]PermissionSetting {

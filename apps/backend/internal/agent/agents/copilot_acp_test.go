@@ -3,15 +3,23 @@ package agents
 import "testing"
 
 // TestCopilotACP_PermissionSettings_Curated verifies the four curated flag
-// suggestions surfaced to the profile-creation UI. These seed new profiles
-// (all disabled by default) and are the origin of the fix for Copilot's
-// permission-prompt-every-tool-call behaviour reported by users.
+// suggestions surfaced to the profile-creation UI. `allow_all_tools` is
+// enabled by default so autonomous runs don't stall on per-tool-call
+// permission prompts; the other --allow-all-* and --no-ask-user toggles
+// stay off as safe defaults.
 func TestCopilotACP_PermissionSettings_Curated(t *testing.T) {
 	ag := NewCopilotACP()
 	settings := ag.PermissionSettings()
 
-	wantKeys := []string{"allow_all_tools", "allow_all_paths", "allow_all_urls", "no_ask_user"}
-	for _, k := range wantKeys {
+	// Pin the expected default for each curated key. Anything not listed
+	// here defaults off.
+	wantDefault := map[string]bool{
+		"allow_all_tools": true,
+		"allow_all_paths": false,
+		"allow_all_urls":  false,
+		"no_ask_user":     false,
+	}
+	for k, want := range wantDefault {
 		s, ok := settings[k]
 		if !ok {
 			t.Fatalf("missing curated setting %q", k)
@@ -19,8 +27,8 @@ func TestCopilotACP_PermissionSettings_Curated(t *testing.T) {
 		if !s.Supported {
 			t.Errorf("%q should be Supported=true", k)
 		}
-		if s.Default {
-			t.Errorf("%q should default to Enabled=false so new profiles are safe", k)
+		if s.Default != want {
+			t.Errorf("%q Default = %v, want %v", k, s.Default, want)
 		}
 		if s.ApplyMethod != "cli_flag" {
 			t.Errorf("%q should apply as cli_flag, got %q", k, s.ApplyMethod)

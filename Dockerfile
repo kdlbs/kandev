@@ -47,6 +47,11 @@ RUN pnpm install --frozen-lockfile
 # Copy full source for build
 COPY apps/ ./
 
+# CHANGELOG.md lives at the repo root in source; the web build scripts
+# (generate-changelog.mjs, generate-release-notes.mjs) resolve it via
+# `${WEB_ROOT}/../../CHANGELOG.md`. Mirror that layout inside the builder.
+COPY CHANGELOG.md /build/CHANGELOG.md
+
 # Build shared packages, web app, and CLI
 RUN pnpm --filter @kandev/web build && \
     pnpm --filter kandev build
@@ -56,10 +61,13 @@ RUN pnpm --filter @kandev/web build && \
 # ---------------------------------------------------------------------------
 FROM node:24-bookworm-slim AS runtime
 
-# Install only essential runtime dependencies, then clean up
+# Install only essential runtime dependencies, then clean up.
+# gh is included because the GitHub integration (PR review, webhooks) shells out
+# to it for auth fallback when GITHUB_TOKEN is not set.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         git \
+        gh \
         ca-certificates \
         gosu \
         tini \
@@ -99,10 +107,14 @@ RUN cd /usr/local/lib/kandev-cli && npm install --omit=dev && \
 # Kandev home directory (DB, worktrees, sessions, repos)
 VOLUME ["/data"]
 
-# Environment defaults for containerized operation
+# Environment defaults for containerized operation.
+# NPM_CONFIG_PREFIX points npm global installs at the PV so user-installed
+# agent CLIs (claude-code, codex, auggie, ...) survive pod restarts.
 ENV KANDEV_NO_BROWSER=1 \
     KANDEV_HOME_DIR=/data \
     KANDEV_DOCKER_ENABLED=false \
+    NPM_CONFIG_PREFIX=/data/.npm-global \
+    PATH=/data/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     HOSTNAME=0.0.0.0 \
     NODE_ENV=production
 

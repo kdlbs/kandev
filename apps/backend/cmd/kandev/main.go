@@ -555,6 +555,7 @@ func buildHTTPServer(
 		services:                services,
 		agentSettingsController: agentSettingsController,
 		agentList:               agentRegistry,
+		agentRegistry:           agentRegistry,
 		userCtrl:                usercontroller.NewController(services.User),
 		notificationCtrl:        notificationCtrl,
 		editorCtrl:              editorcontroller.NewController(services.Editor),

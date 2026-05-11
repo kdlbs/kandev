@@ -72,6 +72,28 @@ export type AgentProfilesState = {
   version: number;
 };
 
+export type InstallJobStatus = "queued" | "running" | "succeeded" | "failed";
+
+export type InstallJob = {
+  job_id: string;
+  agent_name: string;
+  status: InstallJobStatus;
+  output?: string;
+  error?: string;
+  exit_code?: number;
+  started_at: string;
+  finished_at?: string;
+};
+
+/**
+ * Tracks active and recently-finished install jobs by agent_name. Rehydrated
+ * on page mount from GET /agent-install/jobs and kept live via WS events
+ * (agent.install.started/output/finished).
+ */
+export type InstallJobsState = {
+  byAgent: Record<string, InstallJob>;
+};
+
 export type EditorsState = {
   items: EditorOption[];
   loaded: boolean;
@@ -142,6 +164,7 @@ export type SettingsSliceState = {
   agentDiscovery: AgentDiscoveryState;
   availableAgents: AvailableAgentsState;
   agentProfiles: AgentProfilesState;
+  installJobs: InstallJobsState;
   editors: EditorsState;
   prompts: PromptsState;
   secrets: SecretsState;
@@ -162,6 +185,10 @@ export type SettingsSliceActions = {
   ) => void;
   setAvailableAgentsLoading: (loading: boolean) => void;
   setAgentProfiles: (profiles: AgentProfilesState["items"]) => void;
+  setInstallJobs: (jobs: InstallJob[]) => void;
+  upsertInstallJob: (job: InstallJob) => void;
+  appendInstallOutput: (agentName: string, chunk: string) => void;
+  clearInstallJob: (agentName: string) => void;
   setEditors: (editors: EditorsState["items"]) => void;
   setEditorsLoading: (loading: boolean) => void;
   setPrompts: (prompts: PromptsState["items"]) => void;
