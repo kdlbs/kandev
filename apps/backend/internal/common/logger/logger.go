@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/kandev/kandev/internal/common/logger/buffer"
 )
@@ -25,6 +26,13 @@ type LoggingConfig struct {
 	Level      string `mapstructure:"level"`       // debug, info, warn, error
 	Format     string `mapstructure:"format"`      // json, console
 	OutputPath string `mapstructure:"output_path"` // stdout, stderr, or file path
+
+	// Rotation options — apply only when OutputPath is a file path
+	// (ignored for stdout/stderr). Backed by lumberjack.
+	MaxSizeMB  int  `mapstructure:"max_size_mb"`  // rotate when file exceeds this size; 0 = lumberjack default (100MB)
+	MaxBackups int  `mapstructure:"max_backups"`  // max number of rotated files to retain; 0 = unlimited
+	MaxAgeDays int  `mapstructure:"max_age_days"` // max age of rotated files; 0 = unlimited
+	Compress   bool `mapstructure:"compress"`     // gzip rotated files
 }
 
 // Logger wraps zap.Logger to provide structured logging with helper methods.
@@ -94,11 +102,13 @@ func NewLogger(cfg LoggingConfig) (*Logger, error) {
 	case "stderr":
 		writeSyncer = zapcore.AddSync(os.Stderr)
 	default:
-		file, err := os.OpenFile(cfg.OutputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return nil, err
-		}
-		writeSyncer = zapcore.AddSync(file)
+		writeSyncer = zapcore.AddSync(&lumberjack.Logger{
+			Filename:   cfg.OutputPath,
+			MaxSize:    cfg.MaxSizeMB,
+			MaxBackups: cfg.MaxBackups,
+			MaxAge:     cfg.MaxAgeDays,
+			Compress:   cfg.Compress,
+		})
 	}
 
 	outputCore := zapcore.NewCore(encoder, writeSyncer, level)

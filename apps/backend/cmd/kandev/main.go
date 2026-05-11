@@ -136,6 +136,10 @@ func realMain() int {
 		Level:      cfg.Logging.Level,
 		Format:     cfg.Logging.Format,
 		OutputPath: cfg.Logging.OutputPath,
+		MaxSizeMB:  cfg.Logging.MaxSizeMB,
+		MaxBackups: cfg.Logging.MaxBackups,
+		MaxAgeDays: cfg.Logging.MaxAgeDays,
+		Compress:   cfg.Logging.Compress,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)

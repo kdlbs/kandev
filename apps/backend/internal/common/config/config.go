@@ -140,6 +140,13 @@ type LoggingConfig struct {
 	Level      string `mapstructure:"level"`
 	Format     string `mapstructure:"format"`
 	OutputPath string `mapstructure:"outputPath"`
+
+	// Rotation options — apply only when OutputPath is a file path
+	// (ignored for stdout/stderr). Backed by lumberjack.
+	MaxSizeMB  int  `mapstructure:"maxSizeMb"`
+	MaxBackups int  `mapstructure:"maxBackups"`
+	MaxAgeDays int  `mapstructure:"maxAgeDays"`
+	Compress   bool `mapstructure:"compress"`
 }
 
 // RepositoryDiscoveryConfig holds configuration for local repository scanning.
@@ -271,6 +278,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", detectDefaultLogFormat())
 	v.SetDefault("logging.outputPath", "stdout")
+	v.SetDefault("logging.maxSizeMb", 100)
+	v.SetDefault("logging.maxBackups", 5)
+	v.SetDefault("logging.maxAgeDays", 30)
+	v.SetDefault("logging.compress", true)
 
 	// Repository discovery defaults
 	v.SetDefault("repositoryDiscovery.roots", []string{})
