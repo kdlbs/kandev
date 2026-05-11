@@ -425,7 +425,7 @@ export function buildExtraPanelActions(get: StoreGet) {
         opts?.quiet ?? false,
       );
     },
-    addPRPanel: (prKey?: string) => {
+    addPRPanel: (prKey?: string, activeSessionId?: string | null) => {
       const { api, centerGroupId } = get();
       if (!api) return;
       // Multi-repo: each TaskPR opens in its own panel keyed by
@@ -443,11 +443,18 @@ export function buildExtraPanelActions(get: StoreGet) {
           return;
         }
       }
+      // Prefer the live session panel's group over the store's centerGroupId
+      // — the latter can be stale across layout transitions and lands the PR
+      // panel in a separate split group instead of as a tab next to the
+      // session. Mirrors the resolution used by useAutoPRPanel.
+      const targetGroupId = activeSessionId
+        ? (api.getPanel(`session:${activeSessionId}`)?.group?.id ?? centerGroupId)
+        : centerGroupId;
       focusOrAddPanel(api, {
         id,
         component: "pr-detail",
         title: "Pull Request",
-        position: { referenceGroup: centerGroupId },
+        position: { referenceGroup: targetGroupId },
         params: prKey ? { prKey } : undefined,
       });
     },

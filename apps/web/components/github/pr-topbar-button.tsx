@@ -134,6 +134,7 @@ function usePopoverInteractions() {
 
 function PRSingleButton({ pr }: { pr: TaskPR }) {
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
+  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const tooltip = `${pr.owner}/${pr.repo} #${pr.pr_number} — ${pr.pr_title}`;
   const { isMobile, open, onOpenChange, handleEnter, handleLeave } = usePopoverInteractions();
   // Background sync lives on PRStatusChip (always mounted in the chat
@@ -152,7 +153,7 @@ function PRSingleButton({ pr }: { pr: TaskPR }) {
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}
       onClick={() => {
-        addPRPanel(prTaskKey(pr));
+        addPRPanel(prTaskKey(pr), activeSessionId);
         onOpenChange(false);
       }}
     >
@@ -198,6 +199,7 @@ function PRMultiButton({ prs }: { prs: TaskPR[] }) {
 
 function PRMultiDropdown({ prs }: { prs: TaskPR[] }) {
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
+  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const aggColor = aggregatePRStatusColor(prs);
   return (
     <DropdownMenu>
@@ -225,7 +227,7 @@ function PRMultiDropdown({ prs }: { prs: TaskPR[] }) {
         {prs.map((pr) => (
           <DropdownMenuItem
             key={pr.id}
-            onClick={() => addPRPanel(prTaskKey(pr))}
+            onClick={() => addPRPanel(prTaskKey(pr), activeSessionId)}
             className="cursor-pointer gap-2"
             data-testid={`pr-topbar-menu-item-${pr.pr_number}`}
           >

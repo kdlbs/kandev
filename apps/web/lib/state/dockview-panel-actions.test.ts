@@ -448,3 +448,65 @@ describe("addPRPanel — dedup with legacy auto-shown panel", () => {
     expect(keyed.isActive).toBe(true);
   });
 });
+
+describe("addPRPanel — group placement", () => {
+  const PR_KEY = "testorg/testrepo/202";
+  const KEYED_PR_ID = `pr-detail|${PR_KEY}`;
+  const SESSION_ID = "s-1";
+  const SESSION_PANEL_ID = `session:${SESSION_ID}`;
+  const SESSION_GROUP = "group-session-host";
+
+  function buildExtra(api: DockviewApi) {
+    const store = makeStore(api);
+    return { api, actions: buildExtraPanelActions(store.get) };
+  }
+
+  // Seed the api with a session panel in a group that is NOT the store's
+  // centerGroupId. This mirrors the post-transition state where the store's
+  // tracked centerGroupId has gone stale and the live session sits elsewhere.
+  function seedSessionInGroup(api: DockviewApi, groupId: string): void {
+    api.addPanel({
+      id: SESSION_PANEL_ID,
+      component: "chat",
+      title: "Session",
+      params: { sessionId: SESSION_ID },
+      position: { referenceGroup: groupId },
+    });
+  }
+
+  it("places the PR panel in the same group as the active session panel", () => {
+    const { api, actions } = buildExtra(makeApi());
+    seedSessionInGroup(api, SESSION_GROUP);
+
+    actions.addPRPanel(PR_KEY, SESSION_ID);
+
+    const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
+    const session = api.getPanel(SESSION_PANEL_ID) as unknown as MockPanel;
+    expect(pr).toBeDefined();
+    expect(pr.group.id).toBe(session.group.id);
+    expect(pr.group.id).toBe(SESSION_GROUP);
+    // Critical: must NOT have landed in the store's centerGroupId (the bug).
+    expect(pr.group.id).not.toBe(CENTER_GROUP);
+  });
+
+  it("falls back to centerGroupId when no session panel exists for the id", () => {
+    const { api, actions } = buildExtra(makeApi());
+    // No session panel seeded — resolver should fall back.
+    actions.addPRPanel(PR_KEY, SESSION_ID);
+
+    const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
+    expect(pr).toBeDefined();
+    expect(pr.group.id).toBe(CENTER_GROUP);
+  });
+
+  it("falls back to centerGroupId when sessionId is not provided", () => {
+    const { api, actions } = buildExtra(makeApi());
+    // Even with a session panel present, omitting the id keeps legacy behavior.
+    seedSessionInGroup(api, SESSION_GROUP);
+    actions.addPRPanel(PR_KEY);
+
+    const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
+    expect(pr).toBeDefined();
+    expect(pr.group.id).toBe(CENTER_GROUP);
+  });
+});

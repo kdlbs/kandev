@@ -546,6 +546,39 @@ export class SessionPage {
     ).toBe(true);
   }
 
+  /**
+   * Like `expectPrPanelAndSessionShareGroup`, but matches any pr-detail panel
+   * (legacy `pr-detail` or keyed `pr-detail|owner/repo/N`). Use for flows that
+   * exercise the manual click path, which always creates a keyed panel.
+   */
+  async expectAnyPrPanelAndSessionShareGroup(): Promise<void> {
+    const result = await this.page.evaluate(() => {
+      type Panel = { id: string; group?: { id?: string } };
+      type Api = { panels: Panel[]; getPanel: (i: string) => Panel | undefined };
+      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+      if (!api) return { error: "dockview api not exposed" };
+      const prPanels = api.panels.filter(
+        (p) => p.id === "pr-detail" || p.id.startsWith("pr-detail|"),
+      );
+      if (prPanels.length === 0) return { error: "no pr-detail panel" };
+      const sessionPanels = api.panels.filter((p) => p.id.startsWith("session:"));
+      if (sessionPanels.length === 0) return { error: "no session panel" };
+      const sessionGroupIds = new Set(sessionPanels.map((p) => p.group?.id ?? null));
+      const allPrsInSessionGroup = prPanels.every((p) => sessionGroupIds.has(p.group?.id ?? null));
+      return {
+        allPrsInSessionGroup,
+        prLocations: prPanels.map((p) => `${p.id}@${p.group?.id ?? "?"}`),
+        sessionLocations: sessionPanels.map((p) => `${p.id}@${p.group?.id ?? "?"}`),
+      };
+    });
+    expect(result.error, result.error).toBeUndefined();
+    expect(
+      result.allPrsInSessionGroup,
+      `PR panel(s) landed outside the session's group. ` +
+        `prs=[${result.prLocations?.join(", ")}] sessions=[${result.sessionLocations?.join(", ")}]`,
+    ).toBe(true);
+  }
+
   /** Dockview tab for the PR detail panel (title starts as "Pull Request", updated to "PR #N"). */
   prDetailTab(): Locator {
     return this.page.locator(".dv-default-tab").filter({ hasText: /^(Pull Request|PR #\d+)$/ });
