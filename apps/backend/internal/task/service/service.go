@@ -136,6 +136,8 @@ type Service struct {
 	startStepResolver   StartStepResolver
 	quickChatDir        string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
 	branchFetcher       *branchFetcher
+	remoteBranchLister  RemoteBranchLister
+	repoCloneLocation   RepoCloneLocation
 }
 
 // NewService creates a new task service
@@ -195,4 +197,33 @@ func (s *Service) SetStartStepResolver(resolver StartStepResolver) {
 // When set, ephemeral task cleanup will delete the session directory under this path.
 func (s *Service) SetQuickChatDir(dir string) {
 	s.quickChatDir = dir
+}
+
+// RemoteBranchLister fetches branches from a provider's remote (e.g. GitHub
+// API) without needing a local clone. Used by ListBranches so a repo that is
+// registered as remote ("Remote" badge in the UI) can serve branches before
+// before, or even without, the orchestrator finishing its clone.
+type RemoteBranchLister interface {
+	ListRepoBranches(ctx context.Context, owner, repo string) ([]Branch, error)
+}
+
+// SetRemoteBranchLister wires the remote branch source. Currently only GitHub
+// is plumbed; other providers can be added by extending the adapter.
+func (s *Service) SetRemoteBranchLister(lister RemoteBranchLister) {
+	s.remoteBranchLister = lister
+}
+
+// RepoCloneLocation reports the base path the orchestrator clones repos into
+// (e.g. ~/.kandev/repos or KANDEV_REPOCLONE_BASEPATH). Listing local branches
+// for a cloned repo requires that path to be allow-listed by
+// discoveryRoots(); without this hook clones to a custom basepath silently
+// fall outside the allow-list and branch listing returns no results.
+type RepoCloneLocation interface {
+	ExpandedBasePath() (string, error)
+}
+
+// SetRepoCloneLocation wires the cloner so its base path is treated as an
+// implicit discovery root.
+func (s *Service) SetRepoCloneLocation(loc RepoCloneLocation) {
+	s.repoCloneLocation = loc
 }
