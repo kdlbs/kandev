@@ -289,7 +289,21 @@ func (m *Manager) handleAvailableCommandsEvent(execution *AgentExecution, event 
 
 // recordActivity updates the last-activity timestamp and, on the very first
 // event from an execution, publishes AgentRunning to transition STARTING → RUNNING.
-func (m *Manager) recordActivity(execution *AgentExecution) {
+//
+// Wakeup-driven turns also flip Ready → Running here. The adapter's wakeup
+// scheduler fires synthetic prompts directly via Adapter.Prompt, bypassing
+// SessionManager.SendPrompt — so nothing on the lifecycle side flips the
+// execution back to Running for those turns. Without that flip, MarkReady's
+// duplicate-suppression guard (manager_interaction.go:896 — early-returns
+// when execution.Status is already Ready) silently drops the wakeup turn's
+// AgentReady event, the orchestrator never calls completeTurnForSession,
+// and workflow on_turn_complete + queued-message dispatch silently break.
+//
+// `event` is the event whose arrival triggered this activity record. We use
+// it to skip the flip on terminal events (complete/error) — those manage
+// their own status transitions, and flipping Ready → Running just to have
+// them immediately flip back would publish a spurious AgentRunning event.
+func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.AgentEvent) {
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
 	execution.lastActivityAtMu.Unlock()
@@ -297,6 +311,22 @@ func (m *Manager) recordActivity(execution *AgentExecution) {
 	execution.firstActivityOnce.Do(func() {
 		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
 	})
+
+	if execution.Status != v1.AgentStatusReady {
+		return
+	}
+	switch event.Type {
+	case toolStatusComplete, "error":
+		return
+	}
+	if m.executionStore != nil {
+		m.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
+	}
+	m.logger.Info("wakeup-driven turn detected; flipping execution back to Running",
+		zap.String("execution_id", execution.ID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("trigger_event_type", event.Type))
+	m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
 }
 
 // handleStreamDisconnect handles unexpected updates stream disconnections.
@@ -320,7 +350,7 @@ func (m *Manager) handleStreamDisconnect(execution *AgentExecution, err error) {
 
 // handleAgentEvent processes incoming agent events from the agent
 func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
-	m.recordActivity(execution)
+	m.recordActivity(execution, event)
 
 	m.logger.Debug("handleAgentEvent entry",
 		zap.String("execution_id", execution.ID),
