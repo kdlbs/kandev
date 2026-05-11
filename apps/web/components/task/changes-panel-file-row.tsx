@@ -78,8 +78,8 @@ export function FileRow({
       data-changes-file={file.path}
       data-selected={isSelected ? "true" : "false"}
       className={cn(
-        "group flex items-center justify-between gap-2 text-sm rounded-md px-1 py-0.5 -mx-1 cursor-pointer md:px-1 md:py-0.5",
-        "sm:px-2 sm:py-1.5",
+        "group flex items-center justify-between gap-2 text-sm rounded-md px-2 py-1.5 -mx-1 cursor-pointer",
+        "md:px-1 md:py-0.5",
         isSelected ? "bg-accent/60 text-accent-foreground hover:bg-accent/50" : "hover:bg-muted/60",
       )}
       onClick={handleClick}

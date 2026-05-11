@@ -1,9 +1,14 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState, useEffect, useRef } from "react";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
 import { Button } from "@kandev/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { TaskChangesPanel } from "../task-changes-panel";
+import { CommitDiffView } from "../commit-detail-panel";
+import { useAppStore } from "@/components/state-provider";
+import { useReviewSources } from "@/hooks/domains/session/use-review-sources";
+import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import type { SelectedDiff } from "../task-layout";
 
 type DiffSheetMode =
@@ -32,6 +37,26 @@ export const MobileDiffSheet = memo(function MobileDiffSheet({
   onClearSelected,
 }: MobileDiffSheetProps) {
   const open = mode !== null;
+  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const { sourceCounts } = useReviewSources(activeSessionId);
+
+  const [activeSource, setActiveSource] = useState<ReviewSource>("uncommitted");
+  const prevModeKindRef = useRef<string | undefined>(undefined);
+
+  // Auto-select the first non-empty source when the all-mode sheet opens.
+  // Use requestAnimationFrame to defer setState out of the effect body.
+  useEffect(() => {
+    if (mode?.kind !== "all" || prevModeKindRef.current === "all") {
+      prevModeKindRef.current = mode?.kind;
+      return;
+    }
+    prevModeKindRef.current = "all";
+    requestAnimationFrame(() => {
+      if (sourceCounts.uncommitted > 0) setActiveSource("uncommitted");
+      else if (sourceCounts.committed > 0) setActiveSource("committed");
+      else setActiveSource("pr");
+    });
+  }, [mode?.kind, sourceCounts.uncommitted, sourceCounts.committed]);
 
   const title = useMemo(() => {
     if (!mode) return "";
@@ -42,15 +67,41 @@ export const MobileDiffSheet = memo(function MobileDiffSheet({
   }, [mode]);
 
   const taskChangesPanelProps = useMemo(() => {
-    if (!mode) return { mode: "all" as const };
-    if (mode.kind === "all") return { mode: "all" as const };
-    if (mode.kind === "file") {
-      return { mode: "file" as const, filePath: mode.path };
-    }
-    // For commit mode, we'd need CommitDetailPanel content
-    // For now, just show the single-file view
-    return { mode: "file" as const, filePath: "" };
+    if (!mode || mode.kind === "all") return { mode: "all" as const };
+    if (mode.kind === "file") return { mode: "file" as const, filePath: mode.path };
+    return null;
   }, [mode]);
+
+  const sourceTabs = useMemo<Array<{ key: ReviewSource; label: string; count: number }>>(
+    () =>
+      [
+        {
+          key: "uncommitted" as ReviewSource,
+          label: "Uncommitted",
+          count: sourceCounts.uncommitted,
+        },
+        { key: "committed" as ReviewSource, label: "Committed", count: sourceCounts.committed },
+        { key: "pr" as ReviewSource, label: "PR", count: sourceCounts.pr },
+      ].filter((t) => t.count > 0),
+    [sourceCounts],
+  );
+
+  function renderPanelContent() {
+    if (mode?.kind === "commit") {
+      return <CommitDiffView sha={mode.sha} repo={mode.repo} onOpenFile={onOpenFile} />;
+    }
+    if (!taskChangesPanelProps) return null;
+    return (
+      <TaskChangesPanel
+        mode={taskChangesPanelProps.mode}
+        filePath={taskChangesPanelProps.filePath}
+        selectedDiff={selectedDiff}
+        onClearSelected={onClearSelected}
+        onOpenFile={onOpenFile}
+        sourceFilter={mode?.kind === "all" ? activeSource : "all"}
+      />
+    );
+  }
 
   return (
     <Drawer open={open} onOpenChange={onClose}>
@@ -67,16 +118,22 @@ export const MobileDiffSheet = memo(function MobileDiffSheet({
             Close
           </Button>
         </DrawerHeader>
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <TaskChangesPanel
-            mode={taskChangesPanelProps.mode}
-            filePath={taskChangesPanelProps.filePath}
-            selectedDiff={selectedDiff}
-            onClearSelected={onClearSelected}
-            onOpenFile={onOpenFile}
-            sourceFilter="all"
-          />
-        </div>
+
+        {mode?.kind === "all" && sourceTabs.length > 1 && (
+          <div className="px-4 py-2 border-b shrink-0">
+            <Tabs value={activeSource} onValueChange={(v) => setActiveSource(v as ReviewSource)}>
+              <TabsList className="h-8">
+                {sourceTabs.map((tab) => (
+                  <TabsTrigger key={tab.key} value={tab.key} className="text-xs px-2">
+                    {tab.label} ({tab.count})
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+          </div>
+        )}
+
+        <div className="flex-1 min-h-0 overflow-y-auto">{renderPanelContent()}</div>
       </DrawerContent>
     </Drawer>
   );
