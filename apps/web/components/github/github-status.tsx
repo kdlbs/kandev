@@ -3,6 +3,9 @@
 import { useState, useCallback } from "react";
 import {
   IconCheck,
+  IconChevronDown,
+  IconChevronRight,
+  IconInfoCircle,
   IconX,
   IconRefresh,
   IconKey,
@@ -13,8 +16,11 @@ import {
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { Input } from "@kandev/ui/input";
 import { Spinner } from "@kandev/ui/spinner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useAppStore } from "@/components/state-provider";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useToast } from "@/components/toast-provider";
 import { configureGitHubToken, clearGitHubToken } from "@/lib/api/domains/github-api";
@@ -140,6 +146,14 @@ function NotConnectedView({
   ghAuthOpen: boolean;
   setGhAuthOpen: (open: boolean) => void;
 }) {
+  // gh installed → CLI sign-in is the recommended path (browser-driven OAuth,
+  // no PAT to manage). When it's missing we drop to PAT-only.
+  const ghInstalled = useAppStore((state) =>
+    state.availableAgents.tools.some((t) => t.name === "gh" && t.available),
+  );
+  const [tokenOpen, setTokenOpen] = useState(false);
+  const [diagOpen, setDiagOpen] = useState(false);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
@@ -149,45 +163,154 @@ function NotConnectedView({
           <IconRefresh className="h-3.5 w-3.5" />
           Refresh
         </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="ml-auto text-muted-foreground hover:text-foreground cursor-help"
+              aria-label="Authentication methods"
+            >
+              <IconInfoCircle className="h-4 w-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs">
+            <p className="text-xs">
+              Kandev also accepts a <code>GITHUB_TOKEN</code> environment variable on startup. The
+              UI options below cover the common cases.
+            </p>
+          </TooltipContent>
+        </Tooltip>
       </div>
 
-      {/* Token configuration form */}
-      <div className="space-y-2">
-        <p className="text-sm font-medium">Configure GitHub Token</p>
-        <TokenConfigForm onSuccess={refresh} />
-      </div>
+      {ghInstalled ? (
+        <PrimaryCLISignIn onClick={() => setGhAuthOpen(true)} />
+      ) : (
+        <CLIUnavailableHint />
+      )}
 
-      {/* Alternative methods */}
-      <div className="text-xs text-muted-foreground space-y-1.5 border-t pt-3">
-        <p>Other authentication methods:</p>
-        <ul className="list-disc list-inside space-y-1 pl-1">
-          <li>
-            <strong>Environment variable</strong> - set{" "}
-            <code className="bg-muted px-1 rounded">GITHUB_TOKEN</code> when starting Kandev
-          </li>
-          <li>
-            <strong>GitHub CLI</strong> - run{" "}
-            <code className="bg-muted px-1 rounded">gh auth login</code> in a host terminal
-          </li>
-        </ul>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setGhAuthOpen(true)}
-          className="cursor-pointer mt-2"
-          data-testid="github-gh-auth-login"
-        >
-          <IconTerminal2 className="h-3.5 w-3.5 mr-2" />
-          Sign in with gh CLI
-        </Button>
-      </div>
-      {status?.diagnostics && <DiagnosticsOutput diagnostics={status.diagnostics} />}
+      <Collapsible open={tokenOpen} onOpenChange={setTokenOpen}>
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+          >
+            {tokenOpen ? (
+              <IconChevronDown className="h-3 w-3" />
+            ) : (
+              <IconChevronRight className="h-3 w-3" />
+            )}
+            {ghInstalled ? "Use a personal access token instead" : "Configure GitHub token"}
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-2 space-y-2">
+          <TokenConfigForm onSuccess={refresh} />
+          <p className="text-xs text-muted-foreground">
+            Create a{" "}
+            <a
+              href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=KanDev"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline hover:text-foreground"
+            >
+              Personal Access Token
+            </a>{" "}
+            with <code className="bg-muted px-1 rounded">repo</code> and{" "}
+            <code className="bg-muted px-1 rounded">read:org</code> scopes.
+          </p>
+        </CollapsibleContent>
+      </Collapsible>
+
+      {status?.diagnostics && (
+        <DiagnosticsDisclosure
+          diagnostics={status.diagnostics}
+          open={diagOpen}
+          onOpenChange={setDiagOpen}
+        />
+      )}
+
       <HostShellDialog
         open={ghAuthOpen}
         onOpenChange={setGhAuthOpen}
         initialInput={"gh auth login\n"}
         onClose={refresh}
       />
+    </div>
+  );
+}
+
+function DiagnosticsDisclosure({
+  diagnostics,
+  open,
+  onOpenChange,
+}: {
+  diagnostics: AuthDiagnostics;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Collapsible open={open} onOpenChange={onOpenChange}>
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+        >
+          {open ? (
+            <IconChevronDown className="h-3 w-3" />
+          ) : (
+            <IconChevronRight className="h-3 w-3" />
+          )}
+          Diagnostics (
+          <code className="bg-muted px-1 rounded">{diagnostics.command}</code>, exit{" "}
+          {diagnostics.exit_code})
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <DiagnosticsOutput diagnostics={diagnostics} />
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function PrimaryCLISignIn({ onClick }: { onClick: () => void }) {
+  return (
+    <div className="rounded-md border border-primary/40 bg-primary/5 p-4 space-y-3">
+      <div className="space-y-1">
+        <p className="text-sm font-medium">Sign in with the GitHub CLI</p>
+        <p className="text-xs text-muted-foreground">
+          Recommended. Opens a terminal that runs{" "}
+          <code className="bg-muted px-1 rounded">gh auth login</code> with browser-based
+          authentication.
+        </p>
+      </div>
+      <Button
+        size="default"
+        onClick={onClick}
+        className="cursor-pointer"
+        data-testid="github-gh-auth-login"
+      >
+        <IconTerminal2 className="h-4 w-4 mr-2" />
+        Open terminal and sign in
+      </Button>
+    </div>
+  );
+}
+
+function CLIUnavailableHint() {
+  return (
+    <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+      <p>
+        The <code className="bg-muted px-1 rounded">gh</code> CLI is not installed on this host - a
+        personal access token is the only sign-in option available here. To install it later, see{" "}
+        <a
+          href="https://cli.github.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:text-foreground"
+        >
+          cli.github.com
+        </a>
+        .
+      </p>
     </div>
   );
 }
