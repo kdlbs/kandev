@@ -282,7 +282,10 @@ export function branchToOption(b: Branch): PillOption {
   // from local branches with the same short name (e.g. "main" vs "origin/main").
   // Without the prefix, the dropdown shows two indistinguishable rows.
   const display = b.type === "remote" && b.remote ? `${b.remote}/${b.name}` : b.name;
-  const badge = b.type === "local" ? "local" : (b.remote ?? "remote");
+  // `||` (not `??`) so an empty-string `remote` falls back too. Provider-backed
+  // workspace repos (URL-added) list branches without a tracking remote, so the
+  // backend sends `remote: ""`; `??` would render an invisible empty badge.
+  const badge = b.type === "local" ? "local" : b.remote || "remote";
   return {
     value: display,
     label: display,
