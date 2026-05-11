@@ -157,7 +157,7 @@ func TestEnqueueInstall_IdempotentWhileRunning(t *testing.T) {
 	ctrl, _ := newInstallController(t, ag)
 
 	// Block the runner so the first job stays in 'running' while we call
-	// EnqueueInstall a second time. Release on test cleanup.
+	// EnqueueInstall a second time.
 	release := make(chan struct{})
 	withStubStreamingRunner(t, func(ctx context.Context, _ string, _ func(string)) error {
 		select {
@@ -167,7 +167,6 @@ func TestEnqueueInstall_IdempotentWhileRunning(t *testing.T) {
 			return ctx.Err()
 		}
 	})
-	t.Cleanup(func() { close(release) })
 
 	first, err := ctrl.EnqueueInstall("test-agent")
 	if err != nil {
@@ -180,6 +179,12 @@ func TestEnqueueInstall_IdempotentWhileRunning(t *testing.T) {
 	if first.JobID != second.JobID {
 		t.Errorf("expected same job_id, got %s and %s", first.JobID, second.JobID)
 	}
+
+	// Release the runner and wait for the goroutine to finish before the test
+	// returns. Otherwise withStubStreamingRunner's restore cleanup races with
+	// the still-running goroutine's read of streamingInstallRunner.
+	close(release)
+	waitForStatus(t, ctrl, first.JobID, dto.InstallJobStatusSucceeded, dto.InstallJobStatusFailed)
 }
 
 func TestEnqueueInstall_AgentNotFound(t *testing.T) {
