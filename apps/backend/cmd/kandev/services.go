@@ -93,6 +93,14 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
 	slackSvc := initSlackService(dbPool, repos.Secrets, log)
 
+	// Plumb GitHub branch listing into the task service so provider-backed
+	// ("Remote") repos serve branches from the GitHub API rather than relying
+	// on a local clone that may not exist yet (or ever - some executors clone
+	// inside their own container).
+	if githubSvc != nil {
+		taskSvc.SetRemoteBranchLister(githubBranchListerAdapter{svc: githubSvc})
+	}
+
 	return &Services{
 		Task:     taskSvc,
 		User:     userSvc,
@@ -378,4 +386,25 @@ func buildAgentProfileMatcher(repos *Repositories) wfmodels.AgentProfileMatcher 
 		}
 		return ""
 	}
+}
+
+// githubBranchListerAdapter bridges github.Service to the task service's
+// RemoteBranchLister interface. It maps github.RepoBranch into the task
+// service's Branch shape with Type="remote" so the dialog renders branches
+// the same way URL-mode does - bare names without an "origin/" prefix, since
+// there is no checked-out clone whose tracking config could disambiguate.
+type githubBranchListerAdapter struct {
+	svc *github.Service
+}
+
+func (a githubBranchListerAdapter) ListRepoBranches(ctx context.Context, owner, repo string) ([]taskservice.Branch, error) {
+	remote, err := a.svc.ListRepoBranches(ctx, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]taskservice.Branch, 0, len(remote))
+	for _, b := range remote {
+		out = append(out, taskservice.Branch{Name: b.Name, Type: "remote"})
+	}
+	return out, nil
 }

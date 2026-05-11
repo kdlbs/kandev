@@ -2,6 +2,21 @@
 
 All notable changes to Kandev.
 
+## 0.44.0 - 2026-05-11
+
+### Features
+
+- persist N-entry FIFO message queue ([#864](https://github.com/kdlbs/kandev/pull/864))
+- add size/age/backup rotation for file output ([#874](https://github.com/kdlbs/kandev/pull/874))
+
+### Bug Fixes
+
+- list remote branches for provider-backed workspace repos ([#876](https://github.com/kdlbs/kandev/pull/876))
+
+### Refactoring
+
+- close rotating sink on shutdown, add config docs ([#877](https://github.com/kdlbs/kandev/pull/877))
+
 ## 0.43.0 - 2026-05-11
 
 ### Bug Fixes

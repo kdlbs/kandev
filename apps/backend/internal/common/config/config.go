@@ -141,12 +141,16 @@ type LoggingConfig struct {
 	Format     string `mapstructure:"format"`
 	OutputPath string `mapstructure:"outputPath"`
 
-	// Rotation options — apply only when OutputPath is a file path
+	// Rotation options - apply only when OutputPath is a file path
 	// (ignored for stdout/stderr). Backed by lumberjack.
-	MaxSizeMB  int  `mapstructure:"maxSizeMb"`
-	MaxBackups int  `mapstructure:"maxBackups"`
-	MaxAgeDays int  `mapstructure:"maxAgeDays"`
-	Compress   bool `mapstructure:"compress"`
+	//
+	// Note: lumberjack creates the active log file with mode 0600 (owner read/write
+	// only); the previous os.OpenFile path used 0644. External log shippers or
+	// sidecars running as a different user will need to run as the same user.
+	MaxSizeMB  int  `mapstructure:"maxSizeMb"`  // rotate when file exceeds this size; 0 = lumberjack default (100MB)
+	MaxBackups int  `mapstructure:"maxBackups"` // max number of rotated files to retain; 0 = unlimited
+	MaxAgeDays int  `mapstructure:"maxAgeDays"` // max age in days of rotated files; 0 = unlimited
+	Compress   bool `mapstructure:"compress"`   // gzip rotated files
 }
 
 // RepositoryDiscoveryConfig holds configuration for local repository scanning.
@@ -394,7 +398,14 @@ func validate(cfg *Config) error {
 		errs = append(errs, "server.port must be between 1 and 65535")
 	}
 
-	// Database validation
+	// Database validation. Normalize the driver in place so downstream
+	// case-sensitive comparisons (and the postgres-only branch below) see
+	// a canonical value.
+	cfg.Database.Driver = strings.ToLower(cfg.Database.Driver)
+	validDrivers := map[string]bool{"sqlite": true, "postgres": true}
+	if !validDrivers[cfg.Database.Driver] {
+		errs = append(errs, "database.driver must be one of: sqlite, postgres")
+	}
 	if cfg.Database.Driver == "postgres" {
 		if cfg.Database.Port <= 0 || cfg.Database.Port > 65535 {
 			errs = append(errs, "database.port must be between 1 and 65535")
@@ -404,6 +415,12 @@ func validate(cfg *Config) error {
 		}
 		if cfg.Database.DBName == "" {
 			errs = append(errs, "database.dbName is required for postgres driver")
+		}
+		validSSLModes := map[string]bool{
+			"disable": true, "require": true, "verify-ca": true, "verify-full": true,
+		}
+		if !validSSLModes[strings.ToLower(cfg.Database.SSLMode)] {
+			errs = append(errs, "database.sslMode must be one of: disable, require, verify-ca, verify-full")
 		}
 	}
 

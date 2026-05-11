@@ -61,14 +61,23 @@ docker run -p 38429:38429 \
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `KANDEV_HOME_DIR` | `/data` | Kandev home directory — contains `data/` (DB), `tasks/`, `worktrees/`, `repos/`, `sessions/`, and `lsp-servers/` |
-| `KANDEV_DATABASE_DRIVER` | `sqlite` | Database driver (`sqlite` or `postgres`) |
-| `KANDEV_DATABASE_PATH` | `$KANDEV_HOME_DIR/data/kandev.db` | SQLite database file path (override) |
-| `KANDEV_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `KANDEV_LOGGING_FORMAT` | `text` | Log format: `text` or `json` |
-| `KANDEV_DOCKER_ENABLED` | `false` | Enable Docker runtime for agents (see below) |
+See [`configuration.md`](./configuration.md) for the full reference (including the YAML form and every knob the backend reads). The table below covers the env vars most often set in a Docker deployment.
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `KANDEV_HOME_DIR` | No | `/data` | Kandev home directory - contains `data/` (DB), `tasks/`, `worktrees/`, `repos/`, `sessions/`, and `lsp-servers/` |
+| `KANDEV_DATABASE_DRIVER` | No | `sqlite` | Database driver (`sqlite` or `postgres`) |
+| `KANDEV_DATABASE_PATH` | No | `$KANDEV_HOME_DIR/data/kandev.db` | SQLite database file path (override) |
+| `KANDEV_LOG_LEVEL` | No | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `KANDEV_LOGGING_FORMAT` | No | `text` | Log format: `text` or `json` |
+| `KANDEV_LOGGING_OUTPUTPATH` | No | `stdout` | Log destination: `stdout`, `stderr`, or a file path (rotated when a file) |
+| `KANDEV_LOGGING_MAXSIZEMB` | No | `100` | Rotate the log file when it exceeds this size (MB). File output only. |
+| `KANDEV_LOGGING_MAXBACKUPS` | No | `5` | Max rotated files to retain (`0` = unlimited). File output only. |
+| `KANDEV_LOGGING_MAXAGEDAYS` | No | `30` | Max age of rotated files in days (`0` = unlimited). File output only. |
+| `KANDEV_LOGGING_COMPRESS` | No | `true` | Gzip rotated files. File output only. |
+| `KANDEV_DOCKER_ENABLED` | No | `false` | Enable Docker runtime for agents (see below) |
+
+> **File-mode note:** when `KANDEV_LOGGING_OUTPUTPATH` is a file path, the active log file is created with mode `0600` (owner read/write only). Run any log shipper or sidecar as the same user, or use `stdout`/`stderr` and let the container runtime collect logs.
 
 > **Upgrading from a pre-`KANDEV_HOME_DIR` image?** The SQLite DB path moved from `/data/kandev.db` to `/data/data/kandev.db`. The backend auto-migrates the legacy `kandev.db` (plus any `-wal`/`-shm` files) on first boot — look for `Migrated SQLite database from pre-KANDEV_HOME_DIR location` in the logs. If you prefer to pin the old location instead, set `-e KANDEV_DATABASE_PATH=/data/kandev.db`. If you previously set `KANDEV_DATA_DIR`, replace it with `KANDEV_HOME_DIR`.
 

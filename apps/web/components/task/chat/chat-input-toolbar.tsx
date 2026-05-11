@@ -13,7 +13,6 @@ import {
   IconPaperclip,
 } from "@tabler/icons-react";
 
-
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 import { GridSpinner } from "@/components/grid-spinner";
 import { Button } from "@kandev/ui/button";

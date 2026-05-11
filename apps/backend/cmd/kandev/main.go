@@ -164,7 +164,7 @@ func realMain() int {
 	}
 	defer func() {
 		runCleanups()
-		_ = log.Sync()
+		_ = log.Close()
 	}()
 	logger.SetDefault(log)
 
@@ -325,6 +325,13 @@ func startAgentInfrastructure(
 	}, repoclone.DetectGitProtocol(), cfg.ResolvedHomeDir(), log)
 	log.Info("Repository cloner configured",
 		zap.String("base_path", cfg.RepoClone.BasePath))
+
+	// Let the task service treat the cloner's base path as an implicit
+	// allow-listed root. Without this, deploys that put the clone base
+	// outside HOME (e.g. KANDEV_REPOCLONE_BASEPATH=/data/repos in a
+	// container) fail the discoveryRoots() allow-list check and local
+	// branch listing returns nothing.
+	services.Task.SetRepoCloneLocation(repoCloner)
 
 	// ============================================
 	// ORCHESTRATOR
@@ -605,7 +612,7 @@ func awaitShutdown(
 	go func() {
 		second := <-quit
 		log.Warn("Received second shutdown signal, forcing exit", zap.String("signal", second.String()))
-		_ = log.Sync()
+		_ = log.Close()
 		os.Exit(1)
 	}()
 
