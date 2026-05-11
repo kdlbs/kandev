@@ -179,6 +179,18 @@ loop:
 		}
 	}
 
+	// Wait for readLoop to drain remaining PTY output before flipping running=false
+	// or closing subscribers. Otherwise late Subscribe callers (or BufferedOutput
+	// readers) could observe an empty session even though the process produced
+	// output. The pty is closed by stop() in timeout paths and by the child
+	// exit in the natural path; either way readLoop returns shortly after.
+	// Cap the wait so a stuck PTY can't deadlock cleanup.
+	select {
+	case <-sess.readDone:
+	case <-time.After(2 * time.Second):
+		sess.log.Warn("readLoop did not exit in time during supervise cleanup")
+	}
+
 	m.mu.Lock()
 	delete(m.sessions, sess.AgentID)
 	delete(m.byID, sess.ID)
@@ -251,12 +263,14 @@ type Session struct {
 	buffer []byte
 
 	activityCh chan struct{} // notifications to supervise loop on output
+	readDone   chan struct{} // closed when readLoop exits (all PTY output drained)
 
 	log *logger.Logger
 }
 
 func (s *Session) start(cmd []string, cols, rows uint16) error {
 	s.activityCh = make(chan struct{}, 1)
+	s.readDone = make(chan struct{})
 	c := exec.Command(cmd[0], cmd[1:]...) // #nosec G204 — command is hard-coded per agent
 	c.Env = buildLoginEnv()
 
@@ -278,6 +292,7 @@ func (s *Session) start(cmd []string, cols, rows uint16) error {
 }
 
 func (s *Session) readLoop() {
+	defer close(s.readDone)
 	buf := make([]byte, 4096)
 	for {
 		n, err := s.pty.Read(buf)

@@ -248,8 +248,7 @@ function DiagnosticsDisclosure({
           ) : (
             <IconChevronRight className="h-3 w-3" />
           )}
-          Diagnostics (
-          <code className="bg-muted px-1 rounded">{diagnostics.command}</code>, exit{" "}
+          Diagnostics (<code className="bg-muted px-1 rounded">{diagnostics.command}</code>, exit{" "}
           {diagnostics.exit_code})
         </button>
       </CollapsibleTrigger>
