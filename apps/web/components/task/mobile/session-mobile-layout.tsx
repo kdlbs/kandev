@@ -6,7 +6,8 @@ import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
 import { SessionTaskSwitcherSheet } from "./session-task-switcher-sheet";
 import { TaskChatPanel } from "../task-chat-panel";
 import { TaskPlanPanel } from "../task-plan-panel";
-import { MobileChangesTabs } from "./mobile-changes-tabs";
+import { MobileChangesPanel } from "./mobile-changes-panel";
+import { ReviewDialog } from "../review-dialog";
 import { TaskFilesPanel } from "../task-files-panel";
 import { PassthroughTerminal } from "../passthrough-terminal";
 import { MobileTerminalKeybar, KEYBAR_HEIGHT_PX } from "./mobile-terminal-keybar";
@@ -135,7 +136,7 @@ function MobilePanelArea({
       )}
       {currentMobilePanel === "changes" && (
         <div className="flex-1 min-h-0 flex flex-col p-2">
-          <MobileChangesTabs
+          <MobileChangesPanel
             selectedDiff={selectedDiff}
             onClearSelected={handleClearSelectedDiff}
             onOpenFile={handleOpenFileFromChat}
@@ -344,6 +345,9 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         workspaceId={workspaceId}
         workflowId={workflowId}
       />
+
+      {/* Review Dialog — mounted once at layout level, triggered by window event */}
+      <ReviewDialog />
     </div>
   );
 });
