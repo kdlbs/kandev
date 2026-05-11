@@ -302,7 +302,10 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 			zap.String("repository_path", req.RepositoryPath),
 			zap.String("requested_branch", baseRef),
 			zap.String("fallback_branch", fallback))
-		fallbackWarning = fmt.Sprintf("Requested base branch %q not found, used %q instead", baseRef, fallback)
+		// Use req.BaseBranch (the user-supplied name) in the user-facing warning
+		// rather than baseRef, which may carry an internal "origin/<x>" form
+		// produced by pullBaseBranch when PullBeforeWorktree is set.
+		fallbackWarning = fmt.Sprintf("Requested base branch %q not found, used %q instead", req.BaseBranch, fallback)
 		fallbackDetail = fmt.Sprintf("git rev-parse --verify %s failed; recovered using fallback branch %q (typically the repository's default_branch)", baseRef, fallback)
 		baseRef = resolvedFallback
 		// Reflect the resolved branch in the persisted worktree record so

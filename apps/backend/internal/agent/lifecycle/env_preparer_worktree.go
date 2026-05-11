@@ -196,6 +196,10 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 		step.Warning = wt.BaseBranchFallbackWarning
 		step.WarningDetail = wt.BaseBranchFallbackDetail
 	}
+	// wt.FetchWarning is surfaced in the separate "Fetch PR branch" step
+	// rendered later in the pipeline. It can only be non-empty when
+	// req.CheckoutBranch != "" (it is set inside fetchBranchToLocal), so the
+	// two warnings always co-occur and FetchWarning is never silently dropped.
 	steps = append(steps, step)
 	reportProgress(onProgress, step, stepIdx, totalSteps)
 	return wt, steps, stepIdx + 1, nil
