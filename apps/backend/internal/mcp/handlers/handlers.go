@@ -450,7 +450,7 @@ func (h *Handlers) resolveTaskRepositories(
 	parentID, sourceTaskID string,
 	explicit []mcpRepositoryInput,
 ) (taskRepoResult, error) {
-	explicitRepos := explicitRepoInputs(explicit)
+	explicitRepos := h.explicitRepoInputsWithDefaults(ctx, explicit)
 
 	if parentID != "" {
 		parent, err := h.taskSvc.GetTask(ctx, parentID)
@@ -504,20 +504,32 @@ func (h *Handlers) resolveTaskRepositories(
 	return taskRepoResult{}, nil
 }
 
-// explicitRepoInputs maps the MCP-side explicit repo list to service inputs.
-// Returns nil when no explicit repos were supplied so callers can distinguish
-// "agent didn't pass repos" from "agent passed an empty list".
-func explicitRepoInputs(explicit []mcpRepositoryInput) []service.TaskRepositoryInput {
+// explicitRepoInputsWithDefaults maps the MCP-side explicit repo list to
+// service inputs. Returns nil when no explicit repos were supplied so callers
+// can distinguish "agent didn't pass repos" from "agent passed an empty list".
+//
+// When an explicit entry pins a repository_id without a base_branch, the
+// repository's default_branch is filled in. This anchors cross-repo subtasks
+// (a parent on feature/foo creating a child in another repo) to a known-good
+// branch instead of an empty value that would force every downstream consumer
+// to recompute the default.
+func (h *Handlers) explicitRepoInputsWithDefaults(ctx context.Context, explicit []mcpRepositoryInput) []service.TaskRepositoryInput {
 	if len(explicit) == 0 {
 		return nil
 	}
 	repos := make([]service.TaskRepositoryInput, 0, len(explicit))
 	for _, r := range explicit {
+		baseBranch := r.BaseBranch
+		if baseBranch == "" && r.RepositoryID != "" && h.taskSvc != nil {
+			if repo, err := h.taskSvc.GetRepository(ctx, r.RepositoryID); err == nil && repo != nil {
+				baseBranch = repo.DefaultBranch
+			}
+		}
 		repos = append(repos, service.TaskRepositoryInput{
 			RepositoryID: r.RepositoryID,
 			LocalPath:    r.LocalPath,
 			GitHubURL:    r.GitHubURL,
-			BaseBranch:   r.BaseBranch,
+			BaseBranch:   baseBranch,
 		})
 	}
 	return repos
