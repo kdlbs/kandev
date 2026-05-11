@@ -164,7 +164,7 @@ func realMain() int {
 	}
 	defer func() {
 		runCleanups()
-		_ = log.Sync()
+		_ = log.Close()
 	}()
 	logger.SetDefault(log)
 

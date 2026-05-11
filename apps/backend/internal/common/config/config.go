@@ -141,12 +141,16 @@ type LoggingConfig struct {
 	Format     string `mapstructure:"format"`
 	OutputPath string `mapstructure:"outputPath"`
 
-	// Rotation options — apply only when OutputPath is a file path
+	// Rotation options - apply only when OutputPath is a file path
 	// (ignored for stdout/stderr). Backed by lumberjack.
-	MaxSizeMB  int  `mapstructure:"maxSizeMb"`
-	MaxBackups int  `mapstructure:"maxBackups"`
-	MaxAgeDays int  `mapstructure:"maxAgeDays"`
-	Compress   bool `mapstructure:"compress"`
+	//
+	// Note: lumberjack creates the active log file with mode 0600 (owner read/write
+	// only); the previous os.OpenFile path used 0644. External log shippers or
+	// sidecars running as a different user will need to run as the same user.
+	MaxSizeMB  int  `mapstructure:"maxSizeMb"`  // rotate when file exceeds this size; 0 = lumberjack default (100MB)
+	MaxBackups int  `mapstructure:"maxBackups"` // max number of rotated files to retain; 0 = unlimited
+	MaxAgeDays int  `mapstructure:"maxAgeDays"` // max age in days of rotated files; 0 = unlimited
+	Compress   bool `mapstructure:"compress"`   // gzip rotated files
 }
 
 // RepositoryDiscoveryConfig holds configuration for local repository scanning.
