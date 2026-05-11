@@ -37,17 +37,21 @@ func KandevBranchCheckoutPostlude() string {
 	return `
 
 # ---- kandev-managed: ensure session feature branch is checked out ----
-# Appended automatically after the user's prepare script. Idempotent —
-# safe to run even when the user's script already does the checkout.
+# Appended automatically after the user's prepare script. Idempotent and
+# non-destructive: prefer an existing local branch (which may carry unpushed
+# work after a container resume), then fall through to a fresh tracking
+# branch off origin, and only as a last resort create the branch off HEAD.
+# The previous "git checkout -B feature origin/feature" form was destructive
+# for the resume case — overwriting local commits with the remote tip.
 (
   if [ -d "{{workspace.path}}/.git" ] \
      && [ -n "{{worktree.branch}}" ] \
      && [ "{{worktree.branch}}" != "{{repository.branch}}" ]; then
     cd "{{workspace.path}}" || exit 0
-    if git fetch --depth=1 origin "{{worktree.branch}}" 2>/dev/null; then
-      git checkout -B "{{worktree.branch}}" "origin/{{worktree.branch}}"
-    elif git rev-parse --verify "{{worktree.branch}}" >/dev/null 2>&1; then
+    if git rev-parse --verify "{{worktree.branch}}" >/dev/null 2>&1; then
       git checkout "{{worktree.branch}}"
+    elif git fetch --depth=1 origin "{{worktree.branch}}" 2>/dev/null; then
+      git checkout -b "{{worktree.branch}}" "origin/{{worktree.branch}}"
     else
       git checkout -b "{{worktree.branch}}"
     fi

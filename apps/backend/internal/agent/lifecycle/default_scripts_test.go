@@ -19,14 +19,25 @@ func TestKandevBranchCheckoutPostlude_HasInvariantSteps(t *testing.T) {
 		`[ -n "{{worktree.branch}}" ]`,
 		`[ "{{worktree.branch}}" != "{{repository.branch}}" ]`,
 		`cd "{{workspace.path}}"`,
+		`git rev-parse --verify "{{worktree.branch}}"`,
 		`git fetch --depth=1 origin "{{worktree.branch}}"`,
-		`git checkout -B "{{worktree.branch}}" "origin/{{worktree.branch}}"`,
+		`git checkout -b "{{worktree.branch}}" "origin/{{worktree.branch}}"`,
 		`git checkout -b "{{worktree.branch}}"`,
 		`|| true`,
 	}
 	for _, w := range want {
 		if !strings.Contains(postlude, w) {
 			t.Errorf("postlude missing %q", w)
+		}
+	}
+	// The destructive `-B "branch" "origin/branch"` form orphaned local
+	// commits on resume — verify it does NOT come back.
+	forbidden := []string{
+		`git checkout -B "{{worktree.branch}}" "origin/{{worktree.branch}}"`,
+	}
+	for _, f := range forbidden {
+		if strings.Contains(postlude, f) {
+			t.Errorf("postlude must not contain destructive form %q", f)
 		}
 	}
 }
