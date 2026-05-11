@@ -45,7 +45,7 @@ test.describe("Create-task URL flow - branches after reopen", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    // ── First open: enter URL, submit task ──
+    // ── First open: enter URL, pick worktree executor, submit task ──
     await kanban.createTaskButton.first().click();
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
@@ -55,6 +55,8 @@ test.describe("Create-task URL flow - branches after reopen", () => {
 
     await testPage.getByTestId("task-title-input").fill(taskTitle);
     await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
+
+    await selectWorktreeExecutor(testPage);
 
     const startBtn = testPage.getByTestId("submit-start-agent");
     await expect(startBtn).toBeEnabled({ timeout: 15_000 });
@@ -81,27 +83,37 @@ test.describe("Create-task URL flow - branches after reopen", () => {
     await kanban.createTaskButton.first().click();
     await expect(dialog).toBeVisible();
 
+    await selectWorktreeExecutor(testPage);
+
     await testPage.getByTestId("repo-chip-trigger").first().click();
     await testPage
       .getByRole("option", { name: new RegExp(`^${repoFullName}\\b`) })
       .first()
       .click();
 
-    // The branch chip is now populated from the mocked GitHub branches even
-    // though local_path is empty. Asserting against the chip's current text
-    // tolerates whichever default branch the autoselect heuristic picks
-    // (main > master > develop); the dropdown contents are what proves the
-    // full list arrived.
+    // The branch chip should become enabled once the remote-branch fetch
+    // resolves. Pre-fix this never happened: the listing returned an error
+    // and the chip stayed disabled with the "no branches" tooltip.
     const branchChip = testPage.getByTestId("branch-chip-trigger").first();
     await expect(branchChip).toBeEnabled({ timeout: 10_000 });
-    await expect(branchChip).toContainText("main", { timeout: 10_000 });
 
-    // Open the dropdown and verify every mocked branch is selectable.
+    // Open the dropdown and verify every mocked branch is present. Substring
+    // name matching (string, not regex) tolerates the "remote" badge that the
+    // pill renders alongside the branch name in the option's accessible name.
     await branchChip.click();
     for (const name of ["main", "develop", "feature/test"]) {
-      await expect(testPage.getByRole("option", { name: new RegExp(`^${name}$`) })).toBeVisible({
-        timeout: 5_000,
-      });
+      await expect(testPage.getByRole("option", { name })).toBeVisible({ timeout: 5_000 });
     }
   });
 });
+
+// Pin the executor on every dialog open. This test runs in a shard alongside
+// create-task-branch-selector specs that leave local-executor profiles
+// behind, and a stale local default trips the local-executor's
+// currentLocalBranch autoselect race. Worktree is the cleanest neutral
+// choice and exercises the same remote-branch-listing path.
+async function selectWorktreeExecutor(page: import("@playwright/test").Page): Promise<void> {
+  const selector = page.getByTestId("executor-profile-selector");
+  await selector.click();
+  await page.getByRole("option", { name: /Worktree/i }).first().click();
+}
