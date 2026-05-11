@@ -69,15 +69,6 @@ func (c *branchProtectionCache) set(key string, bp BranchProtection) {
 	c.m[key] = bp
 }
 
-// Reset wipes the cache. Used by mock-controller test paths so a follow-up
-// associateTaskPR call with a new required_reviews value is not shadowed by
-// an earlier successful fetch.
-func (c *branchProtectionCache) Reset() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.m = make(map[string]BranchProtection)
-}
-
 func branchProtectionKey(owner, repo, branch string) string {
 	return owner + "/" + repo + "@" + branch
 }

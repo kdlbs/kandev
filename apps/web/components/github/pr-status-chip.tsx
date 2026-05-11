@@ -23,8 +23,12 @@ function chipStatus(pr: TaskPR): ChipStatus {
   if (pr.state === "merged") return "merged";
   if (pr.state === "closed") return "closed";
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") return "failed";
-  if (pr.checks_state === "success") return "passed";
+  // Pending checks / pending review must beat checks_state === "success" so a
+  // PR with all checks green but reviewers still outstanding renders as
+  // in-progress, not passed. Without this order, the chip flips to green the
+  // moment CI finishes and ignores the human gate.
   if (pr.checks_state === "pending" || pr.review_state === "pending") return "in_progress";
+  if (pr.checks_state === "success") return "passed";
   return "neutral";
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -38,18 +39,23 @@ func newServiceWithBPFetcher(f *fakeBPFetcher) *Service {
 }
 
 func TestBranchProtectionCache_GetSet_TTL(t *testing.T) {
-	c := newBranchProtectionCache()
-	c.ttl = 50 * time.Millisecond
-	key := "o/r@main"
-	c.set(key, BranchProtection{HasRule: true, RequiredApprovingReviewCount: 2, FetchedAt: time.Now()})
-	got, ok := c.get(key)
-	if !ok || got.RequiredApprovingReviewCount != 2 {
-		t.Fatalf("fresh entry: got=%+v ok=%v", got, ok)
-	}
-	time.Sleep(60 * time.Millisecond)
-	if _, ok := c.get(key); ok {
-		t.Fatalf("stale entry should not be returned")
-	}
+	// synctest.Test advances time in virtual ticks so a 60ms sleep is
+	// instantaneous wall-clock — keeps the suite fast and deterministic
+	// (no real sleeps that flake on heavily loaded CI runners).
+	synctest.Test(t, func(t *testing.T) {
+		c := newBranchProtectionCache()
+		c.ttl = 50 * time.Millisecond
+		key := "o/r@main"
+		c.set(key, BranchProtection{HasRule: true, RequiredApprovingReviewCount: 2, FetchedAt: time.Now()})
+		got, ok := c.get(key)
+		if !ok || got.RequiredApprovingReviewCount != 2 {
+			t.Fatalf("fresh entry: got=%+v ok=%v", got, ok)
+		}
+		time.Sleep(60 * time.Millisecond)
+		if _, ok := c.get(key); ok {
+			t.Fatalf("stale entry should not be returned")
+		}
+	})
 }
 
 func TestBranchProtectionCache_StaleEntryIsEvicted(t *testing.T) {
@@ -118,13 +124,15 @@ func TestFetchRequiredReviews_ClientWithoutFetcherReturnsNil(t *testing.T) {
 }
 
 func TestFetchRequiredReviews_TTLRefetch(t *testing.T) {
-	f := &fakeBPFetcher{bp: BranchProtection{HasRule: true, RequiredApprovingReviewCount: 1}}
-	s := newServiceWithBPFetcher(f)
-	s.protectionCache.ttl = 50 * time.Millisecond
-	_ = s.fetchRequiredReviews(context.Background(), "o", "r", "main")
-	time.Sleep(60 * time.Millisecond)
-	_ = s.fetchRequiredReviews(context.Background(), "o", "r", "main")
-	if calls := f.calls.Load(); calls != 2 {
-		t.Fatalf("fetcher called %d times, want 2 (refetch after TTL)", calls)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		f := &fakeBPFetcher{bp: BranchProtection{HasRule: true, RequiredApprovingReviewCount: 1}}
+		s := newServiceWithBPFetcher(f)
+		s.protectionCache.ttl = 50 * time.Millisecond
+		_ = s.fetchRequiredReviews(context.Background(), "o", "r", "main")
+		time.Sleep(60 * time.Millisecond)
+		_ = s.fetchRequiredReviews(context.Background(), "o", "r", "main")
+		if calls := f.calls.Load(); calls != 2 {
+			t.Fatalf("fetcher called %d times, want 2 (refetch after TTL)", calls)
+		}
+	})
 }

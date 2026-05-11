@@ -471,3 +471,123 @@ func TestHasChangesRequested(t *testing.T) {
 		})
 	}
 }
+
+// --- Reviewer dedup helpers (countApprovedReviewers + reduceReviewSummary) ---
+
+func TestCountApprovedReviewers(t *testing.T) {
+	t0 := time.Date(2025, 5, 1, 12, 0, 0, 0, time.UTC)
+	mk := func(author, state string, offset time.Duration) PRReview {
+		return PRReview{Author: author, State: state, CreatedAt: t0.Add(offset)}
+	}
+	cases := []struct {
+		name    string
+		reviews []PRReview
+		want    int
+	}{
+		{name: "empty", reviews: []PRReview{}, want: 0},
+		{
+			name:    "single approval",
+			reviews: []PRReview{mk("alice", reviewStateApproved, 0)},
+			want:    1,
+		},
+		{
+			name: "dedup same author latest wins",
+			reviews: []PRReview{
+				mk("alice", reviewStateChangesRequested, 0),
+				mk("alice", reviewStateApproved, time.Hour),
+			},
+			want: 1,
+		},
+		{
+			name: "COMMENTED does not replace prior APPROVED",
+			reviews: []PRReview{
+				mk("alice", reviewStateApproved, 0),
+				mk("alice", "COMMENTED", time.Hour),
+			},
+			want: 1,
+		},
+		{
+			name:    "PENDING never counts even alone",
+			reviews: []PRReview{mk("alice", "PENDING", 0)},
+			want:    0,
+		},
+		{
+			name: "two distinct approvers",
+			reviews: []PRReview{
+				mk("alice", reviewStateApproved, 0),
+				mk("bob", reviewStateApproved, time.Hour),
+			},
+			want: 2,
+		},
+		{
+			name: "approve then change-request reverts",
+			reviews: []PRReview{
+				mk("alice", reviewStateApproved, 0),
+				mk("alice", reviewStateChangesRequested, time.Hour),
+			},
+			want: 0,
+		},
+		{
+			name: "anonymous reviewers counted separately",
+			reviews: []PRReview{
+				mk("", reviewStateApproved, 0),
+				mk("", reviewStateApproved, time.Hour),
+			},
+			want: 2,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := countApprovedReviewers(tc.reviews); got != tc.want {
+				t.Fatalf("countApprovedReviewers = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReduceReviewSummary(t *testing.T) {
+	t0 := time.Date(2025, 5, 1, 12, 0, 0, 0, time.UTC)
+	mk := func(author, state string, offset time.Duration) reviewSample {
+		return reviewSample{author: author, state: state, at: t0.Add(offset)}
+	}
+	cases := []struct {
+		name string
+		in   []reviewSample
+		want string
+	}{
+		{name: "empty", in: nil, want: ""},
+		{
+			name: "single approval",
+			in:   []reviewSample{mk("a", reviewStateApproved, 0)},
+			want: computedReviewStateApproved,
+		},
+		{
+			name: "changes requested wins across authors",
+			in: []reviewSample{
+				mk("a", reviewStateApproved, 0),
+				mk("b", reviewStateChangesRequested, time.Hour),
+			},
+			want: computedReviewStateChangesRequested,
+		},
+		{
+			name: "later approval supersedes earlier changes-requested from same author",
+			in: []reviewSample{
+				mk("a", reviewStateChangesRequested, 0),
+				mk("a", reviewStateApproved, time.Hour),
+			},
+			want: computedReviewStateApproved,
+		},
+		{
+			name: "only comments returns empty",
+			in:   []reviewSample{mk("a", "COMMENTED", 0)},
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := reduceReviewSummary(tc.in); got != tc.want {
+				t.Fatalf("reduceReviewSummary = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

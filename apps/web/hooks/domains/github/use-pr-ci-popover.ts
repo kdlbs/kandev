@@ -12,7 +12,7 @@ export function prFeedbackKey(pr: { owner: string; repo: string; pr_number: numb
 type Result = {
   /** Last cached PRFeedback (may be stale while a refetch is in flight). */
   feedback: PRFeedback | null;
-  /** True while a fetch is in flight. Drives the popover loading state. */
+  /** True while a fetch is in flight. Drives skeleton loading in PRCheckGroup. */
   isFetching: boolean;
   /** Wallclock ms when the cache entry was last updated. */
   lastUpdatedAt: number | null;
@@ -62,14 +62,18 @@ function useFeedbackFetch(pr: TaskPR | null) {
  */
 export function usePRFeedbackBackgroundSync(pr: TaskPR | null): void {
   const { refetch } = useFeedbackFetch(pr);
-  const lastSyncedAt = pr?.updated_at ?? null;
+  // Compound the cache key with the timestamp so that switching the active
+  // task to a different PR (different key) always refetches even when the
+  // two PRs happen to share the same updated_at string. Tracking
+  // updated_at alone would silently skip the new PR's first fetch.
+  const syncKey = pr ? `${prFeedbackKey(pr)}@${pr.updated_at}` : null;
   const lastSyncedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (lastSyncedAt == null) return;
-    if (lastSyncedRef.current === lastSyncedAt) return;
-    lastSyncedRef.current = lastSyncedAt;
+    if (syncKey == null) return;
+    if (lastSyncedRef.current === syncKey) return;
+    lastSyncedRef.current = syncKey;
     queueMicrotask(refetch);
-  }, [lastSyncedAt, refetch]);
+  }, [syncKey, refetch]);
 }
 
 /**

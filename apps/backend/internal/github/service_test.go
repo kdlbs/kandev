@@ -977,6 +977,68 @@ func TestSyncTaskPR_ChecksPopulated_AcceptsRealZero(t *testing.T) {
 	}
 }
 
+// TestSyncTaskPR_ReviewCounts_PreservesOnLightweightSync covers the same
+// preserve-on-not-populated dance for ReviewCount/PendingReviewCount as the
+// checks/threads variants. A partial sync path (status.ReviewCountsPopulated
+// = false) must not reset the popover's "Approved (N)" line to zero.
+func TestSyncTaskPR_ReviewCounts_PreservesOnLightweightSync(t *testing.T) {
+	svc, store, eb := setupSyncTest(t)
+	ctx := context.Background()
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 1, PRURL: "u",
+		HeadBranch: "feat", BaseBranch: "main", State: "open",
+		ReviewCount: 2, PendingReviewCount: 1,
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	status := &PRStatus{
+		PR:                    &PR{Number: 1, State: "open", RepoOwner: "o", RepoName: "r"},
+		ReviewCount:           0,
+		PendingReviewCount:    0,
+		ReviewCountsPopulated: false,
+	}
+	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	stored, _ := store.GetTaskPR(ctx, "t1")
+	if stored.ReviewCount != 2 || stored.PendingReviewCount != 1 {
+		t.Fatalf("review counts clobbered: review=%d pending=%d (want 2/1)",
+			stored.ReviewCount, stored.PendingReviewCount)
+	}
+	if got := eb.publishedCount(); got != 0 {
+		t.Fatalf("expected no event when nothing changed, got %d", got)
+	}
+}
+
+// TestSyncTaskPR_ReviewCounts_AcceptsRealZero is the symmetric case: when the
+// caller actually counted reviewers and reports zero, we honor it (e.g. all
+// approvals dismissed) instead of clinging to the previous non-zero values.
+func TestSyncTaskPR_ReviewCounts_AcceptsRealZero(t *testing.T) {
+	svc, store, _ := setupSyncTest(t)
+	ctx := context.Background()
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 1, PRURL: "u",
+		HeadBranch: "feat", BaseBranch: "main", State: "open",
+		ReviewCount: 2, PendingReviewCount: 1,
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	status := &PRStatus{
+		PR:                    &PR{Number: 1, State: "open", RepoOwner: "o", RepoName: "r"},
+		ReviewCount:           0,
+		PendingReviewCount:    0,
+		ReviewCountsPopulated: true,
+	}
+	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	stored, _ := store.GetTaskPR(ctx, "t1")
+	if stored.ReviewCount != 0 || stored.PendingReviewCount != 0 {
+		t.Fatalf("real-zero not honored: review=%d pending=%d",
+			stored.ReviewCount, stored.PendingReviewCount)
+	}
+}
+
 // TestSyncTaskPR_UnresolvedThreads_PreservesOnLightweightSync verifies the
 // REST single-PR poller (which doesn't fetch review threads) does NOT
 // clobber the value set by the GraphQL batched poller. Without the

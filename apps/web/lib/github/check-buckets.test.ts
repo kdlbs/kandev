@@ -109,6 +109,31 @@ describe("groupChecksByWorkflow", () => {
     expect(group.total).toBe(2);
   });
 
+  it("htmlUrl points to first job matching the group's bucket", () => {
+    // Regression for the URL-selection fix in check-buckets.ts: a failed
+    // workflow row should link to a failing job's log, not the first
+    // (potentially passing) job's URL.
+    const checks = [
+      makeCheck({ name: "Build / a", conclusion: "success", html_url: "https://ok" }),
+      makeCheck({ name: "Build / b", conclusion: "failure", html_url: "https://bad" }),
+      makeCheck({ name: "Build / c", conclusion: "failure", html_url: "https://bad-2" }),
+    ];
+    const [group] = groupChecksByWorkflow(checks);
+    expect(group.bucket).toBe("failed");
+    // Picks the first failing job's URL.
+    expect(group.htmlUrl).toBe("https://bad");
+  });
+
+  it("htmlUrl falls back to first job's URL when no bucket-match has html_url", () => {
+    const checks = [
+      makeCheck({ name: "Build / a", conclusion: "success", html_url: "https://ok-1" }),
+      makeCheck({ name: "Build / b", conclusion: "success", html_url: "https://ok-2" }),
+    ];
+    const [group] = groupChecksByWorkflow(checks);
+    expect(group.bucket).toBe("passed");
+    expect(group.htmlUrl).toBe("https://ok-1");
+  });
+
   it("ignores skipped jobs in totals", () => {
     const checks = [
       makeCheck({ name: "Test / a", conclusion: "success" }),

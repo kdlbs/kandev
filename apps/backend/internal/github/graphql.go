@@ -273,85 +273,31 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 	}
 }
 
-// countApprovedReviewerNodes mirrors countApprovedReviewers (REST path) on
-// the GraphQL reviewNode shape. Returns the number of distinct authors
-// whose latest review state is APPROVED.
+// reviewNodesToSamples converts the GraphQL reviewNode shape to the shared
+// reviewSample slice used by the dedup helpers in client_helpers.go.
+func reviewNodesToSamples(nodes []reviewNode) []reviewSample {
+	samples := make([]reviewSample, len(nodes))
+	for i, n := range nodes {
+		samples[i] = reviewSample{author: n.Author.Login, state: n.State, at: n.SubmittedAt}
+	}
+	return samples
+}
+
+// countApprovedReviewerNodes returns the number of distinct authors whose
+// latest review state is APPROVED, on the GraphQL reviewNode shape. Thin
+// adapter over countApprovedAuthors so REST and GraphQL agree on what
+// "Approved (N)" means.
 func countApprovedReviewerNodes(nodes []reviewNode) int {
-	type latest struct {
-		state string
-		at    time.Time
-	}
-	byAuthor := make(map[string]latest)
-	for _, n := range nodes {
-		key := n.Author.Login
-		if key == "" {
-			key = "<anon>:" + n.SubmittedAt.UTC().Format(time.RFC3339Nano)
-		}
-		state := strings.ToUpper(n.State)
-		if state != reviewStateApproved && state != reviewStateChangesRequested {
-			if _, ok := byAuthor[key]; ok {
-				continue
-			}
-		}
-		prev, ok := byAuthor[key]
-		if !ok || !n.SubmittedAt.Before(prev.at) {
-			byAuthor[key] = latest{state: state, at: n.SubmittedAt}
-		}
-	}
-	count := 0
-	for _, l := range byAuthor {
-		if l.state == reviewStateApproved {
-			count++
-		}
-	}
-	return count
+	return countApprovedAuthors(reviewNodesToSamples(nodes))
 }
 
 // summarizeReviewState collapses the review history to a single
-// "approved"/"changes_requested"/"" value matching the existing
-// service-side summary. Per-reviewer dedup: each reviewer's most-recent
-// review wins, so a CHANGES_REQUESTED followed by an APPROVED from the
-// same author resolves to APPROVED. CHANGES_REQUESTED beats APPROVED across
-// distinct reviewers.
+// "approved"/"changes_requested"/"" value. Per-reviewer dedup: each
+// reviewer's most-recent binding review wins, so a CHANGES_REQUESTED
+// followed by APPROVED from the same author resolves to APPROVED.
+// CHANGES_REQUESTED beats APPROVED across distinct reviewers.
 func summarizeReviewState(nodes []reviewNode) string {
-	type latest struct {
-		state string
-		at    time.Time
-	}
-	byAuthor := map[string]latest{}
-	for _, n := range nodes {
-		// Anonymous reviewers (deleted users) get a unique bucket so each
-		// review still counts independently.
-		key := n.Author.Login
-		if key == "" {
-			key = "<anon>:" + n.SubmittedAt.UTC().Format(time.RFC3339Nano)
-		}
-		state := strings.ToUpper(n.State)
-		// COMMENTED and PENDING are non-binding states and shouldn't replace
-		// a prior APPROVED / CHANGES_REQUESTED for the same reviewer.
-		if state != reviewStateApproved && state != reviewStateChangesRequested {
-			if _, ok := byAuthor[key]; ok {
-				continue
-			}
-		}
-		prev, ok := byAuthor[key]
-		if !ok || !n.SubmittedAt.Before(prev.at) {
-			byAuthor[key] = latest{state: state, at: n.SubmittedAt}
-		}
-	}
-	hasApproval := false
-	for _, l := range byAuthor {
-		switch l.state {
-		case reviewStateChangesRequested:
-			return computedReviewStateChangesRequested
-		case reviewStateApproved:
-			hasApproval = true
-		}
-	}
-	if hasApproval {
-		return computedReviewStateApproved
-	}
-	return ""
+	return reduceReviewSummary(reviewNodesToSamples(nodes))
 }
 
 // PATClient.ExecuteGraphQL satisfies GraphQLExecutor by POSTing to /graphql.
