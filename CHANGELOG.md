@@ -2,6 +2,13 @@
 
 All notable changes to Kandev.
 
+## 0.43.0 - 2026-05-11
+
+### Bug Fixes
+
+- resolve subtask base_branch correctly across repos ([#870](https://github.com/kdlbs/kandev/pull/870))
+- skip NEXT_PUBLIC_KANDEV_API_PORT in production single-port mode ([#872](https://github.com/kdlbs/kandev/pull/872))
+
 ## 0.42.0 - 2026-05-11
 
 ### Features
