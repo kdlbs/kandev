@@ -136,12 +136,7 @@ function useKanbanBoardStore() {
 interface KanbanBoardProps {
   onPreviewTask?: (task: Task) => void;
   onOpenTask?: (task: Task) => void;
-  /**
-   * Fired just before the edit dialog opens. The kanban preview panel
-   * subscribes to this to close itself — otherwise the dialog renders on top
-   * of the preview, leaving the task content visible behind the dialog and
-   * making the page look broken ("everything out of place").
-   */
+  /** Fired before the edit dialog opens so the preview panel can close itself. */
   onBeforeEdit?: () => void;
 }
 
@@ -259,10 +254,7 @@ function useKanbanBoardSetup(
     onPreviewTask,
     onOpenTask,
   });
-  // Close the preview panel (if open) before showing the edit dialog so the
-  // task content doesn't render alongside the dialog. Destructure `handleEdit`
-  // so the dep array tracks the stable callback rather than the freshly-built
-  // `hooks` wrapper object.
+  // Close preview before the edit dialog opens; destructure for stable useCallback dep.
   const { handleEdit } = hooks;
   const handleEditWithCleanup = useCallback(
     (task: Task) => {
