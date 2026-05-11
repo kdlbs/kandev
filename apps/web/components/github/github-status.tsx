@@ -202,21 +202,10 @@ function NotConnectedView({
             {ghInstalled ? "Use a personal access token instead" : "Configure GitHub token"}
           </button>
         </CollapsibleTrigger>
-        <CollapsibleContent className="pt-2 space-y-2">
+        <CollapsibleContent className="pt-2">
+          {/* TokenConfigForm already renders the "Create a Personal Access
+              Token with repo + read:org scopes" hint below its input. */}
           <TokenConfigForm onSuccess={refresh} />
-          <p className="text-xs text-muted-foreground">
-            Create a{" "}
-            <a
-              href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=KanDev"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline hover:text-foreground"
-            >
-              Personal Access Token
-            </a>{" "}
-            with <code className="bg-muted px-1 rounded">repo</code> and{" "}
-            <code className="bg-muted px-1 rounded">read:org</code> scopes.
-          </p>
         </CollapsibleContent>
       </Collapsible>
 
