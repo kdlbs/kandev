@@ -404,8 +404,9 @@ function DropdownEntry({ entry }: { entry: KanbanCardMenuEntry }) {
       data-testid={entry.testId}
       disabled={entry.disabled}
       className={entry.destructive ? "text-destructive focus:text-destructive" : undefined}
-      // React events bubble through the React tree even from a portal — stop here so the card's onClick doesn't navigate.
+      // React events bubble through the React tree even from a portal - stop here so click/pointer don't reach the parent Card's onClick or dnd-kit listeners.
       onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
       onSelect={(event) => {
         event.stopPropagation();
         if (!entry.disabled) entry.onSelect?.();
