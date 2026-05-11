@@ -203,6 +203,115 @@ export async function previewAgentCommand(
   });
 }
 
+export type InstallJobStatus = "queued" | "running" | "succeeded" | "failed";
+
+export type InstallJob = {
+  job_id: string;
+  agent_name: string;
+  status: InstallJobStatus;
+  output?: string;
+  error?: string;
+  exit_code?: number;
+  started_at: string;
+  finished_at?: string;
+};
+
+/** Enqueue an install. Returns the job snapshot (status=queued or running). */
+export async function installAgent(
+  agentName: string,
+  options?: ApiRequestOptions,
+): Promise<InstallJob> {
+  return fetchJson<InstallJob>(`/api/v1/agent-install/${agentName}`, {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
+}
+
+export async function listInstallJobs(
+  options?: ApiRequestOptions,
+): Promise<{ jobs: InstallJob[] }> {
+  return fetchJson<{ jobs: InstallJob[] }>("/api/v1/agent-install/jobs", options);
+}
+
+export async function getInstallJob(
+  jobId: string,
+  options?: ApiRequestOptions,
+): Promise<InstallJob> {
+  return fetchJson<InstallJob>(`/api/v1/agent-install/jobs/${jobId}`, options);
+}
+
+export type AgentLoginSession = {
+  session_id: string;
+  agent_id: string;
+  cmd: string[];
+  running: boolean;
+  started_at: string;
+  finished_at?: string;
+  exit_code?: number;
+};
+
+export async function startAgentLogin(
+  agentName: string,
+  size: { cols: number; rows: number },
+  options?: ApiRequestOptions,
+): Promise<AgentLoginSession> {
+  return fetchJson<AgentLoginSession>(`/api/v1/agent-login/agents/${agentName}/start`, {
+    ...options,
+    init: {
+      method: "POST",
+      body: JSON.stringify(size),
+      ...(options?.init ?? {}),
+    },
+  });
+}
+
+export async function stopAgentLogin(sessionID: string): Promise<void> {
+  await fetchJson<{ ok: boolean }>(`/api/v1/agent-login/sessions/${sessionID}/stop`, {
+    init: { method: "POST" },
+  });
+}
+
+export async function resizeAgentLogin(
+  sessionID: string,
+  size: { cols: number; rows: number },
+): Promise<void> {
+  await fetchJson<{ ok: boolean }>(`/api/v1/agent-login/sessions/${sessionID}/resize`, {
+    init: { method: "POST", body: JSON.stringify(size) },
+  });
+}
+
+/**
+ * Build the bi-directional WS URL for streaming a login session.
+ * Derives the host from the backend config (NOT window.location) so dev mode
+ * — where the browser is on :37429 and the API is on :38429 — routes to the
+ * Go backend, not the Next dev server.
+ */
+export function agentLoginStreamUrl(sessionID: string): string {
+  const { apiBaseUrl } = getBackendConfig();
+  const url = new URL(apiBaseUrl);
+  const proto = url.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${url.host}/api/v1/agent-login/sessions/${sessionID}/stream`;
+}
+
+/**
+ * Start a plain host shell PTY (spawns $SHELL, or bash/sh fallback). Reuses
+ * the same session manager as agent-login, so stop/resize/stream all use the
+ * same session-ID-based endpoints.
+ */
+export async function startHostShell(
+  size: { cols: number; rows: number },
+  options?: ApiRequestOptions,
+): Promise<AgentLoginSession> {
+  return fetchJson<AgentLoginSession>("/api/v1/host-shell/start", {
+    ...options,
+    init: {
+      method: "POST",
+      body: JSON.stringify(size),
+      ...(options?.init ?? {}),
+    },
+  });
+}
+
 export async function createCustomTUIAgent(
   payload: { display_name: string; model?: string; command: string; description?: string },
   options?: ApiRequestOptions,

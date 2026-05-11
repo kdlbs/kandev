@@ -39,6 +39,9 @@ func NewHandlers(ctrl *controller.Controller, hub Broadcaster, log *logger.Logge
 }
 
 func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, hub Broadcaster, log *logger.Logger) {
+	// Wire the install job store with the same broadcaster used by other
+	// agent-settings notifications so streaming install events reach the UI.
+	ctrl.SetJobBroadcaster(hub)
 	handlers := NewHandlers(ctrl, hub, log)
 	handlers.registerHTTP(router)
 }
@@ -57,6 +60,9 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agents/:id/logo", h.httpGetAgentLogo)
 	api.GET("/agent-models/:agentName", h.httpGetAgentModels)
 	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
+	api.POST("/agent-install/:agentName", h.httpInstallAgent)
+	api.GET("/agent-install/jobs", h.httpListInstallJobs)
+	api.GET("/agent-install/jobs/:id", h.httpGetInstallJob)
 	api.PATCH("/agent-profiles/:id", h.httpUpdateProfile)
 	api.DELETE("/agent-profiles/:id", h.httpDeleteProfile)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
@@ -83,6 +89,54 @@ func (h *Handlers) httpListAvailableAgents(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// httpInstallAgent enqueues an async install and returns the job snapshot.
+// The install runs in a goroutine; clients track progress via WS
+// (agent.install.started/output/finished) or by polling /agent-install/jobs/:id.
+//
+// Idempotent: a second POST for the same agent while a job is running returns
+// the existing job_id rather than starting a duplicate.
+func (h *Handlers) httpInstallAgent(c *gin.Context) {
+	name := strings.TrimSpace(c.Param("agentName"))
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "agent name is required"})
+		return
+	}
+	job, err := h.controller.EnqueueInstall(name)
+	if err != nil {
+		switch {
+		case errors.Is(err, controller.ErrAgentNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
+		case errors.Is(err, controller.ErrInstallScriptEmpty):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "agent has no install script"})
+		case errors.Is(err, controller.ErrJobStoreUnavailable):
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "install service not ready"})
+		default:
+			h.logger.Error("failed to enqueue install", zap.String("agent", name), zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue install"})
+		}
+		return
+	}
+	c.JSON(http.StatusAccepted, job)
+}
+
+func (h *Handlers) httpListInstallJobs(c *gin.Context) {
+	c.JSON(http.StatusOK, dto.ListInstallJobsResponse{Jobs: h.controller.ListInstallJobs()})
+}
+
+func (h *Handlers) httpGetInstallJob(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "job id is required"})
+		return
+	}
+	job, ok := h.controller.GetInstallJob(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+		return
+	}
+	c.JSON(http.StatusOK, job)
 }
 
 func (h *Handlers) broadcastAvailableAgentsAsync() {

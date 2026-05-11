@@ -127,6 +127,14 @@ func (a *Auggie) RemoteAuth() *RemoteAuth {
 	}
 }
 
+// Verified per Augment Code docs: "Run `auggie login` and follow the prompts."
+func (a *Auggie) LoginCommand() *LoginCommand {
+	return &LoginCommand{
+		Cmd:         []string{"auggie", "login"},
+		Description: "Sign in with your Augment Code account.",
+	}
+}
+
 func (a *Auggie) InstallScript() string {
 	return "npm install -g " + auggiePkg
 }

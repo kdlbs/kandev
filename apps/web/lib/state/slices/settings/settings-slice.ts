@@ -7,6 +7,7 @@ export const defaultSettingsState: SettingsSliceState = {
   agentDiscovery: { items: [], loading: false, loaded: false },
   availableAgents: { items: [], tools: [], loading: false, loaded: false },
   agentProfiles: { items: [], version: 0 },
+  installJobs: { byAgent: {} },
   editors: { items: [], loaded: false, loading: false },
   prompts: { items: [], loaded: false, loading: false },
   secrets: { items: [], loaded: false, loading: false },
@@ -49,6 +50,63 @@ export const defaultSettingsState: SettingsSliceState = {
 type ImmerSet = Parameters<
   StateCreator<SettingsSlice, [["zustand/immer", never]], [], SettingsSlice>
 >[0];
+
+// installJobStartedAtMs parses started_at to epoch ms so we compare on time,
+// not lexicographically. RFC3339 strings with variable fractional seconds
+// would otherwise misorder ("2026-05-11T10:00:00Z" sorts after
+// "2026-05-11T10:00:00.1Z" despite being older).
+function installJobStartedAtMs(job: { started_at: string }): number {
+  return Date.parse(job.started_at);
+}
+
+function createInstallJobActions(
+  set: ImmerSet,
+): Pick<
+  SettingsSlice,
+  "setInstallJobs" | "upsertInstallJob" | "appendInstallOutput" | "clearInstallJob"
+> {
+  return {
+    setInstallJobs: (jobs) =>
+      set((draft) => {
+        const byAgent: Record<string, (typeof jobs)[number]> = {};
+        for (const job of jobs) {
+          // If two jobs target the same agent (a current run + a stale
+          // finished snapshot in retention), prefer the newest start.
+          const existing = byAgent[job.agent_name];
+          if (!existing || installJobStartedAtMs(job) > installJobStartedAtMs(existing)) {
+            byAgent[job.agent_name] = job;
+          }
+        }
+        draft.installJobs.byAgent = byAgent;
+      }),
+    upsertInstallJob: (job) =>
+      set((draft) => {
+        const current = draft.installJobs.byAgent[job.agent_name];
+        // Drop stale events from a previous job_id (e.g. after retry).
+        if (
+          current &&
+          current.job_id !== job.job_id &&
+          installJobStartedAtMs(current) > installJobStartedAtMs(job)
+        ) {
+          return;
+        }
+        draft.installJobs.byAgent[job.agent_name] = job;
+      }),
+    appendInstallOutput: (agentName, chunk) =>
+      set((draft) => {
+        const current = draft.installJobs.byAgent[agentName];
+        if (!current) return;
+        const next = (current.output ?? "") + chunk;
+        // Cap at 64KB; drop oldest chars on overflow so the live tail stays current.
+        const max = 64 * 1024;
+        current.output = next.length > max ? next.slice(next.length - max) : next;
+      }),
+    clearInstallJob: (agentName) =>
+      set((draft) => {
+        delete draft.installJobs.byAgent[agentName];
+      }),
+  };
+}
 
 function createCoreActions(
   set: ImmerSet,
@@ -219,5 +277,6 @@ export const createSettingsSlice: StateCreator<
 > = (set) => ({
   ...defaultSettingsState,
   ...createCoreActions(set),
+  ...createInstallJobActions(set),
   ...createSecretAndSpriteActions(set),
 });

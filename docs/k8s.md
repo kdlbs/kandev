@@ -76,6 +76,20 @@ kubectl port-forward svc/kandev 38429:38429
 
 No extra configuration is needed. The frontend automatically uses `window.location.origin` to reach the API, which works with any domain, reverse proxy, or ingress setup.
 
+## Installing Agent CLIs
+
+The kandev image ships with `git`, `gh` (GitHub CLI), `node`, and `npm`, but **does not bundle the coding-agent CLIs** (`claude-code`, `codex`, `auggie`, etc.) — agent choice is per-user, and bundling all of them would bloat the image significantly.
+
+To install an agent inside the running pod, open **Settings → Agents** in the UI and click **Install** on the agent card under "Available to Install". The backend runs the agent's hard-coded install script (`npm install -g <pkg>`) and rescans on success.
+
+The image sets `NPM_CONFIG_PREFIX=/data/.npm-global` so user-installed npm globals land on the PV and **survive pod restarts and image upgrades**. The same persistence applies if you `kubectl exec` and install manually:
+
+```bash
+kubectl exec -it deployment/kandev -- npm install -g @anthropic-ai/claude-code
+```
+
+After installing, log in with the agent's own auth (e.g. `claude login`), then click **Rescan** on the agents page.
+
 ## Configuration
 
 Kandev reads configuration via `KANDEV_`-prefixed environment variables (Viper). Set these in `k8s/configmap.yaml` or as environment variables in the deployment.

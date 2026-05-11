@@ -23,6 +23,10 @@ func (c *Controller) ListDiscovery(ctx context.Context) (*dto.ListDiscoveryRespo
 	}
 	payload := make([]dto.AgentDiscoveryDTO, 0, len(results))
 	for _, result := range results {
+		var loginCmd *dto.LoginCommandDTO
+		if ag, ok := c.agentRegistry.Get(result.Name); ok {
+			loginCmd = buildLoginCommandDTO(ag)
+		}
 		payload = append(payload, dto.AgentDiscoveryDTO{
 			Name:              result.Name,
 			SupportsMCP:       result.SupportsMCP,
@@ -30,6 +34,7 @@ func (c *Controller) ListDiscovery(ctx context.Context) (*dto.ListDiscoveryRespo
 			InstallationPaths: result.InstallationPaths,
 			Available:         result.Available,
 			MatchedPath:       result.MatchedPath,
+			LoginCommand:      loginCmd,
 		})
 	}
 	return &dto.ListDiscoveryResponse{Agents: payload, Total: len(payload)}, nil
@@ -120,6 +125,8 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 		}
 	}
 
+	loginCommand := buildLoginCommandDTO(ag)
+
 	return dto.AvailableAgentDTO{
 		Name:               ag.ID(),
 		DisplayName:        displayName,
@@ -134,7 +141,25 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 		ModelConfig:        modelConfig,
 		PermissionSettings: permissionSettings,
 		PassthroughConfig:  passthroughConfig,
+		LoginCommand:       loginCommand,
 		UpdatedAt:          now,
+	}
+}
+
+// buildLoginCommandDTO surfaces the interactive login command for agents that
+// implement LoginAgent. Nil for agents without an interactive login.
+func buildLoginCommandDTO(ag agents.Agent) *dto.LoginCommandDTO {
+	loginAg, ok := ag.(agents.LoginAgent)
+	if !ok {
+		return nil
+	}
+	lc := loginAg.LoginCommand()
+	if lc == nil || len(lc.Cmd) == 0 {
+		return nil
+	}
+	return &dto.LoginCommandDTO{
+		Cmd:         lc.Cmd,
+		Description: lc.Description,
 	}
 }
 

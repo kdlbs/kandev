@@ -54,7 +54,7 @@ func (c *GitHubChecker) Check(_ context.Context) []Issue {
 			Title:    "GitHub integration unavailable",
 			Message:  "Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",
 			Severity: SeverityWarning,
-			FixURL:   "/settings/workspace/{workspaceId}/github",
+			FixURL:   "/settings/integrations/github",
 			FixLabel: "Configure GitHub",
 		}}
 	}
@@ -65,7 +65,7 @@ func (c *GitHubChecker) Check(_ context.Context) []Issue {
 			Title:    "GitHub not authenticated",
 			Message:  "Run 'gh auth login' or add a GITHUB_TOKEN secret.",
 			Severity: SeverityWarning,
-			FixURL:   "/settings/workspace/{workspaceId}/github",
+			FixURL:   "/settings/integrations/github",
 			FixLabel: "Configure GitHub",
 		}}
 	}
@@ -91,7 +91,7 @@ func (c *GitHubChecker) rateLimitIssues() []Issue {
 			Title:    fmt.Sprintf("GitHub API rate limit exhausted (%s)", status.Resource),
 			Message:  rateLimitMessage(status),
 			Severity: SeverityWarning,
-			FixURL:   "/settings/workspace/{workspaceId}/github",
+			FixURL:   "/settings/integrations/github",
 			FixLabel: "View status",
 		})
 	}
