@@ -95,9 +95,15 @@ func (c *Controller) SetHostUtility(h *hostutility.Manager) {
 
 // SetJobBroadcaster initializes the install job store with a WS broadcaster
 // for streaming install progress. Called once during handler registration.
-// If unset, the streaming install API returns ErrJobStoreUnavailable.
+// If unset (hub == nil), the streaming install API returns
+// ErrJobStoreUnavailable — without this guard a nil hub would silently
+// degrade to a non-broadcasting store and the UI would never see progress.
 func (c *Controller) SetJobBroadcaster(hub JobBroadcaster) {
 	c.hub = hub
+	if hub == nil {
+		c.jobStore = nil
+		return
+	}
 	c.jobStore = NewJobStore(hub, c.logger.Zap(), func(agentName string) {
 		c.InvalidateDiscoveryCache()
 		// Kick a fresh capability probe immediately so the UI doesn't sit on

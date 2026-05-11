@@ -32,6 +32,14 @@ func (c *Controller) EnqueueInstall(name string) (*dto.InstallJobDTO, error) {
 		return nil, ErrInstallScriptEmpty
 	}
 	job := c.jobStore.Enqueue(name, script)
+	// Get() takes the store mutex, so it's race-free; calling job.snapshot()
+	// directly here would read job.Status without the lock while the spawned
+	// goroutine may be writing it.
+	if snap, ok := c.jobStore.Get(job.ID); ok {
+		return snap, nil
+	}
+	// Job was evicted between Enqueue and Get (extremely unlikely with the
+	// configured retention window). Fall back to the unguarded snapshot.
 	snap := job.snapshot()
 	return &snap, nil
 }

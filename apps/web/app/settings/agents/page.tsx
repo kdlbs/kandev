@@ -288,6 +288,7 @@ function InstalledAgentsSection({
             savedAgent={savedAgentsByName.get(agent.name)}
             displayName={resolveDisplayName(agent.name)}
             capabilityStatus={resolveCapabilityStatus(agent.name)}
+            onAuthComplete={() => void handleRescan()}
           />
         ))}
       </div>
@@ -381,14 +382,18 @@ function AgentProfilesSection({ savedAgents }: AgentProfilesSectionProps) {
  */
 function useInstallAgent(onSuccess: () => Promise<void>) {
   const installJobs = useAppStore((state) => state.installJobs.byAgent);
-  const setInstallJobs = useAppStore((state) => state.setInstallJobs);
   const upsertInstallJob = useAppStore((state) => state.upsertInstallJob);
 
   useEffect(() => {
     let cancelled = false;
     listInstallJobs()
       .then((resp) => {
-        if (!cancelled) setInstallJobs(resp.jobs);
+        if (cancelled) return;
+        // Upsert per-job rather than wholesale-replace: if a WS event
+        // already seeded an in-flight job with output chunks between page
+        // mount and this HTTP response, the snapshot from the server may
+        // be older, and a full replace would clobber the live output.
+        for (const job of resp.jobs) upsertInstallJob(job);
       })
       .catch(() => {
         /* page mount; ignore */
@@ -396,7 +401,7 @@ function useInstallAgent(onSuccess: () => Promise<void>) {
     return () => {
       cancelled = true;
     };
-  }, [setInstallJobs]);
+  }, [upsertInstallJob]);
 
   // When any install finishes successfully, trigger the page-level rescan so
   // the agent disappears from "Available to Install" and shows up under

@@ -52,22 +52,24 @@ func NewHandlers(mgr *Manager, reg *registry.Registry, log *zap.Logger, checkOri
 }
 
 // defaultCheckOrigin mirrors the policy used by the existing terminal
-// handler: allow no-origin requests (non-browser clients), allow localhost
+// handler: allow no-origin requests (non-browser clients), allow loopback
 // origins (dev), otherwise require Origin host to match Request host.
+//
+// Loopback is matched by exact hostname after parsing — a HasPrefix check
+// against `http://localhost` would also accept `http://localhost.attacker.tld`,
+// which a hostile page could use to slip through the dev exception.
 func defaultCheckOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true
 	}
-	if strings.HasPrefix(origin, "http://localhost") ||
-		strings.HasPrefix(origin, "http://127.0.0.1") ||
-		strings.HasPrefix(origin, "https://localhost") ||
-		strings.HasPrefix(origin, "https://127.0.0.1") {
-		return true
-	}
 	originURL, err := url.Parse(origin)
 	if err != nil {
 		return false
+	}
+	switch originURL.Hostname() {
+	case "localhost", "127.0.0.1", "::1":
+		return true
 	}
 	host := r.Host
 	if host == "" {

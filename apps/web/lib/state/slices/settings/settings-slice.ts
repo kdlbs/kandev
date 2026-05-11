@@ -51,6 +51,14 @@ type ImmerSet = Parameters<
   StateCreator<SettingsSlice, [["zustand/immer", never]], [], SettingsSlice>
 >[0];
 
+// installJobStartedAtMs parses started_at to epoch ms so we compare on time,
+// not lexicographically. RFC3339 strings with variable fractional seconds
+// would otherwise misorder ("2026-05-11T10:00:00Z" sorts after
+// "2026-05-11T10:00:00.1Z" despite being older).
+function installJobStartedAtMs(job: { started_at: string }): number {
+  return Date.parse(job.started_at);
+}
+
 function createInstallJobActions(
   set: ImmerSet,
 ): Pick<
@@ -65,7 +73,7 @@ function createInstallJobActions(
           // If two jobs target the same agent (a current run + a stale
           // finished snapshot in retention), prefer the newest start.
           const existing = byAgent[job.agent_name];
-          if (!existing || job.started_at > existing.started_at) {
+          if (!existing || installJobStartedAtMs(job) > installJobStartedAtMs(existing)) {
             byAgent[job.agent_name] = job;
           }
         }
@@ -75,7 +83,11 @@ function createInstallJobActions(
       set((draft) => {
         const current = draft.installJobs.byAgent[job.agent_name];
         // Drop stale events from a previous job_id (e.g. after retry).
-        if (current && current.job_id !== job.job_id && current.started_at > job.started_at) {
+        if (
+          current &&
+          current.job_id !== job.job_id &&
+          installJobStartedAtMs(current) > installJobStartedAtMs(job)
+        ) {
           return;
         }
         draft.installJobs.byAgent[job.agent_name] = job;

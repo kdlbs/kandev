@@ -18,6 +18,12 @@ type Props = {
   displayName: string;
   /** Capability status from the host utility probe ("ok", "auth_required", etc.). */
   capabilityStatus?: string;
+  /**
+   * Called when the auth/shell dialog closes so the page can refresh
+   * discovery + availability. Without this the yellow lock stays put even
+   * after a successful sign-in, making the recovery flow look broken.
+   */
+  onAuthComplete?: () => void;
 };
 
 /**
@@ -26,7 +32,13 @@ type Props = {
  * `auth_required`. Clicking the lock opens a PTY login dialog if the agent
  * type has a registered LoginCommand.
  */
-export function InstalledAgentCard({ agent, savedAgent, displayName, capabilityStatus }: Props) {
+export function InstalledAgentCard({
+  agent,
+  savedAgent,
+  displayName,
+  capabilityStatus,
+  onAuthComplete,
+}: Props) {
   const configured = Boolean(savedAgent && savedAgent.profiles.length > 0);
   const hasAgentRecord = Boolean(savedAgent);
   const [loginOpen, setLoginOpen] = useState(false);
@@ -107,17 +119,48 @@ export function InstalledAgentCard({ agent, savedAgent, displayName, capabilityS
             {hasAgentRecord ? "Create new profile" : "Setup Profile"}
           </Link>
         </Button>
-        {loginAvailable && (
-          <AgentLoginDialog
-            open={loginOpen}
-            onOpenChange={setLoginOpen}
-            agentName={agent.name}
-            description={agent.login_command?.description}
-            command={agent.login_command?.cmd}
-          />
-        )}
-        {!loginAvailable && <HostShellDialog open={shellOpen} onOpenChange={setShellOpen} />}
+        <AuthDialogs
+          agent={agent}
+          loginOpen={loginOpen}
+          setLoginOpen={setLoginOpen}
+          shellOpen={shellOpen}
+          setShellOpen={setShellOpen}
+          loginAvailable={loginAvailable}
+          onAuthComplete={onAuthComplete}
+        />
       </CardContent>
     </Card>
   );
+}
+
+function AuthDialogs({
+  agent,
+  loginOpen,
+  setLoginOpen,
+  shellOpen,
+  setShellOpen,
+  loginAvailable,
+  onAuthComplete,
+}: {
+  agent: AgentDiscovery;
+  loginOpen: boolean;
+  setLoginOpen: (open: boolean) => void;
+  shellOpen: boolean;
+  setShellOpen: (open: boolean) => void;
+  loginAvailable: boolean;
+  onAuthComplete?: () => void;
+}) {
+  if (loginAvailable) {
+    return (
+      <AgentLoginDialog
+        open={loginOpen}
+        onOpenChange={setLoginOpen}
+        agentName={agent.name}
+        description={agent.login_command?.description}
+        command={agent.login_command?.cmd}
+        onLoginSuccess={onAuthComplete}
+      />
+    );
+  }
+  return <HostShellDialog open={shellOpen} onOpenChange={setShellOpen} onClose={onAuthComplete} />;
 }

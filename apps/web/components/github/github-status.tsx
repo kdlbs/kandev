@@ -9,6 +9,7 @@ import {
   IconTrash,
   IconEye,
   IconEyeOff,
+  IconTerminal2,
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -19,6 +20,7 @@ import { useToast } from "@/components/toast-provider";
 import { configureGitHubToken, clearGitHubToken } from "@/lib/api/domains/github-api";
 import type { AuthDiagnostics } from "@/lib/types/github";
 import { GitHubRateLimitDisplay } from "./github-rate-limit";
+import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 
 function DiagnosticsOutput({ diagnostics }: { diagnostics: AuthDiagnostics }) {
   return (
@@ -123,10 +125,78 @@ function TokenConfigForm({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
+type StatusForNotConnected = {
+  diagnostics?: AuthDiagnostics;
+};
+
+function NotConnectedView({
+  status,
+  refresh,
+  ghAuthOpen,
+  setGhAuthOpen,
+}: {
+  status: StatusForNotConnected | null;
+  refresh: () => void;
+  ghAuthOpen: boolean;
+  setGhAuthOpen: (open: boolean) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <IconX className="h-4 w-4 text-red-500" />
+        <span className="text-sm font-medium">Not connected to GitHub</span>
+        <Button variant="ghost" size="sm" onClick={refresh} className="cursor-pointer h-6 px-2">
+          <IconRefresh className="h-3.5 w-3.5" />
+          Refresh
+        </Button>
+      </div>
+
+      {/* Token configuration form */}
+      <div className="space-y-2">
+        <p className="text-sm font-medium">Configure GitHub Token</p>
+        <TokenConfigForm onSuccess={refresh} />
+      </div>
+
+      {/* Alternative methods */}
+      <div className="text-xs text-muted-foreground space-y-1.5 border-t pt-3">
+        <p>Other authentication methods:</p>
+        <ul className="list-disc list-inside space-y-1 pl-1">
+          <li>
+            <strong>Environment variable</strong> - set{" "}
+            <code className="bg-muted px-1 rounded">GITHUB_TOKEN</code> when starting Kandev
+          </li>
+          <li>
+            <strong>GitHub CLI</strong> - run{" "}
+            <code className="bg-muted px-1 rounded">gh auth login</code> in a host terminal
+          </li>
+        </ul>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setGhAuthOpen(true)}
+          className="cursor-pointer mt-2"
+          data-testid="github-gh-auth-login"
+        >
+          <IconTerminal2 className="h-3.5 w-3.5 mr-2" />
+          Sign in with gh CLI
+        </Button>
+      </div>
+      {status?.diagnostics && <DiagnosticsOutput diagnostics={status.diagnostics} />}
+      <HostShellDialog
+        open={ghAuthOpen}
+        onOpenChange={setGhAuthOpen}
+        initialInput={"gh auth login\n"}
+        onClose={refresh}
+      />
+    </div>
+  );
+}
+
 export function GitHubStatusCard() {
   const { status, loaded, loading, refresh } = useGitHubStatus();
   const { toast } = useToast();
   const [clearing, setClearing] = useState(false);
+  const [ghAuthOpen, setGhAuthOpen] = useState(false);
 
   const handleClearToken = useCallback(async () => {
     setClearing(true);
@@ -152,38 +222,12 @@ export function GitHubStatusCard() {
 
   if (!status || !status.authenticated) {
     return (
-      <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <IconX className="h-4 w-4 text-red-500" />
-          <span className="text-sm font-medium">Not connected to GitHub</span>
-          <Button variant="ghost" size="sm" onClick={refresh} className="cursor-pointer h-6 px-2">
-            <IconRefresh className="h-3.5 w-3.5" />
-            Refresh
-          </Button>
-        </div>
-
-        {/* Token configuration form */}
-        <div className="space-y-2">
-          <p className="text-sm font-medium">Configure GitHub Token</p>
-          <TokenConfigForm onSuccess={refresh} />
-        </div>
-
-        {/* Alternative methods */}
-        <div className="text-xs text-muted-foreground space-y-1.5 border-t pt-3">
-          <p>Other authentication methods:</p>
-          <ul className="list-disc list-inside space-y-1 pl-1">
-            <li>
-              <strong>Environment variable</strong> — set{" "}
-              <code className="bg-muted px-1 rounded">GITHUB_TOKEN</code> when starting Kandev
-            </li>
-            <li>
-              <strong>GitHub CLI</strong> — run{" "}
-              <code className="bg-muted px-1 rounded">gh auth login</code>
-            </li>
-          </ul>
-        </div>
-        {status?.diagnostics && <DiagnosticsOutput diagnostics={status.diagnostics} />}
-      </div>
+      <NotConnectedView
+        status={status}
+        refresh={refresh}
+        ghAuthOpen={ghAuthOpen}
+        setGhAuthOpen={setGhAuthOpen}
+      />
     );
   }
 

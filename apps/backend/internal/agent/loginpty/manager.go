@@ -324,9 +324,20 @@ func (s *Session) BufferedOutput() []byte {
 
 // Subscribe registers a channel for PTY output. The channel is non-blocking:
 // if it fills up, chunks are dropped (the subscriber falls behind).
+//
+// If the session has already ended (broadcastClose ran), the channel is
+// closed immediately so the caller's reader returns rather than blocking
+// forever on a channel that nothing will ever send to or close.
 func (s *Session) Subscribe(ch chan<- []byte) {
+	s.mu.Lock()
+	running := s.running
+	s.mu.Unlock()
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
+	if !running {
+		close(ch)
+		return
+	}
 	s.subscribers[ch] = struct{}{}
 }
 
@@ -417,12 +428,19 @@ func (s *Session) Status() Status {
 	return st
 }
 
+// stop tears the PTY down idempotently. The `!s.running` guard is flipped
+// *under the same lock* that we use to read pty/cmd, so concurrent callers
+// (timeout case in supervise + external Manager.Stop, etc.) don't double-
+// close the file descriptor on the way out. A double Close on *os.File is
+// safe in isolation, but if the OS recycles the fd between the two Close()
+// calls, the second close hits a different open file.
 func (s *Session) stop() {
 	s.mu.Lock()
 	if !s.running {
 		s.mu.Unlock()
 		return
 	}
+	s.running = false
 	pf := s.pty
 	cmd := s.cmd
 	s.mu.Unlock()

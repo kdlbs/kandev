@@ -74,7 +74,7 @@ type PassthroughAgent interface {
 // an agent. The kandev backend runs this under a PTY so the UI can render a
 // terminal and route keystrokes to the underlying process.
 type LoginCommand struct {
-	// Cmd is the command + args to spawn, e.g. []string{"claude", "/login"}.
+	// Cmd is the command + args to spawn, e.g. []string{"claude", "auth", "login"}.
 	Cmd []string
 	// Description renders above the terminal as a one-line hint, e.g.
 	// "Authenticate with your Anthropic account."
