@@ -31,8 +31,7 @@ function addUncommittedFiles(
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
     const skipReason = file.diff_skip_reason;
     if (!diff && !skipReason) continue;
-    const key = repositoryName ? `${repositoryName}:${path}` : path;
-    fileMap.set(key, {
+    fileMap.set(path, {
       path,
       diff,
       status: file.status ?? "modified",

@@ -45,6 +45,22 @@ export function shouldCloseFileDiffPanel(
   return !entry?.diff;
 }
 
+function scrollToFileAndClear(
+  path: string,
+  fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>,
+  onClearSelected: () => void,
+) {
+  const ref = fileRefs.get(path);
+  if (ref?.current) {
+    requestAnimationFrame(() => {
+      ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      onClearSelected();
+    });
+  } else {
+    onClearSelected();
+  }
+}
+
 function useChangesView(selectedDiff: SelectedDiff | null, onClearSelected: () => void) {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const { allFiles, cumulativeLoading, prDiffLoading, gitStatus } =
@@ -102,12 +118,7 @@ function useChangesView(selectedDiff: SelectedDiff | null, onClearSelected: () =
   useEffect(() => {
     if (!selectedDiff?.path || scrolledRef.current === selectedDiff.path) return;
     scrolledRef.current = selectedDiff.path;
-    const ref = fileRefs.get(selectedDiff.path);
-    if (ref?.current)
-      requestAnimationFrame(() => {
-        ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
-    onClearSelected();
+    scrollToFileAndClear(selectedDiff.path, fileRefs, onClearSelected);
   }, [selectedDiff, fileRefs, onClearSelected]);
 
   useEffect(() => {
@@ -461,4 +472,4 @@ function ChangesPanelContent({
   );
 }
 
-export { TaskChangesPanel, filterVisibleFiles };
+export { TaskChangesPanel, filterVisibleFiles, scrollToFileAndClear };

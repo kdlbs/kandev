@@ -1,5 +1,9 @@
-import { describe, it, expect } from "vitest";
-import { shouldCloseFileDiffPanel, filterVisibleFiles } from "./task-changes-panel";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  shouldCloseFileDiffPanel,
+  filterVisibleFiles,
+  scrollToFileAndClear,
+} from "./task-changes-panel";
 import type { ReviewFile } from "@/components/review/types";
 
 const PATH = "src/foo.ts";
@@ -92,5 +96,60 @@ describe("filterVisibleFiles", () => {
 
   it("returns empty list when no files match", () => {
     expect(filterVisibleFiles([], "all", undefined, "all")).toEqual([]);
+  });
+});
+
+describe("scrollToFileAndClear", () => {
+  const rafCallbacks: Array<FrameRequestCallback> = [];
+
+  beforeEach(() => {
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return 0;
+    });
+  });
+
+  afterEach(() => {
+    rafCallbacks.length = 0;
+    vi.unstubAllGlobals();
+  });
+
+  it("defers onClearSelected into rAF when ref has a DOM element", () => {
+    const el = document.createElement("div");
+    el.scrollIntoView = vi.fn();
+    const ref = { current: el };
+    const fileRefs = new Map([["src/pr.ts", ref]]);
+    const onClearSelected = vi.fn();
+
+    scrollToFileAndClear("src/pr.ts", fileRefs, onClearSelected);
+
+    expect(onClearSelected).not.toHaveBeenCalled();
+    expect(rafCallbacks).toHaveLength(1);
+
+    rafCallbacks[0](0);
+
+    expect(el.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    expect(onClearSelected).toHaveBeenCalledOnce();
+  });
+
+  it("calls onClearSelected immediately when ref has no DOM element", () => {
+    const ref = { current: null };
+    const fileRefs = new Map([["src/pr.ts", ref]]);
+    const onClearSelected = vi.fn();
+
+    scrollToFileAndClear("src/pr.ts", fileRefs, onClearSelected);
+
+    expect(onClearSelected).toHaveBeenCalledOnce();
+    expect(rafCallbacks).toHaveLength(0);
+  });
+
+  it("calls onClearSelected immediately when path not in fileRefs", () => {
+    const fileRefs = new Map<string, { current: HTMLDivElement | null }>();
+    const onClearSelected = vi.fn();
+
+    scrollToFileAndClear("src/missing.ts", fileRefs, onClearSelected);
+
+    expect(onClearSelected).toHaveBeenCalledOnce();
+    expect(rafCallbacks).toHaveLength(0);
   });
 });

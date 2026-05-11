@@ -182,6 +182,75 @@ describe("buildReviewSources", () => {
     expect(repoNames).toEqual(["backend", "frontend"]);
   });
 
+  it("multi-repo uncommitted + cumulativeDiff overlap: file appears once as uncommitted", () => {
+    const result = buildReviewSources({
+      gitStatus: undefined,
+      statusByRepo: [
+        {
+          repository_name: "frontend",
+          status: {
+            files: {
+              "src/shared.ts": {
+                diff: "@@u@@",
+                status: "modified",
+                additions: 1,
+                deletions: 0,
+              },
+            },
+          },
+        },
+      ],
+      cumulativeDiff: {
+        files: {
+          "src/shared.ts": {
+            diff: "@@c@@",
+            status: "modified",
+            additions: 1,
+            deletions: 0,
+          },
+        },
+      },
+      prDiffFiles: undefined,
+    });
+    expect(result.allFiles).toHaveLength(1);
+    expect(result.allFiles[0].source).toBe("uncommitted");
+    expect(result.sourceCounts).toEqual({ uncommitted: 1, committed: 0, pr: 0 });
+  });
+
+  it("multi-repo uncommitted + PR overlap: file appears once as uncommitted", () => {
+    const result = buildReviewSources({
+      gitStatus: undefined,
+      statusByRepo: [
+        {
+          repository_name: "frontend",
+          status: {
+            files: {
+              "src/shared.ts": {
+                diff: "@@u@@",
+                status: "modified",
+                additions: 1,
+                deletions: 0,
+              },
+            },
+          },
+        },
+      ],
+      cumulativeDiff: null,
+      prDiffFiles: [
+        {
+          filename: "src/shared.ts",
+          status: "modified",
+          patch: "@@p@@",
+          additions: 1,
+          deletions: 0,
+        },
+      ],
+    });
+    expect(result.allFiles).toHaveLength(1);
+    expect(result.allFiles[0].source).toBe("uncommitted");
+    expect(result.sourceCounts).toEqual({ uncommitted: 1, committed: 0, pr: 0 });
+  });
+
   it("sorts files by repository_name then path", () => {
     const result = buildReviewSources({
       gitStatus: undefined,
