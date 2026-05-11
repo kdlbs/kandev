@@ -495,7 +495,13 @@ func waitForAgentctlHealthWith(ctx context.Context, ctl healthChecker, maxRetrie
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		time.Sleep(retryDelay)
+		if i+1 < maxRetries {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(retryDelay):
+			}
+		}
 	}
 
 	if lastErr != nil {

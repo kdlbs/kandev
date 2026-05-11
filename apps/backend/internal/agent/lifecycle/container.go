@@ -270,7 +270,16 @@ func (cm *ContainerManager) waitForHealth(ctx context.Context, ctl *agentctl.Con
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		time.Sleep(retryDelay)
+		// Cancelable wait that also skips the final retry's sleep — the loop
+		// only re-enters if i+1 < maxRetries, so the extra delay was just
+		// added latency on aborted launches.
+		if i+1 < maxRetries {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(retryDelay):
+			}
+		}
 	}
 
 	if lastErr != nil {
