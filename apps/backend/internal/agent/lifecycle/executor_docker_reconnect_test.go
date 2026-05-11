@@ -125,8 +125,9 @@ func TestWaitForAgentctlHealth_HonoursContextCancellation(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation, got %v", err)
 	}
-	// One Health() call before the loop notices cancellation; the subsequent
-	// time.Sleep is short so cancellation gets observed promptly.
+	// One Health() call before the loop notices cancellation; the cancelable
+	// select exits immediately via ctx.Done() so cancellation is observed
+	// within the same iteration.
 	if got := atomic.LoadInt32(&stub.calls); got > 2 {
 		t.Fatalf("expected ≤2 Health() calls before honouring cancellation, got %d", got)
 	}
