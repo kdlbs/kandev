@@ -101,6 +101,12 @@ func TestCreateWorktree_BaseBranchFallback_FallbackAlsoMissing(t *testing.T) {
 	if !errors.Is(err, ErrInvalidBaseBranch) {
 		t.Fatalf("Create() err = %v, want ErrInvalidBaseBranch", err)
 	}
+	// The error must name both branches so an operator can tell at a glance
+	// that a fallback was attempted and also failed.
+	msg := err.Error()
+	if !strings.Contains(msg, "pr-metrics") || !strings.Contains(msg, "release") {
+		t.Fatalf("error %q should mention both requested and fallback branches", msg)
+	}
 }
 
 // TestCreateWorktree_BaseBranchFallback_NotUsedWhenBaseExists guards against

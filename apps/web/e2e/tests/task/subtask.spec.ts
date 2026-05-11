@@ -543,9 +543,14 @@ test.describe("MCP subtask creation", () => {
     const gitEnv = makeGitEnv(backend.tmpDir);
     execSync("git init -b trunk", { cwd: otherRepoDir, env: gitEnv });
     execSync('git commit --allow-empty -m "init"', { cwd: otherRepoDir, env: gitEnv });
-    const otherRepo = await apiClient.createRepository(seedData.workspaceId, otherRepoDir, "trunk", {
-      name: "Subtask Cross Repo",
-    });
+    const otherRepo = await apiClient.createRepository(
+      seedData.workspaceId,
+      otherRepoDir,
+      "trunk",
+      {
+        name: "Subtask Cross Repo",
+      },
+    );
 
     const subtaskTitle = `Cross-Repo Subtask ${Date.now()}`;
     const script = [
@@ -581,7 +586,10 @@ test.describe("MCP subtask creation", () => {
           subtask = allTasks.tasks.find((t: TaskEntry) => t.title === subtaskTitle);
           return subtask;
         },
-        { timeout: 60_000, message: "Cross-repo subtask should be created by the agent's MCP call" },
+        {
+          timeout: 60_000,
+          message: "Cross-repo subtask should be created by the agent's MCP call",
+        },
       )
       .toBeDefined();
 

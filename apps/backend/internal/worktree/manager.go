@@ -283,8 +283,18 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	fallbackWarning, fallbackDetail := "", ""
 	if !m.branchExists(ctx, req.RepositoryPath, baseRef) {
 		fallback := strings.TrimSpace(req.FallbackBaseBranch)
-		if fallback == "" || fallback == baseRef || !m.branchExists(ctx, req.RepositoryPath, fallback) {
+		if fallback == "" || fallback == baseRef {
 			return nil, fmt.Errorf("%w: %s", ErrInvalidBaseBranch, baseRef)
+		}
+		// Best-effort fetch of the fallback so it is available locally in
+		// containerized / shallow-clone environments where the fallback may
+		// only exist on the remote. Errors here are intentionally swallowed
+		// — branchExists below is the source of truth.
+		if req.PullBeforeWorktree {
+			_ = m.pullBaseBranch(ctx, req.RepositoryPath, fallback, nil)
+		}
+		if !m.branchExists(ctx, req.RepositoryPath, fallback) {
+			return nil, fmt.Errorf("%w: %s (fallback %q also not found)", ErrInvalidBaseBranch, baseRef, fallback)
 		}
 		m.logger.Warn("requested base branch not found, falling back",
 			zap.String("repository_path", req.RepositoryPath),
