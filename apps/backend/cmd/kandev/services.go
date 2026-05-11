@@ -17,6 +17,7 @@ import (
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/integrations/secretadapter"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
@@ -89,6 +90,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	)
 
 	githubSvc := initGitHubService(dbPool, eventBus, repos.Secrets, log)
+	gitlabSvc := initGitLabService(repos.Secrets, log)
 	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
 	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
 	slackSvc := initSlackService(dbPool, repos.Secrets, log)
@@ -101,6 +103,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Utility:  utilitySvc,
 		Workflow: workflowSvc,
 		GitHub:   githubSvc,
+		GitLab:   gitlabSvc,
 		Jira:     jiraSvc,
 		Linear:   linearSvc,
 		Slack:    slackSvc,
@@ -229,6 +232,68 @@ func initGitHubService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secr
 		// GitHub takes both a SecretProvider (read-only) and a SecretManager
 		// (mutating) — same adapter satisfies both interfaces, but the
 		// service needs the mutating one wired explicitly.
+		svc.SetSecretManager(adapter)
+	}
+	return svc
+}
+
+// gitlabSecretAdapter adapts secrets.SecretStore to the GitLab integration's
+// SecretProvider and SecretManager interfaces. Mirrors githubSecretAdapter
+// — kept separate so the two packages can evolve independently.
+type gitlabSecretAdapter struct {
+	store secrets.SecretStore
+}
+
+func (a *gitlabSecretAdapter) List(ctx context.Context) ([]*gitlab.SecretListItem, error) {
+	items, err := a.store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*gitlab.SecretListItem, len(items))
+	for i, item := range items {
+		result[i] = &gitlab.SecretListItem{
+			ID:       item.ID,
+			Name:     item.Name,
+			HasValue: item.HasValue,
+		}
+	}
+	return result, nil
+}
+
+func (a *gitlabSecretAdapter) Reveal(ctx context.Context, id string) (string, error) {
+	return a.store.Reveal(ctx, id)
+}
+
+func (a *gitlabSecretAdapter) Create(ctx context.Context, name, value string) (string, error) {
+	secret := &secrets.SecretWithValue{
+		Secret: secrets.Secret{Name: name},
+		Value:  value,
+	}
+	if err := a.store.Create(ctx, secret); err != nil {
+		return "", err
+	}
+	return secret.ID, nil
+}
+
+func (a *gitlabSecretAdapter) Update(ctx context.Context, id, value string) error {
+	return a.store.Update(ctx, id, &secrets.UpdateSecretRequest{Value: &value})
+}
+
+func (a *gitlabSecretAdapter) Delete(ctx context.Context, id string) error {
+	return a.store.Delete(ctx, id)
+}
+
+// initGitLabService wires up the GitLab integration. Failures are non-fatal:
+// the rest of the backend still boots without GitLab configured.
+func initGitLabService(secretsStore secrets.SecretStore, log *logger.Logger) *gitlab.Service {
+	adapter := &gitlabSecretAdapter{store: secretsStore}
+	// Host persistence (per-workspace gitlab_host) is deferred to a
+	// follow-up; v1 reads from DefaultHost on every boot.
+	svc, _, err := gitlab.Provide(context.Background(), adapter, nil, log)
+	if err != nil {
+		log.Warn("GitLab service initialization failed (non-fatal)", zap.Error(err))
+	}
+	if svc != nil {
 		svc.SetSecretManager(adapter)
 	}
 	return svc

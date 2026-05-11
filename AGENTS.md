@@ -86,6 +86,7 @@ apps/backend/
 │   ├── events/           # Event bus for internal pub/sub
 │   ├── gateway/          # WebSocket gateway
 │   ├── github/           # GitHub API integration (PRs, reviews, webhooks)
+│   ├── gitlab/           # GitLab API integration (MRs, discussions, pipelines)
 │   ├── integration/      # External integrations
 │   ├── integrations/     # Shared shapes for third-party integrations
 │   │   ├── healthpoll/   # Reusable 90s auth-health Poller (used by jira, linear)
