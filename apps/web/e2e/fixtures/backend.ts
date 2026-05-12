@@ -194,8 +194,11 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       // The async cleanup of agent instances runs after each test deletes its
       // tasks, so during a 60+ test shard the in-flight cleanup queue can hold
       // several dozen ports at any given moment. 200 ports per worker keeps
-      // headroom for that without overflowing the 65535 port space (last
-      // worker's range tops out around 30001 + 29*1000 + 9*200 + 199 = 60999).
+      // headroom for that without overflowing the 65535 port space. With the
+      // current playwright config (workers: 1, so workerIndex == 0) and shard
+      // offsets capped at 29, the highest port used is 30001 + 29*1000 + 199
+      // = 59200. The `workerIndex * 200` term is defensive for the case where
+      // a future config sets workers > 1.
       const agentctlPortBase = 30001 + E2E_PORT_OFFSET * 1000 + workerInfo.workerIndex * 200;
       const agentctlPortMax = agentctlPortBase + 199;
 
