@@ -191,8 +191,13 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
 
       // Give each worker its own agentctl port range, offset from the default
       // range (41001-41100) to avoid conflicts with a running dev instance.
-      const agentctlPortBase = 30001 + E2E_PORT_OFFSET * 1000 + workerInfo.workerIndex * 50;
-      const agentctlPortMax = agentctlPortBase + 49;
+      // The async cleanup of agent instances runs after each test deletes its
+      // tasks, so during a 60+ test shard the in-flight cleanup queue can hold
+      // several dozen ports at any given moment. 200 ports per worker keeps
+      // headroom for that without overflowing the 65535 port space (last
+      // worker's range tops out around 30001 + 29*1000 + 9*200 + 199 = 60999).
+      const agentctlPortBase = 30001 + E2E_PORT_OFFSET * 1000 + workerInfo.workerIndex * 200;
+      const agentctlPortMax = agentctlPortBase + 199;
 
       // Install a `git` shim that can sleep on `fetch`/`pull` before execing
       // the real git binary. Tests that need to simulate slow network git

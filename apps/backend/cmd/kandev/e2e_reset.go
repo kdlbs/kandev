@@ -4,8 +4,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
-	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -46,9 +44,10 @@ func handleE2EReset(repo *sqliterepo.Repository, taskSvc *taskservice.Service, l
 		ctx := c.Request.Context()
 
 		// Route through the task service (rather than a raw SQL DELETE) so
-		// running agentctl instances are stopped and their ports released.
-		// Without this, instances accumulate across tests in the same
-		// Playwright worker until the per-worker port range is exhausted.
+		// each delete spawns the async cleanup goroutine that stops the
+		// agentctl instance and releases its port. Without this, instances
+		// accumulate across tests in the same Playwright worker and
+		// eventually exhaust the per-worker port range.
 		const resetPageSize = 10000
 		tasks, total, err := repo.ListTasksByWorkspace(ctx, workspaceID, "", "", "", 1, resetPageSize, true, true, false, false)
 		if err != nil {
@@ -66,31 +65,17 @@ func handleE2EReset(repo *sqliterepo.Repository, taskSvc *taskservice.Service, l
 			})
 			return
 		}
-		// Parallelise the per-task waits — each one blocks on a force-stop
-		// of the agent, which is independent across tasks.
 		var deletedTasks int64
-		var wg sync.WaitGroup
-		errCh := make(chan taskDeleteError, len(tasks))
 		for _, t := range tasks {
-			wg.Add(1)
-			go func(taskID string) {
-				defer wg.Done()
-				if err := taskSvc.DeleteTaskAndWait(ctx, taskID); err != nil {
-					errCh <- taskDeleteError{taskID: taskID, err: err}
-					return
-				}
-				atomic.AddInt64(&deletedTasks, 1)
-			}(t.ID)
-		}
-		wg.Wait()
-		close(errCh)
-		if first, ok := <-errCh; ok {
-			// Abort: leaving an undeleted task with its workflow gone
-			// would create orphan rows visible to subsequent tests.
-			log.Error("e2e reset: failed to delete task",
-				zap.String("task_id", first.taskID), zap.Error(first.err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": first.err.Error()})
-			return
+			if err := taskSvc.DeleteTask(ctx, t.ID); err != nil {
+				// Abort: leaving an undeleted task with its workflow gone
+				// would create orphan rows visible to subsequent tests.
+				log.Error("e2e reset: failed to delete task",
+					zap.String("task_id", t.ID), zap.Error(err))
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			deletedTasks++
 		}
 
 		deletedWorkflows, err := repo.DeleteWorkflowsByWorkspace(ctx, workspaceID, keepWorkflowIDs)
@@ -105,11 +90,6 @@ func handleE2EReset(repo *sqliterepo.Repository, taskSvc *taskservice.Service, l
 			"deleted_workflows": deletedWorkflows,
 		})
 	}
-}
-
-type taskDeleteError struct {
-	taskID string
-	err    error
 }
 
 type e2eHiddenWorkflowRequest struct {
