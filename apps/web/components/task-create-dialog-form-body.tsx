@@ -214,6 +214,13 @@ type WorkflowSectionProps = {
   effectiveWorkflowId: string | null;
   onWorkflowChange: (value: string) => void;
   agentProfiles: AgentProfileOption[];
+  /**
+   * When true the picker is hidden entirely. Used by feature wrappers
+   * (Improve Kandev) where the workflow is enforced and the user must not be
+   * able to switch to a different one. The wrapper is responsible for
+   * surfacing the workflow elsewhere (e.g. a steps preview).
+   */
+  workflowLocked?: boolean;
 };
 
 export const WorkflowSection = memo(function WorkflowSection({
@@ -224,6 +231,7 @@ export const WorkflowSection = memo(function WorkflowSection({
   effectiveWorkflowId,
   onWorkflowChange,
   agentProfiles,
+  workflowLocked,
 }: WorkflowSectionProps) {
   const [lastUsedWorkflowId, setLastUsedWorkflowId] = useState<string | null>(null);
 
@@ -240,6 +248,7 @@ export const WorkflowSection = memo(function WorkflowSection({
   );
 
   if (!isCreateMode || isTaskStarted) return null;
+  if (workflowLocked) return null;
 
   if (!effectiveWorkflowId || workflows.length > 1) {
     return (

@@ -32,6 +32,16 @@ export type BootstrapState =
 
 type ImproveKind = "bug" | "feature";
 
+// Surfaced in the dialog's submit-button tooltip while the bootstrap probe is
+// in flight, so the disabled state has an explanation the user can act on
+// instead of the usual missing-field reasons.
+function bootstrapBlockedReason(bootstrap: BootstrapState): string | null {
+  if (bootstrap.kind === "loading" || bootstrap.kind === "idle") {
+    return "Preparing kandev repository…";
+  }
+  return null;
+}
+
 const PLACEHOLDERS: Record<ImproveKind, string> = {
   bug: "E.g. When I open the kanban board, the column header text overlaps the task count badge on screens narrower than 1200px...",
   feature:
@@ -90,6 +100,7 @@ export function CreateModeView(props: CreateModeViewProps) {
       }}
       onSuccess={props.onTaskCreated}
       lockedFields={{ repository: true, branch: true, workflow: true }}
+      submitBlockedReason={bootstrapBlockedReason(bootstrap)}
       descriptionPlaceholder={PLACEHOLDERS[kind]}
       aboveDescriptionSlot={<KindTabs kind={kind} onChange={handleKindChange} />}
       extraFormSlot={

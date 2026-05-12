@@ -231,6 +231,13 @@ export type TaskCreateDialogFooterProps = {
   onUpdateWithoutAgent: () => void;
   onCreateWithoutAgent: () => void;
   onCreateWithPlanMode?: () => void;
+  /**
+   * Externally-supplied reason that the submit buttons are disabled (e.g. an
+   * async bootstrap step from a feature wrapper hasn't finished yet). When set,
+   * every submit variant is disabled and the tooltip shows this string instead
+   * of the usual missing-field reason.
+   */
+  submitBlockedReason?: string | null;
 };
 
 function isMissingWorkflowCtx(
@@ -290,6 +297,7 @@ export function computeDisabledReason(
   kind: ButtonKind,
 ): string | null {
   if (props.isCreatingTask) return null;
+  if (props.submitBlockedReason) return props.submitBlockedReason;
   if (kind === "update") return props.hasTitle ? null : REASON_TITLE;
   if (kind === "default" && props.isSessionMode) return sessionDefaultReason(props);
   const base = baseReason(props);
@@ -308,9 +316,10 @@ function computeFooterState(props: TaskCreateDialogFooterProps) {
   const showStartTask =
     (props.isCreateMode && (props.hasDescription || props.isPassthroughProfile)) ||
     Boolean(props.isEditMode && props.agentProfileId);
-  const altDisabled = computeBaseDisabled(props);
+  const blocked = Boolean(props.submitBlockedReason);
+  const altDisabled = computeBaseDisabled(props) || blocked;
   const splitDisabled = altDisabled || !props.agentProfileId;
-  const defaultDisabled = props.isSessionMode ? !props.agentProfileId : altDisabled;
+  const defaultDisabled = (props.isSessionMode ? !props.agentProfileId : altDisabled) || blocked;
 
   const disabledReason = computeDisabledReason(props, resolveButtonKind(props, showStartTask));
 
