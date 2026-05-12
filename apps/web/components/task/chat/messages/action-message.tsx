@@ -143,7 +143,7 @@ function ActionButton({
 }: {
   action: MessageAction;
   messageTaskId?: string;
-}): ReactElement {
+}): ReactElement | null {
   const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const taskId = messageTaskId || activeTaskId;
@@ -187,11 +187,15 @@ function ActionButton({
     }
   }, [action, state, taskId, store, archiveAndSwitch, removeTaskFromBoard]);
 
+  // Once a ws_request has been fired, hide this button: it's no longer
+  // actionable. If the recovery succeeds the whole ActionMessage unmounts via
+  // isSessionActive; if it fails, a newer status/error message renders fresh
+  // buttons, so this stale one would just confuse the user.
+  if (state === "done" && action.type === "ws_request") return null;
+
   const Icon = action.icon ? ICON_MAP[action.icon] : null;
   const disabled = state === "busy" || state === "done";
   const isDestructive = action.variant === "destructive";
-  const label =
-    state === "done" && action.type === "ws_request" ? `${action.label} requested` : action.label;
 
   const button = (
     <Button
@@ -206,7 +210,7 @@ function ActionButton({
       data-testid={action.test_id}
     >
       {Icon && <Icon className="h-3 w-3" />}
-      {label}
+      {action.label}
     </Button>
   );
 
