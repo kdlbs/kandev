@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -64,17 +66,31 @@ func handleE2EReset(repo *sqliterepo.Repository, taskSvc *taskservice.Service, l
 			})
 			return
 		}
+		// Parallelise the per-task waits — each one blocks on a force-stop
+		// of the agent, which is independent across tasks.
 		var deletedTasks int64
+		var wg sync.WaitGroup
+		errCh := make(chan taskDeleteError, len(tasks))
 		for _, t := range tasks {
-			if err := taskSvc.DeleteTaskAndWait(ctx, t.ID); err != nil {
-				// Abort: leaving an undeleted task with its workflow gone
-				// would create orphan rows visible to subsequent tests.
-				log.Error("e2e reset: failed to delete task",
-					zap.String("task_id", t.ID), zap.Error(err))
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			deletedTasks++
+			wg.Add(1)
+			go func(taskID string) {
+				defer wg.Done()
+				if err := taskSvc.DeleteTaskAndWait(ctx, taskID); err != nil {
+					errCh <- taskDeleteError{taskID: taskID, err: err}
+					return
+				}
+				atomic.AddInt64(&deletedTasks, 1)
+			}(t.ID)
+		}
+		wg.Wait()
+		close(errCh)
+		if first, ok := <-errCh; ok {
+			// Abort: leaving an undeleted task with its workflow gone
+			// would create orphan rows visible to subsequent tests.
+			log.Error("e2e reset: failed to delete task",
+				zap.String("task_id", first.taskID), zap.Error(first.err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": first.err.Error()})
+			return
 		}
 
 		deletedWorkflows, err := repo.DeleteWorkflowsByWorkspace(ctx, workspaceID, keepWorkflowIDs)
@@ -89,6 +105,11 @@ func handleE2EReset(repo *sqliterepo.Repository, taskSvc *taskservice.Service, l
 			"deleted_workflows": deletedWorkflows,
 		})
 	}
+}
+
+type taskDeleteError struct {
+	taskID string
+	err    error
 }
 
 type e2eHiddenWorkflowRequest struct {

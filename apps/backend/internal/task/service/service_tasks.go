@@ -491,10 +491,12 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	return s.deleteTask(ctx, id, false)
 }
 
-// DeleteTaskAndWait is the synchronous variant of DeleteTask: it returns only
-// after agents are stopped and worktrees are cleaned up. Used by the E2E
-// reset endpoint so subsequent tests start with no leaked agentctl instances
-// holding ports.
+// DeleteTaskAndWait is the half-synchronous variant of DeleteTask: it
+// returns only after agents are stopped (releasing their ports) but lets the
+// remaining cleanup (worktrees, executor records, ephemeral dirs) finish in
+// the background. Used by the E2E reset endpoint so subsequent tests start
+// with no leaked agentctl instances holding ports, without paying the full
+// cleanup cost on every test.
 func (s *Service) DeleteTaskAndWait(ctx context.Context, id string) error {
 	return s.deleteTask(ctx, id, true)
 }
@@ -544,17 +546,18 @@ func (s *Service) deleteTask(ctx context.Context, id string, waitForCleanup bool
 		zap.Bool("wait_for_cleanup", waitForCleanup),
 		zap.Duration("duration", time.Since(start)))
 
-	// 6. Stop agents and cleanup worktrees, async by default and synchronous
-	// when callers (e.g. the E2E reset endpoint) need ports released before
-	// returning.
+	// 6. Stop agents and cleanup worktrees. Async by default. When the caller
+	// asked to wait (e.g. the E2E reset endpoint) we still run agent stops
+	// synchronously — that's what releases ports — but push the rest to a
+	// goroutine so each delete returns as soon as ports are free.
 	hasCleanup := len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || task.IsEphemeral
 	if hasCleanup {
 		const stopReason = "task deleted"
 		const stopFailMsg = "failed to stop session on task delete"
 		const cleanupMsg = "task cleanup completed"
 		if waitForCleanup {
-			s.executeTaskCleanup(id, sessions, worktrees, stopTargets, task.IsEphemeral,
-				stopReason, stopFailMsg, cleanupMsg)
+			s.stopTaskExecutions(id, stopTargets, stopReason, stopFailMsg)
+			go s.performTaskCleanupBackground(id, sessions, worktrees, task.IsEphemeral, cleanupMsg)
 		} else {
 			s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, task.IsEphemeral,
 				stopReason, stopFailMsg, cleanupMsg)
@@ -603,8 +606,8 @@ func (s *Service) runAsyncTaskCleanup(
 }
 
 // executeTaskCleanup runs the post-delete cleanup synchronously. Both the
-// async DeleteTask path and the synchronous DeleteTaskAndWait path call this
-// — the only difference is whether it runs in its own goroutine.
+// async DeleteTask path and the synchronous DeleteTaskAndWait path call into
+// the same primitives — this just wires them together for the async path.
 func (s *Service) executeTaskCleanup(
 	id string,
 	sessions []*models.TaskSession,
@@ -613,41 +616,65 @@ func (s *Service) executeTaskCleanup(
 	isEphemeral bool,
 	stopReason, stopFailMsg, cleanupMsg string,
 ) {
+	s.stopTaskExecutions(id, stopTargets, stopReason, stopFailMsg)
+	s.performTaskCleanupBackground(id, sessions, worktrees, isEphemeral, cleanupMsg)
+}
+
+// stopTaskExecutions force-stops all agentctl executions for a task. This is
+// the part of cleanup that releases ports, so the sync delete path waits for
+// it before returning. Uses a 30s ceiling per call (force=true skips the
+// graceful agentctl Stop, so the only real wait is the runtime tearing down
+// the instance and freeing its port).
+func (s *Service) stopTaskExecutions(taskID string, stopTargets []taskStopTarget, stopReason, stopFailMsg string) {
+	if s.executionStopper == nil || len(stopTargets) == 0 {
+		return
+	}
+	stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for _, target := range stopTargets {
+		if target.executionID != "" {
+			if err := s.executionStopper.StopExecution(stopCtx, target.executionID, stopReason, true); err != nil {
+				s.logger.Warn(stopFailMsg,
+					zap.String("task_id", taskID),
+					zap.String("session_id", target.sessionID),
+					zap.String("execution_id", target.executionID),
+					zap.Error(err))
+			}
+			continue
+		}
+		if err := s.executionStopper.StopSession(stopCtx, target.sessionID, stopReason, true); err != nil {
+			s.logger.Warn(stopFailMsg,
+				zap.String("task_id", taskID),
+				zap.String("session_id", target.sessionID),
+				zap.Error(err))
+		}
+	}
+}
+
+// performTaskCleanupBackground runs worktree, executor record, and ephemeral
+// directory cleanup. Detached from any request context so it can finish
+// after the HTTP/WS caller has already returned.
+func (s *Service) performTaskCleanupBackground(
+	taskID string,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+	isEphemeral bool,
+	cleanupMsg string,
+) {
 	cleanupStart := time.Now()
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	if s.executionStopper != nil && len(stopTargets) > 0 {
-		for _, target := range stopTargets {
-			if target.executionID != "" {
-				if err := s.executionStopper.StopExecution(cleanupCtx, target.executionID, stopReason, true); err != nil {
-					s.logger.Warn(stopFailMsg,
-						zap.String("task_id", id),
-						zap.String("session_id", target.sessionID),
-						zap.String("execution_id", target.executionID),
-						zap.Error(err))
-				}
-				continue
-			}
-			if err := s.executionStopper.StopSession(cleanupCtx, target.sessionID, stopReason, true); err != nil {
-				s.logger.Warn(stopFailMsg,
-					zap.String("task_id", id),
-					zap.String("session_id", target.sessionID),
-					zap.Error(err))
-			}
-		}
-	}
-
-	cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, isEphemeral)
+	cleanupErrors := s.performTaskCleanup(cleanupCtx, taskID, sessions, worktrees, isEphemeral)
 
 	if len(cleanupErrors) > 0 {
 		s.logger.Warn(cleanupMsg+" with errors",
-			zap.String("task_id", id),
+			zap.String("task_id", taskID),
 			zap.Int("error_count", len(cleanupErrors)),
 			zap.Duration("duration", time.Since(cleanupStart)))
 	} else {
 		s.logger.Info(cleanupMsg,
-			zap.String("task_id", id),
+			zap.String("task_id", taskID),
 			zap.Duration("duration", time.Since(cleanupStart)))
 	}
 }
