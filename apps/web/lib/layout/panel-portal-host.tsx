@@ -85,10 +85,28 @@ export function usePortalSlot(
 
     const entry = panelPortalManager.acquire(panelId, component, params, props.api, envId);
 
-    // Reparent the portal element into this panel's DOM slot.
+    // Reparent the portal element into this panel's DOM slot, then restore any
+    // scroll positions captured before the previous detach. Browsers reset
+    // scrollTop/scrollLeft when an element is removed from the DOM, so without
+    // this the sidebar (and any other scrollable descendant of a portal) jumps
+    // back to the top after every dockview layout switch.
     container.appendChild(entry.element);
+    restorePortalScroll(entry.element);
+    // Track every scroll inside this portal so we always have an up-to-date
+    // snapshot to restore after the next reattach. We do this via a capturing
+    // listener because dockview can rip the DOM apart before React runs the
+    // cleanup below (removeChild fires too late to read scrollTop reliably).
+    const onScroll = (e: Event) => {
+      const target = e.target;
+      if (target instanceof Element && entry.element.contains(target)) {
+        const html = target as HTMLElement;
+        scrollSnapshots.set(target, { top: html.scrollTop, left: html.scrollLeft });
+      }
+    };
+    entry.element.addEventListener("scroll", onScroll, true);
 
     return () => {
+      entry.element.removeEventListener("scroll", onScroll, true);
       // Detach only — do NOT release.  The element stays in the manager
       // and will be re-adopted when the panel remounts after fromJSON().
       if (entry.element.parentNode === container) {
@@ -112,4 +130,33 @@ export function usePortalSlot(
   }, [panelId, props.api]);
 
   return containerRef;
+}
+
+// ---------------------------------------------------------------------------
+// Scroll preservation across portal detach/reattach
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-element scroll snapshots, kept up-to-date by a capturing scroll
+ * listener attached to each portal element. Stored in a WeakMap so detached
+ * subtrees can be garbage collected if the portal is ever released.
+ */
+const scrollSnapshots = new WeakMap<Element, { top: number; left: number }>();
+
+function restorePortalScroll(portal: Element): void {
+  // Walk every element under the portal (after reattach the live scrollTop
+  // values have been reset to 0) and restore any snapshot we recorded.
+  const walker = document.createTreeWalker(portal, NodeFilter.SHOW_ELEMENT);
+  let node: Node | null = walker.currentNode;
+  while (node) {
+    if (node instanceof Element) {
+      const snap = scrollSnapshots.get(node);
+      if (snap) {
+        const html = node as HTMLElement;
+        html.scrollTop = snap.top;
+        html.scrollLeft = snap.left;
+      }
+    }
+    node = walker.nextNode();
+  }
 }
