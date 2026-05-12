@@ -208,6 +208,12 @@ export type DialogFormState = {
   /** True while resolving currentLocalBranch — distinguishes "still loading" from "no branch on disk" */
   currentLocalBranchLoading: boolean;
   setCurrentLocalBranchLoading: (v: boolean) => void;
+  /** No-repo mode: when true the task is created with no repositories. */
+  noRepository: boolean;
+  setNoRepository: (v: boolean) => void;
+  /** Optional host folder for repo-less tasks; empty means scratch workspace. */
+  workspacePath: string;
+  setWorkspacePath: (v: string) => void;
 };
 
 export type SubmitHandlersDeps = {
@@ -267,6 +273,10 @@ export type SubmitHandlersDeps = {
   isLocalExecutor: boolean;
   /** Resolved on-disk path for the selected repository (workspace or discovered). Empty if not local. */
   repositoryLocalPath: string;
+  /** When true, the task is created with no repositories (repo-less mode). */
+  noRepository: boolean;
+  /** Optional host folder for repo-less tasks; empty means kandev creates a scratch workspace. */
+  workspacePath: string;
   /**
    * Optional async transform applied to the trimmed description before the
    * API payload is built. Used by feature wrappers (e.g. Improve Kandev) to

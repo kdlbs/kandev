@@ -25,6 +25,7 @@ import { usePlanPanelAutoOpen } from "@/hooks/use-plan-panel-auto-open";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
+import { useActiveTaskHasRepos } from "@/hooks/domains/kanban/use-active-task-has-repos";
 
 // Panel components (rendered via portals, not directly by dockview)
 import { TaskSessionSidebar } from "./task-session-sidebar";
@@ -308,6 +309,18 @@ function ChangesContent({ panelId }: { panelId: string }) {
   const { commits } = useSessionCommits(activeSessionId);
   const fileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
   const totalCount = fileCount + commits.length;
+
+  // Repo-less tasks have no git changes ever — auto-close the panel so users
+  // don't see a permanently empty Changes tab. Gate on a confirmed `false`:
+  // `null` means the task hasn't loaded yet, and removing the panel during
+  // that window is unrecoverable in the same session.
+  const taskHasRepos = useActiveTaskHasRepos();
+  useEffect(() => {
+    if (taskHasRepos !== false) return;
+    const dockApi = useDockviewStore.getState().api;
+    const panel = dockApi?.getPanel(panelId);
+    if (dockApi && panel) dockApi.removePanel(panel);
+  }, [taskHasRepos, panelId]);
 
   useEffect(() => {
     const title = totalCount > 0 ? `Changes (${totalCount})` : "Changes";

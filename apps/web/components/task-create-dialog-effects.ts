@@ -213,6 +213,26 @@ export function useCurrentLocalBranchEffect(
   ]);
 }
 
+/**
+ * Picks the default executor ID to auto-fill on dialog open. Repo-less tasks
+ * skip the worktree executor (it needs a repo); other modes use the workspace
+ * default → DEFAULT_LOCAL_EXECUTOR_TYPE → first available, in priority order.
+ */
+function pickDefaultExecutorId(
+  executors: Executor[],
+  workspaceDefaults: { default_executor_id?: string | null } | null | undefined,
+  noRepository: boolean,
+): string | null {
+  const eligible = noRepository
+    ? executors.filter((e: Executor) => e.type !== "worktree")
+    : executors;
+  if (eligible.length === 0) return null;
+  const defId = workspaceDefaults?.default_executor_id ?? null;
+  if (defId && eligible.some((e: Executor) => e.id === defId)) return defId;
+  const local = eligible.find((e: Executor) => e.type === DEFAULT_LOCAL_EXECUTOR_TYPE);
+  return local?.id ?? eligible[0].id;
+}
+
 export function useDefaultSelectionsEffect(
   fs: DialogFormState,
   open: boolean,
@@ -229,6 +249,7 @@ export function useDefaultSelectionsEffect(
     setAgentProfileId,
     setExecutorId,
     setExecutorProfileId,
+    noRepository,
   } = fs;
   useEffect(() => {
     // Check synchronously whether the selected workflow has an agent override.
@@ -269,14 +290,9 @@ export function useDefaultSelectionsEffect(
 
   useEffect(() => {
     if (!open || executorId || executors.length === 0) return;
-    const defId = workspaceDefaults?.default_executor_id ?? null;
-    if (defId && executors.some((e: Executor) => e.id === defId)) {
-      void Promise.resolve().then(() => setExecutorId(defId));
-      return;
-    }
-    const local = executors.find((e: Executor) => e.type === DEFAULT_LOCAL_EXECUTOR_TYPE);
-    void Promise.resolve().then(() => setExecutorId(local?.id ?? executors[0].id));
-  }, [open, executorId, executors, workspaceDefaults, setExecutorId]);
+    const pick = pickDefaultExecutorId(executors, workspaceDefaults, noRepository);
+    if (pick) void Promise.resolve().then(() => setExecutorId(pick));
+  }, [open, executorId, executors, workspaceDefaults, setExecutorId, noRepository]);
 
   useEffect(() => {
     // Auto-select executor profile: last used (localStorage) → first available

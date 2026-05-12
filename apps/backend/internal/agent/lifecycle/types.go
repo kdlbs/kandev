@@ -284,6 +284,7 @@ type RepoLaunchSpec struct {
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
 	TaskID            string
+	WorkspaceID       string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
 	SessionID         string
 	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
 	TaskTitle         string // Human-readable task title for semantic worktree naming

@@ -66,15 +66,22 @@ func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *lo
 // LaunchAgent creates a new agentctl instance for a task.
 // Agent subprocess is NOT started - call StartAgentProcess() explicitly.
 func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
-	// The RepositoryURL field contains a local filesystem path for the workspace
-	// If empty, the agent will run without a mounted workspace
+	// WorkspacePath wins when set (repo-less task with picked folder); otherwise
+	// fall back to RepositoryURL (legacy: this carries a local filesystem path
+	// for the workspace). Empty is also valid — lifecycle manager creates a
+	// scratch workspace.
+	workspacePath := req.WorkspacePath
+	if workspacePath == "" {
+		workspacePath = req.RepositoryURL
+	}
 	launchReq := &lifecycle.LaunchRequest{
 		TaskID:              req.TaskID,
+		WorkspaceID:         req.WorkspaceID,
 		SessionID:           req.SessionID,
 		TaskEnvironmentID:   req.TaskEnvironmentID,
 		TaskTitle:           req.TaskTitle,
 		AgentProfileID:      req.AgentProfileID,
-		WorkspacePath:       req.RepositoryURL, // May be empty - lifecycle manager handles this
+		WorkspacePath:       workspacePath,
 		TaskDescription:     req.TaskDescription,
 		Attachments:         convertToLifecycleAttachments(req.Attachments),
 		Env:                 req.Env,

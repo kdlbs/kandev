@@ -41,10 +41,12 @@ type Manager struct {
 	worktreeMgr     *worktree.Manager
 	mcpProvider     McpConfigProvider
 	logger          *logger.Logger
-	// dataDir is the base data directory for Kandev (from config.ResolvedDataDir()).
-	// Used for:
+	// dataDir is the kandev root directory. Misnamed for historical reasons:
+	// cmd/kandev/agents.go passes cfg.ResolvedHomeDir() (the kandev root —
+	// typically ~/.kandev) here, not ResolvedDataDir(). Used for:
 	// - Session history storage (SessionHistoryManager)
-	// - Ephemeral workspace creation (quick chat, tasks without repositories)
+	// - Ephemeral workspace creation (quick chat) at <root>/quick-chat/<sessionID>
+	// - Scratch workspaces for repo-less tasks at <root>/tasks/<workspaceID>/<taskID>
 	dataDir string
 
 	// ExecutorRegistry manages multiple runtimes (Docker, Standalone, etc.)

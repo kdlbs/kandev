@@ -126,6 +126,8 @@ type DialogFormBodyProps = {
   onToggleGitHubUrl?: () => void;
   onGitHubUrlChange: (v: string) => void;
   onToggleFreshBranch: (enabled: boolean) => void;
+  onToggleNoRepository: () => void;
+  onWorkspacePathChange: (value: string) => void;
   enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
   workflowAgentLocked: boolean;
   /** Workspace repositories — driven into the chip row for repo + branch picks. */
@@ -147,6 +149,12 @@ type DialogFormBodyProps = {
   /** Optional override for the description placeholder. */
   descriptionPlaceholder?: string;
 };
+
+function computeHasAllBranches(fs: DialogFormState): boolean {
+  if (fs.noRepository) return true;
+  if (fs.useGitHubUrl) return !!fs.githubBranch;
+  return fs.repositories.length > 0 && fs.repositories.every((r) => !!r.branch);
+}
 
 function CreateModeBody(props: DialogFormBodyProps) {
   const {
@@ -193,6 +201,8 @@ function CreateModeBody(props: DialogFormBodyProps) {
         freshBranchEnabled={fs.freshBranchEnabled}
         onToggleFreshBranch={onToggleFreshBranch}
         isLocalExecutor={isLocalExecutor}
+        onToggleNoRepository={props.onToggleNoRepository}
+        onWorkspacePathChange={props.onWorkspacePathChange}
       />
       {showTaskName && (
         <InlineTaskName
@@ -398,6 +408,8 @@ function useSubmitHandlersWiring({
     freshBranchEnabled: fs.freshBranchEnabled,
     isLocalExecutor: computed.isLocalExecutor,
     repositoryLocalPath,
+    noRepository: fs.noRepository,
+    workspacePath: fs.workspacePath,
   });
 }
 
@@ -547,6 +559,8 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             }
             onGitHubUrlChange={handlers.handleGitHubUrlChange}
             onToggleFreshBranch={handlers.handleToggleFreshBranch}
+            onToggleNoRepository={handlers.handleToggleNoRepository}
+            onWorkspacePathChange={handlers.handleWorkspacePathChange}
             enhance={setup.enhance}
             workflowAgentLocked={computed.workflowAgentLocked}
             repositories={repositories}
@@ -569,11 +583,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
               hasTitle={fs.hasTitle}
               hasDescription={fs.hasDescription}
               hasRepositorySelection={computed.hasRepositorySelection}
-              hasAllBranches={
-                fs.useGitHubUrl
-                  ? !!fs.githubBranch
-                  : fs.repositories.length > 0 && fs.repositories.every((r) => !!r.branch)
-              }
+              hasAllBranches={computeHasAllBranches(fs)}
               agentProfileId={computed.effectiveAgentProfileId}
               workspaceId={workspaceId}
               effectiveWorkflowId={computed.effectiveWorkflowId ?? null}
