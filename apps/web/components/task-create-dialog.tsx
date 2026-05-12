@@ -482,18 +482,18 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     isSessionMode,
     isEditMode,
   });
+  const guardedHandleSubmit = useGuardedSubmit(
+    submitHandlers.handleSubmit,
+    props.submitBlockedReason,
+  );
   const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
-    submitHandlers.handleSubmit(event as unknown as FormEvent);
+    guardedHandleSubmit(event as unknown as FormEvent);
   });
   // Fresh-branch is single-row + local executor + not URL mode. The chip row
   // can hold any number of repos; we hide the toggle whenever the question
   // ("which repo do we discard local changes in?") becomes ambiguous.
   const freshBranchAvailable =
     !fs.useGitHubUrl && computed.isLocalExecutor && fs.repositories.length === 1;
-  const guardedHandleSubmit = useGuardedSubmit(
-    submitHandlers.handleSubmit,
-    props.submitBlockedReason,
-  );
   return {
     fs,
     isSessionMode,

@@ -274,6 +274,16 @@ test.describe("Improve Kandev dialog", () => {
       timeout: 5_000,
     });
 
+    // Pressing the Cmd/Ctrl+Enter shortcut must also be gated by the bootstrap
+    // guard — if it bypassed guardedHandleSubmit, the dialog would close and
+    // a task would be created with an empty repositoryId.
+    await createDialog.getByTestId("task-description-input").focus();
+    await testPage.keyboard.press("ControlOrMeta+Enter");
+    await expect(createDialog).toBeVisible();
+    await expect(
+      createDialog.getByText(/Preparing kandev repository in background/i),
+    ).toBeVisible();
+
     // Releasing the bootstrap response transitions the dialog to "ready" and
     // the submit button must become actionable.
     releaseBootstrap();
