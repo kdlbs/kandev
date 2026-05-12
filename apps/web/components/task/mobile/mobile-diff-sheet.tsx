@@ -11,8 +11,15 @@ import type { SelectedDiff } from "../task-layout";
 
 type DiffSheetMode =
   | { kind: "all" }
-  | { kind: "file"; path: string }
+  | {
+      kind: "file";
+      path: string;
+      sourceFilter?: "all" | ReviewSource;
+      repositoryName?: string;
+    }
   | { kind: "commit"; sha: string; repo?: string };
+
+const MOBILE_DIFF_SOURCE_FILTER_KEY = "mobile-diff-source-filter";
 
 type MobileDiffSheetProps = {
   mode: DiffSheetMode | null;
@@ -55,6 +62,7 @@ function useAutoSelectSource(
     if (userPickedRef.current) return;
     const pick = pickFirstNonEmpty(sourceCounts);
     if (pick === null) return;
+    if (sourceCounts[activeSource] > 0) return;
     if (pick === activeSource) return;
     setActiveSource(pick);
   }, [modeKind, sourceCounts, activeSource, setActiveSource]);
@@ -165,14 +173,17 @@ function renderPanel(
   }
   const panelMode = mode.kind;
   const filePath = mode.kind === "file" ? mode.path : undefined;
+  const fileRepositoryName = mode.kind === "file" ? mode.repositoryName : undefined;
+  const effectiveSourceFilter = mode.kind === "all" ? activeSource : (mode.sourceFilter ?? "all");
   return (
     <TaskChangesPanel
       mode={panelMode}
       filePath={filePath}
+      fileRepositoryName={fileRepositoryName}
       selectedDiff={selectedDiff}
       onClearSelected={onClearSelected}
       onOpenFile={onOpenFile}
-      sourceFilter={mode.kind === "all" ? activeSource : "all"}
+      sourceFilter={effectiveSourceFilter}
     />
   );
 }
@@ -190,13 +201,22 @@ export const MobileDiffSheet = memo(function MobileDiffSheet({
   onClearSelected,
   sourceCounts,
 }: MobileDiffSheetProps) {
-  const [activeSource, setActiveSource] = useState<ReviewSource>("uncommitted");
+  const [activeSource, setActiveSource] = useState<ReviewSource>(() => {
+    if (typeof window === "undefined") return "uncommitted";
+    const saved = localStorage.getItem(MOBILE_DIFF_SOURCE_FILTER_KEY);
+    if (saved === "uncommitted" || saved === "committed" || saved === "pr") return saved;
+    return "uncommitted";
+  });
   const { handleUserPick } = useAutoSelectSource(
     mode?.kind,
     sourceCounts,
     activeSource,
     setActiveSource,
   );
+  useEffect(() => {
+    if (mode?.kind !== "all") return;
+    localStorage.setItem(MOBILE_DIFF_SOURCE_FILTER_KEY, activeSource);
+  }, [mode?.kind, activeSource]);
   const sourceTabs = useMemo(() => buildSourceTabs(sourceCounts), [sourceCounts]);
   const activeSourceLabel = useMemo(
     () => sourceTabs.find((t) => t.key === activeSource)?.label ?? null,

@@ -23,6 +23,7 @@ import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-con
 type TaskChangesPanelProps = {
   mode?: "all" | "file";
   filePath?: string;
+  fileRepositoryName?: string;
   selectedDiff: SelectedDiff | null;
   onClearSelected: () => void;
   onBecameEmpty?: () => void;
@@ -307,11 +308,15 @@ function filterVisibleFiles(
   allFiles: ReviewFile[],
   mode: "all" | "file",
   filePath: string | undefined,
+  fileRepositoryName: string | undefined,
   sourceFilter: "all" | ReviewSource,
 ): ReviewFile[] {
   let files = allFiles;
   if (mode === "file" && filePath) {
     files = files.filter((file) => file.path === filePath);
+    if (fileRepositoryName !== undefined) {
+      files = files.filter((file) => (file.repository_name ?? "") === fileRepositoryName);
+    }
   }
   if (sourceFilter !== "all") {
     files = files.filter((file) => file.source === sourceFilter);
@@ -319,9 +324,61 @@ function filterVisibleFiles(
   return files;
 }
 
+function useVisibleDiffState(opts: {
+  allFiles: ReviewFile[];
+  mode: "all" | "file";
+  filePath: string | undefined;
+  fileRepositoryName: string | undefined;
+  sourceFilter: "all" | ReviewSource;
+  fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
+  reviewedFiles: Set<string>;
+  staleFiles: Set<string>;
+}) {
+  const {
+    allFiles,
+    mode,
+    filePath,
+    fileRepositoryName,
+    sourceFilter,
+    fileRefs,
+    reviewedFiles,
+    staleFiles,
+  } = opts;
+  const visibleFiles = useMemo(
+    () => filterVisibleFiles(allFiles, mode, filePath, fileRepositoryName, sourceFilter),
+    [allFiles, mode, filePath, fileRepositoryName, sourceFilter],
+  );
+  const visibleFileRefs = useMemo(() => {
+    if (mode !== "file" || !filePath) return fileRefs;
+    const refs = new Map<string, React.RefObject<HTMLDivElement | null>>();
+    for (const [key, ref] of fileRefs.entries()) {
+      const split = splitReviewFileKey(key);
+      if (split.path !== filePath) continue;
+      if (fileRepositoryName !== undefined && (split.repositoryName || "") !== fileRepositoryName) {
+        continue;
+      }
+      refs.set(key, ref);
+    }
+    return refs;
+  }, [mode, filePath, fileRepositoryName, fileRefs]);
+  const reviewedCount = useMemo(
+    () =>
+      visibleFiles.reduce((count, file) => {
+        const key = reviewFileKey(file);
+        if (!staleFiles.has(key) && reviewedFiles.has(key)) return count + 1;
+        return count;
+      }, 0),
+    [visibleFiles, reviewedFiles, staleFiles],
+  );
+  const totalCount = visibleFiles.length;
+  const progressPercent = totalCount > 0 ? (reviewedCount / totalCount) * 100 : 0;
+  return { visibleFiles, visibleFileRefs, reviewedCount, totalCount, progressPercent };
+}
+
 const TaskChangesPanel = memo(function TaskChangesPanel({
   mode = "all",
   filePath,
+  fileRepositoryName,
   selectedDiff,
   onClearSelected,
   onBecameEmpty,
@@ -342,19 +399,6 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     cumulativeLoading,
     gitStatus,
   } = useChangesView(selectedDiff, onClearSelected);
-  const visibleFiles = useMemo(
-    () => filterVisibleFiles(allFiles, mode, filePath, sourceFilter),
-    [allFiles, mode, filePath, sourceFilter],
-  );
-  const visibleFileRefs = useMemo(() => {
-    if (mode !== "file" || !filePath) return fileRefs;
-    const refs = new Map<string, React.RefObject<HTMLDivElement | null>>();
-    // filePath is always bare — collect all refs whose composite key matches.
-    for (const [key, ref] of fileRefs.entries()) {
-      if (splitReviewFileKey(key).path === filePath) refs.set(key, ref);
-    }
-    return refs;
-  }, [mode, filePath, fileRefs]);
   const {
     splitView,
     wordWrap,
@@ -366,18 +410,24 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     handleToggleAutoMark,
     handleFixComments,
   } = useChangesActions(activeSessionId, allFiles);
-
-  const reviewedCount = useMemo(
+  const { visibleFiles, visibleFileRefs, reviewedCount, totalCount, progressPercent } =
+    useVisibleDiffState({
+      allFiles,
+      mode,
+      filePath,
+      fileRepositoryName,
+      sourceFilter,
+      fileRefs,
+      reviewedFiles,
+      staleFiles,
+    });
+  const selectedFileKey = useMemo(
     () =>
-      visibleFiles.reduce((count, file) => {
-        const key = reviewFileKey(file);
-        if (!staleFiles.has(key) && reviewedFiles.has(key)) return count + 1;
-        return count;
-      }, 0),
-    [visibleFiles, reviewedFiles, staleFiles],
+      mode === "file" && filePath
+        ? reviewFileKey({ path: filePath, repository_name: fileRepositoryName })
+        : undefined,
+    [mode, filePath, fileRepositoryName],
   );
-  const totalCount = visibleFiles.length;
-  const progressPercent = totalCount > 0 ? (reviewedCount / totalCount) * 100 : 0;
   useAutoCloseWhenEmpty({
     mode,
     filePath,
@@ -413,7 +463,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
           staleFiles={staleFiles}
           autoMarkOnScroll={autoMarkOnScroll}
           wordWrap={wordWrap}
-          selectedFile={mode === "file" ? filePath : undefined}
+          selectedFile={selectedFileKey}
           onToggleReviewed={handleToggleReviewed}
           onDiscard={handleDiscard}
           onOpenFile={handleOpenFile}

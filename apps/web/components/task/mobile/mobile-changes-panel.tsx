@@ -12,10 +12,16 @@ import { MobileDiffSheet } from "./mobile-diff-sheet";
 import { useReviewSources } from "@/hooks/domains/session/use-review-sources";
 import { useAppStore } from "@/components/state-provider";
 import type { SelectedDiff } from "../task-layout";
+import type { OpenDiffOptions } from "../changes-diff-target";
 
 type DiffSheetMode =
   | { kind: "all" }
-  | { kind: "file"; path: string }
+  | {
+      kind: "file";
+      path: string;
+      sourceFilter?: "all" | "uncommitted" | "committed" | "pr";
+      repositoryName?: string;
+    }
   | { kind: "commit"; sha: string; repo?: string };
 
 type MobileChangesPanelProps = {
@@ -68,8 +74,13 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
     window.dispatchEvent(new CustomEvent("open-review-dialog"));
   }, []);
 
-  const handleOpenDiffFile = useCallback((path: string) => {
-    setDiffSheet({ kind: "file", path });
+  const handleOpenDiffFile = useCallback((path: string, options?: OpenDiffOptions) => {
+    setDiffSheet({
+      kind: "file",
+      path,
+      sourceFilter: options?.source ?? "all",
+      repositoryName: options?.repositoryName,
+    });
   }, []);
 
   const handleCloseDiffSheet = useCallback(() => {

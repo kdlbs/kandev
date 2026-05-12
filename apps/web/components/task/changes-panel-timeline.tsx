@@ -16,6 +16,7 @@ import {
   RepoGroupItem,
 } from "./changes-panel-repo-groups";
 import { PRFilesGroupedList } from "./changes-panel-pr-files";
+import type { OpenDiffOptions } from "./changes-diff-target";
 
 // --- Timeline visual components ---
 
@@ -226,7 +227,7 @@ type FileListSectionProps = {
   secondaryActionLabel?: string;
   isSecondaryActionLoading?: boolean;
   onSecondaryAction?: () => void;
-  onOpenDiff: (path: string) => void;
+  onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
   onEditFile: (path: string) => void;
   // Multi-repo: handlers receive the file's repositoryName so each per-file op
   // hits the right git repo. Same-named files across repos collide by path.
@@ -257,7 +258,7 @@ type FileListBodyProps = {
   pendingStageFiles: Set<string>;
   multiSelect: ReturnType<typeof useMultiSelect>;
   onKeyDown: (e: React.KeyboardEvent) => void;
-  onOpenDiff: (path: string) => void;
+  onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
   onEditFile: (path: string) => void;
   onStage: (path: string, repo?: string) => void;
   onUnstage: (path: string, repo?: string) => void;
@@ -440,7 +441,7 @@ export type PRChangedFile = {
 type PRFilesSectionProps = {
   files: PRChangedFile[];
   isLast: boolean;
-  onOpenDiff: (path: string) => void;
+  onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
   /** Maps a repository_name to a human-readable label (used for the per-repo header). */
   repoDisplayName?: (repositoryName: string) => string | undefined;
 };

@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { LineStat } from "@/components/diff-stat";
 import type { FileInfo } from "@/lib/state/store";
 import { FileStatusIcon } from "./file-status-icon";
+import type { OpenDiffOptions } from "./changes-diff-target";
 
 const splitPath = (path: string) => {
   const lastSlash = path.lastIndexOf("/");
@@ -41,7 +42,7 @@ type FileRowProps = {
   isPending: boolean;
   isSelected?: boolean;
   onSelect?: (path: string, e: React.MouseEvent) => boolean;
-  onOpenDiff: (path: string) => void;
+  onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
   // Multi-repo: handlers receive the file's repository_name so the per-file
   // staging op routes to the right git repo. Same-named files (e.g. README.md
   // in two repos) cannot be disambiguated by path alone.
@@ -68,7 +69,10 @@ export function FileRow({
     if (e.button === 2) return;
     const consumed = onSelect?.(file.path, e);
     if (!consumed) {
-      onOpenDiff(file.path);
+      onOpenDiff(file.path, {
+        source: "uncommitted",
+        repositoryName: file.repositoryName,
+      });
     }
   };
 

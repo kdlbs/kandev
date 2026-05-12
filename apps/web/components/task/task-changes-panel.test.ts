@@ -62,40 +62,56 @@ describe("filterVisibleFiles", () => {
   ];
 
   it("returns all files when mode=all and sourceFilter=all", () => {
-    expect(filterVisibleFiles(files, "all", undefined, "all")).toHaveLength(3);
+    expect(filterVisibleFiles(files, "all", undefined, undefined, "all")).toHaveLength(3);
   });
 
   it("filters by uncommitted source", () => {
-    const result = filterVisibleFiles(files, "all", undefined, "uncommitted");
+    const result = filterVisibleFiles(files, "all", undefined, undefined, "uncommitted");
     expect(result).toHaveLength(1);
     expect(result[0].path).toBe("a.ts");
   });
 
   it("filters by pr source", () => {
-    const result = filterVisibleFiles(files, "all", undefined, "pr");
+    const result = filterVisibleFiles(files, "all", undefined, undefined, "pr");
     expect(result).toHaveLength(1);
     expect(result[0].path).toBe("c.ts");
   });
 
   it("filters by committed source", () => {
-    const result = filterVisibleFiles(files, "all", undefined, "committed");
+    const result = filterVisibleFiles(files, "all", undefined, undefined, "committed");
     expect(result).toHaveLength(1);
     expect(result[0].path).toBe("b.ts");
   });
 
   it("file-mode + sourceFilter intersect (file present in source)", () => {
-    const result = filterVisibleFiles(files, "file", "a.ts", "uncommitted");
+    const result = filterVisibleFiles(files, "file", "a.ts", undefined, "uncommitted");
     expect(result).toHaveLength(1);
     expect(result[0].path).toBe("a.ts");
   });
 
   it("file-mode + sourceFilter intersect (file absent from source)", () => {
-    const result = filterVisibleFiles(files, "file", "a.ts", "pr");
+    const result = filterVisibleFiles(files, "file", "a.ts", undefined, "pr");
     expect(result).toHaveLength(0);
   });
 
   it("returns empty list when no files match", () => {
-    expect(filterVisibleFiles([], "all", undefined, "all")).toEqual([]);
+    expect(filterVisibleFiles([], "all", undefined, undefined, "all")).toEqual([]);
+  });
+
+  it("file-mode filters by repository name when provided", () => {
+    const samePathMultiRepo: ReviewFile[] = [
+      { ...file("README.md", "uncommitted"), repository_name: "frontend" },
+      { ...file("README.md", "uncommitted"), repository_name: "backend" },
+    ];
+    const result = filterVisibleFiles(
+      samePathMultiRepo,
+      "file",
+      "README.md",
+      "frontend",
+      "uncommitted",
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].repository_name).toBe("frontend");
   });
 });
 
