@@ -8,8 +8,11 @@ import (
 	"strings"
 )
 
-// defaultShellCommand returns the command and args for starting an interactive login shell.
-// On Unix, uses $SHELL (or /bin/sh) with the -l (login) flag.
+// defaultShellCommand returns the command and args for starting an interactive shell.
+// On Unix, uses $SHELL (or /bin/sh) with no extra flags — the shell is interactive
+// via the attached PTY. We deliberately do NOT pass -l: Debian's /etc/profile
+// (and /etc/profile.d/*) can overwrite PATH, dropping container-set entries like
+// /data/.npm-global/bin where agent CLIs (claude, codex, ...) are installed.
 func defaultShellCommand(preferredShell string) []string {
 	shell := resolveShellPath(preferredShell)
 	if shell == "" {
@@ -18,7 +21,7 @@ func defaultShellCommand(preferredShell string) []string {
 	if shell == "" {
 		shell = "/bin/sh"
 	}
-	return []string{shell, "-l"}
+	return []string{shell}
 }
 
 func resolveShellPath(value string) string {

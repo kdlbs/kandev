@@ -95,10 +95,13 @@ func detectShell() (string, []string) {
 
 	// Unix-like systems (Linux, macOS)
 	// Check $SHELL but only use it if the shell actually exists
-	// (host's $SHELL may not be installed in Docker containers)
+	// (host's $SHELL may not be installed in Docker containers).
+	// No -l flag: Debian's /etc/profile (and /etc/profile.d/*) can overwrite
+	// PATH, dropping container-set entries like /data/.npm-global/bin where
+	// agent CLIs (claude, codex, ...) are installed.
 	if shell := os.Getenv("SHELL"); shell != "" {
 		if _, err := exec.LookPath(shell); err == nil {
-			return shell, []string{"-l"} // Login shell
+			return shell, nil
 		}
 	}
 
@@ -106,7 +109,7 @@ func detectShell() (string, []string) {
 	shells := []string{"/bin/bash", "/bin/zsh", "/bin/sh"}
 	for _, sh := range shells {
 		if _, err := os.Stat(sh); err == nil {
-			return sh, []string{"-l"}
+			return sh, nil
 		}
 	}
 
@@ -152,7 +155,7 @@ func defaultShellArgs(shellCommand string) []string {
 		}
 		return nil
 	}
-	return []string{"-l"}
+	return nil
 }
 
 // start initializes and starts the shell process

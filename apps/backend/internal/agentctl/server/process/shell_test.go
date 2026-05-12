@@ -18,11 +18,14 @@ func TestDefaultShellCommand_EmptyPreferred(t *testing.T) {
 	if len(cmd) == 0 {
 		t.Fatal("expected non-empty command")
 	}
-	// On Unix, should fall back to $SHELL or /bin/sh with -l flag
-	// On Windows, should fall back to %COMSPEC% or powershell.exe
+	// On Unix the shell must be invoked WITHOUT -l so /etc/profile doesn't
+	// reset PATH (which would drop /data/.npm-global/bin where agent CLIs
+	// installed via the Settings → Agents install button live).
 	if runtime.GOOS != "windows" {
-		if cmd[len(cmd)-1] != "-l" {
-			t.Errorf("expected login flag -l on Unix, got %v", cmd)
+		for _, a := range cmd[1:] {
+			if a == "-l" {
+				t.Errorf("expected no -l flag on Unix shell, got %v", cmd)
+			}
 		}
 	}
 }
