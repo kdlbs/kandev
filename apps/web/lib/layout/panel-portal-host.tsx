@@ -173,43 +173,55 @@ function restorePortalScroll(portal: Element): () => void {
   }
   if (targets.length === 0) return () => {};
 
+  // Track which elements still need retrying. An element is removed from
+  // `pending` once the layout has grown enough to accommodate the snapshot,
+  // so subsequent ResizeObserver/rAF callbacks won't fight a deliberate user
+  // scroll (including scrolling upward, away from the snapshot position).
+  const pending = new Set(targets.map((t) => t.el));
+  let cancelled = false;
+  let stopId = 0;
+  let ro: ResizeObserver | null = null;
+
+  const stop = () => {
+    cancelled = true;
+    ro?.disconnect();
+    window.clearTimeout(stopId);
+  };
+
   const apply = () => {
     for (const { el, snap } of targets) {
-      // Only push the value back up if the container hasn't already reached
-      // (or surpassed) the snapshot — preserves any real user scroll that
-      // happened during the restore window.
+      if (!pending.has(el)) continue;
       if (el.scrollTop < snap.top) el.scrollTop = snap.top;
       if (el.scrollLeft < snap.left) el.scrollLeft = snap.left;
+      // Once layout can fully accommodate the snapshot, the clamping bug is
+      // resolved — drop the element from pending so future ticks stay out of
+      // the way of any user-initiated scroll.
+      const canReachTop = el.scrollHeight - el.clientHeight >= snap.top;
+      const canReachLeft = el.scrollWidth - el.clientWidth >= snap.left;
+      if (canReachTop && canReachLeft) pending.delete(el);
     }
+    if (pending.size === 0) stop();
   };
   apply();
 
-  // Re-apply on every layout/size change of any tracked element until either
-  // every snapshot is satisfied or the restore window elapses.
-  let cancelled = false;
-  const ro = new ResizeObserver(() => {
-    if (cancelled) return;
-    apply();
-  });
-  for (const { el } of targets) ro.observe(el);
-  // A short rAF chain catches the common case where layout settles within
-  // the next two frames without a measurable size change.
-  requestAnimationFrame(() => {
-    if (cancelled) return;
-    apply();
-    requestAnimationFrame(() => {
+  if (!cancelled) {
+    ro = new ResizeObserver(() => {
       if (cancelled) return;
       apply();
     });
-  });
-  const stopId = window.setTimeout(() => {
-    cancelled = true;
-    ro.disconnect();
-  }, RESTORE_WINDOW_MS);
+    for (const { el } of targets) ro.observe(el);
+    // A short rAF chain catches the common case where layout settles within
+    // the next two frames without a measurable size change.
+    requestAnimationFrame(() => {
+      if (cancelled) return;
+      apply();
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        apply();
+      });
+    });
+    stopId = window.setTimeout(stop, RESTORE_WINDOW_MS);
+  }
 
-  return () => {
-    cancelled = true;
-    ro.disconnect();
-    window.clearTimeout(stopId);
-  };
+  return stop;
 }
