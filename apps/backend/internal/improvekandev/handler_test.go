@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 // fakeGitHubInfo is a configurable GitHubInfo for unit tests. Each method
@@ -122,6 +123,86 @@ func TestIsEMULogin(t *testing.T) {
 		if got := isEMULogin(tc.login); got != tc.want {
 			t.Errorf("isEMULogin(%q) = %v, want %v", tc.login, got, tc.want)
 		}
+	}
+}
+
+func TestFindKandevRepoByLocalRemote(t *testing.T) {
+	resolver := func(path string) (string, string, string) {
+		switch path {
+		case "/home/u/kandev":
+			return "github", "kdlbs", "kandev"
+		case "/home/u/fork":
+			return "github", "alice", "kandev"
+		case "/home/u/other":
+			return "github", "kdlbs", "other"
+		}
+		return "", "", ""
+	}
+
+	cases := []struct {
+		name  string
+		repos []*taskmodels.Repository
+		want  string // matched repo ID, or "" for no match
+	}{
+		{name: "empty list", repos: nil, want: ""},
+		{
+			name: "skips entries without local path",
+			repos: []*taskmodels.Repository{
+				{ID: "no-path", LocalPath: ""},
+			},
+			want: "",
+		},
+		{
+			name: "matches remote owner/name with no provider info",
+			repos: []*taskmodels.Repository{
+				{ID: "match", LocalPath: "/home/u/kandev"},
+			},
+			want: "match",
+		},
+		{
+			name: "skips fork (different owner)",
+			repos: []*taskmodels.Repository{
+				{ID: "fork", LocalPath: "/home/u/fork"},
+			},
+			want: "",
+		},
+		{
+			name: "skips repo already wired to a different provider",
+			repos: []*taskmodels.Repository{
+				{ID: "wired", LocalPath: "/home/u/kandev", Provider: "github", ProviderOwner: "someone", ProviderName: "kandev"},
+			},
+			want: "",
+		},
+		{
+			name: "returns first match when multiple candidates",
+			repos: []*taskmodels.Repository{
+				{ID: "first", LocalPath: "/home/u/kandev"},
+				{ID: "second", LocalPath: "/home/u/kandev"},
+			},
+			want: "first",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := findKandevRepoByLocalRemote(tc.repos, resolver)
+			if tc.want == "" {
+				if got != nil {
+					t.Errorf("expected no match, got %q", got.ID)
+				}
+				return
+			}
+			if got == nil || got.ID != tc.want {
+				t.Errorf("got = %v, want id = %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFindKandevRepoByLocalRemote_NilResolver(t *testing.T) {
+	repos := []*taskmodels.Repository{{ID: "x", LocalPath: "/p"}}
+	if got := findKandevRepoByLocalRemote(repos, nil); got != nil {
+		t.Errorf("nil resolver must return nil, got %v", got)
 	}
 }
 

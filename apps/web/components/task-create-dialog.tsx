@@ -5,7 +5,6 @@ import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
 import type { Task, Repository } from "@/lib/types/http";
-import type { AgentProfileOption } from "@/lib/state/slices";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
@@ -18,7 +17,6 @@ import {
   WorkflowSection,
   DialogPromptSection,
 } from "@/components/task-create-dialog-form-body";
-import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
 import {
   AgentSelector,
   ExecutorProfileSelector,
@@ -32,12 +30,14 @@ import {
   useDialogFormState,
   useTaskCreateDialogEffects,
   useDialogHandlers,
+  useLockedFieldSync,
   useSessionRepoName,
   useTaskCreateDialogData,
   computeIsTaskStarted,
   type DialogFormState,
   type TaskCreateDialogInitialValues,
 } from "@/components/task-create-dialog-state";
+import type { DialogFormBodyProps } from "@/components/task-create-dialog-types";
 
 interface TaskCreateDialogProps {
   open: boolean;
@@ -89,66 +89,19 @@ interface TaskCreateDialogProps {
   extraFormSlot?: React.ReactNode;
   /** Optional render slot at the bottom of the dialog footer area. */
   bottomSlot?: React.ReactNode;
+  /**
+   * When set, every submit button is disabled and the tooltip surfaces this
+   * exact reason (e.g. an async bootstrap step from a feature wrapper hasn't
+   * completed yet). Takes precedence over the usual missing-field reasons.
+   */
+  submitBlockedReason?: string | null;
 }
 
-type DialogFormBodyProps = {
-  isSessionMode: boolean;
-  isCreateMode: boolean;
-  isEditMode: boolean;
-  isTaskStarted: boolean;
-  isPassthroughProfile: boolean;
-  initialDescription: string;
-  hasDescription: boolean;
-  workspaceId: string | null;
-  onJiraImport?: (ticket: JiraTicket) => void;
-  onLinearImport?: (issue: LinearIssue) => void;
-  agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;
-  executorProfileOptions: Array<{
-    value: string;
-    label: string;
-    renderLabel?: () => React.ReactNode;
-  }>;
-  agentProfiles: AgentProfileOption[];
-  agentProfilesLoading: boolean;
-  executorsLoading: boolean;
-  isCreatingSession: boolean;
-  workflows: unknown[];
-  snapshots: unknown;
-  effectiveWorkflowId: string | null;
-  fs: DialogFormState;
-  handleKeyDown: ReturnType<typeof useKeyboardShortcutHandler>;
-  onTaskNameChange: (v: string) => void;
-  onRowRepositoryChange: (key: string, value: string) => void;
-  onRowBranchChange: (key: string, value: string) => void;
-  onAgentProfileChange: (v: string) => void;
-  onExecutorProfileChange: (v: string) => void;
-  onWorkflowChange: (v: string) => void;
-  onToggleGitHubUrl?: () => void;
-  onGitHubUrlChange: (v: string) => void;
-  onToggleFreshBranch: (enabled: boolean) => void;
-  enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
-  workflowAgentLocked: boolean;
-  /** Workspace repositories — driven into the chip row for repo + branch picks. */
-  repositories: Repository[];
-  /** Computed in the parent: single-row + local executor + not URL mode. */
-  freshBranchAvailable: boolean;
-  /**
-   * True when the selected executor profile runs locally on the host. Used
-   * to lock the per-row branch pill (the user's checkout dictates the
-   * branch for local execution; fresh-branch mode unlocks it).
-   */
-  isLocalExecutor: boolean;
-  noCompatibleAgent: boolean;
-  executorProfileName: string | null;
-  /** Optional render slot above the description editor. */
-  aboveDescriptionSlot?: React.ReactNode;
-  /** Optional render slot inside the dialog body (rendered above the chip row). */
-  extraFormSlot?: React.ReactNode;
-  /** Optional render slot at the bottom of the dialog body (above the footer). */
-  bottomSlot?: React.ReactNode;
-  /** Optional override for the description placeholder. */
-  descriptionPlaceholder?: string;
-};
+function computeHasAllBranches(fs: DialogFormState): boolean {
+  if (fs.noRepository) return true;
+  if (fs.useGitHubUrl) return !!fs.githubBranch;
+  return fs.repositories.length > 0 && fs.repositories.every((r) => !!r.branch);
+}
 
 function CreateModeBody(props: DialogFormBodyProps) {
   const {
@@ -195,6 +148,8 @@ function CreateModeBody(props: DialogFormBodyProps) {
         freshBranchEnabled={fs.freshBranchEnabled}
         onToggleFreshBranch={onToggleFreshBranch}
         isLocalExecutor={isLocalExecutor}
+        onToggleNoRepository={props.onToggleNoRepository}
+        onWorkspacePathChange={props.onWorkspacePathChange}
       />
       {showTaskName && (
         <InlineTaskName
@@ -285,6 +240,7 @@ function DialogFormBody(props: DialogFormBodyProps) {
         effectiveWorkflowId={props.effectiveWorkflowId}
         onWorkflowChange={props.onWorkflowChange}
         agentProfiles={props.agentProfiles}
+        workflowLocked={props.workflowLocked}
       />
     </div>
   );
@@ -402,6 +358,8 @@ function useSubmitHandlersWiring({
     freshBranchEnabled: fs.freshBranchEnabled,
     isLocalExecutor: computed.isLocalExecutor,
     repositoryLocalPath,
+    noRepository: fs.noRepository,
+    workspacePath: fs.workspacePath,
   });
 }
 
@@ -418,11 +376,6 @@ function resolveSingleRowLocalPath(fs: DialogFormState, repositories: Repository
     return repositories.find((r) => r.id === row.repositoryId)?.local_path ?? "";
   }
   return "";
-}
-
-function hasAllBranchesSelected(fs: DialogFormState): boolean {
-  if (fs.useGitHubUrl) return !!fs.githubBranch;
-  return fs.repositories.length > 0 && fs.repositories.every((r) => !!r.branch);
 }
 
 function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
@@ -458,6 +411,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     workflows,
     isLocalExecutor: computed.isLocalExecutor,
   });
+  useLockedFieldSync(open, workflowId, initialValues, fs);
   const handlers = useDialogHandlers(fs, repositories);
   const submitHandlers = useSubmitHandlersWiring({
     props,
@@ -468,8 +422,12 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     isSessionMode,
     isEditMode,
   });
+  const guardedHandleSubmit = useGuardedSubmit(
+    submitHandlers.handleSubmit,
+    props.submitBlockedReason,
+  );
   const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
-    submitHandlers.handleSubmit(event as unknown as FormEvent);
+    guardedHandleSubmit(event as unknown as FormEvent);
   });
   // Fresh-branch is single-row + local executor + not URL mode. The chip row
   // can hold any number of repos; we hide the toggle whenever the question
@@ -493,21 +451,37 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     submitHandlers,
     handleKeyDown,
     freshBranchAvailable,
+    guardedHandleSubmit,
     enhance: useEnhanceForDialog(fs),
     handleJiraImport: useJiraImportHandler(fs),
     handleLinearImport: useLinearImportHandler(fs),
   };
 }
 
+// Buttons are disabled when submitBlockedReason is set, but the form can still
+// be submitted via Enter; gate the submit path here so a wrapper's async
+// bootstrap step always finishes before any task is created.
+function useGuardedSubmit(
+  handleSubmit: (e: FormEvent) => void,
+  blockedReason: string | null | undefined,
+) {
+  const blocked = Boolean(blockedReason);
+  return useCallback(
+    (e: FormEvent) => {
+      if (blocked) e.preventDefault();
+      else handleSubmit(e);
+    },
+    [blocked, handleSubmit],
+  );
+}
+
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const { open, onOpenChange, initialValues, workspaceId } = props;
   const setup = useTaskCreateDialogSetup(props);
-  const { fs, isSessionMode, isEditMode, isCreateMode, isTaskStarted } = setup;
-  const { sessionRepoName, workflows, agentProfiles, snapshots, repositories } = setup;
-  const { computed, handlers, handleKeyDown, freshBranchAvailable } = setup;
-  const { handleSubmit, handleUpdateWithoutAgent, handleCreateWithoutAgent } = setup.submitHandlers;
-  const { handleCreateWithPlanMode, handleCancel } = setup.submitHandlers;
-  const { handleJiraImport, handleLinearImport } = setup;
+  const { fs, isSessionMode, isEditMode, isCreateMode, isTaskStarted, sessionRepoName } = setup;
+  const { workflows, agentProfiles, snapshots, repositories, computed, handlers } = setup;
+  const { handleKeyDown, freshBranchAvailable, handleJiraImport, handleLinearImport, guardedHandleSubmit } = setup;
+  const { handleUpdateWithoutAgent, handleCreateWithoutAgent, handleCreateWithPlanMode, handleCancel } = setup.submitHandlers;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -522,7 +496,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             initialTitle={initialValues?.title}
           />
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4 overflow-hidden">
+        <form onSubmit={guardedHandleSubmit} className="flex flex-col gap-4 overflow-hidden">
           <DialogFormBody
             isSessionMode={isSessionMode}
             isCreateMode={isCreateMode}
@@ -551,11 +525,11 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             onAgentProfileChange={handlers.handleAgentProfileChange}
             onExecutorProfileChange={handlers.handleExecutorProfileChange}
             onWorkflowChange={handlers.handleWorkflowChange}
-            onToggleGitHubUrl={
-              props.lockedFields?.repository ? undefined : handlers.handleToggleGitHubUrl
-            }
+            onToggleGitHubUrl={props.lockedFields?.repository ? undefined : handlers.handleToggleGitHubUrl}
             onGitHubUrlChange={handlers.handleGitHubUrlChange}
             onToggleFreshBranch={handlers.handleToggleFreshBranch}
+            onToggleNoRepository={props.lockedFields?.repository ? undefined : handlers.handleToggleNoRepository}
+            onWorkspacePathChange={handlers.handleWorkspacePathChange}
             enhance={setup.enhance}
             workflowAgentLocked={computed.workflowAgentLocked}
             repositories={repositories}
@@ -567,6 +541,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             aboveDescriptionSlot={props.aboveDescriptionSlot}
             bottomSlot={props.bottomSlot}
             descriptionPlaceholder={props.descriptionPlaceholder}
+            workflowLocked={props.lockedFields?.workflow}
           />
           <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
             <TaskCreateDialogFooter
@@ -580,7 +555,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
               hasTitle={fs.hasTitle}
               hasDescription={fs.hasDescription}
               hasRepositorySelection={computed.hasRepositorySelection}
-              hasAllBranches={hasAllBranchesSelected(fs)}
+              hasAllBranches={computeHasAllBranches(fs)}
               agentProfileId={computed.effectiveAgentProfileId}
               workspaceId={workspaceId}
               effectiveWorkflowId={computed.effectiveWorkflowId ?? null}
@@ -591,6 +566,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
               onUpdateWithoutAgent={handleUpdateWithoutAgent}
               onCreateWithoutAgent={handleCreateWithoutAgent}
               onCreateWithPlanMode={handleCreateWithPlanMode}
+              submitBlockedReason={props.submitBlockedReason}
             />
           </DialogFooter>
         </form>

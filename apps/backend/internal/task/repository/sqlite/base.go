@@ -195,6 +195,9 @@ func (r *Repository) runMigrations() error {
 	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
 	// Add hidden flag to workflows for system-only flows excluded from management UI (ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
+	// Add workspace_path to task_sessions: optional host folder for repo-less
+	// tasks where the user pointed the agent at an existing directory.
+	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN workspace_path TEXT DEFAULT ''`)
 	return nil
 }
 

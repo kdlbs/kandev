@@ -48,6 +48,7 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	// flow on the local executor. Path-only — fresh-branch is local-only.
 	api.GET("/workspaces/:id/repositories/local-status", h.httpLocalRepositoryStatus)
 	api.GET("/workspaces/:id/repositories/validate", h.httpValidateRepositoryPath)
+	api.GET("/fs/list-dir", h.httpListDirectory)
 	api.GET("/repositories/:id", h.httpGetRepository)
 	api.GET("/repositories/:id/branches", h.httpListRepositoryBranches)
 	api.PATCH("/repositories/:id", h.httpUpdateRepository)
@@ -134,6 +135,33 @@ func (h *RepositoryHandlers) httpDiscoverRepositories(c *gin.Context) {
 		resp.Repositories = append(resp.Repositories, dto.FromLocalRepository(repo))
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// httpListDirectory lists the immediate subdirectories of ?path= (defaults
+// to $HOME). The picker deliberately allows browsing any directory the
+// kandev process has read access to — kandev runs locally on the user's
+// own machine, and the repo-less starting-folder flow legitimately wants
+// /tmp, /var/log/foo, etc. Hidden (dotfile) directories are excluded.
+func (h *RepositoryHandlers) httpListDirectory(c *gin.Context) {
+	path := c.Query("path")
+	result, err := h.service.ListDirectory(c.Request.Context(), path)
+	if err != nil {
+		// Log the raw OS error for debugging but return a generic message —
+		// otherwise we leak host paths and access patterns to the client (e.g.
+		// "open /home/user/private: permission denied").
+		h.logger.Warn("failed to list directory", zap.String("path", path), zap.Error(err))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to list directory"})
+		return
+	}
+	entries := make([]gin.H, 0, len(result.Entries))
+	for _, e := range result.Entries {
+		entries = append(entries, gin.H{"name": e.Name, "path": e.Path})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"path":    result.Path,
+		"parent":  result.Parent,
+		"entries": entries,
+	})
 }
 
 func (h *RepositoryHandlers) httpValidateRepositoryPath(c *gin.Context) {

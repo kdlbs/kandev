@@ -113,6 +113,7 @@ export type BuildCreatePayloadArgs = {
   planMode?: boolean;
   attachments?: MessageAttachment[];
   parentId?: string;
+  workspacePath?: string;
 };
 
 export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTaskParams {
@@ -131,6 +132,7 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
     plan_mode: args.planMode || undefined,
     attachments: args.attachments,
     parent_id: args.parentId || undefined,
+    workspace_path: args.workspacePath || undefined,
   };
 }
 
@@ -142,8 +144,10 @@ export function validateCreateInputs(inputs: {
   repositories: TaskRepoRow[];
   githubUrl?: string;
   agentProfileId: string;
+  noRepository?: boolean;
 }): boolean {
   const hasRepo =
+    inputs.noRepository ||
     inputs.repositories.some((r) => r.repositoryId || r.localPath) ||
     Boolean(inputs.githubUrl?.trim());
   return Boolean(

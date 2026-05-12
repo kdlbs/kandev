@@ -90,6 +90,21 @@ kubectl exec -it deployment/kandev -- npm install -g @anthropic-ai/claude-code
 
 After installing, log in with the agent's own auth (e.g. `claude login`), then click **Rescan** on the agents page.
 
+### Persistent agent and `gh` CLI auth
+
+The image sets `HOME=/data/home` for the `kandev` user, so every CLI that writes its auth state under `$HOME` lands on the PV and survives pod restarts and image upgrades. This includes:
+
+- `gh` CLI — `~/.config/gh/hosts.yml`
+- Claude Code — `~/.claude/.credentials.json`, `~/.claude.json`
+- Codex — `~/.codex/auth.json`, `~/.codex/config.toml`
+- Auggie — `~/.augment/session.json`
+- GitHub Copilot — `~/.copilot/...`
+- OpenCode, Amp — `~/.config/<tool>/...`
+
+So a one-time `kubectl exec -it deployment/kandev -- gh auth login` (or `claude login`, `codex login`, etc.) is enough; you do not need to redo it after `kubectl set image` or a `helm upgrade`.
+
+> The GitHub PAT configured in **Settings → Integrations → GitHub** is stored as a secret in the SQLite DB (or your external Postgres) and has always persisted. The `HOME=/data/home` setup covers the separate `gh auth login` flow that the backend falls back to when no `GITHUB_TOKEN` secret is set.
+
 ## Configuration
 
 Kandev reads configuration via `KANDEV_`-prefixed environment variables (Viper). Set these in `k8s/configmap.yaml` or as environment variables in the deployment.
@@ -162,6 +177,8 @@ The PVC at `/data` stores:
 
 - **SQLite database** (`/data/data/kandev.db`, `/data/data/kandev.db-wal`, `/data/data/kandev.db-shm`)
 - **Git worktrees** (`/data/worktrees/`), **tasks** (`/data/tasks/`), **repos** (`/data/repos/`), **sessions** (`/data/sessions/`), and **LSP servers** (`/data/lsp-servers/`)
+- **User home** (`/data/home/`) — `$HOME` for the in-pod `kandev` user; holds `gh` CLI auth and agent CLI auth state (see [Persistent agent and `gh` CLI auth](#persistent-agent-and-gh-cli-auth) above)
+- **npm globals** (`/data/.npm-global/`) — agent CLIs installed via `npm install -g`
 
 The PVC uses `ReadWriteOnce` access mode. If your cluster requires a specific StorageClass, add it to `k8s/pvc.yaml`:
 
@@ -210,6 +227,12 @@ kubectl edit deployment kandev
 ```
 
 SQLite migrations run automatically on startup — no manual migration step needed.
+
+> **Upgrading across the `HOME=/data/home` change:** if you used `kubectl exec` to `gh auth login` or log in to agent CLIs on a pre-`HOME=/data/home` image, that state lived in the ephemeral `/home/kandev` and is not carried over. Log in once on the new pod and it will persist for all subsequent upgrades. If you want to keep the old state, copy it onto the PV before upgrading:
+>
+> ```bash
+> kubectl exec deployment/kandev -- sh -c 'cp -a /home/kandev/. /data/home/ 2>/dev/null || true'
+> ```
 
 ## Troubleshooting
 

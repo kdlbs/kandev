@@ -8,6 +8,7 @@ import {
 import { fetchUserSettings } from "@/lib/api";
 import { StateHydrator } from "@/components/state-hydrator";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
 import { TasksPageClient } from "./tasks-page-client";
 import type {
   Workflow,
@@ -50,8 +51,13 @@ async function fetchWorkspaceData(
   );
 
   const workflows = workflowsResponse.workflows;
-  const activeWorkflowId =
-    workflows.find((w) => w.id === savedWorkflowId)?.id ?? workflows[0]?.id ?? null;
+  // Preserve "All Workflows" (null/empty saved filter) instead of falling back
+  // to the first workflow — resolveDesiredWorkflowId handles this consistently
+  // with the kanban page and the root tasks page.
+  const activeWorkflowId = resolveDesiredWorkflowId({
+    settingsWorkflowId: savedWorkflowId,
+    workspaceWorkflows: workflows,
+  });
 
   return {
     workflows,

@@ -67,6 +67,14 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	if req.State != nil {
 		state = *req.State
 	}
+	metadata := req.Metadata
+	workspacePath := strings.TrimSpace(req.WorkspacePath)
+	if workspacePath != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[models.MetaKeyWorkspacePath] = workspacePath
+	}
 	task := &models.Task{
 		ID:             uuid.New().String(),
 		WorkspaceID:    req.WorkspaceID,
@@ -77,7 +85,7 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 		State:          state,
 		Priority:       req.Priority,
 		Position:       req.Position,
-		Metadata:       req.Metadata,
+		Metadata:       metadata,
 		IsEphemeral:    req.IsEphemeral,
 		ParentID:       req.ParentID,
 	}
@@ -531,11 +539,13 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 		zap.String("task_id", id),
 		zap.Duration("duration", time.Since(start)))
 
-	// 6. Return immediately - all remaining cleanup is async
-
-	// 7. Background: Stop agents and cleanup worktrees
+	// 6. Stop agents and cleanup worktrees in the background. Carry the
+	//    envCleanup struct so the task environment row is reset alongside
+	//    the worktrees (an extra task.taskEnv != nil branch keeps the
+	//    cleanup running when only the env needs reclaiming).
 	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: false}
-	if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || task.IsEphemeral || taskEnv != nil {
+	hasCleanup := len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || task.IsEphemeral || taskEnv != nil
+	if hasCleanup {
 		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, task.IsEphemeral,
 			"task deleted", "failed to stop session on task delete", "task cleanup completed")
 	}

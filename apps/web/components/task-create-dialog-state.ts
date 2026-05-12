@@ -27,6 +27,33 @@ function nonWorktreeDisabledReason(profile: ExecutorProfile): string | null {
   if ((profile.executor_type ?? "") === "worktree") return null;
   return "Multi-repo tasks only support the git-worktree executor.";
 }
+
+/**
+ * Worktree executor needs a repository to create the worktree from. Disable
+ * it when the task is in no-repository mode so the picker doesn't offer an
+ * unworkable choice (the backend would silently fall back to local).
+ */
+function worktreeDisabledReason(profile: ExecutorProfile): string | null {
+  if ((profile.executor_type ?? "") !== "worktree") return null;
+  return "Worktree executor requires a repository.";
+}
+
+/**
+ * Combines the two executor-disable rules into a single resolver:
+ *   - no-repository mode → disable worktree (it needs a repo)
+ *   - multi-repo selection → disable everything except worktree
+ *   - otherwise → no disabling
+ * The two never co-occur (no-repository implies zero repos, so multi-repo
+ * cannot be true at the same time), so a simple priority order is enough.
+ */
+function pickExecutorDisabledReason(
+  noRepository: boolean,
+  isMultiRepoSelection: boolean,
+): ((profile: ExecutorProfile) => string | null) | undefined {
+  if (noRepository) return worktreeDisabledReason;
+  if (isMultiRepoSelection) return nonWorktreeDisabledReason;
+  return undefined;
+}
 import type {
   StepType,
   TaskCreateDialogInitialValues,
@@ -66,6 +93,8 @@ type FormResetters = {
   setDiscoverReposLoaded: (v: boolean) => void;
   setUseGitHubUrl: (v: boolean) => void;
   setGitHubUrl: (v: string) => void;
+  setNoRepository: (v: boolean) => void;
+  setWorkspacePath: (v: string) => void;
   setGitHubBranches: (v: Branch[]) => void;
   setGitHubUrlError: (v: string | null) => void;
   setGitHubPrHeadBranch: (v: string | null) => void;
@@ -189,6 +218,10 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   resetters.setGitHubPrHeadBranch(iv?.checkoutBranch ?? null);
   resetters.setFreshBranchEnabled(false);
   resetters.setCurrentLocalBranch("");
+  // Source-mode toggle resets — without these, opening the dialog in "None"
+  // mode and reopening for a different task would land in None mode again.
+  resetters.setNoRepository(false);
+  resetters.setWorkspacePath("");
 }
 
 /** Hook to manage draft persistence for task creation dialog */
@@ -312,6 +345,11 @@ function useFormStateValues(
   const [fetchedSteps, setFetchedSteps] = useState<StepType[] | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
+  // No-repo mode: when true, the task is created with no repositories. The
+  // optional workspacePath points the agent at an existing host folder; empty
+  // means kandev creates a scratch workspace.
+  const [noRepository, setNoRepository] = useState(false);
+  const [workspacePath, setWorkspacePath] = useState("");
   return {
     taskName,
     setTaskName,
@@ -343,6 +381,10 @@ function useFormStateValues(
     currentDefaults,
     setCurrentDefaults,
     prevOpenRef,
+    noRepository,
+    setNoRepository,
+    workspacePath,
+    setWorkspacePath,
   };
 }
 
@@ -406,6 +448,8 @@ export function useDialogFormState(
       setGitHubPrHeadBranch: ghUrl.setGitHubPrHeadBranch,
       setFreshBranchEnabled: freshBranch.setFreshBranchEnabled,
       setCurrentLocalBranch: freshBranch.setCurrentLocalBranch,
+      setNoRepository: form.setNoRepository,
+      setWorkspacePath: form.setWorkspacePath,
     },
   });
 
@@ -478,9 +522,10 @@ export function useDialogComputed({
     ? workspaces.find((ws: Workspace) => ws.id === workspaceId)
     : null;
   // The form has a repo selection when either: (a) any chip in the unified
-  // list has a repo set, or (b) URL mode has a non-empty URL. The chip row
-  // takes care of branch state per row; there is no global branch.
+  // list has a repo set, (b) URL mode has a non-empty URL, or (c) the task
+  // is intentionally repo-less (noRepository toggle on).
   const hasRepositorySelection = Boolean(
+    fs.noRepository ||
     fs.repositories.some((r) => r.repositoryId || r.localPath) ||
     (fs.useGitHubUrl && fs.githubUrl.trim()),
   );
@@ -503,11 +548,16 @@ export function useDialogComputed({
   // keep the full executor catalogue.
   const selectedRepoCount = fs.repositories.filter((r) => r.repositoryId || r.localPath).length;
   const isMultiRepoSelection = selectedRepoCount > 1;
+  // `pickExecutorDisabledReason` came from main — folds two disable rules
+  // (no-repository disables worktree; multi-repo disables non-worktree) into
+  // one resolver. Plug it into our existing useExecutorProfileCompat wrapper
+  // so the downstream consumer still gets selectedExecutorProfile /
+  // noCompatibleAgent metadata.
   const exec = useExecutorProfileCompat(
     allExecutorProfiles,
     fs.executorProfileId,
     agentProfiles,
-    isMultiRepoSelection ? nonWorktreeDisabledReason : undefined,
+    pickExecutorDisabledReason(fs.noRepository, isMultiRepoSelection),
   );
   const agentProfileOptions = useAgentProfileOptions(exec.compatibleAgentProfiles);
   const executorHint = useExecutorHint(executors, fs.executorId, selectedRepoCount);

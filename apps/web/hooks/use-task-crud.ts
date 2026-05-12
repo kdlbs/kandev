@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStoreApi } from "@/components/state-provider";
 import { useTaskActions } from "@/hooks/use-task-actions";
 import type { Task } from "@/components/kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
@@ -18,7 +18,6 @@ export function useTaskCRUD() {
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
   const { deleteTaskById, archiveTaskById } = useTaskActions();
-  const kanban = useAppStore((state) => state.kanban);
   const store = useAppStoreApi();
 
   const handleCreate = useCallback(() => {
@@ -33,8 +32,6 @@ export function useTaskCRUD() {
 
   const handleDelete = useCallback(
     async (task: Task) => {
-      if (!kanban.workflowId) return;
-
       setDeletingTaskId(task.id);
       try {
         await deleteTaskById(task.id);
@@ -52,13 +49,11 @@ export function useTaskCRUD() {
         setDeletingTaskId(null);
       }
     },
-    [deleteTaskById, kanban.workflowId, store],
+    [deleteTaskById, store],
   );
 
   const handleArchive = useCallback(
     async (task: Task) => {
-      if (!kanban.workflowId) return;
-
       setArchivingTaskId(task.id);
       try {
         await archiveTaskById(task.id);
@@ -76,7 +71,7 @@ export function useTaskCRUD() {
         setArchivingTaskId(null);
       }
     },
-    [archiveTaskById, kanban.workflowId, store],
+    [archiveTaskById, store],
   );
 
   const handleDialogOpenChange = useCallback((open: boolean) => {

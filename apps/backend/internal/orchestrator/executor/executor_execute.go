@@ -267,7 +267,9 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 	}
 	isFirstSession := !hasPrimary
 
-	// Create agent session in database
+	// Create agent session in database. WorkspacePath is propagated from task
+	// metadata for repo-less tasks where the user picked a starting folder.
+	workspacePath, _ := task.Metadata[models.MetaKeyWorkspacePath].(string)
 	sessionID := uuid.New().String()
 	now := time.Now().UTC()
 	session := &models.TaskSession{
@@ -276,6 +278,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 		AgentProfileID:       agentProfileID,
 		RepositoryID:         repositoryID,
 		BaseBranch:           baseBranch,
+		WorkspacePath:        workspacePath,
 		State:                models.TaskSessionStateCreated,
 		StartedAt:            now,
 		UpdatedAt:            now,
@@ -570,6 +573,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	sessionID := session.ID
 	req := &LaunchAgentRequest{
 		TaskID:            task.ID,
+		WorkspaceID:       task.WorkspaceID,
 		TaskTitle:         task.Title,
 		AgentProfileID:    agentProfileID,
 		TaskDescription:   prompt,
@@ -577,6 +581,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		SessionID:         sessionID,
 		TaskEnvironmentID: session.TaskEnvironmentID,
 		IsEphemeral:       task.IsEphemeral,
+		WorkspacePath:     session.WorkspacePath,
 	}
 
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)

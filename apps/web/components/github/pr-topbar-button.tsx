@@ -25,6 +25,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import {
   aggregatePRStatusColor,
   getPRStatusColor,
+  isPRAwaitingReview,
   isPRReadyToMerge,
 } from "@/components/github/pr-task-icon";
 import { prTaskKey } from "@/components/github/pr-detail-panel";
@@ -49,6 +50,11 @@ function PRStatusIcon({ pr }: { pr: TaskPR }) {
   }
   if (isPRReadyToMerge(pr)) {
     return <IconCheck className="h-3 w-3 text-emerald-400" />;
+  }
+  // Check awaiting-review before the plain approved check so an approved PR
+  // with pending reviewers (1 of N required) doesn't read as fully approved.
+  if (isPRAwaitingReview(pr)) {
+    return <IconClock className="h-3 w-3 text-sky-400" />;
   }
   if (pr.checks_state === "success" && pr.review_state === "approved") {
     return <IconCheck className="h-3 w-3 text-green-500" />;

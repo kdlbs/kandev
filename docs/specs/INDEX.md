@@ -9,3 +9,4 @@ See `.agents/skills/spec/SKILL.md` for the workflow.
 | [external-mcp](external-mcp/spec.md) | draft | 2026-04-28 | — |
 | [improve-kandev](./improve-kandev/spec.md) | draft | 2026-04-29 | — |
 | [slack-integration](./slack-integration/spec.md) | draft | 2026-05-02 | — |
+| [tasks-without-repositories](./tasks-without-repositories/spec.md) | draft | 2026-05-05 | — |

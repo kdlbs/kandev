@@ -48,6 +48,30 @@ docker run -v /path/on/host:/data ghcr.io/kdlbs/kandev:latest
 
 Without a volume, data is lost when the container is removed.
 
+### What lives on the volume
+
+| Path | Contents |
+|---|---|
+| `/data/data/` | SQLite database (`kandev.db`, `-wal`, `-shm`) |
+| `/data/worktrees/`, `/data/tasks/`, `/data/repos/`, `/data/sessions/`, `/data/lsp-servers/` | Per-session state |
+| `/data/.npm-global/` | Agent CLIs installed via `npm install -g` (`NPM_CONFIG_PREFIX`) |
+| `/data/home/` | `$HOME` for the in-container `kandev` user — `gh` CLI and agent CLI auth state |
+
+### Persistent agent and `gh` CLI auth
+
+The image sets `HOME=/data/home`, so every CLI that writes its auth under `$HOME` lands on the volume and survives container restarts and image upgrades:
+
+- `gh` CLI — `~/.config/gh/hosts.yml`
+- Claude Code — `~/.claude/.credentials.json`, `~/.claude.json`
+- Codex — `~/.codex/auth.json`, `~/.codex/config.toml`
+- Auggie — `~/.augment/session.json`
+- GitHub Copilot — `~/.copilot/...`
+- OpenCode, Amp — `~/.config/<tool>/...`
+
+A one-time `docker exec -it kandev gh auth login` (or `claude login`, `codex login`, etc.) is enough; you do not need to redo it after `docker pull` and recreating the container.
+
+> The GitHub PAT configured in **Settings → Integrations → GitHub** is stored as a secret in the database and has always persisted. The `HOME=/data/home` setup covers the separate `gh auth login` flow that the backend falls back to when no `GITHUB_TOKEN` secret is set.
+
 ## Configuration
 
 Configuration is done via `KANDEV_`-prefixed environment variables:
@@ -227,6 +251,21 @@ docker run -p 38429:38429 \
 ```
 
 > **Note:** Mounting the Docker socket gives the container full access to the host's Docker daemon. Only do this in trusted environments.
+
+## Upgrading
+
+```bash
+docker pull ghcr.io/kdlbs/kandev:latest
+docker compose up -d  # or: docker stop kandev && docker rm kandev && docker run ...
+```
+
+The volume at `/data` carries over the database, worktrees, npm globals, and `$HOME` for agent CLIs, so there is no manual migration step.
+
+> **Upgrading across the `HOME=/data/home` change:** if you previously ran `docker exec` to `gh auth login` or log in to agent CLIs on a pre-`HOME=/data/home` image, that state lived in the ephemeral `/home/kandev` inside the container and is not carried over. Log in once on the new container and it will persist for all subsequent upgrades. If you want to preserve the old state, copy it onto the volume before recreating the container:
+>
+> ```bash
+> docker exec kandev sh -c 'cp -a /home/kandev/. /data/home/ 2>/dev/null || true'
+> ```
 
 ## Health Check
 

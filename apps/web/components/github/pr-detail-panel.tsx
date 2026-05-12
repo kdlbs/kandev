@@ -172,6 +172,25 @@ function DescriptionSection({ body }: { body: string }) {
   );
 }
 
+// GitHub logins are case-insensitive; normalize before comparing.
+function shouldHideApproveButton(
+  taskPR: TaskPR,
+  feedback: PRFeedback | null,
+  currentUser: string | null,
+): boolean {
+  const liveState = feedback?.pr.state ?? taskPR.state;
+  if (liveState !== "open") return true;
+  const normalizedUser = currentUser?.trim().toLowerCase();
+  if (!normalizedUser) return false;
+  const prAuthor = feedback?.pr.author_login ?? taskPR.author_login;
+  if (prAuthor?.trim().toLowerCase() === normalizedUser) return true;
+  return (
+    feedback?.reviews?.some(
+      (r) => r.state === "APPROVED" && r.author?.trim().toLowerCase() === normalizedUser,
+    ) ?? false
+  );
+}
+
 function ApproveButton({
   taskPR,
   feedback,
@@ -183,14 +202,9 @@ function ApproveButton({
 }) {
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
+  const currentUser = useAppStore((s) => s.githubStatus.status?.username ?? null);
 
-  const liveState = feedback?.pr.state ?? taskPR.state;
-  if (liveState !== "open") return null;
-
-  const alreadyApproved = feedback?.reviews?.some(
-    (r) => r.state === "APPROVED" && r.author === feedback.pr.author_login,
-  );
-  if (alreadyApproved) return null;
+  if (shouldHideApproveButton(taskPR, feedback, currentUser)) return null;
 
   const handleApprove = async () => {
     setSubmitting(true);
@@ -211,6 +225,7 @@ function ApproveButton({
 
   return (
     <Button
+      data-testid="pr-approve-button"
       size="sm"
       className="cursor-pointer gap-1.5 border-0 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500"
       onClick={handleApprove}

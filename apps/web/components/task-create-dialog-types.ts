@@ -212,6 +212,12 @@ export type DialogFormState = {
   /** True while resolving currentLocalBranch — distinguishes "still loading" from "no branch on disk" */
   currentLocalBranchLoading: boolean;
   setCurrentLocalBranchLoading: (v: boolean) => void;
+  /** No-repo mode: when true the task is created with no repositories. */
+  noRepository: boolean;
+  setNoRepository: (v: boolean) => void;
+  /** Optional host folder for repo-less tasks; empty means scratch workspace. */
+  workspacePath: string;
+  setWorkspacePath: (v: string) => void;
 };
 
 export type SubmitHandlersDeps = {
@@ -271,10 +277,88 @@ export type SubmitHandlersDeps = {
   isLocalExecutor: boolean;
   /** Resolved on-disk path for the selected repository (workspace or discovered). Empty if not local. */
   repositoryLocalPath: string;
+  /** When true, the task is created with no repositories (repo-less mode). */
+  noRepository: boolean;
+  /** Optional host folder for repo-less tasks; empty means kandev creates a scratch workspace. */
+  workspacePath: string;
   /**
    * Optional async transform applied to the trimmed description before the
    * API payload is built. Used by feature wrappers (e.g. Improve Kandev) to
    * append generated context like bundle file paths.
    */
   transformDescriptionBeforeSubmit?: (description: string) => Promise<string> | string;
+};
+
+import type { JiraTicket } from "@/lib/types/jira";
+import type { LinearIssue } from "@/lib/types/linear";
+import type { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
+
+/**
+ * Props shared by all dialog-body variants (CreateModeBody, SessionModeBody,
+ * DialogFormBody). Lives in this types module so task-create-dialog.tsx
+ * stays under the per-file line cap — the dialog file is already a thin
+ * orchestrator over many sibling modules and this is the largest type
+ * surface left in it.
+ */
+export type DialogFormBodyProps = {
+  isSessionMode: boolean;
+  isCreateMode: boolean;
+  isEditMode: boolean;
+  isTaskStarted: boolean;
+  isPassthroughProfile: boolean;
+  initialDescription: string;
+  hasDescription: boolean;
+  workspaceId: string | null;
+  onJiraImport?: (ticket: JiraTicket) => void;
+  onLinearImport?: (issue: LinearIssue) => void;
+  agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;
+  executorProfileOptions: Array<{
+    value: string;
+    label: string;
+    renderLabel?: () => React.ReactNode;
+  }>;
+  agentProfiles: AgentProfileOption[];
+  agentProfilesLoading: boolean;
+  executorsLoading: boolean;
+  isCreatingSession: boolean;
+  workflows: unknown[];
+  snapshots: unknown;
+  effectiveWorkflowId: string | null;
+  fs: DialogFormState;
+  handleKeyDown: ReturnType<typeof useKeyboardShortcutHandler>;
+  onTaskNameChange: (v: string) => void;
+  onRowRepositoryChange: (key: string, value: string) => void;
+  onRowBranchChange: (key: string, value: string) => void;
+  onAgentProfileChange: (v: string) => void;
+  onExecutorProfileChange: (v: string) => void;
+  onWorkflowChange: (v: string) => void;
+  onToggleGitHubUrl?: () => void;
+  onGitHubUrlChange: (v: string) => void;
+  onToggleFreshBranch: (enabled: boolean) => void;
+  onToggleNoRepository?: () => void;
+  onWorkspacePathChange: (value: string) => void;
+  enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
+  workflowAgentLocked: boolean;
+  /** Workspace repositories — driven into the chip row for repo + branch picks. */
+  repositories: Repository[];
+  /** Computed in the parent: single-row + local executor + not URL mode. */
+  freshBranchAvailable: boolean;
+  /**
+   * True when the selected executor profile runs locally on the host. Used
+   * to lock the per-row branch pill (the user's checkout dictates the
+   * branch for local execution; fresh-branch mode unlocks it).
+   */
+  isLocalExecutor: boolean;
+  noCompatibleAgent: boolean;
+  executorProfileName: string | null;
+  /** Optional render slot above the description editor. */
+  aboveDescriptionSlot?: React.ReactNode;
+  /** Optional render slot inside the dialog body (rendered above the chip row). */
+  extraFormSlot?: React.ReactNode;
+  /** Optional render slot at the bottom of the dialog body (above the footer). */
+  bottomSlot?: React.ReactNode;
+  /** Optional override for the description placeholder. */
+  descriptionPlaceholder?: string;
+  /** When true, hides the workflow picker so the enforced workflow can't be swapped. */
+  workflowLocked?: boolean;
 };

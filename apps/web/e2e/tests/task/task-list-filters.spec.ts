@@ -145,6 +145,40 @@ test.describe("Task list display filters", () => {
     await expect(testPage.getByText("Beta task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
   });
 
+  test("'All Workflows' is preserved when navigating with workspace query param", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflowB = await apiClient.createWorkflow(seedData.workspaceId, "Workflow B", "simple");
+    const stepsB = (await apiClient.listWorkflowSteps(workflowB.id)).steps;
+    const startB = findStartStep(stepsB);
+
+    await apiClient.createTask(seedData.workspaceId, "Alpha task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await apiClient.createTask(seedData.workspaceId, "Beta task", {
+      workflow_id: workflowB.id,
+      workflow_step_id: startB.id,
+    });
+
+    // Persist "All Workflows" (empty workflow_filter_id) before navigating.
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: "",
+    });
+
+    // Navigate to /tasks with the workspace query param — the SSR resolver
+    // must not silently fall back to the first workflow when "All Workflows"
+    // is the saved selection.
+    await testPage.goto(`/tasks?workspace=${seedData.workspaceId}`);
+    await testPage.getByTestId("display-button").waitFor();
+
+    await expect(testPage.getByText("Alpha task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
+    await expect(testPage.getByText("Beta task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
+  });
+
   test("repository filter narrows the list to the selected repository", async ({
     testPage,
     apiClient,
