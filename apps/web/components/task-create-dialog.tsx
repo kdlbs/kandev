@@ -475,99 +475,114 @@ function useGuardedSubmit(
   );
 }
 
+// Build the props object passed to DialogFormBody. Extracted from
+// TaskCreateDialog so the orchestrator stays under the 100-line cap; the
+// shape just spreads setup + dialog props 1:1 so there's no behaviour change.
+function buildDialogFormBodyProps(
+  setup: ReturnType<typeof useTaskCreateDialogSetup>,
+  props: TaskCreateDialogProps,
+): DialogFormBodyProps {
+  const { fs, computed, handlers } = setup;
+  const repoLocked = !!props.lockedFields?.repository;
+  return {
+    isSessionMode: setup.isSessionMode,
+    isCreateMode: setup.isCreateMode,
+    isEditMode: setup.isEditMode,
+    isTaskStarted: setup.isTaskStarted,
+    onTaskNameChange: handlers.handleTaskNameChange,
+    onRowRepositoryChange: handlers.handleRowRepositoryChange,
+    onRowBranchChange: handlers.handleRowBranchChange,
+    isPassthroughProfile: computed.isPassthroughProfile,
+    initialDescription: fs.currentDefaults.description,
+    hasDescription: fs.hasDescription,
+    workspaceId: props.workspaceId,
+    onJiraImport: setup.handleJiraImport,
+    onLinearImport: setup.handleLinearImport,
+    agentProfileOptions: computed.agentProfileOptions,
+    executorProfileOptions: computed.executorProfileOptions,
+    agentProfiles: setup.agentProfiles,
+    agentProfilesLoading: computed.agentProfilesLoading,
+    executorsLoading: computed.executorsLoading,
+    isCreatingSession: fs.isCreatingSession,
+    workflows: setup.workflows,
+    snapshots: setup.snapshots,
+    effectiveWorkflowId: computed.effectiveWorkflowId ?? null,
+    fs,
+    handleKeyDown: setup.handleKeyDown,
+    onAgentProfileChange: handlers.handleAgentProfileChange,
+    onExecutorProfileChange: handlers.handleExecutorProfileChange,
+    onWorkflowChange: handlers.handleWorkflowChange,
+    onToggleGitHubUrl: repoLocked ? undefined : handlers.handleToggleGitHubUrl,
+    onGitHubUrlChange: handlers.handleGitHubUrlChange,
+    onToggleFreshBranch: handlers.handleToggleFreshBranch,
+    onToggleNoRepository: repoLocked ? undefined : handlers.handleToggleNoRepository,
+    onWorkspacePathChange: handlers.handleWorkspacePathChange,
+    enhance: setup.enhance,
+    workflowAgentLocked: computed.workflowAgentLocked,
+    repositories: setup.repositories,
+    freshBranchAvailable: setup.freshBranchAvailable,
+    isLocalExecutor: computed.isLocalExecutor,
+    noCompatibleAgent: computed.noCompatibleAgent,
+    executorProfileName: computed.selectedExecutorProfileName,
+    extraFormSlot: props.extraFormSlot,
+    aboveDescriptionSlot: props.aboveDescriptionSlot,
+    bottomSlot: props.bottomSlot,
+    descriptionPlaceholder: props.descriptionPlaceholder,
+    workflowLocked: props.lockedFields?.workflow,
+  };
+}
+
+function buildDialogFooterProps(
+  setup: ReturnType<typeof useTaskCreateDialogSetup>,
+  props: TaskCreateDialogProps,
+) {
+  const { fs, computed, submitHandlers } = setup;
+  return {
+    isSessionMode: setup.isSessionMode,
+    isCreateMode: setup.isCreateMode,
+    isEditMode: setup.isEditMode,
+    isTaskStarted: setup.isTaskStarted,
+    isPassthroughProfile: computed.isPassthroughProfile,
+    isCreatingSession: fs.isCreatingSession,
+    isCreatingTask: fs.isCreatingTask,
+    hasTitle: fs.hasTitle,
+    hasDescription: fs.hasDescription,
+    hasRepositorySelection: computed.hasRepositorySelection,
+    hasAllBranches: computeHasAllBranches(fs),
+    agentProfileId: computed.effectiveAgentProfileId,
+    workspaceId: props.workspaceId,
+    effectiveWorkflowId: computed.effectiveWorkflowId ?? null,
+    executorHint: computed.executorHint,
+    noCompatibleAgent: computed.noCompatibleAgent,
+    executorProfileName: computed.selectedExecutorProfileName,
+    onCancel: submitHandlers.handleCancel,
+    onUpdateWithoutAgent: submitHandlers.handleUpdateWithoutAgent,
+    onCreateWithoutAgent: submitHandlers.handleCreateWithoutAgent,
+    onCreateWithPlanMode: submitHandlers.handleCreateWithPlanMode,
+    submitBlockedReason: props.submitBlockedReason,
+  };
+}
+
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
-  const { open, onOpenChange, initialValues, workspaceId } = props;
   const setup = useTaskCreateDialogSetup(props);
-  const { fs, isSessionMode, isEditMode, isCreateMode, isTaskStarted, sessionRepoName } = setup;
-  const { workflows, agentProfiles, snapshots, repositories, computed, handlers } = setup;
-  const { handleKeyDown, freshBranchAvailable, handleJiraImport, handleLinearImport, guardedHandleSubmit } = setup;
-  const { handleUpdateWithoutAgent, handleCreateWithoutAgent, handleCreateWithPlanMode, handleCancel } = setup.submitHandlers;
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
         data-testid="create-task-dialog"
         className="w-full h-full max-w-full max-h-full rounded-none sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
       >
         <DialogHeader>
           <DialogHeaderContent
-            isCreateMode={isCreateMode}
-            isEditMode={isEditMode}
-            sessionRepoName={sessionRepoName}
-            initialTitle={initialValues?.title}
+            isCreateMode={setup.isCreateMode}
+            isEditMode={setup.isEditMode}
+            sessionRepoName={setup.sessionRepoName}
+            initialTitle={props.initialValues?.title}
           />
         </DialogHeader>
-        <form onSubmit={guardedHandleSubmit} className="flex flex-col gap-4 overflow-hidden">
-          <DialogFormBody
-            isSessionMode={isSessionMode}
-            isCreateMode={isCreateMode}
-            isEditMode={isEditMode}
-            isTaskStarted={isTaskStarted}
-            onTaskNameChange={handlers.handleTaskNameChange}
-            onRowRepositoryChange={handlers.handleRowRepositoryChange}
-            onRowBranchChange={handlers.handleRowBranchChange}
-            isPassthroughProfile={computed.isPassthroughProfile}
-            initialDescription={fs.currentDefaults.description}
-            hasDescription={fs.hasDescription}
-            workspaceId={workspaceId}
-            onJiraImport={handleJiraImport}
-            onLinearImport={handleLinearImport}
-            agentProfileOptions={computed.agentProfileOptions}
-            executorProfileOptions={computed.executorProfileOptions}
-            agentProfiles={agentProfiles}
-            agentProfilesLoading={computed.agentProfilesLoading}
-            executorsLoading={computed.executorsLoading}
-            isCreatingSession={fs.isCreatingSession}
-            workflows={workflows}
-            snapshots={snapshots}
-            effectiveWorkflowId={computed.effectiveWorkflowId ?? null}
-            fs={fs}
-            handleKeyDown={handleKeyDown}
-            onAgentProfileChange={handlers.handleAgentProfileChange}
-            onExecutorProfileChange={handlers.handleExecutorProfileChange}
-            onWorkflowChange={handlers.handleWorkflowChange}
-            onToggleGitHubUrl={props.lockedFields?.repository ? undefined : handlers.handleToggleGitHubUrl}
-            onGitHubUrlChange={handlers.handleGitHubUrlChange}
-            onToggleFreshBranch={handlers.handleToggleFreshBranch}
-            onToggleNoRepository={props.lockedFields?.repository ? undefined : handlers.handleToggleNoRepository}
-            onWorkspacePathChange={handlers.handleWorkspacePathChange}
-            enhance={setup.enhance}
-            workflowAgentLocked={computed.workflowAgentLocked}
-            repositories={repositories}
-            freshBranchAvailable={freshBranchAvailable}
-            isLocalExecutor={computed.isLocalExecutor}
-            noCompatibleAgent={computed.noCompatibleAgent}
-            executorProfileName={computed.selectedExecutorProfileName}
-            extraFormSlot={props.extraFormSlot}
-            aboveDescriptionSlot={props.aboveDescriptionSlot}
-            bottomSlot={props.bottomSlot}
-            descriptionPlaceholder={props.descriptionPlaceholder}
-            workflowLocked={props.lockedFields?.workflow}
-          />
+        <form onSubmit={setup.guardedHandleSubmit} className="flex flex-col gap-4 overflow-hidden">
+          <DialogFormBody {...buildDialogFormBodyProps(setup, props)} />
           <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
-            <TaskCreateDialogFooter
-              isSessionMode={isSessionMode}
-              isCreateMode={isCreateMode}
-              isEditMode={isEditMode}
-              isTaskStarted={isTaskStarted}
-              isPassthroughProfile={computed.isPassthroughProfile}
-              isCreatingSession={fs.isCreatingSession}
-              isCreatingTask={fs.isCreatingTask}
-              hasTitle={fs.hasTitle}
-              hasDescription={fs.hasDescription}
-              hasRepositorySelection={computed.hasRepositorySelection}
-              hasAllBranches={computeHasAllBranches(fs)}
-              agentProfileId={computed.effectiveAgentProfileId}
-              workspaceId={workspaceId}
-              effectiveWorkflowId={computed.effectiveWorkflowId ?? null}
-              executorHint={computed.executorHint}
-              noCompatibleAgent={computed.noCompatibleAgent}
-              executorProfileName={computed.selectedExecutorProfileName}
-              onCancel={handleCancel}
-              onUpdateWithoutAgent={handleUpdateWithoutAgent}
-              onCreateWithoutAgent={handleCreateWithoutAgent}
-              onCreateWithPlanMode={handleCreateWithPlanMode}
-              submitBlockedReason={props.submitBlockedReason}
-            />
+            <TaskCreateDialogFooter {...buildDialogFooterProps(setup, props)} />
           </DialogFooter>
         </form>
         <PendingDiscardModal pending={setup.submitHandlers.pendingDiscard} />
