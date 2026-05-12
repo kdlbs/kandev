@@ -4,7 +4,14 @@
  * cap — these are non-React, no-JSX projections from the setup hook's
  * result + dialog props, so they belong outside the component module.
  */
-import { TaskCreateDialogProps, useTaskCreateDialogSetup } from "@/components/task-create-dialog";
+// Both names are used only in type positions (interface + `typeof` in
+// ReturnType<>), so the `import type` form makes the otherwise-circular
+// dependency with task-create-dialog.tsx explicitly type-only — bundlers
+// and analysis tools won't treat it as a real runtime cycle.
+import type {
+  TaskCreateDialogProps,
+  useTaskCreateDialogSetup,
+} from "@/components/task-create-dialog";
 import type { DialogFormBodyProps, DialogFormState } from "@/components/task-create-dialog-types";
 
 export function computeHasAllBranches(fs: DialogFormState): boolean {
