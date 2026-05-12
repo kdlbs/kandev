@@ -1,6 +1,8 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 
+const TASK_VISIBLE_TIMEOUT = 10_000;
+
 // Regression: clicking Delete / Archive must show the confirm dialog, not navigate to the task.
 test.describe("Kanban card actions menu — delete/archive does not navigate", () => {
   test("clicking Delete in card dropdown shows confirm dialog and does not navigate", async ({
@@ -79,5 +81,80 @@ test.describe("Kanban card actions menu — delete/archive does not navigate", (
     // Preview-on-click must not have fired — URL should still be the start URL
     expect(testPage.url()).toBe(startUrl);
     await expect(testPage.getByTestId("task-preview-panel")).not.toBeVisible();
+  });
+});
+
+// Regression: in "All Workflows" swimlane view, state.kanban.workflowId is null.
+// useTaskCRUD's handleDelete/handleArchive used to early-return on that, so the
+// dialog closed but no API call ran and the task stayed on the board.
+test.describe("Kanban card actions menu — delete/archive in All Workflows view", () => {
+  // Pull `testPage` so its fixture (which resets user settings) runs before this
+  // hook seeds workflows/settings — otherwise the reset wipes them on first use.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  test.beforeEach(async ({ apiClient, seedData, testPage }) => {
+    // Need a second workflow so resolveDesiredWorkflowId does not auto-select
+    // the only visible workflow when filter is null.
+    await apiClient.createWorkflow(seedData.workspaceId, "Secondary Workflow", "simple");
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: "",
+      repository_ids: [],
+    });
+  });
+
+  test("confirming Delete removes the task from the board in All Workflows view", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "All-Wf Delete Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await expect(kanban.taskCardByTitle("All-Wf Delete Task")).toBeVisible({
+      timeout: TASK_VISIBLE_TIMEOUT,
+    });
+
+    await kanban.openTaskActionsMenu(task.id);
+    await testPage.getByRole("menuitem", { name: "Delete" }).click();
+
+    const dialog = testPage.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Delete" }).click();
+
+    await expect(kanban.taskCardByTitle("All-Wf Delete Task")).not.toBeVisible({
+      timeout: TASK_VISIBLE_TIMEOUT,
+    });
+  });
+
+  test("confirming Archive removes the task from the board in All Workflows view", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "All-Wf Archive Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await expect(kanban.taskCardByTitle("All-Wf Archive Task")).toBeVisible({
+      timeout: TASK_VISIBLE_TIMEOUT,
+    });
+
+    await kanban.openTaskActionsMenu(task.id);
+    await testPage.getByRole("menuitem", { name: "Archive" }).click();
+
+    const dialog = testPage.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Archive" }).click();
+
+    await expect(kanban.taskCardByTitle("All-Wf Archive Task")).not.toBeVisible({
+      timeout: TASK_VISIBLE_TIMEOUT,
+    });
   });
 });
