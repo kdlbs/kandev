@@ -183,9 +183,15 @@ function ApproveButton({
 }) {
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
+  const currentUser = useAppStore((s) => s.githubStatus.status?.username ?? null);
 
   const liveState = feedback?.pr.state ?? taskPR.state;
   if (liveState !== "open") return null;
+
+  // GitHub rejects self-approval at the API level, so hide the button when
+  // the PR is authored by the currently authenticated user.
+  const prAuthor = feedback?.pr.author_login ?? taskPR.author_login;
+  if (currentUser && prAuthor && currentUser === prAuthor) return null;
 
   const alreadyApproved = feedback?.reviews?.some(
     (r) => r.state === "APPROVED" && r.author === feedback.pr.author_login,
