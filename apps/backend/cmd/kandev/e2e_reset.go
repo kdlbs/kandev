@@ -47,19 +47,32 @@ func handleE2EReset(repo *sqliterepo.Repository, taskSvc *taskservice.Service, l
 		// running agentctl instances are stopped and their ports released.
 		// Without this, instances accumulate across tests in the same
 		// Playwright worker until the per-worker port range is exhausted.
-		// pageSize 10000 covers any realistic E2E test count.
-		tasks, _, err := repo.ListTasksByWorkspace(ctx, workspaceID, "", "", "", 1, 10000, true, true, false, false)
+		const resetPageSize = 10000
+		tasks, total, err := repo.ListTasksByWorkspace(ctx, workspaceID, "", "", "", 1, resetPageSize, true, true, false, false)
 		if err != nil {
 			log.Error("e2e reset: failed to list tasks", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		if total > resetPageSize {
+			// Fail loudly rather than silently leaving tasks behind, which
+			// would leak agentctl instances and exhaust ports.
+			log.Error("e2e reset: task count exceeds page size",
+				zap.Int("total", total), zap.Int("page_size", resetPageSize))
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "task count exceeds reset page size",
+			})
+			return
+		}
 		var deletedTasks int64
 		for _, t := range tasks {
 			if err := taskSvc.DeleteTaskAndWait(ctx, t.ID); err != nil {
-				log.Warn("e2e reset: failed to delete task",
+				// Abort: leaving an undeleted task with its workflow gone
+				// would create orphan rows visible to subsequent tests.
+				log.Error("e2e reset: failed to delete task",
 					zap.String("task_id", t.ID), zap.Error(err))
-				continue
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
 			}
 			deletedTasks++
 		}
