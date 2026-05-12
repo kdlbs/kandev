@@ -4,10 +4,7 @@
  * cap — these are non-React, no-JSX projections from the setup hook's
  * result + dialog props, so they belong outside the component module.
  */
-import {
-  TaskCreateDialogProps,
-  useTaskCreateDialogSetup,
-} from "@/components/task-create-dialog";
+import { TaskCreateDialogProps, useTaskCreateDialogSetup } from "@/components/task-create-dialog";
 import type { DialogFormBodyProps, DialogFormState } from "@/components/task-create-dialog-types";
 
 export function computeHasAllBranches(fs: DialogFormState): boolean {
