@@ -68,7 +68,7 @@ The image sets `HOME=/data/home`, so every CLI that writes its auth under `$HOME
 - GitHub Copilot — `~/.copilot/...`
 - OpenCode, Amp — `~/.config/<tool>/...`
 
-A one-time `docker exec -it kandev gh auth login` (or `claude /login`, `codex login`, etc.) is enough; you do not need to redo it after `docker pull` and recreating the container.
+A one-time `docker exec -it kandev gh auth login` (or `claude login`, `codex login`, etc.) is enough; you do not need to redo it after `docker pull` and recreating the container.
 
 > The GitHub PAT configured in **Settings → Integrations → GitHub** is stored as a secret in the database and has always persisted. The `HOME=/data/home` setup covers the separate `gh auth login` flow that the backend falls back to when no `GITHUB_TOKEN` secret is set.
 

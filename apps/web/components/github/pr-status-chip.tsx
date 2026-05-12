@@ -30,7 +30,9 @@ function chipStatus(pr: TaskPR): ChipStatus {
   // moment CI finishes and ignores the human gate. isPRAwaitingReview also
   // covers approved PRs where branch protection requires more reviewers.
   if (pr.checks_state === "pending" || pr.review_state === "pending") return "in_progress";
-  if (isPRAwaitingReview(pr)) return "in_progress";
+  // Mirror getPRStatusColor priority: ready-to-merge beats awaiting-review so
+  // the chip and icon never disagree on a (theoretical) clean+approved+pending PR.
+  if (isPRAwaitingReview(pr) && !isPRReadyToMerge(pr)) return "in_progress";
   if (pr.checks_state === "success") return "passed";
   return "neutral";
 }

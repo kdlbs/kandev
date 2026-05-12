@@ -101,7 +101,7 @@ The image sets `HOME=/data/home` for the `kandev` user, so every CLI that writes
 - GitHub Copilot — `~/.copilot/...`
 - OpenCode, Amp — `~/.config/<tool>/...`
 
-So a one-time `kubectl exec -it deployment/kandev -- gh auth login` (or `claude /login`, `codex login`, etc.) is enough; you do not need to redo it after `kubectl set image` or a `helm upgrade`.
+So a one-time `kubectl exec -it deployment/kandev -- gh auth login` (or `claude login`, `codex login`, etc.) is enough; you do not need to redo it after `kubectl set image` or a `helm upgrade`.
 
 > The GitHub PAT configured in **Settings → Integrations → GitHub** is stored as a secret in the SQLite DB (or your external Postgres) and has always persisted. The `HOME=/data/home` setup covers the separate `gh auth login` flow that the backend falls back to when no `GITHUB_TOKEN` secret is set.
 
