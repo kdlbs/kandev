@@ -88,9 +88,7 @@ test.describe("Kanban card actions menu — delete/archive does not navigate", (
 // useTaskCRUD's handleDelete/handleArchive used to early-return on that, so the
 // dialog closed but no API call ran and the task stayed on the board.
 test.describe("Kanban card actions menu — delete/archive in All Workflows view", () => {
-  // Pull `testPage` so its fixture (which resets user settings) runs before this
-  // hook seeds workflows/settings — otherwise the reset wipes them on first use.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- testPage is listed to force its fixture (user-settings reset) to run before this hook's API seeding; without it the reset wipes our workflow_filter_id on first use
   test.beforeEach(async ({ apiClient, seedData, testPage }) => {
     // Need a second workflow so resolveDesiredWorkflowId does not auto-select
     // the only visible workflow when filter is null.
