@@ -143,13 +143,8 @@ func mockSessionModes() *acp.SessionModeState {
 }
 
 // LoadSession restores a previous session for resume.
-// When --fail-on-resume is set on the ACP path, the process exits 1 before
-// completing the load — simulating an agent whose previous conversation
-// could not be restored. The orchestrator's handleAgentFailed sees a resume
-// attempt that never initialized and routes through handleResumeFailure,
-// which emits the "Previous agent session could not be restored…" status
-// message without creating new recovery action buttons. This is the failure
-// mode the resume-session-recovery e2e test exercises.
+// When --fail-on-resume is set, exit before completing the load — LoadSession
+// is only reached on resume, so no resumed-guard is needed here (unlike TUI).
 func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
 	if parseFailOnResumeFlag() {
 		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: refusing resume for session %s (--fail-on-resume), exiting 1\n", os.Getpid(), req.SessionId)
