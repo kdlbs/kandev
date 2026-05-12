@@ -91,7 +91,7 @@ export function usePortalSlot(
     // this the sidebar (and any other scrollable descendant of a portal) jumps
     // back to the top after every dockview layout switch.
     container.appendChild(entry.element);
-    restorePortalScroll(entry.element);
+    const cancelRestore = restorePortalScroll(entry.element);
     // Track every scroll inside this portal so we always have an up-to-date
     // snapshot to restore after the next reattach. We do this via a capturing
     // listener because dockview can rip the DOM apart before React runs the
@@ -106,6 +106,7 @@ export function usePortalSlot(
     entry.element.addEventListener("scroll", onScroll, true);
 
     return () => {
+      cancelRestore();
       entry.element.removeEventListener("scroll", onScroll, true);
       // Detach only — do NOT release.  The element stays in the manager
       // and will be re-adopted when the panel remounts after fromJSON().
@@ -143,20 +144,72 @@ export function usePortalSlot(
  */
 const scrollSnapshots = new WeakMap<Element, { top: number; left: number }>();
 
-function restorePortalScroll(portal: Element): void {
-  // Walk every element under the portal (after reattach the live scrollTop
-  // values have been reset to 0) and restore any snapshot we recorded.
+/** Window during which we keep re-applying snapshots after attach. */
+const RESTORE_WINDOW_MS = 1500;
+
+/**
+ * Restore captured scroll positions on every scrollable descendant of `portal`,
+ * then keep re-applying for a short window so that a snapshot which gets
+ * clamped by a not-yet-laid-out container (`scrollTop` capped to
+ * `scrollHeight - clientHeight`) is corrected once layout settles.
+ *
+ * Returns a function that cancels any pending retries (call from cleanup so
+ * we never write to a detached subtree).
+ */
+function restorePortalScroll(portal: Element): () => void {
+  // Collect every descendant that has a snapshot up front so we don't re-walk
+  // the tree on each retry.
+  const targets: Array<{ el: HTMLElement; snap: { top: number; left: number } }> = [];
   const walker = document.createTreeWalker(portal, NodeFilter.SHOW_ELEMENT);
   let node: Node | null = walker.currentNode;
   while (node) {
     if (node instanceof Element) {
       const snap = scrollSnapshots.get(node);
-      if (snap) {
-        const html = node as HTMLElement;
-        html.scrollTop = snap.top;
-        html.scrollLeft = snap.left;
+      if (snap && (snap.top > 0 || snap.left > 0)) {
+        targets.push({ el: node as HTMLElement, snap });
       }
     }
     node = walker.nextNode();
   }
+  if (targets.length === 0) return () => {};
+
+  const apply = () => {
+    for (const { el, snap } of targets) {
+      // Only push the value back up if the container hasn't already reached
+      // (or surpassed) the snapshot — preserves any real user scroll that
+      // happened during the restore window.
+      if (el.scrollTop < snap.top) el.scrollTop = snap.top;
+      if (el.scrollLeft < snap.left) el.scrollLeft = snap.left;
+    }
+  };
+  apply();
+
+  // Re-apply on every layout/size change of any tracked element until either
+  // every snapshot is satisfied or the restore window elapses.
+  let cancelled = false;
+  const ro = new ResizeObserver(() => {
+    if (cancelled) return;
+    apply();
+  });
+  for (const { el } of targets) ro.observe(el);
+  // A short rAF chain catches the common case where layout settles within
+  // the next two frames without a measurable size change.
+  requestAnimationFrame(() => {
+    if (cancelled) return;
+    apply();
+    requestAnimationFrame(() => {
+      if (cancelled) return;
+      apply();
+    });
+  });
+  const stopId = window.setTimeout(() => {
+    cancelled = true;
+    ro.disconnect();
+  }, RESTORE_WINDOW_MS);
+
+  return () => {
+    cancelled = true;
+    ro.disconnect();
+    window.clearTimeout(stopId);
+  };
 }
