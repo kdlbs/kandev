@@ -217,6 +217,7 @@ function ApproveButton({
 
   return (
     <Button
+      data-testid="pr-approve-button"
       size="sm"
       className="cursor-pointer gap-1.5 border-0 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500"
       onClick={handleApprove}

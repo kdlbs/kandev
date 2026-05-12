@@ -428,6 +428,12 @@ export class SessionPage {
     return this.page.getByTestId("pr-detail-panel");
   }
 
+  /** "Approve PR" button inside the PR detail panel header. Hidden when the
+   * current GitHub user authored the PR (self-approval is rejected upstream). */
+  prApproveButton(): Locator {
+    return this.page.getByTestId("pr-approve-button");
+  }
+
   // --- CI hover popover accessors (kept here so the spec stays declarative) ---
 
   /** The single-PR hover popover content (visible after hovering the topbar button). */
