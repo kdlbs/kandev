@@ -161,15 +161,15 @@ function restorePortalScroll(portal: Element): () => void {
   // the tree on each retry.
   const targets: Array<{ el: HTMLElement; snap: { top: number; left: number } }> = [];
   const walker = document.createTreeWalker(portal, NodeFilter.SHOW_ELEMENT);
-  let node: Node | null = walker.currentNode;
+  // Skip the portal element itself — it is never user-scrolled, and the loop
+  // body assumes Element nodes (guaranteed by SHOW_ELEMENT for descendants).
+  let node = walker.nextNode() as HTMLElement | null;
   while (node) {
-    if (node instanceof Element) {
-      const snap = scrollSnapshots.get(node);
-      if (snap && (snap.top > 0 || snap.left > 0)) {
-        targets.push({ el: node as HTMLElement, snap });
-      }
+    const snap = scrollSnapshots.get(node);
+    if (snap && (snap.top > 0 || snap.left > 0)) {
+      targets.push({ el: node, snap });
     }
-    node = walker.nextNode();
+    node = walker.nextNode() as HTMLElement | null;
   }
   if (targets.length === 0) return () => {};
 
