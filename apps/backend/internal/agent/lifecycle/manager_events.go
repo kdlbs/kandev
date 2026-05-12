@@ -109,14 +109,24 @@ func (m *Manager) handleCompleteEventMarkState(execution *AgentExecution, event 
 	// turn-content events (no message_chunk/tool_call/etc), recordActivity
 	// won't have flipped Ready → Running. MarkReady would then early-return
 	// on the Ready guard and silently drop AgentReady — same suppression
-	// the wakeup fix is designed to prevent. Detect this here and publish
-	// AgentReady directly so the orchestrator still closes the turn.
+	// the wakeup fix is designed to prevent.
+	//
+	// Publishing AgentReady alone is not enough: the orchestrator's
+	// handleAgentReady (`event_handlers_agent.go:205`) ignores AgentReady
+	// when session.State is not Running/Starting, and after the previous
+	// turn ended the session is WaitingForInput. We mirror what
+	// recordActivity does for the non-empty case — flip Ready → Running
+	// and publish AgentRunning first, so the orchestrator's session state
+	// catches up — then let MarkReady do its normal Running → Ready
+	// transition and publish AgentReady.
 	if execution.Status == v1.AgentStatusReady {
-		m.logger.Info("publishing AgentReady for empty wakeup turn (status already Ready)",
+		m.logger.Info("flipping Ready→Running for empty wakeup turn before publishing AgentReady",
 			zap.String("execution_id", execution.ID),
 			zap.String("session_id", execution.SessionID))
-		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentReady, execution)
-		return
+		if m.executionStore != nil {
+			m.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
+		}
+		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
 	}
 	if err := m.MarkReady(execution.ID); err != nil {
 		m.logger.Error("failed to mark execution as ready after complete",
@@ -342,11 +352,18 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 	execution.lastActivityAt = time.Now()
 	execution.lastActivityAtMu.Unlock()
 
-	execution.firstActivityOnce.Do(func() {
-		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
-	})
-
-	if execution.Status != v1.AgentStatusReady || m.executionStore == nil {
+	// Gate firstActivityOnce on `Status != Ready` so a delayed metadata
+	// event arriving after MarkBootReady can't accidentally fire
+	// AgentRunning. In practice the adapter always emits agent_capabilities
+	// during Initialize (before MarkBootReady), so firstActivityOnce fires
+	// while Status is still Running — this is defensive hardening.
+	if execution.Status != v1.AgentStatusReady {
+		execution.firstActivityOnce.Do(func() {
+			m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
+		})
+		return
+	}
+	if m.executionStore == nil {
 		return
 	}
 	if _, ok := turnContentEventTypes[event.Type]; !ok {

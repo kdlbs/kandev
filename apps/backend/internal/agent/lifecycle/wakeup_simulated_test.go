@@ -113,6 +113,28 @@ func TestWakeup_SecondTurnAgentReadyIsSuppressed(t *testing.T) {
 			readyCount,
 		)
 	}
+
+	// Ordering check: for each AgentReady, there must be a preceding
+	// AgentRunning. The orchestrator's handleAgentReady early-returns when
+	// session.State is not Running/Starting, so an AgentReady on the bus
+	// is only useful if the matching AgentRunning has flipped session
+	// state first. Verify by walking the published events in order and
+	// requiring `running_count >= ready_count` at every AgentReady index.
+	running, ready := 0, 0
+	for _, te := range eventBus.PublishedEvents {
+		if te.Event == nil {
+			continue
+		}
+		switch te.Event.Type {
+		case events.AgentRunning:
+			running++
+		case events.AgentReady:
+			ready++
+			if running < ready {
+				t.Errorf("AgentReady #%d published before matching AgentRunning (running=%d at that point) — orchestrator's handleAgentReady will silently drop this", ready, running)
+			}
+		}
+	}
 }
 
 // TestWakeup_PostBootMetadataEventsDoNotFlipToRunning verifies that boot-time
@@ -128,6 +150,13 @@ func TestWakeup_PostBootMetadataEventsDoNotFlipToRunning(t *testing.T) {
 	mgr, eventBus := createTestManagerWithTracking()
 	execution := createTestExecution("exec-1", "task-1", "session-1")
 	_ = mgr.executionStore.Add(execution)
+
+	// Prime firstActivityOnce so it's already consumed before the post-boot
+	// metadata events arrive. In production, the adapter always emits
+	// `agent_capabilities` during Initialize (before MarkBootReady), which
+	// consumes firstActivityOnce while Status is still Running. The
+	// `Sync.Once.Do` call here mirrors that.
+	execution.firstActivityOnce.Do(func() {})
 
 	// Mirror the no-prompt boot path: dispatchInitialPrompt → MarkBootReady →
 	// status flips to Ready.
@@ -147,10 +176,11 @@ func TestWakeup_PostBootMetadataEventsDoNotFlipToRunning(t *testing.T) {
 			runningCount++
 		}
 	}
-	// firstActivityOnce fires AgentRunning exactly once on the very first event.
-	// The wakeup-detect flip must NOT fire for any of these metadata events.
-	if runningCount > 1 {
-		t.Errorf("expected at most 1 agent.running event (firstActivityOnce), got %d — boot metadata events incorrectly flipped Ready → Running", runningCount)
+	// With firstActivityOnce already consumed, the only way to publish
+	// AgentRunning would be the post-boot whitelist flip. None of these
+	// metadata events are on the whitelist, so the count must be exactly 0.
+	if runningCount != 0 {
+		t.Errorf("expected 0 agent.running events from post-boot metadata, got %d — metadata-driven re-arming is broken", runningCount)
 	}
 	if execution.Status != v1.AgentStatusReady {
 		t.Errorf("execution.Status = %q, want %q — boot metadata events should not change status", execution.Status, v1.AgentStatusReady)
@@ -185,5 +215,25 @@ func TestWakeup_EmptyTurnStillPublishesAgentReady(t *testing.T) {
 	}
 	if readyCount != 2 {
 		t.Errorf("expected 2 agent.ready events (one per turn, including the empty wakeup turn), got %d", readyCount)
+	}
+
+	// The empty-wakeup fallback in handleCompleteEventMarkState must publish
+	// AgentRunning before AgentReady so the orchestrator's session-state
+	// guard (handleAgentReady early-returns on non-Running/Starting state)
+	// lets AgentReady through.
+	running, ready := 0, 0
+	for _, te := range eventBus.PublishedEvents {
+		if te.Event == nil {
+			continue
+		}
+		switch te.Event.Type {
+		case events.AgentRunning:
+			running++
+		case events.AgentReady:
+			ready++
+			if running < ready {
+				t.Errorf("AgentReady #%d for empty wakeup published before matching AgentRunning — orchestrator will drop it", ready)
+			}
+		}
 	}
 }
