@@ -38,8 +38,12 @@ import {
   type TaskCreateDialogInitialValues,
 } from "@/components/task-create-dialog-state";
 import type { DialogFormBodyProps } from "@/components/task-create-dialog-types";
+import {
+  buildDialogFooterProps,
+  buildDialogFormBodyProps,
+} from "@/components/task-create-dialog-prop-builders";
 
-interface TaskCreateDialogProps {
+export interface TaskCreateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   mode?: "create" | "edit" | "session";
@@ -95,12 +99,6 @@ interface TaskCreateDialogProps {
    * completed yet). Takes precedence over the usual missing-field reasons.
    */
   submitBlockedReason?: string | null;
-}
-
-function computeHasAllBranches(fs: DialogFormState): boolean {
-  if (fs.noRepository) return true;
-  if (fs.useGitHubUrl) return !!fs.githubBranch;
-  return fs.repositories.length > 0 && fs.repositories.every((r) => !!r.branch);
 }
 
 function CreateModeBody(props: DialogFormBodyProps) {
@@ -378,7 +376,7 @@ function resolveSingleRowLocalPath(fs: DialogFormState, repositories: Repository
   return "";
 }
 
-function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
+export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
   const { open, mode = "create", workspaceId, workflowId, defaultStepId } = props;
   const { editingTask, initialValues } = props;
   const isSessionMode = mode === "session";
@@ -473,94 +471,6 @@ function useGuardedSubmit(
     },
     [blocked, handleSubmit],
   );
-}
-
-// Build the props object passed to DialogFormBody. Extracted from
-// TaskCreateDialog so the orchestrator stays under the 100-line cap; the
-// shape just spreads setup + dialog props 1:1 so there's no behaviour change.
-function buildDialogFormBodyProps(
-  setup: ReturnType<typeof useTaskCreateDialogSetup>,
-  props: TaskCreateDialogProps,
-): DialogFormBodyProps {
-  const { fs, computed, handlers } = setup;
-  const repoLocked = !!props.lockedFields?.repository;
-  return {
-    isSessionMode: setup.isSessionMode,
-    isCreateMode: setup.isCreateMode,
-    isEditMode: setup.isEditMode,
-    isTaskStarted: setup.isTaskStarted,
-    onTaskNameChange: handlers.handleTaskNameChange,
-    onRowRepositoryChange: handlers.handleRowRepositoryChange,
-    onRowBranchChange: handlers.handleRowBranchChange,
-    isPassthroughProfile: computed.isPassthroughProfile,
-    initialDescription: fs.currentDefaults.description,
-    hasDescription: fs.hasDescription,
-    workspaceId: props.workspaceId,
-    onJiraImport: setup.handleJiraImport,
-    onLinearImport: setup.handleLinearImport,
-    agentProfileOptions: computed.agentProfileOptions,
-    executorProfileOptions: computed.executorProfileOptions,
-    agentProfiles: setup.agentProfiles,
-    agentProfilesLoading: computed.agentProfilesLoading,
-    executorsLoading: computed.executorsLoading,
-    isCreatingSession: fs.isCreatingSession,
-    workflows: setup.workflows,
-    snapshots: setup.snapshots,
-    effectiveWorkflowId: computed.effectiveWorkflowId ?? null,
-    fs,
-    handleKeyDown: setup.handleKeyDown,
-    onAgentProfileChange: handlers.handleAgentProfileChange,
-    onExecutorProfileChange: handlers.handleExecutorProfileChange,
-    onWorkflowChange: handlers.handleWorkflowChange,
-    onToggleGitHubUrl: repoLocked ? undefined : handlers.handleToggleGitHubUrl,
-    onGitHubUrlChange: handlers.handleGitHubUrlChange,
-    onToggleFreshBranch: handlers.handleToggleFreshBranch,
-    onToggleNoRepository: repoLocked ? undefined : handlers.handleToggleNoRepository,
-    onWorkspacePathChange: handlers.handleWorkspacePathChange,
-    enhance: setup.enhance,
-    workflowAgentLocked: computed.workflowAgentLocked,
-    repositories: setup.repositories,
-    freshBranchAvailable: setup.freshBranchAvailable,
-    isLocalExecutor: computed.isLocalExecutor,
-    noCompatibleAgent: computed.noCompatibleAgent,
-    executorProfileName: computed.selectedExecutorProfileName,
-    extraFormSlot: props.extraFormSlot,
-    aboveDescriptionSlot: props.aboveDescriptionSlot,
-    bottomSlot: props.bottomSlot,
-    descriptionPlaceholder: props.descriptionPlaceholder,
-    workflowLocked: props.lockedFields?.workflow,
-  };
-}
-
-function buildDialogFooterProps(
-  setup: ReturnType<typeof useTaskCreateDialogSetup>,
-  props: TaskCreateDialogProps,
-) {
-  const { fs, computed, submitHandlers } = setup;
-  return {
-    isSessionMode: setup.isSessionMode,
-    isCreateMode: setup.isCreateMode,
-    isEditMode: setup.isEditMode,
-    isTaskStarted: setup.isTaskStarted,
-    isPassthroughProfile: computed.isPassthroughProfile,
-    isCreatingSession: fs.isCreatingSession,
-    isCreatingTask: fs.isCreatingTask,
-    hasTitle: fs.hasTitle,
-    hasDescription: fs.hasDescription,
-    hasRepositorySelection: computed.hasRepositorySelection,
-    hasAllBranches: computeHasAllBranches(fs),
-    agentProfileId: computed.effectiveAgentProfileId,
-    workspaceId: props.workspaceId,
-    effectiveWorkflowId: computed.effectiveWorkflowId ?? null,
-    executorHint: computed.executorHint,
-    noCompatibleAgent: computed.noCompatibleAgent,
-    executorProfileName: computed.selectedExecutorProfileName,
-    onCancel: submitHandlers.handleCancel,
-    onUpdateWithoutAgent: submitHandlers.handleUpdateWithoutAgent,
-    onCreateWithoutAgent: submitHandlers.handleCreateWithoutAgent,
-    onCreateWithPlanMode: submitHandlers.handleCreateWithPlanMode,
-    submitBlockedReason: props.submitBlockedReason,
-  };
 }
 
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
