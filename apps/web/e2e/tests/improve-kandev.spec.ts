@@ -196,7 +196,7 @@ test.describe("Improve Kandev dialog", () => {
     await expect(blockedDialog).toBeHidden();
   });
 
-  test("workflow picker stays hidden when locked, even when the workspace has multiple workflows", async ({
+  test("locked mode hides workflow picker and source-mode switch (URL / None)", async ({
     testPage,
     apiClient,
     seedData,
@@ -222,6 +222,13 @@ test.describe("Improve Kandev dialog", () => {
     // switch away from the kandev contribution workflow that the bootstrap
     // probe already locked in.
     await expect(createDialog.getByTestId("workflow-selector-trigger")).toHaveCount(0);
+
+    // Source-mode switch must be hidden entirely when the repo is locked:
+    // neither the URL nor the None ("scratch") modes can be reached, so the
+    // dialog can only ever submit against the bootstrapped kandev repository.
+    await expect(createDialog.getByTestId("toggle-github-url")).toHaveCount(0);
+    await expect(createDialog.getByTestId("source-mode-scratch")).toHaveCount(0);
+    await expect(createDialog.getByTestId("source-mode-workspace")).toHaveCount(0);
   });
 
   test("submit button stays disabled with bootstrap reason while bootstrap is in flight", async ({

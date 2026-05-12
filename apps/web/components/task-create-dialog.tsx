@@ -32,6 +32,7 @@ import {
   useDialogFormState,
   useTaskCreateDialogEffects,
   useDialogHandlers,
+  useLockedFieldSync,
   useSessionRepoName,
   useTaskCreateDialogData,
   computeIsTaskStarted,
@@ -132,7 +133,7 @@ type DialogFormBodyProps = {
   onToggleGitHubUrl?: () => void;
   onGitHubUrlChange: (v: string) => void;
   onToggleFreshBranch: (enabled: boolean) => void;
-  onToggleNoRepository: () => void;
+  onToggleNoRepository?: () => void;
   onWorkspacePathChange: (value: string) => void;
   enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };
   workflowAgentLocked: boolean;
@@ -470,6 +471,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     workflows,
     isLocalExecutor: computed.isLocalExecutor,
   });
+  useLockedFieldSync(open, workflowId, initialValues, fs);
   const handlers = useDialogHandlers(fs, repositories);
   const submitHandlers = useSubmitHandlersWiring({
     props,
@@ -539,6 +541,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const { fs, isSessionMode, isEditMode, isCreateMode, isTaskStarted } = setup;
   const { sessionRepoName, workflows, agentProfiles, snapshots, repositories } = setup;
   const { computed, handlers, handleKeyDown, freshBranchAvailable } = setup;
+  const repoLocked = !!props.lockedFields?.repository;
   const { handleUpdateWithoutAgent, handleCreateWithoutAgent } = setup.submitHandlers;
   const { handleCreateWithPlanMode, handleCancel } = setup.submitHandlers;
   const { handleJiraImport, handleLinearImport, guardedHandleSubmit } = setup;
@@ -585,12 +588,10 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             onAgentProfileChange={handlers.handleAgentProfileChange}
             onExecutorProfileChange={handlers.handleExecutorProfileChange}
             onWorkflowChange={handlers.handleWorkflowChange}
-            onToggleGitHubUrl={
-              props.lockedFields?.repository ? undefined : handlers.handleToggleGitHubUrl
-            }
+            onToggleGitHubUrl={repoLocked ? undefined : handlers.handleToggleGitHubUrl}
             onGitHubUrlChange={handlers.handleGitHubUrlChange}
             onToggleFreshBranch={handlers.handleToggleFreshBranch}
-            onToggleNoRepository={handlers.handleToggleNoRepository}
+            onToggleNoRepository={repoLocked ? undefined : handlers.handleToggleNoRepository}
             onWorkspacePathChange={handlers.handleWorkspacePathChange}
             enhance={setup.enhance}
             workflowAgentLocked={computed.workflowAgentLocked}
