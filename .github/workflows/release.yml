@@ -430,6 +430,86 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  docker-universal:
+    name: Build & push universal container image
+    needs: [prepare, docker]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write    # push to GHCR
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Docker meta (universal)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/kdlbs/kandev
+          tags: |
+            type=raw,value=${{ needs.prepare.outputs.version }}-universal
+            type=raw,value=${{ needs.prepare.outputs.tag }}-universal
+            type=raw,value=universal
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build universal on top of the vanilla image we just pushed. Passing
+      # the exact `:vX.Y.Z` tag (not `:latest`) keeps the pair coherent:
+      # universal-of-vX.Y.Z always rests on vanilla-vX.Y.Z, even if a later
+      # release moves `:latest`.
+      - name: Build and push (universal)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.universal
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            BASE_IMAGE=ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=universal
+          cache-to: type=gha,mode=max,scope=universal
+
+      # Universal size gate. Fails the release if compressed image exceeds
+      # the ceiling — forces deliberate decisions about scope creep. Bump
+      # this number in the same PR that adds the dependency that pushed
+      # over the line, with a one-sentence justification in the commit msg.
+      - name: Enforce size budget
+        env:
+          IMAGE: ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}-universal
+          MAX_COMPRESSED_BYTES: "2684354560"   # 2.5 GiB
+        run: |
+          set -euo pipefail
+          # Inspect the multi-arch manifest and sum compressed layer sizes
+          # for linux/amd64. amd64 is the bigger of the two arches in
+          # practice, so gating on it gives us a single-number signal.
+          docker buildx imagetools inspect "$IMAGE" --raw \
+              > /tmp/index.json
+          AMD64_DIGEST="$(jq -r '
+              .manifests[]
+              | select(.platform.architecture == "amd64" and .platform.os == "linux")
+              | .digest
+            ' /tmp/index.json)"
+          docker buildx imagetools inspect "ghcr.io/kdlbs/kandev@${AMD64_DIGEST}" --raw \
+              > /tmp/manifest.json
+          TOTAL="$(jq '[.layers[].size] | add' /tmp/manifest.json)"
+          echo "Universal image (amd64) compressed size: $TOTAL bytes (max: $MAX_COMPRESSED_BYTES)"
+          if [ "$TOTAL" -gt "$MAX_COMPRESSED_BYTES" ]; then
+            echo "::error::Universal image exceeds compressed-size budget. See docs/images.md inclusion policy." >&2
+            exit 1
+          fi
+
   publish-release:
     name: Publish GitHub release
     needs: [prepare, build-bundles]

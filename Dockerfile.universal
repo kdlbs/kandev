@@ -1,0 +1,138 @@
+# Kandev Universal Dockerfile
+#
+# Extends the vanilla kandev image with language toolchains and developer
+# tools so agents can build/test code in the most common stacks without
+# extra setup. Built and published alongside vanilla in the release
+# workflow. Inclusion policy: see docs/images.md.
+#
+# Build:
+#   docker build -f Dockerfile.universal -t kandev:latest-universal .
+#
+# Run (drop-in replacement for the vanilla image):
+#   docker run -p 38429:38429 -v kandev-data:/data ghcr.io/kdlbs/kandev:latest-universal
+#
+# The BASE_IMAGE arg lets the release workflow point at a freshly built
+# vanilla image inside the same run (so universal-of-X.Y.Z is built on top
+# of vanilla-X.Y.Z, not on whatever :latest happens to be).
+
+ARG BASE_IMAGE=ghcr.io/kdlbs/kandev:latest
+FROM ${BASE_IMAGE}
+
+USER root
+
+# Pinned versions. Bump these deliberately; CI's size gate will catch growth.
+#
+# PLAYWRIGHT_VERSION pins the apt deps list. When this moves, the apt-get
+# install line below may need to add/drop packages — check the upstream list
+# at https://github.com/microsoft/playwright/blob/v<version>/packages/playwright-core/src/server/registry/nativeDeps.ts
+# or run `npx playwright@<version> install-deps --dry-run` to diff.
+ARG GO_VERSION=1.26.0
+ARG GOLANGCI_LINT_VERSION=1.62.0
+ARG PLAYWRIGHT_VERSION=1.48.0
+ARG PNPM_VERSION=9.15.9
+
+# Single RUN to minimize image layers and clean apt lists in the same layer.
+# Tools grouped by purpose; comments explain the why for each cluster so
+# future maintainers can prune deliberately rather than guess.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        # Native compile (CGO, pip wheels with C extensions, native npm modules)
+        build-essential \
+        pkg-config \
+        python3-dev \
+        libssl-dev \
+        # Useful CLI tools agents reach for. Small, broadly applicable.
+        ripgrep \
+        fd-find \
+        jq \
+        # Playwright Chromium runtime deps. Browsers themselves are NOT
+        # preinstalled — users run `pnpm exec playwright install chromium`
+        # once and the download persists at ~/.cache/ms-playwright on the PV.
+        # This list mirrors `npx playwright@${PLAYWRIGHT_VERSION} install-deps chromium`.
+        libnss3 \
+        libnspr4 \
+        libatk1.0-0 \
+        libatk-bridge2.0-0 \
+        libcups2 \
+        libdrm2 \
+        libxkbcommon0 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxfixes3 \
+        libxrandr2 \
+        libgbm1 \
+        libpango-1.0-0 \
+        libcairo2 \
+        libasound2 \
+        fonts-liberation \
+        fonts-noto-color-emoji \
+    ; \
+    rm -rf /var/lib/apt/lists/*
+
+# Go toolchain — tarball install to /usr/local/go (the standard layout the
+# go.dev installer creates). Add to PATH below.
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64) goarch=amd64 ;; \
+        arm64) goarch=arm64 ;; \
+        *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${goarch}.tar.gz" -o /tmp/go.tar.gz; \
+    tar -C /usr/local -xzf /tmp/go.tar.gz; \
+    rm /tmp/go.tar.gz
+
+# golangci-lint — prebuilt binary, no compilation needed.
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64) lintarch=amd64 ;; \
+        arm64) lintarch=arm64 ;; \
+        *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-${lintarch}.tar.gz" \
+        | tar -xz -C /tmp; \
+    mv "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-${lintarch}/golangci-lint" /usr/local/bin/; \
+    rm -rf "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-${lintarch}"
+
+# Rust toolchain via rustup. RUSTUP_HOME/CARGO_HOME live in /usr/local so the
+# install is system-wide and read-only for non-root users at runtime —
+# matching the rest of the image. Users wanting per-user toolchain components
+# can still `rustup install` to ~/.rustup-user via overrides.
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo
+RUN set -eux; \
+    curl -fsSL https://sh.rustup.rs \
+        | sh -s -- -y --default-toolchain stable --no-modify-path --profile minimal; \
+    chmod -R a+rX "$RUSTUP_HOME" "$CARGO_HOME"
+
+# pnpm via corepack — install system-wide so users don't need
+# `corepack enable` themselves. Drops shims into /usr/local/bin.
+RUN set -eux; \
+    corepack enable; \
+    corepack prepare "pnpm@${PNPM_VERSION}" --activate
+
+# fd is installed as `fdfind` on Debian to avoid clashing with the legacy
+# fd package — symlink so agents calling plain `fd` still work.
+RUN ln -s /usr/bin/fdfind /usr/local/bin/fd
+
+# yq is not in Debian stable; install the prebuilt binary from upstream
+# (Mike Farah's yq, the Go implementation — the one most scripts assume).
+ARG YQ_VERSION=4.44.3
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    curl -fsSL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${arch}" \
+        -o /usr/local/bin/yq; \
+    chmod +x /usr/local/bin/yq
+
+# Extend PATH with Go's bin (toolchain + $GOPATH/bin once users `go install`)
+# and cargo's bin. PATH order: keep agent CLI dir (/data/.npm-global/bin)
+# first so user-installed agents win over any same-named system tool, and
+# Cargo/Go after the existing system paths.
+ENV PATH=/data/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/go/bin:/usr/local/cargo/bin
+
+# Drop back to the unprivileged user. Matches the vanilla image's runtime
+# user; the docker-entrypoint.sh in the base image handles root → kandev
+# privilege drop via gosu for users who run the container as root.
+USER kandev

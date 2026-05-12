@@ -38,6 +38,16 @@ Or reference it in your K8s deployment:
 image: ghcr.io/kdlbs/kandev:latest
 ```
 
+### Choosing your image: vanilla vs. universal
+
+Kandev publishes two flavors: the default vanilla image (smallest, npm-installable agent CLIs only) and a `:universal` image (~1.4 GB) that adds language toolchains (Go, Rust, build-essential), linters, and Playwright Chromium system libs — useful when your agents work on Go/Rust/Python projects or drive headless browsers.
+
+```yaml
+image: ghcr.io/kdlbs/kandev:latest-universal
+```
+
+See [`images.md`](./images.md) for the full comparison, inclusion policy, and recipes for deriving your own image when you need something neither flavor includes.
+
 ## Deploying to Kubernetes
 
 ### Quick Start
@@ -79,6 +89,8 @@ No extra configuration is needed. The frontend automatically uses `window.locati
 ## Installing Agent CLIs
 
 The kandev image ships with `git`, `gh` (GitHub CLI), `node`, and `npm`, but **does not bundle the coding-agent CLIs** (`claude-code`, `codex`, `auggie`, etc.) — agent choice is per-user, and bundling all of them would bloat the image significantly.
+
+> Looking to add tools *beyond* agent CLIs — language toolchains, build tools, internal CLIs? See [`images.md`](./images.md) for the universal-image option and recipes for deriving your own image.
 
 To install an agent inside the running pod, open **Settings → Agents** in the UI and click **Install** on the agent card under "Available to Install". The backend runs the agent's hard-coded install script (`npm install -g <pkg>`) and rescans on success.
 

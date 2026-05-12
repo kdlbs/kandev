@@ -1,0 +1,74 @@
+name: universal-rebuild
+
+# Weekly rebuild of the universal image on top of the current :latest
+# vanilla image, so apt security updates flow into universal even when
+# kandev itself hasn't been re-released.
+#
+# - Pushes a moving `:universal-weekly-YYYYMMDD` tag plus refreshes
+#   `:universal` (the "latest universal" alias).
+# - Does NOT push `:vX.Y.Z-universal`. Those are immutable per release;
+#   only the floating `:universal` and the dated weekly tags move here.
+#
+# Manual trigger is also wired up so a maintainer can force a rebuild
+# after a known CVE without waiting for the cron.
+
+on:
+  schedule:
+    # Mondays 06:00 UTC. Picks up the previous week's Debian security
+    # patches without colliding with most weekday release work.
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild:
+    name: Rebuild universal on top of :latest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute date tag
+        id: date
+        run: echo "tag=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/kdlbs/kandev
+          tags: |
+            type=raw,value=universal
+            type=raw,value=universal-weekly-${{ steps.date.outputs.tag }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Rebuild against :latest deliberately — the whole point of the
+      # weekly is to pick up any base-image moves. Use --pull so the
+      # current :latest is freshly fetched, not whatever's in BuildKit's
+      # cache from a previous run.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.universal
+          push: true
+          pull: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            BASE_IMAGE=ghcr.io/kdlbs/kandev:latest
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=universal
+          cache-to: type=gha,mode=max,scope=universal
