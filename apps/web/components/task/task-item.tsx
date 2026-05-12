@@ -19,7 +19,7 @@ import { DEBUG_UI } from "@/lib/config";
 import { useTaskColor } from "@/hooks/use-task-color";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
-import { shouldUseQuestionTaskIcon } from "@/lib/ui/state-icons";
+import { shouldUseQuestionTaskIcon, shouldUsePermissionTaskIcon } from "@/lib/ui/state-icons";
 import type { SessionPollMode } from "@/lib/state/slices/session-runtime/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
@@ -115,7 +115,7 @@ function TaskStateIcon({
       />
     );
   }
-  if (hasPendingPermission) {
+  if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
     return (
       <IconAlertTriangle
         data-testid="task-state-pending-permission"
