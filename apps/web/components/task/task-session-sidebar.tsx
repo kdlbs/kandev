@@ -30,7 +30,10 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { useArchivedTaskState } from "./task-archived-context";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
-import { hasPendingClarificationForSession } from "@/lib/utils/pending-clarification";
+import {
+  hasPendingClarificationForSession,
+  hasPendingPermissionForSession,
+} from "@/lib/utils/pending-clarification";
 
 /**
  * Stabilize a derived array of primary session IDs so the reference only
@@ -138,6 +141,10 @@ function toSidebarItem(
     ctx.messagesBySession,
     task.primarySessionId,
   );
+  const hasPendingPermission = hasPendingPermissionForSession(
+    ctx.messagesBySession,
+    task.primarySessionId,
+  );
 
   const diffStats = resolveDiffStats(
     sessionInfo.diffStats,
@@ -165,6 +172,7 @@ function toSidebarItem(
     remoteExecutorName: task.primaryExecutorName ?? undefined,
     primarySessionId: task.primarySessionId ?? null,
     hasPendingClarification: hasPendingClarificationRequest,
+    hasPendingPermission,
     updatedAt: sessionInfo.updatedAt ?? task.updatedAt ?? task.createdAt,
     createdAt: task.createdAt,
     isArchived: false as boolean,
@@ -209,6 +217,7 @@ function buildArchivedItem(s: ReturnType<typeof useArchivedTaskState>): SidebarI
     remoteExecutorName: undefined,
     primarySessionId: null,
     hasPendingClarification: false,
+    hasPendingPermission: false,
     updatedAt: s.archivedTaskUpdatedAt,
     createdAt: undefined,
     isArchived: true,

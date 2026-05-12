@@ -47,6 +47,7 @@ export type TaskSwitcherItem = {
   isArchived?: boolean;
   primarySessionId?: string | null;
   hasPendingClarification?: boolean;
+  hasPendingPermission?: boolean;
   parentTaskTitle?: string;
   parentTaskId?: string;
   prInfo?: { number: number; state: string };
@@ -195,6 +196,7 @@ function TaskRow({
         taskId={task.id}
         primarySessionId={task.primarySessionId ?? null}
         hasPendingClarification={task.hasPendingClarification}
+        hasPendingPermission={task.hasPendingPermission}
         updatedAt={task.updatedAt}
         repositories={task.repositories}
         prInfo={task.prInfo}

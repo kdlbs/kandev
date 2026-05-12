@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "@/lib/types/http";
-import { findPendingClarificationGroup, hasPendingClarification } from "./pending-clarification";
+import {
+  findPendingClarificationGroup,
+  hasPendingClarification,
+  hasPendingPermissionRequest,
+} from "./pending-clarification";
 
 function message(overrides: Partial<Message>): Message {
   return {
@@ -130,5 +134,53 @@ describe("findPendingClarificationGroup", () => {
       metadata: { pending_id: "p1", question_total: 1, status: "pending" },
     });
     expect(findPendingClarificationGroup([old, a]).map((m) => m.id)).toEqual(["a"]);
+  });
+});
+
+describe("hasPendingPermissionRequest", () => {
+  it("detects permission requests with pending status", () => {
+    expect(
+      hasPendingPermissionRequest([
+        message({ type: "permission_request", metadata: { status: "pending" } }),
+      ]),
+    ).toBe(true);
+  });
+
+  it("treats missing permission status as pending", () => {
+    expect(hasPendingPermissionRequest([message({ type: "permission_request" })])).toBe(true);
+  });
+
+  it("ignores approved permission requests", () => {
+    expect(
+      hasPendingPermissionRequest([
+        message({ type: "permission_request", metadata: { status: "approved" } }),
+      ]),
+    ).toBe(false);
+  });
+
+  it("ignores rejected permission requests", () => {
+    expect(
+      hasPendingPermissionRequest([
+        message({ type: "permission_request", metadata: { status: "rejected" } }),
+      ]),
+    ).toBe(false);
+  });
+
+  it("ignores expired permission requests", () => {
+    expect(
+      hasPendingPermissionRequest([
+        message({ type: "permission_request", metadata: { status: "expired" } }),
+      ]),
+    ).toBe(false);
+  });
+
+  it("returns false for non-permission messages", () => {
+    expect(hasPendingPermissionRequest([message({ type: "message" })])).toBe(false);
+  });
+
+  it("returns false for empty or null input", () => {
+    expect(hasPendingPermissionRequest([])).toBe(false);
+    expect(hasPendingPermissionRequest(null)).toBe(false);
+    expect(hasPendingPermissionRequest(undefined)).toBe(false);
   });
 });

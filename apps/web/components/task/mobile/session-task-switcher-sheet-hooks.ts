@@ -10,7 +10,10 @@ import { useTasks } from "@/hooks/use-tasks";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
-import { hasPendingClarificationForSession } from "@/lib/utils/pending-clarification";
+import {
+  hasPendingClarificationForSession,
+  hasPendingPermissionForSession,
+} from "@/lib/utils/pending-clarification";
 import type {
   TaskState,
   TaskSessionState,
@@ -125,6 +128,10 @@ export function useSheetData(workspaceId: string | null, workflowId: string | nu
         remoteExecutorName: task.primaryExecutorName ?? undefined,
         primarySessionId: task.primarySessionId ?? null,
         hasPendingClarification: hasPendingClarificationForSession(
+          messagesBySession,
+          task.primarySessionId,
+        ),
+        hasPendingPermission: hasPendingPermissionForSession(
           messagesBySession,
           task.primarySessionId,
         ),

@@ -54,3 +54,27 @@ export function hasPendingClarificationForSession(
   if (!sessionId) return false;
   return hasPendingClarification(messagesBySession[sessionId]);
 }
+
+// --- Permission request helpers ---
+
+export function isPendingPermissionMessage(message: Message): boolean {
+  if (message.type !== "permission_request") return false;
+  const metadata = message.metadata as { status?: string } | undefined;
+  return !metadata?.status || metadata.status === "pending";
+}
+
+export function hasPendingPermissionRequest(messages?: readonly Message[] | null): boolean {
+  if (!messages) return false;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (isPendingPermissionMessage(messages[i])) return true;
+  }
+  return false;
+}
+
+export function hasPendingPermissionForSession(
+  messagesBySession: Record<string, readonly Message[] | undefined>,
+  sessionId?: string | null,
+): boolean {
+  if (!sessionId) return false;
+  return hasPendingPermissionRequest(messagesBySession[sessionId]);
+}

@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import {
+  IconAlertTriangle,
   IconChevronDown,
   IconCircleCheck,
   IconCircleDashed,
@@ -47,6 +48,7 @@ type TaskItemProps = {
   taskId?: string;
   primarySessionId?: string | null;
   hasPendingClarification?: boolean;
+  hasPendingPermission?: boolean;
   parentTaskTitle?: string;
   isSubTask?: boolean;
   /** Number of subtasks under this parent task. Only set for parent rows. */
@@ -97,17 +99,27 @@ function TaskStateIcon({
   state,
   isInProgress,
   hasPendingClarification,
+  hasPendingPermission,
 }: {
   sessionState?: TaskSessionState;
   state?: TaskState;
   isInProgress: boolean;
   hasPendingClarification?: boolean;
+  hasPendingPermission?: boolean;
 }) {
   if (shouldUseQuestionTaskIcon(state, hasPendingClarification)) {
     return (
       <IconMessageQuestion
         data-testid="task-state-waiting-for-input"
         className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500"
+      />
+    );
+  }
+  if (hasPendingPermission) {
+    return (
+      <IconAlertTriangle
+        data-testid="task-state-pending-permission"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-amber-500"
       />
     );
   }
@@ -301,6 +313,7 @@ export const TaskItem = memo(function TaskItem({
   taskId,
   primarySessionId,
   hasPendingClarification,
+  hasPendingPermission,
   isSubTask,
   subtaskCount,
   subtasksCollapsed,
@@ -341,6 +354,7 @@ export const TaskItem = memo(function TaskItem({
         state={state}
         isInProgress={isInProgress}
         hasPendingClarification={hasPendingClarification}
+        hasPendingPermission={hasPendingPermission}
       />
       <TaskItemContent
         title={title}
