@@ -114,3 +114,76 @@ func TestWakeup_SecondTurnAgentReadyIsSuppressed(t *testing.T) {
 		)
 	}
 }
+
+// TestWakeup_PostBootMetadataEventsDoNotFlipToRunning verifies that boot-time
+// metadata events (available_commands_update, agent_capabilities, context_window
+// etc.) arriving AFTER MarkBootReady has put the execution into Ready do NOT
+// re-arm the execution as Running. claude-agent-acp emits
+// available_commands_update asynchronously ~50ms after session/new — well
+// after dispatchInitialPrompt fires MarkBootReady for a no-prompt task —
+// and an over-eager Ready → Running flip on that event would put the session
+// into Running state in the orchestrator and break the chat-input UI for
+// freshly-created tasks awaiting their first user message.
+func TestWakeup_PostBootMetadataEventsDoNotFlipToRunning(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	_ = mgr.executionStore.Add(execution)
+
+	// Mirror the no-prompt boot path: dispatchInitialPrompt → MarkBootReady →
+	// status flips to Ready.
+	mgr.executionStore.UpdateStatus(execution.ID, v1.AgentStatusReady)
+
+	// Boot metadata events arrive after MarkBootReady. None of these
+	// indicate a new turn — they're protocol metadata.
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "available_commands"})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "agent_capabilities"})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "session_mode"})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "session_models"})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "context_window"})
+
+	runningCount := 0
+	for _, te := range eventBus.PublishedEvents {
+		if te.Event != nil && te.Event.Type == events.AgentRunning {
+			runningCount++
+		}
+	}
+	// firstActivityOnce fires AgentRunning exactly once on the very first event.
+	// The wakeup-detect flip must NOT fire for any of these metadata events.
+	if runningCount > 1 {
+		t.Errorf("expected at most 1 agent.running event (firstActivityOnce), got %d — boot metadata events incorrectly flipped Ready → Running", runningCount)
+	}
+	if execution.Status != v1.AgentStatusReady {
+		t.Errorf("execution.Status = %q, want %q — boot metadata events should not change status", execution.Status, v1.AgentStatusReady)
+	}
+}
+
+// TestWakeup_EmptyTurnStillPublishesAgentReady covers the narrow edge case
+// where a wakeup turn produces *only* a `complete` event (no preceding
+// message_chunk/tool_call/etc) — e.g. when the model returns an empty
+// response on wake-up. recordActivity skips the flip on `complete` events
+// (they're outside the turn-content whitelist), so handleCompleteEventMarkState
+// must publish AgentReady directly when it detects Status is already Ready.
+func TestWakeup_EmptyTurnStillPublishesAgentReady(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	_ = mgr.executionStore.Add(execution)
+
+	// Turn 1: normal user turn.
+	mgr.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "message_chunk", Text: "ok\n"})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "complete"})
+
+	// Turn 2: wakeup turn with ONLY a complete event — the agent woke up
+	// and immediately decided it had nothing to say.
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "complete"})
+
+	readyCount := 0
+	for _, te := range eventBus.PublishedEvents {
+		if te.Event != nil && te.Event.Type == events.AgentReady {
+			readyCount++
+		}
+	}
+	if readyCount != 2 {
+		t.Errorf("expected 2 agent.ready events (one per turn, including the empty wakeup turn), got %d", readyCount)
+	}
+}

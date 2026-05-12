@@ -22,6 +22,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -84,15 +85,13 @@ func (b *trackingBus) snapshot() []trackedBusEvent {
 
 // teeReader passes bytes through while echoing complete lines to stderr.
 type teeReader struct {
-	src   any
+	src   io.Reader
 	label string
 	buf   []byte
 }
 
 func (t *teeReader) Read(p []byte) (int, error) {
-	type reader interface{ Read([]byte) (int, error) }
-	r, _ := t.src.(reader)
-	n, err := r.Read(p)
+	n, err := t.src.Read(p)
 	if n > 0 {
 		t.buf = append(t.buf, p[:n]...)
 		for {
@@ -329,13 +328,6 @@ func TestWakeupE2EFullPipeline_BridgeToEventBus(t *testing.T) {
 	// Count adapter events for comparison (this is what reached the in-process boundary).
 	adapterEventsMu.Lock()
 	totalAdapterEvents := len(adapterEvents)
-	postPromptAdapterEvents := 0
-	for _, ev := range adapterEvents {
-		if ev.Type == streams.EventTypeMessageChunk && ev.Text != "" && len(strings.TrimSpace(ev.Text)) > 0 {
-			// We'll count messages later.
-		}
-	}
-	// Count adapter-side events that arrived AFTER initial prompt end.
 	adapterEventsSnapshot := make([]streams.AgentEvent, len(adapterEvents))
 	copy(adapterEventsSnapshot, adapterEvents)
 	adapterEventsMu.Unlock()
@@ -354,8 +346,6 @@ func TestWakeupE2EFullPipeline_BridgeToEventBus(t *testing.T) {
 		t.Logf("WARNING: adapter did not surface 'WAKEUP' text. Cannot assert on bus publishing.")
 	} else {
 		t.Logf("✓ adapter surfaced wakeup text chunks: %v", wakeupTexts)
-		postPromptAdapterEvents = len(wakeupTexts)
-		_ = postPromptAdapterEvents
 	}
 
 	// ---- Detailed accounting per turn ----

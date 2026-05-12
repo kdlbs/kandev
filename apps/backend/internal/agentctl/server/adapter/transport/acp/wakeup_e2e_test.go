@@ -322,7 +322,3 @@ func TestWakeupE2E_BridgeQueuedTurnDrainsViaSyntheticPrompt(t *testing.T) {
 
 	t.Logf("✓ wakeup pipeline produced %d events after initial prompt completed", len(wakeupEvents))
 }
-
-// dumpStdout is unused but kept for ad-hoc debugging when one wants to see
-// raw JSON-RPC frames the bridge emits before they're parsed by the adapter.
-var _ = io.MultiReader
