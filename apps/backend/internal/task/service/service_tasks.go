@@ -488,6 +488,18 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 // For fast UI response, the DB delete and event publish happen synchronously,
 // while agent stopping and worktree cleanup happen asynchronously.
 func (s *Service) DeleteTask(ctx context.Context, id string) error {
+	return s.deleteTask(ctx, id, false)
+}
+
+// DeleteTaskAndWait is the synchronous variant of DeleteTask: it returns only
+// after agents are stopped and worktrees are cleaned up. Used by the E2E
+// reset endpoint so subsequent tests start with no leaked agentctl instances
+// holding ports.
+func (s *Service) DeleteTaskAndWait(ctx context.Context, id string) error {
+	return s.deleteTask(ctx, id, true)
+}
+
+func (s *Service) deleteTask(ctx context.Context, id string, waitForCleanup bool) error {
 	start := time.Now()
 
 	// 1. Get task (sync, fast)
@@ -529,14 +541,24 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
 	s.logger.Info("task deleted",
 		zap.String("task_id", id),
+		zap.Bool("wait_for_cleanup", waitForCleanup),
 		zap.Duration("duration", time.Since(start)))
 
-	// 6. Return immediately - all remaining cleanup is async
-
-	// 7. Background: Stop agents and cleanup worktrees
-	if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || task.IsEphemeral {
-		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, task.IsEphemeral,
-			"task deleted", "failed to stop session on task delete", "task cleanup completed")
+	// 6. Stop agents and cleanup worktrees, async by default and synchronous
+	// when callers (e.g. the E2E reset endpoint) need ports released before
+	// returning.
+	hasCleanup := len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || task.IsEphemeral
+	if hasCleanup {
+		const stopReason = "task deleted"
+		const stopFailMsg = "failed to stop session on task delete"
+		const cleanupMsg = "task cleanup completed"
+		if waitForCleanup {
+			s.executeTaskCleanup(id, sessions, worktrees, stopTargets, task.IsEphemeral,
+				stopReason, stopFailMsg, cleanupMsg)
+		} else {
+			s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, task.IsEphemeral,
+				stopReason, stopFailMsg, cleanupMsg)
+		}
 	}
 
 	return nil
@@ -576,45 +598,58 @@ func (s *Service) runAsyncTaskCleanup(
 	isEphemeral bool,
 	stopReason, stopFailMsg, cleanupMsg string,
 ) {
-	go func() {
-		cleanupStart := time.Now()
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
+	go s.executeTaskCleanup(id, sessions, worktrees, stopTargets, isEphemeral,
+		stopReason, stopFailMsg, cleanupMsg)
+}
 
-		if s.executionStopper != nil && len(stopTargets) > 0 {
-			for _, target := range stopTargets {
-				if target.executionID != "" {
-					if err := s.executionStopper.StopExecution(cleanupCtx, target.executionID, stopReason, true); err != nil {
-						s.logger.Warn(stopFailMsg,
-							zap.String("task_id", id),
-							zap.String("session_id", target.sessionID),
-							zap.String("execution_id", target.executionID),
-							zap.Error(err))
-					}
-					continue
-				}
-				if err := s.executionStopper.StopSession(cleanupCtx, target.sessionID, stopReason, true); err != nil {
+// executeTaskCleanup runs the post-delete cleanup synchronously. Both the
+// async DeleteTask path and the synchronous DeleteTaskAndWait path call this
+// — the only difference is whether it runs in its own goroutine.
+func (s *Service) executeTaskCleanup(
+	id string,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+	stopTargets []taskStopTarget,
+	isEphemeral bool,
+	stopReason, stopFailMsg, cleanupMsg string,
+) {
+	cleanupStart := time.Now()
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if s.executionStopper != nil && len(stopTargets) > 0 {
+		for _, target := range stopTargets {
+			if target.executionID != "" {
+				if err := s.executionStopper.StopExecution(cleanupCtx, target.executionID, stopReason, true); err != nil {
 					s.logger.Warn(stopFailMsg,
 						zap.String("task_id", id),
 						zap.String("session_id", target.sessionID),
+						zap.String("execution_id", target.executionID),
 						zap.Error(err))
 				}
+				continue
+			}
+			if err := s.executionStopper.StopSession(cleanupCtx, target.sessionID, stopReason, true); err != nil {
+				s.logger.Warn(stopFailMsg,
+					zap.String("task_id", id),
+					zap.String("session_id", target.sessionID),
+					zap.Error(err))
 			}
 		}
+	}
 
-		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, isEphemeral)
+	cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, isEphemeral)
 
-		if len(cleanupErrors) > 0 {
-			s.logger.Warn(cleanupMsg+" with errors",
-				zap.String("task_id", id),
-				zap.Int("error_count", len(cleanupErrors)),
-				zap.Duration("duration", time.Since(cleanupStart)))
-		} else {
-			s.logger.Info(cleanupMsg,
-				zap.String("task_id", id),
-				zap.Duration("duration", time.Since(cleanupStart)))
-		}
-	}()
+	if len(cleanupErrors) > 0 {
+		s.logger.Warn(cleanupMsg+" with errors",
+			zap.String("task_id", id),
+			zap.Int("error_count", len(cleanupErrors)),
+			zap.Duration("duration", time.Since(cleanupStart)))
+	} else {
+		s.logger.Info(cleanupMsg,
+			zap.String("task_id", id),
+			zap.Duration("duration", time.Since(cleanupStart)))
+	}
 }
 
 func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSessions []*models.TaskSession) []taskStopTarget {
