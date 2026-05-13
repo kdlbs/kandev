@@ -118,3 +118,39 @@ jobs:
             apps/backend/coverage.out
             apps/backend/test-results.json
           retention-days: 30
+
+  test-windows:
+    name: Backend (windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: apps/backend/go.sum
+
+      # Compile-checks every `*_windows.go` file (pty/conpty wrapper, job-object
+      # launcher, shell, signals, sysprocattr, vscode cleanup, …). The rest of
+      # the suite is build-tag-gated out automatically.
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      # Scope to packages with non-trivial Windows-specific code paths.
+      # Tests that genuinely cannot run on Windows (Unix sockets, POSIX
+      # symlinks under default Windows ACLs, delete-while-open) call t.Skip
+      # in source with a documented reason. The shell-fixture tests now use
+      # a self-hosting Go helper (see testmain_test.go) so they run on
+      # every platform.
+      - name: Test windows-sensitive packages
+        run: go test -race -v ./internal/agentctl/server/process/... ./internal/agentctl/client/launcher/...

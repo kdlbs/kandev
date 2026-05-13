@@ -3,6 +3,7 @@ package process
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -93,6 +94,9 @@ func TestResolveNonExistentPath(t *testing.T) {
 	})
 
 	t.Run("permission error is propagated", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("chmod 0o000 does not block traversal on Windows the way POSIX does")
+		}
 		if os.Getuid() == 0 {
 			t.Skip("skipping permission test: root bypasses filesystem permission checks")
 		}

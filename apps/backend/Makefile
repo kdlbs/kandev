@@ -8,14 +8,29 @@ GOFLAGS := -v
 LDFLAGS := -s -w
 
 # Cross-platform commands
+#
+# On Windows, GNU Make invokes commands through cmd.exe, which does not
+# support Unix `NAME=VAL cmd` env-var-prefix syntax. Instead, `set NAME=VAL&`
+# (single ampersand) chains a subsequent command in the same shell, scoping
+# the env var to one recipe line — the closest cmd analog to the Unix form.
+# `EXE` adds the .exe suffix to build outputs; Go does NOT auto-append it
+# when `-o` is explicit.
+#
+# Install GNU Make on Windows with `winget install ezwinports.make` (or via
+# scoop/chocolatey). Targets that rely on Unix builtins (run, dev,
+# start-debug, build-cross, build-agentctl-linux) remain Unix-only.
 ifeq ($(OS),Windows_NT)
   RM = cmd /c del /s /q
   RMDIR = cmd /c rmdir /s /q
   MKDIR = cmd /c mkdir
+  CGO_PREFIX = set CGO_ENABLED=1&
+  EXE = .exe
 else
   RM = rm -f
   RMDIR = rm -rf
   MKDIR = mkdir -p
+  CGO_PREFIX = CGO_ENABLED=1
+  EXE =
 endif
 
 # Build info
@@ -109,7 +124,17 @@ start-debug: build
 ## Run tests
 test:
 	@echo "Running tests..."
-	CGO_ENABLED=1 $(GO) test ./...
+	$(CGO_PREFIX) $(GO) test ./...
+
+## Run only the Windows-sensitive packages — mirrors the test-windows job in
+## .github/workflows/backend-tests.yml. The broader suite uses Unix-only
+## shell commands in test fixtures and would need GOOS guards to be portable;
+## this narrow scope is the regression coverage for the conpty/job-object
+## bug class. Tests that genuinely cannot run on Windows skip themselves via
+## runtime.GOOS guards in source.
+test-windows:
+	@echo "Running Windows-sensitive packages..."
+	$(CGO_PREFIX) $(GO) test -v ./internal/agentctl/server/process/... ./internal/agentctl/client/launcher/...
 
 ## Run E2E tests (real agents, costs money — manual only)
 ## Set agent commands via env vars: E2E_CLAUDE_CODE_COMMAND, E2E_AMP_COMMAND
@@ -128,7 +153,7 @@ test-sprites-e2e: build-agentctl-linux
 ## Run tests with coverage
 test-coverage:
 	@echo "Running tests with coverage..."
-	CGO_ENABLED=1 $(GO) test -v -coverprofile=coverage.out ./...
+	$(CGO_PREFIX) $(GO) test -v -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 
 ## Run linter (requires golangci-lint)
@@ -182,7 +207,8 @@ help:
 	@echo "  run           Build and run the application"
 	@echo "  dev           Run in development mode (pprof enabled)"
 	@echo "  start-debug   Run in debug mode (pprof + debug logging)"
-	@echo "  test          Run tests"
+	@echo "  test          Run tests (full suite — fails on Windows pending fixture cleanup)"
+	@echo "  test-windows  Run only the Windows-clean subset (matches CI windows-latest job)"
 	@echo "  test-e2e      Run E2E adapter tests (real agents, costs money)"
 	@echo "  test-coverage Run tests with coverage report"
 	@echo "  lint          Run golangci-lint"

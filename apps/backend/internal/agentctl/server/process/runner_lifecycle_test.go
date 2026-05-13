@@ -12,9 +12,11 @@ func TestInteractiveRunner_Start(t *testing.T) {
 	log := newTestLogger(t)
 	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
 
+	cmd, env := fixtureExec("echo hello")
 	req := InteractiveStartRequest{
 		SessionID:      "test-session",
-		Command:        []string{"echo", "hello"},
+		Command:        cmd,
+		Env:            env,
 		ImmediateStart: true,
 		DefaultCols:    80,
 		DefaultRows:    24,
@@ -53,6 +55,7 @@ func TestInteractiveRunner_Start_ValidationErrors(t *testing.T) {
 	log := newTestLogger(t)
 	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
 
+	validCmd, validEnv := fixtureExec("echo")
 	tests := []struct {
 		name    string
 		req     InteractiveStartRequest
@@ -61,7 +64,8 @@ func TestInteractiveRunner_Start_ValidationErrors(t *testing.T) {
 		{
 			name: "missing session_id",
 			req: InteractiveStartRequest{
-				Command: []string{"echo"},
+				Command: validCmd,
+				Env:     validEnv,
 			},
 			wantErr: true,
 		},
@@ -76,7 +80,8 @@ func TestInteractiveRunner_Start_ValidationErrors(t *testing.T) {
 			name: "valid request",
 			req: InteractiveStartRequest{
 				SessionID:      "test",
-				Command:        []string{"echo"},
+				Command:        validCmd,
+				Env:            validEnv,
 				ImmediateStart: true,
 			},
 			wantErr: false,
@@ -97,11 +102,13 @@ func TestInteractiveRunner_DeferredStart(t *testing.T) {
 	log := newTestLogger(t)
 	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
 
-	// Start without ImmediateStart - process should be deferred
-	// Use 'cat' which blocks waiting for input, giving us time to check status
+	// Start without ImmediateStart - process should be deferred.
+	// `cat` blocks waiting for input, giving us time to check status.
+	cmd, env := fixtureExec("cat")
 	req := InteractiveStartRequest{
 		SessionID: "deferred-session",
-		Command:   []string{"cat"},
+		Command:   cmd,
+		Env:       env,
 	}
 
 	info, err := runner.Start(context.Background(), req)
@@ -144,9 +151,11 @@ func TestInteractiveRunner_WriteStdin(t *testing.T) {
 	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
 
 	// Start cat process that echoes input
+	cmd, env := fixtureExec("cat")
 	req := InteractiveStartRequest{
 		SessionID:      "stdin-test",
-		Command:        []string{"cat"},
+		Command:        cmd,
+		Env:            env,
 		ImmediateStart: true,
 		DefaultCols:    80,
 		DefaultRows:    24,
@@ -177,9 +186,11 @@ func TestInteractiveRunner_Stop(t *testing.T) {
 	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
 
 	// Start a long-running process
+	cmd, env := fixtureExec("sleep 60")
 	req := InteractiveStartRequest{
 		SessionID:      "stop-test",
-		Command:        []string{"sleep", "60"},
+		Command:        cmd,
+		Env:            env,
 		ImmediateStart: true,
 		DefaultCols:    80,
 		DefaultRows:    24,

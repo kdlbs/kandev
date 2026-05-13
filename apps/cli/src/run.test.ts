@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { getBinaryName } from "./platform";
 import { attachRingBuffer, cleanOldReleases, findCachedRelease } from "./run";
 
 // Mock CACHE_DIR to use a temp directory.
@@ -27,7 +28,10 @@ const PLATFORM = "macos-arm64";
 function createFakeCachedRelease(cacheDir: string, tag: string, platform: string) {
   const binDir = path.join(cacheDir, tag, platform, "kandev", "bin");
   fs.mkdirSync(binDir, { recursive: true });
-  fs.writeFileSync(path.join(binDir, "kandev"), "fake-binary");
+  // findCachedRelease looks up the binary by host-platform name (kandev on
+  // Unix, kandev.exe on Windows) via getBinaryName, so the fixture must match
+  // or the lookup never resolves on Windows.
+  fs.writeFileSync(path.join(binDir, getBinaryName("kandev")), "fake-binary");
 }
 
 describe("findCachedRelease", () => {

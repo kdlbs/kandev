@@ -6,18 +6,34 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 
 	"github.com/UserExistsError/conpty"
 )
 
 // windowsPTY wraps a Windows ConPTY pseudo-console.
+//
+// Close is guarded by sync.Once because the upstream conpty library has no
+// internal synchronization: calling its Close twice double-frees the underlying
+// Windows handles and triggers STATUS_HEAP_CORRUPTION (0xC0000374), crashing
+// the whole backend. Stop() in interactive_lifecycle.go closes the PTY when
+// the user closes a terminal tab, and wait() also closes it once cmd.Wait
+// returns — without the gate, both paths hit the same handles.
 type windowsPTY struct {
-	cpty *conpty.ConPty
+	cpty      *conpty.ConPty
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func (p *windowsPTY) Read(b []byte) (int, error)  { return p.cpty.Read(b) }
 func (p *windowsPTY) Write(b []byte) (int, error) { return p.cpty.Write(b) }
-func (p *windowsPTY) Close() error                { return p.cpty.Close() }
+
+func (p *windowsPTY) Close() error {
+	p.closeOnce.Do(func() {
+		p.closeErr = p.cpty.Close()
+	})
+	return p.closeErr
+}
 
 func (p *windowsPTY) Resize(cols, rows uint16) error {
 	return p.cpty.Resize(int(cols), int(rows))

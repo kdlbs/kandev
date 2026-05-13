@@ -67,7 +67,7 @@ func TestStartProcessPipes_FailsAfterProcessStarted(t *testing.T) {
 	// Regression test: documents the bug where cmd.Start() was called inside
 	// buildFinalCommand() before pipes were created.
 	// exec.Cmd pipes cannot be created after Start() is called.
-	cmd := exec.Command("sleep", "10")
+	cmd := fixtureCmd("sleep 10")
 	require.NoError(t, cmd.Start())
 	t.Cleanup(func() { _ = cmd.Process.Kill() })
 
@@ -101,9 +101,9 @@ func TestManager_Start_PipesCreatedBeforeProcessStart(t *testing.T) {
 
 	m := &Manager{
 		cfg: &config.InstanceConfig{
-			AgentArgs: []string{"cat"},
+			AgentArgs: fixtureArgs(),
 			WorkDir:   workDir,
-			AgentEnv:  []string{"PATH=/usr/bin:/bin"},
+			AgentEnv:  fixtureEnvSlice("cat"),
 		},
 		logger:             log,
 		adapter:            stub,

@@ -76,6 +76,7 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  test             Run all tests (backend + web + cli)"
+	@echo "  test-windows     Run Windows-clean subset (curated backend + web + cli)"
 	@echo "  test-backend     Run backend tests"
 	@echo "  test-web         Run web app tests"
 	@echo "  test-cli         Run CLI tests"
@@ -221,6 +222,27 @@ install-web:
 .PHONY: test
 test: test-backend test-web test-cli
 	@printf "\n$(GREEN)$(BOLD)✓ All tests complete!$(RESET)\n"
+
+# Curated Windows-clean test run. Mirrors the test-windows job in
+# .github/workflows/backend-tests.yml: the backend portion skips ~24 tests
+# with Unix-only fixtures (sleep/cat/echo in test inputs, POSIX symlinks,
+# delete-while-open). Web and CLI use vitest, which is cross-platform.
+# Shrink the backend skip list as fixtures get cleaned up.
+#
+# Deliberately uses plain `echo` and inlines pnpm invocations (rather than
+# depending on test-backend/test-web/test-cli) so it does not pull in the
+# `@printf` and `$(shell uname ...)` calls used by other targets — those
+# fail on cmd.exe (no printf.exe, no uname.exe) and would break the run on
+# Windows even though they are cosmetic on Unix.
+.PHONY: test-windows
+test-windows:
+	@echo "[backend] Running Windows-clean subset..."
+	@$(MAKE) -C $(BACKEND_DIR) test-windows
+	@echo "[web] Running tests..."
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web test
+	@echo "[cli] Running tests..."
+	@cd $(APPS_DIR) && $(PNPM) --filter kandev test
+	@echo "Windows-clean test subset complete."
 
 .PHONY: test-sprites-e2e
 test-sprites-e2e:

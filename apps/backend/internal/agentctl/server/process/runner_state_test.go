@@ -14,9 +14,11 @@ func TestInteractiveRunner_GetBuffer(t *testing.T) {
 	log := newTestLogger(t)
 	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
 
+	cmd, env := fixtureExec("echo buffered")
 	req := InteractiveStartRequest{
 		SessionID:      "buffer-test",
-		Command:        []string{"echo", "buffered output"},
+		Command:        cmd,
+		Env:            env,
 		ImmediateStart: true,
 		DefaultCols:    80,
 		DefaultRows:    24,
@@ -65,9 +67,11 @@ func TestInteractiveRunner_Callbacks(t *testing.T) {
 		mu.Unlock()
 	})
 
+	cmd, env := fixtureExec("echo callback")
 	req := InteractiveStartRequest{
 		SessionID:      "callback-test",
-		Command:        []string{"echo", "callback test"},
+		Command:        cmd,
+		Env:            env,
 		ImmediateStart: true,
 		DefaultCols:    80,
 		DefaultRows:    24,
@@ -133,9 +137,11 @@ func TestInteractiveRunner_DirectOutput(t *testing.T) {
 	log := newTestLogger(t)
 	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
 
+	cmd, env := fixtureExec("cat")
 	req := InteractiveStartRequest{
 		SessionID:      "direct-output-test",
-		Command:        []string{"cat"},
+		Command:        cmd,
+		Env:            env,
 		ImmediateStart: true,
 		DefaultCols:    80,
 		DefaultRows:    24,
@@ -201,9 +207,11 @@ func TestInteractiveRunner_GetPtyWriter(t *testing.T) {
 	log := newTestLogger(t)
 	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
 
+	cmd, env := fixtureExec("cat")
 	req := InteractiveStartRequest{
 		SessionID:      "pty-writer-test",
-		Command:        []string{"cat"},
+		Command:        cmd,
+		Env:            env,
 		ImmediateStart: true,
 		DefaultCols:    80,
 		DefaultRows:    24,
@@ -307,9 +315,11 @@ func TestInteractiveRunner_IsProcessRunning(t *testing.T) {
 	}
 
 	// Start a process
+	cmd, env := fixtureExec("sleep 10")
 	req := InteractiveStartRequest{
 		SessionID:      "running-test",
-		Command:        []string{"sleep", "10"},
+		Command:        cmd,
+		Env:            env,
 		ImmediateStart: true,
 		DefaultCols:    80,
 		DefaultRows:    24,
@@ -352,9 +362,11 @@ func TestInteractiveRunner_IsProcessReadyOrPending(t *testing.T) {
 	}
 
 	// Start a deferred process (not started yet)
+	cmd, env := fixtureExec("cat")
 	req := InteractiveStartRequest{
 		SessionID: "pending-test",
-		Command:   []string{"cat"},
+		Command:   cmd,
+		Env:       env,
 		// ImmediateStart: false (deferred)
 	}
 

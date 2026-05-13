@@ -42,6 +42,14 @@ type Launcher struct {
 	// breaking the pipe. agentctl detects the break and self-terminates.
 	parentPipe *os.File
 
+	// jobHandle holds a platform-specific kernel object used to enforce
+	// "kill the child if the parent dies" without relying on the agentctl
+	// process noticing on its own. On Windows it stores a Job Object handle
+	// (see lifecycle_windows.go) and is accessed atomically. Unused on Unix
+	// — there, the inherited pipe in launcher_pipe_unix.go covers the same
+	// role.
+	jobHandle uintptr
+
 	// authToken is retrieved via handshake after agentctl starts.
 	// agentctl generates its own token; the launcher retrieves it using the bootstrap nonce.
 	authToken string
@@ -173,6 +181,7 @@ func (l *Launcher) Start(ctx context.Context) error {
 			l.logger.Warn("failed to kill agentctl process after failed health check", zap.Error(killErr))
 		}
 		l.closeParentPipe()
+		l.releaseChildLifecycle()
 		return fmt.Errorf("agentctl failed to become healthy: %w", err)
 	}
 
@@ -226,6 +235,15 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	closeChildPipeEnd(l.cmd)
 	l.parentPipe = pipeWrite
 
+	// Bind the child to a kill-on-parent-exit kernel primitive (Job Object on
+	// Windows, no-op on Unix where the inherited liveness pipe already covers
+	// this). Failure is non-fatal: agentctl still works, but a parent crash
+	// may leak an agentctl.exe that holds the control port (issue #892).
+	if err := l.installChildLifecycle(l.cmd); err != nil {
+		l.logger.Warn("failed to install child lifecycle protection; agentctl may outlive a parent crash",
+			zap.Error(err))
+	}
+
 	l.logger.Info("agentctl process started", zap.Int("pid", l.cmd.Process.Pid))
 
 	go l.pipeOutput("stdout", bufio.NewScanner(stdout))
@@ -245,6 +263,7 @@ func (l *Launcher) performHandshake(ctx context.Context, nonce string) (string, 
 			l.logger.Warn("failed to kill agentctl after handshake failure", zap.Error(killErr))
 		}
 		l.closeParentPipe()
+		l.releaseChildLifecycle()
 		return "", fmt.Errorf("agentctl handshake failed: %w", err)
 	}
 	return token, nil
@@ -287,6 +306,7 @@ func (l *Launcher) Stop(ctx context.Context) error {
 	select {
 	case <-l.exited:
 		l.logger.Info("agentctl stopped gracefully")
+		l.releaseChildLifecycle()
 		return nil
 	case <-ctx.Done():
 		l.logger.Warn("graceful shutdown timed out, force killing")
@@ -294,8 +314,10 @@ func (l *Launcher) Stop(ctx context.Context) error {
 		// Wait a bit for the kill to take effect
 		select {
 		case <-l.exited:
+			l.releaseChildLifecycle()
 			return nil
 		case <-time.After(1 * time.Second):
+			l.releaseChildLifecycle()
 			return fmt.Errorf("agentctl did not exit after force kill")
 		}
 	}

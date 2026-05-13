@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -318,6 +319,9 @@ func TestOverlapGuard_ResetsAfterNormalCycle(t *testing.T) {
 // TestOverlapGuard_WorkDirDeletedResetsFlag verifies that the overlap guard
 // is reset when the work directory is deleted, so the goroutine exits cleanly.
 func TestOverlapGuard_WorkDirDeletedResetsFlag(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows refuses to unlink a directory while a process holds a handle inside it; the scenario this test exercises cannot occur on Windows")
+	}
 	isolateTestGitEnv(t)
 
 	repoDir, cleanup := setupTestRepo(t)

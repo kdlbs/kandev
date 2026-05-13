@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +65,12 @@ func setupTestRepo(t *testing.T) (string, func()) {
 	runGit(t, localDir, "config", "user.email", "test@test.com")
 	runGit(t, localDir, "config", "user.name", "Test User")
 	runGit(t, localDir, "config", "core.hooksPath", "/dev/null") // Disable hooks in test repo
+	// Pin line-ending handling so on-disk content survives commit/checkout
+	// roundtrips byte-for-byte. Without this, Windows defaults to
+	// core.autocrlf=true and converts LF to CRLF on checkout, which breaks
+	// tests that compare os.ReadFile output against an LF-only literal.
+	runGit(t, localDir, "config", "core.autocrlf", "false")
+	runGit(t, localDir, "config", "core.eol", "lf")
 
 	// Create initial commit
 	writeFile(t, localDir, "README.md", "# Test Repo")
@@ -759,6 +766,9 @@ func TestApplyFileDiff_RegularFile(t *testing.T) {
 }
 
 func TestApplyFileDiff_Symlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating POSIX symlinks requires Windows Developer Mode or admin")
+	}
 	repoDir, cleanup := setupTestRepo(t)
 	defer cleanup()
 
@@ -1102,6 +1112,15 @@ func TestGetFileContentAtRef(t *testing.T) {
 	})
 
 	t.Run("absolute path rejected", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			// filepath.IsAbs is platform-specific: on Windows it only treats
+			// drive-letter paths (C:\...) as absolute, so `/etc/passwd` is
+			// considered relative and the product's path-traversal check
+			// (correctly) doesn't fire. A meaningful Windows version of this
+			// case would use a path like `C:\Windows\System32\config\sam`
+			// and is left for a separate cleanup.
+			t.Skip("absolute-path semantics differ on Windows")
+		}
 		_, _, _, err := wt.GetFileContentAtRef(ctx, "/etc/passwd", "HEAD")
 		if err == nil {
 			t.Fatal("expected error for absolute path, got nil")
