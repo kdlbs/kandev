@@ -97,7 +97,11 @@ test.describe("Permission approval persistence", () => {
     await expect(session.permissionApproveButtons()).toHaveCount(1, { timeout: 30_000 });
 
     // Sidebar swaps the running spinner for the amber pending-permission icon.
-    const sidebarItem = session.sidebarTaskItem(taskTitle).first();
+    // No `.first()` — `e2eReset` runs before every test (and every retry), so
+    // the worker workspace has exactly one task with this title; if a duplicate
+    // ever appears, strict locator resolution should fail the test rather than
+    // silently picking one row.
+    const sidebarItem = session.sidebarTaskItem(taskTitle);
     await expect(sidebarItem.getByTestId("task-state-pending-permission")).toBeVisible({
       timeout: 10_000,
     });
