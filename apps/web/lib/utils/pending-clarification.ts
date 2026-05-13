@@ -69,19 +69,20 @@ export function isPendingPermissionMessage(message: Message): boolean {
 //     it sees — only the latest one drives the UI. A stale pending row left
 //     behind by an earlier crash followed by a newer approved one must not
 //     light up the amber icon (the agent is no longer blocked on the old row).
-//   - Honours turn boundaries: walking back across a different turn_id ends
-//     the scan, so old turns' permissions can never leak into the indicator
-//     and the scan stays bounded by the current turn size (typically 5–50
-//     messages) regardless of total session length.
-//   - When messages have no turn_id (older data / non-turn-scoped messages),
-//     boundary enforcement is disabled and we fall back to plain latest-only
-//     semantics.
+//   - Honours turn boundaries: when the latest message has a turn_id, walking
+//     back to any row that doesn't share it ends the scan (including legacy
+//     rows with null/undefined turn_id). Old turns' permissions can never
+//     leak into the indicator and the scan stays bounded by the current turn
+//     size (typically 5–50 messages) regardless of total session length.
+//   - When the latest message itself has no turn_id (entirely pre-turn-scope
+//     data), boundary enforcement is disabled and we fall back to plain
+//     latest-only semantics across the whole array.
 export function hasPendingPermissionRequest(messages?: readonly Message[] | null): boolean {
   if (!messages?.length) return false;
   const latestTurnId = messages[messages.length - 1].turn_id;
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
-    if (latestTurnId && m.turn_id && m.turn_id !== latestTurnId) break;
+    if (latestTurnId && m.turn_id !== latestTurnId) break;
     if (m.type !== "permission_request") continue;
     return isPendingPermissionMessage(m);
   }

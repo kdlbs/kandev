@@ -273,4 +273,15 @@ describe("hasPendingPermissionRequest — turn scoping", () => {
       ]),
     ).toBe(false);
   });
+
+  // A legacy permission_request with no turn_id, sitting in a session whose
+  // latest message *does* have a turn_id, must not bypass the boundary.
+  it("ignores a legacy null-turn_id pending permission when a turn is active", () => {
+    expect(
+      hasPendingPermissionRequest([
+        message({ id: "legacy", type: "permission_request", metadata: { status: "pending" } }),
+        message({ id: "current", turn_id: "t2", type: "message", content: "hi" }),
+      ]),
+    ).toBe(false);
+  });
 });

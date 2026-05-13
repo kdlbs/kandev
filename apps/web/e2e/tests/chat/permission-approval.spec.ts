@@ -7,15 +7,18 @@ import { SessionPage } from "../../pages/session-page";
 /**
  * Seed a task that runs the multi-permission scenario, then navigate to it.
  * The mock agent will request three permissions in sequence and block on each.
+ * Returns the SessionPage plus the task so callers can correlate with the
+ * sidebar (which keys off the task title).
  */
 async function seedMultiPermissionTask(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
-): Promise<SessionPage> {
+  title = "Multi-permission approval",
+): Promise<{ session: SessionPage; task: Awaited<ReturnType<ApiClient["createTaskWithAgent"]>> }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
-    "Multi-permission approval",
+    title,
     seedData.agentProfileId,
     {
       description: "/e2e:multi-permission",
@@ -32,7 +35,7 @@ async function seedMultiPermissionTask(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
 
-  return session;
+  return { session, task };
 }
 
 test.describe("Permission approval persistence", () => {
@@ -54,7 +57,7 @@ test.describe("Permission approval persistence", () => {
     apiClient,
     seedData,
   }) => {
-    const session = await seedMultiPermissionTask(testPage, apiClient, seedData);
+    const { session } = await seedMultiPermissionTask(testPage, apiClient, seedData);
 
     // Approve all three permission prompts as they appear. Each click unblocks
     // the agent which then emits the next prompt; the previous one's button
@@ -88,22 +91,7 @@ test.describe("Permission approval persistence", () => {
     seedData,
   }) => {
     const taskTitle = "Sidebar pending permission";
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      taskTitle,
-      seedData.agentProfileId,
-      {
-        description: "/e2e:multi-permission",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-
-    await testPage.goto(`/t/${task.id}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
+    const { session } = await seedMultiPermissionTask(testPage, apiClient, seedData, taskTitle);
 
     // First permission prompt blocks the agent.
     await expect(session.permissionApproveButtons()).toHaveCount(1, { timeout: 30_000 });
