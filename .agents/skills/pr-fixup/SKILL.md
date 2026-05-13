@@ -1,6 +1,6 @@
 ---
 name: pr-fixup
-description: Wait for CI checks and automated reviews (CodeRabbit, Greptile, Claude) on a PR, fix failures and address comments, then push.
+description: Wait for CI checks and automated reviews (CodeRabbit, Greptile, Claude, cubic) on a PR, fix failures and address comments, then push.
 ---
 
 # PR Fixup
@@ -28,7 +28,7 @@ Create these tasks immediately (use your task/todo tracking tool if available):
 
 1. **Gather PR state** — Fetch checks, comments, and review status
 2. **Wait for CI checks** — Poll until all checks resolve
-3. **Wait for automated reviews** — Poll for CodeRabbit and Greptile
+3. **Wait for automated reviews** — Poll for CodeRabbit, Greptile, Claude, and cubic
 4. **Fix failing CI checks** — Read logs, fix issues, run E2E tests locally if needed
 5. **Triage review comments** — Classify each comment as valid, already addressed, nitpick, or wrong
 6. **Address each comment** — Fix or reply with reasoning
@@ -75,12 +75,13 @@ Mark task 2 as completed.
 
 Mark task 3 as in_progress.
 
-Check if CodeRabbit, Greptile, and Claude have posted or are generating reviews.
+Check if CodeRabbit, Greptile, Claude, and cubic have posted or are generating reviews.
 
 **Bot usernames** (`gh pr view --json comments` uses GraphQL and returns `author.login` **without** the `[bot]` suffix; `gh api /.../reviews` and `/.../issues/<n>/comments` use REST and return `user.login` **with** the suffix — filters below use whichever form the invoked endpoint returns):
 - CodeRabbit: `coderabbitai[bot]`
 - Greptile: `greptile-apps[bot]`
 - Claude: `claude[bot]` on same-repo PRs (posts a real review with inline comments via the Claude GitHub App), or `github-actions[bot]` on fork PRs (posts findings as issue comments via `GITHUB_TOKEN`; identify by body markers — tracker starts with `**Claude finished `, findings comment starts with `## Code Review`).
+- cubic (cubic.dev): `cubic-dev-ai[bot]` (posts reviews via the GitHub review API, similar to Greptile; has its own `cubic · AI code reviewer` check).
 
 **CodeRabbit — stop waiting if:**
 - A comment contains `<!-- rate limited by coderabbit.ai -->` — rate-limited, won't review.
@@ -93,6 +94,10 @@ Check if CodeRabbit, Greptile, and Claude have posted or are generating reviews.
 - A review from `claude[bot]` exists (same-repo PR, App-authenticated path — has inline review comments).
 - An issue comment from `github-actions[bot]` whose body starts with `**Claude finished ` or `## Code Review` exists (fork PR, `GITHUB_TOKEN` fallback path — findings are issue comments, no GitHub Review object).
 - The `claude-review` check in `gh pr checks` has completed (regardless of conclusion).
+
+**cubic — stop waiting if any of these holds:**
+- A review from `cubic-dev-ai[bot]` exists (posts via the GitHub review API).
+- The `cubic · AI code reviewer` check in `gh pr checks` has completed (regardless of conclusion).
 
 **Keep polling if:**
 - A bot hasn't commented yet AND `gh pr checks` shows its check is still `pending`.
@@ -107,6 +112,8 @@ gh api repos/:owner/:repo/pulls/<number>/reviews --jq '.[] | select(.user.login 
 gh api repos/:owner/:repo/pulls/<number>/reviews --jq '.[] | select(.user.login == "claude[bot]") | {user: .user.login, state: .state}'
 # Claude — fork PRs: issue comments from github-actions[bot] (match by body marker)
 gh pr view <number> --json comments --jq '.comments[] | select(.author.login == "github-actions" and ((.body | startswith("**Claude finished ")) or (.body | startswith("## Code Review")))) | {author: .author.login, body_start: (.body[0:80])}'
+# cubic posts reviews (with inline review comments)
+gh api repos/:owner/:repo/pulls/<number>/reviews --jq '.[] | select(.user.login == "cubic-dev-ai[bot]") | {user: .user.login, state: .state}'
 ```
 
 Mark task 3 as completed.
@@ -145,7 +152,7 @@ Mark task 4 as completed.
 
 Mark task 5 as in_progress.
 
-Fetch all review comments — human reviewers, CodeRabbit, Greptile, and Claude:
+Fetch all review comments — human reviewers, CodeRabbit, Greptile, Claude, and cubic:
 
 ```bash
 gh pr view <number> --json reviews,comments

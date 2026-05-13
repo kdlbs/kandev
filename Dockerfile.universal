@@ -116,19 +116,36 @@ RUN set -eux; \
 
 # Rust toolchain via rustup. RUSTUP_HOME/CARGO_HOME live in /usr/local so the
 # install is system-wide and read-only for non-root users at runtime -
-# matching the rest of the image. Users wanting per-user toolchain components
-# can still `rustup install` to ~/.rustup-user via overrides.
+# matching the rest of the image. Users who need writable per-user state
+# (e.g. `cargo install <tool>`, `rustup toolchain install nightly`) should
+# override CARGO_HOME and RUSTUP_HOME to a path on the PV, e.g.:
+#   CARGO_HOME=~/.cargo RUSTUP_HOME=~/.rustup cargo install <tool>
 #
 # `--profile minimal` keeps the install lean (rustc + cargo + rust-std); we
 # then explicitly add clippy and rustfmt, which agents working on Rust
 # projects almost always reach for. `--profile default` would also work but
 # pulls in rust-docs which we don't need.
+#
+# Integrity: download rustup-init for our arch and verify its SHA-256
+# against the upstream .sha256 sidecar before executing - matches the
+# pattern used for Go/golangci-lint/yq above, rather than `curl | sh`.
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo
 RUN set -eux; \
-    curl -fsSL https://sh.rustup.rs \
-        | sh -s -- -y --default-toolchain stable --no-modify-path --profile minimal; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64) triplet=x86_64-unknown-linux-gnu ;; \
+        arm64) triplet=aarch64-unknown-linux-gnu ;; \
+        *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    base="https://static.rust-lang.org/rustup/dist/${triplet}"; \
+    curl -fsSL "${base}/rustup-init" -o /tmp/rustup-init; \
+    curl -fsSL "${base}/rustup-init.sha256" -o /tmp/rustup-init.sha256; \
+    (cd /tmp && sha256sum -c rustup-init.sha256); \
+    chmod +x /tmp/rustup-init; \
+    /tmp/rustup-init -y --default-toolchain stable --no-modify-path --profile minimal; \
     /usr/local/cargo/bin/rustup component add --toolchain stable clippy rustfmt; \
+    rm /tmp/rustup-init /tmp/rustup-init.sha256; \
     chmod -R a+rX "$RUSTUP_HOME" "$CARGO_HOME"
 
 # pnpm via corepack - install system-wide so users don't need

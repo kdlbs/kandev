@@ -438,20 +438,17 @@ jobs:
     permissions:
       contents: read
       packages: write    # push to GHCR
+    # Build flow: push to a per-run staging tag, gate on size against the
+    # staging tag, then `buildx imagetools create` to promote the same
+    # manifest to the user-facing tags. The promote step is metadata-only -
+    # no rebuild, no new bytes - so this costs us one extra registry call
+    # in exchange for never publishing an oversized image as :universal.
+    env:
+      STAGING_IMAGE: ghcr.io/kdlbs/kandev:universal-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.tag }}
-
-      - name: Docker meta (universal)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/kdlbs/kandev
-          tags: |
-            type=raw,value=${{ needs.prepare.outputs.version }}-universal
-            type=raw,value=${{ needs.prepare.outputs.tag }}-universal
-            type=raw,value=universal
 
       - uses: docker/setup-buildx-action@v3
 
@@ -465,9 +462,9 @@ jobs:
       # Build universal on top of the vanilla image we just pushed. Passing
       # the exact `:vX.Y.Z` tag (not `:latest`) keeps the pair coherent:
       # universal-of-vX.Y.Z always rests on vanilla-vX.Y.Z, even if a later
-      # release moves `:latest`.
-      - name: Build and push (universal)
-        id: build
+      # release moves `:latest`. The tag pushed here is the staging tag;
+      # final tags are applied below only if the size gate passes.
+      - name: Build and push (staging tag)
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -476,25 +473,25 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args: |
             BASE_IMAGE=ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ env.STAGING_IMAGE }}
           cache-from: type=gha,scope=universal
           cache-to: type=gha,mode=max,scope=universal
 
-      # Universal size gate. Fails the release if compressed image exceeds
-      # the ceiling - forces deliberate decisions about scope creep. Bump
-      # this number in the same PR that adds the dependency that pushed
-      # over the line, with a one-sentence justification in the commit msg.
+      # Universal size gate. Inspects the staging tag - the image is in
+      # GHCR but under a per-run tag no user pulls. Failing the gate aborts
+      # before promotion, so the user-facing :universal / :vX.Y.Z-universal
+      # tags never move to an oversized image. Bump MAX_COMPRESSED_BYTES
+      # deliberately when adding scope, with a one-sentence justification
+      # in the commit msg.
       - name: Enforce size budget
         env:
-          IMAGE: ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}-universal
           MAX_COMPRESSED_BYTES: "2684354560"   # 2.5 GiB
         run: |
           set -euo pipefail
           # Inspect the multi-arch manifest and sum compressed layer sizes
           # for linux/amd64. amd64 is the bigger of the two arches in
           # practice, so gating on it gives us a single-number signal.
-          docker buildx imagetools inspect "$IMAGE" --raw \
+          docker buildx imagetools inspect "$STAGING_IMAGE" --raw \
               > /tmp/index.json
           AMD64_DIGEST="$(jq -r '
               .manifests[]
@@ -506,9 +503,23 @@ jobs:
           TOTAL="$(jq '[.layers[].size] | add' /tmp/manifest.json)"
           echo "Universal image (amd64) compressed size: $TOTAL bytes (max: $MAX_COMPRESSED_BYTES)"
           if [ "$TOTAL" -gt "$MAX_COMPRESSED_BYTES" ]; then
-            echo "::error::Universal image exceeds compressed-size budget. See docs/images.md inclusion policy." >&2
+            echo "::error::Universal image exceeds compressed-size budget. Staging tag $STAGING_IMAGE will not be promoted. See docs/images.md inclusion policy." >&2
             exit 1
           fi
+
+      # Promote: `buildx imagetools create` retargets an existing manifest
+      # list to new tag(s) without rebuilding or re-uploading layers. Multi-
+      # arch is preserved. Only runs if the size gate passed (default step
+      # ordering); if any earlier step failed, the user-facing tags stay at
+      # whatever they pointed to before this run.
+      - name: Promote staging to final tags
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.version }}-universal" \
+            --tag "ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}-universal" \
+            --tag "ghcr.io/kdlbs/kandev:universal" \
+            "$STAGING_IMAGE"
 
   publish-release:
     name: Publish GitHub release
