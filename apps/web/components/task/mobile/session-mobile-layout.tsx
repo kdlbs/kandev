@@ -84,7 +84,6 @@ type MobilePanelAreaProps = {
   selectedDiff: { path: string; content?: string } | null;
   handleOpenFileFromChat: (path: string) => void;
   handleClearSelectedDiff: () => void;
-  handleSelectDiffAndSwitchPanel: (path: string, content?: string) => void;
   handleOpenFile: (file: { path: string }) => void;
   topNavHeight: string;
   bottomNavHeight: string;
@@ -98,7 +97,6 @@ function MobilePanelArea({
   selectedDiff,
   handleOpenFileFromChat,
   handleClearSelectedDiff,
-  handleSelectDiffAndSwitchPanel,
   handleOpenFile,
   topNavHeight,
   bottomNavHeight,
@@ -146,10 +144,7 @@ function MobilePanelArea({
       )}
       {currentMobilePanel === "files" && (
         <div className="flex-1 min-h-0 flex flex-col">
-          <TaskFilesPanel
-            onSelectDiff={handleSelectDiffAndSwitchPanel}
-            onOpenFile={handleOpenFile}
-          />
+          <TaskFilesPanel onOpenFile={handleOpenFile} />
         </div>
       )}
       {currentMobilePanel === "terminal" && (
@@ -244,14 +239,6 @@ function useMobilePanelHandlers({
   handleSelectDiff: (path: string, content?: string) => void;
   handlePanelChange: (panel: MobileSessionPanel) => void;
 }) {
-  const handleSelectDiffAndSwitchPanel = useCallback(
-    (path: string, content?: string) => {
-      handleSelectDiff(path, content);
-      handlePanelChange("changes");
-    },
-    [handleSelectDiff, handlePanelChange],
-  );
-
   const handleOpenFileFromChat = useCallback(
     (path: string) => {
       handleSelectDiff(path);
@@ -268,7 +255,7 @@ function useMobilePanelHandlers({
     [handleSelectDiff, handlePanelChange],
   );
 
-  return { handleSelectDiffAndSwitchPanel, handleOpenFileFromChat, handleOpenFile };
+  return { handleOpenFileFromChat, handleOpenFile };
 }
 
 export const SessionMobileLayout = memo(function SessionMobileLayout({
@@ -305,11 +292,10 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
     setMobileSessionTaskSwitcherOpen,
   } = useSessionLayoutState({ sessionId });
 
-  const { handleSelectDiffAndSwitchPanel, handleOpenFileFromChat, handleOpenFile } =
-    useMobilePanelHandlers({
-      handleSelectDiff,
-      handlePanelChange,
-    });
+  const { handleOpenFileFromChat, handleOpenFile } = useMobilePanelHandlers({
+    handleSelectDiff,
+    handlePanelChange,
+  });
 
   const review = useReviewDialog(effectiveSessionId);
 
@@ -343,7 +329,6 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         selectedDiff={selectedDiff}
         handleOpenFileFromChat={handleOpenFileFromChat}
         handleClearSelectedDiff={handleClearSelectedDiff}
-        handleSelectDiffAndSwitchPanel={handleSelectDiffAndSwitchPanel}
         handleOpenFile={handleOpenFile}
         topNavHeight={TOP_NAV_HEIGHT}
         bottomNavHeight={BOTTOM_NAV_HEIGHT}
