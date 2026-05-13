@@ -7,7 +7,11 @@ import type {
   Task,
 } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
-import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
+import type {
+  KanbanMultiState,
+  WorkflowSnapshotData,
+  WorkflowsState,
+} from "@/lib/state/slices/kanban/types";
 import type {
   useRepositoryOptions,
   useBranchOptions,
@@ -321,8 +325,8 @@ export type DialogFormBodyProps = {
   agentProfilesLoading: boolean;
   executorsLoading: boolean;
   isCreatingSession: boolean;
-  workflows: unknown[];
-  snapshots: unknown;
+  workflows: WorkflowsState["items"];
+  snapshots: KanbanMultiState["snapshots"];
   effectiveWorkflowId: string | null;
   fs: DialogFormState;
   handleKeyDown: ReturnType<typeof useKeyboardShortcutHandler>;
