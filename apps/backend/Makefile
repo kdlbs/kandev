@@ -48,7 +48,7 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || powershell -c
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl build-agentctl-linux build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview clean run dev start-debug test test-e2e test-sprites-e2e lint fmt vet help
+.PHONY: all build build-all build-agentctl build-agentctl-linux build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob clean run dev start-debug test test-e2e test-sprites-e2e lint fmt vet help
 
 ## Default target
 all: build
@@ -65,6 +65,15 @@ build-mock-agent:
 	-@$(MKDIR) $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent$(EXE) ./cmd/mock-agent
 
+## Build the winjob helper — wraps a subprocess in a Windows Job Object so
+## Ctrl-C at the top of the chain reliably terminates the entire subtree
+## (kandev, agentctl, etc.) instead of leaking them. No-op passthrough on Unix.
+## See apps/cli/src/dev.ts for how the CLI launcher uses it.
+build-winjob:
+	@echo "Building winjob..."
+	-@$(MKDIR) $(BUILD_DIR)
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/winjob$(EXE) ./cmd/winjob
+
 ## Build and run acpdbg — usage: make acpdbg ARGS="probe auggie"
 acpdbg: build-acpdbg
 	@$(BUILD_DIR)/acpdbg $(ARGS)
@@ -79,7 +88,7 @@ build-acpdbg:
 ## variant because remote executors (local Docker, remote Docker, Sprites)
 ## bind-mount it into containers — without it, the first Docker session on a
 ## non-Linux host fails with "agentctl linux binary not found".
-build: build-agentctl build-agentctl-linux build-mock-agent build-acpdbg
+build: build-agentctl build-agentctl-linux build-mock-agent build-acpdbg build-winjob
 	@echo "Building $(BINARY_NAME)..."
 	-@$(MKDIR) $(BUILD_DIR)
 	$(CGO_PREFIX) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)$(EXE) ./cmd/kandev

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 
 import { devKandevHome, HEALTH_TIMEOUT_MS_DEV } from "./constants";
@@ -39,7 +40,12 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();
 
-  const backendProc = spawn("make", ["-C", path.join("apps", "backend"), "dev"], {
+  const { cmd: backendCmd, args: backendArgs } = withWinjobWrap(
+    repoRoot,
+    "make",
+    ["-C", path.join("apps", "backend"), "dev"],
+  );
+  const backendProc = spawn(backendCmd, backendArgs, {
     cwd: repoRoot,
     env: backendEnv,
     stdio: "inherit",
@@ -118,4 +124,36 @@ export function resolveDevBackendEnv(repoRoot: string): DevBackendEnv {
       KANDEV_DATABASE_PATH: "",
     },
   };
+}
+
+// withWinjobWrap on Windows prepends apps/backend/bin/winjob.exe to a spawn
+// command so the child runs inside a Job Object configured with
+// JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. That makes "kill the whole backend
+// subtree" a kernel-level guarantee tied to winjob's process exit, instead of
+// relying on the bash → make → pnpm → node → make → sh → kandev signal chain
+// (which drops Ctrl-C at multiple links because MSYS bash, native Win32
+// processes, and Node disagree on signal propagation semantics).
+//
+// On Unix this is a passthrough — POSIX process groups already give us
+// reliable cascading termination.
+//
+// If the winjob binary isn't built yet (the user ran `make dev` before
+// `make -C apps/backend build-winjob`), we fall back to a direct spawn and
+// emit a one-line note. The supervisor's tree-kill still handles the happy
+// path; users only notice the gap if Ctrl-C drops mid-chain.
+function withWinjobWrap(
+  repoRoot: string,
+  cmd: string,
+  args: string[],
+): { cmd: string; args: string[] } {
+  if (process.platform !== "win32") return { cmd, args };
+  const winjob = path.join(repoRoot, "apps", "backend", "bin", "winjob.exe");
+  if (!fs.existsSync(winjob)) {
+    console.warn(
+      `[kandev] winjob.exe not built — Ctrl-C may leak processes on Windows. ` +
+        `Run \`make -C apps/backend build-winjob\` once to enable.`,
+    );
+    return { cmd, args };
+  }
+  return { cmd: winjob, args: [cmd, ...args] };
 }
