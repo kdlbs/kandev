@@ -143,7 +143,13 @@ func mockSessionModes() *acp.SessionModeState {
 }
 
 // LoadSession restores a previous session for resume.
+// When --fail-on-resume is set, exit before completing the load — LoadSession
+// is only reached on resume, so no resumed-guard is needed here (unlike TUI).
 func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+	if parseFailOnResumeFlag() {
+		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: refusing resume for session %s (--fail-on-resume), exiting 1\n", os.Getpid(), req.SessionId)
+		os.Exit(1)
+	}
 	a.mu.Lock()
 	a.sessions[req.SessionId] = true
 	// Reset emit state so the resume re-advertises commands (matches real
