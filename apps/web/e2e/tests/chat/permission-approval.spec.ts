@@ -4,18 +4,27 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 
+// Matches the number of permission prompts emitted by the mock-agent
+// `/e2e:multi-permission` scenario (apps/backend/cmd/mock-agent/scenarios.go).
+// Both approval loops below depend on this — bump together if the scenario
+// changes.
+const MULTI_PERMISSION_COUNT = 3;
+
 /**
  * Seed a task that runs the multi-permission scenario, then navigate to it.
  * The mock agent will request three permissions in sequence and block on each.
+ * The sidebar test passes a custom `title` so it can query the sidebar row by
+ * title text.
  */
 async function seedMultiPermissionTask(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
+  title = "Multi-permission approval",
 ): Promise<SessionPage> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
-    "Multi-permission approval",
+    title,
     seedData.agentProfileId,
     {
       description: "/e2e:multi-permission",
@@ -56,11 +65,11 @@ test.describe("Permission approval persistence", () => {
   }) => {
     const session = await seedMultiPermissionTask(testPage, apiClient, seedData);
 
-    // Approve all three permission prompts as they appear. Each click unblocks
+    // Approve all permission prompts as they appear. Each click unblocks
     // the agent which then emits the next prompt; the previous one's button
     // detaches before the next one mounts, so wait for the count to be back
     // at 1 between clicks.
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < MULTI_PERMISSION_COUNT; i++) {
       await expect(session.permissionApproveButtons()).toHaveCount(1, { timeout: 30_000 });
       await session.permissionApproveButtons().first().click();
     }
@@ -77,5 +86,39 @@ test.describe("Permission approval persistence", () => {
     await session.waitForLoad();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(session.permissionActionRows()).toHaveCount(0);
+  });
+
+  // While an agent is blocked on a permission_request, the sidebar entry for
+  // that task swaps the running spinner for the amber pending-permission icon
+  // (introduced in #882). The icon goes away once the prompt is resolved.
+  test("sidebar shows pending-permission icon while a permission prompt is open", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const taskTitle = "Sidebar pending permission";
+    const session = await seedMultiPermissionTask(testPage, apiClient, seedData, taskTitle);
+
+    // First permission prompt blocks the agent.
+    await expect(session.permissionApproveButtons()).toHaveCount(1, { timeout: 30_000 });
+
+    // Sidebar swaps the running spinner for the amber pending-permission icon.
+    // No `.first()` — `e2eReset` runs before every test (and every retry), so
+    // the worker workspace has exactly one task with this title; if a duplicate
+    // ever appears, strict locator resolution should fail the test rather than
+    // silently picking one row.
+    const sidebarItem = session.sidebarTaskItem(taskTitle);
+    await expect(sidebarItem.getByTestId("task-state-pending-permission")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(sidebarItem.getByTestId("task-state-running")).toHaveCount(0);
+
+    // Approve all prompts; once the agent's turn ends, the icon is gone.
+    for (let i = 0; i < MULTI_PERMISSION_COUNT; i++) {
+      await expect(session.permissionApproveButtons()).toHaveCount(1, { timeout: 30_000 });
+      await session.permissionApproveButtons().first().click();
+    }
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(sidebarItem.getByTestId("task-state-pending-permission")).toHaveCount(0);
   });
 });
