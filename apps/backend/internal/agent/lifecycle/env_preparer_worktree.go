@@ -90,7 +90,7 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	// request copy before resolving the prepare script — the placeholder
 	// substitutes to empty and the resolved script is skipped via
 	// isScriptEffectivelyEmpty.
-	scriptReq := *req
+	scriptReq := *req // shallow copy — Env map is shared (read-only in runSetupScriptStep)
 	scriptReq.RepoSetupScript = ""
 	resolvedScript := resolvePreparerSetupScript(&scriptReq, workspacePath)
 	if resolvedScript != "" {

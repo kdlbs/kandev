@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -312,25 +313,10 @@ func TestWorktreePreparer_SingleRepo_NonIdempotentSetupScriptSucceeds(t *testing
 
 func splitNonEmpty(s string) []string {
 	var out []string
-	for _, line := range splitLines(s) {
+	for _, line := range strings.Split(s, "\n") {
 		if line != "" {
 			out = append(out, line)
 		}
-	}
-	return out
-}
-
-func splitLines(s string) []string {
-	var out []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			out = append(out, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		out = append(out, s[start:])
 	}
 	return out
 }
