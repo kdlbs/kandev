@@ -65,7 +65,7 @@ export const CommitDiffView = memo(function CommitDiffView({
   sha: commitSha,
   repo,
   onOpenFile,
-  wordWrap = false,
+  wordWrap,
 }: CommitDiffViewProps) {
   const commit = useActiveCommit(commitSha);
   const { files, loading } = useCommitDiff(commitSha, repo);
@@ -187,7 +187,7 @@ function CommitFileList({
   onOpenFile,
   baseRef,
   repo,
-  wordWrap = false,
+  wordWrap,
 }: {
   fileEntries: [string, FileInfo][];
   loading: boolean;

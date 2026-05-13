@@ -252,6 +252,67 @@ describe("buildReviewSources", () => {
     expect(result.sourceCounts).toEqual({ uncommitted: 1, committed: 0, pr: 0 });
   });
 
+  it("dedupes repo-scoped PR files against bare-path uncommitted gitStatus entries", () => {
+    const result = buildReviewSources({
+      gitStatus: {
+        files: {
+          "src/shared.ts": {
+            diff: "@@u@@",
+            status: "modified",
+            additions: 1,
+            deletions: 0,
+          },
+        },
+      },
+      statusByRepo: undefined,
+      cumulativeDiff: null,
+      prDiffFiles: [
+        {
+          filename: "src/shared.ts",
+          status: "modified",
+          patch: "@@p@@",
+          additions: 1,
+          deletions: 0,
+        },
+      ],
+      prRepoName: "frontend",
+    });
+    expect(result.allFiles).toHaveLength(1);
+    expect(result.allFiles[0].source).toBe("uncommitted");
+    expect(result.sourceCounts).toEqual({ uncommitted: 1, committed: 0, pr: 0 });
+  });
+
+  it("dedupes repo-scoped cumulative files against bare-path uncommitted gitStatus entries", () => {
+    const result = buildReviewSources({
+      gitStatus: {
+        files: {
+          "src/shared.ts": {
+            diff: "@@u@@",
+            status: "modified",
+            additions: 1,
+            deletions: 0,
+          },
+        },
+      },
+      statusByRepo: undefined,
+      cumulativeDiff: {
+        files: {
+          "src/shared.ts": {
+            diff: "@@c@@",
+            status: "modified",
+            additions: 1,
+            deletions: 0,
+            repository_name: "frontend",
+          },
+        },
+      },
+      prDiffFiles: undefined,
+    });
+    expect(result.allFiles).toHaveLength(1);
+    expect(result.allFiles[0].source).toBe("uncommitted");
+    expect(result.sourceCounts).toEqual({ uncommitted: 1, committed: 0, pr: 0 });
+  });
+
   it("multi-repo: same filename uncommitted in one repo, committed in another — both appear", () => {
     const result = buildReviewSources({
       gitStatus: undefined,

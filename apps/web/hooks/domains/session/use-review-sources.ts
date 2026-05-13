@@ -59,7 +59,8 @@ function addCumulativeFiles(
 ) {
   for (const [path, file] of Object.entries(files)) {
     const key = file.repository_name ? `${file.repository_name}:${path}` : path;
-    if (fileMap.has(key) || uncommittedPaths.has(key)) continue;
+    const hasRepoUnawareCollision = key !== path && fileMap.has(path);
+    if (fileMap.has(key) || uncommittedPaths.has(key) || hasRepoUnawareCollision) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
     if (!diff) continue;
     fileMap.set(key, {
@@ -89,7 +90,8 @@ function addPRFiles(
 ) {
   for (const file of files) {
     const key = repoName ? `${repoName}:${file.filename}` : file.filename;
-    if (fileMap.has(key) || uncommittedPaths.has(key)) continue;
+    const hasRepoUnawareCollision = key !== file.filename && fileMap.has(file.filename);
+    if (fileMap.has(key) || uncommittedPaths.has(key) || hasRepoUnawareCollision) continue;
     const diff = file.patch ? normalizeDiffContent(file.patch) : "";
     if (!diff) continue;
     fileMap.set(key, {

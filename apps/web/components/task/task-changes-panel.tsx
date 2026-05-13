@@ -147,6 +147,7 @@ function useChangesView(selectedDiff: SelectedDiff | null, onClearSelected: () =
     totalCommentCount,
     fileRefs,
     cumulativeLoading,
+    prDiffLoading,
     gitStatus,
   };
 }
@@ -404,6 +405,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     totalCommentCount,
     fileRefs,
     cumulativeLoading,
+    prDiffLoading,
     gitStatus,
   } = useChangesView(selectedDiff, onClearSelected);
   const {
@@ -463,7 +465,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
       />
       <PanelBody padding={false} scroll={false} className="overflow-hidden">
         <ChangesPanelContent
-          isLoading={cumulativeLoading}
+          isLoading={cumulativeLoading || prDiffLoading}
           files={visibleFiles}
           activeSessionId={activeSessionId}
           reviewedFiles={reviewedFiles}

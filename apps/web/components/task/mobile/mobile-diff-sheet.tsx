@@ -222,7 +222,7 @@ export const MobileDiffSheet = memo(function MobileDiffSheet({
   );
 
   return (
-    <Drawer open={mode !== null} onOpenChange={onClose}>
+    <Drawer open={mode !== null} onOpenChange={(open) => (!open ? onClose() : undefined)}>
       <DrawerContent className="h-full max-h-screen flex flex-col rounded-none">
         <SheetHeader
           title={title}

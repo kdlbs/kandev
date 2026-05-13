@@ -32,9 +32,17 @@ export function useCommitDiff(commitSha: string, repo?: string): UseCommitDiffRe
 
   const [files, setFiles] = useState<Record<string, FileInfo> | null>(null);
   const [loading, setLoading] = useState(false);
+  const requestSeqRef = useRef(0);
 
   const fetchDiff = useCallback(async () => {
-    if (!activeSessionId) return;
+    const requestSeq = ++requestSeqRef.current;
+    if (!activeSessionId) {
+      if (requestSeq === requestSeqRef.current) {
+        setFiles(null);
+        setLoading(false);
+      }
+      return;
+    }
     setLoading(true);
     try {
       const response = await requestCommitDiff({
@@ -44,35 +52,25 @@ export function useCommitDiff(commitSha: string, repo?: string): UseCommitDiffRe
         agentctlReady,
         repo,
       });
-      if (response?.success && response.files) {
-        setFiles(response.files);
-      }
+      if (requestSeq !== requestSeqRef.current) return;
+      setFiles(response?.success && response.files ? response.files : null);
     } catch (err) {
+      if (requestSeq !== requestSeqRef.current) return;
       toast({
         title: "Failed to load commit diff",
         description: err instanceof Error ? err.message : "An unexpected error occurred",
         variant: "error",
       });
     } finally {
-      setLoading(false);
+      if (requestSeq === requestSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, [activeSessionId, activeTaskId, agentctlReady, commitSha, repo, sessionTaskId, toast]);
 
   useEffect(() => {
     fetchDiff();
   }, [fetchDiff]);
-
-  // Re-fetch when agentctl transitions from not-ready to ready and we don't
-  // yet have any files. Without this, opening the panel before agentctl is up
-  // would show "No files" forever.
-  const prevAgentctlReadyRef = useRef(agentctlReady);
-  useEffect(() => {
-    const prev = prevAgentctlReadyRef.current;
-    prevAgentctlReadyRef.current = agentctlReady;
-    if (!prev && agentctlReady && files === null) {
-      fetchDiff();
-    }
-  }, [agentctlReady, files, fetchDiff]);
 
   return { files, loading, refetch: fetchDiff };
 }
