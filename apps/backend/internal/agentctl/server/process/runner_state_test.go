@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -94,6 +95,15 @@ func TestInteractiveRunner_Callbacks(t *testing.T) {
 }
 
 func TestInteractiveRunner_TurnCompleteCallback(t *testing.T) {
+	// This test hardcodes `bash -c "echo '$ '"` to produce a literal "$ "
+	// prompt and exercise the PromptPattern turn-complete detector. Migrating
+	// it to fixtureExec would lose the bash-only quoting/echo semantics the
+	// detector depends on. Windows CI passes only because windows-latest ships
+	// Git Bash in PATH; a bare Windows host without Git Bash would fail at
+	// runner.Start. Skip rather than pretend it's portable.
+	if runtime.GOOS == "windows" {
+		t.Skip("requires bash on PATH (Git Bash on Windows); turn-complete pattern is bash-specific")
+	}
 	log := newTestLogger(t)
 	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
 

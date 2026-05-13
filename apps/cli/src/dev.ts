@@ -40,11 +40,11 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();
 
-  const { cmd: backendCmd, args: backendArgs } = withWinjobWrap(
-    repoRoot,
-    "make",
-    ["-C", path.join("apps", "backend"), "dev"],
-  );
+  const { cmd: backendCmd, args: backendArgs } = withWinjobWrap(repoRoot, "make", [
+    "-C",
+    path.join("apps", "backend"),
+    "dev",
+  ]);
   const backendProc = spawn(backendCmd, backendArgs, {
     cwd: repoRoot,
     env: backendEnv,

@@ -76,7 +76,7 @@ build-winjob:
 
 ## Build and run acpdbg — usage: make acpdbg ARGS="probe auggie"
 acpdbg: build-acpdbg
-	@$(BUILD_DIR)/acpdbg $(ARGS)
+	@$(BUILD_DIR)/acpdbg$(EXE) $(ARGS)
 
 ## Build the acpdbg binary — raw ACP JSON-RPC debugger (see .agents/skills/acp-debug)
 build-acpdbg:

@@ -15,10 +15,7 @@ import { createProcessSupervisor } from "./process";
 // cmd metacharacters that need extra escaping.
 const WIN_SHIM_COMMANDS = new Set(["pnpm", "npm", "npx", "yarn"]);
 
-function resolveWindowsShim(
-  command: string,
-  args: string[],
-): { command: string; args: string[] } {
+function resolveWindowsShim(command: string, args: string[]): { command: string; args: string[] } {
   if (process.platform !== "win32") return { command, args };
   if (!WIN_SHIM_COMMANDS.has(command)) return { command, args };
   return { command: "cmd.exe", args: ["/c", command, ...args] };

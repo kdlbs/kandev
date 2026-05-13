@@ -52,13 +52,18 @@ func resolve(shell Shell, script string) (string, []string) {
 	return "sh", []string{"-c", script}
 }
 
-// findWindowsBash looks for bash.exe in the most common Git-for-Windows
-// install locations and on PATH. Returns "" if none found. Exposed for tests
-// via package-level overrides; the production code reads from disk.
+// findWindowsBash looks for bash.exe, preferring Git-for-Windows install
+// locations over whatever PATH happens to resolve. Returns "" if none found.
+// Exposed for tests via package-level overrides; the production code reads
+// from disk.
+//
+// Order matters: on a Windows 10/11 box with WSL installed,
+// C:\Windows\System32\bash.exe (the WSL launcher) is in PATH ahead of any
+// Git addition. Calling that would run our scripts inside a Linux
+// subsystem where Windows-native paths, npm.cmd, node.exe, etc. are
+// invisible — agent install scripts would silently fail. Probe the known
+// Git paths first, then fall back to PATH for non-standard Git installs.
 var findWindowsBash = func() string {
-	if p, err := exec.LookPath("bash"); err == nil {
-		return p
-	}
 	for _, candidate := range []string{
 		`C:\Program Files\Git\bin\bash.exe`,
 		`C:\Program Files\Git\usr\bin\bash.exe`,
@@ -67,6 +72,9 @@ var findWindowsBash = func() string {
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}
+	}
+	if p, err := exec.LookPath("bash"); err == nil {
+		return p
 	}
 	return ""
 }

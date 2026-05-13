@@ -68,12 +68,18 @@ function canBindPort(port: number, host: string): Promise<boolean> {
  * succeeds — covers macOS, Linux, and Windows.
  */
 async function isPortAvailable(port: number): Promise<boolean> {
-  const [v4InUse, v6InUse, v4Bindable] = await Promise.all([
+  // Run connect probes first, then the bind probe — they cannot share the
+  // port concurrently. On loopback, server.listen() completes in the kernel
+  // before a connect SYN to the same address is processed, so a concurrent
+  // canBindPort+isPortInUse pair can answer each other and report a free
+  // port as occupied. Sequencing keeps the bind probe's temporary listener
+  // out of the connect probes' view.
+  const [v4InUse, v6InUse] = await Promise.all([
     isPortInUse(port, "127.0.0.1"),
     isPortInUse(port, "::1"),
-    canBindPort(port, "127.0.0.1"),
   ]);
-  return !v4InUse && !v6InUse && v4Bindable;
+  if (v4InUse || v6InUse) return false;
+  return canBindPort(port, "127.0.0.1");
 }
 
 async function reserveSpecificPort(port: number, host = "127.0.0.1"): Promise<net.Server | null> {
