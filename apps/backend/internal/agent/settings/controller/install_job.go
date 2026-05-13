@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"runtime"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/common/shellexec"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -53,26 +53,12 @@ type InstallJob struct {
 // to the provided callback. Swappable in tests.
 var streamingInstallRunner = defaultStreamingInstallRunner
 
-// installShell returns the (program, args-prefix) pair used to run an install
-// script under the host shell. The script itself is passed as the final arg.
-// Linux/macOS: /bin/sh -c <script>
-// Windows:     cmd.exe /c <script>   (npm/npx etc. resolve their .cmd shims
-//              under cmd; the actual scripts used by built-in agents are
-//              plain `npm install -g ...` which works identically in both.)
-func installShell() (string, []string) {
-	if runtime.GOOS == "windows" {
-		return "cmd", []string{"/c"}
-	}
-	return "/bin/sh", []string{"-c"}
-}
-
 func defaultStreamingInstallRunner(
 	ctx context.Context,
 	script string,
 	onChunk func(chunk string),
 ) error {
-	prog, prefix := installShell()
-	cmd := exec.CommandContext(ctx, prog, append(prefix, script)...)
+	cmd := shellexec.CommandContext(ctx, shellexec.PosixSh, script)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err

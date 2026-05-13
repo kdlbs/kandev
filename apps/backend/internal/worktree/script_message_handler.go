@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/shellexec"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -213,7 +214,7 @@ func (h *DefaultScriptMessageHandler) createScriptMessage(ctx context.Context, r
 // runScriptWithOutput runs the script and captures output, streaming it to the message.
 // The passed context should already have an appropriate timeout set.
 func (h *DefaultScriptMessageHandler) runScriptWithOutput(ctx context.Context, req ScriptExecutionRequest, msg *models.Message) (int, error) {
-	cmd := exec.CommandContext(ctx, "sh", "-c", req.Script)
+	cmd := shellexec.CommandContext(ctx, shellexec.PosixSh, req.Script)
 	cmd.Dir = req.WorkingDir
 
 	stdoutPipe, err := cmd.StdoutPipe()
@@ -286,8 +287,8 @@ func (h *DefaultScriptMessageHandler) runScriptWithoutMessage(ctx context.Contex
 		zap.String("script_type", req.ScriptType),
 		zap.String("command", req.Script))
 
-	// Run script with sh -c
-	cmd := exec.CommandContext(ctx, "sh", "-c", req.Script)
+	// Run script under the host shell (sh -c on Unix, bash/cmd on Windows).
+	cmd := shellexec.CommandContext(ctx, shellexec.PosixSh, req.Script)
 	cmd.Dir = req.WorkingDir
 
 	// Capture output for logging

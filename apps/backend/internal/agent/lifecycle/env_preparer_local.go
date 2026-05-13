@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/shellexec"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -180,7 +181,7 @@ const setupScriptStreamInterval = 100 * time.Millisecond
 // streaming combined stdout/stderr to onOutput (if non-nil) as it runs.
 // Returns the full accumulated output (trimmed) and any execution error.
 func runSetupScript(ctx context.Context, script, workDir string, env map[string]string, onOutput func(current string)) (string, error) {
-	cmd := exec.CommandContext(ctx, "bash", "-c", script)
+	cmd := shellexec.CommandContext(ctx, shellexec.Bash, script)
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
