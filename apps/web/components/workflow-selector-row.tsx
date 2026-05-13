@@ -117,7 +117,12 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button type="button" variant="ghost" className="w-auto justify-between cursor-pointer">
+        <Button
+          type="button"
+          variant="ghost"
+          className="w-auto justify-between cursor-pointer"
+          data-testid="workflow-selector-trigger"
+        >
           <IconLogicBuffer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate">{selectedWorkflow?.name ?? "Select workflow"}</span>
           <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />

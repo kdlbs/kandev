@@ -161,6 +161,20 @@ describe("getPRStatusColor", () => {
     expect(getPRStatusColor(pr)).toBe("text-green-500");
   });
 
+  it("returns sky-400 for approved PR that still has pending reviewers (1 of N required)", () => {
+    // GitHub's review_state="approved" only means at least one reviewer approved;
+    // when branch protection requires more reviews, mergeable_state="blocked" and
+    // pending_review_count > 0. The icon must not imply the PR is fully approved.
+    const pr = makePR({
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "blocked",
+      pending_review_count: 1,
+    });
+    expect(getPRStatusColor(pr)).toBe("text-sky-400");
+  });
+
   it("returns plain green when mergeable_state is empty (backfilled row)", () => {
     const pr = makePR({
       state: "open",
@@ -259,7 +273,8 @@ describe("isPRAwaitingReview", () => {
     ).toBe(false);
   });
 
-  it("is false for an approved PR with extra reviewers still pending", () => {
+  it("is true for an approved PR with extra reviewers still pending", () => {
+    // One reviewer approved but branch protection requires more — still awaiting.
     expect(
       isPRAwaitingReview(
         makePR({
@@ -267,6 +282,19 @@ describe("isPRAwaitingReview", () => {
           review_state: "approved",
           checks_state: "success",
           pending_review_count: 1,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("is false for an approved PR with no pending reviewers", () => {
+    expect(
+      isPRAwaitingReview(
+        makePR({
+          state: "open",
+          review_state: "approved",
+          checks_state: "success",
+          pending_review_count: 0,
         }),
       ),
     ).toBe(false);

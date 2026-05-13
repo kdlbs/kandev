@@ -32,11 +32,14 @@ export function isPRReadyToMerge(pr: TaskPR): boolean {
 }
 
 // CI passed but the PR is still waiting on human review (reviewers requested
-// or pending review state). Distinct from yellow "CI running".
+// or pending review state). Distinct from yellow "CI running". An approved
+// PR with extra reviewers still pending also counts — GitHub's
+// review_state="approved" only means at least one reviewer approved, not
+// that branch protection's required count is met.
 export function isPRAwaitingReview(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
   if (pr.checks_state !== "success") return false;
-  if (pr.review_state === "approved") return false;
+  if (pr.review_state === "approved") return pr.pending_review_count > 0;
   return pr.review_state === "pending" || pr.pending_review_count > 0;
 }
 
@@ -49,11 +52,13 @@ export function getPRStatusColor(pr: TaskPR): string {
   if (isPRReadyToMerge(pr)) {
     return "text-emerald-400";
   }
-  if (pr.review_state === "approved" && pr.checks_state === "success") {
-    return "text-green-500";
-  }
+  // Check awaiting-review before the plain-green fallback so an approved PR
+  // with pending reviewers (1 of N required) doesn't read as fully approved.
   if (isPRAwaitingReview(pr)) {
     return "text-sky-400";
+  }
+  if (pr.review_state === "approved" && pr.checks_state === "success") {
+    return "text-green-500";
   }
   if (pr.checks_state === "pending" || pr.review_state === "pending") {
     return "text-yellow-500";

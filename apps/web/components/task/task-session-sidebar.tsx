@@ -579,7 +579,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   return (
     <PanelRoot data-testid="task-sidebar">
       <SidebarFilterBar />
-      <PanelBody className="space-y-4 p-0">
+      <PanelBody className="space-y-4 p-0" data-testid="task-sidebar-scroll">
         <TaskSwitcher
           grouped={grouped}
           workflows={workflows}

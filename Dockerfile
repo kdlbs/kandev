@@ -77,8 +77,10 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* && \
     PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install apprise
 
-# Replace the node base image's default user so we own uid 1000
-RUN userdel -r node && groupadd -r kandev && useradd -r -g kandev -u 1000 -m kandev
+# Replace the node base image's default user so we own uid 1000.
+# Home is placed under /data so agent CLI auth state (gh, claude, codex, auggie,
+# copilot, amp, ...) lives on the PV and survives pod restarts and image upgrades.
+RUN userdel -r node && groupadd -r kandev && useradd -r -g kandev -u 1000 -d /data/home -M kandev
 
 # Create app directory structure matching what the CLI expects:
 #   /app/apps/backend/bin/kandev
@@ -113,6 +115,7 @@ VOLUME ["/data"]
 ENV KANDEV_NO_BROWSER=1 \
     KANDEV_HOME_DIR=/data \
     KANDEV_DOCKER_ENABLED=false \
+    HOME=/data/home \
     NPM_CONFIG_PREFIX=/data/.npm-global \
     PATH=/data/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     HOSTNAME=0.0.0.0 \

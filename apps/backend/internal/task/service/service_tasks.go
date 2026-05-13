@@ -531,10 +531,9 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 		zap.String("task_id", id),
 		zap.Duration("duration", time.Since(start)))
 
-	// 6. Return immediately - all remaining cleanup is async
-
-	// 7. Background: Stop agents and cleanup worktrees
-	if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || task.IsEphemeral {
+	// 6. Stop agents and cleanup worktrees in the background.
+	hasCleanup := len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || task.IsEphemeral
+	if hasCleanup {
 		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, task.IsEphemeral,
 			"task deleted", "failed to stop session on task delete", "task cleanup completed")
 	}

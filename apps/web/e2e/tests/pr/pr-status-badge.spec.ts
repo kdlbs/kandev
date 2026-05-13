@@ -214,4 +214,59 @@ test.describe("PR status badge", () => {
     // Plain-green approved state, not the ready-to-merge emerald.
     await expect(icon).not.toHaveClass(/text-emerald-400/);
   });
+
+  /**
+   * GitHub's review_state="approved" only means at least one reviewer approved.
+   * When branch protection requires more approvals, the PR is still blocked
+   * and pending_review_count > 0. The badge must read as "awaiting review"
+   * (sky-400) rather than fully approved (green-500) or ready-to-merge
+   * (emerald-400).
+   */
+  test("renders awaiting-review when approved with pending reviewers", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { workflow, workingStep, doneStep, task } = await seedBadgeTest(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      "Awaiting Review Task",
+    );
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await apiClient.moveTask(task.id, workflow.id, workingStep.id);
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 104,
+      pr_url: "https://github.com/testorg/testrepo/pull/104",
+      pr_title: "1 of 2 approvals",
+      head_branch: "feat/partial-approval",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "blocked",
+      pending_review_count: 1,
+    });
+
+    await expect(kanban.taskCardInColumn("Awaiting Review Task", doneStep.id)).toBeVisible({
+      timeout: 45_000,
+    });
+
+    const icon = testPage.getByTestId(`pr-task-icon-${task.id}`);
+    await expect(icon).toBeVisible({ timeout: 15_000 });
+    await expect(icon).toHaveAttribute("data-pr-ready-to-merge", "false");
+    await expect(icon).toHaveClass(/text-sky-400/);
+    await expect(icon).not.toHaveClass(/text-emerald-400/);
+    await expect(icon).not.toHaveClass(/text-green-500/);
+  });
 });

@@ -166,3 +166,42 @@ describe("computeDisabledReason (default)", () => {
     ).toBeNull();
   });
 });
+
+describe("computeDisabledReason (submitBlockedReason)", () => {
+  const REASON = "Preparing kandev repository…";
+
+  it("returns the supplied reason for start-task even when nothing is missing", () => {
+    expect(computeDisabledReason(makeProps({ submitBlockedReason: REASON }), KIND_START)).toBe(
+      REASON,
+    );
+  });
+
+  it("returns the supplied reason for default in create mode", () => {
+    expect(computeDisabledReason(makeProps({ submitBlockedReason: REASON }), KIND_DEFAULT)).toBe(
+      REASON,
+    );
+  });
+
+  it("returns the supplied reason for update mode (overrides title check)", () => {
+    expect(
+      computeDisabledReason(
+        makeProps({ submitBlockedReason: REASON, hasTitle: false }),
+        KIND_UPDATE,
+      ),
+    ).toBe(REASON);
+  });
+
+  it("still suppresses the reason while a submission is in flight", () => {
+    expect(
+      computeDisabledReason(
+        makeProps({ submitBlockedReason: REASON, isCreatingTask: true }),
+        KIND_START,
+      ),
+    ).toBeNull();
+  });
+
+  it("ignores empty/null reason and falls back to normal logic", () => {
+    expect(computeDisabledReason(makeProps({ submitBlockedReason: null }), KIND_START)).toBeNull();
+    expect(computeDisabledReason(makeProps({ submitBlockedReason: "" }), KIND_START)).toBeNull();
+  });
+});
