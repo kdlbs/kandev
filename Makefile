@@ -126,6 +126,10 @@ ifneq ($(HOST_IS_LINUX_AMD64),1)
 	@echo "Building Linux agentctl for remote executors..."
 	@$(MAKE) -C $(BACKEND_DIR) build-agentctl-linux
 endif
+ifeq ($(OS),Windows_NT)
+	@echo "Building winjob (Ctrl-C-safe wrapper for Windows)..."
+	@$(MAKE) -C $(BACKEND_DIR) build-winjob
+endif
 	@echo "Launching via CLI (auto ports)..."
 	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- dev
 
