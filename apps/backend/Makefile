@@ -22,6 +22,9 @@ LDFLAGS := -s -w
 ifeq ($(OS),Windows_NT)
   RM = cmd /c del /s /q
   RMDIR = cmd /c rmdir /s /q
+  # cmd's `mkdir` errors when the dir already exists, unlike Unix `mkdir -p`.
+  # Call sites use `-@$(MKDIR) $(BUILD_DIR)` (note the `-` prefix) so the
+  # "already exists" failure is tolerated; on Unix the prefix is a no-op.
   MKDIR = cmd /c mkdir
   CGO_PREFIX = set CGO_ENABLED=1&
   EXE = .exe
@@ -48,13 +51,13 @@ all: build
 ## Build the preview CLI for deploying PR preview environments to Sprites
 build-preview:
 	@echo "Building preview..."
-	@$(MKDIR) $(BUILD_DIR)
+	-@$(MKDIR) $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/preview ./cmd/preview
 
 ## Build the mock-agent binary for testing
 build-mock-agent:
 	@echo "Building mock-agent..."
-	@$(MKDIR) $(BUILD_DIR)
+	-@$(MKDIR) $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent ./cmd/mock-agent
 
 ## Build and run acpdbg — usage: make acpdbg ARGS="probe auggie"
@@ -64,7 +67,7 @@ acpdbg: build-acpdbg
 ## Build the acpdbg binary — raw ACP JSON-RPC debugger (see .agents/skills/acp-debug)
 build-acpdbg:
 	@echo "Building acpdbg..."
-	@$(MKDIR) $(BUILD_DIR)
+	-@$(MKDIR) $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/acpdbg ./cmd/acpdbg
 
 ## Build the unified kandev binary. Always includes the linux/amd64 agentctl
@@ -73,7 +76,7 @@ build-acpdbg:
 ## non-Linux host fails with "agentctl linux binary not found".
 build: build-agentctl build-agentctl-linux build-mock-agent build-acpdbg
 	@echo "Building $(BINARY_NAME)..."
-	@$(MKDIR) $(BUILD_DIR)
+	-@$(MKDIR) $(BUILD_DIR)
 	CGO_ENABLED=1 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/kandev
 
 ## Build all binaries (unified + individual services + agentctl)
@@ -84,13 +87,13 @@ build-all: build build-agentctl
 ## Build the agentctl sidecar binary (includes embedded MCP server)
 build-agentctl:
 	@echo "Building agentctl..."
-	@$(MKDIR) $(BUILD_DIR)
+	-@$(MKDIR) $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl ./cmd/agentctl
 
 ## Build agentctl for linux/amd64 (used by Sprites remote executor)
 build-agentctl-linux:
 	@echo "Building agentctl for linux/amd64..."
-	@$(MKDIR) $(BUILD_DIR)
+	-@$(MKDIR) $(BUILD_DIR)
 	GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-amd64 ./cmd/agentctl
 
 ## Build mock-agent for linux/amd64 (used by Docker E2E tests)
@@ -184,7 +187,7 @@ deps:
 ## Build for multiple platforms
 build-cross:
 	@echo "Building for multiple platforms..."
-	@$(MKDIR) $(BUILD_DIR)
+	-@$(MKDIR) $(BUILD_DIR)
 	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/kandev
 	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/kandev
 	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/kandev
