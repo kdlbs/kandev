@@ -54,6 +54,7 @@ help:
 	@echo ""
 	@echo "Development Commands:"
 	@echo "  dev              Run backend + web via CLI (auto ports)"
+	@echo "  dev-prod-db      Run dev mode against the production db at ~/.kandev"
 	@echo "  dev-backend      Run backend in development mode (port 38429)"
 	@echo "  dev-web          Run web app in development mode (port 37429)"
 	@echo "  dev              Note: Uses apps/cli launcher (auto ports)"
@@ -111,6 +112,13 @@ ifneq ($(shell uname -s)/$(shell uname -m),Linux/x86_64)
 endif
 	@echo "Launching via CLI (auto ports)..."
 	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- dev
+
+.PHONY: dev-prod-db
+dev-prod-db: export KANDEV_DATABASE_PATH := $(HOME)/.kandev/data/kandev.db
+dev-prod-db:
+	@echo "⚠  dev mode against PRODUCTION db at $(KANDEV_DATABASE_PATH)"
+	@echo "   back it up first; dev binary may run unmigrated schema changes"
+	@$(MAKE) dev
 
 .PHONY: dev-backend
 dev-backend:
