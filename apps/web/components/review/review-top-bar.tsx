@@ -86,14 +86,14 @@ type ReviewProgressProps = { reviewedCount: number; totalCount: number };
 function ReviewProgress({ reviewedCount, totalCount }: ReviewProgressProps) {
   const progressPercent = totalCount > 0 ? (reviewedCount / totalCount) * 100 : 0;
   return (
-    <div className="flex items-center gap-2 flex-1 min-w-0">
+    <div className="flex items-center gap-2 flex-1 min-w-0 overflow-hidden">
       <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden max-w-[200px]">
         <div
           className="h-full bg-primary rounded-full transition-all duration-300"
           style={{ width: `${progressPercent}%` }}
         />
       </div>
-      <span className="text-xs text-muted-foreground whitespace-nowrap">
+      <span className="text-xs text-muted-foreground truncate">
         {reviewedCount} of {totalCount} files reviewed
       </span>
     </div>
