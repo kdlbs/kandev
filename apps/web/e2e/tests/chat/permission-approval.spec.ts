@@ -4,6 +4,12 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 
+// Matches the number of permission prompts emitted by the mock-agent
+// `/e2e:multi-permission` scenario (apps/backend/cmd/mock-agent/scenarios.go).
+// Both approval loops below depend on this — bump together if the scenario
+// changes.
+const MULTI_PERMISSION_COUNT = 3;
+
 /**
  * Seed a task that runs the multi-permission scenario, then navigate to it.
  * The mock agent will request three permissions in sequence and block on each.
@@ -59,11 +65,11 @@ test.describe("Permission approval persistence", () => {
   }) => {
     const { session } = await seedMultiPermissionTask(testPage, apiClient, seedData);
 
-    // Approve all three permission prompts as they appear. Each click unblocks
+    // Approve all permission prompts as they appear. Each click unblocks
     // the agent which then emits the next prompt; the previous one's button
     // detaches before the next one mounts, so wait for the count to be back
     // at 1 between clicks.
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < MULTI_PERMISSION_COUNT; i++) {
       await expect(session.permissionApproveButtons()).toHaveCount(1, { timeout: 30_000 });
       await session.permissionApproveButtons().first().click();
     }
@@ -107,8 +113,8 @@ test.describe("Permission approval persistence", () => {
     });
     await expect(sidebarItem.getByTestId("task-state-running")).toHaveCount(0);
 
-    // Approve all three prompts; once the agent's turn ends, the icon is gone.
-    for (let i = 0; i < 3; i++) {
+    // Approve all prompts; once the agent's turn ends, the icon is gone.
+    for (let i = 0; i < MULTI_PERMISSION_COUNT; i++) {
       await expect(session.permissionApproveButtons()).toHaveCount(1, { timeout: 30_000 });
       await session.permissionApproveButtons().first().click();
     }
