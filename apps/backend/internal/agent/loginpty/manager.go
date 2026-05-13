@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
@@ -160,6 +159,13 @@ loop:
 	for {
 		select {
 		case info = <-exited:
+			// Natural child exit. On Windows ConPTY, the underlying handle does
+			// NOT return EOF when the child process terminates, so the readLoop
+			// would block on Read until something closes the PTY. Closing here
+			// unblocks it so the readDone wait below resolves promptly. On Unix
+			// the master already saw EOF from the slave close — this is just an
+			// extra (idempotent) Close that the windowsPTY sync.Once also guards.
+			sess.stop()
 			break loop
 		case <-idle.C:
 			sess.log.Info("login session idle timeout — terminating")
@@ -250,7 +256,7 @@ type Session struct {
 
 	mu         sync.Mutex
 	cmd        *exec.Cmd
-	pty        *os.File
+	pty        ptyHandle
 	running    bool
 	startedAt  time.Time
 	finishedAt *time.Time
@@ -275,13 +281,13 @@ func (s *Session) start(cmd []string, cols, rows uint16) error {
 	c := exec.Command(cmd[0], cmd[1:]...) // #nosec G204 — command is hard-coded per agent
 	c.Env = buildLoginEnv()
 
-	f, err := pty.StartWithSize(c, &pty.Winsize{Cols: cols, Rows: rows})
+	handle, err := startPTYWithSize(c, cols, rows)
 	if err != nil {
 		return fmt.Errorf("start pty: %w", err)
 	}
 
 	s.cmd = c
-	s.pty = f
+	s.pty = handle
 	s.running = true
 	s.log.Info("login session started",
 		zap.String("session_id", s.ID),
@@ -413,7 +419,7 @@ func (s *Session) Resize(cols, rows uint16) error {
 	if !running || pf == nil {
 		return ErrSessionNotRunning
 	}
-	return pty.Setsize(pf, &pty.Winsize{Cols: cols, Rows: rows})
+	return pf.Resize(cols, rows)
 }
 
 // Status snapshot for HTTP responses.
@@ -452,9 +458,9 @@ func (s *Session) Status() Status {
 // stop tears the PTY down idempotently. The `!s.running` guard is flipped
 // *under the same lock* that we use to read pty/cmd, so concurrent callers
 // (timeout case in supervise + external Manager.Stop, etc.) don't double-
-// close the file descriptor on the way out. A double Close on *os.File is
-// safe in isolation, but if the OS recycles the fd between the two Close()
-// calls, the second close hits a different open file.
+// close the underlying handle on the way out. The Windows ConPTY backing
+// also has its own sync.Once on Close because its upstream library has no
+// internal synchronization and a double-close triggers STATUS_HEAP_CORRUPTION.
 func (s *Session) stop() {
 	s.mu.Lock()
 	if !s.running {
