@@ -563,8 +563,11 @@ export class SessionPage {
       if (prPanels.length === 0) return { error: "no pr-detail panel" };
       const sessionPanels = api.panels.filter((p) => p.id.startsWith("session:"));
       if (sessionPanels.length === 0) return { error: "no session panel" };
-      const sessionGroupIds = new Set(sessionPanels.map((p) => p.group?.id ?? null));
-      const allPrsInSessionGroup = prPanels.every((p) => sessionGroupIds.has(p.group?.id ?? null));
+      const sessionGroupIds = new Set(sessionPanels.map((p) => p.group?.id).filter(Boolean));
+      const allPrsInSessionGroup = prPanels.every((p) => {
+        const gid = p.group?.id;
+        return gid !== undefined && sessionGroupIds.has(gid);
+      });
       return {
         allPrsInSessionGroup,
         prLocations: prPanels.map((p) => `${p.id}@${p.group?.id ?? "?"}`),
