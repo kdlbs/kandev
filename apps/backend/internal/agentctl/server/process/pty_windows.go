@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/UserExistsError/conpty"
@@ -44,10 +46,7 @@ func (p *windowsPTY) Resize(cols, rows uint16) error {
 // the exec.Cmd and starts the process via ConPTY. After this call, cmd.Process
 // is set so callers can manage the process lifecycle.
 func startPTYWithSize(cmd *exec.Cmd, cols, rows int) (PtyHandle, error) {
-	cmdLine := buildCmdLine(cmd.Args)
-	if len(cmd.Args) == 0 {
-		cmdLine = escapeArg(cmd.Path)
-	}
+	cmdLine := resolveConPtyCmdLine(cmd)
 
 	opts := []conpty.ConPtyOption{
 		conpty.ConPtyDimensions(cols, rows),
@@ -76,4 +75,50 @@ func startPTYWithSize(cmd *exec.Cmd, cols, rows int) (PtyHandle, error) {
 	cmd.Process = proc
 
 	return &windowsPTY{cpty: cpty}, nil
+}
+
+// resolveConPtyCmdLine produces the command line conpty.Start should run.
+//
+// Win32 CreateProcessW (which ConPTY uses internally) has two limitations that
+// matter here:
+//
+//  1. It does NOT apply PATHEXT — a bare "opencode" won't resolve to
+//     "opencode.cmd" the way Go's exec.LookPath does. exec.Command on Windows
+//     already PATHEXT-resolved cmd.Path for us, but cmd.Args[0] is still the
+//     unresolved name. We have to substitute cmd.Path so CreateProcess sees a
+//     concrete file.
+//
+//  2. It cannot execute .cmd / .bat scripts directly — those are interpreted
+//     by cmd.exe, not by the Win32 loader. We wrap such commands with
+//     "cmd.exe /c <script> <args...>" so the batch interpreter handles them.
+//
+// Without this, npm-installed CLIs (which install as .cmd shims on Windows)
+// fail to launch under ConPTY with "Failed to create console process: The
+// system cannot find the file specified" — even though `where.exe` and
+// `exec.LookPath` both find them. This is the same family of issue handled in
+// apps/cli/src/web.ts for Node's spawn().
+func resolveConPtyCmdLine(cmd *exec.Cmd) string {
+	args := cmd.Args
+	switch {
+	case len(args) == 0 && cmd.Path == "":
+		return ""
+	case len(args) == 0:
+		args = []string{cmd.Path}
+	case cmd.Path != "":
+		args = append([]string{cmd.Path}, args[1:]...)
+	}
+	if isBatchScript(args[0]) {
+		args = append([]string{"cmd.exe", "/c"}, args...)
+	}
+	return buildCmdLine(args)
+}
+
+// isBatchScript reports whether path ends in .cmd or .bat — the two
+// CreateProcessW-incompatible Windows script extensions npm shims may use.
+func isBatchScript(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".cmd", ".bat":
+		return true
+	}
+	return false
 }
