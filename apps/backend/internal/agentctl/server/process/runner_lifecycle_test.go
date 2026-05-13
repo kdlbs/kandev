@@ -37,18 +37,18 @@ func TestInteractiveRunner_Start(t *testing.T) {
 		t.Errorf("Start() Status = %v, want %v", info.Status, types.ProcessStatusRunning)
 	}
 
-	// Wait for process to exit
-	time.Sleep(500 * time.Millisecond)
-
-	// Process should have completed
-	procInfo, ok := runner.Get(info.ID, false)
-	if !ok {
-		// Process may have been removed after exit, which is expected
-		return
+	// Poll for exit. A fixed sleep was flaky on slow CI runners — the test
+	// binary spawned via PTY can take longer than half a second to print
+	// `echo hello` and exit on Windows GitHub Actions hosts.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		procInfo, ok := runner.Get(info.ID, false)
+		if !ok || procInfo.Status != types.ProcessStatusRunning {
+			return // exited and (optionally) cleaned up
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	if procInfo.Status == types.ProcessStatusRunning {
-		t.Error("Process should have exited")
-	}
+	t.Error("Process should have exited within 5s")
 }
 
 func TestInteractiveRunner_Start_ValidationErrors(t *testing.T) {

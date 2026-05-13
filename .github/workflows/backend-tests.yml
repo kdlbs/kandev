@@ -123,6 +123,11 @@ jobs:
     name: Backend (windows)
     runs-on: windows-latest
     timeout-minutes: 15
+    # Least-privilege: this job only reads source and runs tests, no PR/issue
+    # writes or release operations. Flagged by CodeQL workflow audit + matching
+    # CodeRabbit nitpick.
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: apps/backend

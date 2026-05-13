@@ -47,8 +47,10 @@ type Launcher struct {
 	// process noticing on its own. On Windows it stores a Job Object handle
 	// (see lifecycle_windows.go) and is accessed atomically. Unused on Unix
 	// — there, the inherited pipe in launcher_pipe_unix.go covers the same
-	// role.
-	jobHandle uintptr
+	// role; we keep the field on the shared struct so platform-specific
+	// install/release methods (lifecycle_{unix,windows}.go) compile against
+	// the same Launcher type.
+	jobHandle uintptr //nolint:unused // referenced from lifecycle_windows.go
 
 	// authToken is retrieved via handshake after agentctl starts.
 	// agentctl generates its own token; the launcher retrieves it using the bootstrap nonce.

@@ -50,16 +50,32 @@ func (l *Launcher) installChildLifecycle(cmd *exec.Cmd) error {
 		return fmt.Errorf("AssignProcessToJobObject: %w", err)
 	}
 
-	atomic.StoreUintptr(&l.jobHandle, uintptr(job))
+	// Defensive: if a previous lifecycle was somehow installed without a
+	// matching release (unexpected restart, future code change), close the
+	// stale handle instead of silently leaking it. Doing the swap *after* the
+	// new job is assigned avoids killing the new agentctl before we've stored
+	// its handle — the new job has KILL_ON_JOB_CLOSE so we must hold a
+	// reference at all times.
+	previous := atomic.SwapUintptr(&l.jobHandle, uintptr(job))
+	if previous != 0 {
+		if err := windows.CloseHandle(windows.Handle(previous)); err != nil {
+			l.logger.Warn("failed to close stale job object handle", zap.Error(err))
+		} else {
+			l.logger.Warn("closed stale job object handle from previous install")
+		}
+	}
 	l.logger.Info("agentctl bound to kill-on-close job object",
 		zap.Int("pid", cmd.Process.Pid))
 	return nil
 }
 
 // releaseChildLifecycle closes the job-object handle if one was installed.
-// Safe to call when no handle was set or after a previous release. The agentctl
-// child must already have exited before this runs — closing the last handle
-// to a job marked KILL_ON_JOB_CLOSE terminates any process still in the job.
+// Safe to call at any point after the child was started: on normal shutdown
+// paths the child has already exited and this is a plain handle close; in
+// the force-kill timeout branch of Stop the child may still be alive, and the
+// handle close acts as a backstop — KILL_ON_JOB_CLOSE terminates every
+// remaining process in the job. Also safe to call when no handle was set or
+// after a previous release.
 func (l *Launcher) releaseChildLifecycle() {
 	handle := atomic.SwapUintptr(&l.jobHandle, 0)
 	if handle == 0 {
