@@ -52,7 +52,13 @@ export function launchWebApp({
   quiet = false,
 }: WebLaunchOptions): ChildProcess {
   const stdio: StdioOptions = quiet ? ["ignore", "pipe", "pipe"] : "inherit";
-  const proc = spawn(command, args, { cwd, env, stdio });
+  // Node's spawn doesn't apply PATHEXT on Windows: passing "pnpm" looks for a
+  // literal file named "pnpm", but pnpm is installed as "pnpm.cmd" (a batch
+  // shim). Same for npm, npx, yarn, and many other Node CLIs. Running through
+  // a shell on Windows lets cmd.exe resolve the extension. The args here are
+  // simple identifiers/paths (no quoting hazards) so shell:true is safe.
+  const useShell = process.platform === "win32";
+  const proc = spawn(command, args, { cwd, env, stdio, shell: useShell });
   supervisor.children.push(proc);
 
   // In quiet mode, only forward stderr
