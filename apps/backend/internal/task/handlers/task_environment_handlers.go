@@ -79,9 +79,12 @@ func (h *TaskHandlers) httpResetTaskEnvironment(c *gin.Context) {
 	case errors.Is(err, service.ErrSessionRunning):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	default:
+		// Log the underlying error for operators; respond with a generic
+		// message so internal details (paths, wrapped error chains, etc.)
+		// aren't leaked to clients.
 		h.logger.Error("reset task environment failed",
 			zap.String("task_id", taskID),
 			zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reset task environment"})
 	}
 }
