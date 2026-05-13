@@ -217,7 +217,7 @@ export type UseReviewSourcesResult = {
 /**
  * Multi-source merge hook. Aggregates uncommitted / committed / PR diffs
  * into one sorted ReviewFile[] tagged with `.source`. Shared by
- * `TaskChangesPanel` (diff viewer) and `MobileChangesTabs` (source filter).
+ * `TaskChangesPanel` (diff viewer) and `MobileDiffSheet` (source tab bar).
  *
  * Returns counts per source so consumers can render tab badges without
  * re-running the merge.
