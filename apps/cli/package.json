@@ -40,7 +40,7 @@
     "vitest": "^1.6.0"
   },
   "scripts": {
-    "dev": "unset npm_config_prefix && tsx src/cli.ts",
+    "dev": "tsx src/cli.ts",
     "build": "tsc -p tsconfig.json",
     "bundle": "esbuild dist/cli.js --bundle --platform=node --format=cjs --outfile=dist/cli.bundle.js",
     "start": "node dist/cli.js",

@@ -27,12 +27,17 @@ ifeq ($(OS),Windows_NT)
   # "already exists" failure is tolerated; on Unix the prefix is a no-op.
   MKDIR = cmd /c mkdir
   CGO_PREFIX = set CGO_ENABLED=1&
+  # Cross-compile prefix for the linux/amd64 agentctl bundled with the host
+  # build (used by remote-Sprites executors). cmd has no Unix env-var-prefix
+  # syntax; `set X=Y&` chains `set` and the next command in the same shell.
+  GO_LINUX_AMD64 = set CGO_ENABLED=0& set GOOS=linux& set GOARCH=amd64&
   EXE = .exe
 else
   RM = rm -f
   RMDIR = rm -rf
   MKDIR = mkdir -p
   CGO_PREFIX = CGO_ENABLED=1
+  GO_LINUX_AMD64 = CGO_ENABLED=0 GOOS=linux GOARCH=amd64
   EXE =
 endif
 
@@ -94,7 +99,7 @@ build-agentctl:
 build-agentctl-linux:
 	@echo "Building agentctl for linux/amd64..."
 	-@$(MKDIR) $(BUILD_DIR)
-	GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-amd64 ./cmd/agentctl
+	$(GO_LINUX_AMD64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-amd64 ./cmd/agentctl
 
 ## Build mock-agent for linux/amd64 (used by Docker E2E tests)
 build-mock-agent-linux:

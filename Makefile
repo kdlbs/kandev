@@ -105,9 +105,24 @@ help:
 # Development
 #
 
+# Build the linux/amd64 agentctl on every host except Linux/x86_64 (where the
+# host build IS already linux/amd64). Computed up here, OS-conditionally, so
+# the recipe doesn't shell out to `uname` — that fails on Windows under cmd
+# and produces spurious "CreateProcess(NULL, uname -s, ...) failed" warnings
+# on every Make invocation.
+ifeq ($(OS),Windows_NT)
+  HOST_IS_LINUX_AMD64 := 0
+else
+  ifeq ($(shell uname -s)/$(shell uname -m),Linux/x86_64)
+    HOST_IS_LINUX_AMD64 := 1
+  else
+    HOST_IS_LINUX_AMD64 := 0
+  endif
+endif
+
 .PHONY: dev
 dev:
-ifneq ($(shell uname -s)/$(shell uname -m),Linux/x86_64)
+ifneq ($(HOST_IS_LINUX_AMD64),1)
 	@echo "Building Linux agentctl for remote executors..."
 	@$(MAKE) -C $(BACKEND_DIR) build-agentctl-linux
 endif
