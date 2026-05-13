@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -85,11 +84,18 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 		stepIdx++
 	}
 
-	// Step N: Run setup script (if provided)
-	resolvedScript := resolvePreparerSetupScript(req, workspacePath)
+	// worktree.Manager.Create already executed the per-repo setup script via
+	// its ScriptMessageHandler (recorded as a script_execution message). To
+	// avoid running the same script twice we blank RepoSetupScript on a
+	// request copy before resolving the prepare script — the placeholder
+	// substitutes to empty and the resolved script is skipped via
+	// isScriptEffectivelyEmpty.
+	scriptReq := *req
+	scriptReq.RepoSetupScript = ""
+	resolvedScript := resolvePreparerSetupScript(&scriptReq, workspacePath)
 	if resolvedScript != "" {
 		totalSteps++
-		steps = runSetupScriptStep(ctx, req, workspacePath, resolvedScript, stepIdx, totalSteps, onProgress, steps, p.logger)
+		steps = runSetupScriptStep(ctx, &scriptReq, workspacePath, resolvedScript, stepIdx, totalSteps, onProgress, steps, p.logger)
 	}
 
 	return &EnvPrepareResult{
@@ -232,10 +238,13 @@ func finalizeSyncStep(
 // failure, all already-created worktrees for this preparation are rolled back
 // and the request is reported as failed with the originating error.
 //
-// Per-repo setup scripts (RepoSetupScript) run as a separate step after each
-// repo's worktree is created. The task-level setup script (req.SetupScript)
-// is intentionally NOT run from this path — that resolution depends on the
-// task root layout and is handled by the caller in a future phase.
+// Per-repo setup scripts (RepoSetupScript) are executed by the worktree
+// manager during Create() via its script handler, which streams output to a
+// "script_execution" chat message. The env preparer does not run them as a
+// separate step — doing so caused the script to run twice per repo. The
+// task-level setup script (req.SetupScript) is intentionally NOT run from
+// this path — that resolution depends on the task root layout and is handled
+// by the caller in a future phase.
 //
 // On success the legacy single-worktree fields on EnvPrepareResult mirror
 // Worktrees[0] so existing downstream code (manager_launch.launchApplyPrepareResult,
@@ -263,7 +272,12 @@ func (p *WorktreePreparer) prepareMultiRepo(
 		}, nil
 	}
 
-	// Step budget: per-repo (validate + create + optional sync + optional checkout + optional setup script).
+	// Step budget: per-repo (validate + create + optional sync + optional checkout).
+	// Per-repo setup scripts are executed by the worktree manager during
+	// Create() (via its script handler, which also creates the chat
+	// "script_execution" message). The env preparer no longer re-runs them
+	// here — doing so caused the script to run twice per repo and broke
+	// non-idempotent scripts (e.g. "mkdir build" on the second run).
 	totalSteps := 0
 	for _, spec := range specs {
 		totalSteps += 2
@@ -271,9 +285,6 @@ func (p *WorktreePreparer) prepareMultiRepo(
 			totalSteps++
 		}
 		if spec.CheckoutBranch != "" {
-			totalSteps++
-		}
-		if strings.TrimSpace(spec.RepoSetupScript) != "" {
 			totalSteps++
 		}
 	}
@@ -329,9 +340,11 @@ func (p *WorktreePreparer) prepareMultiRepo(
 	return res, nil
 }
 
-// prepareOneRepo runs the validate → create-worktree → fetch-PR → setup-script
-// sequence for a single repo within a multi-repo preparation. Returns the
-// created worktree, updated steps, the next step index, and any error.
+// prepareOneRepo runs the validate → create-worktree → fetch-PR sequence for
+// a single repo within a multi-repo preparation. The per-repo setup script
+// is executed by the worktree manager during Create() and is not re-run
+// here. Returns the created worktree, updated steps, the next step index,
+// and any error.
 func (p *WorktreePreparer) prepareOneRepo(
 	ctx context.Context,
 	req *EnvPrepareRequest,
@@ -393,48 +406,12 @@ func (p *WorktreePreparer) prepareOneRepo(
 		stepIdx++
 	}
 
-	// Per-repo setup script (passed verbatim — no script-engine resolution
-	// in this phase; that lands with the per-repo placeholder namespace later).
-	if script := strings.TrimSpace(spec.RepoSetupScript); script != "" {
-		var runErr error
-		steps, runErr = runRepoSetupScriptStep(ctx, &subReq, repoLabel, wt.Path, script, stepIdx, totalSteps, onProgress, steps)
-		if runErr != nil {
-			return nil, steps, stepIdx + 1, fmt.Errorf("repo %q setup script failed: %w", repoLabel, runErr)
-		}
-		stepIdx++
-	}
+	// Per-repo setup script execution is owned by the worktree manager
+	// (createInTaskDir → runWorktreeSetupScript), which streams output to a
+	// "script_execution" chat message. Running it here as well caused the
+	// script to execute twice per repo and broke non-idempotent setups.
 
 	return wt, steps, stepIdx, nil
-}
-
-// runRepoSetupScriptStep executes one per-repo setup script and appends the
-// step (with streaming output) to steps. Mirrors runSetupScriptStep but uses a
-// repo-scoped step name and returns any execution error to the caller for
-// rollback control.
-func runRepoSetupScriptStep(
-	ctx context.Context,
-	req *EnvPrepareRequest,
-	repoLabel, workspacePath, script string,
-	stepIdx, totalSteps int,
-	onProgress PrepareProgressCallback,
-	steps []PrepareStep,
-) ([]PrepareStep, error) {
-	step := beginStep(fmt.Sprintf("Run setup script (%s)", repoLabel))
-	step.Command = setupScriptDisplayCommand(req)
-	reportProgress(onProgress, step, stepIdx, totalSteps)
-	output, err := runSetupScript(ctx, script, workspacePath, req.Env, func(current string) {
-		step.Output = current
-		reportProgress(onProgress, step, stepIdx, totalSteps)
-	})
-	step.Output = output
-	if err != nil {
-		completeStepError(&step, err.Error())
-	} else {
-		completeStepSuccess(&step)
-	}
-	steps = append(steps, step)
-	reportProgress(onProgress, step, stepIdx, totalSteps)
-	return steps, err
 }
 
 // rollbackWorktrees removes any worktrees created during a failed multi-repo

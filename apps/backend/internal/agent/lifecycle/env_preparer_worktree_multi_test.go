@@ -272,7 +272,13 @@ func TestWorktreePreparer_MultiRepo_RunsPerRepoSetupScript(t *testing.T) {
 	repoA := initBareGitRepo(t, "frontend")
 	repoB := initBareGitRepo(t, "backend")
 
-	preparer, _ := newPreparerForTest(t)
+	// Per-repo setup scripts are executed by the worktree manager during
+	// Create() through its script handler. Wire one up so the scripts run.
+	repos := map[string]*worktree.Repository{
+		"repo-front": {ID: "repo-front", SetupScript: "echo front-script-ran > setup-marker.txt"},
+		"repo-back":  {ID: "repo-back", SetupScript: "echo back-script-ran > setup-marker.txt"},
+	}
+	preparer, _, _ := newPreparerWithScriptHandler(t, repos)
 
 	req := &EnvPrepareRequest{
 		TaskID:       "task-multi-setup",
@@ -313,15 +319,5 @@ func TestWorktreePreparer_MultiRepo_RunsPerRepoSetupScript(t *testing.T) {
 		if _, err := os.Stat(marker); err != nil {
 			t.Errorf("repo %d setup marker missing: %v", i, err)
 		}
-	}
-	// Each repo should produce a "Run setup script (<name>)" step.
-	var setupStepsSeen int
-	for _, s := range res.Steps {
-		if strings.HasPrefix(s.Name, "Run setup script") {
-			setupStepsSeen++
-		}
-	}
-	if setupStepsSeen != 2 {
-		t.Errorf("expected 2 per-repo setup script steps, got %d", setupStepsSeen)
 	}
 }
