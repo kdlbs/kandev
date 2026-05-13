@@ -57,13 +57,13 @@ all: build
 build-preview:
 	@echo "Building preview..."
 	-@$(MKDIR) $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/preview ./cmd/preview
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/preview$(EXE) ./cmd/preview
 
 ## Build the mock-agent binary for testing
 build-mock-agent:
 	@echo "Building mock-agent..."
 	-@$(MKDIR) $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent ./cmd/mock-agent
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent$(EXE) ./cmd/mock-agent
 
 ## Build and run acpdbg — usage: make acpdbg ARGS="probe auggie"
 acpdbg: build-acpdbg
@@ -73,7 +73,7 @@ acpdbg: build-acpdbg
 build-acpdbg:
 	@echo "Building acpdbg..."
 	-@$(MKDIR) $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/acpdbg ./cmd/acpdbg
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/acpdbg$(EXE) ./cmd/acpdbg
 
 ## Build the unified kandev binary. Always includes the linux/amd64 agentctl
 ## variant because remote executors (local Docker, remote Docker, Sprites)
@@ -82,18 +82,18 @@ build-acpdbg:
 build: build-agentctl build-agentctl-linux build-mock-agent build-acpdbg
 	@echo "Building $(BINARY_NAME)..."
 	-@$(MKDIR) $(BUILD_DIR)
-	CGO_ENABLED=1 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/kandev
+	$(CGO_PREFIX) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)$(EXE) ./cmd/kandev
 
 ## Build all binaries (unified + individual services + agentctl)
 build-all: build build-agentctl
 	@echo "Building individual services..."
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agent-manager ./cmd/agent-manager
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agent-manager$(EXE) ./cmd/agent-manager
 
 ## Build the agentctl sidecar binary (includes embedded MCP server)
 build-agentctl:
 	@echo "Building agentctl..."
 	-@$(MKDIR) $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl ./cmd/agentctl
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl$(EXE) ./cmd/agentctl
 
 ## Build agentctl for linux/amd64 (used by Sprites remote executor)
 build-agentctl-linux:
