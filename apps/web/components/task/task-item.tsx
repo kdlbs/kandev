@@ -2,7 +2,6 @@
 
 import { memo } from "react";
 import {
-  IconAlertTriangle,
   IconChevronDown,
   IconCircleCheck,
   IconCircleDashed,
@@ -10,6 +9,7 @@ import {
   IconGitPullRequest,
   IconMessageQuestion,
   IconPinFilled,
+  IconShieldQuestion,
 } from "@tabler/icons-react";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { IssueTaskIcon } from "@/components/github/issue-task-icon";
@@ -117,7 +117,7 @@ function TaskStateIcon({
   }
   if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
     return (
-      <IconAlertTriangle
+      <IconShieldQuestion
         data-testid="task-state-pending-permission"
         className="mt-[1px] h-3.5 w-3.5 shrink-0 text-amber-500"
       />
