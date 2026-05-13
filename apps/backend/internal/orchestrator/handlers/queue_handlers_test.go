@@ -317,6 +317,27 @@ func TestWsRemoveEntry(t *testing.T) {
 		assert.Equal(t, "entry_not_found", parseError(t, response).Code)
 	})
 
+	t.Run("returns entry_not_found for agent-authored entries", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		ctx := context.Background()
+
+		queued, err := svc.QueueMessageWithMetadata(ctx, "s", "t", "agent prompt", "", messagequeue.QueuedByAgent, false, nil, nil)
+		require.NoError(t, err)
+
+		response, err := handlers.wsRemoveEntry(ctx,
+			createTestMessage(t, ws.ActionMessageQueueRemove, map[string]interface{}{
+				"session_id": "s",
+				"entry_id":   queued.ID,
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, "entry_not_found", parseError(t, response).Code)
+
+		status := svc.GetStatus(ctx, "s")
+		assert.Equal(t, 1, status.Count)
+		assert.Equal(t, "agent prompt", status.Entries[0].Content)
+	})
+
 	t.Run("rejects missing session_id", func(t *testing.T) {
 		handlers, _ := setupQueueHandlers(t)
 		response, err := handlers.wsRemoveEntry(context.Background(),

@@ -169,7 +169,7 @@ function renderPanel(
 ): React.ReactNode {
   if (!mode) return null;
   if (mode.kind === "commit") {
-    return <CommitDiffView sha={mode.sha} repo={mode.repo} onOpenFile={onOpenFile} />;
+    return <CommitDiffView sha={mode.sha} repo={mode.repo} onOpenFile={onOpenFile} wordWrap />;
   }
   const panelMode = mode.kind;
   const filePath = mode.kind === "file" ? mode.path : undefined;
@@ -184,6 +184,7 @@ function renderPanel(
       onClearSelected={onClearSelected}
       onOpenFile={onOpenFile}
       sourceFilter={effectiveSourceFilter}
+      wordWrap
     />
   );
 }
@@ -240,7 +241,9 @@ export const MobileDiffSheet = memo(function MobileDiffSheet({
         {mode?.kind === "all" && sourceTabs.length > 1 && (
           <SourceTabBar tabs={sourceTabs} activeSource={activeSource} onPick={handleUserPick} />
         )}
-        <div className="flex-1 min-h-0 overflow-y-auto">{panelContent}</div>
+        <div className="flex-1 min-h-0 overflow-y-auto" data-vaul-no-drag>
+          {panelContent}
+        </div>
       </DrawerContent>
     </Drawer>
   );

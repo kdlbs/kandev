@@ -58,12 +58,11 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
     prevSelectedDiffRef.current = selectedDiff;
     if (prevPath === selectedDiff.path) return;
 
-    // Defer setState to next render to avoid cascading renders
-    const handle = requestAnimationFrame(() => {
+    // Defer setState to microtask queue (satisfies linter, executes before render)
+    queueMicrotask(() => {
       setDiffSheet({ kind: "file", path: selectedDiff.path });
+      onClearSelected();
     });
-    onClearSelected();
-    return () => cancelAnimationFrame(handle);
   }, [selectedDiff, onClearSelected]);
 
   const handleOpenDiffAll = useCallback(() => {

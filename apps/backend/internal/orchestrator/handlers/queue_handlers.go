@@ -230,7 +230,7 @@ func (h *QueueHandlers) wsRemoveEntry(ctx context.Context, msg *ws.Message) (*ws
 
 	if err := h.queueService.RemoveEntry(ctx, req.SessionID, req.EntryID); err != nil {
 		if errors.Is(err, messagequeue.ErrEntryNotFound) {
-			return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained", nil)
+			return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained or not owned by caller", nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}

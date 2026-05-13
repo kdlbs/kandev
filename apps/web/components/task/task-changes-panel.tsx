@@ -34,6 +34,8 @@ type TaskChangesPanelProps = {
    * filter). Mobile uses this for source tabs; desktop omits it.
    */
   sourceFilter?: "all" | ReviewSource;
+  /** Force word-wrap on diffs. Defaults to false (user-controlled). */
+  wordWrap?: boolean;
 };
 
 // Returns true only after gitStatus loads and the file's uncommitted diff is gone.
@@ -161,7 +163,11 @@ function persistAutoMarkSetting(checked: boolean) {
   updateUserSettings(payload, { cache: "no-store" }).catch(() => {});
 }
 
-function useChangesActions(activeSessionId: string | null | undefined, allFiles: ReviewFile[]) {
+function useChangesActions(
+  activeSessionId: string | null | undefined,
+  allFiles: ReviewFile[],
+  defaultWordWrap = false,
+) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const autoMarkOnScroll = useAppStore((s) => s.userSettings.reviewAutoMarkOnScroll);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
@@ -175,7 +181,7 @@ function useChangesActions(activeSessionId: string | null | undefined, allFiles:
   const [splitView, setSplitView] = useState(
     () => typeof window !== "undefined" && localStorage.getItem("diff-view-mode") === "split",
   );
-  const [wordWrap, setWordWrap] = useState(false);
+  const [wordWrap, setWordWrap] = useState(defaultWordWrap);
 
   const handleToggleSplitView = useCallback((split: boolean) => {
     setSplitView(split);
@@ -384,6 +390,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   onBecameEmpty,
   onOpenFile: onOpenFileProp,
   sourceFilter = "all",
+  wordWrap: wordWrapProp = false,
 }: TaskChangesPanelProps) {
   const isArchived = useIsTaskArchived();
   const { openFile: panelOpenFile, openFileInMarkdownPreview } = usePanelActions();
@@ -409,7 +416,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     handleDiscard,
     handleToggleAutoMark,
     handleFixComments,
-  } = useChangesActions(activeSessionId, allFiles);
+  } = useChangesActions(activeSessionId, allFiles, wordWrapProp);
   const { visibleFiles, visibleFileRefs, reviewedCount, totalCount, progressPercent } =
     useVisibleDiffState({
       allFiles,

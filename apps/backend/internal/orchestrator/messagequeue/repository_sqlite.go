@@ -287,7 +287,12 @@ func (r *sqliteRepository) UpdateContent(ctx context.Context, sessionID, entryID
 }
 
 func (r *sqliteRepository) DeleteByID(ctx context.Context, sessionID, entryID string) error {
-	res, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ? AND session_id = ?`), entryID, sessionID)
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queued_messages
+		WHERE id = ?
+		  AND session_id = ?
+		  AND queued_by != ?
+	`), entryID, sessionID, QueuedByAgent)
 	if err != nil {
 		return fmt.Errorf("delete queued: %w", err)
 	}

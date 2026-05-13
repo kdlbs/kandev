@@ -20,6 +20,7 @@ type CommitDiffViewProps = {
   sha: string;
   repo?: string;
   onOpenFile?: (path: string) => void;
+  wordWrap?: boolean;
 };
 
 function formatRelativeTime(dateStr: string): string {
@@ -64,6 +65,7 @@ export const CommitDiffView = memo(function CommitDiffView({
   sha: commitSha,
   repo,
   onOpenFile,
+  wordWrap = false,
 }: CommitDiffViewProps) {
   const commit = useActiveCommit(commitSha);
   const { files, loading } = useCommitDiff(commitSha, repo);
@@ -87,6 +89,7 @@ export const CommitDiffView = memo(function CommitDiffView({
         onOpenFile={onOpenFile ?? (() => {})}
         baseRef={`${commitSha}^`}
         repo={repo}
+        wordWrap={wordWrap}
       />
     </div>
   );
@@ -184,12 +187,14 @@ function CommitFileList({
   onOpenFile,
   baseRef,
   repo,
+  wordWrap = false,
 }: {
   fileEntries: [string, FileInfo][];
   loading: boolean;
   onOpenFile: (path: string) => void;
   baseRef: string;
   repo?: string;
+  wordWrap?: boolean;
 }) {
   if (fileEntries.length === 0 && !loading) {
     return (
@@ -210,6 +215,7 @@ function CommitFileList({
               enableExpansion={true}
               baseRef={baseRef}
               repo={repo}
+              wordWrap={wordWrap}
             />
           ) : (
             <div className="px-3 py-2 text-xs text-muted-foreground">

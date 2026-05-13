@@ -36,7 +36,8 @@ type Repository interface {
 	// is mandatory so a caller can't delete an entry by guessing its UUID across
 	// sessions — the queue_full MCP payload deliberately discloses sibling-task
 	// entry IDs, so without this guard a hostile agent could prune another
-	// task's queue. Returns ErrEntryNotFound when no row matches.
+	// task's queue. Agent-authored entries (`queued_by="agent"`) are immutable
+	// from this path and return ErrEntryNotFound.
 	DeleteByID(ctx context.Context, sessionID, entryID string) error
 
 	// DeleteAllBySession removes every entry for a session. Returns the count of

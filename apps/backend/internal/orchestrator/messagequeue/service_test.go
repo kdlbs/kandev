@@ -235,6 +235,21 @@ func TestRemoveEntry(t *testing.T) {
 		status := svc.GetStatus(ctx, "s-victim")
 		assert.Equal(t, 1, status.Count)
 	})
+
+	t.Run("rejects deletion of agent-authored entries", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		agentEntry, err := svc.QueueMessageWithMetadata(ctx, "s", "t", "agent entry", "", QueuedByAgent, false, nil, nil)
+		require.NoError(t, err)
+
+		err = svc.RemoveEntry(ctx, "s", agentEntry.ID)
+		assert.ErrorIs(t, err, ErrEntryNotFound)
+
+		status := svc.GetStatus(ctx, "s")
+		assert.Equal(t, 1, status.Count)
+		assert.Equal(t, "agent entry", status.Entries[0].Content)
+	})
 }
 
 func TestCancelAll(t *testing.T) {

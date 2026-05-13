@@ -211,6 +211,18 @@ func TestSQLiteRepository_DeleteByID(t *testing.T) {
 	if err := repo.DeleteByID(ctx, "s1", msg.ID); !errors.Is(err, ErrEntryNotFound) {
 		t.Errorf("expected ErrEntryNotFound on second delete, got %v", err)
 	}
+
+	agentMsg := &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "agent", QueuedBy: QueuedByAgent}
+	if err := repo.Insert(ctx, agentMsg, 0); err != nil {
+		t.Fatalf("insert agent message: %v", err)
+	}
+	if err := repo.DeleteByID(ctx, "s1", agentMsg.ID); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("expected ErrEntryNotFound for agent-authored entry delete, got %v", err)
+	}
+	count, _ = repo.CountBySession(ctx, "s1")
+	if count != 1 {
+		t.Errorf("agent-authored entry should survive delete attempt, got count=%d", count)
+	}
 }
 
 func TestSQLiteRepository_DeleteAllBySession(t *testing.T) {

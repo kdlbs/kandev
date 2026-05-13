@@ -153,6 +153,9 @@ func (r *memoryRepository) DeleteByID(_ context.Context, sessionID, entryID stri
 		if m.ID != entryID {
 			continue
 		}
+		if m.QueuedBy == QueuedByAgent {
+			return ErrEntryNotFound
+		}
 		r.entries[sessionID] = append(list[:i], list[i+1:]...)
 		if len(r.entries[sessionID]) == 0 {
 			delete(r.entries, sessionID)
