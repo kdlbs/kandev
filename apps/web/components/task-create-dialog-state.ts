@@ -556,6 +556,7 @@ export function useDialogComputed({
   const exec = useExecutorProfileCompat(
     allExecutorProfiles,
     fs.executorProfileId,
+    fs.agentProfileId,
     agentProfiles,
     pickExecutorDisabledReason(fs.noRepository, isMultiRepoSelection),
   );
@@ -596,6 +597,7 @@ export function useDialogComputed({
 function useExecutorProfileCompat(
   allExecutorProfiles: ExecutorProfile[],
   selectedProfileId: string,
+  selectedAgentProfileId: string,
   agentProfiles: DialogComputedArgs["agentProfiles"],
   disabledReasonFor?: (profile: ExecutorProfile) => string | null,
 ) {
@@ -613,11 +615,23 @@ function useExecutorProfileCompat(
       isAgentConfiguredOnExecutor(ap, selectedExecutorProfile, authSpecs),
     );
   }, [agentProfiles, selectedExecutorProfile, authSpecs, authLoaded]);
+  // `noCompatibleAgent` gates the submit button. It must catch BOTH cases:
+  //   1. The selected executor has no compatible agents at all.
+  //   2. The user picked an agent that isn't compatible with the executor
+  //      (e.g. switched executor after the agent was chosen).
+  // Previously this only checked case 1, so case 2 silently let the user
+  // submit with a known-incompatible combination.
+  const noCompatibleAgent = useMemo(() => {
+    if (!selectedExecutorProfile) return false;
+    if (compatibleAgentProfiles.length === 0) return true;
+    if (!selectedAgentProfileId) return false;
+    return !compatibleAgentProfiles.some((ap) => ap.id === selectedAgentProfileId);
+  }, [selectedExecutorProfile, compatibleAgentProfiles, selectedAgentProfileId]);
   return {
     selectedExecutorProfile,
     compatibleAgentProfiles,
     executorProfileOptions,
-    noCompatibleAgent: Boolean(selectedExecutorProfile) && compatibleAgentProfiles.length === 0,
+    noCompatibleAgent,
   };
 }
 

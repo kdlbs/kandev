@@ -329,7 +329,13 @@ function computeFooterState(props: TaskCreateDialogFooterProps) {
   const blocked = Boolean(props.submitBlockedReason);
   const altDisabled = computeBaseDisabled(props) || blocked;
   const splitDisabled = altDisabled || !props.agentProfileId;
-  const defaultDisabled = (props.isSessionMode ? !props.agentProfileId : altDisabled) || blocked;
+  // Session mode previously only gated on missing agent — it ignored
+  // noCompatibleAgent, so a user who switched executor after picking an
+  // agent could still submit a known-incompatible combination. The reason
+  // text already surfaces noCompatibleAgentReason in this branch (see
+  // sessionDefaultReason), so the disable gate needs to match.
+  const sessionDisabled = !props.agentProfileId || props.noCompatibleAgent;
+  const defaultDisabled = (props.isSessionMode ? sessionDisabled : altDisabled) || blocked;
 
   const disabledReason = computeDisabledReason(props, resolveButtonKind(props, showStartTask));
 
