@@ -201,7 +201,11 @@ func TestMonitorLoop_FastToPausedStopsPolling(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repoDir, "before_pause.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("failed to write: %v", err)
 	}
-	if !waitForFileChangeNotification(sub, 1*time.Second) {
+	// 3s rather than 1s to absorb GitHub Actions windows-latest slowness
+	// under `-race`. The neighbouring test at line ~142 uses 2s for the same
+	// kind of check; this one needs a touch more because it runs after a
+	// PollMode change that has its own settle time.
+	if !waitForFileChangeNotification(sub, 3*time.Second) {
 		t.Fatal("setup: expected fast mode to emit notification before pausing")
 	}
 
