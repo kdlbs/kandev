@@ -443,6 +443,15 @@ jobs:
     # manifest to the user-facing tags. The promote step is metadata-only -
     # no rebuild, no new bytes - so this costs us one extra registry call
     # in exchange for never publishing an oversized image as :universal.
+    #
+    # Tradeoff: staging tags accumulate in GHCR over time (one per release
+    # run). Auto-cleanup isn't safe here - `imagetools create` produces a
+    # byte-identical manifest list when retagging a single source, so the
+    # staging tag and the promoted user-facing tags share the same package
+    # version in GHCR. Deleting the version to drop the staging tag would
+    # also drop :universal / :vX.Y.Z-universal. A separate cleanup workflow
+    # filtering for versions whose ONLY tags match `universal-staging-*`
+    # would be the correct way to address this if it becomes a problem.
     env:
       STAGING_IMAGE: ghcr.io/kdlbs/kandev:universal-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}
     steps:

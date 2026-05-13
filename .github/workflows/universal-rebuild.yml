@@ -16,6 +16,13 @@ name: universal-rebuild
 # a failed size gate aborts before `:universal` ever points at an
 # oversized image (the previous week's tag remains live).
 #
+# Tradeoff: staging tags (one per weekly run) accumulate in GHCR. See the
+# comment in release.yml's docker-universal job for why per-run cleanup
+# isn't safe (shared manifest digest with promoted tags). A separate
+# cleanup workflow filtering for `universal-staging-*` versions whose
+# only tag matches is the right escape hatch if accumulation becomes a
+# problem; ~52 stale tags/year is acceptable in the meantime.
+#
 # Manual trigger is also wired up so a maintainer can force a rebuild
 # after a known CVE without waiting for the cron.
 

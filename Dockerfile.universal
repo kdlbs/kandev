@@ -150,6 +150,12 @@ RUN set -eux; \
 
 # pnpm via corepack - install system-wide so users don't need
 # `corepack enable` themselves. Drops shims into /usr/local/bin.
+#
+# No separate sha256 step: corepack downloads from registry.npmjs.org and
+# verifies the tarball against the registry's `integrity` field (SHA-512)
+# before activating. The other tools above pin upstream `.sha256` sidecars
+# because they're served from CDNs that don't expose package integrity at
+# the API level; npm does. Decision is deliberate, not an oversight.
 RUN set -eux; \
     corepack enable; \
     corepack prepare "pnpm@${PNPM_VERSION}" --activate
