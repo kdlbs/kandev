@@ -118,11 +118,17 @@ RUN set -eux; \
 # install is system-wide and read-only for non-root users at runtime -
 # matching the rest of the image. Users wanting per-user toolchain components
 # can still `rustup install` to ~/.rustup-user via overrides.
+#
+# `--profile minimal` keeps the install lean (rustc + cargo + rust-std); we
+# then explicitly add clippy and rustfmt, which agents working on Rust
+# projects almost always reach for. `--profile default` would also work but
+# pulls in rust-docs which we don't need.
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo
 RUN set -eux; \
     curl -fsSL https://sh.rustup.rs \
         | sh -s -- -y --default-toolchain stable --no-modify-path --profile minimal; \
+    /usr/local/cargo/bin/rustup component add --toolchain stable clippy rustfmt; \
     chmod -R a+rX "$RUSTUP_HOME" "$CARGO_HOME"
 
 # pnpm via corepack - install system-wide so users don't need
@@ -154,16 +160,21 @@ RUN set -eux; \
     if [ -z "$sha256_col" ]; then echo "SHA-256 not in upstream checksums_hashes_order" >&2; exit 1; fi; \
     expected="$(awk -v t="$target" -v c="$sha256_col" '$1==t {print $c}' /tmp/yq-checksums)"; \
     if [ -z "$expected" ]; then echo "no checksum row for $target" >&2; exit 1; fi; \
-    curl -fsSL "${base}/${target}" -o /usr/local/bin/yq; \
-    echo "${expected}  /usr/local/bin/yq" | sha256sum -c -; \
+    curl -fsSL "${base}/${target}" -o /tmp/yq; \
+    echo "${expected}  /tmp/yq" | sha256sum -c -; \
+    mv /tmp/yq /usr/local/bin/yq; \
     chmod +x /usr/local/bin/yq; \
     rm /tmp/yq-checksums /tmp/yq-hashes-order
 
-# Append Go's bin (toolchain + $GOPATH/bin once users `go install`) and
-# cargo's bin to whatever PATH the base image set. Appending rather than
-# hardcoding the full list keeps the agent CLI dir (/data/.npm-global/bin)
-# first - as the base image already arranges - and stays correct if the
-# base image's PATH ever changes.
+# Append Go's toolchain bin and cargo's bin to whatever PATH the base image
+# set. Appending rather than hardcoding the full list keeps the agent CLI
+# dir (/data/.npm-global/bin) first - as the base image already arranges -
+# and stays correct if the base image's PATH ever changes.
+#
+# Note: $GOPATH/bin (defaults to ~/go/bin, i.e. /data/home/go/bin in this
+# image) is NOT added here - it's user-specific and lives on the PV. Users
+# who `go install` tools and want them on PATH should add it to their shell
+# profile (e.g. `export PATH=$PATH:$(go env GOPATH)/bin`).
 ENV PATH=$PATH:/usr/local/go/bin:/usr/local/cargo/bin
 
 # Drop back to the unprivileged user. Matches the vanilla image's runtime

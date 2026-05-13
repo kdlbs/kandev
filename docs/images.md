@@ -107,20 +107,21 @@ USER kandev
 
 ### Recipe: preinstall a specific agent CLI version
 
-The Settings → Agents *Install* button calls `npm install -g` at runtime. If you want a fixed version baked into the image (so every container starts with it), do it at build time:
+The Settings → Agents *Install* button calls `npm install -g` at runtime. If you want a fixed version baked into the image (so every container starts with it), do it at build time - and install **outside** `/data`, otherwise the named volume mounted at `/data` will shadow your install on every container after the first one is created:
 
 ```dockerfile
 FROM ghcr.io/kdlbs/kandev:0.45.0
 
 USER root
-ENV NPM_CONFIG_PREFIX=/data/.npm-global
-RUN mkdir -p /data/.npm-global \
- && npm install -g @anthropic-ai/claude-code@1.2.3 \
- && chown -R kandev:kandev /data/.npm-global
+# Install to /usr/local (NOT /data/.npm-global, which is on the named volume
+# and only seeded on first volume creation). /usr/local/bin is already on
+# PATH after /data/.npm-global/bin, so a user-installed runtime version
+# would still win if anyone adds one later.
+RUN npm install -g --prefix /usr/local @anthropic-ai/claude-code@1.2.3
 USER kandev
 ```
 
-Note: at runtime kandev users will see the agent as already installed, but baking it in means the version is tied to your image rather than to user choice.
+Note: kandev users will see the agent as already installed on the agents page. Baking it in means the version is tied to your image rather than to user choice - if a user runtime-installs a different version, that one wins (because the runtime path `/data/.npm-global/bin` precedes `/usr/local/bin` on `$PATH`).
 
 ## What if I need something that doesn't fit any of these patterns?
 
