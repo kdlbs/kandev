@@ -69,6 +69,10 @@ export function shouldUseQuestionTaskIcon(
   return isWaitingForInputState(state) || hasPendingClarification;
 }
 
+export function shouldUsePermissionTaskIcon(hasPendingPermission = false): boolean {
+  return hasPendingPermission;
+}
+
 function getTaskStateIconConfig(state?: TaskState, hasPendingClarification = false): IconConfig {
   if (shouldUseQuestionTaskIcon(state, hasPendingClarification)) {
     return TASK_STATE_ICONS.WAITING_FOR_INPUT;

@@ -6,6 +6,7 @@ import { TaskItem } from "./task-item";
 
 const REVIEW_ICON_TEST_ID = "task-state-review";
 const WAITING_FOR_INPUT_ICON_TEST_ID = "task-state-waiting-for-input";
+const PENDING_PERMISSION_ICON_TEST_ID = "task-state-pending-permission";
 
 afterEach(() => cleanup());
 
@@ -37,6 +38,25 @@ describe("TaskItem status icon", () => {
 
     expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).not.toBeNull();
     expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("shows alert icon when a permission request is pending", () => {
+    renderTaskItem({ sessionState: "WAITING_FOR_INPUT", hasPendingPermission: true });
+
+    expect(screen.queryByTestId(PENDING_PERMISSION_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("prefers clarification icon over permission icon when both are pending", () => {
+    renderTaskItem({
+      sessionState: "WAITING_FOR_INPUT",
+      hasPendingClarification: true,
+      hasPendingPermission: true,
+    });
+
+    expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(PENDING_PERMISSION_ICON_TEST_ID)).toBeNull();
   });
 
   it("keeps the review check for completed review tasks", () => {
