@@ -109,8 +109,13 @@ function ChipStatusGlyph({ status }: { status: ChipStatus }) {
     case "failed":
       return <IconCircleXFilled className="h-3.5 w-3.5 text-red-500" aria-hidden="true" />;
     case "in_progress":
+      // CI runs take minutes, so slow the spin to ~3s/rotation — the default
+      // animate-spin (1s) feels frantic for a long-running task.
       return (
-        <IconLoader2 className="h-3.5 w-3.5 text-yellow-500 animate-spin" aria-hidden="true" />
+        <IconLoader2
+          className="h-3.5 w-3.5 text-yellow-500 animate-spin [animation-duration:3s]"
+          aria-hidden="true"
+        />
       );
     case "merged":
       return <IconPointFilled className="h-3.5 w-3.5 text-purple-500" aria-hidden="true" />;
