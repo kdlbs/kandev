@@ -103,8 +103,9 @@ test.describe("PR detail panel — manual open", () => {
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
     await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
 
-    // Dismiss the auto-shown PR panel — this also marks it as "offered" so the
-    // auto-show hook won't re-add it. The next open path is the manual one.
+    // Dismiss the auto-shown PR panel. The auto-show hook already marked it
+    // as "offered" on add, so it won't re-add it — the next open path is the
+    // manual one.
     await session.prDetailTab().hover();
     const closeBtn = session.prDetailTab().locator(".dv-default-tab-action");
     await closeBtn.click();
