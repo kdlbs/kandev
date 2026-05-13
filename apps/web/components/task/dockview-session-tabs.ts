@@ -233,7 +233,10 @@ export function reconcileRemovedSessionPanels(
   keepSessionId: string,
 ): void {
   const currentIds = new Set(currentSessionIds);
-  for (const panel of api.panels) {
+  // Snapshot before iterating: closing a panel can mutate `api.panels`
+  // synchronously, which would skip elements in a `for...of` over the live
+  // array. Matches the pattern in `removeEphemeralPanels`.
+  for (const panel of [...api.panels]) {
     if (!panel.id.startsWith("session:")) continue;
     const sid = panel.id.slice("session:".length);
     if (sid === keepSessionId) continue;
