@@ -126,17 +126,17 @@ clean:
 ## Run the application
 run: build
 	@echo "Running $(BINARY_NAME)..."
-	./$(BUILD_DIR)/$(BINARY_NAME)
+	./$(BUILD_DIR)/$(BINARY_NAME)$(EXE)
 
 ## Run in development mode (with pprof enabled)
 dev: build
 	@echo "Running $(BINARY_NAME) in development mode..."
-	@KANDEV_DEBUG_PPROF_ENABLED=true exec ./$(BUILD_DIR)/$(BINARY_NAME)
+	@KANDEV_DEBUG_PPROF_ENABLED=true exec ./$(BUILD_DIR)/$(BINARY_NAME)$(EXE)
 
 ## Run in debug mode (pprof + debug logging)
 start-debug: build
 	@echo "Running $(BINARY_NAME) in debug mode (pprof + debug logging)..."
-	@KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug exec ./$(BUILD_DIR)/$(BINARY_NAME)
+	@KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug exec ./$(BUILD_DIR)/$(BINARY_NAME)$(EXE)
 
 ## Run tests
 test:
