@@ -35,17 +35,45 @@ function isPortInUse(port: number, host: string): Promise<boolean> {
 }
 
 /**
+ * Tries to bind a port on the given host. Returns true if the bind succeeds
+ * (port is free). Closes immediately on success.
+ *
+ * This catches Windows "phantom" port reservations: Hyper-V/WSL silently
+ * reserve random port ranges at boot that don't appear in netstat or via a
+ * connect probe (nothing is listening, so connect-check thinks the port is
+ * free) — but bind fails with "Only one usage of each socket address". A
+ * connect-only check causes kandev's backend to choose a reserved port and
+ * then die when it tries to actually listen on it.
+ */
+function canBindPort(port: number, host: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once("error", () => resolve(false));
+    server.listen(port, host, () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
+/**
  * Checks if a port is available by probing both IPv4 and IPv6 loopback.
  *
- * Uses a connect-based check: if we can connect to the port on either
- * 127.0.0.1 or ::1, something is already listening and the port is taken.
+ * Uses BOTH a connect check and a bind check:
+ *   - connect: detects ports where a listener is bound with SO_REUSEADDR
+ *     (Node's default on macOS — bind-only check would falsely succeed)
+ *   - bind:    detects Windows phantom reservations (Hyper-V/WSL) and
+ *     ports in TIME_WAIT that connect-only check misses
+ *
+ * The port is available IFF nobody answers a connect AND a fresh bind
+ * succeeds — covers macOS, Linux, and Windows.
  */
 async function isPortAvailable(port: number): Promise<boolean> {
-  const [v4InUse, v6InUse] = await Promise.all([
+  const [v4InUse, v6InUse, v4Bindable] = await Promise.all([
     isPortInUse(port, "127.0.0.1"),
     isPortInUse(port, "::1"),
+    canBindPort(port, "127.0.0.1"),
   ]);
-  return !v4InUse && !v6InUse;
+  return !v4InUse && !v6InUse && v4Bindable;
 }
 
 async function reserveSpecificPort(port: number, host = "127.0.0.1"): Promise<net.Server | null> {
