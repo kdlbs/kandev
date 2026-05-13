@@ -12,17 +12,7 @@ import { MobileDiffSheet } from "./mobile-diff-sheet";
 import { useReviewSources } from "@/hooks/domains/session/use-review-sources";
 import { useAppStore } from "@/components/state-provider";
 import type { SelectedDiff } from "../task-layout";
-import type { OpenDiffOptions } from "../changes-diff-target";
-
-type DiffSheetMode =
-  | { kind: "all" }
-  | {
-      kind: "file";
-      path: string;
-      sourceFilter?: "all" | "uncommitted" | "committed" | "pr";
-      repositoryName?: string;
-    }
-  | { kind: "commit"; sha: string; repo?: string };
+import type { OpenDiffOptions, DiffSheetMode } from "../changes-diff-target";
 
 type MobileChangesPanelProps = {
   selectedDiff: SelectedDiff | null;
@@ -58,7 +48,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
     prevSelectedDiffRef.current = selectedDiff;
     if (prevPath === selectedDiff.path) return;
 
-    // Defer setState to microtask queue (satisfies linter, executes before render)
+    // queueMicrotask satisfies react-hooks/set-state-in-effect; executes before next paint.
     queueMicrotask(() => {
       setDiffSheet({ kind: "file", path: selectedDiff.path });
       onClearSelected();

@@ -104,7 +104,7 @@ function PRFileRow({
 
   return (
     <li
-      className="group flex items-center justify-between gap-2 text-sm rounded-md px-1 py-0.5 -mx-1 hover:bg-muted/60 cursor-pointer"
+      className="group flex items-center justify-between gap-2 text-sm rounded-md px-2 py-1.5 -mx-1 hover:bg-muted/60 cursor-pointer md:px-1 md:py-0.5"
       onClick={() =>
         onOpenDiff(file.path, {
           source: "pr",

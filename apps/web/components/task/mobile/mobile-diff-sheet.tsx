@@ -8,16 +8,7 @@ import { TaskChangesPanel } from "../task-changes-panel";
 import { CommitDiffView } from "../commit-detail-panel";
 import type { ReviewSource, SourceCounts } from "@/hooks/domains/session/use-review-sources";
 import type { SelectedDiff } from "../task-layout";
-
-type DiffSheetMode =
-  | { kind: "all" }
-  | {
-      kind: "file";
-      path: string;
-      sourceFilter?: "all" | ReviewSource;
-      repositoryName?: string;
-    }
-  | { kind: "commit"; sha: string; repo?: string };
+import type { DiffSheetMode } from "../changes-diff-target";
 
 const MOBILE_DIFF_SOURCE_FILTER_KEY = "mobile-diff-source-filter";
 
@@ -54,9 +45,10 @@ function useAutoSelectSource(
     prevModeKindRef.current = modeKind;
   }, [modeKind]);
 
-  // Auto-select highest-priority non-empty source. Runs on open AND when
-  // counts change (so a later-arriving "uncommitted" count overrides the
-  // initial "pr" fallback). Stops once the user makes an explicit choice.
+  // Auto-select highest-priority non-empty source when the active source is
+  // empty. Stops once the user makes an explicit choice. Does not override a
+  // non-empty active source — so switching tabs then seeing uncommitted files
+  // arrive does not forcibly reset the user's view.
   useEffect(() => {
     if (modeKind !== "all") return;
     if (userPickedRef.current) return;
