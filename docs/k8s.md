@@ -43,7 +43,7 @@ image: ghcr.io/kdlbs/kandev:latest
 Kandev publishes two flavors: the default vanilla image (smallest, npm-installable agent CLIs only) and a `:universal` image (~1.4 GB) that adds language toolchains (Go, Rust, build-essential), linters, and Playwright Chromium system libs — useful when your agents work on Go/Rust/Python projects or drive headless browsers.
 
 ```yaml
-image: ghcr.io/kdlbs/kandev:latest-universal
+image: ghcr.io/kdlbs/kandev:universal
 ```
 
 See [`images.md`](./images.md) for the full comparison, inclusion policy, and recipes for deriving your own image when you need something neither flavor includes.

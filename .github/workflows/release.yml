@@ -512,7 +512,10 @@ jobs:
 
   publish-release:
     name: Publish GitHub release
-    needs: [prepare, build-bundles]
+    # docker-universal is included so its size gate (and any build failure)
+    # blocks the release. Without this, publish-release runs in parallel with
+    # docker-universal and an oversized universal image still ships a release.
+    needs: [prepare, build-bundles, docker-universal]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     permissions:

@@ -9,7 +9,7 @@
 #   docker build -f Dockerfile.universal -t kandev:latest-universal .
 #
 # Run (drop-in replacement for the vanilla image):
-#   docker run -p 38429:38429 -v kandev-data:/data ghcr.io/kdlbs/kandev:latest-universal
+#   docker run -p 38429:38429 -v kandev-data:/data ghcr.io/kdlbs/kandev:universal
 #
 # The BASE_IMAGE arg lets the release workflow point at a freshly built
 # vanilla image inside the same run (so universal-of-X.Y.Z is built on top
@@ -22,13 +22,15 @@ USER root
 
 # Pinned versions. Bump these deliberately; CI's size gate will catch growth.
 #
-# PLAYWRIGHT_VERSION pins the apt deps list. When this moves, the apt-get
-# install line below may need to add/drop packages — check the upstream list
-# at https://github.com/microsoft/playwright/blob/v<version>/packages/playwright-core/src/server/registry/nativeDeps.ts
-# or run `npx playwright@<version> install-deps --dry-run` to diff.
+# The Playwright Chromium apt deps below are hand-derived against Playwright
+# 1.48.0. When that target moves, the apt-get install line may need to
+# add/drop packages — check the upstream list at
+# https://github.com/microsoft/playwright/blob/v<version>/packages/playwright-core/src/server/registry/nativeDeps.ts
+# or run `npx playwright@<version> install-deps --dry-run` to diff. (Tracked
+# only via this comment, not an ARG, since the apt package names are hardcoded
+# below and a build-arg override would silently disagree with what's installed.)
 ARG GO_VERSION=1.26.0
 ARG GOLANGCI_LINT_VERSION=1.62.0
-ARG PLAYWRIGHT_VERSION=1.48.0
 ARG PNPM_VERSION=9.15.9
 
 # Single RUN to minimize image layers and clean apt lists in the same layer.
@@ -49,7 +51,7 @@ RUN set -eux; \
         # Playwright Chromium runtime deps. Browsers themselves are NOT
         # preinstalled — users run `pnpm exec playwright install chromium`
         # once and the download persists at ~/.cache/ms-playwright on the PV.
-        # This list mirrors `npx playwright@${PLAYWRIGHT_VERSION} install-deps chromium`.
+        # This list mirrors `npx playwright@1.48.0 install-deps chromium`.
         libnss3 \
         libnspr4 \
         libatk1.0-0 \
@@ -72,6 +74,12 @@ RUN set -eux; \
 
 # Go toolchain — tarball install to /usr/local/go (the standard layout the
 # go.dev installer creates). Add to PATH below.
+#
+# Integrity: go.dev publishes a per-tarball `.sha256` file (a bare hex hash,
+# no filename), fetched alongside the tarball and verified before extraction.
+# This is TOFU on first fetch; if the go.dev CDN itself is compromised both
+# files are bad. Strongest available option without bumping the hash inline
+# every Go release.
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
@@ -80,10 +88,16 @@ RUN set -eux; \
         *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
     esac; \
     curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${goarch}.tar.gz" -o /tmp/go.tar.gz; \
+    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${goarch}.tar.gz.sha256" -o /tmp/go.tar.gz.sha256; \
+    echo "$(cat /tmp/go.tar.gz.sha256)  /tmp/go.tar.gz" | sha256sum -c -; \
     tar -C /usr/local -xzf /tmp/go.tar.gz; \
-    rm /tmp/go.tar.gz
+    rm /tmp/go.tar.gz /tmp/go.tar.gz.sha256
 
 # golangci-lint — prebuilt binary, no compilation needed.
+# Integrity: each release publishes a single `*-checksums.txt` file with
+# `<sha256>  <filename>` lines for every artifact. Grep for our tarball,
+# pipe to `sha256sum -c -`. Download into /tmp and cd there so the relative
+# filename in the checksum line resolves.
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
@@ -91,10 +105,14 @@ RUN set -eux; \
         arm64) lintarch=arm64 ;; \
         *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL "https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-${lintarch}.tar.gz" \
-        | tar -xz -C /tmp; \
+    tarball="golangci-lint-${GOLANGCI_LINT_VERSION}-linux-${lintarch}.tar.gz"; \
+    base="https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}"; \
+    curl -fsSL "${base}/${tarball}" -o "/tmp/${tarball}"; \
+    curl -fsSL "${base}/golangci-lint-${GOLANGCI_LINT_VERSION}-checksums.txt" -o /tmp/golangci-lint-checksums.txt; \
+    (cd /tmp && grep "  ${tarball}$" golangci-lint-checksums.txt | sha256sum -c -); \
+    tar -xz -C /tmp -f "/tmp/${tarball}"; \
     mv "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-${lintarch}/golangci-lint" /usr/local/bin/; \
-    rm -rf "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-${lintarch}"
+    rm -rf "/tmp/${tarball}" "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-${lintarch}" /tmp/golangci-lint-checksums.txt
 
 # Rust toolchain via rustup. RUSTUP_HOME/CARGO_HOME live in /usr/local so the
 # install is system-wide and read-only for non-root users at runtime —
@@ -119,18 +137,34 @@ RUN ln -s /usr/bin/fdfind /usr/local/bin/fd
 
 # yq is not in Debian stable; install the prebuilt binary from upstream
 # (Mike Farah's yq, the Go implementation — the one most scripts assume).
+#
+# Integrity: mikefarah/yq publishes a `checksums` file with one row per
+# artifact and multiple hash columns, plus a `checksums_hashes_order` file
+# that lists which hash algorithm corresponds to each column. We compute the
+# SHA-256 column index dynamically (defensive against upstream reordering)
+# and verify the binary against that column before installing.
 ARG YQ_VERSION=4.44.3
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
-    curl -fsSL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${arch}" \
-        -o /usr/local/bin/yq; \
-    chmod +x /usr/local/bin/yq
+    target="yq_linux_${arch}"; \
+    base="https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}"; \
+    curl -fsSL "${base}/checksums" -o /tmp/yq-checksums; \
+    curl -fsSL "${base}/checksums_hashes_order" -o /tmp/yq-hashes-order; \
+    sha256_col="$(awk '/^SHA-256$/ {print NR + 1; exit}' /tmp/yq-hashes-order)"; \
+    if [ -z "$sha256_col" ]; then echo "SHA-256 not in upstream checksums_hashes_order" >&2; exit 1; fi; \
+    expected="$(awk -v t="$target" -v c="$sha256_col" '$1==t {print $c}' /tmp/yq-checksums)"; \
+    if [ -z "$expected" ]; then echo "no checksum row for $target" >&2; exit 1; fi; \
+    curl -fsSL "${base}/${target}" -o /usr/local/bin/yq; \
+    echo "${expected}  /usr/local/bin/yq" | sha256sum -c -; \
+    chmod +x /usr/local/bin/yq; \
+    rm /tmp/yq-checksums /tmp/yq-hashes-order
 
-# Extend PATH with Go's bin (toolchain + $GOPATH/bin once users `go install`)
-# and cargo's bin. PATH order: keep agent CLI dir (/data/.npm-global/bin)
-# first so user-installed agents win over any same-named system tool, and
-# Cargo/Go after the existing system paths.
-ENV PATH=/data/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/go/bin:/usr/local/cargo/bin
+# Append Go's bin (toolchain + $GOPATH/bin once users `go install`) and
+# cargo's bin to whatever PATH the base image set. Appending rather than
+# hardcoding the full list keeps the agent CLI dir (/data/.npm-global/bin)
+# first — as the base image already arranges — and stays correct if the
+# base image's PATH ever changes.
+ENV PATH=$PATH:/usr/local/go/bin:/usr/local/cargo/bin
 
 # Drop back to the unprivileged user. Matches the vanilla image's runtime
 # user; the docker-entrypoint.sh in the base image handles root → kandev

@@ -27,7 +27,7 @@ docker pull ghcr.io/kdlbs/kandev:0.9.0
 Two flavors are published. The default vanilla image is smallest and bundles npm-installable agent CLIs only. The `:universal` image (~1.4 GB) adds language toolchains (Go, Rust, build-essential), linters, and Playwright Chromium system libs — pick this if your agents work on Go/Rust/Python projects or drive headless browsers.
 
 ```bash
-docker pull ghcr.io/kdlbs/kandev:latest-universal
+docker pull ghcr.io/kdlbs/kandev:universal
 ```
 
 See [`images.md`](./images.md) for the full comparison, inclusion policy, and recipes for deriving your own image.

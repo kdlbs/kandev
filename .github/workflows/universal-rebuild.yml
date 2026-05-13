@@ -72,3 +72,29 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=universal
           cache-to: type=gha,mode=max,scope=universal
+
+      # Same size gate as release.yml's docker-universal job. A base-image
+      # update that adds significant weight (e.g. a new Debian dep pulled by
+      # apt security updates) would otherwise silently push an oversized
+      # `:universal` tag. Keep this MAX in sync with release.yml.
+      - name: Enforce size budget
+        env:
+          IMAGE: ghcr.io/kdlbs/kandev:universal
+          MAX_COMPRESSED_BYTES: "2684354560"   # 2.5 GiB
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "$IMAGE" --raw \
+              > /tmp/index.json
+          AMD64_DIGEST="$(jq -r '
+              .manifests[]
+              | select(.platform.architecture == "amd64" and .platform.os == "linux")
+              | .digest
+            ' /tmp/index.json)"
+          docker buildx imagetools inspect "ghcr.io/kdlbs/kandev@${AMD64_DIGEST}" --raw \
+              > /tmp/manifest.json
+          TOTAL="$(jq '[.layers[].size] | add' /tmp/manifest.json)"
+          echo "Universal image (amd64) compressed size: $TOTAL bytes (max: $MAX_COMPRESSED_BYTES)"
+          if [ "$TOTAL" -gt "$MAX_COMPRESSED_BYTES" ]; then
+            echo "::error::Universal weekly rebuild exceeds compressed-size budget. See docs/images.md inclusion policy." >&2
+            exit 1
+          fi
