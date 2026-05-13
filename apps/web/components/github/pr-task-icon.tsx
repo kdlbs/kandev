@@ -101,7 +101,10 @@ export function aggregatePRStatusColor(prs: TaskPR[]): string {
 export function PRTaskIcon({ taskId }: { taskId: string }) {
   const prs = useAppStore((state) => state.taskPRs.byTaskId[taskId] ?? null);
 
-  if (!prs || prs.length === 0) return null;
+  // Defensive: an upstream payload may briefly seed byTaskId[taskId] with a
+  // non-array value (e.g. an empty object from a partial hydration). Bail
+  // instead of falling through into MultiPRIcon, where for-of throws.
+  if (!Array.isArray(prs) || prs.length === 0) return null;
   if (prs.length === 1) return <SinglePRIcon taskId={taskId} pr={prs[0]} />;
   return <MultiPRIcon taskId={taskId} prs={prs} />;
 }
