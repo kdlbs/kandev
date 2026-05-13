@@ -78,4 +78,49 @@ test.describe("Permission approval persistence", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(session.permissionActionRows()).toHaveCount(0);
   });
+
+  // While an agent is blocked on a permission_request, the sidebar entry for
+  // that task swaps the running spinner for the amber pending-permission icon
+  // (introduced in #882). The icon goes away once the prompt is resolved.
+  test("sidebar shows pending-permission icon while a permission prompt is open", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const taskTitle = "Sidebar pending permission";
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      taskTitle,
+      seedData.agentProfileId,
+      {
+        description: "/e2e:multi-permission",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    // First permission prompt blocks the agent.
+    await expect(session.permissionApproveButtons()).toHaveCount(1, { timeout: 30_000 });
+
+    // Sidebar swaps the running spinner for the amber pending-permission icon.
+    const sidebarItem = session.sidebarTaskItem(taskTitle).first();
+    await expect(sidebarItem.getByTestId("task-state-pending-permission")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(sidebarItem.getByTestId("task-state-running")).toHaveCount(0);
+
+    // Approve all three prompts; once the agent's turn ends, the icon is gone.
+    for (let i = 0; i < 3; i++) {
+      await expect(session.permissionApproveButtons()).toHaveCount(1, { timeout: 30_000 });
+      await session.permissionApproveButtons().first().click();
+    }
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(sidebarItem.getByTestId("task-state-pending-permission")).toHaveCount(0);
+  });
 });
