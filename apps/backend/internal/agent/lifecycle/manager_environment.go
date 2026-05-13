@@ -110,9 +110,15 @@ func (m *Manager) DestroySandbox(ctx context.Context, sandboxID, executionID str
 	if !ok {
 		return fmt.Errorf("sprites backend has unexpected type %T", backend)
 	}
+	// StopInstance only runs sandbox cleanup when StopReason matches a
+	// terminal reason (see shouldRunExecutorCleanup). DestroySandbox IS the
+	// destruction path, so set StopReasonTaskDeleted explicitly — the
+	// empty StopReason this previously sent was silently treated as a
+	// preserve-on-stop signal and the sandbox was never destroyed.
 	instance := &ExecutorInstance{
 		InstanceID: executionID,
 		Metadata:   map[string]interface{}{"sprite_name": sandboxID},
+		StopReason: StopReasonTaskDeleted,
 	}
 	return spritesExec.StopInstance(ctx, instance, true)
 }

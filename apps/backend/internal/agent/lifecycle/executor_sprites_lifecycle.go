@@ -129,9 +129,20 @@ func (r *SpritesExecutor) runTerminalCleanupScript(ctx context.Context, sprite *
 		zap.String("reason", instance.StopReason))
 }
 
+// Terminal stop reasons that trigger destructive executor cleanup
+// (sandbox teardown, container removal, per-instance session-dir removal).
+// Anything outside this set is treated as a "preserve" stop — see
+// shouldRunExecutorCleanup.
+const (
+	StopReasonTaskArchived    = "task archived"
+	StopReasonTaskDeleted     = "task deleted"
+	StopReasonSessionArchived = "session archived"
+	StopReasonSessionDeleted  = "session deleted"
+)
+
 func shouldRunExecutorCleanup(reason string) bool {
 	switch strings.ToLower(strings.TrimSpace(reason)) {
-	case "task archived", "task deleted", "session archived", "session deleted":
+	case StopReasonTaskArchived, StopReasonTaskDeleted, StopReasonSessionArchived, StopReasonSessionDeleted:
 		return true
 	default:
 		return false
