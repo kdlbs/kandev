@@ -164,7 +164,12 @@ func (a *environmentDestroyerAdapter) PushEnvironmentBranch(ctx context.Context,
 	if branch == "" {
 		cmd = exec.CommandContext(pushCtx, "git", "push")
 	} else {
-		cmd = exec.CommandContext(pushCtx, "git", "push", "origin", branch)
+		// Prefer the branch's configured upstream remote so this works for
+		// repos whose primary remote isn't called "origin" (e.g. fork
+		// workflows with "upstream"/"github"). Fall back to "origin" only
+		// when no upstream is set, matching the historical behaviour.
+		remote := detectBranchRemote(pushCtx, env.WorktreePath, branch)
+		cmd = exec.CommandContext(pushCtx, "git", "push", remote, branch)
 	}
 	cmd.Dir = env.WorktreePath
 	// Disable interactive credential prompts — without this, a missing
@@ -179,4 +184,21 @@ func (a *environmentDestroyerAdapter) PushEnvironmentBranch(ctx context.Context,
 		return fmt.Errorf("git push failed: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+// detectBranchRemote reads the configured upstream remote for `branch` from
+// the worktree's git config. Falls back to "origin" when no upstream is set
+// (matching the historical hard-coded behaviour).
+func detectBranchRemote(ctx context.Context, dir, branch string) string {
+	cmd := exec.CommandContext(ctx, "git", "config", "--get", "branch."+branch+".remote")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "origin"
+	}
+	remote := strings.TrimSpace(string(out))
+	if remote == "" {
+		return "origin"
+	}
+	return remote
 }
