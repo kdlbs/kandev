@@ -482,7 +482,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=universal
 
       # Universal size gate. Fails the release if compressed image exceeds
-      # the ceiling — forces deliberate decisions about scope creep. Bump
+      # the ceiling - forces deliberate decisions about scope creep. Bump
       # this number in the same PR that adds the dependency that pushed
       # over the line, with a one-sentence justification in the commit msg.
       - name: Enforce size budget

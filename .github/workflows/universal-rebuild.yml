@@ -54,7 +54,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Rebuild against :latest deliberately — the whole point of the
+      # Rebuild against :latest deliberately - the whole point of the
       # weekly is to pick up any base-image moves. Use --pull so the
       # current :latest is freshly fetched, not whatever's in BuildKit's
       # cache from a previous run.

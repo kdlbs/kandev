@@ -1,13 +1,13 @@
 # Choosing a Kandev Image
 
-Kandev publishes two container image flavors to GitHub Container Registry. Both are functionally identical kandev — same backend, same web UI, same persistence model. They differ only in what *else* is preinstalled in the image.
+Kandev publishes two container image flavors to GitHub Container Registry. Both are functionally identical kandev - same backend, same web UI, same persistence model. They differ only in what *else* is preinstalled in the image.
 
 | Tag                                     | Size (compressed) | Contents                                                                 | Pick when…                                                                                                       |
 |-----------------------------------------|-------------------|--------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
 | `ghcr.io/kdlbs/kandev:X.Y.Z`            | ~600 MB           | kandev + Node 24 + npm + git + gh + python3 + pipx                       | You only need npm-installable agent CLIs (claude-code, codex, …) and want the smallest possible footprint.       |
 | `ghcr.io/kdlbs/kandev:X.Y.Z-universal`  | ~1.4 GB           | vanilla **+** language toolchains, build tools, Playwright Chromium deps | Your agents work on Go / Rust / Python projects, run native test suites, or drive headless browsers.             |
 
-`:latest` aliases the vanilla image; `:universal` aliases the latest universal. **Tag pinning is strongly recommended in production** — `:latest` moves and we don't promise it stays the same forever.
+`:latest` aliases the vanilla image; `:universal` aliases the latest universal. **Tag pinning is strongly recommended in production** - `:latest` moves and we don't promise it stays the same forever.
 
 ## What's in `:universal` (and what's not)
 
@@ -17,11 +17,11 @@ Kandev publishes two container image flavors to GitHub Container Registry. Both 
 
 **Linters and developer CLIs:** `golangci-lint`, `ripgrep`, `fd`, `jq`, `yq`.
 
-**Playwright Chromium system libraries** (browsers themselves are *not* preinstalled — see below).
+**Playwright Chromium system libraries** (browsers themselves are *not* preinstalled - see below).
 
 **Not included:**
 
-- **JDKs / .NET / Mono** — out of scope in v1; if these matter to your workflow, derive your own image (see *Customizing your image* below).
+- **JDKs / .NET / Mono** - out of scope in v1; if these matter to your workflow, derive your own image (see *Customizing your image* below).
 - **Playwright browsers** (`chromium`, `firefox`, `webkit`). Run `pnpm exec playwright install chromium` (or whichever browsers you need) once after the container starts. Downloads land at `~/.cache/ms-playwright`, which lives on the PV under `HOME=/data/home` and survives pod restarts. This keeps universal under 1.5 GB; it adds a one-time setup command per agent that wants browsers.
 - **Database servers** (Postgres, MySQL, Redis). Use a sidecar or external service.
 - **Kandev's own test dependencies beyond what's listed above.** Universal *is* enough to run kandev's backend Go tests, but the Playwright e2e suite needs the user to `pnpm install` and run `playwright install` first, same as on a fresh dev machine.
@@ -35,7 +35,7 @@ We add a tool to universal when **all four** of these hold:
 3. It adds less than 200 MB to the installed image.
 4. It doesn't carry a license that conflicts with redistributing the image.
 
-We **decline** additions that fail any of these. The escape hatch is always *derive your own image* — see below.
+We **decline** additions that fail any of these. The escape hatch is always *derive your own image* - see below.
 
 ## Switching between flavors
 
@@ -57,7 +57,7 @@ All your data (database, worktrees, npm globals, agent auth state) carries over 
 
 ## Customizing your image
 
-Universal is opinionated. If you need something it doesn't include — a JDK, a private apt repository, a specific Node version, your company's CA cert — **derive your own image** from whichever base fits.
+Universal is opinionated. If you need something it doesn't include - a JDK, a private apt repository, a specific Node version, your company's CA cert - **derive your own image** from whichever base fits.
 
 The pattern: a tiny Dockerfile that does `FROM ghcr.io/kdlbs/kandev:X.Y.Z` (or `…:X.Y.Z-universal`), drops back to root, installs what you need, drops back to `kandev`. Build it, push it to a registry you control, point your deployment at it.
 
@@ -137,7 +137,7 @@ The repository also contains the source Dockerfiles (`Dockerfile` and `Dockerfil
 # Vanilla
 docker build -t kandev:dev .
 
-# Universal (depends on a vanilla base — build vanilla first if you want a
+# Universal (depends on a vanilla base - build vanilla first if you want a
 # fully-from-source universal, or let BASE_IMAGE default to the published one)
 docker build -f Dockerfile.universal --build-arg BASE_IMAGE=kandev:dev -t kandev:dev-universal .
 ```
