@@ -395,9 +395,14 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 }
 
 func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *models.TaskEnvironment) {
-	if info.TaskEnvironmentID == "" {
-		info.TaskEnvironmentID = env.ID
-	}
+	// Always align info.TaskEnvironmentID with the env we resolved against.
+	// When session.TaskEnvironmentID points to a stale/missing env, the
+	// caller falls back to GetTaskEnvironmentByTaskID and ends up with a
+	// different env.ID. Previously we only updated info.TaskEnvironmentID
+	// when it was empty, so the metadata + path here would come from env
+	// while the ID still pointed at the stale row — a mismatch downstream
+	// reconcilers and progress events would key off the wrong env.
+	info.TaskEnvironmentID = env.ID
 	if info.WorkspacePath == "" {
 		info.WorkspacePath = env.WorkspacePath
 	}
