@@ -13,15 +13,15 @@ const MULTI_PERMISSION_COUNT = 3;
 /**
  * Seed a task that runs the multi-permission scenario, then navigate to it.
  * The mock agent will request three permissions in sequence and block on each.
- * Returns the SessionPage plus the task so callers can correlate with the
- * sidebar (which keys off the task title).
+ * The sidebar test passes a custom `title` so it can query the sidebar row by
+ * title text.
  */
 async function seedMultiPermissionTask(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
   title = "Multi-permission approval",
-): Promise<{ session: SessionPage; task: Awaited<ReturnType<ApiClient["createTaskWithAgent"]>> }> {
+): Promise<SessionPage> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
@@ -41,7 +41,7 @@ async function seedMultiPermissionTask(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
 
-  return { session, task };
+  return session;
 }
 
 test.describe("Permission approval persistence", () => {
@@ -63,7 +63,7 @@ test.describe("Permission approval persistence", () => {
     apiClient,
     seedData,
   }) => {
-    const { session } = await seedMultiPermissionTask(testPage, apiClient, seedData);
+    const session = await seedMultiPermissionTask(testPage, apiClient, seedData);
 
     // Approve all permission prompts as they appear. Each click unblocks
     // the agent which then emits the next prompt; the previous one's button
@@ -97,7 +97,7 @@ test.describe("Permission approval persistence", () => {
     seedData,
   }) => {
     const taskTitle = "Sidebar pending permission";
-    const { session } = await seedMultiPermissionTask(testPage, apiClient, seedData, taskTitle);
+    const session = await seedMultiPermissionTask(testPage, apiClient, seedData, taskTitle);
 
     // First permission prompt blocks the agent.
     await expect(session.permissionApproveButtons()).toHaveCount(1, { timeout: 30_000 });
