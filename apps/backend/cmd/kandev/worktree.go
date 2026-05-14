@@ -186,19 +186,24 @@ func (a *environmentDestroyerAdapter) PushEnvironmentBranch(ctx context.Context,
 	return nil
 }
 
+// defaultGitRemote is the conventional default remote name. Used as the
+// fallback when a branch has no configured upstream and at the comment level
+// when describing historical hard-coded behaviour.
+const defaultGitRemote = "origin"
+
 // detectBranchRemote reads the configured upstream remote for `branch` from
-// the worktree's git config. Falls back to "origin" when no upstream is set
-// (matching the historical hard-coded behaviour).
+// the worktree's git config. Falls back to defaultGitRemote when no upstream
+// is set (matching the historical hard-coded behaviour).
 func detectBranchRemote(ctx context.Context, dir, branch string) string {
 	cmd := exec.CommandContext(ctx, "git", "config", "--get", "branch."+branch+".remote")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
-		return "origin"
+		return defaultGitRemote
 	}
 	remote := strings.TrimSpace(string(out))
 	if remote == "" {
-		return "origin"
+		return defaultGitRemote
 	}
 	return remote
 }

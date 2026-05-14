@@ -36,8 +36,8 @@ func TestDetectBranchRemote_NoUpstreamFallsBackToOrigin(t *testing.T) {
 	mustGit(t, dir, "checkout", "-b", "feature")
 	// No branch.feature.remote config — git config returns non-zero.
 
-	if got := detectBranchRemote(context.Background(), dir, "feature"); got != "origin" {
-		t.Errorf("got %q, want origin", got)
+	if got := detectBranchRemote(context.Background(), dir, "feature"); got != defaultGitRemote {
+		t.Errorf("got %q, want %s", got, defaultGitRemote)
 	}
 }
 
@@ -46,9 +46,9 @@ func TestDetectBranchRemote_NonGitDirFallsBackToOrigin(t *testing.T) {
 		t.Skip("git not available")
 	}
 	// `git config` in a non-git dir errors out, so detectBranchRemote
-	// should fall back to "origin" rather than propagate the error.
-	if got := detectBranchRemote(context.Background(), t.TempDir(), "feature"); got != "origin" {
-		t.Errorf("got %q, want origin", got)
+	// should fall back to the default remote rather than propagate the error.
+	if got := detectBranchRemote(context.Background(), t.TempDir(), "feature"); got != defaultGitRemote {
+		t.Errorf("got %q, want %s", got, defaultGitRemote)
 	}
 }
 
