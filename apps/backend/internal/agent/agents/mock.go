@@ -86,11 +86,10 @@ func (a *MockAgent) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *MockAgent) BuildCommand(opts CommandOptions) Command {
-	binary := "mock-agent"
-	if a.binaryPath != "" {
-		binary = a.binaryPath
-	}
-	return Cmd(binary).Build()
+	// Always resolve via PATH: works on the host (E2E PATH includes the
+	// kandev bin dir) and inside Docker containers (mock-agent is
+	// bind-mounted at /usr/local/bin/mock-agent for E2E).
+	return Cmd("mock-agent").Build()
 }
 
 func (a *MockAgent) Runtime() *RuntimeConfig {
@@ -107,7 +106,10 @@ func (a *MockAgent) Runtime() *RuntimeConfig {
 	}
 }
 
-func (a *MockAgent) RemoteAuth() *RemoteAuth { return nil }
+// RemoteAuth returns a non-nil empty spec so the mock agent counts as a
+// remote-capable agent (it's runnable inside Docker for E2E tests) but
+// requires no credentials. The empty methods list signals "no auth needed".
+func (a *MockAgent) RemoteAuth() *RemoteAuth { return &RemoteAuth{} }
 
 // InstallScript returns a deterministic short-lived shell script so e2e tests
 // can exercise the install streaming endpoint without depending on npm.

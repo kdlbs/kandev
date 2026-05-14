@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { IconLoader2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
@@ -27,11 +27,13 @@ export type GitIdentityState = {
 };
 
 const RADIO_LABEL_BASE =
-  "flex items-start gap-3 rounded-md border p-3 cursor-pointer transition-colors";
+  "flex w-full items-start gap-3 rounded-md border p-3 text-left cursor-pointer transition-colors";
 const SELECTED_BORDER = "border-primary bg-primary/5";
 const DEFAULT_BORDER = "border-border";
 const RADIO_ITEM_CLASS =
   "mt-0.5 border border-muted-foreground/80 data-[state=checked]:border-primary";
+const OPTION_DOT_BASE =
+  "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border";
 
 type RemoteCredentialsCardProps = {
   isRemote: boolean;
@@ -75,9 +77,6 @@ export function RemoteCredentialsCard({
   }, []);
 
   const selectedSet = new Set(selectedIds);
-  const handleToggle = (id: string, checked: boolean) => {
-    onChange(checked ? [...selectedIds, id] : selectedIds.filter((v) => v !== id));
-  };
 
   if (loading) {
     return (
@@ -118,13 +117,14 @@ export function RemoteCredentialsCard({
               />
             )}
             {authSpecs.map((spec) => {
-              const envMethod = spec.methods.find((m) => m.type === "env");
+              const methods = getSpecMethods(spec);
+              const envMethod = methods.find((m) => m.type === "env");
               return (
                 <AuthSection
                   key={spec.id}
                   spec={spec}
                   selectedIds={selectedSet}
-                  onCredentialToggle={handleToggle}
+                  onCredentialsChange={onChange}
                   envSecretId={envMethod ? (agentEnvVars[envMethod.method_id] ?? null) : null}
                   onMethodSecretChange={onAgentEnvVarChange}
                   secrets={secrets}
@@ -138,6 +138,10 @@ export function RemoteCredentialsCard({
       </CardContent>
     </Card>
   );
+}
+
+function getSpecMethods(spec: RemoteAuthSpec): RemoteAuthMethod[] {
+  return Array.isArray(spec.methods) ? spec.methods : [];
 }
 
 function GitIdentityAccordionItem({
@@ -278,7 +282,15 @@ function initialChoice(opts: InitialChoiceOpts): AuthChoice {
   if (opts.ghTokenMethod && opts.selectedIds.has(opts.ghTokenMethod.method_id))
     return "gh_cli_token";
   if (opts.fileMethod && opts.selectedIds.has(opts.fileMethod.method_id)) return "files";
-  if (opts.envSecretId && opts.envMethod) return "env";
+  // Treat env as selected either when the user just clicked the radio (its
+  // method id is in selectedIds, no secret picked yet) or when a secret is
+  // already persisted. Without the selectedIds branch, first-time env setup
+  // for an agent that exposes both `files` and `env` methods is broken: the
+  // radio click never updates state, `choice` re-derives to "none", the env
+  // option deselects, and the secret dropdown disappears before the user can
+  // pick anything.
+  if (opts.envMethod && (opts.selectedIds.has(opts.envMethod.method_id) || opts.envSecretId))
+    return "env";
   return "none";
 }
 
@@ -287,38 +299,54 @@ const AGENT_LOGO_IDS = new Set(["claude_code", "auggie", "codex", "gemini", "cop
 function AuthSection({
   spec,
   selectedIds,
-  onCredentialToggle,
+  onCredentialsChange,
   envSecretId,
   onMethodSecretChange,
   secrets,
 }: {
   spec: RemoteAuthSpec;
   selectedIds: Set<string>;
-  onCredentialToggle: (id: string, checked: boolean) => void;
+  onCredentialsChange: (ids: string[]) => void;
   envSecretId: string | null;
   onMethodSecretChange: (methodId: string, secretId: string | null) => void;
   secrets: SecretListItem[];
 }) {
-  const envMethod = spec.methods.find((m) => m.type === "env");
-  const fileMethod = spec.methods.find((m) => m.type === "files");
-  const ghTokenMethod = spec.methods.find((m) => m.type === "gh_cli_token");
+  const methods = getSpecMethods(spec);
+  const envMethod = methods.find((m) => m.type === "env");
+  const fileMethod = methods.find((m) => m.type === "files");
+  const ghTokenMethod = methods.find((m) => m.type === "gh_cli_token");
   const hasOnlyEnv = envMethod && !fileMethod && !ghTokenMethod;
 
-  const [choice, setChoice] = useState<AuthChoice>(() =>
-    initialChoice({ fileMethod, envMethod, ghTokenMethod, selectedIds, envSecretId }),
-  );
+  // `choice` is derived from props so the configured-status badge updates live
+  // when the user picks a secret in the dropdown (which only flows back through
+  // `envSecretId`). Holding it in useState would freeze the badge to its initial
+  // value until a full page reload.
+  const choice: AuthChoice = initialChoice({
+    fileMethod,
+    envMethod,
+    ghTokenMethod,
+    selectedIds,
+    envSecretId,
+  });
 
   const handleChoice = (value: AuthChoice) => {
-    setChoice(value);
+    const nextSelectedIds = new Set(selectedIds);
     if (fileMethod) {
-      onCredentialToggle(fileMethod.method_id, value === "files");
+      setMethodSelected(nextSelectedIds, fileMethod.method_id, value === "files");
     }
     if (ghTokenMethod) {
-      onCredentialToggle(ghTokenMethod.method_id, value === "gh_cli_token");
+      setMethodSelected(nextSelectedIds, ghTokenMethod.method_id, value === "gh_cli_token");
     }
-    if (value !== "env" && envMethod) {
-      onMethodSecretChange(envMethod.method_id, null);
+    if (envMethod) {
+      // Track env in selectedIds the same way `files`/`gh_cli_token` are
+      // tracked, so `initialChoice` stays "env" while the user is still
+      // picking a secret. Switching away clears the secret too.
+      setMethodSelected(nextSelectedIds, envMethod.method_id, value === "env");
+      if (value !== "env") {
+        onMethodSecretChange(envMethod.method_id, null);
+      }
     }
+    onCredentialsChange([...nextSelectedIds]);
   };
 
   const showLogo = AGENT_LOGO_IDS.has(spec.id);
@@ -390,10 +418,21 @@ function EnvOnlySection({
   );
 }
 
-function GhTokenOption({ method, isSelected }: { method: RemoteAuthMethod; isSelected: boolean }) {
+function GhTokenOption({
+  method,
+  isSelected,
+  onSelect,
+}: {
+  method: RemoteAuthMethod;
+  isSelected: boolean;
+  onSelect: () => void;
+}) {
   return (
-    <label className={`${RADIO_LABEL_BASE} ${isSelected ? SELECTED_BORDER : DEFAULT_BORDER}`}>
-      <RadioGroupItem value="gh_cli_token" className={RADIO_ITEM_CLASS} />
+    <AuthOptionButton
+      selected={isSelected}
+      onSelect={onSelect}
+      label={method.label ?? "Copy token from local CLI"}
+    >
       <div className="flex flex-col gap-0.5">
         <span className="text-sm font-medium">{method.label ?? "Copy token from local CLI"}</span>
         {method.setup_hint && (
@@ -402,7 +441,7 @@ function GhTokenOption({ method, isSelected }: { method: RemoteAuthMethod; isSel
           </div>
         )}
       </div>
-    </label>
+    </AuthOptionButton>
   );
 }
 
@@ -410,19 +449,20 @@ function FileOption({
   method,
   isSelected,
   filesAvailable,
+  onSelect,
 }: {
   method: RemoteAuthMethod;
   isSelected: boolean;
   filesAvailable: boolean;
+  onSelect: () => void;
 }) {
   const filesLabel = method.source_files?.join(", ") ?? "";
   return (
-    <label
-      className={`${RADIO_LABEL_BASE} ${
-        isSelected ? SELECTED_BORDER : DEFAULT_BORDER
-      } ${!filesAvailable ? "opacity-50 cursor-not-allowed" : ""}`}
+    <AuthOptionButton
+      selected={isSelected}
+      onSelect={onSelect}
+      label={method.label ?? "Copy auth files"}
     >
-      <RadioGroupItem value="files" disabled={!filesAvailable} className={RADIO_ITEM_CLASS} />
       <div className="flex flex-col gap-0.5">
         <span className="text-sm font-medium">{method.label ?? "Copy auth files"}</span>
         <span className="text-xs text-muted-foreground">
@@ -430,7 +470,7 @@ function FileOption({
           {!filesAvailable && " — files not found on this machine"}
         </span>
       </div>
-    </label>
+    </AuthOptionButton>
   );
 }
 
@@ -440,17 +480,18 @@ function EnvOption({
   secretId,
   onSecretIdChange,
   secrets,
+  onSelect,
 }: {
   method: RemoteAuthMethod;
   isSelected: boolean;
   secretId: string | null;
   onSecretIdChange: (id: string | null) => void;
   secrets: SecretListItem[];
+  onSelect: () => void;
 }) {
   return (
     <div>
-      <label className={`${RADIO_LABEL_BASE} ${isSelected ? SELECTED_BORDER : DEFAULT_BORDER}`}>
-        <RadioGroupItem value="env" className={RADIO_ITEM_CLASS} />
+      <AuthOptionButton selected={isSelected} onSelect={onSelect} label="Provide secret">
         <div className="flex flex-col gap-0.5">
           <span className="text-sm font-medium">Provide secret</span>
           <span className="text-xs text-muted-foreground">
@@ -463,7 +504,7 @@ function EnvOption({
             </div>
           )}
         </div>
-      </label>
+      </AuthOptionButton>
       {isSelected && (
         <div className="pl-7 pt-2">
           <InlineSecretSelect
@@ -498,19 +539,20 @@ function AuthChoiceRadio({
   secrets: SecretListItem[];
 }) {
   return (
-    <RadioGroup
-      value={choice}
-      onValueChange={(v) => onChoiceChange(v as AuthChoice)}
-      className="gap-0"
-    >
+    <div role="radiogroup" aria-label="Remote auth method" className="grid gap-0">
       {ghTokenMethod && (
-        <GhTokenOption method={ghTokenMethod} isSelected={choice === "gh_cli_token"} />
+        <GhTokenOption
+          method={ghTokenMethod}
+          isSelected={choice === "gh_cli_token"}
+          onSelect={() => onChoiceChange("gh_cli_token")}
+        />
       )}
       {fileMethod && (
         <FileOption
           method={fileMethod}
           isSelected={choice === "files"}
           filesAvailable={fileMethod.has_local_files ?? false}
+          onSelect={() => onChoiceChange("files")}
         />
       )}
       {envMethod?.env_var && (
@@ -520,10 +562,50 @@ function AuthChoiceRadio({
           secretId={secretId}
           onSecretIdChange={onSecretIdChange}
           secrets={secrets}
+          onSelect={() => onChoiceChange("env")}
         />
       )}
-    </RadioGroup>
+    </div>
   );
+}
+
+function AuthOptionButton({
+  selected,
+  onSelect,
+  label,
+  children,
+}: {
+  selected: boolean;
+  onSelect: () => void;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      aria-label={label}
+      onClick={onSelect}
+      className={`${RADIO_LABEL_BASE} ${selected ? SELECTED_BORDER : DEFAULT_BORDER}`}
+    >
+      <span
+        aria-hidden="true"
+        className={`${OPTION_DOT_BASE} ${selected ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/80"}`}
+      >
+        {selected && <span className="size-2 rounded-full bg-current" />}
+      </span>
+      {children}
+    </button>
+  );
+}
+
+function setMethodSelected(selectedIds: Set<string>, methodId: string, selected: boolean) {
+  if (selected) {
+    selectedIds.add(methodId);
+    return;
+  }
+  selectedIds.delete(methodId);
 }
 
 function AuthStatusBadge({ choice, hasSecret }: { choice: AuthChoice; hasSecret: boolean }) {

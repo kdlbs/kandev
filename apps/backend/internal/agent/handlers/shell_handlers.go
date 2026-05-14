@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -130,10 +131,9 @@ func (h *ShellHandlers) wsShellSubscribe(ctx context.Context, msg *ws.Message) (
 		return nil, fmt.Errorf("session_id is required")
 	}
 
-	// Get or create execution on-demand (survives backend restart)
-	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, req.SessionID)
+	execution, err := h.ensureShellExecution(ctx, req.SessionID)
 	if err != nil {
-		return nil, fmt.Errorf("no agent running for session %s: %w", req.SessionID, err)
+		return nil, err
 	}
 
 	// Get buffered output to include in response
@@ -164,13 +164,9 @@ func (h *ShellHandlers) wsShellInput(ctx context.Context, msg *ws.Message) (*ws.
 		return nil, fmt.Errorf("session_id is required")
 	}
 
-	// Get the agent execution for this session.
-	// Use GetExecutionBySessionID (not GetOrEnsureExecution): writing input
-	// requires the workspace stream to already be live, and the 5s wait below
-	// is too short to absorb a cold-start of agentctl.
-	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(req.SessionID)
-	if !ok {
-		return nil, fmt.Errorf("no agent running for session %s", req.SessionID)
+	execution, err := h.ensureShellExecution(ctx, req.SessionID)
+	if err != nil {
+		return nil, err
 	}
 
 	// Wait for the workspace stream to be ready with a timeout.
@@ -199,6 +195,43 @@ func (h *ShellHandlers) wsShellInput(ctx context.Context, msg *ws.Message) (*ws.
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success": true,
 	})
+}
+
+// shellLifecycle is the narrow slice of lifecycle.Manager that
+// ensureShellExecution needs. *lifecycle.Manager satisfies it; tests can
+// stub it without touching the rest of the manager.
+type shellLifecycle interface {
+	GetOrEnsureExecution(ctx context.Context, sessionID string) (*lifecycle.AgentExecution, error)
+	CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error
+}
+
+func (h *ShellHandlers) ensureShellExecution(ctx context.Context, sessionID string) (*lifecycle.AgentExecution, error) {
+	return ensureShellExecution(ctx, h.lifecycleMgr, h.logger, sessionID)
+}
+
+// ensureShellExecution returns a live shell execution for sessionID, recovering
+// from a stale (Failed) execution by cleaning it up and re-launching once.
+// Extracted as a free function so the recovery branch is directly testable
+// without standing up a real lifecycle.Manager.
+func ensureShellExecution(ctx context.Context, lifecycleMgr shellLifecycle, log *logger.Logger, sessionID string) (*lifecycle.AgentExecution, error) {
+	execution, err := lifecycleMgr.GetOrEnsureExecution(ctx, sessionID)
+	if err != nil {
+		log.Debug("failed to ensure shell execution",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil, fmt.Errorf("no agent running for session %s", sessionID)
+	}
+	if execution.Status != v1.AgentStatusFailed {
+		return execution, nil
+	}
+	if err := lifecycleMgr.CleanupStaleExecutionBySessionID(ctx, sessionID); err != nil {
+		return nil, fmt.Errorf("cleanup stale execution for session %s: %w", sessionID, err)
+	}
+	execution, err = lifecycleMgr.GetOrEnsureExecution(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("recover execution for session %s: %w", sessionID, err)
+	}
+	return execution, nil
 }
 
 // UserShellListRequest for user_shell.list action.

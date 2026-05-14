@@ -22,7 +22,8 @@ RUN go mod download
 COPY apps/backend/ ./
 
 RUN go build -ldflags "-s -w" -o /out/kandev ./cmd/kandev && \
-    go build -ldflags "-s -w" -o /out/agentctl ./cmd/agentctl
+    go build -ldflags "-s -w" -o /out/agentctl ./cmd/agentctl && \
+    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w" -o /out/agentctl-linux-amd64 ./cmd/agentctl
 
 # ---------------------------------------------------------------------------
 # Stage 2: Web + CLI builder — build Next.js standalone + CLI
@@ -87,8 +88,11 @@ RUN userdel -r node && groupadd -r kandev && useradd -r -g kandev -u 1000 -d /da
 #   /app/apps/web/.next/standalone/web/server.js
 RUN mkdir -p /app/apps/backend/bin /app/apps/web/.next /data/worktrees
 
-# Copy Go binaries
+# Copy Go binaries. The -linux-amd64 variant of agentctl is bind-mounted into
+# Docker-executor sandboxes by the lifecycle manager; ship it next to kandev
+# so the AgentctlResolver finds it without manual configuration.
 COPY --from=go-builder /out/kandev /app/apps/backend/bin/kandev
+COPY --from=go-builder /out/agentctl-linux-amd64 /app/apps/backend/bin/agentctl-linux-amd64
 COPY --from=go-builder /out/agentctl /usr/local/bin/agentctl
 
 # Copy Next.js standalone output

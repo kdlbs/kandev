@@ -88,13 +88,19 @@ func (a *CodexACP) Runtime() *RuntimeConfig {
 		Env:         map[string]string{},
 		Mounts: []MountTemplate{
 			{Source: "{workspace}", Target: "/workspace"},
-			{Source: "{home}/.codex", Target: "/root/.codex"},
 		},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
 		Protocol:       agent.ProtocolACP,
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
+			// Use the same SessionDirTemplate pattern every other ACP agent
+			// uses; the docker container manager wires this into a kandev-owned
+			// per-container session dir, isolated from the host's ~/.codex
+			// (which carries host-absolute rollout paths in state.db that
+			// don't resolve inside the container).
+			SessionDirTemplate: "{home}/.codex",
+			SessionDirTarget:   "/root/.codex",
 		},
 	}
 }

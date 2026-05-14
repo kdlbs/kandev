@@ -686,15 +686,11 @@ func (m *Manager) buildWorktreeNames(req CreateRequest) (dirName, branchName str
 	if req.TaskTitle != "" {
 		// Use semantic naming: {sanitized-title}_{suffix}
 		dirName = SemanticWorktreeName(req.TaskTitle, dirSuffix)
-		sanitizedTitle := SanitizeForBranch(req.TaskTitle, 20)
-		if sanitizedTitle == "" {
-			sanitizedTitle = SanitizeForBranch(req.TaskID, 20)
-		}
-		branchName = prefix + sanitizedTitle + "-" + branchSuffix
+		branchName = TaskBranchNameWithSuffix(req.TaskTitle, req.TaskID, prefix, branchSuffix)
 	} else {
 		// Fallback to task ID based naming
 		dirName = req.TaskID + "_" + dirSuffix
-		branchName = prefix + SanitizeForBranch(req.TaskID, 20) + "-" + branchSuffix
+		branchName = TaskBranchNameWithSuffix("", req.TaskID, prefix, branchSuffix)
 	}
 	return dirName, branchName
 }

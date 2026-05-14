@@ -16,9 +16,18 @@ type UseChatInputContainerParams = {
   sessionId: string | null;
   isSending: boolean;
   isStarting: boolean;
+  /** True only during a real Docker/Sprites prepare phase. Different from
+   * `isStarting`, which fires for every session that's transitioning
+   * through STARTING (including local quick-chat). Drives the "agent still
+   * being set up" submit-disabled tooltip so it only appears when a
+   * container/sandbox is genuinely bootstrapping; the disabled state
+   * itself is still gated on the broader `isStarting` to keep e2e
+   * Cmd+Enter from racing the not-yet-ready agent. */
+  isPreparingEnvironment: boolean;
   isMoving: boolean;
   isFailed: boolean;
   needsRecovery: boolean;
+  executorUnavailable: boolean;
   isAgentBusy: boolean;
   hasAgentCommands: boolean;
   placeholder: string | undefined;
@@ -59,6 +68,15 @@ function useInputHandle(
   );
 }
 
+function useSyncTipTapRef(
+  tiptapRef: React.RefObject<TipTapInputHandle | null>,
+  inputRef: React.RefObject<TipTapInputHandle | null>,
+) {
+  useEffect(() => {
+    tiptapRef.current = inputRef.current;
+  });
+}
+
 function getInputPlaceholder(
   placeholder: string | undefined,
   isAgentBusy: boolean,
@@ -74,10 +92,12 @@ function getInputPlaceholder(
 
 function computeDerivedState(params: {
   isStarting: boolean;
+  isPreparingEnvironment: boolean;
   isMoving: boolean;
   isSending: boolean;
   isFailed: boolean;
   needsRecovery: boolean;
+  executorUnavailable: boolean;
   pendingClarification: Message | null | undefined;
   onClarificationResolved: (() => void) | undefined;
   pendingCommentsByFile: Record<string, DiffComment[]> | undefined;
@@ -87,12 +107,26 @@ function computeDerivedState(params: {
   isAgentBusy: boolean;
   hasAgentCommands: boolean;
 }) {
+  // STARTING is included so the editor itself stays uneditable until the
+  // session reaches RUNNING. Without this, the e2e suite's wait-for-
+  // contenteditable would fire mid-STARTING, the test would press Cmd+Enter,
+  // and the backend would reject with "Failed to send message to agent"
+  // before the agent process is ready to receive prompts.
   const isDisabled =
     params.isStarting ||
     params.isMoving ||
     params.isSending ||
     params.isFailed ||
-    params.needsRecovery;
+    params.needsRecovery ||
+    params.executorUnavailable;
+  const submitDisabled = isDisabled;
+  // The "agent still being set up" tooltip is only meaningful while a
+  // container/sandbox is actively bootstrapping. The brief STARTING
+  // transition for local quick-chat sessions doesn't deserve its own
+  // tooltip — the editor is disabled, that's the signal.
+  const submitDisabledReason = params.isPreparingEnvironment
+    ? "The agent is still being set up."
+    : undefined;
   const hasClarification = !!(params.pendingClarification && params.onClarificationResolved);
   const hasPendingComments = !!(
     params.pendingCommentsByFile && Object.keys(params.pendingCommentsByFile).length > 0
@@ -107,6 +141,8 @@ function computeDerivedState(params: {
   );
   return {
     isDisabled,
+    submitDisabled,
+    submitDisabledReason,
     hasClarification,
     hasPendingComments,
     hasContextZone,
@@ -116,25 +152,11 @@ function computeDerivedState(params: {
 }
 
 export function useChatInputContainer(params: UseChatInputContainerParams) {
-  const {
-    ref,
-    sessionId,
-    isSending,
-    isStarting,
-    isMoving,
-    isFailed,
-    needsRecovery,
-    isAgentBusy,
-    hasAgentCommands,
-    placeholder,
-    contextItems,
-    pendingClarification,
-    onClarificationResolved,
-    pendingCommentsByFile,
-    showRequestChangesTooltip,
-    onRequestChangesTooltipDismiss,
-    onSubmit,
-  } = params;
+  const { ref, sessionId, isSending, isStarting, isPreparingEnvironment, isMoving } = params;
+  const { isFailed, needsRecovery, executorUnavailable, isAgentBusy, hasAgentCommands } = params;
+  const { placeholder, contextItems, pendingClarification, onClarificationResolved } = params;
+  const { pendingCommentsByFile, showRequestChangesTooltip } = params;
+  const { onRequestChangesTooltipDismiss, onSubmit } = params;
 
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
@@ -159,9 +181,8 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
       onSubmit,
     });
 
-  useEffect(() => {
-    tiptapRef.current = inputRef.current;
-  });
+  useSyncTipTapRef(tiptapRef, inputRef);
+
   useInputHandle(ref, inputRef, getAttachments);
 
   // Auto-expand the input container as the user types more lines
@@ -185,10 +206,12 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
 
   const derived = computeDerivedState({
     isStarting,
+    isPreparingEnvironment,
     isMoving,
     isSending,
     isFailed,
     needsRecovery,
+    executorUnavailable,
     pendingClarification,
     onClarificationResolved,
     pendingCommentsByFile,

@@ -12,6 +12,7 @@ import {
 } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { ExpandableRow } from "@/components/task/chat/messages/expandable-row";
+import { isFallbackNoticeStep } from "@/lib/prepare/summarize";
 import { cn } from "@/lib/utils";
 import type {
   PrepareStepInfo,
@@ -283,7 +284,13 @@ function getHeaderLabel(status: EffectiveStatus, prepareState: SessionPrepareSta
     // `||` (not `??`) so an empty-string error also falls through to the name fallback.
     return failed?.error || `${failed?.name ?? "Environment prepared"} — step failed`;
   }
-  if (status === "completed_with_warnings") return "Environment prepared with warnings";
+  if (status === "completed_with_warnings") {
+    const warningSteps = prepareState.steps.filter((s) => s.warning);
+    if (warningSteps.length === 1 && isFallbackNoticeStep(warningSteps[0])) {
+      return "Environment prepared on a fresh sandbox";
+    }
+    return "Environment prepared with warnings";
+  }
   return "Environment prepared";
 }
 
@@ -298,6 +305,15 @@ function InfoLine({ icon, children }: { icon: React.ReactNode; children: React.R
 
 function Mono({ children }: { children: React.ReactNode }) {
   return <code className="text-muted-foreground font-mono text-[11px]">{children}</code>;
+}
+
+function hasStepDetails(step: PrepareStepInfo): boolean {
+  return Boolean(step.command || step.output || step.error || step.warning || step.warningDetail);
+}
+
+function isVisibleStep(step: PrepareStepInfo): boolean {
+  if (step.status === "skipped" && !hasStepDetails(step)) return false;
+  return step.name.trim() !== "" || hasStepDetails(step);
 }
 
 function SessionInfo({ sessionId }: { sessionId: string }) {
@@ -350,13 +366,7 @@ export function PrepareProgress({ sessionId }: PrepareProgressProps) {
   if (!prepareState) return null;
 
   const hasSessionInfo = Boolean(session?.worktree_path || session?.worktree_branch);
-  const visibleSteps = prepareState.steps.filter(
-    (step) =>
-      step.name.trim() !== "" ||
-      Boolean(step.output) ||
-      Boolean(step.error) ||
-      Boolean(step.warning),
-  );
+  const visibleSteps = prepareState.steps.filter(isVisibleStep);
   const headerLabel = getHeaderLabel(status, prepareState);
   const isErrorStatus = status === "failed" || status === "completed_with_error";
   const headerClass = cn("text-xs", isErrorStatus ? "text-destructive" : "text-muted-foreground");

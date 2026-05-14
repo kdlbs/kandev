@@ -647,7 +647,7 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered Slack handlers (HTTP + WebSocket)")
 	}
 
-	docker.RegisterDockerRoutes(p.router, p.lifecycleMgr.DockerClientProvider(), p.log)
+	docker.RegisterDockerRoutes(p.router, p.lifecycleMgr.DockerClientProvider(), dockerTaskTitleProvider(p.taskRepo, p.log), p.log)
 	p.log.Debug("Registered Docker management handlers (HTTP)")
 
 	registerHealthRoutes(p)
@@ -664,6 +664,21 @@ func registerSecondaryRoutes(
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService)
 
 	registerE2EResetRoutes(p.router, p.taskRepo, p.taskSvc, p.log)
+}
+
+func dockerTaskTitleProvider(taskRepo *sqliterepo.Repository, log *logger.Logger) docker.TaskTitleProvider {
+	return func(ctx context.Context, taskID string) (string, bool) {
+		if taskRepo == nil || taskID == "" {
+			return "", false
+		}
+		task, err := taskRepo.GetTask(ctx, taskID)
+		if err != nil {
+			log.Debug("docker container task title lookup failed",
+				zap.String("task_id", taskID), zap.Error(err))
+			return "", false
+		}
+		return task.Title, task.Title != ""
+	}
 }
 
 // registerHealthRoutes sets up the system health endpoint with all health checkers.

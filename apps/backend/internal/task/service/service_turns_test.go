@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -171,6 +172,101 @@ func TestGetWorkspaceInfoForSession_ExecutorInfo(t *testing.T) {
 	}
 }
 
+func TestGetWorkspaceInfoForSession_IncludesEnvironmentReconnectMetadata(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+
+	if err := repo.CreateExecutor(ctx, &models.Executor{
+		ID:        "exec-1",
+		Name:      "Docker",
+		Type:      models.ExecutorTypeLocalDocker,
+		Status:    "active",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("failed to create executor: %v", err)
+	}
+
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID:            "env-123",
+		TaskID:        "task-123",
+		ExecutorType:  string(models.ExecutorTypeLocalDocker),
+		Status:        models.TaskEnvironmentStatusReady,
+		WorkspacePath: "/host/repo",
+		ContainerID:   "container-from-env",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatalf("failed to create task environment: %v", err)
+	}
+
+	session := &models.TaskSession{
+		ID:                "session-1",
+		TaskID:            "task-123",
+		TaskEnvironmentID: "env-123",
+		ExecutorID:        "exec-1",
+		AgentProfileSnapshot: map[string]interface{}{
+			"agent_name": "codex",
+		},
+		State:     models.TaskSessionStateCompleted,
+		StartedAt: now,
+		UpdatedAt: now,
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "er-1",
+		SessionID:        "session-1",
+		TaskID:           "task-123",
+		ExecutorID:       "exec-1",
+		Runtime:          "docker",
+		AgentExecutionID: "running-exec",
+		ContainerID:      "container-from-running",
+		Metadata: map[string]interface{}{
+			lifecycle.MetadataKeyAuthTokenSecret:      "secret-token",
+			lifecycle.MetadataKeyBootstrapNonceSecret: "secret-nonce",
+			lifecycle.MetadataKeyImageTagOverride:     "kandev:test",
+			"task_description":                        "drop me",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("failed to upsert executor running: %v", err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-1")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession returned error: %v", err)
+	}
+
+	if info.WorkspacePath != "/host/repo" {
+		t.Fatalf("WorkspacePath = %q, want /host/repo", info.WorkspacePath)
+	}
+	if info.AgentExecutionID != "running-exec" {
+		t.Fatalf("AgentExecutionID = %q, want running-exec", info.AgentExecutionID)
+	}
+	if info.Metadata[lifecycle.MetadataKeyContainerID] != "container-from-running" {
+		t.Fatalf("container metadata = %v, want container-from-running", info.Metadata[lifecycle.MetadataKeyContainerID])
+	}
+	if info.Metadata[lifecycle.MetadataKeyAuthTokenSecret] != "secret-token" {
+		t.Fatalf("auth secret metadata missing: %v", info.Metadata)
+	}
+	if info.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] != "secret-nonce" {
+		t.Fatalf("nonce secret metadata missing: %v", info.Metadata)
+	}
+	if info.Metadata[lifecycle.MetadataKeyImageTagOverride] != "kandev:test" {
+		t.Fatalf("image override metadata missing: %v", info.Metadata)
+	}
+	if _, ok := info.Metadata["task_description"]; ok {
+		t.Fatalf("launch-only metadata should not be retained: %v", info.Metadata)
+	}
+}
+
 func TestGetWorkspaceInfoForSession_NoExecutorRunning(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -202,6 +298,66 @@ func TestGetWorkspaceInfoForSession_NoExecutorRunning(t *testing.T) {
 	}
 	if info.ExecutorType != "" {
 		t.Errorf("expected empty ExecutorType, got %q", info.ExecutorType)
+	}
+}
+
+// TestGetWorkspaceInfoForSession_AlignsTaskEnvironmentIDOnFallback locks in
+// the fix in applyTaskEnvironmentToWorkspaceInfo: when the session's stored
+// TaskEnvironmentID points to a missing/stale row, GetWorkspaceInfoForSession
+// falls back to GetTaskEnvironmentByTaskID. The previous implementation kept
+// info.TaskEnvironmentID pointing at the stale ID while picking up
+// metadata/workspace path from the fallback env — a downstream ID/metadata
+// mismatch that broke reconciler keying. The fix always aligns the ID with
+// the env we resolved against.
+func TestGetWorkspaceInfoForSession_AlignsTaskEnvironmentIDOnFallback(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+
+	// Real env exists under a different ID than what the session points at.
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID:            "real-env",
+		TaskID:        "task-123",
+		Status:        models.TaskEnvironmentStatusReady,
+		WorkspacePath: "/host/real-env",
+		ContainerID:   "container-real",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatalf("failed to create task environment: %v", err)
+	}
+
+	// Session stores a stale TaskEnvironmentID — the env it points at has
+	// been deleted or rolled over, but the session row still references it.
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "session-1",
+		TaskID:            "task-123",
+		TaskEnvironmentID: "stale-env",
+		AgentProfileSnapshot: map[string]interface{}{
+			"agent_name": "auggie",
+		},
+		State:     models.TaskSessionStateCompleted,
+		StartedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-1")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession returned error: %v", err)
+	}
+
+	if info.TaskEnvironmentID != "real-env" {
+		t.Fatalf("TaskEnvironmentID = %q, want real-env (alignment fix should overwrite the session's stale ID)", info.TaskEnvironmentID)
+	}
+	if info.WorkspacePath != "/host/real-env" {
+		t.Fatalf("WorkspacePath = %q, want /host/real-env (metadata must come from the resolved env, same as the ID)", info.WorkspacePath)
+	}
+	if got := info.Metadata["container_id"]; got != "container-real" {
+		t.Fatalf("metadata container_id = %v, want container-real", got)
 	}
 }
 

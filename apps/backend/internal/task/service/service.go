@@ -112,32 +112,34 @@ type Repos struct {
 
 // Service provides task business logic
 type Service struct {
-	workspaces          repository.WorkspaceRepository
-	tasks               repository.TaskRepository
-	taskRepos           repository.TaskRepoRepository
-	workflows           repository.WorkflowRepository
-	messages            repository.MessageRepository
-	turns               repository.TurnRepository
-	sessions            repository.SessionRepository
-	gitSnapshots        repository.GitSnapshotRepository
-	repoEntities        repository.RepositoryEntityRepository
-	executors           repository.ExecutorRepository
-	environments        repository.EnvironmentRepository
-	taskEnvironments    repository.TaskEnvironmentRepository
-	reviews             repository.ReviewRepository
-	eventBus            bus.EventBus
-	logger              *logger.Logger
-	discoveryConfig     RepositoryDiscoveryConfig
-	worktreeCleanup     WorktreeCleanup
-	executionStopper    TaskExecutionStopper
-	gitArchiveCapture   GitArchiveCapture
-	workflowStepCreator WorkflowStepCreator
-	workflowStepGetter  WorkflowStepGetter
-	startStepResolver   StartStepResolver
-	quickChatDir        string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
-	branchFetcher       *branchFetcher
-	remoteBranchLister  RemoteBranchLister
-	repoCloneLocation   RepoCloneLocation
+	workspaces            repository.WorkspaceRepository
+	tasks                 repository.TaskRepository
+	taskRepos             repository.TaskRepoRepository
+	workflows             repository.WorkflowRepository
+	messages              repository.MessageRepository
+	turns                 repository.TurnRepository
+	sessions              repository.SessionRepository
+	gitSnapshots          repository.GitSnapshotRepository
+	repoEntities          repository.RepositoryEntityRepository
+	executors             repository.ExecutorRepository
+	environments          repository.EnvironmentRepository
+	taskEnvironments      repository.TaskEnvironmentRepository
+	reviews               repository.ReviewRepository
+	eventBus              bus.EventBus
+	logger                *logger.Logger
+	discoveryConfig       RepositoryDiscoveryConfig
+	worktreeCleanup       WorktreeCleanup
+	executionStopper      TaskExecutionStopper
+	gitArchiveCapture     GitArchiveCapture
+	workflowStepCreator   WorkflowStepCreator
+	workflowStepGetter    WorkflowStepGetter
+	startStepResolver     StartStepResolver
+	quickChatDir          string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
+	branchFetcher         *branchFetcher
+	envDestroyer          EnvironmentDestroyer
+	sessionRunningChecker SessionRunningChecker
+	remoteBranchLister    RemoteBranchLister
+	repoCloneLocation     RepoCloneLocation
 }
 
 // NewService creates a new task service

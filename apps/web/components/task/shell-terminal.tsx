@@ -138,6 +138,7 @@ type ShellSubscriptionOptions = {
   taskId: string | null;
   sessionId: string | null | undefined;
   canSubscribe: boolean;
+  agentctlStatusKey: string;
   send: (action: string, payload: Record<string, unknown>) => void;
   storeApi: ReturnType<typeof useAppStoreApi>;
 };
@@ -147,6 +148,7 @@ function useShellSubscription({
   taskId,
   sessionId,
   canSubscribe,
+  agentctlStatusKey: _agentctlStatusKey,
   send,
   storeApi,
 }: ShellSubscriptionOptions) {
@@ -206,7 +208,16 @@ function useShellSubscription({
         retryTimeoutRef.current = null;
       }
     };
-  }, [taskId, sessionId, storeApi, canSubscribe, send, xtermRef, lastOutputLengthRef]);
+  }, [
+    taskId,
+    sessionId,
+    storeApi,
+    canSubscribe,
+    send,
+    xtermRef,
+    lastOutputLengthRef,
+    _agentctlStatusKey,
+  ]);
 }
 
 type ReadOnlySyncParams = {
@@ -359,7 +370,7 @@ function useShellSessionState(propSessionId: string | undefined, isReadOnlyMode:
   const { session, isActive, isFailed, errorMessage } = useSession(
     isReadOnlyMode ? null : sessionId,
   );
-  useSessionAgentctl(isReadOnlyMode ? null : sessionId);
+  const agentctlStatus = useSessionAgentctl(isReadOnlyMode ? null : sessionId);
   const taskId = session?.task_id ?? null;
   const isSessionFailed = !isReadOnlyMode && isFailed;
   const shellOutput = useAppStore((state) => {
@@ -367,8 +378,16 @@ function useShellSessionState(propSessionId: string | undefined, isReadOnlyMode:
     const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
     return state.shell.outputs[envKey] || "";
   });
-  const canSubscribe = Boolean(sessionId && isActive && !isReadOnlyMode);
-  return { sessionId, taskId, isSessionFailed, errorMessage, shellOutput, canSubscribe };
+  const canSubscribe = Boolean(sessionId && isActive && !isReadOnlyMode && !agentctlStatus.isError);
+  return {
+    sessionId,
+    taskId,
+    isSessionFailed,
+    errorMessage,
+    shellOutput,
+    canSubscribe,
+    agentctlStatusKey: agentctlStatus.status,
+  };
 }
 
 // eslint-disable-next-line max-lines-per-function -- wires many hooks + refs; each block is already its own hook
@@ -388,8 +407,15 @@ export function ShellTerminal({
   const storeApi = useAppStoreApi();
 
   const isReadOnlyMode = processOutput !== undefined;
-  const { sessionId, taskId, isSessionFailed, errorMessage, shellOutput, canSubscribe } =
-    useShellSessionState(propSessionId, isReadOnlyMode);
+  const {
+    sessionId,
+    taskId,
+    isSessionFailed,
+    errorMessage,
+    shellOutput,
+    canSubscribe,
+    agentctlStatusKey,
+  } = useShellSessionState(propSessionId, isReadOnlyMode);
   useReadOnlyOutputSync({
     xtermRef,
     isReadOnlyMode,
@@ -447,6 +473,7 @@ export function ShellTerminal({
     taskId,
     sessionId,
     canSubscribe,
+    agentctlStatusKey,
     send,
     storeApi,
   });

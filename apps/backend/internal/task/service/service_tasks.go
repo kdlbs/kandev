@@ -24,6 +24,11 @@ type taskStopTarget struct {
 	executionID string
 }
 
+type taskEnvironmentCleanup struct {
+	env       *models.TaskEnvironment
+	deleteRow bool
+}
+
 // Task operations
 
 // CreateTask creates a new task and publishes a task.created event.
@@ -456,6 +461,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 			}
 		}
 	}
+	taskEnv := s.gatherTaskEnvironmentForCleanup(ctx, id)
 
 	// 3. Set archived_at in DB
 	if err := s.tasks.ArchiveTask(ctx, id); err != nil {
@@ -476,8 +482,9 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	// 6. Background: Stop agents and cleanup worktrees
 	// Note: isEphemeral=false for archive to preserve quick-chat directories
-	if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 {
-		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, false,
+	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: true}
+	if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || taskEnv != nil {
+		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, false,
 			"task archived", "failed to stop session on task archive", "task archive cleanup completed")
 	}
 
@@ -505,6 +512,7 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	}
 
 	worktrees := s.gatherWorktreesForDelete(ctx, id)
+	taskEnv := s.gatherTaskEnvironmentForCleanup(ctx, id)
 
 	// 3. Get active sessions for stopping agents (sync, fast)
 	// Must query before delete since DB records will be gone
@@ -531,10 +539,14 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 		zap.String("task_id", id),
 		zap.Duration("duration", time.Since(start)))
 
-	// 6. Stop agents and cleanup worktrees in the background.
-	hasCleanup := len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || task.IsEphemeral
+	// 6. Stop agents and cleanup worktrees in the background. Carry the
+	//    envCleanup struct so the task environment row is reset alongside
+	//    the worktrees (an extra task.taskEnv != nil branch keeps the
+	//    cleanup running when only the env needs reclaiming).
+	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: false}
+	hasCleanup := len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || task.IsEphemeral || taskEnv != nil
 	if hasCleanup {
-		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, task.IsEphemeral,
+		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, task.IsEphemeral,
 			"task deleted", "failed to stop session on task delete", "task cleanup completed")
 	}
 
@@ -567,11 +579,26 @@ func (s *Service) gatherWorktreesForDelete(ctx context.Context, taskID string) [
 	return worktrees
 }
 
+func (s *Service) gatherTaskEnvironmentForCleanup(ctx context.Context, taskID string) *models.TaskEnvironment {
+	if s.taskEnvironments == nil {
+		return nil
+	}
+	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to lookup task environment for cleanup",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return nil
+	}
+	return env
+}
+
 func (s *Service) runAsyncTaskCleanup(
 	id string,
 	sessions []*models.TaskSession,
 	worktrees []*worktree.Worktree,
 	stopTargets []taskStopTarget,
+	envCleanup taskEnvironmentCleanup,
 	isEphemeral bool,
 	stopReason, stopFailMsg, cleanupMsg string,
 ) {
@@ -601,7 +628,7 @@ func (s *Service) runAsyncTaskCleanup(
 			}
 		}
 
-		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, isEphemeral)
+		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, envCleanup, isEphemeral)
 
 		if len(cleanupErrors) > 0 {
 			s.logger.Warn(cleanupMsg+" with errors",
@@ -649,9 +676,13 @@ func (s *Service) performTaskCleanup(
 	taskID string,
 	sessions []*models.TaskSession,
 	worktrees []*worktree.Worktree,
+	envCleanup taskEnvironmentCleanup,
 	isEphemeral bool,
 ) []error {
 	var errs []error
+
+	errs = append(errs, s.cleanupTaskEnvironment(ctx, taskID, envCleanup)...)
+	worktrees = excludeEnvironmentWorktree(worktrees, envCleanup.env)
 
 	// Cleanup worktrees
 	if len(worktrees) > 0 {
@@ -703,6 +734,47 @@ func (s *Service) performTaskCleanup(
 	}
 
 	return errs
+}
+
+func (s *Service) cleanupTaskEnvironment(
+	ctx context.Context,
+	taskID string,
+	cleanup taskEnvironmentCleanup,
+) []error {
+	if cleanup.env == nil {
+		return nil
+	}
+	if err := s.teardownEnvironmentResources(ctx, cleanup.env); err != nil {
+		s.logger.Warn("failed to teardown task environment during task cleanup",
+			zap.String("task_id", taskID),
+			zap.String("env_id", cleanup.env.ID),
+			zap.Error(err))
+		return []error{fmt.Errorf("teardown task environment %s: %w", cleanup.env.ID, err)}
+	}
+	if cleanup.deleteRow {
+		if err := s.taskEnvironments.DeleteTaskEnvironment(ctx, cleanup.env.ID); err != nil {
+			s.logger.Warn("failed to delete task environment row during task cleanup",
+				zap.String("task_id", taskID),
+				zap.String("env_id", cleanup.env.ID),
+				zap.Error(err))
+			return []error{fmt.Errorf("delete task environment row %s: %w", cleanup.env.ID, err)}
+		}
+	}
+	return nil
+}
+
+func excludeEnvironmentWorktree(worktrees []*worktree.Worktree, env *models.TaskEnvironment) []*worktree.Worktree {
+	if env == nil || env.WorktreeID == "" || len(worktrees) == 0 {
+		return worktrees
+	}
+	filtered := worktrees[:0]
+	for _, wt := range worktrees {
+		if wt == nil || wt.ID == env.WorktreeID {
+			continue
+		}
+		filtered = append(filtered, wt)
+	}
+	return filtered
 }
 
 // ListTasks returns all tasks for a workflow

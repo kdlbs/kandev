@@ -460,11 +460,23 @@ export class ApiClient {
 
   async createExecutorProfile(
     executorId: string,
-    name: string,
+    nameOrPayload:
+      | string
+      | {
+          name: string;
+          mcp_policy?: string;
+          prepare_script?: string;
+          cleanup_script?: string;
+          config?: Record<string, string>;
+          env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
+        },
     opts?: { mcp_policy?: string; prepare_script?: string; cleanup_script?: string },
   ): Promise<{ id: string; name: string }> {
+    if (typeof nameOrPayload === "object") {
+      return this.request("POST", `/api/v1/executors/${executorId}/profiles`, nameOrPayload);
+    }
     return this.request("POST", `/api/v1/executors/${executorId}/profiles`, {
-      name,
+      name: nameOrPayload,
       ...(opts?.mcp_policy ? { mcp_policy: opts.mcp_policy } : {}),
       ...(opts?.prepare_script ? { prepare_script: opts.prepare_script } : {}),
       ...(opts?.cleanup_script ? { cleanup_script: opts.cleanup_script } : {}),
@@ -473,6 +485,19 @@ export class ApiClient {
 
   async deleteExecutorProfile(profileId: string): Promise<void> {
     await this.request("DELETE", `/api/v1/executor-profiles/${profileId}`);
+  }
+
+  async getExecutorProfile(
+    executorId: string,
+    profileId: string,
+  ): Promise<{
+    id: string;
+    name: string;
+    config?: Record<string, string>;
+    prepare_script?: string;
+    cleanup_script?: string;
+  }> {
+    return this.request("GET", `/api/v1/executors/${executorId}/profiles/${profileId}`);
   }
 
   async listExecutors(): Promise<{
@@ -858,9 +883,83 @@ export class ApiClient {
     return this.request("GET", `/api/v1/tasks/${taskId}`);
   }
 
+  /**
+   * Send a one-shot WebSocket request and await the matching response.
+   * Used for actions exposed only over WS (e.g. session.launch). Opens a
+   * fresh connection, awaits one response by id, then closes.
+   */
+  async wsRequest<T>(action: string, payload: unknown, timeoutMs = 30_000): Promise<T> {
+    const wsUrl = this.baseUrl.replace(/^http/, "ws") + "/ws";
+    const id = `e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const ws = new WebSocket(wsUrl);
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        ws.close();
+        reject(new Error(`wsRequest("${action}") timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      ws.addEventListener("open", () => {
+        ws.send(
+          JSON.stringify({
+            id,
+            type: "request",
+            action,
+            payload,
+            timestamp: new Date().toISOString(),
+          }),
+        );
+      });
+      ws.addEventListener("message", (event) => {
+        const msg = JSON.parse(String(event.data));
+        if (msg.id !== id) return;
+        clearTimeout(timer);
+        ws.close();
+        if (msg.type === "error") {
+          reject(new Error(`wsRequest("${action}") failed: ${msg.payload?.message ?? msg.action}`));
+          return;
+        }
+        resolve(msg.payload as T);
+      });
+      ws.addEventListener("error", (event) => {
+        clearTimeout(timer);
+        reject(new Error(`wsRequest("${action}") socket error: ${String(event)}`));
+      });
+    });
+  }
+
+  /**
+   * Launch a new session on a task — wraps the WS `session.launch` action.
+   * Used by tests that need a second session on a task with an existing
+   * environment (multi-session reuse, recovery scenarios).
+   */
+  async launchSession(payload: {
+    task_id: string;
+    agent_profile_id: string;
+    executor_id?: string;
+    executor_profile_id?: string;
+    prompt: string;
+    intent?: string;
+    workflow_step_id?: string;
+    auto_start?: boolean;
+  }): Promise<{ session_id: string; agent_execution_id: string; state: string }> {
+    return this.wsRequest("session.launch", payload);
+  }
+
+  /** Stop a running session via WS `session.stop` — same path the UI uses. */
+  async stopSession(payload: {
+    session_id: string;
+    reason?: string;
+    force?: boolean;
+  }): Promise<{ success: boolean }> {
+    return this.wsRequest("session.stop", payload);
+  }
+
   async getTaskEnvironment(taskId: string): Promise<{
     id: string;
     task_id: string;
+    executor_type?: string;
+    executor_profile_id?: string;
+    container_id?: string;
+    sandbox_id?: string;
     worktree_id?: string;
     worktree_path?: string;
     status: string;

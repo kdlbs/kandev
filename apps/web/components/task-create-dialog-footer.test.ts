@@ -34,6 +34,8 @@ function makeProps(
     workspaceId: "ws-1",
     effectiveWorkflowId: "wf-1",
     executorHint: null,
+    noCompatibleAgent: false,
+    executorProfileName: null,
     onCancel: () => {},
     onUpdateWithoutAgent: () => {},
     onCreateWithoutAgent: () => {},
@@ -97,6 +99,19 @@ describe("computeDisabledReason (start-task)", () => {
 
   it("flags missing agent profile for start-task button", () => {
     expect(computeDisabledReason(makeProps({ agentProfileId: "" }), KIND_START)).toBe(REASON_AGENT);
+  });
+
+  it("flags no compatible agent for the selected executor profile", () => {
+    const reason = computeDisabledReason(
+      makeProps({
+        agentProfileId: "",
+        noCompatibleAgent: true,
+        executorProfileName: "Docker (sandbox)",
+      }),
+      KIND_START,
+    );
+    expect(reason).toContain("Docker (sandbox)");
+    expect(reason).toContain("credentials");
   });
 });
 

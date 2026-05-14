@@ -232,6 +232,9 @@ func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *exec
 	if gitUserEmail := profile.Config["git_user_email"]; gitUserEmail != "" {
 		metadata["git_user_email"] = gitUserEmail
 	}
+	if imageTag := profile.Config["image_tag"]; imageTag != "" {
+		metadata["image_tag_override"] = imageTag
+	}
 }
 
 // resolveProfileEnvVars resolves profile env vars, dereferencing secret IDs to their values.

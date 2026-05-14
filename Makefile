@@ -170,6 +170,11 @@ build-backend:
 	@printf "$(CYAN)Building backend...$(RESET)\n"
 	@$(MAKE) -C $(BACKEND_DIR) build
 
+.PHONY: build-backend-linux-helpers
+build-backend-linux-helpers:
+	@printf "$(CYAN)Building linux/amd64 helper binaries (agentctl + mock-agent) for Docker E2E...$(RESET)\n"
+	@$(MAKE) -C $(BACKEND_DIR) build-agentctl-linux build-mock-agent-linux
+
 .PHONY: acpdbg
 acpdbg:
 	@$(MAKE) -s -C $(BACKEND_DIR) acpdbg ARGS="$(ARGS)"

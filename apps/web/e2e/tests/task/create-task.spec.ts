@@ -78,6 +78,72 @@ test.describe("Task creation", () => {
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
   });
 
+  test("explains when a Docker executor has no compatible agent credentials", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const profile = await apiClient.getAgentProfile(seedData.agentProfileId);
+    const { agents } = await apiClient.listAgents();
+    const agent = agents.find((item) => item.profiles?.some((p) => p.id === profile.id));
+    if (!agent) {
+      throw new Error(`agent for profile ${profile.id} not found`);
+    }
+    const dockerExec = await apiClient.createExecutor("E2E Docker Empty Agent", "local_docker");
+    const dockerProfile = await apiClient.createExecutorProfile(dockerExec.id, {
+      name: "Docker Missing Auth",
+      config: {
+        image_tag: "kandev-mock-agent:test",
+        dockerfile: "FROM busybox\nWORKDIR /workspace\n",
+      },
+    });
+
+    await testPage.route("**/api/v1/remote-credentials", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          auth_specs: [
+            {
+              id: agent.name,
+              display_name: profile.agent_display_name,
+              methods: [{ method_id: "test-token", type: "env", env_var: "TEST_TOKEN" }],
+            },
+          ],
+        }),
+      });
+    });
+
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+
+      await kanban.createTaskButton.first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+
+      await testPage.getByTestId("task-title-input").fill("Docker Missing Auth Task");
+      await testPage.getByTestId("task-description-input").fill("testing docker auth empty state");
+
+      await testPage.getByTestId("executor-profile-selector").click();
+      await testPage.getByRole("option", { name: /Docker Missing Auth/i }).click();
+
+      await expect(testPage.getByTestId("agent-profile-empty-state")).toContainText(
+        "No compatible agent profiles",
+      );
+      await expect(testPage.getByRole("link", { name: "Configure credentials" })).toHaveAttribute(
+        "href",
+        `/settings/executors/${dockerProfile.id}`,
+      );
+      await expect(dialog).toContainText(
+        "A Docker container will be created from the selected base branch and checked out on a task branch.",
+      );
+      await expect(testPage.getByTestId(START_AGENT_TEST_ID)).toBeDisabled();
+    } finally {
+      await apiClient.deleteExecutor(dockerExec.id).catch(() => {});
+    }
+  });
+
   test("can fill in task title and description", async ({ testPage }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();

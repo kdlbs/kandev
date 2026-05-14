@@ -245,6 +245,7 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready
 
 		// Wait for the stream to close (it stays open until disconnected)
 		<-ws.Done()
+		execution.ClearWorkspaceStream(ws)
 		return
 	}
 

@@ -134,6 +134,12 @@ func (r *SpritesExecutor) runPrepareScript(
 }
 
 // resolvePrepareScript builds the resolved prepare script using scriptengine.
+//
+// The kandev-managed feature-branch checkout is appended as an invariant
+// postlude after the user's script — see executor_docker.go for the same
+// pattern. Profiles created in the UI snapshot the default at create time,
+// so without an unconditional postlude older Sprites profiles would still
+// commit straight onto main.
 func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) string {
 	script := getMetadataString(req.Metadata, MetadataKeySetupScript)
 	if script == "" {
@@ -142,6 +148,7 @@ func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) strin
 	if script == "" {
 		return ""
 	}
+	script += KandevBranchCheckoutPostlude()
 
 	installScripts := r.collectAgentInstallScripts(req)
 
@@ -151,11 +158,18 @@ func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) strin
 		WithProvider(scriptengine.GitIdentityProvider(req.Metadata)).
 		WithProvider(scriptengine.GitHubAuthProvider(req.Env)).
 		WithProvider(scriptengine.AgentInstallProvider(installScripts)).
+		WithProvider(scriptengine.WorktreeProvider(
+			"",
+			spritesWorkspacePath,
+			getMetadataString(req.Metadata, MetadataKeyWorktreeID),
+			getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
+			getMetadataString(req.Metadata, MetadataKeyBaseBranch),
+		)).
 		WithProvider(scriptengine.RepositoryProvider(
 			req.Metadata,
 			req.Env,
 			getGitRemoteURL,
-			r.injectTokenIntoURL,
+			injectGitHubTokenIntoCloneURL,
 		))
 
 	return resolver.Resolve(script)

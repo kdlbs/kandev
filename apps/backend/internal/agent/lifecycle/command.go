@@ -56,26 +56,26 @@ func (cb *CommandBuilder) BuildContinueCommandString(ag agents.Agent, opts agent
 	return strings.Join(cmd.Args(), " ")
 }
 
-// ExpandSessionDir expands the session directory template from SessionConfig.
-// Replaces {home} with the user's home directory.
-// Returns empty string if no session directory is configured.
-func (cb *CommandBuilder) ExpandSessionDir(ag agents.Agent) string {
+// ExpandSessionDir resolves the host-side directory that should be bind-
+// mounted into the container at SessionDirTarget. The path is the kandev-
+// managed per-container session dir (~/.kandev/agent-sessions/<instance_id>/
+// <dotdir>) — isolated from the user's actual ~/<dotdir> so the host's stale
+// state DBs and session caches stay out of the container.
+//
+// Returns empty string if no session directory is configured or if kandev
+// home / instance ID are unavailable. Production callers always supply a
+// resolved kandev home, so the empty-string path only fires in tests.
+func (cb *CommandBuilder) ExpandSessionDir(ag agents.Agent, kandevHomeDir, instanceID string) string {
 	template := ag.Runtime().SessionConfig.SessionDirTemplate
 	if template == "" {
 		return ""
 	}
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		homeDir = "/tmp"
+	path := SessionDirHostPath(kandevHomeDir, instanceID, template)
+	if path == "" {
+		return ""
 	}
-
-	result := strings.ReplaceAll(template, "{home}", homeDir)
-
-	// Ensure the directory exists
-	_ = os.MkdirAll(result, 0755)
-
-	return result
+	_ = os.MkdirAll(path, 0o755)
+	return path
 }
 
 // GetSessionDirTarget returns the container path for session directory mount.

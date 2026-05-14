@@ -332,6 +332,33 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		ACPSessionID:      acpSessionID,
 	}
 
+	var taskEnv *models.TaskEnvironment
+	if session.TaskEnvironmentID != "" {
+		env, envErr := s.taskEnvironments.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+		if envErr != nil {
+			s.logger.Warn("failed to get task environment for session",
+				zap.String("session_id", sessionID),
+				zap.String("task_environment_id", session.TaskEnvironmentID),
+				zap.Error(envErr))
+		} else {
+			taskEnv = env
+		}
+	}
+	if taskEnv == nil && taskID != "" {
+		env, envErr := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
+		if envErr != nil {
+			s.logger.Warn("failed to get task environment by task",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(envErr))
+		} else {
+			taskEnv = env
+		}
+	}
+	if taskEnv != nil {
+		applyTaskEnvironmentToWorkspaceInfo(info, taskEnv)
+	}
+
 	// Populate executor info for correct runtime selection and remote reconnection
 	running, err := s.executors.GetExecutorRunningBySessionID(ctx, sessionID)
 	if err != nil {
@@ -347,6 +374,10 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	} else if running != nil {
 		info.RuntimeName = running.Runtime
 		info.AgentExecutionID = running.AgentExecutionID
+		mergePersistentWorkspaceMetadata(info, running.Metadata)
+		if running.ContainerID != "" {
+			ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyContainerID] = running.ContainerID
+		}
 	}
 	if session.ExecutorID != "" {
 		exec, err := s.executors.GetExecutor(ctx, session.ExecutorID)
@@ -361,6 +392,44 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	}
 
 	return info, nil
+}
+
+func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *models.TaskEnvironment) {
+	// Always align info.TaskEnvironmentID with the env we resolved against.
+	// When session.TaskEnvironmentID points to a stale/missing env, the
+	// caller falls back to GetTaskEnvironmentByTaskID and ends up with a
+	// different env.ID. Previously we only updated info.TaskEnvironmentID
+	// when it was empty, so the metadata + path here would come from env
+	// while the ID still pointed at the stale row — a mismatch downstream
+	// reconcilers and progress events would key off the wrong env.
+	info.TaskEnvironmentID = env.ID
+	if info.WorkspacePath == "" {
+		info.WorkspacePath = env.WorkspacePath
+	}
+	if env.ContainerID != "" {
+		ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyContainerID] = env.ContainerID
+	}
+	if env.SandboxID != "" {
+		ensureWorkspaceMetadata(info)["sprite_name"] = env.SandboxID
+	}
+}
+
+func mergePersistentWorkspaceMetadata(info *lifecycle.WorkspaceInfo, metadata map[string]interface{}) {
+	filtered := lifecycle.FilterPersistentMetadata(metadata)
+	if filtered == nil {
+		return
+	}
+	dst := ensureWorkspaceMetadata(info)
+	for k, v := range filtered {
+		dst[k] = v
+	}
+}
+
+func ensureWorkspaceMetadata(info *lifecycle.WorkspaceInfo) map[string]interface{} {
+	if info.Metadata == nil {
+		info.Metadata = make(map[string]interface{})
+	}
+	return info.Metadata
 }
 
 // GetWorkspaceInfoForEnvironment returns workspace information for a task environment.

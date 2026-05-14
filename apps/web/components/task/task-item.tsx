@@ -276,6 +276,7 @@ function TaskItemContent({
           <RemoteCloudTooltip
             taskId={taskId ?? ""}
             sessionId={primarySessionId ?? null}
+            executorType={remoteExecutorType}
             fallbackName={remoteExecutorName ?? remoteExecutorType}
             iconClassName="h-3 w-3 text-muted-foreground/60"
           />

@@ -360,6 +360,17 @@ jobs:
           go build -o bin/kandev${EXT} ./cmd/kandev
           go build -o bin/agentctl${EXT} ./cmd/agentctl
 
+      # Cross-compile a linux/amd64 agentctl regardless of the host platform.
+      # Remote executors (local Docker, remote Docker, Sprites) bind-mount this
+      # binary into the container — without it, Docker sessions fail with
+      # "agentctl linux binary not found" on Mac/Windows installs and even on
+      # Linux installs (the resolver looks for the -linux-amd64 suffix).
+      # CGO is off so this works from any host without extra toolchain setup.
+      - name: Build linux/amd64 agentctl helper
+        run: |
+          cd apps/backend
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 CC= go build -o bin/agentctl-linux-amd64 ./cmd/agentctl
+
       - name: Package bundle
         run: |
           rm -rf dist/kandev/bin dist/kandev/web
@@ -367,6 +378,7 @@ jobs:
           EXT=${{ matrix.goos == 'windows' && '.exe' || '' }}
           cp apps/backend/bin/kandev${EXT} dist/kandev/bin/
           cp apps/backend/bin/agentctl${EXT} dist/kandev/bin/
+          cp apps/backend/bin/agentctl-linux-amd64 dist/kandev/bin/
           mkdir -p dist/kandev/web
           cp -R dist/web/. dist/kandev/web/
           # cli/ was already placed by the build-cli job (downloaded above).

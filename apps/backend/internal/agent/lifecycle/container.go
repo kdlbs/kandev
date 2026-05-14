@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -19,22 +18,33 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+const (
+	dockerAgentctlInstancePortBase = 41001
+	dockerAgentctlInstancePortMax  = 41100
+	boolStringTrue                 = "true"
+)
+
 // ContainerConfig holds configuration for launching a Docker container
 type ContainerConfig struct {
-	AgentConfig     agents.Agent
-	WorkspacePath   string // If empty, workspace is not mounted (will clone inside container)
-	TaskID          string
-	TaskDescription string
-	Model           string
-	SessionID       string
-	Credentials     map[string]string
-	ProfileInfo     *AgentProfileInfo
-	InstanceID      string
-	MainRepoGitDir  string // Path to main repo's .git directory (for worktrees)
-	McpServers      []McpServerConfig
-	McpMode         string
-	PrepareScript   string // Script to run inside container before agent starts (e.g., clone repo)
-	BootstrapNonce  string // one-time nonce for agentctl handshake (set internally)
+	AgentConfig       agents.Agent
+	WorkspacePath     string // If empty, workspace is not mounted (will clone inside container)
+	TaskID            string
+	TaskTitle         string
+	TaskEnvironmentID string
+	TaskDescription   string
+	Model             string
+	SessionID         string
+	ExecutorProfileID string
+	Credentials       map[string]string
+	ProfileInfo       *AgentProfileInfo
+	InstanceID        string
+	MainRepoGitDir    string // Path to main repo's .git directory (for worktrees)
+	McpServers        []McpServerConfig
+	McpMode           string
+	PrepareScript     string // Script to run inside container before agent starts (e.g., clone repo)
+	ImageTagOverride  string // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
+	LocalClonePath    string // Host path for file:// repository clone URLs; mounted read-only at the same path.
+	BootstrapNonce    string // one-time nonce for agentctl handshake (set internally)
 }
 
 // ContainerManager handles Docker container lifecycle operations
@@ -43,23 +53,44 @@ type ContainerManager struct {
 	commandBuilder *CommandBuilder
 	logger         *logger.Logger
 	networkName    string
+	// kandevHomeDir is the resolved Kandev root dir, used to derive the
+	// per-container agent session dirs that replace host home bind-mounts.
+	// Empty means "fall back to legacy {home}/.<agent>" — production callers
+	// always pass a non-empty value.
+	kandevHomeDir string
+	// resolveAgentctlBinary returns the host path to a linux/amd64 agentctl
+	// binary. Indirected so tests can inject a stub.
+	resolveAgentctlBinary func() (string, error)
+	// resolveMockAgentBinary returns the host path to a linux/amd64 mock-agent
+	// binary. When it returns "" without error, no mock-agent mount is added
+	// (production case). Used by Docker E2E tests.
+	resolveMockAgentBinary func() (string, error)
 }
 
-// NewContainerManager creates a new ContainerManager
-func NewContainerManager(dockerClient *docker.Client, networkName string, log *logger.Logger) *ContainerManager {
+// NewContainerManager creates a new ContainerManager. kandevHomeDir is the
+// resolved Kandev root dir used to host per-container agent session dirs;
+// pass "" only in legacy callers/tests that don't exercise the session-dir
+// mount path.
+func NewContainerManager(dockerClient *docker.Client, networkName, kandevHomeDir string, log *logger.Logger) *ContainerManager {
+	resolver := NewAgentctlResolver(log)
+	mockResolver := NewMockAgentResolver(log)
 	return &ContainerManager{
-		dockerClient:   dockerClient,
-		commandBuilder: NewCommandBuilder(),
-		logger:         log.WithFields(zap.String("component", "container-manager")),
-		networkName:    networkName,
+		dockerClient:           dockerClient,
+		commandBuilder:         NewCommandBuilder(),
+		logger:                 log.WithFields(zap.String("component", "container-manager")),
+		networkName:            networkName,
+		kandevHomeDir:          kandevHomeDir,
+		resolveAgentctlBinary:  resolver.ResolveLinuxBinary,
+		resolveMockAgentBinary: mockResolver.ResolveLinuxBinary,
 	}
 }
 
 // LaunchResult holds the result of a successful container launch.
 type LaunchResult struct {
-	ContainerID string
-	Client      *agentctl.Client
-	AuthToken   string // auth token retrieved via handshake (for encrypted storage)
+	ContainerID    string
+	Client         *agentctl.Client
+	AuthToken      string // auth token retrieved via handshake (for encrypted storage)
+	BootstrapNonce string // nonce injected into container env for future restart handshakes
 }
 
 // LaunchContainer creates and starts a Docker container for an agent.
@@ -74,24 +105,24 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 	}
 	config.BootstrapNonce = nonce
 
-	containerID, containerIP, err := cm.createAndStartContainer(ctx, config)
+	containerID, containerIP, controlHost, controlPort, err := cm.createAndStartContainer(ctx, config)
 	if err != nil {
 		return nil, err
 	}
 
 	// Create ControlClient (no auth token yet — handshake hasn't happened)
-	ctl := agentctl.NewControlClient(containerIP, AgentCtlPort, cm.logger)
+	ctl := agentctl.NewControlClient(controlHost, controlPort, cm.logger)
 
 	// Wait for agentctl to be healthy
 	if err := cm.waitForHealth(ctx, ctl); err != nil {
-		_ = cm.dockerClient.RemoveContainer(ctx, containerID, true)
+		cm.removeContainerBestEffort(containerID)
 		return nil, fmt.Errorf("agentctl health check failed: %w", err)
 	}
 
 	// Perform handshake: nonce → token
 	authToken, err := ctl.Handshake(ctx, nonce)
 	if err != nil {
-		_ = cm.dockerClient.RemoveContainer(ctx, containerID, true)
+		cm.removeContainerBestEffort(containerID)
 		return nil, fmt.Errorf("agentctl handshake failed: %w", err)
 	}
 
@@ -107,29 +138,30 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 		zap.String("instance_id", config.InstanceID))
 
 	return &LaunchResult{
-		ContainerID: containerID,
-		Client:      client,
-		AuthToken:   authToken,
+		ContainerID:    containerID,
+		Client:         client,
+		AuthToken:      authToken,
+		BootstrapNonce: nonce,
 	}, nil
 }
 
 // createAndStartContainer builds, creates, and starts a Docker container.
 func (cm *ContainerManager) createAndStartContainer(
 	ctx context.Context, config ContainerConfig,
-) (string, string, error) {
+) (string, string, string, int, error) {
 	containerCfg, err := cm.buildContainerConfig(config)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to build container config: %w", err)
+		return "", "", "", 0, fmt.Errorf("failed to build container config: %w", err)
 	}
 
 	containerID, err := cm.dockerClient.CreateContainer(ctx, containerCfg)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to create container: %w", err)
+		return "", "", "", 0, fmt.Errorf("failed to create container: %w", err)
 	}
 
 	if err := cm.dockerClient.StartContainer(ctx, containerID); err != nil {
-		_ = cm.dockerClient.RemoveContainer(ctx, containerID, true)
-		return "", "", fmt.Errorf("failed to start container: %w", err)
+		cm.removeContainerBestEffort(containerID)
+		return "", "", "", 0, fmt.Errorf("failed to start container: %w", err)
 	}
 
 	containerIP, err := cm.dockerClient.GetContainerIP(ctx, containerID)
@@ -139,7 +171,8 @@ func (cm *ContainerManager) createAndStartContainer(
 		containerIP = "127.0.0.1"
 	}
 
-	return containerID, containerIP, nil
+	controlHost, controlPort := cm.resolveContainerEndpoint(ctx, containerID, AgentCtlPort, containerIP)
+	return containerID, containerIP, controlHost, controlPort, nil
 }
 
 // createInstanceAndClient creates an agent instance in the container and returns the client.
@@ -177,13 +210,15 @@ func (cm *ContainerManager) createInstanceAndClient(
 
 	resp, err := ctl.CreateInstance(ctx, createReq)
 	if err != nil {
-		_ = cm.dockerClient.RemoveContainer(ctx, containerID, true)
+		cm.removeContainerBestEffort(containerID)
 		return nil, fmt.Errorf("failed to create instance in container: %w", err)
 	}
 
+	instanceHost, instancePort := cm.resolveContainerEndpoint(ctx, containerID, resp.Port, containerIP)
+
 	// ControlClient already has the auth token set via Handshake —
 	// read it back for the per-instance Client.
-	client := agentctl.NewClient(containerIP, resp.Port, cm.logger,
+	client := agentctl.NewClient(instanceHost, instancePort, cm.logger,
 		agentctl.WithExecutionID(config.InstanceID),
 		agentctl.WithSessionID(config.SessionID),
 		agentctl.WithAuthToken(ctl.AuthToken()))
@@ -191,22 +226,68 @@ func (cm *ContainerManager) createInstanceAndClient(
 	return client, nil
 }
 
-// waitForHealth waits for agentctl to be healthy with retries
+func (cm *ContainerManager) resolveContainerEndpoint(ctx context.Context, containerID string, containerPort int, fallbackHost string) (string, int) {
+	host, port, err := cm.dockerClient.GetContainerHostPort(ctx, containerID, containerPort)
+	if err == nil {
+		return host, port
+	}
+	cm.logger.Warn("failed to resolve published Docker port, falling back to container IP",
+		zap.String("container_id", containerID),
+		zap.Int("container_port", containerPort),
+		zap.String("fallback_host", fallbackHost),
+		zap.Error(err))
+	return fallbackHost, containerPort
+}
+
+func (cm *ContainerManager) removeContainerBestEffort(containerID string) {
+	if containerID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := cm.dockerClient.RemoveContainer(ctx, containerID, true); err != nil {
+		cm.logger.Warn("failed to remove container after launch failure",
+			zap.String("container_id", containerID),
+			zap.Error(err))
+	}
+}
+
+// waitForHealth waits for agentctl to be healthy with retries.
+// The budget covers the time it takes for the container's bootstrap to run the
+// prepare script (git clone, optional network installs) and then exec agentctl.
+// 120s is generous but matches what real workspaces need on first launch.
 func (cm *ContainerManager) waitForHealth(ctx context.Context, ctl *agentctl.ControlClient) error {
-	const maxRetries = 30
+	const maxRetries = 240
 	const retryDelay = 500 * time.Millisecond
 
+	var lastErr error
 	for i := 0; i < maxRetries; i++ {
 		if err := ctl.Health(ctx); err == nil {
 			return nil
+		} else {
+			lastErr = err
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		time.Sleep(retryDelay)
+		// Cancelable wait that also skips the final retry's sleep — the loop
+		// only re-enters if i+1 < maxRetries, so the extra delay was just
+		// added latency on aborted launches.
+		if i+1 < maxRetries {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(retryDelay):
+			}
+		}
 	}
 
-	return fmt.Errorf("agentctl not healthy after %d retries", maxRetries)
+	if lastErr != nil {
+		return fmt.Errorf("agentctl not healthy after %s: %w",
+			time.Duration(maxRetries)*retryDelay, lastErr)
+	}
+	return fmt.Errorf("agentctl not healthy after %s",
+		time.Duration(maxRetries)*retryDelay)
 }
 
 // StopContainer stops and removes a Docker container
@@ -236,29 +317,35 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	ag := config.AgentConfig
 	rt := ag.Runtime()
 
-	// Build image name with tag
+	// Build image name with tag. A profile-level image_tag override (e.g. a
+	// custom Dockerfile built via the executor profile UI) takes precedence
+	// over the agent's hardcoded runtime default.
 	imageName := rt.Image
 	if rt.Tag != "" {
 		imageName = fmt.Sprintf("%s:%s", rt.Image, rt.Tag)
 	}
-
-	// Build command using Agent's BuildCommand
-	cmdOpts := agents.CommandOptions{
-		Model:            config.Model,
-		SessionID:        config.SessionID,
-		PermissionValues: make(map[string]bool),
+	if config.ImageTagOverride != "" {
+		imageName = config.ImageTagOverride
 	}
-	// Get profile settings if available
-	if config.ProfileInfo != nil {
-		cmdOpts.AutoApprove = config.ProfileInfo.AutoApprove
-		cmdOpts.PermissionValues["auto_approve"] = config.ProfileInfo.AutoApprove
-		cmdOpts.PermissionValues["allow_indexing"] = config.ProfileInfo.AllowIndexing
-		cmdOpts.PermissionValues["dangerously_skip_permissions"] = config.ProfileInfo.DangerouslySkipPermissions
-	}
-	cmd := ag.BuildCommand(cmdOpts)
 
-	// Expand mounts
-	mounts := cm.expandMounts(rt.Mounts, config.WorkspacePath, ag)
+	// We don't pre-build the agent CLI command here: agentctl receives it later
+	// via its HTTP API (CreateInstance). The container only needs to launch
+	// agentctl as its main process — see the Entrypoint setup below.
+
+	// Two paths through here use different "workspace" strings:
+	//   - Mount sources expand against the HOST workspace path (config.WorkspacePath
+	//     when set, otherwise no host mount in clone-inside-container mode).
+	//   - WorkingDir is an in-container path; it must always be the container-side
+	//     mount target. Both modes converge on /workspace (the bind-mount target
+	//     in host mode, the clone destination in clone-inside mode), so we hard-
+	//     code it here. Without this distinction, host-bind setups would set
+	//     WorkingDir to the host path, and Docker would happily start the
+	//     container in an unrelated directory.
+	const containerWorkspacePath = "/workspace"
+
+	// Expand mounts using the host path so {workspace} substitutions in mount
+	// sources resolve to a real on-disk location.
+	mounts := cm.expandMounts(rt.Mounts, config.WorkspacePath, ag, config.InstanceID)
 
 	// Add main repo .git directory mount for worktrees
 	if config.MainRepoGitDir != "" {
@@ -271,6 +358,48 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 			zap.String("path", config.MainRepoGitDir))
 	}
 
+	if config.LocalClonePath != "" {
+		mounts = append(mounts, docker.MountConfig{
+			Source:   config.LocalClonePath,
+			Target:   config.LocalClonePath,
+			ReadOnly: true,
+		})
+		cm.logger.Debug("added local clone source mount",
+			zap.String("path", config.LocalClonePath))
+	}
+
+	// Mount the host agentctl linux binary into the container so user-built
+	// images don't have to bake it in. Resolved via AgentctlResolver — same path
+	// the Sprites executor uses.
+	if cm.resolveAgentctlBinary != nil {
+		agentctlPath, err := cm.resolveAgentctlBinary()
+		if err != nil {
+			return docker.ContainerConfig{}, fmt.Errorf("agentctl linux binary not found: %w", err)
+		}
+		mounts = append(mounts, docker.MountConfig{
+			Source:   agentctlPath,
+			Target:   "/usr/local/bin/agentctl",
+			ReadOnly: true,
+		})
+	}
+
+	// Optionally mount a host mock-agent binary for Docker E2E tests. Production
+	// builds run real agents installed in the image; this mount only fires when
+	// KANDEV_MOCK_AGENT_LINUX_BINARY is set or the binary is sitting in build/.
+	if cm.resolveMockAgentBinary != nil {
+		mockPath, err := cm.resolveMockAgentBinary()
+		if err != nil {
+			return docker.ContainerConfig{}, fmt.Errorf("mock-agent binary lookup: %w", err)
+		}
+		if mockPath != "" {
+			mounts = append(mounts, docker.MountConfig{
+				Source:   mockPath,
+				Target:   "/usr/local/bin/mock-agent",
+				ReadOnly: true,
+			})
+		}
+	}
+
 	// Build environment variables
 	env := cm.buildEnvVars(config)
 
@@ -280,30 +409,67 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 
 	containerName := fmt.Sprintf("kandev-agent-%s", config.InstanceID[:8])
 
-	// If a prepare script is provided, pass it as env var for the entrypoint to run
+	// If a prepare script is provided, pass it as env var for the bootstrap to run
 	if config.PrepareScript != "" {
 		env = append(env, "KANDEV_PREPARE_SCRIPT="+config.PrepareScript)
 	}
 
+	// We always launch agentctl as the container's main process and fan out the
+	// agent subprocess from there via the agentctl HTTP API. This frees user-built
+	// images from needing to bake an ENTRYPOINT or know which agent to run — they
+	// only need a runtime that supports the agent CLI (typically node + git).
+	//
+	// The agent's BuildCommand result intentionally stops being passed here;
+	// agentctl receives the agent command later via the CreateInstance API.
+	//
+	// Prepare runs in a subshell so its `set -e` (most prepare scripts opt in)
+	// can't kill the bootstrap before exec'ing agentctl. If prepare fails, we
+	// still bring agentctl up so the host can connect, surface the failure, and
+	// the user can debug from the Executor Settings popover.
+	//
+	//nolint:dupword // two `fi` tokens close two distinct shell blocks.
+	bootstrap := []string{
+		"sh", "-c",
+		`if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then
+  (eval "$KANDEV_PREPARE_SCRIPT")
+  prep_rc=$?
+  if [ "$prep_rc" -ne 0 ]; then
+    echo "[kandev-bootstrap] prepare script failed (exit $prep_rc); starting agentctl anyway so the host can connect and the user can debug via Executor Settings" >&2
+  fi
+fi
+exec /usr/local/bin/agentctl`,
+	}
+
 	containerCfg := docker.ContainerConfig{
-		Name:        containerName,
-		Image:       imageName,
-		Cmd:         cmd.Args(),
-		Env:         env,
-		WorkingDir:  rt.WorkingDir,
-		Mounts:      mounts,
-		NetworkMode: cm.networkName,
-		Memory:      memoryBytes,
-		CPUQuota:    cpuQuota,
+		Name:         containerName,
+		Image:        imageName,
+		Entrypoint:   bootstrap,
+		Cmd:          nil,
+		Env:          env,
+		WorkingDir:   cm.expandMountSource(rt.WorkingDir, containerWorkspacePath),
+		Mounts:       mounts,
+		PortBindings: dockerAgentctlPortBindings(),
+		NetworkMode:  cm.networkName,
+		Memory:       memoryBytes,
+		CPUQuota:     cpuQuota,
 		Labels: map[string]string{
-			"kandev.managed":     "true",
-			"kandev.instance_id": config.InstanceID,
-			"kandev.task_id":     config.TaskID,
-			"kandev.session_id":  config.SessionID,
+			"kandev.managed":             boolStringTrue,
+			"kandev.instance_id":         config.InstanceID,
+			"kandev.task_id":             config.TaskID,
+			"kandev.session_id":          config.SessionID,
+			"kandev.task_environment_id": config.TaskEnvironmentID,
+			"com.kandev.image":           imageName,
 		},
 		AutoRemove: false, // We manage cleanup ourselves
 	}
 
+	if config.ExecutorProfileID != "" {
+		containerCfg.Labels["kandev.executor_profile_id"] = config.ExecutorProfileID
+		containerCfg.Labels["kandev.profile_id"] = config.ExecutorProfileID
+	}
+	if config.TaskTitle != "" {
+		containerCfg.Labels["kandev.task_title"] = config.TaskTitle
+	}
 	if config.ProfileInfo != nil && config.ProfileInfo.ProfileID != "" {
 		containerCfg.Labels["kandev.profile_id"] = config.ProfileInfo.ProfileID
 	}
@@ -311,8 +477,32 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	return containerCfg, nil
 }
 
-// expandMounts expands mount templates with actual paths
-func (cm *ContainerManager) expandMounts(templates []agents.MountTemplate, workspacePath string, ag agents.Agent) []docker.MountConfig {
+func dockerAgentctlPortBindings() []docker.PortBindingConfig {
+	bindings := make([]docker.PortBindingConfig, 0, 1+dockerAgentctlInstancePortMax-dockerAgentctlInstancePortBase+1)
+	bindings = append(bindings, newDockerPortBinding(AgentCtlPort))
+	for port := dockerAgentctlInstancePortBase; port <= dockerAgentctlInstancePortMax; port++ {
+		bindings = append(bindings, newDockerPortBinding(port))
+	}
+	return bindings
+}
+
+func newDockerPortBinding(containerPort int) docker.PortBindingConfig {
+	return docker.PortBindingConfig{
+		ContainerPort: containerPort,
+		HostIP:        "127.0.0.1",
+		HostPort:      "0",
+	}
+}
+
+// expandMounts expands mount templates with actual paths.
+//
+// Per-agent session dirs (SessionConfig.SessionDirTemplate) are mapped to a
+// kandev-managed path under <kandev-home>/agent-sessions/<instance_id>/, NOT
+// the user's host home. The seeder (SeedAgentSessionDir) selectively copies
+// auth files from the host beforehand, so every agent gets a fresh, isolated
+// session dir per launch — host state DBs and session caches that contain
+// absolute host paths (e.g. codex's state.db) stay out of the container.
+func (cm *ContainerManager) expandMounts(templates []agents.MountTemplate, workspacePath string, ag agents.Agent, instanceID string) []docker.MountConfig {
 	mounts := make([]docker.MountConfig, 0, len(templates)+1) // +1 for potential session dir
 
 	for _, mt := range templates {
@@ -332,7 +522,7 @@ func (cm *ContainerManager) expandMounts(templates []agents.MountTemplate, works
 	}
 
 	// Add session directory mount from SessionConfig
-	sessionDirSource := cm.commandBuilder.ExpandSessionDir(ag)
+	sessionDirSource := cm.commandBuilder.ExpandSessionDir(ag, cm.kandevHomeDir, instanceID)
 	sessionDirTarget := cm.commandBuilder.GetSessionDirTarget(ag)
 	if sessionDirSource != "" && sessionDirTarget != "" {
 		mounts = append(mounts, docker.MountConfig{
@@ -348,21 +538,14 @@ func (cm *ContainerManager) expandMounts(templates []agents.MountTemplate, works
 	return mounts
 }
 
-// expandMountSource expands template variables in mount source paths
+// expandMountSource expands template variables in mount source paths.
+// Only `{workspace}` is honoured here — agent session dirs that used to use
+// `{home}/.<agent>` now route through the kandev-managed per-container
+// session dir (see SessionDirHostPath), which keeps host state DBs out of
+// the container. Production agents don't ship `{home}` in Mounts; codex_acp
+// has a regression test asserting this.
 func (cm *ContainerManager) expandMountSource(source, workspacePath string) string {
-	result := source
-	result = strings.ReplaceAll(result, "{workspace}", workspacePath)
-
-	// Expand {home} to user's home directory
-	if strings.Contains(result, "{home}") {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			homeDir = "/tmp"
-		}
-		result = strings.ReplaceAll(result, "{home}", homeDir)
-	}
-
-	return result
+	return strings.ReplaceAll(source, "{workspace}", workspacePath)
 }
 
 // buildEnvVars builds environment variables for the container
@@ -422,6 +605,12 @@ func (cm *ContainerManager) buildEnvVars(config ContainerConfig) []string {
 		env = append(env, fmt.Sprintf("KANDEV_AGENT_PROFILE_ID=%s", config.ProfileInfo.ProfileID))
 	}
 
+	env = append(env,
+		fmt.Sprintf("AGENTCTL_PORT=%d", AgentCtlPort),
+		fmt.Sprintf("AGENTCTL_INSTANCE_PORT_BASE=%d", dockerAgentctlInstancePortBase),
+		fmt.Sprintf("AGENTCTL_INSTANCE_PORT_MAX=%d", dockerAgentctlInstancePortMax),
+	)
+
 	// Inject bootstrap nonce for agentctl handshake (NOT the auth token)
 	if config.BootstrapNonce != "" {
 		env = append(env, "AGENTCTL_BOOTSTRAP_NONCE="+config.BootstrapNonce)
@@ -442,7 +631,7 @@ func generateBootstrapNonce() (string, error) {
 // ListManagedContainers returns all containers managed by kandev
 func (cm *ContainerManager) ListManagedContainers(ctx context.Context) ([]docker.ContainerInfo, error) {
 	return cm.dockerClient.ListContainers(ctx, map[string]string{
-		"kandev.managed": "true",
+		"kandev.managed": boolStringTrue,
 	})
 }
 

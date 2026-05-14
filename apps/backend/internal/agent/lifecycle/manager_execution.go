@@ -169,6 +169,17 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 		taskID = info.TaskID
 	}
 
+	if info.TaskEnvironmentID != "" {
+		if execution, exists := m.executionStore.GetByTaskEnvironmentID(info.TaskEnvironmentID); exists {
+			m.logger.Info("reusing existing execution for task environment",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("task_environment_id", info.TaskEnvironmentID),
+				zap.String("execution_id", execution.ID))
+			return execution, nil
+		}
+	}
+
 	if info.WorkspacePath == "" {
 		return nil, fmt.Errorf("%w: session %s has no workspace path yet", ErrSessionWorkspaceNotReady, sessionID)
 	}
@@ -391,6 +402,8 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		AgentConfig:         agentConfig,
 		Metadata:            info.Metadata,
 		PreviousExecutionID: info.AgentExecutionID,
+		AuthToken:           m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
+		BootstrapNonce:      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
 	}
 
 	runtimeInstance, err := rt.CreateInstance(ctx, req)
@@ -437,7 +450,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 
 	// Persist agentctl auth token only after the execution is tracked, so a
 	// race-lost rollback never leaves an orphaned secret in the store.
-	m.persistAuthToken(ctx, runtimeInstance, execution)
+	m.persistRuntimeSecrets(ctx, runtimeInstance, execution)
 	go m.pollOneRemoteStatus(context.Background(), execution)
 
 	// Publish Starting BEFORE spawning waitForAgentctlReady so subscribers
@@ -477,25 +490,52 @@ func (m *Manager) rollbackRacedExecution(ctx context.Context, rt ExecutorBackend
 	execution.EndSessionSpan()
 }
 
-// MetadataKeyAuthTokenSecret is the metadata key for the encrypted agentctl auth token secret ID.
-const MetadataKeyAuthTokenSecret = "env_secret_id_AGENTCTL_AUTH_TOKEN"
+const (
+	// MetadataKeyAuthTokenSecret is the metadata key for the encrypted agentctl auth token secret ID.
+	MetadataKeyAuthTokenSecret = "env_secret_id_AGENTCTL_AUTH_TOKEN"
+	// MetadataKeyBootstrapNonceSecret stores the encrypted Docker bootstrap nonce.
+	// It lets the backend re-handshake after a container restart starts a new
+	// agentctl process with a fresh auth token.
+	MetadataKeyBootstrapNonceSecret = "env_secret_id_AGENTCTL_BOOTSTRAP_NONCE"
+)
+
+func (m *Manager) persistRuntimeSecrets(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
+	m.persistAuthToken(ctx, instance, execution)
+	m.persistBootstrapNonce(ctx, instance, execution)
+}
 
 // persistAuthToken stores the agentctl handshake auth token in SecretStore
 // and saves the secret ID in the execution's metadata for recovery after restart.
 func (m *Manager) persistAuthToken(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
-	if instance.AuthToken == "" || m.secretStore == nil {
+	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyAuthTokenSecret, "agentctl-auth", instance.AuthToken)
+}
+
+func (m *Manager) persistBootstrapNonce(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
+	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyBootstrapNonceSecret, "agentctl-bootstrap", instance.BootstrapNonce)
+}
+
+func (m *Manager) persistRuntimeSecret(
+	ctx context.Context,
+	instance *ExecutorInstance,
+	execution *AgentExecution,
+	metadataKey string,
+	secretNamePrefix string,
+	value string,
+) {
+	if value == "" || m.secretStore == nil {
 		return
 	}
 
 	secret := &secrets.SecretWithValue{
 		Secret: secrets.Secret{
-			Name: fmt.Sprintf("agentctl-auth-%s", truncateID(instance.InstanceID, 12)),
+			Name: fmt.Sprintf("%s-%s", secretNamePrefix, truncateID(instance.InstanceID, 12)),
 		},
-		Value: instance.AuthToken,
+		Value: value,
 	}
 	if err := m.secretStore.Create(ctx, secret); err != nil {
-		m.logger.Error("failed to persist agentctl auth token",
+		m.logger.Error("failed to persist runtime secret",
 			zap.String("instance_id", instance.InstanceID),
+			zap.String("metadata_key", metadataKey),
 			zap.Error(err))
 		return
 	}
@@ -503,11 +543,31 @@ func (m *Manager) persistAuthToken(ctx context.Context, instance *ExecutorInstan
 	if execution.Metadata == nil {
 		execution.Metadata = make(map[string]interface{})
 	}
-	execution.Metadata[MetadataKeyAuthTokenSecret] = secret.ID
+	execution.Metadata[metadataKey] = secret.ID
 
-	m.logger.Debug("persisted agentctl auth token in secret store",
+	m.logger.Debug("persisted runtime secret in secret store",
 		zap.String("instance_id", instance.InstanceID),
+		zap.String("metadata_key", metadataKey),
 		zap.String("secret_id", secret.ID))
+}
+
+func (m *Manager) revealRuntimeSecret(ctx context.Context, metadata map[string]interface{}, metadataKey string) string {
+	if m.secretStore == nil {
+		return ""
+	}
+	secretID := getMetadataString(metadata, metadataKey)
+	if secretID == "" {
+		return ""
+	}
+	value, err := m.secretStore.Reveal(ctx, secretID)
+	if err != nil {
+		m.logger.Warn("failed to reveal runtime secret",
+			zap.String("metadata_key", metadataKey),
+			zap.String("secret_id", secretID),
+			zap.Error(err))
+		return ""
+	}
+	return value
 }
 
 // truncateID safely truncates an ID string to maxLen characters.

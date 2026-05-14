@@ -227,6 +227,8 @@ export type TaskCreateDialogFooterProps = {
   workspaceId: string | null;
   effectiveWorkflowId: string | null;
   executorHint: string | null;
+  noCompatibleAgent: boolean;
+  executorProfileName: string | null;
   onCancel: () => void;
   onUpdateWithoutAgent: () => void;
   onCreateWithoutAgent: () => void;
@@ -259,7 +261,8 @@ function computeBaseDisabled(props: TaskCreateDialogFooterProps) {
     !props.hasTitle ||
     !props.hasRepositorySelection ||
     !props.hasAllBranches ||
-    missingCtx
+    missingCtx ||
+    props.noCompatibleAgent
   );
 }
 
@@ -273,12 +276,18 @@ export const REASON_WORKFLOW = "Select a workflow";
 export const REASON_AGENT = "Select an agent";
 export const REASON_DESCRIPTION = "Add a session description";
 
+function noCompatibleAgentReason(executorProfileName: string | null): string {
+  const target = executorProfileName ? `“${executorProfileName}”` : "this executor";
+  return `No compatible agent profile is configured for ${target}. Configure agent credentials in Settings → Executors.`;
+}
+
 function baseReason(props: TaskCreateDialogFooterProps): string | null {
   if (!props.hasTitle) return REASON_TITLE;
   if (!props.hasRepositorySelection) return REASON_REPO;
   if (!props.hasAllBranches) return REASON_BRANCH;
   if (props.isCreateMode && !props.workspaceId) return REASON_WORKSPACE;
   if (props.isCreateMode && !props.effectiveWorkflowId) return REASON_WORKFLOW;
+  if (props.noCompatibleAgent) return noCompatibleAgentReason(props.executorProfileName);
   return null;
 }
 
@@ -287,6 +296,7 @@ function missingSessionDescription(props: TaskCreateDialogFooterProps): boolean 
 }
 
 function sessionDefaultReason(props: TaskCreateDialogFooterProps): string | null {
+  if (props.noCompatibleAgent) return noCompatibleAgentReason(props.executorProfileName);
   if (!props.agentProfileId) return REASON_AGENT;
   if (missingSessionDescription(props)) return REASON_DESCRIPTION;
   return null;
@@ -319,7 +329,13 @@ function computeFooterState(props: TaskCreateDialogFooterProps) {
   const blocked = Boolean(props.submitBlockedReason);
   const altDisabled = computeBaseDisabled(props) || blocked;
   const splitDisabled = altDisabled || !props.agentProfileId;
-  const defaultDisabled = (props.isSessionMode ? !props.agentProfileId : altDisabled) || blocked;
+  // Session mode previously only gated on missing agent — it ignored
+  // noCompatibleAgent, so a user who switched executor after picking an
+  // agent could still submit a known-incompatible combination. The reason
+  // text already surfaces noCompatibleAgentReason in this branch (see
+  // sessionDefaultReason), so the disable gate needs to match.
+  const sessionDisabled = !props.agentProfileId || props.noCompatibleAgent;
+  const defaultDisabled = (props.isSessionMode ? sessionDisabled : altDisabled) || blocked;
 
   const disabledReason = computeDisabledReason(props, resolveButtonKind(props, showStartTask));
 

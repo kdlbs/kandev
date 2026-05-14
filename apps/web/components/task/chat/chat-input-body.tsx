@@ -18,6 +18,8 @@ export type ChatInputEditorAreaProps = {
   handleSubmitWithReset: () => void;
   inputPlaceholder: string;
   isDisabled: boolean;
+  submitDisabled: boolean;
+  submitDisabledReason?: string;
   hasClarification: boolean;
   planModeEnabled: boolean;
   planModeAvailable: boolean;
@@ -126,7 +128,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   const userContextCount = planContextEnabled ? Math.max(0, contextCount - 1) : contextCount;
   const hasContent = value.trim().length > 0 || userContextCount > 0;
   // Block submit while enhancing prompt, but keep editor editable for programmatic updates
-  const wrappedSubmit = isEnhancingPrompt ? () => {} : handleSubmitWithReset;
+  const wrappedSubmit = isEnhancingPrompt || p.submitDisabled ? () => {} : handleSubmitWithReset;
   const handleAttachFiles = useCallback(() => fileInputRef.current?.click(), [fileInputRef]);
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -167,7 +169,8 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         taskDescription={taskDescription}
         isAgentBusy={isAgentBusy}
         hasContent={hasContent}
-        isDisabled={isDisabled}
+        isDisabled={p.submitDisabled}
+        submitDisabledReason={p.submitDisabledReason}
         isSending={isSending}
         onCancel={onCancel}
         onSubmit={wrappedSubmit}

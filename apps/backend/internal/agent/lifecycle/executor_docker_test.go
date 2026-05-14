@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/common/config"
@@ -27,7 +28,7 @@ func failingClientFactory(errMsg string) func(config.DockerConfig, *logger.Logge
 
 func TestNewDockerExecutor(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	if exec == nil {
 		t.Fatal("expected non-nil executor")
@@ -48,7 +49,7 @@ func TestNewDockerExecutor(t *testing.T) {
 
 func TestDockerExecutor_Name(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	if exec.Name() != executor.NameDocker {
 		t.Errorf("expected name %q, got %q", executor.NameDocker, exec.Name())
@@ -57,7 +58,7 @@ func TestDockerExecutor_Name(t *testing.T) {
 
 func TestDockerExecutor_HealthCheck(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	if err := exec.HealthCheck(context.Background()); err != nil {
 		t.Errorf("expected nil error, got: %v", err)
@@ -66,7 +67,7 @@ func TestDockerExecutor_HealthCheck(t *testing.T) {
 
 func TestDockerExecutor_RecoverInstances(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	instances, err := exec.RecoverInstances(context.Background())
 	if err != nil {
@@ -79,7 +80,7 @@ func TestDockerExecutor_RecoverInstances(t *testing.T) {
 
 func TestDockerExecutor_GetInteractiveRunner(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	if runner := exec.GetInteractiveRunner(); runner != nil {
 		t.Error("expected nil interactive runner for docker executor")
@@ -88,7 +89,7 @@ func TestDockerExecutor_GetInteractiveRunner(t *testing.T) {
 
 func TestDockerExecutor_EnsureClient_Success(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 	// Default factory uses docker.NewClient which succeeds even without Docker running
 
 	cli, cm, err := exec.ensureClient()
@@ -123,7 +124,7 @@ func TestDockerExecutor_EnsureClient_Success(t *testing.T) {
 
 func TestDockerExecutor_EnsureClient_RetriesOnFailure(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	var callCount atomic.Int32
 	exec.newClientFunc = func(_ config.DockerConfig, _ *logger.Logger) (*docker.Client, error) {
@@ -155,7 +156,7 @@ func TestDockerExecutor_EnsureClient_RetriesOnFailure(t *testing.T) {
 
 func TestDockerExecutor_EnsureClient_RecoversAfterTransientFailure(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	var callCount atomic.Int32
 	exec.newClientFunc = func(cfg config.DockerConfig, l *logger.Logger) (*docker.Client, error) {
@@ -190,7 +191,7 @@ func TestDockerExecutor_EnsureClient_RecoversAfterTransientFailure(t *testing.T)
 
 func TestDockerExecutor_Client_ReturnsNilOnFailure(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 	exec.newClientFunc = failingClientFactory("docker unavailable")
 
 	if cli := exec.Client(); cli != nil {
@@ -200,7 +201,7 @@ func TestDockerExecutor_Client_ReturnsNilOnFailure(t *testing.T) {
 
 func TestDockerExecutor_ContainerMgr_ReturnsNilOnFailure(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 	exec.newClientFunc = failingClientFactory("docker unavailable")
 
 	if cm := exec.ContainerMgr(); cm != nil {
@@ -210,7 +211,7 @@ func TestDockerExecutor_ContainerMgr_ReturnsNilOnFailure(t *testing.T) {
 
 func TestDockerExecutor_Client_ReturnsClientOnSuccess(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	cli := exec.Client()
 	if cli == nil {
@@ -222,7 +223,7 @@ func TestDockerExecutor_Client_ReturnsClientOnSuccess(t *testing.T) {
 
 func TestDockerExecutor_Close_BeforeInit(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	if err := exec.Close(); err != nil {
 		t.Errorf("expected nil error, got: %v", err)
@@ -231,7 +232,7 @@ func TestDockerExecutor_Close_BeforeInit(t *testing.T) {
 
 func TestDockerExecutor_Close_AfterInit(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	// Initialize the client
 	_, _, _ = exec.ensureClient()
@@ -256,7 +257,7 @@ func TestDockerExecutor_Close_AfterInit(t *testing.T) {
 
 func TestDockerExecutor_Close_AfterFailedInit(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 	exec.newClientFunc = failingClientFactory("docker unavailable")
 
 	// Trigger failed init
@@ -296,7 +297,7 @@ func TestDockerClientProvider_NoDockerExecutor(t *testing.T) {
 func TestDockerClientProvider_WithDockerExecutor(t *testing.T) {
 	log := newTestDockerLogger()
 	registry := NewExecutorRegistry(log)
-	dockerExec := NewDockerExecutor(config.DockerConfig{}, log)
+	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", log)
 	dockerExec.newClientFunc = failingClientFactory("docker unavailable")
 	registry.Register(dockerExec)
 	mgr := NewManager(nil, nil, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
@@ -310,7 +311,7 @@ func TestDockerClientProvider_WithDockerExecutor(t *testing.T) {
 func TestDockerClientProvider_WithWorkingDocker(t *testing.T) {
 	log := newTestDockerLogger()
 	registry := NewExecutorRegistry(log)
-	dockerExec := NewDockerExecutor(config.DockerConfig{}, log)
+	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", log)
 	registry.Register(dockerExec)
 	mgr := NewManager(nil, nil, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
 
@@ -328,7 +329,7 @@ func TestExecutorRegistry_CloseAll(t *testing.T) {
 		log := newTestDockerLogger()
 		registry := NewExecutorRegistry(log)
 
-		dockerExec := NewDockerExecutor(config.DockerConfig{}, log)
+		dockerExec := NewDockerExecutor(config.DockerConfig{}, "", log)
 		registry.Register(dockerExec)
 		registry.Register(&MockExecutor{name: executor.NameStandalone})
 
@@ -346,9 +347,6 @@ func TestExecutorRegistry_CloseAll(t *testing.T) {
 }
 
 func TestInjectTokenIntoURL(t *testing.T) {
-	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
-
 	tests := []struct {
 		name     string
 		url      string
@@ -407,7 +405,7 @@ func TestInjectTokenIntoURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := exec.injectTokenIntoURL(tt.url, tt.env)
+			got := injectGitHubTokenIntoCloneURL(tt.url, tt.env)
 			if got != tt.expected {
 				t.Errorf("injectTokenIntoURL(%q) = %q, want %q", tt.url, got, tt.expected)
 			}
@@ -417,7 +415,7 @@ func TestInjectTokenIntoURL(t *testing.T) {
 
 func TestReconnectToContainer_ValidationErrors(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	t.Run("short execution ID rejected", func(t *testing.T) {
 		req := &ExecutorCreateRequest{
@@ -443,9 +441,120 @@ func TestReconnectToContainer_ValidationErrors(t *testing.T) {
 	})
 }
 
+func TestResolveReconnectContainerRef(t *testing.T) {
+	t.Run("uses stored container id before derived execution name", func(t *testing.T) {
+		req := &ExecutorCreateRequest{
+			PreviousExecutionID: "exec-previous",
+			Metadata: map[string]interface{}{
+				MetadataKeyContainerID: "container-real",
+			},
+		}
+		got, err := resolveReconnectContainerRef(req)
+		if err != nil {
+			t.Fatalf("resolveReconnectContainerRef returned error: %v", err)
+		}
+		if got != "container-real" {
+			t.Fatalf("expected stored container id, got %q", got)
+		}
+	})
+
+	t.Run("falls back to legacy name from previous execution id", func(t *testing.T) {
+		req := &ExecutorCreateRequest{PreviousExecutionID: "12345678-abcdef"}
+		got, err := resolveReconnectContainerRef(req)
+		if err != nil {
+			t.Fatalf("resolveReconnectContainerRef returned error: %v", err)
+		}
+		if got != "kandev-agent-12345678" {
+			t.Fatalf("expected derived container name, got %q", got)
+		}
+	})
+}
+
+func TestReconnectInstanceID(t *testing.T) {
+	t.Run("uses requested instance for new session in existing container", func(t *testing.T) {
+		req := &ExecutorCreateRequest{InstanceID: "exec-new"}
+		got := reconnectInstanceID(req, "exec-old")
+		if got != "exec-new" {
+			t.Fatalf("reconnectInstanceID = %q, want exec-new", got)
+		}
+	})
+
+	t.Run("falls back to previous execution for legacy callers", func(t *testing.T) {
+		got := reconnectInstanceID(&ExecutorCreateRequest{}, "exec-old")
+		if got != "exec-old" {
+			t.Fatalf("reconnectInstanceID = %q, want exec-old", got)
+		}
+	})
+}
+
+func TestShouldStartExistingDockerContainer(t *testing.T) {
+	tests := []struct {
+		state string
+		want  bool
+	}{
+		{state: "created", want: true},
+		{state: "exited", want: true},
+		{state: "running", want: false},
+		{state: "paused", want: false},
+		{state: "dead", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.state, func(t *testing.T) {
+			if got := shouldStartExistingDockerContainer(tt.state); got != tt.want {
+				t.Fatalf("shouldStartExistingDockerContainer(%q) = %v, want %v", tt.state, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildReconnectCreateInstanceRequest(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		TaskID:    "task-1",
+		SessionID: "session-1",
+		AgentConfig: &testAgent{
+			id:      "codex",
+			enabled: true,
+			runtimeConfig: &agents.RuntimeConfig{
+				AssumeMcpSse: true,
+			},
+		},
+		Env: map[string]string{
+			"OPENAI_API_KEY": "token",
+		},
+		McpServers: []McpServerConfig{{Name: "test-mcp"}},
+		McpMode:    "config",
+	}
+
+	got := buildReconnectCreateInstanceRequest(req, "previous-exec")
+	if got.ID != "previous-exec" {
+		t.Fatalf("ID = %q, want previous-exec", got.ID)
+	}
+	if got.WorkspacePath != dockerWorkspacePath {
+		t.Fatalf("WorkspacePath = %q, want %q", got.WorkspacePath, dockerWorkspacePath)
+	}
+	if got.AgentType != "codex" {
+		t.Fatalf("AgentType = %q, want codex", got.AgentType)
+	}
+	if got.SessionID != "session-1" || got.TaskID != "task-1" {
+		t.Fatalf("task/session not propagated: task=%q session=%q", got.TaskID, got.SessionID)
+	}
+	if got.Env["OPENAI_API_KEY"] != "token" {
+		t.Fatalf("env not propagated: %v", got.Env)
+	}
+	if len(got.McpServers) != 1 || got.McpServers[0].Name != "test-mcp" {
+		t.Fatalf("mcp servers not propagated: %v", got.McpServers)
+	}
+	if !got.AssumeMcpSse {
+		t.Fatal("expected AssumeMcpSse to be propagated")
+	}
+	if got.McpMode != "config" {
+		t.Fatalf("McpMode = %q, want config", got.McpMode)
+	}
+}
+
 func TestResolvePrepareScript(t *testing.T) {
 	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, log)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
 	t.Run("uses default docker script when no metadata", func(t *testing.T) {
 		req := &ExecutorCreateRequest{
@@ -453,6 +562,7 @@ func TestResolvePrepareScript(t *testing.T) {
 				"repository_path":      "/tmp/repo",
 				"base_branch":          "main",
 				"repository_clone_url": "https://github.com/org/repo.git",
+				"worktree_branch":      "feature/task-abc",
 			},
 			Env: map[string]string{"GH_TOKEN": "ghp_test"},
 		}
@@ -464,9 +574,15 @@ func TestResolvePrepareScript(t *testing.T) {
 		if !strings.Contains(script, "git clone") {
 			t.Error("expected git clone in script")
 		}
+		if !strings.Contains(script, "git config --global --add safe.directory '*'") {
+			t.Error("expected default Docker prepare script to trust mounted local repositories")
+		}
 		// Should contain token stripping
 		if !strings.Contains(script, "git remote set-url") {
 			t.Error("expected token stripping after clone")
+		}
+		if !strings.Contains(script, "git checkout -b \"feature/task-abc\"") {
+			t.Fatalf("expected Docker prepare script to create task branch, got:\n%s", script)
 		}
 	})
 
@@ -481,4 +597,27 @@ func TestResolvePrepareScript(t *testing.T) {
 			t.Fatal("expected non-empty default script")
 		}
 	})
+}
+
+func TestLocalPathFromCloneURL(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "file URL", raw: "file:///tmp/e2e-docker-remote.git", want: "/tmp/e2e-docker-remote.git"},
+		{name: "escaped file URL", raw: "file:///tmp/repo%20remote.git", want: "/tmp/repo remote.git"},
+		{name: "localhost file URL", raw: "file://localhost/tmp/repo.git", want: "/tmp/repo.git"},
+		{name: "plain absolute path", raw: "/tmp/repo.git", want: "/tmp/repo.git"},
+		{name: "https URL", raw: "https://github.com/org/repo.git", want: ""},
+		{name: "remote file host", raw: "file://server/tmp/repo.git", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := localPathFromCloneURL(tt.raw); got != tt.want {
+				t.Fatalf("localPathFromCloneURL(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
 }

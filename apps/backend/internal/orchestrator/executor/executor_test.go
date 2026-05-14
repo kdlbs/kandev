@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -824,6 +825,60 @@ func TestRepositoryCloneURL(t *testing.T) {
 	}
 }
 
+// TestRepositoryCloneURL_LocalPathFallback covers the second code path
+// added to support Docker E2E tests: when the repository has no
+// ProviderOwner/ProviderName, the function shells out to
+// `git -C LocalPath remote get-url origin` and returns the result.
+// Without these tests the file://-remote E2E fixture would have no
+// regression guard.
+func TestRepositoryCloneURL_LocalPathFallback(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	t.Run("local-only repo with valid git remote", func(t *testing.T) {
+		dir := t.TempDir()
+		mustRunGit(t, dir, "init", "--quiet")
+		mustRunGit(t, dir, "remote", "add", "origin", "file:///some/path.git")
+
+		got := repositoryCloneURL(&models.Repository{LocalPath: dir})
+		if got != "file:///some/path.git" {
+			t.Errorf("got %q, want file:///some/path.git", got)
+		}
+	})
+
+	t.Run("local-only repo without remote returns empty", func(t *testing.T) {
+		dir := t.TempDir()
+		mustRunGit(t, dir, "init", "--quiet")
+
+		if got := repositoryCloneURL(&models.Repository{LocalPath: dir}); got != "" {
+			t.Errorf("repo without origin remote should return empty, got %q", got)
+		}
+	})
+
+	t.Run("local-only non-git dir returns empty", func(t *testing.T) {
+		if got := repositoryCloneURL(&models.Repository{LocalPath: t.TempDir()}); got != "" {
+			t.Errorf("non-git dir should return empty, got %q", got)
+		}
+	})
+
+	t.Run("no provider and no local path returns empty", func(t *testing.T) {
+		if got := repositoryCloneURL(&models.Repository{}); got != "" {
+			t.Errorf("empty repository should return empty, got %q", got)
+		}
+	})
+}
+
+// mustRunGit fails the test if `git -C dir <args...>` exits non-zero.
+// Kept tiny on purpose — only used by the LocalPath-fallback tests.
+func mustRunGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
 func TestPersistResumeState_SetsStartingState(t *testing.T) {
 	repo := newMockRepository()
 	agentManager := &mockAgentManager{}
@@ -841,8 +896,7 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 		}
 		repo.sessions[session.ID] = session
 
-		resp := &LaunchAgentResponse{AgentExecutionID: "exec-1"}
-		executor.persistResumeState(context.Background(), "task-1", session, resp, true, executorConfig{}, nil)
+		executor.persistResumeState(context.Background(), "task-1", session, true)
 
 		if session.State != models.TaskSessionStateStarting {
 			t.Errorf("expected state STARTING, got %s", session.State)
@@ -861,8 +915,7 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 		}
 		repo.sessions[session.ID] = session
 
-		resp := &LaunchAgentResponse{AgentExecutionID: "exec-2"}
-		executor.persistResumeState(context.Background(), "task-1", session, resp, false, executorConfig{}, nil)
+		executor.persistResumeState(context.Background(), "task-1", session, false)
 
 		if session.State != models.TaskSessionStateWaitingForInput {
 			t.Errorf("expected state WAITING_FOR_INPUT, got %s", session.State)

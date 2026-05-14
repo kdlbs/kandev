@@ -903,6 +903,50 @@ func TestGetTaskSessionStatus_HealsStuckStartingSession(t *testing.T) {
 // mismatch this test simulated cannot occur, and the band-aid was removed
 // (see shouldHealStuckStartingSession in task_operations.go).
 
+func TestGetTaskSessionStatus_UsesTaskEnvironmentBranchForDocker(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.TaskEnvironmentID = "env1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID:             "env1",
+		TaskID:         "task1",
+		ExecutorType:   string(models.ExecutorTypeLocalDocker),
+		WorktreePath:   "/workspace",
+		WorktreeBranch: "feature/test-task-abc",
+		WorkspacePath:  "/workspace",
+		Status:         models.TaskEnvironmentStatusReady,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}); err != nil {
+		t.Fatalf("failed to create task environment: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus returned error: %v", err)
+	}
+	if resp.WorktreeBranch == nil || *resp.WorktreeBranch != "feature/test-task-abc" {
+		t.Fatalf("worktree_branch = %v, want feature/test-task-abc", resp.WorktreeBranch)
+	}
+	if resp.WorktreePath == nil || *resp.WorktreePath != "/workspace" {
+		t.Fatalf("worktree_path = %v, want /workspace", resp.WorktreePath)
+	}
+}
+
 // --- ReconcileSessionsOnStartup ---
 
 func TestReconcileSessionsOnStartup(t *testing.T) {

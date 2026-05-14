@@ -16,18 +16,32 @@ import (
 
 var uploadHTTPStatusRE = regexp.MustCompile(`(?i)\b(?:http|status)\s*:?\s*(\d{3})\b`)
 
-func (r *SpritesExecutor) injectTokenIntoURL(remoteURL string, env map[string]string) string {
+// injectGitHubTokenIntoCloneURL injects a GitHub token into a clone URL so
+// in-container `git clone` works without prompting. Honours both
+// GITHUB_TOKEN and GH_TOKEN (gh CLI uses GH_TOKEN; Actions/most workflows
+// use GITHUB_TOKEN — accepting either keeps callers from a 401 because they
+// only set one). GITHUB_TOKEN wins when both are present, matching the
+// original Docker behaviour. Uses the documented
+// `https://x-access-token:T@github.com/` form, which works for both clone
+// and gh CLI authentication.
+//
+// Used by both Docker and Sprites executors. SSH→HTTPS rewrite is delegated
+// to rewriteGitHubSSHToHTTPS so the two surfaces never drift again.
+func injectGitHubTokenIntoCloneURL(cloneURL string, env map[string]string) string {
 	token := env["GITHUB_TOKEN"]
 	if token == "" {
-		return remoteURL
+		token = env["GH_TOKEN"]
 	}
-	if converted := rewriteGitHubSSHToHTTPS(remoteURL); converted != "" {
-		remoteURL = converted
+	if token == "" {
+		return cloneURL
 	}
-	if strings.HasPrefix(remoteURL, "https://") {
-		return strings.Replace(remoteURL, "https://", "https://"+token+"@", 1)
+	if converted := rewriteGitHubSSHToHTTPS(cloneURL); converted != "" {
+		cloneURL = converted
 	}
-	return remoteURL
+	if strings.HasPrefix(cloneURL, "https://github.com/") {
+		return strings.Replace(cloneURL, "https://github.com/", "https://x-access-token:"+token+"@github.com/", 1)
+	}
+	return cloneURL
 }
 
 func rewriteGitHubSSHToHTTPS(remoteURL string) string {
@@ -119,12 +133,108 @@ func (r *SpritesExecutor) buildSpriteEnv(env map[string]string) []string {
 	return result
 }
 
-// newStepReporter creates a reporting function that calls OnProgress if non-nil.
-func newStepReporter(onProgress PrepareProgressCallback) func(PrepareStep, int) {
-	return func(step PrepareStep, idx int) {
-		if onProgress != nil {
-			onProgress(step, idx, spritesTotalSteps)
+type spritesStepKey string
+
+const (
+	spriteStepCreateSprite       spritesStepKey = "create_sprite"
+	spriteStepUploadAgentctl     spritesStepKey = "upload_agentctl"
+	spriteStepUploadCredentials  spritesStepKey = "upload_credentials"
+	spriteStepRunPrepareScript   spritesStepKey = "run_prepare_script"
+	spriteStepWaitHealthy        spritesStepKey = "wait_healthy"
+	spriteStepAgentInstance      spritesStepKey = "agent_instance"
+	spriteStepApplyNetworkPolicy spritesStepKey = "apply_network_policy"
+)
+
+// spritesProgressPlan is mutable so the reconnect path can swap to the fresh
+// plan mid-flight when a stale sandbox falls back to provisioning a new one.
+// The reporter created by newSpritesStepReporter resolves indexes lazily off
+// the live plan, so callers don't need to re-create it after replacePlan.
+type spritesProgressPlan struct {
+	steps   []spritesStepKey
+	indexes map[spritesStepKey]int
+}
+
+func newSpritesProgressPlan(reconnect bool) *spritesProgressPlan {
+	if reconnect {
+		return buildPlan([]spritesStepKey{
+			spriteStepCreateSprite,
+			spriteStepWaitHealthy,
+			spriteStepAgentInstance,
+		})
+	}
+	return buildPlan([]spritesStepKey{
+		spriteStepCreateSprite,
+		spriteStepUploadAgentctl,
+		spriteStepUploadCredentials,
+		spriteStepRunPrepareScript,
+		spriteStepWaitHealthy,
+		spriteStepAgentInstance,
+		spriteStepApplyNetworkPolicy,
+	})
+}
+
+func buildPlan(steps []spritesStepKey) *spritesProgressPlan {
+	indexes := make(map[spritesStepKey]int, len(steps))
+	for i, key := range steps {
+		indexes[key] = i
+	}
+	return &spritesProgressPlan{steps: steps, indexes: indexes}
+}
+
+func (p *spritesProgressPlan) total() int {
+	if p == nil {
+		return 0
+	}
+	return len(p.steps)
+}
+
+func (p *spritesProgressPlan) has(key spritesStepKey) bool {
+	if p == nil {
+		return false
+	}
+	_, ok := p.indexes[key]
+	return ok
+}
+
+func (p *spritesProgressPlan) index(key spritesStepKey) int {
+	if p == nil {
+		return -1
+	}
+	idx, ok := p.indexes[key]
+	if !ok {
+		return -1
+	}
+	return idx
+}
+
+// replacePlan swaps the active plan in place (used by the reconnect-fell-back-
+// to-fresh path). The reporter dispatches off the live indexes, so existing
+// closures keep working after replacement.
+func (p *spritesProgressPlan) replacePlan(steps []spritesStepKey) {
+	if p == nil {
+		return
+	}
+	indexes := make(map[spritesStepKey]int, len(steps))
+	for i, key := range steps {
+		indexes[key] = i
+	}
+	p.steps = steps
+	p.indexes = indexes
+}
+
+// newSpritesStepReporter creates a reporting function that calls OnProgress if
+// non-nil. Index/total are resolved against the live plan on each call so
+// replacePlan is reflected in subsequent reports.
+func newSpritesStepReporter(onProgress PrepareProgressCallback, plan *spritesProgressPlan) func(spritesStepKey, PrepareStep) {
+	return func(key spritesStepKey, step PrepareStep) {
+		if onProgress == nil {
+			return
 		}
+		idx := plan.index(key)
+		if idx < 0 {
+			return
+		}
+		onProgress(step, idx, plan.total())
 	}
 }
 

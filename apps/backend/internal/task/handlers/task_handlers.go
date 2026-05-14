@@ -71,6 +71,8 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/tasks/:id/sessions", h.httpListTaskSessions)
 	api.POST("/tasks/:id/sessions/ensure", h.httpEnsureTaskSession)
 	api.GET("/tasks/:id/environment", h.httpGetTaskEnvironment)
+	api.GET("/tasks/:id/environment/live", h.httpGetTaskEnvironmentLive)
+	api.POST("/tasks/:id/environment/reset", h.httpResetTaskEnvironment)
 	api.GET("/task-sessions/:id/turns", h.httpListSessionTurns)
 	api.POST("/tasks", h.httpCreateTask)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)

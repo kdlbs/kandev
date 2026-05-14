@@ -1077,6 +1077,7 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 
 	// Extract worktree info
 	populateWorktreeInfo(session, &resp)
+	s.populateEnvironmentWorkspaceInfo(ctx, session, &resp)
 
 	// 2. Check if this session's agent is running
 	if exec, ok := s.executor.GetExecutionBySession(sessionID); ok && exec != nil {
@@ -1195,6 +1196,31 @@ func populateWorktreeInfo(session *models.TaskSession, resp *dto.TaskSessionStat
 	if wt.WorktreeBranch != "" {
 		resp.WorktreeBranch = &wt.WorktreeBranch
 	}
+}
+
+func (s *Service) populateEnvironmentWorkspaceInfo(ctx context.Context, session *models.TaskSession, resp *dto.TaskSessionStatusResponse) {
+	if hasWorktreeStatus(resp) {
+		return
+	}
+	env, err := s.repo.GetTaskEnvironmentByTaskID(ctx, session.TaskID)
+	if err != nil || env == nil {
+		return
+	}
+	if session.TaskEnvironmentID != "" && env.ID != session.TaskEnvironmentID {
+		return
+	}
+	if resp.WorktreePath == nil && env.WorktreePath != "" {
+		resp.WorktreePath = &env.WorktreePath
+	}
+	if resp.WorktreeBranch == nil && env.WorktreeBranch != "" {
+		resp.WorktreeBranch = &env.WorktreeBranch
+	}
+}
+
+func hasWorktreeStatus(resp *dto.TaskSessionStatusResponse) bool {
+	return resp != nil &&
+		resp.WorktreePath != nil && *resp.WorktreePath != "" &&
+		resp.WorktreeBranch != nil && *resp.WorktreeBranch != ""
 }
 
 // isActiveSessionState returns true for session states where lazy resume makes sense.

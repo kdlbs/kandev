@@ -30,10 +30,14 @@ export function useSessionState(sessionId: string | null) {
 
   const { session } = useSession(resolvedSessionId);
   const task = useTask(session?.task_id ?? null);
+  const prepareStatus = useAppStore((state) =>
+    resolvedSessionId ? state.prepareProgress.bySessionId[resolvedSessionId]?.status : undefined,
+  );
 
   const taskId = session?.task_id ?? null;
   const taskDescription = task?.description ?? null;
   const flags = deriveSessionFlags(session?.state, session?.error_message);
+  const isPreparingEnvironment = prepareStatus === "preparing";
 
   return {
     resolvedSessionId,
@@ -42,5 +46,13 @@ export function useSessionState(sessionId: string | null) {
     taskId,
     taskDescription,
     ...flags,
+    isStarting: flags.isStarting || isPreparingEnvironment,
+    isWorking: flags.isWorking || isPreparingEnvironment,
+    // Exposed separately so consumers that gate on "is the executor still
+    // bootstrapping" (e.g. the chat input "agent is still being set up"
+    // tooltip) can distinguish a brief STARTING transition — which every
+    // session passes through, including local quick-chat — from an active
+    // Docker / Sprites prepare-environment phase.
+    isPreparingEnvironment,
   };
 }

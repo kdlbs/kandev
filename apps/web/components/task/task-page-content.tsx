@@ -282,11 +282,6 @@ function buildTaskTopBarProps(params: {
     isRemoteExecutor: params.remote.isRemoteExecutor,
     isAgentctlReady: params.agentctlReady,
     remoteExecutorType: params.remote.remoteExecutorType,
-    remoteExecutorName: params.remote.remoteExecutorName,
-    remoteState: params.remote.remoteState,
-    remoteCreatedAt: params.remote.remoteCreatedAt,
-    remoteCheckedAt: params.remote.remoteCheckedAt,
-    remoteStatusError: params.remote.remoteStatusError,
   };
 }
 

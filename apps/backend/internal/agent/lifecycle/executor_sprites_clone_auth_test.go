@@ -38,10 +38,17 @@ func TestRewriteGitHubSSHToHTTPS(t *testing.T) {
 }
 
 func TestInjectTokenIntoURL_RewritesGitHubSSHWhenTokenExists(t *testing.T) {
-	exec := &SpritesExecutor{}
 	env := map[string]string{"GITHUB_TOKEN": "test-token"}
-	got := exec.injectTokenIntoURL("git@github.com:kdlbs/agents-protocol-debug.git", env)
-	require.Equal(t, "https://test-token@github.com/kdlbs/agents-protocol-debug.git", got)
+	got := injectGitHubTokenIntoCloneURL("git@github.com:kdlbs/agents-protocol-debug.git", env)
+	require.Equal(t, "https://x-access-token:test-token@github.com/kdlbs/agents-protocol-debug.git", got)
+}
+
+func TestInjectTokenIntoURL_HonoursGHTokenFallback(t *testing.T) {
+	// Sprites used to ignore GH_TOKEN; since unifying with Docker, both env
+	// var names are accepted (GITHUB_TOKEN wins when both are set).
+	env := map[string]string{"GH_TOKEN": "gh-token"}
+	got := injectGitHubTokenIntoCloneURL("https://github.com/org/repo.git", env)
+	require.Equal(t, "https://x-access-token:gh-token@github.com/org/repo.git", got)
 }
 
 func TestIsTransientUploadError(t *testing.T) {

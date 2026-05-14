@@ -2,13 +2,21 @@ package websocket
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/agent/lifecycle"
+	agentctlclient "github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 func TestCheckWebSocketOrigin(t *testing.T) {
@@ -203,4 +211,104 @@ func TestSessionTerminalRouteRequiresAgentMode(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWaitForRemoteExecutionReadyRechecksReplacedExecution(t *testing.T) {
+	log := testTerminalLogger(t)
+	manager := lifecycle.NewManager(
+		nil,
+		bus.NewMemoryEventBus(log),
+		nil,
+		nil,
+		nil,
+		nil,
+		lifecycle.ExecutorFallbackDeny,
+		t.TempDir(),
+		log,
+	)
+	handler := NewTerminalHandler(manager, nil, nil, log)
+
+	staleServer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer staleServer.Close()
+	readyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer readyServer.Close()
+
+	oldExecution := testRemoteExecution(t, staleServer.URL, "exec-old", "session-1", "env-1", log)
+	newExecution := testRemoteExecution(t, readyServer.URL, "exec-new", "session-1", "env-1", log)
+
+	if err := manager.ExecutionStoreForTesting().Add(oldExecution); err != nil {
+		t.Fatalf("add old execution: %v", err)
+	}
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		manager.RemoveExecution(oldExecution.ID)
+		if err := manager.ExecutionStoreForTesting().Add(newExecution); err != nil {
+			t.Errorf("add new execution: %v", err)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	got, ok := handler.waitForRemoteExecutionReadyWithTimeout(ctx, "session-1", 1500*time.Millisecond)
+	if !ok {
+		t.Fatal("waitForRemoteExecutionReadyWithTimeout returned not ready")
+	}
+	if got.ID != newExecution.ID {
+		t.Fatalf("execution ID = %q, want %q", got.ID, newExecution.ID)
+	}
+}
+
+func testRemoteExecution(
+	t *testing.T,
+	serverURL string,
+	executionID string,
+	sessionID string,
+	taskEnvironmentID string,
+	log *logger.Logger,
+) *lifecycle.AgentExecution {
+	t.Helper()
+
+	parsed, err := url.Parse(serverURL)
+	if err != nil {
+		t.Fatalf("parse server URL: %v", err)
+	}
+	host, portString, err := net.SplitHostPort(parsed.Host)
+	if err != nil {
+		t.Fatalf("split server host/port: %v", err)
+	}
+	port, err := strconv.Atoi(portString)
+	if err != nil {
+		t.Fatalf("parse server port: %v", err)
+	}
+
+	instance := &lifecycle.ExecutorInstance{
+		InstanceID:    executionID,
+		Client:        agentctlclient.NewClient(host, port, log),
+		RuntimeName:   "docker",
+		WorkspacePath: "/workspace",
+	}
+	return instance.ToAgentExecution(&lifecycle.ExecutorCreateRequest{
+		TaskID:            "task-1",
+		SessionID:         sessionID,
+		TaskEnvironmentID: taskEnvironmentID,
+		WorkspacePath:     "/workspace",
+	})
+}
+
+func testTerminalLogger(t *testing.T) *logger.Logger {
+	t.Helper()
+	log, err := logger.NewLogger(logger.LoggingConfig{
+		Level:      "error",
+		Format:     "json",
+		OutputPath: t.TempDir() + "/test.log",
+	})
+	if err != nil {
+		t.Fatalf("create logger: %v", err)
+	}
+	return log
 }

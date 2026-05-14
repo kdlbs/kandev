@@ -9,6 +9,7 @@ import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import {
   updateExecutorProfile,
   deleteExecutorProfile,
+  removeDockerContainer,
   fetchLocalGitIdentity,
   listScriptPlaceholders,
 } from "@/lib/api/domains/settings-api";
@@ -33,11 +34,15 @@ import {
   DockerSections,
   SpritesSections,
 } from "@/components/settings/profile-edit/profile-runtime-sections";
+import { useDockerProfileContainers } from "@/components/settings/profile-edit/docker-sections";
 import {
   ProfileHeader,
   ProfileFormActions,
   DeleteProfileDialog,
+  upsertExecutorProfile,
+  type SaveStatus,
 } from "@/components/settings/profile-edit/profile-edit-page-chrome";
+import { useToast } from "@/components/toast-provider";
 import type { Executor, ExecutorProfile, ProfileEnvVar } from "@/lib/types/http";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 
@@ -196,9 +201,10 @@ export default function ProfileEditPage({ params }: { params: Promise<{ profileI
 
 function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
   const router = useRouter();
+  const { toast } = useToast();
   const executors = useAppStore((state) => state.executors.items);
   const setExecutors = useAppStore((state) => state.setExecutors);
-  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -212,45 +218,47 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
       cleanup_script: string;
       env_vars: ProfileEnvVar[];
     }) => {
-      setSaving(true);
+      setSaveStatus("loading");
       setError(null);
       try {
         const updated = await updateExecutorProfile(executor.id, profile.id, data);
+        setSaveStatus("success");
+        toast({ title: "Profile saved", variant: "success" });
+        setExecutors(upsertExecutorProfile(executors, executor, updated));
+        window.setTimeout(() => setSaveStatus("idle"), 1500);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to save profile";
+        setError(message);
+        setSaveStatus("error");
+        toast({ title: "Failed to save profile", description: message, variant: "error" });
+      }
+    },
+    [executor, profile.id, executors, setExecutors, toast],
+  );
+
+  const remove = useCallback(
+    async (beforeDelete?: () => Promise<void>) => {
+      setDeleting(true);
+      try {
+        await beforeDelete?.();
+        await deleteExecutorProfile(executor.id, profile.id);
         setExecutors(
           executors.map((e: Executor) =>
             e.id === executor.id
-              ? { ...e, profiles: e.profiles?.map((p) => (p.id === updated.id ? updated : p)) }
+              ? { ...e, profiles: e.profiles?.filter((p) => p.id !== profile.id) }
               : e,
           ),
         );
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to save profile");
-      } finally {
-        setSaving(false);
+        router.push(EXECUTORS_ROUTE);
+      } catch {
+        setDeleting(false);
+        setDeleteDialogOpen(false);
       }
     },
-    [executor.id, profile.id, executors, setExecutors],
+    [executor.id, profile.id, executors, setExecutors, router],
   );
 
-  const remove = useCallback(async () => {
-    setDeleting(true);
-    try {
-      await deleteExecutorProfile(executor.id, profile.id);
-      setExecutors(
-        executors.map((e: Executor) =>
-          e.id === executor.id
-            ? { ...e, profiles: e.profiles?.filter((p) => p.id !== profile.id) }
-            : e,
-        ),
-      );
-      router.push(EXECUTORS_ROUTE);
-    } catch {
-      setDeleting(false);
-      setDeleteDialogOpen(false);
-    }
-  }, [executor.id, profile.id, executors, setExecutors, router]);
-
-  return { saving, error, deleting, deleteDialogOpen, setDeleteDialogOpen, save, remove };
+  return { saveStatus, error, deleting, deleteDialogOpen, setDeleteDialogOpen, save, remove };
 }
 
 function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
@@ -258,6 +266,8 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
   const [mcpPolicy, setMcpPolicy] = useState(profile.mcp_policy ?? "");
   const [prepareScript, setPrepareScript] = useState(profile.prepare_script ?? "");
   const [cleanupScript, setCleanupScript] = useState(profile.cleanup_script ?? "");
+  const [dockerfile, setDockerfile] = useState(profile.config?.dockerfile ?? "");
+  const [imageTag, setImageTag] = useState(profile.config?.image_tag ?? "");
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar } = useEnvVarRows(profile.env_vars);
   const [placeholders, setPlaceholders] = useState<ScriptPlaceholder[]>([]);
   const [spritesSecretId, setSpritesSecretId] = useState<string | null>(() =>
@@ -295,6 +305,10 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     setPrepareScript,
     cleanupScript,
     setCleanupScript,
+    dockerfile,
+    setDockerfile,
+    imageTag,
+    setImageTag,
     envVarRows,
     addEnvVar,
     removeEnvVar,
@@ -334,7 +348,7 @@ function buildSaveConfig(
   } else {
     delete config.sprites_network_policy_rules;
   }
-  if (form.isSprites && form.remoteCredentials.length > 0) {
+  if (form.isRemote && form.remoteCredentials.length > 0) {
     config.remote_credentials = JSON.stringify(form.remoteCredentials);
   } else {
     delete config.remote_credentials;
@@ -342,7 +356,7 @@ function buildSaveConfig(
   const nonNullEnvVars = Object.fromEntries(
     Object.entries(form.agentEnvVars).filter(([, v]) => v != null),
   );
-  if (form.isSprites && Object.keys(nonNullEnvVars).length > 0) {
+  if (form.isRemote && Object.keys(nonNullEnvVars).length > 0) {
     config.remote_auth_secrets = JSON.stringify(nonNullEnvVars);
   } else {
     delete config.remote_auth_secrets;
@@ -365,7 +379,25 @@ function buildSaveConfig(
   } else {
     delete config.git_user_email;
   }
+  applyDockerConfig(config, form);
   return config;
+}
+
+function applyDockerConfig(
+  config: Record<string, string>,
+  form: ReturnType<typeof useProfileFormState>,
+): void {
+  if (!form.isDocker) return;
+  if (form.dockerfile.trim()) {
+    config.dockerfile = form.dockerfile;
+  } else {
+    delete config.dockerfile;
+  }
+  if (form.imageTag.trim()) {
+    config.image_tag = form.imageTag.trim();
+  } else {
+    delete config.image_tag;
+  }
 }
 
 function ProfileEditSections({
@@ -389,7 +421,15 @@ function ProfileEditSections({
           secrets={secrets}
         />
       )}
-      {form.isDocker && <DockerSections profile={profile} />}
+      {form.isDocker && (
+        <DockerSections
+          profile={profile}
+          dockerfile={form.dockerfile}
+          onDockerfileChange={form.setDockerfile}
+          imageTag={form.imageTag}
+          onImageTagChange={form.setImageTag}
+        />
+      )}
       {form.isRemote && (
         <SpritesSections
           isRemote={form.isRemote}
@@ -451,6 +491,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
   const { items: secrets } = useSecrets();
   const persistence = useProfilePersistence(executor, profile);
   const form = useProfileFormState(executor, profile);
+  const relatedContainers = useDockerProfileContainers(profile.id, form.isDocker);
   const spritesTokenMissing = form.isSprites && !form.spritesSecretId;
 
   const handleSave = () => {
@@ -463,6 +504,18 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       cleanup_script: form.cleanupScript,
       env_vars: form.buildEnvVars(),
     });
+  };
+
+  const handleDelete = (options?: { removeRelatedDockerContainers?: boolean }) => {
+    const beforeDelete = options?.removeRelatedDockerContainers
+      ? async () => {
+          await Promise.all(
+            relatedContainers.containers.map((container) => removeDockerContainer(container.id)),
+          );
+          await relatedContainers.refresh();
+        }
+      : undefined;
+    void persistence.remove(beforeDelete);
   };
 
   return (
@@ -478,12 +531,12 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       )}
       {persistence.error && <p className="text-sm text-destructive">{persistence.error}</p>}
       <ProfileFormActions
-        saving={persistence.saving}
+        saveStatus={persistence.saveStatus}
         saveDisabled={
           !form.name.trim() ||
           Boolean(form.mcpPolicyError) ||
           spritesTokenMissing ||
-          persistence.saving
+          persistence.saveStatus === "loading"
         }
         onSave={handleSave}
         onDelete={() => persistence.setDeleteDialogOpen(true)}
@@ -491,8 +544,9 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       <DeleteProfileDialog
         open={persistence.deleteDialogOpen}
         onOpenChange={persistence.setDeleteDialogOpen}
-        onDelete={persistence.remove}
+        onDelete={handleDelete}
         deleting={persistence.deleting}
+        relatedDockerContainerCount={form.isDocker ? relatedContainers.containers.length : 0}
       />
     </div>
   );

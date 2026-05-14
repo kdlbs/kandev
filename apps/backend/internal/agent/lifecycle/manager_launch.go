@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -300,9 +301,66 @@ func (m *Manager) newProgressCallback(taskID, sessionID string) PrepareProgressC
 	}
 }
 
+type prepareProgressRecorder struct {
+	mu       sync.Mutex
+	steps    []PrepareStep
+	callback PrepareProgressCallback
+}
+
+func newPrepareProgressRecorder(callback PrepareProgressCallback) *prepareProgressRecorder {
+	return &prepareProgressRecorder{callback: callback}
+}
+
+func (r *prepareProgressRecorder) Callback(offset int) PrepareProgressCallback {
+	return func(step PrepareStep, stepIndex int, totalSteps int) {
+		absoluteIndex := stepIndex + offset
+		r.recordStep(step, absoluteIndex)
+		if r.callback != nil {
+			r.callback(step, absoluteIndex, totalSteps+offset)
+		}
+	}
+}
+
+func (r *prepareProgressRecorder) Merge(steps []PrepareStep) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, step := range steps {
+		if i >= len(r.steps) {
+			r.steps = append(r.steps, step)
+			continue
+		}
+		if r.steps[i].Name == "" {
+			r.steps[i] = step
+		}
+	}
+}
+
+func (r *prepareProgressRecorder) Len() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.steps)
+}
+
+func (r *prepareProgressRecorder) Steps() []PrepareStep {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]PrepareStep, len(r.steps))
+	copy(out, r.steps)
+	return out
+}
+
+func (r *prepareProgressRecorder) recordStep(step PrepareStep, index int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for len(r.steps) <= index {
+		r.steps = append(r.steps, PrepareStep{})
+	}
+	r.steps[index] = step
+}
+
 // launchBuildExecutorRequest resolves MCP servers, builds the ExecutorCreateRequest,
 // and creates the runtime instance.
-func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID string, reqWithWorktree *LaunchRequest, agentConfig agents.Agent, mainRepoGitDir, worktreeID, worktreeBranch string) (*ExecutorCreateRequest, *ExecutorInstance, ExecutorBackend, error) {
+func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID string, reqWithWorktree *LaunchRequest, agentConfig agents.Agent, mainRepoGitDir, worktreeID, worktreeBranch string, onProgress PrepareProgressCallback) (*ExecutorCreateRequest, *ExecutorInstance, ExecutorBackend, error) {
 	rt, err := m.getExecutorBackend(reqWithWorktree.ExecutorType)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("no runtime configured: %w", err)
@@ -333,6 +391,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	execReq := &ExecutorCreateRequest{
 		InstanceID:          executionID,
 		TaskID:              reqWithWorktree.TaskID,
+		TaskTitle:           reqWithWorktree.TaskTitle,
 		SessionID:           reqWithWorktree.SessionID,
 		TaskEnvironmentID:   reqWithWorktree.TaskEnvironmentID,
 		AgentProfileID:      reqWithWorktree.AgentProfileID,
@@ -344,7 +403,9 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpServers:          mcpServers,
 		PreviousExecutionID: reqWithWorktree.PreviousExecutionID,
 		McpMode:             reqWithWorktree.McpMode,
-		OnProgress:          m.newProgressCallback(reqWithWorktree.TaskID, reqWithWorktree.SessionID),
+		AuthToken:           m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
+		BootstrapNonce:      m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
+		OnProgress:          onProgress,
 	}
 
 	if resumer, ok := rt.(RemoteSessionResumer); ok {
@@ -367,6 +428,15 @@ func (m *Manager) runEnvironmentPreparer(
 	ctx context.Context,
 	req *LaunchRequest,
 	workspacePath string,
+) *EnvPrepareResult {
+	return m.runEnvironmentPreparerWithProgress(ctx, req, workspacePath, m.newProgressCallback(req.TaskID, req.SessionID))
+}
+
+func (m *Manager) runEnvironmentPreparerWithProgress(
+	ctx context.Context,
+	req *LaunchRequest,
+	workspacePath string,
+	onProgress PrepareProgressCallback,
 ) *EnvPrepareResult {
 	if m.preparerRegistry == nil {
 		return nil
@@ -396,6 +466,24 @@ func (m *Manager) runEnvironmentPreparer(
 		return nil
 	}
 
+	prepReq := buildEnvPrepareRequest(req, workspacePath, execName)
+
+	result, err := preparer.Prepare(ctx, prepReq, onProgress)
+	if err != nil {
+		m.logger.Warn("environment preparation failed",
+			zap.String("task_id", req.TaskID),
+			zap.String("preparer", preparer.Name()),
+			zap.Error(err))
+		return &EnvPrepareResult{
+			Success:      false,
+			ErrorMessage: err.Error(),
+		}
+	}
+
+	return result
+}
+
+func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName executor.Name) *EnvPrepareRequest {
 	repoSetupScript, _ := req.Metadata[MetadataKeyRepoSetupScript].(string)
 	prepReq := &EnvPrepareRequest{
 		TaskID:               req.TaskID,
@@ -412,6 +500,7 @@ func (m *Manager) runEnvironmentPreparer(
 		BaseBranch:           req.BaseBranch,
 		DefaultBranch:        req.DefaultBranch,
 		CheckoutBranch:       req.CheckoutBranch,
+		WorktreeBranch:       getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
 		PullBeforeWorktree:   req.PullBeforeWorktree,
 		TaskDirName:          req.TaskDirName,
@@ -443,23 +532,10 @@ func (m *Manager) runEnvironmentPreparer(
 		}
 		prepReq.Repositories = specs
 	}
-
-	result, err := preparer.Prepare(ctx, prepReq, m.newProgressCallback(req.TaskID, req.SessionID))
-	if err != nil {
-		m.logger.Warn("environment preparation failed",
-			zap.String("task_id", req.TaskID),
-			zap.String("preparer", preparer.Name()),
-			zap.Error(err))
-		return &EnvPrepareResult{
-			Success:      false,
-			ErrorMessage: err.Error(),
-		}
-	}
-
-	return result
+	return prepReq
 }
 
-// launchApplyPrepareResult applies workspace metadata from the preparer result and publishes completion.
+// launchApplyPrepareResult applies workspace metadata from the preparer result.
 // Returns an error if the preparer failed.
 func (m *Manager) launchApplyPrepareResult(
 	req *LaunchRequest,
@@ -488,15 +564,37 @@ func (m *Manager) launchApplyPrepareResult(
 	if result.WorktreeBranch != "" {
 		*worktreeBranch = result.WorktreeBranch
 	}
-	m.eventPublisher.PublishPrepareCompleted(req.SessionID, &PrepareCompletedEventPayload{
+	return nil
+}
+
+func (m *Manager) publishLaunchPrepareCompleted(req *LaunchRequest, result *EnvPrepareResult, recorder *prepareProgressRecorder, workspacePath string, success bool, err error) {
+	if req.ACPSessionID != "" {
+		return
+	}
+
+	steps := recorder.Steps()
+	if len(steps) == 0 && result != nil {
+		steps = result.Steps
+	}
+
+	payload := &PrepareCompletedEventPayload{
 		TaskID:        req.TaskID,
 		SessionID:     req.SessionID,
-		Success:       true,
-		DurationMs:    result.Duration.Milliseconds(),
-		WorkspacePath: result.WorkspacePath,
-		Steps:         result.Steps,
-	})
-	return nil
+		Success:       success,
+		WorkspacePath: workspacePath,
+		Steps:         steps,
+	}
+	if result != nil {
+		payload.DurationMs = result.Duration.Milliseconds()
+		if payload.WorkspacePath == "" {
+			payload.WorkspacePath = result.WorkspacePath
+		}
+	}
+	if err != nil {
+		payload.Success = false
+		payload.ErrorMessage = err.Error()
+	}
+	m.eventPublisher.PublishPrepareCompleted(req.SessionID, payload)
 }
 
 // Launch launches a new agent for a task. Concurrent calls for the same
@@ -614,18 +712,20 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 
 	// 4. Resolve workspace path (non-worktree executors use this directly)
 	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch := m.launchResolveWorkspacePath(ctx, req)
+	progressRecorder := newPrepareProgressRecorder(m.newProgressCallback(req.TaskID, req.SessionID))
 
 	// 4b. Run environment preparation (if preparer registered for this executor type).
 	// Skip on resume (ACPSessionID set) — workspace was already prepared during initial launch.
 	var prepResult *EnvPrepareResult
 	if req.ACPSessionID == "" {
-		prepResult = m.runEnvironmentPreparer(ctx, req, workspacePath)
+		prepResult = m.runEnvironmentPreparerWithProgress(ctx, req, workspacePath, progressRecorder.Callback(0))
 	} else {
 		m.logger.Debug("skipping environment preparation for resumed session",
 			zap.String("task_id", req.TaskID),
 			zap.String("session_id", req.SessionID))
 	}
 	if prepResult != nil {
+		progressRecorder.Merge(prepResult.Steps)
 		if err := m.launchApplyPrepareResult(req, prepResult, &workspacePath, &mainRepoGitDir, &worktreeID, &worktreeBranch); err != nil {
 			return nil, err
 		}
@@ -635,26 +735,19 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	reqWithWorktree, executionID := m.launchPrepareRequest(req, profileInfo, workspacePath)
 
 	// 7. Build runtime request and create instance (agent not started yet)
-	execReq, execInstance, rt, err := m.launchBuildExecutorRequest(ctx, executionID, &reqWithWorktree, agentConfig, mainRepoGitDir, worktreeID, worktreeBranch)
+	var runtimeProgress PrepareProgressCallback
+	if req.ACPSessionID == "" {
+		runtimeProgress = progressRecorder.Callback(progressRecorder.Len())
+	}
+	execReq, execInstance, rt, err := m.launchBuildExecutorRequest(ctx, executionID, &reqWithWorktree, agentConfig, mainRepoGitDir, worktreeID, worktreeBranch, runtimeProgress)
 	if err != nil {
-		m.eventPublisher.PublishPrepareCompleted(req.SessionID, &PrepareCompletedEventPayload{
-			TaskID:       req.TaskID,
-			SessionID:    req.SessionID,
-			Success:      false,
-			ErrorMessage: err.Error(),
-		})
+		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
 		return nil, err
 	}
-	// Publish PrepareCompleted for CreateInstance only if no preparer ran
-	// AND this is not a resume (resume already has persisted prepare_result).
-	if prepResult == nil && req.ACPSessionID == "" {
-		m.eventPublisher.PublishPrepareCompleted(req.SessionID, &PrepareCompletedEventPayload{
-			TaskID:     req.TaskID,
-			SessionID:  req.SessionID,
-			Success:    true,
-			DurationMs: 0,
-		})
+	if prepResult != nil {
+		prepResult.Steps = progressRecorder.Steps()
 	}
+	m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, true, nil)
 
 	// Build the in-memory AgentExecution from the runtime instance. Extracted
 	// to keep launchInternal under the cyclomatic-complexity budget.
@@ -718,6 +811,8 @@ func (m *Manager) registerAndPublishExecution(
 		}
 		return fmt.Errorf("failed to register execution: %w", addErr)
 	}
+
+	m.persistRuntimeSecrets(ctx, execInstance, execution)
 
 	// Persist executors_running in lockstep with Add — see persistence.go for the
 	// invariant. Carries forward resume_token / metadata from a prior row so the

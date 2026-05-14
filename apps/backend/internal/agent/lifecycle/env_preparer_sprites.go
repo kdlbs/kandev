@@ -39,9 +39,10 @@ func (p *SpritesPreparer) Prepare(_ context.Context, req *EnvPrepareRequest, onP
 	reportProgress(onProgress, step, 0, 1)
 
 	return &EnvPrepareResult{
-		Success:       true,
-		Steps:         []PrepareStep{step},
-		WorkspacePath: req.WorkspacePath,
-		Duration:      time.Since(start),
+		Success:        true,
+		Steps:          []PrepareStep{step},
+		WorkspacePath:  req.WorkspacePath,
+		Duration:       time.Since(start),
+		WorktreeBranch: nonWorktreeTaskBranch(req),
 	}, nil
 }

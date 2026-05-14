@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/linear"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // LinearService is the subset of linear.Service the orchestrator needs to
@@ -81,13 +82,13 @@ func (s *Service) createLinearIssueTask(ctx context.Context, evt *linear.NewLine
 		Title:          fmt.Sprintf("[%s] %s", issue.Identifier, issue.Title),
 		Description:    interpolateLinearPrompt(evt.Prompt, issue),
 		Metadata: map[string]interface{}{
-			"linear_issue_watch_id":   evt.IssueWatchID,
-			"linear_issue_identifier": issue.Identifier,
-			"linear_issue_url":        issue.URL,
-			"linear_state":            issue.StateName,
-			"linear_assignee":         issue.AssigneeName,
-			"agent_profile_id":        evt.AgentProfileID,
-			"executor_profile_id":     evt.ExecutorProfileID,
+			"linear_issue_watch_id":         evt.IssueWatchID,
+			"linear_issue_identifier":       issue.Identifier,
+			"linear_issue_url":              issue.URL,
+			"linear_state":                  issue.StateName,
+			"linear_assignee":               issue.AssigneeName,
+			models.MetaKeyAgentProfileID:    evt.AgentProfileID,
+			models.MetaKeyExecutorProfileID: evt.ExecutorProfileID,
 		},
 	}
 

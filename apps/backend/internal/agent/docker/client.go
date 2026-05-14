@@ -17,6 +17,7 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
+	"github.com/docker/go-connections/nat"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
@@ -24,17 +25,26 @@ import (
 
 // ContainerConfig holds configuration for creating a container.
 type ContainerConfig struct {
-	Name        string
-	Image       string
-	Cmd         []string
-	Env         []string // Environment variables
-	WorkingDir  string
-	Mounts      []MountConfig
-	NetworkMode string
-	Memory      int64 // Memory limit in bytes
-	CPUQuota    int64 // CPU quota
-	Labels      map[string]string
-	AutoRemove  bool
+	Name         string
+	Image        string
+	Entrypoint   []string // Overrides the image ENTRYPOINT (nil = use image default)
+	Cmd          []string
+	Env          []string // Environment variables
+	WorkingDir   string
+	Mounts       []MountConfig
+	NetworkMode  string
+	Memory       int64 // Memory limit in bytes
+	CPUQuota     int64 // CPU quota
+	Labels       map[string]string
+	AutoRemove   bool
+	PortBindings []PortBindingConfig
+}
+
+// PortBindingConfig describes a container port to publish on the Docker host.
+type PortBindingConfig struct {
+	ContainerPort int
+	HostIP        string
+	HostPort      string
 }
 
 // MountConfig holds mount configuration.
@@ -55,6 +65,7 @@ type ContainerInfo struct {
 	FinishedAt time.Time
 	ExitCode   int
 	Health     string
+	Labels     map[string]string
 }
 
 // Client wraps the Docker client.
@@ -194,19 +205,23 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 	}
 
 	// Container configuration
+	exposedPorts, portBindings := buildDockerPortBindings(cfg.PortBindings)
 	containerCfg := &container.Config{
-		Image:      cfg.Image,
-		Cmd:        cfg.Cmd,
-		Env:        cfg.Env,
-		WorkingDir: cfg.WorkingDir,
-		Labels:     cfg.Labels,
+		Image:        cfg.Image,
+		Entrypoint:   cfg.Entrypoint,
+		Cmd:          cfg.Cmd,
+		Env:          cfg.Env,
+		WorkingDir:   cfg.WorkingDir,
+		Labels:       cfg.Labels,
+		ExposedPorts: exposedPorts,
 	}
 
 	// Host configuration
 	hostCfg := &container.HostConfig{
-		Mounts:      mounts,
-		NetworkMode: container.NetworkMode(cfg.NetworkMode),
-		AutoRemove:  cfg.AutoRemove,
+		Mounts:       mounts,
+		NetworkMode:  container.NetworkMode(cfg.NetworkMode),
+		AutoRemove:   cfg.AutoRemove,
+		PortBindings: portBindings,
 		Resources: container.Resources{
 			Memory:   cfg.Memory,
 			CPUQuota: cfg.CPUQuota,
@@ -224,6 +239,23 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 
 	c.logger.Info("Container created", zap.String("id", resp.ID), zap.String("name", cfg.Name))
 	return resp.ID, nil
+}
+
+func buildDockerPortBindings(bindings []PortBindingConfig) (nat.PortSet, nat.PortMap) {
+	if len(bindings) == 0 {
+		return nil, nil
+	}
+	exposedPorts := nat.PortSet{}
+	portBindings := nat.PortMap{}
+	for _, binding := range bindings {
+		containerPort := nat.Port(fmt.Sprintf("%d/tcp", binding.ContainerPort))
+		exposedPorts[containerPort] = struct{}{}
+		portBindings[containerPort] = append(portBindings[containerPort], nat.PortBinding{
+			HostIP:   binding.HostIP,
+			HostPort: binding.HostPort,
+		})
+	}
+	return exposedPorts, portBindings
 }
 
 // StartContainer starts a container.
@@ -314,6 +346,7 @@ func (c *Client) GetContainerInfo(ctx context.Context, containerID string) (*Con
 		State:    inspect.State.Status,
 		Status:   inspect.State.Status,
 		ExitCode: inspect.State.ExitCode,
+		Labels:   inspect.Config.Labels,
 	}
 
 	// Parse timestamps
@@ -372,6 +405,41 @@ func (c *Client) GetContainerIP(ctx context.Context, containerID string) (string
 	}
 
 	return "", fmt.Errorf("no IP address found for container %s", containerID)
+}
+
+// GetContainerHostPort returns the Docker host endpoint for a published TCP port.
+func (c *Client) GetContainerHostPort(ctx context.Context, containerID string, containerPort int) (string, int, error) {
+	c.logger.Debug("Getting container host port",
+		zap.String("container_id", containerID),
+		zap.Int("container_port", containerPort))
+
+	inspect, err := c.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to inspect container %s: %w", containerID, err)
+	}
+	if inspect.NetworkSettings == nil || inspect.NetworkSettings.Ports == nil {
+		return "", 0, fmt.Errorf("container %s has no published ports", containerID)
+	}
+
+	bindings := inspect.NetworkSettings.Ports[nat.Port(fmt.Sprintf("%d/tcp", containerPort))]
+	if len(bindings) == 0 {
+		return "", 0, fmt.Errorf("container %s port %d/tcp is not published", containerID, containerPort)
+	}
+	hostPort, err := nat.ParsePort(bindings[0].HostPort)
+	if err != nil {
+		return "", 0, fmt.Errorf("invalid host port for container %s port %d/tcp: %w", containerID, containerPort, err)
+	}
+	hostIP := normalizeDockerHostIP(bindings[0].HostIP)
+	return hostIP, hostPort, nil
+}
+
+func normalizeDockerHostIP(hostIP string) string {
+	switch hostIP {
+	case "", "0.0.0.0", "::":
+		return "127.0.0.1"
+	default:
+		return hostIP
+	}
 }
 
 // GetContainerLabels returns the labels of a container
@@ -478,6 +546,7 @@ func (c *Client) ListContainers(ctx context.Context, labels map[string]string) (
 			Image:  ctr.Image,
 			State:  ctr.State,
 			Status: ctr.Status,
+			Labels: ctr.Labels,
 		}
 		infos = append(infos, info)
 	}
@@ -526,9 +595,13 @@ func (c *Client) CreateContainerInteractive(ctx context.Context, cfg ContainerCo
 		})
 	}
 
-	// Container configuration with stdin attached
+	// Container configuration with stdin attached. Mirror CreateContainer's
+	// handling of ContainerConfig fields — including Entrypoint — so the same
+	// config struct produces consistent container behavior on both paths.
+	exposedPorts, portBindings := buildDockerPortBindings(cfg.PortBindings)
 	containerCfg := &container.Config{
 		Image:        cfg.Image,
+		Entrypoint:   cfg.Entrypoint,
 		Cmd:          cfg.Cmd,
 		Env:          cfg.Env,
 		WorkingDir:   cfg.WorkingDir,
@@ -538,14 +611,16 @@ func (c *Client) CreateContainerInteractive(ctx context.Context, cfg ContainerCo
 		AttachStdin:  true,
 		AttachStdout: true,
 		AttachStderr: true,
+		ExposedPorts: exposedPorts,
 		Tty:          false, // Important: no TTY for JSON-RPC
 	}
 
 	// Host configuration
 	hostCfg := &container.HostConfig{
-		Mounts:      mounts,
-		NetworkMode: container.NetworkMode(cfg.NetworkMode),
-		AutoRemove:  cfg.AutoRemove,
+		Mounts:       mounts,
+		NetworkMode:  container.NetworkMode(cfg.NetworkMode),
+		AutoRemove:   cfg.AutoRemove,
+		PortBindings: portBindings,
 		Resources: container.Resources{
 			Memory:   cfg.Memory,
 			CPUQuota: cfg.CPUQuota,

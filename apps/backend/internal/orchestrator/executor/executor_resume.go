@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -172,19 +173,15 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 // persistLaunchState updates the session record after a successful agent launch.
 // The executors_running row is now written by the lifecycle manager itself in
 // lockstep with executionStore.Add (see lifecycle.persistExecutorRunning) — this
-// function no longer touches it. The lifecycle manager also owns the columns that
-// used to live on task_sessions (agent_execution_id, container_id); the orchestrator
-// stops writing them so the only remaining source of truth is executors_running.
+// function no longer touches it. The lifecycle manager also owns the columns
+// that used to live on task_sessions (agent_execution_id, container_id); the
+// orchestrator stops writing them so the only remaining source of truth is
+// executors_running.
 //
-// What remains here: state transitions (e.g., STARTING) and prepare-result metadata
-// merge, both of which are session-row concerns the lifecycle manager doesn't know
-// about. The execCfg / existingRunning parameters are kept on the signature for
-// historical call shape but are no longer used.
-func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, now time.Time, execCfg executorConfig, existingRunning *models.ExecutorRunning) {
-	_ = resp            // executors_running fields are written by lifecycle manager
-	_ = execCfg         // ditto
-	_ = existingRunning // ditto
-
+// What remains here: state transitions (e.g., STARTING) and prepare-result
+// metadata merge, both of which are session-row concerns the lifecycle manager
+// doesn't know about.
+func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, now time.Time) {
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
 	}
@@ -282,7 +279,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	}
 	defer unlock()
 
-	req, repositoryID, execCfg, existingRunning, err := e.buildResumeRequest(ctx, task, session, startAgent)
+	req, repositoryID, _, _, err := e.buildResumeRequest(ctx, task, session, startAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -342,7 +339,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		return nil, err
 	}
 
-	e.persistResumeState(ctx, task.ID, session, resp, startAgent, execCfg, existingRunning)
+	e.persistResumeState(ctx, task.ID, session, startAgent)
 	e.persistWorktreeAssociation(ctx, task.ID, session, repositoryID, resp)
 
 	worktreePath := resp.WorktreePath
@@ -477,10 +474,20 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 
 	execConfig := e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
 
+	existingEnv, err := e.resolveResumeTaskEnvironment(ctx, task.ID, session)
+	if err != nil {
+		return nil, "", execConfig, nil, err
+	}
+	if session.TaskEnvironmentID != "" {
+		req.TaskEnvironmentID = session.TaskEnvironmentID
+	}
+
 	repositoryID, err := e.applyResumeRepoConfig(ctx, task, session, req)
 	if err != nil {
 		return nil, "", execConfig, nil, err
 	}
+
+	e.reuseExistingEnvironment(ctx, req, existingEnv)
 
 	// Activate config-mode MCP tools when config_mode is set in session metadata.
 	if isConfigModeSession(session) {
@@ -490,6 +497,20 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 	existingRunning := e.applyRunningRecordToResumeRequest(ctx, req, task, session, startAgent)
 
 	return req, repositoryID, execConfig, existingRunning, nil
+}
+
+func (e *Executor) resolveResumeTaskEnvironment(ctx context.Context, taskID string, session *models.TaskSession) (*models.TaskEnvironment, error) {
+	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("lookup existing task environment: %w", err)
+	}
+	if env == nil {
+		return nil, nil
+	}
+	if session.TaskEnvironmentID != env.ID {
+		session.TaskEnvironmentID = env.ID
+	}
+	return env, nil
 }
 
 // applyExecutorConfigToResumeRequest resolves executor config and applies it to the
@@ -619,6 +640,20 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 			return "", ErrNoCloneURL
 		}
 		req.RepositoryURL = cloneURL
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
+		}
+		req.Metadata["repository_clone_url"] = cloneURL
+
+		// Clone-based remote executors (Sprites, Docker, …) need BaseBranch
+		// in launch metadata so the prepare script's `git clone --branch <X>`
+		// resolves. The local executor must NOT receive BaseBranch on resume:
+		// LocalPreparer would force a `git fetch && git checkout` against
+		// the user's actual workspace and clobber the "use current state" UX.
+		// Worktree executors set their own BaseBranch in the block below.
+		if baseBranch != "" {
+			req.BaseBranch = baseBranch
+		}
 	}
 
 	if shouldUseWorktree(req.ExecutorType) && repositoryPath != "" {
@@ -663,14 +698,10 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 
 // persistResumeState updates the session row after a successful resume launch.
 // Like persistLaunchState, executors_running is owned by the lifecycle manager
-// and not touched here — see lifecycle.persistExecutorRunning. The orchestrator's
-// only remaining responsibility is the session-row state machine (STARTING /
-// CompletedAt-clear).
-func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig, existingRunning *models.ExecutorRunning) {
-	_ = resp
-	_ = execCfg
-	_ = existingRunning
-
+// and not touched here — see lifecycle.persistExecutorRunning. The
+// orchestrator's only remaining responsibility is the session-row state
+// machine (STARTING / CompletedAt-clear).
+func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, startAgent bool) {
 	session.ErrorMessage = ""
 	if startAgent {
 		session.State = models.TaskSessionStateStarting

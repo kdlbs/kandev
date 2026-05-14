@@ -23,6 +23,7 @@ import {
   formatPlanCommentsAsMarkdown,
 } from "@/lib/state/slices/comments/format";
 import { usePlanActions } from "@/hooks/domains/kanban/use-plan-actions";
+import { useExecutorEnvironmentAvailability } from "@/hooks/domains/session/use-executor-environment-availability";
 import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useToast } from "@/components/toast-provider";
 import type { DiffComment } from "@/lib/diff/types";
@@ -338,6 +339,14 @@ type ChatInputAreaProps = {
   placeholderOverride?: string;
 };
 
+function useExecutorUnavailable(taskId: string | null, sessionId: string | null) {
+  const availability = useExecutorEnvironmentAvailability(taskId, Boolean(sessionId && taskId));
+  return {
+    unavailable: availability.unavailable,
+    reason: availability.status?.label,
+  };
+}
+
 export function ChatInputArea({
   chatInputRef,
   clarificationKey,
@@ -371,6 +380,7 @@ export function ChatInputArea({
     chatInputRef,
   });
   const hasClarification = !!panelState.pendingClarification;
+  const executor = useExecutorUnavailable(taskId, resolvedSessionId);
   const placeholder = isMoving
     ? "Switching agent..."
     : (placeholderOverride ??
@@ -405,6 +415,7 @@ export function ChatInputArea({
         onPlanModeChange={handlePlanModeChange}
         isAgentBusy={isAgentBusy}
         isStarting={panelState.isStarting}
+        isPreparingEnvironment={panelState.isPreparingEnvironment}
         isMoving={isMoving}
         isSending={isSending}
         onCancel={handleCancelTurn}
@@ -421,6 +432,8 @@ export function ChatInputArea({
         hasAgentCommands={!!(panelState.agentCommands && panelState.agentCommands.length > 0)}
         isFailed={panelState.isFailed}
         needsRecovery={needsRecovery}
+        executorUnavailable={executor.unavailable}
+        executorUnavailableReason={executor.reason}
         contextItems={panelState.contextItems}
         planContextEnabled={panelState.planContextEnabled}
         contextFiles={panelState.contextFiles}

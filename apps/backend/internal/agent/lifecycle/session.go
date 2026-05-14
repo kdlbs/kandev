@@ -131,11 +131,14 @@ func (sm *SessionManager) createOrLoadSession(
 	if rt.SessionConfig.NativeSessionResume && existingSessionID != "" {
 		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID, mcpServers)
 		if err != nil {
-			// If session/load fails because the agent doesn't support it, fall back to session/new.
-			// Check for: JSON-RPC -32601 (Method not found) or our own capability check string.
+			// Fall back to session/new when the agent either doesn't implement
+			// session/load (-32601, capability false) or doesn't know this session
+			// ID anymore (-32002 "Resource not found" — typically because the
+			// agent process restarted and lost its in-memory session map).
 			if isMethodNotFoundErr(err) ||
-				strings.Contains(err.Error(), "LoadSession capability is false") {
-				sm.logger.Warn("agent does not support session loading, falling back to session/new",
+				strings.Contains(err.Error(), "LoadSession capability is false") ||
+				isSessionUnknownErr(err) {
+				sm.logger.Warn("session/load failed, falling back to session/new",
 					zap.String("agent_type", agentConfig.ID()),
 					zap.String("existing_session_id", existingSessionID),
 					zap.String("reason", err.Error()))
@@ -666,6 +669,11 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 // jsonRPCMethodNotFound is the JSON-RPC 2.0 error code for "Method not found".
 const jsonRPCMethodNotFound = -32601
 
+// jsonRPCResourceNotFound is the ACP-specific error code that agents return when
+// asked to load a session ID they don't know about (e.g. claude-agent-acp after
+// its in-memory session map was cleared by a restart).
+const jsonRPCResourceNotFound = -32002
+
 // isMethodNotFoundErr checks if an error wraps a JSON-RPC "Method not found" error.
 func isMethodNotFoundErr(err error) bool {
 	var reqErr *acp.RequestError
@@ -673,6 +681,23 @@ func isMethodNotFoundErr(err error) bool {
 		return reqErr.Code == jsonRPCMethodNotFound
 	}
 	return false
+}
+
+// isSessionUnknownErr reports whether an error from session/load means the
+// agent doesn't know about the requested session ID — typically because the
+// agent process restarted and lost its in-memory session map. The caller
+// should fall back to creating a fresh session rather than aborting the launch.
+func isSessionUnknownErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var reqErr *acp.RequestError
+	if errors.As(err, &reqErr) && reqErr.Code == jsonRPCResourceNotFound {
+		return true
+	}
+	// Some agents return the error in the wrapped message string instead of a
+	// structured RequestError. Match the canonical phrase as a safety net.
+	return strings.Contains(err.Error(), "Resource not found")
 }
 
 func isAgentStreamNotConnectedErr(err error) bool {

@@ -143,6 +143,101 @@ func (p *trackingPreparer) Prepare(_ context.Context, _ *EnvPrepareRequest, _ Pr
 	return &EnvPrepareResult{Success: true, WorkspacePath: "/tmp/ws"}, nil
 }
 
+type progressPreparer struct{}
+
+func (p *progressPreparer) Name() string { return "docker" }
+
+func (p *progressPreparer) Prepare(_ context.Context, _ *EnvPrepareRequest, onProgress PrepareProgressCallback) (*EnvPrepareResult, error) {
+	step := beginStep("Validate Docker")
+	reportProgress(onProgress, step, 0, 1)
+	completeStepSuccess(&step)
+	reportProgress(onProgress, step, 0, 1)
+	return &EnvPrepareResult{Success: true, Steps: []PrepareStep{step}, WorkspacePath: "/tmp/ws"}, nil
+}
+
+func TestLaunch_PublishesPrepareCompletedAfterRuntimeProgress(t *testing.T) {
+	log := newTestLogger()
+	execRegistry := NewExecutorRegistry(log)
+	entered := make(chan struct{}, 1)
+	barrier := make(chan struct{})
+	backend := &createInstanceExecutor{
+		MockExecutor: MockExecutor{name: executor.NameDocker},
+		client:       newReadyAgentctlClient(t, log),
+		entered:      entered,
+		barrier:      barrier,
+		progressStep: "Waiting for Docker container",
+	}
+	execRegistry.Register(backend)
+
+	eventBus := &MockEventBusWithTracking{}
+	mgr := NewManager(
+		newTestRegistry(), eventBus, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	mgr.preparerRegistry = NewPreparerRegistry(log)
+	mgr.preparerRegistry.Register(executor.NameDocker, &progressPreparer{})
+	t.Cleanup(func() { close(mgr.stopCh) })
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := mgr.Launch(context.Background(), &LaunchRequest{
+			TaskID:         "task-1",
+			SessionID:      "session-1",
+			AgentProfileID: "profile-1",
+			ExecutorType:   "local_docker",
+			RepositoryPath: "/tmp/repo",
+			BaseBranch:     "main",
+		})
+		errCh <- err
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime CreateInstance")
+	}
+
+	if completed := prepareCompletedPayloads(eventBus); len(completed) != 0 {
+		t.Fatalf("PrepareCompleted published before runtime finished: %#v", completed)
+	}
+
+	close(barrier)
+	if err := <-errCh; err != nil {
+		t.Fatalf("Launch returned error: %v", err)
+	}
+
+	completed := prepareCompletedPayloads(eventBus)
+	require.NotEmpty(t, completed)
+	final := completed[len(completed)-1]
+	require.True(t, final.Success)
+	requirePrepareStep(t, final.Steps, "Validate Docker")
+	requirePrepareStep(t, final.Steps, "Waiting for Docker container")
+}
+
+func prepareCompletedPayloads(eventBus *MockEventBusWithTracking) []*PrepareCompletedEventPayload {
+	eventBus.mu.Lock()
+	defer eventBus.mu.Unlock()
+	var out []*PrepareCompletedEventPayload
+	for _, tracked := range eventBus.PublishedEvents {
+		payload, ok := tracked.Event.Data.(*PrepareCompletedEventPayload)
+		if ok {
+			out = append(out, payload)
+		}
+	}
+	return out
+}
+
+func requirePrepareStep(t *testing.T, steps []PrepareStep, name string) {
+	t.Helper()
+	for _, step := range steps {
+		if step.Name == name {
+			return
+		}
+	}
+	t.Fatalf("expected prepare step %q in %#v", name, steps)
+}
+
 func TestRunEnvironmentPreparer_CalledOnFreshLaunch(t *testing.T) {
 	mgr := newTestManager()
 	preparer := &trackingPreparer{}
@@ -394,5 +489,45 @@ func TestLaunch_RaceRollback(t *testing.T) {
 	}
 	if got := backend.stopCount.Load(); got != 1 {
 		t.Errorf("StopInstance called %d times, want 1 (runtime instance must be stopped on rollback)", got)
+	}
+}
+
+func TestLaunch_PersistsDockerRuntimeSecrets(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	execRegistry := NewExecutorRegistry(log)
+	backend := &createInstanceExecutor{
+		MockExecutor: MockExecutor{name: executor.NameDocker},
+		client:       newReadyAgentctlClient(t, log),
+		authToken:    "agentctl-token",
+		nonce:        "bootstrap-nonce",
+	}
+	execRegistry.Register(backend)
+
+	store := newInMemorySecretStore()
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	mgr.SetSecretStore(store)
+	mgr.dataDir = t.TempDir()
+	t.Cleanup(func() { close(mgr.stopCh) })
+
+	execution, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+		ExecutorType:   "local_docker",
+		IsEphemeral:    true,
+	})
+	if err != nil {
+		t.Fatalf("Launch returned error: %v", err)
+	}
+
+	if got := mgr.revealRuntimeSecret(context.Background(), execution.Metadata, MetadataKeyAuthTokenSecret); got != "agentctl-token" {
+		t.Fatalf("revealed auth token = %q, want agentctl-token", got)
+	}
+	if got := mgr.revealRuntimeSecret(context.Background(), execution.Metadata, MetadataKeyBootstrapNonceSecret); got != "bootstrap-nonce" {
+		t.Fatalf("revealed bootstrap nonce = %q, want bootstrap-nonce", got)
 	}
 }

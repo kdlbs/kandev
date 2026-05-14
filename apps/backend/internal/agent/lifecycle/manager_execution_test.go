@@ -544,14 +544,63 @@ func TestEnsureWorkspaceExecutionForSession_EmptyTaskID(t *testing.T) {
 	})
 }
 
+func TestEnsureWorkspaceExecutionForSession_ReusesExistingTaskEnvironmentExecution(t *testing.T) {
+	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			"session-1": {
+				TaskID:            "task-1",
+				SessionID:         "session-1",
+				TaskEnvironmentID: "env-1",
+				WorkspacePath:     "/workspace/task-1",
+				AgentID:           "auggie",
+			},
+			"session-2": {
+				TaskID:            "task-1",
+				SessionID:         "session-2",
+				TaskEnvironmentID: "env-1",
+				WorkspacePath:     "/workspace/task-1",
+				AgentID:           "auggie",
+			},
+		},
+	})
+	existing := &AgentExecution{
+		ID:                "exec-existing",
+		SessionID:         "session-1",
+		TaskID:            "task-1",
+		TaskEnvironmentID: "env-1",
+		Status:            v1.AgentStatusRunning,
+		agentctl:          newReadyAgentctlClient(t, newTestLogger()),
+	}
+	if err := mgr.executionStore.Add(existing); err != nil {
+		t.Fatalf("add existing execution: %v", err)
+	}
+
+	got, err := mgr.EnsureWorkspaceExecutionForSession(context.Background(), "task-1", "session-2")
+	if err != nil {
+		t.Fatalf("EnsureWorkspaceExecutionForSession returned error: %v", err)
+	}
+	if got.ID != existing.ID {
+		t.Fatalf("execution ID = %q, want existing environment execution %q", got.ID, existing.ID)
+	}
+	if got.SessionID != "session-1" {
+		t.Fatalf("execution session ID = %q, want original owner session", got.SessionID)
+	}
+	if backend.createCount.Load() != 0 {
+		t.Fatalf("CreateInstance calls = %d, want 0", backend.createCount.Load())
+	}
+}
+
 // --- test helpers ---
 
 type createInstanceExecutor struct {
 	MockExecutor
-	client      *agentctl.Client
-	createCount atomic.Int32
-	stopCount   atomic.Int32
-	delay       time.Duration
+	client       *agentctl.Client
+	createCount  atomic.Int32
+	stopCount    atomic.Int32
+	authToken    string
+	nonce        string
+	delay        time.Duration
+	progressStep string
 	// Barrier-based deterministic synchronization for race tests.
 	// Set entered (buffered 1) to receive a signal when CreateInstance begins.
 	// Set barrier (unbuffered, closed to release) to block until the test is ready.
@@ -560,6 +609,12 @@ type createInstanceExecutor struct {
 }
 
 func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	var progress *PrepareStep
+	if e.progressStep != "" && req.OnProgress != nil {
+		step := beginStep(e.progressStep)
+		progress = &step
+		reportProgress(req.OnProgress, step, 0, 1)
+	}
 	if e.entered != nil {
 		select {
 		case e.entered <- struct{}{}:
@@ -580,13 +635,19 @@ func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *Execut
 		}
 	}
 	e.createCount.Add(1)
+	if progress != nil {
+		completeStepSuccess(progress)
+		reportProgress(req.OnProgress, *progress, 0, 1)
+	}
 	return &ExecutorInstance{
-		InstanceID:    req.InstanceID,
-		TaskID:        req.TaskID,
-		SessionID:     req.SessionID,
-		RuntimeName:   string(e.Name()),
-		Client:        e.client,
-		WorkspacePath: req.WorkspacePath,
+		InstanceID:     req.InstanceID,
+		TaskID:         req.TaskID,
+		SessionID:      req.SessionID,
+		RuntimeName:    string(e.Name()),
+		Client:         e.client,
+		WorkspacePath:  req.WorkspacePath,
+		AuthToken:      e.authToken,
+		BootstrapNonce: e.nonce,
 	}, nil
 }
 

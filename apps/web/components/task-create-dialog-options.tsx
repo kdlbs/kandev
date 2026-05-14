@@ -194,6 +194,9 @@ export function computeExecutorHint(
     }
     return "A git worktree will be created from the base branch.";
   }
+  if (selectedExecutor?.type === "local_docker" || selectedExecutor?.type === "remote_docker") {
+    return "A Docker container will be created from the selected base branch and checked out on a task branch.";
+  }
   if (selectedExecutor?.type === "local") return "The agent will run directly on the repository.";
   return null;
 }

@@ -15,10 +15,11 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-// FileUploader abstracts writing files and running commands on a remote environment.
+// FileUploader abstracts writing files to a remote environment. Used by
+// UploadCredentialFiles to seed agent auth files into the kandev-managed
+// per-container session dir (local) or sprite (remote).
 type FileUploader interface {
 	WriteFile(ctx context.Context, path string, data []byte, mode os.FileMode) error
-	RunCommand(ctx context.Context, name string, args ...string) error
 }
 
 // UploadCredentialFiles reads local credential files and uploads them to the remote environment.

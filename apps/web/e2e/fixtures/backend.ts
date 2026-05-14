@@ -235,6 +235,14 @@ exec git "$@"
         { mode: 0o755 },
       );
 
+      // Opt-in: Docker E2E project or KANDEV_E2E_DOCKER=1 enables real
+      // container execution. Default is off so the regular suite stays fast
+      // and runs without a Docker daemon.
+      const dockerEnabled =
+        workerInfo.project.name === "docker" || process.env.KANDEV_E2E_DOCKER === "1";
+      const mockAgentLinuxBinary = path.join(BACKEND_DIR, "bin", "mock-agent-linux-amd64");
+      const agentctlLinuxBinary = path.join(BACKEND_DIR, "bin", "agentctl-linux-amd64");
+
       const backendEnv = {
         ...stripGitHubTokens(process.env as Record<string, string>),
         // Prepend the kandev bin dir so the host utility probe can locate
@@ -252,7 +260,15 @@ exec git "$@"
         KANDEV_MOCK_GITHUB: "true",
         KANDEV_MOCK_JIRA: "true",
         KANDEV_MOCK_LINEAR: "true",
-        KANDEV_DOCKER_ENABLED: "false",
+        KANDEV_DOCKER_ENABLED: dockerEnabled ? "true" : "false",
+        // When Docker is on, point the lifecycle resolvers at the linux/amd64
+        // binaries the test runner pre-built, so containers can bind-mount them.
+        ...(dockerEnabled
+          ? {
+              KANDEV_AGENTCTL_LINUX_BINARY: agentctlLinuxBinary,
+              KANDEV_MOCK_AGENT_LINUX_BINARY: mockAgentLinuxBinary,
+            }
+          : {}),
         KANDEV_WORKTREE_ENABLED: "true",
         KANDEV_WORKTREE_BASEPATH: worktreeBase,
         KANDEV_REPOCLONE_BASEPATH: repoCloneBase,

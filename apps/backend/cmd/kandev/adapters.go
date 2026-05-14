@@ -203,6 +203,18 @@ func (a *lifecycleAdapter) SetExecutionDescription(ctx context.Context, agentExe
 	return a.mgr.SetExecutionDescription(ctx, agentExecutionID, description)
 }
 
+// RequiresCloneURL implements executor.ExecutorTypeCapabilities by delegating to
+// the lifecycle manager. Without this, executor types like local_docker and
+// sprites can't tell the orchestrator they need a clone URL.
+func (a *lifecycleAdapter) RequiresCloneURL(executorType string) bool {
+	return a.mgr.RequiresCloneURL(executorType)
+}
+
+// ShouldApplyPreferredShell implements executor.ExecutorTypeCapabilities.
+func (a *lifecycleAdapter) ShouldApplyPreferredShell(executorType string) bool {
+	return a.mgr.ShouldApplyPreferredShell(executorType)
+}
+
 // SetMcpMode changes the MCP tool mode on an existing execution's agentctl instance.
 func (a *lifecycleAdapter) SetMcpMode(ctx context.Context, executionID string, mode string) error {
 	return a.mgr.SetMcpMode(ctx, executionID, mode)

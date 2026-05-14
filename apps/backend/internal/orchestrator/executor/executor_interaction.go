@@ -262,7 +262,7 @@ func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID
 		return fmt.Errorf("failed to launch agent with new model: %w", err)
 	}
 
-	e.persistModelSwitchState(ctx, taskID, sessionID, session, resp, newModel, existingRunning)
+	e.persistModelSwitchState(ctx, taskID, sessionID, session, newModel)
 
 	if err := e.agentManager.StartAgentProcess(ctx, resp.AgentExecutionID); err != nil {
 		e.logger.Error("failed to start agent process after model switch",
@@ -335,6 +335,10 @@ func (e *Executor) applyRepositoryToSwitchRequest(ctx context.Context, req *Laun
 			return "", ErrNoCloneURL
 		}
 		req.RepositoryURL = cloneURL
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
+		}
+		req.Metadata["repository_clone_url"] = cloneURL
 	}
 	return repository.LocalPath, nil
 }
@@ -364,10 +368,7 @@ func (e *Executor) applyWorktreeToSwitchRequest(req *LaunchAgentRequest, session
 // after a model switch launch. The executors_running row's agent_execution_id /
 // container_id / status are written by the lifecycle manager during the launch
 // itself (lifecycle.persistExecutorRunning) and not touched here.
-func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, newModel string, existingRunning *models.ExecutorRunning) {
-	_ = resp
-	_ = existingRunning
-
+func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, newModel string) {
 	session.State = models.TaskSessionStateStarting
 	session.UpdatedAt = time.Now().UTC()
 

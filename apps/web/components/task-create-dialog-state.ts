@@ -68,6 +68,8 @@ import {
   computeDialogDefaultStepId,
   computeSingleWorkflowFallbackId,
 } from "@/components/task-create-dialog-defaults";
+import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
+import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
 
 export type {
   StepType,
@@ -531,7 +533,6 @@ export function useDialogComputed({
   // pill loads branches per-repo). Keep the computed value but always feed it
   // the URL branches when in URL mode.
   const branchOptions = useBranchOptions(fs.useGitHubUrl ? fs.githubBranches : []);
-  const agentProfileOptions = useAgentProfileOptions(agentProfiles);
   const allExecutorProfiles = useMemo<ExecutorProfile[]>(() => {
     return executors.flatMap((executor) =>
       (executor.profiles ?? []).map((p) => ({
@@ -547,9 +548,23 @@ export function useDialogComputed({
   // keep the full executor catalogue.
   const selectedRepoCount = fs.repositories.filter((r) => r.repositoryId || r.localPath).length;
   const isMultiRepoSelection = selectedRepoCount > 1;
-  const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles, {
-    disabledReasonFor: pickExecutorDisabledReason(fs.noRepository, isMultiRepoSelection),
-  });
+  // `pickExecutorDisabledReason` came from main — folds two disable rules
+  // (no-repository disables worktree; multi-repo disables non-worktree) into
+  // one resolver. Plug it into our existing useExecutorProfileCompat wrapper
+  // so the downstream consumer still gets selectedExecutorProfile /
+  // noCompatibleAgent metadata.
+  // Use the effective agent ID (form value OR the workflow-locked override)
+  // so the compatibility gate catches the override case too — passing the
+  // raw fs.agentProfileId would let workflow-locked sessions slip past with
+  // an empty selection.
+  const exec = useExecutorProfileCompat(
+    allExecutorProfiles,
+    fs.executorProfileId,
+    effectiveAgentProfileId,
+    agentProfiles,
+    pickExecutorDisabledReason(fs.noRepository, isMultiRepoSelection),
+  );
+  const agentProfileOptions = useAgentProfileOptions(exec.compatibleAgentProfiles);
   const executorHint = useExecutorHint(executors, fs.executorId, selectedRepoCount);
   const isLocalExecutor = useIsLocalExecutor(executors, fs.executorId);
   const { headerRepositoryOptions } = useRepositoryOptions(repositories, fs.discoveredRepositories);
@@ -569,7 +584,7 @@ export function useDialogComputed({
     hasRepositorySelection,
     branchOptions,
     agentProfileOptions,
-    executorProfileOptions,
+    executorProfileOptions: exec.executorProfileOptions,
     executorHint,
     isLocalExecutor,
     headerRepositoryOptions,
@@ -578,6 +593,49 @@ export function useDialogComputed({
     workflowAgentLocked,
     workflowAgentProfileId,
     effectiveAgentProfileId,
+    selectedExecutorProfileName: exec.selectedExecutorProfile?.name ?? null,
+    noCompatibleAgent: exec.noCompatibleAgent,
+  };
+}
+
+function useExecutorProfileCompat(
+  allExecutorProfiles: ExecutorProfile[],
+  selectedProfileId: string,
+  selectedAgentProfileId: string,
+  agentProfiles: DialogComputedArgs["agentProfiles"],
+  disabledReasonFor?: (profile: ExecutorProfile) => string | null,
+) {
+  const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles, {
+    disabledReasonFor,
+  });
+  const selectedExecutorProfile = useMemo(
+    () => allExecutorProfiles.find((p) => p.id === selectedProfileId) ?? null,
+    [allExecutorProfiles, selectedProfileId],
+  );
+  const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
+  const compatibleAgentProfiles = useMemo(() => {
+    if (!selectedExecutorProfile || !authLoaded) return agentProfiles;
+    return agentProfiles.filter((ap) =>
+      isAgentConfiguredOnExecutor(ap, selectedExecutorProfile, authSpecs),
+    );
+  }, [agentProfiles, selectedExecutorProfile, authSpecs, authLoaded]);
+  // `noCompatibleAgent` gates the submit button. It must catch BOTH cases:
+  //   1. The selected executor has no compatible agents at all.
+  //   2. The user picked an agent that isn't compatible with the executor
+  //      (e.g. switched executor after the agent was chosen).
+  // Previously this only checked case 1, so case 2 silently let the user
+  // submit with a known-incompatible combination.
+  const noCompatibleAgent = useMemo(() => {
+    if (!selectedExecutorProfile) return false;
+    if (compatibleAgentProfiles.length === 0) return true;
+    if (!selectedAgentProfileId) return false;
+    return !compatibleAgentProfiles.some((ap) => ap.id === selectedAgentProfileId);
+  }, [selectedExecutorProfile, compatibleAgentProfiles, selectedAgentProfileId]);
+  return {
+    selectedExecutorProfile,
+    compatibleAgentProfiles,
+    executorProfileOptions,
+    noCompatibleAgent,
   };
 }
 
