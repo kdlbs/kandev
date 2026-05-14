@@ -553,10 +553,14 @@ export function useDialogComputed({
   // one resolver. Plug it into our existing useExecutorProfileCompat wrapper
   // so the downstream consumer still gets selectedExecutorProfile /
   // noCompatibleAgent metadata.
+  // Use the effective agent ID (form value OR the workflow-locked override)
+  // so the compatibility gate catches the override case too — passing the
+  // raw fs.agentProfileId would let workflow-locked sessions slip past with
+  // an empty selection.
   const exec = useExecutorProfileCompat(
     allExecutorProfiles,
     fs.executorProfileId,
-    fs.agentProfileId,
+    effectiveAgentProfileId,
     agentProfiles,
     pickExecutorDisabledReason(fs.noRepository, isMultiRepoSelection),
   );
