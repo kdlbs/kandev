@@ -301,6 +301,66 @@ func TestGetWorkspaceInfoForSession_NoExecutorRunning(t *testing.T) {
 	}
 }
 
+// TestGetWorkspaceInfoForSession_AlignsTaskEnvironmentIDOnFallback locks in
+// the fix in applyTaskEnvironmentToWorkspaceInfo: when the session's stored
+// TaskEnvironmentID points to a missing/stale row, GetWorkspaceInfoForSession
+// falls back to GetTaskEnvironmentByTaskID. The previous implementation kept
+// info.TaskEnvironmentID pointing at the stale ID while picking up
+// metadata/workspace path from the fallback env — a downstream ID/metadata
+// mismatch that broke reconciler keying. The fix always aligns the ID with
+// the env we resolved against.
+func TestGetWorkspaceInfoForSession_AlignsTaskEnvironmentIDOnFallback(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+
+	// Real env exists under a different ID than what the session points at.
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID:            "real-env",
+		TaskID:        "task-123",
+		Status:        models.TaskEnvironmentStatusReady,
+		WorkspacePath: "/host/real-env",
+		ContainerID:   "container-real",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatalf("failed to create task environment: %v", err)
+	}
+
+	// Session stores a stale TaskEnvironmentID — the env it points at has
+	// been deleted or rolled over, but the session row still references it.
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "session-1",
+		TaskID:            "task-123",
+		TaskEnvironmentID: "stale-env",
+		AgentProfileSnapshot: map[string]interface{}{
+			"agent_name": "auggie",
+		},
+		State:     models.TaskSessionStateCompleted,
+		StartedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-1")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession returned error: %v", err)
+	}
+
+	if info.TaskEnvironmentID != "real-env" {
+		t.Fatalf("TaskEnvironmentID = %q, want real-env (alignment fix should overwrite the session's stale ID)", info.TaskEnvironmentID)
+	}
+	if info.WorkspacePath != "/host/real-env" {
+		t.Fatalf("WorkspacePath = %q, want /host/real-env (metadata must come from the resolved env, same as the ID)", info.WorkspacePath)
+	}
+	if got := info.Metadata["container_id"]; got != "container-real" {
+		t.Fatalf("metadata container_id = %v, want container-real", got)
+	}
+}
+
 func TestGetWorkspaceInfoForSession_SessionNotFound(t *testing.T) {
 	svc, _, _ := createTestService(t)
 	ctx := context.Background()
