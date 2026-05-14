@@ -5,9 +5,10 @@ import { Button } from "@kandev/ui/button";
 import { PageTopbar } from "@/components/page-topbar";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import type { StatsResponse } from "@/lib/types/http";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { IconChartBar } from "@tabler/icons-react";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import {
   OverviewCards,
   WorkloadSection,
@@ -305,7 +306,7 @@ function buildStatsSummary(
 export function StatsPageClient({ stats, error, workspaceId, activeRange }: StatsPageClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard();
   const range = (activeRange ?? "month") as RangeKey;
   const rangeLabel = getRangeLabel(range);
   const resolvedStats = stats ?? EMPTY_STATS;
@@ -332,14 +333,8 @@ export function StatsPageClient({ stats, error, workspaceId, activeRange }: Stat
     );
   if (!stats) return <StatsEmptyState message="No stats available." />;
 
-  const handleCopyStats = async () => {
-    try {
-      await navigator.clipboard.writeText(statsSummary);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error("Failed to copy stats summary", err);
-    }
+  const handleCopyStats = () => {
+    void copy(statsSummary);
   };
 
   const handleRangeChange = (nextRange: RangeKey) => {
