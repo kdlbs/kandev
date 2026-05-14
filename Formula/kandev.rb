@@ -4,7 +4,6 @@ class Kandev < Formula
   url "https://github.com/kdlbs/kandev/archive/refs/tags/v0.41.0.tar.gz"
   sha256 "dbb689fc3dd0ca7fed00f33da8b10ecfec9f9cd2e49bd9908c4950026743073c"
   license "AGPL-3.0-only"
-  head "https://github.com/kdlbs/kandev.git", branch: "main"
 
   livecheck do
     url :stable
@@ -14,6 +13,8 @@ class Kandev < Formula
   depends_on "go"   => :build
   depends_on "pnpm" => :build
   depends_on "node"
+
+  uses_from_macos "sqlite"
 
   def install
     ENV["KANDEV_VERSION"] = version.to_s

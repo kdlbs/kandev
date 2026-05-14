@@ -77,15 +77,7 @@ brew untap kdlbs/kandev   # avoid local tap shadowing
 brew install --build-from-source ./Formula/kandev.rb
 ```
 
-## 6. (Optional) HEAD install
-
-```bash
-brew install --HEAD ./Formula/kandev.rb
-```
-
-If `head do` block is present, this clones `main` and builds. Useful for catching breakage early but not required for submission.
-
-## 7. Open the upstream PR
+## 6. Open the upstream PR
 
 ```bash
 # 1. Fork & clone homebrew-core
@@ -125,13 +117,13 @@ EOF
 )"
 ```
 
-## 8. Respond to review
+## 7. Respond to review
 
 - Bottle CI runs automatically; failures appear as PR check comments.
 - Maintainer may ask for: tighter test block, dropping `pnpm` for `npm` (lockfile compatibility), license format, or resource-vendoring of JS deps.
 - Iterate until merged.
 
-## 9. After merge
+## 8. After merge
 
 - Auto-bump worker (`BrewTestBot`) will open bump PRs on new tags via `livecheck`.
 - For manual bump: `brew bump-formula-pr --version=X.Y.Z kandev`.
