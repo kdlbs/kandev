@@ -210,7 +210,8 @@ test.describe("Dockview repository scripts in + menu", () => {
     await seedTaskWithSession(testPage, apiClient, seedData, "Readable Script Menu");
     await testPage.getByRole("button", { name: "Run script" }).click();
 
-    const menu = testPage.locator('[data-slot="dropdown-menu-content"]:visible').first();
+    const menu = testPage.locator('[data-slot="dropdown-menu-content"]:visible');
+    await expect(menu).toHaveCount(1);
     await expect(menu).toBeVisible();
     const menuBox = await menu.boundingBox();
     expect(menuBox?.width).toBeGreaterThanOrEqual(260);
@@ -219,8 +220,8 @@ test.describe("Dockview repository scripts in + menu", () => {
     const item = testPage
       .getByRole("menuitem")
       .filter({ hasText: "Windows" })
-      .filter({ hasText: "flutter run -d windows" })
-      .first();
+      .filter({ hasText: "flutter run -d windows" });
+    await expect(item).toHaveCount(1);
     await expect(item).toBeVisible();
 
     const clippedText = await item.evaluate((element) =>
@@ -249,17 +250,27 @@ test.describe("Dockview repository scripts in + menu", () => {
     await seedTaskWithSession(testPage, apiClient, seedData, "Compact Script Preview");
     await testPage.getByRole("button", { name: "Run script" }).click();
 
-    const item = testPage.getByRole("menuitem").filter({ hasText: "Start desktop target" }).first();
+    const item = testPage.getByRole("menuitem").filter({ hasText: "Start desktop target" });
+    await expect(item).toHaveCount(1);
     await expect(item).toBeVisible();
 
     const metrics = await item.evaluate((element) => {
-      const spans = Array.from(element.querySelectorAll("span"));
+      const commandSpan = Array.from(element.querySelectorAll("span")).find(
+        (span) => span.children.length === 0 && span.textContent?.includes("flutter clean"),
+      );
+      if (!commandSpan) {
+        throw new Error("Expected command preview span");
+      }
+      const style = window.getComputedStyle(commandSpan);
       return {
+        commandClientHeight: commandSpan.clientHeight,
+        commandScrollHeight: commandSpan.scrollHeight,
+        commandWhiteSpace: style.whiteSpace,
         itemHeight: element.getBoundingClientRect().height,
-        tallTextNodes: spans.filter((span) => span.getClientRects().length > 1).length,
       };
     });
-    expect(metrics.tallTextNodes).toBe(0);
+    expect(metrics.commandWhiteSpace).toBe("nowrap");
+    expect(metrics.commandScrollHeight).toBeLessThanOrEqual(metrics.commandClientHeight + 1);
     expect(metrics.itemHeight).toBeLessThanOrEqual(44);
   });
 

@@ -22,7 +22,7 @@ func (r *SpritesExecutor) setupPortForwarding(
 	}
 
 	r.logger.Debug("setting up port forwarding",
-		zap.Int("local_port", localPort),
+		zap.Int(MetadataKeyLocalPort, localPort),
 		zap.Int("remote_port", remotePort))
 
 	proxyCtx, cancel := context.WithCancel(context.Background())

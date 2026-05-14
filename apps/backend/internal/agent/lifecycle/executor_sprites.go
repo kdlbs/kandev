@@ -184,8 +184,8 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 
 	r.logger.Info("sprite instance ready",
 		zap.String("instance_id", req.InstanceID),
-		zap.String("sprite_name", spriteName),
-		zap.Int("local_port", localPort),
+		zap.String(MetadataKeySpriteName, spriteName),
+		zap.Int(MetadataKeyLocalPort, localPort),
 		zap.Int("instance_port", instancePort))
 
 	return r.buildInstanceResult(req, spriteName, sprite, localPort, instancePort, reusingExisting), nil
@@ -464,12 +464,12 @@ func (r *SpritesExecutor) buildInstanceResult(
 			agentctl.WithSessionID(req.SessionID)),
 		WorkspacePath: spritesWorkspacePath,
 		Metadata: map[string]interface{}{
-			MetadataKeySpriteName:    spriteName,
-			"sprite_state":           strings.TrimSpace(sprite.Status),
-			"sprite_created_at":      sprite.CreatedAt,
-			"local_port":             localPort,
-			"reuse_existing_process": reusingExisting,
-			MetadataKeyIsRemote:      true,
+			MetadataKeySpriteName:      spriteName,
+			MetadataKeySpriteState:     strings.TrimSpace(sprite.Status),
+			MetadataKeySpriteCreatedAt: sprite.CreatedAt,
+			MetadataKeyLocalPort:       localPort,
+			"reuse_existing_process":   reusingExisting,
+			MetadataKeyIsRemote:        true,
 		},
 	}
 }
