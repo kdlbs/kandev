@@ -57,8 +57,17 @@ func mustGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	full := append([]string{"-C", dir}, args...)
 	cmd := exec.Command("git", full...)
-	// Disable system-level config so user/host config can't interfere.
-	cmd.Env = append(cmd.Env, "GIT_CONFIG_NOSYSTEM=1")
+	// Disable system-level config so user/host config can't interfere, and
+	// inject an identity inline so `git commit` works on CI runners that have
+	// no user.email/user.name configured. Both AUTHOR and COMMITTER are
+	// needed — git fails fast if either is missing.
+	cmd.Env = append(cmd.Env,
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@example.com",
+	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
