@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,6 +61,13 @@ func defaultStreamingInstallRunner(
 	onChunk func(chunk string),
 ) error {
 	cmd := shellexec.CommandContext(ctx, shellexec.PosixSh, script)
+	// Strip npm/pnpm-injected env vars before invoking the install script.
+	// When kandev is launched via `pnpm dev`, pnpm sets npm_config_prefix
+	// (and friends) to the workspace package directory; if we let those
+	// flow through to `npm install -g ...` the package lands in the
+	// workspace's bin/ instead of the user's real npm prefix and the
+	// freshly installed CLI is invisible to the discovery LookPath check.
+	cmd.Env = filteredInstallEnv()
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -385,4 +394,34 @@ func (r *ringBuffer) String() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return string(r.data)
+}
+
+// filteredInstallEnv returns os.Environ() with npm/pnpm-injected configuration
+// variables removed. pnpm exports npm_config_prefix (and friends) to scripts
+// it spawns; if those leak into a child `npm install -g ...` the package gets
+// installed into the workspace package dir instead of the user's global npm
+// prefix. Mirrors isNpmEnvVar in agentctl/server/{config,process}.
+func filteredInstallEnv() []string {
+	parent := os.Environ()
+	out := make([]string, 0, len(parent))
+	for _, entry := range parent {
+		eq := strings.IndexByte(entry, '=')
+		if eq <= 0 {
+			out = append(out, entry)
+			continue
+		}
+		if isInstallNpmEnvVar(entry[:eq]) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func isInstallNpmEnvVar(key string) bool {
+	return strings.HasPrefix(key, "npm_config_") ||
+		strings.HasPrefix(key, "npm_package_") ||
+		strings.HasPrefix(key, "npm_lifecycle_") ||
+		strings.HasPrefix(key, "npm_execpath") ||
+		strings.HasPrefix(key, "npm_node_execpath")
 }

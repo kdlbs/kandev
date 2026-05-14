@@ -5,10 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
-
 	"os/exec"
 	"runtime"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
