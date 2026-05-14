@@ -67,7 +67,7 @@ func (r *SpritesExecutor) applyNetworkPolicy(
 	defer cancel()
 
 	r.logger.Info("applying network policy from profile",
-		zap.String("sprite_name", spriteName),
+		zap.String(MetadataKeySpriteName, spriteName),
 		zap.Int("rule_count", len(rules)))
 
 	return client.UpdateNetworkPolicy(policyCtx, spriteName, &sprites.NetworkPolicy{Rules: rules})

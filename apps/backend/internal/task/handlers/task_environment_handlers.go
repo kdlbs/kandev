@@ -11,6 +11,8 @@ import (
 	"github.com/kandev/kandev/internal/task/service"
 )
 
+const responseKeySuccess = "success"
+
 func (h *TaskHandlers) httpGetTaskEnvironment(c *gin.Context) {
 	taskID := c.Param("id")
 	env, err := h.service.GetTaskEnvironmentByTaskID(c.Request.Context(), taskID)
@@ -73,7 +75,7 @@ func (h *TaskHandlers) httpResetTaskEnvironment(c *gin.Context) {
 	})
 	switch {
 	case err == nil:
-		c.JSON(http.StatusOK, gin.H{"success": true})
+		c.JSON(http.StatusOK, gin.H{responseKeySuccess: true})
 	case errors.Is(err, service.ErrNoEnvironment):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	case errors.Is(err, service.ErrSessionRunning):

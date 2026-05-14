@@ -131,7 +131,7 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 
 	r.logger.Info("creating sprite instance",
 		zap.String("instance_id", req.InstanceID),
-		zap.String("sprite_name", spriteName),
+		zap.String(MetadataKeySpriteName, spriteName),
 		zap.Bool("reconnect_required", reconnect))
 
 	// Step 0: Create or reconnect sprite. On reconnect-then-not-found we fall
@@ -196,7 +196,7 @@ func (r *SpritesExecutor) resolveSpriteName(req *ExecutorCreateRequest, reconnec
 	if !reconnect {
 		return spritesNamePrefix + req.InstanceID[:12]
 	}
-	if name := getMetadataString(req.Metadata, "sprite_name"); name != "" {
+	if name := getMetadataString(req.Metadata, MetadataKeySpriteName); name != "" {
 		return name
 	}
 	suffix := req.PreviousExecutionID
@@ -266,7 +266,7 @@ func spritesShouldReconnect(req *ExecutorCreateRequest) bool {
 	if req == nil {
 		return false
 	}
-	return req.PreviousExecutionID != "" || getMetadataString(req.Metadata, "sprite_name") != ""
+	return req.PreviousExecutionID != "" || getMetadataString(req.Metadata, MetadataKeySpriteName) != ""
 }
 
 func spritesAgentInstanceID(req *ExecutorCreateRequest) string {
@@ -464,7 +464,7 @@ func (r *SpritesExecutor) buildInstanceResult(
 			agentctl.WithSessionID(req.SessionID)),
 		WorkspacePath: spritesWorkspacePath,
 		Metadata: map[string]interface{}{
-			"sprite_name":            spriteName,
+			MetadataKeySpriteName:    spriteName,
 			"sprite_state":           strings.TrimSpace(sprite.Status),
 			"sprite_created_at":      sprite.CreatedAt,
 			"local_port":             localPort,

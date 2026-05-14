@@ -108,8 +108,8 @@ func (h *TaskHandlers) wsUpdateSessionFileReview(ctx context.Context, msg *ws.Me
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"success": true,
-		"review":  review,
+		responseKeySuccess: true,
+		"review":           review,
 	})
 }
 
@@ -132,6 +132,6 @@ func (h *TaskHandlers) wsResetSessionFileReviews(ctx context.Context, msg *ws.Me
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"success": true,
+		responseKeySuccess: true,
 	})
 }

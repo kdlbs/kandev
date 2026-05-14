@@ -27,7 +27,7 @@ func (r *SpritesExecutor) StopInstance(ctx context.Context, instance *ExecutorIn
 	if instance == nil {
 		return nil
 	}
-	spriteName := getMetadataString(instance.Metadata, "sprite_name")
+	spriteName := getMetadataString(instance.Metadata, MetadataKeySpriteName)
 	if spriteName == "" {
 		return nil
 	}
@@ -49,7 +49,7 @@ func (r *SpritesExecutor) StopInstance(ctx context.Context, instance *ExecutorIn
 	// archived). Resume then re-attaches the same sandbox in seconds.
 	if !shouldRunExecutorCleanup(instance.StopReason) {
 		r.logger.Info("preserving sprite sandbox after agent stop",
-			zap.String("sprite_name", spriteName),
+			zap.String(MetadataKeySpriteName, spriteName),
 			zap.String("instance_id", instance.InstanceID),
 			zap.String("stop_reason", instance.StopReason))
 		return nil
@@ -71,7 +71,7 @@ func (r *SpritesExecutor) StopInstance(ctx context.Context, instance *ExecutorIn
 	r.runTerminalCleanupScript(ctx, sprite, instance)
 	if err := sprite.Destroy(); err != nil {
 		r.logger.Warn("failed to destroy sprite",
-			zap.String("sprite_name", spriteName),
+			zap.String(MetadataKeySpriteName, spriteName),
 			zap.Error(err))
 		return fmt.Errorf("failed to destroy sprite: %w", err)
 	}
@@ -80,7 +80,7 @@ func (r *SpritesExecutor) StopInstance(ctx context.Context, instance *ExecutorIn
 	delete(r.tokens, instance.InstanceID)
 	r.mu.Unlock()
 
-	r.logger.Info("sprite destroyed", zap.String("sprite_name", spriteName),
+	r.logger.Info("sprite destroyed", zap.String(MetadataKeySpriteName, spriteName),
 		zap.String("stop_reason", instance.StopReason))
 	return nil
 }
@@ -153,7 +153,7 @@ func (r *SpritesExecutor) GetRemoteStatus(ctx context.Context, instance *Executo
 	if instance == nil {
 		return nil, fmt.Errorf("instance is nil")
 	}
-	spriteName := strings.TrimSpace(getMetadataString(instance.Metadata, "sprite_name"))
+	spriteName := strings.TrimSpace(getMetadataString(instance.Metadata, MetadataKeySpriteName))
 	if spriteName == "" {
 		return &RemoteStatus{
 			RuntimeName:   string(r.Name()),

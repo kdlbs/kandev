@@ -117,7 +117,7 @@ func (m *Manager) DestroySandbox(ctx context.Context, sandboxID, executionID str
 	// preserve-on-stop signal and the sandbox was never destroyed.
 	instance := &ExecutorInstance{
 		InstanceID: executionID,
-		Metadata:   map[string]interface{}{"sprite_name": sandboxID},
+		Metadata:   map[string]interface{}{MetadataKeySpriteName: sandboxID},
 		StopReason: StopReasonTaskDeleted,
 	}
 	return spritesExec.StopInstance(ctx, instance, true)
