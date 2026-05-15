@@ -481,6 +481,12 @@ func registerRoutes(p routeParams) {
 	// the kanban board doesn't react to subtree archive/delete until a
 	// full reload.
 	handoffSvc.SetTaskEventPublisher(p.taskSvc)
+	// Cascade archive/delete must tear down runtime resources
+	// (container, sandbox, worktree, executor_running rows) for every
+	// task in the tree. Without this wiring the agent gets stopped via
+	// runCanceller but its container leaks because the cascade bypasses
+	// Service.ArchiveTask's runAsyncTaskCleanup branch.
+	handoffSvc.SetTaskResourceCleaner(p.taskSvc)
 	p.orchestratorSvc.SetWorkspaceMaterializer(handoffSvc)
 	// Phase 8 prompt enrichment — wire the office scheduler's
 	// TaskContextProvider so every run prompt rendered by the active

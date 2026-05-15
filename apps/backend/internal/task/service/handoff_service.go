@@ -159,17 +159,18 @@ type RelatedTasks struct {
 // than reaching into the repos directly so document writes still go
 // through DocumentService and emit the same revision/event side effects.
 type HandoffService struct {
-	tasks          repository.TaskRepository
-	docs           *DocumentService
-	docsRepo       repository.DocumentRepository
-	blockers       BlockerRepository
-	wsGroups       WorkspaceGroupRepo
-	sessions       SessionWorktreeReader
-	cleaner        WorkspaceCleaner
-	runCanceller   RunCanceller
-	eventPublisher TaskEventPublisher
-	logger         *logger.Logger
-	parentLock     parentMutex
+	tasks           repository.TaskRepository
+	docs            *DocumentService
+	docsRepo        repository.DocumentRepository
+	blockers        BlockerRepository
+	wsGroups        WorkspaceGroupRepo
+	sessions        SessionWorktreeReader
+	cleaner         WorkspaceCleaner
+	runCanceller    RunCanceller
+	eventPublisher  TaskEventPublisher
+	resourceCleaner TaskResourceCleaner
+	logger          *logger.Logger
+	parentLock      parentMutex
 }
 
 // TaskEventPublisher abstracts the side-effect of broadcasting task
@@ -209,6 +210,30 @@ func (s *HandoffService) SetWorkspaceCleaner(c WorkspaceCleaner) {
 // (legacy and test wiring).
 func (s *HandoffService) SetTaskEventPublisher(p TaskEventPublisher) {
 	s.eventPublisher = p
+}
+
+// TaskResourceCleaner tears down a task's runtime resources (container,
+// sandbox, worktree, executor_running rows, quick-chat dir, task_environment
+// row) AFTER the cascade has stamped the task's DB row. The cascade paths
+// (ArchiveTaskTree, DeleteTaskTree) bypass Service.ArchiveTask /
+// Service.DeleteTask — which means they also bypass the env-cleanup branch
+// those wrappers run via runAsyncTaskCleanup. Without this wiring the agent
+// gets stopped (its container exits) but the container itself is never
+// removed and leaks indefinitely.
+//
+// Implemented by *Service via CleanupTaskResources. Optional — when nil the
+// cascade still completes, it just leaks runtime resources (matches the
+// pre-fix behaviour). deleteEnvRow is true for delete cascades and false for
+// archive (archive preserves the env row for later inspection).
+type TaskResourceCleaner interface {
+	CleanupTaskResources(ctx context.Context, taskID string, deleteEnvRow bool)
+}
+
+// SetTaskResourceCleaner wires the resource teardown surface invoked by
+// cascade archive/delete to release containers / sandboxes / worktrees.
+// Optional — when nil the cascade does not tear down runtime resources.
+func (s *HandoffService) SetTaskResourceCleaner(c TaskResourceCleaner) {
+	s.resourceCleaner = c
 }
 
 // NewHandoffService creates a HandoffService. blockers and wsGroups may be

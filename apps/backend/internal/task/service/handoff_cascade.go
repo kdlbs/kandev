@@ -195,6 +195,12 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string) (*C
 			// path so the cascade looks identical to a single-task archive
 			// from the frontend's perspective.
 			s.publishUpdatedTask(ctx, all[i])
+			// Tear down runtime resources (container/sandbox/worktree).
+			// Cancellation above stopped the agent but does not remove the
+			// container. Archive preserves the env row (deleteEnvRow=false).
+			if s.resourceCleaner != nil {
+				s.resourceCleaner.CleanupTaskResources(ctx, all[i], false)
+			}
 		} else {
 			out.SkippedTaskIDs = append(out.SkippedTaskIDs, all[i])
 		}
@@ -269,6 +275,12 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string) (*Ca
 		var snapshot *models.Task
 		if s.eventPublisher != nil {
 			snapshot, _ = s.tasks.GetTask(ctx, all[i])
+		}
+		// Tear down runtime resources BEFORE the DB delete so the env / worktree
+		// rows are still queryable for the gather step. The actual destroy work
+		// runs async after this returns. Delete cascade removes the env row.
+		if s.resourceCleaner != nil {
+			s.resourceCleaner.CleanupTaskResources(ctx, all[i], true)
 		}
 		if err := s.tasks.DeleteTask(ctx, all[i]); err != nil {
 			return out, fmt.Errorf("delete %s: %w", all[i], err)

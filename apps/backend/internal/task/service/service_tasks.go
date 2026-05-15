@@ -649,6 +649,41 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	return nil
 }
 
+// CleanupTaskResources tears down a task's runtime resources (container,
+// sandbox, worktree, executor_running rows, quick-chat dir, task_environment
+// row) AFTER the task row has been archived or deleted by another path.
+//
+// Used by HandoffService.ArchiveTaskTree / DeleteTaskTree, which bypass
+// Service.ArchiveTask / Service.DeleteTask and therefore miss the runtime
+// teardown those wrappers run via runAsyncTaskCleanup. Without this call the
+// agent gets stopped but its container/sandbox leaks indefinitely.
+//
+// The caller is expected to have cancelled active runs separately (cascade
+// does this via runCanceller before invoking us), so stopTargets is empty.
+// deleteEnvRow controls whether the task_environment row is removed (true
+// for delete cascade, false for archive — archive preserves the row).
+// Best-effort and idempotent; failures are logged.
+func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, deleteEnvRow bool) {
+	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to list sessions for cascade cleanup",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+	worktrees := s.gatherWorktreesForDelete(ctx, taskID)
+	taskEnv := s.gatherTaskEnvironmentForCleanup(ctx, taskID)
+	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: deleteEnvRow}
+	if len(sessions) == 0 && len(worktrees) == 0 && taskEnv == nil {
+		return
+	}
+	reason := "cascade archive"
+	if deleteEnvRow {
+		reason = "cascade delete"
+	}
+	s.runAsyncTaskCleanup(taskID, sessions, worktrees, nil, envCleanup, false,
+		reason, "failed to stop session on cascade cleanup", "cascade cleanup completed")
+}
+
 // gatherWorktreesForDelete collects worktrees for a task before it is deleted.
 // For legacy WorktreeCleanup implementations that do not implement WorktreeProvider,
 // it triggers cleanup immediately and returns nil.
