@@ -25,7 +25,15 @@ function normalizeAgentInPlace(agent: Agent): Agent {
 }
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
+  // Pin the URL origin to the configured backend so a tainted path segment
+  // (agent ID from a form, profile ID from a route param) cannot redirect
+  // the request to a different host. Closes the CodeQL SSRF finding.
+  const parsed = new URL(url);
+  const allowed = new URL(apiBaseUrl);
+  if (parsed.origin !== allowed.origin) {
+    throw new Error(`Refusing to fetch outside configured backend origin: ${parsed.origin}`);
+  }
+  const response = await fetch(parsed.toString(), {
     ...options,
     cache: "no-store",
     headers: {
