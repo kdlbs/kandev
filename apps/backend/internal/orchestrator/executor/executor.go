@@ -481,6 +481,11 @@ type RepoCloner interface {
 // RepoUpdater updates repository records in the database.
 type RepoUpdater interface {
 	UpdateRepositoryLocalPath(ctx context.Context, repositoryID, localPath string) error
+	// UpdateRepositoryDefaultBranch persists the integration branch detected
+	// from the local clone. Called after a fresh provider-backed clone when
+	// the repository row was created without an upstream-derived value
+	// (e.g. via the MCP create_task path that takes a bare github URL).
+	UpdateRepositoryDefaultBranch(ctx context.Context, repositoryID, defaultBranch string) error
 }
 
 // ExecutorConfig holds configuration for the Executor

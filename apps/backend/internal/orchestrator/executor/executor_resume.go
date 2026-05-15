@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -112,6 +113,15 @@ func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepos
 		}
 	}
 
+	// Backfill default_branch from the local clone when missing. This fires for
+	// two cases: (1) a freshly cloned provider-backed repo whose row was created
+	// without an upstream-derived value (e.g. the MCP create_task path that
+	// takes a bare github URL), and (2) an already-cloned row that escaped a
+	// prior backfill (e.g. a launch that ran before this code existed). Without
+	// this, the BaseBranch fallback below stays empty and surfaces to the user
+	// as "base branch does not exist" from worktree.Manager.Create.
+	e.backfillRepoDefaultBranch(ctx, repo, repo.LocalPath)
+
 	info.Repository = repo
 	info.RepositoryPath = repo.LocalPath
 	info.WorktreeBranchPrefix = repo.WorktreeBranchPrefix
@@ -167,7 +177,41 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 		}
 	}
 
+	// Note: default_branch backfill is intentionally driven from
+	// resolveTaskRepoInfo (the caller), not here. That way it also runs for
+	// rows whose local_path was already populated by a prior launch but whose
+	// default_branch was never persisted (e.g. rows created before the
+	// backfill existed).
+
 	return localPath, nil
+}
+
+// backfillRepoDefaultBranch populates repo.DefaultBranch from the local clone
+// (in memory + DB) when it's empty. Best-effort: on any failure we log and
+// continue, since the launch still has the legacy worktree-manager fallback
+// to fall back on if it can find a branch by another route.
+func (e *Executor) backfillRepoDefaultBranch(ctx context.Context, repo *models.Repository, localPath string) {
+	if repo.DefaultBranch != "" || localPath == "" {
+		return
+	}
+	detected, err := gitref.DefaultBranch(localPath)
+	if err != nil || detected == "" {
+		e.logger.Debug("could not detect default branch from clone; leaving empty",
+			zap.String("repository_id", repo.ID),
+			zap.String("local_path", localPath),
+			zap.Error(err))
+		return
+	}
+	repo.DefaultBranch = detected
+	if e.repoUpdater == nil {
+		return
+	}
+	if updateErr := e.repoUpdater.UpdateRepositoryDefaultBranch(ctx, repo.ID, detected); updateErr != nil {
+		e.logger.Warn("failed to persist detected default branch after clone",
+			zap.String("repository_id", repo.ID),
+			zap.String("default_branch", detected),
+			zap.Error(updateErr))
+	}
 }
 
 // persistLaunchState updates the session record after a successful agent launch.

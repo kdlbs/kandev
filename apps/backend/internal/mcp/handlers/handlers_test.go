@@ -510,6 +510,46 @@ func TestHandleCreateTask_AutoResolvesWorkspaceAndWorkflow(t *testing.T) {
 	assert.Equal(t, ws.MessageTypeResponse, resp.Type, "should succeed with auto-resolved workspace and workflow")
 }
 
+// TestCreateTask_GitHubURLOnly_LeavesDefaultBranchEmpty pins the upstream
+// contract that produced the production "base branch does not exist" failure
+// for task 01b82e73. When an MCP caller passes only a github_url (no
+// default_branch, no base_branch), the resulting Repository row has an empty
+// default_branch and the TaskRepository row has an empty base_branch — the
+// service layer never probes the upstream remote.
+//
+// This test documents that contract so any future change there (e.g. the
+// service learns to probe the remote up front) is an intentional decision,
+// and so the executor-side backfill that compensates for this isn't
+// accidentally treated as redundant.
+func TestCreateTask_GitHubURLOnly_LeavesDefaultBranchEmpty(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
+
+	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "subtask via bare github url",
+		Repositories: []service.TaskRepositoryInput{
+			{GitHubURL: "https://github.com/acme/never-seen"},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, task.Repositories, 1)
+	assert.Empty(t, task.Repositories[0].BaseBranch,
+		"task_repositories.base_branch should be empty when caller passes neither base_branch nor default_branch — executor backfill compensates downstream")
+
+	createdRepo, err := svc.GetRepository(ctx, task.Repositories[0].RepositoryID)
+	require.NoError(t, err)
+	require.NotNil(t, createdRepo)
+	assert.Empty(t, createdRepo.DefaultBranch,
+		"repositories.default_branch should be empty: FindOrCreateRepository does not probe the remote — the executor backfills it after clone")
+	assert.Equal(t, "acme", createdRepo.ProviderOwner)
+	assert.Equal(t, "never-seen", createdRepo.ProviderName)
+}
+
 func TestHandleCreateTask_AutoResolveFailsWithMultipleWorkflows(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
