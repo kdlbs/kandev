@@ -120,6 +120,16 @@ describe("filterVisibleFiles", () => {
     expect(result[0].source).toBe("pr");
   });
 
+  it("file-mode falls through to allFiles when file not found in rawPRFiles", () => {
+    // rawPRFiles has entries (non-empty) but not for the requested path.
+    // Should fall through and find the file via the normal allFiles path.
+    const rawPRFiles = [file("other.ts", "pr")];
+    const allFiles = [file("a.ts", "pr")];
+    const result = filterVisibleFiles(allFiles, fileOpts("a.ts", "pr", undefined, { rawPRFiles }));
+    expect(result).toHaveLength(1);
+    expect(result[0].path).toBe("a.ts");
+  });
+
   it("returns empty list when no files match", () => {
     expect(filterVisibleFiles([], allOpts("all"))).toEqual([]);
   });
@@ -135,6 +145,21 @@ describe("filterVisibleFiles", () => {
     );
     expect(result).toHaveLength(1);
     expect(result[0].repository_name).toBe("frontend");
+  });
+
+  it("rawPRFiles bypass applies repository name filter in multi-repo scenario", () => {
+    const frontendPR = { ...file("README.md", "pr"), repository_name: "frontend" };
+    const backendPR = { ...file("README.md", "pr"), repository_name: "backend" };
+    const rawPRFiles = [frontendPR, backendPR];
+    // allFiles only has uncommitted — PR entry was shadowed by deduplication
+    const allFiles = [{ ...file("README.md", "uncommitted"), repository_name: "frontend" }];
+    const result = filterVisibleFiles(
+      allFiles,
+      fileOpts("README.md", "pr", "frontend", { rawPRFiles }),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].repository_name).toBe("frontend");
+    expect(result[0].source).toBe("pr");
   });
 });
 

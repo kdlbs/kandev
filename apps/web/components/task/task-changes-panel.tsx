@@ -331,7 +331,7 @@ function filterVisibleFiles(allFiles: ReviewFile[], opts: FilterVisibleFilesOpts
     if (fileRepositoryName !== undefined) {
       prFiles = prFiles.filter((f) => (f.repository_name ?? "") === fileRepositoryName);
     }
-    return prFiles;
+    if (prFiles.length > 0) return prFiles;
   }
   let files = allFiles;
   if (mode === "file" && filePath) {

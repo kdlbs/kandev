@@ -378,4 +378,121 @@ test.describe("Changes panel section ordering", () => {
     git.exec("git reset HEAD -- staged-test.txt");
     git.exec("git checkout -- .");
   });
+
+  /**
+   * Regression: clicking a PR file row should open the PR diff even when the
+   * same path also has local (uncommitted) changes. Previously, allFiles
+   * deduplication caused the PR entry to be shadowed, and the diff panel
+   * showed "No changes" instead of the PR content.
+   */
+  test("clicking PR file row shows PR diff when same file has local changes", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { workflow, inboxStep, workingStep, doneStep } = await seedWorkflow(
+      apiClient,
+      seedData.workspaceId,
+    );
+
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 301,
+        title: "Desktop overlap PR diff test",
+        state: "open",
+        head_branch: "feat/desktop-overlap",
+        base_branch: "main",
+        author_login: "test-user",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+        additions: 2,
+        deletions: 0,
+      },
+    ]);
+    await apiClient.mockGitHubAddPRFiles("testorg", "testrepo", 301, [
+      {
+        filename: "overlap-desktop.txt",
+        status: "added",
+        additions: 2,
+        deletions: 0,
+        patch: "@@ -0,0 +1,2 @@\n+DESKTOP_PR_OVERLAP_MARKER_A\n+DESKTOP_PR_OVERLAP_MARKER_B",
+      },
+    ]);
+
+    const profile = await createStandardProfile(apiClient, "Desktop Overlap Profile");
+    const task = await apiClient.createTask(seedData.workspaceId, "Desktop PR Overlap Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: inboxStep.id,
+      agent_profile_id: profile.id,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await apiClient.moveTask(task.id, workflow.id, workingStep.id);
+    await expect(kanban.taskCardInColumn("Desktop PR Overlap Task", doneStep.id)).toBeVisible({
+      timeout: 45_000,
+    });
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 301,
+      pr_url: "https://github.com/testorg/testrepo/pull/301",
+      pr_title: "Desktop overlap PR diff test",
+      head_branch: "feat/desktop-overlap",
+      base_branch: "main",
+      author_login: "test-user",
+      additions: 2,
+      deletions: 0,
+    });
+
+    // Create local change to the same file — forces allFiles to deduplicate the
+    // PR entry, which was the bug that caused "No changes" on PR file row click.
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const gitEnv = {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    };
+    const git = new GitHelper(repoDir, gitEnv);
+    git.createFile("overlap-desktop.txt", "local change LOCAL_CHANGE_MARKER");
+
+    await kanban.taskCardInColumn("Desktop PR Overlap Task", doneStep.id).click();
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.clickTab("Changes");
+
+    // Both unstaged and PR sections should be present
+    await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("pr-files-section")).toBeVisible({ timeout: 15_000 });
+
+    await session.expandPRChangesSection();
+    await session.prFilesSection().getByText("overlap-desktop.txt").click();
+
+    // PR diff content must appear — not "No changes"
+    await testPage.waitForFunction(
+      (text: string) => {
+        for (const c of document.querySelectorAll("diffs-container")) {
+          if (c.shadowRoot?.textContent?.includes(text)) return true;
+        }
+        return false;
+      },
+      "DESKTOP_PR_OVERLAP_MARKER_A",
+      { timeout: 30_000 },
+    );
+
+    git.exec("git checkout -- .");
+  });
 });
