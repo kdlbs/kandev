@@ -656,25 +656,29 @@ func (r *Repository) findOrphanedTasks() ([]backfillRow, error) {
 // trigger ErrSessionWorkspaceNotReady forever in GetOrEnsureExecutionForEnvironment
 // and leave shell terminals stuck on "Connecting terminal...".
 //
-// Two worktree layouts produce two different workspace_path values, mirroring
-// the create branch in orchestrator/executor/executor_execute.go's
-// computeWorkspacePath:
+// It also repairs rows where workspace_path was the task-root parent of
+// worktree_path — a pre-fix value left by the legacy computeWorkspacePath
+// that collapsed single-repo worktree paths via filepath.Dir. After the fix,
+// workspace_path must equal worktree_path (the agent process cwd) so ACP
+// session/load on cold start hits the same sanitized-cwd jsonl folder the
+// agent wrote on hot start. Without this repair, existing single-repo
+// Worktree tasks keep failing with -32002 after upgrade.
 //
-//   - Plain worktree (.../.kandev/worktrees/<name>) — workspace_path = worktree_path
-//   - Task-dir mode (.../.kandev/tasks/<name>/<repo>) — workspace_path = Dir(worktree_path)
-//
-// The pattern lookup is hardcoded to the kandev path layout — anything that
-// doesn't match either pattern falls back to worktree_path (the common-case
-// plain-worktree assumption) and is logged for manual review.
-//
-// Idempotent — only touches rows where workspace_path is empty.
+// Idempotent — once workspace_path == worktree_path nothing more is changed.
 func (r *Repository) healTaskEnvironmentWorkspacePaths() error {
+	// substr(...) prefix match is safer than LIKE here: paths may contain
+	// "_" or "%", both of which are LIKE wildcards in SQLite.
 	rows, err := r.db.Query(`
 		SELECT id, worktree_path
 		  FROM task_environments
 		 WHERE executor_type = 'worktree'
-		   AND COALESCE(workspace_path, '') = ''
 		   AND COALESCE(worktree_path, '') != ''
+		   AND COALESCE(workspace_path, '') != worktree_path
+		   AND (
+		         COALESCE(workspace_path, '') = ''
+		         OR (length(workspace_path) < length(worktree_path)
+		             AND substr(worktree_path, 1, length(workspace_path)) = workspace_path)
+		       )
 	`)
 	if err != nil {
 		return fmt.Errorf("heal workspace_path: query: %w", err)
@@ -699,35 +703,14 @@ func (r *Repository) healTaskEnvironmentWorkspacePaths() error {
 	}
 
 	for _, hr := range pending {
-		ws := healedWorkspacePath(hr.worktreePath)
 		if _, err := r.db.Exec(
 			`UPDATE task_environments SET workspace_path = ?, updated_at = datetime('now') WHERE id = ?`,
-			ws, hr.id,
+			hr.worktreePath, hr.id,
 		); err != nil {
 			return fmt.Errorf("heal workspace_path: update %s: %w", hr.id, err)
 		}
 	}
 	return nil
-}
-
-// healedWorkspacePath derives workspace_path from worktree_path using the
-// kandev layout rules. Mirrors computeWorkspacePath in the orchestrator so
-// the heal lands the same value the create branch would.
-func healedWorkspacePath(worktreePath string) string {
-	if worktreePath == "" {
-		return ""
-	}
-	// Task-dir mode places the worktree at <root>/.kandev/tasks/<name>/<repo>.
-	// The workspace is the per-task root one level up from the repo subdir.
-	// Detect via the segment .kandev/tasks/ in the path.
-	if strings.Contains(worktreePath, "/.kandev/tasks/") {
-		parent := worktreePath[:strings.LastIndex(worktreePath, "/")]
-		if parent != "" {
-			return parent
-		}
-	}
-	// Plain worktree mode: workspace_path == worktree_path.
-	return worktreePath
 }
 
 // healDuplicateTaskEnvironments collapses rows where a single task has more
