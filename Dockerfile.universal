@@ -39,14 +39,14 @@ ARG PNPM_VERSION=9.15.9
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
+        # Tarball fetcher for the toolchain install steps below (Go,
+        # golangci-lint, rustup, yq). Not provided by the vanilla base image.
+        curl \
         # Native compile (CGO, pip wheels with C extensions, native npm modules)
         build-essential \
         pkg-config \
         python3-dev \
         libssl-dev \
-        # curl is used by the toolchain install steps below (Go, golangci-lint,
-        # rustup, yq). The vanilla base image doesn't ship it.
-        curl \
         # Useful CLI tools agents reach for. Small, broadly applicable.
         ripgrep \
         fd-find \
