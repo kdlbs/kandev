@@ -214,6 +214,13 @@ export type UseReviewSourcesResult = {
   prDiffLoading: boolean;
   /** Raw single-repo gitStatus (kept for `useAutoCloseWhenEmpty` consumers). */
   gitStatus: ReturnType<typeof useSessionGitStatus>;
+  /**
+   * Raw PR diff files as ReviewFile[], NOT deduplicated with uncommitted/committed.
+   * Use when displaying the PR-specific diff for a file (e.g. clicking a PR file row),
+   * where the same file may also have local changes that would win deduplication in allFiles.
+   * NOTE: Only covers the primary PR (single-repo tasks). Multi-PR support is Bug 2.
+   */
+  rawPRFiles: ReviewFile[];
 };
 
 /**
@@ -247,6 +254,13 @@ export function useReviewSources(sessionId: string | null | undefined): UseRevie
     [gitStatus, statusByRepo, cumulativeDiff, prDiffFiles, pr?.repo],
   );
 
+  const rawPRFiles = useMemo(() => {
+    if (!prDiffFiles || prDiffFiles.length === 0) return [] as ReviewFile[];
+    const fileMap = new Map<string, ReviewFile>();
+    addPRFiles(fileMap, prDiffFiles, new Set(), pr?.repo || undefined);
+    return Array.from(fileMap.values());
+  }, [prDiffFiles, pr?.repo]);
+
   // Keep `hasPR` keyed on the existence of a TaskPR row, not on whether the
   // PR diff files have loaded yet — avoids the tab bar reflowing the moment
   // the GitHub PR diff hydrates.
@@ -259,6 +273,7 @@ export function useReviewSources(sessionId: string | null | undefined): UseRevie
     cumulativeLoading,
     prDiffLoading,
     gitStatus,
+    rawPRFiles,
   };
 }
 

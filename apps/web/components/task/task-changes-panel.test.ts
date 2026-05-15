@@ -54,6 +54,21 @@ function file(path: string, source: ReviewFile["source"]): ReviewFile {
   };
 }
 
+type FilterOpts = Parameters<typeof filterVisibleFiles>[1];
+
+function allOpts(sourceFilter: FilterOpts["sourceFilter"]): FilterOpts {
+  return { mode: "all", filePath: undefined, fileRepositoryName: undefined, sourceFilter };
+}
+
+function fileOpts(
+  filePath: string,
+  sourceFilter: FilterOpts["sourceFilter"],
+  fileRepositoryName?: string,
+  extra?: Partial<FilterOpts>,
+): FilterOpts {
+  return { mode: "file", filePath, fileRepositoryName, sourceFilter, ...extra };
+}
+
 describe("filterVisibleFiles", () => {
   const files: ReviewFile[] = [
     file("a.ts", "uncommitted"),
@@ -62,40 +77,51 @@ describe("filterVisibleFiles", () => {
   ];
 
   it("returns all files when mode=all and sourceFilter=all", () => {
-    expect(filterVisibleFiles(files, "all", undefined, undefined, "all")).toHaveLength(3);
+    expect(filterVisibleFiles(files, allOpts("all"))).toHaveLength(3);
   });
 
   it("filters by uncommitted source", () => {
-    const result = filterVisibleFiles(files, "all", undefined, undefined, "uncommitted");
+    const result = filterVisibleFiles(files, allOpts("uncommitted"));
     expect(result).toHaveLength(1);
     expect(result[0].path).toBe("a.ts");
   });
 
   it("filters by pr source", () => {
-    const result = filterVisibleFiles(files, "all", undefined, undefined, "pr");
+    const result = filterVisibleFiles(files, allOpts("pr"));
     expect(result).toHaveLength(1);
     expect(result[0].path).toBe("c.ts");
   });
 
   it("filters by committed source", () => {
-    const result = filterVisibleFiles(files, "all", undefined, undefined, "committed");
+    const result = filterVisibleFiles(files, allOpts("committed"));
     expect(result).toHaveLength(1);
     expect(result[0].path).toBe("b.ts");
   });
 
   it("file-mode + sourceFilter intersect (file present in source)", () => {
-    const result = filterVisibleFiles(files, "file", "a.ts", undefined, "uncommitted");
+    const result = filterVisibleFiles(files, fileOpts("a.ts", "uncommitted"));
     expect(result).toHaveLength(1);
     expect(result[0].path).toBe("a.ts");
   });
 
   it("file-mode + sourceFilter intersect (file absent from source)", () => {
-    const result = filterVisibleFiles(files, "file", "a.ts", undefined, "pr");
-    expect(result).toHaveLength(0);
+    expect(filterVisibleFiles(files, fileOpts("a.ts", "pr"))).toHaveLength(0);
+  });
+
+  it("file-mode opened from PR row should show PR diff even when path exists in uncommitted", () => {
+    const prFile = file("shared.ts", "pr");
+    const allFiles = [file("shared.ts", "uncommitted")]; // deduped — pr entry removed
+    const rawPRFiles = [prFile]; // raw, not deduplicated
+    const result = filterVisibleFiles(
+      allFiles,
+      fileOpts("shared.ts", "pr", undefined, { rawPRFiles }),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].source).toBe("pr");
   });
 
   it("returns empty list when no files match", () => {
-    expect(filterVisibleFiles([], "all", undefined, undefined, "all")).toEqual([]);
+    expect(filterVisibleFiles([], allOpts("all"))).toEqual([]);
   });
 
   it("file-mode filters by repository name when provided", () => {
@@ -105,10 +131,7 @@ describe("filterVisibleFiles", () => {
     ];
     const result = filterVisibleFiles(
       samePathMultiRepo,
-      "file",
-      "README.md",
-      "frontend",
-      "uncommitted",
+      fileOpts("README.md", "uncommitted", "frontend"),
     );
     expect(result).toHaveLength(1);
     expect(result[0].repository_name).toBe("frontend");

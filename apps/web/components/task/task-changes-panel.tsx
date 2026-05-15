@@ -76,7 +76,7 @@ function scrollToFileAndClear(
 
 function useChangesView(selectedDiff: SelectedDiff | null, onClearSelected: () => void) {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const { allFiles, cumulativeLoading, prDiffLoading, gitStatus } =
+  const { allFiles, cumulativeLoading, prDiffLoading, gitStatus, rawPRFiles } =
     useReviewSources(activeSessionId);
   const pr = useActiveTaskPR();
   const { reviews } = useSessionFileReviews(activeSessionId);
@@ -142,6 +142,7 @@ function useChangesView(selectedDiff: SelectedDiff | null, onClearSelected: () =
   return {
     activeSessionId,
     allFiles,
+    rawPRFiles,
     reviewedFiles,
     staleFiles,
     totalCommentCount,
@@ -311,13 +312,27 @@ function useAutoCloseWhenEmpty(opts: {
   }, [mode, filePath, sourceFilter, gitStatus, onBecameEmpty, visibleCount]);
 }
 
-function filterVisibleFiles(
-  allFiles: ReviewFile[],
-  mode: "all" | "file",
-  filePath: string | undefined,
-  fileRepositoryName: string | undefined,
-  sourceFilter: "all" | ReviewSource,
-): ReviewFile[] {
+type FilterVisibleFilesOpts = {
+  mode: "all" | "file";
+  filePath: string | undefined;
+  fileRepositoryName: string | undefined;
+  sourceFilter: "all" | ReviewSource;
+  rawPRFiles?: ReviewFile[];
+};
+
+function filterVisibleFiles(allFiles: ReviewFile[], opts: FilterVisibleFilesOpts): ReviewFile[] {
+  const { mode, filePath, fileRepositoryName, sourceFilter, rawPRFiles } = opts;
+  // In file mode with an explicit PR source, bypass the deduplicated allFiles and
+  // read from rawPRFiles. This is necessary because allFiles deduplicates with
+  // priority uncommitted > committed > PR: a file that also has local changes
+  // will not appear with source "pr" in allFiles, causing "No changes" in PR rows.
+  if (mode === "file" && filePath && sourceFilter === "pr" && rawPRFiles && rawPRFiles.length > 0) {
+    let prFiles = rawPRFiles.filter((f) => f.path === filePath);
+    if (fileRepositoryName !== undefined) {
+      prFiles = prFiles.filter((f) => (f.repository_name ?? "") === fileRepositoryName);
+    }
+    return prFiles;
+  }
   let files = allFiles;
   if (mode === "file" && filePath) {
     files = files.filter((file) => file.path === filePath);
@@ -333,6 +348,7 @@ function filterVisibleFiles(
 
 function useVisibleDiffState(opts: {
   allFiles: ReviewFile[];
+  rawPRFiles: ReviewFile[];
   mode: "all" | "file";
   filePath: string | undefined;
   fileRepositoryName: string | undefined;
@@ -343,6 +359,7 @@ function useVisibleDiffState(opts: {
 }) {
   const {
     allFiles,
+    rawPRFiles,
     mode,
     filePath,
     fileRepositoryName,
@@ -352,8 +369,15 @@ function useVisibleDiffState(opts: {
     staleFiles,
   } = opts;
   const visibleFiles = useMemo(
-    () => filterVisibleFiles(allFiles, mode, filePath, fileRepositoryName, sourceFilter),
-    [allFiles, mode, filePath, fileRepositoryName, sourceFilter],
+    () =>
+      filterVisibleFiles(allFiles, {
+        mode,
+        filePath,
+        fileRepositoryName,
+        sourceFilter,
+        rawPRFiles,
+      }),
+    [allFiles, rawPRFiles, mode, filePath, fileRepositoryName, sourceFilter],
   );
   const visibleFileRefs = useMemo(() => {
     if (mode !== "file" || !filePath) return fileRefs;
@@ -400,6 +424,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   const {
     activeSessionId,
     allFiles,
+    rawPRFiles,
     reviewedFiles,
     staleFiles,
     totalCommentCount,
@@ -422,6 +447,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   const { visibleFiles, visibleFileRefs, reviewedCount, totalCount, progressPercent } =
     useVisibleDiffState({
       allFiles,
+      rawPRFiles,
       mode,
       filePath,
       fileRepositoryName,
