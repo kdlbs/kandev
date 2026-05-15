@@ -77,6 +77,14 @@ For each entry in the report's `ci_failed:` list:
 3. Read the relevant source files at the failing lines (use `Read` with `offset`/`limit`, not `cat`)
 4. Fix the issues (lint errors, test failures, type errors, etc.)
 
+**If the failure looks unfamiliar or the cause isn't obvious from the log, check CI history on the branch before diving into the code:**
+
+```bash
+gh run list --branch <branch> --workflow "<workflow name>" --limit 10 --json conclusion,headSha,createdAt,databaseId
+```
+
+On long-lived PRs that get rebased/squashed, prior SHAs on the same branch often passed the same workflow. A `passing → failing` boundary tells you the regression is isolated to the most recent rework — diff against the last passing SHA (`git diff <last-passing-sha>..HEAD`) instead of against `main` to narrow the search dramatically.
+
 **E2E test failures require special handling:**
 
 If any failing check is an E2E test (Playwright):
