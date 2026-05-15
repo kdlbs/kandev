@@ -2,6 +2,12 @@
 
 All notable changes to Kandev.
 
+## 0.48.0 - 2026-05-15
+
+### Bug Fixes
+
+- fetch Go sha256 from JSON index, bump to 1.26.3 ([#912](https://github.com/kdlbs/kandev/pull/912))
+
 ## 0.47.0 - 2026-05-15
 
 ### Bug Fixes
