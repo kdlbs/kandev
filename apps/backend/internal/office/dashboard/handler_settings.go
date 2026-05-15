@@ -13,20 +13,28 @@ import (
 // -- Git --
 
 func (h *Handler) gitClone(c *gin.Context) {
+	wsID := c.Param("wsId")
 	var req GitCloneRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if req.RepoURL == "" || req.WorkspaceName == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "repoUrl and workspaceName are required"})
+	if req.RepoURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "repoUrl is required"})
+		return
+	}
+	// Body-supplied workspaceName must match the URL :wsId so a caller
+	// cannot POST to /workspaces/ws-A/git/clone with workspaceName=ws-B
+	// and land the clone on ws-B. Empty body field falls back to wsID.
+	if req.WorkspaceName != "" && req.WorkspaceName != wsID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "workspaceName must match URL wsId"})
 		return
 	}
 	if h.gitMgr == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "git manager not initialized"})
 		return
 	}
-	if err := h.gitMgr.CloneWorkspace(c.Request.Context(), req.RepoURL, req.Branch, req.WorkspaceName); err != nil {
+	if err := h.gitMgr.CloneWorkspace(c.Request.Context(), req.RepoURL, req.Branch, wsID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

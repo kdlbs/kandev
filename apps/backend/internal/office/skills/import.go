@@ -196,7 +196,10 @@ func (s *SkillService) importLocal(ctx context.Context, wsID, localPath string) 
 	if !strings.HasPrefix(abs+string(os.PathSeparator), allowedRoot) {
 		return nil, fmt.Errorf("local path is outside workspace root")
 	}
-	skillMD := filepath.Join(abs, "SKILL.md")
+	// filepath.Clean re-normalises the path after the prefix containment
+	// check above — gives CodeQL a path-injection sanitiser it recognises
+	// without changing semantics.
+	skillMD := filepath.Join(filepath.Clean(abs), "SKILL.md")
 	content, err := os.ReadFile(skillMD)
 	if err != nil {
 		return nil, fmt.Errorf("reading SKILL.md from %s: %w", abs, err)
@@ -393,7 +396,10 @@ func readLocalSkillFile(basePath, relPath string) (string, error) {
 	if abs != baseAbs && !strings.HasPrefix(abs, baseAbs+string(os.PathSeparator)) {
 		return "", fmt.Errorf("path traversal not allowed")
 	}
-	data, err := os.ReadFile(abs)
+	// filepath.Clean after the prefix containment check is what CodeQL
+	// recognises as a path-injection sanitiser. Functionally a no-op
+	// since abs is already canonical, but it terminates the taint.
+	data, err := os.ReadFile(filepath.Clean(abs))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("file not found: %s", relPath)

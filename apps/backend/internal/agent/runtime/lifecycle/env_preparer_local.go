@@ -238,7 +238,10 @@ func buildEnvSlice(env map[string]string) []string {
 	if len(env) == 0 {
 		return base
 	}
-	result := make([]string, 0, len(base)+len(env))
+	// No size hint: CodeQL flags len(base)+len(env) as a potential
+	// allocation overflow. The slice grows on append; the hint was only
+	// an optimisation.
+	result := make([]string, 0)
 	result = append(result, base...)
 	for k, v := range env {
 		result = append(result, k+"="+v)

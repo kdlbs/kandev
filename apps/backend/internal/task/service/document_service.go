@@ -324,11 +324,17 @@ func (s *DocumentService) UploadAttachment(
 	if strings.ContainsAny(ext, "/\\\x00") {
 		return nil, ErrInvalidPathComponent
 	}
-	dir := filepath.Join(basePath, "attachments", taskID)
+	// filepath.Base strips any directory components from the user-supplied
+	// taskID / key before they enter filepath.Join — both as a defense in
+	// depth alongside safePathComponent and as the canonical pattern
+	// CodeQL recognises as a path-injection sanitiser.
+	safeTaskID := filepath.Base(taskID)
+	safeKey := filepath.Base(key)
+	dir := filepath.Join(basePath, "attachments", safeTaskID)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("create attachment dir: %w", err)
 	}
-	diskPath := filepath.Join(dir, key+ext)
+	diskPath := filepath.Join(dir, safeKey+ext)
 	if err := os.WriteFile(diskPath, data, 0o640); err != nil {
 		return nil, fmt.Errorf("write attachment file: %w", err)
 	}
