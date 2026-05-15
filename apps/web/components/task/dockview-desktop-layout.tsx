@@ -334,7 +334,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
   const handleEditFile = useCallback((path: string) => openFile(path), [openFile]);
   const handleOpenDiffFile = useCallback(
     (path: string, options?: OpenDiffOptions) =>
-      addFileDiffPanel(path, { source: options?.source }),
+      addFileDiffPanel(path, { source: options?.source, repositoryName: options?.repositoryName }),
     [addFileDiffPanel],
   );
   const handleOpenCommitDetail = useCallback(

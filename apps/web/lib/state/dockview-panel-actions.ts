@@ -259,7 +259,12 @@ function buildFileEditorAction(get: StoreGet) {
 function buildFileDiffAction(get: StoreGet) {
   return (
     path: string,
-    opts?: OpenPanelOpts & { content?: string; groupId?: string; source?: string },
+    opts?: OpenPanelOpts & {
+      content?: string;
+      groupId?: string;
+      source?: string;
+      repositoryName?: string;
+    },
   ) => {
     const { api, centerGroupId } = get();
     if (!api) return;
@@ -268,7 +273,13 @@ function buildFileDiffAction(get: StoreGet) {
       type: "file-diff",
       itemId: path,
       title: `Diff [${getFileName(path)}]`,
-      params: { kind: "file", path, content: opts?.content, source: opts?.source },
+      params: {
+        kind: "file",
+        path,
+        content: opts?.content,
+        source: opts?.source,
+        repositoryName: opts?.repositoryName,
+      },
       groupId: opts?.groupId ?? centerGroupId,
       quiet: opts?.quiet,
       pin: opts?.pin,
