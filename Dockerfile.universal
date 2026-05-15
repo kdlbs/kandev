@@ -44,6 +44,9 @@ RUN set -eux; \
         pkg-config \
         python3-dev \
         libssl-dev \
+        # curl is used by the toolchain install steps below (Go, golangci-lint,
+        # rustup, yq). The vanilla base image doesn't ship it.
+        curl \
         # Useful CLI tools agents reach for. Small, broadly applicable.
         ripgrep \
         fd-find \
