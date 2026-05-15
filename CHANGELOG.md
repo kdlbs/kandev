@@ -2,6 +2,28 @@
 
 All notable changes to Kandev.
 
+## 0.46.0 - 2026-05-15
+
+### Features
+
+- docker and sprites executor improvements ([#738](https://github.com/kdlbs/kandev/pull/738))
+- replace merged-diff view with timeline + overlay sheets on Changes tab ([#902](https://github.com/kdlbs/kandev/pull/902))
+- publish universal image flavor with toolchains + customize docs ([#891](https://github.com/kdlbs/kandev/pull/891))
+- differentiate pending permission icon from turn finished in sidebar ([#882](https://github.com/kdlbs/kandev/pull/882))
+
+### Bug Fixes
+
+- make conpty Close idempotent and kill orphan agentctl ([#900](https://github.com/kdlbs/kandev/pull/900))
+- improve custom script menu readability ([#905](https://github.com/kdlbs/kandev/pull/905))
+- use clipboard hook with HTTP fallback for stats copy ([#903](https://github.com/kdlbs/kandev/pull/903))
+- anchor manual PR panel open to the session's live group ([#901](https://github.com/kdlbs/kandev/pull/901))
+- scope pending-permission scan to current turn ([#899](https://github.com/kdlbs/kandev/pull/899))
+- prevent duplicate execution of repository setup scripts ([#898](https://github.com/kdlbs/kandev/pull/898))
+- hide stuck Resume session button after click + cover with e2e ([#890](https://github.com/kdlbs/kandev/pull/890))
+- drop -l from task shells so PATH keeps agent CLI bin dir ([#889](https://github.com/kdlbs/kandev/pull/889))
+- session tab leak, PR icon crash, and PR review prompt scope ([#897](https://github.com/kdlbs/kandev/pull/897))
+- release agent ports during E2E reset to prevent shard exhaustion ([#888](https://github.com/kdlbs/kandev/pull/888))
+
 ## 0.45.0 - 2026-05-12
 
 ### Features
