@@ -2,6 +2,12 @@
 
 All notable changes to Kandev.
 
+## 0.47.0 - 2026-05-15
+
+### Bug Fixes
+
+- install curl in universal image ([#910](https://github.com/kdlbs/kandev/pull/910))
+
 ## 0.46.0 - 2026-05-15
 
 ### Features
