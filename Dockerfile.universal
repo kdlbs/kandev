@@ -94,7 +94,7 @@ RUN set -eux; \
     tarball="go${GO_VERSION}.linux-${goarch}.tar.gz"; \
     expected="$(curl -fsSL 'https://go.dev/dl/?mode=json&include=all' \
         | jq -r --arg v "go${GO_VERSION}" --arg f "${tarball}" \
-            '.[] | select(.version == $v) | .files[] | select(.filename == $f) | .sha256')"; \
+            'first(.[] | select(.version == $v) | .files[] | select(.filename == $f) | .sha256)')"; \
     if [ -z "$expected" ]; then \
         echo "no upstream sha256 for ${tarball} at version ${GO_VERSION}" >&2; \
         exit 1; \
@@ -139,7 +139,10 @@ RUN set -eux; \
 #
 # Integrity: download rustup-init for our arch and verify its SHA-256
 # against the upstream .sha256 sidecar before executing - matches the
-# pattern used for Go/golangci-lint/yq above, rather than `curl | sh`.
+# pattern used for golangci-lint/yq above, rather than `curl | sh`.
+# (Go uses the JSON release index instead - go.dev doesn't actually
+# publish per-tarball .sha256 sidecars despite the URL pattern looking
+# like it would work.)
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo
 RUN set -eux; \
