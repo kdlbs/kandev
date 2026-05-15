@@ -63,4 +63,7 @@ func TestResolveConPtyCmdLine_ExePassesThrough(t *testing.T) {
 	if strings.HasPrefix(got, "cmd.exe /c ") {
 		t.Errorf("resolveConPtyCmdLine wrapped a non-batch executable: %s", got)
 	}
+	if !strings.Contains(got, cmd.Path) {
+		t.Errorf("resolveConPtyCmdLine should substitute resolved cmd.Path %q for Args[0], got: %s", cmd.Path, got)
+	}
 }
