@@ -603,3 +603,116 @@ func TestCascade_NilEventPublisher_NoCrash(t *testing.T) {
 		t.Fatalf("delete with nil publisher: %v", err)
 	}
 }
+
+// fakeResourceCleaner captures the (taskID, deleteEnvRow) pair delivered
+// to CleanupTaskResources by each cascade invocation. Mirrors
+// fakeEventPublisher above — the same regression class (cascade silently
+// dropping a per-task callback) caused both the WS-event leak and the
+// Docker-container leak.
+type fakeResourceCleaner struct {
+	mu    sync.Mutex
+	calls []resourceCleanerCall
+}
+
+type resourceCleanerCall struct {
+	taskID       string
+	deleteEnvRow bool
+}
+
+func (f *fakeResourceCleaner) CleanupTaskResources(_ context.Context, taskID string, deleteEnvRow bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, resourceCleanerCall{taskID: taskID, deleteEnvRow: deleteEnvRow})
+}
+
+// TestArchiveTaskTree_InvokesResourceCleanerPerTask pins the regression
+// where cascade-archive stopped active runs (which stops the agent /
+// container) but never invoked the env-teardown branch — so containers
+// kept existing on disk forever. Archive preserves the env row, so
+// deleteEnvRow must be false on every call.
+func TestArchiveTaskTree_InvokesResourceCleanerPerTask(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("c1", "root", "ws-1")
+	tasks.addTask("c2", "root", "ws-1")
+	groups := newCascadeWSGroupRepo()
+	svc := newCascadeService(t, tasks, groups)
+	cleaner := &fakeResourceCleaner{}
+	svc.SetTaskResourceCleaner(cleaner)
+
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root"); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+
+	cleaner.mu.Lock()
+	defer cleaner.mu.Unlock()
+	if got, want := len(cleaner.calls), 3; got != want {
+		t.Fatalf("CleanupTaskResources calls = %d, want %d (one per archived task)", got, want)
+	}
+	want := map[string]bool{"root": true, "c1": true, "c2": true}
+	for _, call := range cleaner.calls {
+		if call.deleteEnvRow {
+			t.Errorf("task %s: archive cascade passed deleteEnvRow=true, want false (archive preserves the env row)", call.taskID)
+		}
+		delete(want, call.taskID)
+	}
+	if len(want) > 0 {
+		t.Errorf("missing CleanupTaskResources for: %v", want)
+	}
+}
+
+// TestDeleteTaskTree_InvokesResourceCleanerPerTask is the delete-side
+// equivalent: every deleted task gets its runtime resources torn down,
+// and the env row is removed (deleteEnvRow=true) since the task itself
+// is gone.
+func TestDeleteTaskTree_InvokesResourceCleanerPerTask(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("c1", "root", "ws-1")
+	groups := newCascadeWSGroupRepo()
+	tr := &fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}
+	svc := NewHandoffService(tr, nil, nil, nil, groups, nil)
+	cleaner := &fakeResourceCleaner{}
+	svc.SetTaskResourceCleaner(cleaner)
+
+	if _, err := svc.DeleteTaskTree(context.Background(), "root"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	cleaner.mu.Lock()
+	defer cleaner.mu.Unlock()
+	if got, want := len(cleaner.calls), 2; got != want {
+		t.Fatalf("CleanupTaskResources calls = %d, want %d (one per deleted task)", got, want)
+	}
+	want := map[string]bool{"root": true, "c1": true}
+	for _, call := range cleaner.calls {
+		if !call.deleteEnvRow {
+			t.Errorf("task %s: delete cascade passed deleteEnvRow=false, want true (the task is gone, the env row must follow)", call.taskID)
+		}
+		delete(want, call.taskID)
+	}
+	if len(want) > 0 {
+		t.Errorf("missing CleanupTaskResources for: %v", want)
+	}
+}
+
+// TestCascade_NilResourceCleaner_NoCrash defends the optional-wiring
+// contract for the resource cleaner. Legacy / test setups that don't
+// wire one must still complete the cascade — the cleaner is a runtime
+// hook, not a correctness requirement of the cascade itself.
+func TestCascade_NilResourceCleaner_NoCrash(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("c1", "root", "ws-1")
+	groups := newCascadeWSGroupRepo()
+	tr := &fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}
+	svc := NewHandoffService(tr, nil, nil, nil, groups, nil)
+	// Intentionally NOT calling SetTaskResourceCleaner.
+
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root"); err != nil {
+		t.Fatalf("archive with nil cleaner: %v", err)
+	}
+	if _, err := svc.DeleteTaskTree(context.Background(), "root"); err != nil {
+		t.Fatalf("delete with nil cleaner: %v", err)
+	}
+}
