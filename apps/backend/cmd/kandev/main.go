@@ -1250,6 +1250,18 @@ func backfillAgentDefaultSkills(
 // buildOfficeFeatureServices creates the feature-level office services used by
 // the HTTP handler layer (office.RegisterAllRoutes). The monolithic
 // services.Office is passed for shared interfaces during the transition period.
+// newAgentAuth wraps officeagents.NewAgentAuth with a dev-mode warning when
+// no signing key is configured, so the empty-key fallback can't silently
+// invalidate agent tokens on every restart in production.
+func newAgentAuth(jwtSigningKey string, log *logger.Logger) *officeagents.AgentAuth {
+	if jwtSigningKey == "" {
+		log.Warn("office.jwtSigningKey is empty; generating an ephemeral key. " +
+			"Agent JWTs will be invalidated on every backend restart. " +
+			"Set KANDEV_OFFICE_JWTSIGNINGKEY for stable tokens.")
+	}
+	return officeagents.NewAgentAuth(jwtSigningKey)
+}
+
 func buildOfficeFeatureServices(
 	repo *officesqlite.Repository,
 	taskRepo *tasksqlite.Repository,
@@ -1265,12 +1277,7 @@ func buildOfficeFeatureServices(
 	activity := officeshared.NewActivityLogger(repo, log)
 
 	agentSvc := officeagents.NewAgentService(repo, log, activity)
-	if jwtSigningKey == "" {
-		log.Warn("office.jwtSigningKey is empty; generating an ephemeral key. " +
-			"Agent JWTs will be invalidated on every backend restart. " +
-			"Set KANDEV_OFFICE_JWTSIGNINGKEY for stable tokens.")
-	}
-	agentSvc.SetAuth(officeagents.NewAgentAuth(jwtSigningKey))
+	agentSvc.SetAuth(newAgentAuth(jwtSigningKey, log))
 	if services.Office != nil {
 		services.Office.SetAgentTokenMinter(agentSvc)
 	}
