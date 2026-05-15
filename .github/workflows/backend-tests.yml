@@ -57,8 +57,9 @@ jobs:
       - name: Build
         run: go build -v ./cmd/kandev
 
-      - name: Check gofmt
+      - name: Resolve base SHA
         shell: bash
+        working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
 
@@ -71,6 +72,14 @@ jobs:
           if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
             BASE_SHA="$(git rev-list --max-parents=0 HEAD)"
           fi
+
+          echo "BASE_SHA=${BASE_SHA}" >> "$GITHUB_ENV"
+          echo "Base SHA: ${BASE_SHA}"
+
+      - name: Check gofmt
+        shell: bash
+        run: |
+          set -euo pipefail
 
           CHANGED_GO_FILES="$(
             git diff --name-only --diff-filter=ACMRT "${BASE_SHA}"..."${{ github.sha }}" -- apps/backend \
@@ -94,9 +103,8 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.9
-          args: ./...
+          args: ./... --new-from-rev=${{ env.BASE_SHA }}
           working-directory: apps/backend
-          only-new-issues: true
 
       - name: Run tests
         run: |
