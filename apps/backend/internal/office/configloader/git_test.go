@@ -334,3 +334,32 @@ func TestGetWorkspaceGitStatus_NotGitRepo(t *testing.T) {
 		t.Fatal("expected error for non-git workspace")
 	}
 }
+
+// TestIsAllowedRepoURL pins the rejection branches of the URL guard that
+// prevents argument injection via repository URLs (e.g. --upload-pack=evil).
+func TestIsAllowedRepoURL(t *testing.T) {
+	bad := []string{
+		"--upload-pack=evil",
+		"javascript:alert(1)",
+		"",
+		"://missing-scheme",
+		"ftp://unsupported",
+	}
+	for _, u := range bad {
+		if isAllowedRepoURL(u) {
+			t.Errorf("isAllowedRepoURL(%q) = true, want false", u)
+		}
+	}
+	good := []string{
+		"https://github.com/org/repo",
+		"git@github.com:org/repo.git",
+		"ssh://git@github.com/org/repo",
+		"/tmp/local.git",
+		"file:///tmp/local.git",
+	}
+	for _, u := range good {
+		if !isAllowedRepoURL(u) {
+			t.Errorf("isAllowedRepoURL(%q) = false, want true", u)
+		}
+	}
+}
