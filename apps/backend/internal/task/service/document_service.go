@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -21,7 +22,24 @@ var (
 	ErrDocumentKeyRequired  = errors.New("document key is required")
 	ErrDocumentTaskRequired = errors.New("task_id is required")
 	ErrAttachmentTooLarge   = errors.New("attachment exceeds maximum size")
+	ErrInvalidPathComponent = errors.New("invalid path component")
 )
+
+// safePathComponent rejects taskID / key values that could traverse the
+// attachments root via "..", embedded separators, or null bytes. The HTTP
+// handler accepts these from clients, so the service layer is the right
+// place to enforce containment before they hit filepath.Join.
+func safePathComponent(s string) error {
+	if s == "" || s == "." || s == ".." {
+		return ErrInvalidPathComponent
+	}
+	for _, r := range s {
+		if r == '/' || r == '\\' || r == 0 {
+			return ErrInvalidPathComponent
+		}
+	}
+	return nil
+}
 
 const (
 	maxAttachmentBytes       = 10 * 1024 * 1024 // 10 MB
@@ -292,11 +310,20 @@ func (s *DocumentService) UploadAttachment(
 	if key == "" {
 		return nil, ErrDocumentKeyRequired
 	}
+	if err := safePathComponent(taskID); err != nil {
+		return nil, err
+	}
+	if err := safePathComponent(key); err != nil {
+		return nil, err
+	}
 	if int64(len(data)) > maxAttachmentBytes {
 		return nil, ErrAttachmentTooLarge
 	}
 
 	ext := filepath.Ext(filename)
+	if strings.ContainsAny(ext, "/\\\x00") {
+		return nil, ErrInvalidPathComponent
+	}
 	dir := filepath.Join(basePath, "attachments", taskID)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("create attachment dir: %w", err)

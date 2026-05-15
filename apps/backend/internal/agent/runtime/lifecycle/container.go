@@ -42,10 +42,10 @@ type ContainerConfig struct {
 	MainRepoGitDir    string // Path to main repo's .git directory (for worktrees)
 	McpServers        []McpServerConfig
 	McpMode           string
-	PrepareScript     string // Script to run inside container before agent starts (e.g., clone repo)
-	ImageTagOverride  string // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
-	LocalClonePath    string // Host path for file:// repository clone URLs; mounted read-only at the same path.
-	BootstrapNonce    string // one-time nonce for agentctl handshake (set internally)
+	PrepareScript     string                 // Script to run inside container before agent starts (e.g., clone repo)
+	ImageTagOverride  string                 // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
+	LocalClonePath    string                 // Host path for file:// repository clone URLs; mounted read-only at the same path.
+	BootstrapNonce    string                 // one-time nonce for agentctl handshake (set internally)
 	Metadata          map[string]interface{} // Optional metadata (e.g., office runtime dir)
 }
 

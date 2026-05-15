@@ -71,6 +71,10 @@ func AgentAuthMiddleware(svc *AgentService) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "agent not found"})
 			return
 		}
+		if wsID := c.Param("wsId"); wsID != "" && claims.WorkspaceID != wsID {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "token workspace mismatch"})
+			return
+		}
 		c.Set(ctxKeyAgentClaims, claims)
 		c.Set(ctxKeyAgentCaller, agent)
 		c.Next()

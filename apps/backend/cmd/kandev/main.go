@@ -7,6 +7,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -39,7 +40,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
-	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	runtimeskill "github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
@@ -371,13 +371,9 @@ func startAgentInfrastructure(
 	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
 	log.Info("Workspace info provider configured for session recovery")
 
-	// AGENT RUNTIME FACADE (Phase 1 of task-model-unification, ADR 0004).
-	// This is the single seam future workflow-engine and cron-driven trigger
-	// handlers will call. Phase 1 only introduces the seam; existing callers
-	// continue to use the lifecycle manager directly until later phases route
-	// them through `agentRuntime`.
-	agentRuntime := agentruntime.New(lifecycleMgr)
-	_ = agentRuntime
+	// TODO(task-model-unification Phase 2, ADR 0004): wire agentruntime.New(lifecycleMgr)
+	// once a real consumer (workflow-engine / cron-driven trigger handlers) exists.
+	// Allocating the facade in Phase 1 without a caller is dead code.
 
 	// Persistence writer for executors_running. This makes the lifecycle manager
 	// the sole writer of agent_execution_id / container_id / runtime / status —
@@ -630,26 +626,27 @@ func startGatewayAndServe(
 // backend doesn't permanently advertise "not ready" if probing fails
 // for some unrelated reason (e.g. an iptables hiccup on a dev box).
 func waitListenerThenMarkReady(port int, log *logger.Logger) {
-	url := fmt.Sprintf("http://127.0.0.1:%d/health", port)
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	deadline := time.Now().Add(30 * time.Second)
-	client := &http.Client{Timeout: 500 * time.Millisecond}
-	for time.Now().Before(deadline) {
-		resp, err := client.Get(url)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
 		if err == nil {
-			_ = resp.Body.Close()
-			// Even a 503 response proves the listener is bound and
-			// the route is wired — we're the ones returning the 503,
-			// after all. Flip ready and let subsequent /health
-			// requests see a 200.
+			_ = conn.Close()
+			// A successful TCP dial proves the listener is bound.
 			ready.Store(true)
 			log.Info("backend ready", zap.Int("port", port))
 			return
 		}
-		time.Sleep(50 * time.Millisecond)
+		if time.Now().After(deadline) {
+			log.Warn("backend readiness probe never connected; flipping ready anyway",
+				zap.Int("port", port))
+			ready.Store(true)
+			return
+		}
+		<-ticker.C
 	}
-	log.Warn("backend readiness probe never connected; flipping ready anyway",
-		zap.Int("port", port))
-	ready.Store(true)
 }
 
 // initOfficeServices constructs the office service with all dependencies, then
@@ -731,7 +728,7 @@ func initOfficeServices(
 	// Build feature-package services and wire all inter-service dependencies.
 	services.OfficeSvcs = buildOfficeFeatureServices(
 		repos.Office, repos.Task, repos.AgentSettings, cfgLoader, cfgWriter, configBasePath,
-		agentRegistry, log, services,
+		agentRegistry, log, services, cfg.Office.JWTSigningKey,
 	)
 	wireOfficeSvcsDependencies(services, repos, eventBus, orchestratorSvc, agentRegistry)
 
@@ -1059,7 +1056,7 @@ func wireRuntimeSkillDeployer(
 		SkillReader:             officeskills.NewSkillReaderAdapter(officeSvc),
 		InstructionLister:       officeskills.NewInstructionListerAdapter(officeRepo),
 		ProjectSkillDirResolver: makeProjectSkillDirResolver(agentRegistry),
-		WorkspaceSlugFn:         makeWorkspaceSlugFn(officeRepo),
+		WorkspaceSlugFn:         makeWorkspaceSlugFn(),
 	})
 	if err != nil {
 		log.Warn("failed to construct runtime skill deployer; launches will skip skill delivery",
@@ -1110,11 +1107,13 @@ func makeUserSkillDirResolver(reg *registry.Registry) officeskills.UserSkillDirR
 }
 
 // makeWorkspaceSlugFn returns a slug-resolver that maps a workspace ID
-// to a slug used in on-host runtime paths. Today everything in the
-// office stack hardcodes "default" (single-workspace per install) so we
-// match that — when multi-workspace lands the resolver gets a real
-// lookup against the office repo.
-func makeWorkspaceSlugFn(_ *officesqlite.Repository) func(string) string {
+// to a slug used in on-host runtime paths. The office stack is currently
+// single-workspace-per-install, so every ID resolves to the constant
+// "default". When multi-workspace lands, this becomes a real lookup
+// against officesqlite.Repository (e.g. GetWorkspaceNameByID) — until
+// then we deliberately ignore the workspace ID rather than passing a
+// repo dependency that has nothing to query.
+func makeWorkspaceSlugFn() func(string) string {
 	return func(string) string { return "default" }
 }
 
@@ -1261,11 +1260,17 @@ func buildOfficeFeatureServices(
 	agentRegistry *registry.Registry,
 	log *logger.Logger,
 	services *Services,
+	jwtSigningKey string,
 ) *office.Services {
 	activity := officeshared.NewActivityLogger(repo, log)
 
 	agentSvc := officeagents.NewAgentService(repo, log, activity)
-	agentSvc.SetAuth(officeagents.NewAgentAuth(""))
+	if jwtSigningKey == "" {
+		log.Warn("office.jwtSigningKey is empty; generating an ephemeral key. " +
+			"Agent JWTs will be invalidated on every backend restart. " +
+			"Set KANDEV_OFFICE_JWTSIGNINGKEY for stable tokens.")
+	}
+	agentSvc.SetAuth(officeagents.NewAgentAuth(jwtSigningKey))
 	if services.Office != nil {
 		services.Office.SetAgentTokenMinter(agentSvc)
 	}

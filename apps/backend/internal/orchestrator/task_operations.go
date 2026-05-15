@@ -503,7 +503,11 @@ func mergeRouteEnv(launchEnv, routeEnv map[string]string) map[string]string {
 	if len(launchEnv) == 0 && len(routeEnv) == 0 {
 		return nil
 	}
-	out := make(map[string]string, len(launchEnv)+len(routeEnv))
+	// The size hint is unused intentionally: CodeQL flags
+	// `len(a)+len(b)` as a potential overflow for the make() capacity
+	// argument. Map literals re-grow themselves; the hint was an
+	// optimization, not a correctness requirement.
+	out := make(map[string]string)
 	for k, v := range launchEnv {
 		out[k] = v
 	}

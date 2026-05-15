@@ -39,6 +39,7 @@ type Config struct {
 	Worktree            WorktreeConfig            `mapstructure:"worktree"`
 	RepoClone           RepoCloneConfig           `mapstructure:"repoClone"`
 	Debug               DebugConfig               `mapstructure:"debug"`
+	Office              OfficeConfig              `mapstructure:"office"`
 }
 
 // expandTilde expands a leading "~/" to the user's home directory.
@@ -133,6 +134,15 @@ type DockerConfig struct {
 type AuthConfig struct {
 	JWTSecret     string `mapstructure:"jwtSecret"`
 	TokenDuration int    `mapstructure:"tokenDuration"` // in seconds
+}
+
+// OfficeConfig holds configuration for the office (autonomous agents) feature.
+type OfficeConfig struct {
+	// JWTSigningKey is the HMAC key used to sign agent runtime JWTs.
+	// When empty, a random key is generated at startup — fine for dev, but
+	// means every restart invalidates outstanding agent tokens. Production
+	// deployments should set a stable value (e.g. via KANDEV_OFFICE_JWTSIGNINGKEY).
+	JWTSigningKey string `mapstructure:"jwtSigningKey"`
 }
 
 // LoggingConfig holds logging configuration.
@@ -281,6 +291,9 @@ func setDefaults(v *viper.Viper) {
 	// Auth defaults
 	v.SetDefault("auth.jwtSecret", "")
 	v.SetDefault("auth.tokenDuration", 3600) // 1 hour
+
+	// Office defaults
+	v.SetDefault("office.jwtSigningKey", "")
 
 	// Logging defaults
 	v.SetDefault("logging.level", "info")

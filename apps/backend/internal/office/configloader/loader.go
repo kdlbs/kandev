@@ -75,6 +75,9 @@ func (cl *ConfigLoader) Load() error {
 			continue
 		}
 		name := entry.Name()
+		if err := validateWorkspaceName(name); err != nil {
+			continue
+		}
 		cl.loadWorkspaceLocked(name)
 	}
 	return nil
@@ -327,6 +330,9 @@ func (cl *ConfigLoader) GetErrors() []*ConfigError {
 
 // Reload re-reads a single workspace from disk.
 func (cl *ConfigLoader) Reload(workspaceName string) error {
+	if err := validateWorkspaceName(workspaceName); err != nil {
+		return err
+	}
 	wsPath := filepath.Join(cl.basePath, "workspaces", workspaceName)
 	if _, err := os.Stat(wsPath); err != nil {
 		if os.IsNotExist(err) {

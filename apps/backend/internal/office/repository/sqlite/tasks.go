@@ -738,10 +738,21 @@ func (r *Repository) UpdateTaskParentID(ctx context.Context, taskID, parentID st
 	return r.execTaskScalar(ctx, taskID, "parent_id", parentID)
 }
 
+// taskScalarColumns enumerates the only columns execTaskScalar may target.
+// Column names are interpolated into the SQL string (SQLite does not support
+// parameterised identifiers), so the allowlist prevents an accidental
+// caller-controlled column ever reaching fmt.Sprintf — gosec G201 guardrail.
+var taskScalarColumns = map[string]struct{}{
+	"priority":   {},
+	"project_id": {},
+	"parent_id":  {},
+}
+
 // execTaskScalar updates a single TEXT column on a task and bumps updated_at.
-// The column name is interpolated directly because SQLite does not support
-// parameterised identifiers; only repository-internal callers pick the name.
 func (r *Repository) execTaskScalar(ctx context.Context, taskID, column, value string) error {
+	if _, ok := taskScalarColumns[column]; !ok {
+		return fmt.Errorf("disallowed task column %q", column)
+	}
 	query := fmt.Sprintf("UPDATE tasks SET %s = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", column)
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), value, taskID)
 	if err != nil {

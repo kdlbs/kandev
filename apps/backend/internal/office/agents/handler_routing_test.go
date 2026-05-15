@@ -145,3 +145,42 @@ func asString(v interface{}) string {
 	s, _ := v.(string)
 	return s
 }
+
+// TestAgentAuthMiddleware_RejectsCrossWorkspaceToken ensures a token minted
+// for workspace A cannot access endpoints scoped to workspace B via the
+// :wsId path parameter. Without this check, an agent in one workspace could
+// enumerate or mutate resources in any other workspace on the same backend.
+func TestAgentAuthMiddleware_RejectsCrossWorkspaceToken(t *testing.T) {
+	svc, _ := newTestAgentService(t)
+	svc.SetAuth(NewAgentAuth("test-signing-key"))
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		WorkspaceID: "ws-1",
+		Name:        "Worker",
+		Role:        models.AgentRoleWorker,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	token, err := svc.auth.MintAgentJWT(agent.ID, "task-1", "ws-1", "sess-1")
+	if err != nil {
+		t.Fatalf("mint token: %v", err)
+	}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	group := r.Group("/api/v1")
+	group.Use(AgentAuthMiddleware(svc))
+	RegisterRoutes(group, svc, logger.Default())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/ws-2/agents", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+}

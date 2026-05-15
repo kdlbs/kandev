@@ -45,12 +45,17 @@ func NewGitManager(basePath string, loader *ConfigLoader, log *logger.Logger) *G
 }
 
 // workspacePath returns the absolute path for a workspace directory.
+// Callers must have already validated workspaceName via validateWorkspaceName;
+// this method does not re-validate so it stays a pure path helper.
 func (g *GitManager) workspacePath(workspaceName string) string {
 	return filepath.Join(g.basePath, "workspaces", workspaceName)
 }
 
 // IsGitWorkspace checks whether the workspace directory contains a .git directory.
 func (g *GitManager) IsGitWorkspace(workspaceName string) bool {
+	if err := validateWorkspaceName(workspaceName); err != nil {
+		return false
+	}
 	gitDir := filepath.Join(g.workspacePath(workspaceName), ".git")
 	info, err := os.Stat(gitDir)
 	if err != nil {
@@ -62,6 +67,9 @@ func (g *GitManager) IsGitWorkspace(workspaceName string) bool {
 // CloneWorkspace clones a git repository into the workspace directory.
 // If the directory already exists and is a git repo, it pulls instead.
 func (g *GitManager) CloneWorkspace(ctx context.Context, repoURL, branch, workspaceName string) error {
+	if err := validateWorkspaceName(workspaceName); err != nil {
+		return err
+	}
 	wsPath := g.workspacePath(workspaceName)
 
 	if g.IsGitWorkspace(workspaceName) {
@@ -92,6 +100,9 @@ func (g *GitManager) CloneWorkspace(ctx context.Context, repoURL, branch, worksp
 
 // PullWorkspace runs git pull in the workspace directory.
 func (g *GitManager) PullWorkspace(ctx context.Context, workspaceName string) error {
+	if err := validateWorkspaceName(workspaceName); err != nil {
+		return err
+	}
 	wsPath := g.workspacePath(workspaceName)
 	if !g.IsGitWorkspace(workspaceName) {
 		return fmt.Errorf("workspace %q is not a git repository", workspaceName)
@@ -109,6 +120,9 @@ func (g *GitManager) PullWorkspace(ctx context.Context, workspaceName string) er
 // PushWorkspace stages all changes, commits with the given message, and pushes.
 // Returns nil if there is nothing to commit.
 func (g *GitManager) PushWorkspace(ctx context.Context, workspaceName, message string) error {
+	if err := validateWorkspaceName(workspaceName); err != nil {
+		return err
+	}
 	wsPath := g.workspacePath(workspaceName)
 	if !g.IsGitWorkspace(workspaceName) {
 		return fmt.Errorf("workspace %q is not a git repository", workspaceName)
@@ -148,6 +162,9 @@ func (g *GitManager) stageAndCommit(ctx context.Context, wsPath, message string)
 
 // GetWorkspaceGitStatus returns the git status for a workspace.
 func (g *GitManager) GetWorkspaceGitStatus(ctx context.Context, workspaceName string) (*GitStatus, error) {
+	if err := validateWorkspaceName(workspaceName); err != nil {
+		return nil, err
+	}
 	wsPath := g.workspacePath(workspaceName)
 	if !g.IsGitWorkspace(workspaceName) {
 		return nil, fmt.Errorf("workspace %q is not a git repository", workspaceName)
