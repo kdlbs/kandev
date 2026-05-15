@@ -331,7 +331,7 @@ Every code change must include tests for new or changed logic. Backend: `*_test.
 ### Knowledge
 - **Specs:** Feature specs live in `docs/specs/<slug>/spec.md` — the "what & why" of a feature, written before coding. Optional siblings: `plan.md` (how), `notes.md` (post-ship). Use `/spec` to write or update a spec. See `docs/specs/INDEX.md`.
 - **Decisions:** Architecture decisions are recorded in `docs/decisions/`. Read `docs/decisions/INDEX.md` for an overview. When making significant architectural choices, create a new ADR via `/record decision`.
-- **Plans:** Retrospective implementation plans live in `docs/plans/` (created via `/record plan`). A forward-looking plan tied to a spec goes at `docs/specs/<slug>/plan.md`.
+- **Plans:** Implementation plans are generated from specs via `/plan` and saved to `docs/specs/<slug>/plan.md`. Plans are gitignored (working files, not committed) — only specs and ADRs are tracked.
 
 ### Backend
 - Provider pattern for DI; stderr for logs, stdout for ACP only

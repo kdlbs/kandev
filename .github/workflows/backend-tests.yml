@@ -25,7 +25,7 @@ concurrency:
 jobs:
   test:
     name: Run Backend Tests
-    runs-on: warp-ubuntu-latest-x64-4x
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps/backend
@@ -93,14 +93,10 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.11.3
+          version: v2.9
           args: ./...
           working-directory: apps/backend
-          # Set to false on the office feature branch: the squashed PR has
-          # >300 changed files, exceeding GitHub's diff API cap that this
-          # action uses to filter to "new" issues. The whole codebase
-          # already lints clean (`make -C apps/backend lint`).
-          only-new-issues: false
+          only-new-issues: true
 
       - name: Run tests
         run: |
@@ -162,4 +158,4 @@ jobs:
       # a self-hosting Go helper (see testmain_test.go) so they run on
       # every platform.
       - name: Test windows-sensitive packages
-        run: go test -race -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/...
+        run: go test -race -v ./internal/agentctl/server/process/... ./internal/agentctl/client/launcher/...

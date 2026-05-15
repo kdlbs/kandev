@@ -33,17 +33,12 @@ permissions:
 jobs:
   build:
     name: Build
-    # Snapshot warm-up: this job installs Playwright + apt deps and saves
-    # a VM snapshot at end-of-run. Subsequent shards mount it and skip the
-    # ~60–90s Playwright install per shard. Key invalidates automatically
-    # when the runner image changes.
-    runs-on: "warp-ubuntu-latest-x64-4x;snapshot.key=kandev-e2e"
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -64,18 +59,6 @@ jobs:
       - name: Install dependencies
         working-directory: apps
         run: pnpm install --frozen-lockfile
-
-      # WarpBuild's runner image already has Playwright's required apt
-      # libraries baked in (it inherits from actions/runner-images), so
-      # we skip `--with-deps` and install only the browser binary. This
-      # avoids the apt mirror trap on this runner pool (azure mirror
-      # returns Ign:, archive.ubuntu.com rate-limits, mirror.gcr.io 403s).
-      # If a future Playwright bump needs new system libs, install them
-      # explicitly here against a working mirror rather than via
-      # --with-deps.
-      - name: Install Playwright browsers (snapshot warm-up)
-        working-directory: apps/web
-        run: npx playwright install chromium
 
       - name: Build backend and web
         run: make build-backend build-web
@@ -105,23 +88,11 @@ jobs:
           path: apps/web/next-build.tar
           retention-days: 1
 
-      # Capture VM state (Playwright browsers + apt deps + pnpm store + Go
-      # caches) so the 10 e2e shards don't repeat the ~60–90s install.
-      - name: Save WarpBuild snapshot
-        uses: WarpBuilds/snapshot-save@v1
-        with:
-          alias: kandev-e2e
-          wait-timeout-minutes: 30
-          fail-on-error: "false"
-
   e2e:
     name: E2E Shard ${{ matrix.shard }}/10
     needs: build
-    # Mount the snapshot saved by `build`. Playwright browsers, apt deps,
-    # pnpm store, and Go caches are pre-warmed; pnpm install is fast,
-    # the heavy `--with-deps` apt install is skipped entirely.
-    runs-on: "warp-ubuntu-latest-x64-4x;snapshot.key=kandev-e2e"
-    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -145,13 +116,9 @@ jobs:
         working-directory: apps
         run: pnpm install --frozen-lockfile
 
-      # Snapshot from `build` already has Chromium + apt deps. This call is
-      # a fast no-op when the snapshot's Playwright version matches; if
-      # pnpm-lock.yaml bumped @playwright/test since the snapshot was saved,
-      # it pulls the new browser (~5s) without re-running the apt install.
-      - name: Verify Playwright browsers
+      - name: Install Playwright browsers
         working-directory: apps/web
-        run: npx playwright install chromium
+        run: npx playwright install chromium --with-deps
 
       - name: Download backend build
         uses: actions/download-artifact@v4
@@ -284,7 +251,7 @@ jobs:
     name: Merge E2E Reports
     needs: [e2e, e2e-docker]
     if: always()
-    runs-on: warp-ubuntu-latest-x64-2x
+    runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
