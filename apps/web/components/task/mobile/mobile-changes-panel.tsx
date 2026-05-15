@@ -67,8 +67,8 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
     setDiffSheet({
       kind: "file",
       path,
-      sourceFilter: options?.source ?? "all",
-      repositoryName: options?.repositoryName,
+      sourceFilter: "all",
+      repositoryName: options?.repositoryName || undefined,
     });
   }, []);
 

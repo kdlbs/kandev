@@ -156,6 +156,79 @@ test.describe("Mobile changes panel", () => {
     await testPage.getByTestId("mobile-diff-sheet-close").tap();
   });
 
+  test("tapping a PR file row opens file diff sheet with diff content", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile PR File Diff",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.idleInput()).toBeVisible({ timeout: 45_000 });
+
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 42,
+        title: "Mobile PR file diff test",
+        state: "open",
+        head_branch: "feat/mobile-fix",
+        base_branch: "main",
+        author_login: "test-user",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+        additions: 3,
+        deletions: 0,
+      },
+    ]);
+    await apiClient.mockGitHubAddPRFiles("testorg", "testrepo", 42, [
+      {
+        filename: "mobile-pr-fix.txt",
+        status: "added",
+        additions: 3,
+        deletions: 0,
+        patch:
+          "@@ -0,0 +1,3 @@\n+PR_FILE_MARKER_LINE_ONE\n+PR_FILE_MARKER_LINE_TWO\n+PR_FILE_MARKER_LINE_THREE",
+      },
+    ]);
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 42,
+      pr_url: "https://github.com/testorg/testrepo/pull/42",
+      pr_title: "Mobile PR file diff test",
+      head_branch: "feat/mobile-fix",
+      base_branch: "main",
+      author_login: "test-user",
+    });
+
+    await openMobileChangesPanel(testPage);
+    await expandSection(testPage, "pr-changes-section");
+
+    const prFilesList = testPage.getByTestId("pr-files-list");
+    await expect(prFilesList).toBeVisible({ timeout: 20_000 });
+    await prFilesList.getByText("mobile-pr-fix.txt").tap();
+
+    await expect(testPage.getByText("File Changes")).toBeVisible({ timeout: 10_000 });
+    await expectDiffText(testPage, "PR_FILE_MARKER_LINE_ONE");
+
+    await testPage.getByTestId("mobile-diff-sheet-close").tap();
+  });
+
   test("Diff sheet auto-selects Committed tab when no uncommitted changes exist", async ({
     testPage,
     apiClient,
