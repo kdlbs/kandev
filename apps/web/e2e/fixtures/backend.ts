@@ -282,18 +282,15 @@ exec git "$@"
         KANDEV_HOME_DIR: homeDir,
         KANDEV_SERVER_PORT: String(backendPort),
         KANDEV_DATABASE_PATH: dbPath,
-        KANDEV_MOCK_AGENT: "only",
-        // KANDEV_MOCK_PROVIDERS intentionally NOT set by default. When
-        // set, it registers the mock binary under additional canonical
-        // routing provider IDs (claude-acp, codex-acp, opencode-acp).
-        // That side effect leaks into every spec that counts agents
-        // (e.g. utility-agents listbox sees 4 instead of 1). The five
-        // office-routing-* specs that need multi-mock opt in by passing
-        // KANDEV_MOCK_PROVIDERS to backend.restart() — see
-        // registry.RoutableProviderIDs for the mapping.
-        KANDEV_MOCK_GITHUB: "true",
-        KANDEV_MOCK_JIRA: "true",
-        KANDEV_MOCK_LINEAR: "true",
+        // Profile selector. KANDEV_E2E_MOCK=true tells the backend to
+        // apply the `e2e:` profile from profiles.yaml at startup —
+        // which sets KANDEV_MOCK_AGENT, KANDEV_MOCK_GITHUB/JIRA/LINEAR,
+        // KANDEV_FEATURES_OFFICE, AGENTCTL_AUTO_APPROVE_PERMISSIONS,
+        // KANDEV_PLAN_COALESCE_WINDOW_MS, etc. We don't re-set those
+        // here. KANDEV_MOCK_PROVIDERS stays opt-in per-spec because it
+        // changes agent counts; the five office-routing-* specs pass
+        // it to backend.restart() when needed (see
+        // registry.RoutableProviderIDs).
         KANDEV_E2E_MOCK: "true",
         KANDEV_DOCKER_ENABLED: dockerEnabled ? "true" : "false",
         // When Docker is on, point the lifecycle resolvers at the linux/amd64
@@ -310,13 +307,14 @@ exec git "$@"
         KANDEV_LOG_LEVEL: process.env.KANDEV_LOG_LEVEL ?? "warn",
         AGENTCTL_INSTANCE_PORT_BASE: String(agentctlPortBase),
         AGENTCTL_INSTANCE_PORT_MAX: String(agentctlPortMax),
-        // Most E2E tests rely on auto-approve being on so tools that require
-        // permission (Edit, Bash) just complete without UI interaction. Tests
-        // that exercise the approve/reject flow itself opt in by spawning their
-        // own backend with this env var set to "false" — see permission-approval.spec.ts.
-        AGENTCTL_AUTO_APPROVE_PERMISSIONS: process.env.AGENTCTL_AUTO_APPROVE_PERMISSIONS ?? "true",
-        // Short window makes coalesce-boundary tests practical without wall-clock waits.
-        KANDEV_PLAN_COALESCE_WINDOW_MS: process.env.KANDEV_PLAN_COALESCE_WINDOW_MS ?? "2000",
+        // AGENTCTL_AUTO_APPROVE_PERMISSIONS=true and
+        // KANDEV_PLAN_COALESCE_WINDOW_MS=2000 are applied by the
+        // backend's profile loader (profiles.yaml `e2e:` column).
+        // Specs that need different values (e.g.
+        // permission-approval.spec.ts setting auto-approve=false) set
+        // process.env.X before spawn — that already flows through the
+        // `...stripGitHubTokens(process.env)` spread above, and the
+        // backend's ApplyProfile leaves already-set vars alone.
         GIT_AUTHOR_NAME: "E2E Test",
         GIT_AUTHOR_EMAIL: "e2e@test.local",
         GIT_COMMITTER_NAME: "E2E Test",

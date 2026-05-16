@@ -15,6 +15,7 @@ import { ConfigChatProvider } from "@/components/config-chat/config-chat-provide
 import { SessionFailureToastBridge } from "@/components/session-failure-toast-bridge";
 import { SidebarViewsSyncBridge } from "@/components/sidebar-views-sync-bridge";
 import { LogBufferBridge } from "@/components/log-buffer-bridge";
+import { getFeatureFlagsAction } from "@/app/actions/features";
 
 export const metadata: Metadata = {
   title: "Kandev - AI Kanban",
@@ -29,7 +30,7 @@ export const viewport: Viewport = {
   userScalable: false,
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
@@ -39,6 +40,12 @@ export default function RootLayout({
   // window.location.origin (same-origin, works for any domain / reverse proxy).
   const apiPort = process.env.NEXT_PUBLIC_KANDEV_API_PORT ?? null;
   const debugMode = process.env.NEXT_PUBLIC_KANDEV_DEBUG === "true";
+
+  // SSR-fetch the deployment's feature flags so the entire client tree
+  // (including the sidebar nav and gated routes) renders with the correct
+  // visibility on the first paint. Falls back to all-off when the backend
+  // is unreachable. See docs/decisions/0007-runtime-feature-flags.md.
+  const features = await getFeatureFlagsAction();
 
   return (
     <html lang="en" suppressHydrationWarning>
@@ -58,7 +65,7 @@ export default function RootLayout({
             }}
           />
         ) : null}
-        <StateProvider>
+        <StateProvider initialState={{ features }}>
           <ThemeProvider>
             <DiffWorkerPoolProvider>
               <TooltipProvider>

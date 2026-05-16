@@ -18,6 +18,7 @@ import {
   IconBuildings,
 } from "@tabler/icons-react";
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { IntegrationsTopbarLinks } from "@/components/integrations/integrations-menu";
 import { PageTopbar } from "@/components/page-topbar";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
@@ -138,6 +139,11 @@ function StatsTopbarButton() {
 }
 
 function OfficeTopbarButton() {
+  // Hidden in production where features.office=false. The hook reads SSR-
+  // hydrated state, so the button never appears for a single frame on
+  // first paint.
+  const officeEnabled = useFeature("office");
+  if (!officeEnabled) return null;
   return (
     <Tooltip>
       <TooltipTrigger asChild>

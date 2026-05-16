@@ -1,5 +1,7 @@
+import { notFound } from "next/navigation";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateHydrator } from "@/components/state-hydrator";
+import { getFeatureFlagsAction } from "@/app/actions/features";
 import { listWorkspaces, fetchUserSettings } from "@/lib/api";
 import {
   getInbox,
@@ -41,6 +43,16 @@ function mapWorkspaceItem(ws: {
 }
 
 export default async function OfficeLayout({ children }: { children: React.ReactNode }) {
+  // Feature gate: production releases ship with features.office=false and
+  // the backend's /api/v1/office/* routes are not registered. Return 404
+  // for every Office page so even a guessed URL looks like a non-existent
+  // route, not "you don't have permission".
+  // See docs/decisions/0007-runtime-feature-flags.md.
+  const { office: officeEnabled } = await getFeatureFlagsAction();
+  if (!officeEnabled) {
+    notFound();
+  }
+
   // Check onboarding before rendering the office chrome. When not complete,
   // render only the children (the setup wizard) without the workspace rail,
   // sidebar, or topbar — prevents a flash of stale workspace UI.

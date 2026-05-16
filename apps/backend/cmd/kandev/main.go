@@ -575,8 +575,11 @@ func startGatewayAndServe(
 
 	// Wire subscription usage provider into the office agents service so the
 	// /agents/:id/utilization endpoint can fetch live utilization data.
-	usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
-	services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
+	// Skipped when the Office feature flag is off (services.OfficeSvcs is nil).
+	if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
+		usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
+		services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
+	}
 
 	services.Task.StartAutoArchiveLoop(ctx)
 
@@ -665,6 +668,17 @@ func initOfficeServices(
 	lifecycleMgr *lifecycle.Manager,
 	agentRegistry *registry.Registry,
 ) bool {
+	// Feature gate: when features.office is off (the production default),
+	// skip every Office construction step. Downstream call sites
+	// (helpers.go route registration, cron scheduler, skill backfill,
+	// usage-provider wiring) already nil-check services.Office /
+	// services.OfficeSvcs, so leaving them nil is safe.
+	// See docs/decisions/0007-runtime-feature-flags.md.
+	if !cfg.Features.Office {
+		log.Info("Office feature disabled (features.office=false); skipping initialization")
+		return true
+	}
+
 	configBasePath := cfg.ResolvedHomeDir()
 	cfgLoader, cfgWriter := initOfficeConfigLoader(configBasePath, log, addCleanup)
 
@@ -941,8 +955,14 @@ func startOfficeSchedulersAndGC(
 	go runScheduler.Start(ctx)
 	log.Info("Runs scheduler started",
 		zap.Duration("tick", runsscheduler.TickIntervalFromEnv()))
-	// Phase 5 (ADR-0004): start the shared cron loop.
-	startCronScheduler(ctx, repos, engineDispatcher, services.OfficeSvcs.Routines, log)
+	// Phase 5 (ADR-0004): start the shared cron loop. The routines handler
+	// degrades to a no-op when routineSvc is nil, so omitting Office's
+	// scheduler is safe when features.office is off.
+	var officeRoutines *officeroutines.RoutineService
+	if services.OfficeSvcs != nil {
+		officeRoutines = services.OfficeSvcs.Routines
+	}
+	startCronScheduler(ctx, repos, engineDispatcher, officeRoutines, log)
 	// Start GC sweep for orphaned worktrees and containers.
 	worktreeBase := filepath.Join(cfg.ResolvedHomeDir(), "tasks")
 	gc := officeinfra.NewGarbageCollector(
@@ -1247,9 +1267,6 @@ func backfillAgentDefaultSkills(
 	}
 }
 
-// buildOfficeFeatureServices creates the feature-level office services used by
-// the HTTP handler layer (office.RegisterAllRoutes). The monolithic
-// services.Office is passed for shared interfaces during the transition period.
 // newAgentAuth wraps officeagents.NewAgentAuth with a dev-mode warning when
 // no signing key is configured, so the empty-key fallback can't silently
 // invalidate agent tokens on every restart in production.
@@ -1262,6 +1279,9 @@ func newAgentAuth(jwtSigningKey string, log *logger.Logger) *officeagents.AgentA
 	return officeagents.NewAgentAuth(jwtSigningKey)
 }
 
+// buildOfficeFeatureServices creates the feature-level office services used by
+// the HTTP handler layer (office.RegisterAllRoutes). The monolithic
+// services.Office is passed for shared interfaces during the transition period.
 func buildOfficeFeatureServices(
 	repo *officesqlite.Repository,
 	taskRepo *tasksqlite.Repository,
@@ -1446,6 +1466,7 @@ func buildHTTPServer(
 		webInternalURL:          cfg.Server.WebInternalURL,
 		devMode:                 cfg.Debug.DevMode || cfg.Debug.PprofEnabled,
 		httpPort:                port,
+		features:                cfg.Features,
 		log:                     log,
 	})
 

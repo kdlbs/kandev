@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/ports"
+	"github.com/kandev/kandev/internal/profiles"
 	"github.com/spf13/viper"
 )
 
@@ -40,6 +41,7 @@ type Config struct {
 	RepoClone           RepoCloneConfig           `mapstructure:"repoClone"`
 	Debug               DebugConfig               `mapstructure:"debug"`
 	Office              OfficeConfig              `mapstructure:"office"`
+	Features            FeaturesConfig            `mapstructure:"features"`
 }
 
 // expandTilde expands a leading "~/" to the user's home directory.
@@ -143,6 +145,16 @@ type OfficeConfig struct {
 	// means every restart invalidates outstanding agent tokens. Production
 	// deployments should set a stable value (e.g. via KANDEV_OFFICE_JWTSIGNINGKEY).
 	JWTSigningKey string `mapstructure:"jwtSigningKey"`
+}
+
+// FeaturesConfig is the central registry of runtime feature flags. Every flag
+// defaults to false so production binaries ship with new work hidden until a
+// deployment explicitly opts in (env var, e.g. KANDEV_FEATURES_OFFICE=true).
+// See docs/decisions/0007-runtime-feature-flags.md for the pattern and rollout policy.
+type FeaturesConfig struct {
+	// Office gates the autonomous-agent feature: backend service construction,
+	// HTTP/WS route registration, and frontend nav/route visibility.
+	Office bool `mapstructure:"office"`
 }
 
 // LoggingConfig holds logging configuration.
@@ -295,6 +307,13 @@ func setDefaults(v *viper.Viper) {
 	// Office defaults
 	v.SetDefault("office.jwtSigningKey", "")
 
+	// Feature-flag defaults live in ./features.yaml (symlinked to
+	// apps/backend/internal/features/features.yaml). LoadWithPath applies
+	// them via features.ApplyDefaults after this function returns so the
+	// embedded YAML, not a Go literal, is the source of truth. Env vars
+	// (KANDEV_FEATURES_<NAME>) and the deployment's config.yaml still
+	// override. See docs/decisions/0007-runtime-feature-flags.md.
+
 	// Logging defaults
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", detectDefaultLogFormat())
@@ -357,8 +376,36 @@ func Load() (*Config, error) {
 func LoadWithPath(configPath string) (*Config, error) {
 	v := viper.New()
 
-	// Set defaults first
+	// Apply the active runtime profile (prod / dev / e2e) from the
+	// embedded profiles.yaml. This writes env vars onto our own
+	// process so the subsequent AutomaticEnv and the rest of the
+	// codebase's os.Getenv reads see the YAML-declared values.
+	// Vars already set by the launcher / shell / per-spec override
+	// are left alone, giving precedence:
+	//
+	//   shell env / launcher env > profiles.yaml > Go zero values
+	//
+	// A parse error here means someone committed a malformed
+	// profiles.yaml; fail loud so CI catches it before a release ships.
+	if _, _, err := profiles.ApplyProfile(); err != nil {
+		return nil, fmt.Errorf("apply profile defaults: %w", err)
+	}
+
+	// Set defaults next. setDefaults seeds non-feature config
+	// (server, database, logging, …); feature-flag defaults flow
+	// through env via ApplyProfile + AutomaticEnv below.
 	setDefaults(v)
+
+	// Seed Viper's features.* keyspace from profiles.yaml so the
+	// typed Config struct populates correctly even in tests that
+	// bypass AutomaticEnv. AutomaticEnv still wins at runtime.
+	flags, err := profiles.FeatureFlagDefaults()
+	if err != nil {
+		return nil, fmt.Errorf("read feature flag defaults: %w", err)
+	}
+	for name, value := range flags {
+		v.SetDefault("features."+name, value == "true")
+	}
 
 	// Configure environment variables
 	v.SetEnvPrefix("KANDEV")

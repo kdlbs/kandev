@@ -277,6 +277,12 @@ export function hydrateState(
   if (state.office) {
     Object.assign(draft.office, state.office);
   }
+
+  // Feature flags — overwrite whole map. SSR is authoritative; the backend
+  // is the only source of truth for what's enabled in this deployment.
+  if (state.features) {
+    Object.assign(draft.features, state.features);
+  }
 }
 
 /** Hydrate GitHub slices, preserving loading states. */

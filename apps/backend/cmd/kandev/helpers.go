@@ -31,6 +31,7 @@ import (
 	analyticshandlers "github.com/kandev/kandev/internal/analytics/handlers"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/clarification"
+	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
 	debughandlers "github.com/kandev/kandev/internal/debug"
@@ -441,6 +442,7 @@ type routeParams struct {
 	webInternalURL          string
 	devMode                 bool
 	httpPort                int
+	features                config.FeaturesConfig
 	log                     *logger.Logger
 }
 
@@ -514,6 +516,15 @@ func registerRoutes(p routeParams) {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "kandev", "mode": "websocket+http"})
+	})
+
+	// /api/v1/features is a public, unauthenticated read of the runtime
+	// feature-flag map. The frontend SSR-fetches it once per page render to
+	// decide whether to mount Office (and any future flagged feature). Keep
+	// the response shape stable — new flags are additive boolean keys.
+	// See docs/decisions/0007-runtime-feature-flags.md.
+	p.router.GET("/api/v1/features", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"office": p.features.Office})
 	})
 
 	if p.webInternalURL != "" {
