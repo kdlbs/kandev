@@ -66,11 +66,13 @@ export type InspectorMessage =
   | InspectorReadyMessage;
 
 export function isInspectorMessage(data: unknown): data is InspectorMessage {
+  if (typeof data !== "object" || data === null) return false;
+  const d = data as { source?: unknown; type?: unknown; payload?: unknown };
   return (
-    typeof data === "object" &&
-    data !== null &&
-    (data as { source?: unknown }).source === INSPECTOR_SOURCE &&
-    typeof (data as { type?: unknown }).type === "string"
+    d.source === INSPECTOR_SOURCE &&
+    typeof d.type === "string" &&
+    typeof d.payload === "object" &&
+    d.payload !== null
   );
 }
 
@@ -110,7 +112,8 @@ function formatPin(a: Annotation): string[] {
   let label = "";
   if (el?.ariaLabel) label = ` "${el.ariaLabel}"`;
   else if (el?.text) label = ` "${el.text}"`;
-  lines.push(`${a.number}. [Pin] ${el ? formatElement(el) : ""}${role}${label}`);
+  const elPart = el ? ` ${formatElement(el)}` : "";
+  lines.push(`${a.number}. [Pin]${elPart}${role}${label}`);
   if (el?.selector) lines.push(`   Selector: \`${el.selector}\``);
   if (a.comment) lines.push(`   Comment: ${a.comment}`);
   return lines;
