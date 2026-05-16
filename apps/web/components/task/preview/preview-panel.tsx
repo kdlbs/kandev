@@ -405,13 +405,11 @@ function useInspectMode(iframeRef: React.RefObject<HTMLIFrameElement | null>, pr
 
   const handleRemoveAnnotation = useCallback(
     (id: string) => {
-      setAnnotations((prev) => {
-        const target = prev.find((a) => a.id === id);
-        if (target && iframeRef.current) sendRemoveMarker(iframeRef.current, target.number);
-        return prev.filter((a) => a.id !== id);
-      });
+      const target = annotations.find((a) => a.id === id);
+      if (target && iframeRef.current) sendRemoveMarker(iframeRef.current, target.number);
+      setAnnotations((prev) => prev.filter((a) => a.id !== id));
     },
-    [iframeRef],
+    [annotations, iframeRef],
   );
 
   const handleClearAnnotations = useCallback(() => {
