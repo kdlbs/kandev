@@ -4,8 +4,6 @@ package infra
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"time"
 
 	"go.uber.org/zap"
@@ -123,61 +121,13 @@ func (gc *GarbageCollector) Sweep(ctx context.Context) GCSweepResult {
 	return result
 }
 
-// sweepWorktrees scans the worktree base directory and removes directories
-// whose tasks no longer exist or are archived/deleted.
-func (gc *GarbageCollector) sweepWorktrees(ctx context.Context) GCSweepResult {
-	var result GCSweepResult
-
-	if gc.worktreeBase == "" {
-		return result
-	}
-
-	entries, err := os.ReadDir(gc.worktreeBase)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return result
-		}
-		result.Errors = append(result.Errors, "read worktree dir: "+err.Error())
-		return result
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		if gc.shouldDeleteWorktree(ctx, entry.Name()) {
-			gc.deleteWorktreeDir(entry.Name(), &result)
-		} else {
-			result.WorktreesKept++
-		}
-	}
-
-	return result
-}
-
-// shouldDeleteWorktree checks whether a worktree directory is orphaned.
-// A worktree is considered orphaned if no matching task exists in the DB.
-func (gc *GarbageCollector) shouldDeleteWorktree(ctx context.Context, dirName string) bool {
-	info, err := gc.repo.GetTaskBasicInfo(ctx, dirName)
-	if err != nil || info == nil {
-		// No task found -- this worktree is orphaned.
-		return true
-	}
-	return false
-}
-
-// deleteWorktreeDir removes a worktree directory and logs the action.
-func (gc *GarbageCollector) deleteWorktreeDir(dirName string, result *GCSweepResult) {
-	dirPath := filepath.Join(gc.worktreeBase, dirName)
-
-	gc.logger.Info("removing orphaned worktree directory",
-		zap.String("path", dirPath))
-
-	if err := os.RemoveAll(dirPath); err != nil {
-		result.Errors = append(result.Errors, "remove worktree "+dirPath+": "+err.Error())
-		return
-	}
-	result.WorktreesDeleted++
+// sweepWorktrees is temporarily a no-op. The previous algorithm passed the
+// worktree directory slug to GetTaskBasicInfo (which keys on tasks.id UUID),
+// so every directory was classified as orphaned and removed. A redesigned,
+// inventory-driven implementation lands in a follow-up commit.
+// See docs/specs/office-gc-worktree-safety/spec.md.
+func (gc *GarbageCollector) sweepWorktrees(_ context.Context) GCSweepResult {
+	return GCSweepResult{}
 }
 
 // sweepContainers lists kandev-managed Docker containers and removes

@@ -2,8 +2,6 @@ package infra_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -110,49 +108,6 @@ func newTestGC(t *testing.T, worktreeBase string, docker infra.DockerClient) (*i
 	}
 
 	return gc, execSQL
-}
-
-func TestGC_OrphanWorktreeDeleted(t *testing.T) {
-	base := t.TempDir()
-	orphanDir := filepath.Join(base, "nonexistent-task-id")
-	if err := os.MkdirAll(orphanDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	gc, _ := newTestGC(t, base, nil)
-	result := gc.Sweep(context.Background())
-
-	if result.WorktreesDeleted != 1 {
-		t.Errorf("worktrees_deleted = %d, want 1", result.WorktreesDeleted)
-	}
-	if result.WorktreesKept != 0 {
-		t.Errorf("worktrees_kept = %d, want 0", result.WorktreesKept)
-	}
-	if _, err := os.Stat(orphanDir); !os.IsNotExist(err) {
-		t.Error("orphan directory should have been removed")
-	}
-}
-
-func TestGC_ActiveWorktreeKept(t *testing.T) {
-	base := t.TempDir()
-	taskID := "task-active-1"
-
-	gc, execSQL := newTestGC(t, base, nil)
-	execSQL(`INSERT INTO tasks (id, workspace_id, state, title, created_at, updated_at)
-		VALUES (?, 'ws-1', 'IN_PROGRESS', 'Active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, taskID)
-
-	if err := os.MkdirAll(filepath.Join(base, taskID), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	result := gc.Sweep(context.Background())
-
-	if result.WorktreesDeleted != 0 {
-		t.Errorf("worktrees_deleted = %d, want 0", result.WorktreesDeleted)
-	}
-	if result.WorktreesKept != 1 {
-		t.Errorf("worktrees_kept = %d, want 1", result.WorktreesKept)
-	}
 }
 
 func TestGC_OrphanContainerRemoved(t *testing.T) {
@@ -324,21 +279,12 @@ func TestGC_SweepResultCounts(t *testing.T) {
 	execSQL(`INSERT INTO tasks (id, workspace_id, state, title, created_at, updated_at)
 		VALUES ('t-keep', 'ws-1', 'IN_PROGRESS', 'Keep', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
 
-	if err := os.MkdirAll(filepath.Join(base, "t-keep"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(base, "t-gone"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
 	result := gc.Sweep(context.Background())
 
-	if result.WorktreesDeleted != 1 {
-		t.Errorf("worktrees_deleted = %d, want 1", result.WorktreesDeleted)
-	}
-	if result.WorktreesKept != 1 {
-		t.Errorf("worktrees_kept = %d, want 1", result.WorktreesKept)
-	}
+	// Worktree sweep is a no-op pending the redesign in
+	// docs/specs/office-gc-worktree-safety/spec.md; only container
+	// counts are asserted here. The redesign commit reintroduces
+	// worktree assertions with a real inventory fixture.
 	if result.ContainersRemoved != 1 {
 		t.Errorf("containers_removed = %d, want 1", result.ContainersRemoved)
 	}
