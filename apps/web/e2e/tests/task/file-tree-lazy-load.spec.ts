@@ -51,13 +51,7 @@ test.describe("File tree lazy-load on expand", () => {
     git.stageAll();
     git.commit("seed lazy folder");
 
-    const session = await setupTask(
-      testPage,
-      apiClient,
-      seedData,
-      "ft-lazy-load",
-      "FT Lazy Load",
-    );
+    const session = await setupTask(testPage, apiClient, seedData, "ft-lazy-load", "FT Lazy Load");
 
     const folder = session.fileTreeNode("lazyfolder");
     await expect(folder).toBeVisible({ timeout: 15_000 });
@@ -99,13 +93,7 @@ test.describe("File tree lazy-load on expand", () => {
     git.stageAll();
     git.commit("seed keep folder");
 
-    const session = await setupTask(
-      testPage,
-      apiClient,
-      seedData,
-      "ft-lazy-keep",
-      "FT Lazy Keep",
-    );
+    const session = await setupTask(testPage, apiClient, seedData, "ft-lazy-keep", "FT Lazy Keep");
 
     const folder = session.fileTreeNode("keepfolder");
     await expect(folder).toBeVisible({ timeout: 15_000 });
