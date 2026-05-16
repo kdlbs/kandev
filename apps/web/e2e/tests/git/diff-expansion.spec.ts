@@ -86,19 +86,24 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     // Shiki renders each token as a <span style="color: #RRGGBB"> inside the
     // diff's shadow DOM. If the worker pool is broken or the @pierre/diffs ↔
     // Shiki contract changes, lines still render as plain text without inline
-    // color styles. Counting coloured spans here piggybacks on the seeded
-    // hunks above to avoid spinning a separate ~45s seed for one assertion.
-    const colouredTokenCount = await testPage.evaluate(() => {
-      const container = document.querySelector("diffs-container");
-      const shadow = container?.shadowRoot;
-      if (!shadow) return -1;
-      let count = 0;
-      for (const span of shadow.querySelectorAll<HTMLElement>("span[style]")) {
-        if (/color\s*:/i.test(span.getAttribute("style") ?? "")) count++;
-      }
-      return count;
-    });
-    expect(colouredTokenCount).toBeGreaterThan(20);
+    // color styles. Highlighting is async (worker pool), so poll instead of
+    // reading once.
+    await expect
+      .poll(
+        () =>
+          testPage.evaluate(() => {
+            const container = document.querySelector("diffs-container");
+            const shadow = container?.shadowRoot;
+            if (!shadow) return -1;
+            let count = 0;
+            for (const span of shadow.querySelectorAll<HTMLElement>("span[style]")) {
+              if (/color\s*:/i.test(span.getAttribute("style") ?? "")) count++;
+            }
+            return count;
+          }),
+        { timeout: 20_000 },
+      )
+      .toBeGreaterThan(20);
   });
 
   test("shows expand separator with unmodified line count between hunks", async ({
@@ -182,10 +187,12 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
       timeout: 20_000,
     });
 
-    // The "Expand all lines" button is in the Kandev toolbar that we inject
-    // via renderHeaderMetadata. We anchor on aria-label rather than the Tabler
-    // class so a future icon swap doesn't silently break this test.
-    const expandAllBtn = testPage.getByLabel("Expand all lines");
+    // The "Expand all lines" button is in the Kandev toolbar injected via
+    // renderHeaderMetadata. Anchor on the accessible role+name rather than
+    // the Tabler icon class so a future icon swap doesn't silently break
+    // this test. (getByLabel didn't pick up the Radix Tooltip-wrapped
+    // shadcn Button on CI; getByRole resolves it reliably.)
+    const expandAllBtn = testPage.getByRole("button", { name: "Expand all lines" });
     await expect(expandAllBtn).toBeVisible({ timeout: 10_000 });
     await expandAllBtn.click();
 
