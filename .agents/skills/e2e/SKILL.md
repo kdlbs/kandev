@@ -63,10 +63,16 @@ Without this, tests run against stale code and failures are misleading. `make bu
 ## Writing a test
 
 1. Read `helpers/api-client.ts` and `pages/` to discover available seed methods and page objects
-2. Import fixtures from `../../fixtures/test-base` — provides `testPage`, `apiClient`, and `seedData` (pre-created workspace with default workflow)
+2. Import fixtures from `../../fixtures/test-base` — provides `testPage`, `apiClient`, and `seedData` (pre-created workspace with default workflow). Pull `backend` from the fixture too when you need the backend URL — it's worker-scoped, dynamic, and `process.env.KANDEV_API_BASE_URL` is **not** set in the Playwright runner (only in the frontend SSR child process). Use `backend.baseUrl`.
 3. Use `data-testid` attributes for selectors — add them to components as needed
 4. Use page objects for common interactions; create new ones for new pages
 5. For GitHub features, use `apiClient.mockGitHub*()` methods to seed mock data
+
+### IDs and response shapes — common pitfalls
+
+- **`apiClient.createTaskWithAgent(...)` returns `CreateTaskResponse`**, which is `Task & { session_id?: string; agent_execution_id?: string }`. Read `created.session_id` directly — don't call `listTaskSessions(taskId)` just to fetch the session that was auto-started by the same call.
+- **The URL `/t/:id` contains the TASK ID**, not the session ID. Backend routes like `/port-proxy/:sessionId/:port/*path` expect the session ID. Don't extract IDs from `window.location.pathname` when you need a session ID — pull from the API response.
+- **`page.request` shares cookies/storage with the page context**. Fine for the current no-auth local backend; if auth ever lands, this is where you'd plug it in.
 
 Example:
 
