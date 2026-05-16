@@ -104,6 +104,18 @@ func (s *inMemoryWorktreeStore) ListActiveWorktrees(_ context.Context) ([]*workt
 	return out, nil
 }
 
+func (s *inMemoryWorktreeStore) ListActiveWorktreePaths(_ context.Context) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var paths []string
+	for _, wt := range s.worktrees {
+		if wt.Status == worktree.StatusActive && wt.Path != "" {
+			paths = append(paths, wt.Path)
+		}
+	}
+	return paths, nil
+}
+
 // GetWorktreesBySessionID — MultiRepoStore.
 func (s *inMemoryWorktreeStore) GetWorktreesBySessionID(_ context.Context, sessionID string) ([]*worktree.Worktree, error) {
 	s.mu.Lock()

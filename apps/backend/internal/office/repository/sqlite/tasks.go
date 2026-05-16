@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,13 @@ import (
 
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
+
+// ErrTaskNotFound is returned (wrapped) by repository task lookups when the
+// task row is absent. Callers that must distinguish "row missing" from
+// "lookup failed" should check with errors.Is — this is the positive
+// signal the office GC uses to classify a kandev-managed container as
+// safely removable.
+var ErrTaskNotFound = errors.New("task not found")
 
 // systemTasksJoin is the JOIN onto the workflows table used by every
 // task list/search query that needs to know whether a task lives in a
@@ -64,7 +72,7 @@ func (r *Repository) GetTaskExecutionFields(ctx context.Context, taskID string) 
 		FROM tasks WHERE tasks.id = ?
 	`), taskID).StructScan(&fields)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("task not found: %s", taskID)
+		return nil, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
 	}
 	if err != nil {
 		return nil, err

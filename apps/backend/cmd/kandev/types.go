@@ -25,6 +25,7 @@ import (
 	utilitystore "github.com/kandev/kandev/internal/utility/store"
 	workflowrepository "github.com/kandev/kandev/internal/workflow/repository"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 type Repositories struct {
@@ -59,4 +60,7 @@ type Services struct {
 	// startOfficeSchedulersAndGC. Exposed here so registerRoutes can
 	// wire SetTaskContextProvider after the HandoffService is built.
 	OrchScheduler *officeservice.SchedulerIntegration
+	// WorktreeMgr is the worktree manager. Exposed so the office GC can
+	// consult it as the authoritative inventory of live worktrees.
+	WorktreeMgr *worktree.Manager
 }

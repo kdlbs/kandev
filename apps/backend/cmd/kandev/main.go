@@ -359,11 +359,12 @@ func startAgentInfrastructure(
 	// ============================================
 	log.Info("Initializing Worktree Manager...")
 
-	_, _, worktreeCleanup, err := provideWorktreeManager(dbPool, cfg, log, lifecycleMgr, services.Task)
+	worktreeMgr, _, worktreeCleanup, err := provideWorktreeManager(dbPool, cfg, log, lifecycleMgr, services.Task)
 	if err != nil {
 		log.Error("Failed to initialize worktree manager", zap.Error(err))
 		return false
 	}
+	services.WorktreeMgr = worktreeMgr
 	addCleanup(worktreeCleanup)
 	log.Info("Worktree Manager initialized",
 		zap.Bool("enabled", cfg.Worktree.Enabled))
@@ -957,7 +958,9 @@ func startOfficeSchedulersAndGC(
 	// Start GC sweep for orphaned worktrees and containers.
 	worktreeBase := filepath.Join(cfg.ResolvedHomeDir(), "tasks")
 	gc := officeinfra.NewGarbageCollector(
-		repos.Office, log, worktreeBase,
+		repos.Office,
+		services.WorktreeMgr, // WorktreeInventory — authoritative live-worktrees source
+		log, worktreeBase,
 		nil, // dockerClient - pass if Docker available
 		3*time.Hour,
 	)
