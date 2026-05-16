@@ -36,9 +36,13 @@ export function AnnotationsPanel({
   if (annotations.length === 0) return null;
 
   async function handleCopy() {
-    await navigator.clipboard.writeText(formatAnnotations(annotations));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(formatAnnotations(annotations));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error(`AnnotationsPanel: clipboard write failed: ${String(err)}`);
+    }
   }
 
   return (
