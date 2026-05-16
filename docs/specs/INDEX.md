@@ -6,6 +6,7 @@ See `.agents/skills/spec/SKILL.md` for the workflow.
 
 | Slug | Status | Implemented? | Created | PR |
 |------|--------|--------------|---------|----|
+| [office-gc-worktree-safety](office-gc-worktree-safety/spec.md) | shipped | yes | 2026-05-16 | — |
 | [db-upgrade-safety](db-upgrade-safety/spec.md) | shipped | yes | 2026-05-16 | — |
 | [office-task-handoffs](office-task-handoffs/spec.md) | draft | no | 2026-05-10 | — |
 | [office-provider-routing](office-provider-routing/spec.md) | draft | no | 2026-05-10 | — |
