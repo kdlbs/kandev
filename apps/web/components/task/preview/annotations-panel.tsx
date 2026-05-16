@@ -10,7 +10,6 @@ interface AnnotationsPanelProps {
   annotations: Annotation[];
   onRemove: (id: string) => void;
   onClear: () => void;
-  onInsert?: (markdown: string) => void;
 }
 
 function describeAnnotation(a: Annotation): string {
@@ -26,12 +25,7 @@ function describeAnnotation(a: Annotation): string {
   return r ? `Area ${Math.round(r.w)}x${Math.round(r.h)}` : "Area";
 }
 
-export function AnnotationsPanel({
-  annotations,
-  onRemove,
-  onClear,
-  onInsert,
-}: AnnotationsPanelProps) {
+export function AnnotationsPanel({ annotations, onRemove, onClear }: AnnotationsPanelProps) {
   const [copied, setCopied] = useState(false);
   if (annotations.length === 0) return null;
 
@@ -55,17 +49,6 @@ export function AnnotationsPanel({
           {annotations.length} annotation{annotations.length === 1 ? "" : "s"}
         </span>
         <div className="flex items-center gap-1">
-          {onInsert && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-6 px-2 text-xs cursor-pointer"
-              onClick={() => onInsert(formatAnnotations(annotations))}
-              data-testid="preview-annotations-insert"
-            >
-              Insert
-            </Button>
-          )}
           <Button
             size="sm"
             variant="outline"
