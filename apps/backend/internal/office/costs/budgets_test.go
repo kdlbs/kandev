@@ -48,7 +48,7 @@ func newBudgetTestService(t *testing.T) (*costs.CostService, *sqlite.Repository,
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 
-	if _, _, err := settingsstore.Provide(db, db); err != nil {
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
 		t.Fatalf("settings store init: %v", err)
 	}
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS tasks (
@@ -64,7 +64,7 @@ func newBudgetTestService(t *testing.T) (*costs.CostService, *sqlite.Repository,
 		t.Fatalf("create tasks: %v", err)
 	}
 
-	repo, err := sqlite.NewWithDB(db, db)
+	repo, err := sqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}

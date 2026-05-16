@@ -23,13 +23,13 @@ func TestEnsureOfficeWorkflow(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	// Initialize task repo (creates workspaces, workflows tables + migrations)
-	repo, err := taskrepo.NewWithDB(db, db)
+	repo, err := taskrepo.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init task repo: %v", err)
 	}
 
 	// Initialize workflow repo (creates workflow_steps table)
-	if _, err := workflowrepo.NewWithDB(db, db); err != nil {
+	if _, err := workflowrepo.NewWithDB(db, db, nil); err != nil {
 		t.Fatalf("init workflow repo: %v", err)
 	}
 

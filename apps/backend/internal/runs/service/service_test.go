@@ -28,7 +28,7 @@ func newTestService(t *testing.T) (*runsservice.Service, bus.EventBus) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	officeRepo, err := officesqlite.NewWithDB(db, db)
+	officeRepo, err := officesqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init office repo: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestQueueRun_ResolverPathPickedOverPayload(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	officeRepo, err := officesqlite.NewWithDB(db, db)
+	officeRepo, err := officesqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init: %v", err)
 	}

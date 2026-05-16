@@ -82,10 +82,10 @@ func newTestRepoSched(t *testing.T) *officesqlite.Repository {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if _, _, err := settingsstore.Provide(db, db); err != nil {
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
 		t.Fatalf("settings store: %v", err)
 	}
-	repo, err := officesqlite.NewWithDB(db, db)
+	repo, err := officesqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}

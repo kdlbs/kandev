@@ -11,25 +11,36 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 type sqliteRepository struct {
-	db     *sqlx.DB // writer
-	ro     *sqlx.DB // reader
-	ownsDB bool
+	db      *sqlx.DB // writer
+	ro      *sqlx.DB // reader
+	ownsDB  bool
+	log     *logger.Logger
+	migrate *db.MigrateLogger
 }
 
 var _ Repository = (*sqliteRepository)(nil)
 
-func newSQLiteRepositoryWithDB(writer, reader *sqlx.DB) (*sqliteRepository, error) {
-	return newSQLiteRepository(writer, reader, false)
+func newSQLiteRepositoryWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*sqliteRepository, error) {
+	return newSQLiteRepository(writer, reader, log, false)
 }
 
-func newSQLiteRepository(writer, reader *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
-	repo := &sqliteRepository{db: writer, ro: reader, ownsDB: ownsDB}
+func newSQLiteRepository(writer, reader *sqlx.DB, log *logger.Logger, ownsDB bool) (*sqliteRepository, error) {
+	repo := &sqliteRepository{
+		db:      writer,
+		ro:      reader,
+		ownsDB:  ownsDB,
+		log:     log,
+		migrate: db.NewMigrateLogger(writer, log),
+	}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
 			if closeErr := writer.Close(); closeErr != nil {
@@ -117,16 +128,11 @@ func (r *sqliteRepository) initSchema() error {
 		return err
 	}
 
-	// Migration: add tui_config column (idempotent — ignore error if already exists)
-	_, _ = r.db.Exec(`ALTER TABLE agents ADD COLUMN tui_config TEXT DEFAULT NULL`)
-
-	// Migration: add mode and migrated_from columns on agent_profiles (idempotent)
-	_, _ = r.db.Exec(`ALTER TABLE agent_profiles ADD COLUMN mode TEXT DEFAULT NULL`)
-	_, _ = r.db.Exec(`ALTER TABLE agent_profiles ADD COLUMN migrated_from TEXT DEFAULT NULL`)
-
-	// Migration: add cli_flags column on agent_profiles (idempotent).
-	// Rows where cli_flags IS NULL are backfilled on first read — see scanAgentProfile.
-	_, _ = r.db.Exec(`ALTER TABLE agent_profiles ADD COLUMN cli_flags TEXT DEFAULT NULL`)
+	r.migrate.Apply("agents.tui_config", `ALTER TABLE agents ADD COLUMN tui_config TEXT DEFAULT NULL`)
+	r.migrate.Apply("agent_profiles.mode", `ALTER TABLE agent_profiles ADD COLUMN mode TEXT DEFAULT NULL`)
+	r.migrate.Apply("agent_profiles.migrated_from", `ALTER TABLE agent_profiles ADD COLUMN migrated_from TEXT DEFAULT NULL`)
+	// Rows where cli_flags IS NULL are backfilled on first read - see scanAgentProfile.
+	r.migrate.Apply("agent_profiles.cli_flags", `ALTER TABLE agent_profiles ADD COLUMN cli_flags TEXT DEFAULT NULL`)
 
 	// Migration: drop CHECK(model != '') constraint from agent_profiles.
 	//
@@ -148,35 +154,38 @@ func (r *sqliteRepository) initSchema() error {
 
 // migrateOfficeEnrichmentColumns adds the office-enrichment columns introduced
 // in ADR 0005 Wave A. Each ALTER is idempotent: errors raised when the column
-// already exists are swallowed. Used both on first run after the upgrade and
-// on every subsequent boot — SQLite's idempotency guards make repeats safe.
+// already exists are swallowed.
 func (r *sqliteRepository) migrateOfficeEnrichmentColumns() {
-	stmts := []string{
-		`ALTER TABLE agent_profiles ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE agent_profiles ADD COLUMN role TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE agent_profiles ADD COLUMN icon TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE agent_profiles ADD COLUMN reports_to TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE agent_profiles ADD COLUMN skill_ids TEXT NOT NULL DEFAULT '[]'`,
-		`ALTER TABLE agent_profiles ADD COLUMN desired_skills TEXT NOT NULL DEFAULT '[]'`,
-		`ALTER TABLE agent_profiles ADD COLUMN custom_prompt TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE agent_profiles ADD COLUMN status TEXT NOT NULL DEFAULT 'idle'`,
-		`ALTER TABLE agent_profiles ADD COLUMN pause_reason TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE agent_profiles ADD COLUMN last_run_finished_at TIMESTAMP`,
-		`ALTER TABLE agent_profiles ADD COLUMN max_concurrent_sessions INTEGER NOT NULL DEFAULT 1`,
-		`ALTER TABLE agent_profiles ADD COLUMN cooldown_sec INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE agent_profiles ADD COLUMN skip_idle_runs INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE agent_profiles ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE agent_profiles ADD COLUMN failure_threshold INTEGER NOT NULL DEFAULT 3`,
-		`ALTER TABLE agent_profiles ADD COLUMN executor_preference TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE agent_profiles ADD COLUMN budget_monthly_cents INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE agent_profiles ADD COLUMN settings TEXT NOT NULL DEFAULT '{}'`,
-		`ALTER TABLE agent_profiles ADD COLUMN permissions TEXT NOT NULL DEFAULT '{}'`,
+	type migration struct {
+		name string
+		stmt string
 	}
-	for _, stmt := range stmts {
-		_, _ = r.db.Exec(stmt)
+	migrations := []migration{
+		{"agent_profiles.workspace_id", `ALTER TABLE agent_profiles ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`},
+		{"agent_profiles.role", `ALTER TABLE agent_profiles ADD COLUMN role TEXT NOT NULL DEFAULT ''`},
+		{"agent_profiles.icon", `ALTER TABLE agent_profiles ADD COLUMN icon TEXT NOT NULL DEFAULT ''`},
+		{"agent_profiles.reports_to", `ALTER TABLE agent_profiles ADD COLUMN reports_to TEXT NOT NULL DEFAULT ''`},
+		{"agent_profiles.skill_ids", `ALTER TABLE agent_profiles ADD COLUMN skill_ids TEXT NOT NULL DEFAULT '[]'`},
+		{"agent_profiles.desired_skills", `ALTER TABLE agent_profiles ADD COLUMN desired_skills TEXT NOT NULL DEFAULT '[]'`},
+		{"agent_profiles.custom_prompt", `ALTER TABLE agent_profiles ADD COLUMN custom_prompt TEXT NOT NULL DEFAULT ''`},
+		{"agent_profiles.status", `ALTER TABLE agent_profiles ADD COLUMN status TEXT NOT NULL DEFAULT 'idle'`},
+		{"agent_profiles.pause_reason", `ALTER TABLE agent_profiles ADD COLUMN pause_reason TEXT NOT NULL DEFAULT ''`},
+		{"agent_profiles.last_run_finished_at", `ALTER TABLE agent_profiles ADD COLUMN last_run_finished_at TIMESTAMP`},
+		{"agent_profiles.max_concurrent_sessions", `ALTER TABLE agent_profiles ADD COLUMN max_concurrent_sessions INTEGER NOT NULL DEFAULT 1`},
+		{"agent_profiles.cooldown_sec", `ALTER TABLE agent_profiles ADD COLUMN cooldown_sec INTEGER NOT NULL DEFAULT 0`},
+		{"agent_profiles.skip_idle_runs", `ALTER TABLE agent_profiles ADD COLUMN skip_idle_runs INTEGER NOT NULL DEFAULT 0`},
+		{"agent_profiles.consecutive_failures", `ALTER TABLE agent_profiles ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0`},
+		{"agent_profiles.failure_threshold", `ALTER TABLE agent_profiles ADD COLUMN failure_threshold INTEGER NOT NULL DEFAULT 3`},
+		{"agent_profiles.executor_preference", `ALTER TABLE agent_profiles ADD COLUMN executor_preference TEXT NOT NULL DEFAULT ''`},
+		{"agent_profiles.budget_monthly_cents", `ALTER TABLE agent_profiles ADD COLUMN budget_monthly_cents INTEGER NOT NULL DEFAULT 0`},
+		{"agent_profiles.settings", `ALTER TABLE agent_profiles ADD COLUMN settings TEXT NOT NULL DEFAULT '{}'`},
+		{"agent_profiles.permissions", `ALTER TABLE agent_profiles ADD COLUMN permissions TEXT NOT NULL DEFAULT '{}'`},
+	}
+	for _, m := range migrations {
+		r.migrate.Apply(m.name, m.stmt)
 	}
 	// Indexes are idempotent via IF NOT EXISTS, but the partial-index variant
-	// required for role/reports_to needs the column to exist first — so create
+	// required for role/reports_to needs the column to exist first - so create
 	// here after the ALTERs to handle databases upgraded from older schemas.
 	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_profiles_workspace ON agent_profiles(workspace_id)`)
 	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_profiles_role ON agent_profiles(workspace_id, role) WHERE role != ''`)
@@ -212,7 +221,13 @@ func (r *sqliteRepository) migrateDropModelCheckConstraint() error {
 		return nil
 	}
 
-	return r.recreateAgentProfilesWithoutModelCheck()
+	if err := r.recreateAgentProfilesWithoutModelCheck(); err != nil {
+		return err
+	}
+	if r.log != nil {
+		r.log.Info("migration applied", zap.String("name", "agent_profiles.recreate_drop_model_check"))
+	}
+	return nil
 }
 
 // recreateAgentProfilesWithoutModelCheck performs the actual SQLite table

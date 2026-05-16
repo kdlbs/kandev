@@ -50,7 +50,7 @@ func setupTestRepo(t *testing.T) *Repository {
 		t.Fatalf("failed to insert test workflow: %v", err)
 	}
 
-	repo, err := NewWithDB(sqlxDB, sqlxDB)
+	repo, err := NewWithDB(sqlxDB, sqlxDB, nil)
 	if err != nil {
 		t.Fatalf("failed to create repo: %v", err)
 	}

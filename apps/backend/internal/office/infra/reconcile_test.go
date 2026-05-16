@@ -24,11 +24,11 @@ func newTestReconciler(t *testing.T) (*infra.Reconciler, *sqlite.Repository) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	if _, _, err := settingsstore.Provide(db, db); err != nil {
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
 		t.Fatalf("settings store init: %v", err)
 	}
 
-	repo, err := sqlite.NewWithDB(db, db)
+	repo, err := sqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}

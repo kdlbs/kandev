@@ -93,6 +93,14 @@ type Task struct {
 	ProjectID              string `json:"project_id,omitempty"` // FK to office project
 	Labels                 string `json:"labels,omitempty"`     // JSON array string, default "[]"
 	Identifier             string `json:"identifier,omitempty"` // e.g. "KAN-42"
+
+	// IsFromOffice is a read-time projection set by the task repo's SELECT
+	// (see isFromOfficeProjection in repository/sqlite/task.go). True when
+	// the task is owned by office: either it has a non-empty ProjectID, or
+	// its workflow matches the workspace's office_workflow_id. Kanban-board
+	// tasks always come back false. UI callers gate office-only surfaces on
+	// this (e.g. the "Open in office view" topbar link).
+	IsFromOffice bool `json:"is_from_office,omitempty"`
 }
 
 // TaskTreeFilters provides filter options for the task tree query.

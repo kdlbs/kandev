@@ -81,7 +81,7 @@ func newTestCostService(t *testing.T) (*costs.CostService, func(string, ...inter
 		t.Fatalf("create agent_profiles table: %v", err)
 	}
 
-	repo, err := sqlite.NewWithDB(db, db)
+	repo, err := sqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}

@@ -155,10 +155,10 @@ func newRouteAttemptsRepoWithFK(t *testing.T) (*sqlite.Repository, *sqlx.DB) {
 	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
 		t.Fatalf("pragma fk: %v", err)
 	}
-	if _, _, err := settingsstore.Provide(db, db); err != nil {
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
 		t.Fatalf("settings store: %v", err)
 	}
-	repo, err := sqlite.NewWithDB(db, db)
+	repo, err := sqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}

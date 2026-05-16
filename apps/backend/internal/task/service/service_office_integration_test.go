@@ -28,14 +28,14 @@ func createOfficeIntegrationService(t *testing.T) *Service {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB)
+	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
 	if err != nil {
 		t.Fatalf("task repository: %v", err)
 	}
 	if _, err := worktree.NewSQLiteStore(sqlxDB, sqlxDB); err != nil {
 		t.Fatalf("worktree store: %v", err)
 	}
-	if _, err := officesqlite.NewWithDB(sqlxDB, sqlxDB); err != nil {
+	if _, err := officesqlite.NewWithDB(sqlxDB, sqlxDB, nil); err != nil {
 		t.Fatalf("office migrations: %v", err)
 	}
 	t.Cleanup(func() {

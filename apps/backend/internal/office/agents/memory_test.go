@@ -22,7 +22,7 @@ func newTestAgentService(t *testing.T) *agents.AgentService {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	repo, err := sqlite.NewWithDB(db, db)
+	repo, err := sqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}

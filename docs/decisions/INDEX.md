@@ -13,3 +13,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0005 | [Agent model unification — one `agents` table](0005-agent-model-unification.md) | proposed | backend, frontend | 2026-05-06 |
 | 0006 | [Tier routing vs cheap_agent_profile_id coexistence](0006-tier-routing-vs-cheap-agent-profile-coexistence.md) | superseded | backend | 2026-05-11 |
 | 0007 | [profiles.yaml — runtime defaults for prod / dev / e2e](0007-runtime-feature-flags.md) | accepted | backend, frontend | 2026-05-16 |
+| 0008 | [DB upgrade safety - meta table, pre-migration backup, migration logging](0008-db-upgrade-safety.md) | accepted | backend | 2026-05-16 |

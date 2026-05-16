@@ -5,23 +5,22 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
-// runMigrations applies idempotent schema migrations.
+// runMigrations applies idempotent schema migrations for office tables
+// living alongside the canonical task tables. Office is shipping as a
+// new feature, so we only carry migrations that mutate state owned by
+// the task schema on main (tasks priority TEXT rebuild, FTS triggers,
+// checkout columns) plus the routing/settings/dismissal tables created
+// from base_migrations. Legacy in-branch reshapes (rename office_runs,
+// fold office_agent_instances, drop dead task columns, etc.) have been
+// collapsed: those rows never landed on main so the migrations were
+// pure no-ops at first boot.
 func (r *Repository) runMigrations() {
-	// Phase 3 of task-model-unification renamed office_runs → runs and
-	// office_run_events → run_events. Run the rename BEFORE the column
-	// migrations and createRunTables / createActivityTables so all
-	// downstream paths see the new table names. The function is
-	// idempotent: when the rename has already happened (or the legacy
-	// tables never existed) it does nothing.
-	r.renameLegacyRunTables()
-	r.dropLegacyExecutionDecisions()
 	r.migrateSchedulerColumns()
-	r.migrateChannelColumns()
-	r.migrateLegacyLabels()
 	r.migrateFailureColumns()
-	r.dropLegacyTaskColumns()
 	if err := r.migrateTaskPriorityToText(); err != nil {
 		// Surface to stderr; this stage runs from initSchema which doesn't
 		// have a logger handle. The recreate is wrapped in a transaction
@@ -32,50 +31,19 @@ func (r *Repository) runMigrations() {
 	// recreate-table migrations (notably migrateTaskPriorityToText, which
 	// drops + rebuilds `tasks` and would otherwise wipe the FTS triggers).
 	r.migrateTaskFTS()
-	// ADR 0005 Wave A — copy each office_agent_instances row into the
-	// merged agent_profiles table, preserving the instance id. Idempotent:
-	// rows with a matching id are skipped on subsequent runs.
-	if err := r.migrateOfficeAgentsToProfiles(); err != nil {
-		fmt.Println("office sqlite migrate agents->profiles:", err)
-	}
-	// ADR 0005 Wave C — once every row has been migrated into
-	// agent_profiles and every office query has switched to read from
-	// the merged table, we drop the legacy office_agent_instances table.
-	// Idempotent: a no-op when the table is already gone.
-	r.dropLegacyOfficeAgentInstances()
-	// ADR 0005 Wave C — migrate office_task_participants rows into
-	// workflow_step_participants then drop the legacy table.
-	r.migrateOfficeTaskParticipantsToWorkflow()
-	// ADR 0005 Wave E — migrate office_task_approval_decisions rows into
-	// workflow_step_decisions then drop the legacy table. Idempotent: a
-	// no-op when the legacy table is already gone.
-	r.migrateOfficeDecisionsToWorkflow()
-	// office-provider-routing — workspace routing config, per-run route
-	// attempt history, scoped provider health, plus routing columns on
-	// the runs queue. All idempotent (CREATE IF NOT EXISTS / ALTER ADD
-	// COLUMN swallows duplicate-column errors).
+	// Provider routing tables (office_workspace_routing,
+	// office_run_route_attempts, office_provider_health). The runs queue
+	// routing columns and tier_per_reason are part of the canonical
+	// CREATE TABLE statements, so this migration only creates the
+	// auxiliary tables.
 	r.migrateProviderRouting()
-	// System-skill columns. Added when bundled kandev system skills got
-	// indexed in the office_skills table. Idempotent: ALTER ADD COLUMN
-	// failures (duplicate column) are swallowed.
-	r.migrateSystemSkillColumns()
-}
-
-// migrateSystemSkillColumns adds is_system / system_version /
-// default_for_roles to office_skills for DBs created before bundled
-// system skills became first-class rows. Idempotent.
-func (r *Repository) migrateSystemSkillColumns() {
-	_, _ = r.db.Exec(`ALTER TABLE office_skills ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0`)
-	_, _ = r.db.Exec(`ALTER TABLE office_skills ADD COLUMN system_version TEXT NOT NULL DEFAULT ''`)
-	_, _ = r.db.Exec(`ALTER TABLE office_skills ADD COLUMN default_for_roles TEXT NOT NULL DEFAULT '[]'`)
-	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS office_skills_is_system_idx ON office_skills(is_system, workspace_id)`)
 }
 
 // migrateProviderRouting creates the office_workspace_routing,
-// office_run_route_attempts, and office_provider_health tables and
-// adds the routing columns to the runs queue. Each statement is
-// idempotent; errors are swallowed because the migration runner does
-// not have a logger handle here (mirrors migrateSchedulerColumns).
+// office_run_route_attempts, and office_provider_health tables. The
+// routing columns on the runs queue (logical_provider_order,
+// requested_tier, etc.) live in the canonical CREATE TABLE runs in
+// base.go, so they are not ALTERed here.
 func (r *Repository) migrateProviderRouting() {
 	_, _ = r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_workspace_routing (
@@ -87,10 +55,6 @@ func (r *Repository) migrateProviderRouting() {
 		tier_per_reason   TEXT    NOT NULL DEFAULT '{}',
 		updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`)
-	// tier_per_reason added in the wake-reason tier policy patch — idempotent
-	// for databases that were created before the column was part of the
-	// CREATE TABLE.
-	_, _ = r.db.Exec(`ALTER TABLE office_workspace_routing ADD COLUMN tier_per_reason TEXT NOT NULL DEFAULT '{}'`)
 
 	_, _ = r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_run_route_attempts (
@@ -129,303 +93,13 @@ func (r *Repository) migrateProviderRouting() {
 		updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (workspace_id, provider_id, scope, scope_value)
 	)`)
-
-	for _, stmt := range providerRoutingRunColumnStatements() {
-		_, _ = r.db.Exec(stmt)
-	}
 }
 
-// providerRoutingRunColumnStatements returns the ALTER statements that
-// add routing columns to the runs queue. Extracted so the column list
-// is greppable and the parent migrate function stays under the
-// statement-count linter cap.
-func providerRoutingRunColumnStatements() []string {
-	return []string{
-		`ALTER TABLE runs ADD COLUMN logical_provider_order TEXT`,
-		`ALTER TABLE runs ADD COLUMN requested_tier TEXT`,
-		`ALTER TABLE runs ADD COLUMN resolved_provider_id TEXT`,
-		`ALTER TABLE runs ADD COLUMN resolved_model TEXT`,
-		`ALTER TABLE runs ADD COLUMN current_route_attempt_seq INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE runs ADD COLUMN routing_blocked_status TEXT`,
-		`ALTER TABLE runs ADD COLUMN earliest_retry_at TIMESTAMP`,
-		// route_cycle_baseline_seq marks the floor at which the current
-		// retry cycle began. excludedFromAttempts filters prior attempt
-		// rows with seq <= baseline so a parked-then-lifted run gets a
-		// fresh exclusion list instead of re-inheriting every provider
-		// that failed in the previous cycle. Bumped by lift / manual
-		// retry; left untouched by post-start fallback (within-cycle
-		// exclusion is intentional there).
-		`ALTER TABLE runs ADD COLUMN route_cycle_baseline_seq INTEGER NOT NULL DEFAULT 0`,
-	}
-}
-
-// migrateOfficeTaskParticipantsToWorkflow copies every office_task_participants
-// row into workflow_step_participants under the participant's task's
-// current workflow_step_id, then drops the legacy table. Idempotent:
-// duplicate (step_id, task_id, role, agent_profile_id) keys are skipped via
-// natural-key probe; missing legacy table or empty result is a no-op.
-//
-// Rows whose task has no workflow_step_id are silently dropped — they
-// could not have been read by the office dashboard anyway (the new
-// participants.go short-circuits when stepID is empty).
-func (r *Repository) migrateOfficeTaskParticipantsToWorkflow() {
-	if !r.tableExists("office_task_participants") {
-		return
-	}
-	if !r.tableExists("workflow_step_participants") {
-		// Settings/workflow store hasn't initialised yet — bail; the next
-		// boot will pick this up after the workflow store has built its
-		// schema. The legacy table stays around until then.
-		return
-	}
-	rows, err := r.db.Query(`SELECT
-		p.task_id, p.agent_profile_id, p.role,
-		COALESCE(t.workflow_step_id, '') AS step_id
-		FROM office_task_participants p
-		LEFT JOIN tasks t ON t.id = p.task_id`)
-	if err != nil {
-		return
-	}
-	type legacyRow struct {
-		taskID  string
-		agentID string
-		role    string
-		stepID  string
-	}
-	var legacy []legacyRow
-	for rows.Next() {
-		var lr legacyRow
-		if err := rows.Scan(&lr.taskID, &lr.agentID, &lr.role, &lr.stepID); err != nil {
-			_ = rows.Close()
-			return
-		}
-		legacy = append(legacy, lr)
-	}
-	_ = rows.Close()
-	for _, lr := range legacy {
-		if lr.stepID == "" {
-			continue
-		}
-		// Probe-then-insert idempotency: matches the workflow repo's
-		// UpsertTaskParticipant natural-key behaviour without depending on it.
-		var existing string
-		err := r.db.QueryRow(
-			`SELECT id FROM workflow_step_participants
-			 WHERE step_id = ? AND task_id = ? AND role = ? AND agent_profile_id = ?`,
-			lr.stepID, lr.taskID, lr.role, lr.agentID,
-		).Scan(&existing)
-		if err == nil {
-			continue
-		}
-		_, _ = r.db.Exec(`INSERT INTO workflow_step_participants
-			(id, step_id, task_id, role, agent_profile_id, decision_required, position)
-			VALUES (?, ?, ?, ?, ?, 1, 0)`,
-			newParticipantUUID(), lr.stepID, lr.taskID, lr.role, lr.agentID)
-	}
-	_, _ = r.db.Exec(`DROP TABLE IF EXISTS office_task_participants`)
-}
-
-// migrateOfficeDecisionsToWorkflow copies every office_task_approval_decisions
-// row into workflow_step_decisions, resolving the (step_id, participant_id)
-// pair from the matching workflow_step_participants row, then drops the
-// legacy table. Idempotent: re-runs skip rows whose id already exists in
-// the workflow table; missing legacy table or empty result is a no-op.
-//
-// Resolution rules:
-//   - step_id comes from the decision's task → tasks.workflow_step_id.
-//   - participant_id comes from workflow_step_participants matching
-//     (step_id, task_id, role, decider_id) for agent deciders. User
-//     deciders project to a stable "user" sentinel — workflow_step_decisions
-//     has no FK on participant_id so this is safe.
-//   - rows whose task has no workflow_step_id, or whose decider has no
-//     matching agent participant, are silently skipped (warning logged
-//     to stderr). They could not have been read by the dashboard's new
-//     workflow-store-backed query anyway.
-func (r *Repository) migrateOfficeDecisionsToWorkflow() {
-	if !r.tableExists("office_task_approval_decisions") {
-		return
-	}
-	if !r.tableExists("workflow_step_decisions") {
-		// Workflow store hasn't initialised yet — bail; the next boot
-		// will pick this up after the workflow store has built its
-		// schema. The legacy table stays around until then.
-		return
-	}
-	rows, err := r.db.Query(`SELECT
-		d.id, d.task_id, d.decider_type, d.decider_id, d.role,
-		d.decision, d.comment, d.created_at, d.superseded_at,
-		COALESCE(t.workflow_step_id, '') AS step_id
-		FROM office_task_approval_decisions d
-		LEFT JOIN tasks t ON t.id = d.task_id`)
-	if err != nil {
-		return
-	}
-	type legacyDecision struct {
-		id           string
-		taskID       string
-		deciderType  string
-		deciderID    string
-		role         string
-		decision     string
-		comment      string
-		createdAt    sql.NullTime
-		supersededAt sql.NullTime
-		stepID       string
-	}
-	var legacy []legacyDecision
-	for rows.Next() {
-		var lr legacyDecision
-		if err := rows.Scan(&lr.id, &lr.taskID, &lr.deciderType, &lr.deciderID,
-			&lr.role, &lr.decision, &lr.comment, &lr.createdAt, &lr.supersededAt,
-			&lr.stepID); err != nil {
-			_ = rows.Close()
-			return
-		}
-		legacy = append(legacy, lr)
-	}
-	_ = rows.Close()
-
-	skipped := 0
-	for _, lr := range legacy {
-		if lr.stepID == "" {
-			skipped++
-			continue
-		}
-		// Idempotency: skip when the workflow row already exists.
-		var existing string
-		if err := r.db.QueryRow(
-			`SELECT id FROM workflow_step_decisions WHERE id = ?`, lr.id,
-		).Scan(&existing); err == nil {
-			continue
-		}
-		participantID := r.resolveDecisionParticipant(lr.stepID, lr.taskID, lr.role, lr.deciderType, lr.deciderID)
-		if participantID == "" {
-			skipped++
-			continue
-		}
-		decidedAt := lr.createdAt.Time
-		var supersededAt interface{}
-		if lr.supersededAt.Valid {
-			supersededAt = lr.supersededAt.Time
-		}
-		if _, err := r.db.Exec(`INSERT INTO workflow_step_decisions
-			(id, task_id, step_id, participant_id, decision, note, decided_at,
-			 superseded_at, decider_type, decider_id, role, comment)
-			VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)`,
-			lr.id, lr.taskID, lr.stepID, participantID, lr.decision,
-			decidedAt, supersededAt, lr.deciderType, lr.deciderID,
-			lr.role, lr.comment); err != nil {
-			skipped++
-			continue
-		}
-	}
-	if skipped > 0 {
-		fmt.Printf("office sqlite migrate decisions: skipped %d rows (no step or unresolvable participant)\n", skipped)
-	}
-	_, _ = r.db.Exec(`DROP TABLE IF EXISTS office_task_approval_decisions`)
-}
-
-// resolveDecisionParticipant returns the workflow_step_participants id
-// for the (step, task, role, agent) tuple, falling back to a stable
-// sentinel for user deciders. Used by migrateOfficeDecisionsToWorkflow.
-func (r *Repository) resolveDecisionParticipant(stepID, taskID, role, deciderType, deciderID string) string {
-	if deciderType == "user" {
-		return "user"
-	}
-	if deciderID == "" {
-		return ""
-	}
-	var participantID string
-	err := r.db.QueryRow(
-		`SELECT id FROM workflow_step_participants
-		WHERE step_id = ? AND role = ? AND agent_profile_id = ?
-		  AND (task_id = ? OR task_id = '')
-		ORDER BY (CASE WHEN task_id = '' THEN 1 ELSE 0 END) ASC
-		LIMIT 1`,
-		stepID, role, deciderID, taskID,
-	).Scan(&participantID)
-	if err != nil {
-		return ""
-	}
-	return participantID
-}
-
-// dropLegacyOfficeAgentInstances removes the office_agent_instances table.
-// Office agent CRUD now reads and writes the unified agent_profiles table
-// (workspace_id != " marks office rows). The Wave-A migration that
-// copies rows over runs first; once that has completed at least once,
-// dropping the legacy table is safe. Idempotent via DROP TABLE IF EXISTS.
-func (r *Repository) dropLegacyOfficeAgentInstances() {
-	_, _ = r.db.Exec(`DROP TABLE IF EXISTS office_agent_instances`)
-}
-
-// renameLegacyRunTables renames the old office_runs / office_run_events
-// tables to runs / run_events so the runs package can own the queue
-// schema independently of the office domain. The rename is idempotent:
-// if the new tables already exist (fresh installs build them under
-// the new name) or the legacy tables are absent, the ALTER fails and
-// is swallowed. createRunTables / createActivityTables in this same
-// file are responsible for creating the tables under their new names
-// when this is a fresh database.
-func (r *Repository) renameLegacyRunTables() {
-	if r.tableExists("office_runs") && !r.tableExists("runs") {
-		_, _ = r.db.Exec(`ALTER TABLE office_runs RENAME TO runs`)
-	}
-	if r.tableExists("office_run_events") && !r.tableExists("run_events") {
-		_, _ = r.db.Exec(`ALTER TABLE office_run_events RENAME TO run_events`)
-	}
-	// Drop the old indexes (their stored definitions still mention
-	// office_runs even after the table rename) so the recreated ones
-	// in createRunTables / createActivityTables use the new name.
-	_, _ = r.db.Exec(`DROP INDEX IF EXISTS idx_run_status_requested`)
-	_, _ = r.db.Exec(`DROP INDEX IF EXISTS idx_run_idempotency`)
-	_, _ = r.db.Exec(`DROP INDEX IF EXISTS idx_run_events_run_created`)
-	// Recreate them against the renamed table names.
-	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_run_status_requested ON runs(status, requested_at)`)
-	_, _ = r.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_run_idempotency ON runs(idempotency_key) WHERE idempotency_key IS NOT NULL`)
-	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_run_events_run_created ON run_events(run_id, created_at)`)
-}
-
-// dropLegacyExecutionDecisions removes the office_task_execution_decisions
-// table (Phase 4 of task-model-unification). The table was orphaned —
-// only created, never read — and has been replaced by
-// workflow_step_decisions. Idempotent: a no-op when the table is absent.
-func (r *Repository) dropLegacyExecutionDecisions() {
-	_, _ = r.db.Exec(`DROP TABLE IF EXISTS office_task_execution_decisions`)
-}
-
-// dropLegacyTaskColumns drops the requires_approval, execution_policy
-// and execution_state columns from the tasks table (Phase 4 of
-// task-model-unification). SQLite ALTER TABLE DROP COLUMN is supported
-// since 3.35 (2021); each statement is idempotent — a no-op when the
-// column is already gone — and silently swallowed if the SQLite build
-// is older. Stage progression is owned by the workflow engine now.
-func (r *Repository) dropLegacyTaskColumns() {
-	_, _ = r.db.Exec(`ALTER TABLE tasks DROP COLUMN requires_approval`)
-	_, _ = r.db.Exec(`ALTER TABLE tasks DROP COLUMN execution_policy`)
-	_, _ = r.db.Exec(`ALTER TABLE tasks DROP COLUMN execution_state`)
-}
-
-// tableExists returns true when the given table is present in the
-// SQLite schema. Used by renameLegacyRunTables to decide whether the
-// office_runs → runs migration needs to run.
-func (r *Repository) tableExists(name string) bool {
-	var exists int
-	err := r.db.QueryRow(
-		`SELECT 1 FROM sqlite_master WHERE type='table' AND name=?`, name,
-	).Scan(&exists)
-	return err == nil && exists == 1
-}
-
-// migrateFailureColumns wires up the run error_message column and the
-// office_workspace_settings + inbox dismissal tables used by
-// office-agent-error-handling. The per-agent failure counter / threshold
-// columns are already provided by the merged agent_profiles schema
-// (internal/agent/settings/store), so we no longer ALTER them here.
-// Each ALTER is idempotent — duplicate-column errors are swallowed.
+// migrateFailureColumns creates the auxiliary office_workspace_settings
+// and office_inbox_dismissals tables used by office-agent-error-handling.
+// The runs.error_message column is part of the canonical CREATE TABLE
+// in base.go, so no ALTER is needed here.
 func (r *Repository) migrateFailureColumns() {
-	_, _ = r.db.Exec(`ALTER TABLE runs ADD COLUMN error_message TEXT NOT NULL DEFAULT ''`)
-
 	_, _ = r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_workspace_settings (
 		workspace_id TEXT PRIMARY KEY,
@@ -444,48 +118,15 @@ func (r *Repository) migrateFailureColumns() {
 	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_office_inbox_dismissals_kind ON office_inbox_dismissals(item_kind, item_id)`)
 }
 
-// migrateSchedulerColumns adds scheduler-related columns to existing tables.
-// Each ALTER is idempotent: errors are ignored if the column already exists.
+// migrateSchedulerColumns adds the atomic task-checkout columns to the
+// canonical tasks table. The tasks table exists on main, so this ALTER
+// is necessary for upgrade. All run/routine column ALTERs that used to
+// live here have been folded into the canonical CREATE TABLE statements
+// (base.go) — office is new, so main upgrades pick up the final shape
+// directly without an interim ALTER step.
 func (r *Repository) migrateSchedulerColumns() {
-	// Retry fields on run queue.
-	_, _ = r.db.Exec(`ALTER TABLE runs ADD COLUMN retry_count INTEGER DEFAULT 0`)
-	_, _ = r.db.Exec(`ALTER TABLE runs ADD COLUMN scheduled_retry_at DATETIME`)
-
-	// Atomic task checkout fields.
-	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN checkout_agent_id TEXT`)
-	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN checkout_at DATETIME`)
-
-	// skip_idle_runs / cheap_agent_profile_id ALTERs removed — these
-	// columns now ship as part of the merged agent_profiles schema
-	// (ADR 0005 Wave C) owned by internal/agent/settings/store.
-
-	// Run cancel reason.
-	_, _ = r.db.Exec(`ALTER TABLE runs ADD COLUMN cancel_reason TEXT`)
-
-	// Heartbeat-rework run inspection columns (PR 1 of office-heartbeat-rework).
-	// These persist the structured adapter output, the assembled prompt the
-	// agent received, and the continuation summary that was prepended (if
-	// any). All three default to empty strings so existing rows stay valid.
-	_, _ = r.db.Exec(`ALTER TABLE runs ADD COLUMN result_json TEXT NOT NULL DEFAULT '{}'`)
-	_, _ = r.db.Exec(`ALTER TABLE runs ADD COLUMN assembled_prompt TEXT NOT NULL DEFAULT ''`)
-	_, _ = r.db.Exec(`ALTER TABLE runs ADD COLUMN summary_injected TEXT NOT NULL DEFAULT ''`)
-
-	// Heartbeat-rework routines column (PR 3 of office-heartbeat-rework).
-	// Mirrors the per-agent catch-up policy column for routines so a per-
-	// routine catch-up cap can be configured. Default keeps current
-	// behaviour (no catch-up cap is enforced until the routine cron tick
-	// path consumes this column — tracked in service.go TODO).
-	_, _ = r.db.Exec(`ALTER TABLE office_routines ADD COLUMN catch_up_policy TEXT NOT NULL DEFAULT 'enqueue_missed_with_cap'`)
-	_, _ = r.db.Exec(`ALTER TABLE office_routines ADD COLUMN catch_up_max INTEGER NOT NULL DEFAULT 25`)
-
-	// Index for actionable task lookup by assignee was removed in ADR 0005
-	// Wave F when the column moved to workflow_step_participants. The
-	// task repo's migrateTasksDropAssignee drops both the column and the
-	// index.
-}
-
-func (r *Repository) migrateChannelColumns() {
-	_, _ = r.db.Exec(`ALTER TABLE office_channels ADD COLUMN webhook_secret TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("tasks.checkout_agent_id", `ALTER TABLE tasks ADD COLUMN checkout_agent_id TEXT`)
+	r.migrate.Apply("tasks.checkout_at", `ALTER TABLE tasks ADD COLUMN checkout_at DATETIME`)
 }
 
 // migrateTaskFTS creates the FTS5 virtual table and triggers for full-text task search.
@@ -581,70 +222,6 @@ func (r *Repository) backfillFTS() {
 	`)
 }
 
-// migrateLegacyLabels reads tasks with a non-empty labels JSON column and
-// creates catalog + junction rows. It is idempotent via INSERT OR IGNORE.
-func (r *Repository) migrateLegacyLabels() {
-	// Guard: tasks table may not exist yet (office schema may run before task schema).
-	var exists int
-	if err := r.db.QueryRow(
-		"SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks'",
-	).Scan(&exists); err != nil || exists == 0 {
-		return
-	}
-
-	type taskRow struct {
-		ID          string `db:"id"`
-		WorkspaceID string `db:"workspace_id"`
-		Labels      string `db:"labels"`
-	}
-
-	var rows []taskRow
-	if err := r.db.Select(&rows, `
-		SELECT id, COALESCE(workspace_id,'') AS workspace_id,
-		       COALESCE(labels,'[]') AS labels
-		FROM tasks
-		WHERE labels IS NOT NULL AND labels != '' AND labels != '[]'
-	`); err != nil {
-		return
-	}
-
-	for _, t := range rows {
-		names := parseLabelJSON(t.Labels)
-		for _, name := range names {
-			if name == "" {
-				continue
-			}
-			lbl, err := r.GetOrCreateLabel(context.Background(), t.WorkspaceID, name)
-			if err != nil {
-				continue
-			}
-			_ = r.AddLabelToTask(context.Background(), t.ID, lbl.ID)
-		}
-	}
-}
-
-// parseLabelJSON naively extracts string values from a JSON array like ["bug","urgent"].
-// It avoids pulling in encoding/json to keep the function small.
-func parseLabelJSON(raw string) []string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || raw == "[]" || raw == "null" {
-		return nil
-	}
-	// Strip outer brackets.
-	raw = strings.TrimPrefix(raw, "[")
-	raw = strings.TrimSuffix(raw, "]")
-	parts := strings.Split(raw, ",")
-	names := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		p = strings.Trim(p, `"`)
-		if p != "" {
-			names = append(names, p)
-		}
-	}
-	return names
-}
-
 // migrateTaskPriorityToText converts the tasks.priority column from INTEGER to
 // TEXT with a CHECK constraint and 'medium' default. It is idempotent: when
 // the column is already TEXT (or the tasks table does not yet exist) the
@@ -659,7 +236,13 @@ func (r *Repository) migrateTaskPriorityToText() error {
 	if !r.taskPriorityIsInteger() {
 		return nil
 	}
-	return r.runTaskPriorityRecreate()
+	if err := r.runTaskPriorityRecreate(); err != nil {
+		return err
+	}
+	if r.log != nil {
+		r.log.Info("migration applied", zap.String("name", "tasks.priority_text_rebuild"))
+	}
+	return nil
 }
 
 // tasksTableExists returns true when the `tasks` table is present.

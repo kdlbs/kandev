@@ -13,19 +13,26 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	workflowcfg "github.com/kandev/kandev/config/workflows"
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/workflow/models"
 )
 
 // Repository provides SQLite-based workflow storage operations.
 type Repository struct {
-	db *sqlx.DB // writer
-	ro *sqlx.DB // reader
+	db      *sqlx.DB // writer
+	ro      *sqlx.DB // reader
+	migrate *db.MigrateLogger
 }
 
 // NewWithDB creates a new SQLite repository with existing database connections.
-func NewWithDB(writer, reader *sqlx.DB) (*Repository, error) {
-	repo := &Repository{db: writer, ro: reader}
+func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error) {
+	repo := &Repository{
+		db:      writer,
+		ro:      reader,
+		migrate: db.NewMigrateLogger(writer, log),
+	}
 	if err := repo.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize workflow schema: %w", err)
 	}
@@ -99,17 +106,12 @@ func (r *Repository) initSchema() error {
 		return fmt.Errorf("failed to create session_step_history table: %w", err)
 	}
 
-	// Add show_in_command_panel column if it doesn't exist (idempotent migration)
-	_, _ = r.db.Exec(`ALTER TABLE workflow_steps ADD COLUMN show_in_command_panel INTEGER DEFAULT 1`)
-
-	// Add agent_profile_id column to workflow_steps for per-step agent profile override (ignore error if already exists)
-	_, _ = r.db.Exec(`ALTER TABLE workflow_steps ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
-
-	// Phase 2 (ADR-0004) — workflow_steps.stage_type, a UX hint for the
+	r.migrate.Apply("workflow_steps.show_in_command_panel", `ALTER TABLE workflow_steps ADD COLUMN show_in_command_panel INTEGER DEFAULT 1`)
+	r.migrate.Apply("workflow_steps.agent_profile_id", `ALTER TABLE workflow_steps ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
+	// Phase 2 (ADR-0004) - workflow_steps.stage_type, a UX hint for the
 	// frontend ("work" | "review" | "approval" | "custom"). Backend code
-	// MUST NOT branch on it. Idempotent ALTER; default keeps existing rows
-	// at "custom".
-	_, _ = r.db.Exec(`ALTER TABLE workflow_steps ADD COLUMN stage_type TEXT NOT NULL DEFAULT 'custom'`)
+	// MUST NOT branch on it. Idempotent ALTER; default keeps existing rows at "custom".
+	r.migrate.Apply("workflow_steps.stage_type", `ALTER TABLE workflow_steps ADD COLUMN stage_type TEXT NOT NULL DEFAULT 'custom'`)
 
 	// Phase 2 — multi-agent participation tables. Empty rows for a step
 	// preserve today's single-agent behaviour, so existing kanban

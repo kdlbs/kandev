@@ -149,6 +149,13 @@ type TaskDTO struct {
 	ProjectID              string `json:"project_id,omitempty"`
 	Labels                 string `json:"labels,omitempty"`
 	Identifier             string `json:"identifier,omitempty"`
+	// IsFromOffice is the authoritative "this task is owned by office"
+	// flag. Computed by the task repo at read time as
+	// (project_id != '' OR workflow_id == workspace.office_workflow_id).
+	// True for office tasks even when they have no project yet; false for
+	// kanban-board tasks. Use this to gate office-only UI (e.g. the
+	// "Open in office view" topbar link).
+	IsFromOffice bool `json:"is_from_office,omitempty"`
 }
 
 type TaskRepositoryDTO struct {
@@ -588,6 +595,7 @@ func FromTaskWithSessionInfo(
 		ProjectID:              task.ProjectID,
 		Labels:                 task.Labels,
 		Identifier:             task.Identifier,
+		IsFromOffice:           task.IsFromOffice,
 	}
 }
 

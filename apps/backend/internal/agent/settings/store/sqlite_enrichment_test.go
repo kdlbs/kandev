@@ -22,7 +22,7 @@ func TestEnrichment_RoundTrip(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	repo, err := newSQLiteRepository(db, db, false)
+	repo, err := newSQLiteRepository(db, db, nil, false)
 	if err != nil {
 		t.Fatalf("newSQLiteRepository: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestEnrichment_Migration_LegacyDB(t *testing.T) {
 		t.Fatalf("seed profile: %v", err)
 	}
 
-	repo, err := newSQLiteRepository(db, db, false)
+	repo, err := newSQLiteRepository(db, db, nil, false)
 	if err != nil {
 		t.Fatalf("init schema: %v", err)
 	}

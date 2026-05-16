@@ -80,11 +80,11 @@ func newTestDeps(t *testing.T) *testDeps {
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 
-	if _, _, err := settingsstore.Provide(db, db); err != nil {
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
 		t.Fatalf("settings store: %v", err)
 	}
 
-	repo, err := sqlite.NewWithDB(db, db)
+	repo, err := sqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
@@ -149,7 +149,7 @@ func newTestDeps(t *testing.T) *testDeps {
 	}
 	// Build the workflow repo against the same DB so workflow_step_participants
 	// and workflow_step_decisions exist with their canonical schema.
-	wfRepo, err := workflowrepo.NewWithDB(db, db)
+	wfRepo, err := workflowrepo.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("workflow repo: %v", err)
 	}

@@ -10,6 +10,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
 )
 
 // sqlLimitClause is the SQL fragment appended to dynamic queries when a row limit is requested.
@@ -17,18 +21,26 @@ const sqlLimitClause = " LIMIT ?"
 
 // Repository provides SQLite-based task storage operations.
 type Repository struct {
-	db     *sqlx.DB // writer
-	ro     *sqlx.DB // reader (read-only pool)
-	ownsDB bool
+	db      *sqlx.DB // writer
+	ro      *sqlx.DB // reader (read-only pool)
+	ownsDB  bool
+	log     *logger.Logger
+	migrate *db.MigrateLogger
 }
 
 // NewWithDB creates a new SQLite repository with an existing database connection (shared ownership).
-func NewWithDB(writer, reader *sqlx.DB) (*Repository, error) {
-	return newRepository(writer, reader, false)
+func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error) {
+	return newRepository(writer, reader, log, false)
 }
 
-func newRepository(writer, reader *sqlx.DB, ownsDB bool) (*Repository, error) {
-	repo := &Repository{db: writer, ro: reader, ownsDB: ownsDB}
+func newRepository(writer, reader *sqlx.DB, log *logger.Logger, ownsDB bool) (*Repository, error) {
+	repo := &Repository{
+		db:      writer,
+		ro:      reader,
+		ownsDB:  ownsDB,
+		log:     log,
+		migrate: db.NewMigrateLogger(writer, log),
+	}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
 			if closeErr := writer.Close(); closeErr != nil {
@@ -139,8 +151,7 @@ func (r *Repository) initSchema() error {
 
 // migrateExecutorProfiles adds mcp_policy column and drops is_default from executor_profiles.
 func (r *Repository) migrateExecutorProfiles() error {
-	// Add mcp_policy column if it doesn't exist
-	_, _ = r.db.Exec(`ALTER TABLE executor_profiles ADD COLUMN mcp_policy TEXT DEFAULT ''`)
+	r.migrate.Apply("executor_profiles.mcp_policy", `ALTER TABLE executor_profiles ADD COLUMN mcp_policy TEXT DEFAULT ''`)
 	// Drop is_default column - SQLite doesn't support DROP COLUMN before 3.35.0,
 	// so we just ignore the old column if present. New schema omits it.
 	return nil
@@ -148,28 +159,20 @@ func (r *Repository) migrateExecutorProfiles() error {
 
 // migrateTaskSessions adds new columns to task_sessions.
 func (r *Repository) migrateTaskSessions() error {
-	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN executor_profile_id TEXT DEFAULT ''`)
+	r.migrate.Apply("task_sessions.executor_profile_id", `ALTER TABLE task_sessions ADD COLUMN executor_profile_id TEXT DEFAULT ''`)
 	return nil
 }
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
 func (r *Repository) runMigrations() error {
-	// Add last_message_uuid column to executors_running (ignore error if already exists)
-	_, _ = r.db.Exec(`ALTER TABLE executors_running ADD COLUMN last_message_uuid TEXT DEFAULT ''`)
-	// Add metadata column to executors_running (ignore error if already exists)
-	_, _ = r.db.Exec(`ALTER TABLE executors_running ADD COLUMN metadata TEXT DEFAULT '{}'`)
-	// Add is_ephemeral column to tasks for quick chat (ignore error if already exists)
-	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN is_ephemeral INTEGER NOT NULL DEFAULT 0`)
-	// Add checkout_branch column to task_repositories (ignore error if already exists)
-	_, _ = r.db.Exec(`ALTER TABLE task_repositories ADD COLUMN checkout_branch TEXT DEFAULT ''`)
-	// Add base_commit_sha column to task_sessions for tracking session start commit (ignore error if already exists)
-	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN base_commit_sha TEXT DEFAULT ''`)
-	// Add default_config_agent_profile_id column to workspaces (ignore error if already exists)
-	_, _ = r.db.Exec(`ALTER TABLE workspaces ADD COLUMN default_config_agent_profile_id TEXT DEFAULT ''`)
-	// Add task_environment_id column to task_sessions for shared environment reference (ignore error if already exists)
-	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN task_environment_id TEXT DEFAULT ''`)
-	// Add parent_id column to tasks for subtask support (ignore error if already exists)
-	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN parent_id TEXT DEFAULT ''`)
+	r.migrate.Apply("executors_running.last_message_uuid", `ALTER TABLE executors_running ADD COLUMN last_message_uuid TEXT DEFAULT ''`)
+	r.migrate.Apply("executors_running.metadata", `ALTER TABLE executors_running ADD COLUMN metadata TEXT DEFAULT '{}'`)
+	r.migrate.Apply("tasks.is_ephemeral", `ALTER TABLE tasks ADD COLUMN is_ephemeral INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("task_repositories.checkout_branch", `ALTER TABLE task_repositories ADD COLUMN checkout_branch TEXT DEFAULT ''`)
+	r.migrate.Apply("task_sessions.base_commit_sha", `ALTER TABLE task_sessions ADD COLUMN base_commit_sha TEXT DEFAULT ''`)
+	r.migrate.Apply("workspaces.default_config_agent_profile_id", `ALTER TABLE workspaces ADD COLUMN default_config_agent_profile_id TEXT DEFAULT ''`)
+	r.migrate.Apply("task_sessions.task_environment_id", `ALTER TABLE task_sessions ADD COLUMN task_environment_id TEXT DEFAULT ''`)
+	r.migrate.Apply("tasks.parent_id", `ALTER TABLE tasks ADD COLUMN parent_id TEXT DEFAULT ''`)
 	// Remove FK constraint on workflow_id to allow ephemeral tasks without workflows
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
@@ -181,7 +184,7 @@ func (r *Repository) runMigrations() error {
 	// Backfill executors_running from task_sessions and drop the denormalized
 	// agent_execution_id / container_id columns. After this migration,
 	// executors_running is the single source of truth for "active execution per
-	// session" — see persistence.go in the lifecycle package for the new ownership
+	// session" - see persistence.go in the lifecycle package for the new ownership
 	// model. Order matters: backfill must run BEFORE the column drop.
 	if err := r.backfillExecutorsRunningFromTaskSessions(); err != nil {
 		return err
@@ -189,88 +192,48 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateSessionsRemoveAgentExecutionID(); err != nil {
 		return err
 	}
-	// Add task_dir_name column to task_environments for multi-repo task root layout (ignore error if already exists).
 	// Must run BEFORE migrateTaskEnvironmentsRemoveAgentExecutionID, which copies task_dir_name into the recreated table.
-	_, _ = r.db.Exec(`ALTER TABLE task_environments ADD COLUMN task_dir_name TEXT DEFAULT ''`)
+	r.migrate.Apply("task_environments.task_dir_name", `ALTER TABLE task_environments ADD COLUMN task_dir_name TEXT DEFAULT ''`)
 	if err := r.migrateTaskEnvironmentsRemoveAgentExecutionID(); err != nil {
 		return err
 	}
-	// Add sort_order column to workflows for user-defined ordering (ignore error if already exists)
-	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
-	// Add agent_profile_id column to workflows for per-workflow agent profile override (ignore error if already exists)
-	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
-	// Add hidden flag to workflows for system-only flows excluded from management UI (ignore error if already exists)
-	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
-	// Add workspace_path to task_sessions: optional host folder for repo-less
-	// tasks where the user pointed the agent at an existing directory.
-	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN workspace_path TEXT DEFAULT ''`)
+	r.migrate.Apply("workflows.sort_order", `ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("workflows.agent_profile_id", `ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
+	r.migrate.Apply("workflows.hidden", `ALTER TABLE workflows ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("task_sessions.workspace_path", `ALTER TABLE task_sessions ADD COLUMN workspace_path TEXT DEFAULT ''`)
 
-	// Office task extensions (ignore errors if columns already exist).
-	// Phase 4 of task-model-unification dropped requires_approval,
-	// execution_policy, and execution_state — kept off the migration
-	// list so fresh DBs do not gain them and existing DBs shed them via
-	// dropLegacyTaskColumns() below.
-	// ADR 0005 Wave F dropped assignee_agent_profile_id; the legacy
-	// ALTER ADD COLUMN was removed so fresh DBs do not gain it. Existing
-	// DBs lose the column via migrateTasksDropAssignee below (which also
-	// drops the matching index).
-	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN origin TEXT DEFAULT 'manual'`)
-	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN project_id TEXT DEFAULT ''`)
-	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN labels TEXT DEFAULT '[]'`)
-	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN identifier TEXT`)
-	// Office task-handoffs phase 6 — tag tasks archived as part of a
-	// cascade so unarchive can restore exactly the descendants that
-	// cascade archived (and leave alone tasks the user manually archived
-	// before the cascade ran). Empty/NULL on every existing row.
-	_, _ = r.db.Exec(`ALTER TABLE tasks ADD COLUMN archived_by_cascade_id TEXT DEFAULT ''`)
+	// Office task extensions - net-new columns on existing main tables.
+	// Idempotent ALTERs; main upgrades pick them up at first boot.
+	// The transient in-branch columns (requires_approval,
+	// execution_policy, execution_state, assignee_agent_profile_id,
+	// task_sessions.agent_instance_id) were never on main and are
+	// therefore not added or dropped here.
+	r.migrate.Apply("tasks.origin", `ALTER TABLE tasks ADD COLUMN origin TEXT DEFAULT 'manual'`)
+	r.migrate.Apply("tasks.project_id", `ALTER TABLE tasks ADD COLUMN project_id TEXT DEFAULT ''`)
+	r.migrate.Apply("tasks.labels", `ALTER TABLE tasks ADD COLUMN labels TEXT DEFAULT '[]'`)
+	r.migrate.Apply("tasks.identifier", `ALTER TABLE tasks ADD COLUMN identifier TEXT`)
+	// Office task-handoffs phase 6 - tag tasks archived as part of a cascade so
+	// unarchive can restore exactly the descendants that cascade archived.
+	r.migrate.Apply("tasks.archived_by_cascade_id", `ALTER TABLE tasks ADD COLUMN archived_by_cascade_id TEXT DEFAULT ''`)
 
-	// Office workspace extensions (ignore errors if columns already exist)
-	_, _ = r.db.Exec(`ALTER TABLE workspaces ADD COLUMN task_prefix TEXT DEFAULT 'KAN'`)
-	_, _ = r.db.Exec(`ALTER TABLE workspaces ADD COLUMN task_sequence INTEGER DEFAULT 0`)
-	_, _ = r.db.Exec(`ALTER TABLE workspaces ADD COLUMN office_workflow_id TEXT DEFAULT ''`)
+	// Office workspace extensions
+	r.migrate.Apply("workspaces.task_prefix", `ALTER TABLE workspaces ADD COLUMN task_prefix TEXT DEFAULT 'KAN'`)
+	r.migrate.Apply("workspaces.task_sequence", `ALTER TABLE workspaces ADD COLUMN task_sequence INTEGER DEFAULT 0`)
+	r.migrate.Apply("workspaces.office_workflow_id", `ALTER TABLE workspaces ADD COLUMN office_workflow_id TEXT DEFAULT ''`)
 
 	// Office session cost tracking extensions are declared in
 	// initSessionWorktreeSchema's CREATE TABLE (cost_subcents, tokens_in,
-	// tokens_out). Office is pre-release so existing local DBs get
-	// rebuilt — no ADD COLUMN migration kept here.
+	// tokens_out). task_sessions.agent_profile_id existed on main as
+	// NOT NULL; migrateSessionsRemoveAgentExecutionID rebuilds the table
+	// with the column nullable and the cost columns added.
 
-	// Add is_system column to workflows for system-managed workflows (ignore error if already exists)
-	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN is_system INTEGER DEFAULT 0`)
+	r.migrate.Apply("workflows.is_system", `ALTER TABLE workflows ADD COLUMN is_system INTEGER DEFAULT 0`)
 
-	// Phase 2 (ADR-0004) — workflows.style is a UX hint for the frontend
+	// Phase 2 (ADR-0004) - workflows.style is a UX hint for the frontend
 	// ("kanban" | "office" | "custom"). Backend code MUST NOT branch on
-	// this value; it exists so the frontend can pick a presentation mode
-	// per workflow. Idempotent ALTER; default "kanban" preserves the
-	// current presentation for existing workflows.
-	_, _ = r.db.Exec(`ALTER TABLE workflows ADD COLUMN style TEXT NOT NULL DEFAULT 'kanban'`)
-
-	// ADR 0005: kanban + office task sessions share a single agent_profile_id
-	// column. The previous office-only column (agent_instance_id) collapsed
-	// into this one. ALTER ADD COLUMN below is a no-op when the column already
-	// exists from the base CREATE TABLE / migrateSessionsRemoveAgentExecutionID.
-	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN agent_profile_id TEXT`)
-
-	// One-time migration: copy the legacy office agent_instance_id column into
-	// the unified agent_profile_id and drop the old column. After ADR 0005
-	// Wave B's mass rename the office column became redundant.
-	if err := r.migrateMergeOfficeAgentInstanceColumn(); err != nil {
-		return fmt.Errorf("merge office agent_instance_id into agent_profile_id: %w", err)
-	}
-
-	// The pre-merge partial unique index over (task_id, agent_profile_id)
-	// keyed off the office-only column being NOT NULL. After the merge that
-	// discriminator no longer exists, so the index would reject legitimate
-	// duplicate kanban sessions per (task, profile). Drop it; office's
-	// per-(task, agent) uniqueness is enforced application-side by
-	// EnsureSessionForAgent's lookup-then-insert flow with race recovery.
-	_, _ = r.db.Exec(`DROP INDEX IF EXISTS uniq_office_task_session`)
-
-	// ADR 0005 Wave F — drop tasks.assignee_agent_profile_id. Per-task
-	// runner now lives in workflow_step_participants. Idempotent: a
-	// no-op when the column is already gone.
-	if err := r.migrateTasksDropAssignee(); err != nil {
-		return err
-	}
+	// this value. Idempotent ALTER; default "kanban" preserves the current
+	// presentation for existing workflows.
+	r.migrate.Apply("workflows.style", `ALTER TABLE workflows ADD COLUMN style TEXT NOT NULL DEFAULT 'kanban'`)
 
 	// ADR 0005 Wave F — ensure the runner-projection tables exist so
 	// task SELECTs that reference them via correlated subquery don't
@@ -325,45 +288,6 @@ func (r *Repository) ensureRunnerProjectionTables() {
 		)`)
 }
 
-// migrateTasksDropAssignee drops the assignee_agent_profile_id column
-// from the tasks table along with its supporting index. The column was
-// replaced by a 'runner' row in workflow_step_participants
-// (ADR 0005 Wave F). Idempotent: each statement is wrapped in error
-// swallow so re-runs are no-ops once the column is gone. Uses SQLite's
-// ALTER TABLE DROP COLUMN (>= 3.35) — older builds silently skip and
-// the column stays put; the rest of the system tolerates that
-// because reads no longer depend on the column.
-func (r *Repository) migrateTasksDropAssignee() error {
-	_, _ = r.db.Exec(`DROP INDEX IF EXISTS idx_tasks_assignee`)
-	_, _ = r.db.Exec(`ALTER TABLE tasks DROP COLUMN assignee_agent_profile_id`)
-	return nil
-}
-
-// migrateMergeOfficeAgentInstanceColumn copies values from the legacy
-// task_sessions.agent_instance_id column (if present) into agent_profile_id
-// and drops the old column. Idempotent — a no-op once the source column has
-// been removed.
-func (r *Repository) migrateMergeOfficeAgentInstanceColumn() error {
-	var sqlText string
-	err := r.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='task_sessions'`).Scan(&sqlText)
-	if err != nil {
-		// Table missing => nothing to do.
-		return nil
-	}
-	if !strings.Contains(sqlText, "agent_instance_id") {
-		return nil
-	}
-	// Copy non-empty values from agent_instance_id into agent_profile_id where
-	// the latter is NULL or empty (office rows previously had agent_profile_id
-	// pointing at a CLI profile and agent_instance_id pointing at the office
-	// instance; after Wave A those two ids are the same so either source works).
-	_, _ = r.db.Exec(`UPDATE task_sessions
-		SET agent_profile_id = agent_instance_id
-		WHERE agent_instance_id IS NOT NULL AND agent_instance_id != ''`)
-	_, _ = r.db.Exec(`ALTER TABLE task_sessions DROP COLUMN agent_instance_id`)
-	return nil
-}
-
 // recreateTable checks whether tableName's DDL contains triggerPhrase and, if so,
 // runs statements inside a transaction with FK enforcement disabled.
 // This is the standard SQLite pattern for dropping columns or FK constraints,
@@ -371,37 +295,51 @@ func (r *Repository) migrateMergeOfficeAgentInstanceColumn() error {
 // Note: PRAGMA statements cannot run inside a transaction in SQLite, so FK enforcement
 // is toggled outside the transaction. The writer pool must have MaxOpenConns(1) so that
 // the PRAGMA and the subsequent transaction use the same connection.
-func (r *Repository) recreateTable(tableName, triggerPhrase string, statements []string) error {
+// Returns true if the migration actually ran (gate fired), false if it was a no-op.
+func (r *Repository) recreateTable(tableName, triggerPhrase string, statements []string) (bool, error) {
 	var tableSql string
 	err := r.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`, tableName).Scan(&tableSql)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil // Table doesn't exist yet; migration not applicable
+		return false, nil // Table doesn't exist yet; migration not applicable
 	}
 	if err != nil {
-		return fmt.Errorf("query %s schema: %w", tableName, err)
+		return false, fmt.Errorf("query %s schema: %w", tableName, err)
 	}
 	if !strings.Contains(tableSql, triggerPhrase) {
-		return nil // Trigger phrase absent; migration already applied or not needed
+		return false, nil // Trigger phrase absent; migration already applied or not needed
 	}
 
 	if _, err := r.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
-		return fmt.Errorf("disable foreign keys: %w", err)
+		return false, fmt.Errorf("disable foreign keys: %w", err)
 	}
 	defer func() { _, _ = r.db.Exec(`PRAGMA foreign_keys=ON`) }()
 
 	tx, err := r.db.Beginx()
 	if err != nil {
-		return fmt.Errorf("begin migration transaction: %w", err)
+		return false, fmt.Errorf("begin migration transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	for _, stmt := range statements {
 		if _, err := tx.Exec(stmt); err != nil {
-			return fmt.Errorf("migration %s failed: %w", tableName, err)
+			return false, fmt.Errorf("migration %s failed: %w", tableName, err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit migration transaction: %w", err)
+		return false, fmt.Errorf("commit migration transaction: %w", err)
+	}
+	return true, nil
+}
+
+// recreateTableNamed wraps recreateTable and logs "migration applied" when the
+// gate fires (trigger phrase found and statements ran).
+func (r *Repository) recreateTableNamed(name, tableName, triggerPhrase string, statements []string) error {
+	fired, err := r.recreateTable(tableName, triggerPhrase, statements)
+	if err != nil {
+		return err
+	}
+	if fired && r.log != nil {
+		r.log.Info("migration applied", zap.String("name", name))
 	}
 	return nil
 }
@@ -409,7 +347,7 @@ func (r *Repository) recreateTable(tableName, triggerPhrase string, statements [
 // migrateTasksRemoveWorkflowFK removes the foreign key constraint on workflow_id
 // to allow ephemeral tasks (quick chat) to have empty workflow_id.
 func (r *Repository) migrateTasksRemoveWorkflowFK() error {
-	return r.recreateTable("tasks", "FOREIGN KEY (workflow_id)", []string{
+	return r.recreateTableNamed("tasks.recreate_drop_workflow_fk", "tasks", "FOREIGN KEY (workflow_id)", []string{
 		`CREATE TABLE tasks_new (
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL DEFAULT '',
@@ -503,7 +441,7 @@ func (r *Repository) backfillExecutorsRunningFromTaskSessions() error {
 // The trigger phrase "agent_execution_id" detects when the migration hasn't yet
 // run (column still present); recreateTable is a no-op once the column is gone.
 func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
-	return r.recreateTable("task_sessions", "agent_execution_id", []string{
+	return r.recreateTableNamed("task_sessions.recreate_drop_agent_execution_id", "task_sessions", "agent_execution_id", []string{
 		`CREATE TABLE task_sessions_new (
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,
@@ -555,7 +493,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 // denormalized copy that drifted from the in-memory store. The orchestrator
 // now reads execution state from executors_running only.
 func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
-	return r.recreateTable("task_environments", "agent_execution_id", []string{
+	return r.recreateTableNamed("task_environments.recreate_drop_agent_execution_id", "task_environments", "agent_execution_id", []string{
 		`CREATE TABLE task_environments_new (
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,
@@ -595,7 +533,7 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 // migrateSessionsRemoveWorkflowStepID removes the deprecated workflow_step_id column
 // from task_sessions. Workflow step is now tracked on the task, not the session.
 func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
-	return r.recreateTable("task_sessions", "workflow_step_id", []string{
+	return r.recreateTableNamed("task_sessions.recreate_drop_workflow_step_id", "task_sessions", "workflow_step_id", []string{
 		`CREATE TABLE task_sessions_new (
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,

@@ -45,7 +45,7 @@ func newDocumentTestDeps(t *testing.T) *documentTestDeps {
 	sqlxDB := sqlx.NewDb(rawDB, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
 
-	repo, err := tasksqlite.NewWithDB(sqlxDB, sqlxDB)
+	repo, err := tasksqlite.NewWithDB(sqlxDB, sqlxDB, nil)
 	if err != nil {
 		t.Fatalf("new task repo: %v", err)
 	}

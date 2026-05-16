@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
@@ -52,16 +54,20 @@ func RunnerProjection(alias string) string {
 type Repository struct {
 	*runssqlite.Repository
 
-	db *sqlx.DB // writer
-	ro *sqlx.DB // reader
+	db      *sqlx.DB // writer
+	ro      *sqlx.DB // reader
+	log     *logger.Logger
+	migrate *db.MigrateLogger
 }
 
 // NewWithDB creates a new office repository with existing database connections.
-func NewWithDB(writer, reader *sqlx.DB) (*Repository, error) {
+func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error) {
 	repo := &Repository{
 		Repository: runssqlite.NewWithDB(writer, reader),
 		db:         writer,
 		ro:         reader,
+		log:        log,
+		migrate:    db.NewMigrateLogger(writer, log),
 	}
 	if err := repo.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize office schema: %w", err)
@@ -304,6 +310,26 @@ func (r *Repository) createRunTables() error {
 		scheduled_retry_at DATETIME,
 		error_message TEXT NOT NULL DEFAULT '',
 		cancel_reason TEXT,
+		-- Provider routing (office-provider-routing).
+		logical_provider_order TEXT,
+		requested_tier TEXT,
+		resolved_provider_id TEXT,
+		resolved_model TEXT,
+		current_route_attempt_seq INTEGER NOT NULL DEFAULT 0,
+		routing_blocked_status TEXT,
+		earliest_retry_at TIMESTAMP,
+		-- route_cycle_baseline_seq marks the floor at which the current
+		-- retry cycle began. excludedFromAttempts filters prior attempt
+		-- rows with seq <= baseline so a parked-then-lifted run gets a
+		-- fresh exclusion list instead of re-inheriting every provider
+		-- that failed in the previous cycle.
+		route_cycle_baseline_seq INTEGER NOT NULL DEFAULT 0,
+		-- Heartbeat-rework run inspection columns: structured adapter
+		-- output, the assembled prompt the agent received, and the
+		-- continuation summary that was prepended (if any).
+		result_json TEXT NOT NULL DEFAULT '{}',
+		assembled_prompt TEXT NOT NULL DEFAULT '',
+		summary_injected TEXT NOT NULL DEFAULT '',
 		requested_at DATETIME NOT NULL,
 		claimed_at DATETIME,
 		finished_at DATETIME
