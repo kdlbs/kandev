@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -128,8 +129,12 @@ func (e *ACPInferenceExecutor) executeACPSession(
 
 	updateHandler := func(n acp.SessionNotification) {
 		if n.Update.AgentMessageChunk != nil && n.Update.AgentMessageChunk.Content.Text != nil {
+			chunk := sanitizeInferenceChunk(n.Update.AgentMessageChunk.Content.Text.Text)
+			if chunk == "" {
+				return
+			}
 			mu.Lock()
-			responseText.WriteString(n.Update.AgentMessageChunk.Content.Text.Text)
+			responseText.WriteString(chunk)
 			mu.Unlock()
 		}
 	}
@@ -494,4 +499,27 @@ func buildACPCommand(cfg *InferenceConfigDTO, model string) []string {
 	}
 
 	return args
+}
+
+var piVersionBannerLineRE = regexp.MustCompile(`^\s*pi v\d+\.\d+\.\d+\s*$`)
+
+// sanitizeInferenceChunk removes known non-content banner lines emitted by
+// some CLIs (e.g. pi-acp printing "pi vX.Y.Z") so utility outputs like
+// commit-message generation only contain model response content.
+func sanitizeInferenceChunk(chunk string) string {
+	if chunk == "" {
+		return ""
+	}
+	lines := strings.Split(chunk, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if piVersionBannerLineRE.MatchString(line) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	return strings.Join(kept, "\n")
 }
