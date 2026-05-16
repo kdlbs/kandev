@@ -64,7 +64,7 @@ async function fetchNewContent(
 ): Promise<string> {
   try {
     // Fetch from working tree (current file on disk), not HEAD.
-    // The diff shows working tree changes, so newLines must match.
+    // The diff shows working tree changes, so additionLines must match.
     const res = await requestFileContent(client, sessionId, filePath, repo);
     if (res.is_binary) throw new Error("Cannot expand binary files");
     if (!res.error) return res.content;
@@ -93,17 +93,18 @@ async function fetchExpansionLines(
     ? await fetchOldContent(client, sessionId, filePath, baseRef, repo)
     : "";
   return {
-    oldLines: oldContent.split(SPLIT_WITH_NEWLINES),
-    newLines: newContent.split(SPLIT_WITH_NEWLINES),
+    deletionLines: oldContent.split(SPLIT_WITH_NEWLINES),
+    additionLines: newContent.split(SPLIT_WITH_NEWLINES),
   };
 }
 
 /**
  * Hook for managing expandable diffs with lazy-loaded file content.
  *
- * The @pierre/diffs library requires `oldLines` and `newLines` in FileDiffMetadata
- * for expansion to work. This hook fetches old/new content and merges it into the
- * metadata.
+ * The @pierre/diffs library requires the full file content in
+ * `deletionLines`/`additionLines` on FileDiffMetadata (and `isPartial: false`)
+ * for expansion to work. This hook fetches old/new content and merges it into
+ * the metadata.
  */
 export function useExpandableDiff({
   sessionId,
@@ -115,8 +116,8 @@ export function useExpandableDiff({
 }: UseExpandableDiffOptions): UseExpandableDiffResult {
   const requestVersionRef = useRef(0);
   const [loadedContent, setLoadedContent] = useState<{
-    oldLines: string[];
-    newLines: string[];
+    deletionLines: string[];
+    additionLines: string[];
   } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -124,7 +125,7 @@ export function useExpandableDiff({
   // Reset cached content when inputs change so stale data is never rendered.
   // Including fileDiffMetadata ensures expansion content is invalidated when
   // the diff changes (e.g., file modified while Diff panel is open), because
-  // @pierre/diffs uses oldLines/newLines for rendering when present.
+  // @pierre/diffs uses deletionLines/additionLines for rendering when present.
   useEffect(() => {
     requestVersionRef.current += 1;
     setLoadedContent(null);
@@ -155,8 +156,9 @@ export function useExpandableDiff({
     if (!loadedContent) return fileDiffMetadata;
     return {
       ...fileDiffMetadata,
-      oldLines: loadedContent.oldLines,
-      newLines: loadedContent.newLines,
+      deletionLines: loadedContent.deletionLines,
+      additionLines: loadedContent.additionLines,
+      isPartial: false,
     };
   }, [fileDiffMetadata, loadedContent]);
 

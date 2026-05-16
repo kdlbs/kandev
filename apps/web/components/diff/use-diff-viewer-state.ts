@@ -31,7 +31,7 @@ type HunkState = {
   blockIdx: number;
 };
 
-type HunkOutputs = {
+export type HunkOutputs = {
   result: DiffLineAnnotation<AnnotationMetadata>[];
   lineMap: Map<string, string>;
   revertMap: Map<string, RevertBlockInfo>;
@@ -65,7 +65,7 @@ function processChangeBlock(
 }
 
 /** Build hunk-level annotations, line->changeBlock map, and revert info. */
-function buildHunkAnnotations(fileDiffMetadata: FileDiffMetadata, out: HunkOutputs) {
+export function buildHunkAnnotations(fileDiffMetadata: FileDiffMetadata, out: HunkOutputs) {
   const state: HunkState = { addLine: 0, delLine: 0, lastCtxAdd: 0, lastCtxDel: 0, blockIdx: 0 };
   for (const hunk of fileDiffMetadata.hunks) {
     if (hunk.additionCount === 0 && hunk.deletionCount === 0) continue;

@@ -69,7 +69,7 @@ type UseDiffOptionsArgs = {
   onOpenFile?: (filePath: string) => void;
   onPreviewMarkdown?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
-  /** Enable diff expansion (requires oldLines/newLines in metadata) */
+  /** Enable diff expansion (requires full deletionLines/additionLines in metadata) */
   enableExpansion?: boolean;
   /** Number of lines to expand per click (default: 20) */
   expansionLineCount?: number;
@@ -147,7 +147,7 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
       diffStyle: globalViewMode,
       themeType: resolvedTheme === "dark" ? "dark" : "light",
       enableLineSelection: enableComments,
-      // "line-info" shows expand buttons when oldLines/newLines are on metadata;
+      // "line-info" shows expand buttons when full deletionLines/additionLines are on metadata;
       // "simple" is a plain divider without expand controls.
       hunkSeparators: enableExpansion ? "line-info" : "simple",
       enableHoverUtility: enableComments,

@@ -196,9 +196,10 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
       timeout: 20_000,
     });
 
-    // The "Expand all lines" button is in the Pierre Diffs header toolbar.
-    // It contains a tabler-icon-fold-down SVG icon.
-    const expandAllBtn = testPage.locator("button:has(svg.tabler-icon-fold-down)");
+    // The "Expand all lines" button is in the Kandev toolbar that we inject
+    // via renderHeaderMetadata. We anchor on aria-label rather than the Tabler
+    // class so a future icon swap doesn't silently break this test.
+    const expandAllBtn = testPage.getByLabel("Expand all lines");
     await expect(expandAllBtn).toBeVisible({ timeout: 10_000 });
     await expandAllBtn.click();
 
