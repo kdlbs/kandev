@@ -358,6 +358,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     filePath: data.filePath,
     baseRef,
     fileDiffMetadata: baseDiffMetadata,
+    diff: data.diff,
     enableExpansion,
     repo,
   });
