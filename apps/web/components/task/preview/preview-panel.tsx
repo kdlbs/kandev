@@ -16,6 +16,7 @@ import { AnnotationsPanel } from "./annotations-panel";
 import {
   sendToggleInspect,
   sendClearAnnotations,
+  sendRemoveMarker,
   isInspectorMessage,
   type Annotation,
 } from "@/lib/preview-inspect-bridge";
@@ -373,6 +374,9 @@ function PreviewToolbar({
 function useInspectMode(iframeRef: React.RefObject<HTMLIFrameElement | null>, previewView: string) {
   const [isInspectMode, setIsInspectMode] = useState(false);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  // Monotonic counter: never reused after a removal so panel and copied
+  // markdown stay free of duplicate numbers across the session.
+  const nextNumber = useRef(1);
   const effectiveIsInspectMode = isInspectMode && previewView !== "output";
 
   useEffect(() => {
@@ -384,7 +388,8 @@ function useInspectMode(iframeRef: React.RefObject<HTMLIFrameElement | null>, pr
     function handleMessage(event: MessageEvent) {
       if (!isInspectorMessage(event.data)) return;
       if (event.data.type === "annotation-added") {
-        setAnnotations((prev) => [...prev, { ...event.data.payload, number: prev.length + 1 }]);
+        const number = nextNumber.current++;
+        setAnnotations((prev) => [...prev, { ...event.data.payload, number }]);
       } else if (event.data.type === "inspect-exited") {
         setIsInspectMode(false);
       }
@@ -398,12 +403,20 @@ function useInspectMode(iframeRef: React.RefObject<HTMLIFrameElement | null>, pr
     if (effectiveIsInspectMode) sendToggleInspect(iframeRef.current, true);
   }, [iframeRef, effectiveIsInspectMode]);
 
-  const handleRemoveAnnotation = useCallback((id: string) => {
-    setAnnotations((prev) => prev.filter((a) => a.id !== id));
-  }, []);
+  const handleRemoveAnnotation = useCallback(
+    (id: string) => {
+      setAnnotations((prev) => {
+        const target = prev.find((a) => a.id === id);
+        if (target && iframeRef.current) sendRemoveMarker(iframeRef.current, target.number);
+        return prev.filter((a) => a.id !== id);
+      });
+    },
+    [iframeRef],
+  );
 
   const handleClearAnnotations = useCallback(() => {
     setAnnotations([]);
+    nextNumber.current = 1;
     if (iframeRef.current) sendClearAnnotations(iframeRef.current);
   }, [iframeRef]);
 

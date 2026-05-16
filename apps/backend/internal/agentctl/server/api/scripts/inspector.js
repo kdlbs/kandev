@@ -279,10 +279,19 @@
     }
   }
 
+  function removeMarker(num) {
+    if (num == null) return;
+    var nodes = document.querySelectorAll('[data-kandev-marker="' + String(num) + '"]');
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].parentNode) nodes[i].parentNode.removeChild(nodes[i]);
+    }
+  }
+
   window.addEventListener('message', function (e) {
     if (!e.data || e.data.source !== SOURCE) return;
     if (e.data.type === 'toggle-inspect') setActive(!!(e.data.payload && e.data.payload.active));
     if (e.data.type === 'clear-annotations') clearMarkers();
+    if (e.data.type === 'remove-marker') removeMarker(e.data.payload && e.data.payload.number);
   });
 
   send('inspector-ready', {});

@@ -23,6 +23,7 @@ export function InspectButton({ active, disabled, count = 0, onToggle }: Inspect
       className="cursor-pointer relative"
       data-testid="preview-inspect-button"
       aria-pressed={active}
+      aria-label={active ? "Exit inspect mode" : "Enter inspect mode"}
       title={title}
     >
       <IconClick className="h-4 w-4" />

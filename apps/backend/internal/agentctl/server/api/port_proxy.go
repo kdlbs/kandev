@@ -105,7 +105,7 @@ func (s *Server) createPortProxy(port int) *httputil.ReverseProxy {
 			resp.Header.Set("Connection", "Upgrade")
 			return nil
 		}
-		ct := resp.Header.Get("Content-Type")
+		ct := strings.ToLower(resp.Header.Get("Content-Type"))
 		if strings.Contains(ct, "text/html") {
 			return injectScriptsIntoResponse(resp)
 		}

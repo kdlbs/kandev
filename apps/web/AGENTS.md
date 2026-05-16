@@ -22,7 +22,7 @@ import { Dialog } from "@kandev/ui/dialog";
 
 ## Data Flow Pattern (Critical)
 
-```
+```text
 SSR Fetch -> Hydrate Store -> Components Read Store -> Hooks Subscribe
 ```
 
@@ -30,7 +30,7 @@ SSR Fetch -> Hydrate Store -> Components Read Store -> Hooks Subscribe
 
 ## Store Structure (Domain Slices)
 
-```
+```text
 lib/state/
 ├── store.ts                        # Root composition
 ├── default-state.ts                # Default state + initial state merge

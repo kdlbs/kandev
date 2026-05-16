@@ -45,6 +45,12 @@ interface InspectorClearCommand {
   payload: Record<string, never>;
 }
 
+interface InspectorRemoveMarkerCommand {
+  source: typeof INSPECTOR_SOURCE;
+  type: "remove-marker";
+  payload: { number: number };
+}
+
 interface AnnotationAddedMessage {
   source: typeof INSPECTOR_SOURCE;
   type: "annotation-added";
@@ -97,6 +103,17 @@ export function sendClearAnnotations(iframe: HTMLIFrameElement): void {
       type: "clear-annotations",
       payload: {},
     } satisfies InspectorClearCommand,
+    "*",
+  );
+}
+
+export function sendRemoveMarker(iframe: HTMLIFrameElement, number: number): void {
+  iframe.contentWindow?.postMessage(
+    {
+      source: INSPECTOR_SOURCE,
+      type: "remove-marker",
+      payload: { number },
+    } satisfies InspectorRemoveMarkerCommand,
     "*",
   );
 }
