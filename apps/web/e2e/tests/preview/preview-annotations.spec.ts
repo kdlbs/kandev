@@ -232,28 +232,34 @@ test.describe("Preview annotations", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     const devServer = await startMockDevServer();
     try {
       const profile = await createStandardProfile(apiClient, "annot-inject");
-      await apiClient.createTaskWithAgent(seedData.workspaceId, "Annot inject", profile.id, {
-        description: "inject",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      });
+      const created = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Annot inject",
+        profile.id,
+        {
+          description: "inject",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
       await openTaskSession(testPage, "Annot inject");
       await attachPreview(testPage, devServer.port);
 
-      const sessionId = await testPage.evaluate(() => {
-        const m = window.location.pathname.match(/\/t\/([^/]+)/);
-        return m ? m[1] : "";
-      });
-      expect(sessionId).not.toBe("");
+      // The port-proxy backend route expects a session ID, not the task ID
+      // that appears in the URL.
+      const sessionId = created.session_id;
+      expect(sessionId).toBeTruthy();
 
-      const apiBase = process.env.KANDEV_API_BASE_URL || "http://localhost:8080";
+      // page.request shares cookies with the page context; sufficient for the
+      // current no-auth local backend.
       const proxyResp = await testPage.request.get(
-        `${apiBase}/port-proxy/${sessionId}/${devServer.port}/`,
+        `${backend.baseUrl}/port-proxy/${sessionId}/${devServer.port}/`,
       );
       expect(proxyResp.status()).toBe(200);
       const body = await proxyResp.text();
