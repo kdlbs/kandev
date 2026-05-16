@@ -16,6 +16,8 @@ import type { DiffComment } from "./types";
 const FILE = "src/foo.ts";
 const SIMPLE_PATCH_BODY = "@@ -1,1 +1,1 @@\n-old\n+new";
 const DIFF_GIT_HEADER = `diff --git a/${FILE} b/${FILE}`;
+const OLD_HEADER = `--- a/${FILE}`;
+const NEW_HEADER = `+++ b/${FILE}`;
 
 const baseComment = (overrides: Partial<DiffComment> = {}): DiffComment => ({
   id: "c1",
@@ -47,14 +49,16 @@ describe("normalizeDiffString", () => {
     expect(normalizeDiffString("", FILE)).toBe("");
   });
 
-  it("returns the trimmed diff unchanged when it already starts with diff --git", () => {
+  it("re-emits canonical headers and trailing newline even when input already starts with diff --git", () => {
     const diff = `diff --git a/src/foo.ts b/src/foo.ts
 --- a/src/foo.ts
 +++ b/src/foo.ts
 @@ -1,1 +1,1 @@
 -old
 +new`;
-    expect(normalizeDiffString(`  ${diff}  `, FILE)).toBe(diff);
+    // We always re-emit headers + ensure trailing newline so @pierre/diffs
+    // never sees malformed input regardless of upstream formatting.
+    expect(normalizeDiffString(`  ${diff}  `, FILE)).toBe(diff + "\n");
   });
 
   it("prepends only the diff --git header when --- and +++ are present", () => {
@@ -65,8 +69,8 @@ describe("normalizeDiffString", () => {
 +new`;
     const result = normalizeDiffString(diff, FILE);
     expect(result.startsWith(`${DIFF_GIT_HEADER}\n`)).toBe(true);
-    expect(result).toContain("--- a/src/foo.ts");
-    expect(result).toContain("+++ b/src/foo.ts");
+    expect(result).toContain(OLD_HEADER);
+    expect(result).toContain(NEW_HEADER);
   });
 
   it("prepends the full header trio when no headers are present", () => {
@@ -76,9 +80,38 @@ describe("normalizeDiffString", () => {
     const result = normalizeDiffString(diff, FILE);
     const lines = result.split("\n");
     expect(lines[0]).toBe(DIFF_GIT_HEADER);
-    expect(lines[1]).toBe("--- a/src/foo.ts");
-    expect(lines[2]).toBe("+++ b/src/foo.ts");
+    expect(lines[1]).toBe(OLD_HEADER);
+    expect(lines[2]).toBe(NEW_HEADER);
     expect(lines[3]).toBe("@@ -1,1 +1,1 @@");
+  });
+
+  it("emits --- /dev/null and new-file-mode for an `@@ -0,0 +N,M @@` hunk", () => {
+    // A new file from GitHub mock looks like this (no headers, just the hunk).
+    // @pierre/diffs 1.1.x throws "deletionLine and additionLine are null" if the
+    // diff is fed --- a/file / +++ b/file because it gets classified as a
+    // modification with no old content to read. The /dev/null marker keeps the
+    // renderer in the "new file" code path.
+    const diff = `@@ -0,0 +1,2 @@
++line one
++line two`;
+    const result = normalizeDiffString(diff, FILE);
+    const lines = result.split("\n");
+    expect(lines[0]).toBe(DIFF_GIT_HEADER);
+    expect(lines[1]).toBe("new file mode 100644");
+    expect(lines[2]).toBe("--- /dev/null");
+    expect(lines[3]).toBe("+++ b/src/foo.ts");
+  });
+
+  it("emits +++ /dev/null and deleted-file-mode for an `@@ -N,M +0,0 @@` hunk", () => {
+    const diff = `@@ -1,2 +0,0 @@
+-line one
+-line two`;
+    const result = normalizeDiffString(diff, FILE);
+    const lines = result.split("\n");
+    expect(lines[0]).toBe(DIFF_GIT_HEADER);
+    expect(lines[1]).toBe("deleted file mode 100644");
+    expect(lines[2]).toBe("--- a/src/foo.ts");
+    expect(lines[3]).toBe("+++ /dev/null");
   });
 });
 

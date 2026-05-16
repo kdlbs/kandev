@@ -29,32 +29,45 @@ export interface ModifyFilePayload {
 /**
  * Normalize a diff string by ensuring it has proper headers.
  * Required because backend diffs may not include full git headers.
+ *
+ * Detects new-file (`@@ -0,0 +X,Y @@`) and deleted-file (`@@ -X,Y +0,0 @@`)
+ * hunks and emits the canonical `--- /dev/null` / `+++ /dev/null` markers.
+ * @pierre/diffs 1.1.x relies on these to classify the change type; when both
+ * sides point at `a/file` and `b/file` for a new-file patch the renderer
+ * throws "deletionLine and additionLine are null" because it expects a
+ * modification and there's no old content to read.
  */
 export function normalizeDiffString(diff: string, filePath: string): string {
   if (!diff) return "";
 
   const trimmed = diff.trim();
 
-  // Check if the diff already has headers
-  if (trimmed.startsWith("diff --git")) {
-    return trimmed;
-  }
+  // Detect new/deleted file from the first hunk header so we can force the
+  // correct old/new file markers even when the caller pre-attached headers.
+  const isNewFile = /@@\s+-0,0\s+\+\d/.test(trimmed);
+  const isDeletedFile = /@@\s+-\d[\d,]*\s+\+0,0\s+@@/.test(trimmed);
 
-  // Check if it has file headers but not diff header
-  const hasFileHeaders = trimmed.includes("---") && trimmed.includes("+++");
+  // Strip any existing diff --git / index / mode / --- / +++ headers so we
+  // can re-emit them with the right /dev/null markers below. Hunk content
+  // (lines starting with @@) and everything after stays untouched.
+  const body = trimmed.replace(
+    /^(diff --git[^\n]*\n|index [^\n]*\n|(?:new|deleted) file mode [^\n]*\n|--- [^\n]*\n|\+\+\+ [^\n]*\n)+/,
+    "",
+  );
 
-  if (hasFileHeaders) {
-    // Add just the diff header
-    return `diff --git a/${filePath} b/${filePath}\n${trimmed}`;
-  }
-
-  // Add minimal headers
-  const headers = [
-    `diff --git a/${filePath} b/${filePath}`,
-    `--- a/${filePath}`,
-    `+++ b/${filePath}`,
-  ];
-  return headers.join("\n") + "\n" + trimmed;
+  const headers = [`diff --git a/${filePath} b/${filePath}`];
+  if (isNewFile) headers.push("new file mode 100644");
+  else if (isDeletedFile) headers.push("deleted file mode 100644");
+  headers.push(
+    isNewFile ? "--- /dev/null" : `--- a/${filePath}`,
+    isDeletedFile ? "+++ /dev/null" : `+++ b/${filePath}`,
+  );
+  // Ensure body ends with a newline. @pierre/diffs 1.1.x tolerates a missing
+  // EOF newline on real text content, but its hunk row generator can over-
+  // count rows when the last line lacks a terminator, occasionally tripping
+  // "deletionLine and additionLine are null" inside DiffHunksRenderer.
+  const tail = body.endsWith("\n") ? "" : "\n";
+  return headers.join("\n") + "\n" + body + tail;
 }
 
 /**

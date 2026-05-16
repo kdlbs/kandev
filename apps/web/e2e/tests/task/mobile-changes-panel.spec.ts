@@ -101,11 +101,14 @@ test.describe("Mobile changes panel", () => {
 
     // Regression: mobile diffs must use word-wrap (overflow="wrap") so long
     // lines are readable without horizontal scroll on touch devices.
+    // @pierre/diffs 1.1.x renamed the attribute on the rendered <pre> from
+    // `data-diffs` to `data-diff` — match either to keep the test stable
+    // across the upgrade.
     const overflowAttr = await testPage.waitForFunction(
       () =>
         document
           .querySelector("diffs-container")
-          ?.shadowRoot?.querySelector("[data-diffs]")
+          ?.shadowRoot?.querySelector("[data-diff], [data-diffs]")
           ?.getAttribute("data-overflow"),
       { timeout: 10_000 },
     );

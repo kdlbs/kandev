@@ -98,7 +98,7 @@ async function fetchExpansionContent(
 /**
  * Hook for managing expandable diffs with lazy-loaded file content.
  *
- * @pierre/diffs needs both the patch *and* the full file contents (with
+ * @pierre/diffs needs the patch *and* the full file contents (with
  * isPartial=false and hunk indices addressed against the full arrays) to
  * render expand controls. We get there by re-parsing via `processFile`
  * once the content arrives — it's the only API that produces a metadata
