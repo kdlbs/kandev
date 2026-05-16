@@ -1,11 +1,31 @@
 ---
 name: spec
-description: Write a feature spec — the "what & why" of a kandev product feature, before coding. Use when the user says "let's spec X" or starts a new product feature.
+description: Write a feature spec — the "what & why" of a kandev product feature, before coding. Use ONLY for a product-feature surface (user-visible capability the app supports). Do NOT use for bug fixes, incident postmortems, refactors that preserve behavior, or infra-only work — those get ADRs (if a new convention emerged) and/or regression tests, not specs. Use when the user says "let's spec X" or starts a new product feature.
 ---
 
 # Writing a Spec
 
 A spec captures **what** a feature does and **why**, before deciding **how**.
+
+## Gate: is this actually a feature?
+
+Before doing anything else, check that the topic is feature-shaped. A spec is appropriate ONLY when **all** of these are true:
+
+- It describes a **product-feature surface** — a capability a user (human or office agent) can invoke.
+- The "What" section can be written as observable behaviors the feature must support, not as a problem statement or a fix.
+- The artifact will be a **living document** that evolves with the feature, not a one-shot record of a decision or incident.
+
+If any of these are false, STOP and route to the right artifact:
+
+| Situation | Use this instead |
+|---|---|
+| Bug fix, incident postmortem | `/fix` — plus an ADR via `/record decision` if the fix encoded a new convention. No spec. |
+| Architecture or convention decision | `/record decision` — produces an ADR under `docs/decisions/`. No spec. |
+| Refactor that preserves behavior | Commit + (optional) ADR. No spec. |
+| Infra / tooling / build / CI change | Commit + (optional) ADR. No spec. |
+| Cluster of related sub-features under one umbrella | One spec for the umbrella feature, not one per sub-feature. |
+
+A "spec" that opens with a "Problem statement" or a "Root cause" section is not a spec. Specs describe what the feature **does for users**, not what went wrong or what we decided.
 
 ## What a spec is (and isn't)
 
@@ -18,6 +38,7 @@ A spec **is not**:
 - An architecture or design document
 - A task list
 - A retrospective of work already done
+- A record of a bug, incident, or postmortem (those are ADRs and regression tests)
 
 ## Where it lives
 

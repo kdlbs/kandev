@@ -4,8 +4,6 @@
 **Date:** 2026-05-16
 **Area:** backend
 
-Spec: [office-gc-worktree-safety](../specs/office-gc-worktree-safety/spec.md)
-
 ## Context
 
 Kandev's office service runs a background garbage collector that, every three hours, walks `~/.kandev/tasks/` and removes "orphaned" worktree directories. It also walks kandev-labeled Docker containers and removes ones whose tasks are gone or terminal. The intent was good — agents crash, leave state behind, and disks fill. The implementation was not.
@@ -47,6 +45,5 @@ Concretely:
 
 ## References
 
-- Spec: [`docs/specs/office-gc-worktree-safety/spec.md`](../specs/office-gc-worktree-safety/spec.md)
-- Plan: [`docs/specs/office-gc-worktree-safety/plan.md`](../specs/office-gc-worktree-safety/plan.md)
 - Implementation: `apps/backend/internal/office/infra/gc.go`, `apps/backend/internal/worktree/store.go`, `apps/backend/internal/office/repository/sqlite/tasks.go`
+- Regression tests: `apps/backend/internal/office/infra/gc_test.go`, `apps/backend/internal/worktree/store_test.go`
