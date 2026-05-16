@@ -64,6 +64,14 @@ export default defineConfig({
       testMatch: /docker\/.*\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
       timeout: 180_000,
+      // Per-test sharding: CI runs `--shard=N/6` to split this project's
+      // tests across runners. Playwright only shards at the test level
+      // when fullyParallel is true (otherwise sharding is by file, and
+      // since this project has a single spec file every test would land
+      // in shard 1). Each shard is its own process with its own backend,
+      // and workers:1 still serializes tests within a shard, so this is
+      // safe.
+      fullyParallel: true,
     },
   ],
 
