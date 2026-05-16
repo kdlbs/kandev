@@ -73,6 +73,16 @@ const (
 // String implements fmt.Stringer.
 func (p RoutineConcurrencyPolicy) String() string { return string(p) }
 
+// Valid reports whether p is one of the declared RoutineConcurrencyPolicy values.
+// Use at trust boundaries (HTTP handlers, config loaders) to reject malformed input.
+func (p RoutineConcurrencyPolicy) Valid() bool {
+	switch p {
+	case ConcurrencyPolicySkipIfActive, ConcurrencyPolicyCoalesceIfActive, ConcurrencyPolicyAlwaysCreate:
+		return true
+	}
+	return false
+}
+
 // RoutineCatchUpPolicy controls what happens when a scheduled routine
 // missed fires (e.g. backend was down).
 type RoutineCatchUpPolicy string
@@ -86,6 +96,15 @@ const (
 
 // String implements fmt.Stringer.
 func (p RoutineCatchUpPolicy) String() string { return string(p) }
+
+// Valid reports whether p is one of the declared RoutineCatchUpPolicy values.
+func (p RoutineCatchUpPolicy) Valid() bool {
+	switch p {
+	case CatchUpPolicyEnqueueMissedWithCap, CatchUpPolicySkipMissed:
+		return true
+	}
+	return false
+}
 
 // BudgetScopeType selects what a BudgetPolicy applies to.
 type BudgetScopeType string

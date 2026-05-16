@@ -499,13 +499,13 @@ func (m *Manager) runEnvironmentPreparerWithProgress(
 	// can still get distinct preparation logic.
 	execType := models.ExecutorType(req.ExecutorType)
 	preparer := m.preparerRegistry.Get(execType)
-	if preparer == nil {
-		// Fall back to LocalPreparer for empty or unrecognized ExecutorType.
-		// Matches the pre-typing behavior where ExecutorTypeToBackend's
-		// default case routed unknown values to NameStandalone → LocalPreparer.
-		// Legacy task rows (e.g. PR-watcher-created tasks without an explicit
-		// executor) rely on this so environment prep — including missing-branch
-		// detection — still runs.
+	if preparer == nil && execType == "" {
+		// Fall back to LocalPreparer only for a genuinely empty ExecutorType
+		// — legacy task rows (e.g. PR-watcher-created tasks without an
+		// explicit executor) rely on local environment prep, including
+		// missing-branch detection. Typed-but-unregistered values like
+		// "remote_docker" intentionally return nil so the caller skips prep
+		// rather than running local git operations against a remote executor.
 		preparer = m.preparerRegistry.Get(models.ExecutorTypeLocal)
 	}
 	if preparer == nil {

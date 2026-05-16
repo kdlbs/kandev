@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -56,6 +57,16 @@ func (h *Handler) createRoutine(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	concurrencyPolicy := models.RoutineConcurrencyPolicy(req.ConcurrencyPolicy)
+	catchUpPolicy := models.RoutineCatchUpPolicy(req.CatchUpPolicy)
+	if !concurrencyPolicy.Valid() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid concurrency_policy: " + req.ConcurrencyPolicy})
+		return
+	}
+	if !catchUpPolicy.Valid() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid catch_up_policy: " + req.CatchUpPolicy})
+		return
+	}
 	routine := &Routine{
 		WorkspaceID:            c.Param("wsId"),
 		Name:                   req.Name,
@@ -63,8 +74,8 @@ func (h *Handler) createRoutine(c *gin.Context) {
 		TaskTemplate:           req.TaskTemplate,
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
 		Status:                 "active",
-		ConcurrencyPolicy:      models.RoutineConcurrencyPolicy(req.ConcurrencyPolicy),
-		CatchUpPolicy:          models.RoutineCatchUpPolicy(req.CatchUpPolicy),
+		ConcurrencyPolicy:      concurrencyPolicy,
+		CatchUpPolicy:          catchUpPolicy,
 		CatchUpMax:             req.CatchUpMax,
 		Variables:              req.Variables,
 	}
@@ -102,6 +113,12 @@ func (h *Handler) doUpdateRoutine(c *gin.Context) (*Routine, int, error) {
 	var req UpdateRoutineRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return nil, http.StatusBadRequest, err
+	}
+	if req.ConcurrencyPolicy != nil && !models.RoutineConcurrencyPolicy(*req.ConcurrencyPolicy).Valid() {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid concurrency_policy: %s", *req.ConcurrencyPolicy)
+	}
+	if req.CatchUpPolicy != nil && !models.RoutineCatchUpPolicy(*req.CatchUpPolicy).Valid() {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid catch_up_policy: %s", *req.CatchUpPolicy)
 	}
 	applyRoutineUpdates(routine, &req)
 	if err := h.svc.UpdateRoutine(ctx, routine); err != nil {
