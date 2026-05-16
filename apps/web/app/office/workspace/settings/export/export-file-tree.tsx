@@ -13,12 +13,11 @@ import { Input } from "@kandev/ui/input";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { useTree, type VisibleRow } from "@/hooks/use-tree";
-import type { ExportFile, FileTreeNode } from "./export-types";
+import type { FileTreeNode } from "./export-types";
 import { getDescendantFilePaths } from "./export-utils";
 
 interface ExportFileTreeProps {
   tree: FileTreeNode[];
-  files: ExportFile[];
   selectedPaths: Set<string>;
   onSelectedPathsChange: (next: Set<string>) => void;
   previewPath: string | null;

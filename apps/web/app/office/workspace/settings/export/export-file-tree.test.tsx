@@ -30,7 +30,6 @@ function renderExport(overrides: RenderOpts = {}) {
   render(
     <ExportFileTree
       tree={tree}
-      files={FILES}
       selectedPaths={new Set(FILES.map((f) => f.path))}
       onSelectedPathsChange={onSelectedPathsChange}
       previewPath={null}
