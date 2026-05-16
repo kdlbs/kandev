@@ -161,6 +161,8 @@ export type PassthroughConfig = {
   supported: boolean;
   label: string;
   description: string;
+  auto_inject_prompt?: boolean;
+  submit_sequence?: string;
 };
 
 export type ToolStatus = {

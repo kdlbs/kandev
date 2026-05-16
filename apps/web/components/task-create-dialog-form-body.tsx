@@ -350,7 +350,6 @@ export const WorkflowSection = memo(function WorkflowSection({
 export type DialogPromptSectionProps = {
   isSessionMode: boolean;
   isTaskStarted: boolean;
-  isPassthroughProfile: boolean;
   initialDescription: string;
   hasDescription: boolean;
   fs: DialogFormState;
@@ -380,19 +379,16 @@ export type DialogPromptSectionProps = {
 function importBindings<T>(
   enabled: boolean,
   workspaceId: string | null,
-  isPassthroughProfile: boolean,
   onImport: ((value: T) => void) | undefined,
 ) {
   if (!enabled || !onImport) return undefined;
-  return { workspaceId, disabled: isPassthroughProfile, onImport };
+  return { workspaceId, disabled: false, onImport };
 }
 
 export function DialogPromptSection({
   isSessionMode,
   isTaskStarted,
-  isPassthroughProfile,
   initialDescription,
-  hasDescription,
   fs,
   handleKeyDown,
   enhance,
@@ -406,9 +402,6 @@ export function DialogPromptSection({
 }: DialogPromptSectionProps) {
   const importsEnabled = !isSessionMode && !isTaskStarted;
   const ws = workspaceId ?? null;
-  const placeholder = isPassthroughProfile
-    ? "Passthrough mode — prompt not supported"
-    : descriptionPlaceholder;
   const shouldAutoFocus = autoFocusDescription ?? !isTaskStarted;
   return (
     <>
@@ -421,18 +414,15 @@ export function DialogPromptSection({
         onDescriptionChange={fs.setHasDescription}
         onKeyDown={handleKeyDown}
         descriptionValueRef={fs.descriptionInputRef}
-        disabled={isTaskStarted || isPassthroughProfile}
-        placeholder={placeholder}
+        disabled={isTaskStarted}
+        placeholder={descriptionPlaceholder}
         onEnhancePrompt={enhance?.onEnhance}
         isEnhancingPrompt={enhance?.isLoading}
         isUtilityConfigured={enhance?.isConfigured}
-        jiraImport={importBindings(importsEnabled, ws, isPassthroughProfile, onJiraImport)}
-        linearImport={importBindings(importsEnabled, ws, isPassthroughProfile, onLinearImport)}
+        jiraImport={importBindings(importsEnabled, ws, onJiraImport)}
+        linearImport={importBindings(importsEnabled, ws, onLinearImport)}
       />
       {extraFormSlot}
-      {isPassthroughProfile && hasDescription && (
-        <p className="text-xs text-amber-500">Prompt ignored — passthrough mode active</p>
-      )}
     </>
   );
 }

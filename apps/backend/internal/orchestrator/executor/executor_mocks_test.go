@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -141,6 +142,9 @@ func (m *mockAgentManager) WritePassthroughStdin(ctx context.Context, sessionID 
 		return m.writePassthroughStdinFunc(ctx, sessionID, data)
 	}
 	return nil
+}
+func (m *mockAgentManager) ResolvePassthroughConfig(_ context.Context, _ string) (agents.PassthroughConfig, error) {
+	return agents.PassthroughConfig{}, nil
 }
 func (m *mockAgentManager) MarkPassthroughRunning(sessionID string) error {
 	m.markPassthroughRunningCalls = append(m.markPassthroughRunningCalls, sessionID)

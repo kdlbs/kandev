@@ -7,6 +7,8 @@
 package process
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -148,4 +150,22 @@ func (r *InteractiveRunner) SetStateCallback(cb AgentStateCallback) {
 // Currently always returns an idle detector that relies on the idle timer mechanism.
 func createStatusDetector() StatusDetector {
 	return NewIdleDetector()
+}
+
+// WaitForFirstIdle blocks until the idle detector for processID fires for
+// the first time, or ctx is canceled. Returns nil on first-idle, error otherwise.
+// Returns an error immediately if processID is unknown.
+func (r *InteractiveRunner) WaitForFirstIdle(ctx context.Context, processID string) error {
+	r.mu.RLock()
+	proc, ok := r.processes[processID]
+	r.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("process %q not found", processID)
+	}
+	select {
+	case <-proc.firstIdleCh:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
