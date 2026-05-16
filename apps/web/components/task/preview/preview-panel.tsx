@@ -175,7 +175,6 @@ type PreviewActions = {
   previewUrl: string;
   previewUrlDraft: string;
   devProcessId: string | undefined;
-  isRemote: boolean;
 };
 
 function usePreviewActions(sessionId: string | null, actions: PreviewActions) {
@@ -190,7 +189,6 @@ function usePreviewActions(sessionId: string | null, actions: PreviewActions) {
     previewUrl,
     previewUrlDraft,
     devProcessId,
-    isRemote,
   } = actions;
 
   const handleStopClick = useCallback(async () => {
@@ -218,9 +216,9 @@ function usePreviewActions(sessionId: string | null, actions: PreviewActions) {
     if (!sessionId) return;
     const trimmed = previewUrlDraft.trim();
     if (!trimmed) return;
-    const rewritten = rewritePreviewUrlForProxy(trimmed, sessionId, isRemote);
+    const rewritten = rewritePreviewUrlForProxy(trimmed, sessionId);
     setPreviewUrl(sessionId, rewritten ?? trimmed);
-  }, [sessionId, previewUrlDraft, setPreviewUrl, isRemote]);
+  }, [sessionId, previewUrlDraft, setPreviewUrl]);
 
   const handleOpenInTab = useCallback(() => {
     if (!sessionId || !previewUrl) return;
@@ -411,7 +409,6 @@ export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
     handleStop,
     detectedUrl,
     isRunning,
-    isRemote,
   } = panelState;
 
   const [refreshKey, setRefreshKey] = useState(0);
@@ -437,7 +434,6 @@ export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
     previewUrl,
     previewUrlDraft,
     devProcessId,
-    isRemote: isRemote ?? false,
   });
 
   if (!sessionId) return <PreviewPlaceholder message="Select a session to enable preview." />;
