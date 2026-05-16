@@ -131,18 +131,32 @@ function buildMultiRepoTree(files: ReviewFile[]): FileTreeNode[] {
   }
   const repoRoots: FileTreeNode[] = [];
   for (const [, entry] of byRepo) {
+    const repoPath = `__repo__:${entry.id}`;
     const subtree = buildFlatTree(entry.files);
+    // Two repos can contain a same-named path ("src/foo.ts" in both
+    // frontend and backend). Prefix every node path under this repo with
+    // the repo root path so tree-node paths are globally unique — required
+    // for useTree's expansion Set to track them independently.
+    const prefixedSubtree = subtree.map((n) => prefixPaths(n, repoPath));
     repoRoots.push({
       name: entry.name,
-      path: `__repo__:${entry.id}`,
+      path: repoPath,
       isDir: true,
       isRepoRoot: true,
       repositoryId: entry.id,
-      children: subtree,
+      children: prefixedSubtree,
     });
   }
   // Stable alphabetical order by repo name.
   return repoRoots.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function prefixPaths(node: FileTreeNode, prefix: string): FileTreeNode {
+  return {
+    ...node,
+    path: `${prefix}/${node.path}`,
+    children: node.children?.map((c) => prefixPaths(c, prefix)),
+  };
 }
 
 function buildFlatTree(files: ReviewFile[]): FileTreeNode[] {

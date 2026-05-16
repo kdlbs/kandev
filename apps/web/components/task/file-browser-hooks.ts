@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import {
   requestFileTree,
@@ -16,7 +16,20 @@ import {
   setFilesPanelScrollPosition,
 } from "@/lib/local-storage";
 import type { useToast } from "@/components/toast-provider";
+import { useTree, type VisibleRow } from "@/hooks/use-tree";
 import { mergeTreeNodes } from "./file-browser-parts";
+import { compareTreeNodes } from "./file-tree-utils";
+
+const FB_GET_PATH = (n: FileTreeNode) => n.path;
+// Children are sorted (dirs first, then files, alphabetically) on every
+// access so the flat visibleRows list comes out in the same order the
+// recursive render produced. The backend doesn't guarantee order and tree
+// mutations (rename / create) can insert arbitrarily.
+const FB_GET_CHILDREN = (n: FileTreeNode) =>
+  n.children ? [...n.children].sort(compareTreeNodes) : undefined;
+const FB_IS_DIR = (n: FileTreeNode) => n.is_dir;
+
+export type FileBrowserRow = VisibleRow<FileTreeNode>;
 
 const MAX_RETRY_ATTEMPTS = 4;
 const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000];
@@ -317,7 +330,19 @@ function useFileChangeSubscription({
 export function useFileBrowserTree(sessionId: string, resetKey?: string) {
   const effectiveResetKey = resetKey ?? sessionId;
   const [tree, setTree] = useState<FileTreeNode | null>(null);
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  // Expansion + flat visibleRows come from the shared useTree hook. tree is
+  // a single root node with children; useTree wants an array, so feed it the
+  // root's children.
+  const treeNodes = useMemo(() => tree?.children ?? [], [tree]);
+  const treeApi = useTree<FileTreeNode>({
+    nodes: treeNodes,
+    getPath: FB_GET_PATH,
+    getChildren: FB_GET_CHILDREN,
+    isDir: FB_IS_DIR,
+  });
+  const expandedPaths = treeApi.expanded as Set<string>;
+  const setExpandedPaths = treeApi.setExpanded;
+  const visibleRows = treeApi.visibleRows;
   const [isLoadingTree, setIsLoadingTree] = useState(true);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -373,7 +398,7 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
     return () => {
       clearRetryTimer();
     };
-  }, [clearRetryTimer, loadTree, effectiveResetKey, sessionId]);
+  }, [clearRetryTimer, loadTree, effectiveResetKey, sessionId, setExpandedPaths]);
 
   // Fire the initial load on the waiting → ready transition. `loadState` is
   // read via a ref so a failed load (which sets state back to "waiting") does
@@ -402,15 +427,14 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
 
   useFileChangeSubscription({ sessionIdRef, expandedPaths, setTree, setLoadState });
 
-  const collapseAll = useCallback(() => {
-    setExpandedPaths(new Set());
-  }, []);
+  const collapseAll = treeApi.collapseAll;
 
   return {
     tree,
     setTree,
     expandedPaths,
     setExpandedPaths,
+    visibleRows,
     visibleLoadingPaths,
     isLoadingTree,
     loadState,

@@ -442,7 +442,7 @@ export function FileBrowser({
           loadError={treeState.loadError}
           creatingInPath={handlers.creatingInPath}
           fileStatuses={fileStatuses}
-          expandedPaths={treeState.expandedPaths}
+          visibleRows={treeState.visibleRows}
           activeFolderPath={handlers.activeFolderPath}
           activeFilePath={activeFilePath}
           visibleLoadingPaths={treeState.visibleLoadingPaths}

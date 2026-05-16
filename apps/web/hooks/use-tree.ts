@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /**
  * Headless tree state. Owns expansion + derived flat visibleRows + search
@@ -66,6 +66,9 @@ export interface UseTreeResult<N> {
   collapseAll: () => void;
   /** Adds every ancestor prefix of `path` to the expanded set. */
   expandAncestorsOf: (path: string) => void;
+  /** Direct setter for the expanded set. Use sparingly — for things like
+   *  rehydrating from persistence on session change. */
+  setExpanded: React.Dispatch<React.SetStateAction<Set<string>>>;
 }
 
 function lastSegment(p: string): string {
@@ -281,6 +284,7 @@ function useExpandedState<N>(
 
   return {
     expanded,
+    setExpanded,
     isExpanded: isExpandedFn,
     toggle,
     expand,
