@@ -21,6 +21,13 @@ export interface FileTreeNode {
   content?: string;
 }
 
+// Module-level adapter constants so they keep a stable identity across
+// renders. Without this, useTree's visibleRows useMemo would recompute on
+// every parent render — the adapters land in its dependency array.
+const FILE_TREE_GET_PATH = (n: FileTreeNode) => n.path;
+const FILE_TREE_GET_CHILDREN = (n: FileTreeNode) => n.children;
+const FILE_TREE_IS_DIR = (n: FileTreeNode) => n.isDir;
+
 interface FileTreeProps {
   nodes: FileTreeNode[];
   selectedPath?: string | null;
@@ -59,9 +66,9 @@ export function FileTree({
 }: FileTreeProps) {
   const tree = useTree<FileTreeNode>({
     nodes,
-    getPath: (n) => n.path,
-    getChildren: (n) => n.children,
-    isDir: (n) => n.isDir,
+    getPath: FILE_TREE_GET_PATH,
+    getChildren: FILE_TREE_GET_CHILDREN,
+    isDir: FILE_TREE_IS_DIR,
     chainCollapse: true,
     defaultExpanded: defaultExpanded ? "all" : undefined,
   });

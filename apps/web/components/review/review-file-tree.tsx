@@ -28,6 +28,12 @@ type ReviewFileTreeProps = {
   onToggleReviewed: (path: string, reviewed: boolean) => void;
 };
 
+// Stable adapter identities so useTree's visibleRows memoisation is not
+// invalidated on every parent render.
+const REVIEW_GET_PATH = (n: FileTreeNode) => n.path;
+const REVIEW_GET_CHILDREN = (n: FileTreeNode) => n.children;
+const REVIEW_IS_DIR = (n: FileTreeNode) => Boolean(n.isDir);
+
 export const ReviewFileTree = memo(function ReviewFileTree({
   files,
   reviewedFiles,
@@ -44,9 +50,9 @@ export const ReviewFileTree = memo(function ReviewFileTree({
 
   const { visibleRows, toggle } = useTree<FileTreeNode>({
     nodes: tree,
-    getPath: (n) => n.path,
-    getChildren: (n) => n.children,
-    isDir: (n) => Boolean(n.isDir),
+    getPath: REVIEW_GET_PATH,
+    getChildren: REVIEW_GET_CHILDREN,
+    isDir: REVIEW_IS_DIR,
     defaultExpanded: "all",
   });
 

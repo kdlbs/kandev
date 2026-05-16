@@ -25,6 +25,12 @@ interface ExportFileTreeProps {
   onPreviewPathChange: (path: string) => void;
 }
 
+// Stable adapter identities so useTree's visibleRows memoisation is not
+// invalidated on every parent render.
+const EXPORT_GET_PATH = (n: FileTreeNode) => n.path;
+const EXPORT_GET_CHILDREN = (n: FileTreeNode) => n.children;
+const EXPORT_IS_DIR = (n: FileTreeNode) => n.isDir;
+
 type CheckState = boolean | "indeterminate";
 
 function getCheckState(node: FileTreeNode, selectedPaths: Set<string>): CheckState {
@@ -45,9 +51,9 @@ export function ExportFileTree({
 
   const { visibleRows, toggle } = useTree<FileTreeNode>({
     nodes: tree,
-    getPath: (n) => n.path,
-    getChildren: (n) => n.children,
-    isDir: (n) => n.isDir,
+    getPath: EXPORT_GET_PATH,
+    getChildren: EXPORT_GET_CHILDREN,
+    isDir: EXPORT_IS_DIR,
     defaultExpanded: "all",
     search,
     searchMode: "hide",

@@ -121,7 +121,7 @@ export function useFileBrowserSearch(sessionId: string) {
 function applyFileChanges(ctx: {
   client: ReturnType<typeof getWebSocketClient>;
   sessionId: string;
-  expandedPaths: Set<string>;
+  expandedPaths: ReadonlySet<string>;
   changes: Array<{ path: string }>;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   setLoadState: React.Dispatch<React.SetStateAction<LoadState>>;
@@ -297,7 +297,7 @@ function useFileChangeSubscription({
   setLoadState,
 }: {
   sessionIdRef: React.MutableRefObject<string>;
-  expandedPaths: Set<string>;
+  expandedPaths: ReadonlySet<string>;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   setLoadState: React.Dispatch<React.SetStateAction<LoadState>>;
 }) {
@@ -340,7 +340,7 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
     getChildren: FB_GET_CHILDREN,
     isDir: FB_IS_DIR,
   });
-  const expandedPaths = treeApi.expanded as Set<string>;
+  const expandedPaths = treeApi.expanded;
   const setExpandedPaths = treeApi.setExpanded;
   const visibleRows = treeApi.visibleRows;
   const [isLoadingTree, setIsLoadingTree] = useState(true);

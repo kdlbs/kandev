@@ -89,7 +89,7 @@ export function renameNodeInTree(
 }
 
 /** Collect visible (expanded) node paths in DFS order for multi-select range computation. */
-export function getVisiblePaths(tree: FileTreeNode, expandedPaths: Set<string>): string[] {
+export function getVisiblePaths(tree: FileTreeNode, expandedPaths: ReadonlySet<string>): string[] {
   const result: string[] = [];
   function walk(node: FileTreeNode) {
     // Skip the root node itself (it represents the workspace root)
