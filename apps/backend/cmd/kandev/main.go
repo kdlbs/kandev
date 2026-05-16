@@ -687,16 +687,7 @@ func initOfficeServices(
 		apiPort = ports.Backend
 	}
 
-	taskStarter := officeservice.TaskStarterWithEnvFunc(
-		func(ctx context.Context, taskID, agentProfileID, executorID,
-			executorProfileID string, priority string, prompt, workflowStepID string,
-			planMode bool, attachments []v1.MessageAttachment, env map[string]string) error {
-			_, err := orchestratorSvc.StartTaskWithEnv(ctx, taskID, agentProfileID,
-				executorID, executorProfileID, priority, prompt,
-				workflowStepID, planMode, attachments, env)
-			return err
-		},
-	)
+	taskStarter := newOfficeTaskStarter(orchestratorSvc)
 
 	// Construct the office service with all dependencies at once so the
 	// compiler catches missing fields rather than failing at runtime.
@@ -1265,6 +1256,22 @@ func backfillAgentDefaultSkills(
 	for _, w := range workspaces {
 		services.OfficeSvcs.Agents.BackfillDefaultSkillsForWorkspace(ctx, w.ID)
 	}
+}
+
+// newOfficeTaskStarter wraps orchestratorSvc.StartTaskWithEnv in the
+// officeservice.TaskStarterWithEnvFunc adapter. Extracted from
+// initOfficeServices to keep that function under the funlen cap.
+func newOfficeTaskStarter(orchestratorSvc *orchestrator.Service) officeservice.TaskStarter {
+	return officeservice.TaskStarterWithEnvFunc(
+		func(ctx context.Context, taskID, agentProfileID, executorID,
+			executorProfileID string, priority string, prompt, workflowStepID string,
+			planMode bool, attachments []v1.MessageAttachment, env map[string]string) error {
+			_, err := orchestratorSvc.StartTaskWithEnv(ctx, taskID, agentProfileID,
+				executorID, executorProfileID, priority, prompt,
+				workflowStepID, planMode, attachments, env)
+			return err
+		},
+	)
 }
 
 // newAgentAuth wraps officeagents.NewAgentAuth with a dev-mode warning when
