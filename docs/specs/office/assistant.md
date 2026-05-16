@@ -2,7 +2,6 @@
 status: draft
 created: 2026-04-25
 owner: cfl
-needs-upgrade: [state-machine, persistence-guarantees]
 ---
 
 # Office: Personal Assistant Agent, Channels & Agent Memory
@@ -166,6 +165,48 @@ Standard routines (see `office/routines/` spec) with assistant as assignee. Rout
 - `require_approval_for_skill_changes` (workspace, default true): gates agent-created skills via inbox approval flow.
 - Memory is scoped per agent instance: the assistant's memory includes user preferences; a worker's memory includes codebase knowledge. Agents cannot read another agent's memory.
 
+## State machine
+
+The assistant has three lifecycles running in parallel: the agent instance lifecycle (shared with every office agent), the channel lifecycle (per channel row), and the conversation lifecycle (per inbound message on a channel task).
+
+### Agent instance lifecycle
+
+The assistant uses the same state machine as every office agent (`pending_approval` -> `idle` -> `working` -> `paused` -> `stopped`). See [agents.md](./agents.md#state-machine). The only assistant-specific rule: an assistant should never be `stopped` while any of its channels is `active`, because inbound messages would queue wakeups against an inactive agent. Stopping the assistant does not auto-pause its channels — the user must do that explicitly, or accept that inbound messages will create comments that go un-processed until the assistant is reactivated.
+
+### Channel lifecycle
+
+A channel row in `office_channels` has its own status, independent of the agent it's bound to.
+
+- **active**: webhook ingress is accepted, inbound messages create comments, outbound relay delivers agent replies.
+- **paused**: webhook ingress returns 200 OK but the inbound message is dropped (no comment, no wakeup); outbound relay still delivers (so the agent can finish a turn already in progress).
+
+Transitions:
+
+| From | To | Trigger | Actor |
+|---|---|---|---|
+| (none) | active | `POST /office/agents/:id/channels` | user (channel setup wizard) |
+| active | paused | `PATCH` status -> `paused` | user |
+| paused | active | `PATCH` status -> `active` | user |
+| any | (deleted) | `DELETE /office/agents/:id/channels/:channelId` | user |
+| any | (deleted) | reconciler sweep when the bound agent row is gone | reconciler |
+
+The channel task created at setup time is never deleted by channel deletion: it remains as a long-lived task in the workspace so the comment history is preserved. Setup is two-phase: insert the channel row, create the task, link `task_id` back, set the assignee. If task creation fails the channel row is rolled back; if the assignee update fails the channel row is rolled back; if linking fails the orphan task is left behind and the user sees the failure surfaced through the setup wizard.
+
+### Conversation lifecycle (per inbound message)
+
+Each inbound message on an `active` channel walks a strict pipeline:
+
+1. **received**: webhook POST to `/api/channels/<channel_id>/inbound`. Body capped at 64 KiB. The `?author=` query param is ignored — the comment author is always `"external"` to prevent spoofing.
+2. **verified**: if `webhook_secret` is set, the signature on the incoming request is checked (Telegram: raw token in `X-Telegram-Bot-Api-Secret-Token`; Slack/Discord/webhook: HMAC-SHA256 in `X-Webhook-Signature` or `X-Hub-Signature-256`). Failure -> 401 + activity log entry, conversation ends.
+3. **commented**: a row is inserted into the channel task's comments with `author_type="user"`, `author_id="external"`, `source=<platform>`, `reply_channel_id=<channel.id>`.
+4. **woken**: the `task_comment` event fires; the assistant's `service.event_subscribers.handleCommentCreated` enqueues a wakeup keyed by `task_comment:<comment_id>` (idempotent — duplicate webhook deliveries do not duplicate wakeups).
+5. **processing**: the scheduler claims the wakeup when the assistant has capacity (`status=idle` or `working` with a free slot). Agent runs the standard session preparation flow.
+6. **replied**: agent posts one or more comments. Replies destined for the platform carry `reply_channel_id=<channel.id>`; comments without it are kanban-internal (no relay).
+7. **relayed**: the channel relay picks up agent-authored comments with a matching `reply_channel_id`, formats per platform, and sends. Retries with exponential backoff up to 3 attempts. Each attempt + final outcome is recorded in `office_activity_log` (`channel.message_relayed` or `channel.delivery_failed`).
+8. **done**: the run completes; `office_runs` and `office_run_events` retain the conversation turn for auditing.
+
+The pipeline has no shared `status` column — state is implicit in which tables have rows for the inbound `comment_id`: a verified-but-unprocessed message is a comment without a corresponding run; a processing message is a run in `running`; a delivered reply is an activity log row of type `channel.message_relayed`.
+
 ## Failure modes
 
 - **Channel webhook signature invalid**: request rejected with 401; activity log records the rejection.
@@ -176,11 +217,26 @@ Standard routines (see `office/routines/` spec) with assistant as assignee. Rout
 
 ## Persistence guarantees
 
-- Memory lives in the database; survives backend restarts.
-- Filesystem export is optional and downstream (Sync UI); the DB is the source of truth.
-- For repo-backed workspaces, memory can be shared between team members via git; the CEO's delegation patterns and the worker's codebase knowledge become available to every team member's kandev instance.
-- Memory can be reviewed in PRs (team reviews what an agent learned before merging).
-- Channel tasks and their comments persist normally with other tasks.
+The assistant agent itself follows the same rules as any office agent — see [agents.md](./agents.md#persistence-guarantees). Channel-specific and memory-specific guarantees:
+
+What survives a backend restart:
+
+- **Channel rows** persist in `office_channels` (PK `id`): `workspace_id`, `agent_profile_id` (the assistant the channel routes to), `platform`, `config` JSON (bot tokens, chat IDs, signing secrets — stored as opaque JSON), `webhook_secret` (auto-generated 32-byte hex on setup if the caller does not supply one), `status`, `task_id`, `created_at`, `updated_at`. A paused channel stays paused across restart; webhook URL + secret are stable.
+- **Channel tasks** persist as normal `tasks` rows with state `IN_PROGRESS`. Channels reference them via `task_id`. Channel tasks never auto-transition to `done`; deleting a channel does not delete its task (history is retained).
+- **Channel task comments** persist in `task_comments` with `source=<platform>` and `reply_channel_id=<channel.id>` on inbound rows. Both inbound and agent-authored relay-tagged comments survive restart so the conversation history is intact and the relay can be replayed by an operator if needed.
+- **Memory entries** persist in `office_agent_memory` (`UNIQUE(agent_profile_id, layer, key)`). Fields: `id`, `agent_profile_id`, `layer` (`operating` | `knowledge` | session-scoped layers), `key`, `content`, `metadata` JSON, timestamps. Upserts are by `(agent, layer, key)`; deletes are by primary key or owned-by-agent guard (`DeleteAgentMemoryOwned`) to prevent cross-agent deletion.
+- **Reconciliation at startup** drops `office_channels` rows whose `agent_profile_id` is no longer present in `agent_profiles` (`infra.Reconciler.reconcileChannels`). Orphan channel rows do not accumulate. The channel task and its comments survive that sweep — only the channel row, webhook secret, and platform config are removed.
+- **Filesystem-exported memory** (`agents/<name>/memory/<layer>/<key>.md` produced by the Sync UI) is a downstream snapshot, not authoritative. Wiping or reverting the filesystem copy never changes the DB; re-running Outgoing sync regenerates the files.
+
+What does NOT survive a restart:
+
+- **In-flight outbound relay attempts**: if the backend exits mid-retry, the comment remains in `task_comments` with `reply_channel_id` set but no `channel.message_relayed` activity row. There is no relay queue persisted independently of the comment table; recovery is whatever activity-log inspection or manual re-trigger the user does. The channel relay is not automatically replayed on boot.
+- **Per-platform connection state** for streaming integrations (Slack RTM, Discord gateway). All v1 platforms are webhook-driven (kandev exposes ingress) or HTTP-driven (kandev posts outbound) so there is no long-lived socket to lose, but any future streaming transport must treat its connection as ephemeral.
+- **Webhook delivery deduplication beyond what the platform sends**: replays of the same webhook by the upstream platform are deduped only at the wakeup layer (`task_comment:<comment_id>` idempotency key). A comment that was created but whose wakeup had not yet been enqueued at shutdown will get a wakeup on the next event-bus re-emission only if the event subscriber re-scans the comment — there is no automatic catch-up scan at boot.
+
+Repo-backed workspaces can sync memory through git via the Sync UI; team review of `agents/*/memory/*.md` in PRs is the intended pattern for sharing learned operating knowledge across team members' kandev instances. The DB remains the source of truth on each member's machine; `ApplyIncoming` overwrites DB rows from disk, `ApplyOutgoing` overwrites disk from DB. Neither direction is run automatically.
+
+There are no TTLs on channels, channel tasks, channel comments, or memory entries. Retention is by user action only.
 
 ## Scenarios
 

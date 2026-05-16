@@ -2,7 +2,6 @@
 status: draft
 created: 2026-04-25
 owner: cfl
-needs-upgrade: [persistence-guarantees]
 ---
 
 # Office: Inbox, Approvals & Activity Log
@@ -189,6 +188,33 @@ Task states relevant to inbox: `in_progress` -> `in_review` -> (back to `in_prog
 - Agent submits approval but kandev restarts: pending approval persists in DB; inbox item reappears on next read.
 - All reviewers approve but one rejection arrives late: rejection wins only if it arrives before the count is met; otherwise the task has already advanced and the late rejection is ignored.
 - Assignee agent missing when blocker resolves: `task_blockers_resolved` wakeup remains queued until the assignee comes online or the task is reassigned.
+
+## Persistence guarantees
+
+The inbox listing itself is a **computed view** — `office_inbox` does not exist. On every fetch `DashboardService.GetInboxItems` re-aggregates the underlying sources, so a kandev restart never loses inbox state and never reorders existing rows: identical inputs produce identical output. The badge count (`GetInboxCount`) is computed the same way.
+
+**Durable (survives restart):**
+
+- **Approval requests** persist in `office_approvals` with `status = pending|approved|rejected`. Pending rows stay in the table until decided; decided rows stay forever for audit. `decided_by`, `decided_at`, and `decision_note` are written atomically with the status flip in `DecideApproval`.
+- **Activity log entries** persist in `office_activity_log` (append-only, no TTL). The `approval.created` / `approval.resolved` entries are written by `ApprovalService` from inside the decide flow; failures to write activity are logged but never bubble back to the caller.
+- **Budget alerts** and **agent errors** surfaced in the inbox are activity rows with `action ∈ {budget.alert, agent.error}` — the inbox re-reads up to 20 most-recent entries per type on every fetch. They do not have a separate "resolved" state; the rows persist forever in the log.
+- **Failed-run and auto-paused-agent rows** come from `FailureInboxSource` (failed `office_runs` rows + `office_agents.status = paused`). They persist across restart and disappear from the inbox only when the user "Mark fixed"-dismisses them, when the run is re-queued, or when the agent is un-paused.
+- **Inbox dismissals** persist in `office_inbox_dismissals` keyed by `(user_id, item_kind, item_id)`. Single-user kandev writes `user_id = "default"`. The inbox filters dismissed rows out on every fetch; the underlying activity/run rows are NOT deleted.
+- **Reviewer/approver participants** for task `execution_policy` stages persist in `workflow_step_participants`; their decisions persist in `workflow_step_decisions`. Decisions are superseded (never deleted) when re-recorded, so the "viewer needs decision" check is deterministic across restarts.
+- **Approval `task_blockers`** rows (in `task_blockers`) persist; blocker resolution on completion triggers a `task_blockers_resolved` wakeup queued in the office scheduler queue, which itself persists in `office_run_requests`.
+- **Notification subscriptions** persist in `notification_subscriptions` (event type `office.inbox_item`). User preference about which providers receive inbox notifications survives restart.
+
+**Transient (recomputed on every read):**
+
+- The inbox listing array, badge count, item titles, item descriptions, and the per-task `task_review_request` items are all recomputed per-request. There is no caching layer.
+- Item IDs for synthetic types are deterministic strings rebuilt at fetch time:
+  - `review:<task_id>:<viewer_agent_id>` for review-request rows.
+  - Inbox row IDs for failed runs / paused agents are the `run_id` / `agent_id` from the source row, so dismissals key against stable identifiers.
+- WS notifications fired by `notifications.HandleInboxItem` for `office.inbox_item` events are at-most-once: if a delivery worker is mid-flight when kandev restarts, the in-flight delivery is lost. The inbox item itself is still discoverable on next dashboard fetch because the underlying source row persists.
+- The frontend Zustand inbox slice hydrates from the SSR fetch; it holds no durable client-side state beyond what the server returns. A hard reload reseeds from the server.
+- Per-agent inbox views (`GetAgentInboxItems`) are computed on demand for agent wakeups; agents do not hold inbox state between sessions.
+
+There is no retention policy or archival job: dismissed/decided rows accumulate in their respective tables indefinitely. Out-of-scope for this iteration (see Out of scope).
 
 ## Scenarios
 

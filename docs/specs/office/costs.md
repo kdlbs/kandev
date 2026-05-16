@@ -2,7 +2,6 @@
 status: in-progress
 created: 2026-04-25
 owner: cfl
-needs-upgrade: [permissions, persistence-guarantees]
 ---
 
 # Office: Cost Tracking & Budget Management
@@ -144,6 +143,17 @@ Budget enforcement transitions (per agent instance):
 
 Monthly reset is idempotent: backend restart mid-month does not refire.
 
+## Permissions
+
+Cost data and budget policies are workspace-scoped. The same auth gate as the rest of the office HTTP surface applies (see [agents.md](./agents.md#permissions)): UI requests authenticated via the user session bypass as admin; agent JWT requests run through the office permission middleware.
+
+- **Read cost data** (`GET /workspaces/:wsId/costs*`): any caller with workspace access. CEO, worker, specialist, assistant, and reviewer agents can all read their workspace's cost rollups. There is no per-agent or per-project read scoping today - any agent in the workspace sees workspace-wide totals.
+- **Manage budget policies** (`POST /workspaces/:wsId/budgets`, `PATCH /budgets/:id`, `DELETE /budgets/:id`): UI / admin only. The CEO's `kandev-budget` skill is the agent-facing surface for budget proposals; CEO agents do not call the budget HTTP endpoints directly, they raise proposals that the user actions through the inbox.
+- **Override pricing** (per-model overrides written into workspace settings): user only. Agents cannot mutate the pricing table.
+- **Trigger pause** (the side effect of `CheckBudget` when `action_on_exceed=pause_agent`): performed by the `system` actor inside the cost subscriber, not by any caller. The agent pause it produces is identical to a user-initiated pause; only the user can resume by raising the budget or waiting for the monthly reset.
+
+There is no per-field permission model. Conformance tests should assert that cost-read endpoints accept any authenticated workspace member, and that mutating budget endpoints either accept the admin / UI session or follow the same JWT-bypass rules used by the rest of the office API.
+
 ## Failure modes
 
 - **models.dev miss**: row recorded with `cost_subcents=0` and `estimated=true`; UI shows "pricing unavailable".
@@ -152,6 +162,28 @@ Monthly reset is idempotent: backend restart mid-month does not refire.
 - **ccusage JSON schema drift**: schema validator returns decode error; office subscriber treats run as no-op (no rows touched). Codex falls back to wire-side estimated path; amp absent. Nightly fixture-smoke CI alerts maintainers.
 - **`@ccusage/<provider>@latest` yanked**: next runner invocation fails; coverage degrades the same as parse failure.
 - **Coalescing**: if `session/complete` fires while a runner is already executing for that provider, the second invocation is dropped. The 60s sweep catches sessions in the gap.
+
+## Persistence guarantees
+
+**Survives restart:**
+
+- `office_cost_events` rows (full history, never trimmed). Disk-runner rows keyed by `(session_id, provider_event_id)` survive re-ingestion without duplicating; the wire-side `estimated=true` rows for codex are deleted once the matching aggregate row lands.
+- `office_budget_policies` rows.
+- `TaskSession.cost_subcents` / `tokens_in` / `tokens_out` running totals, kept in sync with `office_cost_events` so per-session totals are correct without a re-scan.
+- Per-agent `budget_monthly_cents` stored on the agent instance row.
+- Per-model pricing overrides stored in workspace settings.
+- The on-disk `models.dev` cache at `<data-dir>/cache/models-dev.json`. Recovery on next boot: the in-memory pricing map is empty until first query; queries fall back to the on-disk file when the background refresh has not yet completed.
+- Activity log entries `budget.alert` and `budget.exceeded` (workspace-scoped, included in the standard office backup as part of normal SQLite persistence - see `persistence.Provide` for the snapshot policy).
+
+**Does NOT survive restart:**
+
+- In-memory pricing map inside the models.dev client. Rebuilt lazily on first lookup from the on-disk cache file.
+- The disk-runner coalescing set (the in-process record of "already running for provider X"). After restart the 60s periodic sweep is the catch-up path - no in-flight session state is replayed.
+- Wire-side `estimated=true` rows for codex sessions that completed during downtime: those are reconciled when the next disk-runner sweep promotes them to the aggregate row.
+- The "monthly reset already ran for month M" guard is durable (idempotent by month boundary) so a restart on the 1st UTC does not refire the reset for agents that already returned to `idle`.
+- Cached aggregation results in the frontend store (`office.costSummary`, `office.budgetPolicies`) - rehydrated from the API on next page load.
+
+No TTL or retention is applied to `office_cost_events`; rows accumulate for the lifetime of the workspace. Cleanup happens only through workspace deletion (cascade via task workspace foreign key) and agent / project deletion garbage collection (see `office/repository/sqlite/runtime.go`).
 
 ## Scenarios
 

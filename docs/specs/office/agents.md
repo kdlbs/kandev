@@ -2,7 +2,6 @@
 status: draft
 created: 2026-04-25
 owner: cfl
-needs-upgrade: [persistence-guarantees]
 ---
 
 # Office: Agents
@@ -494,6 +493,29 @@ Skill list (name, description, source type, which agents use each skill), inline
 - **Adapter without skill discovery**: agent type has no known `ProjectSkillDir`. Skill `SKILL.md` content appended to the system prompt as fallback.
 - **Skill registry edit while session runs**: the running session is unaffected (file already written). Next session for that agent picks up updated content.
 - **Worktree deletion**: when the worktree is deleted at session end, all injected skill directories are removed automatically. No explicit cleanup hook needed.
+
+## Persistence guarantees
+
+What survives a kandev backend restart:
+
+- **Agent identity and configuration** persist in `agent_profiles` (office rows: `workspace_id != '' AND deleted_at IS NULL`). Name, role, icon, `reports_to`, permissions JSON, budget cents, `max_concurrent_sessions`, `cooldown_sec`, `desired_skills`, `skill_ids`, `executor_preference`, and `failure_threshold` are all durable. The same row is the canonical "agent profile" — there is no longer a separate agent-profile/agent-instance split (ADR 0005 Wave G).
+- **Runtime status** persists in `office_agent_runtime` (PK `agent_id`). On restart a `paused` agent stays `paused`, `pause_reason` (e.g. `"budget"`) is preserved, and `last_run_finished_at` is retained so the cooldown guard works across restarts.
+- **Reconciliation at startup**: `infra.Reconciler.ReconcileAll` (called once during boot) drops `office_agent_runtime` rows whose `agent_id` no longer exists in `agent_profiles`, deletes `office_channels` and `office_budget_policies` rows that reference removed agents/projects, and seeds default routine triggers for routines without one. Reconciliation is best-effort: any sub-step that errors is logged but does not block boot.
+- **Hire requests** persist as `pending_approval` agent rows plus an approval entry in the inbox. A restart mid-hire leaves the approval visible; the user can still approve or reject and the same activation/deletion paths run.
+- **Instructions** (`AGENTS.md`, `HEARTBEAT.md`, `SOUL.md`, `TOOLS.md` and any custom files) live in the office DB (`office_agent_instructions`) as the source of truth. The exported copy under `~/.kandev/runtime/<workspace-slug>/instructions/<agentId>/` is regenerated from DB on every session preparation — losing or wiping this directory between runs has no observable effect.
+- **Skills** persist in the workspace `skill` table (DB is the source of truth for inline skills; git-sourced skills cache their `file_inventory` in DB and re-clone on demand). Skill content materialized into `<worktree>/<ProjectSkillDir>/kandev-<slug>/` is ephemeral: it is rewritten at the start of every session and the `kandev-*` patterns added to `.git/info/exclude` are idempotent.
+- **System skills** are re-synced from the embedded `//go:embed` set on every boot via `office.service.SystemSkills.Sync`. Removed slugs are deleted, content is upserted, and per-agent `desired_skills` references are preserved across content updates.
+- **Run history** (`office_runs`, `office_run_events`, `office_activity_log`, `office_cost_events`) is fully durable. Per-run lookups (`tasks_touched`, costs, events) survive restarts because each row carries `run_id`/`session_id`.
+- **Filesystem config** (`workspace/agents/<name>.yml`, `workspace/skills/`, `workspace/routines/`) is a separate snapshot used by `config.ScanFilesystem` for the Sync UI. It is not authoritative: the DB is, and a missing or stale on-disk config never breaks the runtime — at most the Incoming/Outgoing diff is empty or noisy until the user re-syncs.
+
+What does NOT survive a restart:
+
+- **In-flight agent sessions**: the agent subprocess and its agentctl HTTP server are owned by the kandev process; both die when the backend exits. The `TaskSession.ACPSessionID` and `office_runs` row are retained, so the orchestrator's `RecoverInstances` path can resume the session — but the partially-streamed turn at the moment of shutdown is lost unless the underlying CLI itself supports replay.
+- **Queued wakeups for capacity-saturated agents**: wakeups that were already persisted survive (they live in the same DB tables as the rest). Wakeups that were only held in memory at the time of shutdown are lost; the originating event (task assign, comment, routine fire) must re-emit to re-queue.
+- **Per-run JWTs** (`KANDEV_API_KEY`) and the rest of the agent's environment block are minted fresh per session. Old JWTs are not honoured after restart.
+- **Worktrees on disk** belong to `task_session_worktrees`. They survive a backend restart but are reaped by the worktree GC if their owning `TaskSession` is gone. Injected `kandev-*` skill directories under a surviving worktree are stale until the next session rewrites them (the clean-slate step at session start handles this).
+
+There are no TTLs on agent rows, runtime rows, instructions, skills, run history, or activity logs. Retention is by user action only.
 
 ## Scenarios
 

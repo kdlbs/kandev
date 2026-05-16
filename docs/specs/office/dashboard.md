@@ -2,7 +2,6 @@
 status: draft
 created: 2026-05-02
 owner: cfl
-needs-upgrade: [permissions, persistence-guarantees]
 ---
 
 # Office Dashboard
@@ -158,6 +157,44 @@ The pre-existing `GET /workspaces/:wsId/live-runs` endpoint stays for backward c
 ### Dashboard payload
 
 The existing `GET /api/v1/office/workspaces/:wsId/dashboard` endpoint backs the stat cards, charts, Recent Tasks list, and Recent Activity feed. (Shape evolves alongside the dashboard; cross-link to the implementation when adding new sections rather than re-restating here.)
+
+## Permissions
+
+The dashboard is a read-mostly surface scoped to a single workspace. Authorization rules:
+
+- **Workspace scoping.** Every dashboard endpoint takes `:wsId` in the path. The `agents.AgentAuthMiddleware` rejects any agent-JWT request whose `claims.WorkspaceID` does not match `:wsId` with `403 token workspace mismatch`. UI callers (no JWT) currently pass through unchecked — single-user kandev does not yet have a user-session auth layer, so the dashboard treats all UI callers as the singleton human user (`decider_id = "user"`, `inbox_dismissals.user_id = "default"`).
+- **Read endpoints** (`GET /dashboard`, `/agent-summaries`, `/agents/:id/summary`, `/agents/:id/runs`, `/agents/:id/runs/:runId`, `/inbox`, `/activity`, `/runs`, `/tasks`, `/tasks/search`, `/live-runs`) require only that the caller resolve to the workspace. No per-agent visibility filtering is applied — every agent in the workspace can see every other agent's cards, runs, and activity. The per-agent inbox view (`GetAgentInboxItems`) is invoked internally for agent-scoped wakeups and returns only that agent's pending review/approval requests; it is not a separate HTTP route.
+- **Mutating endpoints** carry the same permission keys defined in `internal/office/shared/permissions.go`:
+  - `POST /tasks/:id/approve`, `POST /tasks/:id/request-changes`: agent callers require `can_approve`. Cross-workspace decisions are rejected with `403`. An agent cannot decide an approval it requested (self-approval guard).
+  - `POST /tasks/:id/blockers`, `DELETE /tasks/:id/blockers/:blockerId`, reviewer/approver mutations: open to all callers (no permission gate today).
+  - `PATCH /tasks/:id` assignee mutation surfaces `shared.ErrForbidden` as `403` for agent callers without the required permission, anything else as `500`.
+  - `POST /inbox/dismiss`: requires the `MarkFixedHandler` to be wired (`503` otherwise) and resolves under `user_id = "default"`.
+  - Settings mutation (`PATCH /workspaces/:wsId/settings`): no gate today; UI-only.
+- **Activity feed entries** carry `actor_type ∈ {user, agent, system}` and `actor_id` (user id, agent instance id, or literal `"system"`). The feed does not redact entries per viewer — every workspace member sees the full log.
+- **Routing endpoints** (`/workspaces/:wsId/routing*`, `/agents/:id/route`, `/runs/:id/attempts`) are scoped the same way; their authorization rules live in `office/routing.md`.
+
+See `agents/` spec for the role → permission defaults and the no-escalation rule that governs the underlying permission keys.
+
+## Persistence guarantees
+
+The dashboard is a thin projection over durable office tables. Nothing the dashboard surfaces is held in process memory across the request boundary; on restart the next dashboard fetch recomputes everything from SQLite.
+
+**Durable (survives restart):**
+
+- Recent Activity feed and the status-change timeline reads `office_activity_log` rows; entries are append-only and have no TTL.
+- Pending Approvals card count reads `office_approvals` rows; `pending` rows persist until the user decides them.
+- Stat cards, charts, Recent Tasks, Tasks by Status / Priority — derived from `tasks`, `office_agents`, `office_runs`, `messages`, `office_cost_events`. None of this data is dashboard-owned.
+- Run Activity / Success Rate bars query `office_runs` for the 14-day window; rows older than the window stay in the DB but are not visualised.
+- Inbox dismissals persist in `office_inbox_dismissals` keyed by `(user_id, item_kind, item_id)` so a "Mark fixed" decision survives restart.
+- Workspace governance flags (`require_approval_for_new_agents`, `require_approval_for_task_completion`, `require_approval_for_skill_changes`) persist in `office_workspace_governance`; `permission_handling_mode` and `recovery_lookback_hours` persist on the workspace's filesystem config via the `SettingsProvider` adapter.
+- Workflow-domain decisions (used to compute "viewer needs decision" on inbox review-request items) persist in `workflow_step_decisions` and are superseded — never deleted — when re-recorded.
+
+**Transient (recomputed on every read):**
+
+- Per-agent cards `status` (`live` / `finished` / `never_run`), the sort order, `recent_sessions`, and `command_count` are computed live by `GetAgentSummaries` from `office_agents` + `task_sessions` + `messages` at request time. There is no cached cards payload; a kandev restart serves identical content from the first fetch onward.
+- Inbox is a computed view (see `inbox.md` Persistence guarantees) — no `office_inbox` table exists. The badge count and the listing both recompute on every fetch.
+- Frontend store hydration: SSR fetches dashboard data once on page load and hydrates the Zustand store. Live updates are WS-driven (`live-updates.md`); on hard reload the SSR fetch reseeds the store. WS subscriptions are not durable — the gateway re-subscribes on reconnect.
+- The dashboard does NOT cache anything backend-side beyond the request lifetime; there is no Redis/in-memory dashboard cache. Adding one would require explicit invalidation hooks and is intentionally not implemented.
 
 ## Scenarios
 

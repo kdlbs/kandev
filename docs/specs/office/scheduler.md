@@ -2,7 +2,6 @@
 status: draft
 created: 2026-04-25
 owner: cfl
-needs-upgrade: [permissions]
 ---
 
 # Office Scheduler
@@ -597,6 +596,24 @@ received -> skipped         (concurrency_policy=skip_if_active and active run ex
 received -> coalesced       (concurrency_policy=coalesce_if_active and active run exists)
 received -> failed          (dispatch error)
 ```
+
+## Permissions
+
+The scheduler's reach is workspace-scoped: every routine, wakeup-request, run, and recovery dispatch is keyed by `workspace_id` (routines) or by an `agent_profile_id` that resolves to a single workspace. Cross-workspace dispatch is not possible by construction - the dispatcher only loads agents and tasks from the routine / wakeup's own workspace.
+
+| Action | Who can perform it |
+|---|---|
+| Create / update / delete / pause routines in a workspace | The workspace's UI user (no per-field permission model in v1). Routines API endpoints under `/api/office/routines` are not gated by agent capability today. |
+| Fire a routine manually (`POST /api/office/routines/:id/fire`) | UI user. Agent callers cannot manually fire routines from the runtime (no `CapabilitySpawnRoutine`). |
+| Fire a webhook trigger (`POST /api/routine-triggers/:public_id/fire`) | Any external caller possessing a valid signature per the trigger's `signing_mode` (`none` accepts unauthenticated requests). Failed signature returns 401; no routine run is created. |
+| Enqueue a wakeup (`office.wakeup.Service.Enqueue`) | Internal-only Go API. Office event subscribers, the workflow engine, comment handlers, approval handlers, and the recovery sweep are the legitimate callers. Agents cannot synthesize wakeups directly - the `self`-source wakeup is produced by the runtime in response to a recognized agent tool call, not by an HTTP route. |
+| Override / cancel an in-flight wakeup or scheduled retry | Indirect only. Reassigning a task via the task API or cancelling / completing the underlying task triggers the staleness and retry-cancellation paths described above. There is no direct "cancel this wakeup" endpoint. |
+| Read run inspection (`assembled_prompt`, `summary_injected`, `result_json`) | UI user for the workspace. No agent-side capability exposes raw prompts cross-agent. |
+| Adjust workspace settings (`recovery_lookback_hours`) | UI user. Workspace-level setting; no per-agent or per-project override. |
+
+Agent capabilities (`CapabilityPostComment`, `CapabilityUpdateTaskStatus`, etc., per `agents.md`) govern what an agent can do **inside** a run. They do not gate which agents the scheduler will wake - that is determined entirely by routine assignment, task assignment, and the `reviewers` / `approvers` lists managed in `tasks.md`.
+
+A formal per-route authorization model (workspace membership, admin role, RBAC over routines / wakeups) is out of scope here; see Out of scope.
 
 ## Failure modes
 

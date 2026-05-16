@@ -2,7 +2,6 @@
 status: draft
 created: 2026-05-02
 owner: cfl
-needs-upgrade: [data-model, state-machine, permissions, failure-modes, persistence-guarantees]
 ---
 
 # Office Live Updates
@@ -136,9 +135,213 @@ The same live-presence affordances appear on every surface a task or agent is re
 - Property-panel edits on the task detail page are fully optimistic with rollback + toast on failure. No inline per-field error state.
 - No surface introduces a `setInterval` or polling fallback. If the WS connection is down, surfaces stay as-is until the connection recovers and the next event arrives.
 
+## Data model
+
+Live updates are **not** a persisted feature surface — there is no `live_subscriptions` table, no event log replay buffer, no per-client cursor. The contract is built entirely from already-persisted entities (`tasks`, `task_sessions`, `office_runs`, `office_comments`, `office_approvals`, `office_activity`, `office_agents`, `provider_health_state`, `office_route_attempts`) plus three pieces of in-memory state on the backend and one piece on the frontend.
+
+### Backend in-memory state (gateway hub)
+
+Maintained by `*Hub` in `internal/gateway/websocket/hub.go`. None of this survives a process restart.
+
+```
+Hub
+  clients                map[*Client]bool                  // all connected sockets
+  taskSubscribers        map[taskID]map[*Client]bool       // task.* notifications
+  sessionSubscribers     map[sessionID]map[*Client]bool    // session.*, shell, git, file notifications
+  userSubscribers        map[userID]map[*Client]bool       // user.settings.updated
+  runSubscribers         map[runID]map[*Client]bool        // run.event.appended (run detail page)
+  sessionMode            *sessionModeTracker               // focus → fast/slow poll mode
+```
+
+```
+Client
+  ID                    string         // server-generated socket id
+  conn                  *websocket.Conn
+  send                  chan []byte    // 256-deep outbound buffer
+  subscriptions         map[taskID]bool
+  sessionSubscriptions  map[sessionID]bool
+  sessionFocus          map[sessionID]bool   // strict subset of sessionSubscriptions
+  userSubscriptions     map[userID]bool
+  runSubscriptions      map[runID]bool
+  closed                bool
+```
+
+All maps are guarded by `Hub.mu` / `Client.mu`. Subscription state is shared between the per-client map (for cleanup on disconnect) and the per-key map (for fan-out on broadcast). The two are kept consistent under `Hub.mu.Lock()`.
+
+### Backend broadcaster state
+
+`OfficeEventBroadcaster` (`internal/gateway/websocket/office_notifications.go`) holds one `bus.Subscription` per office event subject. `SessionStreamBroadcaster` holds one per session-stream subject. Both are cleaned up when the parent `ctx` cancels.
+
+### Event bus subjects
+
+In-memory `MemoryEventBus` (`internal/events/bus/memory.go`) maintains `map[subject][]*memorySubscription`. Subjects are flat strings (e.g. `office.comment.created`) except for the per-id fan-out path `office.run.event_appended.<runID>` (built by `events.BuildOfficeRunEventSubject`). Subscriptions are not persisted; a process restart loses every subscription and the bus re-registers them on next boot via the same `RegisterEventSubscribers` / `RegisterOfficeNotifications` calls.
+
+### Forwarded event payload
+
+Every office event published to the bus is forwarded by `OfficeEventBroadcaster` as a `ws.Message`:
+
+```
+ws.Message
+  id          string             // empty for notifications
+  type        "notification"
+  action      string             // e.g. "office.comment.created"
+  payload     json.RawMessage    // event-specific shape; MUST include workspace_id when scoped
+  timestamp   time.Time          // server clock, UTC
+  metadata    map[string]string  // optional
+```
+
+The payload `workspace_id` field is the scoping key. Office event-payload structs (`TaskMovedData`, `TaskUpdatedData`, `TaskStatusChangedData`, etc., defined in `internal/office/service/event_subscribers.go`) embed `WorkspaceID` as JSON `workspace_id`. Routing-related payloads (`OfficeProviderHealthChanged`, `OfficeRouteAttemptAppended`, `OfficeRoutingSettingsUpdated`) MUST include `workspace_id` so the frontend filter can scope them. Events without a `workspace_id` (legacy or genuinely workspace-agnostic) are treated as in-scope by the frontend filter.
+
+### Frontend client state
+
+`WebSocketClient` (`apps/web/lib/ws/client.ts`) holds ref-counted subscription maps:
+
+```
+WebSocketClient
+  status                "idle"|"connecting"|"open"|"closed"|"error"|"reconnecting"
+  subscriptions         Map<taskID, count>
+  sessionSubscriptions  Map<sessionID, count>
+  sessionFocusCounts    Map<sessionID, count>   // strict subset
+  userSubscriptionCount number
+  runSubscriptions      Map<runID, count>
+  pendingRequests       Map<requestId, {resolve, reject, timeout}>
+  pendingQueue          string[]                 // outbound frames buffered while not open
+  reconnectAttempts     number
+```
+
+The store layer (`apps/web/lib/state/slices/office/office-slice.ts`) holds a single `officeRefetchTrigger: string` field that pages watch. Office WS handlers either patch the store directly (task status, agent status, routing) or call `setOfficeRefetchTrigger(type)` to invalidate a page-scoped fetch, where `type` is one of `"dashboard" | "tasks" | "agents" | "inbox" | "activity" | "comments:<taskId>" | "task:<taskId>" | "runs" | "routines" | "costs" | "approvals"`.
+
 ## API surface
 
 WS events listed in section A above. The agent-summaries endpoint that backs dashboard agent cards is documented in `dashboard.md`. No HTTP endpoints are introduced by the live-updates surface itself beyond the per-property mutation events already covered by `PATCH /tasks/:id` and the comment-run lifecycle endpoints.
+
+### Subscription control frames
+
+The frontend issues these as `type: "request"` frames; the backend replies with `type: "response"` `{success: true, ...}` or `type: "error"`.
+
+| Action | Payload | Effect |
+|---|---|---|
+| `task.subscribe` | `{task_id}` | Adds client to `taskSubscribers[task_id]`. |
+| `task.unsubscribe` | `{task_id}` | Removes client from `taskSubscribers[task_id]`. |
+| `session.subscribe` | `{session_id}` | Adds client to `sessionSubscribers[session_id]`; server pushes an initial session-data snapshot (git status). Triggers session-mode recomputation. |
+| `session.unsubscribe` | `{session_id}` | Removes client; recomputes session mode. |
+| `session.focus` | `{session_id}` | Marks the session as actively viewed by this client; lifts polling to fast mode and re-pushes the session-data snapshot. |
+| `session.unfocus` | `{session_id}` | Releases focus; debounced fallback to slow or paused mode. |
+| `user.subscribe` | `{user_id?}` | Subscribes to `user.settings.updated`. `user_id` must equal `store.DefaultUserID` (single-user model) or the server returns `ErrorCodeForbidden`. |
+| `user.unsubscribe` | `{user_id?}` | Inverse of `user.subscribe`. |
+| `run.subscribe` | `{run_id}` | Subscribes to `run.event.appended` for one office run. Server replays no state — caller fetches the snapshot via REST. |
+| `run.unsubscribe` | `{run_id}` | Inverse of `run.subscribe`. |
+
+## State machine
+
+### WS connection (frontend)
+
+Tracked by `WebSocketClient.status`. Server-side, the connection is just an open `websocket.Conn`; the state machine below is the observable surface used by hooks and the connection indicator in the topbar.
+
+| State | Entered when | Outgoing transitions |
+|---|---|---|
+| `idle` | Client constructed, `connect()` not yet called. | `connect()` → `connecting`. |
+| `connecting` | `connect()` called and `new WebSocket(url)` issued. | `socket.onopen` → `open`. `socket.onerror` → `error`. `socket.onclose` → `closed` (then auto-reconnect logic). |
+| `open` | `socket.onopen` fired. Reconnect attempts reset to 0. Queued frames are flushed; `resubscribe()` re-sends every entry in the subscription maps. | `socket.onclose` → `closed`. `disconnect()` → `closed`. |
+| `closed` | `disconnect()` called or socket closed and reconnect is disabled / cap reached. Pending requests are rejected with `WebSocket connection closed`. | `connect()` → `connecting`. |
+| `error` | `socket.onerror` fired, or reconnect cap exceeded. Pending requests are rejected. | `connect()` → `connecting`. |
+| `reconnecting` | Socket closed unexpectedly, reconnect is enabled, attempts < cap. A timer is armed with exponential backoff (initial 1s, multiplier 1.5, max 30s, cap 10 attempts). | Timer fires → `connecting`. `disconnect()` → `closed`. |
+
+Server-side ping/pong: every `pingPeriod` (54s = 60s pong-wait × 0.9) the server sends a WS ping; missing the pong before `pongWait` (60s) closes the connection. Max inbound frame is 32 MiB (raised to accommodate base64 image attachments).
+
+### Subscription state (per `(client, key)` pair)
+
+| State | Entered when | Outgoing transitions |
+|---|---|---|
+| `unsubscribed` | Initial state, or after `*.unsubscribe`. No fan-out. | `*.subscribe` → `subscribed`. |
+| `pending` | `*.subscribe` called while `status != "open"`. Frame buffered in `pendingQueue`; refcount incremented; intent recorded in subscription map. | Status becomes `open` → frame flushed → `subscribed`. `disconnect()` → `unsubscribed`. |
+| `subscribed` | Server responded `{success:true}` to `*.subscribe`. Client appears in the matching `Hub` map; broadcasts fan out. | `*.unsubscribe` (last ref drops) → `unsubscribed`. Socket closes → backend `unsubscribed`, frontend records intent retained for `resubscribe()` on reconnect. |
+
+No per-message ack: notifications are fire-and-forget. Only request frames (those carrying an `id`) get a paired `response`/`error` and only when the client originated the request — broadcast notifications carry no `id` and the client never acks.
+
+### Session-mode tracker (per session)
+
+Driven by `session.focus` / `session.unfocus` and subscriber counts. Listeners on the backend toggle agent polling cadence per workspace.
+
+| State | Trigger to enter |
+|---|---|
+| `paused` | No subscribers remain. |
+| `slow` | At least one subscriber, zero focused. |
+| `fast` | At least one focused subscriber. Server upgrades workspace poll cadence. |
+
+Transitions out of `fast` are debounced (see `hub_session_mode.go`) to absorb tab-switch churn.
+
+### Optimistic comment lifecycle
+
+| State | Entered when | Visible affordance |
+|---|---|---|
+| `sending` | User clicks send. Local row appended within 50 ms. | Faded row, `Sending...` sub-label, send button disabled. |
+| `awaiting_agent` | POST returns 2xx **or** matching `office.comment.created` arrives (whichever first). | One of: `Queued - agent paused`, `Agent is replying...`, `Awaiting agent (N ahead)`, `Awaiting agent`. |
+| `resolved` | Assignee agent posts a reply comment to the same task (`office.comment.created` with `author_type != "user"`). | Awaiting indicator disappears. |
+| `failed` | POST returns non-2xx **and** no matching `office.comment.created` has been seen. | Pending row removed; draft restored; toast surfaced. |
+
+Matching pending row to confirmation: the client embeds a generated UUID in the create-comment payload; the server echoes it back in the `office.comment.created` WS event so the optimistic row replaces (rather than duplicates) the confirmed one.
+
+## Permissions
+
+The kandev backend runs in a single-user model (`store.DefaultUserID = "default-user"`). Authorization rules below describe the observable contract; multi-user enforcement would extend them.
+
+- **Workspace scoping** — every office WS notification carries `workspace_id` in its payload (when scoped). The current implementation broadcasts office notifications to every connected client and the frontend filters by `workspace_id === workspaces.activeId`. The observable contract is: a client viewing workspace A MUST NOT act on events originating in workspace B. Either server-side filtering or client-side filtering satisfies the contract.
+- **User subscription** — `user.subscribe` accepts only the caller's own user id. Subscribing to another user's id returns WS error `forbidden` (`ws.ErrorCodeForbidden`, "cannot subscribe to another user"). Symmetric rule for `user.unsubscribe`.
+- **Task / session / run subscriptions** — no per-key authorization in the current implementation. Any connected client can subscribe to any `task_id`, `session_id`, or `run_id`. Information-leak risk is bounded by the single-user model. A future multi-user iteration MUST gate `task.subscribe` / `session.subscribe` / `run.subscribe` on workspace membership; the gate point is `Hub.SubscribeToTask` etc.
+- **Agent-originated subscriptions** — agentctl-initiated MCP tool calls reach the backend over a tunnelled WS connection but do **not** carry a separate identity over this surface; agents cannot subscribe to other agents' streams because subscription frames are scoped per-socket and agents never open the user-facing office WS.
+- **Subscription requests are not approvals** — there is no approval / review gate on subscribing. Once authorized to connect, a client may subscribe and unsubscribe freely.
+
+## Failure modes
+
+| Dependency / scenario | Observable behavior |
+|---|---|
+| **WS network drop** | Socket transitions `open → closed → reconnecting`. Pending request promises stay armed until `cleanupPendingRequests()` rejects them at the reconnect cap. Subscription maps are retained. On `open` the client flushes the buffered outbound queue, then re-issues every `subscribe` / `focus` / `user.subscribe` / `run.subscribe` frame from `resubscribe()`. **No replay** of missed notifications — surfaces refetch on next event or stay stale until then. |
+| **Reconnect cap exceeded** | After `maxAttempts` (default 10) consecutive failures with exponential backoff capped at 30s, status moves to `error`, pending requests are rejected with `WebSocket connection closed`, and no further automatic reconnects occur. The topbar surfaces a connection indicator; the user must reload to recover. |
+| **Server send buffer full** | `client.send` is a 256-deep buffer. When full, `sendBytes` logs `Client send buffer full, dropping message` and the message is dropped for that client only. Other clients still receive it. No retry, no replay; consumer must reconcile on next event. |
+| **Frontend handler throws** | The hub's frontend WS client invokes handlers in a `forEach`; an unhandled throw skips remaining handlers for that event but does not tear down the socket. |
+| **Event bus publish during shutdown** | `MemoryEventBus.Publish` returns `event bus is closed` after `Close()`. The publisher (orchestrator / office service) logs and continues; the broadcast is dropped. WS clients see no notification for that event. |
+| **Event bus subscription error in handler** | `OfficeEventBroadcaster.subscribe` logs `failed to build office ws notification` and returns nil to the bus — handler errors never propagate back to the publisher. |
+| **Cross-workspace event leaks past server** | Frontend `isCurrentWorkspace(payload)` discards it. No store mutation occurs. Refetch is not triggered. |
+| **Optimistic comment — server returns 5xx / network error** | Pending row removed from thread, draft text and any attached file are restored to the input, send button re-enables, and a toast (`Failed to send comment - please try again.`) surfaces. No automatic retry. |
+| **Optimistic comment — server confirms but WS event never arrives** | Pending row stays in `awaiting_agent` indefinitely. A page reload reconciles against the REST list. No client-side timeout flips it to `failed` once the POST succeeded. |
+| **`office.run.queued` arrives before the user comment refetch lands** | The badge waits — `triggerRefetch("comments:<taskId>")` invalidates the comment fetch and the badge renders once the next list response includes `runId` / `runStatus`. |
+| **Agent reply lands before run finishes** | The per-comment run-status badge hides reactively when any agent reply for the task arrives (`office.comment.created` with `author_type != "user"`), even if the run is still `claimed`. |
+| **Backend restart mid-session** | Every client transitions to `reconnecting` after `pongWait` (60s). Subscriptions are restored on the next open. In-flight notifications between the bus and the socket are lost. |
+| **Slow consumer (frontend tab in background)** | Browser may throttle the WS but the connection persists. Notifications queue in the OS-level buffer until the tab resumes; on resume the handlers replay in arrival order. No client-side dedup. |
+| **Duplicate notifications** | The frontend tolerates re-delivery — handlers are idempotent (status patches converge; refetch triggers debounce per page). Same UUID seen twice in `office.comment.created` does **not** spawn two rows because the optimistic UUID match deduplicates. |
+| **WS disabled / blocked at the network edge** | `setStatus("error")` after first failure; reconnect loop runs to cap. Out of scope: a polling fallback. Surfaces stay frozen on last-known-good data until the user reloads. |
+
+## Persistence guarantees
+
+### Survives a kandev process restart
+
+- All entity rows that drive UI state: `tasks`, `task_sessions`, `office_comments`, `office_runs`, `office_run_events`, `office_activity`, `office_approvals`, `office_agents`, `provider_health_state`, `office_route_attempts`. On reconnect the frontend refetches each surface from REST and resumes streaming from there.
+- Event-bus subject registry is **rebuilt on boot** by `RegisterEventSubscribers` (office) and `RegisterOfficeNotifications` (WS) — not persisted, but deterministically reconstructed.
+
+### Does NOT survive a kandev process restart
+
+- `Hub.clients`, `taskSubscribers`, `sessionSubscribers`, `userSubscribers`, `runSubscribers`, `sessionMode` — all in-memory, cleared on shutdown via `closeAllClients()`.
+- `bus.MemoryEventBus.subscriptions` — process-local channels.
+- `WebSocketClient.pendingRequests` and `pendingQueue` on the frontend — rejected on `disconnect()` cleanup.
+- Any notification mid-flight on the bus when the bus is closed.
+- The "Sending..." / "Awaiting agent" sticker on a pending optimistic comment — the row is wiped on reload; the REST refetch produces the canonical thread.
+
+### Does NOT survive a WS reconnect
+
+- Missed notifications during the gap. There is no replay window, no event sequence number, no last-event-id header. Surfaces reconcile by re-reading the server state via REST (driven by the `setOfficeRefetchTrigger` plumbing) plus any new notifications that arrive after `open`.
+- The "initial session-data snapshot" pushed on `session.subscribe` / `session.focus` is re-sent each time those frames are re-issued from `resubscribe()`.
+
+### Survives a WS reconnect
+
+- Frontend subscription intent (`subscriptions`, `sessionSubscriptions`, `sessionFocusCounts`, `userSubscriptionCount`, `runSubscriptions` maps). `resubscribe()` replays every entry as a fresh subscribe frame on `open`.
+- All Zustand store slices not specifically invalidated by a refetch trigger. The store is not cleared on reconnect.
+
+### TTL / retention
+
+- No event log retention. There is no replay window — past-tense notifications are gone the moment the gateway hands them off.
+- No client-side cache of WS messages beyond what individual store slices choose to keep.
+- The optimistic-comment client UUID is held only for the lifetime of the pending row; once `office.comment.created` reconciles or the row is dropped on failure, it is forgotten.
 
 ## Scenarios
 

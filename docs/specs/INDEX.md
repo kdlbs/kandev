@@ -6,7 +6,7 @@ The bar: an agent given only a spec (no source code) should be able to either re
 
 **Status:** `draft` (being written) · `building` (in active development) · `shipped` (implemented, spec matches code) · `archived` (deprecated).
 
-**`needs-upgrade`** in a spec's frontmatter flags template sections that the original sources did not cover and should be filled in from code (Data model, API surface, State machine, Permissions, Failure modes, Persistence guarantees). Tracked here so the implementability bar can be reached incrementally.
+**`needs-upgrade`** in a spec's frontmatter flags template sections that the original sources did not cover and should be filled in from code (Data model, API surface, State machine, Permissions, Failure modes, Persistence guarantees). All office specs have been brought to the implementability bar; this flag is only used for newly-drafted specs that need a code-driven fill-in pass.
 
 ---
 
@@ -14,21 +14,21 @@ The bar: an agent given only a spec (no source code) should be able to either re
 
 The office umbrella covers kandev's autonomous-agent product surface: workspaces of long-running agents that pick up tasks, coordinate via handoffs, and report through a dashboard.
 
-| Spec | Status | needs-upgrade |
-|---|---|---|
-| [overview](office/overview.md) | draft | — |
-| [agents](office/agents.md) | draft | persistence-guarantees |
-| [tasks](office/tasks.md) | draft | permissions |
-| [scheduler](office/scheduler.md) | draft | permissions |
-| [runtime](office/runtime.md) | draft | API surface, Permissions, Persistence guarantees, Scenarios |
-| [routing](office/routing.md) | draft | Data model, API surface, Permissions, Persistence guarantees |
-| [costs](office/costs.md) | in-progress | permissions, persistence-guarantees |
-| [dashboard](office/dashboard.md) | draft | permissions, persistence-guarantees |
-| [live-updates](office/live-updates.md) | draft | data-model, state-machine, permissions, failure-modes, persistence-guarantees |
-| [inbox](office/inbox.md) | draft | persistence-guarantees |
-| [assistant](office/assistant.md) | draft | state-machine, persistence-guarantees |
-| [plugins](office/plugins.md) | draft | — |
-| [testing](office/testing.md) | shipped | persistence-guarantees |
+| Spec | Status |
+|---|---|
+| [overview](office/overview.md) | draft |
+| [agents](office/agents.md) | draft |
+| [tasks](office/tasks.md) | draft |
+| [scheduler](office/scheduler.md) | draft |
+| [runtime](office/runtime.md) | draft |
+| [routing](office/routing.md) | draft |
+| [costs](office/costs.md) | in-progress |
+| [dashboard](office/dashboard.md) | draft |
+| [live-updates](office/live-updates.md) | draft |
+| [inbox](office/inbox.md) | draft |
+| [assistant](office/assistant.md) | draft |
+| [plugins](office/plugins.md) | draft |
+| [testing](office/testing.md) | shipped |
 
 ## tasks/ — task & workflow model
 

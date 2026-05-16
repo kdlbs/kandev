@@ -2,7 +2,6 @@
 status: draft
 created: 2026-05-02
 owner: cfl
-needs-upgrade: [permissions]
 ---
 
 # Office Tasks
@@ -276,11 +275,32 @@ todo ──► in_progress ──► in_review ──► done
 
 ## Permissions
 
-`needs-upgrade`: a formal authorization model is out of scope for this iteration. Today the rules are:
+There are two authorization layers: **agent capability** (what a running agent can do via runtime APIs) and **HTTP caller identity** (what a UI user or JWT-bearing agent can do via task endpoints). See `agents.md` for the agent role / permission model that supplies the capability set on each run.
 
-- Approve / request-changes endpoints require the caller to appear in the task's reviewers or approvers list (403 otherwise).
-- Property edits assume the current authenticated user / agent can edit any task in workspaces they have access to. There is no per-field permission model and no "no permission" UI state.
-- Workspace-level participation rules (who can be added as assignee / reviewer / approver) follow the existing agent / workspace membership rules and are not redefined here.
+**Agent runtime capabilities** (resolved from role + permission overrides; enforced by the office runtime handlers):
+
+| Task action | Required capability | Default holders |
+|---|---|---|
+| Post a comment / reply | `post_comment` | All roles (assignee, reviewers, approvers, mentioned agents). |
+| Change task status | `update_task_status` | All roles. |
+| Create a subtask | `create_subtask` | Roles with `can_create_tasks` (CEO, worker). |
+| Request approval on a task | `request_approval` | Roles with `can_approve` (CEO). |
+| Spawn an agent run on a task (assign and wake) | `spawn_agent_run` | Roles with `can_assign_tasks` (CEO, worker). |
+
+An agent's run JWT also pins an `AllowedTaskIDs` scope. The runtime rejects mutations against any task outside that scope with `ErrTaskOutOfScope` (403, `shared.ErrForbidden`), even when the capability is granted - this prevents a worker on task T1 from mutating task T2 just because both belong to its workspace.
+
+**HTTP endpoint gates** (`internal/office/approvals`, task service):
+
+- `POST /tasks/:id/approve`, `POST /tasks/:id/request-changes`: when called by an agent (caller has an agent JWT), the handler additionally checks: (1) `caller.WorkspaceID == task.WorkspaceID` (403 otherwise), (2) `has_permission(can_approve)` (403 otherwise), (3) the caller is not the requester of the approval (403 self-decide). Reviewers / approvers list membership is the user-facing gate; the `can_approve` permission is the underlying agent gate. UI callers (no agent JWT) are accepted without these checks today.
+- `DELETE /tasks/:id/reviewers/:agentId`, `DELETE /tasks/:id/approvers/:agentId`: caller must be a workspace UI user; no agent-side endpoint exposes participant removal.
+- `PATCH /tasks/:id` (inline property edits) and `POST /tasks/:id/blockers`: no per-field authorization in v1; any UI user with workspace access can edit any task, and any agent with the appropriate runtime capability can mutate within its task scope.
+- Approver gate on `done`: independent of caller identity. A `done` transition is rejected 409 while any approver lacks a current `approved` decision (see Failure modes).
+
+**Out of scope for this iteration:**
+
+- A "no permission" UI state for fields a user cannot edit, and per-field user-side permission rules (see `out of scope`).
+- Granular per-task ACLs beyond workspace membership.
+- Workspace-level rules for who can be added as assignee / reviewer / approver - those follow the existing agent / workspace membership rules and are not redefined here.
 
 ## Failure modes
 

@@ -2,7 +2,6 @@
 status: shipped
 created: 2026-05-03
 owner: cfl
-needs-upgrade: [persistence-guarantees]
 ---
 
 # Office: E2E Mock Harness for Task Sessions and Messages
@@ -84,6 +83,32 @@ The Playwright fixture asserts the test routes are reachable on startup. An acci
 - **Non-canonical state value**: seed route rejects with 400.
 - **Terminal state without `completed_at`**: seed route rejects with 400.
 - **Fixture reachability check fails at test startup**: fixture errors loudly so the whole suite fails fast rather than producing flaky session-dependent tests.
+
+## Persistence guarantees
+
+State boundaries inside the e2e harness (`apps/web/e2e/fixtures/backend.ts`, `office-fixture.ts`):
+
+**Per worker, persists for the worker's lifetime:**
+
+- A unique tmpdir (`os.tmpdir()/kandev-e2e-<workerIndex>-<rand>`) containing the SQLite DB (`kandev.db`), HOME (`.kandev/`), worktree base, repo-clone base, an isolated `.gitconfig`, and a `git` shim. All seeded rows - tasks, sessions, messages inserted via `POST /api/v1/_test/...` - land in this DB.
+- The worker-scoped `officeSeed` fixture: one workspace + CEO agent + project, created once via `completeOnboarding` and reused across every test in the worker.
+- The backend process and its env baseline. `backend.restart(envOverrides)` kills and respawns the process against the same DB and tmpdir, so persisted seed data survives a restart; only in-memory execution state (running agent processes, live WS connections) is lost. Overrides do not leak into a subsequent `restart()` - each call rebuilds from the baseline snapshot.
+
+**Per test, reset between tests:**
+
+- The base `testPage` fixture invokes `apiClient.e2eReset(workspaceId, keepWorkflowIds)` against both the seed workspace and `officeSeed.workspaceId`, which deletes per-test rows (tasks, sessions, messages, etc.) while preserving the seeded workflow and onboarding artifacts.
+- Optimistic / runtime caches such as user settings are re-saved through `saveUserSettings` on each test's setup.
+
+**Does NOT persist beyond the worker:**
+
+- The tmpdir is removed in the fixture's `finally` block (`fs.rmSync(tmpDir, { recursive: true, force: true })`). The DB, worktrees, clones, and seeded sessions / messages are discarded at worker teardown.
+- The backend and frontend processes are killed in `finally`; nothing survives the Playwright run.
+- No cross-shard or cross-worker caching: each worker mints its own port range and tmpdir, so seeded data from one worker is invisible to another.
+
+**Interaction with this spec's seed routes:**
+
+- Rows inserted by `POST /api/v1/_test/task-sessions` and `POST /api/v1/_test/messages` live in the worker's SQLite DB. They survive a `backend.restart()` exactly like rows inserted by production routes - the seed routes are persistence-equivalent, only the API gate differs.
+- Seeded sessions never have a matching in-memory `lifecycle.Manager` execution, before OR after a restart, because no real executor was launched. Tests asserting "the live spinner is gone" after restart should rely on this invariant.
 
 ## Scenarios
 
