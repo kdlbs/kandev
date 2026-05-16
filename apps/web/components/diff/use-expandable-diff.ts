@@ -156,7 +156,11 @@ export function useExpandableDiff({
       oldFile: { name: filePath, contents: loadedContent.oldContent },
       newFile: { name: filePath, contents: loadedContent.newContent },
     });
-    return reparsed ?? fileDiffMetadata;
+    if (!reparsed) return fileDiffMetadata;
+    // Preserve the lang override that useDiffMetadata sets (e.g. lang:'text'
+    // for Go files that hit the Shiki backtracking guard). processFile would
+    // otherwise infer "go" from the filename and silently re-enable Shiki.
+    return fileDiffMetadata.lang ? { ...reparsed, lang: fileDiffMetadata.lang } : reparsed;
   }, [fileDiffMetadata, loadedContent, diff, filePath]);
 
   const isContentLoaded = loadedContent !== null;

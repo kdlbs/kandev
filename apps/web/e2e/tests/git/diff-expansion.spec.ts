@@ -187,12 +187,11 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
       timeout: 20_000,
     });
 
-    // The "Expand all lines" button is in the Kandev toolbar injected via
-    // renderHeaderMetadata. Anchor on the accessible role+name rather than
-    // the Tabler icon class so a future icon swap doesn't silently break
-    // this test. (getByLabel didn't pick up the Radix Tooltip-wrapped
-    // shadcn Button on CI; getByRole resolves it reliably.)
-    const expandAllBtn = testPage.getByRole("button", { name: "Expand all lines" });
+    // The Changes tab renders ReviewDiffList → FileDiffToolbar (not the
+    // Pierre Diffs renderHeaderMetadata toolbar), and its expand-all button
+    // has aria-label "Expand all". Anchor on role+name instead of the
+    // Tabler icon class so an icon swap doesn't silently break this test.
+    const expandAllBtn = testPage.getByRole("button", { name: "Expand all" });
     await expect(expandAllBtn).toBeVisible({ timeout: 10_000 });
     await expandAllBtn.click();
 
