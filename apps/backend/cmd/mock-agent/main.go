@@ -211,9 +211,14 @@ func (a *mockAgent) ResumeSession(_ context.Context, _ acp.ResumeSessionRequest)
 
 // emitAvailableCommandsOnce sends the available commands list once per session.
 // Idempotent — guarded by `commandsEmitted` so callers (NewSession, LoadSession,
-// first Prompt) can call it freely.
+// first Prompt) can call it freely. Skips emission if the session was closed
+// while the post-handshake delay was sleeping.
 func (a *mockAgent) emitAvailableCommandsOnce(ctx context.Context, sid acp.SessionId) {
 	a.mu.Lock()
+	if !a.sessions[sid] {
+		a.mu.Unlock()
+		return
+	}
 	if a.commandsEmitted[sid] {
 		a.mu.Unlock()
 		return
