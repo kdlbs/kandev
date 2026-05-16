@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -30,6 +31,63 @@ func TestMockAgent_BuildCommand_NoResumeFlag(t *testing.T) {
 		if arg == "--resume" {
 			t.Errorf("--resume flag should not be present for ACP agent, got args %v", args)
 		}
+	}
+}
+
+// TestMockAgent_BuildCommand_ContainerizedUsesBareName pins the docker
+// branch of BuildCommand: when opts.Runtime is containerized (docker,
+// remote_docker, sprites), MockAgent must emit the bare binary name so
+// PATH lookup inside the container resolves to the bind-mounted
+// linux/amd64 mock-agent at /usr/local/bin. Regressing this would
+// cause docker e2e to fail with `exec: "<host-abs-path>": not found`,
+// which is exactly the bug commit `8518f65` fixed.
+func TestMockAgent_BuildCommand_ContainerizedUsesBareName(t *testing.T) {
+	a := NewMockAgent()
+	a.SetBinaryPath("/Users/dev/kandev/apps/backend/bin/mock-agent")
+	for _, rt := range []agentruntime.Runtime{
+		agentruntime.RuntimeDocker,
+		agentruntime.RuntimeRemoteDocker,
+		agentruntime.RuntimeSprites,
+	} {
+		t.Run(string(rt), func(t *testing.T) {
+			cmd := a.BuildCommand(CommandOptions{Runtime: rt})
+			args := cmd.Args()
+			if len(args) == 0 || args[0] != mockAgentDefaultID {
+				t.Errorf("containerized runtime %q: BuildCommand args = %v, want first arg %q (bare name for PATH lookup in container)",
+					rt, args, mockAgentDefaultID)
+			}
+		})
+	}
+}
+
+// TestMockAgent_BuildCommand_HostUsesBinaryPath pins the host branch:
+// when opts.Runtime is host-side (standalone) and binaryPath is set
+// (which configureMockAgent does via os.Executable()), MockAgent must
+// emit the absolute host path so dev mode works without
+// apps/backend/bin being on the shell's $PATH.
+func TestMockAgent_BuildCommand_HostUsesBinaryPath(t *testing.T) {
+	a := NewMockAgent()
+	const absPath = "/Users/dev/kandev/apps/backend/bin/mock-agent"
+	a.SetBinaryPath(absPath)
+	cmd := a.BuildCommand(CommandOptions{Runtime: agentruntime.RuntimeStandalone})
+	args := cmd.Args()
+	if len(args) == 0 || args[0] != absPath {
+		t.Errorf("host runtime: BuildCommand args = %v, want first arg %q (absolute host path)",
+			args, absPath)
+	}
+}
+
+// TestMockAgent_BuildCommand_HostNoBinaryPathFallsBack covers the e2e
+// case where configureMockAgent hasn't run yet (or has been bypassed)
+// but the test fixture has prepended apps/backend/bin to PATH. Host
+// runtime + empty binaryPath → bare name, resolved via PATH.
+func TestMockAgent_BuildCommand_HostNoBinaryPathFallsBack(t *testing.T) {
+	a := NewMockAgent()
+	cmd := a.BuildCommand(CommandOptions{Runtime: agentruntime.RuntimeStandalone})
+	args := cmd.Args()
+	if len(args) == 0 || args[0] != mockAgentDefaultID {
+		t.Errorf("host runtime without binaryPath: BuildCommand args = %v, want first arg %q (bare name fallback)",
+			args, mockAgentDefaultID)
 	}
 }
 

@@ -88,16 +88,6 @@ func NewFromZap(z *zap.Logger) (*Logger, error) {
 	}, nil
 }
 
-// NewNop returns a Logger that discards all output. Intended for tests
-// that need a non-nil logger but do not care about log output.
-func NewNop() *Logger {
-	z := zap.NewNop()
-	return &Logger{
-		zap:   z,
-		sugar: z.Sugar(),
-	}
-}
-
 // NewLogger creates a new Logger with the given configuration.
 func NewLogger(cfg LoggingConfig) (*Logger, error) {
 	level, err := parseLevel(cfg.Level)
