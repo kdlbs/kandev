@@ -444,7 +444,6 @@ jobs:
           # tarball so ctx/bundle/ ends up with bin/, web/, cli/ directly.
           tar -xzf dist/bundle/kandev-linux-x64.tar.gz --strip-components=1 -C ctx/bundle
           cp docker-entrypoint.sh ctx/
-          ls -la ctx ctx/bundle ctx/bundle/bin
 
       - uses: docker/setup-buildx-action@v3
 
@@ -455,6 +454,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # OCI labels are produced once here per arch. The manifest job combines
+      # the per-arch image manifests into a multi-arch list via `imagetools
+      # create`, which cannot retroactively add labels to image configs, so
+      # the labels MUST be stamped at build time on each arch. GHCR's package
+      # page link + provenance tooling rely on these annotations.
+      - name: Docker metadata (labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/kdlbs/kandev
+
       - name: Build and push (amd64 staging tag)
         id: build
         uses: docker/build-push-action@v6
@@ -464,6 +474,14 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ${{ env.STAGING_IMAGE }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # provenance/sbom would attach an extra attestation manifest, which
+          # turns `imagetools inspect --raw` into an OCI index and breaks the
+          # size gate's `.layers[].size` query. The final multi-arch tags
+          # don't preserve attestations through `imagetools create` anyway,
+          # so disabling here doesn't change user-facing image content.
+          provenance: false
+          sbom: false
           cache-from: type=gha,scope=base-amd64
           cache-to: type=gha,mode=max,scope=base-amd64
 
@@ -495,7 +513,6 @@ jobs:
           mkdir -p ctx/bundle
           tar -xzf dist/bundle/kandev-linux-arm64.tar.gz --strip-components=1 -C ctx/bundle
           cp docker-entrypoint.sh ctx/
-          ls -la ctx ctx/bundle ctx/bundle/bin
 
       - uses: docker/setup-buildx-action@v3
 
@@ -506,6 +523,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Docker metadata (labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/kdlbs/kandev
+
       - name: Build and push (arm64 staging tag)
         id: build
         uses: docker/build-push-action@v6
@@ -515,6 +538,9 @@ jobs:
           push: true
           platforms: linux/arm64
           tags: ${{ env.STAGING_IMAGE }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+          sbom: false
           cache-from: type=gha,scope=base-arm64
           cache-to: type=gha,mode=max,scope=base-arm64
 
@@ -550,10 +576,13 @@ jobs:
       # `imagetools create` combines two single-arch images into a multi-arch
       # manifest list under each of the user-facing tags. No layers are
       # rebuilt or re-uploaded; this is a registry-side metadata operation.
+      # The per-arch source images are referenced by digest (not by the
+      # mutable staging tag) so this is pinned to the exact bytes the
+      # per-arch jobs just pushed.
       - name: Combine arch images into multi-arch tags
         env:
-          AMD64_IMAGE: ghcr.io/kdlbs/kandev:base-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-amd64
-          ARM64_IMAGE: ghcr.io/kdlbs/kandev:base-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-arm64
+          AMD64_REF: ghcr.io/kdlbs/kandev@${{ needs.docker-amd64.outputs.digest }}
+          ARM64_REF: ghcr.io/kdlbs/kandev@${{ needs.docker-arm64.outputs.digest }}
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           set -euo pipefail
@@ -562,7 +591,7 @@ jobs:
             [ -z "$tag" ] && continue
             tag_args+=(--tag "$tag")
           done <<<"$TAGS"
-          docker buildx imagetools create "${tag_args[@]}" "$AMD64_IMAGE" "$ARM64_IMAGE"
+          docker buildx imagetools create "${tag_args[@]}" "$AMD64_REF" "$ARM64_REF"
 
   # ---------------------------------------------------------------------------
   # Universal image — same per-arch native split, on top of the base image
@@ -577,6 +606,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     env:
       STAGING_IMAGE: ghcr.io/kdlbs/kandev:universal-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-amd64
     steps:
@@ -593,7 +624,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Docker metadata (labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/kdlbs/kandev
+
       - name: Build and push (universal amd64 staging tag)
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -603,6 +641,12 @@ jobs:
           build-args: |
             BASE_IMAGE=ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}
           tags: ${{ env.STAGING_IMAGE }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # provenance/sbom off so `imagetools inspect --raw` on the staging
+          # tag returns the plain image manifest, not an OCI index — required
+          # by the size gate in docker-universal-manifest.
+          provenance: false
+          sbom: false
           cache-from: type=gha,scope=universal-amd64
           cache-to: type=gha,mode=max,scope=universal-amd64
 
@@ -614,6 +658,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     env:
       STAGING_IMAGE: ghcr.io/kdlbs/kandev:universal-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-arm64
     steps:
@@ -630,7 +676,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Docker metadata (labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/kdlbs/kandev
+
       - name: Build and push (universal arm64 staging tag)
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -640,6 +693,9 @@ jobs:
           build-args: |
             BASE_IMAGE=ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}
           tags: ${{ env.STAGING_IMAGE }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+          sbom: false
           cache-from: type=gha,scope=universal-arm64
           cache-to: type=gha,mode=max,scope=universal-arm64
 
@@ -654,8 +710,8 @@ jobs:
       contents: read
       packages: write
     env:
-      AMD64_IMAGE: ghcr.io/kdlbs/kandev:universal-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-amd64
-      ARM64_IMAGE: ghcr.io/kdlbs/kandev:universal-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-arm64
+      AMD64_REF: ghcr.io/kdlbs/kandev@${{ needs.docker-universal-amd64.outputs.digest }}
+      ARM64_REF: ghcr.io/kdlbs/kandev@${{ needs.docker-universal-arm64.outputs.digest }}
     steps:
       - uses: docker/setup-buildx-action@v3
 
@@ -666,19 +722,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Universal size gate. Inspects the amd64 staging tag - the image is in
-      # GHCR but under a per-run tag no user pulls. Failing the gate aborts
-      # before promotion, so the user-facing :universal / :vX.Y.Z-universal
-      # tags never move to an oversized image. Bump MAX_COMPRESSED_BYTES
-      # deliberately when adding scope, with a one-sentence justification
-      # in the commit msg. amd64 is the bigger of the two arches in practice,
-      # so gating on it gives us a single-number signal.
+      # Universal size gate. Inspects the amd64 staging image by digest - the
+      # image is in GHCR but under a per-run tag no user pulls. Failing the
+      # gate aborts before promotion, so the user-facing :universal /
+      # :vX.Y.Z-universal tags never move to an oversized image. Bump
+      # MAX_COMPRESSED_BYTES deliberately when adding scope, with a
+      # one-sentence justification in the commit msg. amd64 is the bigger of
+      # the two arches in practice, so gating on it gives us a single-number
+      # signal. Per-arch staging builds set provenance: false, so the digest
+      # points directly at the image manifest (not an OCI index).
       - name: Enforce size budget
         env:
           MAX_COMPRESSED_BYTES: "2684354560"   # 2.5 GiB
         run: |
           set -euo pipefail
-          docker buildx imagetools inspect "$AMD64_IMAGE" --raw > /tmp/manifest.json
+          docker buildx imagetools inspect "$AMD64_REF" --raw > /tmp/manifest.json
           TOTAL="$(jq '[.layers[].size] | add' /tmp/manifest.json)"
           echo "Universal image (amd64) compressed size: $TOTAL bytes (max: $MAX_COMPRESSED_BYTES)"
           if [ "$TOTAL" -gt "$MAX_COMPRESSED_BYTES" ]; then
@@ -688,7 +746,9 @@ jobs:
 
       # Promote: combine both arches into a single multi-arch manifest list
       # under the user-facing tags. `imagetools create` is a metadata-only
-      # registry call - no layers are rebuilt or re-uploaded.
+      # registry call - no layers are rebuilt or re-uploaded. Per-arch source
+      # images referenced by digest, not tag, so this is pinned to the bytes
+      # the previous jobs pushed.
       - name: Promote staging to final tags
         run: |
           set -euo pipefail
@@ -696,7 +756,7 @@ jobs:
             --tag "ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.version }}-universal" \
             --tag "ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}-universal" \
             --tag "ghcr.io/kdlbs/kandev:universal" \
-            "$AMD64_IMAGE" "$ARM64_IMAGE"
+            "$AMD64_REF" "$ARM64_REF"
 
   publish-release:
     name: Publish GitHub release

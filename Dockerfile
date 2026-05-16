@@ -6,8 +6,10 @@
 # just COPYs the binaries + web standalone + CLI into the runtime layout.
 #
 # Building this file outside CI (manual `docker build .`) will fail because
-# the bundle artifacts aren't present. Use the release workflow or extract a
-# release tarball into ./ctx/ first and pass `--build-context bundle=./ctx`.
+# the `bundle/` directory isn't present in the build context. To build
+# locally, extract a release tarball into ./ctx/bundle/ alongside
+# ./ctx/docker-entrypoint.sh and run:
+#   docker build -f Dockerfile ./ctx
 #
 # Run:
 #   docker run -p 38429:38429 -v kandev-data:/data ghcr.io/kdlbs/kandev:latest
