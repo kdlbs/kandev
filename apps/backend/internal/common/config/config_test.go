@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -177,5 +178,24 @@ func TestFeatures_OfficeEnabledByEnv(t *testing.T) {
 	}
 	if !cfg.Features.Office {
 		t.Errorf("Features.Office = false, want true (KANDEV_FEATURES_OFFICE=true must flip the flag)")
+	}
+}
+
+// TestFeaturesConfig_JSONShape pins the wire format of GET /api/v1/features.
+// The handler in helpers.go serializes FeaturesConfig directly so new
+// fields flow through without an extra edit; this test guarantees the
+// `json` tag is present on every field. A regression (struct field added
+// without a tag) would surface as a capitalized JSON key and break the
+// frontend's case-sensitive read in apps/web/app/actions/features.ts.
+func TestFeaturesConfig_JSONShape(t *testing.T) {
+	cfg := FeaturesConfig{Office: true}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	got := string(raw)
+	want := `{"office":true}`
+	if got != want {
+		t.Errorf("FeaturesConfig JSON = %s; want %s — missing or wrong `json:` struct tag", got, want)
 	}
 }
