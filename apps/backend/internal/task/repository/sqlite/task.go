@@ -15,12 +15,17 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// defaultTaskAlias is the fallback alias the projection helpers use when
+// the caller passes an empty string — i.e., when the SELECT references
+// the `tasks` table directly rather than through a join alias.
+const defaultTaskAlias = "tasks"
+
 // taskSelectColumns returns the column projection (with runner subquery)
 // for a SELECT against tasks aliased as `alias`. The output column order
 // matches scanSingleTask / scanTasks.
 func taskSelectColumns(alias string) string {
 	if alias == "" {
-		alias = "tasks"
+		alias = defaultTaskAlias
 	}
 	prefix := alias + "."
 	return prefix + "id, " + prefix + "workspace_id, " + prefix + "workflow_id, " + prefix + "workflow_step_id, " +
@@ -39,7 +44,7 @@ func taskSelectColumns(alias string) string {
 // in any other workflow and have no project.
 func isFromOfficeProjection(alias string) string {
 	if alias == "" {
-		alias = "tasks"
+		alias = defaultTaskAlias
 	}
 	return `(
 		COALESCE(` + alias + `.project_id, '') != ''
@@ -57,7 +62,7 @@ func isFromOfficeProjection(alias string) string {
 // inline in SELECT projections.
 func runnerProjection(alias string) string {
 	if alias == "" {
-		alias = "tasks"
+		alias = defaultTaskAlias
 	}
 	return `COALESCE(
 		(SELECT wsp.agent_profile_id FROM workflow_step_participants wsp

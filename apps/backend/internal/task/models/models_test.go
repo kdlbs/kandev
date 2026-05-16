@@ -224,8 +224,10 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 // through the model. The actual office-vs-kanban predicate is computed in
 // SQL by isFromOfficeProjection (see repository/sqlite/task.go) so the
 // scan layer is the only thing that sets the field. A round-trip test is
-// the right scope at this layer; the SQL projection is covered by repo
-// integration tests against a real workspace + workflow row.
+// the right scope at this layer; the SQL projection itself is covered by
+// TestIsFromOfficeProjection_RealWorkspaceWorkflow in
+// repository/sqlite/is_from_office_test.go, which exercises all three
+// branches (office workflow, project link, neither) against a real DB.
 func TestTaskIsFromOfficeField(t *testing.T) {
 	tests := []struct {
 		name string
