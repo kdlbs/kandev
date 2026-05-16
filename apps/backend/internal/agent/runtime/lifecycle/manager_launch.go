@@ -500,6 +500,15 @@ func (m *Manager) runEnvironmentPreparerWithProgress(
 	execType := models.ExecutorType(req.ExecutorType)
 	preparer := m.preparerRegistry.Get(execType)
 	if preparer == nil {
+		// Fall back to LocalPreparer for empty or unrecognized ExecutorType.
+		// Matches the pre-typing behavior where ExecutorTypeToBackend's
+		// default case routed unknown values to NameStandalone → LocalPreparer.
+		// Legacy task rows (e.g. PR-watcher-created tasks without an explicit
+		// executor) rely on this so environment prep — including missing-branch
+		// detection — still runs.
+		preparer = m.preparerRegistry.Get(models.ExecutorTypeLocal)
+	}
+	if preparer == nil {
 		return nil
 	}
 	// The EnvPrepareRequest carries the resolved Runtime (executor.Name),

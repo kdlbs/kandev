@@ -100,6 +100,17 @@ const (
 // String implements fmt.Stringer.
 func (s BudgetScopeType) String() string { return string(s) }
 
+// Valid reports whether s is one of the declared BudgetScopeType values.
+// Use at trust boundaries (HTTP handlers, config loaders) to reject
+// malformed input before it reaches the cost service.
+func (s BudgetScopeType) Valid() bool {
+	switch s {
+	case BudgetScopeAgent, BudgetScopeProject, BudgetScopeWorkspace:
+		return true
+	}
+	return false
+}
+
 // BudgetPeriod is the time window a BudgetPolicy limit applies to.
 type BudgetPeriod string
 
@@ -112,6 +123,15 @@ const (
 
 // String implements fmt.Stringer.
 func (p BudgetPeriod) String() string { return string(p) }
+
+// Valid reports whether p is one of the declared BudgetPeriod values.
+func (p BudgetPeriod) Valid() bool {
+	switch p {
+	case BudgetPeriodDaily, BudgetPeriodMonthly, BudgetPeriodYearly:
+		return true
+	}
+	return false
+}
 
 // BudgetActionOnExceed is the side-effect a BudgetPolicy triggers on
 // limit breach.
@@ -127,6 +147,15 @@ const (
 
 // String implements fmt.Stringer.
 func (a BudgetActionOnExceed) String() string { return string(a) }
+
+// Valid reports whether a is one of the declared BudgetActionOnExceed values.
+func (a BudgetActionOnExceed) Valid() bool {
+	switch a {
+	case BudgetActionPauseAgent, BudgetActionBlockNewTasks, BudgetActionNotifyOnly:
+		return true
+	}
+	return false
+}
 
 // ProviderHealthScope identifies what slice of a provider a
 // ProviderHealth row covers.

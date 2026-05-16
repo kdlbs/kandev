@@ -16,7 +16,7 @@ const LOCAL = "The agent will run directly on the repository.";
 describe("computeExecutorHint", () => {
   const executors = [
     exec("wt", "worktree"),
-    exec("loc", "local_pc"),
+    exec("loc", "local"),
     exec("docker", "local_docker"),
     exec("remote-docker", "remote_docker"),
   ];
