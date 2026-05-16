@@ -134,7 +134,6 @@ describe("DialogPromptSection (CLI-mode parity)", () => {
       <DialogPromptSection
         isSessionMode={false}
         isTaskStarted={false}
-        isPassthroughProfile={true}
         initialDescription=""
         hasDescription={false}
         fs={makeFs()}
@@ -156,7 +155,6 @@ describe("DialogPromptSection (CLI-mode parity)", () => {
       <DialogPromptSection
         isSessionMode={false}
         isTaskStarted={false}
-        isPassthroughProfile={true}
         initialDescription="hello"
         hasDescription={true}
         fs={makeFs()}
@@ -174,7 +172,6 @@ describe("DialogPromptSection (CLI-mode parity)", () => {
       <DialogPromptSection
         isSessionMode={false}
         isTaskStarted={false}
-        isPassthroughProfile={true}
         initialDescription=""
         hasDescription={false}
         fs={makeFs()}

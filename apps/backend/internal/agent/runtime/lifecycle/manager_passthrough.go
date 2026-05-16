@@ -965,13 +965,11 @@ func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, executio
 			zap.Error(err))
 		return
 	}
-	// WaitForFirstIdle also unblocks when the process exits (firstIdleCh is closed
-	// on Stop/wait). Skip the write if we're tearing down or the execution lost
-	// its passthrough process while we waited — writing to a dead PTY just logs noise.
+	// WaitForFirstIdle also unblocks when the process exits — skip the write
+	// during shutdown so we don't race the lifecycle manager's teardown. If the
+	// process is already gone, WriteStdin returns "process not found" and the
+	// existing error branch logs it.
 	if m.IsShuttingDown() {
-		return
-	}
-	if execution.PassthroughProcessID != processID {
 		return
 	}
 	payload := description + pt.SubmitSequence

@@ -1880,13 +1880,22 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 		return nil, err
 	}
 
-	// Passthrough (PTY) sessions have no ACP wire — route the prompt directly to
-	// the agent process's stdin with the agent-declared submit sequence (e.g. "\r").
-	// The user message row was already inserted by the WS message handler before
-	// PromptTask was called (see message_handlers.go:219), so the chat panel renders
-	// without us re-inserting it.
+	// Inject config context for config-mode sessions (dedicated settings chat, not plan mode)
+	effectivePrompt := prompt
+	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
+		effectivePrompt = sysprompt.InjectConfigContext(sessionID, prompt)
+	}
+
+	// Inject plan mode prefix for follow-up messages in plan mode sessions.
+	if planMode {
+		effectivePrompt = sysprompt.InjectPlanMode(effectivePrompt)
+	}
+
+	// Passthrough (PTY) sessions skip ACP turn machinery — the PTY's idle
+	// detector drives session state directly. Route the transformed prompt
+	// straight to stdin with the agent-declared submit sequence.
 	if s.agentManager.IsPassthroughSession(ctx, sessionID) {
-		return s.promptPassthrough(ctx, sessionID, prompt)
+		return s.promptPassthrough(ctx, sessionID, effectivePrompt)
 	}
 
 	// Ensure the agent process is actually running. After a lazy backend restart,
@@ -1904,17 +1913,14 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	// freshly-persisted AgentExecutionID.
 	if reloaded, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && reloaded != nil {
 		session = reloaded
-	}
-
-	// Inject config context for config-mode sessions (dedicated settings chat, not plan mode)
-	effectivePrompt := prompt
-	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
-		effectivePrompt = sysprompt.InjectConfigContext(sessionID, prompt)
-	}
-
-	// Inject plan mode prefix for follow-up messages in plan mode sessions.
-	if planMode {
-		effectivePrompt = sysprompt.InjectPlanMode(effectivePrompt)
+		// Re-apply transforms in case metadata changed during ensureSessionRunning.
+		effectivePrompt = prompt
+		if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
+			effectivePrompt = sysprompt.InjectConfigContext(sessionID, prompt)
+		}
+		if planMode {
+			effectivePrompt = sysprompt.InjectPlanMode(effectivePrompt)
+		}
 	}
 
 	// Check if model switching is requested

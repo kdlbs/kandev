@@ -78,7 +78,6 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 |---|---|
 | [subscription-usage](costs/subscription-usage.md) | draft |
 | [cheap-model-profiles](costs/cheap-model-profiles.md) | shipped |
-| [cli-mode-parity](cli-mode-parity/spec.md) | draft |
 
 ## ui/ — cross-cutting UI features
 
@@ -93,6 +92,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | Spec | Status |
 |---|---|
 | [improve-kandev](improve-kandev/spec.md) | draft |
+| [cli-mode-parity](cli-mode-parity/spec.md) | draft |
 
 ---
 

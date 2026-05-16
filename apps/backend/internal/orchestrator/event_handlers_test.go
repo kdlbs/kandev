@@ -304,6 +304,9 @@ func (m *mockAgentManager) ResolvePassthroughConfig(_ context.Context, _ string)
 	if m.passthroughConfigSet {
 		return m.passthroughConfig, nil
 	}
+	if !m.isPassthrough {
+		return agents.PassthroughConfig{Supported: false}, nil
+	}
 	return agents.PassthroughConfig{Supported: true, SubmitSequence: "\r"}, nil
 }
 func (m *mockAgentManager) MarkPassthroughRunning(sessionID string) error {

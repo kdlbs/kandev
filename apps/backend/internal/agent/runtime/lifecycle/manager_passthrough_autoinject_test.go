@@ -122,27 +122,16 @@ func TestAutoInject_writes_description_plus_submit(t *testing.T) {
 	}
 }
 
-func TestAutoInject_times_out_gracefully(t *testing.T) {
+// TestAutoInject_returns_when_wait_errors exercises the WaitForFirstIdle
+// error-return path: the helper must skip the stdin write and exit cleanly
+// rather than panic or loop.
+func TestAutoInject_returns_when_wait_errors(t *testing.T) {
 	mgr := newTestManager()
-	// Use a runner that blocks on WaitForFirstIdle, but shorten the timeout
-	// to avoid making the test take 60s. We test the gracefulness via the
-	// inner helper directly so the real 60s ctx never matters: we wrap with
-	// a small context here.
-	runner := &fakePassthroughRunner{waitBlock: true}
+	runner := &fakePassthroughRunner{waitErr: context.DeadlineExceeded}
 
-	// Drive the inner with a manually canceled context by simulating the
-	// wait error path: call WaitForFirstIdle with a tight context to ensure
-	// the runner returns ctx.Err() quickly. We invoke autoInjectInitialPromptWith
-	// in a goroutine and assert no panic / no write within a reasonable window.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		// Inject a wait error and unblock so we don't actually wait 60s.
-		runner.mu.Lock()
-		runner.waitBlock = false
-		runner.waitErr = context.DeadlineExceeded
-		runner.mu.Unlock()
-
 		mgr.autoInjectInitialPromptWith(runner, newAutoInjectExecution("hello"), agents.PassthroughConfig{
 			AutoInjectPrompt: true,
 			SubmitSequence:   "\r",

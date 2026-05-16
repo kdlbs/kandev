@@ -99,6 +99,38 @@ func TestPromptTask_passthrough_resolve_config_error(t *testing.T) {
 	}
 }
 
+// TestPromptTask_passthrough_applies_plan_mode_prefix verifies the passthrough
+// branch sees the prompt AFTER sysprompt.InjectPlanMode is applied, so plan-mode
+// follow-ups are framed the same way they would be for ACP sessions.
+func TestPromptTask_passthrough_applies_plan_mode_prefix(t *testing.T) {
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{isPassthrough: true}
+	agentMgr.passthroughConfigSet = true
+	agentMgr.passthroughConfig = agents.PassthroughConfig{Supported: true, SubmitSequence: "\r"}
+
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+
+	if _, err := svc.PromptTask(context.Background(), "task1", "session1", "raw prompt", "", true, nil, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(agentMgr.passthroughStdinCalls) != 1 {
+		t.Fatalf("expected 1 stdin call, got %d", len(agentMgr.passthroughStdinCalls))
+	}
+	got := agentMgr.passthroughStdinCalls[0].Data
+	if got == "raw prompt\r" {
+		t.Fatalf("passthrough received raw prompt without plan-mode framing: %q", got)
+	}
+	// Sanity: still ends with SubmitSequence.
+	if got[len(got)-1] != '\r' {
+		t.Fatalf("expected stdin payload to end with \\r, got %q", got)
+	}
+}
+
 // TestPromptTask_acp_path_unaffected covers the original ACP path: when the
 // session is not in passthrough mode, prompts flow through the executor as
 // before and no PTY stdin write happens.
