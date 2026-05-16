@@ -217,10 +217,20 @@ func (m *Manager) passthroughAgentCommand(execution *AgentExecution, profileInfo
 	rt := agentConfig.Runtime()
 	taskDescription := getTaskDescriptionFromMetadata(execution)
 
+	// When AutoInjectPrompt is on and the agent has no PromptFlag, the prompt
+	// would be appended as a positional arg by BuildPassthroughCommand —
+	// putting Claude (and similar TUIs) into non-interactive `-p` mode. The
+	// PTY-stdin delivery in autoInjectInitialPrompt is the intended path; omit
+	// the prompt here so we don't double-deliver.
+	promptForCmd := taskDescription
+	if pt.AutoInjectPrompt && pt.PromptFlag.IsEmpty() {
+		promptForCmd = ""
+	}
+
 	cmd := ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
 		Model:            profileModel(profileInfo),
 		SessionID:        execution.ACPSessionID,
-		Prompt:           taskDescription,
+		Prompt:           promptForCmd,
 		PermissionValues: profilePermissionValues(profileInfo),
 		CLIFlagTokens:    m.profileCLIFlagTokens(profileInfo),
 	})

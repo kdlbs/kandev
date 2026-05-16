@@ -15,12 +15,14 @@ test.describe("CLI mode: prompt injection into PTY", () => {
     apiClient,
     seedData,
   }) => {
-    // Resolve the mock agent by id so the spec is robust against ordering
-    // changes in agent registration.
+    // Resolve a passthrough-capable agent by capability rather than ordering,
+    // so the spec is robust against agent-registration order changes.
     const { agents } = await apiClient.listAgents();
-    const mock = agents.find((a) => a.id === "mock-agent");
-    if (!mock) throw new Error("mock-agent not registered in this e2e profile");
-    const tui = await apiClient.createAgentProfile(mock.id, "CLI Inject", {
+    const tuiAgent = agents.find((a) => a.passthrough_config?.supported);
+    if (!tuiAgent) {
+      throw new Error("no passthrough-capable agent registered in this e2e profile");
+    }
+    const tui = await apiClient.createAgentProfile(tuiAgent.id, "CLI Inject", {
       model: "mock-fast",
       auto_approve: true,
       cli_passthrough: true,
