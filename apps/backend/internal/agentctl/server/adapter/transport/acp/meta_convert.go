@@ -16,17 +16,35 @@ func convertAuthMethods(methods []acp.AuthMethod) []streams.AuthMethodInfo {
 	}
 	result := make([]streams.AuthMethodInfo, 0, len(methods))
 	for _, m := range methods {
+		id, name, desc, meta := flattenAuthMethod(m)
+		if id == "" && name == "" {
+			continue
+		}
 		info := streams.AuthMethodInfo{
-			ID:          string(m.Id),
-			Name:        m.Name,
-			Description: derefStr(m.Description),
-			Meta:        toStringMap(m.Meta),
+			ID:          id,
+			Name:        name,
+			Description: derefStr(desc),
+			Meta:        toStringMap(meta),
 		}
 		// Normalize _meta.terminal-auth → TerminalAuth
 		info.TerminalAuth = extractTerminalAuth(info.Meta)
 		result = append(result, info)
 	}
 	return result
+}
+
+// flattenAuthMethod collapses upstream's tagged-union AuthMethod into the
+// (id, name, description, meta) tuple our streams layer expects.
+func flattenAuthMethod(m acp.AuthMethod) (string, string, *string, map[string]any) {
+	switch {
+	case m.Agent != nil:
+		return m.Agent.Id, m.Agent.Name, m.Agent.Description, m.Agent.Meta
+	case m.Terminal != nil:
+		return m.Terminal.Id, m.Terminal.Name, m.Terminal.Description, m.Terminal.Meta
+	case m.EnvVar != nil:
+		return m.EnvVar.Id, m.EnvVar.Name, m.EnvVar.Description, m.EnvVar.Meta
+	}
+	return "", "", nil, nil
 }
 
 // extractTerminalAuth normalizes the terminal-auth pattern from _meta.
@@ -65,7 +83,7 @@ func extractTerminalAuth(meta map[string]any) *streams.TerminalAuth {
 
 // convertSessionModels converts ACP model info to stream types,
 // normalizing known _meta patterns (copilotUsage) while preserving raw _meta.
-func convertSessionModels(models []acp.UnstableModelInfo) []streams.SessionModelInfo {
+func convertSessionModels(models []acp.ModelInfo) []streams.SessionModelInfo {
 	if len(models) == 0 {
 		return nil
 	}

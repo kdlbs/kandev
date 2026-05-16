@@ -215,14 +215,12 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	return result, nil
 }
 
-// toACPMcpServers converts the cross-process DTO list into the ACP SDK
-// shape. Uses the *Inline variants because the agentcooper fork (vendored
-// via go.mod replace) names them that way; the upstream SDK would call them
-// McpServerHttp / McpServerSse. Returns nil when there are no entries so
-// callers can use the nil-as-empty convention upstream. The second return
-// value carries the names of any DTOs we couldn't convert (unsupported
-// transport, e.g. stdio) so the caller can surface them in logs rather than
-// having them silently disappear from the agent's tool surface.
+// toACPMcpServers converts the cross-process DTO list into the ACP SDK shape.
+// Returns nil when there are no entries so callers can use the nil-as-empty
+// convention. The second return value carries the names of any DTOs we
+// couldn't convert (unsupported transport, e.g. stdio) so the caller can
+// surface them in logs rather than having them silently disappear from the
+// agent's tool surface.
 func toACPMcpServers(in []MCPServerDTO) ([]acp.McpServer, []string) {
 	if len(in) == 0 {
 		return nil, nil
@@ -424,11 +422,15 @@ func buildInitProbeFields(initResp acp.InitializeResponse) *ProbeResponse {
 		out.AgentVersion = initResp.AgentInfo.Version
 	}
 	for _, m := range initResp.AuthMethods {
+		id, name, desc, meta := authMethodFields(m)
+		if id == "" && name == "" {
+			continue
+		}
 		out.AuthMethods = append(out.AuthMethods, ProbeAuthMethod{
-			ID:          string(m.Id), //nolint:unconvert // AuthMethodId is a named string type; conversion required
-			Name:        m.Name,
-			Description: derefString(m.Description),
-			Meta:        m.Meta,
+			ID:          id,
+			Name:        name,
+			Description: derefString(desc),
+			Meta:        meta,
 		})
 	}
 	return out
@@ -465,6 +467,20 @@ func derefString(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// authMethodFields collapses upstream's tagged-union AuthMethod into the
+// (id, name, description, meta) tuple our probe payload expects.
+func authMethodFields(m acp.AuthMethod) (string, string, *string, map[string]any) {
+	switch {
+	case m.Agent != nil:
+		return m.Agent.Id, m.Agent.Name, m.Agent.Description, m.Agent.Meta
+	case m.Terminal != nil:
+		return m.Terminal.Id, m.Terminal.Name, m.Terminal.Description, m.Terminal.Meta
+	case m.EnvVar != nil:
+		return m.EnvVar.Id, m.EnvVar.Name, m.EnvVar.Description, m.EnvVar.Meta
+	}
+	return "", "", nil, nil
 }
 
 // allowedProbeCommands maps each permitted executable base name to a
