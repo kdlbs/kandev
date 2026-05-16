@@ -151,6 +151,13 @@ type TaskDTO struct {
 	Identifier             string `json:"identifier,omitempty"`
 }
 
+// IsFromOffice mirrors models.Task.IsFromOffice for the wire DTO so
+// HTTP/WS consumers can ask the same question without reaching for the
+// raw ProjectID field.
+func (t *TaskDTO) IsFromOffice() bool {
+	return t != nil && t.ProjectID != ""
+}
+
 type TaskRepositoryDTO struct {
 	ID             string                 `json:"id"`
 	TaskID         string                 `json:"task_id"`

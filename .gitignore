@@ -114,3 +114,6 @@ normalized-*.jsonl
 # implementation plans (reviewed locally, not committed)
 docs/specs/*/plan.md
 docs/plans/
+
+# Local worktrees (not the backend-managed tree under ~/.kandev)
+/.worktrees/

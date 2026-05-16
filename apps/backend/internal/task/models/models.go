@@ -95,6 +95,15 @@ type Task struct {
 	Identifier             string `json:"identifier,omitempty"` // e.g. "KAN-42"
 }
 
+// IsFromOffice reports whether the task is owned by an office project.
+// Office tasks have a non-empty ProjectID (FK to office_projects); kanban
+// workspace tasks created from the regular kanban board have no project.
+// Callers use this to gate UI surfaces that only make sense for office
+// tasks (e.g. the "Open in office view" topbar link).
+func (t *Task) IsFromOffice() bool {
+	return t != nil && t.ProjectID != ""
+}
+
 // TaskTreeFilters provides filter options for the task tree query.
 type TaskTreeFilters struct {
 	ProjectID  string

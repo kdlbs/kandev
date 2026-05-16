@@ -219,3 +219,24 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 		t.Errorf("expected no repositories, got %d", len(apiTask.Repositories))
 	}
 }
+
+func TestTaskIsFromOffice(t *testing.T) {
+	tests := []struct {
+		name string
+		task *Task
+		want bool
+	}{
+		{"nil receiver", nil, false},
+		{"empty project_id (kanban-origin)", &Task{ProjectID: ""}, false},
+		{"non-empty project_id (office-origin)", &Task{ProjectID: "proj-123"}, true},
+		{"manual origin without project", &Task{Origin: TaskOriginManual}, false},
+		{"agent_created origin with project", &Task{Origin: TaskOriginAgentCreated, ProjectID: "p"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.task.IsFromOffice(); got != tt.want {
+				t.Errorf("IsFromOffice() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

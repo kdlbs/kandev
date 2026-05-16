@@ -19,6 +19,8 @@ import Link from "next/link";
 import { TaskPageContent } from "@/components/task/task-page-content";
 import { TaskBody, resolveTaskBodyMode } from "@/components/task/TaskBody";
 import { TaskHeader } from "@/components/task/TaskHeader";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { isFromOffice } from "@/lib/types/http";
 import type { Repository, RepositoryScript, Task } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import type { Layout } from "react-resizable-panels";
@@ -50,6 +52,11 @@ export function KanbanTaskShell({
 }: KanbanTaskShellProps) {
   // Kanban shell defaults to advanced. ?simple flips to simple.
   const mode = resolveTaskBodyMode({ simple: urlSimple, mode: urlMode }, "advanced");
+  // "Open in office view" only makes sense when (a) the office feature is
+  // enabled, and (b) the task actually exists in office (has a project).
+  // Kanban-origin tasks have no office row, so the link would 404.
+  const officeEnabled = useFeature("office");
+  const showOfficeLink = officeEnabled && isFromOffice(task);
 
   const advancedSlot = (
     <TaskPageContent
@@ -61,13 +68,13 @@ export function KanbanTaskShell({
       initialTerminals={initialTerminals}
       defaultLayouts={defaultLayouts}
       initialLayout={initialLayout}
-      officeTaskHref={`/office/tasks/${taskId}`}
+      officeTaskHref={showOfficeLink ? `/office/tasks/${taskId}` : null}
     />
   );
 
   const simpleSlot = (
     <div className="flex h-screen w-full flex-col overflow-y-auto bg-background p-6">
-      <CrossLinkRow taskId={taskId} target="office" />
+      {showOfficeLink && <CrossLinkRow taskId={taskId} target="office" />}
       <div className="mt-4 max-w-3xl">
         <TaskHeader
           identifier={task?.id?.slice(0, 8)}
@@ -75,9 +82,9 @@ export function KanbanTaskShell({
           state={task?.state ?? null}
         />
         <p className="mt-4 text-sm text-muted-foreground">
-          Simple view for kanban tasks shows the chat that&apos;s already in the panels. For the
-          full Linear-style experience (comments, properties, activity timeline), open this task in
-          the office view.
+          {showOfficeLink
+            ? "Simple view for kanban tasks shows the chat that's already in the panels. For the full Linear-style experience (comments, properties, activity timeline), open this task in the office view."
+            : "Simple view shows the chat that's already in the panels. Use ?simple=false to flip back to the advanced layout."}
         </p>
       </div>
     </div>
