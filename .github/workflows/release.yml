@@ -4,14 +4,21 @@ name: release
 # Trigger: GitHub Actions UI → "Run workflow" (workflow_dispatch).
 #
 # Flow (one click → everything below):
-#   1. prepare        — bump version, regen CHANGELOG, open + merge release PR, push tag vX.Y.Z
-#   2. build-web      — build Next.js standalone bundle
-#   3. build-cli      — build + esbuild-bundle CLI
-#   4. build-bundles  — assemble bin/ + web/ + cli/ tarballs for 5 platforms
-#   5. docker         — build & push multi-arch container image to GHCR
-#   6. publish-release — create GH release with .tar.gz + .sha256 assets + auto-generated notes
-#   7. publish-npm    — publish kandev@X.Y.Z + @kdlbs/runtime-*@X.Y.Z to npmjs
-#   8. update-homebrew-tap — push updated Formula/kandev.rb to kdlbs/homebrew-kandev
+#   1. prepare           — bump version, regen CHANGELOG, open + merge release PR, push tag vX.Y.Z
+#   2. build-web         — build Next.js standalone bundle (shared across arches)
+#   3. build-cli         — build + esbuild-bundle CLI (shared across arches)
+#   4. build-bundles     — assemble bin/ + web/ + cli/ tarballs for 5 platforms
+#   5. docker-{amd64,arm64} — native per-arch image builds (no QEMU), consuming
+#                          the prebuilt linux bundles from step 4
+#   6. docker-manifest   — stitch the two arch digests into the user-facing
+#                          multi-arch tags via `buildx imagetools create`
+#   7. docker-universal-{amd64,arm64} — native universal builds on top of
+#                          docker-manifest's per-arch base
+#   8. docker-universal-manifest — size-gate amd64 staging, then promote both
+#                          arches to the user-facing :universal tags
+#   9. publish-release   — create GH release with .tar.gz + .sha256 assets + auto-generated notes
+#  10. publish-npm       — publish kandev@X.Y.Z + @kdlbs/runtime-*@X.Y.Z to npmjs
+#  11. update-homebrew-tap — push updated Formula/kandev.rb to kdlbs/homebrew-kandev
 #
 # npm publishing uses Trusted Publishers (OIDC) — no NPM_TOKEN required.
 # Each package (kandev + 5 @kdlbs/runtime-* packages) must have this workflow
@@ -255,6 +262,8 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+          cache: pnpm
+          cache-dependency-path: apps/pnpm-lock.yaml
       - name: Install dependencies
         run: pnpm -C apps install --frozen-lockfile
       - name: Build web (standalone)
@@ -284,6 +293,8 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+          cache: pnpm
+          cache-dependency-path: apps/pnpm-lock.yaml
       - name: Install dependencies
         run: pnpm -C apps install --frozen-lockfile
       - name: Build and bundle CLI
@@ -304,11 +315,10 @@ jobs:
             platform: linux-x64
             goos: linux
             goarch: amd64
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             platform: linux-arm64
             goos: linux
             goarch: arm64
-            cc: aarch64-linux-gnu-gcc
           - os: macos-14
             platform: macos-x64
             goos: darwin
@@ -348,7 +358,7 @@ jobs:
         if: matrix.cc
         run: |
           sudo apt-get update
-          sudo apt-get install -y ${{ matrix.cc == 'aarch64-linux-gnu-gcc' && 'gcc-aarch64-linux-gnu' || 'gcc-mingw-w64-x86-64' }}
+          sudo apt-get install -y gcc-mingw-w64-x86-64
 
       - name: Build backend binaries
         env:
@@ -398,19 +408,125 @@ jobs:
             dist/kandev-${{ matrix.platform }}.tar.gz
             dist/kandev-${{ matrix.platform }}.tar.gz.sha256
 
-  docker:
-    name: Build & push container image
-    needs: prepare
+  # ---------------------------------------------------------------------------
+  # Docker base image — split per arch onto native runners, then stitched into
+  # a multi-arch manifest list. Each arch consumes the matching linux bundle
+  # produced by build-bundles, so no Go/Next.js/pnpm work happens inside the
+  # Docker build (the Dockerfile is reduced to apt-get + COPY).
+  # ---------------------------------------------------------------------------
+  docker-amd64:
+    name: Build & push container image (amd64)
+    needs: [prepare, build-bundles]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write    # push to GHCR
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    env:
+      STAGING_IMAGE: ghcr.io/kdlbs/kandev:base-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-amd64
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.tag }}
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundle-linux-x64
+          path: dist/bundle
+
+      - name: Prepare Docker build context
+        run: |
+          set -euo pipefail
+          mkdir -p ctx/bundle
+          # --strip-components=1 drops the top-level `kandev/` dir inside the
+          # tarball so ctx/bundle/ ends up with bin/, web/, cli/ directly.
+          tar -xzf dist/bundle/kandev-linux-x64.tar.gz --strip-components=1 -C ctx/bundle
+          cp docker-entrypoint.sh ctx/
+          ls -la ctx ctx/bundle ctx/bundle/bin
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (amd64 staging tag)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./ctx
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ env.STAGING_IMAGE }}
+          cache-from: type=gha,scope=base-amd64
+          cache-to: type=gha,mode=max,scope=base-amd64
+
+  docker-arm64:
+    name: Build & push container image (arm64)
+    needs: [prepare, build-bundles]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    env:
+      STAGING_IMAGE: ghcr.io/kdlbs/kandev:base-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundle-linux-arm64
+          path: dist/bundle
+
+      - name: Prepare Docker build context
+        run: |
+          set -euo pipefail
+          mkdir -p ctx/bundle
+          tar -xzf dist/bundle/kandev-linux-arm64.tar.gz --strip-components=1 -C ctx/bundle
+          cp docker-entrypoint.sh ctx/
+          ls -la ctx ctx/bundle ctx/bundle/bin
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (arm64 staging tag)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./ctx
+          file: ./Dockerfile
+          push: true
+          platforms: linux/arm64
+          tags: ${{ env.STAGING_IMAGE }}
+          cache-from: type=gha,scope=base-arm64
+          cache-to: type=gha,mode=max,scope=base-arm64
+
+  docker-manifest:
+    name: Assemble multi-arch base manifest
+    needs: [prepare, docker-amd64, docker-arm64]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
@@ -431,41 +547,38 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      # `imagetools create` combines two single-arch images into a multi-arch
+      # manifest list under each of the user-facing tags. No layers are
+      # rebuilt or re-uploaded; this is a registry-side metadata operation.
+      - name: Combine arch images into multi-arch tags
+        env:
+          AMD64_IMAGE: ghcr.io/kdlbs/kandev:base-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-amd64
+          ARM64_IMAGE: ghcr.io/kdlbs/kandev:base-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-arm64
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          tag_args=()
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            tag_args+=(--tag "$tag")
+          done <<<"$TAGS"
+          docker buildx imagetools create "${tag_args[@]}" "$AMD64_IMAGE" "$ARM64_IMAGE"
 
-  docker-universal:
-    name: Build & push universal container image
-    needs: [prepare, docker]
+  # ---------------------------------------------------------------------------
+  # Universal image — same per-arch native split, on top of the base image
+  # we just promoted. The size gate inspects the amd64 staging tag and aborts
+  # before the user-facing :universal tags are moved.
+  # ---------------------------------------------------------------------------
+  docker-universal-amd64:
+    name: Build & push universal image (amd64)
+    needs: [prepare, docker-manifest]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write    # push to GHCR
-    # Build flow: push to a per-run staging tag, gate on size against the
-    # staging tag, then `buildx imagetools create` to promote the same
-    # manifest to the user-facing tags. The promote step is metadata-only -
-    # no rebuild, no new bytes - so this costs us one extra registry call
-    # in exchange for never publishing an oversized image as :universal.
-    #
-    # Tradeoff: staging tags accumulate in GHCR over time (one per release
-    # run). Auto-cleanup isn't safe here - `imagetools create` produces a
-    # byte-identical manifest list when retagging a single source, so the
-    # staging tag and the promoted user-facing tags share the same package
-    # version in GHCR. Deleting the version to drop the staging tag would
-    # also drop :universal / :vX.Y.Z-universal. A separate cleanup workflow
-    # filtering for versions whose ONLY tags match `universal-staging-*`
-    # would be the correct way to address this if it becomes a problem.
+      packages: write
     env:
-      STAGING_IMAGE: ghcr.io/kdlbs/kandev:universal-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}
+      STAGING_IMAGE: ghcr.io/kdlbs/kandev:universal-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-amd64
     steps:
       - uses: actions/checkout@v4
         with:
@@ -480,59 +593,102 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build universal on top of the vanilla image we just pushed. Passing
-      # the exact `:vX.Y.Z` tag (not `:latest`) keeps the pair coherent:
-      # universal-of-vX.Y.Z always rests on vanilla-vX.Y.Z, even if a later
-      # release moves `:latest`. The tag pushed here is the staging tag;
-      # final tags are applied below only if the size gate passes.
-      - name: Build and push (staging tag)
+      - name: Build and push (universal amd64 staging tag)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.universal
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           build-args: |
             BASE_IMAGE=ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}
           tags: ${{ env.STAGING_IMAGE }}
-          cache-from: type=gha,scope=universal
-          cache-to: type=gha,mode=max,scope=universal
+          cache-from: type=gha,scope=universal-amd64
+          cache-to: type=gha,mode=max,scope=universal-amd64
 
-      # Universal size gate. Inspects the staging tag - the image is in
+  docker-universal-arm64:
+    name: Build & push universal image (arm64)
+    needs: [prepare, docker-manifest]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    env:
+      STAGING_IMAGE: ghcr.io/kdlbs/kandev:universal-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (universal arm64 staging tag)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.universal
+          push: true
+          platforms: linux/arm64
+          build-args: |
+            BASE_IMAGE=ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}
+          tags: ${{ env.STAGING_IMAGE }}
+          cache-from: type=gha,scope=universal-arm64
+          cache-to: type=gha,mode=max,scope=universal-arm64
+
+  docker-universal-manifest:
+    name: Gate size + promote universal manifest
+    # docker-universal-manifest is included in publish-release's `needs` so
+    # its size gate (and any per-arch build failure) blocks the release.
+    needs: [prepare, docker-universal-amd64, docker-universal-arm64]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      AMD64_IMAGE: ghcr.io/kdlbs/kandev:universal-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-amd64
+      ARM64_IMAGE: ghcr.io/kdlbs/kandev:universal-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-arm64
+    steps:
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Universal size gate. Inspects the amd64 staging tag - the image is in
       # GHCR but under a per-run tag no user pulls. Failing the gate aborts
       # before promotion, so the user-facing :universal / :vX.Y.Z-universal
       # tags never move to an oversized image. Bump MAX_COMPRESSED_BYTES
       # deliberately when adding scope, with a one-sentence justification
-      # in the commit msg.
+      # in the commit msg. amd64 is the bigger of the two arches in practice,
+      # so gating on it gives us a single-number signal.
       - name: Enforce size budget
         env:
           MAX_COMPRESSED_BYTES: "2684354560"   # 2.5 GiB
         run: |
           set -euo pipefail
-          # Inspect the multi-arch manifest and sum compressed layer sizes
-          # for linux/amd64. amd64 is the bigger of the two arches in
-          # practice, so gating on it gives us a single-number signal.
-          docker buildx imagetools inspect "$STAGING_IMAGE" --raw \
-              > /tmp/index.json
-          AMD64_DIGEST="$(jq -r '
-              .manifests[]
-              | select(.platform.architecture == "amd64" and .platform.os == "linux")
-              | .digest
-            ' /tmp/index.json)"
-          docker buildx imagetools inspect "ghcr.io/kdlbs/kandev@${AMD64_DIGEST}" --raw \
-              > /tmp/manifest.json
+          docker buildx imagetools inspect "$AMD64_IMAGE" --raw > /tmp/manifest.json
           TOTAL="$(jq '[.layers[].size] | add' /tmp/manifest.json)"
           echo "Universal image (amd64) compressed size: $TOTAL bytes (max: $MAX_COMPRESSED_BYTES)"
           if [ "$TOTAL" -gt "$MAX_COMPRESSED_BYTES" ]; then
-            echo "::error::Universal image exceeds compressed-size budget. Staging tag $STAGING_IMAGE will not be promoted. See docs/images.md inclusion policy." >&2
+            echo "::error::Universal image exceeds compressed-size budget. Staging tags will not be promoted. See docs/images.md inclusion policy." >&2
             exit 1
           fi
 
-      # Promote: `buildx imagetools create` retargets an existing manifest
-      # list to new tag(s) without rebuilding or re-uploading layers. Multi-
-      # arch is preserved. Only runs if the size gate passed (default step
-      # ordering); if any earlier step failed, the user-facing tags stay at
-      # whatever they pointed to before this run.
+      # Promote: combine both arches into a single multi-arch manifest list
+      # under the user-facing tags. `imagetools create` is a metadata-only
+      # registry call - no layers are rebuilt or re-uploaded.
       - name: Promote staging to final tags
         run: |
           set -euo pipefail
@@ -540,14 +696,11 @@ jobs:
             --tag "ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.version }}-universal" \
             --tag "ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}-universal" \
             --tag "ghcr.io/kdlbs/kandev:universal" \
-            "$STAGING_IMAGE"
+            "$AMD64_IMAGE" "$ARM64_IMAGE"
 
   publish-release:
     name: Publish GitHub release
-    # docker-universal is included so its size gate (and any build failure)
-    # blocks the release. Without this, publish-release runs in parallel with
-    # docker-universal and an oversized universal image still ships a release.
-    needs: [prepare, build-bundles, docker-universal]
+    needs: [prepare, build-bundles, docker-universal-manifest]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     permissions:
@@ -621,6 +774,8 @@ jobs:
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
+          cache: pnpm
+          cache-dependency-path: apps/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm -C apps install --frozen-lockfile
