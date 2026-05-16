@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, type ReactNode } from "react";
 import {
   IconChevronRight,
   IconChevronDown,
@@ -10,6 +10,7 @@ import {
 } from "@tabler/icons-react";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { cn } from "@/lib/utils";
+import { useTree, type VisibleRow } from "@/hooks/use-tree";
 
 export interface FileTreeNode {
   name: string;
@@ -30,21 +31,19 @@ interface FileTreeProps {
   defaultExpanded?: boolean;
 }
 
-/** Collect all leaf (file) paths under a node */
+/** Collect all leaf (file) paths under a node. */
 function getLeafPaths(node: FileTreeNode): string[] {
   if (!node.isDir) return [node.path];
   return node.children.flatMap(getLeafPaths);
 }
 
-/** Collapse single-child directory chains into "a/b/c" display names */
-function collapseChain(node: FileTreeNode): { displayName: string; node: FileTreeNode } {
-  let current = node;
-  let name = current.name;
-  while (current.isDir && current.children.length === 1 && current.children[0].isDir) {
-    current = current.children[0];
-    name = `${name}/${current.name}`;
-  }
-  return { displayName: name, node: current };
+type CheckState = boolean | "indeterminate";
+
+function getCheckState(node: FileTreeNode, checkedPaths: Set<string>): CheckState {
+  const leaves = getLeafPaths(node);
+  if (leaves.every((p) => checkedPaths.has(p))) return true;
+  if (leaves.some((p) => checkedPaths.has(p))) return "indeterminate";
+  return false;
 }
 
 export function FileTree({
@@ -57,31 +56,16 @@ export function FileTree({
   renderExtra,
   defaultExpanded = false,
 }: FileTreeProps) {
-  const [expanded, setExpanded] = useState<Set<string>>(() => {
-    if (!defaultExpanded) return new Set<string>();
-    const dirs = new Set<string>();
-    function walk(list: FileTreeNode[]) {
-      for (const n of list) {
-        if (n.isDir) {
-          dirs.add(n.path);
-          walk(n.children);
-        }
-      }
-    }
-    walk(nodes);
-    return dirs;
+  const { visibleRows, toggle } = useTree<FileTreeNode>({
+    nodes,
+    getPath: (n) => n.path,
+    getChildren: (n) => n.children,
+    isDir: (n) => n.isDir,
+    chainCollapse: true,
+    defaultExpanded: defaultExpanded ? "all" : undefined,
   });
 
-  const toggleExpand = useCallback((path: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  }, []);
-
-  const toggleCheck = useCallback(
+  const handleToggleCheck = useCallback(
     (node: FileTreeNode) => {
       if (!checkedPaths || !onCheckedPathsChange) return;
       const paths = getLeafPaths(node);
@@ -98,18 +82,20 @@ export function FileTree({
 
   return (
     <div className="overflow-y-auto py-1">
-      {nodes.map((node) => (
-        <TreeNodeRow
-          key={node.path}
-          node={node}
-          depth={0}
-          expanded={expanded}
-          onToggleExpand={toggleExpand}
-          selectedPath={selectedPath}
-          onSelectPath={onSelectPath}
-          checkedPaths={checkedPaths}
+      {visibleRows.map((row) => (
+        <FileTreeRow
+          key={row.path}
+          row={row}
+          isActive={!row.isDir && selectedPath === row.path}
+          checkState={
+            showCheckboxes && checkedPaths ? getCheckState(row.node, checkedPaths) : undefined
+          }
           showCheckboxes={showCheckboxes}
-          onToggleCheck={toggleCheck}
+          onClick={() => {
+            if (row.isDir) toggle(row.path);
+            else onSelectPath?.(row.path);
+          }}
+          onToggleCheck={() => handleToggleCheck(row.node)}
           renderExtra={renderExtra}
         />
       ))}
@@ -117,102 +103,53 @@ export function FileTree({
   );
 }
 
-interface TreeNodeRowProps {
-  node: FileTreeNode;
-  depth: number;
-  expanded: Set<string>;
-  onToggleExpand: (path: string) => void;
-  selectedPath?: string | null;
-  onSelectPath?: (path: string) => void;
-  checkedPaths?: Set<string>;
+interface FileTreeRowProps {
+  row: VisibleRow<FileTreeNode>;
+  isActive: boolean;
+  checkState?: CheckState;
   showCheckboxes: boolean;
-  onToggleCheck: (node: FileTreeNode) => void;
+  onClick: () => void;
+  onToggleCheck: () => void;
   renderExtra?: (node: FileTreeNode) => ReactNode;
 }
 
-function TreeNodeRow({
-  node,
-  depth,
-  expanded,
-  onToggleExpand,
-  selectedPath,
-  onSelectPath,
-  checkedPaths,
+function FileTreeRow({
+  row,
+  isActive,
+  checkState,
   showCheckboxes,
+  onClick,
   onToggleCheck,
   renderExtra,
-}: TreeNodeRowProps) {
-  const { displayName, node: effectiveNode } = collapseChain(node);
-  const isExpanded = expanded.has(effectiveNode.path);
-  const isActive = !effectiveNode.isDir && selectedPath === effectiveNode.path;
-
-  const handleClick = () => {
-    if (effectiveNode.isDir) {
-      onToggleExpand(effectiveNode.path);
-    } else {
-      onSelectPath?.(effectiveNode.path);
-    }
-  };
-
-  const checkState = (() => {
-    if (!showCheckboxes || !checkedPaths) return undefined;
-    const leaves = getLeafPaths(effectiveNode);
-    const allChecked = leaves.every((p) => checkedPaths.has(p));
-    if (allChecked) return true;
-    const someChecked = leaves.some((p) => checkedPaths.has(p));
-    if (someChecked) return "indeterminate" as const;
-    return false;
-  })();
-
-  const FolderIcon = isExpanded ? IconFolderOpen : IconFolder;
-  const ChevronIcon = isExpanded ? IconChevronDown : IconChevronRight;
+}: FileTreeRowProps) {
+  const FolderIcon = row.isExpanded ? IconFolderOpen : IconFolder;
+  const ChevronIcon = row.isExpanded ? IconChevronDown : IconChevronRight;
 
   return (
-    <>
-      <div
-        className={cn(
-          "flex items-center gap-1.5 px-2 py-1 text-sm cursor-pointer hover:bg-accent/50",
-          isActive && "bg-accent",
-        )}
-        style={{ paddingLeft: `${depth * 16 + 8}px` }}
-        onClick={handleClick}
-      >
-        {showCheckboxes && checkState !== undefined && (
-          <Checkbox
-            checked={checkState}
-            onCheckedChange={() => onToggleCheck(effectiveNode)}
-            onClick={(e) => e.stopPropagation()}
-            className="cursor-pointer shrink-0"
-          />
-        )}
-        {effectiveNode.isDir && (
-          <ChevronIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        )}
-        {effectiveNode.isDir ? (
-          <FolderIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-        ) : (
-          <IconFileText className="h-4 w-4 text-muted-foreground shrink-0" />
-        )}
-        <span className="truncate">{displayName}</span>
-        {renderExtra?.(effectiveNode)}
-      </div>
-      {effectiveNode.isDir &&
-        isExpanded &&
-        effectiveNode.children.map((child) => (
-          <TreeNodeRow
-            key={child.path}
-            node={child}
-            depth={depth + 1}
-            expanded={expanded}
-            onToggleExpand={onToggleExpand}
-            selectedPath={selectedPath}
-            onSelectPath={onSelectPath}
-            checkedPaths={checkedPaths}
-            showCheckboxes={showCheckboxes}
-            onToggleCheck={onToggleCheck}
-            renderExtra={renderExtra}
-          />
-        ))}
-    </>
+    <div
+      className={cn(
+        "flex items-center gap-1.5 px-2 py-1 text-sm cursor-pointer hover:bg-accent/50",
+        isActive && "bg-accent",
+      )}
+      style={{ paddingLeft: `${row.depth * 16 + 8}px` }}
+      onClick={onClick}
+    >
+      {showCheckboxes && checkState !== undefined && (
+        <Checkbox
+          checked={checkState}
+          onCheckedChange={onToggleCheck}
+          onClick={(e) => e.stopPropagation()}
+          className="cursor-pointer shrink-0"
+        />
+      )}
+      {row.isDir && <ChevronIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+      {row.isDir ? (
+        <FolderIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+      ) : (
+        <IconFileText className="h-4 w-4 text-muted-foreground shrink-0" />
+      )}
+      <span className="truncate">{row.displayName}</span>
+      {renderExtra?.(row.node)}
+    </div>
   );
 }
