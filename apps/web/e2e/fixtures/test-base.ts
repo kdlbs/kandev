@@ -163,6 +163,11 @@ export const test = backendFixture.extend<
       keyboard_shortcuts: {},
       enable_preview_on_click: false,
       sidebar_views: [],
+      // Reset to default kanban view. Pipeline-view tests switch this to
+      // "graph2", which persists per-workspace; without this reset the next
+      // test renders cards with data-testid="pipeline-task-<id>" instead of
+      // "task-card-<id>", breaking taskCardByTitle locators.
+      kanban_view_mode: "",
     });
     const context = await browser.newContext({
       baseURL: backend.frontendUrl,
@@ -213,6 +218,7 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     keyboard_shortcuts: {},
     enable_preview_on_click: false,
     sidebar_views: [],
+    kanban_view_mode: "",
   });
 });
 
@@ -238,6 +244,41 @@ async function setupPage(page: Page, backend: BackendContext, seedData: SeedData
       // Set the window global that getBackendConfig() reads for API/WS connections
       // (e2e tests run frontend and backend on separate ports, like dev mode)
       window.__KANDEV_API_PORT = backendPort;
+
+      // Replace native Notification with a capture stub so e2e runs never
+      // pop OS-level toasts on the developer's machine. Tests that want to
+      // assert read window.__kandevTestNotifications via the helpers in
+      // e2e/helpers/notifications-capture.ts. permission stays "granted"
+      // so the WS handler at apps/web/lib/ws/handlers/notifications.ts
+      // (which early-returns when not granted) still runs its full logic.
+      const captured: { title: string; body?: string }[] = [];
+      (
+        window as unknown as { __kandevTestNotifications: typeof captured }
+      ).__kandevTestNotifications = captured;
+      class NotificationStub {
+        static permission: NotificationPermission = "granted";
+        static async requestPermission(): Promise<NotificationPermission> {
+          return "granted";
+        }
+        title: string;
+        body?: string;
+        constructor(title: string, opts?: NotificationOptions) {
+          this.title = title;
+          this.body = opts?.body;
+          captured.push({ title, body: opts?.body });
+        }
+        close(): void {}
+        addEventListener(): void {}
+        removeEventListener(): void {}
+        dispatchEvent(): boolean {
+          return false;
+        }
+      }
+      Object.defineProperty(window, "Notification", {
+        configurable: true,
+        writable: true,
+        value: NotificationStub,
+      });
     },
     {
       backendPort: String(backend.port),

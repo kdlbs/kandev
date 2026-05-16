@@ -81,14 +81,26 @@ test.describe("Office agent run live", () => {
     // Append a terminal "complete" event over the bus. The hook
     // observes the event_type and flips local status to finished
     // without a snapshot refetch.
-    await apiClient.seedRunEvent({
-      runId,
-      eventType: "complete",
-      level: "info",
-    });
-
-    await expect(testPage.getByTestId("run-status-badge")).toContainText("finished", {
-      timeout: 5_000,
-    });
+    //
+    // Poll-retry the seed because the WS `run.subscribe` message is
+    // fire-and-forget on the client and the broadcaster only fans an
+    // event to clients already in the per-run subscriber map at
+    // publish time. If the first seed lands before the backend has
+    // processed the subscribe, the event is silently dropped for
+    // this client. Re-seeding catches the race once the subscription
+    // is registered server-side.
+    await expect
+      .poll(
+        async () => {
+          await apiClient.seedRunEvent({
+            runId,
+            eventType: "complete",
+            level: "info",
+          });
+          return await testPage.getByTestId("run-status-badge").textContent();
+        },
+        { timeout: 15_000, intervals: [500, 1000, 2000] },
+      )
+      .toContain("finished");
   });
 });

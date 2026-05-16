@@ -549,6 +549,7 @@ export class ApiClient {
     default_utility_agent_id?: string;
     default_utility_model?: string;
     sidebar_views?: unknown[];
+    kanban_view_mode?: string;
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }
