@@ -105,6 +105,29 @@ func (m *Manager) handleCompleteEventMarkState(execution *AgentExecution, event 
 		}
 		return
 	}
+	// Empty wakeup turn fallback: if the wakeup-driven turn produced no
+	// turn-content events (no message_chunk/tool_call/etc), recordActivity
+	// won't have flipped Ready → Running. MarkReady would then early-return
+	// on the Ready guard and silently drop AgentReady — same suppression
+	// the wakeup fix is designed to prevent.
+	//
+	// Publishing AgentReady alone is not enough: the orchestrator's
+	// handleAgentReady (`event_handlers_agent.go:205`) ignores AgentReady
+	// when session.State is not Running/Starting, and after the previous
+	// turn ended the session is WaitingForInput. We mirror what
+	// recordActivity does for the non-empty case — flip Ready → Running
+	// and publish AgentRunning first, so the orchestrator's session state
+	// catches up — then let MarkReady do its normal Running → Ready
+	// transition and publish AgentReady.
+	if execution.Status == v1.AgentStatusReady {
+		m.logger.Info("flipping Ready→Running for empty wakeup turn before publishing AgentReady",
+			zap.String("execution_id", execution.ID),
+			zap.String("session_id", execution.SessionID))
+		if m.executionStore != nil {
+			m.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
+		}
+		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
+	}
 	if err := m.MarkReady(execution.ID); err != nil {
 		m.logger.Error("failed to mark execution as ready after complete",
 			zap.String("execution_id", execution.ID),
@@ -287,16 +310,71 @@ func (m *Manager) handleAvailableCommandsEvent(execution *AgentExecution, event 
 	m.eventPublisher.PublishAvailableCommands(execution, event.AvailableCommands)
 }
 
+// turnContentEventTypes is the set of agent event types that unambiguously
+// signal a real turn is in progress — assistant text, reasoning, tool work,
+// plan/permission updates. These are the only events that drive the
+// Ready → Running flip for wakeup-driven turns; boot/metadata events
+// (agent_capabilities, available_commands, session_mode/models/status,
+// context_window, etc.) can arrive *after* MarkBootReady has put the
+// execution into Ready (e.g. claude-agent-acp emits available_commands
+// asynchronously ~50ms after session/new, well after dispatchInitialPrompt
+// has fired MarkBootReady for a no-prompt task) and must NOT be treated
+// as turn starts. Terminal events (complete/error) are excluded too —
+// they own their own status transitions via handleCompleteEvent and a
+// dedicated empty-turn fallback in handleCompleteEventMarkState.
+var turnContentEventTypes = map[string]struct{}{
+	"message_chunk":      {},
+	"reasoning":          {},
+	"tool_call":          {},
+	"tool_update":        {},
+	"plan":               {},
+	"agent_plan":         {},
+	"permission_request": {},
+}
+
 // recordActivity updates the last-activity timestamp and, on the very first
 // event from an execution, publishes AgentRunning to transition STARTING → RUNNING.
-func (m *Manager) recordActivity(execution *AgentExecution) {
+//
+// Wakeup-driven turns also flip Ready → Running here. The adapter's wakeup
+// scheduler fires synthetic prompts directly via Adapter.Prompt, bypassing
+// SessionManager.SendPrompt — so nothing on the lifecycle side flips the
+// execution back to Running for those turns. Without that flip, MarkReady's
+// duplicate-suppression guard (manager_interaction.go:896 — early-returns
+// when execution.Status is already Ready) silently drops the wakeup turn's
+// AgentReady event, the orchestrator never calls completeTurnForSession,
+// and workflow on_turn_complete + queued-message dispatch silently break.
+//
+// The flip is gated on `turnContentEventTypes` so post-boot metadata events
+// (available_commands_update arriving 50ms after MarkBootReady, etc.) don't
+// accidentally re-arm a freshly-booted no-prompt session as Running.
+func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.AgentEvent) {
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
 	execution.lastActivityAtMu.Unlock()
 
-	execution.firstActivityOnce.Do(func() {
-		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
-	})
+	// Gate firstActivityOnce on `Status != Ready` so a delayed metadata
+	// event arriving after MarkBootReady can't accidentally fire
+	// AgentRunning. In practice the adapter always emits agent_capabilities
+	// during Initialize (before MarkBootReady), so firstActivityOnce fires
+	// while Status is still Running — this is defensive hardening.
+	if execution.Status != v1.AgentStatusReady {
+		execution.firstActivityOnce.Do(func() {
+			m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
+		})
+		return
+	}
+	if m.executionStore == nil {
+		return
+	}
+	if _, ok := turnContentEventTypes[event.Type]; !ok {
+		return
+	}
+	m.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
+	m.logger.Info("wakeup-driven turn detected; flipping execution back to Running",
+		zap.String("execution_id", execution.ID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("trigger_event_type", event.Type))
+	m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
 }
 
 // handleStreamDisconnect handles unexpected updates stream disconnections.
@@ -320,7 +398,7 @@ func (m *Manager) handleStreamDisconnect(execution *AgentExecution, err error) {
 
 // handleAgentEvent processes incoming agent events from the agent
 func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
-	m.recordActivity(execution)
+	m.recordActivity(execution, event)
 
 	m.logger.Debug("handleAgentEvent entry",
 		zap.String("execution_id", execution.ID),
