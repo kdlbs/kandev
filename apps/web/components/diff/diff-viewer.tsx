@@ -96,7 +96,7 @@ function useAutoLoadExpansion(
     loadExpansionContent,
   ]);
   const hasValidData = !!(
-    state.fileDiffMetadata?.oldLines?.length && state.fileDiffMetadata?.newLines?.length
+    state.fileDiffMetadata?.deletionLines?.length && state.fileDiffMetadata?.additionLines?.length
   );
   return enableExpansion && isExpansionContentLoaded && hasValidData;
 }

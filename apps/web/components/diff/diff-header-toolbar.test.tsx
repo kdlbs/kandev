@@ -23,14 +23,14 @@ function renderToolbar(node: ReactElement) {
 }
 
 /**
- * Build a synthetic RenderHeaderMetadataProps shape. Calling this through the
- * hook callback means a future library change to the prop shape (rename,
+ * Build a synthetic FileDiffMetadata shape. Calling this through the
+ * hook callback means a future library change to the metadata shape (rename,
  * removal, or restructure) surfaces here rather than only at the live FileDiff
  * render site.
  */
 function headerProp(name: string | undefined) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (name === undefined ? {} : { fileDiff: { name } }) as any;
+  return (name === undefined ? {} : { name }) as any;
 }
 
 const baseOpts = {

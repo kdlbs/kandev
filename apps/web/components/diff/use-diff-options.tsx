@@ -1,6 +1,6 @@
 import { useCallback, useMemo, type ReactNode } from "react";
 import { useTheme } from "next-themes";
-import type { FileDiffOptions, SelectedLineRange, RenderHeaderMetadataProps } from "@pierre/diffs";
+import type { FileDiffOptions, SelectedLineRange, FileDiffMetadata } from "@pierre/diffs";
 import { IconPlus } from "@tabler/icons-react";
 import { FONT } from "@/lib/theme/colors";
 import { useGlobalViewMode } from "@/hooks/use-global-view-mode";
@@ -82,7 +82,7 @@ type UseDiffOptionsArgs = {
 type UseDiffOptionsResult = {
   globalViewMode: string;
   options: FileDiffOptions<AnnotationMetadata>;
-  renderHeaderMetadata: ((props: RenderHeaderMetadataProps) => ReactNode) | undefined;
+  renderHeaderMetadata: ((fileDiff: FileDiffMetadata) => ReactNode) | undefined;
   renderHoverUtility: () => ReactNode;
 };
 

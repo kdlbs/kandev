@@ -4,6 +4,7 @@ import type {
   FileDiffMetadata,
   DiffLineAnnotation,
   AnnotationSide,
+  ChangeContent,
 } from "@pierre/diffs";
 import type { FileDiffData, DiffComment } from "@/lib/diff/types";
 import { buildDiffComment, useCommentActions } from "@/lib/diff/comment-utils";
@@ -30,38 +31,41 @@ type HunkState = {
   blockIdx: number;
 };
 
+type HunkOutputs = {
+  result: DiffLineAnnotation<AnnotationMetadata>[];
+  lineMap: Map<string, string>;
+  revertMap: Map<string, RevertBlockInfo>;
+};
+
 /** Process a single change block within a hunk. */
 function processChangeBlock(
-  content: { additions: string[]; deletions: string[] },
+  content: ChangeContent,
+  deletionLines: string[],
   state: HunkState,
-  result: DiffLineAnnotation<AnnotationMetadata>[],
-  newLineMap: Map<string, string>,
-  newRevertMap: Map<string, RevertBlockInfo>,
+  out: HunkOutputs,
 ) {
-  const aLen = content.additions.length;
-  const dLen = content.deletions.length;
+  const aLen = content.additions;
+  const dLen = content.deletions;
   if (aLen === 0 && dLen === 0) return;
 
   const cbId = `cb-${state.blockIdx++}`;
   const side: AnnotationSide = aLen > 0 ? "additions" : "deletions";
   const lineNumber = side === "additions" ? state.lastCtxAdd : state.lastCtxDel;
-  result.push({ side, lineNumber, metadata: { type: "hunk-actions", changeBlockId: cbId } });
-  for (let l = 0; l < aLen; l++) newLineMap.set(`additions:${state.addLine + l}`, cbId);
-  for (let l = 0; l < dLen; l++) newLineMap.set(`deletions:${state.delLine + l}`, cbId);
-  newRevertMap.set(cbId, {
+  out.result.push({ side, lineNumber, metadata: { type: "hunk-actions", changeBlockId: cbId } });
+  for (let l = 0; l < aLen; l++) out.lineMap.set(`additions:${state.addLine + l}`, cbId);
+  for (let l = 0; l < dLen; l++) out.lineMap.set(`deletions:${state.delLine + l}`, cbId);
+  const oldLines = deletionLines
+    .slice(content.deletionLineIndex, content.deletionLineIndex + dLen)
+    .map((l) => l.replace(/\r?\n$/, ""));
+  out.revertMap.set(cbId, {
     addStart: state.addLine,
     addCount: aLen,
-    oldLines: content.deletions.map((l) => l.replace(/\r?\n$/, "")),
+    oldLines,
   });
 }
 
 /** Build hunk-level annotations, line->changeBlock map, and revert info. */
-function buildHunkAnnotations(
-  fileDiffMetadata: FileDiffMetadata,
-  result: DiffLineAnnotation<AnnotationMetadata>[],
-  newLineMap: Map<string, string>,
-  newRevertMap: Map<string, RevertBlockInfo>,
-) {
+function buildHunkAnnotations(fileDiffMetadata: FileDiffMetadata, out: HunkOutputs) {
   const state: HunkState = { addLine: 0, delLine: 0, lastCtxAdd: 0, lastCtxDel: 0, blockIdx: 0 };
   for (const hunk of fileDiffMetadata.hunks) {
     if (hunk.additionCount === 0 && hunk.deletionCount === 0) continue;
@@ -71,16 +75,16 @@ function buildHunkAnnotations(
     state.lastCtxDel = state.delLine > 1 ? state.delLine - 1 : state.delLine;
     for (const content of hunk.hunkContent) {
       if (content.type === "context") {
-        const len = content.lines.length;
+        const len = content.lines;
         state.lastCtxAdd = state.addLine + len - 1;
         state.lastCtxDel = state.delLine + len - 1;
         state.addLine += len;
         state.delLine += len;
         continue;
       }
-      processChangeBlock(content, state, result, newLineMap, newRevertMap);
-      state.addLine += content.additions.length;
-      state.delLine += content.deletions.length;
+      processChangeBlock(content, fileDiffMetadata.deletionLines, state, out);
+      state.addLine += content.additions;
+      state.delLine += content.deletions;
     }
   }
 }
@@ -112,7 +116,11 @@ function buildAnnotations(opts: BuildAnnotationsOpts) {
   const newLineMap = new Map<string, string>();
   const newRevertMap = new Map<string, RevertBlockInfo>();
   if (enableAcceptReject && fileDiffMetadata) {
-    buildHunkAnnotations(fileDiffMetadata, result, newLineMap, newRevertMap);
+    buildHunkAnnotations(fileDiffMetadata, {
+      result,
+      lineMap: newLineMap,
+      revertMap: newRevertMap,
+    });
   }
 
   return { annotations: result, lineMap: newLineMap, revertMap: newRevertMap };
