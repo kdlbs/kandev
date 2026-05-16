@@ -11,6 +11,7 @@ import {
 import { Checkbox } from "@kandev/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { useTree, type VisibleRow } from "@/hooks/use-tree";
+import { useTreeKeyboardNav } from "@/hooks/use-tree-keyboard-nav";
 
 export interface FileTreeNode {
   name: string;
@@ -56,13 +57,22 @@ export function FileTree({
   renderExtra,
   defaultExpanded = false,
 }: FileTreeProps) {
-  const { visibleRows, toggle } = useTree<FileTreeNode>({
+  const tree = useTree<FileTreeNode>({
     nodes,
     getPath: (n) => n.path,
     getChildren: (n) => n.children,
     isDir: (n) => n.isDir,
     chainCollapse: true,
     defaultExpanded: defaultExpanded ? "all" : undefined,
+  });
+  const { visibleRows, toggle } = tree;
+  const nav = useTreeKeyboardNav<FileTreeNode>({
+    visibleRows,
+    toggle,
+    expand: tree.expand,
+    collapse: tree.collapse,
+    isExpanded: tree.isExpanded,
+    onActivate: (row) => onSelectPath?.(row.path),
   });
 
   const handleToggleCheck = useCallback(
@@ -81,17 +91,24 @@ export function FileTree({
   );
 
   return (
-    <div className="overflow-y-auto py-1">
+    <div
+      className="overflow-y-auto py-1 outline-none"
+      tabIndex={0}
+      role="tree"
+      onKeyDown={nav.handleKeyDown}
+    >
       {visibleRows.map((row) => (
         <FileTreeRow
           key={row.path}
           row={row}
           isActive={!row.isDir && selectedPath === row.path}
+          isFocused={nav.focusedPath === row.path}
           checkState={
             showCheckboxes && checkedPaths ? getCheckState(row.node, checkedPaths) : undefined
           }
           showCheckboxes={showCheckboxes}
           onClick={() => {
+            nav.setFocusedPath(row.path);
             if (row.isDir) toggle(row.path);
             else onSelectPath?.(row.path);
           }}
@@ -106,6 +123,7 @@ export function FileTree({
 interface FileTreeRowProps {
   row: VisibleRow<FileTreeNode>;
   isActive: boolean;
+  isFocused: boolean;
   checkState?: CheckState;
   showCheckboxes: boolean;
   onClick: () => void;
@@ -116,6 +134,7 @@ interface FileTreeRowProps {
 function FileTreeRow({
   row,
   isActive,
+  isFocused,
   checkState,
   showCheckboxes,
   onClick,
@@ -130,6 +149,7 @@ function FileTreeRow({
       className={cn(
         "flex items-center gap-1.5 px-2 py-1 text-sm cursor-pointer hover:bg-accent/50",
         isActive && "bg-accent",
+        isFocused && "ring-1 ring-ring",
       )}
       style={{ paddingLeft: `${row.depth * 16 + 8}px` }}
       onClick={onClick}
