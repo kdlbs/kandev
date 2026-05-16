@@ -1,65 +1,109 @@
 # Feature Specs
 
-Specs for kandev product features. Each feature gets a folder with `spec.md` (what & why), optionally `plan.md` (how), and optionally `notes.md` (post-ship).
+Specs for kandev product features, grouped by umbrella. Each spec describes a user-invocable capability and is the source of truth for "is this feature done?"
 
-See `.agents/skills/spec/SKILL.md` for the workflow.
+The bar: an agent given only a spec (no source code) should be able to either reimplement the feature or test the existing system for conformance. See `.agents/skills/spec/SKILL.md` for the workflow and template.
 
-| Slug | Status | Implemented? | Created | PR |
-|------|--------|--------------|---------|----|
-| [db-upgrade-safety](db-upgrade-safety/spec.md) | shipped | yes | 2026-05-16 | — |
-| [office-task-handoffs](office-task-handoffs/spec.md) | draft | no | 2026-05-10 | — |
-| [office-provider-routing](office-provider-routing/spec.md) | draft | no | 2026-05-10 | — |
-| [external-mcp](external-mcp/spec.md) | draft | no | 2026-04-28 | — |
-| [improve-kandev](./improve-kandev/spec.md) | draft | no | 2026-04-29 | — |
-| [slack-integration](./slack-integration/spec.md) | draft | no | 2026-05-02 | — |
-| [tasks-without-repositories](./tasks-without-repositories/spec.md) | draft | no | 2026-05-05 | — |
-| [office-overview](office-overview/spec.md) | draft | partial | 2026-04-25 | — |
-| [office-agents](office-agents/spec.md) | draft | partial | 2026-04-25 | — |
-| [office-agent-context](office-agent-context/spec.md) | draft | partial | 2026-04-27 | — |
-| [office-skills](office-skills/spec.md) | draft | partial | 2026-04-25 | — |
-| [office-scheduler](office-scheduler/spec.md) | draft | partial | 2026-04-25 | — |
-| [office-agent-runtime](office-agent-runtime/spec.md) | draft | partial | 2026-05-09 | — |
-| [office-costs](office-costs/spec.md) | draft | partial | 2026-04-25 | — |
-| [office-routines](office-routines/spec.md) | draft | partial | 2026-04-25 | — |
-| [office-inbox](office-inbox/spec.md) | draft | partial | 2026-04-25 | — |
-| [office-projects](office-projects/spec.md) | draft | partial | 2026-04-25 | — |
-| [office-assistant](office-assistant/spec.md) | draft | partial | 2026-04-25 | — |
-| [office-config](office-config/spec.md) | draft | partial | 2026-04-25 | — |
-| [office-onboarding](office-onboarding/spec.md) | shipped | yes | 2026-04-27 | — |
-| [office-plugins](office-plugins/spec.md) | draft | no | 2026-04-27 | — |
-| [office-agent-cli](office-agent-cli/spec.md) | draft | partial | 2026-04-27 | — |
-| [task-execution-stages](task-execution-stages/spec.md) | shipped | yes | 2026-04-29 | — |
-| [task-labels](task-labels/spec.md) | shipped | yes | 2026-04-29 | — |
-| [task-documents](task-documents/spec.md) | shipped | yes | 2026-04-29 | — |
-| [rate-limit-retry](rate-limit-retry/spec.md) | draft | partial | 2026-04-28 | — |
-| [idle-wakeup-skip](idle-wakeup-skip/spec.md) | draft | partial | 2026-04-28 | — |
-| [granular-permissions](granular-permissions/spec.md) | draft | partial | 2026-04-28 | — |
-| [blocked-task-escalation](blocked-task-escalation/spec.md) | draft | partial | 2026-04-28 | — |
-| [recovery-reliability](recovery-reliability/spec.md) | draft | partial | 2026-04-28 | — |
-| [subscription-usage](subscription-usage/spec.md) | draft | partial | 2026-04-28 | — |
-| [cheap-model-profiles](cheap-model-profiles/spec.md) | shipped | yes | 2026-04-28 | — |
-| [subtree-controls](subtree-controls/spec.md) | shipped | yes | 2026-04-28 | — |
-| [comment-markdown](comment-markdown/spec.md) | shipped | yes | 2026-04-28 | — |
-| [subtask-checklist](subtask-checklist/spec.md) | shipped | yes | 2026-04-28 | — |
-| [agent-roles](agent-roles/spec.md) | shipped | yes | 2026-04-28 | — |
-| [agent-governance](agent-governance/spec.md) | shipped | yes | 2026-04-28 | — |
-| [workspace-deletion](workspace-deletion/spec.md) | shipped | yes | 2026-05-02 | — |
-| [office-task-chat](office-task-chat/spec.md) | shipped | yes | 2026-05-02 | — |
-| [office-dashboard](office-dashboard/spec.md) | shipped | yes | 2026-05-02 | — |
-| [office-task-chat-v2](office-task-chat-v2/spec.md) | shipped | yes | 2026-05-02 | — |
-| [office-realtime](office-realtime/spec.md) | shipped | yes | 2026-05-02 | — |
-| [office-advanced-mode](office-advanced-mode/spec.md) | shipped | yes | 2026-05-02 | — |
-| [office-dashboard-reactivity](office-dashboard-reactivity/spec.md) | draft | no | 2026-05-03 | — |
-| [office-sidebar-live-agents](office-sidebar-live-agents/spec.md) | draft | no | 2026-05-03 | — |
-| [office-optimistic-comments](office-optimistic-comments/spec.md) | draft | no | 2026-05-03 | — |
-| [office-editable-task-properties](office-editable-task-properties/spec.md) | draft | no | 2026-05-03 | — |
-| [office-task-reactivity-pipeline](office-task-reactivity-pipeline/spec.md) | shipped | yes | 2026-05-03 | — |
-| [office-ux-parity](office-ux-parity/spec.md) | shipped | yes | 2026-05-03 | — |
-| [office-blocker-cycle-detection](office-blocker-cycle-detection/spec.md) | shipped | yes | 2026-05-03 | — |
-| [office-task-approval-flow](office-task-approval-flow/spec.md) | shipped | yes | 2026-05-03 | — |
-| [office-e2e-mock-harness](office-e2e-mock-harness/spec.md) | shipped | yes | 2026-05-03 | — |
-| [office-task-session-lifecycle](office-task-session-lifecycle/spec.md) | shipped | yes | 2026-05-03 | — |
-| [office-dashboard-agent-cards](office-dashboard-agent-cards/spec.md) | draft | no | 2026-05-04 | — |
-| [office-agent-error-handling](office-agent-error-handling/spec.md) | draft | no | 2026-05-04 | — |
-| [office-agent-detail-overhaul](office-agent-detail-overhaul/spec.md) | draft | no | 2026-05-04 | — |
-| [task-model-unification](task-model-unification/spec.md) | draft | no | 2026-05-05 | — |
+**Status:** `draft` (being written) · `building` (in active development) · `shipped` (implemented, spec matches code) · `archived` (deprecated).
+
+**`needs-upgrade`** in a spec's frontmatter flags template sections that the original sources did not cover and should be filled in from code (Data model, API surface, State machine, Permissions, Failure modes, Persistence guarantees). Tracked here so the implementability bar can be reached incrementally.
+
+---
+
+## office/ — autonomous agent management
+
+The office umbrella covers kandev's autonomous-agent product surface: workspaces of long-running agents that pick up tasks, coordinate via handoffs, and report through a dashboard.
+
+| Spec | Status | needs-upgrade |
+|---|---|---|
+| [overview](office/overview.md) | draft | — |
+| [agents](office/agents.md) | draft | persistence-guarantees |
+| [tasks](office/tasks.md) | draft | permissions |
+| [scheduler](office/scheduler.md) | draft | permissions |
+| [runtime](office/runtime.md) | draft | API surface, Permissions, Persistence guarantees, Scenarios |
+| [routing](office/routing.md) | draft | Data model, API surface, Permissions, Persistence guarantees |
+| [costs](office/costs.md) | in-progress | permissions, persistence-guarantees |
+| [dashboard](office/dashboard.md) | draft | permissions, persistence-guarantees |
+| [live-updates](office/live-updates.md) | draft | data-model, state-machine, permissions, failure-modes, persistence-guarantees |
+| [inbox](office/inbox.md) | draft | persistence-guarantees |
+| [assistant](office/assistant.md) | draft | state-machine, persistence-guarantees |
+| [plugins](office/plugins.md) | draft | — |
+| [testing](office/testing.md) | shipped | persistence-guarantees |
+
+## tasks/ — task & workflow model
+
+Kandev's task model: documents, execution stages, labels, blocker escalation, subtask checklists, subtree controls, and the unification with the workflow engine.
+
+| Spec | Status |
+|---|---|
+| [documents](tasks/documents.md) | shipped |
+| [execution-stages](tasks/execution-stages.md) | shipped |
+| [labels](tasks/labels.md) | shipped |
+| [model-unification](tasks/model-unification.md) | draft |
+| [without-repositories](tasks/without-repositories.md) | draft |
+| [subtask-checklist](tasks/subtask-checklist.md) | shipped |
+| [subtree-controls](tasks/subtree-controls.md) | shipped |
+| [blocked-task-escalation](tasks/blocked-task-escalation.md) | draft |
+
+## agents/ — agent governance
+
+Roles, governance gates, and granular permissions that apply across human users and office agents.
+
+| Spec | Status |
+|---|---|
+| [roles](agents/roles.md) | shipped |
+| [governance](agents/governance.md) | shipped |
+| [granular-permissions](agents/granular-permissions.md) | draft |
+
+## integrations/ — external service integrations
+
+Per-workspace credentials and triage triggers for external services.
+
+| Spec | Status |
+|---|---|
+| [slack](integrations/slack.md) | shipped |
+| [external-mcp](integrations/external-mcp.md) | draft |
+
+## workspaces/ — workspace lifecycle
+
+| Spec | Status |
+|---|---|
+| [deletion](workspaces/deletion.md) | shipped |
+
+## costs/ — cost tracking & budgets
+
+Subscription quota tracking and per-agent cheap-model profile routing.
+
+| Spec | Status |
+|---|---|
+| [subscription-usage](costs/subscription-usage.md) | draft |
+| [cheap-model-profiles](costs/cheap-model-profiles.md) | shipped |
+
+## ui/ — cross-cutting UI features
+
+| Spec | Status |
+|---|---|
+| [comment-markdown](ui/comment-markdown.md) | shipped |
+
+---
+
+## Standalone
+
+| Spec | Status |
+|---|---|
+| [improve-kandev](improve-kandev/spec.md) | draft |
+
+---
+
+## Conventions
+
+- **Spec layout.** Umbrella specs live as flat `.md` files under the umbrella directory (`docs/specs/office/agents.md`). Standalone specs use a folder (`docs/specs/improve-kandev/spec.md`).
+- **Plans are not specs.** Implementation plans (`plan.md`) are working files, gitignored. Specs are the durable requirements.
+- **Bug fixes are not specs.** Bugs produce a regression test plus an ADR if they encoded a new convention. See `/fix` skill.
+- **Architecture decisions are not specs.** ADRs live under `docs/decisions/`. See `/record decision`.
+
+## Cross-references
+
+- ADRs: [`../decisions/INDEX.md`](../decisions/INDEX.md)
+- Spec workflow: [`.agents/skills/spec/SKILL.md`](../../.agents/skills/spec/SKILL.md)
+- Bug-fix workflow: [`.agents/skills/fix/SKILL.md`](../../.agents/skills/fix/SKILL.md)
