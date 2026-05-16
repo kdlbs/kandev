@@ -148,6 +148,37 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     });
   });
 
+  test("renders syntax-highlighted tokens (worker pool + Shiki sanity check)", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedExpansionTask(testPage, apiClient, seedData);
+    await openChangesTab(testPage);
+    await openExpansionFileDiff(testPage);
+
+    // Wait for the diff to render so the worker pool has had a chance to highlight.
+    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({
+      timeout: 60_000,
+    });
+
+    // Shiki renders each token as a <span style="color: #RRGGBB"> inside the
+    // diff's shadow DOM. If the worker pool is broken or the @pierre/diffs ↔
+    // Shiki contract changes, lines still render as plain text without
+    // inline color styles. Count coloured spans as a smoke test.
+    const colouredTokenCount = await testPage.evaluate(() => {
+      const container = document.querySelector("diffs-container");
+      const shadow = container?.shadowRoot;
+      if (!shadow) return -1;
+      let count = 0;
+      for (const span of shadow.querySelectorAll<HTMLElement>("span[style]")) {
+        if (/color\s*:/i.test(span.getAttribute("style") ?? "")) count++;
+      }
+      return count;
+    });
+    expect(colouredTokenCount).toBeGreaterThan(20);
+  });
+
   test("expand-all button reveals all collapsed lines at once", async ({
     testPage,
     apiClient,
