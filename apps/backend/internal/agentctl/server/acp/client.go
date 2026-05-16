@@ -399,7 +399,7 @@ func (c *Client) CreateTerminal(ctx context.Context, p acp.CreateTerminalRequest
 
 // KillTerminal sends SIGTERM to a terminal's process.
 func (c *Client) KillTerminal(ctx context.Context, p acp.KillTerminalRequest) (acp.KillTerminalResponse, error) {
-	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.kill_terminal_command")
+	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.kill_terminal")
 	defer span.End()
 	span.SetAttributes(attribute.String("terminal_id", p.TerminalId))
 
