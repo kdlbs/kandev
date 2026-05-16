@@ -47,14 +47,14 @@ Mark task 1 as in_progress.
 
 Invoke the `pr-poller` subagent with the PR number (or let it resolve via `gh pr view` against the current branch). The subagent:
 - Fetches the current CI/bot/comment state once
-- Polls (30s, 10min cap) until every CI check and every bot (CodeRabbit, Greptile, Claude, cubic) reaches a terminal state
+- Polls (30s cadence, **20 min cap**) until every CI check and every bot (CodeRabbit, Greptile, Claude, cubic) reaches a terminal state
 - Counts unresolved review threads and bot issue comments
 - Returns a structured report between `=== pr-poller report ===` and `=== end ===` markers
 
 **Parse the report.** The fields you care about:
 
 - `ci_failed` — list of `{name, run_id, conclusion, url}`. Empty list ⇒ CI is green.
-- `ci_pending` — anything still running when the 10-min cap hit. Decide whether to re-invoke `pr-poller` after a short delay, or proceed with what you have and re-check at step 6.
+- `ci_pending` — anything still running when the 20-min cap hit. Decide whether to re-invoke `pr-poller` after a short delay, or proceed with what you have and re-check at step 6.
 - `bots.<name>` — `done` / `rate_limited` / `pending` / `timeout`. Anything in `done` or `rate_limited` has had its chance; treat the rest as missing data, not a blocker.
 - `unresolved_review_threads` and `issue_comments_from_bots` — drive steps 3-4. If both are 0 and `ci_failed` is empty, skip to step 5 (still run verify + push if you have fixes from earlier).
 
@@ -231,12 +231,12 @@ Mark task 5 as completed.
 
 Mark task 6 as in_progress.
 
-After the push, CI restarts and bots may re-review. Delegate to `pr-poller` again — same subagent, same contract. Parse the new report:
+After the push, CI restarts and bots may re-review. Delegate to `pr-poller` again — same subagent, same contract, same 20-min cap. Parse the new report:
 
 - If `ci_failed:` is empty AND `unresolved_review_threads: 0` AND `issue_comments_from_bots: 0` (no new bot comments to address) → mark task 6 completed and proceed to summary.
 - If new CI failures appeared from the latest commit → loop back to task 2 and reset task 2-5 to `in_progress` as needed.
 - If new review comments appeared after the push → loop back to task 3.
-- If the poller hit a polling timeout (`recommendation:` mentions "timed out") → decide whether to wait longer or surface to the user.
+- If the poller hit its cap (`recommendation:` mentions "timed out") → surface the remaining pending items to the user and stop.
 
 Cap re-check loops at **3 iterations** to prevent runaway sessions. After 3, surface the remaining state to the user and stop.
 

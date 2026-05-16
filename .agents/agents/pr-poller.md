@@ -46,7 +46,7 @@ Free-form notes are forbidden outside the markers. The parent parses this verbat
    ```
    For JSON queries use `--jq` directly; those are short and can run unwrapped. `gh run view --log-failed` is the big one to wrap — but the parent uses that, not you.
 
-3. **Poll loop, 30 s cadence, 10 min cap (20 rounds).** Each round, in parallel:
+3. **Poll loop, 30 s cadence, 20 min cap (40 rounds).** Each round, in parallel:
 
    a. **CI status:**
       ```bash
@@ -88,7 +88,7 @@ Free-form notes are forbidden outside the markers. The parent parses this verbat
 
    c. **Exit conditions:**
       - All CI checks completed AND every bot is in a terminal state (`done` / `rate_limited` / `timeout`) → exit loop.
-      - Round 20 reached (≈10 min) → mark any still-pending CI checks under `ci_pending:` and any still-pending bots as `timeout`, then exit loop.
+      - Round 40 reached (≈20 min) → mark any still-pending CI checks under `ci_pending:` and any still-pending bots as `timeout`, then exit loop.
 
 4. **Count unresolved review threads** via GraphQL (single call, not per-round):
    ```bash
