@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -1163,6 +1164,14 @@ func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentEx
 		SessionID:        "", // Fresh start — no resume flags
 		AutoApprove:      autoApprove,
 		PermissionValues: permissionValues,
+		// RuntimeName is "standalone" / "docker" / "sprites" — MockAgent
+		// reads this to pick a bare name (container PATH lookup) vs.
+		// an absolute host path.
+		// TODO: retype AgentExecution.RuntimeName to agentruntime.Runtime
+		// so this cast disappears. Ripples to ~14 files (executor impls
+		// + tests) — deferred from the typed-enum refactor that
+		// introduced this site.
+		Runtime: agentruntime.Runtime(execution.RuntimeName),
 	}
 	return m.commandBuilder.BuildCommandString(agentConfig, opts),
 		m.commandBuilder.BuildContinueCommandString(agentConfig, opts)

@@ -146,6 +146,7 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 		AutoApprove:      autoApprove,
 		PermissionValues: permissionValues,
 		CLIFlagTokens:    cliFlagTokens,
+		Runtime:          models.ExecutorType(req.ExecutorType).Runtime(),
 	}
 	return agentCommands{
 		initial:   m.commandBuilder.BuildCommandString(agentConfig, cmdOpts),

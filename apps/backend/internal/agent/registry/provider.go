@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -214,12 +215,19 @@ func configureMockAgent(reg *Registry, id string, log *logger.Logger) {
 	if os.Getenv("KANDEV_MOCK_AGENT_MCP") == "false" {
 		mock.SetSupportsMCP(false)
 	}
-	// Resolve binary path: same directory as the running executable
+	// Resolve binary path: same directory as the running executable.
+	// On Windows the binary is mock-agent.exe — exec.Command on Windows
+	// only auto-appends .exe for PATH lookups, not absolute paths, so
+	// the basename must include the extension here.
 	exePath, err := os.Executable()
 	if err != nil {
 		return
 	}
-	binaryPath := filepath.Join(filepath.Dir(exePath), "mock-agent")
+	binaryName := "mock-agent"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	binaryPath := filepath.Join(filepath.Dir(exePath), binaryName)
 	mock.SetBinaryPath(binaryPath)
 	log.Info("mock agent enabled",
 		zap.String("id", id),

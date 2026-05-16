@@ -133,14 +133,20 @@ func (a *MockAgent) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *MockAgent) BuildCommand(opts CommandOptions) Command {
-	// Prefer the absolute binary path that configureMockAgent computed
-	// via os.Executable() — that's the only way the host path works in
-	// dev mode (where the shell's $PATH doesn't include apps/backend/bin).
-	// Fall back to the bare name when no path is set: e2e fixtures
-	// prepend the kandev bin dir to PATH, and Docker containers receive
-	// the command via agentctl's API (not via this method), so PATH
-	// lookup is the right fallback in both cases. Mirrors the pattern in
-	// InferenceConfig below.
+	// For container-bound runtimes (Docker, Sprites, remote Docker) the
+	// agent process exec's inside a Linux container, where the host path
+	// computed by configureMockAgent doesn't exist. The container's image
+	// has /usr/local/bin on PATH and container.go bind-mounts the
+	// linux/amd64 mock-agent there, so the bare name resolves correctly.
+	//
+	// For host runtimes (standalone) we prefer the absolute host path
+	// that configureMockAgent computed via os.Executable() — that's the
+	// only way the host path works in dev mode (where the shell's $PATH
+	// doesn't include apps/backend/bin). Fall back to the bare name when
+	// no path is set: e2e fixtures prepend the kandev bin dir to PATH.
+	if opts.Runtime.IsContainerized() {
+		return Cmd(mockAgentDefaultID).Build()
+	}
 	binary := mockAgentDefaultID
 	if a.binaryPath != "" {
 		binary = a.binaryPath

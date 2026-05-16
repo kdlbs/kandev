@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/usage"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -140,6 +141,12 @@ type CommandOptions struct {
 	// AgentProfile.CLIFlags (only Enabled entries, shell-tokenised). Appended
 	// verbatim to the built command by every agent's BuildCommand.
 	CLIFlagTokens []string
+	// Runtime is the execution backend hosting the agent subprocess.
+	// Agents whose binary lives in a different place inside a container
+	// than on the host (currently only MockAgent) consult
+	// Runtime.IsContainerized() to pick a host absolute path vs. a bare
+	// name resolved via the container's PATH.
+	Runtime agentruntime.Runtime
 }
 
 // PassthroughOptions are passed to BuildPassthroughCommand.

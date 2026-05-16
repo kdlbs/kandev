@@ -5,6 +5,7 @@ import (
 	"maps"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/sysprompt"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -496,16 +497,33 @@ func IsRemoteExecutorType(t ExecutorType) bool {
 	}
 }
 
+// Runtime maps an ExecutorType to the runtime backend that hosts the
+// agent subprocess. Mirrors executor.ExecutorTypeToBackend so callers
+// outside the executor package can ask the property without importing
+// it. The two are kept in lock-step intentionally — keep them in sync
+// when adding a new ExecutorType.
+func (t ExecutorType) Runtime() agentruntime.Runtime {
+	switch t {
+	case ExecutorTypeLocal, ExecutorTypeWorktree, ExecutorTypeMockRemote:
+		return agentruntime.RuntimeStandalone
+	case ExecutorTypeLocalDocker:
+		return agentruntime.RuntimeDocker
+	case ExecutorTypeRemoteDocker:
+		return agentruntime.RuntimeRemoteDocker
+	case ExecutorTypeSprites:
+		return agentruntime.RuntimeSprites
+	default:
+		return agentruntime.RuntimeStandalone
+	}
+}
+
 // IsContainerizedExecutorType reports whether the given executor type runs
 // in a container/sandbox where shells must be executed inside the container
-// via agentctl, not on the host.
+// via agentctl, not on the host. Single source of truth is
+// Runtime().IsContainerized() so a new ExecutorType only has to declare its
+// runtime once.
 func IsContainerizedExecutorType(t ExecutorType) bool {
-	switch t {
-	case ExecutorTypeLocalDocker, ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeMockRemote:
-		return true
-	default:
-		return false
-	}
+	return t.Runtime().IsContainerized()
 }
 
 // IsAlwaysResumableRuntime reports whether the given runtime string represents
