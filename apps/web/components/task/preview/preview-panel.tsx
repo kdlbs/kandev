@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { IconRefresh, IconExternalLink, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -11,6 +11,14 @@ import { ShellTerminal } from "@/components/task/shell-terminal";
 import { getLocalStorage } from "@/lib/local-storage";
 import { rewritePreviewUrlForProxy } from "@/lib/preview-url-detector";
 import type { PreviewViewMode, PreviewStage } from "@/lib/state/slices";
+import { InspectButton } from "./inspect-button";
+import { AnnotationsPanel } from "./annotations-panel";
+import {
+  sendToggleInspect,
+  sendClearAnnotations,
+  isInspectorMessage,
+  type Annotation,
+} from "@/lib/preview-inspect-bridge";
 
 type PreviewContentProps = {
   previewView: string;
@@ -23,6 +31,8 @@ type PreviewContentProps = {
   detectedUrl: string | null;
   devOutput: string;
   devProcessId: string | undefined;
+  iframeRef?: React.RefObject<HTMLIFrameElement | null>;
+  onIframeLoad?: () => void;
 };
 
 function PreviewContent({
@@ -36,6 +46,8 @@ function PreviewContent({
   detectedUrl,
   devOutput,
   devProcessId,
+  iframeRef,
+  onIframeLoad,
 }: PreviewContentProps) {
   if (previewView === "output") {
     return <ShellTerminal processOutput={devOutput} processId={devProcessId ?? null} />;
@@ -43,12 +55,14 @@ function PreviewContent({
   if (showIframe && previewUrl) {
     return (
       <iframe
+        ref={iframeRef}
         key={refreshKey}
         src={previewUrl}
         title="Preview"
         className="h-full w-full border-0"
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
         referrerPolicy="no-referrer"
+        onLoad={onIframeLoad}
       />
     );
   }
@@ -263,6 +277,10 @@ type PreviewToolbarProps = {
   handleUrlSubmit: () => void;
   handleOpenInTab: () => void;
   handleStopClick: () => void;
+  showInspect: boolean;
+  isInspectMode: boolean;
+  annotationCount: number;
+  onToggleInspect: () => void;
 };
 
 function PreviewToolbar({
@@ -281,6 +299,10 @@ function PreviewToolbar({
   handleUrlSubmit,
   handleOpenInTab,
   handleStopClick,
+  showInspect,
+  isInspectMode,
+  annotationCount,
+  onToggleInspect,
 }: PreviewToolbarProps) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -316,6 +338,14 @@ function PreviewToolbar({
       >
         <IconRefresh className="h-4 w-4" />
       </Button>
+      {showInspect && (
+        <InspectButton
+          active={isInspectMode}
+          disabled={!previewUrl}
+          count={annotationCount}
+          onToggle={onToggleInspect}
+        />
+      )}
       <Button
         size="sm"
         variant="outline"
@@ -338,6 +368,56 @@ function PreviewToolbar({
       </Button>
     </div>
   );
+}
+
+function useInspectMode(iframeRef: React.RefObject<HTMLIFrameElement | null>, previewView: string) {
+  const [isInspectMode, setIsInspectMode] = useState(false);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const effectiveIsInspectMode = isInspectMode && previewView !== "output";
+
+  useEffect(() => {
+    if (!iframeRef.current) return;
+    sendToggleInspect(iframeRef.current, effectiveIsInspectMode);
+  }, [iframeRef, effectiveIsInspectMode]);
+
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      if (event.source !== iframeRef.current?.contentWindow) return;
+      if (!isInspectorMessage(event.data)) return;
+      if (event.data.type === "annotation-added") {
+        setAnnotations((prev) => [...prev, event.data.payload]);
+      } else if (event.data.type === "inspect-exited") {
+        setIsInspectMode(false);
+      }
+    }
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [iframeRef]);
+
+  const handleIframeLoad = useCallback(() => {
+    if (!iframeRef.current) return;
+    if (effectiveIsInspectMode) sendToggleInspect(iframeRef.current, true);
+  }, [iframeRef, effectiveIsInspectMode]);
+
+  const handleRemoveAnnotation = useCallback((id: string) => {
+    setAnnotations((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  const handleClearAnnotations = useCallback(() => {
+    setAnnotations([]);
+    if (iframeRef.current) sendClearAnnotations(iframeRef.current);
+  }, [iframeRef]);
+
+  const toggleInspect = useCallback(() => setIsInspectMode((v) => !v), []);
+
+  return {
+    isInspectMode: effectiveIsInspectMode,
+    annotations,
+    toggleInspect,
+    handleIframeLoad,
+    handleRemoveAnnotation,
+    handleClearAnnotations,
+  };
 }
 
 function usePreviewPanelState(sessionId: string | null, hasDevScript: boolean) {
@@ -381,6 +461,37 @@ function usePreviewPanelState(sessionId: string | null, hasDevScript: boolean) {
   };
 }
 
+function usePreviewPanelData(sessionId: string | null, hasDevScript: boolean) {
+  const panelState = usePreviewPanelState(sessionId, hasDevScript);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  usePreviewViewSync(sessionId, panelState.setPreviewView, panelState.appStoreApi);
+  const timers = usePreviewTimers({
+    isRunning: panelState.isRunning,
+    detectedUrl: panelState.detectedUrl,
+    sessionId,
+    previewUrl: panelState.previewUrl,
+    refreshKey,
+    setPreviewView: panelState.setPreviewView,
+  });
+  const actions = usePreviewActions(sessionId, {
+    setPreviewOpen: panelState.setPreviewOpen,
+    setPreviewStage: panelState.setPreviewStage,
+    setPreviewView: panelState.setPreviewView,
+    setPreviewUrl: panelState.setPreviewUrl,
+    setPreviewUrlDraft: panelState.setPreviewUrlDraft,
+    clearProcessOutput: panelState.clearProcessOutput,
+    handleStop: panelState.handleStop,
+    previewUrl: panelState.previewUrl,
+    previewUrlDraft: panelState.previewUrlDraft,
+    devProcessId: panelState.devProcessId,
+  });
+  const inspect = useInspectMode(iframeRef, panelState.previewView);
+
+  return { panelState, refreshKey, setRefreshKey, iframeRef, timers, actions, inspect };
+}
+
 function PreviewPlaceholder({ message }: { message: string }) {
   return (
     <div className="h-full w-full flex items-center justify-center text-muted-foreground mr-[5px]">
@@ -390,51 +501,24 @@ function PreviewPlaceholder({ message }: { message: string }) {
 }
 
 export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
-  const panelState = usePreviewPanelState(sessionId, hasDevScript);
+  const { panelState, refreshKey, setRefreshKey, iframeRef, timers, actions, inspect } =
+    usePreviewPanelData(sessionId, hasDevScript);
   const {
     previewUrl,
     previewUrlDraft,
-    setPreviewUrl,
     setPreviewUrlDraft,
-    setPreviewOpen,
-    setPreviewStage,
     setPreviewView,
-    clearProcessOutput,
-    appStoreApi,
     previewView,
     devProcessId,
     devProcess,
     devOutput,
     isStopping,
-    handleStop,
     detectedUrl,
     isRunning,
   } = panelState;
-
-  const [refreshKey, setRefreshKey] = useState(0);
+  const { allowManualUrl, showLoadingSpinner, showIframe } = timers;
+  const { handleStopClick, handleUrlSubmit, handleOpenInTab } = actions;
   const isWaitingForUrl = isRunning && previewView === "output" && !previewUrl;
-
-  usePreviewViewSync(sessionId, setPreviewView, appStoreApi);
-  const { allowManualUrl, showLoadingSpinner, showIframe } = usePreviewTimers({
-    isRunning,
-    detectedUrl,
-    sessionId,
-    previewUrl,
-    refreshKey,
-    setPreviewView,
-  });
-  const { handleStopClick, handleUrlSubmit, handleOpenInTab } = usePreviewActions(sessionId, {
-    setPreviewOpen,
-    setPreviewStage,
-    setPreviewView,
-    setPreviewUrl,
-    setPreviewUrlDraft,
-    clearProcessOutput,
-    handleStop,
-    previewUrl,
-    previewUrlDraft,
-    devProcessId,
-  });
 
   if (!sessionId) return <PreviewPlaceholder message="Select a session to enable preview." />;
   if (!hasDevScript) return <PreviewPlaceholder message="Configure a dev script to use preview." />;
@@ -464,6 +548,15 @@ export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
           handleUrlSubmit={handleUrlSubmit}
           handleOpenInTab={handleOpenInTab}
           handleStopClick={handleStopClick}
+          showInspect={showIframe && previewView !== "output" && !!previewUrl}
+          isInspectMode={inspect.isInspectMode}
+          annotationCount={inspect.annotations.length}
+          onToggleInspect={inspect.toggleInspect}
+        />
+        <AnnotationsPanel
+          annotations={inspect.annotations}
+          onRemove={inspect.handleRemoveAnnotation}
+          onClear={inspect.handleClearAnnotations}
         />
         <SessionPanelContent
           className={previewView === "output" || (showIframe && previewUrl) ? "p-0" : ""}
@@ -479,6 +572,8 @@ export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
             detectedUrl={detectedUrl}
             devOutput={devOutput}
             devProcessId={devProcessId}
+            iframeRef={iframeRef}
+            onIframeLoad={inspect.handleIframeLoad}
           />
         </SessionPanelContent>
       </div>
