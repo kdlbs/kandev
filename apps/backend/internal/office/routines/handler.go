@@ -57,8 +57,17 @@ func (h *Handler) createRoutine(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// Apply server defaults when the client omits the policy fields, then
+	// validate. Empty string in either field means "use default" — the
+	// agentctl CLI and several internal call sites POST without setting them.
 	concurrencyPolicy := models.RoutineConcurrencyPolicy(req.ConcurrencyPolicy)
+	if concurrencyPolicy == "" {
+		concurrencyPolicy = models.ConcurrencyPolicySkipIfActive
+	}
 	catchUpPolicy := models.RoutineCatchUpPolicy(req.CatchUpPolicy)
+	if catchUpPolicy == "" {
+		catchUpPolicy = models.CatchUpPolicyEnqueueMissedWithCap
+	}
 	if !concurrencyPolicy.Valid() {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid concurrency_policy: " + req.ConcurrencyPolicy})
 		return
