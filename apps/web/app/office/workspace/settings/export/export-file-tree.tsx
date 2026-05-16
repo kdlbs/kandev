@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import {
   IconFile,
   IconFolder,
@@ -12,6 +12,7 @@ import {
 import { Input } from "@kandev/ui/input";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { cn } from "@/lib/utils";
+import { useTree, type VisibleRow } from "@/hooks/use-tree";
 import type { ExportFile, FileTreeNode } from "./export-types";
 import { getDescendantFilePaths } from "./export-utils";
 
@@ -24,58 +25,43 @@ interface ExportFileTreeProps {
   onPreviewPathChange: (path: string) => void;
 }
 
+type CheckState = boolean | "indeterminate";
+
+function getCheckState(node: FileTreeNode, selectedPaths: Set<string>): CheckState {
+  const descendants = getDescendantFilePaths(node);
+  if (descendants.every((p) => selectedPaths.has(p))) return true;
+  if (descendants.some((p) => selectedPaths.has(p))) return "indeterminate";
+  return false;
+}
+
 export function ExportFileTree({
   tree,
-  files,
   selectedPaths,
   onSelectedPathsChange,
   previewPath,
   onPreviewPathChange,
 }: ExportFileTreeProps) {
   const [search, setSearch] = useState("");
-  const [expanded, setExpanded] = useState<Set<string>>(() => {
-    // Expand all directories by default
-    const dirs = new Set<string>();
-    function walk(nodes: FileTreeNode[]) {
-      for (const n of nodes) {
-        if (n.isDir) {
-          dirs.add(n.path);
-          walk(n.children);
-        }
-      }
-    }
-    walk(tree);
-    return dirs;
+
+  const { visibleRows, toggle } = useTree<FileTreeNode>({
+    nodes: tree,
+    getPath: (n) => n.path,
+    getChildren: (n) => n.children,
+    isDir: (n) => n.isDir,
+    defaultExpanded: "all",
+    search,
+    searchMode: "hide",
   });
 
-  const toggleExpand = useCallback((path: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  }, []);
-
-  const toggleSelection = useCallback(
-    (node: FileTreeNode) => {
-      const paths = getDescendantFilePaths(node);
-      const allSelected = paths.every((p) => selectedPaths.has(p));
-      const next = new Set(selectedPaths);
-      for (const p of paths) {
-        if (allSelected) next.delete(p);
-        else next.add(p);
-      }
-      onSelectedPathsChange(next);
-    },
-    [selectedPaths, onSelectedPathsChange],
-  );
-
-  const lowerSearch = search.toLowerCase();
-  const matchesSearch = (node: FileTreeNode): boolean => {
-    if (!lowerSearch) return true;
-    if (node.name.toLowerCase().includes(lowerSearch)) return true;
-    return node.children.some(matchesSearch);
+  const toggleSelection = (node: FileTreeNode) => {
+    const paths = getDescendantFilePaths(node);
+    const allSelected = paths.every((p) => selectedPaths.has(p));
+    const next = new Set(selectedPaths);
+    for (const p of paths) {
+      if (allSelected) next.delete(p);
+      else next.add(p);
+    }
+    onSelectedPathsChange(next);
   };
 
   return (
@@ -92,19 +78,17 @@ export function ExportFileTree({
         </div>
       </div>
       <div className="flex-1 overflow-y-auto py-1">
-        {tree.filter(matchesSearch).map((node) => (
-          <TreeRow
-            key={node.path}
-            node={node}
-            depth={0}
-            expanded={expanded}
-            selectedPaths={selectedPaths}
-            previewPath={previewPath}
-            onToggleExpand={toggleExpand}
-            onToggleSelection={toggleSelection}
-            onPreview={onPreviewPathChange}
-            matchesSearch={matchesSearch}
-            allFiles={files}
+        {visibleRows.map((row) => (
+          <ExportTreeRow
+            key={row.path}
+            row={row}
+            isActive={!row.isDir && previewPath === row.path}
+            checkState={getCheckState(row.node, selectedPaths)}
+            onClick={() => {
+              if (row.isDir) toggle(row.path);
+              else onPreviewPathChange(row.path);
+            }}
+            onToggleCheck={() => toggleSelection(row.node)}
           />
         ))}
       </div>
@@ -112,94 +96,37 @@ export function ExportFileTree({
   );
 }
 
-interface TreeRowProps {
-  node: FileTreeNode;
-  depth: number;
-  expanded: Set<string>;
-  selectedPaths: Set<string>;
-  previewPath: string | null;
-  onToggleExpand: (path: string) => void;
-  onToggleSelection: (node: FileTreeNode) => void;
-  onPreview: (path: string) => void;
-  matchesSearch: (node: FileTreeNode) => boolean;
-  allFiles: ExportFile[];
+interface ExportTreeRowProps {
+  row: VisibleRow<FileTreeNode>;
+  isActive: boolean;
+  checkState: CheckState;
+  onClick: () => void;
+  onToggleCheck: () => void;
 }
 
-function TreeRow({
-  node,
-  depth,
-  expanded,
-  selectedPaths,
-  previewPath,
-  onToggleExpand,
-  onToggleSelection,
-  onPreview,
-  matchesSearch,
-  allFiles,
-}: TreeRowProps) {
-  const isExpanded = expanded.has(node.path);
-  const descendants = getDescendantFilePaths(node);
-  const allSelected = descendants.every((p) => selectedPaths.has(p));
-  const someSelected = !allSelected && descendants.some((p) => selectedPaths.has(p));
-  const isActive = !node.isDir && previewPath === node.path;
-
-  const handleClick = () => {
-    if (node.isDir) {
-      onToggleExpand(node.path);
-    } else {
-      onPreview(node.path);
-    }
-  };
-
+function ExportTreeRow({ row, isActive, checkState, onClick, onToggleCheck }: ExportTreeRowProps) {
+  let FileIconComp = IconFile;
+  if (row.isDir) FileIconComp = row.isExpanded ? IconFolderOpen : IconFolder;
   let ChevronIcon: typeof IconChevronDown | null = null;
-  if (node.isDir) ChevronIcon = isExpanded ? IconChevronDown : IconChevronRight;
-
-  let FileIcon = IconFile;
-  if (node.isDir) FileIcon = isExpanded ? IconFolderOpen : IconFolder;
-
-  let checkedState: boolean | "indeterminate" = false;
-  if (allSelected) checkedState = true;
-  else if (someSelected) checkedState = "indeterminate";
-
+  if (row.isDir) ChevronIcon = row.isExpanded ? IconChevronDown : IconChevronRight;
   return (
-    <>
-      <div
-        className={cn(
-          "flex items-center gap-1.5 px-2 py-1 text-sm cursor-pointer hover:bg-accent/50",
-          isActive && "bg-accent",
-        )}
-        style={{ paddingLeft: `${depth * 16 + 8}px` }}
-        onClick={handleClick}
-      >
-        <Checkbox
-          checked={checkedState}
-          onCheckedChange={() => onToggleSelection(node)}
-          onClick={(e) => e.stopPropagation()}
-          className="cursor-pointer shrink-0"
-        />
-        {ChevronIcon && <ChevronIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
-        <FileIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-        <span className="truncate">{node.name}</span>
-      </div>
-      {node.isDir &&
-        isExpanded &&
-        node.children
-          .filter(matchesSearch)
-          .map((child) => (
-            <TreeRow
-              key={child.path}
-              node={child}
-              depth={depth + 1}
-              expanded={expanded}
-              selectedPaths={selectedPaths}
-              previewPath={previewPath}
-              onToggleExpand={onToggleExpand}
-              onToggleSelection={onToggleSelection}
-              onPreview={onPreview}
-              matchesSearch={matchesSearch}
-              allFiles={allFiles}
-            />
-          ))}
-    </>
+    <div
+      className={cn(
+        "flex items-center gap-1.5 px-2 py-1 text-sm cursor-pointer hover:bg-accent/50",
+        isActive && "bg-accent",
+      )}
+      style={{ paddingLeft: `${row.depth * 16 + 8}px` }}
+      onClick={onClick}
+    >
+      <Checkbox
+        checked={checkState}
+        onCheckedChange={onToggleCheck}
+        onClick={(e) => e.stopPropagation()}
+        className="cursor-pointer shrink-0"
+      />
+      {ChevronIcon && <ChevronIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+      <FileIconComp className="h-4 w-4 text-muted-foreground shrink-0" />
+      <span className="truncate">{row.displayName}</span>
+    </div>
   );
 }
