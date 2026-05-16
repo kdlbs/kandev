@@ -15,10 +15,12 @@ test.describe("CLI mode: prompt injection into PTY", () => {
     apiClient,
     seedData,
   }) => {
-    // Create a dedicated TUI profile so this spec is robust against
-    // ordering changes in agent registration.
+    // Resolve the mock agent by id so the spec is robust against ordering
+    // changes in agent registration.
     const { agents } = await apiClient.listAgents();
-    const tui = await apiClient.createAgentProfile(agents[0].id, "CLI Inject", {
+    const mock = agents.find((a) => a.id === "mock-agent");
+    if (!mock) throw new Error("mock-agent not registered in this e2e profile");
+    const tui = await apiClient.createAgentProfile(mock.id, "CLI Inject", {
       model: "mock-fast",
       auto_approve: true,
       cli_passthrough: true,

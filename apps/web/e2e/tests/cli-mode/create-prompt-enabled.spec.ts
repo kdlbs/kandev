@@ -23,7 +23,8 @@ test.describe("CLI mode: create-task dialog prompt", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await kanban.createTaskButton.first().click();
+    await expect(kanban.createTaskButton).toHaveCount(1);
+    await kanban.createTaskButton.click();
 
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();

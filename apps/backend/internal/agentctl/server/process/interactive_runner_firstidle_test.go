@@ -44,12 +44,8 @@ func TestWaitForFirstIdle_fires_on_idle_event(t *testing.T) {
 		done <- runner.WaitForFirstIdle(context.Background(), "proc-fires")
 	}()
 
-	// Simulate the idle detector firing. This is exactly what emitTurnComplete
-	// does in production.
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		runner.emitTurnComplete(proc)
-	}()
+	// emitTurnComplete is what fires the idle event in production.
+	go runner.emitTurnComplete(proc)
 
 	select {
 	case err := <-done:
