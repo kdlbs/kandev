@@ -1833,6 +1833,24 @@ func (s *Service) saveArchiveCommits(ctx context.Context, sessionID string, comm
 		zap.Int("count", len(commits)))
 }
 
+// promptPassthrough sends a follow-up prompt to a PTY session via stdin —
+// CLI mode has no ACP wire.
+func (s *Service) promptPassthrough(ctx context.Context, sessionID, prompt string) (*PromptResult, error) {
+	pt, err := s.agentManager.ResolvePassthroughConfig(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve passthrough config: %w", err)
+	}
+	payload := prompt + pt.SubmitSequence
+	if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, payload); err != nil {
+		return nil, fmt.Errorf("write passthrough stdin: %w", err)
+	}
+	s.logger.Debug("dispatched prompt to passthrough PTY",
+		zap.String("session_id", sessionID),
+		zap.Int("prompt_length", len(prompt)),
+		zap.Int("submit_seq_length", len(pt.SubmitSequence)))
+	return &PromptResult{StopReason: "passthrough_dispatched"}, nil
+}
+
 // PromptTask sends a follow-up prompt to a running agent for a task session.
 // If planMode is true, a plan mode prefix is prepended to the prompt.
 // Attachments (images) are passed through to the agent if provided.
@@ -1860,6 +1878,15 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	}
 	if err := s.checkSessionPromptable(taskID, sessionID, session.State); err != nil {
 		return nil, err
+	}
+
+	// Passthrough (PTY) sessions have no ACP wire — route the prompt directly to
+	// the agent process's stdin with the agent-declared submit sequence (e.g. "\r").
+	// The user message row was already inserted by the WS message handler before
+	// PromptTask was called (see message_handlers.go:219), so the chat panel renders
+	// without us re-inserting it.
+	if s.agentManager.IsPassthroughSession(ctx, sessionID) {
+		return s.promptPassthrough(ctx, sessionID, prompt)
 	}
 
 	// Ensure the agent process is actually running. After a lazy backend restart,
@@ -2108,7 +2135,15 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// just to host the cancel message.
 	cancelTurnID := s.getActiveTurnID(sessionID)
 
-	if err := s.agentManager.CancelAgent(ctx, sessionID); err != nil {
+	// Passthrough sessions have no ACP cancel — Ctrl-C is the only stop signal.
+	// Continue to DB reconciliation even on write failure so the UI unsticks.
+	if s.agentManager.IsPassthroughSession(ctx, sessionID) {
+		if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, "\x03"); err != nil {
+			s.logger.Warn("failed to write Ctrl-C to passthrough stdin",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	} else if err := s.agentManager.CancelAgent(ctx, sessionID); err != nil {
 		switch {
 		case errors.Is(err, lifecycle.ErrNoExecutionForSession):
 			// The session was live but there is no execution to cancel — the agent process

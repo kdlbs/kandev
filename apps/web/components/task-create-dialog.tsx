@@ -159,7 +159,6 @@ function CreateModeBody(props: DialogFormBodyProps) {
       <DialogPromptSection
         isSessionMode={false}
         isTaskStarted={isTaskStarted}
-        isPassthroughProfile={props.isPassthroughProfile}
         initialDescription={props.initialDescription}
         hasDescription={props.hasDescription}
         fs={fs}
@@ -199,7 +198,6 @@ function SessionModeBody(props: DialogFormBodyProps) {
       <DialogPromptSection
         isSessionMode
         isTaskStarted={props.isTaskStarted}
-        isPassthroughProfile={props.isPassthroughProfile}
         initialDescription={props.initialDescription}
         hasDescription={props.hasDescription}
         fs={props.fs}

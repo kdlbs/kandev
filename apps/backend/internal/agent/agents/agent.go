@@ -252,6 +252,13 @@ type PassthroughConfig struct {
 	ResumeFlag        Param // generic "continue last session" (e.g. NewParam("-c"), NewParam("--resume", "latest"))
 	SessionResumeFlag Param // resume a specific session by ID (e.g. NewParam("--resume"))
 	WaitForTerminal   bool
+	// AutoInjectPrompt enables writing the task description to the PTY stdin
+	// after the first idle window. Default false preserves today's behavior.
+	AutoInjectPrompt bool
+	// SubmitSequence is appended after the prompt text when auto-injecting
+	// and when routing chat-compose messages to the PTY. "\r" for most TUIs.
+	// Empty means "write text only, no submit".
+	SubmitSequence string
 }
 
 // DefaultBufferMaxBytes is the default maximum buffer size for passthrough mode (2 MB).

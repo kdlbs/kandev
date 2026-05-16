@@ -138,9 +138,11 @@ type PermissionSettingDTO struct {
 }
 
 type PassthroughConfigDTO struct {
-	Supported   bool   `json:"supported"`
-	Label       string `json:"label"`
-	Description string `json:"description"`
+	Supported        bool   `json:"supported"`
+	Label            string `json:"label"`
+	Description      string `json:"description"`
+	AutoInjectPrompt bool   `json:"auto_inject_prompt"`
+	SubmitSequence   string `json:"submit_sequence"`
 }
 
 type ToolStatusDTO struct {
