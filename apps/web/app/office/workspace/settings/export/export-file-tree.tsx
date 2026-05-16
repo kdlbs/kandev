@@ -34,6 +34,8 @@ type CheckState = boolean | "indeterminate";
 
 function getCheckState(node: FileTreeNode, selectedPaths: Set<string>): CheckState {
   const descendants = getDescendantFilePaths(node);
+  // Empty descendants would make .every() vacuously true.
+  if (descendants.length === 0) return false;
   if (descendants.every((p) => selectedPaths.has(p))) return true;
   if (descendants.some((p) => selectedPaths.has(p))) return "indeterminate";
   return false;

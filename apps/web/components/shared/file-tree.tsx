@@ -49,6 +49,9 @@ type CheckState = boolean | "indeterminate";
 
 function getCheckState(node: FileTreeNode, checkedPaths: Set<string>): CheckState {
   const leaves = getLeafPaths(node);
+  // An empty leaves array would make .every() vacuously true and the dir
+  // would render as checked. A dir with no file leaves can't be "all checked".
+  if (leaves.length === 0) return false;
   if (leaves.every((p) => checkedPaths.has(p))) return true;
   if (leaves.some((p) => checkedPaths.has(p))) return "indeterminate";
   return false;
