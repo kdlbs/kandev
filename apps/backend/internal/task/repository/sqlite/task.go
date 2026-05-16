@@ -28,7 +28,28 @@ func taskSelectColumns(alias string) string {
 		prefix + "metadata, " + prefix + "is_ephemeral, " + prefix + "parent_id, " + prefix + "archived_at, " +
 		prefix + "created_at, " + prefix + "updated_at, " +
 		runnerProjection(alias) + ` AS assignee_agent_profile_id, ` +
-		prefix + "origin, " + prefix + "project_id, " + prefix + "labels, " + prefix + "identifier"
+		prefix + "origin, " + prefix + "project_id, " + prefix + "labels, " + prefix + "identifier, " +
+		isFromOfficeProjection(alias) + ` AS is_from_office`
+}
+
+// isFromOfficeProjection returns a SQL boolean expression that is true
+// when the task is owned by office: either it has a non-empty project_id
+// (explicit office task) or its workflow matches the workspace's
+// office_workflow_id (the canonical "office workflow"). Kanban tasks live
+// in any other workflow and have no project.
+func isFromOfficeProjection(alias string) string {
+	if alias == "" {
+		alias = "tasks"
+	}
+	return `(
+		COALESCE(` + alias + `.project_id, '') != ''
+		OR EXISTS (
+			SELECT 1 FROM workspaces w
+			WHERE w.id = ` + alias + `.workspace_id
+			  AND COALESCE(w.office_workflow_id, '') != ''
+			  AND w.office_workflow_id = ` + alias + `.workflow_id
+		)
+	)`
 }
 
 // runnerProjection produces the correlated subquery (without alias) that
@@ -565,7 +586,7 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 		&metadata, &task.IsEphemeral, &task.ParentID, &archivedAt,
 		&task.CreatedAt, &task.UpdatedAt,
 		&task.AssigneeAgentProfileID, &task.Origin, &task.ProjectID,
-		&task.Labels, &identifier,
+		&task.Labels, &identifier, &task.IsFromOffice,
 	)
 	if err != nil {
 		return nil, err
@@ -594,7 +615,7 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 			&metadata, &task.IsEphemeral, &task.ParentID, &archivedAt,
 			&task.CreatedAt, &task.UpdatedAt,
 			&task.AssigneeAgentProfileID, &task.Origin, &task.ProjectID,
-			&task.Labels, &identifier,
+			&task.Labels, &identifier, &task.IsFromOffice,
 		)
 		if err != nil {
 			return nil, err

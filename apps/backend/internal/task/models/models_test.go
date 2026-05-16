@@ -220,22 +220,26 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 	}
 }
 
-func TestTaskIsFromOffice(t *testing.T) {
+// TestTaskIsFromOfficeField verifies the IsFromOffice field round-trips
+// through the model. The actual office-vs-kanban predicate is computed in
+// SQL by isFromOfficeProjection (see repository/sqlite/task.go) so the
+// scan layer is the only thing that sets the field. A round-trip test is
+// the right scope at this layer; the SQL projection is covered by repo
+// integration tests against a real workspace + workflow row.
+func TestTaskIsFromOfficeField(t *testing.T) {
 	tests := []struct {
 		name string
-		task *Task
+		task Task
 		want bool
 	}{
-		{"nil receiver", nil, false},
-		{"empty project_id (kanban-origin)", &Task{ProjectID: ""}, false},
-		{"non-empty project_id (office-origin)", &Task{ProjectID: "proj-123"}, true},
-		{"manual origin without project", &Task{Origin: TaskOriginManual}, false},
-		{"agent_created origin with project", &Task{Origin: TaskOriginAgentCreated, ProjectID: "p"}, true},
+		{"default zero value", Task{}, false},
+		{"explicit false", Task{IsFromOffice: false}, false},
+		{"explicit true", Task{IsFromOffice: true}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.task.IsFromOffice(); got != tt.want {
-				t.Errorf("IsFromOffice() = %v, want %v", got, tt.want)
+			if got := tt.task.IsFromOffice; got != tt.want {
+				t.Errorf("IsFromOffice = %v, want %v", got, tt.want)
 			}
 		})
 	}

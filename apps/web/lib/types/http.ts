@@ -287,17 +287,19 @@ export type Task = {
   // Office extensions (mirror TaskDTO Go fields). Empty/undefined for kanban-origin tasks.
   origin?: TaskOrigin;
   project_id?: string;
+  // Backend-computed "owned by office" flag: true when project_id is set
+  // OR workflow_id matches the workspace's office_workflow_id. See
+  // isFromOfficeProjection in the Go task repo for the canonical rule.
+  is_from_office?: boolean;
 };
 
 // Task origin values mirror models.TaskOrigin* constants in the Go backend.
 export type TaskOrigin = "manual" | "agent_created" | "routine" | "onboarding";
 
-// isFromOffice mirrors models.Task.IsFromOffice in Go: office tasks have a
-// non-empty project_id (FK to office_projects). Use to gate UI that only
-// makes sense for office tasks (e.g. the "Open in office view" topbar link).
-export function isFromOffice(task: Task | null | undefined): boolean {
-  return !!task?.project_id;
-}
+// isFromOffice reads the backend-computed flag (predicate lives in SQL at
+// apps/backend/internal/task/repository/sqlite/task.go). Use to gate
+// office-only UI like the "Open in office view" topbar link.
+export const isFromOffice = (task: Task | null | undefined): boolean => !!task?.is_from_office;
 
 export type CreateTaskResponse = Task & {
   session_id?: string;

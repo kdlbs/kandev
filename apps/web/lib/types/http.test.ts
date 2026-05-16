@@ -58,12 +58,14 @@ describe("isFromOffice", () => {
     expect(isFromOffice(undefined)).toBe(false);
   });
 
-  it("is false when project_id is missing or empty", () => {
+  it("is false when the backend flag is missing or false", () => {
     expect(isFromOffice(task({}))).toBe(false);
-    expect(isFromOffice(task({ project_id: "" }))).toBe(false);
+    expect(isFromOffice(task({ is_from_office: false }))).toBe(false);
   });
 
-  it("is true when project_id is set (office-origin task)", () => {
-    expect(isFromOffice(task({ project_id: "proj-123" }))).toBe(true);
+  it("is true when the backend flag is set (project linked or office workflow)", () => {
+    expect(isFromOffice(task({ is_from_office: true }))).toBe(true);
+    // Project alone no longer drives the answer client-side - backend decides.
+    expect(isFromOffice(task({ project_id: "p1" }))).toBe(false);
   });
 });
