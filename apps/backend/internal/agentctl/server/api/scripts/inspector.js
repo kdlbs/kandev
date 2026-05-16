@@ -164,9 +164,10 @@
     counter += 1;
     var a = pendingAnnotation;
     a.id = 'a-' + Date.now() + '-' + counter;
-    a.number = counter;
     a.comment = comment || '';
     placeMarker(counter, a.markerX, a.markerY);
+    // Note: we do NOT set `a.number` here. The React parent assigns numbers
+    // so they remain monotonic across iframe refreshes.
     send('annotation-added', a);
     pendingAnnotation = null;
     closePopup();

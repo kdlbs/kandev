@@ -382,10 +382,9 @@ function useInspectMode(iframeRef: React.RefObject<HTMLIFrameElement | null>, pr
 
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
-      if (event.source !== iframeRef.current?.contentWindow) return;
       if (!isInspectorMessage(event.data)) return;
       if (event.data.type === "annotation-added") {
-        setAnnotations((prev) => [...prev, event.data.payload]);
+        setAnnotations((prev) => [...prev, { ...event.data.payload, number: prev.length + 1 }]);
       } else if (event.data.type === "inspect-exited") {
         setIsInspectMode(false);
       }

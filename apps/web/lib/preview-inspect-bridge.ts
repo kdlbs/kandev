@@ -30,6 +30,9 @@ export interface Annotation {
   elements?: CapturedElement[] | null;
 }
 
+/** Wire payload — number is assigned by the parent on receipt. */
+export type AnnotationWirePayload = Omit<Annotation, "number">;
+
 interface InspectorToggleCommand {
   source: typeof INSPECTOR_SOURCE;
   type: "toggle-inspect";
@@ -45,7 +48,7 @@ interface InspectorClearCommand {
 interface AnnotationAddedMessage {
   source: typeof INSPECTOR_SOURCE;
   type: "annotation-added";
-  payload: Annotation;
+  payload: AnnotationWirePayload;
 }
 
 interface InspectExitedMessage {
