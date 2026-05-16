@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -112,6 +113,7 @@ func (a *TUIAgent) BuildCommand(_ CommandOptions) Command {
 
 func (a *TUIAgent) InstallScript() string                            { return "" }
 func (a *TUIAgent) RemoteAuth() *RemoteAuth                          { return nil }
+func (a *TUIAgent) BillingType() usage.BillingType                   { return defaultBillingType() }
 func (a *TUIAgent) PermissionSettings() map[string]PermissionSetting { return nil }
 
 func (a *TUIAgent) Runtime() *RuntimeConfig {

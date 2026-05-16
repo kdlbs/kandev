@@ -13,6 +13,12 @@ import (
 
 // seedTask creates prerequisite workspace + workflow + task rows so that
 // foreign-key constraints on task_plans are satisfied.
+//
+// Priority is set to "medium" because the office priority migration
+// (when applied alongside task migrations) adds a CHECK constraint
+// against the canonical four-value enum on tasks.priority. Service-level
+// CreateTask defaults empty values to "medium"; this seed helper writes
+// to the repo directly so it must set the value explicitly.
 func seedTask(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, taskID string) {
 	t.Helper()
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-plan", Name: "Plan WS"})
@@ -24,6 +30,7 @@ func seedTask(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, ta
 		WorkflowID:  "wf-plan",
 		Title:       "Test",
 		State:       v1.TaskStateCreated,
+		Priority:    "medium",
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	})
@@ -351,7 +358,8 @@ func TestPlanService_RevertRejectsWrongTask(t *testing.T) {
 	seedTask(t, ctx, repo, "task-x")
 	_ = repo.CreateTask(ctx, &models.Task{
 		ID: "task-y", WorkspaceID: "ws-plan", WorkflowID: "wf-plan", Title: "Y",
-		State: v1.TaskStateCreated, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		State: v1.TaskStateCreated, Priority: "medium",
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	})
 
 	_, _ = svc.CreatePlan(ctx, CreatePlanRequest{TaskID: "task-x", Content: "x", AuthorKind: "agent"})

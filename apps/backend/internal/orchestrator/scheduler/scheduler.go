@@ -141,7 +141,7 @@ func (s *Scheduler) EnqueueTask(task *v1.Task) error {
 	s.logger.Info("enqueueing task",
 		zap.String("task_id", task.ID),
 		zap.String("title", task.Title),
-		zap.Int("priority", task.Priority))
+		zap.String("priority", task.Priority))
 	return s.queue.Enqueue(task)
 }
 

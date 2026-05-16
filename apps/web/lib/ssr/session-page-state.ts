@@ -112,6 +112,7 @@ function buildResourceState(p: BuildSessionPageStateParams) {
         workspaceId: w.workspace_id,
         name: w.name,
         hidden: w.hidden,
+        style: w.style,
       })),
     } as Partial<AppState>["workflows"],
     repositories: {

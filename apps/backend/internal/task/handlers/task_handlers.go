@@ -20,6 +20,7 @@ type handlerRepo interface {
 	GetSessionFileReviews(ctx context.Context, sessionID string) ([]*models.SessionFileReview, error)
 	DeleteSessionFileReviews(ctx context.Context, sessionID string) error
 	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
+	CountToolCallMessagesBySession(ctx context.Context, sessionIDs []string) (map[string]int, error)
 }
 
 type TaskHandlers struct {
@@ -27,8 +28,17 @@ type TaskHandlers struct {
 	orchestrator        OrchestratorStarter
 	repo                handlerRepo
 	planService         *service.PlanService
+	handoffSvc          *service.HandoffService
 	onTaskCreatedWithPR func(ctx context.Context, taskID, sessionID, prURL, branch string)
 	logger              *logger.Logger
+}
+
+// SetHandoffService wires the office task-handoffs service used by the
+// Kanban subtask path to attach workspace-group membership and the
+// sequential blocker chain (handoffs phase 5). Optional — nil disables
+// post-create attachment, matching the pre-handoffs behaviour.
+func (h *TaskHandlers) SetHandoffService(svc *service.HandoffService) {
+	h.handoffSvc = svc
 }
 
 // SetOnTaskCreatedWithPR sets a callback invoked when a task is created with a PR URL
@@ -42,7 +52,7 @@ type OrchestratorStarter interface {
 	LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)
 	// EnsureSession returns the task's existing primary/newest session if any,
 	// otherwise resolves the agent profile server-side and creates one.
-	EnsureSession(ctx context.Context, taskID string) (*orchestrator.EnsureSessionResponse, error)
+	EnsureSession(ctx context.Context, taskID string, opts ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error)
 }
 
 func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
@@ -67,6 +77,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/workflows/:id/tasks", h.httpListTasks)
 	api.GET("/workspaces/:id/tasks", h.httpListTasksByWorkspace)
 	api.GET("/tasks/:id", h.httpGetTask)
+	api.GET("/tasks/:id/context", h.httpGetTaskContext)
 	api.GET("/task-sessions/:id", h.httpGetTaskSession)
 	api.GET("/tasks/:id/sessions", h.httpListTaskSessions)
 	api.POST("/tasks/:id/sessions/ensure", h.httpEnsureTaskSession)
@@ -79,6 +90,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/:id/move", h.httpMoveTask)
 	api.DELETE("/tasks/:id", h.httpDeleteTask)
 	api.POST("/tasks/:id/archive", h.httpArchiveTask)
+	api.POST("/tasks/:id/unarchive", h.httpUnarchiveTask)
 
 	api.POST("/tasks/bulk-move", h.httpBulkMoveTasks)
 	api.GET("/workflows/:id/task-count", h.httpGetWorkflowTaskCount)

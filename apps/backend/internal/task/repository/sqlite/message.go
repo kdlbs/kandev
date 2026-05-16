@@ -183,7 +183,7 @@ func buildListMessagesQuery(sessionID string, opts models.ListMessagesOptions, c
 	}
 	query += fmt.Sprintf(" ORDER BY created_at %s, id %s", sortDir, sortDir)
 	if limit > 0 {
-		query += " LIMIT ?"
+		query += sqlLimitClause
 		args = append(args, limit+1)
 	}
 	return query, args
@@ -449,4 +449,41 @@ func (r *Repository) UpdateMessage(ctx context.Context, message *models.Message)
 		return fmt.Errorf("message not found: %s", message.ID)
 	}
 	return nil
+}
+
+// CountToolCallMessagesBySession returns the number of tool_call messages
+// per session for the given session IDs. Sessions with zero tool calls are
+// omitted from the result map. Powers the "ran N commands" segment of the
+// inline session timeline entry without requiring the frontend to fetch the
+// full message list for each row.
+func (r *Repository) CountToolCallMessagesBySession(ctx context.Context, sessionIDs []string) (map[string]int, error) {
+	if len(sessionIDs) == 0 {
+		return map[string]int{}, nil
+	}
+	placeholders := make([]string, len(sessionIDs))
+	args := make([]interface{}, 0, len(sessionIDs))
+	for i, id := range sessionIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	query := `SELECT task_session_id, COUNT(*) AS cnt
+	          FROM task_session_messages
+	          WHERE type = 'tool_call'
+	            AND task_session_id IN (` + strings.Join(placeholders, ",") + `)
+	          GROUP BY task_session_id`
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := make(map[string]int)
+	for rows.Next() {
+		var sessionID string
+		var count int
+		if err := rows.Scan(&sessionID, &count); err != nil {
+			return nil, err
+		}
+		out[sessionID] = count
+	}
+	return out, rows.Err()
 }

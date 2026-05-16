@@ -42,9 +42,14 @@ export function useWorkflowAgentProfileEffect(
       }
     } else {
       setWorkflowAgentProfileId("");
-      // Restore the user's last-used agent profile when unlocking
+      // Restore the user's last-used agent profile when unlocking, but only
+      // if it still exists. A clean DB mints fresh UUIDs for the same agents,
+      // so the previous run's id never matches and would otherwise poison
+      // the dialog into "No compatible agent profiles" because
+      // useDefaultSelectionsEffect skips when agentProfileId is truthy.
       const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
-      setAgentProfileId(lastId ?? "");
+      const isValidLastId = Boolean(lastId && agentProfiles.some((p) => p.id === lastId));
+      setAgentProfileId(isValidLastId && lastId ? lastId : "");
     }
   }, [selectedWorkflowId, workflows, agentProfiles, setAgentProfileId, setWorkflowAgentProfileId]);
 }

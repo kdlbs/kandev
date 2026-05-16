@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
@@ -19,7 +20,11 @@ import (
 // For SQLite it returns a Pool with a single-writer connection and a
 // multi-reader connection pool (leveraging WAL for concurrent reads).
 // For PostgreSQL both Writer and Reader point to the same *sqlx.DB.
-func Provide(cfg *config.Config, log *logger.Logger) (*db.Pool, func() error, error) {
+//
+// version is the current binary version string (e.g. "v0.43.0").  It is
+// compared against the stored kandev_version to decide whether to take a
+// pre-migration backup.  Pass "" in tests that do not care about snapshots.
+func Provide(cfg *config.Config, log *logger.Logger, version string) (*db.Pool, func() error, error) {
 	driver := cfg.Database.Driver
 	if driver == "" {
 		driver = "sqlite"
@@ -27,7 +32,7 @@ func Provide(cfg *config.Config, log *logger.Logger) (*db.Pool, func() error, er
 
 	switch driver {
 	case "sqlite":
-		return provideSQLite(cfg, log)
+		return provideSQLite(cfg, log, version)
 	case "postgres":
 		return providePostgres(cfg, log)
 	default:
@@ -35,7 +40,7 @@ func Provide(cfg *config.Config, log *logger.Logger) (*db.Pool, func() error, er
 	}
 }
 
-func provideSQLite(cfg *config.Config, log *logger.Logger) (*db.Pool, func() error, error) {
+func provideSQLite(cfg *config.Config, log *logger.Logger, version string) (*db.Pool, func() error, error) {
 	dbPath := cfg.Database.Path
 	if dbPath == "" {
 		dbPath = filepath.Join(cfg.ResolvedDataDir(), "kandev.db")
@@ -60,6 +65,56 @@ func provideSQLite(cfg *config.Config, log *logger.Logger) (*db.Pool, func() err
 	reader := sqlx.NewDb(readerConn, "sqlite3")
 
 	pool := db.NewPool(writer, reader)
+
+	// --- meta + backup window ---
+	// Runs before any repository touches the DB so the snapshot is a clean
+	// pre-migration image.
+	if err := ensureMetaTable(writer); err != nil {
+		_ = pool.Close()
+		return nil, nil, fmt.Errorf("ensure meta table: %w", err)
+	}
+
+	// Meta reads must succeed: if we cannot determine whether this is an
+	// upgrade boot we must NOT charge ahead into migrations. The dominant
+	// failure mode here is a partially-corrupt DB that opens but cannot
+	// read sqlite_master / kandev_meta - exactly the case where a backup
+	// would matter most.
+	storedVersion, err := readKey(writer, "kandev_version")
+	if err != nil {
+		_ = pool.Close()
+		return nil, nil, fmt.Errorf("read kandev_version: %w", err)
+	}
+	userTables, err := hasUserTables(writer)
+	if err != nil {
+		_ = pool.Close()
+		return nil, nil, fmt.Errorf("inspect user tables: %w", err)
+	}
+
+	if shouldBackup(storedVersion, version, userTables) {
+		backupDir := filepath.Join(filepath.Dir(dbPath), "backups")
+		if err := os.MkdirAll(backupDir, 0o755); err != nil {
+			_ = pool.Close()
+			return nil, nil, fmt.Errorf("create backup dir: %w", err)
+		}
+		path := snapshotPath(backupDir, storedVersion)
+		size, err := snapshotSQLite(writer, path)
+		if err != nil {
+			_ = pool.Close()
+			return nil, nil, fmt.Errorf("pre-migration backup failed: %w", err)
+		}
+		if log != nil {
+			log.Info("pre-migration backup taken",
+				zap.String("from_version", fallback(storedVersion, "pre-meta")),
+				zap.String("to_version", version),
+				zap.String("path", path),
+				zap.Int64("size_bytes", size),
+			)
+		}
+		_ = pruneBackups(backupDir, 2)
+	} else if storedVersion == "" && !userTables {
+		// Fresh DB - record first-boot timestamp.
+		_ = writeKey(writer, "schema_initialized_at", time.Now().UTC().Format(time.RFC3339))
+	}
 
 	if log != nil {
 		log.Info("Database initialized (single-writer pool)",
@@ -88,11 +143,11 @@ func provideSQLite(cfg *config.Config, log *logger.Logger) (*db.Pool, func() err
 //   - A legacy file exists at <HomeDir>/kandev.db.
 //   - The legacy path differs from the new path (skip when HomeDir == DataDir).
 //
-// Only the main .db file is moved — SQLite recreates -wal/-shm on open, and a
+// Only the main .db file is moved - SQLite recreates -wal/-shm on open, and a
 // cleanly-shut-down DB (the expected state on container restart) has empty WAL.
 func migrateLegacyDBPath(cfg *config.Config, newPath string, log *logger.Logger) error {
 	if _, err := os.Stat(newPath); !errors.Is(err, fs.ErrNotExist) {
-		return nil // new path exists (or stat failed) — nothing to migrate
+		return nil // new path exists (or stat failed) - nothing to migrate
 	}
 	legacyPath := filepath.Join(cfg.ResolvedHomeDir(), "kandev.db")
 	if legacyPath == newPath {
@@ -133,6 +188,7 @@ func providePostgres(cfg *config.Config, log *logger.Logger) (*db.Pool, func() e
 	pool := db.NewPool(pgDB, pgDB)
 
 	if log != nil {
+		log.Info("pre-migration backup skipped: postgres driver (use pg_dump)")
 		log.Info("Database initialized", zap.String("db_driver", "postgres"))
 	}
 	cleanup := func() error {

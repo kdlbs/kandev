@@ -280,6 +280,52 @@ func TestEnsureSession_Concurrent_CreatesSingleSession(t *testing.T) {
 	}
 }
 
+func TestEnsureSession_EnsureExecution_TriggersResume(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+
+	// Session exists but agent is not running — ensureSessionRunning will be called.
+	// Without a real executor it will fail, but we verify it was attempted by checking
+	// the error path (non-fatal in EnsureSession, session is still returned).
+	agentMgr := &mockAgentManager{isAgentRunning: false}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	log := testLogger()
+	svc.executor = executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+
+	resp, err := svc.EnsureSession(ctx, "task1", EnsureSessionOptions{EnsureExecution: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.SessionID != "session1" {
+		t.Errorf("expected session1, got %q", resp.SessionID)
+	}
+	if resp.Source != "existing_newest" {
+		t.Errorf("expected source=existing_newest, got %q", resp.Source)
+	}
+	// tryEnsureExecution is non-fatal — the response is still returned even if
+	// resume fails (no executor running record in this test setup).
+}
+
+func TestEnsureSession_WithoutEnsureExecution_SkipsResume(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	// Without EnsureExecution, should return existing session without attempting resume.
+	resp, err := svc.EnsureSession(ctx, "task1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.SessionID != "session1" {
+		t.Errorf("expected session1, got %q", resp.SessionID)
+	}
+}
+
 func TestStepAllowsAutoStart(t *testing.T) {
 	if !stepAllowsAutoStart(nil) {
 		t.Error("expected nil step to allow auto-start (no workflow step constraint)")

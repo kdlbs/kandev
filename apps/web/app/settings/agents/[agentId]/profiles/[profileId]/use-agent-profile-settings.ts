@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useAppStore } from "@/components/state-provider";
+import { listAgents } from "@/lib/api";
+import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type {
   Agent,
   AgentProfile,
@@ -25,7 +27,10 @@ export function useAgentProfileSettings(
   profileId: string,
 ): AgentProfileSettingsResult {
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
+  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
   const availableAgents = useAvailableAgents().items;
+  const refreshKeyRef = useRef<string | null>(null);
 
   const agent = useMemo(() => {
     return settingsAgents.find((item: Agent) => item.name === agentKey) ?? null;
@@ -34,6 +39,36 @@ export function useAgentProfileSettings(
   const profile = useMemo(() => {
     return agent?.profiles.find((item: AgentProfile) => item.id === profileId) ?? null;
   }, [agent?.profiles, profileId]);
+
+  useEffect(() => {
+    if (profile) {
+      refreshKeyRef.current = null;
+      return;
+    }
+
+    const refreshKey = `${agentKey}:${profileId}`;
+    if (refreshKeyRef.current === refreshKey) return;
+    refreshKeyRef.current = refreshKey;
+
+    let cancelled = false;
+    listAgents({ cache: "no-store" })
+      .then((response) => {
+        if (cancelled) return;
+        setSettingsAgents(response.agents);
+        setAgentProfiles(
+          response.agents.flatMap((item) =>
+            item.profiles.map((itemProfile) => toAgentProfileOption(item, itemProfile)),
+          ),
+        );
+      })
+      .catch(() => {
+        refreshKeyRef.current = null;
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [agentKey, profile, profileId, setAgentProfiles, setSettingsAgents]);
 
   const availableAgent = useMemo(() => {
     return availableAgents.find((item: AvailableAgent) => item.name === agent?.name) ?? null;

@@ -344,7 +344,7 @@ function useTasksPageComputed({
   );
   const handleRowClick = useCallback(
     (task: Task) => {
-      router.push(`/t/${task.id}`);
+      router.push(`/tasks/${task.id}`);
     },
     [router],
   );

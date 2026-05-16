@@ -194,14 +194,27 @@ func (h *TaskHandlers) httpGetTask(c *gin.Context) {
 }
 
 func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
-	sessions, err := h.service.ListTaskSessions(c.Request.Context(), c.Param("id"))
+	ctx := c.Request.Context()
+	sessions, err := h.service.ListTaskSessions(ctx, c.Param("id"))
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task sessions not found")
 		return
 	}
 	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
+	ids := make([]string, 0, len(sessions))
 	for _, session := range sessions {
 		sessionDTOs = append(sessionDTOs, dto.FromTaskSessionSummary(session))
+		ids = append(ids, session.ID)
+	}
+	// Resolve the per-session tool_call counts so the frontend can render
+	// the "ran N commands" segment without fetching every session's full
+	// message list. Best-effort: a count failure leaves CommandCount at 0.
+	if counts, cErr := h.repo.CountToolCallMessagesBySession(ctx, ids); cErr == nil {
+		for i := range sessionDTOs {
+			sessionDTOs[i].CommandCount = counts[sessionDTOs[i].ID]
+		}
+	} else {
+		h.logger.Warn("count tool calls failed", zap.Error(cErr))
 	}
 	c.JSON(http.StatusOK, dto.ListTaskSessionSummariesResponse{
 		Sessions: sessionDTOs,
@@ -381,7 +394,7 @@ type httpCreateTaskRequest struct {
 	WorkflowStepID    string                    `json:"workflow_step_id"`
 	Title             string                    `json:"title"`
 	Description       string                    `json:"description,omitempty"`
-	Priority          int                       `json:"priority,omitempty"`
+	Priority          string                    `json:"priority,omitempty"`
 	State             *v1.TaskState             `json:"state,omitempty"`
 	Repositories      []httpTaskRepositoryInput `json:"repositories,omitempty"`
 	Position          int                       `json:"position,omitempty"`
@@ -395,6 +408,13 @@ type httpCreateTaskRequest struct {
 	Attachments       []v1.MessageAttachment    `json:"attachments,omitempty"`
 	ParentID          string                    `json:"parent_id,omitempty"`
 	WorkspacePath     string                    `json:"workspace_path,omitempty"`
+	BlockedBy         []string                  `json:"blocked_by,omitempty"`
+	// Office task-handoffs phase 5 — workspace policy. Optional; same
+	// shape as the MCP create_task_kandev fields.
+	WorkspaceMode         string `json:"workspace_mode,omitempty"`
+	WorkspaceGroupID      string `json:"workspace_group_id,omitempty"`
+	DefaultChildWorkspace string `json:"default_child_workspace,omitempty"`
+	DefaultChildOrdering  string `json:"default_child_ordering,omitempty"`
 }
 
 type createTaskResponse struct {
@@ -482,6 +502,16 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	title := strings.TrimSpace(body.Title)
 	description := strings.TrimSpace(body.Description)
 
+	// Office task-handoffs phase 5: resolve workspace policy from the
+	// request + parent task, merge into Metadata, and remember it so the
+	// post-create attach can record group membership / blocker chain.
+	wsPolicy, policyErr := h.resolveWorkspacePolicy(c.Request.Context(), body)
+	if policyErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": policyErr.Error()})
+		return
+	}
+	metadata := mergeWorkspaceMetadata(body.Metadata, wsPolicy.MetadataBlock())
+
 	task, err := h.service.CreateTask(c.Request.Context(), &service.CreateTaskRequest{
 		WorkspaceID:    body.WorkspaceID,
 		WorkflowID:     body.WorkflowID,
@@ -492,14 +522,30 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		State:          body.State,
 		Repositories:   convertToServiceRepos(repos),
 		Position:       body.Position,
-		Metadata:       body.Metadata,
+		Metadata:       metadata,
 		PlanMode:       body.PlanMode && !body.StartAgent,
 		ParentID:       body.ParentID,
 		WorkspacePath:  body.WorkspacePath,
+		BlockedBy:      body.BlockedBy,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
 		return
+	}
+
+	if h.handoffSvc != nil && wsPolicy.NeedsAttachment() {
+		if attachErr := h.handoffSvc.AttachWorkspacePolicy(c.Request.Context(), task.ID, body.ParentID, wsPolicy); attachErr != nil {
+			h.logger.Error("attach workspace policy; rolling back task creation",
+				zap.String("task_id", task.ID), zap.Error(attachErr))
+			if delErr := h.service.DeleteTask(c.Request.Context(), task.ID); delErr != nil {
+				h.logger.Error("rollback delete failed; task left in inconsistent state",
+					zap.String("task_id", task.ID), zap.Error(delErr))
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "failed to attach workspace policy: " + attachErr.Error(),
+			})
+			return
+		}
 	}
 
 	if !h.commitFreshBranch(c, task.ID, title, body.WorkspaceID, body.Repositories, repos) {
@@ -798,7 +844,7 @@ func (h *TaskHandlers) startAgentForNewTask(
 type httpUpdateTaskRequest struct {
 	Title        *string                   `json:"title,omitempty"`
 	Description  *string                   `json:"description,omitempty"`
-	Priority     *int                      `json:"priority,omitempty"`
+	Priority     *string                   `json:"priority,omitempty"`
 	State        *v1.TaskState             `json:"state,omitempty"`
 	Repositories []httpTaskRepositoryInput `json:"repositories,omitempty"`
 	Position     *int                      `json:"position,omitempty"`
@@ -891,7 +937,19 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	deleteCtx, cancel := context.WithTimeout(context.Background(), constants.TaskDeleteTimeout)
 	defer cancel()
-	if err := h.service.DeleteTask(deleteCtx, c.Param("id")); err != nil {
+	taskID := c.Param("id")
+	// Office task-handoffs phase 6: route through HandoffService.DeleteTaskTree
+	// when wired so descendant runs are cancelled, group memberships are
+	// released with reason=deleted, and the cleanup state machine fires.
+	if h.handoffSvc != nil {
+		if _, err := h.handoffSvc.DeleteTaskTree(deleteCtx, taskID); err != nil {
+			handleNotFound(c, h.logger, err, "task not deleted")
+			return
+		}
+		c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
+		return
+	}
+	if err := h.service.DeleteTask(deleteCtx, taskID); err != nil {
 		handleNotFound(c, h.logger, err, "task not deleted")
 		return
 	}
@@ -899,11 +957,51 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 }
 
 func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
-	if err := h.service.ArchiveTask(c.Request.Context(), c.Param("id")); err != nil {
+	taskID := c.Param("id")
+	// Office task-handoffs phase 6: when a HandoffService is wired,
+	// archive the whole subtree under a single cascade ID so
+	// descendants get tagged for scoped unarchive AND workspace-group
+	// memberships are released. When HandoffService is unconfigured
+	// (legacy / tests) fall back to the single-task path.
+	if h.handoffSvc != nil {
+		if _, err := h.handoffSvc.ArchiveTaskTree(c.Request.Context(), taskID); err != nil {
+			handleNotFound(c, h.logger, err, "task not archived")
+			return
+		}
+		c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
+		return
+	}
+	if err := h.service.ArchiveTask(c.Request.Context(), taskID); err != nil {
 		handleNotFound(c, h.logger, err, "task not archived")
 		return
 	}
 	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
+}
+
+// httpUnarchiveTask routes through HandoffService.UnarchiveTaskTree so
+// every task this cascade archived (and only those) is restored. The
+// handler returns 503 when no HandoffService is wired since unarchive
+// is meaningless without the cascade infrastructure.
+func (h *TaskHandlers) httpUnarchiveTask(c *gin.Context) {
+	if h.handoffSvc == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "unarchive requires office task-handoffs to be configured",
+		})
+		return
+	}
+	taskID := c.Param("id")
+	outcome, err := h.handoffSvc.UnarchiveTaskTree(c.Request.Context(), taskID)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task not unarchived")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success":            true,
+		"cascade_id":         outcome.CascadeID,
+		"unarchived_ids":     outcome.ArchivedTaskIDs,
+		"skipped_ids":        outcome.SkippedTaskIDs,
+		"affected_group_ids": outcome.ReleasedGroupIDs,
+	})
 }
 
 // httpStartQuickChatRequest is the request body for starting a quick chat session.

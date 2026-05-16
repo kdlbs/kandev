@@ -4,6 +4,7 @@ import type {
   CreateTaskResponse,
   ListWorkflowsResponse,
   ListWorkflowStepsResponse,
+  TaskSessionState,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 
@@ -177,6 +178,10 @@ export class ApiClient {
     return this.request("POST", "/api/v1/workspaces", { name });
   }
 
+  async listWorkspaces(): Promise<{ workspaces: Workspace[]; total: number }> {
+    return this.request("GET", "/api/v1/workspaces");
+  }
+
   async createWorkflow(workspaceId: string, name: string, templateId?: string): Promise<Workflow> {
     return this.request("POST", "/api/v1/workflows", {
       workspace_id: workspaceId,
@@ -244,13 +249,23 @@ export class ApiClient {
     await this.request("DELETE", `/api/v1/agent-profiles/${profileId}${qs}`);
   }
 
-  /** Delete all agent profiles except the ones in keepIds. */
+  /**
+   * Delete kanban-only agent profiles except the ones in keepIds.
+   *
+   * Office-scoped profiles (those with a non-empty `workspace_id`) are
+   * always preserved — they belong to onboarded office workspaces and
+   * are managed via the office agent endpoints, not by this helper.
+   * Without this guard the per-test cleanup deletes the seeded CEO and
+   * cascades into "No agents yet" failures across office tests.
+   */
   async cleanupTestProfiles(keepIds: string[]): Promise<void> {
     const { agents } = await this.listAgents();
     for (const agent of agents) {
       for (const profile of agent.profiles ?? []) {
+        const wsId = (profile as unknown as { workspace_id?: string }).workspace_id;
+        if (wsId) continue;
         if (!keepIds.includes(profile.id)) {
-          await this.deleteAgentProfile(profile.id);
+          await this.deleteAgentProfile(profile.id, true);
         }
       }
     }
@@ -534,6 +549,7 @@ export class ApiClient {
     default_utility_agent_id?: string;
     default_utility_model?: string;
     sidebar_views?: unknown[];
+    kanban_view_mode?: string;
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }
@@ -643,6 +659,130 @@ export class ApiClient {
       workspace_id: workspaceId,
       name,
     });
+  }
+
+  // --- E2E Mock Harness (KANDEV_E2E_MOCK=true) ---
+  // These routes are mounted only when the backend was started with the
+  // env var set. They write directly to task_sessions / messages so the
+  // live-presence UI can be exercised without launching a real executor.
+
+  async seedTaskSession(
+    taskId: string,
+    opts: {
+      state: TaskSessionState;
+      agentProfileId?: string;
+      startedAt?: string;
+      completedAt?: string;
+      commandCount?: number;
+    },
+  ): Promise<{ session_id: string }> {
+    const body: Record<string, unknown> = {
+      task_id: taskId,
+      state: opts.state,
+    };
+    if (opts.agentProfileId !== undefined) body.agent_profile_id = opts.agentProfileId;
+    if (opts.startedAt !== undefined) body.started_at = opts.startedAt;
+    if (opts.completedAt !== undefined) body.completed_at = opts.completedAt;
+    if (opts.commandCount !== undefined) body.command_count = opts.commandCount;
+    return this.request("POST", "/api/v1/_test/task-sessions", body);
+  }
+
+  async seedSessionMessage(
+    sessionId: string,
+    opts: {
+      type: string;
+      content?: string;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<void> {
+    const body: Record<string, unknown> = { session_id: sessionId, type: opts.type };
+    if (opts.content !== undefined) body.content = opts.content;
+    if (opts.metadata !== undefined) body.metadata = opts.metadata;
+    await this.request("POST", "/api/v1/_test/messages", body);
+  }
+
+  async seedToolCallMessages(sessionId: string, count: number): Promise<void> {
+    for (let i = 0; i < count; i++) {
+      await this.seedSessionMessage(sessionId, {
+        type: "tool_call",
+        content: `synthetic tool call ${i + 1}`,
+      });
+    }
+  }
+
+  async testHarnessHealth(): Promise<{ ok: boolean }> {
+    return this.request("GET", "/api/v1/_test/health");
+  }
+
+  /** Set desired_skills on an agent_profiles row via the e2e harness. */
+  async setProfileDesiredSkills(profileId: string, slugs: string[]): Promise<void> {
+    await this.request("POST", `/api/v1/_test/agent-profiles/${profileId}/desired-skills`, {
+      slugs,
+    });
+  }
+
+  async seedAgentFailure(opts: {
+    taskId: string;
+    agentProfileId: string;
+    errorMessage?: string;
+  }): Promise<{ run_id: string; consecutive_failures: number; threshold: number }> {
+    const payload: Record<string, unknown> = {
+      task_id: opts.taskId,
+      agent_profile_id: opts.agentProfileId,
+    };
+    if (opts.errorMessage !== undefined) payload.error_message = opts.errorMessage;
+    return this.request("POST", "/api/v1/_test/agent-failures", payload);
+  }
+
+  async seedRunEvent(opts: {
+    runId: string;
+    eventType: string;
+    level?: "info" | "warn" | "error" | "debug";
+    payload?: string;
+  }): Promise<{ ok: boolean }> {
+    const body: Record<string, unknown> = {
+      run_id: opts.runId,
+      event_type: opts.eventType,
+    };
+    if (opts.level !== undefined) body.level = opts.level;
+    if (opts.payload !== undefined) body.payload = opts.payload;
+    return this.request("POST", "/api/v1/_test/run-events", body);
+  }
+
+  async seedRunSkillSnapshot(opts: {
+    runId: string;
+    skillId: string;
+    version?: string;
+    contentHash?: string;
+    materializedPath?: string;
+  }): Promise<{ ok: boolean }> {
+    const body: Record<string, unknown> = {
+      run_id: opts.runId,
+      skill_id: opts.skillId,
+    };
+    if (opts.version !== undefined) body.version = opts.version;
+    if (opts.contentHash !== undefined) body.content_hash = opts.contentHash;
+    if (opts.materializedPath !== undefined) body.materialized_path = opts.materializedPath;
+    return this.request("POST", "/api/v1/_test/run-skills", body);
+  }
+
+  async seedComment(opts: {
+    taskId: string;
+    authorType: "user" | "agent";
+    authorId: string;
+    body: string;
+    source?: string;
+    createdAt?: string;
+  }): Promise<{ comment_id: string }> {
+    const payload: Record<string, unknown> = {
+      task_id: opts.taskId,
+      author_type: opts.authorType,
+      author_id: opts.authorId,
+      body: opts.body,
+    };
+    if (opts.source !== undefined) payload.source = opts.source;
+    if (opts.createdAt !== undefined) payload.created_at = opts.createdAt;
+    return this.request("POST", "/api/v1/_test/comments", payload);
   }
 
   // --- GitHub Mock Control ---
@@ -962,6 +1102,7 @@ export class ApiClient {
     sandbox_id?: string;
     worktree_id?: string;
     worktree_path?: string;
+    workspace_path?: string;
     status: string;
   } | null> {
     const res = await this.rawRequest("GET", `/api/v1/tasks/${taskId}/environment`);
@@ -1134,6 +1275,206 @@ export class ApiClient {
 
   async mockLinearSetGetIssueError(args: { statusCode: number; message: string }): Promise<void> {
     await this.request("PUT", "/api/v1/linear/mock/get-issue-error", args);
+  }
+
+  // --- Agent dashboard E2E seed helpers (KANDEV_E2E_MOCK=true) ---
+  // These wrappers append rows to office_runs / office_cost_events /
+  // office_activity_log directly so the agent dashboard E2E spec can
+  // populate the charts without launching an executor or running
+  // through the production mutation pipelines.
+
+  async seedRun(opts: {
+    agentProfileId: string;
+    reason?: string;
+    status?: "queued" | "claimed" | "finished" | "failed" | "cancelled";
+    taskId?: string;
+    sessionId?: string;
+    capabilities?: string;
+    inputSnapshot?: string;
+    commentId?: string;
+    /**
+     * Routine that triggered this run. Surfaces as `payload.routine_id`
+     * so the office run summary's Linked column deeplinks to
+     * `/office/routines/<id>`.
+     */
+    routineId?: string;
+    idempotencyKey?: string;
+    errorMessage?: string;
+    requestedAt?: string;
+    claimedAt?: string;
+    finishedAt?: string;
+  }): Promise<{ run_id: string }> {
+    const payload: Record<string, unknown> = { agent_profile_id: opts.agentProfileId };
+    if (opts.reason !== undefined) payload.reason = opts.reason;
+    if (opts.status !== undefined) payload.status = opts.status;
+    if (opts.taskId !== undefined) payload.task_id = opts.taskId;
+    if (opts.sessionId !== undefined) payload.session_id = opts.sessionId;
+    if (opts.capabilities !== undefined) payload.capabilities = opts.capabilities;
+    if (opts.inputSnapshot !== undefined) payload.input_snapshot = opts.inputSnapshot;
+    if (opts.commentId !== undefined) payload.comment_id = opts.commentId;
+    if (opts.routineId !== undefined) payload.routine_id = opts.routineId;
+    if (opts.idempotencyKey !== undefined) payload.idempotency_key = opts.idempotencyKey;
+    if (opts.errorMessage !== undefined) payload.error_message = opts.errorMessage;
+    if (opts.requestedAt !== undefined) payload.requested_at = opts.requestedAt;
+    if (opts.claimedAt !== undefined) payload.claimed_at = opts.claimedAt;
+    if (opts.finishedAt !== undefined) payload.finished_at = opts.finishedAt;
+    return this.request("POST", "/api/v1/_test/runs", payload);
+  }
+
+  /**
+   * Patches a previously-seeded run's status (and optional error_message).
+   * The harness publishes office.run.processed afterwards so WS-driven UI
+   * sees the transition without a page reload.
+   */
+  async updateRunStatus(
+    runId: string,
+    opts: { status: string; errorMessage?: string },
+  ): Promise<void> {
+    const body: Record<string, unknown> = { status: opts.status };
+    if (opts.errorMessage !== undefined) body.error_message = opts.errorMessage;
+    await this.request("PATCH", `/api/v1/_test/runs/${runId}`, body);
+  }
+
+  async seedCostEvent(opts: {
+    agentProfileId: string;
+    taskId?: string;
+    sessionId?: string;
+    tokensIn?: number;
+    tokensOut?: number;
+    tokensCachedIn?: number;
+    costSubcents?: number;
+    occurredAt?: string;
+  }): Promise<{ id: string }> {
+    const payload: Record<string, unknown> = {
+      agent_profile_id: opts.agentProfileId,
+      tokens_in: opts.tokensIn ?? 0,
+      tokens_out: opts.tokensOut ?? 0,
+      tokens_cached_in: opts.tokensCachedIn ?? 0,
+      cost_subcents: opts.costSubcents ?? 0,
+    };
+    if (opts.taskId !== undefined) payload.task_id = opts.taskId;
+    if (opts.sessionId !== undefined) payload.session_id = opts.sessionId;
+    if (opts.occurredAt !== undefined) payload.occurred_at = opts.occurredAt;
+    return this.request("POST", "/api/v1/_test/cost-events", payload);
+  }
+
+  async seedActivity(opts: {
+    workspaceId: string;
+    actorType: string;
+    actorId: string;
+    action: string;
+    targetType?: string;
+    targetId?: string;
+    details?: string;
+    runId?: string;
+    sessionId?: string;
+    createdAt?: string;
+  }): Promise<{ id: string }> {
+    const payload: Record<string, unknown> = {
+      workspace_id: opts.workspaceId,
+      actor_type: opts.actorType,
+      actor_id: opts.actorId,
+      action: opts.action,
+    };
+    if (opts.targetType !== undefined) payload.target_type = opts.targetType;
+    if (opts.targetId !== undefined) payload.target_id = opts.targetId;
+    if (opts.details !== undefined) payload.details = opts.details;
+    if (opts.runId !== undefined) payload.run_id = opts.runId;
+    if (opts.sessionId !== undefined) payload.session_id = opts.sessionId;
+    if (opts.createdAt !== undefined) payload.created_at = opts.createdAt;
+    return this.request("POST", "/api/v1/_test/activity", payload);
+  }
+
+  async mintRuntimeToken(opts: {
+    agentProfileId: string;
+    workspaceId: string;
+    runId: string;
+    taskId?: string;
+    sessionId?: string;
+    capabilities?: string;
+  }): Promise<{ token: string }> {
+    const payload: Record<string, unknown> = {
+      agent_profile_id: opts.agentProfileId,
+      workspace_id: opts.workspaceId,
+      run_id: opts.runId,
+    };
+    if (opts.taskId !== undefined) payload.task_id = opts.taskId;
+    if (opts.sessionId !== undefined) payload.session_id = opts.sessionId;
+    if (opts.capabilities !== undefined) payload.capabilities = opts.capabilities;
+    return this.request("POST", "/api/v1/_test/runtime-token", payload);
+  }
+
+  async runtimeUpdateTaskStatus(token: string, taskId: string, status: string): Promise<Response> {
+    return fetch(`${this.baseUrl}/api/v1/office/runtime/tasks/${taskId}/status`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  async runtimePostComment(token: string, taskId: string, body: string): Promise<Response> {
+    return fetch(`${this.baseUrl}/api/v1/office/runtime/comments`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ task_id: taskId, body }),
+    });
+  }
+
+  async runtimeCreateSubtask(
+    token: string,
+    parentTaskId: string,
+    data: { title: string; description?: string; assigneeAgentId?: string },
+  ): Promise<Response> {
+    return fetch(`${this.baseUrl}/api/v1/office/runtime/tasks/${parentTaskId}/subtasks`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        parent_task_id: parentTaskId,
+        title: data.title,
+        description: data.description ?? "",
+        assignee_agent_id: data.assigneeAgentId,
+      }),
+    });
+  }
+
+  async runtimeCreateAgent(
+    token: string,
+    data: { name: string; role: string; reason?: string },
+  ): Promise<Response> {
+    return fetch(`${this.baseUrl}/api/v1/office/runtime/agents`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async runtimePutMemory(token: string, path: string, content: string): Promise<Response> {
+    return fetch(`${this.baseUrl}/api/v1/office/runtime/memory${path}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  async runtimeGetMemory(token: string, path: string): Promise<Response> {
+    return fetch(`${this.baseUrl}/api/v1/office/runtime/memory${path}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
   }
 }
 

@@ -69,11 +69,18 @@ export const markdownComponents = {
     }
     return <InlineCode>{content}</InlineCode>;
   },
-  a: ({ href, children }: { href?: string; children?: ReactNode }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer">
-      {children}
-    </a>
-  ),
+  a: ({ href, children }: { href?: string; children?: ReactNode }) => {
+    const isInternal = href?.startsWith("/") || href?.startsWith("#");
+    return (
+      <a
+        href={href}
+        target={isInternal ? "_self" : "_blank"}
+        rel={isInternal ? undefined : "noopener noreferrer"}
+      >
+        {children}
+      </a>
+    );
+  },
   table: ({ children }: { children?: ReactNode }) => (
     <div className="overflow-x-auto">
       <table>{children}</table>

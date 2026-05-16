@@ -1,0 +1,25 @@
+id: routine
+name: Routine
+description: System workflow for routine-fired tasks. Single auto-completing step.
+steps:
+  - id: in_progress
+    name: In Progress
+    position: 0
+    color: bg-blue-500
+    is_start_step: true
+    show_in_command_panel: false
+    allow_manual_move: false
+    events:
+      on_enter:
+        - type: auto_start_agent
+      on_turn_complete:
+        - type: move_to_step
+          config:
+            step_id: done
+
+  - id: done
+    name: Done
+    position: 1
+    color: bg-green-500
+    show_in_command_panel: false
+    allow_manual_move: false

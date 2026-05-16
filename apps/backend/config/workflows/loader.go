@@ -28,6 +28,7 @@ type stepDefYAML struct {
 	Position              int            `yaml:"position"`
 	Color                 string         `yaml:"color"`
 	Prompt                string         `yaml:"prompt,omitempty"`
+	StageType             string         `yaml:"stage_type,omitempty"`
 	IsStartStep           bool           `yaml:"is_start_step,omitempty"`
 	ShowInCommandPanel    bool           `yaml:"show_in_command_panel,omitempty"`
 	AllowManualMove       bool           `yaml:"allow_manual_move,omitempty"`
@@ -41,6 +42,17 @@ type stepEventsYAML struct {
 	OnTurnStart    []actionYAML `yaml:"on_turn_start,omitempty"`
 	OnTurnComplete []actionYAML `yaml:"on_turn_complete,omitempty"`
 	OnExit         []actionYAML `yaml:"on_exit,omitempty"`
+
+	// Phase 2 (ADR-0004) event-driven triggers. Actions on these triggers
+	// are GenericActions (queue_run, clear_decisions,
+	// queue_run_for_each_participant) — the YAML keys are the same.
+	OnComment           []actionYAML `yaml:"on_comment,omitempty"`
+	OnBlockerResolved   []actionYAML `yaml:"on_blocker_resolved,omitempty"`
+	OnChildrenCompleted []actionYAML `yaml:"on_children_completed,omitempty"`
+	OnApprovalResolved  []actionYAML `yaml:"on_approval_resolved,omitempty"`
+	OnHeartbeat         []actionYAML `yaml:"on_heartbeat,omitempty"`
+	OnBudgetAlert       []actionYAML `yaml:"on_budget_alert,omitempty"`
+	OnAgentError        []actionYAML `yaml:"on_agent_error,omitempty"`
 }
 
 // actionYAML is the YAML-friendly representation of a step action.
@@ -145,6 +157,10 @@ func convertStep(s stepDefYAML) (models.StepDefinition, error) {
 	if err != nil {
 		return models.StepDefinition{}, fmt.Errorf("step %q: %w", s.ID, err)
 	}
+	stage, err := convertStageType(s.StageType)
+	if err != nil {
+		return models.StepDefinition{}, fmt.Errorf("step %q: %w", s.ID, err)
+	}
 	return models.StepDefinition{
 		ID:                    s.ID,
 		Name:                  s.Name,
@@ -156,15 +172,42 @@ func convertStep(s stepDefYAML) (models.StepDefinition, error) {
 		IsStartStep:           s.IsStartStep,
 		ShowInCommandPanel:    s.ShowInCommandPanel,
 		AutoArchiveAfterHours: s.AutoArchiveAfterHours,
+		StageType:             stage,
 	}, nil
+}
+
+// convertStageType validates a YAML stage_type field. Empty strings become
+// the schema default ("custom").
+func convertStageType(stage string) (models.StageType, error) {
+	if stage == "" {
+		return models.StageTypeCustom, nil
+	}
+	switch models.StageType(stage) {
+	case models.StageTypeWork, models.StageTypeReview, models.StageTypeApproval, models.StageTypeCustom:
+		return models.StageType(stage), nil
+	}
+	return "", fmt.Errorf("invalid stage_type %q", stage)
+}
+
+// validGenericAction is the YAML allow-list for actions appearing under any
+// of the Phase 2 (ADR-0004) event-driven triggers. Restricting the set keeps
+// templates honest while letting the engine reject malformed actions at
+// compile time.
+var validGenericAction = map[string]bool{
+	string(models.GenericActionQueueRun):                   true,
+	string(models.GenericActionClearDecisions):             true,
+	string(models.GenericActionQueueRunForEachParticipant): true,
 }
 
 // Valid action types for each event trigger.
 var (
 	validOnEnter = map[string]bool{
-		string(models.OnEnterEnablePlanMode):    true,
-		string(models.OnEnterAutoStartAgent):    true,
-		string(models.OnEnterResetAgentContext): true,
+		string(models.OnEnterEnablePlanMode):             true,
+		string(models.OnEnterAutoStartAgent):             true,
+		string(models.OnEnterResetAgentContext):          true,
+		string(models.OnEnterClearDecisions):             true,
+		string(models.OnEnterQueueRunForEachParticipant): true,
+		string(models.OnEnterQueueRun):                   true,
 	}
 	validOnTurnStart = map[string]bool{
 		string(models.OnTurnStartMoveToNext):     true,
@@ -220,5 +263,38 @@ func convertEvents(e stepEventsYAML) (models.StepEvents, error) {
 			Config: a.Config,
 		})
 	}
+	if err := convertGenericTriggers(e, &events); err != nil {
+		return events, err
+	}
 	return events, nil
+}
+
+// convertGenericTriggers translates the YAML actions under the seven
+// Phase 2 (ADR-0004) event-driven triggers into models.GenericAction lists.
+func convertGenericTriggers(e stepEventsYAML, events *models.StepEvents) error {
+	mappings := []struct {
+		name string
+		in   []actionYAML
+		out  *[]models.GenericAction
+	}{
+		{"on_comment", e.OnComment, &events.OnComment},
+		{"on_blocker_resolved", e.OnBlockerResolved, &events.OnBlockerResolved},
+		{"on_children_completed", e.OnChildrenCompleted, &events.OnChildrenCompleted},
+		{"on_approval_resolved", e.OnApprovalResolved, &events.OnApprovalResolved},
+		{"on_heartbeat", e.OnHeartbeat, &events.OnHeartbeat},
+		{"on_budget_alert", e.OnBudgetAlert, &events.OnBudgetAlert},
+		{"on_agent_error", e.OnAgentError, &events.OnAgentError},
+	}
+	for _, m := range mappings {
+		for _, a := range m.in {
+			if !validGenericAction[a.Type] {
+				return fmt.Errorf("invalid %s action type %q", m.name, a.Type)
+			}
+			*m.out = append(*m.out, models.GenericAction{
+				Type:   models.GenericActionType(a.Type),
+				Config: a.Config,
+			})
+		}
+	}
+	return nil
 }

@@ -43,6 +43,37 @@ func handleE2EReset(repo *sqliterepo.Repository, taskSvc *taskservice.Service, l
 
 		ctx := c.Request.Context()
 
+		// Wipe routing state so the office-routing-* specs don't leak
+		// degraded health rows / route attempts / parked runs between
+		// each other. Office tables live in the same SQLite db so the
+		// task repo's connection can hit them. Tables are no-ops when
+		// the office routing feature isn't enabled.
+		for _, q := range []string{
+			`DELETE FROM office_run_route_attempts WHERE run_id IN (SELECT id FROM runs WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?))`,
+			`DELETE FROM runs WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
+			`DELETE FROM office_provider_health WHERE workspace_id = ?`,
+			`DELETE FROM office_workspace_routing WHERE workspace_id = ?`,
+		} {
+			if _, err := repo.DB().ExecContext(ctx, q, workspaceID); err != nil {
+				// Best-effort: log + continue. Some routing tables may
+				// not exist when the feature is gated off.
+				log.Warn("e2e reset: routing cleanup failed", zap.String("sql", q), zap.Error(err))
+			}
+		}
+
+		// Reset every agent's routing override to the inherit-markers
+		// shape onboarding writes. Without this, an agent-override test
+		// leaves the CEO pinned to a single provider, which derails
+		// subsequent workspace-level routing specs that expect the
+		// resolver to walk the full provider_order.
+		if _, err := repo.DB().ExecContext(ctx, `
+			UPDATE agent_profiles
+			SET settings = '{"routing":{"provider_order_source":"inherit","tier_source":"inherit"}}'
+			WHERE workspace_id = ?
+		`, workspaceID); err != nil {
+			log.Warn("e2e reset: agent settings reset failed", zap.Error(err))
+		}
+
 		// Route through the task service (rather than a raw SQL DELETE) so
 		// each delete spawns the async cleanup goroutine that stops the
 		// agentctl instance and releases its port. Without this, instances

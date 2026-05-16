@@ -42,11 +42,11 @@ const (
 	contentTypeResource = "resource"
 )
 
-// wakeupPromptTimeout bounds how long a synthetic wakeup prompt can run.
-// Wakeup turns can perform real work (the model often runs a few tool calls
+// runPromptTimeout bounds how long a synthetic run prompt can run.
+// Run turns can perform real work (the model often runs a few tool calls
 // before stopping) so we mirror what a normal user-initiated prompt would
 // allow rather than a tight RPC deadline.
-const wakeupPromptTimeout = 30 * time.Minute
+const runPromptTimeout = 30 * time.Minute
 
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
@@ -112,15 +112,15 @@ type Adapter struct {
 	// and rebuilt during session/load replay.
 	activeMonitors map[string]map[string]string
 
-	// ScheduleWakeup tracking. The Claude Agent SDK's ScheduleWakeup tool fires
+	// ScheduleRun tracking. The Claude Agent SDK's ScheduleRun tool fires
 	// its timer inside the SDK's async-iterator, but the upstream
 	// @agentclientprotocol/claude-agent-acp bridge only drains that iterator
-	// inside its prompt() handler — so a wakeup that fires while no prompt is
-	// in flight produces no output. wakeup re-injects the wakeup as a synthetic
-	// session/prompt at fire time. pendingWakeups tracks per-tool-call info
+	// inside its prompt() handler — so a run that fires while no prompt is
+	// in flight produces no output. run re-injects the run as a synthetic
+	// session/prompt at fire time. pendingRuns tracks per-tool-call info
 	// (prompt + scheduledFor) since these arrive in separate notifications.
-	wakeup         *wakeupScheduler
-	pendingWakeups map[string]*pendingWakeup
+	run         *runScheduler
+	pendingRuns map[string]*pendingRun
 
 	// OTel tracing: active prompt span context.
 	// Notification spans become children of the prompt span for visual grouping.
@@ -133,6 +133,15 @@ type Adapter struct {
 	// Available models from the most recent session creation/load.
 	// Used by SetModel to validate the requested model exists.
 	availableModels []acp.UnstableModelInfo
+
+	// usageDelta tracks the running cumulative `usage_update.used` and
+	// the most recent USD cost reported per session. codex-acp emits no
+	// per-turn usage frame; the prompt-complete handler consumes the
+	// delta here when resp.Usage is empty and flags the row estimated.
+	// claude-acp / opencode-acp report a real `result.usage` so this
+	// cache is only ever read for codex-acp turns. Reset to 0 once
+	// consumed so the next turn starts from a fresh delta.
+	usageBySession map[string]*usageTracker
 
 	// Available auth methods captured from the ACP initialize response.
 	// Re-emitted via EventTypeAuthRequired when session/new fails with the
@@ -150,7 +159,7 @@ type Adapter struct {
 	closed bool
 
 	// lifetimeCtx is cancelled by Close. Background work that may outlive
-	// the call site (e.g. the synthetic wakeup prompt goroutine) derives its
+	// the call site (e.g. the synthetic run prompt goroutine) derives its
 	// context from this one so it aborts when the adapter shuts down rather
 	// than continuing to drive a dead subprocess.
 	lifetimeCtx    context.Context
@@ -171,12 +180,13 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		updatesCh:       make(chan AgentEvent, 100),
 		activeToolCalls: make(map[string]*streams.NormalizedPayload),
 		activeMonitors:  make(map[string]map[string]string),
-		pendingWakeups:  make(map[string]*pendingWakeup),
+		pendingRuns:     make(map[string]*pendingRun),
+		usageBySession:  make(map[string]*usageTracker),
 		attachMgr:       shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
 		lifetimeCtx:     ctx,
 		lifetimeCancel:  cancel,
 	}
-	a.wakeup = newWakeupScheduler(l, a.fireWakeup)
+	a.run = newRunScheduler(l, a.fireRun)
 	return a
 }
 
@@ -295,13 +305,13 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 		return "", fmt.Errorf("adapter not initialized")
 	}
 
-	// A fresh session invalidates any pending wakeup keyed to the prior
-	// session. Reset pendingWakeups and cancel the scheduler under one
-	// a.mu critical section so a concurrent handleWakeupEvent can't slip
+	// A fresh session invalidates any pending run keyed to the prior
+	// session. Reset pendingRuns and cancel the scheduler under one
+	// a.mu critical section so a concurrent handleRunEvent can't slip
 	// a stale entry between the two operations.
 	a.mu.Lock()
-	a.pendingWakeups = make(map[string]*pendingWakeup)
-	a.wakeup.cancel()
+	a.pendingRuns = make(map[string]*pendingRun)
+	a.run.cancel()
 	a.mu.Unlock()
 
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.new")
@@ -478,13 +488,13 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
 	}
 
-	// Loading a different session invalidates any pending wakeup keyed to the
+	// Loading a different session invalidates any pending run keyed to the
 	// prior session — same reset block as NewSession to avoid leaving an armed
 	// timer for a session id that's about to change and accumulating stale
-	// pendingWakeups entries across reloads.
+	// pendingRuns entries across reloads.
 	a.mu.Lock()
-	a.pendingWakeups = make(map[string]*pendingWakeup)
-	a.wakeup.cancel()
+	a.pendingRuns = make(map[string]*pendingRun)
+	a.run.cancel()
 	a.mu.Unlock()
 
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.load")
@@ -704,11 +714,35 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 	a.logger.Debug("emitting complete event after prompt",
 		zap.String("session_id", sessionID),
 		zap.String("stop_reason", stopReason))
+	usage := extractUsage(&resp)
+	// codex-acp emits no per-turn usage frame, only cumulative
+	// usage_update.used. Fall back to the inferred delta so the office
+	// cost subscriber sees at least an approximate input count. The
+	// resulting cost is off (no input/output split) — flagged via
+	// PromptUsage.Estimated so downstream rows carry estimated=true.
+	delta, costSubcents := a.consumeUsageDelta(sessionID)
+	if usage == nil {
+		if delta > 0 || costSubcents > 0 {
+			usage = &streams.PromptUsage{
+				InputTokens:                  delta,
+				Estimated:                    true,
+				ProviderReportedCostSubcents: costSubcents,
+			}
+		}
+	} else if costSubcents > 0 {
+		// claude-acp: usage_update.cost.amount carries the authoritative
+		// USD cost — attach it to the typed usage frame so Layer A wins
+		// downstream and the office cost subscriber stores the row
+		// verbatim instead of falling back to models.dev. claude-acp's
+		// model id is a logical alias (sonnet / haiku) that won't match
+		// any pricing entry, so this is the only accurate cost path.
+		usage.ProviderReportedCostSubcents = costSubcents
+	}
 	a.sendUpdate(AgentEvent{
 		Type:      streams.EventTypeComplete,
 		SessionID: sessionID,
 		Data:      map[string]any{"stop_reason": stopReason},
-		Usage:     extractPromptUsage(resp.Meta),
+		Usage:     usage,
 	})
 
 	// Clean up saved attachments — agent has finished reading them
@@ -717,9 +751,9 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 	return nil
 }
 
-// fireWakeup is invoked by wakeupScheduler when a ScheduleWakeup timer
+// fireRun is invoked by runScheduler when a ScheduleRun timer
 // elapses. It issues a synthetic session/prompt so the upstream
-// @agentclientprotocol/claude-agent-acp bridge drains the SDK's queued wakeup
+// @agentclientprotocol/claude-agent-acp bridge drains the SDK's queued run
 // turn and emits visible ACP frames. The session must still match (the user
 // hasn't started a fresh session) and the adapter must not be closed.
 //
@@ -730,80 +764,80 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 // JSON-RPC pairs each response back to its originating request via id —
 // but it does mean two prompts can be in flight against the bridge at
 // once. The bridge serialises them in the order it receives them, which
-// is exactly what we want for a wakeup that races a user message.
-func (a *Adapter) fireWakeup(sessionID, prompt string) {
+// is exactly what we want for a run that races a user message.
+func (a *Adapter) fireRun(sessionID, prompt string) {
 	a.mu.RLock()
 	closed := a.closed
 	currentSession := a.sessionID
 	a.mu.RUnlock()
 
 	if closed {
-		a.logger.Debug("skipping wakeup fire: adapter closed",
+		a.logger.Debug("skipping run fire: adapter closed",
 			zap.String("session_id", sessionID))
 		return
 	}
 	if currentSession != sessionID {
-		a.logger.Info("skipping wakeup fire: session changed",
+		a.logger.Info("skipping run fire: session changed",
 			zap.String("scheduled_for", sessionID),
 			zap.String("current", currentSession))
 		return
 	}
 
-	a.logger.Info("injecting synthetic wakeup prompt",
+	a.logger.Info("injecting synthetic run prompt",
 		zap.String("session_id", sessionID),
 		zap.Int("prompt_len", len(prompt)))
 
 	go func() {
 		// Derive from lifetimeCtx so a concurrent Close aborts the in-flight
 		// prompt instead of letting it run against a dead subprocess.
-		ctx, cancel := context.WithTimeout(a.lifetimeCtx, wakeupPromptTimeout)
+		ctx, cancel := context.WithTimeout(a.lifetimeCtx, runPromptTimeout)
 		defer cancel()
 		if err := a.Prompt(ctx, prompt, nil); err != nil {
-			a.logger.Error("synthetic wakeup prompt failed",
+			a.logger.Error("synthetic run prompt failed",
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 		}
 	}()
 }
 
-// handleWakeupEvent inspects a tool-call meta + rawInput pair, accumulates
-// pending state per toolCallID, and schedules a wakeup once both the prompt
+// handleRunEvent inspects a tool-call meta + rawInput pair, accumulates
+// pending state per toolCallID, and schedules a run once both the prompt
 // and scheduledFor timestamp are known. terminal=true means the tool call has
 // reached a terminal state, so any pending entry should be cleaned up.
-func (a *Adapter) handleWakeupEvent(sessionID, toolCallID string, meta any, rawInput any, terminal bool) {
+func (a *Adapter) handleRunEvent(sessionID, toolCallID string, meta any, rawInput any, terminal bool) {
 	if toolCallID == "" {
 		return
 	}
 
-	scheduledForMs, isWakeup := extractScheduleWakeup(meta)
+	scheduledForMs, isRun := extractScheduleRun(meta)
 
 	a.mu.Lock()
-	pw, tracked := a.pendingWakeups[toolCallID]
+	pw, tracked := a.pendingRuns[toolCallID]
 	if !tracked {
-		if !isWakeup {
+		if !isRun {
 			a.mu.Unlock()
 			return
 		}
-		pw = &pendingWakeup{}
-		a.pendingWakeups[toolCallID] = pw
+		pw = &pendingRun{}
+		a.pendingRuns[toolCallID] = pw
 	}
 
 	if scheduledForMs > 0 {
 		pw.scheduledForMs = scheduledForMs
 	}
-	if prompt, ok := extractWakeupPrompt(rawInput); ok {
+	if prompt, ok := extractRunPrompt(rawInput); ok {
 		pw.prompt = prompt
 	}
 
 	prompt := pw.prompt
 	stamp := pw.scheduledForMs
 	if (prompt != "" && stamp > 0) || terminal {
-		delete(a.pendingWakeups, toolCallID)
+		delete(a.pendingRuns, toolCallID)
 	}
 	a.mu.Unlock()
 
 	if prompt != "" && stamp > 0 {
-		a.wakeup.schedule(sessionID, prompt, stamp)
+		a.run.schedule(sessionID, prompt, stamp)
 	}
 }
 
@@ -939,10 +973,10 @@ func (a *Adapter) Close() error {
 
 	a.logger.Info("closing ACP adapter")
 
-	// Stop any pending ScheduleWakeup timer so it doesn't fire after close,
-	// and cancel the lifetime context so any in-flight wakeup prompt aborts.
-	if a.wakeup != nil {
-		a.wakeup.cancel()
+	// Stop any pending ScheduleRun timer so it doesn't fire after close,
+	// and cancel the lifetime context so any in-flight run prompt aborts.
+	if a.run != nil {
+		a.run.cancel()
 	}
 	if a.lifetimeCancel != nil {
 		a.lifetimeCancel()
@@ -1149,6 +1183,60 @@ type acpUsageUpdate struct {
 	} `json:"cost,omitempty"`
 }
 
+// usageTracker carries the running cumulative usage state for one ACP
+// session — used to infer codex-acp's per-turn deltas. Reset when the
+// prompt-complete handler consumes it; lastUsed sticks so subsequent
+// updates compute deltas from the new baseline.
+//
+// lastCostSubcents is the most recent USD cost (Layer A from spec) in
+// hundredths of a cent; pumped through to PromptUsage.
+// ProviderReportedCostSubcents at consume time. The actual claude-acp
+// frames carry a cumulative number, but we treat the most-recent value
+// as the per-turn cost because claude-code already emits one cost
+// snapshot per session/prompt cycle.
+type usageTracker struct {
+	lastUsed         int64
+	lastCostSubcents int64
+}
+
+// recordUsageDelta updates the per-session tracker. Returns the
+// integer delta against the previous `used` snapshot — the next prompt
+// complete call consumes this via consumeUsageDelta. Cost is forwarded
+// as the latest value (claude-acp emits a per-turn cumulative cost; we
+// treat the most recent value as the turn's cost).
+func (a *Adapter) recordUsageDelta(sessionID string, used int64, costSubcents int64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	tr := a.usageBySession[sessionID]
+	if tr == nil {
+		tr = &usageTracker{}
+		a.usageBySession[sessionID] = tr
+	}
+	if used > tr.lastUsed {
+		tr.lastUsed = used
+	}
+	if costSubcents > 0 {
+		tr.lastCostSubcents = costSubcents
+	}
+}
+
+// consumeUsageDelta returns the delta of cumulative `used` since the
+// last consumption + the most recent USD cost (subcents). Both fields
+// are reset to zero after read so the next turn starts fresh.
+func (a *Adapter) consumeUsageDelta(sessionID string) (int64, int64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	tr := a.usageBySession[sessionID]
+	if tr == nil {
+		return 0, 0
+	}
+	delta := tr.lastUsed
+	cost := tr.lastCostSubcents
+	tr.lastUsed = 0
+	tr.lastCostSubcents = 0
+	return delta, cost
+}
+
 // tryConvertUntypedUpdate handles ACP session update types not yet supported by the SDK.
 // When the SDK adds native support, move the handling into convertNotification and delete this.
 func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID string) *AgentEvent {
@@ -1166,6 +1254,19 @@ func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID stri
 	if usage.SessionUpdate != "usage_update" || usage.Size <= 0 {
 		return nil
 	}
+
+	// Forward usage_update.cost to the prompt-complete handler via the
+	// per-session tracker. claude-acp emits a USD float; we convert to
+	// hundredths-of-a-cent (subcents). The actual cost frame might be
+	// "cumulative-this-session"; the prompt-complete handler currently
+	// treats the value as the turn's cost — close enough for the
+	// budget+display surface today and revisited if claude-acp's
+	// semantics change.
+	var costSubcents int64
+	if usage.Cost != nil {
+		costSubcents = int64(usage.Cost.Amount * 10000)
+	}
+	a.recordUsageDelta(sessionID, usage.Used, costSubcents)
 
 	remaining := max(usage.Size-usage.Used, 0)
 	return &AgentEvent{
@@ -1657,10 +1758,10 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 	a.activeToolCalls[toolCallID] = normalizedPayload
 	a.mu.Unlock()
 
-	// ScheduleWakeup tracking: meta carries `_meta.claudeCode.toolName`
+	// ScheduleRun tracking: meta carries `_meta.claudeCode.toolName`
 	// on the initial tool_call; rawInput is usually empty here but record
 	// the prompt eagerly when it does arrive in the same notification.
-	a.handleWakeupEvent(sessionID, toolCallID, tc.Meta, tc.RawInput, false)
+	a.handleRunEvent(sessionID, toolCallID, tc.Meta, tc.RawInput, false)
 
 	// Detect tool type for logging
 	toolType := DetectToolOperationType(toolKind, args)
@@ -1787,10 +1888,10 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	}
 	a.mu.Unlock()
 
-	// ScheduleWakeup tracking: tool_call_update is where rawInput.prompt and
+	// ScheduleRun tracking: tool_call_update is where rawInput.prompt and
 	// `_meta.claudeCode.toolResponse.scheduledFor` typically arrive. Once both
 	// are known, schedule the synthetic prompt; on terminal status, clean up.
-	a.handleWakeupEvent(sessionID, toolCallID, tcu.Meta, tcu.RawInput, isTerminal)
+	a.handleRunEvent(sessionID, toolCallID, tcu.Meta, tcu.RawInput, isTerminal)
 
 	// When a switch_mode tool carries a plan (e.g. ExitPlanMode), emit it
 	// as an agent_plan event so the orchestrator creates a visible plan message.

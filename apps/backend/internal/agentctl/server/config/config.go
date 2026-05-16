@@ -115,6 +115,14 @@ type McpServerConfig struct {
 // InstanceConfig holds configuration for a single agent instance.
 // This is passed to the process manager and API server.
 type InstanceConfig struct {
+	// InstanceID is the stable identifier the InstanceManager assigned to
+	// this instance. Used by the API middleware to reject requests whose
+	// X-Instance-ID header doesn't match — a stale client that still
+	// targets a port that has since been recycled to a new instance
+	// (e.g. after the previous instance was deleted) gets 404 instead
+	// of accidentally configuring or starting the new instance's agent.
+	InstanceID string
+
 	// Port is the HTTP server port for this instance
 	Port int
 
@@ -301,6 +309,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides == nil {
 		return
 	}
+	if overrides.InstanceID != "" {
+		cfg.InstanceID = overrides.InstanceID
+	}
 	if overrides.Protocol != "" {
 		cfg.Protocol = overrides.Protocol
 	}
@@ -344,6 +355,7 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 
 // InstanceOverrides allows overriding default values when creating an instance
 type InstanceOverrides struct {
+	InstanceID         string
 	Protocol           agent.Protocol
 	AgentCommand       string
 	WorkDir            string

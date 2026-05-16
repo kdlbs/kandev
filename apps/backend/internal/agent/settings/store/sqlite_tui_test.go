@@ -18,7 +18,7 @@ func newTestRepo(t *testing.T) Repository {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	repo, err := newSQLiteRepository(db, db, false)
+	repo, err := newSQLiteRepository(db, db, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

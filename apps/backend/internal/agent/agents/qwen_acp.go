@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -108,3 +109,5 @@ func (a *QwenACP) InferenceConfig() *InferenceConfig {
 		Command:   NewCommand("npx", "-y", qwenACPPkg, "--acp"),
 	}
 }
+
+func (a *QwenACP) BillingType() usage.BillingType { return defaultBillingType() }

@@ -146,6 +146,14 @@ func TestMonitorLoop_TransitionToFastTriggersImmediateScan(t *testing.T) {
 
 // TestMonitorLoop_FastPolls verifies that fast mode actually polls at its
 // configured interval (smoke test for the resettable-timer path).
+//
+// Synchronization: the monitor loop signals tickDone (buffered, size 1) at
+// the end of every cycle, so the test drives off completed ticks instead of
+// wall-clock budgets. After WriteFile we wait for two consecutive ticks: the
+// first one may have started before WriteFile returned (and would miss the
+// change); the second is guaranteed to have started after. This removes the
+// Windows-CI flake where a tight 1s wall-clock budget plus a real `git
+// diff-files` subprocess occasionally exceeded the deadline under -race.
 func TestMonitorLoop_FastPolls(t *testing.T) {
 	isolateTestGitEnv(t)
 	repoDir, cleanup := setupTestRepo(t)
@@ -165,13 +173,31 @@ func TestMonitorLoop_FastPolls(t *testing.T) {
 	// Wait for monitorLoop's initial state capture before writing.
 	<-wt.initialScanDone
 	drainStream(sub)
+	// Clear any tick signal that was buffered between initialScanDone and now
+	// so the next tickDone read corresponds to a tick after our drain.
+	select {
+	case <-wt.tickDone:
+	default:
+	}
 
 	if err := os.WriteFile(filepath.Join(repoDir, "tick.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
 
-	if got := waitForFileChangeNotification(sub, 1*time.Second); !got {
-		t.Error("expected file-change notification within 1s in fast mode")
+	// Wait for two consecutive tick completions. The first might be a tick
+	// that started before WriteFile returned; the second is guaranteed to
+	// have run getWorkspaceState after the file landed. 10s per tick is
+	// generous — actual tick work is bounded by one `git diff-files` call.
+	for i := 0; i < 2; i++ {
+		select {
+		case <-wt.tickDone:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("tick %d did not complete within 10s", i+1)
+		}
+	}
+
+	if got := waitForFileChangeNotification(sub, 2*time.Second); !got {
+		t.Error("expected file-change notification after two complete poll cycles in fast mode")
 	}
 }
 

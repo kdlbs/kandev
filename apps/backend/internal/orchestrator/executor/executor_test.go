@@ -242,6 +242,84 @@ func TestAssignLaunchTaskEnvironmentID(t *testing.T) {
 	})
 }
 
+// TestLaunchPreparedSession_InheritsEnvFromSessionEnvironmentID pins the
+// office task-handoffs inheritance contract: when a child task's session
+// already has TaskEnvironmentID pointing at a parent / shared-group env,
+// the launch path must consult that env (via GetTaskEnvironment) instead
+// of creating a fresh worktree.
+//
+// Regression guard for the bug where executor_execute.go only called
+// GetTaskEnvironmentByTaskID(task.ID) — which always missed the parent's
+// env row because that row is indexed by the parent's task id.
+func TestLaunchPreparedSession_InheritsEnvFromSessionEnvironmentID(t *testing.T) {
+	repo := newMockRepository()
+
+	// Seed a parent-owned env that is NOT indexed by the child's task id.
+	parentEnv := &models.TaskEnvironment{
+		ID:            "env-parent",
+		TaskID:        "task-parent",
+		WorktreeID:    "wt-parent",
+		WorktreePath:  "/tmp/parent",
+		WorkspacePath: "/tmp/parent",
+		Status:        models.TaskEnvironmentStatusReady,
+	}
+	repo.taskEnvironments[parentEnv.ID] = parentEnv
+
+	// Child session already points at the parent env (set earlier by
+	// propagateInheritedEnvironment in internal/orchestrator/handoff_inheritance.go).
+	session := &models.TaskSession{
+		ID:                "session-child",
+		TaskID:            "task-child",
+		AgentProfileID:    "profile-123",
+		TaskEnvironmentID: parentEnv.ID,
+		State:             models.TaskSessionStateCreated,
+		StartedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+	}
+	repo.sessions[session.ID] = session
+
+	gotEnvID := ""
+	gotUseWorktree := false
+	gotWorktreeID := ""
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			gotEnvID = req.TaskEnvironmentID
+			gotUseWorktree = req.UseWorktree
+			gotWorktreeID = req.WorktreeID
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-1",
+				ContainerID:      "container-1",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+	}
+	executor := newTestExecutor(t, agentManager, repo)
+
+	task := &v1.Task{ID: "task-child", WorkspaceID: "ws-1"}
+	if _, err := executor.LaunchPreparedSession(context.Background(), task, "session-child",
+		LaunchOptions{AgentProfileID: "profile-123", Prompt: "test", StartAgent: true}); err != nil {
+		t.Fatalf("LaunchPreparedSession: %v", err)
+	}
+
+	if gotEnvID != parentEnv.ID {
+		t.Errorf("expected inherited TaskEnvironmentID=%q on launch req; got %q",
+			parentEnv.ID, gotEnvID)
+	}
+	// When the executor type elected a worktree-backed launch, the
+	// existingEnv.WorktreeID must flow through. When it didn't, this
+	// assertion is a no-op — the env-id inheritance above is the load-
+	// bearing check for the regression we're guarding against.
+	if gotUseWorktree && gotWorktreeID != parentEnv.WorktreeID {
+		t.Errorf("expected reused WorktreeID=%q from inherited env; got %q",
+			parentEnv.WorktreeID, gotWorktreeID)
+	}
+	// No fresh env row should be created — the inherited one was reused.
+	if len(repo.createTaskEnvironmentCalls) != 0 {
+		t.Errorf("expected zero CreateTaskEnvironment calls (env inherited); got %d",
+			len(repo.createTaskEnvironmentCalls))
+	}
+}
+
 func TestLaunchPreparedSession_SessionNotBelongsToTask(t *testing.T) {
 	repo := newMockRepository()
 
@@ -507,6 +585,152 @@ func TestLaunchPreparedSession_StaleExecution_FallsThroughToLaunchAgent(t *testi
 			got = updatedRunning.AgentExecutionID
 		}
 		t.Errorf("Expected executors_running.agent_execution_id to be 'new-exec-id', got %q", got)
+	}
+}
+
+// TestLaunchPreparedSession_FullPath_CarriesResumeToken verifies that when the
+// full LaunchAgent path runs (e.g. office wakeup falling through after an IDLE
+// session tore down the in-memory execution), the prior ACP session id is read
+// from executors_running.resume_token and passed as req.ACPSessionID so the
+// agent CLI resumes the conversation via session/load instead of starting a
+// fresh session/new. The wakeup prompt (TaskDescription) must NOT be cleared —
+// office wakeups deliver the new comment / event as the prompt.
+func TestLaunchPreparedSession_FullPath_CarriesResumeToken(t *testing.T) {
+	repo := newMockRepository()
+
+	session := &models.TaskSession{
+		ID:             "session-123",
+		TaskID:         "task-123",
+		AgentProfileID: "profile-123",
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	repo.sessions[session.ID] = session
+	// executors_running row carries the prior ACP session id (resume token).
+	// HasExecutorRunningRow is true → fast path is tried; the live execution
+	// is gone (office IDLE) → ErrStaleExecution → fall through to full path.
+	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
+		ID:               session.ID,
+		SessionID:        session.ID,
+		TaskID:           session.TaskID,
+		AgentExecutionID: "stale-exec-id",
+		ResumeToken:      "acp-session-abc",
+		Status:           "ready",
+	}
+
+	var capturedReq *LaunchAgentRequest
+	agentManager := &mockAgentManager{
+		// No live execution — simulates office IDLE / backend restart.
+		getExecutionIDForSessionFunc: func(ctx context.Context, sessionID string) (string, error) {
+			return "", fmt.Errorf("no execution found for session %s", sessionID)
+		},
+		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			capturedReq = req
+			repo.executorsRunning[req.SessionID] = &models.ExecutorRunning{
+				ID:               req.SessionID,
+				SessionID:        req.SessionID,
+				TaskID:           req.TaskID,
+				AgentExecutionID: "new-exec-id",
+				ResumeToken:      "acp-session-abc",
+				Status:           "starting",
+			}
+			return &LaunchAgentResponse{
+				AgentExecutionID: "new-exec-id",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+	}
+
+	executor := newTestExecutor(t, agentManager, repo)
+
+	task := &v1.Task{
+		ID:          "task-123",
+		WorkspaceID: "workspace-123",
+		Title:       "Test Task",
+	}
+
+	_, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{
+		AgentProfileID: "profile-123",
+		Prompt:         "follow-up wakeup prompt",
+		StartAgent:     true,
+	})
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession failed: %v", err)
+	}
+
+	if capturedReq == nil {
+		t.Fatal("Expected LaunchAgent to be called")
+	}
+	if capturedReq.ACPSessionID != "acp-session-abc" {
+		t.Errorf("Expected req.ACPSessionID to be carried from resume_token, got %q", capturedReq.ACPSessionID)
+	}
+	// Wakeup must still deliver the prompt — unlike the explicit ResumeSession
+	// path we do NOT clear TaskDescription.
+	if capturedReq.TaskDescription == "" {
+		t.Error("Expected req.TaskDescription to remain set for wakeup; it was cleared")
+	}
+}
+
+// TestLaunchPreparedSession_FullPath_WorkspaceOnly_DoesNotResume verifies that
+// when startAgent is false (workspace-only prep) we do NOT carry the resume
+// token forward, mirroring the gating in ResumeSession.
+func TestLaunchPreparedSession_FullPath_WorkspaceOnly_DoesNotResume(t *testing.T) {
+	repo := newMockRepository()
+
+	session := &models.TaskSession{
+		ID:             "session-456",
+		TaskID:         "task-456",
+		AgentProfileID: "profile-456",
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	repo.sessions[session.ID] = session
+	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
+		ID:               session.ID,
+		SessionID:        session.ID,
+		TaskID:           session.TaskID,
+		AgentExecutionID: "stale-exec-id",
+		ResumeToken:      "acp-session-xyz",
+		Status:           "ready",
+	}
+
+	var capturedReq *LaunchAgentRequest
+	agentManager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(ctx context.Context, sessionID string) (string, error) {
+			return "", fmt.Errorf("no execution found for session %s", sessionID)
+		},
+		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			capturedReq = req
+			return &LaunchAgentResponse{
+				AgentExecutionID: "new-exec-id",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+	}
+
+	executor := newTestExecutor(t, agentManager, repo)
+
+	task := &v1.Task{
+		ID:          "task-456",
+		WorkspaceID: "workspace-456",
+		Title:       "Test Task",
+	}
+
+	_, err := executor.LaunchPreparedSession(context.Background(), task, "session-456", LaunchOptions{
+		AgentProfileID: "profile-456",
+		StartAgent:     false,
+	})
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession failed: %v", err)
+	}
+
+	if capturedReq == nil {
+		t.Fatal("Expected LaunchAgent to be called")
+	}
+	if capturedReq.ACPSessionID != "" {
+		t.Errorf("Expected req.ACPSessionID to remain empty when startAgent=false, got %q", capturedReq.ACPSessionID)
 	}
 }
 

@@ -112,7 +112,7 @@ func (s *Service) createLinearIssueTask(ctx context.Context, evt *linear.NewLine
 	}
 	if _, err := s.StartTask(
 		ctx, task.ID, evt.AgentProfileID, "", evt.ExecutorProfileID,
-		0, task.Description, evt.WorkflowStepID, false, nil,
+		"", task.Description, evt.WorkflowStepID, false, nil,
 	); err != nil {
 		s.logger.Error("failed to auto-start linear issue task",
 			zap.String("task_id", task.ID), zap.Error(err))

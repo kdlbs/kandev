@@ -2,40 +2,34 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { normalizeAgentProfile } from "@/lib/api/domains/agent-profile-normalize";
+import type { AgentProfile } from "@/lib/types/agent-profile";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildProfileEntry(profile: any) {
-  return {
-    id: profile.id,
-    agent_id: profile.agent_id,
-    name: profile.name,
-    agent_display_name: profile.agent_display_name,
-    model: profile.model,
-    auto_approve: profile.auto_approve,
-    dangerously_skip_permissions: profile.dangerously_skip_permissions,
-    allow_indexing: profile.allow_indexing,
-    cli_flags: profile.cli_flags ?? [],
-    cli_passthrough: profile.cli_passthrough ?? false,
-    plan: profile.plan,
-    created_at: profile.created_at ?? "",
-    updated_at: profile.updated_at ?? "",
-  };
+function buildProfileEntry(profile: unknown): AgentProfile {
+  return normalizeAgentProfile(profile);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function handleProfileCreated(state: AppState, profile: any): Partial<AppState> {
-  const agent = state.settingsAgents.items.find((a) => a.id === profile.agent_id);
-  const agentStub = { id: profile.agent_id, name: agent?.name ?? "" };
+function getAgentId(raw: unknown): string {
+  const obj = (raw ?? {}) as Record<string, unknown>;
+  const value = obj.agentId ?? obj.agent_id;
+  return typeof value === "string" ? value : "";
+}
+
+function handleProfileCreated(state: AppState, profile: unknown): Partial<AppState> {
+  const normalized = normalizeAgentProfile(profile);
+  const agentId = getAgentId(profile);
+  const agent = state.settingsAgents.items.find((a) => a.id === agentId);
+  const agentStub = { id: agentId, name: agent?.name ?? "" };
   const nextProfiles = [
-    ...state.agentProfiles.items.filter((p) => p.id !== profile.id),
-    toAgentProfileOption(agentStub, profile),
+    ...state.agentProfiles.items.filter((p) => p.id !== normalized.id),
+    toAgentProfileOption(agentStub, normalized),
   ];
   const nextAgents = state.settingsAgents.items.map((item) =>
-    item.id === profile.agent_id
+    item.id === agentId
       ? {
           ...item,
           profiles: [
-            ...item.profiles.filter((p) => p.id !== profile.id),
+            ...item.profiles.filter((p) => p.id !== normalized.id),
             buildProfileEntry(profile),
           ],
         }
@@ -47,33 +41,19 @@ function handleProfileCreated(state: AppState, profile: any): Partial<AppState> 
   };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function handleProfileUpdated(state: AppState, profile: any): Partial<AppState> {
-  const agent = state.settingsAgents.items.find((a) => a.id === profile.agent_id);
-  const agentStub = { id: profile.agent_id, name: agent?.name ?? "" };
+function handleProfileUpdated(state: AppState, profile: unknown): Partial<AppState> {
+  const normalized = normalizeAgentProfile(profile);
+  const agentId = getAgentId(profile);
+  const agent = state.settingsAgents.items.find((a) => a.id === agentId);
+  const agentStub = { id: agentId, name: agent?.name ?? "" };
   const nextProfiles = state.agentProfiles.items.map((p) =>
-    p.id === profile.id ? toAgentProfileOption(agentStub, profile) : p,
+    p.id === normalized.id ? toAgentProfileOption(agentStub, normalized) : p,
   );
   const nextAgents = state.settingsAgents.items.map((item) =>
-    item.id === profile.agent_id
+    item.id === agentId
       ? {
           ...item,
-          profiles: item.profiles.map((p) =>
-            p.id === profile.id
-              ? {
-                  ...p,
-                  name: profile.name,
-                  agent_display_name: profile.agent_display_name,
-                  model: profile.model,
-                  auto_approve: profile.auto_approve,
-                  dangerously_skip_permissions: profile.dangerously_skip_permissions,
-                  allow_indexing: profile.allow_indexing,
-                  cli_flags: profile.cli_flags ?? p.cli_flags ?? [],
-                  plan: profile.plan,
-                  updated_at: profile.updated_at ?? p.updated_at,
-                }
-              : p,
-          ),
+          profiles: item.profiles.map((p) => (p.id === normalized.id ? normalized : p)),
         }
       : item,
   );
@@ -138,18 +118,21 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
       }));
     },
     "agent.profile.deleted": (message) => {
+      const profile = message.payload.profile as Record<string, unknown>;
+      const profileId = profile.id as string;
+      const agentId = getAgentId(profile);
       store.setState((state) => ({
         ...state,
         agentProfiles: {
           ...state.agentProfiles,
-          items: state.agentProfiles.items.filter((p) => p.id !== message.payload.profile.id),
+          items: state.agentProfiles.items.filter((p) => p.id !== profileId),
         },
         settingsAgents: {
           items: state.settingsAgents.items.map((item) =>
-            item.id === message.payload.profile.agent_id
+            item.id === agentId
               ? {
                   ...item,
-                  profiles: item.profiles.filter((p) => p.id !== message.payload.profile.id),
+                  profiles: item.profiles.filter((p) => p.id !== profileId),
                 }
               : item,
           ),

@@ -34,6 +34,10 @@ const eslintConfig = defineConfig([
       "sonarjs/no-duplicate-string": ["warn", { threshold: 4 }],
       "sonarjs/no-identical-functions": "warn",
       "unused-imports/no-unused-imports": "warn",
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { varsIgnorePattern: "^_", argsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" },
+      ],
     },
   },
   // E2E tests (Playwright): disable React hooks rules since Playwright's `use()` and

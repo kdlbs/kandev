@@ -11,6 +11,8 @@ export { createUISlice, defaultUIState } from "./ui/ui-slice";
 export { createGitHubSlice, defaultGitHubState } from "./github/github-slice";
 export { createJiraSlice, defaultJiraState } from "./jira/jira-slice";
 export { createLinearSlice, defaultLinearState } from "./linear/linear-slice";
+export { createOfficeSlice, defaultOfficeState } from "./office/office-slice";
+export { createFeaturesSlice, defaultFeaturesState } from "./features/features-slice";
 
 // Export types
 export type { KanbanSlice, KanbanSliceState, KanbanSliceActions } from "./kanban/types";
@@ -36,6 +38,14 @@ export type {
   LinearSliceActions,
   LinearIssueWatchesState,
 } from "./linear/types";
+export type { OfficeSlice, OfficeSliceState, OfficeSliceActions } from "./office/types";
+export type {
+  FeaturesSlice,
+  FeaturesSliceState,
+  FeaturesSliceActions,
+  FeatureFlags,
+  FeatureName,
+} from "./features/types";
 
 // Re-export commonly used types from each domain
 export type {
@@ -126,4 +136,17 @@ export type {
   ReviewWatchesState,
   IssueWatchesState,
 } from "./github/types";
+export type {
+  AgentProfile,
+  Skill,
+  Project,
+  Approval,
+  ActivityEntry,
+  CostSummary,
+  BudgetPolicy,
+  Routine,
+  InboxItem,
+  Run,
+  DashboardData,
+} from "./office/types";
 export type { Repository, Branch } from "@/lib/types/http";

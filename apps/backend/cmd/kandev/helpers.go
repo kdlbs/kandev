@@ -19,17 +19,19 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	agenthandlers "github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/hostutility"
-	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/loginpty"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
+	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentsettingshandlers "github.com/kandev/kandev/internal/agent/settings/handlers"
-	"github.com/kandev/kandev/internal/agentctl/client"
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	analyticshandlers "github.com/kandev/kandev/internal/analytics/handlers"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/clarification"
+	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
 	debughandlers "github.com/kandev/kandev/internal/debug"
@@ -46,6 +48,10 @@ import (
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
+	"github.com/kandev/kandev/internal/office"
+	officeagents "github.com/kandev/kandev/internal/office/agents"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	officetestharness "github.com/kandev/kandev/internal/office/testharness"
 	"github.com/kandev/kandev/internal/orchestrator"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
@@ -63,6 +69,7 @@ import (
 	utilityhandlers "github.com/kandev/kandev/internal/utility/handlers"
 	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
 	workflowhandlers "github.com/kandev/kandev/internal/workflow/handlers"
+	"github.com/kandev/kandev/internal/worktree"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -409,6 +416,7 @@ type routeParams struct {
 	gateway                 *gateways.Gateway
 	taskSvc                 *taskservice.Service
 	taskRepo                *sqliterepo.Repository
+	officeRepo              *officesqlite.Repository
 	analyticsRepo           analyticsrepository.Repository
 	orchestratorSvc         *orchestrator.Service
 	lifecycleMgr            *lifecycle.Manager
@@ -416,6 +424,7 @@ type routeParams struct {
 	eventBus                bus.EventBus
 	services                *Services
 	agentSettingsController *agentsettingscontroller.Controller
+	agentSettingsRepo       settingsstore.Repository
 	agentList               taskhandlers.AgentLister
 	agentRegistry           *registry.Registry
 	userCtrl                *usercontroller.Controller
@@ -431,8 +440,9 @@ type routeParams struct {
 	repoCloner              *repoclone.Cloner
 	version                 string
 	webInternalURL          string
-	pprofEnabled            bool
+	devMode                 bool
 	httpPort                int
+	features                config.FeaturesConfig
 	log                     *logger.Logger
 }
 
@@ -444,12 +454,78 @@ func registerRoutes(p routeParams) {
 	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.eventBus, p.log)
 	p.orchestratorSvc.SetClarificationCanceller(clarificationCanceller)
 
-	p.gateway.SetupRoutes(p.router)
-	registerTaskRoutes(p, planService)
-	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, planService)
+	// Wire pending clarification requests into the office inbox.
+	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
+		p.services.OfficeSvcs.Dashboard.SetPermissionLister(clarificationStore)
+	}
 
+	// Office task-handoffs phase 4 + 5 — single HandoffService instance
+	// shared by the MCP path (office agents) and the HTTP path (Kanban
+	// subtask UI). Constructed here so registerTaskRoutes can wire it
+	// into TaskHandlers.SetHandoffService and registerMCPAndDebugRoutes
+	// reuses the same instance via SetHandoffService on mcpHandlers.
+	handoffDocSvc := taskservice.NewDocumentService(p.taskRepo, p.log)
+	handoffSvc := taskservice.NewHandoffService(p.taskRepo, p.taskRepo, handoffDocSvc,
+		p.officeRepo, p.officeRepo, p.log)
+	// Phase 6 wirings — materializer hook + disk cleaner. The
+	// SessionWorktreeReader and WorkspaceCleaner interfaces are both
+	// satisfied by adapters that delegate to existing services.
+	handoffSvc.SetSessionReader(p.taskRepo)
+	if p.lifecycleMgr != nil {
+		if wtMgr := p.lifecycleMgr.WorktreeManager(); wtMgr != nil {
+			handoffSvc.SetWorkspaceCleaner(worktree.NewHandoffCleaner(wtMgr, p.log))
+		}
+	}
+	handoffSvc.SetRunCanceller(p.orchestratorSvc)
+	// Cascade archive/delete must re-publish task.updated / task.deleted
+	// events; HandoffService walks the repo directly and bypasses the
+	// Service wrappers that normally publish these. Without this wiring
+	// the kanban board doesn't react to subtree archive/delete until a
+	// full reload.
+	handoffSvc.SetTaskEventPublisher(p.taskSvc)
+	// Cascade archive/delete must tear down runtime resources
+	// (container, sandbox, worktree, executor_running rows) for every
+	// task in the tree. Without this wiring the agent gets stopped via
+	// runCanceller but its container leaks because the cascade bypasses
+	// Service.ArchiveTask's runAsyncTaskCleanup branch.
+	handoffSvc.SetTaskResourceCleaner(p.taskSvc)
+	p.orchestratorSvc.SetWorkspaceMaterializer(handoffSvc)
+	// Phase 8 prompt enrichment — wire the office scheduler's
+	// TaskContextProvider so every run prompt rendered by the active
+	// office/service/BuildPrompt sees Related-tasks / Documents
+	// available / Workspace sections.
+	if p.services.OrchScheduler != nil {
+		p.services.OrchScheduler.SetTaskContextProvider(handoffSvc)
+	}
+
+	p.gateway.SetupRoutes(p.router)
+	registerTaskRoutes(p, planService, handoffSvc)
+	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, planService, handoffSvc)
+
+	// /health is a readiness probe, not a liveness probe. It only
+	// returns 200 after main has flipped the package-level `ready`
+	// flag — which happens after route registration, agent-registry
+	// seeding, the HTTP listener accepting connections, and (when
+	// KANDEV_E2E_MOCK is set) the testharness routes being mounted.
+	// Before that, return 503 so callers (including the e2e fixture's
+	// waitForHealth) keep polling instead of racing ahead and hitting
+	// 404s on routes that aren't wired yet.
 	p.router.GET("/health", func(c *gin.Context) {
+		if !ready.Load() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "starting", "service": "kandev"})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "kandev", "mode": "websocket+http"})
+	})
+
+	// /api/v1/features is a public, unauthenticated read of the runtime
+	// feature-flag map. The frontend SSR-fetches it once per page render to
+	// decide whether to mount Office (and any future flagged feature). The
+	// `json:` tags on FeaturesConfig drive serialization, so adding a new
+	// field to the struct is enough — no edit here required.
+	// See docs/decisions/0007-runtime-feature-flags.md.
+	p.router.GET("/api/v1/features", func(c *gin.Context) {
+		c.JSON(http.StatusOK, p.features)
 	})
 
 	if p.webInternalURL != "" {
@@ -539,10 +615,13 @@ func resolveRepositoryIDForSubpath(ctx context.Context, taskRepo *sqliterepo.Rep
 }
 
 // registerTaskRoutes registers all task-related HTTP and WebSocket routes.
-func registerTaskRoutes(p routeParams, planService *taskservice.PlanService) {
+func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, handoffSvc *taskservice.HandoffService) {
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterWorkflowRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.services.Workflow, p.log)
 	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
+	if handoffSvc != nil {
+		taskH.SetHandoffService(handoffSvc)
+	}
 	if p.services.GitHub != nil {
 		ghSvc := p.services.GitHub
 		taskH.SetOnTaskCreatedWithPR(func(ctx context.Context, taskID, sessionID, prURL, branch string) {
@@ -574,6 +653,7 @@ func registerSecondaryRoutes(
 	workflowCtrl *workflowcontroller.Controller,
 	clarificationStore *clarification.Store,
 	planService *taskservice.PlanService,
+	handoffSvc *taskservice.HandoffService,
 ) {
 	workflowhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, workflowCtrl, p.log)
 	p.log.Info("Registered Workflow handlers (HTTP + WebSocket)")
@@ -661,9 +741,34 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered Improve Kandev handlers (HTTP)")
 	}
 
-	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService)
+	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService, handoffSvc)
 
 	registerE2EResetRoutes(p.router, p.taskRepo, p.taskSvc, p.log)
+
+	if officetestharness.Enabled() {
+		var officeAgentSvc *officeagents.AgentService
+		if p.services.OfficeSvcs != nil {
+			officeAgentSvc = p.services.OfficeSvcs.Agents
+		}
+		officetestharness.RegisterRoutes(
+			p.router,
+			p.taskRepo,
+			p.officeRepo,
+			p.agentSettingsRepo,
+			officeAgentSvc,
+			p.eventBus,
+			p.log,
+		)
+		p.log.Info("E2E mock routes enabled at /api/v1/_test/* — DO NOT enable in production")
+	}
+
+	// Register office routes
+	if p.services.OfficeSvcs != nil {
+		api := p.router.Group("/api/v1/office")
+		api.Use(officeagents.AgentAuthMiddleware(p.services.OfficeSvcs.Agents))
+		office.RegisterAllRoutes(api, p.services.OfficeSvcs, p.log)
+		p.log.Debug("Registered Office handlers (HTTP)")
+	}
 }
 
 func dockerTaskTitleProvider(taskRepo *sqliterepo.Repository, log *logger.Logger) docker.TaskTitleProvider {
@@ -728,6 +833,7 @@ func registerMCPAndDebugRoutes(
 	wfCtrl *workflowcontroller.Controller,
 	clarificationStore *clarification.Store,
 	planService *taskservice.PlanService,
+	handoffSvc *taskservice.HandoffService,
 ) {
 	mcpHandlers := mcphandlers.NewHandlers(
 		p.taskSvc, wfCtrl,
@@ -735,6 +841,13 @@ func registerMCPAndDebugRoutes(
 	)
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
+
+	// Reuse the cross-task handoff service constructed in registerRoutes —
+	// the same instance backs the MCP path and the HTTP Kanban path so
+	// workspace-group state stays consistent across both surfaces.
+	if handoffSvc != nil {
+		mcpHandlers.SetHandoffService(handoffSvc)
+	}
 
 	mcpHandlers.RegisterHandlers(p.gateway.Dispatcher)
 	p.log.Debug("Registered MCP handlers (WebSocket)")
@@ -749,7 +862,8 @@ func registerMCPAndDebugRoutes(
 	debughandlers.RegisterRoutes(p.router, p.log)
 	p.log.Debug("Registered Debug handlers (HTTP)")
 
-	if p.pprofEnabled {
+	if p.devMode {
+		debughandlers.RegisterExportRoute(p.router, p.version, Commit, p.log)
 		debughandlers.RegisterPprofRoutes(p.router, p.log)
 		debughandlers.RegisterMemoryRoute(p.router, p.log)
 	}

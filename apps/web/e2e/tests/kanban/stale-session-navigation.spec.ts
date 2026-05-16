@@ -2,8 +2,6 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
-const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
-
 /**
  * Regression test: navigating from a task with chat messages to a sessionless
  * task must not display the previous task's messages.
@@ -21,7 +19,7 @@ test.describe("Stale session navigation", () => {
     test.setTimeout(120_000);
 
     // 1. Create Task A with an agent session that produces messages
-    const taskA = await apiClient.createTaskWithAgent(
+    await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Task With Messages",
       seedData.agentProfileId,
@@ -33,54 +31,47 @@ test.describe("Stale session navigation", () => {
       },
     );
 
-    // 2. Wait for Task A's session to finish
-    await expect
-      .poll(
-        async () => {
-          const { sessions } = await apiClient.listTaskSessions(taskA.id);
-          return DONE_STATES.includes(sessions[0]?.state);
-        },
-        { timeout: 30_000, message: "Waiting for Task A session to finish" },
-      )
-      .toBe(true);
-
-    // 3. Navigate to Task A's session page to populate store with its messages
+    // 2. Navigate to Task A's session page and wait for its message.
+    // We wait for the chat message directly instead of polling session state
+    // because the mock agent emits the message quickly; the backend session
+    // state transition to COMPLETED/WAITING_FOR_INPUT can be slow in CI.
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
     const cardA = kanban.taskCardByTitle("Task With Messages");
-    await expect(cardA).toBeVisible({ timeout: 10_000 });
+    await expect(cardA).toBeVisible({ timeout: 15_000 });
     await cardA.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    // Confirm Task A's messages are visible
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
-      timeout: 15_000,
+    await expect(
+      session.activeChat().getByText("simple mock response", { exact: false }),
+    ).toBeVisible({
+      timeout: 30_000,
     });
 
-    // 4. Create Task B (no agent session — simulates a PR watcher or new task)
+    // 3. Create Task B (no agent session — simulates a PR watcher or new task)
     await apiClient.createTask(seedData.workspaceId, "Sessionless Task", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
 
-    // 5. Go back to kanban
+    // 4. Go back to kanban
     await kanban.goto();
     await expect(kanban.board).toBeVisible({ timeout: 10_000 });
 
-    // 6. Click on Task B from kanban
+    // 5. Click on Task B from kanban
     const cardB = kanban.taskCardByTitle("Sessionless Task");
     await expect(cardB).toBeVisible({ timeout: 10_000 });
     await cardB.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
-    // 7. Verify Task B's page shows the correct title
+    // 6. Verify Task B's page shows the correct title
     await expect(testPage.getByText("Sessionless Task")).toBeVisible({ timeout: 10_000 });
 
-    // 8. Task A's messages must NOT appear on Task B's page
+    // 7. Task A's messages must NOT appear on Task B's page
     await expect(testPage.getByText("simple mock response", { exact: false })).not.toBeVisible({
       timeout: 5_000,
     });

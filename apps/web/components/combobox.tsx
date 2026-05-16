@@ -12,6 +12,7 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
+  CommandSeparator,
 } from "@kandev/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -72,34 +73,6 @@ function TriggerLabel({
   return <span className="truncate">{selectedOption?.label || placeholder}</span>;
 }
 
-function DisabledOptionItem({ option }: { option: ComboboxOption }) {
-  // cmdk's CommandItem swallows pointer events with no native tooltip slot, so
-  // we wrap the disabled item in a Tooltip trigger. The trigger is a plain
-  // div; CommandItem still owns keyboard nav and rendering.
-  const item = (
-    <CommandItem
-      key={option.value}
-      value={option.value}
-      keywords={[option.label, option.description ?? ""]}
-      disabled
-      className="relative pr-7 opacity-50 cursor-not-allowed"
-    >
-      <div className="flex min-w-0 flex-1 items-center">
-        {option.renderLabel ? option.renderLabel() : option.label}
-      </div>
-    </CommandItem>
-  );
-  if (!option.disabledReason) return item;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div>{item}</div>
-      </TooltipTrigger>
-      <TooltipContent side="right">{option.disabledReason}</TooltipContent>
-    </Tooltip>
-  );
-}
-
 function OptionsList({
   options,
   value,
@@ -109,32 +82,55 @@ function OptionsList({
   value: string;
   onSelect: (value: string) => void;
 }) {
+  const enabled = options.filter((o) => !o.disabled);
+  const disabled = options.filter((o) => o.disabled);
+
+  const renderItem = (option: ComboboxOption) => {
+    const item = (
+      <CommandItem
+        key={option.value}
+        value={option.value}
+        keywords={option.keywords ?? [option.label, option.description ?? ""]}
+        onSelect={() => !option.disabled && onSelect(option.value)}
+        disabled={option.disabled}
+        className={cn("relative pr-7", option.disabled && "opacity-40 cursor-not-allowed")}
+      >
+        <div className="flex min-w-0 flex-1 items-center">
+          {option.renderLabel ? option.renderLabel() : option.label}
+        </div>
+        <IconCheck
+          className={cn(
+            "absolute right-2 h-4 w-4",
+            value === option.value ? "opacity-100" : "opacity-0",
+          )}
+        />
+      </CommandItem>
+    );
+    // cmdk's CommandItem swallows pointer events with no native tooltip slot;
+    // wrap disabled items in a Tooltip trigger so the disabled reason shows.
+    if (option.disabled && option.disabledReason) {
+      return (
+        <Tooltip key={option.value}>
+          <TooltipTrigger asChild>
+            <div>{item}</div>
+          </TooltipTrigger>
+          <TooltipContent side="right">{option.disabledReason}</TooltipContent>
+        </Tooltip>
+      );
+    }
+    return item;
+  };
+
   return (
-    <CommandGroup>
-      {options.map((option) =>
-        option.disabled ? (
-          <DisabledOptionItem key={option.value} option={option} />
-        ) : (
-          <CommandItem
-            key={option.value}
-            value={option.value}
-            keywords={option.keywords ?? [option.label, option.description ?? ""]}
-            onSelect={() => onSelect(option.value)}
-            className="relative pr-7"
-          >
-            <div className="flex min-w-0 flex-1 items-center">
-              {option.renderLabel ? option.renderLabel() : option.label}
-            </div>
-            <IconCheck
-              className={cn(
-                "absolute right-2 h-4 w-4",
-                value === option.value ? "opacity-100" : "opacity-0",
-              )}
-            />
-          </CommandItem>
-        ),
+    <>
+      <CommandGroup>{enabled.map(renderItem)}</CommandGroup>
+      {disabled.length > 0 && (
+        <>
+          <CommandSeparator />
+          <CommandGroup>{disabled.map(renderItem)}</CommandGroup>
+        </>
       )}
-    </CommandGroup>
+    </>
   );
 }
 

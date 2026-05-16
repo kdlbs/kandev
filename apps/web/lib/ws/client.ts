@@ -46,6 +46,7 @@ export class WebSocketClient {
   // slow when the count reaches 0 (debounced server-side).
   private sessionFocusCounts = new Map<string, number>();
   private userSubscriptionCount = 0;
+  private runSubscriptions = new Map<string, number>();
 
   constructor(
     private url: string,
@@ -250,6 +251,47 @@ export class WebSocketClient {
     this.sessionSubscriptions.set(sessionId, nextCount);
   }
 
+  /**
+   * Subscribe to office run-event notifications for the given run id.
+   * Ref-counted so multiple components can subscribe independently;
+   * only the first call sends `run.subscribe` over the wire, only the
+   * last unsubscribe sends `run.unsubscribe`. Returns an
+   * unsubscribe function.
+   */
+  subscribeRun(runId: string) {
+    const currentCount = this.runSubscriptions.get(runId) ?? 0;
+    const nextCount = currentCount + 1;
+    this.runSubscriptions.set(runId, nextCount);
+    if (this.status === "open" && nextCount === 1) {
+      this.send({
+        id: generateUUID(),
+        type: "request",
+        action: "run.subscribe",
+        payload: { run_id: runId },
+      });
+    }
+    return () => this.unsubscribeRun(runId);
+  }
+
+  unsubscribeRun(runId: string) {
+    const currentCount = this.runSubscriptions.get(runId);
+    if (!currentCount) return;
+    const nextCount = currentCount - 1;
+    if (nextCount <= 0) {
+      this.runSubscriptions.delete(runId);
+      if (this.status === "open") {
+        this.send({
+          id: generateUUID(),
+          type: "request",
+          action: "run.unsubscribe",
+          payload: { run_id: runId },
+        });
+      }
+      return;
+    }
+    this.runSubscriptions.set(runId, nextCount);
+  }
+
   unsubscribeUser() {
     this.userSubscriptionCount = Math.max(0, this.userSubscriptionCount - 1);
     if (this.status === "open" && this.userSubscriptionCount === 0) {
@@ -402,6 +444,14 @@ export class WebSocketClient {
         type: "request",
         action: "session.focus",
         payload: { session_id: sessionId },
+      });
+    });
+    this.runSubscriptions.forEach((_count, runId) => {
+      this.send({
+        id: generateUUID(),
+        type: "request",
+        action: "run.subscribe",
+        payload: { run_id: runId },
       });
     });
     if (this.userSubscriptionCount > 0) {

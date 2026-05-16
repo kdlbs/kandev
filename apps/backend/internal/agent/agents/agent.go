@@ -9,6 +9,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -43,6 +45,11 @@ type Agent interface {
 
 	// --- Runtime ---
 	Runtime() *RuntimeConfig
+
+	// --- Billing ---
+	// BillingType returns how this agent is billed: api_key or subscription.
+	// Computed at call time from credential files, not stored in the DB.
+	BillingType() usage.BillingType
 
 	// --- Remote Auth ---
 	// RemoteAuth returns the auth methods this agent supports in remote environments.
@@ -134,6 +141,12 @@ type CommandOptions struct {
 	// AgentProfile.CLIFlags (only Enabled entries, shell-tokenised). Appended
 	// verbatim to the built command by every agent's BuildCommand.
 	CLIFlagTokens []string
+	// Runtime is the execution backend hosting the agent subprocess.
+	// Agents whose binary lives in a different place inside a container
+	// than on the host (currently only MockAgent) consult
+	// Runtime.IsContainerized() to pick a host absolute path vs. a bare
+	// name resolved via the container's PATH.
+	Runtime agentruntime.Runtime
 }
 
 // PassthroughOptions are passed to BuildPassthroughCommand.
@@ -152,20 +165,22 @@ type PassthroughOptions struct {
 
 // RuntimeConfig holds Docker / standalone runtime settings.
 type RuntimeConfig struct {
-	Image          string
-	Tag            string
-	Cmd            Command
-	Entrypoint     Command
-	WorkingDir     string
-	Env            map[string]string
-	RequiredEnv    []string
-	Mounts         []MountTemplate
-	ResourceLimits ResourceLimits
-	SessionConfig  SessionConfig
-	Protocol       agent.Protocol
-	ModelFlag      Param  // e.g. NewParam("--model", "{model}")
-	WorkspaceFlag  string // e.g. "--workspace-root"
-	AssumeMcpSse   bool   // Override: assume agent supports SSE MCP servers even if not advertised
+	Image           string
+	Tag             string
+	Cmd             Command
+	Entrypoint      Command
+	WorkingDir      string
+	Env             map[string]string
+	RequiredEnv     []string
+	Mounts          []MountTemplate
+	ResourceLimits  ResourceLimits
+	SessionConfig   SessionConfig
+	Protocol        agent.Protocol
+	ModelFlag       Param  // e.g. NewParam("--model", "{model}")
+	WorkspaceFlag   string // e.g. "--workspace-root"
+	AssumeMcpSse    bool   // Override: assume agent supports SSE MCP servers even if not advertised
+	ProjectSkillDir string // CWD-relative path for project-level skills (e.g. ".claude/skills")
+	UserSkillDir    string // home-relative path for user-level skills (e.g. ".claude/skills")
 }
 
 // MountTemplate defines a mount with template variables.
@@ -245,6 +260,29 @@ const DefaultBufferMaxBytes int64 = 2 * 1024 * 1024
 // DefaultResourceLimits is the standard resource limit set shared by most agents.
 var DefaultResourceLimits = ResourceLimits{
 	MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour,
+}
+
+// DefaultProjectSkillDir is the fallback CWD-relative skill directory used when
+// an agent type does not declare a ProjectSkillDir in its RuntimeConfig.
+const DefaultProjectSkillDir = ".agents/skills"
+
+// ProjectSkillDirFromRuntime returns the CWD-relative skill directory for the
+// agent. Falls back to DefaultProjectSkillDir if the agent's RuntimeConfig does
+// not set one.
+func ProjectSkillDirFromRuntime(a Agent) string {
+	if rt := a.Runtime(); rt != nil && rt.ProjectSkillDir != "" {
+		return rt.ProjectSkillDir
+	}
+	return DefaultProjectSkillDir
+}
+
+// UserSkillDirFromRuntime returns the home-relative user skill directory for the
+// agent. An empty string means the agent does not expose a user-home skill dir.
+func UserSkillDirFromRuntime(a Agent) string {
+	if rt := a.Runtime(); rt != nil {
+		return rt.UserSkillDir
+	}
+	return ""
 }
 
 // InferenceConfig describes how an agent executes one-shot prompts via ACP.

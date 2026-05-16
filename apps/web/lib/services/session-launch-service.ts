@@ -60,6 +60,7 @@ export type EnsureSessionResponse = {
   agent_profile_id?: string;
   source: "existing_primary" | "existing_newest" | "created_prepare" | "created_start";
   newly_created: boolean;
+  workspace_path?: string;
 };
 
 /**
@@ -71,13 +72,13 @@ export type EnsureSessionResponse = {
  */
 export async function ensureTaskSession(
   taskId: string,
-  timeout?: number,
+  opts?: { ensureExecution?: boolean; timeout?: number },
 ): Promise<EnsureSessionResponse> {
   const client = getWebSocketClient();
   if (!client) throw new Error("WebSocket client not available");
   return client.request<EnsureSessionResponse>(
     "session.ensure",
-    { task_id: taskId },
-    timeout ?? 15_000,
+    { task_id: taskId, ensure_execution: opts?.ensureExecution },
+    opts?.timeout ?? 15_000,
   );
 }

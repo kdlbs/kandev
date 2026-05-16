@@ -13,12 +13,17 @@ import (
 
 func setupTestRepo(t *testing.T) *Repository {
 	t.Helper()
-	rawDB, err := sql.Open("sqlite3", ":memory:")
+	rawDB, err := sql.Open("sqlite3", ":memory:?_foreign_keys=on")
 	if err != nil {
 		t.Fatalf("failed to open sqlite: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(rawDB, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
+	// Enable FK enforcement explicitly so workflow_step_participants
+	// ON DELETE CASCADE behaves as designed in the cascade test.
+	if _, err := sqlxDB.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		t.Fatalf("enable foreign keys: %v", err)
+	}
 
 	// Create workflows table (normally created by task repo)
 	_, err = sqlxDB.Exec(`CREATE TABLE IF NOT EXISTS workflows (
@@ -45,7 +50,7 @@ func setupTestRepo(t *testing.T) *Repository {
 		t.Fatalf("failed to insert test workflow: %v", err)
 	}
 
-	repo, err := NewWithDB(sqlxDB, sqlxDB)
+	repo, err := NewWithDB(sqlxDB, sqlxDB, nil)
 	if err != nil {
 		t.Fatalf("failed to create repo: %v", err)
 	}

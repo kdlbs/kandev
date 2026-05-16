@@ -199,7 +199,7 @@ function AgentsSidebarSection({ pathname, agents }: AgentsSidebarSectionProps) {
             agent.profiles.map((profile: AgentProfile) => {
               const encodedAgent = encodeURIComponent(agent.name);
               const profilePath = `/settings/agents/${encodedAgent}/profiles/${profile.id}`;
-              const agentLabel = profile.agent_display_name || agent.name;
+              const agentLabel = profile.agentDisplayName || agent.name;
               const warning = getCapabilityWarning(agent.capability_status, agent.capability_error);
               return (
                 <SidebarMenuSubItem key={profile.id} className="min-w-0">

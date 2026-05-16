@@ -175,6 +175,30 @@ func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) (
 	return result, nil
 }
 
+// taskSessionSelectCols is the column list used by every SELECT that scans
+// into a *models.TaskSession via scanTaskSession / scanTaskSessionRow. Centralised
+// so columns can be added in one place. Order MUST match the scan helpers.
+//
+// agent_execution_id and container_id come from executors_running (the single
+// source of truth for active execution state) via LEFT JOIN. All other columns
+// come from task_sessions (aliased ts).
+//
+// ADR 0005: agent_profile_id is the single column for both kanban (FK to a
+// shallow profile) and office (FK to a per-workspace rich profile) sessions —
+// the two column names that used to live here have collapsed into one.
+const taskSessionSelectCols = `ts.id, ts.task_id,
+	COALESCE(er.agent_execution_id, ''), COALESCE(er.container_id, ''),
+	ts.agent_profile_id, ts.executor_id, ts.executor_profile_id, ts.environment_id,
+	ts.repository_id, ts.base_branch, ts.base_commit_sha, ts.workspace_path,
+	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
+	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
+	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id`
+
+// taskSessionFromClause is the FROM clause that pairs with taskSessionSelectCols.
+// Always reference task_sessions as `ts` and executors_running as `er` in WHERE/ORDER.
+const taskSessionFromClause = `FROM task_sessions ts
+	LEFT JOIN executors_running er ON er.session_id = ts.id`
+
 // Task Session operations
 
 // CreateTaskSession creates a new agent session
@@ -183,8 +207,16 @@ func (r *Repository) CreateTaskSession(ctx context.Context, session *models.Task
 		session.ID = uuid.New().String()
 	}
 	now := time.Now().UTC()
-	session.StartedAt = now
-	session.UpdatedAt = now
+	// Only default StartedAt / UpdatedAt when the caller hasn't supplied
+	// one. The test harness backdates StartedAt so completed sessions
+	// have a non-zero duration (e.g. "Agent worked for 30s"); blowing
+	// those values away here defeats that.
+	if session.StartedAt.IsZero() {
+		session.StartedAt = now
+	}
+	if session.UpdatedAt.IsZero() {
+		session.UpdatedAt = now
+	}
 	if session.State == "" {
 		session.State = models.TaskSessionStateCreated
 	}
@@ -209,6 +241,14 @@ func (r *Repository) CreateTaskSession(ctx context.Context, session *models.Task
 	if err != nil {
 		return fmt.Errorf("failed to serialize repository snapshot: %w", err)
 	}
+	// agent_profile_id is NULL-able. Empty string would defeat the partial
+	// unique index since SQLite treats two empty strings as equal — store NULL
+	// for kanban / quick-chat rows and a real value only for office sessions
+	// (per ADR 0005, kanban and office now share the same column).
+	var agentProfileID interface{}
+	if session.AgentProfileID != "" {
+		agentProfileID = session.AgentProfileID
+	}
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_sessions (
 			id, task_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
@@ -217,7 +257,7 @@ func (r *Repository) CreateTaskSession(ctx context.Context, session *models.Task
 			state, error_message, metadata, started_at, completed_at, updated_at,
 			is_primary, review_status, is_passthrough, task_environment_id
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), session.ID, session.TaskID, session.AgentProfileID,
+	`), session.ID, session.TaskID, agentProfileID,
 		session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID, session.RepositoryID, session.BaseBranch, session.BaseCommitSHA, session.WorkspacePath,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, string(metadataJSON),
@@ -251,9 +291,12 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 	var isPrimary int
 	var isPassthrough int
 	var reviewStatus sql.NullString
+	// agent_profile_id is nullable (kanban / quick-chat rows store NULL); decode
+	// via NullString so the empty case maps to "" on the model.
+	var agentProfileID sql.NullString
 
 	err := row.Scan(
-		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
+		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &agentProfileID,
 		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
@@ -273,6 +316,9 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 	session.IsPassthrough = isPassthrough == 1
 	if reviewStatus.Valid {
 		session.ReviewStatus = &reviewStatus.String
+	}
+	if agentProfileID.Valid {
+		session.AgentProfileID = agentProfileID.String
 	}
 	if completedAt.Valid {
 		session.CompletedAt = &completedAt.Time
@@ -304,52 +350,73 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 
 // GetTaskSession retrieves an agent session by ID
 func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
-	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT ts.id, ts.task_id,
-		       COALESCE(er.agent_execution_id, ''), COALESCE(er.container_id, ''),
-		       ts.agent_profile_id, ts.executor_id, ts.executor_profile_id, ts.environment_id,
-		       ts.repository_id, ts.base_branch, ts.base_commit_sha, ts.workspace_path,
-		       ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
-		       ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
-		       ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id
-		FROM task_sessions ts
-		LEFT JOIN executors_running er ON er.session_id = ts.id WHERE ts.id = ?
-	`), id)
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
+		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+` WHERE ts.id = ?`,
+	), id)
 	return r.scanTaskSession(ctx, row, fmt.Sprintf("agent session not found: %s", id))
 }
 
 // GetTaskSessionByTaskID retrieves the most recent agent session for a task
 func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
-	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT ts.id, ts.task_id,
-		       COALESCE(er.agent_execution_id, ''), COALESCE(er.container_id, ''),
-		       ts.agent_profile_id, ts.executor_id, ts.executor_profile_id, ts.environment_id,
-		       ts.repository_id, ts.base_branch, ts.base_commit_sha, ts.workspace_path,
-		       ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
-		       ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
-		       ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id
-		FROM task_sessions ts
-		LEFT JOIN executors_running er ON er.session_id = ts.id WHERE ts.task_id = ? ORDER BY ts.started_at DESC LIMIT 1
-	`), taskID)
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
+		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+` WHERE ts.task_id = ? ORDER BY ts.started_at DESC LIMIT 1`,
+	), taskID)
 	return r.scanTaskSession(ctx, row, fmt.Sprintf("agent session not found for task: %s", taskID))
 }
 
 // GetActiveTaskSessionByTaskID retrieves the active (running/waiting) agent session for a task
 func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
-	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT ts.id, ts.task_id,
-		       COALESCE(er.agent_execution_id, ''), COALESCE(er.container_id, ''),
-		       ts.agent_profile_id, ts.executor_id, ts.executor_profile_id, ts.environment_id,
-		       ts.repository_id, ts.base_branch, ts.base_commit_sha, ts.workspace_path,
-		       ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
-		       ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
-		       ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id
-		FROM task_sessions ts
-		LEFT JOIN executors_running er ON er.session_id = ts.id
-		WHERE ts.task_id = ? AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
-		ORDER BY ts.started_at DESC LIMIT 1
-	`), taskID)
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
+		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+`
+		 WHERE ts.task_id = ? AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+		 ORDER BY ts.started_at DESC LIMIT 1`,
+	), taskID)
 	return r.scanTaskSession(ctx, row, fmt.Sprintf("no active agent session for task: %s", taskID))
+}
+
+// GetTaskSessionByTaskAndAgent retrieves the office task session for the given
+// (task_id, agent_profile_id) pair. The pair is unique across non-NULL
+// agent_profile_id rows, so at most one row matches. Returns nil, nil when
+// no session exists for the pair.
+func (r *Repository) GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error) {
+	if taskID == "" || agentInstanceID == "" {
+		return nil, nil
+	}
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
+		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+`
+		 WHERE ts.task_id = ? AND ts.agent_profile_id = ?
+		 ORDER BY ts.started_at DESC LIMIT 1`,
+	), taskID, agentInstanceID)
+	session, err := r.scanTaskSession(ctx, row, sessionNotFoundMsg)
+	if err != nil && err.Error() == sessionNotFoundMsg {
+		return nil, nil
+	}
+	return session, err
+}
+
+// sessionNotFoundMsg is the sentinel string used by GetTaskSessionByTaskAndAgent
+// to detect "no row found" so the caller gets nil, nil instead of an error.
+const sessionNotFoundMsg = "task_sessions: no matching row"
+
+// ListNonTerminalSessionsByAgentInstance returns every office task_session row
+// for the given agent_profile_id whose state is NOT terminal
+// (CREATED / STARTING / RUNNING / IDLE / WAITING_FOR_INPUT). Used by the
+// agent-instance deletion cascade in office, which must terminate all of an
+// agent's live sessions across every task.
+func (r *Repository) ListNonTerminalSessionsByAgentInstance(ctx context.Context, agentInstanceID string) ([]*models.TaskSession, error) {
+	if agentInstanceID == "" {
+		return nil, nil
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(
+		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+`
+		 WHERE ts.agent_profile_id = ?
+		   AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'IDLE', 'WAITING_FOR_INPUT')`,
+	), agentInstanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTaskSessions(ctx, rows)
 }
 
 // UpdateTaskSession updates an existing agent session.
@@ -376,6 +443,12 @@ func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.Task
 		return fmt.Errorf("failed to serialize repository snapshot: %w", err)
 	}
 
+	// agent_profile_id is stored as NULL when empty so the partial unique
+	// index over (task_id, agent_profile_id) ignores kanban / quick-chat rows.
+	var agentProfileID interface{}
+	if session.AgentProfileID != "" {
+		agentProfileID = session.AgentProfileID
+	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET
 			agent_profile_id = ?, executor_id = ?, executor_profile_id = ?, environment_id = ?,
@@ -384,7 +457,7 @@ func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.Task
 			state = ?, error_message = ?, completed_at = ?, updated_at = ?,
 			is_primary = ?, review_status = ?, is_passthrough = ?, task_environment_id = ?
 		WHERE id = ?
-	`), session.AgentProfileID, session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
+	`), agentProfileID, session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
 		session.RepositoryID, session.BaseBranch, session.BaseCommitSHA, session.WorkspacePath,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, session.CompletedAt, session.UpdatedAt,
@@ -469,6 +542,42 @@ func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key s
 	return nil
 }
 
+// GetLastAgentMessage returns the content of the most recent agent message in a session.
+func (r *Repository) GetLastAgentMessage(ctx context.Context, sessionID string) (string, error) {
+	var content string
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT content FROM task_session_messages
+		WHERE task_session_id = ? AND author_type = 'agent' AND type = 'message'
+		ORDER BY created_at DESC LIMIT 1
+	`), sessionID).Scan(&content)
+	if err != nil {
+		return "", err
+	}
+	return content, nil
+}
+
+// IncrementTaskSessionUsage adds the given deltas to the cumulative
+// tokens / cost columns on task_sessions. Used by the office cost
+// subscriber after a cost event lands so the per-session totals stay
+// in sync without re-summing office_cost_events. The model + DTO
+// don't surface these columns yet (DB-only per the office-costs
+// wedge); the cost explorer follow-up will expose them.
+func (r *Repository) IncrementTaskSessionUsage(
+	ctx context.Context, sessionID string, tokensIn, tokensOut, costSubcents int64,
+) error {
+	if sessionID == "" {
+		return nil
+	}
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions
+		   SET tokens_in     = COALESCE(tokens_in, 0)     + ?,
+		       tokens_out    = COALESCE(tokens_out, 0)    + ?,
+		       cost_subcents = COALESCE(cost_subcents, 0) + ?
+		 WHERE id = ?
+	`), tokensIn, tokensOut, costSubcents, sessionID)
+	return err
+}
+
 // UpdateTaskSessionBaseCommit updates the base_commit_sha for a session.
 // This is called after agent launch to capture the HEAD commit at session start.
 func (r *Repository) UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error {
@@ -490,17 +599,9 @@ func (r *Repository) UpdateTaskSessionBaseCommit(ctx context.Context, id string,
 func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTaskSessions")
 	defer span.End()
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT ts.id, ts.task_id,
-		       COALESCE(er.agent_execution_id, ''), COALESCE(er.container_id, ''),
-		       ts.agent_profile_id, ts.executor_id, ts.executor_profile_id, ts.environment_id,
-		       ts.repository_id, ts.base_branch, ts.base_commit_sha, ts.workspace_path,
-		       ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
-		       ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
-		       ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id
-		FROM task_sessions ts
-		LEFT JOIN executors_running er ON er.session_id = ts.id WHERE ts.task_id = ? ORDER BY ts.started_at DESC
-	`), taskID)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(
+		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+` WHERE ts.task_id = ? ORDER BY ts.started_at DESC`,
+	), taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -517,17 +618,9 @@ func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*mo
 func (r *Repository) ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListActiveTaskSessions")
 	defer span.End()
-	rows, err := r.ro.QueryContext(ctx, `
-		SELECT ts.id, ts.task_id,
-		       COALESCE(er.agent_execution_id, ''), COALESCE(er.container_id, ''),
-		       ts.agent_profile_id, ts.executor_id, ts.executor_profile_id, ts.environment_id,
-		       ts.repository_id, ts.base_branch, ts.base_commit_sha, ts.workspace_path,
-		       ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
-		       ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
-		       ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id
-		FROM task_sessions ts
-		LEFT JOIN executors_running er ON er.session_id = ts.id WHERE ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT') ORDER BY ts.started_at DESC
-	`)
+	rows, err := r.ro.QueryContext(ctx,
+		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+` WHERE ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT') ORDER BY ts.started_at DESC`,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -542,17 +635,9 @@ func (r *Repository) ListActiveTaskSessions(ctx context.Context) ([]*models.Task
 
 // ListActiveTaskSessionsByTaskID returns all active agent sessions for a specific task
 func (r *Repository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT ts.id, ts.task_id,
-		       COALESCE(er.agent_execution_id, ''), COALESCE(er.container_id, ''),
-		       ts.agent_profile_id, ts.executor_id, ts.executor_profile_id, ts.environment_id,
-		       ts.repository_id, ts.base_branch, ts.base_commit_sha, ts.workspace_path,
-		       ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
-		       ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
-		       ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id
-		FROM task_sessions ts
-		LEFT JOIN executors_running er ON er.session_id = ts.id WHERE ts.task_id = ? AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT') ORDER BY ts.started_at DESC
-	`), taskID)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(
+		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+` WHERE ts.task_id = ? AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT') ORDER BY ts.started_at DESC`,
+	), taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -697,9 +782,10 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 	var isPrimary int
 	var isPassthrough int
 	var reviewStatus sql.NullString
+	var agentProfileID sql.NullString
 
 	err := rows.Scan(
-		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
+		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &agentProfileID,
 		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
@@ -715,6 +801,9 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 	session.IsPassthrough = isPassthrough == 1
 	if reviewStatus.Valid {
 		session.ReviewStatus = &reviewStatus.String
+	}
+	if agentProfileID.Valid {
+		session.AgentProfileID = agentProfileID.String
 	}
 	if completedAt.Valid {
 		session.CompletedAt = &completedAt.Time
@@ -906,17 +995,9 @@ func (r *Repository) DeleteTaskSessionWorktreesBySession(ctx context.Context, se
 
 // GetPrimarySessionByTaskID retrieves the primary session for a task
 func (r *Repository) GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
-	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT ts.id, ts.task_id,
-		       COALESCE(er.agent_execution_id, ''), COALESCE(er.container_id, ''),
-		       ts.agent_profile_id, ts.executor_id, ts.executor_profile_id, ts.environment_id,
-		       ts.repository_id, ts.base_branch, ts.base_commit_sha, ts.workspace_path,
-		       ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
-		       ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
-		       ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id
-		FROM task_sessions ts
-		LEFT JOIN executors_running er ON er.session_id = ts.id WHERE ts.task_id = ? AND ts.is_primary = 1 LIMIT 1
-	`), taskID)
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
+		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+` WHERE ts.task_id = ? AND ts.is_primary = 1 LIMIT 1`,
+	), taskID)
 	return r.scanTaskSession(ctx, row, fmt.Sprintf("no primary session found for task: %s", taskID))
 }
 

@@ -410,7 +410,6 @@ export function buildExtraPanelActions(get: StoreGet) {
         position: { referenceGroup: centerGroupId },
       });
     },
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     openInternalVscode: (_goto: { file: string; line: number; col: number } | null) => {
       const { api, centerGroupId } = get();
       if (!api) return;

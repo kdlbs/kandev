@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -110,3 +111,5 @@ func (a *KimiACP) InferenceConfig() *InferenceConfig {
 		Command:   NewCommand(kimiACPBin, "acp"),
 	}
 }
+
+func (a *KimiACP) BillingType() usage.BillingType { return defaultBillingType() }

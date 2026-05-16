@@ -114,7 +114,7 @@ func TestOrchestratorStartTaskWithAgentTypeOverride(t *testing.T) {
 	resp, err := client.SendRequest("start-1", ws.ActionSessionLaunch, map[string]interface{}{
 		"task_id":          taskID,
 		"agent_profile_id": "override-profile-id",
-		"priority":         3,
+		"priority":         "high",
 	})
 	require.NoError(t, err)
 

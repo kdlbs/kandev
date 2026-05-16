@@ -583,55 +583,25 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 	s.completeTurnForSession(ctx, data.SessionID)
 
 	// Create a status message with recovery action metadata.
-	if s.messageCreator != nil {
-		authErr := isAuthError(data.ErrorMessage)
-		displayMsg := data.ErrorMessage
-		if authErr {
-			if readable := extractReadableAuthError(data.ErrorMessage); readable != "" {
-				displayMsg = readable
-			}
-		}
-
-		statusMsg := fmt.Sprintf("Agent encountered an error: %s", displayMsg)
-
-		hasResumeToken := s.wasResumeAttempt(ctx, data.SessionID)
-		meta := map[string]interface{}{
-			"variant":          "error",
-			"recovery_actions": true,
-			"session_id":       data.SessionID,
-			"task_id":          data.TaskID,
-			"has_resume_token": hasResumeToken,
-			"is_auth_error":    authErr,
-		}
-
-		// Include cached auth methods so the frontend can show login options.
-		if authErr {
-			if methods := s.agentManager.GetSessionAuthMethods(data.SessionID); len(methods) > 0 {
-				meta["auth_methods"] = methods
-			}
-		}
-
-		// Build generic actions array for the frontend ActionMessage component.
-		meta["actions"] = buildRecoveryActions(data.TaskID, data.SessionID, hasResumeToken, authErr)
-
-		if err := s.messageCreator.CreateSessionMessage(
-			ctx,
-			data.TaskID,
-			statusMsg,
-			data.SessionID,
-			string(v1.MessageTypeStatus),
-			s.getActiveTurnID(data.SessionID),
-			meta,
-			false,
-		); err != nil {
-			s.logger.Warn("failed to create recovery status message",
-				zap.String("task_id", data.TaskID),
-				zap.Error(err))
-		}
+	// Skipped for office sessions: the office task page renders its
+	// own structured RunErrorEntry sourced from the FAILED session,
+	// and including the legacy ActionMessage would double-show the
+	// red banner (top-level + inside the embedded chat panel).
+	if s.messageCreator != nil && !s.isOfficeSession(ctx, data.SessionID) {
+		s.createRecoveryStatusMessage(ctx, data)
 	}
 
-	// Set session to WAITING_FOR_INPUT so the user can interact via recovery buttons.
-	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateWaitingForInput, data.ErrorMessage, false)
+	// Set session state. Office tasks (those with an assignee_agent_profile_id)
+	// transition to FAILED so the chat correctly stops rendering "Agent
+	// working" and the topbar spinner clears. Kanban / quick-chat tasks
+	// keep the legacy WAITING_FOR_INPUT path so the user can resume via
+	// the Resume / Start fresh recovery buttons in the existing chat
+	// surface. (See docs/specs/office-agent-error-handling.)
+	nextState := models.TaskSessionStateWaitingForInput
+	if s.isOfficeSession(ctx, data.SessionID) {
+		nextState = models.TaskSessionStateFailed
+	}
+	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, nextState, data.ErrorMessage, false)
 
 	// Ensure task is in REVIEW state.
 	if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
@@ -642,6 +612,68 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 
 	// Clean up the agent execution.
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+}
+
+// createRecoveryStatusMessage builds and persists the ActionMessage shown
+// in the kanban chat surface after a recoverable agent failure. Must only
+// be called for non-office sessions (office sessions render their own error UI).
+func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.AgentEventData) {
+	authErr := isAuthError(data.ErrorMessage)
+	displayMsg := data.ErrorMessage
+	if authErr {
+		if readable := extractReadableAuthError(data.ErrorMessage); readable != "" {
+			displayMsg = readable
+		}
+	}
+
+	statusMsg := fmt.Sprintf("Agent encountered an error: %s", displayMsg)
+	hasResumeToken := s.wasResumeAttempt(ctx, data.SessionID)
+	meta := map[string]interface{}{
+		"variant":          "error",
+		"recovery_actions": true,
+		"session_id":       data.SessionID,
+		"task_id":          data.TaskID,
+		"has_resume_token": hasResumeToken,
+		"is_auth_error":    authErr,
+	}
+
+	// Include cached auth methods so the frontend can show login options.
+	if authErr {
+		if methods := s.agentManager.GetSessionAuthMethods(data.SessionID); len(methods) > 0 {
+			meta["auth_methods"] = methods
+		}
+	}
+
+	meta["actions"] = buildRecoveryActions(data.TaskID, data.SessionID, hasResumeToken, authErr)
+
+	if err := s.messageCreator.CreateSessionMessage(
+		ctx,
+		data.TaskID,
+		statusMsg,
+		data.SessionID,
+		string(v1.MessageTypeStatus),
+		s.getActiveTurnID(data.SessionID),
+		meta,
+		false,
+	); err != nil {
+		s.logger.Warn("failed to create recovery status message",
+			zap.String("task_id", data.TaskID),
+			zap.Error(err))
+	}
+}
+
+// isOfficeSession returns true when the session row carries an
+// agent_profile_id — the office indicator. Best-effort: a missing
+// session falls back to the legacy kanban path.
+func (s *Service) isOfficeSession(ctx context.Context, sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return false
+	}
+	return session.AgentProfileID != ""
 }
 
 // handleAgentStartFailed is called by the executor when StartAgentProcess fails.
@@ -717,13 +749,21 @@ func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEven
 	// Complete the current turn if there is one
 	s.completeTurnForSession(ctx, data.SessionID)
 
-	// Don't override WAITING_FOR_INPUT — the recovery path sets this so the user
-	// can choose to resume or start fresh. The stopped event fires as a side-effect
-	// of cleanupAgentExecution and should not clobber the recovery state.
+	// Don't override WAITING_FOR_INPUT or IDLE — these are "stopped on
+	// purpose" states the caller already set. WAITING_FOR_INPUT comes from
+	// the recovery path so the user can choose to resume; IDLE comes from
+	// the office fire-and-forget turn-complete handler which intentionally
+	// stops the agent and parks the session for the next run. Either
+	// way, the AgentStopped event here is a side-effect of that stop —
+	// clobbering the state to CANCELLED would mark the row terminal and
+	// break the next office run (EnsureSessionForAgent then tries to
+	// INSERT a new row and the partial unique index rejects it).
 	if session, err := s.repo.GetTaskSession(ctx, data.SessionID); err == nil &&
-		session.State == models.TaskSessionStateWaitingForInput {
-		s.logger.Info("skipping CANCELLED transition, session is in recovery (WAITING_FOR_INPUT)",
-			zap.String("session_id", data.SessionID))
+		(session.State == models.TaskSessionStateWaitingForInput ||
+			session.State == models.TaskSessionStateIdle) {
+		s.logger.Info("skipping CANCELLED transition; session was stopped on purpose",
+			zap.String("session_id", data.SessionID),
+			zap.String("state", string(session.State)))
 		return
 	}
 

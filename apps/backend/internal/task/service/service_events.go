@@ -21,6 +21,14 @@ func (s *Service) PublishTaskUpdated(ctx context.Context, task *models.Task) {
 	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
 }
 
+// PublishTaskDeleted publishes a task.deleted event for the given task.
+// Used by cascade-delete callers (HandoffService.DeleteTaskTree) that
+// bypass Service.DeleteTask and therefore would otherwise leave WS
+// clients with a stale kanban view.
+func (s *Service) PublishTaskDeleted(ctx context.Context, task *models.Task) {
+	s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
+}
+
 // publishTaskEvent publishes task events to the event bus
 func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, oldWorkflowIDs ...string) {
 	if s.eventBus == nil {
@@ -29,6 +37,7 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 
 	data := map[string]interface{}{
 		"task_id":          task.ID,
+		"workspace_id":     task.WorkspaceID,
 		"workflow_id":      task.WorkflowID,
 		"workflow_step_id": task.WorkflowStepID,
 		"title":            task.Title,
@@ -162,14 +171,16 @@ func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, 
 		return
 	}
 	data := map[string]interface{}{
-		"task_id":          task.ID,
-		"from_workflow_id": fromWorkflowID,
-		"to_workflow_id":   task.WorkflowID,
-		"from_step_id":     fromStepID,
-		"to_step_id":       toStepID,
-		"session_id":       sessionID,
-		"workflow_id":      task.WorkflowID,
-		"task_description": task.Description,
+		"task_id":                   task.ID,
+		"from_workflow_id":          fromWorkflowID,
+		"to_workflow_id":            task.WorkflowID,
+		"from_step_id":              fromStepID,
+		"to_step_id":                toStepID,
+		"session_id":                sessionID,
+		"workflow_id":               task.WorkflowID,
+		"task_description":          task.Description,
+		"parent_id":                 task.ParentID,
+		"assignee_agent_profile_id": task.AssigneeAgentProfileID,
 	}
 	event := bus.NewEvent(events.TaskMoved, "task-service", data)
 	if err := s.eventBus.Publish(ctx, events.TaskMoved, event); err != nil {

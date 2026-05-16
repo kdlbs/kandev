@@ -5,6 +5,7 @@ import (
 	"maps"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/sysprompt"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -44,6 +45,14 @@ const (
 	MetaKeyWorkspacePath = "workspace_path"
 )
 
+// Task origin values for the Origin field.
+const (
+	TaskOriginManual       = "manual"
+	TaskOriginAgentCreated = "agent_created"
+	TaskOriginRoutine      = "routine"
+	TaskOriginOnboarding   = "onboarding"
+)
+
 // Task represents a task in the database
 type Task struct {
 	ID             string                 `json:"id"`
@@ -53,16 +62,63 @@ type Task struct {
 	Title          string                 `json:"title"`
 	Description    string                 `json:"description"`
 	State          v1.TaskState           `json:"state"`
-	Priority       int                    `json:"priority"`
+	Priority       string                 `json:"priority"`
 	Position       int                    `json:"position"` // Order within workflow step
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	Repositories   []*TaskRepository      `json:"repositories,omitempty"`
 	IsEphemeral    bool                   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
 	ParentID       string                 `json:"parent_id,omitempty"` // FK to parent task for subtasks
 	ArchivedAt     *time.Time             `json:"archived_at,omitempty"`
-	CreatedAt      time.Time              `json:"created_at"`
-	UpdatedAt      time.Time              `json:"updated_at"`
+	// ArchivedByCascadeID is set when the task was archived as part of an
+	// office task-handoffs cascade (phase 6). UnarchiveTaskByCascade uses
+	// it to scope restoration to exactly the descendants this cascade
+	// owned, leaving manually-archived tasks alone. Empty for
+	// manually-archived tasks and any task archived before phase 6.
+	ArchivedByCascadeID string    `json:"archived_by_cascade_id,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+
+	// Office extensions.
+	//
+	// ADR 0005 Wave F: the task's assignee is no longer a column on the
+	// tasks table. The canonical store is a `runner` row in
+	// workflow_step_participants (resolve via
+	// workflow.Repository.ResolveCurrentRunner). The struct field below
+	// is a read-time projection populated by repo SELECT queries through
+	// a correlated subquery and consumed unchanged by callers that
+	// previously read tasks.assignee_agent_profile_id. Repo writes to
+	// this field are routed to SetTaskRunner / ClearTaskRunner inside
+	// the task repository.
+	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`
+	Origin                 string `json:"origin,omitempty"`     // manual, agent_created, routine
+	ProjectID              string `json:"project_id,omitempty"` // FK to office project
+	Labels                 string `json:"labels,omitempty"`     // JSON array string, default "[]"
+	Identifier             string `json:"identifier,omitempty"` // e.g. "KAN-42"
+
+	// IsFromOffice is a read-time projection set by the task repo's SELECT
+	// (see isFromOfficeProjection in repository/sqlite/task.go). True when
+	// the task is owned by office: either it has a non-empty ProjectID, or
+	// its workflow matches the workspace's office_workflow_id. Kanban-board
+	// tasks always come back false. UI callers gate office-only surfaces on
+	// this (e.g. the "Open in office view" topbar link).
+	IsFromOffice bool `json:"is_from_office,omitempty"`
 }
+
+// TaskTreeFilters provides filter options for the task tree query.
+type TaskTreeFilters struct {
+	ProjectID  string
+	AssigneeID string
+	WorkflowID string
+	Origin     string
+}
+
+// WorkflowStyle values are persisted in workflows.style. See ADR-0004.
+// They're a UX hint for the frontend; backend code MUST NOT branch on them.
+const (
+	WorkflowStyleKanban = "kanban"
+	WorkflowStyleOffice = "office"
+	WorkflowStyleCustom = "custom"
+)
 
 // Workflow represents a task workflow
 type Workflow struct {
@@ -75,7 +131,13 @@ type Workflow struct {
 	SortOrder          int     `json:"sort_order"`
 	// Hidden workflows are excluded from management and picker UIs by default.
 	// Used by system-only flows like Improve Kandev.
-	Hidden    bool      `json:"hidden,omitempty"`
+	Hidden bool `json:"hidden,omitempty"`
+	// Style is a Phase 2 (ADR-0004) UX hint read by the frontend ONLY.
+	// Allowed values: "kanban" | "office" | "custom". Empty / unknown
+	// values fall back to "kanban" via the schema default. Backend code
+	// MUST NOT branch on this field — it is a presentation hint, not a
+	// behavioural invariant.
+	Style     string    `json:"style,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -92,6 +154,11 @@ type Workspace struct {
 	DefaultConfigAgentProfileID *string   `json:"default_config_agent_profile_id,omitempty"`
 	CreatedAt                   time.Time `json:"created_at"`
 	UpdatedAt                   time.Time `json:"updated_at"`
+
+	// Office extensions
+	TaskPrefix       string `json:"task_prefix,omitempty"`        // e.g. "KAN"
+	TaskSequence     int    `json:"task_sequence,omitempty"`      // auto-incrementing counter
+	OfficeWorkflowID string `json:"office_workflow_id,omitempty"` // FK to system office workflow
 }
 
 // TaskRepository represents a repository associated with a task
@@ -239,6 +306,9 @@ const (
 	TaskSessionStateStarting TaskSessionState = "STARTING"
 	// TaskSessionStateRunning - agent is actively running
 	TaskSessionStateRunning TaskSessionState = "RUNNING"
+	// TaskSessionStateIdle - office sessions only: agent process and executor torn down
+	// between turns; conversation (acp_session_id) preserved for the next run.
+	TaskSessionStateIdle TaskSessionState = "IDLE"
 	// TaskSessionStateWaitingForInput - agent waiting for user input
 	TaskSessionStateWaitingForInput TaskSessionState = "WAITING_FOR_INPUT"
 	// TaskSessionStateCompleted - agent finished successfully
@@ -357,6 +427,13 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 	if s.TaskEnvironmentID != "" {
 		result["task_environment_id"] = s.TaskEnvironmentID
 	}
+	// Office sessions carry an agent_profile_id; the frontend uses it
+	// to distinguish per-(task, agent) office sessions from per-launch
+	// kanban/quick-chat sessions, which drives "live" detection in the
+	// chat. Omit when blank so kanban responses look unchanged.
+	if s.AgentProfileID != "" {
+		result["agent_profile_id"] = s.AgentProfileID
+	}
 	return result
 }
 
@@ -420,16 +497,33 @@ func IsRemoteExecutorType(t ExecutorType) bool {
 	}
 }
 
+// Runtime maps an ExecutorType to the runtime backend that hosts the
+// agent subprocess. Mirrors executor.ExecutorTypeToBackend so callers
+// outside the executor package can ask the property without importing
+// it. The two are kept in lock-step intentionally — keep them in sync
+// when adding a new ExecutorType.
+func (t ExecutorType) Runtime() agentruntime.Runtime {
+	switch t {
+	case ExecutorTypeLocal, ExecutorTypeWorktree, ExecutorTypeMockRemote:
+		return agentruntime.RuntimeStandalone
+	case ExecutorTypeLocalDocker:
+		return agentruntime.RuntimeDocker
+	case ExecutorTypeRemoteDocker:
+		return agentruntime.RuntimeRemoteDocker
+	case ExecutorTypeSprites:
+		return agentruntime.RuntimeSprites
+	default:
+		return agentruntime.RuntimeStandalone
+	}
+}
+
 // IsContainerizedExecutorType reports whether the given executor type runs
 // in a container/sandbox where shells must be executed inside the container
-// via agentctl, not on the host.
+// via agentctl, not on the host. Single source of truth is
+// Runtime().IsContainerized() so a new ExecutorType only has to declare its
+// runtime once.
 func IsContainerizedExecutorType(t ExecutorType) bool {
-	switch t {
-	case ExecutorTypeLocalDocker, ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeMockRemote:
-		return true
-	default:
-		return false
-	}
+	return t.Runtime().IsContainerized()
 }
 
 // IsAlwaysResumableRuntime reports whether the given runtime string represents
@@ -716,6 +810,41 @@ type TaskPlanRevision struct {
 	UpdatedAt          time.Time `json:"updated_at"` // bumps on coalesce merge
 }
 
+// TaskDocument represents a named document (plan, spec, notes, etc.) associated with a task.
+// The key uniquely identifies the document within a task (e.g., "plan", "spec", "notes").
+type TaskDocument struct {
+	ID         string    `json:"id" db:"id"`
+	TaskID     string    `json:"task_id" db:"task_id"`
+	Key        string    `json:"key" db:"key"`
+	Type       string    `json:"type" db:"type"`
+	Title      string    `json:"title" db:"title"`
+	Content    string    `json:"content" db:"content"`
+	AuthorKind string    `json:"author_kind" db:"author_kind"`
+	AuthorName string    `json:"author_name" db:"author_name"`
+	Filename   string    `json:"filename,omitempty" db:"filename"`
+	MimeType   string    `json:"mime_type,omitempty" db:"mime_type"`
+	SizeBytes  int64     `json:"size_bytes,omitempty" db:"size_bytes"`
+	DiskPath   string    `json:"-" db:"disk_path"`
+	CreatedAt  time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// TaskDocumentRevision is one immutable snapshot in the revision history of a task document.
+// Revisions are the source of truth for history; TaskDocument stores the latest revision's content as HEAD.
+type TaskDocumentRevision struct {
+	ID                 string    `json:"id" db:"id"`
+	TaskID             string    `json:"task_id" db:"task_id"`
+	DocumentKey        string    `json:"document_key" db:"document_key"`
+	RevisionNumber     int       `json:"revision_number" db:"revision_number"`
+	Title              string    `json:"title" db:"title"`
+	Content            string    `json:"content" db:"content"`
+	AuthorKind         string    `json:"author_kind" db:"author_kind"`
+	AuthorName         string    `json:"author_name" db:"author_name"`
+	RevertOfRevisionID *string   `json:"revert_of_revision_id,omitempty" db:"revert_of_revision_id"`
+	CreatedAt          time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at" db:"updated_at"`
+}
+
 // SessionFileReview tracks per-file review state within a session
 type SessionFileReview struct {
 	ID         string     `json:"id"`
@@ -745,7 +874,7 @@ func (t *Task) ToAPI() *v1.Task {
 		})
 	}
 
-	return &v1.Task{
+	result := &v1.Task{
 		ID:           t.ID,
 		WorkspaceID:  t.WorkspaceID,
 		WorkflowID:   t.WorkflowID,
@@ -760,4 +889,8 @@ func (t *Task) ToAPI() *v1.Task {
 		IsEphemeral:  t.IsEphemeral,
 		ParentID:     t.ParentID,
 	}
+	if t.Identifier != "" {
+		result.Identifier = t.Identifier
+	}
+	return result
 }

@@ -87,9 +87,13 @@ type DevBackendEnv = {
 // is assumed to be leaked from the parent backend and is ignored. In a normal
 // shell, an explicit KANDEV_DATABASE_PATH is honored as an escape hatch.
 export function resolveDevBackendEnv(repoRoot: string): DevBackendEnv {
+  // Profile-selector only: the backend reads profiles.yaml at startup
+  // and applies the matching `dev:` values (mock agent, pprof,
+  // feature flags, etc.) to its own env. We don't repeat those here —
+  // profiles.yaml at the repo root is the single source of truth.
+  // See docs/decisions/0007-runtime-feature-flags.md.
   const baseExtra: Record<string, string> = {
-    KANDEV_MOCK_AGENT: process.env.KANDEV_MOCK_AGENT || "true",
-    KANDEV_DEBUG_PPROF_ENABLED: "true",
+    KANDEV_DEBUG_DEV_MODE: "true",
   };
   const devHome = devKandevHome(repoRoot);
   // Display only; the backend derives its own DB path from KANDEV_HOME_DIR

@@ -93,6 +93,11 @@ export type WorkflowStep = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
+  /**
+   * Phase 2 (ADR-0004) semantic UX hint. Backend code does not branch on this;
+   * frontend uses it to choose presentation (review/approval styling, etc).
+   */
+  stage_type?: "work" | "review" | "approval" | "custom";
   created_at: string;
   updated_at: string;
 };
@@ -130,6 +135,7 @@ export type TaskSessionState =
   | "CREATED"
   | "STARTING"
   | "RUNNING"
+  | "IDLE"
   | "WAITING_FOR_INPUT"
   | "COMPLETED"
   | "FAILED"
@@ -144,6 +150,11 @@ export type Workflow = {
   agent_profile_id?: string;
   sort_order?: number;
   hidden?: boolean;
+  /**
+   * Phase 2 (ADR-0004) UX hint. Frontend uses this to pick a presentation
+   * shell (kanban board, office task pane, etc). Backend does NOT branch on it.
+   */
+  style?: "kanban" | "office" | "custom";
   created_at: string;
   updated_at: string;
 };
@@ -157,6 +168,7 @@ export type Workspace = {
   default_environment_id?: string | null;
   default_agent_profile_id?: string | null;
   default_config_agent_profile_id?: string | null;
+  office_workflow_id?: string;
   created_at: string;
   updated_at: string;
 };
@@ -272,7 +284,22 @@ export type Task = {
   created_at: string;
   updated_at: string;
   metadata?: Record<string, unknown> | null;
+  // Office extensions (mirror TaskDTO Go fields). Empty/undefined for kanban-origin tasks.
+  origin?: TaskOrigin;
+  project_id?: string;
+  // Backend-computed "owned by office" flag: true when project_id is set
+  // OR workflow_id matches the workspace's office_workflow_id. See
+  // isFromOfficeProjection in the Go task repo for the canonical rule.
+  is_from_office?: boolean;
 };
+
+// Task origin values mirror models.TaskOrigin* constants in the Go backend.
+export type TaskOrigin = "manual" | "agent_created" | "routine" | "onboarding";
+
+// isFromOffice reads the backend-computed flag (predicate lives in SQL at
+// apps/backend/internal/task/repository/sqlite/task.go). Use to gate
+// office-only UI like the "Open in office view" topbar link.
+export const isFromOffice = (task: Task | null | undefined): boolean => !!task?.is_from_office;
 
 export type CreateTaskResponse = Task & {
   session_id?: string;
@@ -293,6 +320,7 @@ export type WorkflowStepDTO = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
+  stage_type?: "work" | "review" | "approval" | "custom";
   created_at?: string;
   updated_at?: string;
 };
@@ -306,9 +334,8 @@ export type MoveTaskResponse = {
 export type TaskSession = {
   id: string;
   task_id: string;
-  agent_instance_id?: string;
-  container_id?: string;
   agent_profile_id?: string;
+  container_id?: string;
   executor_id?: string;
   environment_id?: string;
   repository_id?: string;
@@ -332,6 +359,8 @@ export type TaskSession = {
   is_primary?: boolean;
   is_passthrough?: boolean;
   review_status?: WorkflowReviewStatus;
+  // Server-resolved tool_call count, populated by ListTaskSessions.
+  command_count?: number;
 };
 
 export type TaskSessionsResponse = {

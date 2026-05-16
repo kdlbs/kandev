@@ -605,7 +605,7 @@ func newDiscoveryService(t *testing.T, root string) *Service {
 		t.Fatalf("failed to open test database: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repoImpl, cleanup, err := repository.Provide(sqlxDB, sqlxDB)
+	repoImpl, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}

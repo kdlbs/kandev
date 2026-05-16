@@ -112,6 +112,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Jira:     jiraSvc,
 		Linear:   linearSvc,
 		Slack:    slackSvc,
+		// Office is constructed later in initOfficeServices once all
+		// of its dependencies (config loader, task integrations, etc.) are available.
+		Office: nil,
 		// Notification service is initialized after gateway is available.
 		Notification: nil,
 	}, agentSettingsController, nil

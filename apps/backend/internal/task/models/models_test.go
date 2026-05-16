@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentruntime"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -56,7 +57,7 @@ func TestTaskStructInitialization(t *testing.T) {
 		Title:          "Test Task",
 		Description:    "A test task description",
 		State:          v1.TaskStateTODO,
-		Priority:       5,
+		Priority:       "high",
 		Position:       1,
 		Metadata:       map[string]interface{}{"key": "value"},
 		Repositories:   repos,
@@ -85,8 +86,8 @@ func TestTaskStructInitialization(t *testing.T) {
 	if task.State != v1.TaskStateTODO {
 		t.Errorf("expected State TODO, got %s", task.State)
 	}
-	if task.Priority != 5 {
-		t.Errorf("expected Priority 5, got %d", task.Priority)
+	if task.Priority != "high" {
+		t.Errorf("expected Priority high, got %s", task.Priority)
 	}
 	if len(task.Repositories) != 1 {
 		t.Fatalf("expected 1 repository, got %d", len(task.Repositories))
@@ -140,7 +141,7 @@ func TestTaskToAPI(t *testing.T) {
 		Title:          "Test Task",
 		Description:    "A test task description",
 		State:          v1.TaskStateInProgress,
-		Priority:       3,
+		Priority:       "medium",
 		Repositories: []*TaskRepository{
 			{
 				ID:           "task-repo-1",
@@ -180,7 +181,7 @@ func TestTaskToAPI(t *testing.T) {
 		t.Errorf("expected State %s, got %s", task.State, apiTask.State)
 	}
 	if apiTask.Priority != task.Priority {
-		t.Errorf("expected Priority %d, got %d", task.Priority, apiTask.Priority)
+		t.Errorf("expected Priority %s, got %s", task.Priority, apiTask.Priority)
 	}
 	if len(apiTask.Repositories) != 1 {
 		t.Fatalf("expected 1 repository, got %d", len(apiTask.Repositories))
@@ -206,7 +207,7 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 		Title:          "Test Task",
 		Description:    "A test task description",
 		State:          v1.TaskStateTODO,
-		Priority:       0,
+		Priority:       "medium",
 		Position:       0,
 		Metadata:       nil,
 		CreatedAt:      now,
@@ -218,4 +219,79 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 	if len(apiTask.Repositories) != 0 {
 		t.Errorf("expected no repositories, got %d", len(apiTask.Repositories))
 	}
+}
+
+// TestTaskIsFromOfficeField verifies the IsFromOffice field round-trips
+// through the model. The actual office-vs-kanban predicate is computed in
+// SQL by isFromOfficeProjection (see repository/sqlite/task.go) so the
+// scan layer is the only thing that sets the field. A round-trip test is
+// the right scope at this layer; the SQL projection itself is covered by
+// TestIsFromOfficeProjection_RealWorkspaceWorkflow in
+// repository/sqlite/is_from_office_test.go, which exercises all three
+// branches (office workflow, project link, neither) against a real DB.
+func TestTaskIsFromOfficeField(t *testing.T) {
+	tests := []struct {
+		name string
+		task Task
+		want bool
+	}{
+		{"default zero value", Task{}, false},
+		{"explicit false", Task{IsFromOffice: false}, false},
+		{"explicit true", Task{IsFromOffice: true}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.task.IsFromOffice; got != tt.want {
+				t.Errorf("IsFromOffice = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestExecutorTypeRuntime pins the ExecutorType → agentruntime.Runtime
+// mapping table. Every executor variant the codebase ships must
+// declare its runtime explicitly here — a missing case falls through
+// to RuntimeStandalone, which silently mislabels container executors
+// as host-side. That's the exact failure mode MockAgent.BuildCommand
+// guards against via opts.Runtime.IsContainerized(); if Runtime()
+// reports the wrong value here, the guard is bypassed and docker e2e
+// fails with `exec: "<host-abs-path>": not found` (the bug fixed in
+// commit 8518f65).
+//
+// When you add a new ExecutorType, add a row here and a matching
+// case in the Runtime() switch. The default-fallthrough probe at the
+// end keeps the implementation honest: it exercises an unknown value
+// and asserts the host-side default, so introducing a new container
+// type without registering it surfaces as a real mismatch upstream
+// rather than as a quiet wrong answer.
+func TestExecutorTypeRuntime(t *testing.T) {
+	cases := []struct {
+		in   ExecutorType
+		want agentruntime.Runtime
+	}{
+		{ExecutorTypeLocal, agentruntime.RuntimeStandalone},
+		{ExecutorTypeWorktree, agentruntime.RuntimeStandalone},
+		{ExecutorTypeMockRemote, agentruntime.RuntimeStandalone},
+		{ExecutorTypeLocalDocker, agentruntime.RuntimeDocker},
+		{ExecutorTypeRemoteDocker, agentruntime.RuntimeRemoteDocker},
+		{ExecutorTypeSprites, agentruntime.RuntimeSprites},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.in), func(t *testing.T) {
+			if got := tc.in.Runtime(); got != tc.want {
+				t.Errorf("ExecutorType(%q).Runtime() = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	// Unknown ExecutorType falls back to standalone — documented in the
+	// switch's default branch. Pin it so a future "treat unknown as
+	// docker" refactor can't happen silently.
+	t.Run("unknown_falls_back_to_standalone", func(t *testing.T) {
+		got := ExecutorType("not-a-real-type").Runtime()
+		if got != agentruntime.RuntimeStandalone {
+			t.Errorf("unknown ExecutorType.Runtime() = %q, want %q (host-side fallback)",
+				got, agentruntime.RuntimeStandalone)
+		}
+	})
 }

@@ -88,6 +88,7 @@ func RegisterRoutes(router *gin.Engine, store *Store, hub Broadcaster, messageCr
 	api.GET("/:id", h.httpGetRequest)
 	api.GET("/:id/wait", h.httpWaitForResponse)
 	api.POST("/:id/respond", h.httpRespond)
+	api.POST("/:id/cancel", h.httpCancelRequest)
 }
 
 // CreateRequestBody is the request body for creating a clarification request.
@@ -396,6 +397,43 @@ func (h *Handlers) expectedQuestionIDs(ctx context.Context, pendingID string) []
 	return ids
 }
 
+func (h *Handlers) httpCancelRequest(c *gin.Context) {
+	pendingID := c.Param("id")
+	req, ok := h.store.GetRequest(pendingID)
+	if !ok || req == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "clarification request not found"})
+		return
+	}
+	if !h.store.CancelRequest(pendingID) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "clarification request not found"})
+		return
+	}
+
+	if h.messageCreator != nil {
+		for _, q := range req.Questions {
+			if err := h.messageCreator.UpdateClarificationMessage(
+				c.Request.Context(),
+				req.SessionID,
+				pendingID,
+				q.ID,
+				string(StatusCancelled),
+				nil,
+			); err != nil {
+				h.logger.Warn("failed to mark clarification cancelled",
+					zap.String("pending_id", pendingID),
+					zap.String("question_id", q.ID),
+					zap.Error(err))
+			}
+		}
+	}
+	h.publishCancelledEvent(c, pendingID, req)
+	h.logger.Info("clarification cancelled by operator",
+		zap.String("pending_id", pendingID),
+		zap.String("session_id", req.SessionID),
+		zap.String("task_id", req.TaskID))
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
 // applyAnswersToMessages flips per-question status (answered/rejected) on every
 // message that belongs to the bundle. When rejected, every question is marked
 // rejected; when answered, each answer updates the matching question's row.
@@ -506,6 +544,35 @@ func (h *Handlers) respondViaEventFallback(c *gin.Context, pendingID string, ans
 		zap.String("pending_id", pendingID),
 		zap.String("session_id", clarificationCtx.SessionID),
 		zap.String("task_id", clarificationCtx.TaskID))
+}
+
+func (h *Handlers) publishCancelledEvent(c *gin.Context, pendingID string, req *Request) {
+	if h.eventBus == nil || req == nil {
+		return
+	}
+	prompt := ""
+	if len(req.Questions) > 0 {
+		prompt = req.Questions[0].Prompt
+	}
+	eventData := map[string]any{
+		"session_id":    req.SessionID,
+		"task_id":       req.TaskID,
+		"pending_id":    pendingID,
+		"question":      prompt,
+		"answer_text":   "The pending clarification question was cancelled by the operator.",
+		"rejected":      true,
+		"reject_reason": "cancelled",
+	}
+	if err := h.eventBus.Publish(c.Request.Context(), events.ClarificationCancelled, bus.NewEvent(
+		events.ClarificationCancelled,
+		"clarification-handlers",
+		eventData,
+	)); err != nil {
+		h.logger.Error("failed to publish clarification cancelled event",
+			zap.String("pending_id", pendingID),
+			zap.String("session_id", req.SessionID),
+			zap.Error(err))
+	}
 }
 
 // lookupSessionForPending returns the session ID for a pending clarification.

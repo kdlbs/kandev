@@ -10,7 +10,7 @@ import {
   IconAt,
   IconPlugConnected,
   IconPlugConnectedX,
-  IconPaperclip,
+  IconUpload,
 } from "@tabler/icons-react";
 
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
@@ -220,6 +220,8 @@ function PlanToggleButton({
           variant="ghost"
           size="sm"
           data-testid="plan-mode-toggle-button"
+          data-plan-available={planModeAvailable}
+          data-plan-enabled={planModeEnabled}
           className={cn(
             "h-7 gap-1.5 px-2 hover:bg-muted/40 cursor-pointer",
             planModeEnabled && planModeAvailable && "bg-violet-500/15 text-violet-400",
@@ -437,7 +439,7 @@ function AttachFilesButton({ onClick }: { onClick: () => void }) {
           className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
           onClick={onClick}
         >
-          <IconPaperclip className="h-4 w-4" />
+          <IconUpload className="h-4 w-4" />
         </Button>
       </TooltipTrigger>
       <TooltipContent>Attach files</TooltipContent>

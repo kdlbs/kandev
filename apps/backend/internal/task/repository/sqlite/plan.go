@@ -155,7 +155,7 @@ func (r *Repository) ListTaskPlanRevisions(ctx context.Context, taskID string, l
 	query := `SELECT ` + revisionSelectCols + ` FROM task_plan_revisions WHERE task_id = ? ORDER BY revision_number DESC`
 	args := []interface{}{taskID}
 	if limit > 0 {
-		query += ` LIMIT ?`
+		query += sqlLimitClause
 		args = append(args, limit)
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)

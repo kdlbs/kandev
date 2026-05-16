@@ -10,6 +10,9 @@ import (
 	"github.com/kandev/kandev/internal/linear"
 	notificationservice "github.com/kandev/kandev/internal/notifications/service"
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
+	office "github.com/kandev/kandev/internal/office"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	officeservice "github.com/kandev/kandev/internal/office/service"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
 	"github.com/kandev/kandev/internal/secrets"
@@ -22,6 +25,7 @@ import (
 	utilitystore "github.com/kandev/kandev/internal/utility/store"
 	workflowrepository "github.com/kandev/kandev/internal/workflow/repository"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 type Repositories struct {
@@ -35,6 +39,7 @@ type Repositories struct {
 	Utility       utilitystore.Repository
 	Workflow      *workflowrepository.Repository
 	Secrets       secrets.SecretStore
+	Office        *officesqlite.Repository
 }
 
 type Services struct {
@@ -49,4 +54,13 @@ type Services struct {
 	Jira         *jira.Service
 	Linear       *linear.Service
 	Slack        *slack.Service
+	Office       *officeservice.Service
+	OfficeSvcs   *office.Services
+	// OrchScheduler is the office SchedulerIntegration constructed by
+	// startOfficeSchedulersAndGC. Exposed here so registerRoutes can
+	// wire SetTaskContextProvider after the HandoffService is built.
+	OrchScheduler *officeservice.SchedulerIntegration
+	// WorktreeMgr is the worktree manager. Exposed so the office GC can
+	// consult it as the authoritative inventory of live worktrees.
+	WorktreeMgr *worktree.Manager
 }

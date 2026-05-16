@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
-	"github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
@@ -45,6 +45,10 @@ func (m *mockAgentManager) SetExecutionDescription(ctx context.Context, agentExe
 	if m.setExecutionDescriptionFunc != nil {
 		return m.setExecutionDescriptionFunc(ctx, agentExecutionID, description)
 	}
+	return nil
+}
+
+func (m *mockAgentManager) SetExecutionEnv(_ context.Context, _ string, _ map[string]string) error {
 	return nil
 }
 
@@ -165,6 +169,10 @@ func (m *mockAgentManager) GetGitStatus(ctx context.Context, sessionID string) (
 		Branch:     "main",
 		HeadCommit: "abc123def456",
 	}, nil
+}
+
+func (m *mockAgentManager) GetGitStatusFresh(ctx context.Context, sessionID string) (*client.GitStatusResult, error) {
+	return m.GetGitStatus(ctx, sessionID)
 }
 
 func (m *mockAgentManager) WaitForAgentctlReady(ctx context.Context, sessionID string) error {
@@ -465,6 +473,16 @@ func (m *mockRepository) GetTaskSessionByTaskID(ctx context.Context, taskID stri
 func (m *mockRepository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	return nil, nil
 }
+func (m *mockRepository) GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, s := range m.sessions {
+		if s.TaskID == taskID && s.AgentProfileID == agentInstanceID {
+			return s, nil
+		}
+	}
+	return nil, nil
+}
 func (m *mockRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -527,6 +545,9 @@ func (m *mockRepository) UpdateSessionMetadata(ctx context.Context, sessionID st
 func (m *mockRepository) SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
 	return nil
 }
+func (m *mockRepository) GetLastAgentMessage(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
 
 // Task Session Worktree operations
 func (m *mockRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
@@ -542,6 +563,9 @@ func (m *mockRepository) DeleteTaskSessionWorktreesBySession(ctx context.Context
 
 // Git Snapshot operations
 func (m *mockRepository) CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error {
+	return nil
+}
+func (m *mockRepository) DeleteLiveMonitorSnapshots(ctx context.Context, sessionID string) error {
 	return nil
 }
 func (m *mockRepository) GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
@@ -648,6 +672,12 @@ func (m *mockRepository) ListEnvironments(ctx context.Context) ([]*models.Enviro
 }
 
 // Task environment operations
+func (m *mockRepository) GetTaskEnvironment(_ context.Context, id string) (*models.TaskEnvironment, error) {
+	if env, ok := m.taskEnvironments[id]; ok {
+		return env, nil
+	}
+	return nil, nil
+}
 func (m *mockRepository) GetTaskEnvironmentByTaskID(_ context.Context, taskID string) (*models.TaskEnvironment, error) {
 	for _, env := range m.taskEnvironments {
 		if env.TaskID == taskID {

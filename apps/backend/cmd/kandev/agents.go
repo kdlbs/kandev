@@ -8,11 +8,11 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/credentials"
 	agentexecutor "github.com/kandev/kandev/internal/agent/executor"
-	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
-	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -108,6 +108,11 @@ func provideLifecycleManager(
 	preparerRegistry.Register(agentexecutor.NameSprites, lifecycle.NewSpritesPreparer(log))
 	lifecycleMgr.SetPreparerRegistry(preparerRegistry)
 	lifecycleMgr.SetSecretStore(secretStore)
+	// Wire the agent_profiles reader so the launch-prep skill deploy hook
+	// (ADR 0005 Wave A) can resolve full profile rows including the office
+	// enrichment fields. Without a wired SkillDeployer this is a no-op,
+	// but the reader still lets future Wave-B/C consumers light up.
+	lifecycleMgr.SetAgentProfileReader(agentSettingsRepo)
 
 	// MCP handler is set later in main.go after MCP handlers are registered
 	// via lifecycleMgr.SetMCPHandler(gateway.Dispatcher)

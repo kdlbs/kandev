@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 func TestNewStore_DefaultTimeout(t *testing.T) {
@@ -256,4 +258,89 @@ func TestCancelSession_NoMatch(t *testing.T) {
 	if len(cancelled) != 0 {
 		t.Errorf("expected 0 cancelled, got %d", len(cancelled))
 	}
+}
+
+func TestListPendingPermissions_Empty(t *testing.T) {
+	s := NewStore(time.Minute)
+	perms := s.ListPendingPermissions()
+	if perms == nil {
+		t.Error("expected non-nil slice from ListPendingPermissions")
+	}
+	if len(perms) != 0 {
+		t.Errorf("expected 0 pending permissions, got %d", len(perms))
+	}
+}
+
+func TestListPendingPermissions_ReturnsPendingRequests(t *testing.T) {
+	s := NewStore(time.Minute)
+
+	s.CreateRequest(&Request{
+		SessionID: "session-1",
+		TaskID:    "task-1",
+		Questions: []Question{{Prompt: "Allow bash execution?"}},
+		Context:   "tool permission",
+	})
+	s.CreateRequest(&Request{
+		SessionID: "session-2",
+		TaskID:    "task-2",
+		Questions: []Question{{Prompt: "Write to /tmp?"}},
+	})
+
+	perms := s.ListPendingPermissions()
+
+	if len(perms) != 2 {
+		t.Fatalf("expected 2 pending permissions, got %d", len(perms))
+	}
+
+	bySession := make(map[string]shared.PendingPermission)
+	for _, p := range perms {
+		bySession[p.SessionID] = p
+	}
+
+	p1, ok := bySession["session-1"]
+	if !ok {
+		t.Fatal("expected permission for session-1")
+	}
+	if p1.TaskID != "task-1" {
+		t.Errorf("task_id = %q, want task-1", p1.TaskID)
+	}
+	if p1.Prompt != "Allow bash execution?" {
+		t.Errorf("prompt = %q, want 'Allow bash execution?'", p1.Prompt)
+	}
+	if p1.Context != "tool permission" {
+		t.Errorf("context = %q, want 'tool permission'", p1.Context)
+	}
+	if p1.PendingID == "" {
+		t.Error("expected non-empty pending_id")
+	}
+	if p1.CreatedAt.IsZero() {
+		t.Error("expected non-zero created_at")
+	}
+}
+
+func TestListPendingPermissions_ExcludesCancelled(t *testing.T) {
+	s := NewStore(time.Minute)
+
+	s.CreateRequest(&Request{SessionID: "s1"})
+	s.CreateRequest(&Request{SessionID: "s2"})
+
+	// Cancel session s1
+	s.CancelSession("s1")
+
+	perms := s.ListPendingPermissions()
+
+	if len(perms) != 1 {
+		t.Fatalf("expected 1 pending permission after cancel, got %d", len(perms))
+	}
+	if perms[0].SessionID != "s2" {
+		t.Errorf("expected session-2 to remain, got %q", perms[0].SessionID)
+	}
+}
+
+func TestListPendingPermissions_ImplementsInterface(t *testing.T) {
+	s := NewStore(time.Minute)
+	// Verify Store satisfies shared.PermissionLister at compile time.
+	var _ interface {
+		ListPendingPermissions() []shared.PendingPermission
+	} = s
 }

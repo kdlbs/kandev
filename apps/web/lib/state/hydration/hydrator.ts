@@ -235,7 +235,6 @@ export function hydrateUI(draft: Draft<AppState>, state: Partial<AppState>): voi
     }
   }
   if (state.connection) {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { status: _status, ...rest } = state.connection || {};
     if (Object.keys(rest).length > 0) {
       Object.assign(draft.connection, rest);
@@ -273,6 +272,17 @@ export function hydrateState(
 
   hydrateGitHub(draft, state);
   hydrateUI(draft, state);
+
+  // Office slice — shallow merge SSR-provided data into the store.
+  if (state.office) {
+    Object.assign(draft.office, state.office);
+  }
+
+  // Feature flags — overwrite whole map. SSR is authoritative; the backend
+  // is the only source of truth for what's enabled in this deployment.
+  if (state.features) {
+    Object.assign(draft.features, state.features);
+  }
 }
 
 /** Hydrate GitHub slices, preserving loading states. */

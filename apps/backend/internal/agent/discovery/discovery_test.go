@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -28,6 +29,7 @@ func (a *discoveryTestAgent) PermissionSettings() map[string]agents.PermissionSe
 	return nil
 }
 func (a *discoveryTestAgent) Runtime() *agents.RuntimeConfig { return nil }
+func (a *discoveryTestAgent) BillingType() usage.BillingType { return usage.BillingTypeAPIKey }
 func (a *discoveryTestAgent) RemoteAuth() *agents.RemoteAuth { return nil }
 func (a *discoveryTestAgent) InstallScript() string          { return "" }
 func (a *discoveryTestAgent) BuildCommand(opts agents.CommandOptions) agents.Command {

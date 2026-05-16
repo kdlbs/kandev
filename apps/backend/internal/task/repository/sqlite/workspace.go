@@ -19,6 +19,9 @@ func (r *Repository) CreateWorkspace(ctx context.Context, workspace *models.Work
 	now := time.Now().UTC()
 	workspace.CreatedAt = now
 	workspace.UpdatedAt = now
+	if workspace.TaskPrefix == "" {
+		workspace.TaskPrefix = "KAN"
+	}
 
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workspaces (
@@ -30,11 +33,14 @@ func (r *Repository) CreateWorkspace(ctx context.Context, workspace *models.Work
 			default_environment_id,
 			default_agent_profile_id,
 			default_config_agent_profile_id,
+			task_prefix,
+			task_sequence,
+			office_workflow_id,
 			created_at,
 			updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.CreatedAt, workspace.UpdatedAt)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.TaskPrefix, workspace.TaskSequence, workspace.OfficeWorkflowID, workspace.CreatedAt, workspace.UpdatedAt)
 
 	return err
 }
@@ -48,7 +54,7 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 	var defaultConfigAgentProfileID sql.NullString
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, created_at, updated_at
+		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, created_at, updated_at
 		FROM workspaces WHERE id = ?
 	`), id).Scan(
 		&workspace.ID,
@@ -59,6 +65,9 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 		&defaultEnvironmentID,
 		&defaultAgentProfileID,
 		&defaultConfigAgentProfileID,
+		&workspace.TaskPrefix,
+		&workspace.TaskSequence,
+		&workspace.OfficeWorkflowID,
 		&workspace.CreatedAt,
 		&workspace.UpdatedAt,
 	)
@@ -124,7 +133,7 @@ func (r *Repository) DeleteWorkspace(ctx context.Context, id string) error {
 // ListWorkspaces returns all workspaces
 func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	rows, err := r.ro.QueryContext(ctx, `
-		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, created_at, updated_at
+		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, created_at, updated_at
 		FROM workspaces ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -148,6 +157,9 @@ func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, e
 			&defaultEnvironmentID,
 			&defaultAgentProfileID,
 			&defaultConfigAgentProfileID,
+			&workspace.TaskPrefix,
+			&workspace.TaskSequence,
+			&workspace.OfficeWorkflowID,
 			&workspace.CreatedAt,
 			&workspace.UpdatedAt,
 		); err != nil {

@@ -149,6 +149,19 @@ func (s *Store) CancelRequest(pendingID string) bool {
 	return true
 }
 
+// ListPending returns a snapshot of all pending clarification requests.
+// The caller should not modify the returned requests.
+func (s *Store) ListPending() []*Request {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make([]*Request, 0, len(s.pending))
+	for _, p := range s.pending {
+		out = append(out, p.Request)
+	}
+	return out
+}
+
 // CancelSession cancels all pending clarification requests for a given session.
 // It closes the CancelCh to unblock any WaitForResponse callers and removes entries.
 // Returns the list of cancelled pending IDs.

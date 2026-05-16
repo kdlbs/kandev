@@ -3,7 +3,7 @@ package websocket
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
 	"github.com/kandev/kandev/internal/lsp/installer"

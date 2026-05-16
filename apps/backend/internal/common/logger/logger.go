@@ -79,6 +79,15 @@ func SetDefault(logger *Logger) {
 	defaultLogger = logger
 }
 
+// NewFromZap wraps an existing *zap.Logger in a Logger. Useful in tests
+// where the caller provides a custom core (e.g. zaptest/observer).
+func NewFromZap(z *zap.Logger) (*Logger, error) {
+	return &Logger{
+		zap:   z,
+		sugar: z.Sugar(),
+	}, nil
+}
+
 // NewLogger creates a new Logger with the given configuration.
 func NewLogger(cfg LoggingConfig) (*Logger, error) {
 	level, err := parseLevel(cfg.Level)

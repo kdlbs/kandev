@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -20,8 +21,24 @@ var (
 	_ InferenceAgent   = (*MockAgent)(nil)
 )
 
+const (
+	mockTUIReadyPromptPattern = "\x1b\\[1;32m❯\x1b\\[0m $"
+	// mockAgentDefaultID is the canonical ID for the default MockAgent
+	// instance. When NewMockAgentWithID() supplies a non-empty override
+	// the override wins; otherwise this is returned by ID() and used as
+	// the default binary basename across BuildCommand/Runtime/Inference.
+	mockAgentDefaultID = "mock-agent"
+)
+
 type MockAgent struct {
 	StandardPassthrough
+	// id/name/displayName are per-instance overrides so the same mock
+	// binary can be registered under multiple canonical routing provider
+	// IDs (e.g. "claude-acp", "codex-acp") in E2E mode. When empty the
+	// defaults ("mock-agent", "Mock Agent", "Mock") are returned.
+	id          string
+	name        string
+	displayName string
 	enabled     bool
 	binaryPath  string
 	supportsMCP bool
@@ -34,17 +51,32 @@ func NewMockAgent() *MockAgent {
 				Supported:         true,
 				Label:             "TUI Passthrough",
 				Description:       "Terminal UI mode for testing",
-				PassthroughCmd:    NewCommand("mock-agent", "--tui"),
+				PassthroughCmd:    NewCommand(mockAgentDefaultID, "--tui"),
 				ModelFlag:         NewParam("--model", "{model}"),
 				PromptFlag:        NewParam("--prompt", "{prompt}"),
 				SessionResumeFlag: NewParam("--resume"),
 				ResumeFlag:        NewParam("-c"),
+				PromptPattern:     mockTUIReadyPromptPattern,
 				IdleTimeout:       2 * time.Second,
 				BufferMaxBytes:    DefaultBufferMaxBytes,
 			},
 		},
 		supportsMCP: true,
 	}
+}
+
+// NewMockAgentWithID returns a MockAgent identical to NewMockAgent but
+// with its ID, Name and DisplayName pre-set to the supplied values.
+// Used in E2E mode (KANDEV_MOCK_PROVIDERS) to register the same mock
+// binary under multiple canonical routing provider IDs so routing
+// validation accepts real-looking provider_order lists while every
+// launch still routes through the mock binary.
+func NewMockAgentWithID(id, name, displayName string) *MockAgent {
+	a := NewMockAgent()
+	a.id = id
+	a.name = name
+	a.displayName = displayName
+	return a
 }
 
 // SetEnabled enables or disables the mock agent at runtime.
@@ -64,9 +96,24 @@ func (a *MockAgent) SetSupportsMCP(v bool) { a.supportsMCP = v }
 // SupportsMCPEnabled reports the current MCP support setting.
 func (a *MockAgent) SupportsMCPEnabled() bool { return a.supportsMCP }
 
-func (a *MockAgent) ID() string          { return "mock-agent" }
-func (a *MockAgent) Name() string        { return "Mock Agent" }
-func (a *MockAgent) DisplayName() string { return "Mock" }
+func (a *MockAgent) ID() string {
+	if a.id != "" {
+		return a.id
+	}
+	return mockAgentDefaultID
+}
+func (a *MockAgent) Name() string {
+	if a.name != "" {
+		return a.name
+	}
+	return "Mock Agent"
+}
+func (a *MockAgent) DisplayName() string {
+	if a.displayName != "" {
+		return a.displayName
+	}
+	return "Mock"
+}
 func (a *MockAgent) Description() string {
 	return "Mock agent for testing. Generates simulated responses with all message types."
 }
@@ -86,20 +133,37 @@ func (a *MockAgent) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *MockAgent) BuildCommand(opts CommandOptions) Command {
-	// Always resolve via PATH: works on the host (E2E PATH includes the
-	// kandev bin dir) and inside Docker containers (mock-agent is
-	// bind-mounted at /usr/local/bin/mock-agent for E2E).
-	return Cmd("mock-agent").Build()
+	// For container-bound runtimes (Docker, Sprites, remote Docker) the
+	// agent process exec's inside a Linux container, where the host path
+	// computed by configureMockAgent doesn't exist. The container's image
+	// has /usr/local/bin on PATH and container.go bind-mounts the
+	// linux/amd64 mock-agent there, so the bare name resolves correctly.
+	//
+	// For host runtimes (standalone) we prefer the absolute host path
+	// that configureMockAgent computed via os.Executable() — that's the
+	// only way the host path works in dev mode (where the shell's $PATH
+	// doesn't include apps/backend/bin). Fall back to the bare name when
+	// no path is set: e2e fixtures prepend the kandev bin dir to PATH.
+	if opts.Runtime.IsContainerized() {
+		return Cmd(mockAgentDefaultID).Build()
+	}
+	binary := mockAgentDefaultID
+	if a.binaryPath != "" {
+		binary = a.binaryPath
+	}
+	return Cmd(binary).Build()
 }
 
 func (a *MockAgent) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd("mock-agent").Build(),
-		WorkingDir:     "{workspace}",
-		Env:            map[string]string{},
-		ResourceLimits: ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
-		Protocol:       agent.ProtocolACP,
+		Cmd:             Cmd(mockAgentDefaultID).Build(),
+		WorkingDir:      "{workspace}",
+		Env:             map[string]string{},
+		ResourceLimits:  ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+		Protocol:        agent.ProtocolACP,
+		ProjectSkillDir: DefaultProjectSkillDir,
+		UserSkillDir:    ".mock-agent/skills",
 		SessionConfig: SessionConfig{
 			CanRecover: &canRecover,
 		},
@@ -127,6 +191,8 @@ func (a *MockAgent) LoginCommand() *LoginCommand {
 	}
 }
 
+func (a *MockAgent) BillingType() usage.BillingType { return defaultBillingType() }
+
 func (a *MockAgent) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings
 }
@@ -136,7 +202,7 @@ func (a *MockAgent) PermissionSettings() map[string]PermissionSetting {
 // utility capability probe populates them into the cache without any static
 // model list here.
 func (a *MockAgent) InferenceConfig() *InferenceConfig {
-	binary := "mock-agent"
+	binary := mockAgentDefaultID
 	if a.binaryPath != "" {
 		binary = a.binaryPath
 	}

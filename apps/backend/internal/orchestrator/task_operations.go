@@ -11,8 +11,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
-	"github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -159,14 +159,24 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 		}
 	}
 
-	// Create session entry in database
-	sessionID, err := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	// Create session entry in database. Office tasks route through
+	// EnsureSessionForAgent so runs + advanced-mode reuse one row.
+	sessionID, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		s.logger.Error("failed to prepare session",
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return "", err
 	}
+
+	// Office task-handoffs phase 4: when this task's workspace policy says
+	// inherit_parent, propagate the parent task's primary-session
+	// TaskEnvironmentID to the new session so executor lookup binds to the
+	// existing materialized environment instead of provisioning a fresh one.
+	// shared_group is handled the same way once the group has been
+	// materialized by an earlier launch — we look up the group's
+	// MaterializedEnvironmentID via the same propagation hook.
+	s.propagateInheritedEnvironment(ctx, task, sessionID)
 
 	// Notify the frontend that a new CREATED session exists. The start path
 	// transitions through updateTaskSessionState which broadcasts; the prepare
@@ -205,7 +215,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 // This is used after PrepareTaskSession to continue with the agent launch.
 // If planMode is true and the workflow step doesn't already apply plan mode,
 // default plan mode instructions are injected into the prompt.
-func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, executorProfileID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error) {
+func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error) {
 	s.logger.Debug("starting task with existing session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -245,7 +255,7 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 		return nil, err
 	}
 
-	if priority > 0 {
+	if priority != "" {
 		task.Priority = priority
 	}
 
@@ -448,18 +458,89 @@ func (s *Service) postLaunchCreated(ctx context.Context, taskID, sessionID, prom
 // applied if the step has plan_mode enabled.
 // If planMode is true and the workflow step doesn't already apply plan mode,
 // default plan mode instructions are injected into the prompt.
-func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority int, prompt string, workflowStepID string, planMode bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error) {
+func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error) {
+	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, attachments, nil, nil)
+}
+
+// StartTaskWithEnv starts a task and carries launch-scoped environment variables
+// through to the agent runtime. Existing StartTask callers keep the old behavior.
+func (s *Service) StartTaskWithEnv(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode bool, attachments []v1.MessageAttachment, env map[string]string) (*executor.TaskExecution, error) {
+	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, attachments, env, nil)
+}
+
+// StartTaskWithRoute launches a task with a fully resolved provider
+// override resolved by the office routing dispatcher. Workspace, executor
+// selection, instruction files, system prompt, and ACP session settings
+// are inherited from the base AgentProfile referenced by agentProfileID;
+// only the provider-scoped fields (agent_id, model, mode, flags, env,
+// permissions) are overridden via route.
+//
+// launch carries the Office-built launch context (prompt, env, workflow
+// step, attachments, plan-mode flag) so routed launches behave
+// identically to the legacy launch path for everything except provider
+// selection. Without launch, routed runs would fall back to
+// task.Description and drop role framing / AGENTS.md / wake context.
+//
+// Env merging: launch.Env carries the office-built env vars (token,
+// KANDEV_*); route.Env carries provider-scoped overrides. The route
+// env wins on key collisions because per-provider env is the more
+// specific authority.
+func (s *Service) StartTaskWithRoute(
+	ctx context.Context, taskID, agentProfileID string,
+	launch executor.LaunchContext, route executor.RouteOverride,
+) error {
+	merged := mergeRouteEnv(launch.Env, route.Env)
+	_, err := s.startTask(ctx, taskID, agentProfileID,
+		launch.ExecutorID, launch.ExecutorProfileID, launch.Priority,
+		launch.Prompt, launch.WorkflowStepID, launch.PlanMode,
+		launch.Attachments, merged, &route)
+	return err
+}
+
+// mergeRouteEnv combines the office-built launch env with the
+// per-provider route env. Route entries win on key collisions.
+func mergeRouteEnv(launchEnv, routeEnv map[string]string) map[string]string {
+	if len(launchEnv) == 0 && len(routeEnv) == 0 {
+		return nil
+	}
+	// The size hint is unused intentionally: CodeQL flags
+	// `len(a)+len(b)` as a potential overflow for the make() capacity
+	// argument. Map literals re-grow themselves; the hint was an
+	// optimization, not a correctness requirement.
+	out := make(map[string]string)
+	for k, v := range launchEnv {
+		out[k] = v
+	}
+	for k, v := range routeEnv {
+		out[k] = v
+	}
+	return out
+}
+
+func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode bool, attachments []v1.MessageAttachment, env map[string]string, route *executor.RouteOverride) (*executor.TaskExecution, error) {
 	s.logger.Debug("manually starting task",
 		zap.String("task_id", taskID),
 		zap.String("agent_profile_id", agentProfileID),
 		zap.String("executor_id", executorID),
-		zap.Int("priority", priority),
+		zap.String("priority", priority),
 		zap.Int("prompt_length", len(prompt)),
 		zap.String("workflow_step_id", workflowStepID),
 		zap.Bool("plan_mode", planMode),
 		zap.Int("attachments", len(attachments)))
 
-	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
+	// Office tasks do NOT transition through SCHEDULING / IN_PROGRESS on
+	// every run. Their lifecycle status (todo / in_review / done /
+	// blocked / cancelled) reflects the *user-meaningful workflow*, not
+	// the orchestrator's runtime cycle. Runs schedule the *agent*,
+	// not the task — the agent's runtime state is shown via the topbar
+	// Working spinner + inline session timeline entry. Suppressing the
+	// transition here avoids gratuitous flicker (REVIEW → SCHEDULING →
+	// IN_PROGRESS → REVIEW for a single comment-reply cycle) and matches
+	// the user's mental model.
+	if s.isOfficeTask(ctx, taskID) {
+		s.logger.Debug("skipping SCHEDULING transition for office task",
+			zap.String("task_id", taskID))
+	} else if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
 		s.logger.Warn("failed to update task state to SCHEDULING",
 			zap.String("task_id", taskID),
 			zap.Error(err))
@@ -482,7 +563,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 	}
 
 	// Override priority if provided in the request
-	if priority > 0 {
+	if priority != "" {
 		task.Priority = priority
 	}
 
@@ -492,8 +573,10 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		effectivePrompt = task.Description
 	}
 
-	// Prepare session first so we have the sessionID for config context injection
-	sessionID, err := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	// Prepare session first so we have the sessionID for config context injection.
+	// For office tasks, replace the per-launch PrepareSession with the per-(task,
+	// agent) EnsureSessionForAgent so runs reuse one row across turns.
+	sessionID, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		return nil, err
 	}
@@ -507,13 +590,24 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
 	}
 
+	// Office tasks restrict the MCP toolset: kanban tools (move/update/list
+	// task, etc.) are excluded because office agents call those via the
+	// kandev CLI ($KANDEV_CLI). See docs/specs/office-agent-cli/spec.md.
+	mcpMode := ""
+	if s.isOfficeTask(ctx, taskID) {
+		mcpMode = executor.McpModeOffice
+	}
+
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID: agentProfileID,
 		ExecutorID:     executorID,
 		Prompt:         effectivePrompt,
 		WorkflowStepID: workflowStepID,
 		StartAgent:     true,
+		McpMode:        mcpMode,
 		Attachments:    attachments,
+		Env:            env,
+		RouteOverride:  route,
 	})
 	if err != nil {
 		return nil, err
@@ -525,6 +619,34 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
 
 	return execution, nil
+}
+
+// isOfficeTask returns true when the task has an assignee agent profile, which
+// identifies it as an office-managed task (as opposed to a kanban / quick-chat task).
+func (s *Service) isOfficeTask(ctx context.Context, taskID string) bool {
+	dbTask, err := s.repo.GetTask(ctx, taskID)
+	return err == nil && dbTask != nil && dbTask.AssigneeAgentProfileID != ""
+}
+
+// prepareSessionForStart picks the right session-creation path for the task:
+// office tasks with an assignee use the per-(task, agent) EnsureSessionForAgent
+// (so runs reuse one row across turns); kanban / quick-chat fall through to
+// the per-launch PrepareSession used since day one.
+func (s *Service) prepareSessionForStart(
+	ctx context.Context, task *v1.Task,
+	agentProfileID, executorID, executorProfileID, workflowStepID string,
+) (string, error) {
+	dbTask, err := s.repo.GetTask(ctx, task.ID)
+	if err == nil && dbTask != nil && dbTask.AssigneeAgentProfileID != "" {
+		session, ensureErr := s.executor.EnsureSessionForAgent(
+			ctx, task, dbTask.AssigneeAgentProfileID, agentProfileID, executorID, executorProfileID,
+		)
+		if ensureErr != nil {
+			return "", ensureErr
+		}
+		return session.ID, nil
+	}
+	return s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 }
 
 // moveTaskToWorkflowStep moves a task to the target workflow step if provided and different from current.
@@ -1316,6 +1438,17 @@ func (s *Service) StopTask(ctx context.Context, taskID string, reason string, fo
 	return nil
 }
 
+// CancelTaskExecution stops active sessions for a task without mutating task state.
+// It is used by office tree controls where pause/cancel state transitions are
+// handled by the office service itself.
+func (s *Service) CancelTaskExecution(ctx context.Context, taskID string, reason string, force bool) error {
+	s.logger.Info("cancelling task execution",
+		zap.String("task_id", taskID),
+		zap.String("reason", reason),
+		zap.Bool("force", force))
+	return s.executor.StopByTaskID(ctx, taskID, reason, force)
+}
+
 // StopSession stops agent execution for a specific session
 func (s *Service) StopSession(ctx context.Context, sessionID string, reason string, force bool) error {
 	s.logger.Info("stopping session execution",
@@ -1522,19 +1655,66 @@ func (s *Service) captureArchiveCommits(ctx context.Context, sessionID, baseComm
 	return true
 }
 
-// captureGitStatusSnapshot fetches the current git status from agentctl and saves it
-// as a DB snapshot. Called when a session completes so the status is available when
-// clients subscribe later (e.g. sidebar showing diff stats for inactive sessions).
+// captureGitStatusSnapshot fetches the current (cached) git status from agentctl
+// and saves it as a DB snapshot. Called when a session's execution completes so
+// the status is available when clients subscribe later.
 func (s *Service) captureGitStatusSnapshot(ctx context.Context, sessionID string) {
-	status, err := s.agentManager.GetGitStatus(ctx, sessionID)
+	_, _ = s.saveGitStatusSnapshot(ctx, sessionID, false)
+}
+
+// captureGitStatusSnapshotWithRetry attempts a fresh capture with up to 3
+// retries at 1-second intervals if the first attempt returns stale 0/0 data
+// (caused by git lock contention between concurrent worktrees). Returns
+// immediately without retrying when no execution exists for the session
+// (returns nil,nil) or the agent genuinely has no file changes.
+func (s *Service) captureGitStatusSnapshotWithRetry(ctx context.Context, sessionID string) {
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Second)
+		}
+		wrote, noExec := s.saveGitStatusSnapshot(ctx, sessionID, true)
+		if noExec {
+			return // No execution exists — retrying won't help
+		}
+		if wrote {
+			return // Successfully wrote a snapshot (may be 0/0 for no-change turns, that's fine)
+		}
+		// saveGitStatusSnapshot returned false without noExec — means fresh
+		// returned 0/0 and was skipped due to possible lock contention. Retry.
+	}
+}
+
+// saveGitStatusSnapshot is the shared implementation for snapshot capture.
+// When fresh is true, it bypasses the workspace tracker's poll cache.
+// Returns (wrote, noExecution): wrote=true if a snapshot was persisted,
+// noExecution=true if the session has no active execution (nil status).
+func (s *Service) saveGitStatusSnapshot(ctx context.Context, sessionID string, fresh bool) (wrote, noExecution bool) {
+	var status *client.GitStatusResult
+	var err error
+	if fresh {
+		status, err = s.agentManager.GetGitStatusFresh(ctx, sessionID)
+	} else {
+		status, err = s.agentManager.GetGitStatus(ctx, sessionID)
+	}
 	if err != nil {
 		s.logger.Debug("failed to capture git status snapshot",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return
+		return false, false
 	}
-	if status == nil || !status.Success {
-		return
+	if status == nil {
+		return false, true // No execution — caller should not retry
+	}
+	if !status.Success {
+		return false, false
+	}
+
+	// When a fresh query returns zero additions AND zero deletions, the result
+	// may be stale due to git lock contention between concurrent worktrees
+	// (merge-base computation fails transiently). Don't overwrite a potentially
+	// better live_monitor snapshot that already has the correct non-zero values.
+	if fresh && status.BranchAdditions == 0 && status.BranchDeletions == 0 {
+		return false, false
 	}
 
 	metadata := map[string]interface{}{
@@ -1564,12 +1744,24 @@ func (s *Service) captureGitStatusSnapshot(ctx context.Context, sessionID string
 		s.logger.Warn("failed to save git status snapshot",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return
+		return false, false
 	}
 
-	s.logger.Debug("saved git status snapshot on agent completion",
+	// Remove stale live_monitor snapshots so the authoritative agent_completed
+	// snapshot is always returned by GetLatestGitSnapshot. Without this, a
+	// live_monitor poll that raced with agent completion could persist a
+	// snapshot with a later timestamp but stale data.
+	if err := s.repo.DeleteLiveMonitorSnapshots(ctx, sessionID); err != nil {
+		s.logger.Debug("failed to clean up live monitor snapshots",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+
+	s.logger.Debug("saved git status snapshot",
 		zap.String("session_id", sessionID),
-		zap.String("branch", status.Branch))
+		zap.String("branch", status.Branch),
+		zap.Bool("fresh", fresh))
+	return true, false
 }
 
 // captureArchiveDiff fetches and saves the cumulative diff from baseCommit to the working tree

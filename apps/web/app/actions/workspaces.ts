@@ -87,7 +87,7 @@ export async function updateWorkspaceAction(
 }
 
 export async function deleteWorkspaceAction(id: string) {
-  await fetchJson<void>(`${apiBaseUrl}/api/v1/workspaces/${id}`, { method: "DELETE" });
+  await fetchJson<void>(`${apiBaseUrl}/api/v1/office/workspaces/${id}`, { method: "DELETE" });
 }
 
 export async function listWorkflowsAction(workspaceId: string): Promise<ListWorkflowsResponse> {

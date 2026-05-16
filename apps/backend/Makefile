@@ -91,7 +91,7 @@ build-acpdbg:
 build: build-agentctl build-agentctl-linux build-mock-agent build-acpdbg build-winjob
 	@echo "Building $(BINARY_NAME)..."
 	-@$(MKDIR) $(BUILD_DIR)
-	$(CGO_PREFIX) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)$(EXE) ./cmd/kandev
+	$(CGO_PREFIX) $(GO) build $(GOFLAGS) -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)$(EXE) ./cmd/kandev
 
 ## Build all binaries (unified + individual services + agentctl)
 build-all: build build-agentctl
@@ -141,7 +141,7 @@ start-debug: build
 ## Run tests
 test:
 	@echo "Running tests..."
-	$(CGO_PREFIX) $(GO) test ./...
+	$(CGO_PREFIX) $(GO) test -tags fts5 ./...
 
 ## Run only the Windows-sensitive packages — mirrors the test-windows job in
 ## .github/workflows/backend-tests.yml. The broader suite uses Unix-only
@@ -151,7 +151,7 @@ test:
 ## runtime.GOOS guards in source.
 test-windows:
 	@echo "Running Windows-sensitive packages..."
-	$(CGO_PREFIX) $(GO) test -v ./internal/agentctl/server/process/... ./internal/agentctl/client/launcher/...
+	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/...
 
 ## Run E2E tests (real agents, costs money — manual only)
 ## Set agent commands via env vars: E2E_CLAUDE_CODE_COMMAND, E2E_AMP_COMMAND
@@ -165,12 +165,12 @@ test-e2e:
 test-sprites-e2e: build-agentctl-linux
 	@echo "Running sprites e2e test..."
 	KANDEV_AGENTCTL_LINUX_BINARY=$(CURDIR)/$(BUILD_DIR)/agentctl-linux-amd64 \
-		$(GO) test -v -count=1 -tags sprites_e2e -run TestSpritesE2E -timeout 10m ./internal/agent/lifecycle/
+		$(GO) test -v -count=1 -tags sprites_e2e -run TestSpritesE2E -timeout 10m ./internal/agent/runtime/lifecycle/
 
 ## Run tests with coverage
 test-coverage:
 	@echo "Running tests with coverage..."
-	$(CGO_PREFIX) $(GO) test -v -coverprofile=coverage.out ./...
+	$(CGO_PREFIX) $(GO) test -tags fts5 -v -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 
 ## Run linter (requires golangci-lint)
@@ -202,10 +202,10 @@ deps:
 build-cross:
 	@echo "Building for multiple platforms..."
 	-@$(MKDIR) $(BUILD_DIR)
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/kandev
-	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/kandev
-	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/kandev
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe ./cmd/kandev
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 $(GO) build -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/kandev
+	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 $(GO) build -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/kandev
+	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 $(GO) build -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/kandev
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 $(GO) build -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe ./cmd/kandev
 
 ## Show help
 help:

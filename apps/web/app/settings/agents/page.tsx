@@ -181,7 +181,7 @@ function ProfileListItem({ agent, profile }: ProfileListItemProps) {
           <div className="flex items-center gap-2">
             <AgentLogo agentName={agent.name} className="shrink-0" />
             <span className="text-sm font-medium">
-              {agent.profiles[0]?.agent_display_name ?? agent.name}
+              {agent.profiles[0]?.agentDisplayName ?? agent.name}
             </span>
             {agent.supports_mcp && <Badge variant="secondary">MCP</Badge>}
             <span className="text-sm text-muted-foreground">{profile.name}</span>

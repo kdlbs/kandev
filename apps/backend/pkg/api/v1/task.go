@@ -66,7 +66,7 @@ type Task struct {
 	Title        string                 `json:"title"`
 	Description  string                 `json:"description"`
 	State        TaskState              `json:"state"`
-	Priority     int                    `json:"priority"`
+	Priority     string                 `json:"priority"`
 	Repositories []TaskRepository       `json:"repositories,omitempty"`
 	CreatedBy    string                 `json:"created_by"`
 	CreatedAt    time.Time              `json:"created_at"`
@@ -76,6 +76,7 @@ type Task struct {
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 	IsEphemeral  bool                   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
 	ParentID     string                 `json:"parent_id,omitempty"` // FK to parent task for subtasks
+	Identifier   string                 `json:"identifier,omitempty"`
 }
 
 // TaskRepositoryInput for creating/updating task repositories
@@ -88,7 +89,7 @@ type TaskRepositoryInput struct {
 type CreateTaskRequest struct {
 	Title          string                 `json:"title" binding:"required,max=500"`
 	Description    string                 `json:"description" binding:"required"`
-	Priority       int                    `json:"priority" binding:"min=0,max=10"`
+	Priority       string                 `json:"priority,omitempty" binding:"omitempty,oneof=critical high medium low"`
 	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	StartAgent     bool                   `json:"start_agent,omitempty"`
@@ -99,7 +100,7 @@ type CreateTaskRequest struct {
 type UpdateTaskRequest struct {
 	Title        *string                `json:"title,omitempty" binding:"omitempty,max=500"`
 	Description  *string                `json:"description,omitempty"`
-	Priority     *int                   `json:"priority,omitempty" binding:"omitempty,min=0,max=10"`
+	Priority     *string                `json:"priority,omitempty" binding:"omitempty,oneof=critical high medium low"`
 	Repositories []TaskRepositoryInput  `json:"repositories,omitempty"`
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }

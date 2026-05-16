@@ -38,16 +38,16 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: apps/backend/go.mod
           cache-dependency-path: apps/backend/go.sum
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: "9.15.9"
 
@@ -70,7 +70,7 @@ jobs:
         run: make build-backend-linux-helpers
 
       - name: Upload backend build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: e2e-backend-build
           path: apps/backend/bin/
@@ -82,7 +82,7 @@ jobs:
         run: tar -cf apps/web/next-build.tar -C apps/web .next
 
       - name: Upload web build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: e2e-web-build
           path: apps/web/next-build.tar
@@ -100,10 +100,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: "9.15.9"
 
@@ -121,7 +121,7 @@ jobs:
         run: npx playwright install chromium --with-deps
 
       - name: Download backend build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: e2e-backend-build
           path: apps/backend/bin/
@@ -130,7 +130,7 @@ jobs:
         run: chmod +x apps/backend/bin/*
 
       - name: Download web build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: e2e-web-build
           path: apps/web/
@@ -149,7 +149,7 @@ jobs:
 
       - name: Upload blob report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: blob-report-${{ matrix.shard }}
           path: apps/web/e2e/blob-report/
@@ -157,32 +157,37 @@ jobs:
 
       - name: Upload test results
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: test-results-${{ matrix.shard }}
           path: apps/web/e2e/test-results/
           retention-days: 7
 
-  # Real-Docker E2E: exercises the local_docker executor end-to-end. ubuntu-latest
-  # ships with Docker preinstalled, so no service container is required. The
-  # spec count is small (currently 1 active + 2 fixme) so we don't shard.
+  # Real-Docker E2E: exercises the local_docker executor end-to-end.
+  # ubuntu-latest ships with Docker preinstalled, so no service container is
+  # required. Container-bound tests are slow (~2 min each), so we shard across
+  # 6 runners — Playwright's --shard splits the project's tests into N groups.
   # Cleans up any leftover kandev-managed containers at the end so a leaky
   # process doesn't poison the next run on the same self-hosted runner.
   e2e-docker:
-    name: E2E Docker
+    name: E2E Docker Shard ${{ matrix.shard }}/6
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Verify Docker is available
         run: docker info
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: "9.15.9"
 
@@ -200,7 +205,7 @@ jobs:
         run: npx playwright install chromium --with-deps
 
       - name: Download backend build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: e2e-backend-build
           path: apps/backend/bin/
@@ -209,7 +214,7 @@ jobs:
         run: chmod +x apps/backend/bin/*
 
       - name: Download web build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: e2e-web-build
           path: apps/web/
@@ -218,11 +223,11 @@ jobs:
         working-directory: apps/web
         run: tar -xf next-build.tar && rm next-build.tar
 
-      - name: Run Docker E2E tests
+      - name: Run Docker E2E tests (shard ${{ matrix.shard }}/6)
         working-directory: apps/web
         env:
           KANDEV_E2E_DOCKER: "1"
-        run: npx playwright test --config e2e/playwright.config.ts --project=docker
+        run: npx playwright test --config e2e/playwright.config.ts --project=docker --shard=${{ matrix.shard }}/6
 
       - name: Cleanup leftover kandev containers
         if: always()
@@ -233,17 +238,17 @@ jobs:
       # sharded chromium/mobile-chrome runs.
       - name: Upload Docker blob report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
-          name: blob-report-docker
+          name: blob-report-docker-${{ matrix.shard }}
           path: apps/web/e2e/blob-report/
           retention-days: 3
 
       - name: Upload Docker E2E results
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
-          name: docker-e2e-test-results
+          name: docker-e2e-test-results-${{ matrix.shard }}
           path: apps/web/e2e/test-results/
           retention-days: 7
 
@@ -256,10 +261,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: "9.15.9"
 
@@ -273,7 +278,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Download blob reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: apps/web/e2e/blob-reports
           pattern: blob-report-*
@@ -284,7 +289,7 @@ jobs:
         run: npx playwright merge-reports --reporter=html ./e2e/blob-reports
 
       - name: Upload merged report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: playwright-report
           path: apps/web/playwright-report/

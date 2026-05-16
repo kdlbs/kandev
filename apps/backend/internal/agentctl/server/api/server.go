@@ -59,6 +59,12 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess which
 	//   runs in the same trust boundary but does not possess the auth token.
 	s.router.Use(bearerTokenAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp"))
+	// Validate X-Instance-ID so a client that holds a stale port (because
+	// the previous instance was deleted and the port recycled to a new
+	// instance) gets a clean 404 instead of accidentally configuring or
+	// starting the new instance's agent. Missing header is allowed for
+	// backward compatibility with curl/tests; mismatch is rejected.
+	s.router.Use(instanceIDGuard(cfg.InstanceID))
 
 	s.setupRoutes()
 	return s
@@ -169,7 +175,7 @@ func (s *Server) setupRoutes() {
 	}
 
 	// pprof + memory stats (enabled via KANDEV_DEBUG_PPROF_ENABLED=true)
-	if os.Getenv("KANDEV_DEBUG_PPROF_ENABLED") == "true" {
+	if os.Getenv("KANDEV_DEBUG_PPROF_ENABLED") == "true" { //nolint:goconst // env-var check, not a query param
 		s.registerPprofRoutes()
 	}
 }

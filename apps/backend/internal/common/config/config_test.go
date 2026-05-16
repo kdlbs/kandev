@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,4 +142,60 @@ func TestValidate_PostgresSSLMode(t *testing.T) {
 			t.Errorf("sqlite should ignore sslMode, got %v", err)
 		}
 	})
+}
+
+// TestFeatures_DefaultOff pins the production-safety invariant: every
+// feature flag in FeaturesConfig is false unless the deployment explicitly
+// sets the matching env var. A regression that flips a default to true
+// would ship an in-progress feature to users on the next release.
+// See docs/decisions/0007-runtime-feature-flags.md.
+func TestFeatures_DefaultOff(t *testing.T) {
+	// Force a clean env so KANDEV_FEATURES_* from the host shell can't
+	// bleed in and turn a default-off check into a default-on accident.
+	t.Setenv("KANDEV_FEATURES_OFFICE", "")
+
+	dir := t.TempDir()
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if cfg.Features.Office {
+		t.Errorf("Features.Office = true, want false (production default must be off)")
+	}
+}
+
+// TestFeatures_OfficeEnabledByEnv proves the documented opt-in path:
+// setting KANDEV_FEATURES_OFFICE=true flips Features.Office to true. This
+// is what `apps/cli/src/dev.ts` relies on for dev mode and what release
+// deployments would set if they ever wanted Office on.
+func TestFeatures_OfficeEnabledByEnv(t *testing.T) {
+	t.Setenv("KANDEV_FEATURES_OFFICE", "true")
+
+	dir := t.TempDir()
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if !cfg.Features.Office {
+		t.Errorf("Features.Office = false, want true (KANDEV_FEATURES_OFFICE=true must flip the flag)")
+	}
+}
+
+// TestFeaturesConfig_JSONShape pins the wire format of GET /api/v1/features.
+// The handler in helpers.go serializes FeaturesConfig directly so new
+// fields flow through without an extra edit; this test guarantees the
+// `json` tag is present on every field. A regression (struct field added
+// without a tag) would surface as a capitalized JSON key and break the
+// frontend's case-sensitive read in apps/web/app/actions/features.ts.
+func TestFeaturesConfig_JSONShape(t *testing.T) {
+	cfg := FeaturesConfig{Office: true}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	got := string(raw)
+	want := `{"office":true}`
+	if got != want {
+		t.Errorf("FeaturesConfig JSON = %s; want %s — missing or wrong `json:` struct tag", got, want)
+	}
 }

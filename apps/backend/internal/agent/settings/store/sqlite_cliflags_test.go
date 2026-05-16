@@ -17,7 +17,7 @@ func newFreshRepo(t *testing.T) *sqliteRepository {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	repo, err := newSQLiteRepository(db, db, false)
+	repo, err := newSQLiteRepository(db, db, nil, false)
 	if err != nil {
 		t.Fatalf("newSQLiteRepository: %v", err)
 	}

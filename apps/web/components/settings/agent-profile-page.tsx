@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { useToast } from "@/components/toast-provider";
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
-import { ProfileFormFields } from "@/components/settings/profile-form-fields";
+import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
 import { deleteAgentProfileAction, updateAgentProfileAction } from "@/app/actions/agents";
 import type { ActiveSessionInfo } from "@/lib/types/agent-profile-errors";
 import {
@@ -125,6 +125,10 @@ function ProfileSettingsCard({
   permissionSettings,
   passthroughConfig,
 }: ProfileSettingsCardProps) {
+  const handleFormChange = (patch: Partial<ProfileFormData>) => {
+    onDraftChange(toAgentProfilePatch(patch));
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -139,11 +143,11 @@ function ProfileSettingsCard({
             name: draft.name,
             model: draft.model,
             mode: draft.mode ?? "",
-            allow_indexing: draft.allow_indexing,
-            cli_passthrough: draft.cli_passthrough,
-            cli_flags: draft.cli_flags ?? [],
+            allow_indexing: draft.allowIndexing,
+            cli_passthrough: draft.cliPassthrough,
+            cli_flags: draft.cliFlags ?? [],
           }}
-          onChange={onDraftChange}
+          onChange={handleFormChange}
           modelConfig={modelConfig}
           permissionSettings={permissionSettings}
           passthroughConfig={passthroughConfig}
@@ -155,6 +159,17 @@ function ProfileSettingsCard({
   );
 }
 
+function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<AgentProfile> {
+  const next: Partial<AgentProfile> = {};
+  if (patch.name !== undefined) next.name = patch.name;
+  if (patch.model !== undefined) next.model = patch.model;
+  if (patch.mode !== undefined) next.mode = patch.mode;
+  if (patch.allow_indexing !== undefined) next.allowIndexing = patch.allow_indexing;
+  if (patch.cli_passthrough !== undefined) next.cliPassthrough = patch.cli_passthrough;
+  if (patch.cli_flags !== undefined) next.cliFlags = patch.cli_flags;
+  return next;
+}
+
 function useSyncAgentsToStore() {
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
@@ -164,10 +179,10 @@ function useSyncAgentsToStore() {
       nextAgents.flatMap((agentItem) =>
         agentItem.profiles.map((agentProfile) => ({
           id: agentProfile.id,
-          label: `${agentProfile.agent_display_name} • ${agentProfile.name}`,
+          label: `${agentProfile.agentDisplayName ?? ""} • ${agentProfile.name}`,
           agent_id: agentItem.id,
           agent_name: agentItem.name,
-          cli_passthrough: agentProfile.cli_passthrough,
+          cli_passthrough: agentProfile.cliPassthrough ?? false,
         })),
       ),
     );
@@ -184,9 +199,9 @@ function useProfileEditorState(profile: AgentProfile) {
       draft.name !== savedProfile.name ||
       draft.model !== savedProfile.model ||
       (draft.mode ?? "") !== (savedProfile.mode ?? "") ||
-      draft.allow_indexing !== savedProfile.allow_indexing ||
-      draft.cli_passthrough !== savedProfile.cli_passthrough ||
-      !areCLIFlagsEqual(draft.cli_flags, savedProfile.cli_flags),
+      draft.allowIndexing !== savedProfile.allowIndexing ||
+      draft.cliPassthrough !== savedProfile.cliPassthrough ||
+      !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []),
     [draft, savedProfile],
   );
 
@@ -237,9 +252,9 @@ function useProfileSave({
         name: draft.name,
         model: draft.model,
         mode: draft.mode,
-        allow_indexing: draft.allow_indexing,
-        cli_passthrough: draft.cli_passthrough,
-        cli_flags: draft.cli_flags,
+        allow_indexing: draft.allowIndexing,
+        cli_passthrough: draft.cliPassthrough,
+        cli_flags: draft.cliFlags,
       });
       setSavedProfile(updated);
       setDraft(updated);
@@ -363,7 +378,7 @@ function ProfileEditor({
     <div className="space-y-8">
       <ProfileEditorHeader
         agentName={agent.name}
-        agentDisplayName={profile.agent_display_name}
+        agentDisplayName={profile.agentDisplayName ?? ""}
         savedProfileName={savedProfile.name}
         isDirty={isDirty}
         isLoading={saveStatus === "loading"}
@@ -376,7 +391,7 @@ function ProfileEditor({
       <ProfileSettingsCard
         agent={agent}
         draft={draft}
-        onDraftChange={(patch) => setDraft({ ...draft, ...patch })}
+        onDraftChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
         modelConfig={modelConfig}
         permissionSettings={permissionSettings}
         passthroughConfig={passthroughConfig}
@@ -386,10 +401,10 @@ function ProfileEditor({
         agentName={agent.name}
         model={draft.model}
         permissionSettings={{
-          allow_indexing: draft.allow_indexing,
+          allow_indexing: draft.allowIndexing,
         }}
-        cliPassthrough={draft.cli_passthrough}
-        cliFlags={draft.cli_flags ?? []}
+        cliPassthrough={draft.cliPassthrough}
+        cliFlags={draft.cliFlags ?? []}
       />
 
       <ProfileMcpConfigCard

@@ -9,15 +9,18 @@ import (
 )
 
 type WorkflowDTO struct {
-	ID             string    `json:"id"`
-	WorkspaceID    string    `json:"workspace_id"`
-	Name           string    `json:"name"`
-	Description    *string   `json:"description,omitempty"`
-	AgentProfileID string    `json:"agent_profile_id,omitempty"`
-	SortOrder      int       `json:"sort_order"`
-	Hidden         bool      `json:"hidden,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string  `json:"id"`
+	WorkspaceID    string  `json:"workspace_id"`
+	Name           string  `json:"name"`
+	Description    *string `json:"description,omitempty"`
+	AgentProfileID string  `json:"agent_profile_id,omitempty"`
+	SortOrder      int     `json:"sort_order"`
+	Hidden         bool    `json:"hidden,omitempty"`
+	// Style is a Phase 2 (ADR-0004) UX hint read by the frontend ONLY.
+	// Allowed values: "kanban" | "office" | "custom".
+	Style     string    `json:"style,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type WorkspaceDTO struct {
@@ -29,6 +32,9 @@ type WorkspaceDTO struct {
 	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
 	DefaultConfigAgentProfileID *string   `json:"default_config_agent_profile_id,omitempty"`
+	TaskPrefix                  string    `json:"task_prefix,omitempty"`
+	TaskSequence                int       `json:"task_sequence,omitempty"`
+	OfficeWorkflowID            string    `json:"office_workflow_id,omitempty"`
 	CreatedAt                   time.Time `json:"created_at"`
 	UpdatedAt                   time.Time `json:"updated_at"`
 }
@@ -118,7 +124,7 @@ type TaskDTO struct {
 	Title                   string                 `json:"title"`
 	Description             string                 `json:"description"`
 	State                   v1.TaskState           `json:"state"`
-	Priority                int                    `json:"priority"`
+	Priority                string                 `json:"priority"`
 	Repositories            []TaskRepositoryDTO    `json:"repositories,omitempty"`
 	Position                int                    `json:"position"`
 	PrimarySessionID        *string                `json:"primary_session_id,omitempty"`
@@ -136,6 +142,20 @@ type TaskDTO struct {
 	CreatedAt               time.Time              `json:"created_at"`
 	UpdatedAt               time.Time              `json:"updated_at"`
 	Metadata                map[string]interface{} `json:"metadata,omitempty"`
+
+	// Office extensions
+	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`
+	Origin                 string `json:"origin,omitempty"`
+	ProjectID              string `json:"project_id,omitempty"`
+	Labels                 string `json:"labels,omitempty"`
+	Identifier             string `json:"identifier,omitempty"`
+	// IsFromOffice is the authoritative "this task is owned by office"
+	// flag. Computed by the task repo at read time as
+	// (project_id != '' OR workflow_id == workspace.office_workflow_id).
+	// True for office tasks even when they have no project yet; false for
+	// kanban-board tasks. Use this to gate office-only UI (e.g. the
+	// "Open in office view" topbar link).
+	IsFromOffice bool `json:"is_from_office,omitempty"`
 }
 
 type TaskRepositoryDTO struct {
@@ -209,6 +229,11 @@ type TaskSessionSummaryDTO struct {
 	IsPassthrough     bool                    `json:"is_passthrough"`
 	ReviewStatus      *string                 `json:"review_status,omitempty"`
 	TaskEnvironmentID string                  `json:"task_environment_id,omitempty"`
+	// CommandCount is the number of tool_call messages on this session,
+	// surfaced inline in the timeline entry header ("ran N commands").
+	// Populated by ListTaskSessions; defaults to 0 for callers that don't
+	// resolve it.
+	CommandCount int `json:"command_count"`
 }
 
 // ListTaskSessionSummariesResponse is the list response using summary DTOs.
@@ -372,6 +397,7 @@ func FromWorkflow(workflow *models.Workflow) WorkflowDTO {
 		AgentProfileID: workflow.AgentProfileID,
 		SortOrder:      workflow.SortOrder,
 		Hidden:         workflow.Hidden,
+		Style:          workflow.Style,
 		CreatedAt:      workflow.CreatedAt,
 		UpdatedAt:      workflow.UpdatedAt,
 	}
@@ -392,6 +418,9 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 		DefaultEnvironmentID:        workspace.DefaultEnvironmentID,
 		DefaultAgentProfileID:       workspace.DefaultAgentProfileID,
 		DefaultConfigAgentProfileID: workspace.DefaultConfigAgentProfileID,
+		TaskPrefix:                  workspace.TaskPrefix,
+		TaskSequence:                workspace.TaskSequence,
+		OfficeWorkflowID:            workspace.OfficeWorkflowID,
 		CreatedAt:                   workspace.CreatedAt,
 		UpdatedAt:                   workspace.UpdatedAt,
 	}
@@ -558,6 +587,15 @@ func FromTaskWithSessionInfo(
 		CreatedAt:               task.CreatedAt,
 		UpdatedAt:               task.UpdatedAt,
 		Metadata:                task.Metadata,
+		// Office extensions. AssigneeAgentProfileID is a read-time
+		// projection from workflow_step_participants (ADR 0005 Wave F);
+		// the repo's task SELECTs hydrate it via a correlated subquery.
+		AssigneeAgentProfileID: task.AssigneeAgentProfileID,
+		Origin:                 task.Origin,
+		ProjectID:              task.ProjectID,
+		Labels:                 task.Labels,
+		Identifier:             task.Identifier,
+		IsFromOffice:           task.IsFromOffice,
 	}
 }
 
@@ -645,8 +683,11 @@ type WorkflowStepDTO struct {
 	ShowInCommandPanel    bool           `json:"show_in_command_panel"`
 	AutoArchiveAfterHours int            `json:"auto_archive_after_hours,omitempty"`
 	AgentProfileID        string         `json:"agent_profile_id,omitempty"`
-	CreatedAt             time.Time      `json:"created_at"`
-	UpdatedAt             time.Time      `json:"updated_at"`
+	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend.
+	// Allowed values: "work" | "review" | "approval" | "custom".
+	StageType string    `json:"stage_type,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // StepEventsDTO represents step events for API responses

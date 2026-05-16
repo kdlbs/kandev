@@ -96,6 +96,11 @@ type Handlers struct {
 	workflowSvc       *workflowsvc.Service
 	agentSettingsCtrl *agentsettingscontroller.Controller
 	mcpConfigSvc      *mcpconfig.Service
+
+	// Cross-task handoff service (optional, set via SetHandoffService).
+	// Wires the list_related_tasks_kandev / *_task_document_kandev
+	// MCP tools introduced in office task handoffs phase 2.
+	handoffSvc *service.HandoffService
 }
 
 // NewHandlers creates new MCP handlers.
@@ -157,7 +162,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPDeleteTaskPlan, h.handleDeleteTaskPlan)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 15
+	count := 14
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
@@ -188,6 +193,13 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPGetMcpConfig, h.handleGetMcpConfig)
 		d.RegisterFunc(ws.ActionMCPUpdateMcpConfig, h.handleUpdateMcpConfig)
 		count += 2
+	}
+	if h.handoffSvc != nil {
+		d.RegisterFunc(ws.ActionMCPListRelatedTasks, h.handleListRelatedTasks)
+		d.RegisterFunc(ws.ActionMCPListTaskDocuments, h.handleListTaskDocuments)
+		d.RegisterFunc(ws.ActionMCPGetTaskDocument, h.handleGetTaskDocument)
+		d.RegisterFunc(ws.ActionMCPWriteTaskDocument, h.handleWriteTaskDocument)
+		count += 4
 	}
 	if h.taskSvc != nil {
 		d.RegisterFunc(ws.ActionMCPMoveTask, h.handleMoveTask)
@@ -343,17 +355,24 @@ type mcpRepositoryInput struct {
 func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	// Use local struct with JSON tags since dto.CreateTaskRequest lacks them
 	var req struct {
-		ParentID          string               `json:"parent_id"`
-		SourceTaskID      string               `json:"source_task_id"`
-		WorkspaceID       string               `json:"workspace_id"`
-		WorkflowID        string               `json:"workflow_id"`
-		WorkflowStepID    string               `json:"workflow_step_id"`
-		Title             string               `json:"title"`
-		Description       string               `json:"description"`
-		AgentProfileID    string               `json:"agent_profile_id"`
-		ExecutorProfileID string               `json:"executor_profile_id"`
-		StartAgent        *bool                `json:"start_agent"`  // nil means default to true for backward compatibility
-		Repositories      []mcpRepositoryInput `json:"repositories"` // explicit repositories for top-level tasks
+		ParentID               string               `json:"parent_id"`
+		SourceTaskID           string               `json:"source_task_id"`
+		WorkspaceID            string               `json:"workspace_id"`
+		WorkflowID             string               `json:"workflow_id"`
+		WorkflowStepID         string               `json:"workflow_step_id"`
+		Title                  string               `json:"title"`
+		Description            string               `json:"description"`
+		AgentProfileID         string               `json:"agent_profile_id"`
+		ExecutorProfileID      string               `json:"executor_profile_id"`
+		StartAgent             *bool                `json:"start_agent"`               // nil means default to true for backward compatibility
+		Repositories           []mcpRepositoryInput `json:"repositories"`              // explicit repositories for top-level tasks
+		BlockedBy              []string             `json:"blocked_by"`                // task IDs that must complete before this task
+		AssigneeAgentProfileID string               `json:"assignee_agent_profile_id"` // agent instance to assign the task to
+		// Office task-handoffs phase 4 — workspace policy.
+		WorkspaceMode         string `json:"workspace_mode"`
+		WorkspaceGroupID      string `json:"workspace_group_id"`
+		DefaultChildWorkspace string `json:"default_child_workspace"`
+		DefaultChildOrdering  string `json:"default_child_ordering"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -406,18 +425,50 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
 
+	// Office task-handoffs phase 4: resolve effective workspace policy and
+	// build the metadata block that gets persisted on the new task.
+	wsPolicy, policyErr := h.resolveWorkspacePolicy(ctx, req.ParentID,
+		req.WorkspaceMode, req.WorkspaceGroupID,
+		req.DefaultChildWorkspace, req.DefaultChildOrdering)
+	if policyErr != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, policyErr.Error(), nil)
+	}
+	metadata := wsPolicy.MetadataBlock()
+
 	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
-		ParentID:       req.ParentID,
-		WorkspaceID:    req.WorkspaceID,
-		WorkflowID:     req.WorkflowID,
-		WorkflowStepID: req.WorkflowStepID,
-		Title:          req.Title,
-		Description:    req.Description,
-		Repositories:   repos,
+		ParentID:               req.ParentID,
+		WorkspaceID:            req.WorkspaceID,
+		WorkflowID:             req.WorkflowID,
+		WorkflowStepID:         req.WorkflowStepID,
+		Title:                  req.Title,
+		Description:            req.Description,
+		Repositories:           repos,
+		BlockedBy:              req.BlockedBy,
+		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
+		Metadata:               metadata,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
+	}
+
+	// Office task-handoffs phase 4: attach workspace-group membership and
+	// (if parent says sequential) add a blocker edge to the previous
+	// non-archived sibling. A failed attach leaves the task in a broken
+	// state — the metadata claims it belongs to a group it never joined.
+	// Compensate by deleting the just-created task so the caller gets a
+	// clean error and can retry (post-review #3).
+	if h.handoffSvc != nil && wsPolicy.NeedsAttachment() {
+		if err := h.handoffSvc.AttachWorkspacePolicy(ctx, task.ID, req.ParentID, wsPolicy); err != nil {
+			h.logger.Error("attach workspace policy; rolling back task creation",
+				zap.String("task_id", task.ID), zap.Error(err))
+			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
+				h.logger.Error("rollback delete failed; task left in inconsistent state",
+					zap.String("task_id", task.ID), zap.Error(delErr))
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to attach workspace policy: "+err.Error(), nil)
+		}
 	}
 
 	// Auto-start agent session asynchronously only if requested
