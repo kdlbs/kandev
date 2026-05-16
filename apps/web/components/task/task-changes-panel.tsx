@@ -76,7 +76,7 @@ function scrollToFileAndClear(
 
 function useChangesView(selectedDiff: SelectedDiff | null, onClearSelected: () => void) {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const { allFiles, cumulativeLoading, prDiffLoading, gitStatus } =
+  const { allFiles, cumulativeLoading, prDiffLoading, gitStatus, rawPRFiles } =
     useReviewSources(activeSessionId);
   const pr = useActiveTaskPR();
   const { reviews } = useSessionFileReviews(activeSessionId);
@@ -142,6 +142,7 @@ function useChangesView(selectedDiff: SelectedDiff | null, onClearSelected: () =
   return {
     activeSessionId,
     allFiles,
+    rawPRFiles,
     reviewedFiles,
     staleFiles,
     totalCommentCount,
@@ -272,6 +273,21 @@ function useChangesActions(
   };
 }
 
+function shouldCloseFileDiffPanelAggregate(
+  prevFileSeenRef: React.MutableRefObject<boolean>,
+  gitStatus: { files?: Record<string, { diff?: string }> } | undefined,
+  filePath: string,
+  onBecameEmpty: (() => void) | undefined,
+): boolean {
+  const shouldClose = shouldCloseFileDiffPanel(gitStatus, filePath);
+  if (prevFileSeenRef.current && shouldClose) {
+    onBecameEmpty?.();
+    return true;
+  }
+  if (!shouldClose) prevFileSeenRef.current = true;
+  return false;
+}
+
 function useAutoCloseWhenEmpty(opts: {
   mode: "all" | "file";
   filePath: string | undefined;
@@ -283,25 +299,34 @@ function useAutoCloseWhenEmpty(opts: {
   const { mode, filePath, sourceFilter, gitStatus, visibleCount, onBecameEmpty } = opts;
   const prevVisibleCountRef = useRef<number | null>(null);
   const prevFileSeenRef = useRef<boolean>(false);
+  const prevSourceFilterRef = useRef<typeof sourceFilter | null>(null);
 
   useEffect(() => {
     if (!onBecameEmpty) return;
-    // A filtered tab going empty is not a "panel is empty" signal — the
-    // other sources may still have content. Only close in the unfiltered
-    // case.
-    if (sourceFilter !== "all") return;
-
     if (mode === "file" && filePath) {
-      // File-mode: close when the file no longer has an uncommitted diff,
-      // regardless of whether it still appears in PR/cumulative diff sources.
-      const shouldClose = shouldCloseFileDiffPanel(gitStatus, filePath);
-      if (prevFileSeenRef.current && shouldClose) {
-        onBecameEmpty();
+      if (sourceFilter === "all") {
+        shouldCloseFileDiffPanelAggregate(prevFileSeenRef, gitStatus, filePath, onBecameEmpty);
         return;
       }
-      if (!shouldClose) prevFileSeenRef.current = true;
+      // File-mode with explicit source (uncommitted/committed/pr): close when
+      // that source-specific view becomes empty for the opened file.
+      // Reset tracking when the filtered source changes so a tab switch
+      // doesn't fire onBecameEmpty just because the new tab starts empty.
+      if (prevSourceFilterRef.current !== sourceFilter) {
+        prevSourceFilterRef.current = sourceFilter;
+        prevVisibleCountRef.current = null;
+      }
+      const prevCount = prevVisibleCountRef.current;
+      prevVisibleCountRef.current = visibleCount;
+      if (prevCount !== null && prevCount > 0 && visibleCount === 0) {
+        onBecameEmpty();
+      }
       return;
     }
+
+    // In list mode, a filtered tab going empty is not a "panel is empty"
+    // signal — other sources may still have content.
+    if (sourceFilter !== "all") return;
 
     const prevCount = prevVisibleCountRef.current;
     if (prevCount !== null && prevCount > 0 && visibleCount === 0) {
@@ -311,13 +336,27 @@ function useAutoCloseWhenEmpty(opts: {
   }, [mode, filePath, sourceFilter, gitStatus, onBecameEmpty, visibleCount]);
 }
 
-function filterVisibleFiles(
-  allFiles: ReviewFile[],
-  mode: "all" | "file",
-  filePath: string | undefined,
-  fileRepositoryName: string | undefined,
-  sourceFilter: "all" | ReviewSource,
-): ReviewFile[] {
+type FilterVisibleFilesOpts = {
+  mode: "all" | "file";
+  filePath: string | undefined;
+  fileRepositoryName: string | undefined;
+  sourceFilter: "all" | ReviewSource;
+  rawPRFiles?: ReviewFile[];
+};
+
+function filterVisibleFiles(allFiles: ReviewFile[], opts: FilterVisibleFilesOpts): ReviewFile[] {
+  const { mode, filePath, fileRepositoryName, sourceFilter, rawPRFiles } = opts;
+  // In file mode with an explicit PR source, bypass the deduplicated allFiles and
+  // read from rawPRFiles. This is necessary because allFiles deduplicates with
+  // priority uncommitted > committed > PR: a file that also has local changes
+  // will not appear with source "pr" in allFiles, causing "No changes" in PR rows.
+  if (mode === "file" && filePath && sourceFilter === "pr" && rawPRFiles && rawPRFiles.length > 0) {
+    let prFiles = rawPRFiles.filter((f) => f.path === filePath && f.source === "pr");
+    if (fileRepositoryName !== undefined) {
+      prFiles = prFiles.filter((f) => (f.repository_name ?? "") === fileRepositoryName);
+    }
+    if (prFiles.length > 0) return prFiles;
+  }
   let files = allFiles;
   if (mode === "file" && filePath) {
     files = files.filter((file) => file.path === filePath);
@@ -333,6 +372,7 @@ function filterVisibleFiles(
 
 function useVisibleDiffState(opts: {
   allFiles: ReviewFile[];
+  rawPRFiles: ReviewFile[];
   mode: "all" | "file";
   filePath: string | undefined;
   fileRepositoryName: string | undefined;
@@ -343,6 +383,7 @@ function useVisibleDiffState(opts: {
 }) {
   const {
     allFiles,
+    rawPRFiles,
     mode,
     filePath,
     fileRepositoryName,
@@ -352,8 +393,15 @@ function useVisibleDiffState(opts: {
     staleFiles,
   } = opts;
   const visibleFiles = useMemo(
-    () => filterVisibleFiles(allFiles, mode, filePath, fileRepositoryName, sourceFilter),
-    [allFiles, mode, filePath, fileRepositoryName, sourceFilter],
+    () =>
+      filterVisibleFiles(allFiles, {
+        mode,
+        filePath,
+        fileRepositoryName,
+        sourceFilter,
+        rawPRFiles,
+      }),
+    [allFiles, rawPRFiles, mode, filePath, fileRepositoryName, sourceFilter],
   );
   const visibleFileRefs = useMemo(() => {
     if (mode !== "file" || !filePath) return fileRefs;
@@ -400,6 +448,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   const {
     activeSessionId,
     allFiles,
+    rawPRFiles,
     reviewedFiles,
     staleFiles,
     totalCommentCount,
@@ -422,6 +471,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   const { visibleFiles, visibleFileRefs, reviewedCount, totalCount, progressPercent } =
     useVisibleDiffState({
       allFiles,
+      rawPRFiles,
       mode,
       filePath,
       fileRepositoryName,

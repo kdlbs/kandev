@@ -103,7 +103,12 @@ type DockviewStore = {
   addDiffViewerPanel: (path?: string, content?: string, groupId?: string) => void;
   addFileDiffPanel: (
     path: string,
-    opts?: OpenPanelOpts & { content?: string; groupId?: string },
+    opts?: OpenPanelOpts & {
+      content?: string;
+      groupId?: string;
+      source?: string;
+      repositoryName?: string;
+    },
   ) => void;
   addCommitDetailPanel: (
     sha: string,
