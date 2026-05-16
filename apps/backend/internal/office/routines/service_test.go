@@ -30,7 +30,7 @@ func newTestRoutineService(t *testing.T) *routines.RoutineService {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	repo, err := sqlite.NewWithDB(db, db)
+	repo, err := sqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,18 +43,6 @@ func (r *Repository) initPhase2Schema() error {
 	if _, err := r.db.Exec(participantsSchema); err != nil {
 		return fmt.Errorf("failed to create workflow_step_participants table: %w", err)
 	}
-	// Idempotent ALTER for existing dev DBs that were created before the
-	// task_id column was added. SQLite raises an error when the column
-	// already exists; that's swallowed.
-	_, _ = r.db.Exec(`ALTER TABLE workflow_step_participants ADD COLUMN task_id TEXT NOT NULL DEFAULT ''`)
-	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_workflow_step_participants_task ON workflow_step_participants(task_id) WHERE task_id != ''`)
-	// ADR 0005 Wave D added 'runner' to the role CHECK constraint.
-	// SQLite cannot ALTER a CHECK; if the existing constraint rejects
-	// 'runner' inserts we recreate the table preserving rows. The probe
-	// is cheap: try a transactional dummy insert + rollback. On SQLite
-	// builds where the constraint allows 'runner' (fresh installs) the
-	// recreate is a no-op.
-	r.upgradeParticipantsRunnerRoleIfNeeded()
 
 	decisionsSchema := `
 	CREATE TABLE IF NOT EXISTS workflow_step_decisions (
@@ -80,16 +67,6 @@ func (r *Repository) initPhase2Schema() error {
 	if _, err := r.db.Exec(decisionsSchema); err != nil {
 		return fmt.Errorf("failed to create workflow_step_decisions table: %w", err)
 	}
-	// Idempotent ALTERs for dev DBs created before ADR 0005 Wave D added the
-	// supersede + denormalised decider columns. SQLite raises an error when
-	// the column already exists; that's swallowed.
-	_, _ = r.db.Exec(`ALTER TABLE workflow_step_decisions ADD COLUMN superseded_at TIMESTAMP NULL`)
-	_, _ = r.db.Exec(`ALTER TABLE workflow_step_decisions ADD COLUMN decider_type TEXT NOT NULL DEFAULT ''`)
-	_, _ = r.db.Exec(`ALTER TABLE workflow_step_decisions ADD COLUMN decider_id TEXT NOT NULL DEFAULT ''`)
-	_, _ = r.db.Exec(`ALTER TABLE workflow_step_decisions ADD COLUMN role TEXT NOT NULL DEFAULT ''`)
-	_, _ = r.db.Exec(`ALTER TABLE workflow_step_decisions ADD COLUMN comment TEXT NOT NULL DEFAULT ''`)
-	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_workflow_step_decisions_active
-		ON workflow_step_decisions(task_id, role) WHERE superseded_at IS NULL`)
 
 	return nil
 }
@@ -696,70 +673,4 @@ func validParticipantRole(role models.ParticipantRole) bool {
 		return true
 	}
 	return false
-}
-
-// upgradeParticipantsRunnerRoleIfNeeded recreates the workflow_step_participants
-// table when the existing CHECK constraint rejects the new 'runner' role
-// (added in ADR 0005 Wave D). The probe reads the table's stored DDL from
-// sqlite_master; if it lacks 'runner' in the role CHECK we copy rows into
-// a fresh table built with the updated CHECK and swap them in. Idempotent
-// and safe across restarts.
-func (r *Repository) upgradeParticipantsRunnerRoleIfNeeded() {
-	var ddl string
-	err := r.db.QueryRow(
-		`SELECT sql FROM sqlite_master WHERE type='table' AND name='workflow_step_participants'`,
-	).Scan(&ddl)
-	if err != nil {
-		return
-	}
-	// CHECK already includes 'runner' — fresh schema, no upgrade required.
-	if strings.Contains(ddl, "'runner'") {
-		return
-	}
-	r.recreateParticipantsTable()
-}
-
-// recreateParticipantsTable rebuilds workflow_step_participants with the
-// updated role CHECK constraint, copying every existing row into the new
-// table. SQLite-style recreate-table swap inside a single transaction.
-func (r *Repository) recreateParticipantsTable() {
-	tx, err := r.db.Begin()
-	if err != nil {
-		return
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if _, err := tx.Exec(`CREATE TABLE workflow_step_participants_new (
-		id TEXT PRIMARY KEY,
-		step_id TEXT NOT NULL REFERENCES workflow_steps(id) ON DELETE CASCADE,
-		task_id TEXT NOT NULL DEFAULT '',
-		role TEXT NOT NULL CHECK (role IN ('reviewer','approver','watcher','collaborator','runner')),
-		agent_profile_id TEXT NOT NULL,
-		decision_required INTEGER NOT NULL DEFAULT 0,
-		position INTEGER NOT NULL DEFAULT 0
-	)`); err != nil {
-		return
-	}
-	if _, err := tx.Exec(`INSERT INTO workflow_step_participants_new
-		(id, step_id, task_id, role, agent_profile_id, decision_required, position)
-		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position
-		FROM workflow_step_participants`); err != nil {
-		return
-	}
-	if _, err := tx.Exec(`DROP TABLE workflow_step_participants`); err != nil {
-		return
-	}
-	if _, err := tx.Exec(`ALTER TABLE workflow_step_participants_new RENAME TO workflow_step_participants`); err != nil {
-		return
-	}
-	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_workflow_step_participants_step ON workflow_step_participants(step_id)`); err != nil {
-		return
-	}
-	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_workflow_step_participants_role ON workflow_step_participants(step_id, role)`); err != nil {
-		return
-	}
-	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_workflow_step_participants_task ON workflow_step_participants(task_id) WHERE task_id != ''`); err != nil {
-		return
-	}
-	_ = tx.Commit()
 }

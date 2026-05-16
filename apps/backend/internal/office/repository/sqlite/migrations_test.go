@@ -17,7 +17,7 @@ func TestTaskMigrations_NewColumnsExist(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	// Initialize task repo (which runs all migrations)
-	if _, err := taskrepo.NewWithDB(db, db); err != nil {
+	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
 		t.Fatalf("init task repo: %v", err)
 	}
 

@@ -54,7 +54,7 @@ func newTestApprovalService(t *testing.T) (*approvals.ApprovalService, *sqlite.R
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	repo, err := sqlite.NewWithDB(db, db)
+	repo, err := sqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}

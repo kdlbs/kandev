@@ -23,11 +23,11 @@ func newTestRepo(t *testing.T) *sqlite.Repository {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	if _, _, err := settingsstore.Provide(db, db); err != nil {
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
 		t.Fatalf("settings store init: %v", err)
 	}
 
-	repo, err := sqlite.NewWithDB(db, db)
+	repo, err := sqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestInitSchema_AllTablesExist(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 
-	_, err = sqlite.NewWithDB(db, db)
+	_, err = sqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
@@ -91,11 +91,11 @@ func TestInitSchema_Idempotent(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	// Create repo twice - should not error on second call
-	_, err = sqlite.NewWithDB(db, db)
+	_, err = sqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("first init: %v", err)
 	}
-	_, err = sqlite.NewWithDB(db, db)
+	_, err = sqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("second init should be idempotent: %v", err)
 	}

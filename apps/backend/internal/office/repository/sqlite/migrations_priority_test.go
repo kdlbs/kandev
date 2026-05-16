@@ -57,7 +57,7 @@ func TestMigrate_PriorityIntegerToText(t *testing.T) {
 		t.Fatalf("seed legacy schema: %v", err)
 	}
 
-	if _, err := sqlite.NewWithDB(db, db); err != nil {
+	if _, err := sqlite.NewWithDB(db, db, nil); err != nil {
 		t.Fatalf("init office repo (run migrations): %v", err)
 	}
 
@@ -140,10 +140,10 @@ func TestMigrate_PriorityIdempotent(t *testing.T) {
 		t.Fatalf("seed migrated schema: %v", err)
 	}
 
-	if _, err := sqlite.NewWithDB(db, db); err != nil {
+	if _, err := sqlite.NewWithDB(db, db, nil); err != nil {
 		t.Fatalf("first init: %v", err)
 	}
-	if _, err := sqlite.NewWithDB(db, db); err != nil {
+	if _, err := sqlite.NewWithDB(db, db, nil); err != nil {
 		t.Fatalf("second init should be idempotent: %v", err)
 	}
 

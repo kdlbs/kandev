@@ -23,7 +23,7 @@ func newRepoForHealTests(t *testing.T) *Repository {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repo, err := NewWithDB(sqlxDB, sqlxDB)
+	repo, err := NewWithDB(sqlxDB, sqlxDB, nil)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}

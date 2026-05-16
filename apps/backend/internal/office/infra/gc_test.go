@@ -94,7 +94,7 @@ func newTestGC(t *testing.T, worktreeBase string, docker infra.DockerClient) (*i
 		t.Fatalf("create workflow_step_participants: %v", err)
 	}
 
-	repo, err := sqlite.NewWithDB(db, db)
+	repo, err := sqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}

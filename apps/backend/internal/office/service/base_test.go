@@ -27,7 +27,7 @@ import (
 // repo.
 func initSharedAgentProfilesSchema(t *testing.T, db *sqlx.DB) {
 	t.Helper()
-	if _, _, err := settingsstore.Provide(db, db); err != nil {
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
 		t.Fatalf("settings store init: %v", err)
 	}
 }
@@ -92,7 +92,7 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 
 	initSharedAgentProfilesSchema(t, db)
 
-	repo, err := sqlite.NewWithDB(db, db)
+	repo, err := sqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
@@ -254,7 +254,7 @@ func newTestServiceWithConfig(t *testing.T) (*service.Service, string) {
 
 	initSharedAgentProfilesSchema(t, db)
 
-	repo, err := sqlite.NewWithDB(db, db)
+	repo, err := sqlite.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}

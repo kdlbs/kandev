@@ -24,14 +24,14 @@ func newRepoForBuiltinWorkflowTests(t *testing.T) *Repository {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repo, err := NewWithDB(sqlxDB, sqlxDB)
+	repo, err := NewWithDB(sqlxDB, sqlxDB, nil)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
 	// The Phase 6 ensure helpers write into workflow_steps, whose schema
 	// is initialised by the workflow repository. Build it on the same DB
 	// so tests exercise the production migration order.
-	if _, err := workflowrepo.NewWithDB(sqlxDB, sqlxDB); err != nil {
+	if _, err := workflowrepo.NewWithDB(sqlxDB, sqlxDB, nil); err != nil {
 		t.Fatalf("init workflow repo schema: %v", err)
 	}
 	t.Cleanup(func() { _ = sqlxDB.Close() })

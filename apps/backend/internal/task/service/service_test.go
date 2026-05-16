@@ -82,7 +82,7 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Repos
 		t.Fatalf("failed to open test database: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB)
+	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
@@ -94,7 +94,7 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Repos
 	// enables foreign_keys=ON. Running both migrations here mirrors
 	// production startup so service-layer tests catch cross-package
 	// constraint regressions automatically.
-	if _, err := officesqlite.NewWithDB(sqlxDB, sqlxDB); err != nil {
+	if _, err := officesqlite.NewWithDB(sqlxDB, sqlxDB, nil); err != nil {
 		t.Fatalf("failed to apply office migrations: %v", err)
 	}
 	t.Cleanup(func() {
