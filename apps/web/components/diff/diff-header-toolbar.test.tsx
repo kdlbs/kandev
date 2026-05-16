@@ -45,9 +45,9 @@ const baseOpts = {
 describe("useDiffHeaderToolbar", () => {
   it("returns a callback that renders the toolbar buttons", () => {
     const { result } = renderHook(() => useDiffHeaderToolbar(baseOpts));
-    // The callback signature is the library's RenderHeaderMetadataProps; we
-    // pass a synthetic value so a real change in the library's prop shape
-    // would surface here instead of only at the FileDiff render site.
+    // The callback receives FileDiffMetadata directly; passing a synthetic
+    // value through the hook means a future library change to that shape
+    // surfaces here instead of only at the live FileDiff render site.
     const node = result.current(headerProp(FILE));
     renderToolbar(node as ReactElement);
 
