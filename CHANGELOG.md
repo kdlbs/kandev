@@ -2,6 +2,13 @@
 
 All notable changes to Kandev.
 
+## 0.49.0 - 2026-05-16
+
+### Bug Fixes
+
+- ignore pi version banner in utility inference output ([#915](https://github.com/kdlbs/kandev/pull/915))
+- show PR diff when clicking file row that has local changes ([#908](https://github.com/kdlbs/kandev/pull/908))
+
 ## 0.48.0 - 2026-05-15
 
 ### Bug Fixes
