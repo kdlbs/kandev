@@ -227,11 +227,11 @@ func TestListRunsWaitingOnProvider_WildcardProviderIDMatchesNone(t *testing.T) {
 	}
 }
 
-func derefStr(p *string) string {
+func derefStr[T ~string](p *T) string {
 	if p == nil {
 		return ""
 	}
-	return *p
+	return string(*p)
 }
 
 // TestClaimNextEligibleRun_SkipsRoutingBlocked verifies the eligibility

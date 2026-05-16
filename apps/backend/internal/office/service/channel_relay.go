@@ -58,7 +58,7 @@ func (r *ChannelRelay) RelayComment(ctx context.Context, comment *models.TaskCom
 	// claimed for the comment's task. Empty when the comment isn't
 	// attached to an in-flight run (manual user comment, etc.).
 	runID := r.svc.ResolveRunForTask(ctx, comment.TaskID)
-	sendErr := r.sendWithRetry(ctx, channel.Platform, config, comment.Body)
+	sendErr := r.sendWithRetry(ctx, string(channel.Platform), config, comment.Body)
 	if sendErr != nil {
 		r.svc.LogActivityWithRun(ctx, channel.WorkspaceID, "system", "", "channel.delivery_failed",
 			"channel", channel.ID,

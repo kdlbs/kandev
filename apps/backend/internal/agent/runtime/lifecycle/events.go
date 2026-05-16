@@ -354,7 +354,7 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 		options[i] = PermissionOption{
 			OptionID: opt.OptionID,
 			Name:     opt.Name,
-			Kind:     opt.Kind,
+			Kind:     string(opt.Kind),
 		}
 	}
 

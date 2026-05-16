@@ -43,7 +43,7 @@ import {
   type SaveStatus,
 } from "@/components/settings/profile-edit/profile-edit-page-chrome";
 import { useToast } from "@/components/toast-provider";
-import type { Executor, ExecutorProfile, ProfileEnvVar } from "@/lib/types/http";
+import type { Executor, ExecutorProfile, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 
 const EXECUTORS_ROUTE = "/settings/executors";
@@ -83,7 +83,7 @@ function parseRemoteCredentials(config?: Record<string, string>): string[] {
   }
 }
 
-function useRemoteExecutorFlags(executorType: string) {
+function useRemoteExecutorFlags(executorType: ExecutorType) {
   const isRemote =
     executorType === "local_docker" ||
     executorType === "remote_docker" ||
@@ -552,8 +552,8 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
   );
 }
 
-function getExecutorDescription(type: string): string {
-  if (type === "local") return "Runs agents directly in the repository folder.";
+function getExecutorDescription(type: ExecutorType): string {
+  if (type === "local_pc") return "Runs agents directly in the repository folder.";
   if (type === "worktree") return "Creates git worktrees for isolated agent sessions.";
   if (type === "local_docker") return "Runs Docker containers on this machine.";
   if (type === "remote_docker") return "Connects to a remote Docker host.";

@@ -493,19 +493,19 @@ func (m *Manager) runEnvironmentPreparerWithProgress(
 	if m.preparerRegistry == nil {
 		return nil
 	}
-	// Look up preparer by the raw executor type first (e.g. "worktree"),
-	// then fall back to the backend name (e.g. "standalone").
-	// This allows executor types that share a backend (local and worktree
-	// both map to standalone) to have distinct preparation logic.
-	execName := executor.Name(req.ExecutorType)
-	preparer := m.preparerRegistry.Get(execName)
-	if preparer == nil {
-		execName = executor.ExecutorTypeToBackend(models.ExecutorType(req.ExecutorType))
-		preparer = m.preparerRegistry.Get(execName)
-	}
+	// Preparer registry is keyed by ExecutorType (the "local"/"worktree"/
+	// "local_docker"/... taxonomy), not Runtime — so executor types that
+	// share a runtime backend (local + worktree both run on standalone)
+	// can still get distinct preparation logic.
+	execType := models.ExecutorType(req.ExecutorType)
+	preparer := m.preparerRegistry.Get(execType)
 	if preparer == nil {
 		return nil
 	}
+	// The EnvPrepareRequest carries the resolved Runtime (executor.Name),
+	// which preparer_script.go uses for runtime-level decisions like
+	// picking the default prepare template.
+	execName := execType.Runtime()
 
 	// Skip environment preparation for repo-less tasks (e.g. config chat).
 	// Preparers assume a repository is available; without one the session
@@ -818,7 +818,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	m.logger.Debug("agentctl execution created (agent not started)",
 		zap.String("execution_id", executionID),
 		zap.String("task_id", req.TaskID),
-		zap.String("runtime", execution.RuntimeName))
+		zap.Stringer("runtime", execution.RuntimeName))
 
 	return execution, nil
 }
@@ -836,7 +836,7 @@ func (m *Manager) buildExecutionFromInstance(
 	prepResult *EnvPrepareResult,
 ) *AgentExecution {
 	execution := execInstance.ToAgentExecution(execReq)
-	execution.RuntimeName = string(rt.Name())
+	execution.RuntimeName = rt.Name()
 	if req.ACPSessionID != "" {
 		execution.ACPSessionID = req.ACPSessionID
 	}

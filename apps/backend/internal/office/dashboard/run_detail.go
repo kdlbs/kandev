@@ -135,7 +135,7 @@ func buildRunSummaryDTO(run *models.Run) AgentRunSummaryDTO {
 		ID:           run.ID,
 		IDShort:      shortID(run.ID),
 		Reason:       run.Reason,
-		Status:       run.Status,
+		Status:       string(run.Status),
 		ErrorMessage: run.ErrorMessage,
 		TaskID:       taskIDFromPayload(run.Payload),
 		CommentID:    commentID,
@@ -234,8 +234,8 @@ func GetRunDetail(
 	for i, e := range events {
 		eventDTOs[i] = RunEventDTO{
 			Seq:       e.Seq,
-			EventType: e.EventType,
-			Level:     e.Level,
+			EventType: string(e.EventType),
+			Level:     string(e.Level),
 			Payload:   e.Payload,
 			CreatedAt: e.CreatedAt.UTC().Format(time.RFC3339),
 		}
@@ -253,7 +253,7 @@ func GetRunDetail(
 		IDShort:      shortID(run.ID),
 		AgentID:      run.AgentProfileID,
 		Reason:       run.Reason,
-		Status:       run.Status,
+		Status:       string(run.Status),
 		ErrorMessage: run.ErrorMessage,
 		TaskID:       taskIDFromPayload(run.Payload),
 		RequestedAt:  run.RequestedAt.UTC().Format(time.RFC3339),
@@ -317,7 +317,7 @@ func buildRunRouting(
 		out.ResolvedModel = *run.ResolvedModel
 	}
 	if run.RoutingBlockedStatus != nil {
-		out.BlockedStatus = *run.RoutingBlockedStatus
+		out.BlockedStatus = string(*run.RoutingBlockedStatus)
 	}
 	if run.EarliestRetryAt != nil && !run.EarliestRetryAt.IsZero() {
 		s := run.EarliestRetryAt.UTC().Format(time.RFC3339)

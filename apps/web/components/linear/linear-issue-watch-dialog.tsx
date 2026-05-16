@@ -106,7 +106,7 @@ function useFormData(workspaceId: string) {
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
   const executors = useAppStore((s) => s.executors.items);
   const allExecutorProfiles = useMemo(
-    () => executors.filter((e) => e.type !== "local").flatMap((e) => e.profiles ?? []),
+    () => executors.filter((e) => e.type !== "local_pc").flatMap((e) => e.profiles ?? []),
     [executors],
   );
   const filteredAgentProfiles = useMemo(

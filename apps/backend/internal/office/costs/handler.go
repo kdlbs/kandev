@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/kandev/kandev/internal/office/models"
 )
 
 // Handler provides HTTP handlers for cost and budget routes.
@@ -134,12 +136,12 @@ func (h *Handler) createBudget(c *gin.Context) {
 	}
 	policy := &BudgetPolicy{
 		WorkspaceID:       c.Param("wsId"),
-		ScopeType:         req.ScopeType,
+		ScopeType:         models.BudgetScopeType(req.ScopeType),
 		ScopeID:           req.ScopeID,
 		LimitSubcents:     req.LimitSubcents,
-		Period:            req.Period,
+		Period:            models.BudgetPeriod(req.Period),
 		AlertThresholdPct: req.AlertThresholdPct,
-		ActionOnExceed:    req.ActionOnExceed,
+		ActionOnExceed:    models.BudgetActionOnExceed(req.ActionOnExceed),
 	}
 	if err := h.svc.CreateBudgetPolicy(c.Request.Context(), policy); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -169,7 +171,7 @@ func (h *Handler) updateBudget(c *gin.Context) {
 
 func applyBudgetPatch(policy *BudgetPolicy, req *UpdateBudgetRequest) {
 	if req.ScopeType != nil {
-		policy.ScopeType = *req.ScopeType
+		policy.ScopeType = models.BudgetScopeType(*req.ScopeType)
 	}
 	if req.ScopeID != nil {
 		policy.ScopeID = *req.ScopeID
@@ -178,13 +180,13 @@ func applyBudgetPatch(policy *BudgetPolicy, req *UpdateBudgetRequest) {
 		policy.LimitSubcents = *req.LimitSubcents
 	}
 	if req.Period != nil {
-		policy.Period = *req.Period
+		policy.Period = models.BudgetPeriod(*req.Period)
 	}
 	if req.AlertThresholdPct != nil {
 		policy.AlertThresholdPct = *req.AlertThresholdPct
 	}
 	if req.ActionOnExceed != nil {
-		policy.ActionOnExceed = *req.ActionOnExceed
+		policy.ActionOnExceed = models.BudgetActionOnExceed(*req.ActionOnExceed)
 	}
 }
 

@@ -433,8 +433,8 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 			"is_passthrough":         session.IsPassthrough,
 		}
 		// Include review_status if present to ensure frontend state consistency
-		if session.ReviewStatus != nil {
-			eventData["review_status"] = *session.ReviewStatus
+		if session.ReviewStatus != models.ReviewStatusNone {
+			eventData["review_status"] = string(session.ReviewStatus)
 		}
 		// Include session metadata (e.g. plan_mode set by workflow events).
 		// Key is "session_metadata" to avoid conflict with message-level "metadata".

@@ -21,6 +21,8 @@ type (
 	// Permission stream types
 	PermissionNotification    = streams.PermissionNotification
 	PermissionOption          = streams.PermissionOption
+	PermissionActionType      = streams.PermissionActionType
+	PermissionOptionKind      = streams.PermissionOptionKind
 	PermissionRespondRequest  = streams.PermissionRespondRequest
 	PermissionRespondResponse = streams.PermissionRespondResponse
 

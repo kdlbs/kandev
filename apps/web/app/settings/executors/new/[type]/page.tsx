@@ -40,7 +40,7 @@ import {
   type GitIdentityState,
 } from "@/components/settings/profile-edit/remote-credentials-card";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
-import type { Executor, ProfileEnvVar } from "@/lib/types/http";
+import type { Executor, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
@@ -91,7 +91,7 @@ export default function CreateProfilePage({ params }: { params: Promise<{ type: 
     return <InvalidTypeFallback />;
   }
 
-  return <CreateProfileForm executorType={type} typeInfo={typeInfo} />;
+  return <CreateProfileForm executorType={type as ExecutorType} typeInfo={typeInfo} />;
 }
 
 function InvalidTypeFallback() {
@@ -271,7 +271,7 @@ function useDefaultScripts(executorType: string, setPrepareScript: (v: string) =
   }, [executorType, setPrepareScript]);
 }
 
-function useCreateRemoteFlags(executorType: string) {
+function useCreateRemoteFlags(executorType: ExecutorType) {
   const isRemote =
     executorType === "local_docker" ||
     executorType === "remote_docker" ||
@@ -283,7 +283,7 @@ function useCreateRemoteFlags(executorType: string) {
   };
 }
 
-function useCreateRemoteAuthState(executorType: string) {
+function useCreateRemoteAuthState(executorType: ExecutorType) {
   const [remoteCredentials, setRemoteCredentials] = useState<string[]>(() =>
     executorType === "sprites" ? ["gh_cli_token"] : [],
   );
@@ -346,7 +346,7 @@ function useCreateGitIdentityState(isRemote: boolean) {
   };
 }
 
-function useCreateProfileFormState(executorType: string) {
+function useCreateProfileFormState(executorType: ExecutorType) {
   const [name, setName] = useState(() => (executorType === "local_docker" ? "Docker" : ""));
   const [mcpPolicy, setMcpPolicy] = useState("");
   const [prepareScript, setPrepareScript] = useState("");
@@ -501,7 +501,7 @@ function CreateProfileSections({
   form,
   secrets,
 }: {
-  executorType: string;
+  executorType: ExecutorType;
   form: ReturnType<typeof useCreateProfileFormState>;
   secrets: ReturnType<typeof useSecrets>["items"];
 }) {
@@ -604,7 +604,7 @@ function CreateProfileForm({
   executorType,
   typeInfo,
 }: {
-  executorType: string;
+  executorType: ExecutorType;
   typeInfo: { executorId: string; label: string; description: string };
 }) {
   const { items: secrets } = useSecrets();

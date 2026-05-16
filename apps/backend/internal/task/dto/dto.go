@@ -129,7 +129,7 @@ type TaskDTO struct {
 	Position                int                    `json:"position"`
 	PrimarySessionID        *string                `json:"primary_session_id,omitempty"`
 	SessionCount            *int                   `json:"session_count,omitempty"`
-	ReviewStatus            *string                `json:"review_status,omitempty"`
+	ReviewStatus            models.ReviewStatus    `json:"review_status,omitempty"`
 	PrimaryExecutorID       *string                `json:"primary_executor_id,omitempty"`
 	PrimaryExecutorType     *string                `json:"primary_executor_type,omitempty"`
 	PrimaryExecutorName     *string                `json:"primary_executor_name,omitempty"`
@@ -196,10 +196,10 @@ type TaskSessionDTO struct {
 	CompletedAt          *time.Time              `json:"completed_at,omitempty"`
 	UpdatedAt            time.Time               `json:"updated_at"`
 	// Workflow fields
-	IsPrimary         bool    `json:"is_primary"`
-	IsPassthrough     bool    `json:"is_passthrough"`
-	ReviewStatus      *string `json:"review_status,omitempty"`
-	TaskEnvironmentID string  `json:"task_environment_id,omitempty"`
+	IsPrimary         bool                `json:"is_primary"`
+	IsPassthrough     bool                `json:"is_passthrough"`
+	ReviewStatus      models.ReviewStatus `json:"review_status,omitempty"`
+	TaskEnvironmentID string              `json:"task_environment_id,omitempty"`
 }
 
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
@@ -227,7 +227,7 @@ type TaskSessionSummaryDTO struct {
 	UpdatedAt         time.Time               `json:"updated_at"`
 	IsPrimary         bool                    `json:"is_primary"`
 	IsPassthrough     bool                    `json:"is_passthrough"`
-	ReviewStatus      *string                 `json:"review_status,omitempty"`
+	ReviewStatus      models.ReviewStatus     `json:"review_status,omitempty"`
 	TaskEnvironmentID string                  `json:"task_environment_id,omitempty"`
 	// CommandCount is the number of tool_call messages on this session,
 	// surfaced inline in the timeline entry header ("ran N commands").
@@ -529,7 +529,7 @@ func FromTask(task *models.Task) TaskDTO {
 
 // FromTaskWithPrimarySession converts a task model to a TaskDTO, including the primary session ID.
 func FromTaskWithPrimarySession(task *models.Task, primarySessionID *string) TaskDTO {
-	return FromTaskWithSessionInfo(task, primarySessionID, nil, nil, nil, nil, nil, nil, nil, nil)
+	return FromTaskWithSessionInfo(task, primarySessionID, nil, models.ReviewStatusNone, nil, nil, nil, nil, nil, nil)
 }
 
 // FromTaskWithSessionInfo converts a task model to a TaskDTO, including session information.
@@ -537,7 +537,7 @@ func FromTaskWithSessionInfo(
 	task *models.Task,
 	primarySessionID *string,
 	sessionCount *int,
-	reviewStatus *string,
+	reviewStatus models.ReviewStatus,
 	primaryExecutorID *string,
 	primaryExecutorType *string,
 	primaryExecutorName *string,

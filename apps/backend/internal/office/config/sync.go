@@ -27,13 +27,13 @@ func (s *ConfigService) ScanFilesystem(_ context.Context, _ string) (*ConfigBund
 	for _, sk := range s.cfgLoader.GetSkills(defaultWorkspaceName) {
 		bundle.Skills = append(bundle.Skills, SkillConfig{
 			Name: sk.Name, Slug: sk.Slug, Description: sk.Description,
-			SourceType: sk.SourceType, Content: sk.Content,
+			SourceType: string(sk.SourceType), Content: sk.Content,
 		})
 	}
 	for _, r := range s.cfgLoader.GetRoutines(defaultWorkspaceName) {
 		bundle.Routines = append(bundle.Routines, RoutineConfig{
 			Name: r.Name, Description: r.Description, TaskTemplate: r.TaskTemplate,
-			ConcurrencyPolicy: r.ConcurrencyPolicy,
+			ConcurrencyPolicy: string(r.ConcurrencyPolicy),
 		})
 	}
 	for _, p := range s.cfgLoader.GetProjects(defaultWorkspaceName) {

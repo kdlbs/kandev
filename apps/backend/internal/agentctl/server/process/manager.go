@@ -1284,7 +1284,7 @@ func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (*adapte
 	m.logger.Info("auto-approving permission request",
 		zap.String("option_id", selectedOption.OptionID),
 		zap.String("option_name", selectedOption.Name),
-		zap.String("kind", selectedOption.Kind))
+		zap.String("kind", string(selectedOption.Kind)))
 
 	return &adapter.PermissionResponse{
 		OptionID: selectedOption.OptionID,

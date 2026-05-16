@@ -44,7 +44,10 @@ import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agent
 import { AgentLogo } from "@/components/agent-logo";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { getCapabilityWarning } from "@/lib/capability-warning";
-import type { Workspace, Agent, AgentProfile, Executor } from "@/lib/types/http";
+import type { Agent, AgentProfile, Executor } from "@/lib/types/http";
+import type { WorkspaceState } from "@/lib/state/slices";
+
+type WorkspaceItem = WorkspaceState["items"][number];
 
 type GeneralSidebarSectionProps = {
   pathname: string;
@@ -91,7 +94,7 @@ function GeneralSidebarSection({ pathname }: GeneralSidebarSectionProps) {
 
 type WorkspacesSidebarSectionProps = {
   pathname: string;
-  workspaces: Workspace[];
+  workspaces: WorkspaceItem[];
 };
 
 function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSectionProps) {
@@ -105,7 +108,7 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
       </SidebarMenuButton>
       {workspaces.length > 0 && (
         <SidebarMenuSub className="ml-3 mt-1">
-          {workspaces.map((workspace: Workspace) => {
+          {workspaces.map((workspace) => {
             const workspacePath = `/settings/workspace/${workspace.id}`;
             const workflowsPath = `${workspacePath}/workflows`;
             const repositoriesPath = `${workspacePath}/repositories`;

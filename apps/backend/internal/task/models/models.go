@@ -296,6 +296,25 @@ type Turn struct {
 	UpdatedAt     time.Time              `json:"updated_at"`
 }
 
+// ReviewStatus represents the review state of a TaskSession. The zero value
+// (ReviewStatusNone, the empty string) means "no review needed" and serializes
+// out via omitempty, preserving the JSON shape of the legacy *string field.
+// The persisted column (task_sessions.review_status TEXT DEFAULT ”) is
+// compatible with these values without any migration.
+type ReviewStatus string
+
+const (
+	// ReviewStatusNone is the zero value meaning no review is needed.
+	ReviewStatusNone ReviewStatus = ""
+	// ReviewStatusPending indicates the session is waiting on a human review.
+	ReviewStatusPending ReviewStatus = "pending"
+	// ReviewStatusApproved indicates the reviewer accepted the session output.
+	ReviewStatusApproved ReviewStatus = "approved"
+)
+
+// String returns the underlying string value for the review status.
+func (r ReviewStatus) String() string { return string(r) }
+
 // TaskSessionState represents the state of an agent session
 type TaskSessionState string
 
@@ -372,9 +391,9 @@ type TaskSession struct {
 	TaskEnvironmentID string `json:"task_environment_id,omitempty"` // FK to task_environments for shared env
 
 	// Workflow-related fields
-	IsPrimary     bool    `json:"is_primary"`              // Whether this is the primary session for the task
-	IsPassthrough bool    `json:"is_passthrough"`          // Whether this session uses passthrough (PTY) mode
-	ReviewStatus  *string `json:"review_status,omitempty"` // pending, approved
+	IsPrimary     bool         `json:"is_primary"`              // Whether this is the primary session for the task
+	IsPassthrough bool         `json:"is_passthrough"`          // Whether this session uses passthrough (PTY) mode
+	ReviewStatus  ReviewStatus `json:"review_status,omitempty"` // zero value = no review needed
 }
 
 // ToAPI converts internal TaskSession to API type
@@ -526,10 +545,10 @@ func IsContainerizedExecutorType(t ExecutorType) bool {
 	return t.Runtime().IsContainerized()
 }
 
-// IsAlwaysResumableRuntime reports whether the given runtime string represents
+// IsAlwaysResumableRuntime reports whether the given runtime represents
 // an executor that can always be resumed even without an explicit resume token.
-func IsAlwaysResumableRuntime(runtime string) bool {
-	return ExecutorType(runtime) == ExecutorTypeSprites
+func IsAlwaysResumableRuntime(runtime agentruntime.Runtime) bool {
+	return runtime == agentruntime.RuntimeSprites
 }
 
 const (
@@ -567,7 +586,7 @@ type ExecutorRunning struct {
 	SessionID        string                 `json:"session_id"`
 	TaskID           string                 `json:"task_id"`
 	ExecutorID       string                 `json:"executor_id"`
-	Runtime          string                 `json:"runtime,omitempty"`
+	Runtime          agentruntime.Runtime   `json:"runtime,omitempty"`
 	Status           string                 `json:"status"`
 	Resumable        bool                   `json:"resumable"`
 	ResumeToken      string                 `json:"resume_token,omitempty"`

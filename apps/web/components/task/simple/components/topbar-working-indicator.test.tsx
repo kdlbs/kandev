@@ -2,7 +2,12 @@ import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
-import type { TaskSession } from "@/lib/types/http";
+import {
+  agentProfileId as toAgentProfileId,
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type TaskSession,
+} from "@/lib/types/http";
 import { TopbarWorkingIndicator } from "./topbar-working-indicator";
 import { ActiveSessionRefProvider, useActiveSessionRef } from "./active-session-ref-context";
 
@@ -12,10 +17,10 @@ const INDICATOR_TID = "topbar-working-indicator";
 const T_START = "2026-05-01T10:00:00Z";
 const T_UPDATE = "2026-05-01T10:01:00Z";
 
-function liveSession(taskId: string, id = "s-1"): TaskSession {
+function liveSession(taskIdStr: string, id = "s-1"): TaskSession {
   return {
-    id,
-    task_id: taskId,
+    id: toSessionId(id),
+    task_id: toTaskId(taskIdStr),
     state: "RUNNING",
     started_at: T_START,
     updated_at: T_START,
@@ -48,9 +53,9 @@ describe("TopbarWorkingIndicator", () => {
   it("drops the spinner when an office session goes RUNNING → IDLE", () => {
     // Office session: agent_profile_id set + state IDLE → not live.
     const idleOffice: TaskSession = {
-      id: "s-1",
-      task_id: "task-1",
-      agent_profile_id: "agent-a",
+      id: toSessionId("s-1"),
+      task_id: toTaskId("task-1"),
+      agent_profile_id: toAgentProfileId("agent-a"),
       state: "IDLE",
       started_at: T_START,
       updated_at: T_UPDATE,
@@ -62,8 +67,8 @@ describe("TopbarWorkingIndicator", () => {
 
   it("keeps the spinner up for kanban WAITING_FOR_INPUT (no agent_profile_id)", () => {
     const waitingKanban: TaskSession = {
-      id: "s-1",
-      task_id: "task-1",
+      id: toSessionId("s-1"),
+      task_id: toTaskId("task-1"),
       state: "WAITING_FOR_INPUT",
       started_at: T_START,
       updated_at: T_UPDATE,

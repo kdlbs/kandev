@@ -1,7 +1,7 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
-import type { MessageType } from "@/lib/types/http";
+import { sessionId, taskId, type MessageType } from "@/lib/types/http";
 
 export function registerMessagesHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
@@ -12,8 +12,8 @@ export function registerMessagesHandlers(store: StoreApi<AppState>): WsHandlers 
       }
       store.getState().addMessage({
         id: payload.message_id,
-        session_id: payload.session_id,
-        task_id: payload.task_id,
+        session_id: sessionId(payload.session_id),
+        task_id: taskId(payload.task_id),
         turn_id: payload.turn_id,
         author_type: payload.author_type,
         author_id: payload.author_id,
@@ -32,8 +32,8 @@ export function registerMessagesHandlers(store: StoreApi<AppState>): WsHandlers 
       }
       store.getState().updateMessage({
         id: payload.message_id,
-        session_id: payload.session_id,
-        task_id: payload.task_id,
+        session_id: sessionId(payload.session_id),
+        task_id: taskId(payload.task_id),
         turn_id: payload.turn_id,
         author_type: payload.author_type,
         author_id: payload.author_id,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
+import { agentProfileId as toAgentProfileId, workspaceId as toWorkspaceId } from "@/lib/types/ids";
 import {
   buildForest,
   layoutForest,
@@ -13,8 +14,8 @@ import {
 
 function makeAgent(id: string, name: string, reportsTo?: string): AgentProfile {
   return {
-    id,
-    workspaceId: "ws-1",
+    id: toAgentProfileId(id),
+    workspaceId: toWorkspaceId("ws-1"),
     name,
     role: "worker",
     status: "idle",

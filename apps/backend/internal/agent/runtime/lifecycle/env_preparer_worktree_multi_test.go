@@ -196,7 +196,7 @@ func TestWorktreePreparer_MultiRepo_CreatesWorktreePerRepo(t *testing.T) {
 		TaskID:       "task-multi-1",
 		SessionID:    "sess-multi-1",
 		TaskTitle:    "Multi Repo Task",
-		ExecutorType: executor.Name("worktree"),
+		ExecutorType: executor.NameStandalone,
 		TaskDirName:  "multi-repo-task_aaa",
 		Repositories: []RepoPrepareSpec{
 			{RepositoryID: "repo-front", RepositoryPath: repoA, RepoName: "frontend", BaseBranch: "main"},
@@ -249,7 +249,7 @@ func TestWorktreePreparer_MultiRepo_RollbackOnPartialFailure(t *testing.T) {
 		TaskID:       "task-multi-fail",
 		SessionID:    "sess-multi-fail",
 		TaskTitle:    "Failing Task",
-		ExecutorType: executor.Name("worktree"),
+		ExecutorType: executor.NameStandalone,
 		TaskDirName:  "failing-task_bbb",
 		Repositories: []RepoPrepareSpec{
 			{RepositoryID: "repo-good", RepositoryPath: repoA, RepoName: "good", BaseBranch: "main"},
@@ -296,7 +296,7 @@ func TestWorktreePreparer_MultiRepo_RunsPerRepoSetupScript(t *testing.T) {
 		TaskID:       "task-multi-setup",
 		SessionID:    "sess-multi-setup",
 		TaskTitle:    "Setup Task",
-		ExecutorType: executor.Name("worktree"),
+		ExecutorType: executor.NameStandalone,
 		TaskDirName:  "setup-task_ccc",
 		Repositories: []RepoPrepareSpec{
 			{

@@ -116,7 +116,7 @@ func buildProviderDegradedItem(
 		Type:        inboxProviderDegradedType,
 		Title:       providerDegradedTitle(h),
 		Description: truncateInboxDescription(h.RawExcerpt),
-		Status:      h.State,
+		Status:      string(h.State),
 		EntityID:    h.ProviderID,
 		EntityType:  "provider",
 		Payload: map[string]interface{}{

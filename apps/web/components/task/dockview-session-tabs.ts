@@ -6,6 +6,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
+import { sessionId as toSessionId } from "@/lib/types/ids";
 
 /**
  * Sync `activeSessionId` in the store when the user clicks a session tab.
@@ -367,7 +368,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     // guards against a race where removeTaskSession fires before the active
     // session is switched, which would cause the deleted session's panel to
     // be re-created by ensureSessionPanel.
-    if (!currentSessionIds.includes(effectiveSessionId)) return;
+    if (!currentSessionIds.includes(toSessionId(effectiveSessionId))) return;
 
     if (!prepareLayoutForSessionPanels(api)) {
       sessionTabCreatedRef.current.add(effectiveSessionId);

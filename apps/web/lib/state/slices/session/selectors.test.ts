@@ -8,7 +8,14 @@ import {
   selectTotalLiveSessions,
 } from "./selectors";
 import type { AppState } from "@/lib/state/store";
-import type { Message, TaskSession, TaskSessionState } from "@/lib/types/http";
+import {
+  agentProfileId as toAgentProfileId,
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type Message,
+  type TaskSession,
+  type TaskSessionState,
+} from "@/lib/types/http";
 
 const AGENT_A = "agent-a";
 const AGENT_B = "agent-b";
@@ -23,9 +30,9 @@ function makeSession(
   overrides: Partial<TaskSession> = {},
 ): TaskSession {
   return {
-    id,
-    task_id: overrides.task_id ?? `task-${id}`,
-    agent_profile_id: agentProfileId,
+    id: toSessionId(id),
+    task_id: overrides.task_id ?? toTaskId(`task-${id}`),
+    agent_profile_id: agentProfileId ? toAgentProfileId(agentProfileId) : undefined,
     state,
     started_at: overrides.started_at ?? "2026-05-03T00:00:00Z",
     updated_at: overrides.updated_at ?? "2026-05-03T00:00:00Z",
@@ -42,8 +49,8 @@ function stateWithSessions(sessions: TaskSession[]): AppState {
 function makeMessage(id: string, sessionId: string, type: Message["type"]): Message {
   return {
     id,
-    session_id: sessionId,
-    task_id: "task-1",
+    session_id: toSessionId(sessionId),
+    task_id: toTaskId("task-1"),
     author_type: "agent",
     content: "",
     type,
@@ -115,60 +122,64 @@ describe("selectActiveSessionsForAgent", () => {
 
 describe("selectLiveSessionForTask", () => {
   it("returns null when taskId is empty", () => {
-    const state = stateWithSessions([makeSession("s1", AGENT_A, "RUNNING", { task_id: "task-1" })]);
+    const state = stateWithSessions([
+      makeSession("s1", AGENT_A, "RUNNING", { task_id: toTaskId("task-1") }),
+    ]);
     expect(selectLiveSessionForTask(state, "")).toBeNull();
   });
 
   it("returns null when no sessions match the task", () => {
     const state = stateWithSessions([
-      makeSession("s1", AGENT_A, "RUNNING", { task_id: "task-other" }),
+      makeSession("s1", AGENT_A, "RUNNING", { task_id: toTaskId("task-other") }),
     ]);
     expect(selectLiveSessionForTask(state, "task-1")).toBeNull();
   });
 
   it("returns null when sessions exist but none are live", () => {
     const state = stateWithSessions([
-      makeSession("s1", AGENT_A, "COMPLETED", { task_id: "task-1" }),
-      makeSession("s2", AGENT_A, "FAILED", { task_id: "task-1" }),
+      makeSession("s1", AGENT_A, "COMPLETED", { task_id: toTaskId("task-1") }),
+      makeSession("s2", AGENT_A, "FAILED", { task_id: toTaskId("task-1") }),
     ]);
     expect(selectLiveSessionForTask(state, "task-1")).toBeNull();
   });
 
   it("returns the only RUNNING session for the task", () => {
-    const live = makeSession("s1", AGENT_A, "RUNNING", { task_id: "task-1" });
+    const live = makeSession("s1", AGENT_A, "RUNNING", { task_id: toTaskId("task-1") });
     const state = stateWithSessions([live]);
     expect(selectLiveSessionForTask(state, "task-1")?.id).toBe("s1");
   });
 
   it("treats WAITING_FOR_INPUT as live for kanban (no agent_profile_id)", () => {
-    const live = makeSession("s1", undefined, "WAITING_FOR_INPUT", { task_id: "task-1" });
+    const live = makeSession("s1", undefined, "WAITING_FOR_INPUT", { task_id: toTaskId("task-1") });
     const state = stateWithSessions([live]);
     expect(selectLiveSessionForTask(state, "task-1")?.id).toBe("s1");
   });
 
   it("does NOT treat IDLE as live for office sessions", () => {
-    const idle = makeSession("s1", AGENT_A, "IDLE", { task_id: "task-1" });
+    const idle = makeSession("s1", AGENT_A, "IDLE", { task_id: toTaskId("task-1") });
     const state = stateWithSessions([idle]);
     expect(selectLiveSessionForTask(state, "task-1")).toBeNull();
   });
 
   it("topbar drops the moment a turn ends: RUNNING → IDLE", () => {
     const before = stateWithSessions([
-      makeSession("s1", AGENT_A, "RUNNING", { task_id: "task-1" }),
+      makeSession("s1", AGENT_A, "RUNNING", { task_id: toTaskId("task-1") }),
     ]);
     expect(selectLiveSessionForTask(before, "task-1")?.id).toBe("s1");
-    const after = stateWithSessions([makeSession("s1", AGENT_A, "IDLE", { task_id: "task-1" })]);
+    const after = stateWithSessions([
+      makeSession("s1", AGENT_A, "IDLE", { task_id: toTaskId("task-1") }),
+    ]);
     expect(selectLiveSessionForTask(after, "task-1")).toBeNull();
   });
 
   it("multi-agent task: returns the agent currently RUNNING, ignoring IDLE peers", () => {
     const state = stateWithSessions([
       makeSession("s1", AGENT_A, "IDLE", {
-        task_id: "task-1",
+        task_id: toTaskId("task-1"),
         started_at: "2026-05-03T11:00:00Z",
       }),
       makeSession("s2", AGENT_B, "RUNNING", {
-        task_id: "task-1",
+        task_id: toTaskId("task-1"),
         started_at: T_MAY_03,
       }),
     ]);
@@ -178,15 +189,15 @@ describe("selectLiveSessionForTask", () => {
   it("picks the most recently started live session", () => {
     const state = stateWithSessions([
       makeSession("s1", AGENT_A, "RUNNING", {
-        task_id: "task-1",
+        task_id: toTaskId("task-1"),
         started_at: T_MAY_01,
       }),
       makeSession("s2", AGENT_A, "RUNNING", {
-        task_id: "task-1",
+        task_id: toTaskId("task-1"),
         started_at: T_MAY_03,
       }),
       makeSession("s3", AGENT_A, "RUNNING", {
-        task_id: "task-1",
+        task_id: toTaskId("task-1"),
         started_at: T_MAY_02,
       }),
     ]);
@@ -196,11 +207,11 @@ describe("selectLiveSessionForTask", () => {
   it("ignores sessions for other tasks", () => {
     const state = stateWithSessions([
       makeSession("s1", AGENT_A, "RUNNING", {
-        task_id: "task-other",
+        task_id: toTaskId("task-other"),
         started_at: "2026-05-04T10:00:00Z",
       }),
       makeSession("s2", AGENT_A, "RUNNING", {
-        task_id: "task-1",
+        task_id: toTaskId("task-1"),
         started_at: T_MAY_01,
       }),
     ]);
@@ -210,22 +221,24 @@ describe("selectLiveSessionForTask", () => {
 
 describe("selectAllSessionsForTask", () => {
   it("returns empty array when taskId is empty", () => {
-    const state = stateWithSessions([makeSession("s1", AGENT_A, "RUNNING", { task_id: "task-1" })]);
+    const state = stateWithSessions([
+      makeSession("s1", AGENT_A, "RUNNING", { task_id: toTaskId("task-1") }),
+    ]);
     expect(selectAllSessionsForTask(state, "")).toEqual([]);
   });
 
   it("returns sessions sorted by started_at ascending", () => {
     const state = stateWithSessions([
       makeSession("s1", AGENT_A, "COMPLETED", {
-        task_id: "task-1",
+        task_id: toTaskId("task-1"),
         started_at: T_MAY_03,
       }),
       makeSession("s2", AGENT_A, "RUNNING", {
-        task_id: "task-1",
+        task_id: toTaskId("task-1"),
         started_at: T_MAY_01,
       }),
       makeSession("s3", AGENT_A, "FAILED", {
-        task_id: "task-1",
+        task_id: toTaskId("task-1"),
         started_at: T_MAY_02,
       }),
     ]);
@@ -235,8 +248,8 @@ describe("selectAllSessionsForTask", () => {
 
   it("ignores sessions for other tasks", () => {
     const state = stateWithSessions([
-      makeSession("s1", AGENT_A, "RUNNING", { task_id: "task-1" }),
-      makeSession("s2", AGENT_A, "RUNNING", { task_id: "task-2" }),
+      makeSession("s1", AGENT_A, "RUNNING", { task_id: toTaskId("task-1") }),
+      makeSession("s2", AGENT_A, "RUNNING", { task_id: toTaskId("task-2") }),
     ]);
     const result = selectAllSessionsForTask(state, "task-1");
     expect(result.map((s) => s.id)).toEqual(["s1"]);
@@ -250,11 +263,11 @@ describe("selectTotalLiveSessions", () => {
 
   it("counts RUNNING for office and (RUNNING | WAITING_FOR_INPUT) for kanban", () => {
     const state = stateWithSessions([
-      makeSession("s1", AGENT_A, "RUNNING", { task_id: "t-1" }), // office, live
-      makeSession("s2", AGENT_B, "WAITING_FOR_INPUT", { task_id: "t-2" }), // office, NOT live
-      makeSession("s3", AGENT_A, "RUNNING", { task_id: "t-3" }), // office, live
-      makeSession("s4", AGENT_A, "COMPLETED", { task_id: "t-4" }), // not live
-      makeSession("s5", undefined, "WAITING_FOR_INPUT", { task_id: "t-5" }), // kanban, live
+      makeSession("s1", AGENT_A, "RUNNING", { task_id: toTaskId("t-1") }), // office, live
+      makeSession("s2", AGENT_B, "WAITING_FOR_INPUT", { task_id: toTaskId("t-2") }), // office, NOT live
+      makeSession("s3", AGENT_A, "RUNNING", { task_id: toTaskId("t-3") }), // office, live
+      makeSession("s4", AGENT_A, "COMPLETED", { task_id: toTaskId("t-4") }), // not live
+      makeSession("s5", undefined, "WAITING_FOR_INPUT", { task_id: toTaskId("t-5") }), // kanban, live
     ]);
     expect(selectTotalLiveSessions(state)).toBe(3);
   });
@@ -274,15 +287,17 @@ describe("selectTotalLiveSessions", () => {
 
 describe("selectSessionsByAgentForTask", () => {
   it("returns an empty Map when taskId is empty", () => {
-    const state = stateWithSessions([makeSession("s1", AGENT_A, "RUNNING", { task_id: "task-1" })]);
+    const state = stateWithSessions([
+      makeSession("s1", AGENT_A, "RUNNING", { task_id: toTaskId("task-1") }),
+    ]);
     expect(selectSessionsByAgentForTask(state, "").size).toBe(0);
   });
 
   it("groups sessions by agent_profile_id", () => {
     const state = stateWithSessions([
-      makeSession("s1", AGENT_A, "RUNNING", { task_id: "task-1" }),
-      makeSession("s2", AGENT_B, "IDLE", { task_id: "task-1" }),
-      makeSession("s3", AGENT_A, "COMPLETED", { task_id: "task-1" }),
+      makeSession("s1", AGENT_A, "RUNNING", { task_id: toTaskId("task-1") }),
+      makeSession("s2", AGENT_B, "IDLE", { task_id: toTaskId("task-1") }),
+      makeSession("s3", AGENT_A, "COMPLETED", { task_id: toTaskId("task-1") }),
     ]);
     const result = selectSessionsByAgentForTask(state, "task-1");
     expect(result.size).toBe(2);
@@ -297,8 +312,8 @@ describe("selectSessionsByAgentForTask", () => {
 
   it("buckets kanban sessions (no agent_profile_id) under empty key", () => {
     const state = stateWithSessions([
-      makeSession("s1", undefined, "RUNNING", { task_id: "task-1" }),
-      makeSession("s2", AGENT_A, "IDLE", { task_id: "task-1" }),
+      makeSession("s1", undefined, "RUNNING", { task_id: toTaskId("task-1") }),
+      makeSession("s2", AGENT_A, "IDLE", { task_id: toTaskId("task-1") }),
     ]);
     const result = selectSessionsByAgentForTask(state, "task-1");
     expect(result.get("")?.map((s) => s.id)).toEqual(["s1"]);
@@ -307,8 +322,8 @@ describe("selectSessionsByAgentForTask", () => {
 
   it("ignores sessions for other tasks", () => {
     const state = stateWithSessions([
-      makeSession("s1", AGENT_A, "RUNNING", { task_id: "task-1" }),
-      makeSession("s2", AGENT_A, "RUNNING", { task_id: "task-other" }),
+      makeSession("s1", AGENT_A, "RUNNING", { task_id: toTaskId("task-1") }),
+      makeSession("s2", AGENT_A, "RUNNING", { task_id: toTaskId("task-other") }),
     ]);
     const result = selectSessionsByAgentForTask(state, "task-1");
     expect(result.get(AGENT_A)?.map((s) => s.id)).toEqual(["s1"]);
@@ -317,12 +332,12 @@ describe("selectSessionsByAgentForTask", () => {
   it("orders agent buckets by most-recent activity (latest updated_at desc)", () => {
     const state = stateWithSessions([
       makeSession("s1", AGENT_A, "IDLE", {
-        task_id: "task-1",
+        task_id: toTaskId("task-1"),
         started_at: T_MAY_01,
         updated_at: T_MAY_01,
       }),
       makeSession("s2", AGENT_B, "RUNNING", {
-        task_id: "task-1",
+        task_id: toTaskId("task-1"),
         started_at: T_MAY_02,
         updated_at: T_MAY_03,
       }),
@@ -336,11 +351,11 @@ describe("selectSessionsByAgentForTask", () => {
   it("sorts within an agent bucket by started_at ascending", () => {
     const state = stateWithSessions([
       makeSession("s1", AGENT_A, "COMPLETED", {
-        task_id: "task-1",
+        task_id: toTaskId("task-1"),
         started_at: T_MAY_03,
       }),
       makeSession("s2", AGENT_A, "IDLE", {
-        task_id: "task-1",
+        task_id: toTaskId("task-1"),
         started_at: T_MAY_01,
       }),
     ]);

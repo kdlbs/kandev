@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createOfficeSlice } from "./office-slice";
 import type { OfficeSlice, AgentProfile } from "./types";
+import { agentProfileId as toAgentProfileId, workspaceId as toWorkspaceId } from "@/lib/types/ids";
 
 function makeStore() {
   return create<OfficeSlice>()(
@@ -13,8 +14,8 @@ function makeStore() {
 
 function makeAgent(id: string, name: string): AgentProfile {
   return {
-    id,
-    workspaceId: "ws-1",
+    id: toAgentProfileId(id),
+    workspaceId: toWorkspaceId("ws-1"),
     name,
     role: "worker",
     status: "idle",

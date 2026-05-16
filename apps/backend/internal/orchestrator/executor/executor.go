@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -205,7 +206,7 @@ type AgentManagerClient interface {
 
 // RemoteRuntimeStatus mirrors runtime status details needed by orchestrator/UI.
 type RemoteRuntimeStatus struct {
-	RuntimeName   string
+	RuntimeName   agentruntime.Runtime
 	RemoteName    string
 	State         string
 	CreatedAt     *time.Time
@@ -216,7 +217,7 @@ type RemoteRuntimeStatus struct {
 // RemoteStatusPollRequest contains the fields from ExecutorRunning needed for remote status polling.
 type RemoteStatusPollRequest struct {
 	SessionID        string
-	Runtime          string
+	Runtime          agentruntime.Runtime
 	AgentExecutionID string
 	ContainerID      string
 	Metadata         map[string]interface{}

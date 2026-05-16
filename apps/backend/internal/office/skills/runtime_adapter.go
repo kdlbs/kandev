@@ -52,7 +52,7 @@ func (a *SkillReaderAdapter) GetSkillFromConfig(ctx context.Context, idOrSlug st
 	return &runtimeskill.Skill{
 		Slug:       sk.Slug,
 		Content:    sk.Content,
-		SourceType: sk.SourceType,
+		SourceType: string(sk.SourceType),
 	}, nil
 }
 

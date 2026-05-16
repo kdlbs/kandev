@@ -1,16 +1,31 @@
 import { describe, it, expect } from "vitest";
-import { isFromOffice, primaryTaskRepository, type Task, type TaskRepository } from "./http";
+import {
+  isFromOffice,
+  primaryTaskRepository,
+  repositoryId as toRepositoryId,
+  taskId as toTaskId,
+  workflowId as toWorkflowId,
+  workspaceId as toWorkspaceId,
+  type Task,
+  type TaskRepository,
+} from "./http";
 
-function repo(overrides: Partial<TaskRepository>): TaskRepository {
+type RepoOverrides = Partial<Omit<TaskRepository, "task_id" | "repository_id">> & {
+  task_id?: string;
+  repository_id?: string;
+};
+
+function repo(overrides: RepoOverrides): TaskRepository {
+  const { task_id, repository_id, ...rest } = overrides;
   return {
     id: "tr-" + Math.random().toString(36).slice(2),
-    task_id: "task-1",
-    repository_id: "repo-x",
+    task_id: toTaskId(task_id ?? "task-1"),
+    repository_id: toRepositoryId(repository_id ?? "repo-x"),
     base_branch: "main",
     position: 0,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
-    ...overrides,
+    ...rest,
   };
 }
 
@@ -37,9 +52,9 @@ describe("primaryTaskRepository", () => {
 
 function task(overrides: Partial<Task>): Task {
   return {
-    id: "task-1",
-    workspace_id: "ws-1",
-    workflow_id: "wf-1",
+    id: toTaskId("task-1"),
+    workspace_id: toWorkspaceId("ws-1"),
+    workflow_id: toWorkflowId("wf-1"),
     workflow_step_id: "ws-step-1",
     position: 0,
     title: "t",

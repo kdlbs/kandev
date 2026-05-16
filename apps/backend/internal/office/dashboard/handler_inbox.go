@@ -127,14 +127,14 @@ func runToListItem(r *models.Run) RunListItem {
 	taskID, _ := parseRunPayload(r.Payload)
 	routingBlocked := ""
 	if r.RoutingBlockedStatus != nil {
-		routingBlocked = *r.RoutingBlockedStatus
+		routingBlocked = string(*r.RoutingBlockedStatus)
 	}
 	item := RunListItem{
 		ID:                   r.ID,
 		AgentProfileID:       r.AgentProfileID,
 		Reason:               r.Reason,
 		Payload:              r.Payload,
-		Status:               r.Status,
+		Status:               string(r.Status),
 		CoalescedCount:       r.CoalescedCount,
 		IdempotencyKey:       r.IdempotencyKey,
 		ContextSnapshot:      r.ContextSnapshot,

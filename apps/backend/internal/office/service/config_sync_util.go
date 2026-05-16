@@ -140,7 +140,7 @@ func writeBundleEntities(w *configloader.FileWriter, bundle *ConfigBundle) error
 	for _, r := range bundle.Routines {
 		routine := &models.Routine{
 			Name: r.Name, Description: r.Description, TaskTemplate: r.TaskTemplate,
-			ConcurrencyPolicy: r.ConcurrencyPolicy,
+			ConcurrencyPolicy: models.RoutineConcurrencyPolicy(r.ConcurrencyPolicy),
 		}
 		if err := w.WriteRoutine(defaultWorkspaceName, routine); err != nil {
 			return err

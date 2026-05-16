@@ -49,7 +49,7 @@ func createTestRoutine(t *testing.T, svc interface {
 		Name:              name,
 		TaskTemplate:      `{"title":"{{name}} - {{date}}","description":"Run for {{date}}"}`,
 		Status:            "active",
-		ConcurrencyPolicy: policy,
+		ConcurrencyPolicy: models.RoutineConcurrencyPolicy(policy),
 		Variables:         `{"name":{"default":"Daily Check"}}`,
 	}
 	if err := svc.CreateRoutine(context.Background(), r); err != nil {

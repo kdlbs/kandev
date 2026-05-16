@@ -1,9 +1,11 @@
 // Executor and environment payload types for WS events
 
+import type { ExecutorType } from "./executor";
+
 export type ExecutorPayload = {
   id: string;
   name: string;
-  type: string;
+  type: ExecutorType;
   status: string;
   is_system: boolean;
   config?: Record<string, string>;

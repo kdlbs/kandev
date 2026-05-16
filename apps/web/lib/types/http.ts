@@ -1,3 +1,30 @@
+import type { ExecutorType } from "./executor";
+import type {
+  AgentProfileId,
+  RepositoryId,
+  SessionId,
+  TaskId,
+  WorkflowId,
+  WorkspaceId,
+} from "./ids";
+import type { OnEnterActionType, StepEvents } from "./workflow-actions";
+
+export type { ExecutorType } from "./executor";
+export * from "./ids";
+export type {
+  MoveToStepConfig,
+  OnEnterAction,
+  OnEnterActionType,
+  OnExitAction,
+  OnExitActionType,
+  OnTurnCompleteAction,
+  OnTurnCompleteActionType,
+  OnTurnStartAction,
+  OnTurnStartActionType,
+  StepEvents,
+  TransitionConfig,
+} from "./workflow-actions";
+
 export type TaskState =
   | "CREATED"
   | "SCHEDULING"
@@ -9,49 +36,6 @@ export type TaskState =
   | "COMPLETED"
   | "FAILED"
   | "CANCELLED";
-
-// On Enter action types
-export type OnEnterActionType = "enable_plan_mode" | "auto_start_agent" | "reset_agent_context";
-
-// On Turn Start action types
-export type OnTurnStartActionType = "move_to_next" | "move_to_previous" | "move_to_step";
-
-// On Turn Complete action types
-export type OnTurnCompleteActionType =
-  | "move_to_next"
-  | "move_to_previous"
-  | "move_to_step"
-  | "disable_plan_mode";
-
-// On Exit action types
-export type OnExitActionType = "disable_plan_mode";
-
-export type OnEnterAction = {
-  type: OnEnterActionType;
-  config?: Record<string, unknown>;
-};
-
-export type OnTurnStartAction = {
-  type: OnTurnStartActionType;
-  config?: Record<string, unknown>;
-};
-
-export type OnTurnCompleteAction = {
-  type: OnTurnCompleteActionType;
-  config?: Record<string, unknown>;
-};
-
-export type OnExitAction = {
-  type: OnExitActionType;
-  config?: Record<string, unknown>;
-};
-
-export type StepEvents = {
-  on_enter?: OnEnterAction[];
-  on_turn_start?: OnTurnStartAction[];
-  on_turn_complete?: OnTurnCompleteAction[];
-  on_exit?: OnExitAction[];
-};
 
 // Workflow Review Status
 export type WorkflowReviewStatus = "pending" | "approved" | "changes_requested" | "rejected";
@@ -76,13 +60,13 @@ export type StepDefinition = {
   events?: StepEvents;
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
-  agent_profile_id?: string;
+  agent_profile_id?: AgentProfileId;
 };
 
 // Workflow Step - instance of a step on a workflow
 export type WorkflowStep = {
   id: string;
-  workflow_id: string;
+  workflow_id: WorkflowId;
   name: string;
   position: number;
   color: string;
@@ -105,7 +89,7 @@ export type WorkflowStep = {
 // Session Step History - audit trail
 export type SessionStepHistory = {
   id: string;
-  session_id: string;
+  session_id: SessionId;
   from_step_id?: string;
   to_step_id: string;
   trigger: string;
@@ -142,12 +126,12 @@ export type TaskSessionState =
   | "CANCELLED";
 
 export type Workflow = {
-  id: string;
-  workspace_id: string;
+  id: WorkflowId;
+  workspace_id: WorkspaceId;
   name: string;
   description?: string | null;
   workflow_template_id?: string | null;
-  agent_profile_id?: string;
+  agent_profile_id?: AgentProfileId;
   sort_order?: number;
   hidden?: boolean;
   /**
@@ -160,22 +144,22 @@ export type Workflow = {
 };
 
 export type Workspace = {
-  id: string;
+  id: WorkspaceId;
   name: string;
   description?: string | null;
   owner_id: string;
   default_executor_id?: string | null;
   default_environment_id?: string | null;
-  default_agent_profile_id?: string | null;
-  default_config_agent_profile_id?: string | null;
-  office_workflow_id?: string;
+  default_agent_profile_id?: AgentProfileId | null;
+  default_config_agent_profile_id?: AgentProfileId | null;
+  office_workflow_id?: WorkflowId;
   created_at: string;
   updated_at: string;
 };
 
 export type Repository = {
-  id: string;
-  workspace_id: string;
+  id: RepositoryId;
+  workspace_id: WorkspaceId;
   name: string;
   source_type: string;
   local_path: string;
@@ -196,7 +180,7 @@ export type Repository = {
 
 export type RepositoryScript = {
   id: string;
-  repository_id: string;
+  repository_id: RepositoryId;
   name: string;
   command: string;
   position: number;
@@ -212,7 +196,7 @@ export type ProcessOutputChunk = {
 
 export type ProcessInfo = {
   id: string;
-  session_id: string;
+  session_id: SessionId;
   kind: string;
   script_name?: string;
   command: string;
@@ -226,8 +210,8 @@ export type ProcessInfo = {
 
 export type TaskRepository = {
   id: string;
-  task_id: string;
-  repository_id: string;
+  task_id: TaskId;
+  repository_id: RepositoryId;
   base_branch: string;
   /**
    * Optional branch to fetch and check out after worktree creation
@@ -258,9 +242,9 @@ export function primaryTaskRepository(
 }
 
 export type Task = {
-  id: string;
-  workspace_id: string;
-  workflow_id: string;
+  id: TaskId;
+  workspace_id: WorkspaceId;
+  workflow_id: WorkflowId;
   workflow_step_id: string;
   position: number;
   title: string;
@@ -268,18 +252,18 @@ export type Task = {
   state: TaskState;
   priority: number;
   repositories?: TaskRepository[];
-  primary_session_id?: string | null;
+  primary_session_id?: SessionId | null;
   primary_session_state?: TaskSessionState | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
-  primary_executor_type?: string | null;
+  primary_executor_type?: ExecutorType | null;
   primary_executor_name?: string | null;
   primary_agent_name?: string | null;
   primary_working_directory?: string | null;
   is_remote_executor?: boolean;
   is_ephemeral?: boolean;
-  parent_id?: string;
+  parent_id?: TaskId;
   archived_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -309,7 +293,7 @@ export type CreateTaskResponse = Task & {
 // Backend workflow step DTO (flat fields, as returned from API)
 export type WorkflowStepDTO = {
   id: string;
-  workflow_id: string;
+  workflow_id: WorkflowId;
   name: string;
   position: number;
   color: string;
@@ -319,7 +303,7 @@ export type WorkflowStepDTO = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
-  agent_profile_id?: string;
+  agent_profile_id?: AgentProfileId;
   stage_type?: "work" | "review" | "approval" | "custom";
   created_at?: string;
   updated_at?: string;
@@ -332,13 +316,13 @@ export type MoveTaskResponse = {
 };
 
 export type TaskSession = {
-  id: string;
-  task_id: string;
-  agent_profile_id?: string;
+  id: SessionId;
+  task_id: TaskId;
+  agent_profile_id?: AgentProfileId;
   container_id?: string;
   executor_id?: string;
   environment_id?: string;
-  repository_id?: string;
+  repository_id?: RepositoryId;
   base_branch?: string;
   base_commit_sha?: string;
   worktree_id?: string;
@@ -423,7 +407,7 @@ export type SidebarViewApi = {
 
 export type UserSettings = {
   user_id: string;
-  workspace_id: string;
+  workspace_id: WorkspaceId;
   kanban_view_mode?: string;
   workflow_filter_id?: string;
   repository_ids: string[];
@@ -568,7 +552,7 @@ export type ListWorkspacesResponse = {
 export type Executor = {
   id: string;
   name: string;
-  type: string;
+  type: ExecutorType;
   status: string;
   is_system: boolean;
   config?: Record<string, string>;
@@ -586,7 +570,7 @@ export type ProfileEnvVar = {
 export type ExecutorProfile = {
   id: string;
   executor_id: string;
-  executor_type?: string;
+  executor_type?: ExecutorType;
   executor_name?: string;
   name: string;
   mcp_policy?: string;
@@ -655,8 +639,8 @@ export type MessageType =
 
 export type Message = {
   id: string;
-  session_id: string;
-  task_id: string;
+  session_id: SessionId;
+  task_id: TaskId;
   turn_id?: string;
   author_type: MessageAuthorType;
   author_id?: string;
@@ -670,8 +654,8 @@ export type Message = {
 
 export type Turn = {
   id: string;
-  session_id: string;
-  task_id: string;
+  session_id: SessionId;
+  task_id: TaskId;
   started_at: string;
   completed_at?: string;
   metadata?: Record<string, unknown>;

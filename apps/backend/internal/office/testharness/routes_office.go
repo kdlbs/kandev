@@ -705,10 +705,10 @@ func seedActivityHandler(repo *officesqlite.Repository, log *logger.Logger) gin.
 		entry := &officemodels.ActivityEntry{
 			ID:          uuid.New().String(),
 			WorkspaceID: req.WorkspaceID,
-			ActorType:   req.ActorType,
+			ActorType:   officemodels.ActivityActorType(req.ActorType),
 			ActorID:     req.ActorID,
-			Action:      req.Action,
-			TargetType:  req.TargetType,
+			Action:      officemodels.ActivityAction(req.Action),
+			TargetType:  officemodels.ActivityTargetType(req.TargetType),
 			TargetID:    req.TargetID,
 			Details:     details,
 			RunID:       req.RunID,

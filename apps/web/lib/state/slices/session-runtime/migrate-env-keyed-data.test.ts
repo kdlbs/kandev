@@ -5,6 +5,7 @@ import { createSessionRuntimeSlice } from "./session-runtime-slice";
 import { createSessionSlice } from "../session/session-slice";
 import type { SessionCommit, SessionRuntimeSlice } from "./types";
 import type { SessionSlice } from "../session/types";
+import { sessionId as toSessionId, taskId as toTaskId } from "@/lib/types/ids";
 
 function makeStore() {
   return create<SessionRuntimeSlice>()(immer(createSessionRuntimeSlice));
@@ -186,8 +187,8 @@ describe("setTaskSession — cross-slice migration", () => {
 
     // Session update arrives with task_environment_id
     store.getState().setTaskSession({
-      id: "sess-1",
-      task_id: "task-1",
+      id: toSessionId("sess-1"),
+      task_id: toTaskId("task-1"),
       state: "RUNNING",
       task_environment_id: "env-1",
       started_at: "",
@@ -208,8 +209,8 @@ describe("setTaskSession — cross-slice migration", () => {
     store.getState().setGitStatus("sess-2", { branch: "dev" } as never);
 
     store.getState().setTaskSession({
-      id: "sess-2",
-      task_id: "task-2",
+      id: toSessionId("sess-2"),
+      task_id: toTaskId("task-2"),
       state: "RUNNING",
       started_at: "",
       updated_at: "",
@@ -231,16 +232,16 @@ describe("setTaskSessionsForTask — bulk cross-slice migration", () => {
 
     store.getState().setTaskSessionsForTask("task-1", [
       {
-        id: "sess-a",
-        task_id: "task-1",
+        id: toSessionId("sess-a"),
+        task_id: toTaskId("task-1"),
         state: "COMPLETED",
         task_environment_id: "env-x",
         started_at: "",
         updated_at: "",
       },
       {
-        id: "sess-b",
-        task_id: "task-1",
+        id: toSessionId("sess-b"),
+        task_id: toTaskId("task-1"),
         state: "RUNNING",
         task_environment_id: "env-y",
         started_at: "",

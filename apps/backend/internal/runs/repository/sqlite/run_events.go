@@ -40,8 +40,8 @@ func (r *Repository) AppendRunEvent(
 	return &models.RunEvent{
 		RunID:     runID,
 		Seq:       seq,
-		EventType: eventType,
-		Level:     level,
+		EventType: models.RunEventType(eventType),
+		Level:     models.RunEventLevel(level),
 		Payload:   payload,
 		CreatedAt: now,
 	}, nil

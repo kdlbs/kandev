@@ -7,6 +7,7 @@
 // `app/actions/agents.ts` and `lib/ws/handlers/agents.ts`.
 
 import type { AgentProfile, AgentProfilePayload, CLIFlag } from "@/lib/types/agent-profile";
+import { agentProfileId } from "@/lib/types/ids";
 
 type RawProfile = Partial<AgentProfilePayload> & Partial<AgentProfile> & Record<string, unknown>;
 
@@ -33,7 +34,7 @@ function pickFlags(raw: RawProfile): CLIFlag[] {
 export function normalizeAgentProfile(raw: unknown): AgentProfile {
   const profile = (raw ?? {}) as RawProfile;
   return {
-    id: pickString(profile, "id", "id"),
+    id: agentProfileId(pickString(profile, "id", "id")),
     name: pickString(profile, "name", "name"),
     agentId: pickString(profile, "agentId", "agent_id"),
     agentDisplayName: pickString(profile, "agentDisplayName", "agent_display_name"),

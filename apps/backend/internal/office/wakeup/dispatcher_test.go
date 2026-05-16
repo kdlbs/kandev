@@ -85,7 +85,7 @@ func (h *testHarness) seedRun(id, status string) {
 		AgentProfileID:  h.agentID,
 		Reason:          "routine",
 		Payload:         "{}",
-		Status:          status,
+		Status:          officemodels.RunStatus(status),
 		CoalescedCount:  1,
 		ContextSnapshot: `{"prior":"snapshot"}`,
 	}
@@ -187,7 +187,7 @@ type fakeRoutineLookup struct {
 }
 
 func (f *fakeRoutineLookup) GetRoutine(_ context.Context, id string) (*officemodels.Routine, error) {
-	return &officemodels.Routine{ID: id, ConcurrencyPolicy: f.policy}, nil
+	return &officemodels.Routine{ID: id, ConcurrencyPolicy: officemodels.RoutineConcurrencyPolicy(f.policy)}, nil
 }
 
 // dispatchRoutineWith seeds an in-flight run + a routine wakeup-request

@@ -315,7 +315,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 	session.IsPrimary = isPrimary == 1
 	session.IsPassthrough = isPassthrough == 1
 	if reviewStatus.Valid {
-		session.ReviewStatus = &reviewStatus.String
+		session.ReviewStatus = models.ReviewStatus(reviewStatus.String)
 	}
 	if agentProfileID.Valid {
 		session.AgentProfileID = agentProfileID.String
@@ -800,7 +800,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 	session.IsPrimary = isPrimary == 1
 	session.IsPassthrough = isPassthrough == 1
 	if reviewStatus.Valid {
-		session.ReviewStatus = &reviewStatus.String
+		session.ReviewStatus = models.ReviewStatus(reviewStatus.String)
 	}
 	if agentProfileID.Valid {
 		session.AgentProfileID = agentProfileID.String
@@ -1128,7 +1128,7 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 			session.State = models.TaskSessionState(sessionState.String)
 		}
 		if reviewStatus.Valid {
-			session.ReviewStatus = &reviewStatus.String
+			session.ReviewStatus = models.ReviewStatus(reviewStatus.String)
 		}
 		if executorID.Valid {
 			session.ExecutorID = executorID.String

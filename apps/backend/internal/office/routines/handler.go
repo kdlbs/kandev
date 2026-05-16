@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/kandev/kandev/internal/office/models"
 )
 
 // Handler provides HTTP handlers for routine routes.
@@ -61,8 +63,8 @@ func (h *Handler) createRoutine(c *gin.Context) {
 		TaskTemplate:           req.TaskTemplate,
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
 		Status:                 "active",
-		ConcurrencyPolicy:      req.ConcurrencyPolicy,
-		CatchUpPolicy:          req.CatchUpPolicy,
+		ConcurrencyPolicy:      models.RoutineConcurrencyPolicy(req.ConcurrencyPolicy),
+		CatchUpPolicy:          models.RoutineCatchUpPolicy(req.CatchUpPolicy),
 		CatchUpMax:             req.CatchUpMax,
 		Variables:              req.Variables,
 	}
@@ -260,10 +262,10 @@ func applyRoutineUpdates(routine *Routine, req *UpdateRoutineRequest) {
 		routine.Status = *req.Status
 	}
 	if req.ConcurrencyPolicy != nil {
-		routine.ConcurrencyPolicy = *req.ConcurrencyPolicy
+		routine.ConcurrencyPolicy = models.RoutineConcurrencyPolicy(*req.ConcurrencyPolicy)
 	}
 	if req.CatchUpPolicy != nil {
-		routine.CatchUpPolicy = *req.CatchUpPolicy
+		routine.CatchUpPolicy = models.RoutineCatchUpPolicy(*req.CatchUpPolicy)
 	}
 	if req.CatchUpMax != nil {
 		routine.CatchUpMax = *req.CatchUpMax

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import type { Message, MessageType } from "@/lib/types/http";
+import { sessionId, taskId, type Message, type MessageType } from "@/lib/types/http";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import {
   fetchFixtureFiles,
@@ -39,8 +39,8 @@ function fixtureToMessage(fixture: NormalizedFixture, index: number): Message {
 
   return {
     id: `fixture-${index}`,
-    session_id: "demo",
-    task_id: "demo-task",
+    session_id: sessionId("demo"),
+    task_id: taskId("demo-task"),
     author_type: "agent",
     type: toolType,
     content,

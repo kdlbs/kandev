@@ -40,12 +40,14 @@ import {
   importWorkflowsAction,
   reorderWorkflowsAction,
 } from "@/app/actions/workspaces";
-import type {
-  Workflow,
-  StepDefinition,
-  WorkflowStep,
-  Workspace,
-  WorkflowTemplate,
+import {
+  agentProfileId as toAgentProfileId,
+  workflowId as toWorkflowId,
+  type Workflow,
+  type StepDefinition,
+  type WorkflowStep,
+  type Workspace,
+  type WorkflowTemplate,
 } from "@/lib/types/http";
 import {
   CreateWorkflowDialog,
@@ -170,6 +172,20 @@ function useWorkflowImportExport(
   };
 }
 
+function brandWorkflowUpdates(updates: {
+  name?: string;
+  description?: string;
+  agent_profile_id?: string;
+}): Partial<Workflow> {
+  return {
+    ...(updates.name !== undefined ? { name: updates.name } : {}),
+    ...(updates.description !== undefined ? { description: updates.description } : {}),
+    ...(updates.agent_profile_id !== undefined
+      ? { agent_profile_id: toAgentProfileId(updates.agent_profile_id) }
+      : {}),
+  };
+}
+
 function useWorkflowActions({
   workspace,
   workflowItems,
@@ -193,7 +209,7 @@ function useWorkflowActions({
       ? (workflowTemplates.find((t) => t.id === selectedTemplateId)?.name ?? "New Workflow")
       : "New Workflow";
     const draftWorkflow: Workflow = {
-      id: `temp-${generateUUID()}`,
+      id: toWorkflowId(`temp-${generateUUID()}`),
       workspace_id: workspace.id,
       name: newWorkflowName.trim() || templateName,
       description: "",
@@ -210,7 +226,18 @@ function useWorkflowActions({
     updates: { name?: string; description?: string; agent_profile_id?: string },
   ) => {
     setWorkflowItems((prev) =>
-      prev.map((wf) => (wf.id === workflowId ? { ...wf, ...updates } : wf)),
+      prev.map((wf) =>
+        wf.id === workflowId
+          ? {
+              ...wf,
+              ...updates,
+              agent_profile_id:
+                updates.agent_profile_id !== undefined
+                  ? toAgentProfileId(updates.agent_profile_id)
+                  : wf.agent_profile_id,
+            }
+          : wf,
+      ),
     );
   };
 
@@ -238,13 +265,14 @@ function useWorkflowActions({
     if (workflow.name.trim()) updates.name = workflow.name.trim();
     updates.agent_profile_id = workflow.agent_profile_id ?? "";
     if (Object.keys(updates).length) await updateWorkflowAction(workflowId, updates);
+    const branded = brandWorkflowUpdates(updates);
     setWorkflowItems((prev) =>
-      prev.map((item) => (item.id === workflowId ? { ...item, ...updates } : item)),
+      prev.map((item) => (item.id === workflowId ? { ...item, ...branded } : item)),
     );
     setSavedWorkflowItems((prev) =>
       prev.some((item) => item.id === workflowId)
-        ? prev.map((item) => (item.id === workflowId ? { ...workflow, ...updates } : item))
-        : [...prev, { ...workflow, ...updates }],
+        ? prev.map((item) => (item.id === workflowId ? { ...workflow, ...branded } : item))
+        : [...prev, { ...workflow, ...branded }],
     );
   };
 

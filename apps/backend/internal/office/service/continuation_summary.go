@@ -22,7 +22,7 @@ func summaryLoadInputs(
 		ctx, repo, repo.ReaderDB(),
 		summary.RunSnapshot{
 			ID:         run.ID,
-			Status:     run.Status,
+			Status:     string(run.Status),
 			ResultJSON: run.ResultJSON,
 		},
 		agentID, scope,

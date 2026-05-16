@@ -21,7 +21,7 @@ import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
-import type { ExecutorProfile, Repository } from "@/lib/types/http";
+import type { ExecutorProfile, ExecutorType, Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import {
   defaultSubtaskWorkspaceMode,
@@ -99,7 +99,7 @@ function useSessionOptions(taskId: string) {
 }
 
 function useExecutorProfiles(
-  executors: Array<{ id: string; type: string; name: string; profiles?: ExecutorProfile[] }>,
+  executors: Array<{ id: string; type: ExecutorType; name: string; profiles?: ExecutorProfile[] }>,
 ) {
   return useMemo<ExecutorProfile[]>(() => {
     return executors.flatMap((executor) =>
@@ -204,7 +204,7 @@ type SubtaskFormProps = {
   worktreeBranch: string | null;
   initialPrompt: string | null;
   agentProfiles: AgentProfileOption[];
-  executors: Array<{ id: string; type: string; name: string; profiles?: ExecutorProfile[] }>;
+  executors: Array<{ id: string; type: ExecutorType; name: string; profiles?: ExecutorProfile[] }>;
   workspaceId: string | null;
   workflowId: string | null;
   /** The parent task's repository — used as the default for the subtask. */

@@ -103,7 +103,7 @@ func (s *CostService) evaluatePolicy(
 	limit := policy.LimitSubcents
 	result := BudgetCheckResult{
 		PolicyID:       policy.ID,
-		ActionOnExceed: policy.ActionOnExceed,
+		ActionOnExceed: string(policy.ActionOnExceed),
 		SpentSubcents:  spent,
 		LimitSubcents:  limit,
 	}
@@ -140,7 +140,7 @@ func (s *CostService) getSpendForPolicy(
 	workspaceID string,
 	policy *BudgetPolicy,
 ) (int64, error) {
-	since := periodCutoff(policy.Period, time.Now())
+	since := periodCutoff(string(policy.Period), time.Now())
 	switch policy.ScopeType {
 	case scopeAgent:
 		return s.repo.GetCostForAgentSince(ctx, policy.ScopeID, since)
@@ -160,7 +160,7 @@ func (s *CostService) logBudgetAlert(
 	spentSubcents int64,
 ) {
 	s.activity.LogActivity(ctx, workspaceID, "system", "budget_checker",
-		"budget.alert", policy.ScopeType, policy.ScopeID,
+		"budget.alert", string(policy.ScopeType), policy.ScopeID,
 		fmt.Sprintf(`{"spent_subcents":%d,"limit_subcents":%d,"period":%q,"policy_id":%q}`,
 			spentSubcents, policy.LimitSubcents, policy.Period, policy.ID))
 }
@@ -172,7 +172,7 @@ func (s *CostService) logBudgetExceeded(
 	spentSubcents int64,
 ) {
 	s.activity.LogActivity(ctx, workspaceID, "system", "budget_checker",
-		"budget.exceeded", policy.ScopeType, policy.ScopeID,
+		"budget.exceeded", string(policy.ScopeType), policy.ScopeID,
 		fmt.Sprintf(`{"spent_subcents":%d,"limit_subcents":%d,"period":%q,"action":%q,"policy_id":%q}`,
 			spentSubcents, policy.LimitSubcents, policy.Period, policy.ActionOnExceed, policy.ID))
 }

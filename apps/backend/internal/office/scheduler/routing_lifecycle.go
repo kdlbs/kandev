@@ -179,7 +179,7 @@ func (ss *SchedulerService) runProberAndApply(
 		ProviderID:  providerID,
 		Scope:       sqliterepo.HealthScopeProvider,
 		ScopeValue:  "",
-		State:       healthStateFor(probeErr),
+		State:       models.ProviderHealthState(healthStateFor(probeErr)),
 		ErrorCode:   string(probeErr.Code),
 		RetryAt:     timePtrIfNonZero(retryAt),
 		BackoffStep: step,

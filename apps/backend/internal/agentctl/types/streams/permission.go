@@ -2,25 +2,54 @@ package streams
 
 import "time"
 
+// PermissionActionType categorizes the kind of action requiring approval.
+// Values are stable wire-format strings shared across agentctl, the backend
+// orchestrator, and the frontend.
+type PermissionActionType string
+
+func (t PermissionActionType) String() string { return string(t) }
+
 // Permission action types categorize the kind of action requiring approval.
 const (
 	// ActionTypeCommand indicates shell command execution.
-	ActionTypeCommand = "command"
+	ActionTypeCommand PermissionActionType = "command"
 
 	// ActionTypeFileWrite indicates file modification or creation.
-	ActionTypeFileWrite = "file_write"
+	ActionTypeFileWrite PermissionActionType = "file_write"
 
 	// ActionTypeFileRead indicates file read (for sensitive files).
-	ActionTypeFileRead = "file_read"
+	ActionTypeFileRead PermissionActionType = "file_read"
 
 	// ActionTypeNetwork indicates network access.
-	ActionTypeNetwork = "network"
+	ActionTypeNetwork PermissionActionType = "network"
 
 	// ActionTypeMCPTool indicates MCP tool invocation.
-	ActionTypeMCPTool = "mcp_tool"
+	ActionTypeMCPTool PermissionActionType = "mcp_tool"
 
 	// ActionTypeOther indicates other/unknown action type.
-	ActionTypeOther = "other"
+	ActionTypeOther PermissionActionType = "other"
+)
+
+// PermissionOptionKind identifies the semantics of a permission option
+// presented to the user. Values are stable wire-format strings shared with
+// the frontend.
+type PermissionOptionKind string
+
+func (k PermissionOptionKind) String() string { return string(k) }
+
+// Permission option kinds describe the semantics of each available choice.
+const (
+	// PermissionOptionKindAllowOnce approves the current request only.
+	PermissionOptionKindAllowOnce PermissionOptionKind = "allow_once"
+
+	// PermissionOptionKindAllowAlways approves and remembers the decision.
+	PermissionOptionKindAllowAlways PermissionOptionKind = "allow_always"
+
+	// PermissionOptionKindRejectOnce rejects the current request only.
+	PermissionOptionKindRejectOnce PermissionOptionKind = "reject_once"
+
+	// PermissionOptionKindRejectAlways rejects and remembers the decision.
+	PermissionOptionKindRejectAlways PermissionOptionKind = "reject_always"
 )
 
 // PermissionNotification is the message type streamed via the permissions stream.
@@ -45,7 +74,7 @@ type PermissionNotification struct {
 
 	// ActionType categorizes the action requiring approval.
 	// Use ActionType* constants: "command", "file_write", "file_read", "network", "mcp_tool", "other".
-	ActionType string `json:"action_type,omitempty"`
+	ActionType PermissionActionType `json:"action_type,omitempty"`
 
 	// ActionDetails contains structured details about the action.
 	// For commands: {"command": ["ls", "-la"], "cwd": "/path"}
@@ -67,7 +96,7 @@ type PermissionOption struct {
 
 	// Kind indicates the type of permission: "allow_once", "allow_always",
 	// "reject_once", "reject_always".
-	Kind string `json:"kind"`
+	Kind PermissionOptionKind `json:"kind"`
 
 	// Metadata contains protocol-specific option data.
 	// For Codex: {"for_session": true} for session-wide approvals.

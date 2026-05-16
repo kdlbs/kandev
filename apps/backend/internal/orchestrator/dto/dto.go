@@ -1,6 +1,8 @@
 // Package dto provides Data Transfer Objects for the orchestrator module.
 package dto
 
+import "github.com/kandev/kandev/internal/agentruntime"
+
 // GetStatusRequest is the request for orchestrator.status
 type GetStatusRequest struct{}
 
@@ -46,16 +48,16 @@ type TaskSessionStatusResponse struct {
 	ACPSessionID string `json:"acp_session_id,omitempty"`
 
 	// Executor/runtime info
-	ExecutorID       string `json:"executor_id,omitempty"`
-	ExecutorType     string `json:"executor_type,omitempty"`
-	ExecutorName     string `json:"executor_name,omitempty"`
-	Runtime          string `json:"runtime,omitempty"`
-	IsRemoteExecutor bool   `json:"is_remote_executor"`
-	RemoteState      string `json:"remote_state,omitempty"`
-	RemoteName       string `json:"remote_name,omitempty"`
-	RemoteCreatedAt  string `json:"remote_created_at,omitempty"`
-	RemoteCheckedAt  string `json:"remote_checked_at,omitempty"`
-	RemoteStatusErr  string `json:"remote_status_error,omitempty"`
+	ExecutorID       string               `json:"executor_id,omitempty"`
+	ExecutorType     string               `json:"executor_type,omitempty"`
+	ExecutorName     string               `json:"executor_name,omitempty"`
+	Runtime          agentruntime.Runtime `json:"runtime,omitempty"`
+	IsRemoteExecutor bool                 `json:"is_remote_executor"`
+	RemoteState      string               `json:"remote_state,omitempty"`
+	RemoteName       string               `json:"remote_name,omitempty"`
+	RemoteCreatedAt  string               `json:"remote_created_at,omitempty"`
+	RemoteCheckedAt  string               `json:"remote_checked_at,omitempty"`
+	RemoteStatusErr  string               `json:"remote_status_error,omitempty"`
 
 	// Worktree info
 	WorktreePath   *string `json:"worktree_path,omitempty"`

@@ -403,7 +403,7 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 			zap.String("trigger_id", trigger.ID), zap.Error(err))
 	}
 	missedForPayload := 0
-	if strings.EqualFold(routine.CatchUpPolicy, CatchUpPolicySkipMissed) {
+	if strings.EqualFold(string(routine.CatchUpPolicy), CatchUpPolicySkipMissed) {
 		// skip_missed: collapse all misses, fire once with no attribution.
 		missedForPayload = 0
 	} else if runCount > 0 {
@@ -609,7 +609,7 @@ func (s *RoutineService) materialiseHeavyRoutineRun(
 	}
 	run.Status = RunStatusTaskCreated
 	run.LinkedTaskID = taskID
-	if err := s.repo.UpdateRunStatus(ctx, run.ID, run.Status, run.LinkedTaskID); err != nil {
+	if err := s.repo.UpdateRunStatus(ctx, run.ID, string(run.Status), run.LinkedTaskID); err != nil {
 		return fmt.Errorf("update run status: %w", err)
 	}
 	return nil
@@ -631,7 +631,7 @@ func (s *RoutineService) materialiseLightweightRoutineRun(
 	missedTicks int,
 ) error {
 	run.Status = RunStatusTaskCreated
-	if err := s.repo.UpdateRunStatus(ctx, run.ID, run.Status, ""); err != nil {
+	if err := s.repo.UpdateRunStatus(ctx, run.ID, string(run.Status), ""); err != nil {
 		return fmt.Errorf("update run status: %w", err)
 	}
 	if s.wakeup == nil || routine.AssigneeAgentProfileID == "" {

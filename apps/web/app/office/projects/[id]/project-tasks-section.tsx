@@ -3,6 +3,7 @@
 import { useEffect, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { listTasks } from "@/lib/api/domains/office-tasks-api";
+import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { TaskRow } from "../../tasks/task-row";
 
 type ProjectTasksSectionProps = {
@@ -74,7 +75,7 @@ export function ProjectTasksSection({ projectId }: ProjectTasksSectionProps) {
               onToggleExpand={noop}
               agentName={
                 task.assigneeAgentProfileId
-                  ? agentNameById.get(task.assigneeAgentProfileId)
+                  ? agentNameById.get(toAgentProfileId(task.assigneeAgentProfileId))
                   : undefined
               }
             />

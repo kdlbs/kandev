@@ -123,7 +123,7 @@ func (s *DashboardService) inboxApprovalItems(ctx context.Context, wsID string) 
 			ID:         a.ID,
 			Type:       "approval",
 			Title:      approvalTitle(a),
-			Status:     a.Status,
+			Status:     string(a.Status),
 			EntityID:   a.ID,
 			EntityType: "approval",
 			CreatedAt:  a.CreatedAt,
@@ -150,7 +150,7 @@ func (s *DashboardService) inboxBudgetAlertItems(ctx context.Context, wsID strin
 			Description: e.Details,
 			Status:      "active",
 			EntityID:    e.TargetID,
-			EntityType:  e.TargetType,
+			EntityType:  string(e.TargetType),
 			CreatedAt:   e.CreatedAt,
 		}
 		items = append(items, item)
@@ -172,7 +172,7 @@ func (s *DashboardService) inboxAgentErrorItems(ctx context.Context, wsID string
 			Description: e.Details,
 			Status:      "active",
 			EntityID:    e.TargetID,
-			EntityType:  e.TargetType,
+			EntityType:  string(e.TargetType),
 			CreatedAt:   e.CreatedAt,
 		}
 		items = append(items, item)

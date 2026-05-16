@@ -63,7 +63,7 @@ func (r *ChannelRelay) RelayComment(ctx context.Context, comment *models.TaskCom
 	if r.svc.runs != nil {
 		runID = r.svc.runs.ResolveRunForTask(ctx, comment.TaskID)
 	}
-	sendErr := r.sendWithRetry(ctx, channel.Platform, config, comment.Body)
+	sendErr := r.sendWithRetry(ctx, string(channel.Platform), config, comment.Body)
 	if sendErr != nil {
 		r.svc.activity.LogActivityWithRun(ctx, channel.WorkspaceID, "system", "", "channel.delivery_failed",
 			"channel", channel.ID,

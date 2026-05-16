@@ -223,7 +223,7 @@ func timePtr(t time.Time) *time.Time { return &t }
 func degradedRow(provider, scope, scopeVal, code string, retryAt time.Time) models.ProviderHealth {
 	return models.ProviderHealth{
 		ProviderID: provider,
-		Scope:      scope,
+		Scope:      models.ProviderHealthScope(scope),
 		ScopeValue: scopeVal,
 		State:      "degraded",
 		ErrorCode:  code,

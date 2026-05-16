@@ -16,6 +16,7 @@ import { cn, transformPathsInText } from "@/lib/utils";
 import { prettifyToolTitle } from "@/lib/pretty-tool-title";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { Message } from "@/lib/types/http";
+import type { PermissionActionType, PermissionOptionKind } from "@/lib/types/permission";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { PermissionActionRow } from "./permission-action-row";
 import { ExpandableRow } from "./expandable-row";
@@ -24,14 +25,14 @@ import { useExpandState } from "./use-expand-state";
 type PermissionOption = {
   option_id: string;
   name: string;
-  kind: string;
+  kind: PermissionOptionKind;
 };
 
 type PermissionRequestMetadata = {
   pending_id: string;
   tool_call_id: string;
   options: PermissionOption[];
-  action_type: string;
+  action_type: PermissionActionType;
   action_details: { command?: string; path?: string; cwd?: string };
   status?: "pending" | "approved" | "rejected";
 };

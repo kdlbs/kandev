@@ -1,7 +1,13 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
-import type { TaskSessionState } from "@/lib/types/http";
+import {
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type SessionId,
+  type TaskId,
+  type TaskSessionState,
+} from "@/lib/types/http";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 
 const TERMINAL_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
@@ -105,8 +111,8 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
  *  fills in fields like agent_profile_id / repository_id / worktree_path. */
 function upsertTaskSessionList(
   store: StoreApi<AppState>,
-  taskId: string,
-  sessionId: string,
+  taskId: TaskId,
+  sessionId: SessionId,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: any,
   sessionUpdate: Record<string, unknown>,
@@ -224,10 +230,12 @@ function syncEnvFromAgentctlPayload(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: any,
 ): void {
-  const taskId = payload?.task_id;
-  const sessionId = payload?.session_id;
+  const rawTaskId = payload?.task_id;
+  const rawSessionId = payload?.session_id;
   const envId = payload?.task_environment_id;
-  if (!taskId || !sessionId || !envId) return;
+  if (!rawTaskId || !rawSessionId || !envId) return;
+  const taskId = toTaskId(rawTaskId);
+  const sessionId = toSessionId(rawSessionId);
   const existing = store.getState().taskSessions.items[sessionId];
   store.getState().upsertTaskSessionFromEvent(taskId, {
     id: sessionId,
@@ -271,8 +279,8 @@ function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
 }
 
 interface SessionFailureContext {
-  taskId: string;
-  sessionId: string;
+  taskId: TaskId;
+  sessionId: SessionId;
   newState: TaskSessionState | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: any;
@@ -320,10 +328,12 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
     "session.state_changed": (message) => {
       const payload = message.payload;
       if (!payload?.task_id) return;
-      const { task_id: taskId, session_id: sessionId } = payload;
+      const { task_id: rawTaskId, session_id: rawSessionId } = payload;
       const newState = payload.new_state as TaskSessionState | undefined;
 
-      if (!sessionId) return;
+      if (!rawSessionId) return;
+      const taskId = toTaskId(rawTaskId);
+      const sessionId = toSessionId(rawSessionId);
 
       const sessionUpdate = buildSessionUpdate(payload);
       const existingSession = store.getState().taskSessions.items[sessionId];

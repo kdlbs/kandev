@@ -178,7 +178,7 @@ export function useExecutorOptions(executors: Executor[]): OptionItem[] {
 export function useIsLocalExecutor(executors: Executor[], executorId: string): boolean {
   return useMemo(() => {
     const selected = executors.find((e: Executor) => e.id === executorId);
-    return selected?.type === "local";
+    return selected?.type === "local_pc";
   }, [executors, executorId]);
 }
 
@@ -197,7 +197,8 @@ export function computeExecutorHint(
   if (selectedExecutor?.type === "local_docker" || selectedExecutor?.type === "remote_docker") {
     return "A Docker container will be created from the selected base branch and checked out on a task branch.";
   }
-  if (selectedExecutor?.type === "local") return "The agent will run directly on the repository.";
+  if (selectedExecutor?.type === "local_pc")
+    return "The agent will run directly on the repository.";
   return null;
 }
 

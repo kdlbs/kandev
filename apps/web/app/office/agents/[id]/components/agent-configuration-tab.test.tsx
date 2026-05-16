@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
+import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { defaultOfficeState } from "@/lib/state/slices/office/office-slice";
 import { AgentConfigurationTab } from "./agent-configuration-tab";
 
@@ -108,7 +109,12 @@ describe("AgentConfigurationTab", () => {
   });
 
   it("omits create-agent capability for default worker agents", () => {
-    const worker = { ...baseAgent, id: "agent-worker", name: "Worker", role: "worker" as const };
+    const worker = {
+      ...baseAgent,
+      id: toAgentProfileId("agent-worker"),
+      name: "Worker",
+      role: "worker" as const,
+    };
     render(
       <StateProvider
         initialState={{

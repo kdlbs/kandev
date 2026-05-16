@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 import { renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
-import type { Message } from "@/lib/types/http";
+import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 import { useTaskPendingClarification } from "./use-task-pending-clarification";
 
 function message(overrides: Partial<Message>): Message {
   return {
     id: "msg-1",
-    session_id: "session-1",
-    task_id: "task-1",
+    session_id: toSessionId("session-1"),
+    task_id: toTaskId("task-1"),
     author_type: "agent",
     content: "",
     type: "message",

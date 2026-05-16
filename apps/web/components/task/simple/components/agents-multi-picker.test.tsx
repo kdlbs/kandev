@@ -6,6 +6,7 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider, useAppStore } from "@/components/state-provider";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
+import { agentProfileId as toAgentProfileId, workspaceId as toWorkspaceId } from "@/lib/types/ids";
 import { ApproversPicker } from "./approvers-picker";
 import { buildDecisionLookup } from "./agents-multi-picker";
 import type { Task, TaskDecision } from "@/app/office/tasks/[id]/types";
@@ -16,10 +17,10 @@ const TS = "2026-05-01T00:00:00Z";
 
 function makeAgent(id: string, name: string): AgentProfile {
   return {
-    id,
-    workspaceId: "ws-1",
+    id: toAgentProfileId(id),
+    workspaceId: toWorkspaceId("ws-1"),
     name,
-    agentProfileId: "p1",
+    agentProfileId: toAgentProfileId("p1"),
     role: "worker",
     icon: "🤖",
     status: "idle",

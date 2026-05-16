@@ -173,7 +173,7 @@ function useWatchFormData(workspaceId: string) {
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const executors = useAppStore((state) => state.executors.items);
   const allExecutorProfiles = useMemo(
-    () => executors.filter((e) => e.type !== "local").flatMap((e) => e.profiles ?? []),
+    () => executors.filter((e) => e.type !== "local_pc").flatMap((e) => e.profiles ?? []),
     [executors],
   );
 

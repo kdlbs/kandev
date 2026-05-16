@@ -46,10 +46,10 @@ func (a *ActivityLoggerImpl) LogActivityWithRun(
 ) {
 	entry := &models.ActivityEntry{
 		WorkspaceID: wsID,
-		ActorType:   actorType,
+		ActorType:   models.ActivityActorType(actorType),
 		ActorID:     actorID,
-		Action:      action,
-		TargetType:  targetType,
+		Action:      models.ActivityAction(action),
+		TargetType:  models.ActivityTargetType(targetType),
 		TargetID:    targetID,
 		Details:     details,
 		RunID:       runID,

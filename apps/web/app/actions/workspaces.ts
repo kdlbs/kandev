@@ -1,6 +1,7 @@
 "use server";
 
 import { getBackendConfig } from "@/lib/config";
+import { workflowId as toWorkflowId } from "@/lib/types/ids";
 import type {
   ApproveSessionResponse,
   Workflow,
@@ -349,7 +350,7 @@ type BackendWorkflowStep = {
 
 const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   id: step.id,
-  workflow_id: step.workflow_id,
+  workflow_id: toWorkflowId(step.workflow_id),
   name: step.name,
   position: step.position,
   color: step.color,

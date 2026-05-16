@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import type { AgentProfile } from "@/lib/types/http";
+import { agentProfileId as toAgentProfileId, type AgentProfile } from "@/lib/types/http";
 import { isProfileDirty, type DraftProfile } from "./agent-save-helpers";
 
 const baseProfile: AgentProfile = {
-  id: "p1",
+  id: toAgentProfileId("p1"),
   agentId: "a1",
   name: "Profile",
   agentDisplayName: "Mock",

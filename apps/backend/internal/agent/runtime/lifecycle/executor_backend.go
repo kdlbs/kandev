@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentruntime"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -154,7 +155,7 @@ func FilterPersistentMetadata(src map[string]interface{}) map[string]interface{}
 // RemoteStatus describes runtime health/details for remote executors.
 // It is intentionally generic so each executor can include extra details in Details.
 type RemoteStatus struct {
-	RuntimeName   string                 `json:"runtime_name"`
+	RuntimeName   agentruntime.Runtime   `json:"runtime_name"`
 	RemoteName    string                 `json:"remote_name,omitempty"`
 	State         string                 `json:"state,omitempty"`
 	CreatedAt     *time.Time             `json:"created_at,omitempty"`
@@ -209,7 +210,7 @@ type ExecutorInstance struct {
 	SessionID  string
 
 	// Runtime name (e.g., "docker", "standalone") - set by the runtime that created this instance
-	RuntimeName string
+	RuntimeName agentruntime.Runtime
 
 	// Agentctl client for communicating with this instance
 	Client *agentctl.Client

@@ -5,7 +5,7 @@ import { mapSelectedRepositoryIds } from "@/lib/kanban/filters";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
-import type { Repository } from "@/lib/types/http";
+import { repositoryId, type Repository } from "@/lib/types/http";
 import type { UserSettingsState } from "@/lib/state/slices/settings/types";
 
 type DisplaySettings = UserSettingsState;
@@ -123,6 +123,39 @@ function useLoadUserSettings(
   }, [loaded, setUserSettings]);
 }
 
+function usePruneStaleRepositoryIds(
+  userSettings: DisplaySettings,
+  repositories: Repository[],
+  commitSettings: (next: CommitPayload) => void,
+) {
+  useEffect(() => {
+    if (!userSettings.loaded || repositories.length === 0) return;
+    const repoIds = repositories.map((repo: Repository) => repo.id);
+    const validIds = userSettings.repositoryIds.filter((id: string) =>
+      repoIds.includes(repositoryId(id)),
+    );
+    const isSame =
+      validIds.length === userSettings.repositoryIds.length &&
+      validIds.every((id: string, index: number) => id === userSettings.repositoryIds[index]);
+    if (!isSame) {
+      queueMicrotask(() => {
+        commitSettings({
+          workspaceId: userSettings.workspaceId,
+          workflowId: userSettings.workflowId,
+          repositoryIds: validIds,
+        });
+      });
+    }
+  }, [
+    commitSettings,
+    repositories,
+    userSettings.workflowId,
+    userSettings.loaded,
+    userSettings.repositoryIds,
+    userSettings.workspaceId,
+  ]);
+}
+
 export function useUserDisplaySettings({
   workspaceId,
   workflowId,
@@ -191,30 +224,7 @@ export function useUserDisplaySettings({
     }
   }, [workflowId, onWorkflowChange, userSettings.workflowId, userSettings.loaded]);
 
-  useEffect(() => {
-    if (!userSettings.loaded || repositories.length === 0) return;
-    const repoIds = repositories.map((repo: Repository) => repo.id);
-    const validIds = userSettings.repositoryIds.filter((id: string) => repoIds.includes(id));
-    const isSame =
-      validIds.length === userSettings.repositoryIds.length &&
-      validIds.every((id: string, index: number) => id === userSettings.repositoryIds[index]);
-    if (!isSame) {
-      queueMicrotask(() => {
-        commitSettings({
-          workspaceId: userSettings.workspaceId,
-          workflowId: userSettings.workflowId,
-          repositoryIds: validIds,
-        });
-      });
-    }
-  }, [
-    commitSettings,
-    repositories,
-    userSettings.workflowId,
-    userSettings.loaded,
-    userSettings.repositoryIds,
-    userSettings.workspaceId,
-  ]);
+  usePruneStaleRepositoryIds(userSettings, repositories, commitSettings);
 
   const allRepositoriesSelected = userSettings.repositoryIds.length === 0;
   const selectedRepositoryIds = useMemo(

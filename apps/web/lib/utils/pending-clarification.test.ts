@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Message } from "@/lib/types/http";
+import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 import {
   findPendingClarificationGroup,
   hasPendingClarification,
@@ -9,8 +9,8 @@ import {
 function message(overrides: Partial<Message>): Message {
   return {
     id: "msg-1",
-    session_id: "session-1",
-    task_id: "task-1",
+    session_id: toSessionId("session-1"),
+    task_id: toTaskId("task-1"),
     author_type: "agent",
     content: "",
     type: "message",

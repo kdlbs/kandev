@@ -463,7 +463,7 @@ func (r *SpritesExecutor) buildInstanceResult(
 		InstanceID:  req.InstanceID,
 		TaskID:      req.TaskID,
 		SessionID:   req.SessionID,
-		RuntimeName: string(r.Name()),
+		RuntimeName: r.Name(),
 		Client: agentctl.NewClient("127.0.0.1", localPort, r.logger,
 			agentctl.WithExecutionID(req.InstanceID),
 			agentctl.WithSessionID(req.SessionID)),

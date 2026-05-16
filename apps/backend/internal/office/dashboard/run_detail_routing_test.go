@@ -54,7 +54,7 @@ func TestBuildRunRouting_PopulatesAttemptsAndSnapshot(t *testing.T) {
 	tier := "frontier"
 	prov := "claude-acp"
 	model := "opus"
-	blocked := "waiting_for_provider_capacity"
+	blocked := models.RoutingBlockedStatus("waiting_for_provider_capacity")
 	retry := time.Now().UTC().Add(time.Minute)
 	run := &models.Run{
 		ID:                   "r1",
@@ -85,7 +85,7 @@ func TestBuildRunRouting_PopulatesAttemptsAndSnapshot(t *testing.T) {
 	if len(out.LogicalProviderOrder) != 2 || out.LogicalProviderOrder[0] != "claude-acp" {
 		t.Errorf("order = %v", out.LogicalProviderOrder)
 	}
-	if out.BlockedStatus != blocked {
+	if out.BlockedStatus != string(blocked) {
 		t.Errorf("blocked = %q", out.BlockedStatus)
 	}
 	if out.EarliestRetryAt == nil {
