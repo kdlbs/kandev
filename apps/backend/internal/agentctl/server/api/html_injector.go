@@ -34,7 +34,8 @@ func injectInspectorScript(html []byte) []byte {
 
 // injectScriptsIntoResponse modifies an HTML response in-place: strips
 // iframe-blocking headers and injects the inspector script. Assumes the
-// caller has prevented gzip on the upstream request (Accept-Encoding stripped).
+// caller cleared the outbound Accept-Encoding header so net/http.Transport
+// auto-decompresses any upstream gzip before this runs.
 func injectScriptsIntoResponse(resp *http.Response) error {
 	stripIframeSecurityHeaders(resp.Header)
 
