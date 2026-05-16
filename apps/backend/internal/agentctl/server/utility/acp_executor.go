@@ -506,6 +506,8 @@ var piVersionBannerLineRE = regexp.MustCompile(`^\s*pi v\d+\.\d+\.\d+\s*$`)
 // sanitizeInferenceChunk removes known non-content banner lines emitted by
 // some CLIs (e.g. pi-acp printing "pi vX.Y.Z") so utility outputs like
 // commit-message generation only contain model response content.
+// Note: pi-acp is always launched via "npx" (see PiACP.InferenceConfig),
+// so "npx" is the allowedProbeCommand entry that gates execution here.
 func sanitizeInferenceChunk(chunk string) string {
 	if chunk == "" {
 		return ""
