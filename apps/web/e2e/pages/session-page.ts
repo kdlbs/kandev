@@ -81,6 +81,38 @@ export class SessionPage {
     await this.activeChat().waitFor({ state: "visible", timeout });
   }
 
+  /**
+   * Wait for the chat to be idle (input placeholder visible, agent not busy).
+   *
+   * On mobile-chrome (and occasionally desktop), there's a WS subscribe race:
+   * a fresh task auto-starts its agent, the mock agent completes in <1s, and
+   * the session_state transition (RUNNING -> AWAITING_INPUT) can fan out
+   * before the client's WS subscription registers server-side. The client
+   * then sits with `isAgentBusy=true` forever and the idle placeholder
+   * never renders. SSR picks up the right state on the next page load, so
+   * one targeted reload-and-retry is enough to recover.
+   *
+   * This is the same race the office agent-run-live spec rides out with
+   * `expect.poll`-based re-seeding.
+   */
+  async waitForChatIdle(opts: { timeout?: number; attemptTimeout?: number } = {}) {
+    const totalTimeout = opts.timeout ?? 45_000;
+    const attemptTimeout = opts.attemptTimeout ?? 15_000;
+    const idle = this.idleInput();
+    try {
+      await idle.waitFor({ state: "visible", timeout: attemptTimeout });
+      return;
+    } catch {
+      // Reload once to re-SSR with the latest session state, then wait the
+      // remaining budget. If the placeholder still doesn't appear after a
+      // reload, fall through to the original error semantics.
+    }
+    await this.page.reload();
+    await this.activeChat().waitFor({ state: "visible", timeout: attemptTimeout });
+    const remaining = Math.max(attemptTimeout, totalTimeout - attemptTimeout);
+    await idle.waitFor({ state: "visible", timeout: remaining });
+  }
+
   /** Wait for the passthrough terminal to be visible (for TUI/passthrough sessions). */
   async waitForPassthroughLoad(timeout = 15_000) {
     await this.passthroughTerminal.waitFor({ state: "visible", timeout });
