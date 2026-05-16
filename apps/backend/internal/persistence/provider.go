@@ -74,8 +74,21 @@ func provideSQLite(cfg *config.Config, log *logger.Logger, version string) (*db.
 		return nil, nil, fmt.Errorf("ensure meta table: %w", err)
 	}
 
-	storedVersion, _ := readKey(writer, "kandev_version")
-	userTables, _ := hasUserTables(writer)
+	// Meta reads must succeed: if we cannot determine whether this is an
+	// upgrade boot we must NOT charge ahead into migrations. The dominant
+	// failure mode here is a partially-corrupt DB that opens but cannot
+	// read sqlite_master / kandev_meta - exactly the case where a backup
+	// would matter most.
+	storedVersion, err := readKey(writer, "kandev_version")
+	if err != nil {
+		_ = pool.Close()
+		return nil, nil, fmt.Errorf("read kandev_version: %w", err)
+	}
+	userTables, err := hasUserTables(writer)
+	if err != nil {
+		_ = pool.Close()
+		return nil, nil, fmt.Errorf("inspect user tables: %w", err)
+	}
 
 	if shouldBackup(storedVersion, version, userTables) {
 		backupDir := filepath.Join(filepath.Dir(dbPath), "backups")

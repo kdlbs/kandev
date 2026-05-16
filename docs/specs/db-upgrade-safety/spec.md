@@ -120,6 +120,7 @@ INFO  Database initialized (single-writer pool)        db_path=/.../kandev.db
 - **No UI surface.** Backend logs are sufficient. A future "Last upgrade" panel in the web app settings page is out of scope for this spec.
 - **No new migration framework.** Migrations stay imperative (`runMigrations()` per repo). The helper only adds logging - it doesn't reorder, batch, or transactionalize anything.
 - **Refuse-to-boot on backup failure.** Disk full is the dominant failure mode. Better to surface it loudly than to apply migrations into an unrecoverable state.
+- **Dev builds (`Version="dev"`) are not protected.** The backup trigger is a version delta. Local builds without an injected ldflags version all report `dev`, so iterative dev cycles that add a new ALTER will run the migration without taking a snapshot. Production releases each carry a unique tag and so always cross the version threshold. If a developer wants belt-and-suspenders safety during destructive schema work, the workaround is to `cp kandev.db kandev.db.bak` manually or to pass `KANDEV_VERSION=devN` via ldflags to force the delta.
 
 ## Success criteria
 
