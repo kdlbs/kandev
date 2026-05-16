@@ -5,6 +5,7 @@ import (
 
 	"github.com/coder/acp-go-sdk"
 
+	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
@@ -16,7 +17,7 @@ func convertAuthMethods(methods []acp.AuthMethod) []streams.AuthMethodInfo {
 	}
 	result := make([]streams.AuthMethodInfo, 0, len(methods))
 	for _, m := range methods {
-		id, name, desc, meta := flattenAuthMethod(m)
+		id, name, desc, meta := acpclient.AuthMethodFields(m)
 		if id == "" && name == "" {
 			continue
 		}
@@ -31,20 +32,6 @@ func convertAuthMethods(methods []acp.AuthMethod) []streams.AuthMethodInfo {
 		result = append(result, info)
 	}
 	return result
-}
-
-// flattenAuthMethod collapses upstream's tagged-union AuthMethod into the
-// (id, name, description, meta) tuple our streams layer expects.
-func flattenAuthMethod(m acp.AuthMethod) (string, string, *string, map[string]any) {
-	switch {
-	case m.Agent != nil:
-		return m.Agent.Id, m.Agent.Name, m.Agent.Description, m.Agent.Meta
-	case m.Terminal != nil:
-		return m.Terminal.Id, m.Terminal.Name, m.Terminal.Description, m.Terminal.Meta
-	case m.EnvVar != nil:
-		return m.EnvVar.Id, m.EnvVar.Name, m.EnvVar.Description, m.EnvVar.Meta
-	}
-	return "", "", nil, nil
 }
 
 // extractTerminalAuth normalizes the terminal-auth pattern from _meta.

@@ -422,7 +422,7 @@ func buildInitProbeFields(initResp acp.InitializeResponse) *ProbeResponse {
 		out.AgentVersion = initResp.AgentInfo.Version
 	}
 	for _, m := range initResp.AuthMethods {
-		id, name, desc, meta := authMethodFields(m)
+		id, name, desc, meta := acpclient.AuthMethodFields(m)
 		if id == "" && name == "" {
 			continue
 		}
@@ -467,20 +467,6 @@ func derefString(p *string) string {
 		return ""
 	}
 	return *p
-}
-
-// authMethodFields collapses upstream's tagged-union AuthMethod into the
-// (id, name, description, meta) tuple our probe payload expects.
-func authMethodFields(m acp.AuthMethod) (string, string, *string, map[string]any) {
-	switch {
-	case m.Agent != nil:
-		return m.Agent.Id, m.Agent.Name, m.Agent.Description, m.Agent.Meta
-	case m.Terminal != nil:
-		return m.Terminal.Id, m.Terminal.Name, m.Terminal.Description, m.Terminal.Meta
-	case m.EnvVar != nil:
-		return m.EnvVar.Id, m.EnvVar.Name, m.EnvVar.Description, m.EnvVar.Meta
-	}
-	return "", "", nil, nil
 }
 
 // allowedProbeCommands maps each permitted executable base name to a
