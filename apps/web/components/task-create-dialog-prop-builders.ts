@@ -35,7 +35,6 @@ export function buildDialogFormBodyProps(
     onRowRepositoryChange: handlers.handleRowRepositoryChange,
     onRowBranchChange: handlers.handleRowBranchChange,
     initialDescription: fs.currentDefaults.description,
-    hasDescription: fs.hasDescription,
     workspaceId: props.workspaceId,
     onJiraImport: setup.handleJiraImport,
     onLinearImport: setup.handleLinearImport,
