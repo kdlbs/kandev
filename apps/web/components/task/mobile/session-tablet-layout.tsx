@@ -6,8 +6,8 @@ import { SessionTaskSwitcherSheet } from "./session-task-switcher-sheet";
 import { TaskCenterPanel } from "../task-center-panel";
 import { TaskRightPanel } from "../task-right-panel";
 import { TaskFilesPanel } from "../task-files-panel";
-import { PreviewPanel } from "@/components/task/preview/preview-panel";
-import { PreviewController } from "@/components/task/preview/preview-controller";
+import { BrowserPanel } from "@/components/task/browser-panel";
+import { PreviewController } from "@/components/task/preview-controller";
 import { useDefaultLayout } from "@/lib/layout/use-default-layout";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useSessionLayoutState } from "@/hooks/use-session-layout-state";
@@ -43,8 +43,6 @@ type TabletLeftPanelProps = {
   handleClearSelectedDiff: () => void;
   handleFileOpenHandled: () => void;
   sessionId?: string | null;
-  sessionForPreview: string | null;
-  hasDevScript: boolean;
 };
 
 function TabletLeftPanel({
@@ -57,8 +55,6 @@ function TabletLeftPanel({
   handleClearSelectedDiff,
   handleFileOpenHandled,
   sessionId,
-  sessionForPreview,
-  hasDevScript,
 }: TabletLeftPanelProps) {
   const centerPanel = (
     <TaskCenterPanel
@@ -82,7 +78,7 @@ function TabletLeftPanel({
           {centerPanel}
         </Panel>
         <Panel id="preview" minSize="300px" className="min-h-0 min-w-0">
-          <PreviewPanel sessionId={sessionForPreview} hasDevScript={hasDevScript} />
+          <BrowserPanel panelId="tablet-preview" params={{}} />
         </Panel>
       </Group>
     );
@@ -171,8 +167,6 @@ export const SessionTabletLayout = memo(function SessionTabletLayout({
             handleClearSelectedDiff={handleClearSelectedDiff}
             handleFileOpenHandled={handleFileOpenHandled}
             sessionId={sessionId}
-            sessionForPreview={sessionForPreview}
-            hasDevScript={hasDevScript}
           />
         </Panel>
 
