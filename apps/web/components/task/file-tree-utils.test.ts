@@ -102,13 +102,15 @@ describe("sortRootChildren", () => {
       file("package.json"),
       dir("src", []),
     ]);
+    // compareTreeNodes uses localeCompare, which is case-insensitive by
+    // default — "package" (p) sorts before "README" (R/r).
     expect(sortRootChildren(tree).map((n) => n.name)).toEqual([
       "alpha",
       "src",
       "zeta",
       ".babelrc",
-      "README.md",
       "package.json",
+      "README.md",
     ]);
   });
 

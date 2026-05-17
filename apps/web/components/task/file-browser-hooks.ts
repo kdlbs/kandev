@@ -292,15 +292,18 @@ function useTreeLoader(ctx: TreeLoaderContext) {
 
 function useFileChangeSubscription({
   sessionIdRef,
-  expandedPaths,
+  expandedPathsRef,
   setTree,
   setLoadState,
 }: {
   sessionIdRef: React.MutableRefObject<string>;
-  expandedPaths: ReadonlySet<string>;
+  expandedPathsRef: React.MutableRefObject<ReadonlySet<string>>;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   setLoadState: React.Dispatch<React.SetStateAction<LoadState>>;
 }) {
+  // expandedPaths is read via ref so that toggling a directory (which mints a
+  // new Set) does not tear down and re-attach this WS listener — any event
+  // arriving during the swap would otherwise be silently dropped.
   useEffect(() => {
     const client = getWebSocketClient();
     if (!client) return;
@@ -310,14 +313,13 @@ function useFileChangeSubscription({
       applyFileChanges({
         client,
         sessionId: sessionIdRef.current,
-        expandedPaths,
+        expandedPaths: expandedPathsRef.current,
         changes,
         setTree,
         setLoadState,
       });
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expandedPaths]);
+  }, [sessionIdRef, expandedPathsRef, setTree, setLoadState]);
 }
 
 /**
@@ -343,6 +345,10 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
   const expandedPaths = treeApi.expanded;
   const setExpandedPaths = treeApi.setExpanded;
   const visibleRows = treeApi.visibleRows;
+  // Stable ref over `expandedPaths` so the WS file-change subscription does
+  // not re-attach on every toggle (each toggle mints a new Set reference).
+  const expandedPathsRef = useRef<ReadonlySet<string>>(expandedPaths);
+  expandedPathsRef.current = expandedPaths;
   const [isLoadingTree, setIsLoadingTree] = useState(true);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -425,7 +431,7 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
     }
   }, [expandedPaths, effectiveResetKey]);
 
-  useFileChangeSubscription({ sessionIdRef, expandedPaths, setTree, setLoadState });
+  useFileChangeSubscription({ sessionIdRef, expandedPathsRef, setTree, setLoadState });
 
   const collapseAll = treeApi.collapseAll;
 
