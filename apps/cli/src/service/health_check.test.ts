@@ -56,6 +56,22 @@ describe("waitForServiceHealth", () => {
     expect(dump).toHaveBeenCalledTimes(1);
   });
 
+  it("passes an AbortSignal so a hung fetch can't outrun the deadline", async () => {
+    let lastSignal: AbortSignal | undefined;
+    global.fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      lastSignal = init?.signal ?? undefined;
+      return new Response("ok", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const dump = vi.fn();
+    const p = waitForServiceHealth(undefined, dump);
+    await vi.advanceTimersByTimeAsync(500);
+    await p;
+    // The exact timeout value is an implementation detail; what matters is
+    // that some abortable signal is passed through.
+    expect(lastSignal).toBeInstanceOf(AbortSignal);
+  });
+
   it("uses the default port when none is given", async () => {
     const seenUrls: string[] = [];
     global.fetch = vi.fn(async (url: string | URL | Request) => {

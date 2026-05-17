@@ -9,6 +9,10 @@ export type LogDumper = () => void;
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const POLL_INTERVAL_MS = 500;
+// Per-request timeout. Without this, undici's default headersTimeout (5min)
+// can stall a single fetch — e.g. TCP accepted but the backend hangs before
+// writing response headers — and silently overrun the outer deadline.
+const REQUEST_TIMEOUT_MS = 2_000;
 
 /**
  * Poll the kandev /health endpoint to confirm the freshly-installed service
@@ -31,13 +35,13 @@ export async function waitForServiceHealth(
 
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
       if (res.ok) {
         process.stderr.write(`[kandev] service is healthy\n`);
         return;
       }
     } catch {
-      // not up yet; keep polling
+      // not up yet (or per-request timeout fired); keep polling
     }
     await delay(POLL_INTERVAL_MS);
   }
