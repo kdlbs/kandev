@@ -11,6 +11,34 @@ import { regenerateHostKey } from "../../helpers/ssh";
  * Covers e2e-plan.md group K (K1–K4).
  */
 test.describe("ssh executor — host key rotation", () => {
+  // Each test mutates the worker-scoped sshd container's host key + the
+  // seeded executor's pinned fingerprint. After the test, refresh both so
+  // any later spec in the same worker that depends on seedData.sshTarget /
+  // seedData.sshExecutorId sees a coherent fingerprint.
+  test.afterEach(async ({ apiClient, seedData }) => {
+    const observed = await apiClient.testSSHConnection({
+      name: "K cleanup observe",
+      host: seedData.sshTarget.host,
+      port: seedData.sshTarget.port,
+      user: seedData.sshTarget.user,
+      identity_source: "file",
+      identity_file: seedData.sshTarget.identityFile,
+    });
+    if (observed.success && observed.fingerprint) {
+      seedData.sshTarget.hostFingerprint = observed.fingerprint;
+      await apiClient.updateExecutor(seedData.sshExecutorId, {
+        config: {
+          ssh_host: seedData.sshTarget.host,
+          ssh_port: String(seedData.sshTarget.port),
+          ssh_user: seedData.sshTarget.user,
+          ssh_identity_source: "file",
+          ssh_identity_file: seedData.sshTarget.identityFile,
+          ssh_host_fingerprint: observed.fingerprint,
+        },
+      });
+    }
+  });
+
   test("regenerating the host key surfaces a new fingerprint on the next test", async ({
     apiClient,
     seedData,
