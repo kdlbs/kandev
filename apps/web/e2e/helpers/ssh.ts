@@ -244,28 +244,49 @@ function removeContainerIfExists(name: string): void {
   spawnSync("docker", ["rm", "-f", name], { stdio: "ignore" });
 }
 
-function waitForTCPOpen(host: string, port: number, timeoutMs = 15_000): void {
+function waitForTCPOpen(host: string, port: number, timeoutMs = 30_000): void {
   const deadline = Date.now() + timeoutMs;
+  let lastErr = "";
   while (Date.now() < deadline) {
-    const res = spawnSync("nc", ["-z", host, String(port)], { stdio: "ignore" });
+    // Prefer bash's /dev/tcp probe — always available on POSIX, no `nc` dep.
+    const res = spawnSync("bash", ["-c", `exec 3<>/dev/tcp/${host}/${port} && exec 3<&-`], {
+      stdio: ["ignore", "ignore", "pipe"],
+      encoding: "utf8",
+    });
     if (res.status === 0) return;
-    sleep(150);
+    lastErr = (res.stderr ?? "").trim();
+    sleep(250);
   }
-  throw new Error(`sshd at ${host}:${port} did not open within ${timeoutMs}ms`);
+  throw new Error(`sshd at ${host}:${port} did not open within ${timeoutMs}ms: ${lastErr}`);
 }
 
 function scanHostFingerprint(host: string, port: number): string {
-  // ssh-keyscan prints the host's public key; ssh-keygen -lf computes its
-  // SHA256 fingerprint. Output shape: "256 SHA256:abc... no comment (ED25519)".
-  const keyOut = spawnSync("ssh-keyscan", ["-p", String(port), "-t", "ed25519", host], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  });
-  if (keyOut.status !== 0 || !keyOut.stdout.trim()) {
-    throw new Error(`ssh-keyscan ${host}:${port} returned nothing`);
+  // ssh-keyscan prints the host's public key on stdout; `# host SSH-2.0-...`
+  // comment lines go to stderr. We retry briefly because the first scan can
+  // race the container's first sshd accept.
+  const deadline = Date.now() + 15_000;
+  let stdout = "";
+  let stderr = "";
+  while (Date.now() < deadline) {
+    const keyOut = spawnSync(
+      "ssh-keyscan",
+      ["-p", String(port), "-t", "ed25519", "-T", "5", host],
+      {
+        encoding: "utf8",
+      },
+    );
+    stdout = keyOut.stdout ?? "";
+    stderr = keyOut.stderr ?? "";
+    if (keyOut.status === 0 && stdout.trim()) break;
+    sleep(300);
+  }
+  if (!stdout.trim()) {
+    throw new Error(
+      `ssh-keyscan ${host}:${port} returned nothing after retries; stderr=${stderr.trim()}`,
+    );
   }
   const tmpKey = path.join(os.tmpdir(), `kandev-e2e-keyscan-${process.pid}-${port}`);
-  fs.writeFileSync(tmpKey, keyOut.stdout);
+  fs.writeFileSync(tmpKey, stdout);
   try {
     const fp = spawnSync("ssh-keygen", ["-lf", tmpKey], { encoding: "utf8" });
     const match = fp.stdout.match(/SHA256:\S+/);
@@ -281,10 +302,8 @@ function shellQuote(s: string): string {
 }
 
 function sleep(ms: number): void {
-  const end = Date.now() + ms;
-  // Busy-wait with a small `nc`-style cost gate — fine for our short polling
-  // loops and lets us avoid pulling in setTimeout-on-sync semantics.
-  while (Date.now() < end) {
-    spawnSync("true");
-  }
+  // Synchronous sleep via the system `sleep` binary. Subprocess overhead is
+  // dwarfed by the ms we're waiting, and we get an honest wall-clock pause
+  // rather than CPU spin.
+  spawnSync("sleep", [(ms / 1000).toFixed(3)]);
 }

@@ -61,6 +61,31 @@ export const sshTest = backendFixture.extend<
       const sshWorkDir = path.join(backend.tmpDir, "ssh");
       const sshTarget = startSSHServer(workerInfo.workerIndex, SSH_E2E_IMAGE_TAG, sshWorkDir);
 
+      // ssh-keyscan reports the ed25519 fingerprint, but the Go ssh client may
+      // negotiate a different key type — meaning the pinned fingerprint must
+      // be the one *kandev* observes, not the one we scanned. Hit the
+      // permissive test endpoint once to capture the canonical value.
+      try {
+        const observed = await apiClient.testSSHConnection({
+          name: "ssh-fixture-observe",
+          host: sshTarget.host,
+          port: sshTarget.port,
+          user: sshTarget.user,
+          identity_source: "file",
+          identity_file: sshTarget.identityFile,
+        });
+        if (!observed.success || !observed.fingerprint) {
+          throw new Error(
+            `SSH fixture: probe failed (${observed.error ?? "no error"}); ` +
+              `steps=${JSON.stringify(observed.steps)}`,
+          );
+        }
+        sshTarget.hostFingerprint = observed.fingerprint;
+      } catch (e) {
+        stopSSHServer(sshTarget);
+        throw e;
+      }
+
       try {
         const seed = await seedSSHWorkspace(apiClient, backend, sshTarget);
         await use({ ...seed, sshTarget });

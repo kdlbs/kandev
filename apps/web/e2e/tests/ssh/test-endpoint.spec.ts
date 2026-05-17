@@ -65,13 +65,14 @@ test.describe("ssh test-endpoint contract", () => {
   });
 
   // F4 — handshake against a closed port surfaces verbatim, no probe steps emitted.
-  test("handshake failure short-circuits with no probe steps", async ({ apiClient }) => {
+  test("handshake failure short-circuits with no probe steps", async ({ apiClient, seedData }) => {
     const result = await apiClient.testSSHConnection({
       name: "F4",
       host: "127.0.0.1",
       port: 1, // reserved, refused
       user: "kandev",
-      identity_source: "agent",
+      identity_source: "file",
+      identity_file: seedData.sshTarget.identityFile,
     });
 
     expect(result.success).toBe(false);
