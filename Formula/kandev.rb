@@ -1,8 +1,8 @@
 class Kandev < Formula
   desc "Manage tasks, orchestrate agents, review changes, and ship value"
   homepage "https://github.com/kdlbs/kandev"
-  url "https://github.com/kdlbs/kandev/archive/refs/tags/v0.41.0.tar.gz"
-  sha256 "dbb689fc3dd0ca7fed00f33da8b10ecfec9f9cd2e49bd9908c4950026743073c"
+  url "https://github.com/kdlbs/kandev/archive/refs/tags/v0.49.0.tar.gz"
+  sha256 "a97f93b7733656d2c128998bce10dd804c7f192bf03112540198aa96e005a449"
   license "AGPL-3.0-only"
 
   livecheck do
