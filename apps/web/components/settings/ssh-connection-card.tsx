@@ -109,16 +109,18 @@ function useSSHConnection(props: SSHConnectionCardProps) {
     <K extends keyof SSHExecutorConfig>(key: K, value: SSHExecutorConfig[K]) => {
       setState((prev) => {
         const isConnectionField = CONNECTION_FIELDS.has(key);
+        // A connection edit invalidates the prior result. Mark stale when
+        // a test result is already on screen OR a test is mid-flight — in
+        // the latter case handleTest will see the staleness on completion
+        // and refuse to clear it, so a fingerprint returned for the old
+        // form can't be trusted against the new one.
+        const staleAfter = isConnectionField
+          ? prev.result !== null || prev.testing || prev.resultStale
+          : prev.resultStale;
         return {
           ...prev,
           form: { ...prev.form, [key]: value },
-          // Editing a connection-affecting field invalidates the prior test:
-          // the user must re-run Test Connection before they can trust + save
-          // for the new target. We keep `result` rendered (the trust-gate
-          // spec relies on the checkbox remaining present) but mark it stale
-          // so re-checking trust here doesn't save the old fingerprint.
-          // Editing the display-only `name` leaves trust alone.
-          resultStale: isConnectionField ? prev.result !== null : prev.resultStale,
+          resultStale: staleAfter,
           trust: isConnectionField ? false : prev.trust,
           error: null,
         };
@@ -156,7 +158,15 @@ function useSSHConnection(props: SSHConnectionCardProps) {
         proxy_jump: form.proxy_jump || undefined,
       };
       const res = await testSSHConnection(req);
-      setState((prev) => ({ ...prev, result: res, resultStale: false, testing: false }));
+      setState((prev) => ({
+        ...prev,
+        result: res,
+        // Preserve resultStale if the user edited a connection field while
+        // the test was in flight — the returned fingerprint is bound to the
+        // old form and must not be trusted against the new target.
+        resultStale: prev.resultStale,
+        testing: false,
+      }));
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to reach backend";
       setState((prev) => ({ ...prev, error: msg, testing: false }));
