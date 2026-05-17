@@ -160,7 +160,6 @@ function CreateModeBody(props: DialogFormBodyProps) {
         isSessionMode={false}
         isTaskStarted={isTaskStarted}
         initialDescription={props.initialDescription}
-        hasDescription={props.hasDescription}
         fs={fs}
         handleKeyDown={props.handleKeyDown}
         enhance={props.enhance}
@@ -199,7 +198,6 @@ function SessionModeBody(props: DialogFormBodyProps) {
         isSessionMode
         isTaskStarted={props.isTaskStarted}
         initialDescription={props.initialDescription}
-        hasDescription={props.hasDescription}
         fs={props.fs}
         handleKeyDown={props.handleKeyDown}
         enhance={props.enhance}

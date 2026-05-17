@@ -351,7 +351,6 @@ export type DialogPromptSectionProps = {
   isSessionMode: boolean;
   isTaskStarted: boolean;
   initialDescription: string;
-  hasDescription: boolean;
   fs: DialogFormState;
   handleKeyDown: ReturnType<typeof useKeyboardShortcutHandler>;
   enhance?: { onEnhance: () => void; isLoading: boolean; isConfigured: boolean };

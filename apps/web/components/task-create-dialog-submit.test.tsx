@@ -35,8 +35,10 @@ vi.mock("@/lib/services/session-launch-helpers", () => ({
   buildStartRequest: () => ({ request: { taskId: "t", agentProfileId: "a" } }),
 }));
 
-const buildCreateTaskPayloadMock = vi.fn(() => ({ workflow_step_id: "step-1" }));
-const validateCreateInputsMock = vi.fn(() => true);
+const buildCreateTaskPayloadMock = vi.fn((..._args: unknown[]) => ({
+  workflow_step_id: "step-1",
+}));
+const validateCreateInputsMock = vi.fn((..._args: unknown[]) => true);
 vi.mock("@/components/task-create-dialog-helpers", () => ({
   activatePlanMode: vi.fn(),
   buildCreateTaskPayload: (...args: unknown[]) => buildCreateTaskPayloadMock(...args),
