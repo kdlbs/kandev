@@ -53,9 +53,30 @@ export function startSSHServer(
   const publicKeyFile = `${identityFile}.pub`;
   generateKeypair(identityFile);
 
+  // kandev's orchestrator builds the agent command using KANDEV_MOCK_AGENT_LINUX_BINARY,
+  // which is set to the *host* absolute path of mock-agent-linux-amd64.
+  // Docker e2e gets away with using that path inside the container because
+  // it bind-mounts the same host file at the same path; for SSH e2e we have
+  // to do the equivalent — otherwise the kandev backend tells agentctl on
+  // the remote to exec a path that doesn't exist there.
+  const mockAgentHostPath = path.resolve(__dirname, "../../../backend/bin/mock-agent-linux-amd64");
+  if (!fs.existsSync(mockAgentHostPath)) {
+    throw new Error(
+      `mock-agent-linux-amd64 not found at ${mockAgentHostPath}; ` +
+        `build it with 'make -C apps/backend build-mock-agent-linux'.`,
+    );
+  }
+
   // The container reads /authorized_keys on entry, so mount the public key
   // into that path read-only.
   removeContainerIfExists(containerName);
+  // Bind-mount the remote workspace root to the host so agentctl + task logs
+  // survive `--rm` teardown and the test runner can `cat /tmp/...` them in
+  // failure summaries. The kandev user inside the container writes to its
+  // own home dir at /home/kandev/.kandev, so we point the host side at the
+  // worker's workDir/remote-home (created on demand).
+  const remoteHome = path.join(workDir, "remote-home");
+  fs.mkdirSync(remoteHome, { recursive: true });
   const containerId = execFileSync(
     "docker",
     [
@@ -74,6 +95,10 @@ export function startSSHServer(
       `127.0.0.1:${port}:22`,
       "-v",
       `${publicKeyFile}:/authorized_keys:ro`,
+      "-v",
+      `${mockAgentHostPath}:${mockAgentHostPath}:ro`,
+      "-v",
+      `${remoteHome}:/home/kandev/.kandev`,
       imageTag,
     ],
     { encoding: "utf8" },

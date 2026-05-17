@@ -11,13 +11,14 @@ import path from "node:path";
  * Covers e2e-plan.md group Q (Q1–Q5).
  */
 test.describe("ssh error surfacing", () => {
-  test("TCP refused — error mentions 'connection refused'", async ({ apiClient }) => {
+  test("TCP refused — error mentions 'connection refused'", async ({ apiClient, seedData }) => {
     const result = await apiClient.testSSHConnection({
       name: "Q1",
       host: "127.0.0.1",
       port: 1,
       user: "kandev",
-      identity_source: "agent",
+      identity_source: "file",
+      identity_file: seedData.sshTarget.identityFile,
     });
     expect(result.success).toBe(false);
     const handshake = result.steps.find((s) => s.name === "SSH handshake");

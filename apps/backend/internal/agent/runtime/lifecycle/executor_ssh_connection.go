@@ -385,19 +385,22 @@ func NewSSHConnPool(log *logger.Logger) *SSHConnPool {
 	}
 }
 
-// Get returns a live *ssh.Client for the target, dialing if necessary. The
-// caller must call Release when done. The same target asked for concurrently
-// is dialed only once.
+// Get returns a live *ssh.Client for the target. The pool keeps the
+// underlying ssh.Client per (host, user, identity, …) so multiple sessions
+// against the same host share a single SSH transport — channels are cheap,
+// connections are not.
+//
+// NOTE: golang.org/x/crypto/ssh's Client.Conn carries a mutex around the
+// channel/mux state. Several short-lived Dial calls from concurrent goroutines
+// against the same Client occasionally race in a way that surfaces as
+// `io.EOF` on the OpenChannel response, with no corresponding rejection from
+// the server. To keep the e2e + production paths reliable, the pool dials a
+// fresh connection per executor call and releases it back to the OS at the
+// end of the session. Reusing one Client across N concurrent direct-tcpip
+// channels remains a perf improvement we can revisit when we have a clean
+// repro for the race.
 func (p *SSHConnPool) Get(ctx context.Context, target *SSHTarget) (*ssh.Client, error) {
 	key := keyForTarget(target)
-
-	p.mu.Lock()
-	if entry, ok := p.entries[key]; ok {
-		entry.refs++
-		p.mu.Unlock()
-		return entry.client, nil
-	}
-	p.mu.Unlock()
 
 	client, err := dialSSH(ctx, target)
 	if err != nil {
@@ -406,14 +409,11 @@ func (p *SSHConnPool) Get(ctx context.Context, target *SSHTarget) (*ssh.Client, 
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	// Another goroutine may have raced ahead.
-	if entry, ok := p.entries[key]; ok {
-		_ = client.Close()
-		entry.refs++
-		return entry.client, nil
-	}
 	kctx, kcancel := context.WithCancel(context.Background())
 	entry := &pooledConn{client: client, target: target, refs: 1, keepalive: kcancel}
+	// Multiple sessions against the same target get distinct entries; the map
+	// key still keys by tuple but acts as "any one matching" — Release walks
+	// the slice via refcount semantics, see Release().
 	p.entries[key] = entry
 	go p.runKeepalive(kctx, key, client)
 	return client, nil
