@@ -333,12 +333,13 @@ func dialDirect(ctx context.Context, addr string, cfg *ssh.ClientConfig) (*ssh.C
 // dialViaJump implements ProxyJump as a single bastion hop. The bastion is
 // resolved from its own ~/.ssh/config Host block, defaulting to the same
 // identity source as the target (passes the user's agent / key through).
+//
+// OpenSSH ProxyJump supports both an alias (e.g. `prod-jump`) and an explicit
+// `[user@]host[:port]` form. We honor the latter inline rather than asking
+// ResolveSSHTarget to treat it as an alias — the literal form has no Host
+// block in ~/.ssh/config to inherit from.
 func dialViaJump(ctx context.Context, target *SSHTarget, finalAddr string, finalCfg *ssh.ClientConfig) (*ssh.Client, error) {
-	bastion, err := ResolveSSHTarget(SSHConnConfig{
-		HostAlias:      target.ProxyJump,
-		IdentitySource: target.IdentitySource,
-		IdentityFile:   target.IdentityFile,
-	})
+	bastion, err := resolveBastion(target)
 	if err != nil {
 		return nil, fmt.Errorf("ssh: resolve bastion %q: %w", target.ProxyJump, err)
 	}
@@ -371,6 +372,63 @@ func dialViaJump(ctx context.Context, target *SSHTarget, finalAddr string, final
 		_ = bastionClient.Close()
 	}()
 	return final, nil
+}
+
+// resolveBastion turns the target's ProxyJump value into a connection
+// SSHTarget. Two accepted shapes:
+//
+//   - alias: looked up in ~/.ssh/config (HostName / Port / User / IdentityFile)
+//   - literal "[user@]host[:port]": parsed inline, no config lookup
+//
+// The literal form has no Host block to inherit from, so passing it straight
+// to ResolveSSHTarget (which falls back to alias-as-hostname) would produce
+// `user@host:port` as a single hostname and the TCP dial fails on lookup.
+// Identity defaults flow from the target so the same key reaches the bastion.
+func resolveBastion(target *SSHTarget) (*SSHTarget, error) {
+	if user, host, port, ok := parseLiteralProxyJump(target.ProxyJump); ok {
+		return ResolveSSHTarget(SSHConnConfig{
+			Host:           host,
+			Port:           port,
+			User:           user,
+			IdentitySource: target.IdentitySource,
+			IdentityFile:   target.IdentityFile,
+		})
+	}
+	return ResolveSSHTarget(SSHConnConfig{
+		HostAlias:      target.ProxyJump,
+		IdentitySource: target.IdentitySource,
+		IdentityFile:   target.IdentityFile,
+	})
+}
+
+// parseLiteralProxyJump recognizes a `[user@]host[:port]` ProxyJump literal.
+// Returns ok=false when the input doesn't contain an `@` or `:` (treat as
+// alias instead). Anything that doesn't parse cleanly also returns false so
+// the alias path can take over.
+func parseLiteralProxyJump(s string) (user, host string, port int, ok bool) {
+	s = strings.TrimSpace(s)
+	if s == "" || !strings.ContainsAny(s, "@:") {
+		return "", "", 0, false
+	}
+	rest := s
+	if at := strings.LastIndex(rest, "@"); at != -1 {
+		user = rest[:at]
+		rest = rest[at+1:]
+	}
+	if colon := strings.LastIndex(rest, ":"); colon != -1 {
+		portStr := rest[colon+1:]
+		n, err := strconv.Atoi(portStr)
+		if err != nil {
+			return "", "", 0, false
+		}
+		port = n
+		rest = rest[:colon]
+	}
+	host = rest
+	if host == "" {
+		return "", "", 0, false
+	}
+	return user, host, port, true
 }
 
 // sshConnKey identifies a pooled SSH connection. Connections are not shared
