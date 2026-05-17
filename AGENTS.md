@@ -19,6 +19,7 @@ apps/
 - **Backend**: Go with Make (`make -C apps/backend test|lint|build`)
 - **Frontend**: Next.js (`cd apps && pnpm --filter @kandev/web dev|lint|typecheck`)
 - **UI**: Shadcn components via `@kandev/ui`
+- **E2E**: Playwright (`cd apps/web && pnpm e2e`). The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers both the Docker executor and the SSH executor — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
 - **GitHub repo**: `https://github.com/kdlbs/kandev`
 - **Container image**: `ghcr.io/kdlbs/kandev` (GitHub Container Registry)
 
