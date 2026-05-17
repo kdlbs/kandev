@@ -57,6 +57,19 @@ interface SSHConnectionState {
   error: string | null;
 }
 
+// Fields whose value, if changed, could route the next connection to a
+// different machine — editing any of them invalidates the current trust tick
+// so the user must re-test against the new target.
+const CONNECTION_FIELDS = new Set<keyof SSHExecutorConfig>([
+  "host_alias",
+  "host",
+  "port",
+  "user",
+  "identity_source",
+  "identity_file",
+  "proxy_jump",
+]);
+
 const SSH_FORM_DEFAULTS: SSHExecutorConfig = {
   name: "",
   host_alias: "",
@@ -86,13 +99,19 @@ function useSSHConnection(props: SSHConnectionCardProps) {
 
   const update = useCallback(
     <K extends keyof SSHExecutorConfig>(key: K, value: SSHExecutorConfig[K]) => {
-      setState((prev) => ({
-        ...prev,
-        form: { ...prev.form, [key]: value },
-        result: null,
-        trust: false,
-        error: null,
-      }));
+      setState((prev) => {
+        const isConnectionField = CONNECTION_FIELDS.has(key);
+        return {
+          ...prev,
+          form: { ...prev.form, [key]: value },
+          // Editing a connection-affecting field invalidates the trust gate
+          // but keeps the prior result visible so the user can re-tick after
+          // a quick re-test; editing the display-only `name` leaves trust
+          // alone.
+          trust: isConnectionField ? false : prev.trust,
+          error: null,
+        };
+      });
     },
     [],
   );
