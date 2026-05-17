@@ -5,6 +5,7 @@ import {
   computeMoveTargets,
   findNodeByPath,
   getVisiblePaths,
+  sortRootChildren,
 } from "./file-tree-utils";
 
 function file(name: string, parentPath = ""): FileTreeNode {
@@ -84,6 +85,38 @@ describe("moveNodesInTree", () => {
     expect(findNodeByPath(result, "dest/x (1).ts")).not.toBeNull();
     expect(findNodeByPath(result, "src/x.ts")).toBeNull();
     expect(findNodeByPath(result, "lib/x.ts")).toBeNull();
+  });
+});
+
+describe("sortRootChildren", () => {
+  it("orders directories before files at the root, alpha within each group", () => {
+    // Backend can return root children in any order — interleaved dirs/files
+    // and not necessarily alphabetical. The file browser feeds this list
+    // straight into useTree, which never re-sorts its top-level `nodes`, so
+    // this helper is the only thing keeping dirs on top at depth 0.
+    const tree = root([
+      file("README.md"),
+      dir("zeta", []),
+      file(".babelrc"),
+      dir("alpha", []),
+      file("package.json"),
+      dir("src", []),
+    ]);
+    // compareTreeNodes uses localeCompare, which is case-insensitive by
+    // default — "package" (p) sorts before "README" (R/r).
+    expect(sortRootChildren(tree).map((n) => n.name)).toEqual([
+      "alpha",
+      "src",
+      "zeta",
+      ".babelrc",
+      "package.json",
+      "README.md",
+    ]);
+  });
+
+  it("returns an empty array for a null tree or a tree with no children", () => {
+    expect(sortRootChildren(null)).toEqual([]);
+    expect(sortRootChildren({ name: "", path: "", is_dir: true })).toEqual([]);
   });
 });
 

@@ -93,7 +93,6 @@ export function ExportPreview() {
       <div className="flex flex-1 min-h-0">
         <ExportFileTree
           tree={tree}
-          files={files}
           selectedPaths={selectedPaths}
           onSelectedPathsChange={setSelectedPaths}
           previewPath={previewPath}
