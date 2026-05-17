@@ -135,7 +135,6 @@ describe("DialogPromptSection (CLI-mode parity)", () => {
         isSessionMode={false}
         isTaskStarted={false}
         initialDescription=""
-        hasDescription={false}
         fs={makeFs()}
         handleKeyDown={(() => {}) as never}
         descriptionPlaceholder="Write a prompt for the agent..."
@@ -156,7 +155,6 @@ describe("DialogPromptSection (CLI-mode parity)", () => {
         isSessionMode={false}
         isTaskStarted={false}
         initialDescription="hello"
-        hasDescription={true}
         fs={makeFs()}
         handleKeyDown={(() => {}) as never}
       />,
@@ -173,7 +171,6 @@ describe("DialogPromptSection (CLI-mode parity)", () => {
         isSessionMode={false}
         isTaskStarted={false}
         initialDescription=""
-        hasDescription={false}
         fs={makeFs()}
         handleKeyDown={(() => {}) as never}
         workspaceId="ws-1"
