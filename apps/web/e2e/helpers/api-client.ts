@@ -1135,7 +1135,96 @@ export class ApiClient {
   async mockLinearSetGetIssueError(args: { statusCode: number; message: string }): Promise<void> {
     await this.request("PUT", "/api/v1/linear/mock/get-issue-error", args);
   }
+
+  // --- SSH executor helpers ---
+
+  /**
+   * Create an SSH executor. The `config` map carries the fields the SSH
+   * runtime reads at launch time: ssh_host / ssh_port / ssh_user /
+   * ssh_host_fingerprint / ssh_identity_source / ssh_identity_file /
+   * ssh_proxy_jump. Pre-trusting a fingerprint here lets tests skip the UI
+   * test-then-trust flow.
+   */
+  async createSSHExecutor(
+    name: string,
+    config: Record<string, string>,
+  ): Promise<{ id: string; name: string; type: string; config: Record<string, string> }> {
+    return this.request("POST", "/api/v1/executors", { name, type: "ssh", config });
+  }
+
+  async updateExecutor(
+    executorId: string,
+    patch: { name?: string; config?: Record<string, string> },
+  ): Promise<void> {
+    await this.request("PATCH", `/api/v1/executors/${executorId}`, patch);
+  }
+
+  async getExecutor(executorId: string): Promise<{
+    id: string;
+    name: string;
+    type: string;
+    config?: Record<string, string>;
+  }> {
+    return this.request("GET", `/api/v1/executors/${executorId}`);
+  }
+
+  async testSSHConnection(req: SSHTestRequestBody): Promise<SSHTestResultBody> {
+    return this.request("POST", "/api/v1/ssh/test", req);
+  }
+
+  async listSSHSessions(executorId: string): Promise<SSHSessionBody[]> {
+    return this.request("GET", `/api/v1/ssh/executors/${executorId}/sessions`);
+  }
 }
+
+// --- SSH HTTP shapes (kept here, alongside the rest of the api-client types) ---
+
+export type SSHIdentitySourceBody = "agent" | "file";
+
+export type SSHTestRequestBody = {
+  name: string;
+  host_alias?: string;
+  host?: string;
+  port?: number;
+  user?: string;
+  identity_source?: SSHIdentitySourceBody;
+  identity_file?: string;
+  proxy_jump?: string;
+};
+
+export type SSHTestStepBody = {
+  name: string;
+  duration_ms: number;
+  success: boolean;
+  output?: string;
+  error?: string;
+};
+
+export type SSHTestResultBody = {
+  success: boolean;
+  fingerprint?: string;
+  uname_all?: string;
+  arch?: string;
+  git_version?: string;
+  agentctl_action?: "cached" | "uploaded" | "skipped";
+  steps: SSHTestStepBody[];
+  total_duration_ms: number;
+  error?: string;
+};
+
+export type SSHSessionBody = {
+  session_id: string;
+  task_id: string;
+  task_title?: string;
+  host: string;
+  user?: string;
+  remote_task_dir?: string;
+  remote_agentctl_port?: number;
+  local_forward_port?: number;
+  status: string;
+  uptime_seconds: number;
+  created_at: string;
+};
 
 // --- Jira / Linear mock payload types ---
 
