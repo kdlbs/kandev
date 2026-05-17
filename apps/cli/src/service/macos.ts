@@ -23,17 +23,21 @@ type Ctx = {
   isSystem: boolean;
   /** launchctl domain target, e.g. gui/501 or system. */
   domain: string;
+  /** Full launchctl service target, e.g. gui/501/com.kdlbs.kandev. */
+  target: string;
 };
 
 function makeCtx(args: ServiceArgs): Ctx {
   const isSystem = !!args.system;
   const dir = isSystem ? MACOS_SYSTEM_DAEMON_DIR : macosUserAgentDir();
   const uid = os.userInfo().uid;
+  const domain = isSystem ? "system" : `gui/${uid}`;
   return {
     args,
     plistPath: path.join(dir, `${LAUNCHD_LABEL}.plist`),
     isSystem,
-    domain: isSystem ? "system" : `gui/${uid}`,
+    domain,
+    target: `${domain}/${LAUNCHD_LABEL}`,
   };
 }
 
@@ -94,9 +98,9 @@ function installSync(ctx: Ctx): { logDir: string } {
   // (ignoring its error if nothing was loaded). This means 'install' is
   // idempotent: re-running it reloads the unit even if the file is unchanged,
   // which is how we recover from a user manually unloading the service.
-  spawnSync("launchctl", ["bootout", `${ctx.domain}/${LAUNCHD_LABEL}`], { stdio: "ignore" });
+  spawnSync("launchctl", ["bootout", ctx.target], { stdio: "ignore" });
   runLaunchctl(["bootstrap", ctx.domain, ctx.plistPath]);
-  runLaunchctl(["enable", `${ctx.domain}/${LAUNCHD_LABEL}`], { allowFailure: true });
+  runLaunchctl(["enable", ctx.target], { allowFailure: true });
   console.log(
     outcome === "unchanged"
       ? "[kandev] service is loaded and running"
@@ -108,7 +112,7 @@ function installSync(ctx: Ctx): { logDir: string } {
 }
 
 function uninstall(ctx: Ctx): void {
-  runLaunchctl(["bootout", `${ctx.domain}/${LAUNCHD_LABEL}`], { allowFailure: true });
+  runLaunchctl(["bootout", ctx.target], { allowFailure: true });
   if (fs.existsSync(ctx.plistPath)) {
     fs.unlinkSync(ctx.plistPath);
     console.log(`[kandev] removed ${ctx.plistPath}`);
@@ -127,18 +131,18 @@ function startService(ctx: Ctx): void {
 }
 
 function stopService(ctx: Ctx): void {
-  runLaunchctl(["bootout", `${ctx.domain}/${LAUNCHD_LABEL}`], { allowFailure: true });
+  runLaunchctl(["bootout", ctx.target], { allowFailure: true });
 }
 
 // `kickstart -k` atomically kills and restarts the service. Doing
 // `kill` + `kickstart` separately races: `kill SIGTERM` is async, so
 // `kickstart` (without -k) is a no-op while the old process is still alive.
 function restartService(ctx: Ctx): void {
-  runLaunchctl(["kickstart", "-k", `${ctx.domain}/${LAUNCHD_LABEL}`]);
+  runLaunchctl(["kickstart", "-k", ctx.target]);
 }
 
 function showStatus(ctx: Ctx): void {
-  const res = spawnSync("launchctl", ["print", `${ctx.domain}/${LAUNCHD_LABEL}`], {
+  const res = spawnSync("launchctl", ["print", ctx.target], {
     stdio: "inherit",
   });
   if (res.status !== 0) {
@@ -170,7 +174,7 @@ function runLaunchctl(args: string[], opts: { allowFailure?: boolean } = {}): vo
 function printPostInstallHints(ctx: Ctx, logDir: string): void {
   console.log("");
   console.log("[kandev] Useful commands:");
-  console.log(`[kandev]   launchctl print ${ctx.domain}/${LAUNCHD_LABEL}`);
+  console.log(`[kandev]   launchctl print ${ctx.target}`);
   console.log(`[kandev]   kandev service restart${ctx.isSystem ? " --system" : ""}`);
   console.log(`[kandev]   tail -f ${path.join(logDir, "service.err")}`);
 }
