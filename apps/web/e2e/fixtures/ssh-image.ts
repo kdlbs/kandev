@@ -56,11 +56,17 @@ RUN apk add --no-cache \\
     git \\
     bash \\
     sudo \\
+    shadow \\
     coreutils \\
     ca-certificates \\
     iproute2 \\
     iptables \\
  && adduser -D -s /bin/bash kandev \\
+ # Alpine's adduser -D leaves the account "locked" (password = ! in /etc/shadow).
+ # sshd refuses ALL auth methods — including pubkey — for locked users, so we
+ # unlock by setting the password hash to '*' (no valid password, but the
+ # account itself is open for key-based login).
+ && usermod -p '*' kandev \\
  && echo "kandev ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers \\
  && mkdir -p /home/kandev/.ssh /var/empty /var/run/sshd \\
  && chown -R kandev:kandev /home/kandev \\
