@@ -43,6 +43,7 @@ import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import type { Executor, ProfileEnvVar } from "@/lib/types/http";
 
 import { EXECUTOR_TYPE_MAP } from "./executor-types";
+import { SSHCreatePage } from "./ssh-create-page";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
@@ -60,6 +61,10 @@ export default function CreateProfilePage({ params }: { params: Promise<{ type: 
 
   if (!typeInfo) {
     return <InvalidTypeFallback />;
+  }
+
+  if (type === "ssh") {
+    return <SSHCreatePage />;
   }
 
   return <CreateProfileForm executorType={type} typeInfo={typeInfo} />;

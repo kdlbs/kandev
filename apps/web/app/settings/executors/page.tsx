@@ -57,6 +57,11 @@ const EXECUTOR_TYPES = [
     label: "Sprites.dev",
     description: "Run agents in Sprites.dev cloud sandboxes.",
   },
+  {
+    type: "ssh",
+    label: "SSH",
+    description: "Connect to a remote host over SSH and run agentctl there.",
+  },
 ] as const;
 
 function ExecutorIconBadge({ type }: { type: string }) {
