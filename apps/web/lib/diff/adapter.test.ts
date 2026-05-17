@@ -102,6 +102,46 @@ describe("normalizeDiffString", () => {
     expect(lines[3]).toBe("+++ b/src/foo.ts");
   });
 
+  it("detects new file from a `new file mode` header even without an @@ hunk", () => {
+    // Header-only new-file patches (mode-only / binary / rename-no-delta)
+    // need the same /dev/null treatment — otherwise the renderer treats
+    // them as modifications and pairs missing old content with the patch.
+    const diff = `new file mode 100644
+index 0000000..e69de29`;
+    const result = normalizeDiffString(diff, FILE);
+    const lines = result.split("\n");
+    expect(lines[0]).toBe(DIFF_GIT_HEADER);
+    expect(lines[1]).toBe("new file mode 100644");
+    expect(lines[2]).toBe("--- /dev/null");
+    expect(lines[3]).toBe(NEW_HEADER);
+  });
+
+  it("strips rename headers so the canonical --- / +++ pair survives", () => {
+    // `git diff --find-renames` produces `similarity index`, `rename from`,
+    // `rename to` lines that our older regex left in place — the duplicated
+    // header pair confused @pierre/diffs.
+    const diff = `diff --git a/old.ts b/${FILE}
+similarity index 95%
+rename from old.ts
+rename to ${FILE}
+index abcdef0..1234567 100644
+--- a/old.ts
++++ b/${FILE}
+@@ -1,1 +1,1 @@
+-old
++new`;
+    const result = normalizeDiffString(diff, FILE);
+    // No leftover rename / similarity / index header should remain.
+    expect(result).not.toContain("similarity index");
+    expect(result).not.toContain("rename from");
+    expect(result).not.toContain("rename to");
+    expect(result).not.toContain("a/old.ts");
+    expect(result).toContain(DIFF_GIT_HEADER);
+    expect(result).toContain(OLD_HEADER);
+    expect(result).toContain(NEW_HEADER);
+    expect(result).toContain("@@ -1,1 +1,1 @@");
+  });
+
   it("emits +++ /dev/null and deleted-file-mode for an `@@ -N,M +0,0 @@` hunk", () => {
     const diff = `@@ -1,2 +0,0 @@
 -line one

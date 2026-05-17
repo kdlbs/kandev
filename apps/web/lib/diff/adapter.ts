@@ -42,16 +42,19 @@ export function normalizeDiffString(diff: string, filePath: string): string {
 
   const trimmed = diff.trim();
 
-  // Detect new/deleted file from the first hunk header so we can force the
-  // correct old/new file markers even when the caller pre-attached headers.
-  const isNewFile = /@@\s+-0,0\s+\+\d/.test(trimmed);
-  const isDeletedFile = /@@\s+-\d[\d,]*\s+\+0,0\s+@@/.test(trimmed);
+  // Detect new/deleted file from the hunk header OR from the explicit
+  // mode-change line — covers patches with no `@@` body (mode-only,
+  // binary, or rename-with-no-delta).
+  const isNewFile = /@@\s+-0,0\s+\+\d/.test(trimmed) || /^new file mode\b/m.test(trimmed);
+  const isDeletedFile =
+    /@@\s+-\d[\d,]*\s+\+0,0\s+@@/.test(trimmed) || /^deleted file mode\b/m.test(trimmed);
 
-  // Strip any existing diff --git / index / mode / --- / +++ headers so we
-  // can re-emit them with the right /dev/null markers below. Hunk content
-  // (lines starting with @@) and everything after stays untouched.
+  // Strip every git-produced header line so we can re-emit canonical ones.
+  // Covers diff --git, index, mode change, similarity/dissimilarity, rename
+  // and copy markers, and the --- / +++ pair. Hunk content (lines starting
+  // with @@) and everything after stays untouched.
   const body = trimmed.replace(
-    /^(diff --git[^\n]*\n|index [^\n]*\n|(?:new|deleted) file mode [^\n]*\n|--- [^\n]*\n|\+\+\+ [^\n]*\n)+/,
+    /^(?:(?:diff --git|index |(?:new|deleted) file mode |(?:old|new) mode |(?:similarity|dissimilarity) index |(?:rename|copy) (?:from|to) |Binary files |--- |\+\+\+ )[^\n]*\n)+/,
     "",
   );
 
