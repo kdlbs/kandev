@@ -200,6 +200,19 @@ func (m *Manager) resolvePassthroughAgent(ctx context.Context, execution *AgentE
 	}, nil
 }
 
+// promptForPassthroughCommand returns the prompt that should be passed to
+// BuildPassthroughCommand. When the agent uses idle-based auto-inject and has
+// no PromptFlag, the prompt would otherwise be appended as a positional arg
+// (putting TUIs like Claude into non-interactive `-p` mode and exiting before
+// auto-inject fires). In that case we return "" so the prompt is delivered via
+// PTY stdin in autoInjectInitialPrompt.
+func promptForPassthroughCommand(pt agents.PassthroughConfig, taskDescription string) string {
+	if pt.AutoInjectPrompt && pt.PromptFlag.IsEmpty() {
+		return ""
+	}
+	return taskDescription
+}
+
 // passthroughAgentCommand validates passthrough support and builds the command for a passthrough session.
 // Returns the PassthroughAgent, PassthroughConfig, RuntimeConfig pointer, command, and any error.
 func (m *Manager) passthroughAgentCommand(execution *AgentExecution, profileInfo *AgentProfileInfo) (agents.PassthroughAgent, agents.PassthroughConfig, *agents.RuntimeConfig, agents.Command, error) {
@@ -216,16 +229,7 @@ func (m *Manager) passthroughAgentCommand(execution *AgentExecution, profileInfo
 	pt := ptAgent.PassthroughConfig()
 	rt := agentConfig.Runtime()
 	taskDescription := getTaskDescriptionFromMetadata(execution)
-
-	// When AutoInjectPrompt is on and the agent has no PromptFlag, the prompt
-	// would be appended as a positional arg by BuildPassthroughCommand —
-	// putting Claude (and similar TUIs) into non-interactive `-p` mode. The
-	// PTY-stdin delivery in autoInjectInitialPrompt is the intended path; omit
-	// the prompt here so we don't double-deliver.
-	promptForCmd := taskDescription
-	if pt.AutoInjectPrompt && pt.PromptFlag.IsEmpty() {
-		promptForCmd = ""
-	}
+	promptForCmd := promptForPassthroughCommand(pt, taskDescription)
 
 	cmd := ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
 		Model:            profileModel(profileInfo),

@@ -1834,7 +1834,9 @@ func (s *Service) saveArchiveCommits(ctx context.Context, sessionID string, comm
 }
 
 // promptPassthrough sends a follow-up prompt to a PTY session via stdin —
-// CLI mode has no ACP wire.
+// CLI mode has no ACP wire. MarkPassthroughRunning flips the session to
+// RUNNING so checkSessionPromptable on the next call rejects concurrent
+// prompts the same way ACP's setSessionRunning does.
 func (s *Service) promptPassthrough(ctx context.Context, sessionID, prompt string) (*PromptResult, error) {
 	pt, err := s.agentManager.ResolvePassthroughConfig(ctx, sessionID)
 	if err != nil {
@@ -1843,6 +1845,11 @@ func (s *Service) promptPassthrough(ctx context.Context, sessionID, prompt strin
 	payload := prompt + pt.SubmitSequence
 	if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, payload); err != nil {
 		return nil, fmt.Errorf("write passthrough stdin: %w", err)
+	}
+	if err := s.agentManager.MarkPassthroughRunning(sessionID); err != nil {
+		s.logger.Warn("failed to mark passthrough session as running",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 	}
 	s.logger.Debug("dispatched prompt to passthrough PTY",
 		zap.String("session_id", sessionID),
