@@ -170,6 +170,13 @@ export type StartupInfoOptions = {
   /** Mode header line, e.g. "dev mode: using local repo" or "release: v0.0.12 (github latest)" */
   header: string;
   ports: PortConfig;
+  /**
+   * Which port a user actually opens in a browser. In `start`/`run` the Go
+   * backend reverse-proxies Next.js so the entry point is the backend port;
+   * in `dev` the browser hits Next.js directly. Network URLs are only listed
+   * under this port — the other one is internal-only. Defaults to "backend".
+   */
+  primary?: "backend" | "web";
   /** Database file path */
   dbPath?: string;
   /** Log level being used */
@@ -185,18 +192,16 @@ export type StartupInfoOptions = {
  * browser running on a different machine.
  */
 export function logStartupInfo(options: StartupInfoOptions): void {
-  const { header, ports, dbPath, logLevel } = options;
+  const { header, ports, primary = "backend", dbPath, logLevel } = options;
   const backendUrl = ports.backendUrl;
   const webUrl = `http://localhost:${ports.webPort}`;
   const networkHosts = listHostNetworkAddresses();
+  const primaryPort = primary === "web" ? ports.webPort : ports.backendPort;
 
   console.log(`[kandev] ${header}`);
   console.log("[kandev] backend:", backendUrl);
-  for (const url of networkUrlsForPort(ports.backendPort, networkHosts)) {
-    console.log("[kandev]   network:", url);
-  }
   console.log("[kandev] web:", webUrl);
-  for (const url of networkUrlsForPort(ports.webPort, networkHosts)) {
+  for (const url of networkUrlsForPort(primaryPort, networkHosts)) {
     console.log("[kandev]   network:", url);
   }
   console.log("[kandev] agentctl port:", ports.agentctlPort);

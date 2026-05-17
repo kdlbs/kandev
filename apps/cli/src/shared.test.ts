@@ -293,7 +293,7 @@ describe("logStartupInfo", () => {
     vi.restoreAllMocks();
   });
 
-  it("prints a network URL line for each non-loopback host on both ports", () => {
+  function mockTwoInterfaces() {
     vi.spyOn(os, "networkInterfaces").mockReturnValue({
       eth0: [
         {
@@ -316,14 +316,27 @@ describe("logStartupInfo", () => {
         },
       ],
     });
+  }
 
+  it("prints network URLs on the backend port by default (start/run mode)", () => {
+    mockTwoInterfaces();
     logStartupInfo({ header: "test", ports });
-
     const lines = log.mock.calls.map((c) => c.join(" "));
     expect(lines).toContain("[kandev]   network: http://192.168.1.34:38429");
     expect(lines).toContain("[kandev]   network: http://100.94.173.104:38429");
+    // Web port network URLs are NOT printed — in start/run the backend
+    // reverse-proxies the web app, so the web port is internal-only and would
+    // only mislead a remote user.
+    expect(lines.some((l) => l.includes("network:") && l.includes(":37429"))).toBe(false);
+  });
+
+  it('prints network URLs on the web port when primary="web" (dev mode)', () => {
+    mockTwoInterfaces();
+    logStartupInfo({ header: "test", ports, primary: "web" });
+    const lines = log.mock.calls.map((c) => c.join(" "));
     expect(lines).toContain("[kandev]   network: http://192.168.1.34:37429");
     expect(lines).toContain("[kandev]   network: http://100.94.173.104:37429");
+    expect(lines.some((l) => l.includes("network:") && l.includes(":38429"))).toBe(false);
   });
 
   it("emits no network lines when only loopback interfaces exist", () => {
