@@ -6,7 +6,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { IconTerminal2 } from "@tabler/icons-react";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStoreApi } from "@/components/state-provider";
 import { createExecutor } from "@/lib/api/domains/settings-api";
 import { SSHConnectionCard } from "@/components/settings/ssh-connection-card";
 import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
@@ -26,8 +26,7 @@ const EXECUTORS_ROUTE = "/settings/executors";
  */
 export function SSHCreatePage() {
   const router = useRouter();
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
+  const store = useAppStoreApi();
 
   const handleSave = useCallback(
     async (cfg: SSHExecutorConfig) => {
@@ -47,10 +46,14 @@ export function SSHCreatePage() {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
-      setExecutors([...executors, next]);
+      // Read the latest store snapshot at write time so a concurrent
+      // updater (another fetch, a WS event, etc.) that landed while
+      // createExecutor was in-flight doesn't get overwritten.
+      const current = store.getState().executors.items;
+      store.getState().setExecutors([...current, next]);
       router.push(`/settings/executors/ssh/${created.id}`);
     },
-    [router, executors, setExecutors],
+    [router, store],
   );
 
   return (
