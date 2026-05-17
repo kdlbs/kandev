@@ -95,9 +95,13 @@ function systemctlIsActive(isSystem: boolean): string | null {
     const out = execFileSync("systemctl", args, { encoding: "utf8" });
     return out.trim();
   } catch (err: unknown) {
-    // is-active returns nonzero for inactive/failed/unknown — read the output anyway
-    const e = err as { stdout?: Buffer | string };
-    if (e?.stdout) return String(e.stdout).trim();
+    // is-active returns nonzero for inactive/failed/unknown — read the output anyway.
+    // execFileSync attaches stdout to the thrown error; guard with a type check
+    // instead of an unsafe cast so this keeps working if the error shape changes.
+    if (err !== null && typeof err === "object" && "stdout" in err) {
+      const { stdout } = err as { stdout?: Buffer | string };
+      if (stdout) return String(stdout).trim();
+    }
     return null;
   }
 }
