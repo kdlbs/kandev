@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
+import { execInContainer } from "../../helpers/ssh";
 
 /**
  * HTTP contract for POST /api/v1/ssh/test. The endpoint dials the host with a
@@ -91,6 +92,16 @@ test.describe("ssh test-endpoint contract", () => {
     apiClient,
     seedData,
   }) => {
+    // Wipe any prior agentctl + sha256 sidecar from the per-worker container
+    // so the "before" probe sees a fresh-install state regardless of which
+    // tests ran earlier in this worker.
+    execInContainer(seedData.sshTarget, [
+      "rm",
+      "-f",
+      "/home/kandev/.kandev/bin/agentctl",
+      "/home/kandev/.kandev/bin/agentctl.sha256",
+    ]);
+
     // First test run: agentctl has never been uploaded, status = "uploaded".
     const before = await apiClient.testSSHConnection({
       name: "F5-before",

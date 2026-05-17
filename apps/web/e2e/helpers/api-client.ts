@@ -852,6 +852,7 @@ export class ApiClient {
       task_environment_id?: string;
       worktree_path?: string;
       worktree_branch?: string;
+      error_message?: string;
     }>;
     total: number;
   }> {
