@@ -159,7 +159,10 @@ test.describe("ssh executor — task launch", () => {
     const sessionDir = `${row!.remote_task_dir}/.kandev/sessions/${row!.session_id}`;
     expect(remotePathExists(seedData.sshTarget, sessionDir)).toBe(true);
     const entries = listRemoteDir(seedData.sshTarget, sessionDir);
-    expect(entries).toEqual(expect.arrayContaining(["agentctl.pid", "agentctl.port"]));
+    // The wrapper writes the pid file and the log; the port travels via the
+    // AGENTCTL_PORT env var and the ExecutorRunning metadata, not a file.
+    expect(entries).toEqual(expect.arrayContaining(["agentctl.pid", "agentctl.log"]));
+    expect(row!.remote_agentctl_port).toBeGreaterThan(0);
   });
 
   test("stopping the session cleans up the session runtime dir but leaves the task dir", async ({
