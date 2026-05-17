@@ -567,34 +567,37 @@ func (f *SSHPortForwarder) handleLocal(client *ssh.Client, local net.Conn) {
 		return
 	}
 
-	// Bidirectional copy. The kandev backend's WS streams (agent + workspace)
-	// drive their own Close-frame teardown; when either side finishes the
-	// frame exchange the underlying TCP closes naturally, the io.Copy on
-	// that direction returns, we Close the conn we own, the OTHER io.Copy
-	// gets an error from the closed conn and returns, and we exit cleanly.
-	//
-	// We avoid CloseWrite-style half-close on the SSH channel: sending
-	// channel-eof while the WS server still has frames to send is sometimes
-	// observed as "abnormal closure" on the kandev side. Letting the WS
-	// protocol layer drive teardown — and only fully closing the conns once
-	// both io.Copy goroutines return — produces a clean 1000 close.
+	// Bidirectional copy. Each io.Copy reads until its source EOFs (kandev
+	// or agentctl sends FIN at the application layer) or errors. We use
+	// CloseWrite to propagate the half-close cleanly: when local->remote
+	// finishes, we tell agentctl "no more data from us" via the SSH channel's
+	// EOF without slamming the whole channel shut — that lets agentctl's WS
+	// writer finish flushing its pending frames before naturally tearing
+	// down its side. Symmetric for the other direction. The final full Close
+	// happens via the deferred handler when both goroutines have returned.
+	type halfCloser interface{ CloseWrite() error }
+	closeWriteHalf := func(c net.Conn) {
+		if hc, ok := c.(halfCloser); ok {
+			_ = hc.CloseWrite()
+		} else {
+			_ = c.Close()
+		}
+	}
 	errc := make(chan error, 2)
 	go func() {
 		_, err := io.Copy(remote, local)
-		// Closing remote on our way out signals to agentctl that the client
-		// half is gone; agentctl will close its WS side which closes its
-		// read of our channel, which surfaces as EOF in the other goroutine.
-		_ = remote.Close()
+		closeWriteHalf(remote)
 		errc <- err
 	}()
 	go func() {
 		_, err := io.Copy(local, remote)
-		// Closing local sends FIN to kandev so its read side EOFs cleanly.
-		_ = local.Close()
+		closeWriteHalf(local)
 		errc <- err
 	}()
 	<-errc
 	<-errc
+	_ = remote.Close()
+	_ = local.Close()
 }
 
 // LocalPort returns the local TCP port the forwarder is listening on.
