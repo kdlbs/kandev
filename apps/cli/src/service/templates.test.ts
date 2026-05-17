@@ -131,6 +131,37 @@ describe("renderLaunchdPlist", () => {
     expect(plist).toContain("KANDEV_VERSION");
   });
 
+  it("quotes Environment= lines when value contains a space (greptile P1 regression)", () => {
+    const unit = renderSystemdUnit({
+      launcher: NPM_LAUNCHER,
+      homeDir: "/home/john doe/.kandev",
+      logDir: "/home/john doe/.kandev/logs",
+      mode: "user",
+    });
+    // The whole assignment must be wrapped, not just the value.
+    expect(unit).toContain('Environment="KANDEV_HOME_DIR=/home/john doe/.kandev"');
+    // PATH always contains colons but no spaces — should NOT be quoted.
+    expect(unit).toMatch(/^Environment=PATH=\/usr\/local\/bin/m);
+  });
+
+  it("escapes backslash + double-quote in Environment= and ExecStart values", () => {
+    const unit = renderSystemdUnit({
+      launcher: {
+        nodePath: 'C:\\Program Files\\node "Node"\\node.exe',
+        cliEntry: "/home/alice/cli.js",
+        kind: "unknown",
+      },
+      homeDir: "C:\\Program Files\\kandev",
+      logDir: "/var/log",
+      mode: "user",
+    });
+    // Backslashes doubled, quotes escaped, whole thing wrapped.
+    expect(unit).toContain('Environment="KANDEV_HOME_DIR=C:\\\\Program Files\\\\kandev"');
+    expect(unit).toContain(
+      'ExecStart="C:\\\\Program Files\\\\node \\"Node\\"\\\\node.exe" /home/alice/cli.js --headless',
+    );
+  });
+
   it("emits UserName for system mode with systemUser", () => {
     const plist = renderLaunchdPlist({
       launcher: NPM_LAUNCHER,

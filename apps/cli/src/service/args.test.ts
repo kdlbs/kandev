@@ -71,4 +71,29 @@ describe("parseServiceArgs", () => {
   it("throws ParseError on unknown flag", () => {
     expect(() => parseServiceArgs(["install", "--nope"])).toThrow(/unknown flag/);
   });
+
+  it("rejects --follow for actions other than logs", () => {
+    expect(() => parseServiceArgs(["start", "--follow"])).toThrow(
+      /--follow only applies to 'kandev service logs'/,
+    );
+    expect(() => parseServiceArgs(["status", "-f"])).toThrow(
+      /--follow only applies to 'kandev service logs'/,
+    );
+    // happy path
+    expect(parseServiceArgs(["logs", "-f"]).follow).toBe(true);
+  });
+
+  it("rejects install-only flags on non-install actions", () => {
+    expect(() => parseServiceArgs(["stop", "--port=9000"])).toThrow(
+      /--port only applies to 'kandev service install'/,
+    );
+    expect(() => parseServiceArgs(["restart", "--home-dir=/x"])).toThrow(
+      /--home-dir only applies to 'kandev service install'/,
+    );
+    expect(() => parseServiceArgs(["status", "--no-boot-start"])).toThrow(
+      /--no-boot-start only applies to 'kandev service install'/,
+    );
+    // happy path
+    expect(parseServiceArgs(["install", "--port=9000"]).port).toBe(9000);
+  });
 });

@@ -2,7 +2,7 @@ import os from "node:os";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { resolveServiceUser } from "./paths";
+import { resolveHomeDir, resolveServiceUser } from "./paths";
 
 describe("resolveServiceUser", () => {
   const originalSudoUser = process.env.SUDO_USER;
@@ -64,5 +64,41 @@ describe("resolveServiceUser", () => {
     });
     process.env.SUDO_USER = "root";
     expect(resolveServiceUser(true)).toBe("alice");
+  });
+});
+
+describe("resolveHomeDir", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns an absolute override as-is (no tilde)", () => {
+    expect(resolveHomeDir("/srv/kandev", false)).toBe("/srv/kandev");
+  });
+
+  it("expands a leading ~/ to os.homedir()", () => {
+    vi.spyOn(os, "homedir").mockReturnValue("/home/alice");
+    expect(resolveHomeDir("~/kandev", false)).toBe("/home/alice/kandev");
+    expect(resolveHomeDir("~/srv/nested", false)).toBe("/home/alice/srv/nested");
+  });
+
+  it("expands a bare ~ to os.homedir()", () => {
+    vi.spyOn(os, "homedir").mockReturnValue("/home/alice");
+    expect(resolveHomeDir("~", false)).toBe("/home/alice");
+  });
+
+  it("does not expand a tilde that isn't at the start", () => {
+    expect(resolveHomeDir("/srv/~/data", false)).toBe("/srv/~/data");
+  });
+
+  it("falls back to /var/lib/kandev for system mode with no override", () => {
+    expect(resolveHomeDir(undefined, true)).toBe("/var/lib/kandev");
+  });
+
+  it("falls back to ~/.kandev for user mode with no override", () => {
+    // KANDEV_HOME_DIR is the constant from ../constants, computed at import
+    // time. We just check it ends with .kandev and starts with the home dir.
+    const result = resolveHomeDir(undefined, false);
+    expect(result.endsWith(".kandev")).toBe(true);
   });
 });

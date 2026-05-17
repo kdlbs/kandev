@@ -68,13 +68,11 @@ export async function runMacosService(args: ServiceArgs): Promise<void> {
 }
 
 async function installAsync(ctx: Ctx): Promise<void> {
-  installSync(ctx);
-  const homeDir = resolveHomeDir(ctx.args.homeDir, ctx.isSystem);
-  const logDir = resolveLogDir(homeDir);
+  const { logDir } = installSync(ctx);
   await waitForServiceHealth(ctx.args.port, () => dumpLaunchdLogs({ logDir, lines: 50 }));
 }
 
-function installSync(ctx: Ctx): void {
+function installSync(ctx: Ctx): { logDir: string } {
   const launcher = captureLauncher();
   const homeDir = resolveHomeDir(ctx.args.homeDir, ctx.isSystem);
   const logDir = resolveLogDir(homeDir);
@@ -106,6 +104,7 @@ function installSync(ctx: Ctx): void {
   );
 
   printPostInstallHints(ctx, logDir);
+  return { logDir };
 }
 
 function uninstall(ctx: Ctx): void {
