@@ -18,7 +18,7 @@ import {
 import type { useToast } from "@/components/toast-provider";
 import { useTree, type VisibleRow } from "@/hooks/use-tree";
 import { mergeTreeNodes } from "./file-browser-parts";
-import { compareTreeNodes } from "./file-tree-utils";
+import { compareTreeNodes, sortRootChildren } from "./file-tree-utils";
 
 const FB_GET_PATH = (n: FileTreeNode) => n.path;
 // Children are sorted (dirs first, then files, alphabetically) on every
@@ -332,8 +332,8 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
   const [tree, setTree] = useState<FileTreeNode | null>(null);
   // Expansion + flat visibleRows come from the shared useTree hook. tree is
   // a single root node with children; useTree wants an array, so feed it the
-  // root's children.
-  const treeNodes = useMemo(() => tree?.children ?? [], [tree]);
+  // root's children (pre-sorted — see sortRootChildren).
+  const treeNodes = useMemo(() => sortRootChildren(tree), [tree]);
   const treeApi = useTree<FileTreeNode>({
     nodes: treeNodes,
     getPath: FB_GET_PATH,

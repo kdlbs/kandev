@@ -7,6 +7,17 @@ export const compareTreeNodes = (a: FileTreeNode, b: FileTreeNode): number => {
 };
 
 /**
+ * Return the tree's root children sorted dirs-first / alpha. useTree iterates
+ * its top-level `nodes` directly (it only invokes `getChildren` to descend),
+ * so the root list must be pre-sorted by the caller — otherwise backend order
+ * leaks through and dirs interleave with files at depth 0.
+ */
+export function sortRootChildren(tree: FileTreeNode | null): FileTreeNode[] {
+  if (!tree?.children) return [];
+  return [...tree.children].sort(compareTreeNodes);
+}
+
+/**
  * Merge a freshly-fetched tree node into an existing one, preserving
  * already-loaded children so expanded folders don't collapse.
  */
