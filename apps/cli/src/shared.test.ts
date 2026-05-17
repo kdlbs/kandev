@@ -152,6 +152,10 @@ describe("buildWebEnv allowedDevOrigins", () => {
 });
 
 describe("listHostNetworkAddresses", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("returns a deduplicated list of non-internal addresses", () => {
     vi.spyOn(os, "networkInterfaces").mockReturnValue({
       eth0: [
@@ -176,6 +180,57 @@ describe("listHostNetworkAddresses", () => {
       ],
     });
     expect(listHostNetworkAddresses()).toEqual(["10.0.0.1"]);
-    vi.restoreAllMocks();
+  });
+
+  it("excludes internal loopback addresses", () => {
+    vi.spyOn(os, "networkInterfaces").mockReturnValue({
+      lo: [
+        {
+          address: "127.0.0.1",
+          netmask: "255.0.0.0",
+          family: "IPv4",
+          mac: "00:00:00:00:00:00",
+          internal: true,
+          cidr: "127.0.0.1/8",
+        },
+      ],
+      eth0: [
+        {
+          address: "10.0.0.5",
+          netmask: "255.0.0.0",
+          family: "IPv4",
+          mac: "aa:bb:cc:dd:ee:ff",
+          internal: false,
+          cidr: "10.0.0.5/8",
+        },
+      ],
+    });
+    expect(listHostNetworkAddresses()).toEqual(["10.0.0.5"]);
+  });
+
+  it("excludes IPv6 link-local (fe80::) addresses", () => {
+    vi.spyOn(os, "networkInterfaces").mockReturnValue({
+      eth0: [
+        {
+          address: "fe80::abcd",
+          netmask: "ffff:ffff:ffff:ffff::",
+          family: "IPv6",
+          mac: "aa:bb:cc:dd:ee:ff",
+          internal: false,
+          cidr: "fe80::abcd/64",
+          scopeid: 2,
+        },
+        {
+          address: "2001:db8::1",
+          netmask: "ffff:ffff:ffff:ffff::",
+          family: "IPv6",
+          mac: "aa:bb:cc:dd:ee:ff",
+          internal: false,
+          cidr: "2001:db8::1/64",
+          scopeid: 0,
+        },
+      ],
+    });
+    expect(listHostNetworkAddresses()).toEqual(["2001:db8::1"]);
   });
 });
