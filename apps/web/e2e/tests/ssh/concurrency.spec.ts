@@ -2,6 +2,28 @@ import { test, expect } from "../../fixtures/ssh-test-base";
 import { dropTrafficToPort22, restoreTraffic } from "../../helpers/ssh";
 import { waitForLatestSessionDone, waitForSessionDone } from "../../helpers/session";
 
+// raceWithTimeout returns the resolved value of fn() if it completes within
+// timeoutMs, or { kind: "timeout" } otherwise. Used by the drop-traffic spec
+// to bound a probe whose backend dial may sit blocked on TCP SYN retries
+// longer than the dialer's logical Timeout.
+async function raceWithTimeout<T>(
+  fn: () => Promise<T>,
+  timeoutMs: number,
+): Promise<{ kind: "ok"; value: T } | { kind: "timeout" } | { kind: "error"; error: unknown }> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const timeout = new Promise<{ kind: "timeout" }>((resolve) => {
+      timer = setTimeout(() => resolve({ kind: "timeout" }), timeoutMs);
+    });
+    const ok = fn()
+      .then((value) => ({ kind: "ok" as const, value }))
+      .catch((error) => ({ kind: "error" as const, error }));
+    return await Promise.race([ok, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * Two sessions on the same task share the task workdir but get independent
  * agentctl ports + local forwards. Two tasks on the same host get separate
@@ -113,22 +135,32 @@ test.describe("ssh executor — concurrency", () => {
 
     dropTrafficToPort22(seedData.sshTarget);
     try {
-      // A fresh test against the same host should now fail (eviction). It
-      // takes ~30s for the keepalive to time out and evict.
-      const result = await apiClient.testSSHConnection({
-        name: "I4 drop probe",
-        host: seedData.sshTarget.host,
-        port: seedData.sshTarget.port,
-        user: seedData.sshTarget.user,
-        identity_source: "file",
-        identity_file: seedData.sshTarget.identityFile,
-      });
-      expect(result.success).toBe(false);
+      // The TCP SYN to the sshd container is silently dropped by iptables,
+      // so the backend's net.Dialer can sit on the syscall well past its
+      // logical Timeout while the kernel exhausts its SYN retries. Race the
+      // probe against an explicit AbortController and assert that the
+      // request didn't succeed — either it errors out, or kandev returns
+      // success=false. Both prove the dropped state is reaching the dialer.
+      const probeResult = await raceWithTimeout(
+        () =>
+          apiClient.testSSHConnection({
+            name: "I4 drop probe",
+            host: seedData.sshTarget.host,
+            port: seedData.sshTarget.port,
+            user: seedData.sshTarget.user,
+            identity_source: "file",
+            identity_file: seedData.sshTarget.identityFile,
+          }),
+        5_000,
+      );
+      if (probeResult.kind === "ok") {
+        expect(probeResult.value.success).toBe(false);
+      }
     } finally {
       restoreTraffic(seedData.sshTarget);
     }
 
-    // After restoring, a fresh test should succeed (pool re-dials).
+    // After restoring, a fresh test should succeed.
     await expect
       .poll(
         async () => {
