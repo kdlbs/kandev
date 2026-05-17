@@ -7,6 +7,7 @@ import type {
   TaskSessionState,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
+import type { SSHSessionBody, SSHTestRequestBody, SSHTestResultBody } from "./api-client-ssh";
 
 // --- GitHub Mock Types ---
 
@@ -1519,54 +1520,15 @@ export class ApiClient {
   }
 }
 
-// --- SSH HTTP shapes (kept here, alongside the rest of the api-client types) ---
-
-export type SSHIdentitySourceBody = "agent" | "file";
-
-export type SSHTestRequestBody = {
-  name: string;
-  host_alias?: string;
-  host?: string;
-  port?: number;
-  user?: string;
-  identity_source?: SSHIdentitySourceBody;
-  identity_file?: string;
-  proxy_jump?: string;
-};
-
-export type SSHTestStepBody = {
-  name: string;
-  duration_ms: number;
-  success: boolean;
-  output?: string;
-  error?: string;
-};
-
-export type SSHTestResultBody = {
-  success: boolean;
-  fingerprint?: string;
-  uname_all?: string;
-  arch?: string;
-  git_version?: string;
-  agentctl_action?: "cached" | "uploaded" | "skipped";
-  steps: SSHTestStepBody[];
-  total_duration_ms: number;
-  error?: string;
-};
-
-export type SSHSessionBody = {
-  session_id: string;
-  task_id: string;
-  task_title?: string;
-  host: string;
-  user?: string;
-  remote_task_dir?: string;
-  remote_agentctl_port?: number;
-  local_forward_port?: number;
-  status: string;
-  uptime_seconds: number;
-  created_at: string;
-};
+// SSH HTTP shapes live in api-client-ssh.ts; re-exported here so existing
+// callers that imported them from api-client keep working.
+export type {
+  SSHIdentitySourceBody,
+  SSHTestRequestBody,
+  SSHTestStepBody,
+  SSHTestResultBody,
+  SSHSessionBody,
+} from "./api-client-ssh";
 
 // --- Jira / Linear mock payload types ---
 

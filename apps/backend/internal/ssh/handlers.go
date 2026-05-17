@@ -330,6 +330,11 @@ func (h *Handler) testAgentctlCache(ctx context.Context, client *ssh.Client, res
 // the TaskSession associated with each row — the row itself has an
 // ExecutorID column but the lifecycle manager does not populate it for fresh
 // executions, so it's unreliable as a filter.
+//
+// The runtime filter runs before the session lookup, so the per-row
+// GetTaskSession call only fires for SSH rows — typically <10 per executor.
+// If that count ever grows materially we should add a batch List by
+// session-ID method to the repo and resolve in one query.
 func (h *Handler) listSessions(ctx context.Context, executorID string) ([]SessionRow, error) {
 	rows, err := h.repo.ListExecutorsRunning(ctx)
 	if err != nil {
