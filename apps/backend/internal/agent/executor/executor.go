@@ -15,6 +15,7 @@ const (
 	NameLocal        Name = "local"
 	NameRemoteDocker Name = "remote_docker"
 	NameSprites      Name = "sprites"
+	NameSSH          Name = "ssh"
 )
 
 // ExecutorTypeToBackend maps an ExecutorType to its corresponding executor Name.
@@ -30,6 +31,8 @@ func ExecutorTypeToBackend(execType models.ExecutorType) Name {
 		return NameRemoteDocker
 	case models.ExecutorTypeSprites:
 		return NameSprites
+	case models.ExecutorTypeSSH:
+		return NameSSH
 	case models.ExecutorTypeMockRemote:
 		return NameStandalone
 	default:

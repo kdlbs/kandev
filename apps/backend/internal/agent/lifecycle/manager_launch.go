@@ -46,6 +46,14 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	for k, v := range req.Metadata {
 		metadata[k] = v
 	}
+	// Merge executor record's Config (host, port, fingerprint, etc.) so
+	// runtimes that need per-executor config (e.g. SSH) can read it from
+	// metadata without re-querying the DB.
+	for k, v := range req.ExecutorConfig {
+		if _, exists := metadata[k]; !exists {
+			metadata[k] = v
+		}
+	}
 	if mainRepoGitDir != "" {
 		metadata[MetadataKeyMainRepoGitDir] = mainRepoGitDir
 	}

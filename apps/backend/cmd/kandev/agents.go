@@ -76,6 +76,11 @@ func provideLifecycleManager(
 	executorRegistry.Register(spritesExec)
 	log.Info("Sprites runtime registered")
 
+	// Register SSH runtime (run an agent on any Linux box reachable over SSH).
+	sshExec := lifecycle.NewSSHExecutor(secretStore, agentRegistry, agentctlResolver, log)
+	executorRegistry.Register(sshExec)
+	log.Info("SSH runtime registered")
+
 	credsMgr := credentials.NewManager(log)
 	if secretStore != nil {
 		credsMgr.AddProvider(secrets.NewSecretStoreProvider(secretStore))
@@ -106,6 +111,7 @@ func provideLifecycleManager(
 	preparerRegistry.Register(agentexecutor.NameStandalone, lifecycle.NewLocalPreparer(log))
 	preparerRegistry.Register(agentexecutor.NameDocker, lifecycle.NewDockerPreparer(log))
 	preparerRegistry.Register(agentexecutor.NameSprites, lifecycle.NewSpritesPreparer(log))
+	preparerRegistry.Register(agentexecutor.NameSSH, lifecycle.NewSSHPreparer(log))
 	lifecycleMgr.SetPreparerRegistry(preparerRegistry)
 	lifecycleMgr.SetSecretStore(secretStore)
 
