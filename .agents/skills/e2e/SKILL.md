@@ -73,6 +73,7 @@ Without this, tests run against stale code and failures are misleading. `make bu
 - **`apiClient.createTaskWithAgent(...)` returns `CreateTaskResponse`**, which is `Task & { session_id?: string; agent_execution_id?: string }`. Read `created.session_id` directly — don't call `listTaskSessions(taskId)` just to fetch the session that was auto-started by the same call.
 - **The URL `/t/:id` contains the TASK ID**, not the session ID. Backend routes like `/port-proxy/:sessionId/:port/*path` expect the session ID. Don't extract IDs from `window.location.pathname` when you need a session ID — pull from the API response.
 - **`page.request` shares cookies/storage with the page context**. Fine for the current no-auth local backend; if auth ever lands, this is where you'd plug it in.
+- **Preview iframe tests:** the seed repo has no `dev_script` configured, so the preview panel renders a placeholder ("Configure a dev script…") and the URL input never appears — tests that try to drive it hang on the locator timeout. To use the preview iframe in a test, set one first: `await apiClient.updateRepository(seedData.repositoryId, { dev_script: "echo dev" })`. Then click the Preview dockview tab (`await session.clickTab("Preview")`) — the toolbar will mount and the URL input becomes targetable.
 
 Example:
 
