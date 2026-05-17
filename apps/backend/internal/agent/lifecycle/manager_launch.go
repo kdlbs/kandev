@@ -40,16 +40,43 @@ func (m *Manager) resolveAgentProfile(ctx context.Context, req *LaunchRequest) (
 	return profileInfo.AgentName, profileInfo, nil
 }
 
+// trustedExecutorConfigKeys are the metadata keys whose value MUST come from
+// the configured executor record — never from request-supplied metadata —
+// because they steer the connection (host, fingerprint, identity). Letting a
+// task override them would allow pivoting an SSH launch to a different host
+// or bypassing the pinned host-key.
+var trustedExecutorConfigKeys = map[string]bool{
+	MetadataKeySSHHost:            true,
+	MetadataKeySSHPort:            true,
+	MetadataKeySSHUser:            true,
+	MetadataKeySSHHostFingerprint: true,
+	MetadataKeySSHIdentitySource:  true,
+	MetadataKeySSHIdentityFile:    true,
+	MetadataKeySSHProxyJump:       true,
+}
+
+func isTrustedExecutorConfigKey(k string) bool { return trustedExecutorConfigKeys[k] }
+
 // buildLaunchMetadata builds runtime metadata for the Launch request.
+//
+// Per-executor config (host, fingerprint, ssh identity, …) is the trusted
+// source for connection-routing decisions, so it overrides any same-key
+// values the caller passed in req.Metadata. Other keys (per-task settings
+// like setup_script, base_branch, repo_setup_script, etc.) keep the caller's
+// value when present.
 func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktreeBranch string) map[string]interface{} {
 	metadata := make(map[string]interface{})
 	for k, v := range req.Metadata {
 		metadata[k] = v
 	}
-	// Merge executor record's Config (host, port, fingerprint, etc.) so
-	// runtimes that need per-executor config (e.g. SSH) can read it from
-	// metadata without re-querying the DB.
 	for k, v := range req.ExecutorConfig {
+		if isTrustedExecutorConfigKey(k) {
+			// Executor config wins for connection-routing keys so a malicious
+			// or buggy task metadata payload can't swap out the SSH host /
+			// pinned fingerprint and pivot the launch to a different target.
+			metadata[k] = v
+			continue
+		}
 		if _, exists := metadata[k]; !exists {
 			metadata[k] = v
 		}

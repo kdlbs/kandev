@@ -82,10 +82,27 @@ func (r *SSHExecutor) HealthCheck(_ context.Context) error {
 	return nil
 }
 
-// Close is a no-op: per-session SSH clients are owned by sshSessionState and
-// torn down by StopInstance. Kept on the type so the executor satisfies
-// io.Closer alongside the other backends.
-func (r *SSHExecutor) Close() error { return nil }
+// Close terminates every still-tracked SSH session. Normal teardown happens
+// session-by-session via StopInstance; Close is the shutdown safety net for
+// sessions whose StopInstance didn't run (e.g. a hard kandev exit).
+func (r *SSHExecutor) Close() error {
+	r.mu.Lock()
+	states := make([]*sshSessionState, 0, len(r.sessions))
+	for id, s := range r.sessions {
+		states = append(states, s)
+		delete(r.sessions, id)
+	}
+	r.mu.Unlock()
+	for _, s := range states {
+		if s.forwarder != nil {
+			_ = s.forwarder.Close()
+		}
+		if s.client != nil {
+			_ = s.client.Close()
+		}
+	}
+	return nil
+}
 
 // targetFromMetadata builds an SSHTarget from the executor metadata
 // propagated via buildLaunchMetadata (req.ExecutorConfig keys merged in).
@@ -132,7 +149,18 @@ func (r *SSHExecutor) workdirRoot(md map[string]interface{}) string {
 // ensures agentctl is uploaded, provisions the per-task remote dir, launches
 // a per-session agentctl process, and sets up a local port forward so the
 // kandev backend can speak to it as if it were on localhost.
+//
+// If ResumeRemoteInstance already attached this InstanceID (e.g. after a
+// backend restart), reuse the resumed SSH client + forwarder + remote pid
+// instead of starting a second remote agentctl on top of the live one.
 func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	r.mu.Lock()
+	resumed, ok := r.sessions[req.InstanceID]
+	r.mu.Unlock()
+	if ok {
+		return r.buildResumedInstance(req, resumed), nil
+	}
+
 	target, err := r.targetFromMetadata(req.Metadata)
 	if err != nil {
 		return nil, err
@@ -299,6 +327,40 @@ func (r *SSHExecutor) buildInstance(
 			MetadataKeySSHRemoteAgentctlPort: strconv.Itoa(port),
 			MetadataKeySSHRemoteAgentctlPID:  strconv.Itoa(pid),
 			MetadataKeySSHLocalForwardPort:   strconv.Itoa(fwd.LocalPort()),
+			MetadataKeySSHWorkdirRoot:        workdir,
+			MetadataKeyIsRemote:              true,
+		},
+	}
+}
+
+// buildResumedInstance constructs an ExecutorInstance from already-attached
+// session state set up by ResumeRemoteInstance. No new dials / uploads / agent
+// launches — the remote agentctl is still running from the previous session.
+// Metadata mirrors the original launch's values so downstream consumers
+// don't see a partial view.
+func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *sshSessionState) *ExecutorInstance {
+	port, _ := strconv.Atoi(getMetadataString(req.Metadata, MetadataKeySSHRemoteAgentctlPort))
+	taskDir := getMetadataString(req.Metadata, MetadataKeySSHRemoteTaskDir)
+	workdir := r.workdirRoot(req.Metadata)
+	return &ExecutorInstance{
+		InstanceID:  req.InstanceID,
+		TaskID:      req.TaskID,
+		SessionID:   req.SessionID,
+		RuntimeName: string(r.Name()),
+		Client: agentctl.NewClient("127.0.0.1", state.forwarder.LocalPort(), r.logger,
+			agentctl.WithExecutionID(req.InstanceID),
+			agentctl.WithSessionID(req.SessionID)),
+		WorkspacePath: taskDir,
+		Metadata: map[string]interface{}{
+			MetadataKeySSHHost:               state.target.Host,
+			MetadataKeySSHPort:               strconv.Itoa(state.target.Port),
+			MetadataKeySSHUser:               state.target.User,
+			MetadataKeySSHHostFingerprint:    state.target.PinnedFingerprint,
+			MetadataKeySSHRemoteTaskDir:      taskDir,
+			MetadataKeySSHRemoteSessionDir:   state.remoteDir,
+			MetadataKeySSHRemoteAgentctlPort: strconv.Itoa(port),
+			MetadataKeySSHRemoteAgentctlPID:  strconv.Itoa(state.pid),
+			MetadataKeySSHLocalForwardPort:   strconv.Itoa(state.forwarder.LocalPort()),
 			MetadataKeySSHWorkdirRoot:        workdir,
 			MetadataKeyIsRemote:              true,
 		},

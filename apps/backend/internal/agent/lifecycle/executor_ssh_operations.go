@@ -628,15 +628,29 @@ func (f *SSHPortForwarder) Close() error {
 
 // waitAgentctlHealthy polls http://127.0.0.1:<localPort>/health for up to
 // timeout. Used to confirm the forwarded tunnel is wired up after start /
-// recovery.
+// recovery. An open TCP socket isn't enough — the local port is owned by the
+// SSH forwarder, which accepts then dials direct-tcpip to the remote; a TCP
+// connect can succeed before the forwarder actually establishes the channel.
+// Probe with a real HTTP request and require a 2xx response so a broken
+// channel surfaces here instead of at the first agent operation.
 func waitAgentctlHealthy(ctx context.Context, localPort int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	dialer := &net.Dialer{Timeout: 2 * time.Second}
+	url := fmt.Sprintf("http://127.0.0.1:%d/health", localPort)
+	httpClient := &http.Client{Timeout: 5 * time.Second}
+	defer httpClient.CloseIdleConnections()
+
 	for time.Now().Before(deadline) {
-		conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort)))
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return fmt.Errorf("agentctl health probe: build request: %w", err)
+		}
+		resp, err := httpClient.Do(req)
 		if err == nil {
-			_ = conn.Close()
-			return nil
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+				return nil
+			}
 		}
 		select {
 		case <-ctx.Done():

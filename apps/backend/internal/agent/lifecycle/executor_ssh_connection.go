@@ -228,22 +228,29 @@ func (e *errHostKeyMismatch) Error() string {
 // buildAuthMethods builds the SSH auth methods for the target.
 // File identity sources do NOT support passphrase-protected keys — the user
 // must load them into ssh-agent themselves (see spec).
-func buildAuthMethods(target *SSHTarget) ([]ssh.AuthMethod, error) {
+//
+// The returned cleanup function releases any resources held by the auth
+// methods (e.g. the ssh-agent unix socket). Callers should invoke it after
+// the handshake completes — the agent connection is only consulted during
+// initial key exchange.
+func buildAuthMethods(target *SSHTarget) ([]ssh.AuthMethod, func(), error) {
+	noop := func() {}
 	switch target.IdentitySource {
 	case SSHIdentitySourceAgent:
 		sock := os.Getenv("SSH_AUTH_SOCK")
 		if sock == "" {
-			return nil, errors.New("ssh-agent identity source selected but SSH_AUTH_SOCK is not set; start an agent and add your key (ssh-add)")
+			return nil, noop, errors.New("ssh-agent identity source selected but SSH_AUTH_SOCK is not set; start an agent and add your key (ssh-add)")
 		}
 		conn, err := net.Dial("unix", sock)
 		if err != nil {
-			return nil, fmt.Errorf("failed to connect to ssh-agent: %w", err)
+			return nil, noop, fmt.Errorf("failed to connect to ssh-agent: %w", err)
 		}
 		ag := agent.NewClient(conn)
-		return []ssh.AuthMethod{ssh.PublicKeysCallback(ag.Signers)}, nil
+		cleanup := func() { _ = conn.Close() }
+		return []ssh.AuthMethod{ssh.PublicKeysCallback(ag.Signers)}, cleanup, nil
 	case SSHIdentitySourceFile:
 		if target.IdentityFile == "" {
-			return nil, errors.New("ssh: identity file path is required")
+			return nil, noop, errors.New("ssh: identity file path is required")
 		}
 		// IdentityFile is configured by the kandev user themselves — it's the
 		// same path semantics as `ssh -i` (any absolute or ~-relative path on
@@ -253,20 +260,20 @@ func buildAuthMethods(target *SSHTarget) ([]ssh.AuthMethod, error) {
 		path := filepath.Clean(target.IdentityFile)
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read identity file %s: %w", path, err)
+			return nil, noop, fmt.Errorf("failed to read identity file %s: %w", path, err)
 		}
 		signer, err := ssh.ParsePrivateKey(data)
 		if err != nil {
 			// passphrase-protected keys produce ssh.PassphraseMissingError — fail loudly.
 			var pmErr *ssh.PassphraseMissingError
 			if errors.As(err, &pmErr) {
-				return nil, fmt.Errorf("identity file %s is passphrase-protected; load it into ssh-agent (ssh-add) and switch identity source to ssh-agent — kandev does not store passphrases", path)
+				return nil, noop, fmt.Errorf("identity file %s is passphrase-protected; load it into ssh-agent (ssh-add) and switch identity source to ssh-agent — kandev does not store passphrases", path)
 			}
-			return nil, fmt.Errorf("failed to parse identity file %s: %w", path, err)
+			return nil, noop, fmt.Errorf("failed to parse identity file %s: %w", path, err)
 		}
-		return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
+		return []ssh.AuthMethod{ssh.PublicKeys(signer)}, noop, nil
 	default:
-		return nil, fmt.Errorf("unsupported identity source: %q", target.IdentitySource)
+		return nil, noop, fmt.Errorf("unsupported identity source: %q", target.IdentitySource)
 	}
 }
 
@@ -277,10 +284,14 @@ func buildAuthMethods(target *SSHTarget) ([]ssh.AuthMethod, error) {
 // records the observed fingerprint on target.ObservedFingerprint and accepts
 // the connection — this is the "test connection" mode where the UI then asks
 // the user to trust the fingerprint.
-func buildClientConfig(target *SSHTarget) (*ssh.ClientConfig, error) {
-	auth, err := buildAuthMethods(target)
+//
+// The returned cleanup function releases any auth-time resources (ssh-agent
+// socket) — callers must call it once the handshake completes; the agent
+// connection is only consulted during initial key exchange.
+func buildClientConfig(target *SSHTarget) (*ssh.ClientConfig, func(), error) {
+	auth, authCleanup, err := buildAuthMethods(target)
 	if err != nil {
-		return nil, err
+		return nil, authCleanup, err
 	}
 	return &ssh.ClientConfig{
 		User: target.User,
@@ -297,7 +308,7 @@ func buildClientConfig(target *SSHTarget) (*ssh.ClientConfig, error) {
 			return nil
 		},
 		Timeout: sshDialTimeout,
-	}, nil
+	}, authCleanup, nil
 }
 
 // DialSSH opens an SSH connection to target, optionally via a bastion if
@@ -312,10 +323,16 @@ func DialSSH(ctx context.Context, target *SSHTarget) (*ssh.Client, error) {
 // dial opens an SSH connection to target, optionally via a bastion if ProxyJump
 // is set. Returns the live *ssh.Client and the observed fingerprint.
 func dialSSH(ctx context.Context, target *SSHTarget) (*ssh.Client, error) {
-	cfg, err := buildClientConfig(target)
+	cfg, cleanup, err := buildClientConfig(target)
 	if err != nil {
+		cleanup()
 		return nil, err
 	}
+	// The auth cleanup (ssh-agent socket) is only needed during the handshake
+	// — the agent is consulted by PublicKeysCallback during key exchange and
+	// never again. Release it after the dial path returns, regardless of
+	// success.
+	defer cleanup()
 	addr := net.JoinHostPort(target.Host, strconv.Itoa(target.Port))
 
 	if target.ProxyJump == "" {
@@ -351,10 +368,12 @@ func dialViaJump(ctx context.Context, target *SSHTarget, finalAddr string, final
 	if err != nil {
 		return nil, fmt.Errorf("ssh: resolve bastion %q: %w", target.ProxyJump, err)
 	}
-	bastionCfg, err := buildClientConfig(bastion)
+	bastionCfg, bastionAuthCleanup, err := buildClientConfig(bastion)
 	if err != nil {
+		bastionAuthCleanup()
 		return nil, fmt.Errorf("ssh: bastion config: %w", err)
 	}
+	defer bastionAuthCleanup()
 	bastionAddr := net.JoinHostPort(bastion.Host, strconv.Itoa(bastion.Port))
 	// Without an explicit pinned fingerprint, the bastion's host key would
 	// otherwise be accepted unconditionally by buildClientConfig. Verify it
