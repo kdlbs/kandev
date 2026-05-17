@@ -202,7 +202,7 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
 When a test fails:
 
 1. **Read the error output** — the Playwright error message, expected vs. actual, and which locator timed out
-2. **Read `error-context.md`** from `test-results/<test-name>/` — contains a YAML DOM snapshot showing exactly what was rendered. Search for expected elements, check if the page is in the right state (e.g., simple mode vs advanced mode)
+2. **Read `error-context.md`** from `test-results/<test-name>/` — contains a YAML DOM snapshot showing exactly what was rendered. Search for expected elements, check if the page is in the right state (e.g., simple mode vs advanced mode). **These files persist across runs** — always confirm timestamps (`stat -f "%Sm" e2e/test-results/.../error-context.md`) or rebuild + rerun the spec fresh before trusting the snapshot. A stale context from a previous failure mode will send you debugging the wrong bug.
 3. **Read the failure screenshot** from `e2e/test-results/` — see what the page actually rendered
 4. **Attach to the failure** for deeper debugging using `playwright-cli`:
    ```bash

@@ -99,6 +99,13 @@ If any failing check is an E2E test (Playwright):
    ```
    Run the specific failing test file(s), not the full suite. Only proceed to step 5 after the test passes locally.
 
+**Don't dismiss a repeated failure as "flaky".** If the same shard or test fails 2+ poll iterations in a row, stop polling and do two cheap checks instead:
+
+- **Compare per-shard runtime vs `main`.** `gh run list --branch main --workflow "<name>" --limit 5 --json databaseId` then `gh run view <id> --json jobs` and diff started/completed timestamps against the PR's run. A shard that takes e.g. 216s on main and 616s on the PR is real test failures + retries pushing past the job's `timeout-minutes` cap, not infrastructure variance. "Cancelled" at exactly the timeout boundary almost always means this.
+- **Reproduce the failing spec locally** (step 4 above). CI logs hide in-DOM React render errors that show up immediately in the local `e2e/test-results/<test>/error-context.md`. A single local run (~5-10 min) routinely unlocks fixes that would otherwise burn 3+ CI cycles of speculative "rerun and hope".
+
+Recommend a merge over green-pending-flake-rerun only after both checks pass.
+
 Mark task 2 as completed.
 
 ### 3. Triage review comments
