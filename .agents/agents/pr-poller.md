@@ -30,11 +30,14 @@ bots:
   cubic:      <done|pending|timeout>              reviews=<N>
 unresolved_review_threads: <N>
 issue_comments_from_bots: <N>
+claude_summary: blockers=<N> suggestions=<N> verdict=<ready|ready_with_suggestions|blocked|unknown|none>
 recommendation: <one sentence — what the parent should do next>
 === end ===
 ```
 
 Free-form notes are forbidden outside the markers. The parent parses this verbatim. If something unexpected happens, surface it through `recommendation:` (one sentence).
+
+The `claude_summary` line carries the **latest** Claude summary's structured findings table. Pure issue-comment counts (`issue_comments_from_bots`) miss this because the count alone can't tell the parent whether the comment is actionable (e.g. CodeRabbit's "review skipped, too many files" boilerplate ≠ a Claude finding). Use `claude_summary` to drive triage, not the raw count.
 
 ## Procedure
 
@@ -107,9 +110,34 @@ Free-form notes are forbidden outside the markers. The parent parses this verbat
    gh pr view <num> --json comments --jq '[.comments[] | select(.author.login | IN("coderabbitai","github-actions"))] | length'
    ```
 
-6. **Emit the report.** Fill in the shape above exactly. The `recommendation:` line is one short sentence chosen from this menu, picking the first that applies:
+6. **Parse the latest Claude summary** for structured findings. Claude posts its review summary as an *issue comment* (not a review) — either as `claude[bot]` (same-repo app) or as `github-actions` with a body that begins `**Claude finished ` (fork path). Each summary ends with a markdown table of the form `| Blocker | <N> |` / `| Suggestion | <N> |` and a `**Verdict:** ...` line. Read only the **latest** such comment — earlier summaries reflect previous commit states.
+
+   ```bash
+   body=$(gh api repos/:owner/:repo/issues/<num>/comments --jq '
+     [.[] | select(
+       .user.login == "claude[bot]" or
+       (.user.login == "github-actions" and (.body | startswith("**Claude finished ")))
+     )] | sort_by(.created_at) | last | .body // ""
+   ')
+   blockers=$(printf '%s' "$body" | grep -oE '\| Blocker \| [0-9]+ \|' | grep -oE '[0-9]+' | head -1)
+   suggestions=$(printf '%s' "$body" | grep -oE '\| Suggestion \| [0-9]+ \|' | grep -oE '[0-9]+' | head -1)
+   verdict_raw=$(printf '%s' "$body" | grep -oE '\*\*Verdict:\*\* [A-Za-z][^.]*' | sed 's/\*\*Verdict:\*\* //' | head -1)
+   ```
+
+   Map `verdict_raw` to the emitted token:
+   - starts with `Blocked` → `blocked`
+   - starts with `Ready with suggestions` → `ready_with_suggestions`
+   - starts with `Ready` (and not "Ready with") → `ready`
+   - empty body or no match → `none`
+   - anything else → `unknown`
+
+   If `body` was empty (no Claude summary yet), emit `claude_summary: blockers=0 suggestions=0 verdict=none`. Default missing counts to `0`.
+
+7. **Emit the report.** Fill in the shape above exactly. The `recommendation:` line is one short sentence chosen from this menu, picking the first that applies:
    - `"CI failed — parent should read failing logs and fix."` if `ci_failed` is non-empty
    - `"All checks green; parent should triage <N> unresolved review threads."` if `unresolved_review_threads > 0`
+   - `"Claude summary flags <N> blocker(s); parent should fetch the latest claude[bot] comment and address them."` if `claude_summary.blockers > 0`
+   - `"All threads resolved; Claude has <N> pending suggestion(s) in its latest summary — parent should fetch and triage."` if `claude_summary.suggestions > 0`
    - `"All checks green and no unresolved comments — parent may close out."` otherwise
    - `"Polling timed out with pending items; parent should decide whether to keep waiting."` if any axis hit the cap
 
