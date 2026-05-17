@@ -135,8 +135,8 @@ The `claude_summary` line carries the **latest** Claude summary's structured fin
 
 7. **Emit the report.** Fill in the shape above exactly. The `recommendation:` line is one short sentence chosen from this menu, picking the first that applies:
    - `"CI failed — parent should read failing logs and fix."` if `ci_failed` is non-empty
-   - `"All checks green; parent should triage <N> unresolved review threads."` if `unresolved_review_threads > 0`
    - `"Claude summary flags <N> blocker(s); parent should fetch the latest claude[bot] comment and address them."` if `claude_summary.blockers > 0`
+   - `"All checks green; parent should triage <N> unresolved review threads."` if `unresolved_review_threads > 0`
    - `"All threads resolved; Claude has <N> pending suggestion(s) in its latest summary — parent should fetch and triage."` if `claude_summary.suggestions > 0`
    - `"All checks green and no unresolved comments — parent may close out."` otherwise
    - `"Polling timed out with pending items; parent should decide whether to keep waiting."` if any axis hit the cap
