@@ -271,7 +271,7 @@ func (r *Repository) GetActiveRunForFingerprint(
 
 // UpdateRunStatus updates a run's status and optionally its linked task.
 func (r *Repository) UpdateRunStatus(
-	ctx context.Context, runID, status, linkedTaskID string,
+	ctx context.Context, runID string, status models.RoutineRunStatus, linkedTaskID string,
 ) error {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`

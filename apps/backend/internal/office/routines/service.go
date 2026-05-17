@@ -5,32 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
-)
-
-// Concurrency policy constants.
-const (
-	ConcurrencySkipIfActive   = "skip_if_active"
-	ConcurrencyCoalesceActive = "coalesce_if_active"
-	ConcurrencyAlwaysCreate   = "always_create"
-)
-
-// Run status constants.
-const (
-	RunStatusReceived    = "received"
-	RunStatusTaskCreated = "task_created"
-	RunStatusSkipped     = "skipped"
-	RunStatusCoalesced   = "coalesced"
-	RunStatusFailed      = "failed"
-	RunStatusDone        = "done"
-	RunStatusCancelled   = "cancelled"
 )
 
 // Repository is the persistence interface required by RoutineService.
@@ -53,7 +35,7 @@ type Repository interface {
 	ListRoutineRuns(ctx context.Context, routineID string, limit, offset int) ([]*RoutineRun, error)
 	ListAllRuns(ctx context.Context, workspaceID string, limit int) ([]*RoutineRun, error)
 	GetActiveRunForFingerprint(ctx context.Context, routineID, fingerprint string) (*RoutineRun, error)
-	UpdateRunStatus(ctx context.Context, runID, status, linkedTaskID string) error
+	UpdateRunStatus(ctx context.Context, runID string, status models.RoutineRunStatus, linkedTaskID string) error
 	UpdateRunCoalesced(ctx context.Context, runID, coalescedIntoRunID string) error
 }
 
@@ -176,8 +158,8 @@ func (s *RoutineService) CreateDefaultCoordinatorRoutine(
 		TaskTemplate:           "",
 		AssigneeAgentProfileID: agentID,
 		Status:                 "active",
-		ConcurrencyPolicy:      ConcurrencyCoalesceActive,
-		CatchUpPolicy:          CatchUpPolicyEnqueueWithCap,
+		ConcurrencyPolicy:      models.ConcurrencyPolicyCoalesceIfActive,
+		CatchUpPolicy:          models.CatchUpPolicyEnqueueMissedWithCap,
 		CatchUpMax:             25,
 		Variables:              "{}",
 	}
@@ -403,7 +385,7 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 			zap.String("trigger_id", trigger.ID), zap.Error(err))
 	}
 	missedForPayload := 0
-	if strings.EqualFold(string(routine.CatchUpPolicy), CatchUpPolicySkipMissed) {
+	if routine.CatchUpPolicy == models.CatchUpPolicySkipMissed {
 		// skip_missed: collapse all misses, fire once with no attribution.
 		missedForPayload = 0
 	} else if runCount > 0 {
@@ -415,12 +397,7 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 	return err
 }
 
-// CatchUpPolicy values mirror the agent-heartbeat enum.
-const (
-	CatchUpPolicyEnqueueWithCap = "enqueue_missed_with_cap"
-	CatchUpPolicySkipMissed     = "skip_missed"
-	defaultCatchUpMax           = 25
-)
+const defaultCatchUpMax = 25
 
 // computeRoutineMissed counts cron ticks between trigger.NextRunAt
 // (inclusive — that's the tick "due now") and `now`, capped at
@@ -536,7 +513,7 @@ func (s *RoutineService) dispatchRoutineRun(
 		RoutineID:           routine.ID,
 		TriggerID:           triggerID,
 		Source:              source,
-		Status:              RunStatusReceived,
+		Status:              models.RoutineRunStatusReceived,
 		TriggerPayload:      string(payloadJSON),
 		DispatchFingerprint: fingerprint,
 		StartedAt:           &now,
@@ -568,7 +545,7 @@ func (s *RoutineService) dispatchRoutineRun(
 
 // materialiseRoutineRun branches on tmpl.Title to choose the lightweight
 // (taskless) or heavy (real task) path. Both paths transition the run
-// to RunStatusTaskCreated; only the heavy path attaches a real task id.
+// to models.RoutineRunStatusTaskCreated; only the heavy path attaches a real task id.
 // missedTicks is forwarded to the lightweight wakeup payload; the heavy
 // path doesn't attribute it (the agent reads context from the task).
 func (s *RoutineService) materialiseRoutineRun(
@@ -607,9 +584,9 @@ func (s *RoutineService) materialiseHeavyRoutineRun(
 	if err != nil {
 		return fmt.Errorf("create routine task: %w", err)
 	}
-	run.Status = RunStatusTaskCreated
+	run.Status = models.RoutineRunStatusTaskCreated
 	run.LinkedTaskID = taskID
-	if err := s.repo.UpdateRunStatus(ctx, run.ID, string(run.Status), run.LinkedTaskID); err != nil {
+	if err := s.repo.UpdateRunStatus(ctx, run.ID, run.Status, run.LinkedTaskID); err != nil {
 		return fmt.Errorf("update run status: %w", err)
 	}
 	return nil
@@ -630,8 +607,8 @@ func (s *RoutineService) materialiseLightweightRoutineRun(
 	vars map[string]string,
 	missedTicks int,
 ) error {
-	run.Status = RunStatusTaskCreated
-	if err := s.repo.UpdateRunStatus(ctx, run.ID, string(run.Status), ""); err != nil {
+	run.Status = models.RoutineRunStatusTaskCreated
+	if err := s.repo.UpdateRunStatus(ctx, run.ID, run.Status, ""); err != nil {
 		return fmt.Errorf("update run status: %w", err)
 	}
 	if s.wakeup == nil || routine.AssigneeAgentProfileID == "" {
@@ -706,8 +683,8 @@ func (s *RoutineService) applyConcurrencyPolicy(
 	routine *Routine,
 	run *RoutineRun,
 	fingerprint string,
-) (string, error) {
-	if routine.ConcurrencyPolicy == ConcurrencyAlwaysCreate {
+) (models.RoutineRunStatus, error) {
+	if routine.ConcurrencyPolicy == models.ConcurrencyPolicyAlwaysCreate {
 		return "", nil
 	}
 	active, err := s.repo.GetActiveRunForFingerprint(ctx, routine.ID, fingerprint)
@@ -718,15 +695,15 @@ func (s *RoutineService) applyConcurrencyPolicy(
 		return "", nil
 	}
 	switch routine.ConcurrencyPolicy {
-	case ConcurrencySkipIfActive:
-		_ = s.repo.UpdateRunStatus(ctx, run.ID, RunStatusSkipped, "")
-		run.Status = RunStatusSkipped
-		return RunStatusSkipped, nil
-	case ConcurrencyCoalesceActive:
+	case models.ConcurrencyPolicySkipIfActive:
+		_ = s.repo.UpdateRunStatus(ctx, run.ID, models.RoutineRunStatusSkipped, "")
+		run.Status = models.RoutineRunStatusSkipped
+		return models.RoutineRunStatusSkipped, nil
+	case models.ConcurrencyPolicyCoalesceIfActive:
 		_ = s.repo.UpdateRunCoalesced(ctx, run.ID, active.ID)
-		run.Status = RunStatusCoalesced
+		run.Status = models.RoutineRunStatusCoalesced
 		run.CoalescedIntoRunID = active.ID
-		return RunStatusCoalesced, nil
+		return models.RoutineRunStatusCoalesced, nil
 	}
 	return "", nil
 }
