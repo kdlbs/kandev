@@ -1,5 +1,4 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
-
 /**
  * HTTP contract for GET /api/v1/ssh/executors/:id/sessions. Backs the
  * SSHSessionsCard table. Filtered to ssh-runtime ExecutorRunning rows for
@@ -13,7 +12,7 @@ test.describe("ssh sessions-endpoint contract", () => {
     apiClient,
     seedData,
   }) => {
-    const task = await apiClient.createTaskWithAgent(
+    await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "G1 launch SSH session",
       seedData.agentProfileId,
@@ -25,18 +24,21 @@ test.describe("ssh sessions-endpoint contract", () => {
         executor_profile_id: seedData.sshExecutorProfileId,
       },
     );
+    // Poll listSSHSessions directly. We want the row to appear while the
+    // executor is up; the per-turn session may complete quickly and the row
+    // gets removed when the executor is fully torn down — so we race the
+    // query against teardown.
+    let sessions: Awaited<ReturnType<typeof apiClient.listSSHSessions>> = [];
     await expect
       .poll(
         async () => {
-          const env = await apiClient.getTaskEnvironment(task.id);
-          return env?.executor_type ?? null;
+          sessions = await apiClient.listSSHSessions(seedData.sshExecutorId);
+          return sessions.length;
         },
-        { message: "wait for ssh executor pickup", timeout: 60_000 },
+        { message: "wait for ssh session row to appear", timeout: 60_000 },
       )
-      .toBe("ssh");
+      .toBeGreaterThan(0);
 
-    const sessions = await apiClient.listSSHSessions(seedData.sshExecutorId);
-    expect(sessions.length).toBeGreaterThan(0);
     for (const s of sessions) {
       expect(s.host).toBe(seedData.sshTarget.host);
       expect(s.user).toBe(seedData.sshTarget.user);
