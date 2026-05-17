@@ -159,17 +159,43 @@ function showStatus(ctx: Ctx): void {
 }
 
 function showLogs(ctx: Ctx): void {
+  // Pull the log paths from the *installed* plist rather than recomputing
+  // from defaults — `--home-dir` is install-only, so a user who installed
+  // with a custom home dir would otherwise see "no logs yet" at the wrong
+  // location while logs accumulate at the real path.
+  const installed = readInstalledLogPaths(ctx.plistPath);
   const homeDir = resolveHomeDir(ctx.args.homeDir, ctx.isSystem);
-  const logDir = resolveLogDir(homeDir);
-  const outPath = path.join(logDir, "service.out");
-  const errPath = path.join(logDir, "service.err");
+  const fallbackDir = resolveLogDir(homeDir);
+  const outPath = installed?.out ?? path.join(fallbackDir, "service.out");
+  const errPath = installed?.err ?? path.join(fallbackDir, "service.err");
+
   const tailArgs: string[] = ctx.args.follow ? ["-f", "-n", "200"] : ["-n", "200"];
   const targets = [outPath, errPath].filter((p) => fs.existsSync(p));
   if (targets.length === 0) {
-    console.log(`[kandev] no logs yet at ${logDir}`);
+    const checkedDir = installed ? path.dirname(installed.err) : fallbackDir;
+    console.log(`[kandev] no logs yet at ${checkedDir}`);
     return;
   }
   spawnSync("tail", [...tailArgs, ...targets], { stdio: "inherit" });
+}
+
+/**
+ * Pull the literal StandardOutPath / StandardErrorPath values out of an
+ * installed plist. Plist XML is rigidly formatted by our renderer, so a
+ * regex match is enough — avoids pulling in a plist parser for two strings.
+ * Returns null when the plist is missing or doesn't contain the keys.
+ */
+export function readInstalledLogPaths(plistPath: string): { out: string; err: string } | null {
+  let content: string;
+  try {
+    content = fs.readFileSync(plistPath, "utf8");
+  } catch {
+    return null;
+  }
+  const outMatch = /<key>StandardOutPath<\/key>\s*<string>([^<]+)<\/string>/.exec(content);
+  const errMatch = /<key>StandardErrorPath<\/key>\s*<string>([^<]+)<\/string>/.exec(content);
+  if (!outMatch || !errMatch) return null;
+  return { out: outMatch[1], err: errMatch[1] };
 }
 
 function runLaunchctl(args: string[], opts: { allowFailure?: boolean } = {}): void {
