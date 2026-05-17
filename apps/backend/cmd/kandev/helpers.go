@@ -53,6 +53,7 @@ import (
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/slack"
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
+	sshhandlers "github.com/kandev/kandev/internal/ssh"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -622,6 +623,11 @@ func registerSecondaryRoutes(
 	if p.secretStore != nil {
 		spriteshandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, p.secretStore, p.log)
 		p.log.Debug("Registered Sprites handlers (HTTP + WebSocket)")
+	}
+
+	if p.taskRepo != nil {
+		sshhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, p.taskRepo, lifecycle.NewAgentctlResolver(p.log), p.log)
+		p.log.Debug("Registered SSH handlers (HTTP + WebSocket)")
 	}
 
 	if p.services.GitHub != nil {
