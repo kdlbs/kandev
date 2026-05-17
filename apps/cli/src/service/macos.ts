@@ -126,7 +126,13 @@ function uninstall(ctx: Ctx): void {
 // `KeepAlive=true` — under KeepAlive, `kill SIGTERM` does not stop the
 // service: launchd just respawns it seconds later. Only `bootout` removes
 // the job from launchd's supervision.
+//
+// start/restart both have to handle two pre-states — job loaded vs not —
+// so each begins with a bootout-then-bootstrap dance similar to installSync.
 function startService(ctx: Ctx): void {
+  // Idempotent: if the label is already loaded, bootstrap would fail. Bootout
+  // first so start works whether the service was previously running or stopped.
+  spawnSync("launchctl", ["bootout", ctx.target], { stdio: "ignore" });
   runLaunchctl(["bootstrap", ctx.domain, ctx.plistPath]);
 }
 
@@ -134,11 +140,13 @@ function stopService(ctx: Ctx): void {
   runLaunchctl(["bootout", ctx.target], { allowFailure: true });
 }
 
-// `kickstart -k` atomically kills and restarts the service. Doing
-// `kill` + `kickstart` separately races: `kill SIGTERM` is async, so
-// `kickstart` (without -k) is a no-op while the old process is still alive.
+// `kickstart -k` atomically kills and restarts a loaded service. If the job
+// was previously stopped (bootout'd), the target no longer exists in the
+// launchd domain and kickstart fails — fall back to bootstrap to reload it.
 function restartService(ctx: Ctx): void {
-  runLaunchctl(["kickstart", "-k", ctx.target]);
+  const res = spawnSync("launchctl", ["kickstart", "-k", ctx.target], { stdio: "inherit" });
+  if (res.status === 0) return;
+  runLaunchctl(["bootstrap", ctx.domain, ctx.plistPath]);
 }
 
 function showStatus(ctx: Ctx): void {
