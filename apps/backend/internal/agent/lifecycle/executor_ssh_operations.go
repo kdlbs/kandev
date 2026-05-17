@@ -188,11 +188,14 @@ func ensureAgentctlOnHost(ctx context.Context, client *ssh.Client, resolver *Age
 		return "", err
 	}
 
-	// Compare existing remote sha256, if any.
-	if out, _, err := runSSHCommand(ctx, client, "cat "+remoteShaFile+" 2>/dev/null"); err == nil {
+	// Compare existing remote sha256, if any. Every path that lands in a
+	// shell-interpreted command goes through shellQuote so a remote $HOME
+	// (or anything else with metacharacters) can't break the parse — even
+	// though the path was supplied by the remote, not the kandev user.
+	if out, _, err := runSSHCommand(ctx, client, "cat "+shellQuote(remoteShaFile)+" 2>/dev/null"); err == nil {
 		if strings.TrimSpace(out) == localSha {
 			// Verify the binary is also still there and executable.
-			if _, _, terr := runSSHCommand(ctx, client, "test -x "+remoteBin); terr == nil {
+			if _, _, terr := runSSHCommand(ctx, client, "test -x "+shellQuote(remoteBin)); terr == nil {
 				log.Debug("agentctl already up-to-date on remote", zap.String("sha256", localSha))
 				return remoteBin, nil
 			}
@@ -205,7 +208,7 @@ func ensureAgentctlOnHost(ctx context.Context, client *ssh.Client, resolver *Age
 		zap.String("sha256", localSha),
 		zap.Int("bytes", len(localData)))
 
-	if _, _, err := runSSHCommand(ctx, client, "mkdir -p "+filepath.Dir(remoteBin)); err != nil {
+	if _, _, err := runSSHCommand(ctx, client, "mkdir -p "+shellQuote(filepath.Dir(remoteBin))); err != nil {
 		return "", fmt.Errorf("ssh: mkdir for agentctl: %w", err)
 	}
 	if err := sftpUploadBytes(client, remoteBin, localData, 0o755); err != nil {
@@ -215,7 +218,7 @@ func ensureAgentctlOnHost(ctx context.Context, client *ssh.Client, resolver *Age
 		return "", fmt.Errorf("ssh: upload agentctl sha256: %w", err)
 	}
 	// Sanity check.
-	if _, _, err := runSSHCommand(ctx, client, "test -x "+remoteBin); err != nil {
+	if _, _, err := runSSHCommand(ctx, client, "test -x "+shellQuote(remoteBin)); err != nil {
 		return "", fmt.Errorf("ssh: agentctl not executable after upload: %w", err)
 	}
 	return remoteBin, nil
