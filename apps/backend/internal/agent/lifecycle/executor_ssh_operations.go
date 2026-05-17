@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	mrand "math/rand/v2"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -391,11 +393,11 @@ func startRemoteAgentctl(
 const sshAgentctlLogTailLines = 25
 
 // createRemoteAgentInstance creates a per-session agent instance on the
-// remote agentctl control server by POSTing to /api/v1/instances from inside
-// the container (so we don't need a second SSH port forward just to call the
-// control API). Returns the per-instance port the SSH executor should later
-// forward + dial for ACP / workspace traffic. Mirrors what
-// executor_sprites.go does inside its sprite.
+// remote agentctl control server by POSTing to /api/v1/instances over a
+// direct-tcpip channel through the existing SSH client — no second port
+// forward, and no dependency on remote curl. Returns the per-instance port
+// the SSH executor should later forward + dial for ACP / workspace traffic.
+// Mirrors what executor_sprites.go does inside its sprite.
 func createRemoteAgentInstance(
 	ctx context.Context,
 	client *ssh.Client,
@@ -416,39 +418,47 @@ func createRemoteAgentInstance(
 	if err != nil {
 		return 0, fmt.Errorf("ssh: marshal create-instance: %w", err)
 	}
-	// Pipe the JSON body via curl's --data-binary @- so the shell doesn't have
-	// to escape it. -sS to suppress progress but keep errors. --fail returns
-	// non-zero on HTTP >= 400 so we get a clear error code.
-	cmd := fmt.Sprintf(
-		"curl -sS --fail -X POST -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:%d/api/v1/instances",
-		controlPort,
-	)
-	session, err := client.NewSession()
+
+	// HTTP-over-direct-tcpip: every request dials a fresh SSH channel to the
+	// remote control port. Keep-alives are disabled so the channel closes
+	// after the response.
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return client.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(controlPort)))
+			},
+			DisableKeepAlives: true,
+		},
+	}
+
+	url := fmt.Sprintf("http://127.0.0.1:%d/api/v1/instances", controlPort)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return 0, fmt.Errorf("ssh: new session: %w", err)
+		return 0, fmt.Errorf("ssh: build create-instance request: %w", err)
 	}
-	defer func() { _ = session.Close() }()
-	session.Stdin = bytes.NewReader(body)
-	var stdout, stderr bytes.Buffer
-	session.Stdout = &stdout
-	session.Stderr = &stderr
-	done := make(chan error, 1)
-	go func() { done <- session.Run(cmd) }()
-	select {
-	case <-ctx.Done():
-		_ = session.Signal(ssh.SIGTERM)
-		return 0, ctx.Err()
-	case rerr := <-done:
-		if rerr != nil {
-			return 0, fmt.Errorf("ssh: create-instance curl: %w (stderr: %s)", rerr, strings.TrimSpace(stderr.String()))
-		}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	httpResp, err := httpClient.Do(httpReq)
+	if err != nil {
+		return 0, fmt.Errorf("ssh: create-instance dial: %w", err)
 	}
+	defer func() { _ = httpResp.Body.Close() }()
+
+	respBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("ssh: read create-instance response: %w", err)
+	}
+	if httpResp.StatusCode >= http.StatusBadRequest {
+		return 0, fmt.Errorf("ssh: create-instance returned %d: %s", httpResp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
 	var resp agentctl.CreateInstanceResponse
-	if err := json.Unmarshal(stdout.Bytes(), &resp); err != nil {
-		return 0, fmt.Errorf("ssh: parse create-instance response: %w (body: %s)", err, stdout.String())
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return 0, fmt.Errorf("ssh: parse create-instance response: %w (body: %s)", err, string(respBody))
 	}
 	if resp.Port == 0 {
-		return 0, fmt.Errorf("ssh: create-instance returned port 0 (body: %s)", stdout.String())
+		return 0, fmt.Errorf("ssh: create-instance returned port 0 (body: %s)", string(respBody))
 	}
 	log.Info("created remote agent instance",
 		zap.Int("control_port", controlPort),
@@ -467,14 +477,13 @@ func sshAgentTypeFromReq(req *ExecutorCreateRequest) string {
 }
 
 // pickRemoteAgentctlPort returns a port in [40000, 60000). The kandev backend
-// picks per session; agentctl honors AGENTCTL_PORT. Collisions inside one sshd
-// container would surface as a clear "failed to bind" error and a quick retry
-// fixes it — in practice for e2e and a single SSH user, collisions are
-// vanishingly unlikely.
-//
-//nolint:gosec // not used for cryptographic purposes
+// picks per session; agentctl honors AGENTCTL_PORT. Uses math/rand/v2 so two
+// concurrent CreateInstance calls don't collide (UnixNano%20000 cycles in
+// ~20µs, which is well within the window between back-to-back launches on a
+// fast machine). A residual collision still surfaces as a clear bind failure
+// and the caller can retry.
 func pickRemoteAgentctlPort() int {
-	return 40000 + int(time.Now().UnixNano())%20000
+	return 40000 + mrand.IntN(20000)
 }
 
 // stopRemoteAgentctl best-effort kills a remote agentctl by PID and removes

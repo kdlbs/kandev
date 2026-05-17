@@ -192,13 +192,11 @@ func (h *Handler) runTest(ctx context.Context, req TestRequest) *TestResult {
 		return finalize()
 	}
 
-	pool := lifecycle.NewSSHConnPool(h.logger)
-	defer pool.CloseAll()
-
-	client, err := h.testHandshake(ctx, pool, target, result)
+	client, err := h.testHandshake(ctx, target, result)
 	if err != nil {
 		return finalize()
 	}
+	defer func() { _ = client.Close() }()
 
 	infoCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -237,10 +235,10 @@ func (h *Handler) testResolveTarget(req TestRequest, result *TestResult) (*lifec
 }
 
 func (h *Handler) testHandshake(
-	ctx context.Context, pool *lifecycle.SSHConnPool, target *lifecycle.SSHTarget, result *TestResult,
+	ctx context.Context, target *lifecycle.SSHTarget, result *TestResult,
 ) (*ssh.Client, error) {
 	stepStart := time.Now()
-	client, err := pool.Get(ctx, target)
+	client, err := lifecycle.DialSSH(ctx, target)
 	step := TestStep{Name: "SSH handshake", DurationMs: time.Since(stepStart).Milliseconds()}
 	if err != nil {
 		step.Success = false

@@ -9,22 +9,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/kevinburke/ssh_config"
-	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
-
-	"github.com/kandev/kandev/internal/common/logger"
 )
 
-const (
-	sshDialTimeout      = 30 * time.Second
-	sshKeepaliveEvery   = 30 * time.Second
-	sshKeepaliveTimeout = 15 * time.Second
-)
+const sshDialTimeout = 30 * time.Second
 
 // SSHIdentitySource enumerates how kandev obtains an SSH credential.
 type SSHIdentitySource string
@@ -307,6 +299,15 @@ func buildClientConfig(target *SSHTarget) (*ssh.ClientConfig, error) {
 	}, nil
 }
 
+// DialSSH opens an SSH connection to target, optionally via a bastion if
+// ProxyJump is set. Returns the live *ssh.Client and the observed fingerprint
+// (recorded on target.ObservedFingerprint via the host-key callback).
+//
+// Callers own the client and must Close it when done.
+func DialSSH(ctx context.Context, target *SSHTarget) (*ssh.Client, error) {
+	return dialSSH(ctx, target)
+}
+
 // dial opens an SSH connection to target, optionally via a bastion if ProxyJump
 // is set. Returns the live *ssh.Client and the observed fingerprint.
 func dialSSH(ctx context.Context, target *SSHTarget) (*ssh.Client, error) {
@@ -437,161 +438,8 @@ func parseLiteralProxyJump(s string) (user, host string, port int, ok bool) {
 	return user, host, port, true
 }
 
-// sshConnKey identifies a pooled SSH connection. Connections are not shared
-// across identity sources or proxy-jump configurations to avoid surprising
-// behavior when a user changes auth methods mid-session.
-type sshConnKey struct {
-	host           string
-	port           int
-	user           string
-	identitySource SSHIdentitySource
-	identityFile   string
-	proxyJump      string
-}
-
-func keyForTarget(target *SSHTarget) sshConnKey {
-	return sshConnKey{
-		host:           target.Host,
-		port:           target.Port,
-		user:           target.User,
-		identitySource: target.IdentitySource,
-		identityFile:   target.IdentityFile,
-		proxyJump:      target.ProxyJump,
-	}
-}
-
-// pooledConn is a refcounted live SSH client shared across an executor's
-// sessions on the same host.
-type pooledConn struct {
-	client    *ssh.Client
-	target    *SSHTarget
-	refs      int
-	keepalive context.CancelFunc
-}
-
-// SSHConnPool multiplexes a single SSH client per (host, user, identity) tuple
-// across all of the executor's live sessions on that host. Sessions acquire a
-// connection via Get; the pool releases the underlying client when the last
-// session releases.
-type SSHConnPool struct {
-	mu      sync.Mutex
-	entries map[sshConnKey]*pooledConn
-	logger  *logger.Logger
-}
-
-func NewSSHConnPool(log *logger.Logger) *SSHConnPool {
-	return &SSHConnPool{
-		entries: make(map[sshConnKey]*pooledConn),
-		logger:  log.WithFields(zap.String("component", "ssh-conn-pool")),
-	}
-}
-
-// Get returns a live *ssh.Client for the target. The pool keeps the
-// underlying ssh.Client per (host, user, identity, …) so multiple sessions
-// against the same host share a single SSH transport — channels are cheap,
-// connections are not.
-//
-// NOTE: golang.org/x/crypto/ssh's Client.Conn carries a mutex around the
-// channel/mux state. Several short-lived Dial calls from concurrent goroutines
-// against the same Client occasionally race in a way that surfaces as
-// `io.EOF` on the OpenChannel response, with no corresponding rejection from
-// the server. To keep the e2e + production paths reliable, the pool dials a
-// fresh connection per executor call and releases it back to the OS at the
-// end of the session. Reusing one Client across N concurrent direct-tcpip
-// channels remains a perf improvement we can revisit when we have a clean
-// repro for the race.
-func (p *SSHConnPool) Get(ctx context.Context, target *SSHTarget) (*ssh.Client, error) {
-	key := keyForTarget(target)
-
-	client, err := dialSSH(ctx, target)
-	if err != nil {
-		return nil, err
-	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	kctx, kcancel := context.WithCancel(context.Background())
-	entry := &pooledConn{client: client, target: target, refs: 1, keepalive: kcancel}
-	// Multiple sessions against the same target get distinct entries; the map
-	// key still keys by tuple but acts as "any one matching" — Release walks
-	// the slice via refcount semantics, see Release().
-	p.entries[key] = entry
-	go p.runKeepalive(kctx, key, client)
-	return client, nil
-}
-
-// Release decrements the refcount; when it hits zero the underlying client is
-// closed and removed from the pool.
-func (p *SSHConnPool) Release(target *SSHTarget) {
-	key := keyForTarget(target)
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	entry, ok := p.entries[key]
-	if !ok {
-		return
-	}
-	entry.refs--
-	if entry.refs > 0 {
-		return
-	}
-	entry.keepalive()
-	_ = entry.client.Close()
-	delete(p.entries, key)
-}
-
-// CloseAll terminates every pooled connection. Used at shutdown.
-func (p *SSHConnPool) CloseAll() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for k, entry := range p.entries {
-		entry.keepalive()
-		_ = entry.client.Close()
-		delete(p.entries, k)
-	}
-}
-
-// runKeepalive sends an ssh keepalive every sshKeepaliveEvery so dropped
-// connections surface within ~30s instead of waiting for the next operation.
-// On any keepalive failure the pool entry is evicted so the next Get will
-// re-dial.
-func (p *SSHConnPool) runKeepalive(ctx context.Context, key sshConnKey, client *ssh.Client) {
-	t := time.NewTicker(sshKeepaliveEvery)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			done := make(chan error, 1)
-			go func() {
-				_, _, err := client.SendRequest("keepalive@kandev", true, nil)
-				done <- err
-			}()
-			select {
-			case err := <-done:
-				if err != nil {
-					p.evictOnFailure(key, err)
-					return
-				}
-			case <-time.After(sshKeepaliveTimeout):
-				p.evictOnFailure(key, fmt.Errorf("keepalive timed out"))
-				return
-			}
-		}
-	}
-}
-
-func (p *SSHConnPool) evictOnFailure(key sshConnKey, err error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	entry, ok := p.entries[key]
-	if !ok {
-		return
-	}
-	p.logger.Warn("ssh connection lost — evicting from pool",
-		zap.String("host", key.host),
-		zap.String("user", key.user),
-		zap.Error(err))
-	_ = entry.client.Close()
-	delete(p.entries, key)
-}
+// SSH connections are owned per-session (no shared pool): a session's client
+// lives on sshSessionState and is Close()d by StopInstance. The earlier
+// pool/refcount/keepalive plumbing was dead code — the executor never used it
+// in production, and the orphaned keepalive goroutines surfaced under e2e
+// fault-injection. See PR #927 for the removal rationale.
