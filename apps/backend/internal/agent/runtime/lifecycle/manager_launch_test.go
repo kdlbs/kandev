@@ -14,6 +14,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // resumeTestAgent is a minimal agent with a BuildCommand that respects the
@@ -176,7 +177,7 @@ func TestLaunch_PublishesPrepareCompletedAfterRuntimeProgress(t *testing.T) {
 		ExecutorFallbackWarn, "", log,
 	)
 	mgr.preparerRegistry = NewPreparerRegistry(log)
-	mgr.preparerRegistry.Register(executor.NameDocker, &progressPreparer{})
+	mgr.preparerRegistry.Register(models.ExecutorTypeLocalDocker, &progressPreparer{})
 	t.Cleanup(func() { close(mgr.stopCh) })
 
 	errCh := make(chan error, 1)
@@ -242,12 +243,12 @@ func TestRunEnvironmentPreparer_CalledOnFreshLaunch(t *testing.T) {
 	mgr := newTestManager()
 	preparer := &trackingPreparer{}
 	mgr.preparerRegistry = NewPreparerRegistry(mgr.logger)
-	mgr.preparerRegistry.Register(executor.NameStandalone, preparer)
+	mgr.preparerRegistry.Register(models.ExecutorTypeLocal, preparer)
 
 	req := &LaunchRequest{
 		TaskID:         "task-1",
 		SessionID:      "session-1",
-		ExecutorType:   string(executor.NameStandalone),
+		ExecutorType:   string(models.ExecutorTypeLocal),
 		RepositoryPath: "/tmp/repo",
 	}
 
@@ -261,12 +262,12 @@ func TestRunEnvironmentPreparer_SkippedWithoutRepoPath(t *testing.T) {
 	mgr := newTestManager()
 	preparer := &trackingPreparer{}
 	mgr.preparerRegistry = NewPreparerRegistry(mgr.logger)
-	mgr.preparerRegistry.Register(executor.NameStandalone, preparer)
+	mgr.preparerRegistry.Register(models.ExecutorTypeLocal, preparer)
 
 	req := &LaunchRequest{
 		TaskID:       "task-1",
 		SessionID:    "session-1",
-		ExecutorType: string(executor.NameStandalone),
+		ExecutorType: string(models.ExecutorTypeLocal),
 		// No RepositoryPath — preparer should be skipped
 	}
 

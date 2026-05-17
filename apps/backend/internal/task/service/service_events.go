@@ -107,8 +107,8 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 		return
 	}
 	data["primary_session_id"] = sessionInfo.ID
-	if sessionInfo.ReviewStatus != nil {
-		data["review_status"] = *sessionInfo.ReviewStatus
+	if sessionInfo.ReviewStatus != models.ReviewStatusNone {
+		data["review_status"] = string(sessionInfo.ReviewStatus)
 	}
 	if sessionInfo.State != "" {
 		data["primary_session_state"] = string(sessionInfo.State)

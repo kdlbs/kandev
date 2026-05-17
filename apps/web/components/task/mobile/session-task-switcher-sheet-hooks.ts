@@ -14,12 +14,13 @@ import {
   hasPendingClarificationForSession,
   hasPendingPermissionForSession,
 } from "@/lib/utils/pending-clarification";
-import type {
-  TaskState,
-  TaskSessionState,
-  Repository,
-  Task,
-  WorkflowSnapshot,
+import {
+  repositoryId as toRepositoryId,
+  type TaskState,
+  type TaskSessionState,
+  type Repository,
+  type Task,
+  type WorkflowSnapshot,
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
 
@@ -120,7 +121,9 @@ export function useSheetData(workspaceId: string | null, workflowId: string | nu
           sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined),
         description: task.description,
         workflowStepId: task.workflowStepId,
-        repositoryPath: task.repositoryId ? repositoryPathsById.get(task.repositoryId) : undefined,
+        repositoryPath: task.repositoryId
+          ? repositoryPathsById.get(toRepositoryId(task.repositoryId))
+          : undefined,
         diffStats: sessionInfo.diffStats,
         updatedAt: sessionInfo.updatedAt ?? task.updatedAt,
         isRemoteExecutor: task.isRemoteExecutor,

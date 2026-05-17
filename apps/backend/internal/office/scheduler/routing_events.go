@@ -49,7 +49,7 @@ func (ss *SchedulerService) publishProviderHealthy(
 	ss.publishProviderHealthChanged(ctx, models.ProviderHealth{
 		WorkspaceID: workspaceID,
 		ProviderID:  providerID,
-		Scope:       scope,
+		Scope:       models.ProviderHealthScope(scope),
 		ScopeValue:  scopeValue,
 		State:       "healthy",
 	})

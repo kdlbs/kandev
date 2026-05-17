@@ -73,7 +73,7 @@ func TestRunLifecycle_StepCompleteEventsEmitted(t *testing.T) {
 		t.Fatalf("event count = %d, want %d (%+v)", len(rowEvents), len(wantTypes), rowEvents)
 	}
 	for i, e := range rowEvents {
-		if e.EventType != wantTypes[i] {
+		if string(e.EventType) != wantTypes[i] {
 			t.Errorf("event[%d].type = %q, want %q", i, e.EventType, wantTypes[i])
 		}
 		if e.Seq != i {

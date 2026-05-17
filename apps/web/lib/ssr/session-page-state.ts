@@ -108,8 +108,8 @@ function buildResourceState(p: BuildSessionPageStateParams) {
     // Don't write activeId — null means "All Workflows"; task context lives in kanban.workflowId.
     workflows: {
       items: workflows.map((w) => ({
-        id: w.id,
-        workspaceId: w.workspace_id,
+        id: w.id as string,
+        workspaceId: w.workspace_id as string,
         name: w.name,
         hidden: w.hidden,
         style: w.style,

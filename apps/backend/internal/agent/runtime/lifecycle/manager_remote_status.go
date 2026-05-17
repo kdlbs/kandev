@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"go.uber.org/zap"
 )
 
@@ -35,7 +35,7 @@ func (m *Manager) pollOneRemoteStatus(ctx context.Context, execution *AgentExecu
 	if execution == nil || execution.SessionID == "" || m.executorRegistry == nil {
 		return
 	}
-	rt, err := m.executorRegistry.GetBackend(executor.Name(execution.RuntimeName))
+	rt, err := m.executorRegistry.GetBackend(execution.RuntimeName)
 	if err != nil {
 		return
 	}
@@ -66,7 +66,7 @@ func (m *Manager) pollOneRemoteStatus(ctx context.Context, execution *AgentExecu
 		m.logger.Debug("remote status poll failed",
 			zap.String("session_id", execution.SessionID),
 			zap.String("execution_id", execution.ID),
-			zap.String("runtime", execution.RuntimeName),
+			zap.Stringer("runtime", execution.RuntimeName),
 			zap.Error(statusErr))
 		return
 	}
@@ -127,7 +127,7 @@ func (m *Manager) GetRemoteStatusBySessionID(ctx context.Context, sessionID stri
 // for a session that is not currently tracked in the in-memory execution store.
 type RemoteStatusPollRecord struct {
 	SessionID        string
-	Runtime          string
+	Runtime          agentruntime.Runtime
 	AgentExecutionID string
 	ContainerID      string
 	Metadata         map[string]interface{}
@@ -144,7 +144,7 @@ func (m *Manager) PollRemoteStatusForRecords(ctx context.Context, records []Remo
 		if rec.SessionID == "" || rec.Runtime == "" {
 			continue
 		}
-		rt, err := m.executorRegistry.GetBackend(executor.Name(rec.Runtime))
+		rt, err := m.executorRegistry.GetBackend(rec.Runtime)
 		if err != nil {
 			continue
 		}
@@ -169,7 +169,7 @@ func (m *Manager) PollRemoteStatusForRecords(ctx context.Context, records []Remo
 			})
 			m.logger.Debug("startup remote status poll failed",
 				zap.String("session_id", rec.SessionID),
-				zap.String("runtime", rec.Runtime),
+				zap.Stringer("runtime", rec.Runtime),
 				zap.Error(statusErr))
 			continue
 		}
@@ -185,7 +185,7 @@ func (m *Manager) PollRemoteStatusForRecords(ctx context.Context, records []Remo
 		m.storeRemoteStatus(rec.SessionID, status)
 		m.logger.Debug("startup remote status polled",
 			zap.String("session_id", rec.SessionID),
-			zap.String("runtime", rec.Runtime),
+			zap.Stringer("runtime", rec.Runtime),
 			zap.String("state", status.State))
 	}
 }

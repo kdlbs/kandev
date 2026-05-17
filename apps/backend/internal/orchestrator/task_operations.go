@@ -965,7 +965,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		return fmt.Errorf("failed to get task: %w", err)
 	}
 
-	if session.ReviewStatus != nil && *session.ReviewStatus == "pending" {
+	if session.ReviewStatus == models.ReviewStatusPending {
 		return fmt.Errorf("session is pending approval - use Approve button to proceed or send a message to request changes")
 	}
 
@@ -1006,7 +1006,7 @@ func (s *Service) advanceTaskWorkflowStep(ctx context.Context, task *models.Task
 			zap.String("workflow_step_id", workflowStepID),
 			zap.Error(err))
 	}
-	if session.ReviewStatus != nil && *session.ReviewStatus != "" {
+	if session.ReviewStatus != models.ReviewStatusNone {
 		if err := s.repo.UpdateSessionReviewStatus(ctx, session.ID, ""); err != nil {
 			s.logger.Warn("failed to clear session review status",
 				zap.String("session_id", session.ID),

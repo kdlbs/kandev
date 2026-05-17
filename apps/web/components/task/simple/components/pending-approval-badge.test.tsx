@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider, useAppStore } from "@/components/state-provider";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
+import { agentProfileId as toAgentProfileId, workspaceId as toWorkspaceId } from "@/lib/types/ids";
 import {
   PendingApprovalBadge,
   computePendingApprovers,
@@ -43,10 +44,10 @@ function SeedAgents({ agents }: { agents: AgentProfile[] }) {
 
 function makeAgent(id: string, name: string): AgentProfile {
   return {
-    id,
-    workspaceId: "ws-1",
+    id: toAgentProfileId(id),
+    workspaceId: toWorkspaceId("ws-1"),
     name,
-    agentProfileId: "p1",
+    agentProfileId: toAgentProfileId("p1"),
     role: "worker",
     icon: "🤖",
     status: "idle",

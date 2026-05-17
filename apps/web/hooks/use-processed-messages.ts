@@ -1,5 +1,11 @@
 import { useMemo } from "react";
-import type { Message, ClarificationRequestMetadata, MessageType } from "@/lib/types/http";
+import {
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type ClarificationRequestMetadata,
+  type Message,
+  type MessageType,
+} from "@/lib/types/http";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import {
   findPendingClarification,
@@ -264,8 +270,8 @@ export function useProcessedMessages(
     return taskDescription && visibleMessages.length === 0
       ? {
           id: "task-description",
-          task_id: taskId ?? "",
-          session_id: resolvedSessionId ?? "",
+          task_id: toTaskId(taskId ?? ""),
+          session_id: toSessionId(resolvedSessionId ?? ""),
           author_type: "user",
           content: taskDescription,
           type: "message",

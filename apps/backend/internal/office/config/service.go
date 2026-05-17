@@ -102,7 +102,7 @@ func (s *ConfigService) exportSkills(ctx context.Context, _ string, bundle *Conf
 			Name:        sk.Name,
 			Slug:        sk.Slug,
 			Description: sk.Description,
-			SourceType:  sk.SourceType,
+			SourceType:  string(sk.SourceType),
 			Content:     sk.Content,
 		}
 		bundle.Skills = append(bundle.Skills, cfg)
@@ -129,7 +129,7 @@ func (s *ConfigService) exportRoutines(ctx context.Context, _ string, bundle *Co
 			Description:       r.Description,
 			TaskTemplate:      r.TaskTemplate,
 			AssigneeName:      nameByID[r.AssigneeAgentProfileID],
-			ConcurrencyPolicy: r.ConcurrencyPolicy,
+			ConcurrencyPolicy: string(r.ConcurrencyPolicy),
 		}
 		bundle.Routines = append(bundle.Routines, cfg)
 	}

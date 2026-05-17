@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MonitorMessage } from "./monitor-message";
-import type { Message } from "@/lib/types/http";
+import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 
 // monitorMessage is a tiny test-helper that constructs the kandev Message
 // shape produced by the orchestrator for a Monitor tool_call. The fields
@@ -18,8 +18,8 @@ function monitorMessage(opts: {
 }): Message {
   return {
     id: "msg-1",
-    session_id: "s1",
-    task_id: "t1",
+    session_id: toSessionId("s1"),
+    task_id: toTaskId("t1"),
     author_type: "agent",
     content: "Monitor",
     type: "tool_call",
@@ -123,8 +123,8 @@ describe("MonitorMessage", () => {
     // the "watching" baseline rather than crashing.
     const empty: Message = {
       id: "msg-1",
-      session_id: "s1",
-      task_id: "t1",
+      session_id: toSessionId("s1"),
+      task_id: toTaskId("t1"),
       author_type: "agent",
       content: "Monitor",
       type: "tool_call",

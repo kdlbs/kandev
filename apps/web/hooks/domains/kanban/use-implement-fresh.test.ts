@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import type { TaskSession } from "@/lib/types/http";
+import {
+  agentProfileId as toAgentProfileId,
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type TaskSession,
+} from "@/lib/types/http";
 import type { MessageAttachment } from "@/components/task/chat/chat-input-container";
 
 const mockLaunchSession = vi.fn();
@@ -49,10 +54,10 @@ const SESS_FRESH = "sess-fresh";
 
 function makeSession(overrides: Partial<TaskSession> = {}): TaskSession {
   return {
-    id: SESS_PLAN,
-    task_id: TASK_ID,
+    id: toSessionId(SESS_PLAN),
+    task_id: toTaskId(TASK_ID),
     state: "WAITING_FOR_INPUT",
-    agent_profile_id: "ap-1",
+    agent_profile_id: toAgentProfileId("ap-1"),
     executor_id: "ex-1",
     created_at: "",
     updated_at: "",

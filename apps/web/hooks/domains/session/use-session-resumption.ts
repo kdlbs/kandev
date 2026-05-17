@@ -6,7 +6,13 @@ import {
   buildRestoreWorkspaceRequest,
 } from "@/lib/services/session-launch-helpers";
 import { useAppStore } from "@/components/state-provider";
-import type { TaskSessionState } from "@/lib/types/http";
+import {
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type SessionId,
+  type TaskId,
+  type TaskSessionState,
+} from "@/lib/types/http";
 
 export type SessionStatus = {
   session_id: string;
@@ -50,8 +56,8 @@ export type ResumeStateSetter = {
   setWorktreePath: (p: string | null) => void;
   setWorktreeBranch: (b: string | null) => void;
   setTaskSession: (s: {
-    id: string;
-    task_id: string;
+    id: SessionId;
+    task_id: TaskId;
     state: TaskSessionState;
     started_at: string;
     updated_at: string;
@@ -73,8 +79,8 @@ function applyResumeResponse(
     setters.setResumptionState("resumed");
     if (resp.state) {
       setters.setTaskSession({
-        id: sessionId,
-        task_id: taskId,
+        id: toSessionId(sessionId),
+        task_id: toTaskId(taskId),
         state: resp.state as TaskSessionState,
         started_at: session?.started_at ?? "",
         updated_at: session?.updated_at ?? "",
@@ -230,8 +236,8 @@ function applyStatusToState(
   setters.setWorktreeBranch(status.worktree_branch ?? null);
   if (status.state) {
     setters.setTaskSession({
-      id: sessionId,
-      task_id: taskId,
+      id: toSessionId(sessionId),
+      task_id: toTaskId(taskId),
       state: status.state as TaskSessionState,
       started_at: session?.started_at ?? "",
       updated_at: session?.updated_at ?? "",
@@ -445,8 +451,8 @@ export function useSessionResumption(
         setResumptionState("resumed");
         if (response.state) {
           setTaskSession({
-            id: sessionId,
-            task_id: taskId,
+            id: toSessionId(sessionId),
+            task_id: toTaskId(taskId),
             state: response.state as TaskSessionState,
             started_at: session?.started_at ?? "",
             updated_at: session?.updated_at ?? "",

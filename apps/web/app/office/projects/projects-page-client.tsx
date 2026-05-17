@@ -6,6 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { listProjects } from "@/lib/api/domains/office-api";
+import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import type { Project } from "@/lib/state/slices/office/types";
 import { ProjectCard } from "./project-card";
 import { CreateProjectDialog } from "./create-project-dialog";
@@ -80,7 +81,7 @@ export function ProjectsPageClient({ initialProjects }: ProjectsPageClientProps)
               project={project}
               leadAgentName={
                 project.leadAgentProfileId
-                  ? agentNameMap.get(project.leadAgentProfileId)
+                  ? agentNameMap.get(toAgentProfileId(project.leadAgentProfileId))
                   : undefined
               }
             />

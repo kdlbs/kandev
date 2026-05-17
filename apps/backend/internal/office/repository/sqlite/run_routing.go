@@ -87,7 +87,7 @@ func (r *Repository) UpdateRouteAttemptOutcome(
 		    raw_excerpt = ?, reset_hint = ?, finished_at = ?
 		WHERE run_id = ? AND seq = ?
 	`), attempt.Outcome, nullableString(attempt.ErrorCode),
-		nullableString(attempt.ErrorConfidence), nullableString(attempt.AdapterPhase),
+		nullableString(string(attempt.ErrorConfidence)), nullableString(string(attempt.AdapterPhase)),
 		nullableString(attempt.ClassifierRule), attempt.ExitCode,
 		nullableString(attempt.RawExcerpt), attempt.ResetHint, attempt.FinishedAt,
 		attempt.RunID, attempt.Seq)

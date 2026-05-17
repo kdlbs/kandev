@@ -197,7 +197,7 @@ func MarshalRoutine(routine *models.Routine) ([]byte, error) {
 		Description:       routine.Description,
 		TaskTemplate:      routine.TaskTemplate,
 		Status:            routine.Status,
-		ConcurrencyPolicy: routine.ConcurrencyPolicy,
+		ConcurrencyPolicy: string(routine.ConcurrencyPolicy),
 		Variables:         routine.Variables,
 	}
 	return yaml.Marshal(y)
@@ -217,7 +217,7 @@ func UnmarshalRoutine(data []byte, workspaceID string) (*models.Routine, error) 
 		Description:       y.Description,
 		TaskTemplate:      y.TaskTemplate,
 		Status:            y.Status,
-		ConcurrencyPolicy: y.ConcurrencyPolicy,
+		ConcurrencyPolicy: models.RoutineConcurrencyPolicy(y.ConcurrencyPolicy),
 		Variables:         y.Variables,
 		CreatedAt:         now,
 		UpdatedAt:         now,

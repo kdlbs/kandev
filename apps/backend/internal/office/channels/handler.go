@@ -48,9 +48,9 @@ func (h *Handler) setupChannel(c *gin.Context) {
 	channel := &models.Channel{
 		WorkspaceID:    req.WorkspaceID,
 		AgentProfileID: c.Param("id"),
-		Platform:       req.Platform,
+		Platform:       models.ChannelPlatform(req.Platform),
 		Config:         req.Config,
-		Status:         req.Status,
+		Status:         models.ChannelStatus(req.Status),
 	}
 	if err := h.svc.SetupChannel(c.Request.Context(), channel); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -96,7 +96,7 @@ func (h *Handler) channelInbound(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "empty message body"})
 		return
 	}
-	if channel.WebhookSecret != "" && !verifyWebhookSignature(channel.WebhookSecret, channel.Platform, body, webhookSignature(c)) {
+	if channel.WebhookSecret != "" && !verifyWebhookSignature(channel.WebhookSecret, string(channel.Platform), body, webhookSignature(c)) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
 		return
 	}

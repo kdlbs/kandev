@@ -3,6 +3,8 @@ package routines
 import (
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/office/models"
 )
 
 // TestComputeRoutineMissed_HappyPath: NextRunAt == now, no backlog —
@@ -14,7 +16,7 @@ func TestComputeRoutineMissed_HappyPath(t *testing.T) {
 		Timezone:       "",
 		NextRunAt:      &t0,
 	}
-	routine := &Routine{CatchUpPolicy: CatchUpPolicyEnqueueWithCap, CatchUpMax: 25}
+	routine := &Routine{CatchUpPolicy: models.CatchUpPolicyEnqueueMissedWithCap, CatchUpMax: 25}
 
 	count, advanceTo, err := computeRoutineMissed(trigger, routine, t0)
 	if err != nil {
@@ -39,7 +41,7 @@ func TestComputeRoutineMissed_BackendDownTenMinutes(t *testing.T) {
 		Timezone:       "",
 		NextRunAt:      &tenAgo,
 	}
-	routine := &Routine{CatchUpPolicy: CatchUpPolicyEnqueueWithCap, CatchUpMax: 25}
+	routine := &Routine{CatchUpPolicy: models.CatchUpPolicyEnqueueMissedWithCap, CatchUpMax: 25}
 
 	count, advanceTo, err := computeRoutineMissed(trigger, routine, now)
 	if err != nil {
@@ -64,7 +66,7 @@ func TestComputeRoutineMissed_HitsCap(t *testing.T) {
 		Timezone:       "",
 		NextRunAt:      &hundredAgo,
 	}
-	routine := &Routine{CatchUpPolicy: CatchUpPolicyEnqueueWithCap, CatchUpMax: 5}
+	routine := &Routine{CatchUpPolicy: models.CatchUpPolicyEnqueueMissedWithCap, CatchUpMax: 5}
 
 	count, advanceTo, err := computeRoutineMissed(trigger, routine, now)
 	if err != nil {
@@ -88,7 +90,7 @@ func TestComputeRoutineMissed_DefaultCap(t *testing.T) {
 		NextRunAt:      &hundredAgo,
 	}
 	// CatchUpMax=0 → defaultCatchUpMax (25).
-	routine := &Routine{CatchUpPolicy: CatchUpPolicyEnqueueWithCap, CatchUpMax: 0}
+	routine := &Routine{CatchUpPolicy: models.CatchUpPolicyEnqueueMissedWithCap, CatchUpMax: 0}
 
 	count, _, err := computeRoutineMissed(trigger, routine, now)
 	if err != nil {

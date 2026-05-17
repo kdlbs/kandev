@@ -236,10 +236,10 @@ func (r *Resolver) loadHealthIndex(
 			byScope = map[string]map[string]models.ProviderHealth{}
 			idx[ProviderID(row.ProviderID)] = byScope
 		}
-		byValue, ok := byScope[row.Scope]
+		byValue, ok := byScope[string(row.Scope)]
 		if !ok {
 			byValue = map[string]models.ProviderHealth{}
-			byScope[row.Scope] = byValue
+			byScope[string(row.Scope)] = byValue
 		}
 		byValue[row.ScopeValue] = row
 	}
@@ -267,7 +267,7 @@ func lookupHealth(
 		if !ok {
 			continue
 		}
-		if row.State == healthStateHealthy {
+		if string(row.State) == healthStateHealthy {
 			continue
 		}
 		return row, true
@@ -285,13 +285,13 @@ func classifyHealthHit(
 	sc := SkippedCandidate{
 		ProviderID: pid,
 		ErrorCode:  row.ErrorCode,
-		State:      row.State,
-		Scope:      row.Scope,
+		State:      string(row.State),
+		Scope:      string(row.Scope),
 		ScopeValue: row.ScopeValue,
 		RawExcerpt: row.RawExcerpt,
 		AutoRetry:  IsAutoRetryableCode(row.ErrorCode),
 	}
-	switch row.State {
+	switch string(row.State) {
 	case healthStateDegraded:
 		if row.RetryAt == nil || !row.RetryAt.After(now) {
 			return SkippedCandidate{}, false

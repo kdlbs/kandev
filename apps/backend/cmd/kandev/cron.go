@@ -203,11 +203,11 @@ func (e *budgetEvaluator) EvaluatePolicies(ctx context.Context) ([]schedulercron
 			}
 			out = append(out, schedulercron.BudgetCheckResult{
 				WorkspaceID:   ws.ID,
-				ScopeType:     p.ScopeType,
+				ScopeType:     string(p.ScopeType),
 				ScopeID:       p.ScopeID,
 				SpentSubcents: spent,
 				LimitSubcents: p.LimitSubcents,
-				Period:        p.Period,
+				Period:        string(p.Period),
 			})
 		}
 	}

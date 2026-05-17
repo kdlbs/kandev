@@ -130,7 +130,7 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 }
 
 type sessionInfoFields struct {
-	reviewStatus     *string
+	reviewStatus     models.ReviewStatus
 	sessionState     *string
 	executorID       *string
 	executorType     *string

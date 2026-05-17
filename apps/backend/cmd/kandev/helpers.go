@@ -157,8 +157,8 @@ func appendSessionStateMessage(sessionID string, session *models.TaskSession, re
 		"task_id":    session.TaskID,
 		"new_state":  string(session.State),
 	}
-	if session.ReviewStatus != nil && *session.ReviewStatus != "" {
-		payload["review_status"] = *session.ReviewStatus
+	if session.ReviewStatus != models.ReviewStatusNone {
+		payload["review_status"] = string(session.ReviewStatus)
 	}
 	if session.Metadata != nil {
 		payload["session_metadata"] = session.Metadata

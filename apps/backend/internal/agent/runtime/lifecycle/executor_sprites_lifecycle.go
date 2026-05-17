@@ -156,7 +156,7 @@ func (r *SpritesExecutor) GetRemoteStatus(ctx context.Context, instance *Executo
 	spriteName := strings.TrimSpace(getMetadataString(instance.Metadata, MetadataKeySpriteName))
 	if spriteName == "" {
 		return &RemoteStatus{
-			RuntimeName:   string(r.Name()),
+			RuntimeName:   r.Name(),
 			State:         "unknown",
 			LastCheckedAt: time.Now().UTC(),
 		}, nil
@@ -170,7 +170,7 @@ func (r *SpritesExecutor) GetRemoteStatus(ctx context.Context, instance *Executo
 	}
 	if token == "" {
 		return &RemoteStatus{
-			RuntimeName:   string(r.Name()),
+			RuntimeName:   r.Name(),
 			RemoteName:    spriteName,
 			State:         "unknown",
 			LastCheckedAt: time.Now().UTC(),
@@ -187,7 +187,7 @@ func (r *SpritesExecutor) GetRemoteStatus(ctx context.Context, instance *Executo
 	}
 
 	return &RemoteStatus{
-		RuntimeName:   string(r.Name()),
+		RuntimeName:   r.Name(),
 		RemoteName:    spriteName,
 		State:         spritesutil.NormalizeSpriteStatus(sprite.Status),
 		CreatedAt:     nonZeroTimePtr(sprite.CreatedAt),

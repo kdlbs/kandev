@@ -10,10 +10,10 @@ import (
 func newActivityEntry(wsID, actorType, actorID, action, targetType, targetID string) *models.ActivityEntry {
 	return &models.ActivityEntry{
 		WorkspaceID: wsID,
-		ActorType:   actorType,
+		ActorType:   models.ActivityActorType(actorType),
 		ActorID:     actorID,
-		Action:      action,
-		TargetType:  targetType,
+		Action:      models.ActivityAction(action),
+		TargetType:  models.ActivityTargetType(targetType),
 		TargetID:    targetID,
 		Details:     "{}",
 	}

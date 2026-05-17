@@ -1,17 +1,12 @@
-import type {
-  LocalRepository,
-  Repository,
-  Workspace,
-  Executor,
-  Branch,
-  Task,
-} from "@/lib/types/http";
-import type { AgentProfileOption } from "@/lib/state/slices";
+import type { LocalRepository, Repository, Executor, Branch, Task } from "@/lib/types/http";
+import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import type {
   KanbanMultiState,
   WorkflowSnapshotData,
   WorkflowsState,
 } from "@/lib/state/slices/kanban/types";
+
+type Workspace = WorkspaceState["items"][number];
 import type {
   useRepositoryOptions,
   useBranchOptions,

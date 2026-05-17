@@ -13,7 +13,6 @@ import { WorkspaceSwitcher } from "../workspace-switcher";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { TaskArchiveConfirmDialog } from "../task-archive-confirm-dialog";
 import { useSheetData, useSheetActions } from "./session-task-switcher-sheet-hooks";
-import type { Workspace } from "@/lib/types/http";
 
 type SessionTaskSwitcherSheetProps = {
   open: boolean;
@@ -98,7 +97,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
           </div>
           <div className="pt-2">
             <WorkspaceSwitcher
-              workspaces={data.workspaces.map((w: Workspace) => ({ id: w.id, name: w.name }))}
+              workspaces={data.workspaces.map((w) => ({ id: w.id, name: w.name }))}
               activeWorkspaceId={workspaceId}
               onSelect={actions.handleWorkspaceChange}
             />

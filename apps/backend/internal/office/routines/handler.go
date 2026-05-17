@@ -5,12 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/kandev/kandev/internal/office/models"
 )
 
 // Handler provides HTTP handlers for routine routes.
@@ -54,6 +57,25 @@ func (h *Handler) createRoutine(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// Apply server defaults when the client omits the policy fields, then
+	// validate. Empty string in either field means "use default" — the
+	// agentctl CLI and several internal call sites POST without setting them.
+	concurrencyPolicy := models.RoutineConcurrencyPolicy(req.ConcurrencyPolicy)
+	if concurrencyPolicy == "" {
+		concurrencyPolicy = models.ConcurrencyPolicySkipIfActive
+	}
+	catchUpPolicy := models.RoutineCatchUpPolicy(req.CatchUpPolicy)
+	if catchUpPolicy == "" {
+		catchUpPolicy = models.CatchUpPolicyEnqueueMissedWithCap
+	}
+	if !concurrencyPolicy.Valid() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid concurrency_policy: " + req.ConcurrencyPolicy})
+		return
+	}
+	if !catchUpPolicy.Valid() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid catch_up_policy: " + req.CatchUpPolicy})
+		return
+	}
 	routine := &Routine{
 		WorkspaceID:            c.Param("wsId"),
 		Name:                   req.Name,
@@ -61,8 +83,8 @@ func (h *Handler) createRoutine(c *gin.Context) {
 		TaskTemplate:           req.TaskTemplate,
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
 		Status:                 "active",
-		ConcurrencyPolicy:      req.ConcurrencyPolicy,
-		CatchUpPolicy:          req.CatchUpPolicy,
+		ConcurrencyPolicy:      concurrencyPolicy,
+		CatchUpPolicy:          catchUpPolicy,
 		CatchUpMax:             req.CatchUpMax,
 		Variables:              req.Variables,
 	}
@@ -100,6 +122,12 @@ func (h *Handler) doUpdateRoutine(c *gin.Context) (*Routine, int, error) {
 	var req UpdateRoutineRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return nil, http.StatusBadRequest, err
+	}
+	if req.ConcurrencyPolicy != nil && !models.RoutineConcurrencyPolicy(*req.ConcurrencyPolicy).Valid() {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid concurrency_policy: %s", *req.ConcurrencyPolicy)
+	}
+	if req.CatchUpPolicy != nil && !models.RoutineCatchUpPolicy(*req.CatchUpPolicy).Valid() {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid catch_up_policy: %s", *req.CatchUpPolicy)
 	}
 	applyRoutineUpdates(routine, &req)
 	if err := h.svc.UpdateRoutine(ctx, routine); err != nil {
@@ -260,10 +288,10 @@ func applyRoutineUpdates(routine *Routine, req *UpdateRoutineRequest) {
 		routine.Status = *req.Status
 	}
 	if req.ConcurrencyPolicy != nil {
-		routine.ConcurrencyPolicy = *req.ConcurrencyPolicy
+		routine.ConcurrencyPolicy = models.RoutineConcurrencyPolicy(*req.ConcurrencyPolicy)
 	}
 	if req.CatchUpPolicy != nil {
-		routine.CatchUpPolicy = *req.CatchUpPolicy
+		routine.CatchUpPolicy = models.RoutineCatchUpPolicy(*req.CatchUpPolicy)
 	}
 	if req.CatchUpMax != nil {
 		routine.CatchUpMax = *req.CatchUpMax

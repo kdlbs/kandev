@@ -5,19 +5,20 @@ import { IconAlertTriangle, IconCheck, IconX } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { Message } from "@/lib/types/http";
+import type { PermissionActionType, PermissionOptionKind } from "@/lib/types/permission";
 import { PermissionActionRow } from "./permission-action-row";
 
 type PermissionOption = {
   option_id: string;
   name: string;
-  kind: string;
+  kind: PermissionOptionKind;
 };
 
 type PermissionRequestMetadata = {
   pending_id: string;
   tool_call_id?: string;
   options: PermissionOption[];
-  action_type: string;
+  action_type: PermissionActionType;
   action_details?: {
     command?: string;
     path?: string;

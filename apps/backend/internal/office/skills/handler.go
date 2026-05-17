@@ -55,7 +55,7 @@ func (h *Handler) createSkill(c *gin.Context) {
 		Name:                    req.Name,
 		Slug:                    req.Slug,
 		Description:             req.Description,
-		SourceType:              req.SourceType,
+		SourceType:              models.SkillSourceType(req.SourceType),
 		SourceLocator:           req.SourceLocator,
 		Content:                 req.Content,
 		FileInventory:           req.FileInventory,
@@ -203,7 +203,7 @@ func applySkillUpdates(skill *models.Skill, req *UpdateSkillRequest) {
 		skill.Description = *req.Description
 	}
 	if req.SourceType != nil {
-		skill.SourceType = *req.SourceType
+		skill.SourceType = models.SkillSourceType(*req.SourceType)
 	}
 	if req.SourceLocator != nil {
 		skill.SourceLocator = *req.SourceLocator

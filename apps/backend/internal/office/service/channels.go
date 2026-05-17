@@ -67,7 +67,7 @@ func (s *Service) SetupChannel(ctx context.Context, channel *models.Channel) err
 
 	s.logger.Info("channel setup complete",
 		zap.String("channel_id", channel.ID),
-		zap.String("platform", channel.Platform),
+		zap.String("platform", string(channel.Platform)),
 		zap.String("task_id", taskID))
 
 	s.LogActivity(ctx, channel.WorkspaceID, "user", "",
@@ -111,7 +111,7 @@ func (s *Service) UpdateChannelStatus(ctx context.Context, id, status string) er
 	if err != nil {
 		return err
 	}
-	channel.Status = status
+	channel.Status = models.ChannelStatus(status)
 	return s.repo.UpdateChannel(ctx, channel)
 }
 
@@ -138,7 +138,7 @@ func (s *Service) HandleChannelInbound(
 		AuthorType:     "user",
 		AuthorID:       authorName,
 		Body:           body,
-		Source:         channel.Platform,
+		Source:         string(channel.Platform),
 		ReplyChannelID: channel.ID,
 	}
 	return s.CreateComment(ctx, comment)

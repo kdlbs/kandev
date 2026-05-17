@@ -6,6 +6,7 @@ import { cleanupTaskStorage } from "@/lib/local-storage";
 import { removeRecentTask } from "@/lib/recent-tasks";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { toKanbanTask, type TaskLike } from "@/lib/kanban/map-task";
+import { sessionId as toSessionId } from "@/lib/types/http";
 
 type KanbanTask = KanbanState["tasks"][number];
 
@@ -168,8 +169,11 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         (s) => s.id,
       );
       const task = currentState.kanban.tasks.find((t) => t.id === deletedId);
-      if (task?.primarySessionId && !sessionIds.includes(task.primarySessionId)) {
-        sessionIds.push(task.primarySessionId);
+      if (task?.primarySessionId) {
+        const primaryId = toSessionId(task.primarySessionId);
+        if (!sessionIds.includes(primaryId)) {
+          sessionIds.push(primaryId);
+        }
       }
       const envIds = Array.from(
         new Set(

@@ -550,7 +550,7 @@ func TestIsRemoteSession(t *testing.T) {
 		store.Add(&AgentExecution{
 			ID:          "exec-1",
 			SessionID:   "session-1",
-			RuntimeName: string(executor.NameSprites),
+			RuntimeName: executor.NameSprites,
 			Status:      v1.AgentStatusRunning,
 		})
 		mgr := &Manager{executionStore: store}
@@ -562,7 +562,7 @@ func TestIsRemoteSession(t *testing.T) {
 		store.Add(&AgentExecution{
 			ID:          "exec-2",
 			SessionID:   "session-2",
-			RuntimeName: string(executor.NameStandalone),
+			RuntimeName: executor.NameStandalone,
 			Status:      v1.AgentStatusRunning,
 			Metadata:    map[string]interface{}{MetadataKeyIsRemote: true},
 		})
@@ -575,7 +575,7 @@ func TestIsRemoteSession(t *testing.T) {
 		store.Add(&AgentExecution{
 			ID:          "exec-3",
 			SessionID:   "session-3",
-			RuntimeName: string(executor.NameStandalone),
+			RuntimeName: executor.NameStandalone,
 			Status:      v1.AgentStatusRunning,
 		})
 		mgr := &Manager{executionStore: store}
@@ -608,7 +608,7 @@ func TestIsRemoteSession(t *testing.T) {
 		store := NewExecutionStore()
 		provider := &mockWorkspaceInfoProvider{
 			infos: map[string]*WorkspaceInfo{
-				"session-6": {RuntimeName: string(executor.NameSprites)},
+				"session-6": {RuntimeName: executor.NameSprites},
 			},
 		}
 		mgr := &Manager{executionStore: store, workspaceInfoProvider: provider}
@@ -646,7 +646,7 @@ func TestShouldUseContainerShell(t *testing.T) {
 		store.Add(&AgentExecution{
 			ID:          "exec-1",
 			SessionID:   "session-1",
-			RuntimeName: string(executor.NameDocker),
+			RuntimeName: executor.NameDocker,
 			Status:      v1.AgentStatusRunning,
 		})
 		mgr := &Manager{executionStore: store}
@@ -658,7 +658,7 @@ func TestShouldUseContainerShell(t *testing.T) {
 		store.Add(&AgentExecution{
 			ID:          "exec-2",
 			SessionID:   "session-2",
-			RuntimeName: string(executor.NameSprites),
+			RuntimeName: executor.NameSprites,
 			Status:      v1.AgentStatusRunning,
 		})
 		mgr := &Manager{executionStore: store}
@@ -670,7 +670,7 @@ func TestShouldUseContainerShell(t *testing.T) {
 		store.Add(&AgentExecution{
 			ID:          "exec-3",
 			SessionID:   "session-3",
-			RuntimeName: string(executor.NameStandalone),
+			RuntimeName: executor.NameStandalone,
 			Status:      v1.AgentStatusRunning,
 			Metadata:    map[string]interface{}{MetadataKeyIsRemote: true},
 		})
@@ -683,7 +683,7 @@ func TestShouldUseContainerShell(t *testing.T) {
 		store.Add(&AgentExecution{
 			ID:          "exec-4",
 			SessionID:   "session-4",
-			RuntimeName: string(executor.NameStandalone),
+			RuntimeName: executor.NameStandalone,
 			Status:      v1.AgentStatusRunning,
 		})
 		mgr := &Manager{executionStore: store}
@@ -716,7 +716,7 @@ func TestShouldUseContainerShell(t *testing.T) {
 		store := NewExecutionStore()
 		provider := &mockWorkspaceInfoProvider{
 			infos: map[string]*WorkspaceInfo{
-				"session-7": {RuntimeName: string(executor.NameDocker)},
+				"session-7": {RuntimeName: executor.NameDocker},
 			},
 		}
 		mgr := &Manager{executionStore: store, workspaceInfoProvider: provider}

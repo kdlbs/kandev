@@ -32,10 +32,10 @@ func (s *Service) LogActivityWithRun(
 ) {
 	entry := &models.ActivityEntry{
 		WorkspaceID: workspaceID,
-		ActorType:   actorType,
+		ActorType:   models.ActivityActorType(actorType),
 		ActorID:     actorID,
-		Action:      action,
-		TargetType:  targetType,
+		Action:      models.ActivityAction(action),
+		TargetType:  models.ActivityTargetType(targetType),
 		TargetID:    targetID,
 		Details:     details,
 		RunID:       runID,
@@ -107,8 +107,8 @@ func (s *Service) publishRunEventAppended(ctx context.Context, evt *models.RunEv
 		"run_id": evt.RunID,
 		"event": map[string]interface{}{
 			"seq":        evt.Seq,
-			"event_type": evt.EventType,
-			"level":      evt.Level,
+			"event_type": string(evt.EventType),
+			"level":      string(evt.Level),
 			"payload":    evt.Payload,
 			"created_at": evt.CreatedAt.UTC().Format(time.RFC3339Nano),
 		},

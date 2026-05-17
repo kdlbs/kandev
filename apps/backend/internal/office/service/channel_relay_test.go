@@ -28,7 +28,7 @@ func setupChannelForRelay(t *testing.T, svc *service.Service, platform, config s
 	channel := &models.Channel{
 		WorkspaceID:    "ws-1",
 		AgentProfileID: agent.ID,
-		Platform:       platform,
+		Platform:       models.ChannelPlatform(platform),
 		Config:         config,
 	}
 	if err := svc.SetupChannel(ctx, channel); err != nil {

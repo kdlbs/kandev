@@ -262,7 +262,7 @@ func TestBuildResumeRequest_ReusesTaskEnvironmentRuntimeMetadata(t *testing.T) {
 		TaskID:           "task-1",
 		AgentExecutionID: "exec-old",
 		ContainerID:      "container-old",
-		Runtime:          string(models.ExecutorTypeLocalDocker),
+		Runtime:          models.ExecutorTypeLocalDocker.Runtime(),
 		Metadata: map[string]interface{}{
 			lifecycle.MetadataKeyAuthTokenSecret: "secret-token",
 			"task_description":                   "drop me",

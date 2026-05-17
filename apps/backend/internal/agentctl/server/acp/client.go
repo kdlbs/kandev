@@ -146,7 +146,7 @@ func (c *Client) forwardPermissionRequest(ctx context.Context, handler Permissio
 		options[i] = types.PermissionOption{
 			OptionID: string(opt.OptionId),
 			Name:     opt.Name,
-			Kind:     string(opt.Kind),
+			Kind:     types.PermissionOptionKind(opt.Kind),
 		}
 	}
 

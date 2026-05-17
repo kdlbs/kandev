@@ -71,24 +71,24 @@ type AgentInstance = settingsmodels.AgentProfile
 // create (e.g. ["ceo"]). Empty array for "no auto-attach". Ignored
 // for is_system = false.
 type Skill struct {
-	ID                      string    `json:"id" db:"id"`
-	WorkspaceID             string    `json:"workspace_id" db:"workspace_id"`
-	Name                    string    `json:"name" db:"name"`
-	Slug                    string    `json:"slug" db:"slug"`
-	Description             string    `json:"description" db:"description"`
-	SourceType              string    `json:"source_type" db:"source_type"`
-	SourceLocator           string    `json:"source_locator" db:"source_locator"`
-	Content                 string    `json:"content" db:"content"`
-	FileInventory           string    `json:"file_inventory" db:"file_inventory"`
-	Version                 string    `json:"version" db:"version"`
-	ContentHash             string    `json:"content_hash" db:"content_hash"`
-	ApprovalState           string    `json:"approval_state" db:"approval_state"`
-	CreatedByAgentProfileID string    `json:"created_by_agent_profile_id" db:"created_by_agent_profile_id"`
-	IsSystem                bool      `json:"is_system" db:"is_system"`
-	SystemVersion           string    `json:"system_version" db:"system_version"`
-	DefaultForRoles         string    `json:"default_for_roles" db:"default_for_roles"`
-	CreatedAt               time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt               time.Time `json:"updated_at" db:"updated_at"`
+	ID                      string             `json:"id" db:"id"`
+	WorkspaceID             string             `json:"workspace_id" db:"workspace_id"`
+	Name                    string             `json:"name" db:"name"`
+	Slug                    string             `json:"slug" db:"slug"`
+	Description             string             `json:"description" db:"description"`
+	SourceType              SkillSourceType    `json:"source_type" db:"source_type"`
+	SourceLocator           string             `json:"source_locator" db:"source_locator"`
+	Content                 string             `json:"content" db:"content"`
+	FileInventory           string             `json:"file_inventory" db:"file_inventory"`
+	Version                 string             `json:"version" db:"version"`
+	ContentHash             string             `json:"content_hash" db:"content_hash"`
+	ApprovalState           SkillApprovalState `json:"approval_state" db:"approval_state"`
+	CreatedByAgentProfileID string             `json:"created_by_agent_profile_id" db:"created_by_agent_profile_id"`
+	IsSystem                bool               `json:"is_system" db:"is_system"`
+	SystemVersion           string             `json:"system_version" db:"system_version"`
+	DefaultForRoles         string             `json:"default_for_roles" db:"default_for_roles"`
+	CreatedAt               time.Time          `json:"created_at" db:"created_at"`
+	UpdatedAt               time.Time          `json:"updated_at" db:"updated_at"`
 }
 
 // RunSkillSnapshot records the exact skill package attached to a run.
@@ -314,16 +314,16 @@ type CostEvent struct {
 // hundredths of a cent (matches CostEvent.CostSubcents); the UI divides
 // by 10000 to render dollars via apps/web/lib/utils.ts:formatDollars.
 type BudgetPolicy struct {
-	ID                string    `json:"id" db:"id"`
-	WorkspaceID       string    `json:"workspace_id" db:"workspace_id"`
-	ScopeType         string    `json:"scope_type" db:"scope_type"`
-	ScopeID           string    `json:"scope_id" db:"scope_id"`
-	LimitSubcents     int64     `json:"limit_subcents" db:"limit_subcents"`
-	Period            string    `json:"period" db:"period"`
-	AlertThresholdPct int       `json:"alert_threshold_pct" db:"alert_threshold_pct"`
-	ActionOnExceed    string    `json:"action_on_exceed" db:"action_on_exceed"`
-	CreatedAt         time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at" db:"updated_at"`
+	ID                string               `json:"id" db:"id"`
+	WorkspaceID       string               `json:"workspace_id" db:"workspace_id"`
+	ScopeType         BudgetScopeType      `json:"scope_type" db:"scope_type"`
+	ScopeID           string               `json:"scope_id" db:"scope_id"`
+	LimitSubcents     int64                `json:"limit_subcents" db:"limit_subcents"`
+	Period            BudgetPeriod         `json:"period" db:"period"`
+	AlertThresholdPct int                  `json:"alert_threshold_pct" db:"alert_threshold_pct"`
+	ActionOnExceed    BudgetActionOnExceed `json:"action_on_exceed" db:"action_on_exceed"`
+	CreatedAt         time.Time            `json:"created_at" db:"created_at"`
+	UpdatedAt         time.Time            `json:"updated_at" db:"updated_at"`
 }
 
 // Run represents a run queue entry.
@@ -332,7 +332,7 @@ type Run struct {
 	AgentProfileID   string     `json:"agent_profile_id" db:"agent_profile_id"`
 	Reason           string     `json:"reason" db:"reason"`
 	Payload          string     `json:"payload" db:"payload"`
-	Status           string     `json:"status" db:"status"`
+	Status           RunStatus  `json:"status" db:"status"`
 	CoalescedCount   int        `json:"coalesced_count" db:"coalesced_count"`
 	IdempotencyKey   *string    `json:"idempotency_key" db:"idempotency_key"`
 	ContextSnapshot  string     `json:"context_snapshot" db:"context_snapshot"`
@@ -395,7 +395,7 @@ type Run struct {
 	// RoutingBlockedStatus is set when every provider candidate is
 	// unavailable; values: 'waiting_for_provider_capacity' |
 	// 'blocked_provider_action_required'.
-	RoutingBlockedStatus *string `json:"routing_blocked_status,omitempty" db:"routing_blocked_status"`
+	RoutingBlockedStatus *RoutingBlockedStatus `json:"routing_blocked_status,omitempty" db:"routing_blocked_status"`
 	// EarliestRetryAt is the earliest moment a parked run should be re-
 	// resolved. Set only when at least one degraded route is auto-retryable.
 	EarliestRetryAt *time.Time `json:"earliest_retry_at,omitempty" db:"earliest_retry_at"`
@@ -406,21 +406,21 @@ type Run struct {
 // Persisted by the routing scheduler dispatcher in
 // internal/office/scheduler/dispatch_routing.go.
 type RouteAttempt struct {
-	RunID           string     `json:"run_id" db:"run_id"`
-	Seq             int        `json:"seq" db:"seq"`
-	ProviderID      string     `json:"provider_id" db:"provider_id"`
-	Model           string     `json:"model" db:"model"`
-	Tier            string     `json:"tier" db:"tier"`
-	Outcome         string     `json:"outcome" db:"outcome"`
-	ErrorCode       string     `json:"error_code,omitempty" db:"error_code"`
-	ErrorConfidence string     `json:"error_confidence,omitempty" db:"error_confidence"`
-	AdapterPhase    string     `json:"adapter_phase,omitempty" db:"adapter_phase"`
-	ClassifierRule  string     `json:"classifier_rule,omitempty" db:"classifier_rule"`
-	ExitCode        *int       `json:"exit_code,omitempty" db:"exit_code"`
-	RawExcerpt      string     `json:"raw_excerpt,omitempty" db:"raw_excerpt"`
-	ResetHint       *time.Time `json:"reset_hint,omitempty" db:"reset_hint"`
-	StartedAt       time.Time  `json:"started_at" db:"started_at"`
-	FinishedAt      *time.Time `json:"finished_at,omitempty" db:"finished_at"`
+	RunID           string              `json:"run_id" db:"run_id"`
+	Seq             int                 `json:"seq" db:"seq"`
+	ProviderID      string              `json:"provider_id" db:"provider_id"`
+	Model           string              `json:"model" db:"model"`
+	Tier            string              `json:"tier" db:"tier"`
+	Outcome         RouteAttemptOutcome `json:"outcome" db:"outcome"`
+	ErrorCode       string              `json:"error_code,omitempty" db:"error_code"`
+	ErrorConfidence ErrorConfidence     `json:"error_confidence,omitempty" db:"error_confidence"`
+	AdapterPhase    AdapterPhase        `json:"adapter_phase,omitempty" db:"adapter_phase"`
+	ClassifierRule  string              `json:"classifier_rule,omitempty" db:"classifier_rule"`
+	ExitCode        *int                `json:"exit_code,omitempty" db:"exit_code"`
+	RawExcerpt      string              `json:"raw_excerpt,omitempty" db:"raw_excerpt"`
+	ResetHint       *time.Time          `json:"reset_hint,omitempty" db:"reset_hint"`
+	StartedAt       time.Time           `json:"started_at" db:"started_at"`
+	FinishedAt      *time.Time          `json:"finished_at,omitempty" db:"finished_at"`
 }
 
 // ProviderHealth records the health state of one (workspace, provider,
@@ -429,18 +429,18 @@ type RouteAttempt struct {
 // tier mapping on this provider). The resolver checks scopes in order
 // provider → tier → model before considering a candidate eligible.
 type ProviderHealth struct {
-	WorkspaceID string     `json:"workspace_id" db:"workspace_id"`
-	ProviderID  string     `json:"provider_id" db:"provider_id"`
-	Scope       string     `json:"scope" db:"scope"`
-	ScopeValue  string     `json:"scope_value" db:"scope_value"`
-	State       string     `json:"state" db:"state"`
-	ErrorCode   string     `json:"error_code,omitempty" db:"error_code"`
-	RetryAt     *time.Time `json:"retry_at,omitempty" db:"retry_at"`
-	BackoffStep int        `json:"backoff_step" db:"backoff_step"`
-	LastFailure *time.Time `json:"last_failure,omitempty" db:"last_failure"`
-	LastSuccess *time.Time `json:"last_success,omitempty" db:"last_success"`
-	RawExcerpt  string     `json:"raw_excerpt,omitempty" db:"raw_excerpt"`
-	UpdatedAt   time.Time  `json:"updated_at" db:"updated_at"`
+	WorkspaceID string              `json:"workspace_id" db:"workspace_id"`
+	ProviderID  string              `json:"provider_id" db:"provider_id"`
+	Scope       ProviderHealthScope `json:"scope" db:"scope"`
+	ScopeValue  string              `json:"scope_value" db:"scope_value"`
+	State       ProviderHealthState `json:"state" db:"state"`
+	ErrorCode   string              `json:"error_code,omitempty" db:"error_code"`
+	RetryAt     *time.Time          `json:"retry_at,omitempty" db:"retry_at"`
+	BackoffStep int                 `json:"backoff_step" db:"backoff_step"`
+	LastFailure *time.Time          `json:"last_failure,omitempty" db:"last_failure"`
+	LastSuccess *time.Time          `json:"last_success,omitempty" db:"last_success"`
+	RawExcerpt  string              `json:"raw_excerpt,omitempty" db:"raw_excerpt"`
+	UpdatedAt   time.Time           `json:"updated_at" db:"updated_at"`
 }
 
 // RunEvent is one row in office_run_events. Each row is a discrete
@@ -448,30 +448,30 @@ type ProviderHealth struct {
 // complete, error. The frontend renders these in the run detail
 // page's Events log.
 type RunEvent struct {
-	RunID     string    `json:"run_id" db:"run_id"`
-	Seq       int       `json:"seq" db:"seq"`
-	EventType string    `json:"event_type" db:"event_type"`
-	Level     string    `json:"level" db:"level"`
-	Payload   string    `json:"payload" db:"payload"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	RunID     string        `json:"run_id" db:"run_id"`
+	Seq       int           `json:"seq" db:"seq"`
+	EventType RunEventType  `json:"event_type" db:"event_type"`
+	Level     RunEventLevel `json:"level" db:"level"`
+	Payload   string        `json:"payload" db:"payload"`
+	CreatedAt time.Time     `json:"created_at" db:"created_at"`
 }
 
 // Routine represents a recurring task definition.
 type Routine struct {
-	ID                     string     `json:"id" db:"id"`
-	WorkspaceID            string     `json:"workspace_id" db:"workspace_id"`
-	Name                   string     `json:"name" db:"name"`
-	Description            string     `json:"description" db:"description"`
-	TaskTemplate           string     `json:"task_template" db:"task_template"`
-	AssigneeAgentProfileID string     `json:"assignee_agent_profile_id" db:"assignee_agent_profile_id"`
-	Status                 string     `json:"status" db:"status"`
-	ConcurrencyPolicy      string     `json:"concurrency_policy" db:"concurrency_policy"`
-	CatchUpPolicy          string     `json:"catch_up_policy" db:"catch_up_policy"`
-	CatchUpMax             int        `json:"catch_up_max" db:"catch_up_max"`
-	Variables              string     `json:"variables" db:"variables"`
-	LastRunAt              *time.Time `json:"last_run_at" db:"last_run_at"`
-	CreatedAt              time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt              time.Time  `json:"updated_at" db:"updated_at"`
+	ID                     string                   `json:"id" db:"id"`
+	WorkspaceID            string                   `json:"workspace_id" db:"workspace_id"`
+	Name                   string                   `json:"name" db:"name"`
+	Description            string                   `json:"description" db:"description"`
+	TaskTemplate           string                   `json:"task_template" db:"task_template"`
+	AssigneeAgentProfileID string                   `json:"assignee_agent_profile_id" db:"assignee_agent_profile_id"`
+	Status                 string                   `json:"status" db:"status"`
+	ConcurrencyPolicy      RoutineConcurrencyPolicy `json:"concurrency_policy" db:"concurrency_policy"`
+	CatchUpPolicy          RoutineCatchUpPolicy     `json:"catch_up_policy" db:"catch_up_policy"`
+	CatchUpMax             int                      `json:"catch_up_max" db:"catch_up_max"`
+	Variables              string                   `json:"variables" db:"variables"`
+	LastRunAt              *time.Time               `json:"last_run_at" db:"last_run_at"`
+	CreatedAt              time.Time                `json:"created_at" db:"created_at"`
+	UpdatedAt              time.Time                `json:"updated_at" db:"updated_at"`
 }
 
 // RoutineTrigger represents a trigger for a routine.
@@ -493,18 +493,18 @@ type RoutineTrigger struct {
 
 // RoutineRun represents a single run of a routine.
 type RoutineRun struct {
-	ID                  string     `json:"id" db:"id"`
-	RoutineID           string     `json:"routine_id" db:"routine_id"`
-	TriggerID           string     `json:"trigger_id" db:"trigger_id"`
-	Source              string     `json:"source" db:"source"`
-	Status              string     `json:"status" db:"status"`
-	TriggerPayload      string     `json:"trigger_payload" db:"trigger_payload"`
-	LinkedTaskID        string     `json:"linked_task_id" db:"linked_task_id"`
-	CoalescedIntoRunID  string     `json:"coalesced_into_run_id" db:"coalesced_into_run_id"`
-	DispatchFingerprint string     `json:"dispatch_fingerprint" db:"dispatch_fingerprint"`
-	StartedAt           *time.Time `json:"started_at" db:"started_at"`
-	CompletedAt         *time.Time `json:"completed_at" db:"completed_at"`
-	CreatedAt           time.Time  `json:"created_at" db:"created_at"`
+	ID                  string           `json:"id" db:"id"`
+	RoutineID           string           `json:"routine_id" db:"routine_id"`
+	TriggerID           string           `json:"trigger_id" db:"trigger_id"`
+	Source              string           `json:"source" db:"source"`
+	Status              RoutineRunStatus `json:"status" db:"status"`
+	TriggerPayload      string           `json:"trigger_payload" db:"trigger_payload"`
+	LinkedTaskID        string           `json:"linked_task_id" db:"linked_task_id"`
+	CoalescedIntoRunID  string           `json:"coalesced_into_run_id" db:"coalesced_into_run_id"`
+	DispatchFingerprint string           `json:"dispatch_fingerprint" db:"dispatch_fingerprint"`
+	StartedAt           *time.Time       `json:"started_at" db:"started_at"`
+	CompletedAt         *time.Time       `json:"completed_at" db:"completed_at"`
+	CreatedAt           time.Time        `json:"created_at" db:"created_at"`
 }
 
 // ApprovalType constants for approval request types.
@@ -518,29 +518,29 @@ const (
 
 // Approval represents a pending or resolved approval request.
 type Approval struct {
-	ID                        string     `json:"id" db:"id"`
-	WorkspaceID               string     `json:"workspace_id" db:"workspace_id"`
-	Type                      string     `json:"type" db:"type"`
-	RequestedByAgentProfileID string     `json:"requested_by_agent_profile_id" db:"requested_by_agent_profile_id"`
-	Status                    string     `json:"status" db:"status"`
-	Payload                   string     `json:"payload" db:"payload"`
-	DecisionNote              string     `json:"decision_note" db:"decision_note"`
-	DecidedBy                 string     `json:"decided_by" db:"decided_by"`
-	DecidedAt                 *time.Time `json:"decided_at" db:"decided_at"`
-	CreatedAt                 time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt                 time.Time  `json:"updated_at" db:"updated_at"`
+	ID                        string         `json:"id" db:"id"`
+	WorkspaceID               string         `json:"workspace_id" db:"workspace_id"`
+	Type                      string         `json:"type" db:"type"`
+	RequestedByAgentProfileID string         `json:"requested_by_agent_profile_id" db:"requested_by_agent_profile_id"`
+	Status                    ApprovalStatus `json:"status" db:"status"`
+	Payload                   string         `json:"payload" db:"payload"`
+	DecisionNote              string         `json:"decision_note" db:"decision_note"`
+	DecidedBy                 string         `json:"decided_by" db:"decided_by"`
+	DecidedAt                 *time.Time     `json:"decided_at" db:"decided_at"`
+	CreatedAt                 time.Time      `json:"created_at" db:"created_at"`
+	UpdatedAt                 time.Time      `json:"updated_at" db:"updated_at"`
 }
 
 // ActivityEntry represents an entry in the activity log.
 type ActivityEntry struct {
-	ID          string `json:"id" db:"id"`
-	WorkspaceID string `json:"workspace_id" db:"workspace_id"`
-	ActorType   string `json:"actor_type" db:"actor_type"`
-	ActorID     string `json:"actor_id" db:"actor_id"`
-	Action      string `json:"action" db:"action"`
-	TargetType  string `json:"target_type" db:"target_type"`
-	TargetID    string `json:"target_id" db:"target_id"`
-	Details     string `json:"details" db:"details"`
+	ID          string             `json:"id" db:"id"`
+	WorkspaceID string             `json:"workspace_id" db:"workspace_id"`
+	ActorType   ActivityActorType  `json:"actor_type" db:"actor_type"`
+	ActorID     string             `json:"actor_id" db:"actor_id"`
+	Action      ActivityAction     `json:"action" db:"action"`
+	TargetType  ActivityTargetType `json:"target_type" db:"target_type"`
+	TargetID    string             `json:"target_id" db:"target_id"`
+	Details     string             `json:"details" db:"details"`
 	// RunID + SessionID let the run detail page join activity rows
 	// back to the originating run for the "Tasks Touched" surface.
 	// Empty string for activity not produced under a run (manual
@@ -564,16 +564,16 @@ type AgentMemory struct {
 
 // Channel represents a communication channel for an agent.
 type Channel struct {
-	ID             string    `json:"id" db:"id"`
-	WorkspaceID    string    `json:"workspace_id" db:"workspace_id"`
-	AgentProfileID string    `json:"agent_profile_id" db:"agent_profile_id"`
-	Platform       string    `json:"platform" db:"platform"`
-	Config         string    `json:"config" db:"config"`
-	WebhookSecret  string    `json:"webhook_secret,omitempty" db:"webhook_secret"`
-	Status         string    `json:"status" db:"status"`
-	TaskID         string    `json:"task_id" db:"task_id"`
-	CreatedAt      time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
+	ID             string          `json:"id" db:"id"`
+	WorkspaceID    string          `json:"workspace_id" db:"workspace_id"`
+	AgentProfileID string          `json:"agent_profile_id" db:"agent_profile_id"`
+	Platform       ChannelPlatform `json:"platform" db:"platform"`
+	Config         string          `json:"config" db:"config"`
+	WebhookSecret  string          `json:"webhook_secret,omitempty" db:"webhook_secret"`
+	Status         ChannelStatus   `json:"status" db:"status"`
+	TaskID         string          `json:"task_id" db:"task_id"`
+	CreatedAt      time.Time       `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at" db:"updated_at"`
 }
 
 // TaskBlocker represents a blocker relationship between tasks.

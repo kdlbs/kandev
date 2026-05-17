@@ -1,9 +1,13 @@
 import type { BackendMessageMap, BackendMessageType } from "@/lib/types/backend";
+import type { ConnectionStatus } from "@/lib/types/connection";
 import { generateUUID } from "@/lib/utils";
 
 type MessageHandler<T extends BackendMessageType> = (message: BackendMessageMap[T]) => void;
 
-type WebSocketStatus = "idle" | "connecting" | "open" | "closed" | "error" | "reconnecting";
+// Internal alias kept for readability — the WS client emits the same vocabulary
+// the UI consumes. `disconnected` covers both "never connected" (formerly
+// `idle`) and "socket closed" (formerly `closed`); `connected` replaces `open`.
+type WebSocketStatus = ConnectionStatus;
 
 export interface ReconnectOptions {
   enabled?: boolean;
@@ -23,7 +27,7 @@ const DEFAULT_RECONNECT_OPTIONS: Required<ReconnectOptions> = {
 
 export class WebSocketClient {
   private socket: WebSocket | null = null;
-  private status: WebSocketStatus = "idle";
+  private status: WebSocketStatus = "disconnected";
   private handlers = new Map<BackendMessageType, Set<MessageHandler<BackendMessageType>>>();
   private pendingRequests = new Map<
     string,
@@ -69,7 +73,7 @@ export class WebSocketClient {
 
     this.socket.onopen = () => {
       this.reconnectAttempts = 0;
-      this.setStatus("open");
+      this.setStatus("connected");
       this.flushQueue();
       this.resubscribe();
     };
@@ -105,13 +109,13 @@ export class WebSocketClient {
       this.socket.close();
       this.socket = null;
     }
-    this.setStatus("closed");
+    this.setStatus("disconnected");
     this.cleanupPendingRequests();
   }
 
   send(payload: unknown) {
     const data = JSON.stringify(payload);
-    if (this.status !== "open" || !this.socket) {
+    if (this.status !== "connected" || !this.socket) {
       this.pendingQueue.push(data);
       return;
     }
@@ -138,7 +142,7 @@ export class WebSocketClient {
     const currentCount = this.subscriptions.get(taskId) ?? 0;
     const nextCount = currentCount + 1;
     this.subscriptions.set(taskId, nextCount);
-    if (this.status === "open" && nextCount === 1) {
+    if (this.status === "connected" && nextCount === 1) {
       this.send({
         id: generateUUID(),
         type: "request",
@@ -153,7 +157,7 @@ export class WebSocketClient {
     const currentCount = this.sessionSubscriptions.get(sessionId) ?? 0;
     const nextCount = currentCount + 1;
     this.sessionSubscriptions.set(sessionId, nextCount);
-    if (this.status === "open" && nextCount === 1) {
+    if (this.status === "connected" && nextCount === 1) {
       this.send({
         id: generateUUID(),
         type: "request",
@@ -168,7 +172,7 @@ export class WebSocketClient {
     const currentCount = this.sessionFocusCounts.get(sessionId) ?? 0;
     const nextCount = currentCount + 1;
     this.sessionFocusCounts.set(sessionId, nextCount);
-    if (this.status === "open" && nextCount === 1) {
+    if (this.status === "connected" && nextCount === 1) {
       this.send({
         id: generateUUID(),
         type: "request",
@@ -185,7 +189,7 @@ export class WebSocketClient {
     const nextCount = currentCount - 1;
     if (nextCount <= 0) {
       this.sessionFocusCounts.delete(sessionId);
-      if (this.status === "open") {
+      if (this.status === "connected") {
         this.send({
           id: generateUUID(),
           type: "request",
@@ -200,7 +204,7 @@ export class WebSocketClient {
 
   subscribeUser() {
     this.userSubscriptionCount += 1;
-    if (this.status === "open" && this.userSubscriptionCount === 1) {
+    if (this.status === "connected" && this.userSubscriptionCount === 1) {
       this.send({
         id: generateUUID(),
         type: "request",
@@ -216,7 +220,7 @@ export class WebSocketClient {
     const nextCount = currentCount - 1;
     if (nextCount <= 0) {
       this.subscriptions.delete(taskId);
-      if (this.status === "open") {
+      if (this.status === "connected") {
         this.send({
           id: generateUUID(),
           type: "request",
@@ -238,7 +242,7 @@ export class WebSocketClient {
 
     if (nextCount <= 0) {
       this.sessionSubscriptions.delete(sessionId);
-      if (this.status === "open") {
+      if (this.status === "connected") {
         this.send({
           id: generateUUID(),
           type: "request",
@@ -262,7 +266,7 @@ export class WebSocketClient {
     const currentCount = this.runSubscriptions.get(runId) ?? 0;
     const nextCount = currentCount + 1;
     this.runSubscriptions.set(runId, nextCount);
-    if (this.status === "open" && nextCount === 1) {
+    if (this.status === "connected" && nextCount === 1) {
       this.send({
         id: generateUUID(),
         type: "request",
@@ -279,7 +283,7 @@ export class WebSocketClient {
     const nextCount = currentCount - 1;
     if (nextCount <= 0) {
       this.runSubscriptions.delete(runId);
-      if (this.status === "open") {
+      if (this.status === "connected") {
         this.send({
           id: generateUUID(),
           type: "request",
@@ -294,7 +298,7 @@ export class WebSocketClient {
 
   unsubscribeUser() {
     this.userSubscriptionCount = Math.max(0, this.userSubscriptionCount - 1);
-    if (this.status === "open" && this.userSubscriptionCount === 0) {
+    if (this.status === "connected" && this.userSubscriptionCount === 0) {
       this.send({
         id: generateUUID(),
         type: "request",
@@ -362,7 +366,7 @@ export class WebSocketClient {
   }
 
   private handleDisconnect(event: CloseEvent) {
-    this.setStatus("closed");
+    this.setStatus("disconnected");
 
     // Don't reconnect if this was an intentional close
     if (this.intentionalClose) {
@@ -465,7 +469,7 @@ export class WebSocketClient {
   }
 
   private flushQueue() {
-    if (!this.socket || this.status !== "open") return;
+    if (!this.socket || this.status !== "connected") return;
     this.pendingQueue.forEach((data) => this.socket?.send(data));
     this.pendingQueue = [];
   }

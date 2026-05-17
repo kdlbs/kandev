@@ -12,6 +12,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/ports"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -30,12 +31,12 @@ type AgentExecution struct {
 	AgentProfileID    string
 	AgentID           string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
 	ContainerID       string
-	ContainerIP       string // IP address of the container for agentctl communication
-	WorkspacePath     string // Path to the workspace (worktree or repository path)
-	ACPSessionID      string // ACP session ID to resume, if available
-	AgentCommand      string // Command to start the agent subprocess
-	ContinueCommand   string // Command for follow-up prompts (one-shot agents like Amp)
-	RuntimeName       string // Name of the runtime used (e.g., "docker", "standalone")
+	ContainerIP       string               // IP address of the container for agentctl communication
+	WorkspacePath     string               // Path to the workspace (worktree or repository path)
+	ACPSessionID      string               // ACP session ID to resume, if available
+	AgentCommand      string               // Command to start the agent subprocess
+	ContinueCommand   string               // Command for follow-up prompts (one-shot agents like Amp)
+	RuntimeName       agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
 	Status            v1.AgentStatus
 	StartedAt         time.Time
 	FinishedAt        *time.Time
@@ -462,7 +463,7 @@ type WorkspaceInfo struct {
 
 	// Executor-aware fields for correct runtime selection and remote reconnection
 	ExecutorType     string                 // Executor type (e.g., "local_pc", "sprites")
-	RuntimeName      string                 // Runtime name from ExecutorRunning record
+	RuntimeName      agentruntime.Runtime   // Runtime name from ExecutorRunning record
 	AgentExecutionID string                 // Previous execution ID (for remote reconnect)
 	Metadata         map[string]interface{} // Additional metadata (reconnect flags)
 }

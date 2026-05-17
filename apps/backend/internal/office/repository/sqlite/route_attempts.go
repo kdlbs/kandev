@@ -27,8 +27,8 @@ func (r *Repository) AppendRouteAttempt(
 			exit_code, raw_excerpt, reset_hint, started_at, finished_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), a.RunID, a.Seq, a.ProviderID, a.Model, a.Tier, a.Outcome,
-		nullableString(a.ErrorCode), nullableString(a.ErrorConfidence),
-		nullableString(a.AdapterPhase), nullableString(a.ClassifierRule),
+		nullableString(a.ErrorCode), nullableString(string(a.ErrorConfidence)),
+		nullableString(string(a.AdapterPhase)), nullableString(a.ClassifierRule),
 		a.ExitCode, nullableString(a.RawExcerpt), a.ResetHint,
 		a.StartedAt, a.FinishedAt)
 	if err != nil {

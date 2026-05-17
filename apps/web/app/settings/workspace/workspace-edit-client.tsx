@@ -19,8 +19,10 @@ import {
   DialogTitle,
 } from "@kandev/ui/dialog";
 import { updateWorkspaceAction, deleteWorkspaceAction } from "@/app/actions/workspaces";
-import type { Workspace, Executor } from "@/lib/types/http";
-import type { AgentProfileOption } from "@/lib/state/slices";
+import type { Executor } from "@/lib/types/http";
+import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
+
+type Workspace = WorkspaceState["items"][number];
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";

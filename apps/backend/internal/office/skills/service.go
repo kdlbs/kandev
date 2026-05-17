@@ -143,7 +143,7 @@ func (s *SkillService) ValidateAndPrepareSkill(ctx context.Context, skill *model
 		return err
 	}
 	prepareSkillPackageMetadata(skill)
-	return s.validateSourceType(skill.SourceType)
+	return s.validateSourceType(string(skill.SourceType))
 }
 
 func prepareSkillPackageMetadata(skill *models.Skill) {

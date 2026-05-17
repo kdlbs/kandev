@@ -20,8 +20,10 @@ import { MobileIntegrationsSection } from "@/components/integrations/integration
 import { TaskSearchInput } from "./task-search-input";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { linkToTasks } from "@/lib/links";
-import type { Workspace, Repository } from "@/lib/types/http";
-import type { WorkflowsState } from "@/lib/state/slices";
+import type { Repository } from "@/lib/types/http";
+import type { WorkflowsState, WorkspaceState } from "@/lib/state/slices";
+
+type WorkspaceItem = WorkspaceState["items"][number];
 
 type MobileMenuSheetProps = {
   open: boolean;
@@ -51,7 +53,7 @@ function getMobileViewValue(currentPage: string, kanbanViewMode: string | null):
 
 type MobileDisplayOptionsProps = {
   activeWorkspaceId: string | null;
-  workspaces: Workspace[];
+  workspaces: WorkspaceItem[];
   onWorkspaceChange: (id: string | null) => void;
   activeWorkflowId: string | null;
   workflows: WorkflowsState["items"];
@@ -88,7 +90,7 @@ function MobileDisplaySelects({
             <SelectValue placeholder="Select workspace" />
           </SelectTrigger>
           <SelectContent>
-            {workspaces.map((workspace: Workspace) => (
+            {workspaces.map((workspace) => (
               <SelectItem key={workspace.id} value={workspace.id}>
                 {workspace.name}
               </SelectItem>

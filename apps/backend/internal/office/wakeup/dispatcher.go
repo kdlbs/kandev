@@ -190,7 +190,7 @@ func (d *Dispatcher) resolveRoutinePolicy(
 	if err != nil || routine == nil {
 		return PolicyCoalesceIfActive, nil
 	}
-	return normaliseRoutinePolicy(routine.ConcurrencyPolicy), nil
+	return normaliseRoutinePolicy(string(routine.ConcurrencyPolicy)), nil
 }
 
 // normaliseRoutinePolicy maps the routines package's legacy enum values

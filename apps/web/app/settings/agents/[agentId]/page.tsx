@@ -17,6 +17,7 @@ import type {
 import { buildDefaultPermissions } from "@/lib/agent-permissions";
 import { seedDefaultCLIFlags } from "@/lib/cli-flags";
 import { generateUUID } from "@/lib/utils";
+import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { deleteAgentAction } from "@/app/actions/agents";
@@ -45,7 +46,7 @@ const createDraftProfile = (
   defaultModel: string,
   permissionSettings?: Record<string, PermissionSetting>,
 ): DraftProfile => ({
-  id: `draft-${generateUUID()}`,
+  id: toAgentProfileId(`draft-${generateUUID()}`),
   agentId,
   name: "",
   agentDisplayName,
@@ -266,7 +267,7 @@ function useProfileHandlers(
   const [newProfileId, setNewProfileId] = useState<string | null>(null);
 
   const handleAddProfile = () => {
-    const draftId = `draft-${generateUUID()}`;
+    const draftId = toAgentProfileId(`draft-${generateUUID()}`);
     setDraftAgent((current) => ({
       ...current,
       profiles: [

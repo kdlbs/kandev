@@ -15,6 +15,7 @@ import type {
   LiveRun,
 } from "@/lib/state/slices/office/types";
 import type { CLIFlag, AgentRole, AgentStatus } from "@/lib/types/agent-profile";
+import { agentProfileId, workspaceId } from "@/lib/types/ids";
 
 // Re-export extended API so existing imports continue to work.
 export {
@@ -133,12 +134,13 @@ function boolField(agent: Record<string, unknown>, camelKey: string, snakeKey: s
 
 function normalizeAgent(raw: unknown): AgentProfile {
   const agent = raw as Record<string, unknown>;
-  const id = agent.id as string;
+  const id = agentProfileId(agent.id as string);
+  const rawAgentProfileId = stringField(agent, "agentProfileId", "agent_profile_id");
   return {
     id,
-    workspaceId: stringField(agent, "workspaceId", "workspace_id"),
+    workspaceId: workspaceId(stringField(agent, "workspaceId", "workspace_id")),
     name: agent.name as string,
-    agentProfileId: stringField(agent, "agentProfileId", "agent_profile_id") || id,
+    agentProfileId: rawAgentProfileId ? agentProfileId(rawAgentProfileId) : id,
     role: agent.role as AgentRole,
     icon: agent.icon as string | undefined,
     status: agent.status as AgentStatus,

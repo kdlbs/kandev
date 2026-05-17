@@ -643,7 +643,7 @@ func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *Execut
 		InstanceID:     req.InstanceID,
 		TaskID:         req.TaskID,
 		SessionID:      req.SessionID,
-		RuntimeName:    string(e.Name()),
+		RuntimeName:    e.Name(),
 		Client:         e.client,
 		WorkspacePath:  req.WorkspacePath,
 		AuthToken:      e.authToken,

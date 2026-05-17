@@ -156,7 +156,7 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 		InstanceID:           req.InstanceID,
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
-		RuntimeName:          string(r.Name()),
+		RuntimeName:          r.Name(),
 		Client:               client,
 		StandaloneInstanceID: resp.ID,
 		StandalonePort:       resp.Port,

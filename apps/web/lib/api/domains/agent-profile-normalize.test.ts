@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { normalizeAgentProfile, toAgentProfilePayload } from "./agent-profile-normalize";
+import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 
 describe("normalizeAgentProfile", () => {
   it("converts snake_case wire payload to canonical camelCase", () => {
@@ -57,7 +58,7 @@ describe("normalizeAgentProfile", () => {
 describe("toAgentProfilePayload", () => {
   it("converts canonical camelCase back to snake_case wire shape", () => {
     const payload = toAgentProfilePayload({
-      id: "p1",
+      id: toAgentProfileId("p1"),
       agentId: "claude",
       name: "default",
       cliPassthrough: false,
@@ -73,7 +74,7 @@ describe("toAgentProfilePayload", () => {
   });
 
   it("omits undefined fields rather than emitting nullish keys", () => {
-    const payload = toAgentProfilePayload({ id: "p1", name: "x" });
+    const payload = toAgentProfilePayload({ id: toAgentProfileId("p1"), name: "x" });
     expect(payload).toEqual({ id: "p1", name: "x" });
     expect("agent_id" in payload).toBe(false);
   });

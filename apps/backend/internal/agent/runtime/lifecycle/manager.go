@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -238,7 +239,7 @@ func (m *Manager) SetWorktreeManager(worktreeMgr *worktree.Manager) {
 	// worktree-specific preparation (create git worktree, checkout PR branch)
 	// instead of the generic local preparer.
 	if m.preparerRegistry != nil {
-		m.preparerRegistry.Register(executor.Name("worktree"), NewWorktreePreparer(worktreeMgr, m.logger))
+		m.preparerRegistry.Register(models.ExecutorTypeWorktree, NewWorktreePreparer(worktreeMgr, m.logger))
 	}
 }
 

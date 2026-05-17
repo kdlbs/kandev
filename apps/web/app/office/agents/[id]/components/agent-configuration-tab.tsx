@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import { updateAgentProfile } from "@/lib/api/domains/office-api";
 import type { AgentProfile, AgentRole } from "@/lib/state/slices/office/types";
+import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { AgentConfigCliCard } from "./agent-config-cli-card";
 import { AgentRoutingCard } from "./agent-routing-card";
 
@@ -97,7 +98,7 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
       const update: Partial<AgentProfile> = {
         name: form.name,
         role: form.role,
-        agentProfileId: form.agentProfileId || undefined,
+        agentProfileId: form.agentProfileId ? toAgentProfileId(form.agentProfileId) : undefined,
         budgetMonthlyCents: form.budgetMonthlyCents,
         maxConcurrentSessions: form.maxConcurrentSessions,
         executorPreference: form.executorType ? { type: form.executorType } : undefined,

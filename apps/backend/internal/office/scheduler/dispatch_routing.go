@@ -217,7 +217,7 @@ func (ss *SchedulerService) parkRunBlocked(
 	return false, &br, nil
 }
 
-func skipOutcome(reason string) string {
+func skipOutcome(reason string) models.RouteAttemptOutcome {
 	switch reason {
 	case routing.SkipReasonDegraded:
 		return RouteAttemptOutcomeSkippedDegraded
@@ -451,9 +451,9 @@ func (ss *SchedulerService) degradeProviderForCandidate(
 	row := models.ProviderHealth{
 		WorkspaceID: workspaceID,
 		ProviderID:  string(candidate.ProviderID),
-		Scope:       scope,
+		Scope:       models.ProviderHealthScope(scope),
 		ScopeValue:  scopeVal,
-		State:       healthStateFor(e),
+		State:       models.ProviderHealthState(healthStateFor(e)),
 		ErrorCode:   string(e.Code),
 		RetryAt:     timePtrIfNonZero(retryAt),
 		BackoffStep: step,
@@ -499,10 +499,10 @@ func (ss *SchedulerService) finishAttempt(
 	attempt := models.RouteAttempt{
 		RunID:           runID,
 		Seq:             seq,
-		Outcome:         outcome,
+		Outcome:         models.RouteAttemptOutcome(outcome),
 		ErrorCode:       string(e.Code),
-		ErrorConfidence: string(e.Confidence),
-		AdapterPhase:    string(e.Phase),
+		ErrorConfidence: models.ErrorConfidence(e.Confidence),
+		AdapterPhase:    models.AdapterPhase(e.Phase),
 		ClassifierRule:  e.ClassifierRule,
 		ExitCode:        e.ExitCode,
 		RawExcerpt:      e.RawExcerpt,

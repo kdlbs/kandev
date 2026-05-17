@@ -217,7 +217,7 @@ func (s *Service) applySkills(
 		if skill, ok := bySlug[cfg.Slug]; ok {
 			skill.Name = cfg.Name
 			skill.Description = cfg.Description
-			skill.SourceType = cfg.SourceType
+			skill.SourceType = models.SkillSourceType(cfg.SourceType)
 			skill.Content = cfg.Content
 			if err := s.UpdateSkill(ctx, skill); err != nil {
 				return err
@@ -228,7 +228,7 @@ func (s *Service) applySkills(
 				Name:        cfg.Name,
 				Slug:        cfg.Slug,
 				Description: cfg.Description,
-				SourceType:  cfg.SourceType,
+				SourceType:  models.SkillSourceType(cfg.SourceType),
 				Content:     cfg.Content,
 			}
 			if err := s.CreateSkill(ctx, skill); err != nil {
@@ -255,7 +255,7 @@ func (s *Service) applyRoutines(
 		if routine, ok := byName[cfg.Name]; ok {
 			routine.Description = cfg.Description
 			routine.TaskTemplate = cfg.TaskTemplate
-			routine.ConcurrencyPolicy = cfg.ConcurrencyPolicy
+			routine.ConcurrencyPolicy = models.RoutineConcurrencyPolicy(cfg.ConcurrencyPolicy)
 			if err := s.UpdateRoutine(ctx, routine); err != nil {
 				return err
 			}
@@ -266,7 +266,7 @@ func (s *Service) applyRoutines(
 				Description:       cfg.Description,
 				TaskTemplate:      cfg.TaskTemplate,
 				Status:            "active",
-				ConcurrencyPolicy: cfg.ConcurrencyPolicy,
+				ConcurrencyPolicy: models.RoutineConcurrencyPolicy(cfg.ConcurrencyPolicy),
 			}
 			if err := s.CreateRoutine(ctx, routine); err != nil {
 				return err

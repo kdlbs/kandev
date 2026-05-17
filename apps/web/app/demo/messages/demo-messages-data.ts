@@ -1,8 +1,8 @@
-import type { Message } from "@/lib/types/http";
+import { sessionId, taskId, type Message } from "@/lib/types/http";
 import { MARKDOWN_DEMO_MESSAGE_CONTENT } from "./demo-messages-content";
 
 const AUTH_CONFIG_PATH = "src/auth/config.ts";
-const B = { session_id: "demo" as const, task_id: "demo-task" };
+const B = { session_id: sessionId("demo"), task_id: taskId("demo-task") };
 
 export const dummyMessages: Message[] = [
   // Task description
@@ -206,7 +206,7 @@ export const dummyMessages: Message[] = [
     metadata: {
       pending_id: "perm-1",
       tool_call_id: "tool-4",
-      action_type: "file_search",
+      action_type: "file_read",
       action_details: {
         path: "/Users/demo/project/src",
         command: 'grep -r "authentication"',

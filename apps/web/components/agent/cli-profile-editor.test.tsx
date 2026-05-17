@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import { CliProfileEditor } from "./cli-profile-editor";
+import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -87,7 +88,7 @@ describe("CliProfileEditor", () => {
 
   it("shows existing profile values in edit mode", () => {
     const profile = {
-      id: "p1",
+      id: toAgentProfileId("p1"),
       name: "default",
       agentId: "claude",
       agentDisplayName: "Claude",

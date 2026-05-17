@@ -4,7 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { TaskTopBar } from "@/components/task/task-top-bar";
 import { TaskLayout } from "@/components/task/task-layout";
 import { DebugOverlay } from "@/components/debug-overlay";
-import type { Repository, RepositoryScript, Task } from "@/lib/types/http";
+import {
+  taskId as toTaskId,
+  workflowId as toWorkflowId,
+  workspaceId as toWorkspaceId,
+  type Repository,
+  type RepositoryScript,
+  type Task,
+} from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import type { KanbanState } from "@/lib/state/slices";
 import { DEBUG_UI } from "@/lib/config";
@@ -83,19 +90,19 @@ function buildTaskFromKanban(
   const prevWorkspaceId = taskDetails?.workspace_id ?? initialTask?.workspace_id;
   const prevBoardId = taskDetails?.workflow_id ?? initialTask?.workflow_id;
   return {
-    id: kanbanTask.id,
+    id: toTaskId(kanbanTask.id),
     title: kanbanTask.title,
     description: kanbanTask.description ?? "",
     workflow_step_id: kanbanTask.workflowStepId,
     position: kanbanTask.position,
     state: kanbanTask.state ?? "CREATED",
-    workspace_id: prevWorkspaceId ?? "",
-    workflow_id: prevBoardId ?? "",
+    workspace_id: prevWorkspaceId ?? toWorkspaceId(""),
+    workflow_id: prevBoardId ?? toWorkflowId(""),
     priority: 0,
     repositories: [],
     created_at: "",
     updated_at: kanbanTask.updatedAt ?? "",
-  } as Task;
+  };
 }
 
 function useWorkflowStepsMapped() {

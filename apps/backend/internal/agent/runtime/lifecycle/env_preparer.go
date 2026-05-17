@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // PrepareStepStatus represents the status of a preparation step.
@@ -201,26 +202,32 @@ func SerializePrepareResult(result *EnvPrepareResult) map[string]interface{} {
 	}
 }
 
-// PreparerRegistry maps executor types to environment preparers.
+// PreparerRegistry maps executor types (models.ExecutorType — the "local",
+// "worktree", "local_docker", "sprites" taxonomy) to environment preparers.
+//
+// Keyed by ExecutorType, not Runtime: preparers do per-executor-type filesystem
+// setup (e.g. worktree creation for the worktree type), and different
+// ExecutorTypes that share a Runtime (local + worktree both run on standalone)
+// can still get distinct preparation logic.
 type PreparerRegistry struct {
-	preparers map[executor.Name]EnvironmentPreparer
+	preparers map[models.ExecutorType]EnvironmentPreparer
 	logger    *logger.Logger
 }
 
 // NewPreparerRegistry creates a new PreparerRegistry.
 func NewPreparerRegistry(log *logger.Logger) *PreparerRegistry {
 	return &PreparerRegistry{
-		preparers: make(map[executor.Name]EnvironmentPreparer),
+		preparers: make(map[models.ExecutorType]EnvironmentPreparer),
 		logger:    log,
 	}
 }
 
 // Register adds a preparer for the given executor type.
-func (r *PreparerRegistry) Register(execType executor.Name, preparer EnvironmentPreparer) {
+func (r *PreparerRegistry) Register(execType models.ExecutorType, preparer EnvironmentPreparer) {
 	r.preparers[execType] = preparer
 }
 
 // Get returns the preparer for the given executor type, or nil if not found.
-func (r *PreparerRegistry) Get(execType executor.Name) EnvironmentPreparer {
+func (r *PreparerRegistry) Get(execType models.ExecutorType) EnvironmentPreparer {
 	return r.preparers[execType]
 }

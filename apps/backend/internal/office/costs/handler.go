@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/kandev/kandev/internal/office/models"
 )
 
 // Handler provides HTTP handlers for cost and budget routes.
@@ -132,14 +134,29 @@ func (h *Handler) createBudget(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	scopeType := models.BudgetScopeType(req.ScopeType)
+	period := models.BudgetPeriod(req.Period)
+	action := models.BudgetActionOnExceed(req.ActionOnExceed)
+	if !scopeType.Valid() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope_type: " + req.ScopeType})
+		return
+	}
+	if !period.Valid() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid period: " + req.Period})
+		return
+	}
+	if !action.Valid() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid action_on_exceed: " + req.ActionOnExceed})
+		return
+	}
 	policy := &BudgetPolicy{
 		WorkspaceID:       c.Param("wsId"),
-		ScopeType:         req.ScopeType,
+		ScopeType:         scopeType,
 		ScopeID:           req.ScopeID,
 		LimitSubcents:     req.LimitSubcents,
-		Period:            req.Period,
+		Period:            period,
 		AlertThresholdPct: req.AlertThresholdPct,
-		ActionOnExceed:    req.ActionOnExceed,
+		ActionOnExceed:    action,
 	}
 	if err := h.svc.CreateBudgetPolicy(c.Request.Context(), policy); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -152,6 +169,18 @@ func (h *Handler) updateBudget(c *gin.Context) {
 	var req UpdateBudgetRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.ScopeType != nil && !models.BudgetScopeType(*req.ScopeType).Valid() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope_type: " + *req.ScopeType})
+		return
+	}
+	if req.Period != nil && !models.BudgetPeriod(*req.Period).Valid() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid period: " + *req.Period})
+		return
+	}
+	if req.ActionOnExceed != nil && !models.BudgetActionOnExceed(*req.ActionOnExceed).Valid() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid action_on_exceed: " + *req.ActionOnExceed})
 		return
 	}
 	policy, err := h.svc.GetBudgetPolicy(c.Request.Context(), c.Param("id"))
@@ -169,7 +198,7 @@ func (h *Handler) updateBudget(c *gin.Context) {
 
 func applyBudgetPatch(policy *BudgetPolicy, req *UpdateBudgetRequest) {
 	if req.ScopeType != nil {
-		policy.ScopeType = *req.ScopeType
+		policy.ScopeType = models.BudgetScopeType(*req.ScopeType)
 	}
 	if req.ScopeID != nil {
 		policy.ScopeID = *req.ScopeID
@@ -178,13 +207,13 @@ func applyBudgetPatch(policy *BudgetPolicy, req *UpdateBudgetRequest) {
 		policy.LimitSubcents = *req.LimitSubcents
 	}
 	if req.Period != nil {
-		policy.Period = *req.Period
+		policy.Period = models.BudgetPeriod(*req.Period)
 	}
 	if req.AlertThresholdPct != nil {
 		policy.AlertThresholdPct = *req.AlertThresholdPct
 	}
 	if req.ActionOnExceed != nil {
-		policy.ActionOnExceed = *req.ActionOnExceed
+		policy.ActionOnExceed = models.BudgetActionOnExceed(*req.ActionOnExceed)
 	}
 }
 

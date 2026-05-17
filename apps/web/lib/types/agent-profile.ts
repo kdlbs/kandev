@@ -1,3 +1,5 @@
+import type { AgentProfileId, WorkspaceId } from "./ids";
+
 // Canonical AgentProfile (ADR 0005, Wave E):
 // ONE camelCase shape used by both kanban and office consumers. The HTTP
 // transport layer normalizes snake_case server payloads at the API client
@@ -50,7 +52,7 @@ export type AgentStatus = "idle" | "working" | "paused" | "stopped" | "pending_a
 
 export type AgentProfile = {
   // --- Identity ---
-  id: string;
+  id: AgentProfileId;
   name: string;
   /** ID of the agent (CLI) this profile belongs to. */
   agentId: string;
@@ -71,13 +73,13 @@ export type AgentProfile = {
 
   // --- Office orchestration (always populated by office API,
   //     absent on kanban-served rows; consumers should null-check) ---
-  workspaceId?: string;
+  workspaceId?: WorkspaceId;
   /**
    * FK to a kanban-flavour profile when the office row delegates CLI
    * subprocess configuration to a separate profile rather than carrying
    * the CLI fields directly.
    */
-  agentProfileId?: string;
+  agentProfileId?: AgentProfileId;
   role?: AgentRole;
   icon?: string;
   status?: AgentStatus;

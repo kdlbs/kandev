@@ -412,7 +412,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	}
 
 	execution := runtimeInstance.ToAgentExecution(req)
-	execution.RuntimeName = string(rt.Name())
+	execution.RuntimeName = rt.Name()
 
 	// Set the ACP session ID for session resumption
 	if info.ACPSessionID != "" {
@@ -464,7 +464,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		zap.String("execution_id", executionID),
 		zap.String("task_id", taskID),
 		zap.String("workspace_path", info.WorkspacePath),
-		zap.String("runtime", execution.RuntimeName))
+		zap.Stringer("runtime", execution.RuntimeName))
 
 	return execution, nil
 }

@@ -109,7 +109,7 @@ func TestWorktreePreparer_MultiRepo_RunsSetupScriptOncePerRepo(t *testing.T) {
 		TaskID:       "task-multi-once",
 		SessionID:    "sess-multi-once",
 		TaskTitle:    "Once Task",
-		ExecutorType: executor.Name("worktree"),
+		ExecutorType: executor.NameStandalone,
 		TaskDirName:  "once-task_xxx",
 		Repositories: []RepoPrepareSpec{
 			{
@@ -184,7 +184,7 @@ func TestWorktreePreparer_MultiRepo_NonIdempotentSetupScriptSucceeds(t *testing.
 		TaskID:       "task-multi-nonidempotent",
 		SessionID:    "sess-multi-nonidempotent",
 		TaskTitle:    "Non-Idempotent Task",
-		ExecutorType: executor.Name("worktree"),
+		ExecutorType: executor.NameStandalone,
 		TaskDirName:  "nonidempotent_yyy",
 		Repositories: []RepoPrepareSpec{
 			{
@@ -233,7 +233,7 @@ func TestWorktreePreparer_SingleRepo_RunsSetupScriptOnce(t *testing.T) {
 		TaskID:          "task-single-once",
 		SessionID:       "sess-single-once",
 		TaskTitle:       "Single Once",
-		ExecutorType:    executor.Name("worktree"),
+		ExecutorType:    executor.NameStandalone,
 		TaskDirName:     "single-once_zzz",
 		UseWorktree:     true,
 		RepositoryID:    "repo-single",
@@ -287,7 +287,7 @@ func TestWorktreePreparer_SingleRepo_NonIdempotentSetupScriptSucceeds(t *testing
 		TaskID:          "task-single-nonidempotent",
 		SessionID:       "sess-single-nonidempotent",
 		TaskTitle:       "Single Non-Idempotent",
-		ExecutorType:    executor.Name("worktree"),
+		ExecutorType:    executor.NameStandalone,
 		TaskDirName:     "single-nonidempotent_qqq",
 		UseWorktree:     true,
 		RepositoryID:    "repo-single",

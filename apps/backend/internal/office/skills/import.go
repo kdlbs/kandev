@@ -250,7 +250,7 @@ func (s *SkillService) importSingleSkill(
 		Name:          name,
 		Slug:          GenerateSlug(ps.Slug),
 		Description:   desc,
-		SourceType:    ps.SourceType,
+		SourceType:    models.SkillSourceType(ps.SourceType),
 		SourceLocator: locator,
 		Content:       content,
 	}

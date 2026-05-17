@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
 
 	"go.uber.org/zap"
@@ -100,7 +101,7 @@ func (s *ApprovalService) DecideApproval(
 	}
 
 	now := time.Now().UTC()
-	approval.Status = status
+	approval.Status = models.ApprovalStatus(status)
 	approval.DecisionNote = note
 	approval.DecidedBy = decidedBy
 	approval.DecidedAt = &now

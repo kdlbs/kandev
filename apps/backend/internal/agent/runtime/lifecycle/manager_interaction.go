@@ -13,7 +13,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
-	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -398,7 +397,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		zap.String("execution_id", executionID),
 		zap.String("reason", reason),
 		zap.Bool("force", force),
-		zap.String("runtime", execution.RuntimeName))
+		zap.Stringer("runtime", execution.RuntimeName))
 
 	// Try to gracefully stop via agentctl first, then always close connections
 	if execution.agentctl != nil {
@@ -671,7 +670,7 @@ func (m *Manager) ResolveTaskEnvironmentID(ctx context.Context, sessionID string
 func (m *Manager) IsRemoteSession(ctx context.Context, sessionID string) bool {
 	// Check in-memory execution first (fast path).
 	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
-		if execution.RuntimeName == string(executor.NameSprites) {
+		if execution.RuntimeName == executor.NameSprites {
 			return true
 		}
 		if execution.Metadata != nil {
@@ -694,7 +693,7 @@ func (m *Manager) IsRemoteSession(ctx context.Context, sessionID string) bool {
 		return true
 	}
 	// Backwards compatibility: old records may only have RuntimeName set.
-	return info.RuntimeName == string(executor.NameSprites) || info.RuntimeName == string(executor.NameRemoteDocker)
+	return info.RuntimeName == executor.NameSprites || info.RuntimeName == executor.NameRemoteDocker
 }
 
 // ShouldUseContainerShell checks whether a session's shell should run inside a container/sandbox
@@ -704,8 +703,8 @@ func (m *Manager) ShouldUseContainerShell(ctx context.Context, sessionID string)
 	// Check in-memory execution first (fast path).
 	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
 		// Docker and Sprites executors run shells inside the container/sandbox
-		if execution.RuntimeName == string(executor.NameDocker) ||
-			execution.RuntimeName == string(executor.NameSprites) {
+		if execution.RuntimeName == executor.NameDocker ||
+			execution.RuntimeName == executor.NameSprites {
 			return true
 		}
 		if execution.Metadata != nil {
@@ -728,9 +727,9 @@ func (m *Manager) ShouldUseContainerShell(ctx context.Context, sessionID string)
 		return true
 	}
 	// Backwards compatibility: old records may only have RuntimeName set.
-	return info.RuntimeName == string(executor.NameDocker) ||
-		info.RuntimeName == string(executor.NameSprites) ||
-		info.RuntimeName == string(executor.NameRemoteDocker)
+	return info.RuntimeName == executor.NameDocker ||
+		info.RuntimeName == executor.NameSprites ||
+		info.RuntimeName == executor.NameRemoteDocker
 }
 
 // GetAvailableCommandsForSession returns the available slash commands for a session.
@@ -1078,11 +1077,11 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 	if execution.RuntimeName == "" || m.executorRegistry == nil {
 		return
 	}
-	rt, err := m.executorRegistry.GetBackend(executor.Name(execution.RuntimeName))
+	rt, err := m.executorRegistry.GetBackend(execution.RuntimeName)
 	if err != nil {
 		m.logger.Warn("failed to get runtime for stopping execution",
 			zap.String("execution_id", executionID),
-			zap.String("runtime", execution.RuntimeName),
+			zap.Stringer("runtime", execution.RuntimeName),
 			zap.Error(err))
 		return
 	}
@@ -1164,14 +1163,10 @@ func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentEx
 		SessionID:        "", // Fresh start — no resume flags
 		AutoApprove:      autoApprove,
 		PermissionValues: permissionValues,
-		// RuntimeName is "standalone" / "docker" / "sprites" — MockAgent
+		// Runtime is "standalone" / "docker" / "sprites" — MockAgent
 		// reads this to pick a bare name (container PATH lookup) vs.
 		// an absolute host path.
-		// TODO: retype AgentExecution.RuntimeName to agentruntime.Runtime
-		// so this cast disappears. Ripples to ~14 files (executor impls
-		// + tests) — deferred from the typed-enum refactor that
-		// introduced this site.
-		Runtime: agentruntime.Runtime(execution.RuntimeName),
+		Runtime: execution.RuntimeName,
 	}
 	return m.commandBuilder.BuildCommandString(agentConfig, opts),
 		m.commandBuilder.BuildContinueCommandString(agentConfig, opts)
