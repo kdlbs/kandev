@@ -2,7 +2,13 @@ import os from "node:os";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { buildWebEnv, listHostNetworkAddresses, type PortConfig } from "./shared";
+import {
+  buildWebEnv,
+  listHostNetworkAddresses,
+  logStartupInfo,
+  networkUrlsForPort,
+  type PortConfig,
+} from "./shared";
 
 const ports: PortConfig = {
   backendPort: 38429,
@@ -208,6 +214,30 @@ describe("listHostNetworkAddresses", () => {
     expect(listHostNetworkAddresses()).toEqual(["10.0.0.5"]);
   });
 
+  it("excludes IPv4 link-local (169.254.0.0/16) addresses", () => {
+    vi.spyOn(os, "networkInterfaces").mockReturnValue({
+      eth0: [
+        {
+          address: "169.254.83.107",
+          netmask: "255.255.0.0",
+          family: "IPv4",
+          mac: "aa:bb:cc:dd:ee:ff",
+          internal: false,
+          cidr: "169.254.83.107/16",
+        },
+        {
+          address: "192.168.1.34",
+          netmask: "255.255.252.0",
+          family: "IPv4",
+          mac: "aa:bb:cc:dd:ee:ff",
+          internal: false,
+          cidr: "192.168.1.34/22",
+        },
+      ],
+    });
+    expect(listHostNetworkAddresses()).toEqual(["192.168.1.34"]);
+  });
+
   it("excludes IPv6 link-local (fe80::) addresses", () => {
     vi.spyOn(os, "networkInterfaces").mockReturnValue({
       eth0: [
@@ -232,5 +262,87 @@ describe("listHostNetworkAddresses", () => {
       ],
     });
     expect(listHostNetworkAddresses()).toEqual(["2001:db8::1"]);
+  });
+});
+
+describe("networkUrlsForPort", () => {
+  it("formats IPv4 hosts without brackets", () => {
+    expect(networkUrlsForPort(38429, ["192.168.1.34", "100.94.173.104"])).toEqual([
+      "http://192.168.1.34:38429",
+      "http://100.94.173.104:38429",
+    ]);
+  });
+
+  it("wraps IPv6 hosts in brackets per RFC 3986", () => {
+    expect(networkUrlsForPort(38429, ["2001:db8::1"])).toEqual(["http://[2001:db8::1]:38429"]);
+  });
+
+  it("returns an empty list when there are no hosts", () => {
+    expect(networkUrlsForPort(38429, [])).toEqual([]);
+  });
+});
+
+describe("logStartupInfo", () => {
+  let log: ReturnType<typeof vi.spyOn<typeof console, "log">>;
+
+  beforeEach(() => {
+    log = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("prints a network URL line for each non-loopback host on both ports", () => {
+    vi.spyOn(os, "networkInterfaces").mockReturnValue({
+      eth0: [
+        {
+          address: "192.168.1.34",
+          netmask: "255.255.252.0",
+          family: "IPv4",
+          mac: "aa:bb:cc:dd:ee:ff",
+          internal: false,
+          cidr: "192.168.1.34/22",
+        },
+      ],
+      tailscale0: [
+        {
+          address: "100.94.173.104",
+          netmask: "255.255.255.255",
+          family: "IPv4",
+          mac: "00:00:00:00:00:00",
+          internal: false,
+          cidr: "100.94.173.104/32",
+        },
+      ],
+    });
+
+    logStartupInfo({ header: "test", ports });
+
+    const lines = log.mock.calls.map((c) => c.join(" "));
+    expect(lines).toContain("[kandev]   network: http://192.168.1.34:38429");
+    expect(lines).toContain("[kandev]   network: http://100.94.173.104:38429");
+    expect(lines).toContain("[kandev]   network: http://192.168.1.34:37429");
+    expect(lines).toContain("[kandev]   network: http://100.94.173.104:37429");
+  });
+
+  it("emits no network lines when only loopback interfaces exist", () => {
+    vi.spyOn(os, "networkInterfaces").mockReturnValue({
+      lo: [
+        {
+          address: "127.0.0.1",
+          netmask: "255.0.0.0",
+          family: "IPv4",
+          mac: "00:00:00:00:00:00",
+          internal: true,
+          cidr: "127.0.0.1/8",
+        },
+      ],
+    });
+
+    logStartupInfo({ header: "test", ports });
+
+    const lines = log.mock.calls.map((c) => c.join(" "));
+    expect(lines.some((l) => l.includes("network:"))).toBe(false);
   });
 });
