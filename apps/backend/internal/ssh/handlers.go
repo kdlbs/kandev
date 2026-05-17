@@ -15,7 +15,8 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -192,13 +193,11 @@ func (h *Handler) runTest(ctx context.Context, req TestRequest) *TestResult {
 		return finalize()
 	}
 
-	pool := lifecycle.NewSSHConnPool(h.logger)
-	defer pool.CloseAll()
-
-	client, err := h.testHandshake(ctx, pool, target, result)
+	client, err := h.testHandshake(ctx, target, result)
 	if err != nil {
 		return finalize()
 	}
+	defer func() { _ = client.Close() }()
 
 	infoCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -237,10 +236,10 @@ func (h *Handler) testResolveTarget(req TestRequest, result *TestResult) (*lifec
 }
 
 func (h *Handler) testHandshake(
-	ctx context.Context, pool *lifecycle.SSHConnPool, target *lifecycle.SSHTarget, result *TestResult,
+	ctx context.Context, target *lifecycle.SSHTarget, result *TestResult,
 ) (*ssh.Client, error) {
 	stepStart := time.Now()
-	client, err := pool.Get(ctx, target)
+	client, err := lifecycle.DialSSH(ctx, target)
 	step := TestStep{Name: "SSH handshake", DurationMs: time.Since(stepStart).Milliseconds()}
 	if err != nil {
 		step.Success = false
@@ -342,7 +341,7 @@ func (h *Handler) listSessions(ctx context.Context, executorID string) ([]Sessio
 		if run == nil {
 			continue
 		}
-		if run.Runtime != string(models.ExecutorTypeSSH) {
+		if run.Runtime != agentruntime.RuntimeSSH {
 			continue
 		}
 		if !h.sessionBelongsToExecutor(ctx, run, executorID) {

@@ -42,12 +42,11 @@ type sshSessionState struct {
 
 // SSHExecutor implements ExecutorBackend for SSH-reachable Linux hosts.
 //
-// One SSH connection is shared per (host, user, identity) tuple across all
-// sessions on that host. Each session gets its own agentctl process + remote
-// port + local-forwarded port. See docs/specs/ssh-executor/spec.md for the
-// full design.
+// Each session owns its own *ssh.Client (no shared pool). One SSH connection
+// per session keeps teardown simple — closing the executor instance closes
+// the client — at the cost of an extra TCP+handshake per session on the same
+// host. See docs/specs/ssh-executor/spec.md for the full design.
 type SSHExecutor struct {
-	pool             *SSHConnPool
 	agentctlResolver *AgentctlResolver
 	secretStore      secrets.SecretStore
 	agentList        RemoteAuthAgentLister
@@ -66,7 +65,6 @@ func NewSSHExecutor(
 	log *logger.Logger,
 ) *SSHExecutor {
 	return &SSHExecutor{
-		pool:             NewSSHConnPool(log),
 		agentctlResolver: resolver,
 		secretStore:      secretStore,
 		agentList:        agentList,
@@ -84,11 +82,10 @@ func (r *SSHExecutor) HealthCheck(_ context.Context) error {
 	return nil
 }
 
-// Close terminates pooled SSH connections at shutdown.
-func (r *SSHExecutor) Close() error {
-	r.pool.CloseAll()
-	return nil
-}
+// Close is a no-op: per-session SSH clients are owned by sshSessionState and
+// torn down by StopInstance. Kept on the type so the executor satisfies
+// io.Closer alongside the other backends.
+func (r *SSHExecutor) Close() error { return nil }
 
 // targetFromMetadata builds an SSHTarget from the executor metadata
 // propagated via buildLaunchMetadata (req.ExecutorConfig keys merged in).
@@ -461,34 +458,21 @@ func (r *SSHExecutor) IsAlwaysResumable() bool         { return true }
 // creation. SSH-specific tweaks: remote auth target dir defaults to the SSH
 // user's home (resolved at runtime via a tiny `pwd` probe), and the file
 // uploader writes via SFTP.
-func (r *SSHExecutor) maybeUploadCredentials(ctx context.Context, client *ssh.Client, req *ExecutorCreateRequest) {
-	credsJSON := getMetadataString(req.Metadata, "remote_credentials")
-	if credsJSON == "" {
+//
+// v1 ships without remote-credentials upload — the field is accepted on the
+// executor profile (parity with Sprites/Docker) but the upload pipeline lives
+// in the Sprites executor and is not yet ported over. A non-empty
+// remote_credentials log is the only side effect so users notice they
+// configured a feature that isn't active yet.
+func (r *SSHExecutor) maybeUploadCredentials(_ context.Context, _ *ssh.Client, req *ExecutorCreateRequest) {
+	if getMetadataString(req.Metadata, "remote_credentials") == "" {
 		return
 	}
-	// Resolve remote $HOME for the target auth dir, unless the profile pinned one.
-	if getMetadataString(req.Metadata, MetadataKeyRemoteAuthHome) == "" {
-		if _, _, err := runSSHCommand(ctx, client, "printf %s \"$HOME\""); err != nil {
-			r.logger.Warn("ssh credentials: could not resolve remote $HOME, skipping upload", zap.Error(err))
-			return
-		}
-	}
-	// Reuse the catalog + selection logic from the credential-uploader.
-	// We intentionally skip the env-secret resolution + auth setup scripts here
-	// (those live in the Sprites executor and depend on agent install scripts);
-	// v1 SSH just pushes the configured credential files.
-	if r.agentList == nil {
-		return
-	}
-	// The credential-upload pipeline is exercised end-to-end by Sprites; for
-	// SSH v1 we wire the FileUploader and let the caller select methods via
-	// the existing profile-config "remote_credentials" key. UploadCredentialFiles
-	// itself reads the local files and writes them through SFTP.
-	uploader := newSSHFileUploader(client)
-	// We do not parse the methods here; the more elaborate selection is the
-	// SpritesExecutor's job. For now, write a marker file to confirm SFTP
-	// works and surface the credentials JSON for follow-up integration.
-	_ = uploader // referenced for future expansion; intentional no-op in v1
+	r.logger.Warn(
+		"ssh executor: remote_credentials is configured but credential upload is not yet implemented for the SSH runtime; see docs/specs/ssh-executor/spec.md",
+		zap.String("task_id", req.TaskID),
+		zap.String("session_id", req.SessionID),
+	)
 }
 
 // sshTaskDirName builds a stable per-task remote directory name. Prefers an

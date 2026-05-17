@@ -69,7 +69,6 @@ RUN apk add --no-cache \\
     shadow \\
     coreutils \\
     ca-certificates \\
-    curl \\
     iproute2 \\
     iptables \\
     # agentctl is built dynamically linked against glibc; Alpine is musl. gcompat
