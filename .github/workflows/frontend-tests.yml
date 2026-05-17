@@ -87,11 +87,23 @@ jobs:
             exit 0
           fi
 
+          # Skip symlinks — prettier errors with exit 123 when an explicit
+          # pattern is a symbolic link. CLAUDE.md files in the tree are symlinks
+          # to sibling AGENTS.md files (Codex / Claude Code convention).
+          FILES_TO_CHECK="$(
+            echo "${CHANGED_FILES}" \
+              | sed 's#^apps/##' \
+              | while IFS= read -r f; do [ -L "$f" ] || echo "$f"; done
+          )"
+
+          if [[ -z "${FILES_TO_CHECK}" ]]; then
+            echo "No non-symlink Prettier-scoped files changed."
+            exit 0
+          fi
+
           echo "Checking Prettier on changed files:"
-          echo "${CHANGED_FILES}"
-          echo "${CHANGED_FILES}" \
-            | sed 's#^apps/##' \
-            | xargs pnpm exec prettier --check --ignore-unknown
+          echo "${FILES_TO_CHECK}"
+          echo "${FILES_TO_CHECK}" | xargs pnpm exec prettier --check --ignore-unknown
 
       - name: Run lint
         run: pnpm --filter @kandev/web lint

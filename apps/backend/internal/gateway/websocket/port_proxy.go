@@ -123,7 +123,11 @@ func (h *PortProxyHandler) resolveProxy(c *gin.Context, sessionID string, port i
 	}
 
 	authToken := agentctlClient.AuthToken()
-	proxy := h.createProxy(cacheKey, target, authToken)
+	// Public path that fronts this proxy on the gateway. Used by `ModifyResponse`
+	// to rewrite root-absolute URLs in proxied HTML/CSS so iframe asset requests
+	// stay on the same proxy chain instead of escaping to the host origin.
+	proxyPrefix := "/port-proxy/" + sessionID + "/" + strconv.Itoa(port)
+	proxy := h.createProxy(cacheKey, target, authToken, proxyPrefix)
 	h.proxies[cacheKey] = &portProxyEntry{proxy: proxy, target: baseURL}
 
 	h.logger.Info("created port proxy",
@@ -134,7 +138,7 @@ func (h *PortProxyHandler) resolveProxy(c *gin.Context, sessionID string, port i
 	return proxy, nil
 }
 
-func (h *PortProxyHandler) createProxy(cacheKey string, target *url.URL, authToken string) *httputil.ReverseProxy {
+func (h *PortProxyHandler) createProxy(cacheKey string, target *url.URL, authToken, proxyPrefix string) *httputil.ReverseProxy {
 	proxy := &httputil.ReverseProxy{}
 	proxy.Rewrite = func(r *httputil.ProxyRequest) {
 		r.SetURL(target)
@@ -152,8 +156,9 @@ func (h *PortProxyHandler) createProxy(cacheKey string, target *url.URL, authTok
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		if resp.StatusCode == http.StatusSwitchingProtocols {
 			resp.Header.Set("Connection", "Upgrade")
+			return nil
 		}
-		return nil
+		return rewriteProxyResponse(resp, proxyPrefix)
 	}
 
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {

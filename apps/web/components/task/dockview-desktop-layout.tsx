@@ -58,7 +58,7 @@ import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
 import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
-import { PreviewController } from "./preview/preview-controller";
+import { PreviewController } from "./preview-controller";
 import { ReviewDialog } from "@/components/review/review-dialog";
 import { BottomTerminalPanel } from "./bottom-terminal-panel";
 import { useReviewDialog } from "./use-review-dialog";
