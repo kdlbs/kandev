@@ -73,7 +73,10 @@ test.describe("ssh trust gate", () => {
     apiClient,
     seedData,
   }) => {
-    // Set a wrong fingerprint on the seeded executor.
+    // Set a wrong fingerprint on the seeded executor. Restore it after the
+    // test so any later spec in the worker that exercises a real launch
+    // doesn't trip over host-key-changed against the still-bad pin.
+    const originalFingerprint = seedData.sshTarget.hostFingerprint;
     await apiClient.updateExecutor(seedData.sshExecutorId, {
       config: {
         ssh_host: seedData.sshTarget.host,
@@ -85,13 +88,26 @@ test.describe("ssh trust gate", () => {
       },
     });
 
-    const page = new SSHSettingsPage(testPage);
-    await page.gotoExisting(seedData.sshExecutorId);
-    await expect(page.pinnedFingerprint()).toHaveText("SHA256:wrong-fingerprint-on-purpose");
+    try {
+      const page = new SSHSettingsPage(testPage);
+      await page.gotoExisting(seedData.sshExecutorId);
+      await expect(page.pinnedFingerprint()).toHaveText("SHA256:wrong-fingerprint-on-purpose");
 
-    await page.clickTest();
-    await page.waitForTestResult();
-    await expect(page.fingerprintChangeWarning()).toBeVisible();
-    await expect(page.observedFingerprint()).toHaveText(seedData.sshTarget.hostFingerprint);
+      await page.clickTest();
+      await page.waitForTestResult();
+      await expect(page.fingerprintChangeWarning()).toBeVisible();
+      await expect(page.observedFingerprint()).toHaveText(seedData.sshTarget.hostFingerprint);
+    } finally {
+      await apiClient.updateExecutor(seedData.sshExecutorId, {
+        config: {
+          ssh_host: seedData.sshTarget.host,
+          ssh_port: String(seedData.sshTarget.port),
+          ssh_user: seedData.sshTarget.user,
+          ssh_identity_source: "file",
+          ssh_identity_file: seedData.sshTarget.identityFile,
+          ssh_host_fingerprint: originalFingerprint,
+        },
+      });
+    }
   });
 });
