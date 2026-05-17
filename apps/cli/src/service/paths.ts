@@ -4,6 +4,36 @@ import path from "node:path";
 
 import { KANDEV_HOME_DIR } from "../constants";
 
+/** Service unit/plist locations. Single source of truth for where kandev */
+/** writes/reads its unit files — linux.ts, macos.ts, config.ts, stale_check.ts */
+/** all consume these. Exposed as functions (not eager constants) so tests can */
+/** mock `os.homedir()` between cases. */
+export const SERVICE_NAME = "kandev";
+export const LAUNCHD_LABEL = "com.kdlbs.kandev";
+
+export const LINUX_SYSTEM_UNIT_DIR = "/etc/systemd/system";
+export const MACOS_SYSTEM_DAEMON_DIR = "/Library/LaunchDaemons";
+
+export function linuxUserUnitDir(): string {
+  return path.join(os.homedir(), ".config", "systemd", "user");
+}
+export function linuxUserUnitPath(): string {
+  return path.join(linuxUserUnitDir(), `${SERVICE_NAME}.service`);
+}
+export function linuxSystemUnitPath(): string {
+  return path.join(LINUX_SYSTEM_UNIT_DIR, `${SERVICE_NAME}.service`);
+}
+
+export function macosUserAgentDir(): string {
+  return path.join(os.homedir(), "Library", "LaunchAgents");
+}
+export function macosUserPlistPath(): string {
+  return path.join(macosUserAgentDir(), `${LAUNCHD_LABEL}.plist`);
+}
+export function macosSystemPlistPath(): string {
+  return path.join(MACOS_SYSTEM_DAEMON_DIR, `${LAUNCHD_LABEL}.plist`);
+}
+
 export type LauncherKind = "homebrew" | "npm" | "unknown";
 
 export type LauncherInfo = {
@@ -53,7 +83,15 @@ function resolveCliEntry(): string {
 
 /** Resolve the home directory used for the unit's KANDEV_HOME_DIR env. */
 export function resolveHomeDir(override: string | undefined, runAsRoot: boolean): string {
-  if (override) return path.resolve(override);
+  if (override) {
+    // Node's path.resolve doesn't expand `~`; users often type `--home-dir ~/foo`
+    // (especially via shell escapes that defer expansion), so do it ourselves.
+    const expanded =
+      override === "~" || override.startsWith(`~${path.sep}`)
+        ? path.join(os.homedir(), override.slice(1))
+        : override;
+    return path.resolve(expanded);
+  }
   if (runAsRoot) {
     // System units default to /var/lib/kandev so root-owned data lives outside any
     // single user's $HOME (where it would be unreachable to other users).

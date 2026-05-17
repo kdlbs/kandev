@@ -1,6 +1,13 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 
 import { looksLikeManagedUnit } from "./templates";
+
+/** Cheap PATH lookup; returns true if `cmd` resolves via `which`. */
+export function commandExists(cmd: string): boolean {
+  const res = spawnSync("which", [cmd], { stdio: "ignore" });
+  return res.status === 0;
+}
 
 export type WriteOutcome = "created" | "updated" | "unchanged" | "replaced-foreign";
 

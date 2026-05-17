@@ -1,23 +1,22 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
-import path from "node:path";
 
+import { DEFAULT_BACKEND_PORT } from "../constants";
 import type { ServiceArgs } from "./args";
-import { captureLauncher, resolveHomeDir, resolveLogDir, resolveServiceUser } from "./paths";
+import {
+  captureLauncher,
+  LAUNCHD_LABEL,
+  linuxSystemUnitPath,
+  linuxUserUnitPath,
+  macosSystemPlistPath,
+  macosUserPlistPath,
+  resolveHomeDir,
+  resolveLogDir,
+  resolveServiceUser,
+  SERVICE_NAME,
+} from "./paths";
 import { looksLikeManagedUnit } from "./templates";
-
-const LINUX_USER_UNIT = path.join(os.homedir(), ".config", "systemd", "user", "kandev.service");
-const LINUX_SYSTEM_UNIT = "/etc/systemd/system/kandev.service";
-const MACOS_USER_PLIST = path.join(
-  os.homedir(),
-  "Library",
-  "LaunchAgents",
-  "com.kdlbs.kandev.plist",
-);
-const MACOS_SYSTEM_PLIST = "/Library/LaunchDaemons/com.kdlbs.kandev.plist";
-const SERVICE_NAME = "kandev";
-const LABEL = "com.kdlbs.kandev";
 
 /**
  * Print a human-readable summary of what kandev knows about the local
@@ -42,7 +41,7 @@ export function printServiceConfig(args: ServiceArgs): void {
   console.log("");
   console.log(`KANDEV_HOME_DIR: ${homeDir}`);
   console.log(`log dir:         ${logDir}`);
-  console.log(`port:            ${args.port ?? "(default 38429)"}`);
+  console.log(`port:            ${args.port ?? `(default ${DEFAULT_BACKEND_PORT})`}`);
   if (isSystem) {
     console.log(`run as user:     ${resolveServiceUser(true)}`);
   }
@@ -58,7 +57,7 @@ export function printServiceConfig(args: ServiceArgs): void {
 }
 
 function printLinuxUnit(isSystem: boolean): void {
-  const unitPath = isSystem ? LINUX_SYSTEM_UNIT : LINUX_USER_UNIT;
+  const unitPath = isSystem ? linuxSystemUnitPath() : linuxUserUnitPath();
   console.log(`unit path:       ${unitPath}`);
   const present = fs.existsSync(unitPath);
   console.log(`installed:       ${present ? "yes" : "no"}`);
@@ -71,7 +70,7 @@ function printLinuxUnit(isSystem: boolean): void {
 }
 
 function printMacosUnit(isSystem: boolean): void {
-  const plistPath = isSystem ? MACOS_SYSTEM_PLIST : MACOS_USER_PLIST;
+  const plistPath = isSystem ? macosSystemPlistPath() : macosUserPlistPath();
   console.log(`plist path:      ${plistPath}`);
   const present = fs.existsSync(plistPath);
   console.log(`installed:       ${present ? "yes" : "no"}`);
@@ -79,8 +78,7 @@ function printMacosUnit(isSystem: boolean): void {
     const content = safeRead(plistPath);
     console.log(`managed by us:   ${content && looksLikeManagedUnit(content) ? "yes" : "no"}`);
   }
-  const loaded = launchctlIsLoaded(isSystem);
-  if (loaded !== null) console.log(`loaded:          ${loaded ? "yes" : "no"}`);
+  console.log(`loaded:          ${launchctlIsLoaded(isSystem) ? "yes" : "no"}`);
 }
 
 function safeRead(p: string): string | null {
@@ -104,10 +102,10 @@ function systemctlIsActive(isSystem: boolean): string | null {
   }
 }
 
-function launchctlIsLoaded(isSystem: boolean): boolean | null {
+function launchctlIsLoaded(isSystem: boolean): boolean {
   try {
     const domain = isSystem ? "system" : `gui/${os.userInfo().uid}`;
-    execFileSync("launchctl", ["print", `${domain}/${LABEL}`], { stdio: "ignore" });
+    execFileSync("launchctl", ["print", `${domain}/${LAUNCHD_LABEL}`], { stdio: "ignore" });
     return true;
   } catch {
     return false;

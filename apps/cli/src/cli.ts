@@ -112,7 +112,11 @@ async function main(): Promise<void> {
 
   // After an npm/brew upgrade, paths baked into an installed service unit may
   // be stale. Warn once before launch so the user knows to re-run install.
-  warnIfStaleServiceUnit();
+  // Skip when invoked from a service unit (--headless) — the warning would
+  // land in journalctl/launchd logs and pile up on every restart.
+  if (!options.headless) {
+    warnIfStaleServiceUnit();
+  }
 
   if (options.command === "dev") {
     const repoRoot = findRepoRoot(process.cwd());

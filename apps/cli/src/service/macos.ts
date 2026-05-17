@@ -1,17 +1,21 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import type { ServiceArgs } from "./args";
 import { dumpLaunchdLogs, waitForServiceHealth } from "./health_check";
-import { writeUnitFile } from "./install_helpers";
-import { captureLauncher, resolveHomeDir, resolveLogDir, resolveServiceUser } from "./paths";
+import { commandExists, writeUnitFile } from "./install_helpers";
+import {
+  captureLauncher,
+  LAUNCHD_LABEL,
+  macosUserAgentDir,
+  MACOS_SYSTEM_DAEMON_DIR,
+  resolveHomeDir,
+  resolveLogDir,
+  resolveServiceUser,
+} from "./paths";
 import { renderLaunchdPlist } from "./templates";
-
-const LABEL = "com.kdlbs.kandev";
-const USER_AGENT_DIR = path.join(os.homedir(), "Library", "LaunchAgents");
-const SYSTEM_DAEMON_DIR = "/Library/LaunchDaemons";
 
 type Ctx = {
   args: ServiceArgs;
@@ -23,11 +27,11 @@ type Ctx = {
 
 function makeCtx(args: ServiceArgs): Ctx {
   const isSystem = !!args.system;
-  const dir = isSystem ? SYSTEM_DAEMON_DIR : USER_AGENT_DIR;
+  const dir = isSystem ? MACOS_SYSTEM_DAEMON_DIR : macosUserAgentDir();
   const uid = os.userInfo().uid;
   return {
     args,
-    plistPath: path.join(dir, `${LABEL}.plist`),
+    plistPath: path.join(dir, `${LAUNCHD_LABEL}.plist`),
     isSystem,
     domain: isSystem ? "system" : `gui/${uid}`,
   };
@@ -48,12 +52,18 @@ export async function runMacosService(args: ServiceArgs): Promise<void> {
     case "stop":
       return stopService(ctx);
     case "restart":
-      stopService(ctx);
-      return startService(ctx);
+      return restartService(ctx);
     case "status":
       return showStatus(ctx);
     case "logs":
       return showLogs(ctx);
+    case "config":
+      // Handled by the dispatcher in index.ts before reaching the platform layer.
+      throw new Error("unreachable: config action handled in service/index.ts");
+    default: {
+      const _exhaustive: never = args.action;
+      throw new Error(`unhandled service action: ${_exhaustive as string}`);
+    }
   }
 }
 
@@ -86,9 +96,9 @@ function installSync(ctx: Ctx): void {
   // (ignoring its error if nothing was loaded). This means 'install' is
   // idempotent: re-running it reloads the unit even if the file is unchanged,
   // which is how we recover from a user manually unloading the service.
-  spawnSync("launchctl", ["bootout", `${ctx.domain}/${LABEL}`], { stdio: "ignore" });
+  spawnSync("launchctl", ["bootout", `${ctx.domain}/${LAUNCHD_LABEL}`], { stdio: "ignore" });
   runLaunchctl(["bootstrap", ctx.domain, ctx.plistPath]);
-  runLaunchctl(["enable", `${ctx.domain}/${LABEL}`], { allowFailure: true });
+  runLaunchctl(["enable", `${ctx.domain}/${LAUNCHD_LABEL}`], { allowFailure: true });
   console.log(
     outcome === "unchanged"
       ? "[kandev] service is loaded and running"
@@ -99,7 +109,7 @@ function installSync(ctx: Ctx): void {
 }
 
 function uninstall(ctx: Ctx): void {
-  runLaunchctl(["bootout", `${ctx.domain}/${LABEL}`], { allowFailure: true });
+  runLaunchctl(["bootout", `${ctx.domain}/${LAUNCHD_LABEL}`], { allowFailure: true });
   if (fs.existsSync(ctx.plistPath)) {
     fs.unlinkSync(ctx.plistPath);
     console.log(`[kandev] removed ${ctx.plistPath}`);
@@ -109,15 +119,24 @@ function uninstall(ctx: Ctx): void {
 }
 
 function startService(ctx: Ctx): void {
-  runLaunchctl(["kickstart", `${ctx.domain}/${LABEL}`]);
+  runLaunchctl(["kickstart", `${ctx.domain}/${LAUNCHD_LABEL}`]);
 }
 
 function stopService(ctx: Ctx): void {
-  runLaunchctl(["kill", "SIGTERM", `${ctx.domain}/${LABEL}`], { allowFailure: true });
+  runLaunchctl(["kill", "SIGTERM", `${ctx.domain}/${LAUNCHD_LABEL}`], { allowFailure: true });
+}
+
+// `kickstart -k` atomically kills and restarts the service. Doing
+// `kill` + `kickstart` separately races: `kill SIGTERM` is async, so
+// `kickstart` (without -k) is a no-op while the old process is still alive.
+function restartService(ctx: Ctx): void {
+  runLaunchctl(["kickstart", "-k", `${ctx.domain}/${LAUNCHD_LABEL}`]);
 }
 
 function showStatus(ctx: Ctx): void {
-  const res = spawnSync("launchctl", ["print", `${ctx.domain}/${LABEL}`], { stdio: "inherit" });
+  const res = spawnSync("launchctl", ["print", `${ctx.domain}/${LAUNCHD_LABEL}`], {
+    stdio: "inherit",
+  });
   if (res.status !== 0) {
     console.log(`[kandev] service not loaded in ${ctx.domain}`);
   }
@@ -144,19 +163,10 @@ function runLaunchctl(args: string[], opts: { allowFailure?: boolean } = {}): vo
   }
 }
 
-function commandExists(cmd: string): boolean {
-  try {
-    execFileSync("which", [cmd], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function printPostInstallHints(ctx: Ctx, logDir: string): void {
   console.log("");
   console.log("[kandev] Useful commands:");
-  console.log(`[kandev]   launchctl print ${ctx.domain}/${LABEL}`);
+  console.log(`[kandev]   launchctl print ${ctx.domain}/${LAUNCHD_LABEL}`);
   console.log(`[kandev]   kandev service restart${ctx.isSystem ? " --system" : ""}`);
   console.log(`[kandev]   tail -f ${path.join(logDir, "service.err")}`);
 }

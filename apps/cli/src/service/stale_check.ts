@@ -1,8 +1,6 @@
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-import { captureLauncher } from "./paths";
+import { captureLauncher, linuxUserUnitPath, macosUserPlistPath } from "./paths";
 import { looksLikeManagedUnit } from "./templates";
 
 /**
@@ -11,12 +9,8 @@ import { looksLikeManagedUnit } from "./templates";
  * arbitrary `/etc` paths from a regular launch is noisier than worth it.
  */
 function userModeUnitPath(): string | null {
-  if (process.platform === "linux") {
-    return path.join(os.homedir(), ".config", "systemd", "user", "kandev.service");
-  }
-  if (process.platform === "darwin") {
-    return path.join(os.homedir(), "Library", "LaunchAgents", "com.kdlbs.kandev.plist");
-  }
+  if (process.platform === "linux") return linuxUserUnitPath();
+  if (process.platform === "darwin") return macosUserPlistPath();
   return null;
 }
 
@@ -43,7 +37,14 @@ export function detectStaleServiceUnit(): string | null {
   }
   if (!looksLikeManagedUnit(content)) return null;
 
-  const launcher = captureLauncher();
+  let launcher: ReturnType<typeof captureLauncher>;
+  try {
+    launcher = captureLauncher();
+  } catch {
+    // captureLauncher throws when process.argv[1] is missing — extremely rare,
+    // but if it happens we can't tell whether the unit is stale or not.
+    return null;
+  }
   // Stale = the unit's hard-coded paths no longer match the running binary.
   // We match on substring rather than parsing the unit so the check works for
   // both systemd Environment= lines and plist <string> entries.

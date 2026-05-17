@@ -88,7 +88,36 @@ export function parseServiceArgs(argv: string[]): ServiceArgs {
     }
     throw new ParseError(`unknown flag "${arg}" for kandev service ${head}`);
   }
+  validateActionFlags(out);
   return out;
+}
+
+/**
+ * Reject flag combinations that silently no-op so the user gets immediate
+ * feedback instead of a successful command that ignored their input. The
+ * matrix is small enough that explicit checks beat a generic flag-applicability
+ * table.
+ */
+function validateActionFlags(args: ServiceArgs): void {
+  if (args.follow && args.action !== "logs") {
+    throw new ParseError(`--follow only applies to 'kandev service logs', not '${args.action}'`);
+  }
+  const installOnly: Array<keyof ServiceArgs> = ["port", "homeDir", "noBootStart"];
+  if (args.action !== "install") {
+    for (const flag of installOnly) {
+      if (args[flag] !== undefined) {
+        const display =
+          flag === "homeDir"
+            ? "--home-dir"
+            : flag === "noBootStart"
+              ? "--no-boot-start"
+              : `--${flag}`;
+        throw new ParseError(
+          `${display} only applies to 'kandev service install', not '${args.action}'`,
+        );
+      }
+    }
+  }
 }
 
 function takeValue(argv: string[], i: number, flag: string): string {

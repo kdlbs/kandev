@@ -43,18 +43,18 @@ export function looksLikeManagedUnit(content: string): boolean {
  */
 export function renderSystemdUnit(input: UnitInputs): string {
   const env: string[] = [
-    `Environment=KANDEV_HOME_DIR=${input.homeDir}`,
-    `Environment=KANDEV_LOG_LEVEL=info`,
-    `Environment=PATH=${SYSTEMD_PATH}`,
+    envLine("KANDEV_HOME_DIR", input.homeDir),
+    envLine("KANDEV_LOG_LEVEL", "info"),
+    envLine("PATH", SYSTEMD_PATH),
   ];
   if (input.port !== undefined) {
-    env.push(`Environment=KANDEV_SERVER_PORT=${input.port}`);
+    env.push(envLine("KANDEV_SERVER_PORT", String(input.port)));
   }
   if (input.launcher.bundleDir) {
-    env.push(`Environment=KANDEV_BUNDLE_DIR=${input.launcher.bundleDir}`);
+    env.push(envLine("KANDEV_BUNDLE_DIR", input.launcher.bundleDir));
   }
   if (input.launcher.version) {
-    env.push(`Environment=KANDEV_VERSION=${input.launcher.version}`);
+    env.push(envLine("KANDEV_VERSION", input.launcher.version));
   }
 
   const wantedBy = input.mode === "system" ? "multi-user.target" : "default.target";
@@ -162,8 +162,22 @@ function escapeXml(value: string): string {
 
 // systemd unit "Environment=" lines can contain spaces by wrapping in double quotes.
 // ExecStart needs special handling for spaces too — paths with spaces must be
-// double-quoted per systemd.unit(5).
+// double-quoted per systemd.unit(5). Escape backslashes before double-quotes so
+// a literal `\` in a path is preserved instead of merging with the following
+// character into an escape sequence.
 function quoteForUnit(value: string): string {
-  if (!/[\s"]/.test(value)) return value;
-  return `"${value.replace(/"/g, '\\"')}"`;
+  if (!/[\s"\\]/.test(value)) return value;
+  const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `"${escaped}"`;
+}
+
+// Render a systemd `Environment=KEY=value` line, quoting the whole assignment
+// when the value contains whitespace, double-quote, or backslash. Without
+// quoting, systemd splits the line on the first space and treats subsequent
+// tokens as separate KEY=value pairs — which silently corrupts paths like
+// `/home/john doe/.kandev`.
+function envLine(key: string, value: string): string {
+  if (!/[\s"\\]/.test(value)) return `Environment=${key}=${value}`;
+  const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `Environment="${key}=${escaped}"`;
 }

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { DEFAULT_BACKEND_PORT } from "../constants";
+import { delay, resolveHealthTimeoutMs } from "../health";
 
 export type LogDumper = () => void;
 
@@ -24,7 +25,8 @@ export async function waitForServiceHealth(
   dumpLogs: LogDumper,
 ): Promise<void> {
   const url = `http://localhost:${port ?? DEFAULT_BACKEND_PORT}/health`;
-  const deadline = Date.now() + DEFAULT_TIMEOUT_MS;
+  const timeoutMs = resolveHealthTimeoutMs(DEFAULT_TIMEOUT_MS);
+  const deadline = Date.now() + timeoutMs;
   process.stderr.write(`[kandev] waiting for service to be healthy at ${url}\n`);
 
   while (Date.now() < deadline) {
@@ -37,20 +39,17 @@ export async function waitForServiceHealth(
     } catch {
       // not up yet; keep polling
     }
-    await sleep(POLL_INTERVAL_MS);
+    await delay(POLL_INTERVAL_MS);
   }
 
-  process.stderr.write(`[kandev] service did not become healthy within 30s\n`);
+  process.stderr.write(`[kandev] service did not become healthy within ${timeoutMs}ms\n`);
   process.stderr.write(`[kandev] dumping recent service logs:\n`);
   dumpLogs();
   throw new Error(
     "kandev service was installed but the /health endpoint never responded. " +
-      "Inspect the logs above and re-run 'kandev service install' once fixed.",
+      "Inspect the logs above and re-run 'kandev service install' once fixed. " +
+      "If the service needs more time to come up, set KANDEV_HEALTH_TIMEOUT_MS=120000.",
   );
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** Dump the last N lines of a systemd unit's logs via journalctl. */
@@ -58,7 +57,15 @@ export function dumpJournalctlLogs(opts: { unit: string; isSystem: boolean; line
   const args = opts.isSystem
     ? ["-u", opts.unit, "-n", String(opts.lines), "--no-pager"]
     : ["--user-unit", opts.unit, "-n", String(opts.lines), "--no-pager"];
-  spawnSync("journalctl", args, { stdio: "inherit" });
+  try {
+    spawnSync("journalctl", args, { stdio: "inherit" });
+  } catch (err) {
+    // journalctl may be unavailable in containerized or stripped-down setups.
+    // We're already in a failure path; don't compound it with a thrown error.
+    process.stderr.write(
+      `[kandev]   (could not run journalctl: ${err instanceof Error ? err.message : String(err)})\n`,
+    );
+  }
 }
 
 /** Dump the last N lines of launchd-managed log files via `tail`. */
@@ -70,5 +77,11 @@ export function dumpLaunchdLogs(opts: { logDir: string; lines: number }): void {
     process.stderr.write(`[kandev]   (no logs found in ${opts.logDir})\n`);
     return;
   }
-  spawnSync("tail", ["-n", String(opts.lines), ...candidates], { stdio: "inherit" });
+  try {
+    spawnSync("tail", ["-n", String(opts.lines), ...candidates], { stdio: "inherit" });
+  } catch (err) {
+    process.stderr.write(
+      `[kandev]   (could not run tail: ${err instanceof Error ? err.message : String(err)})\n`,
+    );
+  }
 }

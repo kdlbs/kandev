@@ -1,22 +1,21 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+
 import type { ServiceArgs } from "./args";
 import { dumpJournalctlLogs, waitForServiceHealth } from "./health_check";
-import { writeUnitFile } from "./install_helpers";
+import { commandExists, writeUnitFile } from "./install_helpers";
 import {
   captureLauncher,
   currentUsername,
+  linuxUserUnitDir,
+  LINUX_SYSTEM_UNIT_DIR,
   resolveHomeDir,
   resolveLogDir,
   resolveServiceUser,
+  SERVICE_NAME,
 } from "./paths";
 import { renderSystemdUnit } from "./templates";
-
-const SERVICE_NAME = "kandev";
-const USER_UNIT_DIR = path.join(os.homedir(), ".config", "systemd", "user");
-const SYSTEM_UNIT_DIR = "/etc/systemd/system";
 
 type Ctx = {
   args: ServiceArgs;
@@ -27,7 +26,7 @@ type Ctx = {
 
 function makeCtx(args: ServiceArgs): Ctx {
   const isSystem = !!args.system;
-  const unitDir = isSystem ? SYSTEM_UNIT_DIR : USER_UNIT_DIR;
+  const unitDir = isSystem ? LINUX_SYSTEM_UNIT_DIR : linuxUserUnitDir();
   const systemctlArgs = isSystem ? [] : ["--user"];
   return {
     args,
@@ -57,6 +56,13 @@ export async function runLinuxService(args: ServiceArgs): Promise<void> {
       return runSystemctl(ctx, ["status", SERVICE_NAME], { allowFailure: true });
     case "logs":
       return showLogs(ctx);
+    case "config":
+      // Handled by the dispatcher in index.ts before reaching the platform layer.
+      throw new Error("unreachable: config action handled in service/index.ts");
+    default: {
+      const _exhaustive: never = args.action;
+      throw new Error(`unhandled service action: ${_exhaustive as string}`);
+    }
   }
 }
 
@@ -130,11 +136,6 @@ function runSystemctl(ctx: Ctx, args: string[], opts: { allowFailure?: boolean }
   if (res.status !== 0 && !opts.allowFailure) {
     throw new Error(`systemctl ${argv.join(" ")} failed with code ${res.status}`);
   }
-}
-
-function commandExists(cmd: string): boolean {
-  const res = spawnSync("which", [cmd], { stdio: "ignore" });
-  return res.status === 0;
 }
 
 function lingerEnabled(user: string): boolean {

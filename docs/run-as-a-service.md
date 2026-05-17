@@ -4,7 +4,7 @@ Install Kandev as an OS-managed service (systemd on Linux, launchd on macOS) so 
 
 This guide assumes you've already installed kandev via [Homebrew or npm](../apps/cli/README.md#quick-start) and that `kandev` works when run interactively.
 
-> **Windows:** not yet supported. Track [#TODO](https://github.com/kdlbs/kandev/issues) for SCM support.
+> **Windows:** not yet supported. See [open issues mentioning Windows](https://github.com/kdlbs/kandev/issues?q=is%3Aissue+windows) for SCM support progress, or open a new one if there isn't one yet.
 
 ## Quick Start
 
@@ -38,7 +38,7 @@ Linux user-mode with `loginctl enable-linger` is functionally equivalent to syst
 
 ## Commands
 
-```
+```bash
 kandev service install [--system] [--port <port>] [--home-dir <path>] [--no-boot-start]
 kandev service uninstall [--system]
 kandev service start|stop|restart|status [--system]
