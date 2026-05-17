@@ -15,7 +15,7 @@ import {
   IconFold,
   IconEye,
 } from "@tabler/icons-react";
-import type { RenderHeaderMetadataProps } from "@pierre/diffs";
+import type { FileDiffMetadata } from "@pierre/diffs";
 import type { ViewMode } from "@/hooks/use-global-view-mode";
 
 const iconBtn = "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100";
@@ -168,8 +168,8 @@ export function useDiffHeaderToolbar(opts: DiffHeaderToolbarOptions) {
   } = opts;
 
   return useCallback(
-    (props: RenderHeaderMetadataProps): ReactNode => {
-      const resolvedPath = props.fileDiff?.name || filePath;
+    (fileDiff: FileDiffMetadata): ReactNode => {
+      const resolvedPath = fileDiff?.name || filePath;
       return (
         <DiffHeaderToolbarButtons
           resolvedPath={resolvedPath}

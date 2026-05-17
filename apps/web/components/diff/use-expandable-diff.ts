@@ -1,16 +1,16 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import type { FileDiffMetadata } from "@pierre/diffs";
+import { processFile, type FileDiffMetadata } from "@pierre/diffs";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent, requestFileContentAtRef } from "@/lib/ws/workspace-files";
-
-/** Must match @pierre/diffs SPLIT_WITH_NEWLINES — splits preserving trailing \n */
-const SPLIT_WITH_NEWLINES = /(?<=\n)/;
 
 type UseExpandableDiffOptions = {
   sessionId: string | undefined;
   filePath: string;
   baseRef: string | undefined;
   fileDiffMetadata: FileDiffMetadata | null;
+  /** Original patch string used to build fileDiffMetadata. Required for
+   *  re-parsing via processFile with the loaded full content. */
+  diff: string | undefined;
   enableExpansion?: boolean;
   /** Multi-repo subpath for the file (e.g. "kandev"); empty for single-repo. */
   repo?: string;
@@ -64,7 +64,7 @@ async function fetchNewContent(
 ): Promise<string> {
   try {
     // Fetch from working tree (current file on disk), not HEAD.
-    // The diff shows working tree changes, so newLines must match.
+    // The diff shows working tree changes, so additionLines must match.
     const res = await requestFileContent(client, sessionId, filePath, repo);
     if (res.is_binary) throw new Error("Cannot expand binary files");
     if (!res.error) return res.content;
@@ -79,8 +79,8 @@ async function fetchNewContent(
   }
 }
 
-/** Fetch both old and new content, split into lines for @pierre/diffs expansion. */
-async function fetchExpansionLines(
+/** Fetch both old and new content as raw strings for @pierre/diffs expansion. */
+async function fetchExpansionContent(
   sessionId: string,
   filePath: string,
   baseRef: string | undefined,
@@ -92,39 +92,38 @@ async function fetchExpansionLines(
   const oldContent = baseRef
     ? await fetchOldContent(client, sessionId, filePath, baseRef, repo)
     : "";
-  return {
-    oldLines: oldContent.split(SPLIT_WITH_NEWLINES),
-    newLines: newContent.split(SPLIT_WITH_NEWLINES),
-  };
+  return { oldContent, newContent };
 }
 
 /**
  * Hook for managing expandable diffs with lazy-loaded file content.
  *
- * The @pierre/diffs library requires `oldLines` and `newLines` in FileDiffMetadata
- * for expansion to work. This hook fetches old/new content and merges it into the
- * metadata.
+ * @pierre/diffs needs the patch *and* the full file contents (with
+ * isPartial=false and hunk indices addressed against the full arrays) to
+ * render expand controls. We get there by re-parsing via `processFile`
+ * once the content arrives — it's the only API that produces a metadata
+ * shape internally consistent enough for the library's expansion path.
  */
 export function useExpandableDiff({
   sessionId,
   filePath,
   baseRef,
   fileDiffMetadata,
+  diff,
   enableExpansion = false,
   repo,
 }: UseExpandableDiffOptions): UseExpandableDiffResult {
   const requestVersionRef = useRef(0);
   const [loadedContent, setLoadedContent] = useState<{
-    oldLines: string[];
-    newLines: string[];
+    oldContent: string;
+    newContent: string;
   } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Reset cached content when inputs change so stale data is never rendered.
   // Including fileDiffMetadata ensures expansion content is invalidated when
-  // the diff changes (e.g., file modified while Diff panel is open), because
-  // @pierre/diffs uses oldLines/newLines for rendering when present.
+  // the diff changes (e.g., file modified while Diff panel is open).
   useEffect(() => {
     requestVersionRef.current += 1;
     setLoadedContent(null);
@@ -139,8 +138,8 @@ export function useExpandableDiff({
     setError(null);
 
     try {
-      const lines = await fetchExpansionLines(sessionId, filePath, baseRef, repo);
-      if (version === requestVersionRef.current) setLoadedContent(lines);
+      const content = await fetchExpansionContent(sessionId, filePath, baseRef, repo);
+      if (version === requestVersionRef.current) setLoadedContent(content);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load file content";
       console.error("[useExpandableDiff]", msg);
@@ -152,13 +151,17 @@ export function useExpandableDiff({
 
   const metadata = useMemo<FileDiffMetadata | null>(() => {
     if (!fileDiffMetadata) return null;
-    if (!loadedContent) return fileDiffMetadata;
-    return {
-      ...fileDiffMetadata,
-      oldLines: loadedContent.oldLines,
-      newLines: loadedContent.newLines,
-    };
-  }, [fileDiffMetadata, loadedContent]);
+    if (!loadedContent || !diff) return fileDiffMetadata;
+    const reparsed = processFile(diff, {
+      oldFile: { name: filePath, contents: loadedContent.oldContent },
+      newFile: { name: filePath, contents: loadedContent.newContent },
+    });
+    if (!reparsed) return fileDiffMetadata;
+    // Preserve the lang override that useDiffMetadata sets (e.g. lang:'text'
+    // for Go files that hit the Shiki backtracking guard). processFile would
+    // otherwise infer "go" from the filename and silently re-enable Shiki.
+    return fileDiffMetadata.lang ? { ...reparsed, lang: fileDiffMetadata.lang } : reparsed;
+  }, [fileDiffMetadata, loadedContent, diff, filePath]);
 
   const isContentLoaded = loadedContent !== null;
 

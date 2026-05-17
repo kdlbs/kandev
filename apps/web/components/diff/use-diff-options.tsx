@@ -1,6 +1,6 @@
 import { useCallback, useMemo, type ReactNode } from "react";
 import { useTheme } from "next-themes";
-import type { FileDiffOptions, SelectedLineRange, RenderHeaderMetadataProps } from "@pierre/diffs";
+import type { FileDiffOptions, SelectedLineRange, FileDiffMetadata } from "@pierre/diffs";
 import { IconPlus } from "@tabler/icons-react";
 import { FONT } from "@/lib/theme/colors";
 import { useGlobalViewMode } from "@/hooks/use-global-view-mode";
@@ -69,7 +69,7 @@ type UseDiffOptionsArgs = {
   onOpenFile?: (filePath: string) => void;
   onPreviewMarkdown?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
-  /** Enable diff expansion (requires oldLines/newLines in metadata) */
+  /** Enable diff expansion (requires full deletionLines/additionLines in metadata) */
   enableExpansion?: boolean;
   /** Number of lines to expand per click (default: 20) */
   expansionLineCount?: number;
@@ -82,7 +82,7 @@ type UseDiffOptionsArgs = {
 type UseDiffOptionsResult = {
   globalViewMode: string;
   options: FileDiffOptions<AnnotationMetadata>;
-  renderHeaderMetadata: ((props: RenderHeaderMetadataProps) => ReactNode) | undefined;
+  renderHeaderMetadata: ((fileDiff: FileDiffMetadata) => ReactNode) | undefined;
   renderHoverUtility: () => ReactNode;
 };
 
@@ -147,7 +147,7 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
       diffStyle: globalViewMode,
       themeType: resolvedTheme === "dark" ? "dark" : "light",
       enableLineSelection: enableComments,
-      // "line-info" shows expand buttons when oldLines/newLines are on metadata;
+      // "line-info" shows expand buttons when full deletionLines/additionLines are on metadata;
       // "simple" is a plain divider without expand controls.
       hunkSeparators: enableExpansion ? "line-info" : "simple",
       enableHoverUtility: enableComments,

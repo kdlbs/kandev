@@ -369,6 +369,13 @@ function renderDiffContent(opts: {
     onToggleExpandUnchanged,
   } = opts;
   if (shouldRender && file.diff) {
+    // Expansion fetches the file content from the working tree to reconstruct
+    // full context around hunks. For PR files the working tree's content
+    // belongs to the local branch, not the PR head — when the same file has
+    // both PR and local changes, the wrong content gets paired with the PR
+    // patch and @pierre/diffs 1.1.x renders nothing/errors. Disable expansion
+    // for PR-sourced rows; uncommitted/committed rows still get it.
+    const enableExpansion = file.source !== "pr";
     return (
       <>
         <FileDiffViewer
@@ -381,7 +388,7 @@ function renderDiffContent(opts: {
           onCommentRun={onCommentRun}
           sessionId={sessionId}
           wordWrap={wordWrap}
-          enableExpansion={true}
+          enableExpansion={enableExpansion}
           baseRef="HEAD"
           hideHeader
           expandUnchanged={expandUnchanged}
