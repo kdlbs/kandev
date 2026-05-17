@@ -54,6 +54,12 @@ func TestPromptTask_passthrough_writes_to_stdin(t *testing.T) {
 	if len(agentMgr.capturedPrompts) != 0 {
 		t.Fatalf("expected 0 ACP prompt calls, got %d", len(agentMgr.capturedPrompts))
 	}
+
+	// MarkPassthroughRunning must fire so checkSessionPromptable blocks the
+	// next overlapping prompt (Greptile P1 regression guard).
+	if len(agentMgr.markPassthroughCalls) != 1 || agentMgr.markPassthroughCalls[0] != "session1" {
+		t.Errorf("expected MarkPassthroughRunning called once for session1, got %v", agentMgr.markPassthroughCalls)
+	}
 }
 
 // TestPromptTask_passthrough_propagates_write_error verifies that PTY write
