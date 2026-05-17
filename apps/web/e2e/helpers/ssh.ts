@@ -174,9 +174,12 @@ export function dumpRemoteLogs(handle: SSHServerHandle, label: string): string |
  * fingerprint surface the host-key-changed error verbatim — exactly the path
  * the host-key-rotation specs care about.
  *
- * Returns the new fingerprint so the test can assert against it.
+ * Does NOT return the new fingerprint. ssh-keyscan and the Go ssh client
+ * negotiate different host-key types in some configurations, so the
+ * fingerprint reported by keyscan won't always match what kandev observes
+ * — callers must hit /api/v1/ssh/test to learn the canonical value.
  */
-export function regenerateHostKey(handle: SSHServerHandle): string {
+export function regenerateHostKey(handle: SSHServerHandle): void {
   execInContainer(handle, [
     "sh",
     "-c",
@@ -184,7 +187,6 @@ export function regenerateHostKey(handle: SSHServerHandle): string {
   ]);
   // sshd needs a moment to re-bind after pkill -HUP.
   waitForTCPOpen(handle.host, handle.port);
-  return scanHostFingerprint(handle.host, handle.port);
 }
 
 /**
@@ -291,7 +293,13 @@ function generateKeypair(identityFile: string): void {
   fs.chmodSync(identityFile, 0o600);
 }
 
-function execInContainer(handle: SSHServerHandle, argv: string[]): string {
+/**
+ * Run an arbitrary command inside the sshd container as root. Used by tests
+ * to seed/clear remote state that the SSH executor would normally manage —
+ * e.g. wiping ~/.kandev/bin/agentctl to force a re-upload on the next
+ * launch. Throws when the command exits non-zero.
+ */
+export function execInContainer(handle: SSHServerHandle, argv: string[]): string {
   const res = spawnSync("docker", ["exec", handle.containerName, ...argv], {
     encoding: "utf8",
   });
