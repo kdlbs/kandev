@@ -132,7 +132,7 @@ type Adapter struct {
 
 	// Available models from the most recent session creation/load.
 	// Used by SetModel to validate the requested model exists.
-	availableModels []acp.UnstableModelInfo
+	availableModels []acp.ModelInfo
 
 	// usageDelta tracks the running cumulative `usage_update.used` and
 	// the most recent USD cost reported per session. codex-acp emits no
@@ -1407,7 +1407,7 @@ func (a *Adapter) emitInitialModeState(modes *acp.SessionModeState) {
 }
 
 // emitSessionModels emits a session_models event from the session response.
-func (a *Adapter) emitSessionModels(sessionID string, models *acp.UnstableSessionModelState, meta map[string]any, acpConfigOptions []acp.SessionConfigOption) {
+func (a *Adapter) emitSessionModels(sessionID string, models *acp.SessionModelState, meta map[string]any, acpConfigOptions []acp.SessionConfigOption) {
 	currentModelID := string(models.CurrentModelId)
 	// Prefer typed config options from the response; fall back to _meta extraction for older agents
 	configOptions := convertACPConfigOptions(acpConfigOptions)
@@ -1575,9 +1575,11 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 	}
 
 	_, err := conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
-		SessionId: acp.SessionId(sessionID),
-		ConfigId:  acp.SessionConfigId(configID),
-		Value:     acp.SessionConfigValueId(value),
+		ValueId: &acp.SetSessionConfigOptionValueId{
+			SessionId: acp.SessionId(sessionID),
+			ConfigId:  acp.SessionConfigId(configID),
+			Value:     acp.SessionConfigValueId(value),
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("set session config option failed: %w", err)

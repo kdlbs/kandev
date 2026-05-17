@@ -114,12 +114,12 @@ func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (ac
 // mockSessionModels returns the mock agent's advertised model list for ACP
 // session responses. Two models are exposed so tests can verify both
 // selection and default behavior (mock-fast is the default).
-func mockSessionModels() *acp.UnstableSessionModelState {
+func mockSessionModels() *acp.SessionModelState {
 	fastDesc := "Fast mock model for testing"
 	smartDesc := "Smart mock model for testing"
-	return &acp.UnstableSessionModelState{
+	return &acp.SessionModelState{
 		CurrentModelId: "mock-fast",
-		AvailableModels: []acp.UnstableModelInfo{
+		AvailableModels: []acp.ModelInfo{
 			{ModelId: "mock-fast", Name: "Mock Fast", Description: &fastDesc},
 			{ModelId: "mock-smart", Name: "Mock Smart", Description: &smartDesc},
 		},
@@ -190,11 +190,35 @@ func (a *mockAgent) SetSessionConfigOption(_ context.Context, _ acp.SetSessionCo
 	return acp.SetSessionConfigOptionResponse{}, nil
 }
 
+// CloseSession releases any state for a session (no-op for mock).
+func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
+	a.mu.Lock()
+	delete(a.sessions, req.SessionId)
+	delete(a.commandsEmitted, req.SessionId)
+	a.mu.Unlock()
+	return acp.CloseSessionResponse{}, nil
+}
+
+// ListSessions is not supported by the mock and returns an empty list.
+func (a *mockAgent) ListSessions(_ context.Context, _ acp.ListSessionsRequest) (acp.ListSessionsResponse, error) {
+	return acp.ListSessionsResponse{}, nil
+}
+
+// ResumeSession is not supported by the mock; LoadSession is used instead.
+func (a *mockAgent) ResumeSession(_ context.Context, _ acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
+	return acp.ResumeSessionResponse{}, nil
+}
+
 // emitAvailableCommandsOnce sends the available commands list once per session.
 // Idempotent — guarded by `commandsEmitted` so callers (NewSession, LoadSession,
-// first Prompt) can call it freely.
+// first Prompt) can call it freely. Skips emission if the session was closed
+// while the post-handshake delay was sleeping.
 func (a *mockAgent) emitAvailableCommandsOnce(ctx context.Context, sid acp.SessionId) {
 	a.mu.Lock()
+	if !a.sessions[sid] {
+		a.mu.Unlock()
+		return
+	}
 	if a.commandsEmitted[sid] {
 		a.mu.Unlock()
 		return

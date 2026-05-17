@@ -163,8 +163,6 @@ func sendSessionNew(ctx context.Context, r *Runner) (Frame, error) {
 }
 
 func sendSetModel(ctx context.Context, r *Runner, sessionID, modelID string) error {
-	// Try the unstable form first (matches the acp-go-sdk fork we use).
-	// If that returns method-not-found, fall back to the stable name.
 	req, _ := r.Framer().NewRequest("session/set_model", map[string]any{
 		"sessionId": sessionID,
 		"modelId":   modelID,

@@ -215,14 +215,12 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	return result, nil
 }
 
-// toACPMcpServers converts the cross-process DTO list into the ACP SDK
-// shape. Uses the *Inline variants because the agentcooper fork (vendored
-// via go.mod replace) names them that way; the upstream SDK would call them
-// McpServerHttp / McpServerSse. Returns nil when there are no entries so
-// callers can use the nil-as-empty convention upstream. The second return
-// value carries the names of any DTOs we couldn't convert (unsupported
-// transport, e.g. stdio) so the caller can surface them in logs rather than
-// having them silently disappear from the agent's tool surface.
+// toACPMcpServers converts the cross-process DTO list into the ACP SDK shape.
+// Returns nil when there are no entries so callers can use the nil-as-empty
+// convention. The second return value carries the names of any DTOs we
+// couldn't convert (unsupported transport, e.g. stdio) so the caller can
+// surface them in logs rather than having them silently disappear from the
+// agent's tool surface.
 func toACPMcpServers(in []MCPServerDTO) ([]acp.McpServer, []string) {
 	if len(in) == 0 {
 		return nil, nil
@@ -424,11 +422,15 @@ func buildInitProbeFields(initResp acp.InitializeResponse) *ProbeResponse {
 		out.AgentVersion = initResp.AgentInfo.Version
 	}
 	for _, m := range initResp.AuthMethods {
+		id, name, desc, meta := acpclient.AuthMethodFields(m)
+		if id == "" && name == "" {
+			continue
+		}
 		out.AuthMethods = append(out.AuthMethods, ProbeAuthMethod{
-			ID:          string(m.Id), //nolint:unconvert // AuthMethodId is a named string type; conversion required
-			Name:        m.Name,
-			Description: derefString(m.Description),
-			Meta:        m.Meta,
+			ID:          id,
+			Name:        name,
+			Description: derefString(desc),
+			Meta:        meta,
 		})
 	}
 	return out

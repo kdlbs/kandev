@@ -194,12 +194,9 @@ func TestACPUpdateHandlerOrdering(t *testing.T) {
 // Helper to verify AdapterEvent type (unused variable fix)
 var _ = streams.EventTypeMessageChunk
 
-// TestNotificationOrderingFix verifies that the ACP SDK fork (github.com/kdlbs/acp-go-sdk)
-// correctly preserves notification ordering by processing them synchronously.
-//
-// This test is the primary verification that the fix works. It should:
-// - Pass 100% of the time with the patched SDK
-// - Fail frequently (40-80% out of order) with the original SDK
+// TestNotificationOrderingFix verifies that the ACP SDK preserves notification
+// ordering by serializing notification processing. Upstream coder/acp-go-sdk#8
+// (merged 2026-02-24) is the fix this regression guards against.
 func TestNotificationOrderingFix(t *testing.T) {
 	const numChunks = 200 // Use more chunks to increase confidence
 

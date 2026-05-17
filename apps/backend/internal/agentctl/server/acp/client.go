@@ -397,17 +397,17 @@ func (c *Client) CreateTerminal(ctx context.Context, p acp.CreateTerminalRequest
 	return acp.CreateTerminalResponse{TerminalId: id}, nil
 }
 
-// KillTerminalCommand sends SIGTERM to a terminal's process.
-func (c *Client) KillTerminalCommand(ctx context.Context, p acp.KillTerminalCommandRequest) (acp.KillTerminalCommandResponse, error) {
-	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.kill_terminal_command")
+// KillTerminal sends SIGTERM to a terminal's process.
+func (c *Client) KillTerminal(ctx context.Context, p acp.KillTerminalRequest) (acp.KillTerminalResponse, error) {
+	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.kill_terminal")
 	defer span.End()
 	span.SetAttributes(attribute.String("terminal_id", p.TerminalId))
 
 	if err := c.terminals.Kill(p.TerminalId); err != nil {
 		span.RecordError(err)
-		return acp.KillTerminalCommandResponse{}, err
+		return acp.KillTerminalResponse{}, err
 	}
-	return acp.KillTerminalCommandResponse{}, nil
+	return acp.KillTerminalResponse{}, nil
 }
 
 // TerminalOutput returns the current output of a terminal.

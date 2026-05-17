@@ -23,6 +23,10 @@ apps/
 - **Container image**: `ghcr.io/kdlbs/kandev` (GitHub Container Registry)
 - **Dev mock providers**: In `KANDEV_MOCK_AGENT=true` dev mode the base `mock-agent` is enabled alongside the real CLIs. To exercise the office provider-routing UI without installing real CLIs, set `KANDEV_MOCK_PROVIDERS=claude-acp,codex-acp,opencode-acp` (or any subset of `RoutableProviderIDs`) when launching `make dev` — those canonicals are then replaced with MockAgent aliases.
 
+### Worktrees and commit hooks
+
+The commit-msg hook runs `cd apps && pnpm exec commitlint --edit "$1"`. A fresh git worktree shares `.git/` but **not** `apps/node_modules/`, so the first commit attempted in a worktree fails with `Command "commitlint" not found` / `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL`. Run `pnpm install --frozen-lockfile` from `apps/` in the worktree once before the first commit; subsequent commits work normally.
+
 ---
 
 ## Backend Architecture
