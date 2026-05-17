@@ -52,6 +52,10 @@ func (h *ExecutorProfileHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/executors/:id/profiles/:profileId", h.httpGetProfile)
 	api.PATCH("/executors/:id/profiles/:profileId", h.httpUpdateProfile)
 	api.DELETE("/executors/:id/profiles/:profileId", h.httpDeleteProfile)
+	// Top-level DELETE: profile IDs are globally unique, so callers that
+	// only have the profile id (CLI, settings UI, test helpers) don't need
+	// to plumb the executor id through. The handler is identical otherwise.
+	api.DELETE("/executor-profiles/:profileId", h.httpDeleteProfile)
 }
 
 func (h *ExecutorProfileHandlers) registerWS(dispatcher *ws.Dispatcher) {
