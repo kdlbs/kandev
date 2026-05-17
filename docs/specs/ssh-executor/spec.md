@@ -96,7 +96,7 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 ### Recovery after backend restart
 
 - Persist in `ExecutorRunning.Metadata` (allow-listed in `persistentMetadataKeys`): `ssh_host`, `ssh_port`, `ssh_user`, `ssh_host_fingerprint`, `ssh_remote_task_dir`, `ssh_remote_session_dir`, `ssh_remote_agentctl_port`, `ssh_remote_agentctl_pid`, `ssh_local_forward_port`, `ssh_workdir_root`, `ssh_proxy_jump`, `ssh_identity_source`, `ssh_identity_file`.
-- `ResumeRemoteInstance` re-opens the SSH connection per `(host, user)` (one connection serves all surviving sessions on that host), re-establishes each session's local port forward to its recorded remote port, verifies the remote agentctl is alive (`kill -0 <pid>` for liveness, then HTTP probe on the forwarded port), and re-binds the stream manager. If the remote process is gone, the resume fails and the manager falls back to creating a fresh instance.
+- `ResumeRemoteInstance` re-opens an SSH connection per surviving session using its full `(host, port, user, identity_source, identity_file, proxy_jump, host_fingerprint)` tuple — no sharing across sessions, so two profiles on the same host with different keys don't get merged. It re-establishes each session's local port forward to its recorded remote port, verifies the remote agentctl is alive (`kill -0 <pid>` for liveness, then HTTP probe on the forwarded port), and re-binds the stream manager. If the remote process is gone, the resume fails and the manager falls back to creating a fresh instance.
 
 ### Settings UI
 
