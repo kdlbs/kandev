@@ -62,6 +62,20 @@ describe("decideSubmitShortcut", () => {
         }),
       ).toBe("submit");
     });
+
+    // Mod-Enter is not a suggestion-pick key (handleMenuKeyDown only handles
+    // Enter and Tab) so the menu state is intentionally ignored — Mod-Enter
+    // always submits in cmd_enter mode.
+    it("submits on Mod-Enter even when the menu is open", () => {
+      expect(
+        decideSubmitShortcut({
+          pressed: "mod-enter",
+          disabled: false,
+          submitKey: "cmd_enter",
+          isSuggestionMenuOpen: true,
+        }),
+      ).toBe("submit");
+    });
   });
 
   describe("disabled", () => {

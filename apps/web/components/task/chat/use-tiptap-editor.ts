@@ -389,7 +389,7 @@ function useSubmitKeymap(refs: {
   onSubmitRef: React.RefObject<(() => void) | undefined>;
   planModeEnabledRef: React.RefObject<boolean>;
   onPlanModeChangeRef: React.RefObject<((enabled: boolean) => void) | undefined>;
-  isSuggestionMenuOpenRef: React.RefObject<boolean | undefined>;
+  isSuggestionMenuOpenRef: React.RefObject<boolean>;
   keyboardShortcutsRef: React.RefObject<StoredShortcutOverrides | undefined>;
 }) {
   const {
@@ -410,7 +410,7 @@ function useSubmitKeymap(refs: {
             pressed,
             disabled: !!disabledRef.current,
             submitKey: submitKeyRef.current ?? "cmd_enter",
-            isSuggestionMenuOpen: !!isSuggestionMenuOpenRef.current,
+            isSuggestionMenuOpen: isSuggestionMenuOpenRef.current,
           });
           if (decision === "consume-noop") return true;
           if (decision === "submit") {
