@@ -115,6 +115,10 @@ type UseTipTapEditorOptions = {
   mentionSuggestion: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   slashSuggestion: any;
+  /** True when a slash/@ suggestion menu is open with selectable items. Enter
+   *  must defer to the suggestion plugin so the highlighted item is inserted
+   *  instead of submitting the message. */
+  isSuggestionMenuOpen: boolean;
   ref: React.ForwardedRef<TipTapInputHandle>;
 };
 
@@ -127,6 +131,7 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
   const sessionIdRef = useRef(opts.sessionId);
   const planModeEnabledRef = useRef(opts.planModeEnabled);
   const onPlanModeChangeRef = useRef(opts.onPlanModeChange);
+  const isSuggestionMenuOpenRef = useRef(opts.isSuggestionMenuOpen);
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   const keyboardShortcutsRef = useRef(keyboardShortcuts);
   useLayoutEffect(() => {
@@ -138,6 +143,7 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
     sessionIdRef.current = opts.sessionId;
     planModeEnabledRef.current = opts.planModeEnabled;
     onPlanModeChangeRef.current = opts.onPlanModeChange;
+    isSuggestionMenuOpenRef.current = opts.isSuggestionMenuOpen;
     keyboardShortcutsRef.current = keyboardShortcuts;
   });
   return {
@@ -149,6 +155,7 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
     sessionIdRef,
     planModeEnabledRef,
     onPlanModeChangeRef,
+    isSuggestionMenuOpenRef,
     keyboardShortcutsRef,
   };
 }
@@ -175,6 +182,7 @@ export function useTipTapEditor(opts: UseTipTapEditorOptions) {
     onSubmitRef: refs.onSubmitRef,
     planModeEnabledRef: refs.planModeEnabledRef,
     onPlanModeChangeRef: refs.onPlanModeChangeRef,
+    isSuggestionMenuOpenRef: refs.isSuggestionMenuOpenRef,
     keyboardShortcutsRef: refs.keyboardShortcutsRef,
   });
   const isSyncingRef = useRef(false);
@@ -349,6 +357,30 @@ function syncEditorValue({
   initialSyncDoneRef.current = true;
 }
 
+// ── Submit shortcut decision ────────────────────────────────────────
+
+export type SubmitShortcutDecision = "consume-noop" | "submit" | "defer";
+
+/** Pure decision for whether an Enter/Mod-Enter press in the chat input should
+ *  submit the message, defer to the next ProseMirror handler (e.g. the slash/
+ *  mention suggestion plugin or paragraph-split), or no-op while disabled.
+ *  Kept pure so the keymap contract is unit-testable without mounting TipTap. */
+export function decideSubmitShortcut(args: {
+  pressed: "enter" | "mod-enter";
+  disabled: boolean;
+  submitKey: "enter" | "cmd_enter";
+  isSuggestionMenuOpen: boolean;
+}): SubmitShortcutDecision {
+  if (args.disabled) return "consume-noop";
+  if (args.pressed === "enter") {
+    if (args.submitKey !== "enter") return "defer";
+    if (args.isSuggestionMenuOpen) return "defer";
+    return "submit";
+  }
+  if (args.submitKey !== "cmd_enter") return "defer";
+  return "submit";
+}
+
 // ── Submit keymap hook ──────────────────────────────────────────────
 
 function useSubmitKeymap(refs: {
@@ -357,6 +389,7 @@ function useSubmitKeymap(refs: {
   onSubmitRef: React.RefObject<(() => void) | undefined>;
   planModeEnabledRef: React.RefObject<boolean>;
   onPlanModeChangeRef: React.RefObject<((enabled: boolean) => void) | undefined>;
+  isSuggestionMenuOpenRef: React.RefObject<boolean | undefined>;
   keyboardShortcutsRef: React.RefObject<StoredShortcutOverrides | undefined>;
 }) {
   const {
@@ -365,29 +398,30 @@ function useSubmitKeymap(refs: {
     onSubmitRef,
     planModeEnabledRef,
     onPlanModeChangeRef,
+    isSuggestionMenuOpenRef,
     keyboardShortcutsRef,
   } = refs;
   return useMemo(() => {
     return Extension.create({
       name: "submitKeymap",
       addKeyboardShortcuts() {
+        const run = (pressed: "enter" | "mod-enter") => {
+          const decision = decideSubmitShortcut({
+            pressed,
+            disabled: !!disabledRef.current,
+            submitKey: submitKeyRef.current ?? "cmd_enter",
+            isSuggestionMenuOpen: !!isSuggestionMenuOpenRef.current,
+          });
+          if (decision === "consume-noop") return true;
+          if (decision === "submit") {
+            onSubmitRef.current?.();
+            return true;
+          }
+          return false;
+        };
         return {
-          Enter: () => {
-            if (disabledRef.current) return true;
-            if (submitKeyRef.current === "enter") {
-              onSubmitRef.current?.();
-              return true;
-            }
-            return false;
-          },
-          "Mod-Enter": () => {
-            if (disabledRef.current) return true;
-            if (submitKeyRef.current === "cmd_enter") {
-              onSubmitRef.current?.();
-              return true;
-            }
-            return false;
-          },
+          Enter: () => run("enter"),
+          "Mod-Enter": () => run("mod-enter"),
         };
       },
       addProseMirrorPlugins() {
