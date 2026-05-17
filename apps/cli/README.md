@@ -35,6 +35,17 @@ The package manager owns the runtime version. `kandev@X.Y.Z` ships with the matc
 kandev --runtime-version v0.16.0
 ```
 
+## Run as a Service
+
+Install kandev as a systemd (Linux) or launchd (macOS) service so it auto-starts and stays running across reboots:
+
+```bash
+kandev service install                   # user mode (laptop, single-user)
+sudo kandev service install --system     # system mode (VPS, shared host)
+```
+
+See [docs/run-as-a-service.md](../../docs/run-as-a-service.md) for the full guide — user vs system mode comparison, update workflow, troubleshooting.
+
 ## What You Get
 
 - **Multi-agent support** - Claude Code, Codex, GitHub Copilot, Gemini CLI, Amp, Auggie, OpenCode

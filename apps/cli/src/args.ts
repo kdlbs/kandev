@@ -8,6 +8,8 @@ export type CliOptions = {
   verbose?: boolean;
   debug?: boolean;
   showVersion?: boolean;
+  /** Skip browser open + interactive prompts. Set by systemd/launchd units. */
+  headless?: boolean;
 };
 
 export type ParseResult = {
@@ -92,6 +94,10 @@ export function parseArgs(argv: string[]): ParseResult {
     }
     if (arg === "--debug") {
       opts.debug = true;
+      continue;
+    }
+    if (arg === "--headless" || arg === "--no-browser") {
+      opts.headless = true;
       continue;
     }
   }

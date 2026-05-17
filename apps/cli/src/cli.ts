@@ -5,6 +5,8 @@ import pkg from "../package.json";
 import { parseArgs, ParseError, resolvePorts } from "./args";
 import { runDev } from "./dev";
 import { runRelease } from "./run";
+import { runServiceCommand } from "./service";
+import { warnIfStaleServiceUnit } from "./service/stale_check";
 import { runStart } from "./start";
 import { ensureValidPort } from "./ports";
 
@@ -17,6 +19,7 @@ Usage:
   kandev start [--port <port>] [--verbose] [--debug]
   kandev [--port <port>] [--verbose] [--debug]
   kandev --dev [--port <port>]
+  kandev service install|uninstall|start|stop|restart|status|logs [--system]
 
 Examples:
   kandev
@@ -32,6 +35,8 @@ Options:
   dev              Use local repo for dev (make dev + next dev) if available.
   start            Use local production build (make build + next start).
   run              Use installed runtime bundle (default).
+  service          Manage kandev as an OS service (systemd / launchd).
+                   Run 'kandev service --help' for details.
   --dev            Alias for "dev".
   --version, -V    Print CLI version and exit.
   --port           Port for the Go backend (the URL kandev opens on in
@@ -39,6 +44,7 @@ Options:
                    KANDEV_PORT or KANDEV_BACKEND_PORT.
   --verbose, -v    Show info logs from backend + web.
   --debug          Show debug logs + agent message dumps.
+  --headless       Skip opening the browser. Used by service units.
   --help, -h       Show help.
 
 Advanced:
@@ -77,6 +83,13 @@ function findRepoRoot(startDir: string): string | null {
 }
 
 async function main(): Promise<void> {
+  // The `service` subcommand has its own argv parser (own subcommands, flags).
+  // Handle it before the top-level flag parser to keep the two parsers isolated.
+  if (process.argv[2] === "service") {
+    await runServiceCommand(process.argv.slice(3));
+    return;
+  }
+
   const { options, showHelp, deprecatedFlags } = parseArgs(process.argv.slice(2));
 
   if (options.showVersion) {
@@ -96,6 +109,10 @@ async function main(): Promise<void> {
   const resolved = resolvePorts(options, process.env);
   const backendPort = ensureValidPort(resolved.backendPort, "backend port");
   const webPort = ensureValidPort(resolved.webPort, "web port");
+
+  // After an npm/brew upgrade, paths baked into an installed service unit may
+  // be stale. Warn once before launch so the user knows to re-run install.
+  warnIfStaleServiceUnit();
 
   if (options.command === "dev") {
     const repoRoot = findRepoRoot(process.cwd());
@@ -127,6 +144,7 @@ async function main(): Promise<void> {
     webPort,
     verbose: options.verbose,
     debug: options.debug,
+    headless: options.headless,
   });
 }
 
