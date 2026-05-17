@@ -39,6 +39,13 @@ export function startBastionAndTarget(workerIndex: number, workDir: string): SSH
   const networkName = `kandev-e2e-ssh-net-${workerIndex}`;
   ensureNetwork(networkName);
 
+  // The SSH executor's ProxyJump string doesn't carry a separate identity for
+  // the bastion (matching OpenSSH semantics — per-host identities come from
+  // ~/.ssh/config or ssh-agent). For these tests we share one keypair across
+  // bastion + target so a single -i flag authenticates both hops.
+  const sharedIdentityFile = path.join(workDir, "shared_id_ed25519");
+  generateKeypair(sharedIdentityFile);
+
   const bastionPort = BASTION_BASE_PORT + workerIndex * 2;
   const bastion = launchInNetwork({
     name: `kandev-bastion-${workerIndex}`,
@@ -46,6 +53,7 @@ export function startBastionAndTarget(workerIndex: number, workDir: string): SSH
     networkName,
     hostPort: bastionPort,
     workDir: path.join(workDir, "bastion"),
+    identityFile: sharedIdentityFile,
   });
 
   const target = launchInNetwork({
@@ -54,6 +62,7 @@ export function startBastionAndTarget(workerIndex: number, workDir: string): SSH
     networkName,
     hostPort: null, // not reachable from host
     workDir: path.join(workDir, "target"),
+    identityFile: sharedIdentityFile,
   });
 
   return {
@@ -87,13 +96,14 @@ interface LaunchOpts {
   networkName: string;
   hostPort: number | null;
   workDir: string;
+  /** Pre-generated identity file to mount as authorized_keys. */
+  identityFile: string;
 }
 
 function launchInNetwork(opts: LaunchOpts): SSHServerHandle {
   fs.mkdirSync(opts.workDir, { recursive: true });
 
-  const identityFile = path.join(opts.workDir, "id_ed25519");
-  generateKeypair(identityFile);
+  const identityFile = opts.identityFile;
   const publicKeyFile = `${identityFile}.pub`;
 
   spawnSync("docker", ["rm", "-f", opts.name], { stdio: "ignore" });
@@ -201,14 +211,31 @@ function waitForTCPOpenInsideNetwork(
 }
 
 function scanFingerprintViaHost(host: string, port: number): string {
-  const keyOut = spawnSync("ssh-keyscan", ["-p", String(port), "-t", "ed25519", host], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  });
-  return parseFingerprint(keyOut.stdout);
+  // sshd often accepts TCP before it's finished negotiating host keys —
+  // ssh-keyscan can come back empty on the first try right after the
+  // container starts. Retry a few times before giving up so the bastion
+  // fixture isn't flaky on a cold daemon.
+  const deadline = Date.now() + 15_000;
+  let lastErr = "";
+  while (Date.now() < deadline) {
+    const keyOut = spawnSync("ssh-keyscan", ["-p", String(port), "-t", "ed25519", host], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (keyOut.stdout?.trim()) {
+      return parseFingerprint(keyOut.stdout);
+    }
+    lastErr = keyOut.stderr ?? "";
+    spawnSync("sleep", ["0.3"]);
+  }
+  throw new Error(`scanFingerprintViaHost: empty output (stderr=${lastErr})`);
 }
 
 function scanFingerprintInsideNetwork(networkName: string, targetName: string): string {
+  // openssh-client is the package that ships ssh-keyscan on Alpine. (The
+  // historical "openssh-keyscan" name doesn't exist in repos.) Pin to a
+  // known-good Alpine and surface install/keyscan stderr so failures are
+  // diagnosable instead of empty.
   const res = spawnSync(
     "docker",
     [
@@ -219,10 +246,15 @@ function scanFingerprintInsideNetwork(networkName: string, targetName: string): 
       "alpine:3.20",
       "sh",
       "-c",
-      `apk add --no-cache openssh-keyscan >/dev/null 2>&1; ssh-keyscan -t ed25519 ${targetName} 2>/dev/null`,
+      `apk add --no-cache openssh-client >/dev/null 2>&1 && ssh-keyscan -t ed25519 ${targetName}`,
     ],
     { encoding: "utf8" },
   );
+  if (!res.stdout?.trim()) {
+    throw new Error(
+      `scanFingerprintInsideNetwork: empty output (status=${res.status}, stderr=${res.stderr})`,
+    );
+  }
   return parseFingerprint(res.stdout);
 }
 
