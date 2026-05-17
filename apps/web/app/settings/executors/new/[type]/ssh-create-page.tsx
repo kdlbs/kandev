@@ -48,9 +48,12 @@ export function SSHCreatePage() {
       };
       // Read the latest store snapshot at write time so a concurrent
       // updater (another fetch, a WS event, etc.) that landed while
-      // createExecutor was in-flight doesn't get overwritten.
+      // createExecutor was in-flight doesn't get overwritten. Dedupe
+      // on id so a WS event that already inserted this executor doesn't
+      // double-list it after our append.
       const current = store.getState().executors.items;
-      store.getState().setExecutors([...current, next]);
+      const merged = current.some((e) => e.id === next.id) ? current : [...current, next];
+      store.getState().setExecutors(merged);
       router.push(`/settings/executors/ssh/${created.id}`);
     },
     [router, store],

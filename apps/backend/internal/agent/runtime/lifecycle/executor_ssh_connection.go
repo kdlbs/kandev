@@ -479,10 +479,10 @@ func resolveBastion(target *SSHTarget) (*SSHTarget, error) {
 	})
 }
 
-// parseLiteralProxyJump recognizes a `[user@]host[:port]` ProxyJump literal.
-// Returns ok=false when the input doesn't contain an `@` or `:` (treat as
-// alias instead). Anything that doesn't parse cleanly also returns false so
-// the alias path can take over.
+// parseLiteralProxyJump recognizes a `[user@]host[:port]` ProxyJump literal,
+// including IPv6 hosts in `[2001:db8::1]:22` form. Returns ok=false when the
+// input doesn't contain an `@` or `:` (treat as alias instead). Anything that
+// doesn't parse cleanly also returns false so the alias path can take over.
 func parseLiteralProxyJump(s string) (user, host string, port int, ok bool) {
 	s = strings.TrimSpace(s)
 	if s == "" || !strings.ContainsAny(s, "@:") {
@@ -493,20 +493,61 @@ func parseLiteralProxyJump(s string) (user, host string, port int, ok bool) {
 		user = rest[:at]
 		rest = rest[at+1:]
 	}
-	if colon := strings.LastIndex(rest, ":"); colon != -1 {
-		portStr := rest[colon+1:]
-		n, err := strconv.Atoi(portStr)
-		if err != nil {
-			return "", "", 0, false
-		}
-		port = n
-		rest = rest[:colon]
-	}
-	host = rest
-	if host == "" {
+	host, port, ok = parseProxyJumpHostPort(rest)
+	if !ok || host == "" {
 		return "", "", 0, false
 	}
 	return user, host, port, true
+}
+
+// parseProxyJumpHostPort splits the `host[:port]` segment of a ProxyJump
+// literal, with IPv6 bracketing recognised. ok=false on any malformed input
+// (mismatched brackets, junk after `]`, non-numeric or out-of-range port).
+func parseProxyJumpHostPort(s string) (host string, port int, ok bool) {
+	if strings.HasPrefix(s, "[") {
+		return parseBracketedHostPort(s)
+	}
+	if colon := strings.LastIndex(s, ":"); colon != -1 {
+		p, pok := parsePortString(s[colon+1:])
+		if !pok {
+			return "", 0, false
+		}
+		return s[:colon], p, true
+	}
+	return s, 0, true
+}
+
+// parseBracketedHostPort handles the `[host][:port]?` IPv6 form. Strips the
+// brackets so callers can pass host straight to net.JoinHostPort without
+// producing `[[…]]:port`.
+func parseBracketedHostPort(s string) (host string, port int, ok bool) {
+	end := strings.Index(s, "]")
+	if end == -1 {
+		return "", 0, false
+	}
+	host = s[1:end]
+	tail := s[end+1:]
+	if tail == "" {
+		return host, 0, true
+	}
+	if !strings.HasPrefix(tail, ":") {
+		return "", 0, false
+	}
+	p, pok := parsePortString(tail[1:])
+	if !pok {
+		return "", 0, false
+	}
+	return host, p, true
+}
+
+// parsePortString parses a base-10 port and rejects values outside the
+// inclusive [1, 65535] TCP port range.
+func parsePortString(s string) (int, bool) {
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 || n > 65535 {
+		return 0, false
+	}
+	return n, true
 }
 
 // SSH connections are owned per-session (no shared pool): a session's client

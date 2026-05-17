@@ -123,7 +123,9 @@ ENTRYPOINT ["/entrypoint.sh"]
  * implying anything about the Docker executor.
  */
 export function hasSSHContainerSupport(): boolean {
-  return spawnSync("docker", ["info"], { stdio: "ignore" }).status === 0;
+  // 10s ceiling so a hung / unreachable Docker daemon doesn't stall the
+  // Playwright worker indefinitely — we just want a yes/no probe.
+  return spawnSync("docker", ["info"], { stdio: "ignore", timeout: 10_000 }).status === 0;
 }
 
 /**
@@ -150,6 +152,10 @@ export function buildE2ESSHImage(): void {
     fs.copyFileSync(mockAgentPath, path.join(ctxDir, "mock-agent-linux-amd64"));
     execFileSync("docker", ["build", "-t", SSH_E2E_IMAGE_TAG, ctxDir], {
       stdio: process.env.E2E_DEBUG ? "inherit" : "ignore",
+      // 15-minute ceiling — even cold-cache builds (apk add openssh-server
+      // + a few hundred KB of mock-agent + sshd config) finish well under
+      // a minute. A stuck registry pull or BuildKit hang should fail fast.
+      timeout: 15 * 60 * 1000,
     });
   } finally {
     fs.rmSync(ctxDir, { recursive: true, force: true });
