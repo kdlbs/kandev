@@ -23,7 +23,6 @@ function makeProps(
     isCreateMode: true,
     isEditMode: false,
     isTaskStarted: false,
-    isPassthroughProfile: false,
     isCreatingSession: false,
     isCreatingTask: false,
     hasTitle: true,
@@ -155,13 +154,15 @@ describe("computeDisabledReason (default)", () => {
     ).toBe(REASON_DESCRIPTION);
   });
 
-  it("does not flag missing description for passthrough profiles", () => {
+  it("requires description in session mode even for CLI/passthrough profiles", () => {
+    // CLI-mode parity: the backend now auto-injects the prompt into the CLI's
+    // stdin, so the prompt is required just like in ACP mode.
     expect(
       computeDisabledReason(
-        makeProps({ isSessionMode: true, hasDescription: false, isPassthroughProfile: true }),
+        makeProps({ isSessionMode: true, hasDescription: false }),
         KIND_DEFAULT,
       ),
-    ).toBeNull();
+    ).toBe(REASON_DESCRIPTION);
   });
 
   it("ignores base reasons in session mode to match DefaultSubmitButton disabled logic", () => {

@@ -44,6 +44,8 @@ func NewClaudeACP() *ClaudeACP {
 				BufferMaxBytes:    DefaultBufferMaxBytes,
 				ResumeFlag:        NewParam("-c"),
 				SessionResumeFlag: NewParam("--resume"),
+				AutoInjectPrompt:  true,
+				SubmitSequence:    "\r",
 			},
 		},
 	}

@@ -119,9 +119,11 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 	if ptAgent, ok := ag.(agents.PassthroughAgent); ok {
 		pt := ptAgent.PassthroughConfig()
 		passthroughConfig = &dto.PassthroughConfigDTO{
-			Supported:   pt.Supported,
-			Label:       pt.Label,
-			Description: pt.Description,
+			Supported:        pt.Supported,
+			Label:            pt.Label,
+			Description:      pt.Description,
+			AutoInjectPrompt: pt.AutoInjectPrompt,
+			SubmitSequence:   pt.SubmitSequence,
 		}
 	}
 

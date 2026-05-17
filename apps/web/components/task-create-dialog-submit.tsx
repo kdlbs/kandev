@@ -159,7 +159,7 @@ export function useTaskSubmitHandlers({
     const trimmedDescription = description.trim();
     const attachments = descriptionInputRef.current?.getAttachments() ?? [];
     if (!agentProfileId) return;
-    if (!trimmedDescription && !isPassthroughProfile) return;
+    if (!trimmedDescription) return;
 
     if (onCreateSession) {
       onCreateSession({ prompt: trimmedDescription, agentProfileId, executorId });
@@ -194,7 +194,6 @@ export function useTaskSubmitHandlers({
     agentProfileId,
     executorId,
     executorProfileId,
-    isPassthroughProfile,
     onCreateSession,
     onOpenChange,
     router,
@@ -464,7 +463,7 @@ export function useTaskSubmitHandlers({
     if (consent === null) return;
     setIsCreatingTask(true);
     try {
-      if (trimmedDescription || isPassthroughProfile) {
+      if (trimmedDescription) {
         const finalDescription = transformDescriptionBeforeSubmit
           ? await transformDescriptionBeforeSubmit(trimmedDescription)
           : trimmedDescription;
@@ -489,7 +488,6 @@ export function useTaskSubmitHandlers({
     }
   }, [
     taskName,
-    isPassthroughProfile,
     validateForCreate,
     ensureFreshBranchConsent,
     performCreate,

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -149,6 +150,11 @@ type AgentManagerClient interface {
 
 	// WritePassthroughStdin writes data to the agent's PTY stdin for passthrough sessions.
 	WritePassthroughStdin(ctx context.Context, sessionID string, data string) error
+
+	// ResolvePassthroughConfig returns the resolved PassthroughConfig for a session's agent.
+	// Used by the orchestrator to route chat-compose prompts and Stop button presses into
+	// the agent's PTY stdin (with the correct submit sequence) instead of through ACP.
+	ResolvePassthroughConfig(ctx context.Context, sessionID string) (agents.PassthroughConfig, error)
 
 	// MarkPassthroughRunning marks a passthrough execution as running.
 	MarkPassthroughRunning(sessionID string) error

@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -353,6 +354,11 @@ func (a *lifecycleAdapter) IsPassthroughSession(ctx context.Context, sessionID s
 
 func (a *lifecycleAdapter) WritePassthroughStdin(ctx context.Context, sessionID string, data string) error {
 	return a.mgr.WritePassthroughStdin(ctx, sessionID, data)
+}
+
+// ResolvePassthroughConfig returns the resolved PassthroughConfig for a session's agent.
+func (a *lifecycleAdapter) ResolvePassthroughConfig(ctx context.Context, sessionID string) (agents.PassthroughConfig, error) {
+	return a.mgr.ResolvePassthroughConfig(ctx, sessionID)
 }
 
 func (a *lifecycleAdapter) MarkPassthroughRunning(sessionID string) error {

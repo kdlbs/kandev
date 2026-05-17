@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -103,6 +104,9 @@ func (m *mockAgentManager) IsPassthroughSession(ctx context.Context, sessionID s
 }
 func (m *mockAgentManager) WritePassthroughStdin(_ context.Context, _ string, _ string) error {
 	return nil
+}
+func (m *mockAgentManager) ResolvePassthroughConfig(_ context.Context, _ string) (agents.PassthroughConfig, error) {
+	return agents.PassthroughConfig{}, nil
 }
 func (m *mockAgentManager) MarkPassthroughRunning(_ string) error {
 	return nil

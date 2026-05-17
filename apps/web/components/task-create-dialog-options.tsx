@@ -141,7 +141,7 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
               {isPassthrough && (
                 <IconTerminal2
                   className="size-3.5 text-muted-foreground"
-                  title="Passthrough terminal"
+                  title="CLI mode - your prompt will be auto-injected into the terminal"
                 />
               )}
               {profileLabel ? (

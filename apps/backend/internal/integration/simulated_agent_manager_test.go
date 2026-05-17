@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -490,6 +491,9 @@ func (s *SimulatedAgentManagerClient) IsPassthroughSession(ctx context.Context, 
 }
 func (s *SimulatedAgentManagerClient) WritePassthroughStdin(_ context.Context, _ string, _ string) error {
 	return nil
+}
+func (s *SimulatedAgentManagerClient) ResolvePassthroughConfig(_ context.Context, _ string) (agents.PassthroughConfig, error) {
+	return agents.PassthroughConfig{}, nil
 }
 func (s *SimulatedAgentManagerClient) MarkPassthroughRunning(_ string) error {
 	return nil

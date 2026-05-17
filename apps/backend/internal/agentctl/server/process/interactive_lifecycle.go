@@ -62,6 +62,13 @@ type interactiveProcess struct {
 	// race with stdin echo (which would otherwise duplicate the command in output).
 	firstOutputOnce sync.Once
 	firstOutputCh   chan struct{}
+
+	// firstIdleCh is closed the first time the idle detector fires for this
+	// process — i.e. the CLI has finished its startup output and is ready for
+	// input. Used by the lifecycle manager to auto-inject the task description
+	// at the right moment when AutoInjectPrompt is enabled.
+	firstIdleOnce sync.Once
+	firstIdleCh   chan struct{}
 }
 
 // Start creates an interactive process entry and defers PTY creation until first resize.
@@ -124,6 +131,7 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 		stopSignal:    make(chan struct{}),
 		waitDone:      make(chan struct{}),
 		firstOutputCh: make(chan struct{}),
+		firstIdleCh:   make(chan struct{}),
 		// Store start parameters for deferred initialization
 		started:  false,
 		startCmd: req.Command,
@@ -349,6 +357,11 @@ func (r *InteractiveRunner) Stop(ctx context.Context, processID string) error {
 		return fmt.Errorf("process not found: %s", processID)
 	}
 
+	// Unblock anyone waiting on first-idle — the process is going away.
+	proc.firstIdleOnce.Do(func() {
+		close(proc.firstIdleCh)
+	})
+
 	// Signal output reader to exit
 	proc.stopOnce.Do(func() {
 		close(proc.stopSignal)
@@ -486,6 +499,11 @@ func (r *InteractiveRunner) get(id string) (*interactiveProcess, bool) {
 // 3. Adding a timeout here would leave the process unreachable and create leaks
 func (r *InteractiveRunner) wait(proc *interactiveProcess) {
 	defer close(proc.waitDone)
+	// Unblock first-idle waiters on exit so an early crash doesn't strand
+	// callers (e.g. autoInjectInitialPrompt) until their context times out.
+	// Callers can't distinguish "idle and ready" from "process exited" — the
+	// subsequent WriteStdin returns "process not found" which is logged.
+	defer proc.firstIdleOnce.Do(func() { close(proc.firstIdleCh) })
 
 	proc.mu.Lock()
 	ptyHandle := proc.ptmx

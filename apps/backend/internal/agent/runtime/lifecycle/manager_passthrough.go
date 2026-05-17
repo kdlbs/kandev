@@ -200,6 +200,19 @@ func (m *Manager) resolvePassthroughAgent(ctx context.Context, execution *AgentE
 	}, nil
 }
 
+// promptForPassthroughCommand returns the prompt that should be passed to
+// BuildPassthroughCommand. When the agent uses idle-based auto-inject and has
+// no PromptFlag, the prompt would otherwise be appended as a positional arg
+// (putting TUIs like Claude into non-interactive `-p` mode and exiting before
+// auto-inject fires). In that case we return "" so the prompt is delivered via
+// PTY stdin in autoInjectInitialPrompt.
+func promptForPassthroughCommand(pt agents.PassthroughConfig, taskDescription string) string {
+	if pt.AutoInjectPrompt && pt.PromptFlag.IsEmpty() {
+		return ""
+	}
+	return taskDescription
+}
+
 // passthroughAgentCommand validates passthrough support and builds the command for a passthrough session.
 // Returns the PassthroughAgent, PassthroughConfig, RuntimeConfig pointer, command, and any error.
 func (m *Manager) passthroughAgentCommand(execution *AgentExecution, profileInfo *AgentProfileInfo) (agents.PassthroughAgent, agents.PassthroughConfig, *agents.RuntimeConfig, agents.Command, error) {
@@ -216,11 +229,12 @@ func (m *Manager) passthroughAgentCommand(execution *AgentExecution, profileInfo
 	pt := ptAgent.PassthroughConfig()
 	rt := agentConfig.Runtime()
 	taskDescription := getTaskDescriptionFromMetadata(execution)
+	promptForCmd := promptForPassthroughCommand(pt, taskDescription)
 
 	cmd := ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
 		Model:            profileModel(profileInfo),
 		SessionID:        execution.ACPSessionID,
-		Prompt:           taskDescription,
+		Prompt:           promptForCmd,
 		PermissionValues: profilePermissionValues(profileInfo),
 		CLIFlagTokens:    m.profileCLIFlagTokens(profileInfo),
 	})
@@ -328,6 +342,8 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	if m.streamManager != nil && execution.agentctl != nil {
 		go m.streamManager.connectWorkspaceStream(execution, nil)
 	}
+
+	go m.autoInjectInitialPrompt(execution, pt)
 
 	return nil
 }
@@ -785,6 +801,9 @@ func (m *Manager) attemptResumeFallback(execution *AgentExecution, runner *proce
 	if m.streamManager != nil && execution.agentctl != nil && execution.GetWorkspaceStream() == nil {
 		go m.streamManager.connectWorkspaceStream(execution, nil)
 	}
+
+	// Fallback path is a fresh session (no --resume) — re-inject the prompt.
+	go m.autoInjectInitialPrompt(execution, pt)
 }
 
 // attemptPassthroughRestart announces the restart on the terminal, waits the
@@ -909,6 +928,91 @@ func isFastFailExit(startedAt, exitedAt time.Time, exitCode int, window time.Dur
 		return false
 	}
 	return exitedAt.Sub(startedAt) < window
+}
+
+// passthroughRunner is the minimal seam autoInjectInitialPrompt needs from
+// *process.InteractiveRunner. Defined as an interface so tests can supply a
+// fake runner without spinning up a real PTY subprocess.
+type passthroughRunner interface {
+	WaitForFirstIdle(ctx context.Context, processID string) error
+	WriteStdin(processID string, data string) error
+}
+
+// autoInjectInitialPrompt writes the task description to the PTY stdin once
+// the agent is idle (ready for input). Opt-in per agent via PassthroughConfig.
+// Called from startPassthroughSession and attemptResumeFallback only — never
+// from ResumePassthroughSession (would duplicate the prompt in agent history).
+func (m *Manager) autoInjectInitialPrompt(execution *AgentExecution, pt agents.PassthroughConfig) {
+	runner := m.GetInteractiveRunner()
+	if runner == nil {
+		return
+	}
+	m.autoInjectInitialPromptWith(runner, execution, pt)
+}
+
+// autoInjectInitialPromptWith is the testable inner of autoInjectInitialPrompt,
+// taking a runner seam so unit tests can avoid spawning a real PTY.
+func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, execution *AgentExecution, pt agents.PassthroughConfig) {
+	if !pt.AutoInjectPrompt {
+		return
+	}
+	if !pt.PromptFlag.IsEmpty() {
+		// The agent already received the prompt as a CLI flag.
+		return
+	}
+	description := getTaskDescriptionFromMetadata(execution)
+	if description == "" {
+		return
+	}
+	processID := execution.PassthroughProcessID
+	if processID == "" {
+		m.logger.Warn("autoInjectInitialPrompt called without passthrough process",
+			zap.String("execution_id", execution.ID))
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := runner.WaitForFirstIdle(ctx, processID); err != nil {
+		m.logger.Warn("autoInjectInitialPrompt timed out waiting for idle",
+			zap.String("execution_id", execution.ID),
+			zap.String("process_id", processID),
+			zap.Error(err))
+		return
+	}
+	// WaitForFirstIdle also unblocks when the process exits — skip the write
+	// during shutdown so we don't race the lifecycle manager's teardown. If the
+	// process is already gone, WriteStdin returns "process not found" and the
+	// existing error branch logs it.
+	if m.IsShuttingDown() {
+		return
+	}
+	payload := description + pt.SubmitSequence
+	if err := runner.WriteStdin(processID, payload); err != nil {
+		m.logger.Warn("autoInjectInitialPrompt write failed",
+			zap.String("execution_id", execution.ID),
+			zap.String("process_id", processID),
+			zap.Error(err))
+		return
+	}
+	m.logger.Info("autoInjectInitialPrompt wrote task description to PTY",
+		zap.String("execution_id", execution.ID),
+		zap.String("process_id", processID),
+		zap.Int("description_len", len(description)))
+}
+
+// ResolvePassthroughConfig returns the PassthroughConfig for a session's agent.
+// Used by callers outside this package (e.g. orchestrator) that need the submit
+// sequence to write to PTY stdin.
+func (m *Manager) ResolvePassthroughConfig(ctx context.Context, sessionID string) (agents.PassthroughConfig, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return agents.PassthroughConfig{}, fmt.Errorf("no execution for session %q", sessionID)
+	}
+	resolved, err := m.resolvePassthroughAgent(ctx, execution)
+	if err != nil {
+		return agents.PassthroughConfig{}, err
+	}
+	return resolved.pt, nil
 }
 
 // GetInteractiveRunner returns the interactive runner for passthrough mode.

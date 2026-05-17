@@ -13,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -144,6 +145,12 @@ type mockAgentManager struct {
 	passthroughStdinErr   error
 	markPassthroughCalls  []string // session IDs
 	markPassthroughErr    error
+
+	// Passthrough config resolution. When zero-valued and isPassthrough is true,
+	// the mock returns a default config with SubmitSequence == "\r".
+	passthroughConfig    agents.PassthroughConfig
+	passthroughConfigSet bool
+	passthroughConfigErr error
 
 	// Optional override for GetExecutionIDForSession. When unset, the default
 	// implementation reads from repoForExecutionLookup if provided so tests that
@@ -287,6 +294,20 @@ func (m *mockAgentManager) WritePassthroughStdin(_ context.Context, sessionID st
 	defer m.mu.Unlock()
 	m.passthroughStdinCalls = append(m.passthroughStdinCalls, passthroughStdinCall{SessionID: sessionID, Data: data})
 	return m.passthroughStdinErr
+}
+func (m *mockAgentManager) ResolvePassthroughConfig(_ context.Context, _ string) (agents.PassthroughConfig, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.passthroughConfigErr != nil {
+		return agents.PassthroughConfig{}, m.passthroughConfigErr
+	}
+	if m.passthroughConfigSet {
+		return m.passthroughConfig, nil
+	}
+	if !m.isPassthrough {
+		return agents.PassthroughConfig{Supported: false}, nil
+	}
+	return agents.PassthroughConfig{Supported: true, SubmitSequence: "\r"}, nil
 }
 func (m *mockAgentManager) MarkPassthroughRunning(sessionID string) error {
 	m.mu.Lock()
