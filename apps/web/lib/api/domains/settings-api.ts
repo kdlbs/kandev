@@ -65,6 +65,44 @@ export async function listExecutors(options?: ApiRequestOptions): Promise<ListEx
   return fetchJson<ListExecutorsResponse>("/api/v1/executors", options);
 }
 
+export async function fetchExecutor(
+  executorId: string,
+  options?: ApiRequestOptions,
+): Promise<{ id: string; name: string; type: string; config?: Record<string, string> }> {
+  return fetchJson<{ id: string; name: string; type: string; config?: Record<string, string> }>(
+    `/api/v1/executors/${executorId}`,
+    options,
+  );
+}
+
+export async function createExecutor(
+  payload: {
+    name: string;
+    type: string;
+    config?: Record<string, string>;
+  },
+  options?: ApiRequestOptions,
+): Promise<{ id: string; name: string; type: string; config?: Record<string, string> }> {
+  return fetchJson<{ id: string; name: string; type: string; config?: Record<string, string> }>(
+    "/api/v1/executors",
+    {
+      ...options,
+      init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    },
+  );
+}
+
+export async function updateExecutor(
+  executorId: string,
+  payload: { name?: string; config?: Record<string, string> },
+  options?: ApiRequestOptions,
+): Promise<void> {
+  await fetchJson<void>(`/api/v1/executors/${executorId}`, {
+    ...options,
+    init: { method: "PATCH", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
 // Executor profiles
 export async function listExecutorProfiles(
   executorId: string,

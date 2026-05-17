@@ -17,6 +17,7 @@ export type ExecutorType =
   | "local_pc"
   | "local_docker"
   | "sprites"
+  | "ssh"
   | "remote_docker"
   | "remote_vps"
   | "k8s"
