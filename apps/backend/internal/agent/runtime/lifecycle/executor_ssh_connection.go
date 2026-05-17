@@ -252,18 +252,24 @@ func buildAuthMethods(target *SSHTarget) ([]ssh.AuthMethod, error) {
 		if target.IdentityFile == "" {
 			return nil, errors.New("ssh: identity file path is required")
 		}
-		data, err := os.ReadFile(target.IdentityFile)
+		// IdentityFile is configured by the kandev user themselves — it's the
+		// same path semantics as `ssh -i` (any absolute or ~-relative path on
+		// the host). Clean it (no `..` traversal sneaking through string
+		// substitution), then read. The contents are passed straight to
+		// ssh.ParsePrivateKey and never reflected back to a caller.
+		path := filepath.Clean(target.IdentityFile)
+		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read identity file %s: %w", target.IdentityFile, err)
+			return nil, fmt.Errorf("failed to read identity file %s: %w", path, err)
 		}
 		signer, err := ssh.ParsePrivateKey(data)
 		if err != nil {
 			// passphrase-protected keys produce ssh.PassphraseMissingError — fail loudly.
 			var pmErr *ssh.PassphraseMissingError
 			if errors.As(err, &pmErr) {
-				return nil, fmt.Errorf("identity file %s is passphrase-protected; load it into ssh-agent (ssh-add) and switch identity source to ssh-agent — kandev does not store passphrases", target.IdentityFile)
+				return nil, fmt.Errorf("identity file %s is passphrase-protected; load it into ssh-agent (ssh-add) and switch identity source to ssh-agent — kandev does not store passphrases", path)
 			}
-			return nil, fmt.Errorf("failed to parse identity file %s: %w", target.IdentityFile, err)
+			return nil, fmt.Errorf("failed to parse identity file %s: %w", path, err)
 		}
 		return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
 	default:
