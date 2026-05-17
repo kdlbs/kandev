@@ -42,39 +42,10 @@ import {
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import type { Executor, ProfileEnvVar } from "@/lib/types/http";
 
+import { EXECUTOR_TYPE_MAP } from "./executor-types";
+
 const EXECUTORS_ROUTE = "/settings/executors";
 const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
-
-const EXECUTOR_TYPE_MAP: Record<
-  string,
-  { executorId: string; label: string; description: string }
-> = {
-  local: {
-    executorId: "exec-local",
-    label: "Local",
-    description: "Runs agents directly in the repository folder.",
-  },
-  worktree: {
-    executorId: "exec-worktree",
-    label: "Worktree",
-    description: "Creates git worktrees for isolated agent sessions.",
-  },
-  local_docker: {
-    executorId: "exec-local-docker",
-    label: "Docker",
-    description: "Runs Docker containers on this machine.",
-  },
-  remote_docker: {
-    executorId: "exec-remote-docker",
-    label: "Remote Docker",
-    description: "Connects to a remote Docker host.",
-  },
-  sprites: {
-    executorId: "exec-sprites",
-    label: "Sprites.dev",
-    description: "Runs agents in Sprites.dev cloud sandboxes.",
-  },
-};
 
 const DefaultIcon = EXECUTOR_ICON_MAP.local;
 
