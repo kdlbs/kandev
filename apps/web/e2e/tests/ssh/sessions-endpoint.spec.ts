@@ -48,10 +48,33 @@ test.describe("ssh sessions-endpoint contract", () => {
   // G2 — non-ssh ExecutorRunning rows are filtered out even if they reference
   // the same executor id (extra defensive guard the handler enforces).
   test("non-ssh runtime rows are filtered out", async ({ apiClient, seedData }) => {
-    // We don't have a non-ssh row trivially available, so assert the
-    // negative-space invariant by confirming every returned row's runtime
-    // type matches via the host carrying through from our SSH target.
-    const sessions = await apiClient.listSSHSessions(seedData.sshExecutorId);
+    // Seed at least one live SSH row so the per-row checks aren't vacuous —
+    // a handler regression that returned [] would otherwise still pass.
+    await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "G2 filter contract",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.sshExecutorProfileId,
+      },
+    );
+    let sessions: Awaited<ReturnType<typeof apiClient.listSSHSessions>> = [];
+    await expect
+      .poll(
+        async () => {
+          sessions = await apiClient.listSSHSessions(seedData.sshExecutorId);
+          return sessions.length;
+        },
+        { message: "wait for at least one ssh session row", timeout: 60_000 },
+      )
+      .toBeGreaterThan(0);
+    // Every returned row's runtime must trace back to the seeded SSH target;
+    // a row with a different host would mean either the runtime filter or
+    // the executor-id filter leaked a non-SSH / cross-executor row.
     for (const s of sessions) {
       expect(s.host).toBe(seedData.sshTarget.host);
     }

@@ -157,30 +157,23 @@ test.describe("ssh test-endpoint contract", () => {
     apiClient,
     seedData,
   }) => {
-    const http = await apiClient.testSSHConnection({
+    const payload = {
       name: "F6",
       host: seedData.sshTarget.host,
       port: seedData.sshTarget.port,
       user: seedData.sshTarget.user,
-      identity_source: "file",
+      identity_source: "file" as const,
       identity_file: seedData.sshTarget.identityFile,
-    });
+    };
+    const http = await apiClient.testSSHConnection(payload);
     expect(http.success).toBe(true);
     expect(http.steps.length).toBeGreaterThanOrEqual(5);
 
-    // The WS surface is invoked indirectly via the gateway; calling the HTTP
-    // route a second time documents the contract. (The dispatcher entry
-    // reuses the same handler function; expand here when a dedicated WS
-    // helper lands in api-client.)
-    const http2 = await apiClient.testSSHConnection({
-      name: "F6",
-      host: seedData.sshTarget.host,
-      port: seedData.sshTarget.port,
-      user: seedData.sshTarget.user,
-      identity_source: "file",
-      identity_file: seedData.sshTarget.identityFile,
-    });
-    expect(http2.success).toBe(true);
-    expect(http2.steps.map((s) => s.name)).toEqual(http.steps.map((s) => s.name));
+    // Hit the WS dispatcher entry directly so a regression in the gateway
+    // (e.g. the action handler diverging from the HTTP route) is caught
+    // here, not just at the HTTP layer.
+    const ws = await apiClient.wsRequest<typeof http>("ssh.test", payload);
+    expect(ws.success).toBe(true);
+    expect(ws.steps.map((s) => s.name)).toEqual(http.steps.map((s) => s.name));
   });
 });
