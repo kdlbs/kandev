@@ -5,12 +5,21 @@ import { waitForServiceHealth } from "./health_check";
 describe("waitForServiceHealth", () => {
   const originalFetch = global.fetch;
 
+  const originalTimeout = process.env.KANDEV_HEALTH_TIMEOUT_MS;
+
   beforeEach(() => {
+    // The error message in waitForServiceHealth suggests setting this env var
+    // for slow first-launch scenarios. If a developer has it exported in their
+    // shell, the timeout test would block waiting for the overridden deadline
+    // instead of the 30s default we're asserting against.
+    delete process.env.KANDEV_HEALTH_TIMEOUT_MS;
     vi.useFakeTimers();
     vi.spyOn(process.stderr, "write").mockImplementation(() => true);
   });
 
   afterEach(() => {
+    if (originalTimeout === undefined) delete process.env.KANDEV_HEALTH_TIMEOUT_MS;
+    else process.env.KANDEV_HEALTH_TIMEOUT_MS = originalTimeout;
     vi.useRealTimers();
     global.fetch = originalFetch;
     vi.restoreAllMocks();

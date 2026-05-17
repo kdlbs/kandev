@@ -117,12 +117,17 @@ function uninstall(ctx: Ctx): void {
   }
 }
 
+// `bootstrap` loads the job (start) and `bootout` fully unloads it (stop).
+// We use these instead of `kickstart` + `kill` because the plist sets
+// `KeepAlive=true` — under KeepAlive, `kill SIGTERM` does not stop the
+// service: launchd just respawns it seconds later. Only `bootout` removes
+// the job from launchd's supervision.
 function startService(ctx: Ctx): void {
-  runLaunchctl(["kickstart", `${ctx.domain}/${LAUNCHD_LABEL}`]);
+  runLaunchctl(["bootstrap", ctx.domain, ctx.plistPath]);
 }
 
 function stopService(ctx: Ctx): void {
-  runLaunchctl(["kill", "SIGTERM", `${ctx.domain}/${LAUNCHD_LABEL}`], { allowFailure: true });
+  runLaunchctl(["bootout", `${ctx.domain}/${LAUNCHD_LABEL}`], { allowFailure: true });
 }
 
 // `kickstart -k` atomically kills and restarts the service. Doing
