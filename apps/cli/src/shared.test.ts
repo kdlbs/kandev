@@ -318,25 +318,37 @@ describe("logStartupInfo", () => {
     });
   }
 
-  it("prints network URLs on the backend port by default (start/run mode)", () => {
+  it("prints the backend URL and network URLs by default (start/run mode)", () => {
     mockTwoInterfaces();
     logStartupInfo({ header: "test", ports });
     const lines = log.mock.calls.map((c) => c.join(" "));
+    expect(lines).toContain("[kandev] url: http://localhost:38429");
     expect(lines).toContain("[kandev]   network: http://192.168.1.34:38429");
     expect(lines).toContain("[kandev]   network: http://100.94.173.104:38429");
-    // Web port network URLs are NOT printed — in start/run the backend
-    // reverse-proxies the web app, so the web port is internal-only and would
-    // only mislead a remote user.
-    expect(lines.some((l) => l.includes("network:") && l.includes(":37429"))).toBe(false);
+    // Internal-only ports must not appear — the user opens exactly one URL.
+    expect(lines.some((l) => l.includes(":37429"))).toBe(false);
+    expect(lines.some((l) => l.includes("agentctl"))).toBe(false);
   });
 
-  it('prints network URLs on the web port when primary="web" (dev mode)', () => {
+  it('prints the web URL and network URLs when primary="web" (dev mode)', () => {
     mockTwoInterfaces();
     logStartupInfo({ header: "test", ports, primary: "web" });
     const lines = log.mock.calls.map((c) => c.join(" "));
+    expect(lines).toContain("[kandev] url: http://localhost:37429");
     expect(lines).toContain("[kandev]   network: http://192.168.1.34:37429");
     expect(lines).toContain("[kandev]   network: http://100.94.173.104:37429");
+    // The backend port is internal in dev mode (only the browser's API calls
+    // hit it, via NEXT_PUBLIC_KANDEV_API_PORT), so it doesn't show up as a URL
+    // for the user. The mcp endpoint still appears because MCP clients use it.
+    expect(lines.some((l) => l === "[kandev] url: http://localhost:38429")).toBe(false);
     expect(lines.some((l) => l.includes("network:") && l.includes(":38429"))).toBe(false);
+  });
+
+  it("still emits the mcp endpoint pointing at the backend port", () => {
+    vi.spyOn(os, "networkInterfaces").mockReturnValue({});
+    logStartupInfo({ header: "test", ports, primary: "web" });
+    const lines = log.mock.calls.map((c) => c.join(" "));
+    expect(lines).toContain("[kandev] mcp: http://localhost:38429/mcp");
   });
 
   it("emits no network lines when only loopback interfaces exist", () => {

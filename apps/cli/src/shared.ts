@@ -186,28 +186,27 @@ export type StartupInfoOptions = {
 /**
  * Logs a unified startup info block to the console.
  *
- * Under each localhost line for the backend and web ports, also lists the
- * URLs reachable on the host's non-loopback interfaces (LAN, Tailscale, etc.)
- * so a user SSH'd or remoting into the dev box knows what to paste into a
- * browser running on a different machine.
+ * Shows only the URL the user actually opens — start/run modes have the Go
+ * backend reverse-proxy Next.js on a single port, dev mode hits Next.js
+ * directly. The other port and the agentctl port are internal plumbing and
+ * would only mislead. Below the URL, lists the same port on each non-loopback
+ * interface (LAN, Tailscale) so a user opening the app remotely sees the
+ * right address.
  */
 export function logStartupInfo(options: StartupInfoOptions): void {
   const { header, ports, primary = "backend", dbPath, logLevel } = options;
-  const backendUrl = ports.backendUrl;
-  const webUrl = `http://localhost:${ports.webPort}`;
-  const networkHosts = listHostNetworkAddresses();
   const primaryPort = primary === "web" ? ports.webPort : ports.backendPort;
+  const primaryUrl = `http://localhost:${primaryPort}`;
+  const networkHosts = listHostNetworkAddresses();
 
   console.log(`[kandev] ${header}`);
-  console.log("[kandev] backend:", backendUrl);
-  console.log("[kandev] web:", webUrl);
+  console.log("[kandev] url:", primaryUrl);
   for (const url of networkUrlsForPort(primaryPort, networkHosts)) {
     console.log("[kandev]   network:", url);
   }
-  console.log("[kandev] agentctl port:", ports.agentctlPort);
-  console.log("[kandev] mcp url:", `${backendUrl}/mcp`);
+  console.log("[kandev] mcp:", `${ports.backendUrl}/mcp`);
   if (dbPath) {
-    console.log("[kandev] db path:", dbPath);
+    console.log("[kandev] db:", dbPath);
   }
   if (logLevel) {
     console.log("[kandev] log level:", logLevel);
