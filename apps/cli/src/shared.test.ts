@@ -150,6 +150,28 @@ describe("buildWebEnv allowedDevOrigins", () => {
     expect(origins.filter((s) => s === "192.168.1.34")).toHaveLength(1);
   });
 
+  it("omits NEXT_ALLOWED_DEV_ORIGINS entirely when there's nothing to allow", () => {
+    delete process.env.NEXT_ALLOWED_DEV_ORIGINS;
+    vi.restoreAllMocks();
+    vi.spyOn(os, "networkInterfaces").mockReturnValue({
+      lo: [
+        {
+          address: "127.0.0.1",
+          netmask: "255.0.0.0",
+          family: "IPv4",
+          mac: "00:00:00:00:00:00",
+          internal: true,
+          cidr: "127.0.0.1/8",
+        },
+      ],
+    });
+    const env = buildWebEnv({ ports });
+    // Better than setting NEXT_ALLOWED_DEV_ORIGINS="" — keeps the env clean for
+    // the loopback-only case so a downstream consumer that distinguishes
+    // "unset" from "empty" doesn't get confused.
+    expect(env.NEXT_ALLOWED_DEV_ORIGINS).toBeUndefined();
+  });
+
   it("does not set NEXT_ALLOWED_DEV_ORIGINS in production", () => {
     delete process.env.NEXT_ALLOWED_DEV_ORIGINS;
     const env = buildWebEnv({ ports, production: true });
@@ -238,7 +260,10 @@ describe("listHostNetworkAddresses", () => {
     expect(listHostNetworkAddresses()).toEqual(["192.168.1.34"]);
   });
 
-  it("excludes IPv6 link-local (fe80::) addresses", () => {
+  it("excludes the full IPv6 link-local range (fe80::/10, covers fe80–febf)", () => {
+    // In practice OS stacks only assign fe80::/64, but per RFC 4291 the link-
+    // local range is fe80::/10 — anything from fe80:: through febf:ffff:... is
+    // link-local and never reachable from a remote machine.
     vi.spyOn(os, "networkInterfaces").mockReturnValue({
       eth0: [
         {
@@ -251,6 +276,33 @@ describe("listHostNetworkAddresses", () => {
           scopeid: 2,
         },
         {
+          address: "fea0::1",
+          netmask: "ffff:ffff:ffff:ffff::",
+          family: "IPv6",
+          mac: "aa:bb:cc:dd:ee:ff",
+          internal: false,
+          cidr: "fea0::1/64",
+          scopeid: 2,
+        },
+        {
+          address: "FEBF::1",
+          netmask: "ffff:ffff:ffff:ffff::",
+          family: "IPv6",
+          mac: "aa:bb:cc:dd:ee:ff",
+          internal: false,
+          cidr: "FEBF::1/64",
+          scopeid: 2,
+        },
+        {
+          address: "fec0::1",
+          netmask: "ffff:ffff:ffff:ffff::",
+          family: "IPv6",
+          mac: "aa:bb:cc:dd:ee:ff",
+          internal: false,
+          cidr: "fec0::1/64",
+          scopeid: 0,
+        },
+        {
           address: "2001:db8::1",
           netmask: "ffff:ffff:ffff:ffff::",
           family: "IPv6",
@@ -261,7 +313,10 @@ describe("listHostNetworkAddresses", () => {
         },
       ],
     });
-    expect(listHostNetworkAddresses()).toEqual(["2001:db8::1"]);
+    // fe80::abcd, fea0::1, FEBF::1 are link-local (excluded).
+    // fec0::1 was deprecated site-local (kept — outside fe80::/10).
+    // 2001:db8::1 is global (kept).
+    expect(listHostNetworkAddresses()).toEqual(["fec0::1", "2001:db8::1"]);
   });
 });
 

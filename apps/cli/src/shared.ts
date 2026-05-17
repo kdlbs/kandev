@@ -111,10 +111,13 @@ export function buildWebEnv(options: WebEnvOptions): NodeJS.ProcessEnv {
     // server from another device on the same network (Tailscale, LAN IP, WSL
     // mirrored mode, etc.) passes Next.js's allowedDevOrigins check and HMR
     // works. The user can still extend the list via NEXT_ALLOWED_DEV_ORIGINS.
-    env.NEXT_ALLOWED_DEV_ORIGINS = mergeAllowedDevOrigins(
+    // Skip the assignment when there's nothing to add — keeps the env clean
+    // for the loopback-only case.
+    const merged = mergeAllowedDevOrigins(
       process.env.NEXT_ALLOWED_DEV_ORIGINS,
       listHostNetworkAddresses(),
     );
+    if (merged) env.NEXT_ALLOWED_DEV_ORIGINS = merged;
   }
 
   if (debug) {
@@ -141,8 +144,10 @@ export function listHostNetworkAddresses(): string[] {
       // Skip link-local IPv6 (fe80::/10) and link-local IPv4 (169.254.0.0/16,
       // RFC 3927) — neither is reachable from a remote machine, and the
       // 169.254 range in particular is what Hyper-V assigns to its phantom
-      // WSL adapter, which clutters the startup output.
-      if (addr.family === "IPv6" && addr.address.toLowerCase().startsWith("fe80")) continue;
+      // WSL adapter, which clutters the startup output. The regex covers the
+      // full /10 (fe80::–febf::); OS stacks only assign fe80::/64 in practice
+      // but a stricter check is the same effort and removes the surprise.
+      if (addr.family === "IPv6" && /^fe[89ab]/i.test(addr.address)) continue;
       if (addr.family === "IPv4" && addr.address.startsWith("169.254.")) continue;
       if (seen.has(addr.address)) continue;
       seen.add(addr.address);
