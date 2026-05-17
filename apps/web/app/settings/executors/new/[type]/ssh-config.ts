@@ -29,12 +29,16 @@ export function parseSSHExecutorConfig(
 ): Partial<SSHExecutorConfig> {
   const c = config ?? {};
   const portRaw = c.ssh_port;
+  // A missing ssh_port intentionally stays `undefined` so the backend's
+  // resolver can apply ~/.ssh/config Port inheritance for the configured
+  // alias. Substituting 22 here would silently redirect connections that
+  // relied on the alias' Port.
   const port = portRaw ? Number.parseInt(portRaw, 10) : undefined;
   return {
     name,
     host_alias: c.ssh_host_alias ?? "",
     host: c.ssh_host ?? "",
-    port: Number.isFinite(port) ? (port as number) : 22,
+    port: port != null && Number.isFinite(port) ? port : undefined,
     user: c.ssh_user ?? "",
     identity_source: (c.ssh_identity_source as "agent" | "file") || "agent",
     identity_file: c.ssh_identity_file ?? "",

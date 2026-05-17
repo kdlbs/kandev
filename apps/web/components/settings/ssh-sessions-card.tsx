@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -19,24 +19,39 @@ export function SSHSessionsCard({ executorId }: SSHSessionsCardProps) {
   const [sessions, setSessions] = useState<SSHSession[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Monotonic sequence used to ignore stale poll responses: a slow request
+  // that resolves after a newer one (or after executorId changes) would
+  // otherwise overwrite the fresh row set.
+  const seqRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    const seq = ++seqRef.current;
     setLoading(true);
     setError(null);
     try {
       const rows = await listSSHSessions(executorId);
+      if (seq !== seqRef.current) return; // a newer call (or executor switch) won the race
       setSessions(rows);
     } catch (e) {
+      if (seq !== seqRef.current) return;
       setError(e instanceof Error ? e.message : "Failed to load sessions");
     } finally {
-      setLoading(false);
+      if (seq === seqRef.current) setLoading(false);
     }
   }, [executorId]);
 
   useEffect(() => {
+    // Reset sequence so a previous executor's pending response can't land
+    // here and pollute the new executor's data.
+    seqRef.current = 0;
     refresh();
     const id = setInterval(refresh, REFRESH_INTERVAL_MS);
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      // Bump the sequence to invalidate any in-flight response from the
+      // unmounted instance.
+      seqRef.current = -1;
+    };
   }, [refresh]);
 
   return (

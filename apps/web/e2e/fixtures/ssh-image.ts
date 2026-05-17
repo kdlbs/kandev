@@ -50,8 +50,15 @@ fi
 
 # Optional second authorized_keys for a different user (passphrase-protected
 # key tests load a second key into ssh-agent and want it accepted too).
+# Make sure the destination exists when only /authorized_keys.extra is mounted
+# (otherwise "set -e" aborts the entrypoint on the >> redirect).
 if [ -f /authorized_keys.extra ]; then
+  mkdir -p /home/kandev/.ssh
+  touch /home/kandev/.ssh/authorized_keys
   cat /authorized_keys.extra >> /home/kandev/.ssh/authorized_keys
+  chown -R kandev:kandev /home/kandev/.ssh
+  chmod 700 /home/kandev/.ssh
+  chmod 600 /home/kandev/.ssh/authorized_keys
 fi
 
 # Run sshd in the foreground so docker logs and exit-codes propagate.
