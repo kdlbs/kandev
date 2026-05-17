@@ -14,13 +14,13 @@ export class SSHSettingsPage {
 
   /** Navigate to the new-executor flow. */
   async gotoNew(): Promise<void> {
-    await this.page.goto("/settings/executors/new?type=ssh");
+    await this.page.goto("/settings/executors/new/ssh");
     await expect(this.connectionCard).toBeVisible();
   }
 
   /** Navigate to the edit page for an existing SSH executor. */
   async gotoExisting(executorId: string): Promise<void> {
-    await this.page.goto(`/settings/executors/${executorId}`);
+    await this.page.goto(`/settings/executors/ssh/${executorId}`);
     await expect(this.connectionCard).toBeVisible();
   }
 
