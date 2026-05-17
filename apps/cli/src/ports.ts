@@ -3,6 +3,8 @@ import net from "node:net";
 
 import { RANDOM_PORT_MAX, RANDOM_PORT_MIN, RANDOM_PORT_RETRIES } from "./constants";
 
+const CONNECT_PROBE_TIMEOUT_MS = 500;
+
 export function ensureValidPort(port: number | undefined, name: string): number | undefined {
   if (port === undefined) {
     return undefined;
@@ -15,22 +17,33 @@ export function ensureValidPort(port: number | undefined, name: string): number 
 
 /**
  * Tries to connect to a port on the given host. Returns true if something
- * is already listening (i.e. the port is in use).
+ * is already listening (i.e. the port is in use). Returns false on connection
+ * refused, on any other socket error, or when the probe takes longer than
+ * `timeoutMs` — under WSL2 mirrored networking the kernel can silently drop
+ * the SYN to an unbound loopback port, so an unbounded connect would hang
+ * forever and deadlock isPortAvailable.
  *
- * This is more reliable than a bind-based check on macOS where
- * SO_REUSEADDR (set by default in Node.js) can allow a bind to succeed
- * even when another process is already listening on the same port.
+ * Used alongside canBindPort because it detects ports where a listener is
+ * bound with SO_REUSEADDR (Node's default on macOS), which a bind-only check
+ * would miss.
  */
-function isPortInUse(port: number, host: string): Promise<boolean> {
+function isPortInUse(
+  port: number,
+  host: string,
+  timeoutMs = CONNECT_PROBE_TIMEOUT_MS,
+): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = net.createConnection({ port, host });
-    socket.once("connect", () => {
+    let settled = false;
+    const done = (v: boolean) => {
+      if (settled) return;
+      settled = true;
       socket.destroy();
-      resolve(true);
-    });
-    socket.once("error", () => {
-      resolve(false);
-    });
+      resolve(v);
+    };
+    socket.once("connect", () => done(true));
+    socket.once("error", () => done(false));
+    setTimeout(() => done(false), timeoutMs).unref();
   });
 }
 
@@ -134,3 +147,6 @@ export async function pickAndReservePort(
 
   throw new Error(`Unable to reserve a free port after ${retries + 1} attempts`);
 }
+
+// Exported for tests only.
+export const __testing = { isPortInUse, isPortAvailable };
