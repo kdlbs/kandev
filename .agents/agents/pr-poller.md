@@ -116,7 +116,7 @@ The `claude_summary` line carries the **latest** Claude summary's structured fin
    body=$(gh api repos/:owner/:repo/issues/<num>/comments --jq '
      [.[] | select(
        .user.login == "claude[bot]" or
-       (.user.login == "github-actions" and (.body | startswith("**Claude finished ")))
+       (.user.login == "github-actions" and ((.body | startswith("**Claude finished ")) or (.body | startswith("## Code Review"))))
      )] | sort_by(.created_at) | last | .body // ""
    ')
    blockers=$(printf '%s' "$body" | grep -oE '\| Blocker \| [0-9]+ \|' | grep -oE '[0-9]+' | head -1)
