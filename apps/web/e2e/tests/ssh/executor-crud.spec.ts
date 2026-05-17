@@ -109,22 +109,38 @@ test.describe("ssh executor CRUD", () => {
     const originalHost = beforeRow!.host;
 
     // Bait: change the executor's host to something different. The live
-    // session must keep its snapshot.
-    await apiClient.updateExecutor(seedData.sshExecutorId, {
-      config: {
-        ssh_host: "10.255.255.1",
-        ssh_port: String(seedData.sshTarget.port),
-        ssh_user: seedData.sshTarget.user,
-        ssh_identity_source: "file",
-        ssh_identity_file: seedData.sshTarget.identityFile,
-        ssh_host_fingerprint: seedData.sshTarget.hostFingerprint,
-      },
-    });
+    // session must keep its snapshot. Restore the original config in a
+    // try/finally so any subsequent spec in this worker that reuses
+    // seedData.sshExecutorId sees a working executor — without restore,
+    // later launches would dial 10.255.255.1 and hang.
+    try {
+      await apiClient.updateExecutor(seedData.sshExecutorId, {
+        config: {
+          ssh_host: "10.255.255.1",
+          ssh_port: String(seedData.sshTarget.port),
+          ssh_user: seedData.sshTarget.user,
+          ssh_identity_source: "file",
+          ssh_identity_file: seedData.sshTarget.identityFile,
+          ssh_host_fingerprint: seedData.sshTarget.hostFingerprint,
+        },
+      });
 
-    const after = await apiClient.listSSHSessions(seedData.sshExecutorId);
-    const afterRow = after.find((s) => s.task_id === task.id);
-    expect(afterRow).toBeDefined();
-    expect(afterRow!.host).toBe(originalHost);
+      const after = await apiClient.listSSHSessions(seedData.sshExecutorId);
+      const afterRow = after.find((s) => s.task_id === task.id);
+      expect(afterRow).toBeDefined();
+      expect(afterRow!.host).toBe(originalHost);
+    } finally {
+      await apiClient.updateExecutor(seedData.sshExecutorId, {
+        config: {
+          ssh_host: seedData.sshTarget.host,
+          ssh_port: String(seedData.sshTarget.port),
+          ssh_user: seedData.sshTarget.user,
+          ssh_identity_source: "file",
+          ssh_identity_file: seedData.sshTarget.identityFile,
+          ssh_host_fingerprint: seedData.sshTarget.hostFingerprint,
+        },
+      });
+    }
   });
 
   test("delete executor profile is accepted regardless of session count", async ({

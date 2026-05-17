@@ -114,9 +114,15 @@ func (r *SSHExecutor) targetFromMetadata(md map[string]interface{}) (*SSHTarget,
 	}
 	port := 0
 	if p := getMetadataString(md, MetadataKeySSHPort); p != "" {
-		if n, err := strconv.Atoi(p); err == nil {
-			port = n
+		// Reject malformed / out-of-range ports loudly instead of silently
+		// falling back to 22 — that fallback would mask an obviously bad
+		// config (e.g. ssh_port="abc" or ssh_port="0") and route every
+		// launch through a port the user never meant to use.
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 1 || n > 65535 {
+			return nil, fmt.Errorf("ssh executor: invalid ssh_port %q (must be 1-65535)", p)
 		}
+		port = n
 	}
 	identitySource := SSHIdentitySource(getMetadataString(md, MetadataKeySSHIdentitySource))
 	identityFile := getMetadataString(md, MetadataKeySSHIdentityFile)

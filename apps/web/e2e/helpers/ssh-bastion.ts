@@ -235,27 +235,33 @@ function scanFingerprintInsideNetwork(networkName: string, targetName: string): 
   // openssh-client is the package that ships ssh-keyscan on Alpine. (The
   // historical "openssh-keyscan" name doesn't exist in repos.) Pin to a
   // known-good Alpine and surface install/keyscan stderr so failures are
-  // diagnosable instead of empty.
-  const res = spawnSync(
-    "docker",
-    [
-      "run",
-      "--rm",
-      "--network",
-      networkName,
-      "alpine:3.20",
-      "sh",
-      "-c",
-      `apk add --no-cache openssh-client >/dev/null 2>&1 && ssh-keyscan -t ed25519 ${targetName}`,
-    ],
-    { encoding: "utf8" },
-  );
-  if (!res.stdout?.trim()) {
-    throw new Error(
-      `scanFingerprintInsideNetwork: empty output (status=${res.status}, stderr=${res.stderr})`,
+  // diagnosable instead of empty. Retry on empty output — sshd accepts TCP
+  // before completing host-key negotiation on a cold container, mirroring
+  // the same flake guard the host-side scanFingerprintViaHost helper uses.
+  const deadline = Date.now() + 15_000;
+  let lastErr = "";
+  while (Date.now() < deadline) {
+    const res = spawnSync(
+      "docker",
+      [
+        "run",
+        "--rm",
+        "--network",
+        networkName,
+        "alpine:3.20",
+        "sh",
+        "-c",
+        `apk add --no-cache openssh-client >/dev/null 2>&1 && ssh-keyscan -t ed25519 ${targetName}`,
+      ],
+      { encoding: "utf8" },
     );
+    if (res.stdout?.trim()) {
+      return parseFingerprint(res.stdout);
+    }
+    lastErr = `status=${res.status}, stderr=${res.stderr ?? ""}`;
+    spawnSync("sleep", ["0.3"]);
   }
-  return parseFingerprint(res.stdout);
+  throw new Error(`scanFingerprintInsideNetwork: empty output after retry (${lastErr})`);
 }
 
 function parseFingerprint(keyscanOutput: string): string {

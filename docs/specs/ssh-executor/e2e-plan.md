@@ -65,7 +65,8 @@ Test naming follows the same concern-based grouping the existing `docker/*.spec.
 | `ssh/error-surfacing.spec.ts` | Q1–Q5: TCP refused, auth failed, permission denied (mkdir), ProxyJump unreachable, backend 5xx |
 | `ssh/persistence.spec.ts` | R1–R4: fingerprint persists across reload, incomplete test does not leak state, mobile project responsive, executor icon/label correct in lists |
 
-Roughly 75 cases across 17 files.
+80 cases across 17 SSH spec files (see `apps/web/e2e/tests/ssh/`).
+The full suite runs in ~2.4 min on the containers project.
 
 ## Helpers exposed to specs
 
