@@ -17,19 +17,12 @@ fi
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
-# Copy with symlinks dereferenced so pnpm's .pnpm/ structure survives
-# archiving (symlinks cause issues on Windows even inside tar). The
-# standalone output may contain broken symlinks from partial tracing —
-# --safe-links skips those and rsync exits with code 23 (partial transfer),
-# which is expected.
-rsync -a --copy-links --safe-links "$WEB_DIR/.next/standalone/" "$OUT_DIR/" || {
-  rc=$?
-  if [ "$rc" -eq 23 ]; then
-    echo "Warning: some broken symlinks were skipped (expected for standalone output)"
-  else
-    exit "$rc"
-  fi
-}
+# Copy the standalone bundle with symlinks dereferenced so pnpm's
+# .pnpm/ structure survives archiving (symlinks cause issues on
+# Windows even inside tar). cp -RL ships with both BSD and GNU
+# coreutils; rsync isn't present in Linuxbrew CI. The trailing `.` is
+# the portable way to copy directory contents on both flavors.
+cp -RL "$WEB_DIR/.next/standalone/." "$OUT_DIR/"
 # pnpm's .pnpm virtual store keeps hoisted packages in
 # node_modules/.pnpm/node_modules/ which is unreachable via normal Node
 # module resolution from web/node_modules/next/. Copy everything into
