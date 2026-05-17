@@ -24,9 +24,14 @@ import (
 const errorJSONKey = "error"
 
 // ExecutorRunningLister is the narrow repository slice we need to surface
-// active SSH sessions. Implemented by the task repository.
+// active SSH sessions. We list all running executors and resolve each row's
+// executor_id by looking up the task_session — the lifecycle manager doesn't
+// populate ExecutorRunning.ExecutorID directly (it's only carried forward from
+// prior rows on resume), so joining through the session is the source of
+// truth.
 type ExecutorRunningLister interface {
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
+	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
 }
 
 // Handler exposes /api/v1/ssh routes used by the settings UI.
@@ -322,8 +327,10 @@ func (h *Handler) testAgentctlCache(ctx context.Context, client *ssh.Client, res
 
 // listSessions returns the active SSH-runtime sessions for the given executor.
 // Backed by the ExecutorRunning table; each row carries the SSH metadata we
-// persisted in CreateInstance. Filtered client-side because the repository
-// does not yet expose a "list-by-executor" method.
+// persisted in CreateInstance. The executor binding is resolved by looking up
+// the TaskSession associated with each row — the row itself has an
+// ExecutorID column but the lifecycle manager does not populate it for fresh
+// executions, so it's unreliable as a filter.
 func (h *Handler) listSessions(ctx context.Context, executorID string) ([]SessionRow, error) {
 	rows, err := h.repo.ListExecutorsRunning(ctx)
 	if err != nil {
@@ -335,10 +342,10 @@ func (h *Handler) listSessions(ctx context.Context, executorID string) ([]Sessio
 		if run == nil {
 			continue
 		}
-		if run.ExecutorID != executorID {
+		if run.Runtime != string(models.ExecutorTypeSSH) {
 			continue
 		}
-		if run.Runtime != string(models.ExecutorTypeSSH) {
+		if !h.sessionBelongsToExecutor(ctx, run, executorID) {
 			continue
 		}
 		row := SessionRow{
@@ -352,4 +359,23 @@ func (h *Handler) listSessions(ctx context.Context, executorID string) ([]Sessio
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+// sessionBelongsToExecutor returns true when the given ExecutorRunning row was
+// launched under the given executor config. Resolves via the task_session
+// row because ExecutorRunning.ExecutorID is unpopulated on fresh executions.
+// Falls back to the row's own ExecutorID when the session lookup fails, so
+// resume / recovery paths (where the row has it) still match.
+func (h *Handler) sessionBelongsToExecutor(ctx context.Context, run *models.ExecutorRunning, executorID string) bool {
+	if run.ExecutorID == executorID && executorID != "" {
+		return true
+	}
+	if run.SessionID == "" {
+		return false
+	}
+	session, err := h.repo.GetTaskSession(ctx, run.SessionID)
+	if err != nil || session == nil {
+		return false
+	}
+	return session.ExecutorID == executorID
 }
