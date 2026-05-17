@@ -16,6 +16,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { testSSHConnection } from "@/lib/api/domains/ssh-api";
+import { FingerprintTrustBlock } from "@/components/settings/ssh-fingerprint-trust-block";
 import type {
   SSHIdentitySource,
   SSHTestRequest,
@@ -53,6 +54,12 @@ interface SSHConnectionState {
   testing: boolean;
   saving: boolean;
   result: SSHTestResult | null;
+  // resultStale flips true when the user edits a connection-affecting field
+  // after a successful test, so the prior fingerprint cannot be trusted for
+  // the current form. The result stays visible (the trust-gate spec expects
+  // the checkbox to render) but trust + save are gated off until the user
+  // re-runs Test Connection.
+  resultStale: boolean;
   trust: boolean;
   error: string | null;
 }
@@ -88,6 +95,7 @@ function initialState(initial?: Partial<SSHExecutorConfig>): SSHConnectionState 
     testing: false,
     saving: false,
     result: null,
+    resultStale: false,
     trust: false,
     error: null,
   };
@@ -95,7 +103,7 @@ function initialState(initial?: Partial<SSHExecutorConfig>): SSHConnectionState 
 
 function useSSHConnection(props: SSHConnectionCardProps) {
   const [state, setState] = useState<SSHConnectionState>(() => initialState(props.initial));
-  const { form, testing, saving, result, trust, error } = state;
+  const { form, testing, saving, result, resultStale, trust, error } = state;
 
   const update = useCallback(
     <K extends keyof SSHExecutorConfig>(key: K, value: SSHExecutorConfig[K]) => {
@@ -104,10 +112,13 @@ function useSSHConnection(props: SSHConnectionCardProps) {
         return {
           ...prev,
           form: { ...prev.form, [key]: value },
-          // Editing a connection-affecting field invalidates the trust gate
-          // but keeps the prior result visible so the user can re-tick after
-          // a quick re-test; editing the display-only `name` leaves trust
-          // alone.
+          // Editing a connection-affecting field invalidates the prior test:
+          // the user must re-run Test Connection before they can trust + save
+          // for the new target. We keep `result` rendered (the trust-gate
+          // spec relies on the checkbox remaining present) but mark it stale
+          // so re-checking trust here doesn't save the old fingerprint.
+          // Editing the display-only `name` leaves trust alone.
+          resultStale: isConnectionField ? prev.result !== null : prev.resultStale,
           trust: isConnectionField ? false : prev.trust,
           error: null,
         };
@@ -126,7 +137,13 @@ function useSSHConnection(props: SSHConnectionCardProps) {
   }, [form, testing]);
 
   const handleTest = useCallback(async () => {
-    setState((prev) => ({ ...prev, testing: true, result: null, error: null }));
+    setState((prev) => ({
+      ...prev,
+      testing: true,
+      result: null,
+      resultStale: false,
+      error: null,
+    }));
     try {
       const req: SSHTestRequest = {
         name: form.name,
@@ -139,14 +156,14 @@ function useSSHConnection(props: SSHConnectionCardProps) {
         proxy_jump: form.proxy_jump || undefined,
       };
       const res = await testSSHConnection(req);
-      setState((prev) => ({ ...prev, result: res, testing: false }));
+      setState((prev) => ({ ...prev, result: res, resultStale: false, testing: false }));
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to reach backend";
       setState((prev) => ({ ...prev, error: msg, testing: false }));
     }
   }, [form]);
 
-  const canSave = !!result?.success && !!result.fingerprint && trust && !saving;
+  const canSave = !!result?.success && !!result.fingerprint && trust && !resultStale && !saving;
 
   const confirmRunningSessions = useCallback(
     () =>
@@ -163,11 +180,13 @@ function useSSHConnection(props: SSHConnectionCardProps) {
   const handleSave = useCallback(async () => {
     if (!canSave || !result?.fingerprint) return;
     if (!confirmRunningSessions()) return;
-    setState((prev) => ({ ...prev, saving: true }));
+    setState((prev) => ({ ...prev, saving: true, error: null }));
     try {
       await props.onSave({ ...form, host_fingerprint: result.fingerprint });
-    } finally {
       setState((prev) => ({ ...prev, saving: false }));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to save executor";
+      setState((prev) => ({ ...prev, saving: false, error: msg }));
     }
   }, [canSave, confirmRunningSessions, form, props, result]);
 
@@ -176,6 +195,7 @@ function useSSHConnection(props: SSHConnectionCardProps) {
     testing,
     saving,
     result,
+    resultStale,
     trust,
     error,
     canTest,
@@ -225,6 +245,7 @@ export function SSHConnectionCard(props: SSHConnectionCardProps) {
           <TestResultDisplay
             result={c.result}
             trust={c.trust}
+            resultStale={c.resultStale}
             onTrustChange={c.setTrust}
             currentlyPinned={c.form.host_fingerprint}
           />
@@ -483,11 +504,13 @@ function ConnectionBadge({ fingerprint }: { fingerprint?: string }) {
 function TestResultDisplay({
   result,
   trust,
+  resultStale,
   onTrustChange,
   currentlyPinned,
 }: {
   result: SSHTestResult;
   trust: boolean;
+  resultStale: boolean;
   onTrustChange: (v: boolean) => void;
   currentlyPinned?: string;
 }) {
@@ -511,6 +534,7 @@ function TestResultDisplay({
           fingerprint={result.fingerprint}
           currentlyPinned={currentlyPinned}
           trust={trust}
+          resultStale={resultStale}
           onTrustChange={onTrustChange}
         />
       )}
@@ -531,50 +555,6 @@ function TestResultHeader({ success, totalMs }: { success: boolean; totalMs: num
       )}
       {success ? "Connection test passed" : "Connection test failed"}
       <span className="text-muted-foreground font-normal">({totalMs}ms)</span>
-    </div>
-  );
-}
-
-function FingerprintTrustBlock({
-  fingerprint,
-  currentlyPinned,
-  trust,
-  onTrustChange,
-}: {
-  fingerprint: string;
-  currentlyPinned?: string;
-  trust: boolean;
-  onTrustChange: (v: boolean) => void;
-}) {
-  const fingerprintChanged = !!currentlyPinned && currentlyPinned !== fingerprint;
-  return (
-    <div className="mt-3 space-y-2">
-      <div className="text-xs">
-        <span className="text-muted-foreground">Host fingerprint observed: </span>
-        <code data-testid="ssh-fingerprint-observed" className="font-mono">
-          {fingerprint}
-        </code>
-      </div>
-      {fingerprintChanged && (
-        <p data-testid="ssh-fingerprint-change-warning" className="text-xs text-amber-600">
-          Warning: this fingerprint differs from the one currently pinned (
-          <code className="font-mono">{currentlyPinned}</code>). Trusting it overwrites the pinned
-          key. If you didn’t expect a host re-key, stop here.
-        </p>
-      )}
-      <label className="flex items-start gap-2 text-sm cursor-pointer">
-        <input
-          type="checkbox"
-          data-testid="ssh-trust-checkbox"
-          checked={trust}
-          onChange={(e) => onTrustChange(e.target.checked)}
-          className="mt-0.5 cursor-pointer"
-        />
-        <span>
-          <strong>Trust this host.</strong> I’ve verified the fingerprint above matches my server.
-          Future connections that report a different fingerprint will be refused.
-        </span>
-      </label>
     </div>
   );
 }
