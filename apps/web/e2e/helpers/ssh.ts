@@ -131,6 +131,44 @@ export function stopSSHServer(handle: SSHServerHandle): void {
 }
 
 /**
+ * Dump every per-session agentctl.log from the running container to a host
+ * directory before teardown so test failures have a server-side trace. Tests
+ * call this in a try/finally around the test body when investigating
+ * intermittent issues; in steady-state CI it's a no-op (logs aren't needed).
+ *
+ * The dump survives `--rm` cleanup and `fs.rmSync` of the worker tmpdir
+ * because it writes to /tmp/kandev-e2e-ssh-logs/ at the system root.
+ */
+export function dumpRemoteLogs(handle: SSHServerHandle, label: string): string | null {
+  const dumpDir = path.join("/tmp", "kandev-e2e-ssh-logs", `${label}-${Date.now()}`);
+  fs.mkdirSync(dumpDir, { recursive: true });
+  const list = spawnSync(
+    "docker",
+    [
+      "exec",
+      handle.containerName,
+      "sh",
+      "-c",
+      "find /home/kandev/.kandev/tasks -name 'agentctl.log' 2>/dev/null",
+    ],
+    { encoding: "utf8" },
+  );
+  if (list.status !== 0 || !list.stdout.trim()) return null;
+  const files = list.stdout
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const f of files) {
+    const out = path.join(dumpDir, f.replace(/\//g, "_"));
+    const cat = spawnSync("docker", ["exec", handle.containerName, "cat", f], {
+      encoding: "utf8",
+    });
+    fs.writeFileSync(out, cat.stdout ?? "");
+  }
+  return dumpDir;
+}
+
+/**
  * Regenerate the container's host key and bounce sshd. The container's host
  * fingerprint changes; subsequent connections that use the old pinned
  * fingerprint surface the host-key-changed error verbatim — exactly the path
