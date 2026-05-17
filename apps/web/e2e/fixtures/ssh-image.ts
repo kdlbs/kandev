@@ -28,6 +28,16 @@ set -e
 # fingerprint-pinning works end-to-end.
 ssh-keygen -A >/dev/null
 
+# Verbose sshd logging so test failures can be diagnosed without rebuilding
+# the image — landed via the entrypoint so it always lands.
+printf "\\nLogLevel DEBUG2\\n" >> /etc/ssh/sshd_config.d/10-kandev-forwarding.conf
+
+# If the test runner bind-mounted /home/kandev/.kandev to inspect logs from
+# the host, the mount inherits host ownership; make it writable by the
+# kandev user before sshd starts accepting sessions.
+mkdir -p /home/kandev/.kandev
+chown -R kandev:kandev /home/kandev/.kandev
+
 # Worker mounts its public key in here; copy into the kandev user's
 # authorized_keys with the right perms so sshd accepts it.
 if [ -f /authorized_keys ]; then
@@ -59,8 +69,24 @@ RUN apk add --no-cache \\
     shadow \\
     coreutils \\
     ca-certificates \\
+    curl \\
     iproute2 \\
     iptables \\
+    # agentctl is built dynamically linked against glibc; Alpine is musl. gcompat
+    # ships a glibc-compat shim that lets glibc binaries exec on Alpine. Without
+    # it 'nohup /home/kandev/.kandev/bin/agentctl' fails with "No such file or
+    # directory" (the kernel can't find /lib64/ld-linux-x86-64.so.2).
+    gcompat \\
+    libstdc++ \\
+ # Alpine sshd_config sets AllowTcpForwarding no, which makes sshd reject
+ # every direct-tcpip channel request — exactly what the SSH executor's
+ # local port forward needs. Override to yes via a config.d drop-in.
+ # Also bump MaxSessions: kandev opens several concurrent direct-tcpip
+ # channels per session (health probe + agent stream + workspace stream +
+ # follow-up HTTP requests), and the OpenSSH default of 10 isn't enough
+ # under load — sshd starts EOF'ing channel open requests once exhausted.
+ && printf "\\nAllowTcpForwarding yes\\nMaxSessions 100\\n" \\
+      > /etc/ssh/sshd_config.d/10-kandev-forwarding.conf \\
  && adduser -D -s /bin/bash kandev \\
  # Alpine's adduser -D leaves the account "locked" (password = ! in /etc/shadow).
  # sshd refuses ALL auth methods — including pubkey — for locked users, so we

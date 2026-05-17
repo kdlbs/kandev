@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,12 +14,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pkg/sftp"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 
+	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -303,86 +306,172 @@ func ensureRemoteSessionDir(ctx context.Context, client *ssh.Client, taskDir, se
 	return sessionDir, nil
 }
 
-// startRemoteAgentctl launches an agentctl process on the remote bound to
-// 127.0.0.1:0 and waits for it to write its chosen port + PID into the session
-// runtime dir. Returns the chosen port and the process PID.
+// startRemoteAgentctl launches an agentctl process on the remote with a
+// kandev-chosen port and waits for the agentctl log to confirm a successful
+// bind. Returns the chosen port and the process PID.
 //
-// The on-remote layout written by agentctl on startup:
+// On-remote layout written by the launch wrapper:
 //
-//	<sessionDir>/agentctl.port
-//	<sessionDir>/agentctl.pid
-//	<sessionDir>/agentctl.log
+//	<sessionDir>/agentctl.pid   — written by the wrapper script ($!)
+//	<sessionDir>/agentctl.log   — agentctl's own stdout+stderr
+//
+// agentctl honors AGENTCTL_PORT from its environment (default 39429). We pick
+// a per-session port from a wide ephemeral range; collisions on the remote are
+// vanishingly unlikely and would surface as a clear bind failure that the
+// caller can retry.
 func startRemoteAgentctl(
 	ctx context.Context,
 	client *ssh.Client,
 	agentctlBin, workspacePath, sessionDir string,
 	log *logger.Logger,
 ) (port int, pid int, err error) {
-	// Build the launch command. We:
-	//   - export the workspace
-	//   - launch agentctl as a backgrounded, disowned process
-	//   - have it bind to a free port; on startup we expect agentctl to either
-	//     accept --port-file / --pid-file flags OR we fall back to grabbing a
-	//     port ourselves and passing --port. To stay portable we always grab
-	//     a port ourselves here using `python3 -c` or `ss -tln` is brittle, so
-	//     we use a small inline shell helper.
-	//
-	// agentctl is invoked with KANDEV_AGENTCTL_PORT honored. We pick a port by
-	// asking the kernel to allocate one (via `bash` reading from /dev/tcp is
-	// unreliable for binding), so we use a tiny `python3` fallback if available,
-	// else awk-on-ss. To keep the dependency surface minimal we instead just
-	// rely on agentctl itself printing its bound port to a port-file when
-	// invoked with KANDEV_AGENTCTL_PORT=0 — the standalone agentctl already
-	// supports binding to :0 and printing the chosen port to stdout.
+	port = pickRemoteAgentctlPort()
+
 	cmd := fmt.Sprintf(
 		`set -e
 		mkdir -p %[1]s
 		: > %[1]s/agentctl.log
-		nohup %[2]s serve \
-		  --workspace %[3]s \
-		  --port 0 \
-		  --port-file %[1]s/agentctl.port \
-		  --pid-file %[1]s/agentctl.pid \
+		AGENTCTL_PORT=%[4]d nohup %[2]s --workdir %[3]s \
 		  >> %[1]s/agentctl.log 2>&1 < /dev/null &
-		disown $! 2>/dev/null || true
-		echo $!
+		AGENTCTL_PID=$!
+		disown "$AGENTCTL_PID" 2>/dev/null || true
+		echo "$AGENTCTL_PID" > %[1]s/agentctl.pid
+		echo "$AGENTCTL_PID"
 		`,
 		shellQuote(sessionDir),
 		shellQuote(agentctlBin),
 		shellQuote(workspacePath),
+		port,
 	)
 	out, stderr, err := runSSHCommand(ctx, client, cmd)
 	if err != nil {
 		return 0, 0, fmt.Errorf("ssh: launch agentctl: %w (stderr: %s)", err, strings.TrimSpace(stderr))
 	}
-	_ = strings.TrimSpace(out) // immediate $! is informational; the on-disk pidfile is authoritative
+	pid, err = strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, 0, fmt.Errorf("ssh: agentctl wrapper returned non-numeric pid %q", out)
+	}
 
-	// Poll for the port file + pid file to appear and be readable.
+	// Poll the on-disk log for the "bound successfully" line; until then the
+	// process is starting up and a port-forward connect would race the bind.
 	deadline := time.Now().Add(sshAgentctlReadyTimeout)
 	for time.Now().Before(deadline) {
-		portStr, _, perr := runSSHCommand(ctx, client, "cat "+shellQuote(sessionDir+"/agentctl.port")+" 2>/dev/null")
-		pidStr, _, _ := runSSHCommand(ctx, client, "cat "+shellQuote(sessionDir+"/agentctl.pid")+" 2>/dev/null")
-		portStr = strings.TrimSpace(portStr)
-		pidStr = strings.TrimSpace(pidStr)
-		if portStr != "" && pidStr != "" && perr == nil {
-			port, err = strconv.Atoi(portStr)
-			if err != nil {
-				return 0, 0, fmt.Errorf("ssh: agentctl wrote invalid port %q", portStr)
-			}
-			pid, err = strconv.Atoi(pidStr)
-			if err != nil {
-				return 0, 0, fmt.Errorf("ssh: agentctl wrote invalid pid %q", pidStr)
-			}
+		logOut, _, _ := runSSHCommand(ctx, client,
+			"cat "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
+		if strings.Contains(logOut, "HTTP server bound successfully") {
 			log.Info("agentctl started on remote",
 				zap.Int("port", port),
 				zap.Int("pid", pid),
 				zap.String("session_dir", sessionDir))
 			return port, pid, nil
 		}
+		if strings.Contains(logOut, "HTTP server failed to bind") {
+			return 0, 0, fmt.Errorf(
+				"ssh: agentctl failed to bind port %d on remote; log:\n%s", port,
+				lastLines(logOut, sshAgentctlLogTailLines))
+		}
+		// Also catch "exited without binding" via pid check — if the wrapper
+		// exited before logging, kill -0 fails and we fail fast.
+		if !isRemoteAgentctlAlive(ctx, client, pid) {
+			return 0, 0, fmt.Errorf(
+				"ssh: agentctl exited before becoming ready; log tail:\n%s",
+				lastLines(logOut, sshAgentctlLogTailLines))
+		}
 		time.Sleep(sshAgentctlReadyPoll)
 	}
-	tail, _, _ := runSSHCommand(ctx, client, "tail -n 50 "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
-	return 0, 0, fmt.Errorf("ssh: agentctl did not become ready within %v; log tail:\n%s", sshAgentctlReadyTimeout, tail)
+	tail, _, _ := runSSHCommand(ctx, client,
+		"tail -n 50 "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
+	return 0, 0, fmt.Errorf("ssh: agentctl did not become ready within %v; log tail:\n%s",
+		sshAgentctlReadyTimeout, tail)
+}
+
+const sshAgentctlLogTailLines = 25
+
+// createRemoteAgentInstance creates a per-session agent instance on the
+// remote agentctl control server by POSTing to /api/v1/instances from inside
+// the container (so we don't need a second SSH port forward just to call the
+// control API). Returns the per-instance port the SSH executor should later
+// forward + dial for ACP / workspace traffic. Mirrors what
+// executor_sprites.go does inside its sprite.
+func createRemoteAgentInstance(
+	ctx context.Context,
+	client *ssh.Client,
+	controlPort int,
+	req *ExecutorCreateRequest,
+	log *logger.Logger,
+) (int, error) {
+	body, err := json.Marshal(agentctl.CreateInstanceRequest{
+		ID:            req.InstanceID,
+		WorkspacePath: req.WorkspacePath,
+		SessionID:     req.SessionID,
+		TaskID:        req.TaskID,
+		Protocol:      req.Protocol,
+		AgentType:     sshAgentTypeFromReq(req),
+		McpServers:    req.McpServers,
+		McpMode:       req.McpMode,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("ssh: marshal create-instance: %w", err)
+	}
+	// Pipe the JSON body via curl's --data-binary @- so the shell doesn't have
+	// to escape it. -sS to suppress progress but keep errors. --fail returns
+	// non-zero on HTTP >= 400 so we get a clear error code.
+	cmd := fmt.Sprintf(
+		"curl -sS --fail -X POST -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:%d/api/v1/instances",
+		controlPort,
+	)
+	session, err := client.NewSession()
+	if err != nil {
+		return 0, fmt.Errorf("ssh: new session: %w", err)
+	}
+	defer func() { _ = session.Close() }()
+	session.Stdin = bytes.NewReader(body)
+	var stdout, stderr bytes.Buffer
+	session.Stdout = &stdout
+	session.Stderr = &stderr
+	done := make(chan error, 1)
+	go func() { done <- session.Run(cmd) }()
+	select {
+	case <-ctx.Done():
+		_ = session.Signal(ssh.SIGTERM)
+		return 0, ctx.Err()
+	case rerr := <-done:
+		if rerr != nil {
+			return 0, fmt.Errorf("ssh: create-instance curl: %w (stderr: %s)", rerr, strings.TrimSpace(stderr.String()))
+		}
+	}
+	var resp agentctl.CreateInstanceResponse
+	if err := json.Unmarshal(stdout.Bytes(), &resp); err != nil {
+		return 0, fmt.Errorf("ssh: parse create-instance response: %w (body: %s)", err, stdout.String())
+	}
+	if resp.Port == 0 {
+		return 0, fmt.Errorf("ssh: create-instance returned port 0 (body: %s)", stdout.String())
+	}
+	log.Info("created remote agent instance",
+		zap.Int("control_port", controlPort),
+		zap.Int("instance_port", resp.Port),
+		zap.String("instance_id", resp.ID))
+	return resp.Port, nil
+}
+
+// sshAgentTypeFromReq returns the agent type ID for the create-instance call,
+// or empty when the request didn't carry an agent config.
+func sshAgentTypeFromReq(req *ExecutorCreateRequest) string {
+	if req == nil || req.AgentConfig == nil {
+		return ""
+	}
+	return req.AgentConfig.ID()
+}
+
+// pickRemoteAgentctlPort returns a port in [40000, 60000). The kandev backend
+// picks per session; agentctl honors AGENTCTL_PORT. Collisions inside one sshd
+// container would surface as a clear "failed to bind" error and a quick retry
+// fixes it — in practice for e2e and a single SSH user, collisions are
+// vanishingly unlikely.
+//
+//nolint:gosec // not used for cryptographic purposes
+func pickRemoteAgentctlPort() int {
+	return 40000 + int(time.Now().UnixNano())%20000
 }
 
 // stopRemoteAgentctl best-effort kills a remote agentctl by PID and removes
@@ -417,6 +506,14 @@ type SSHPortForwarder struct {
 	remotePort int
 	logger     *logger.Logger
 	closed     chan struct{}
+	// dialMu serializes client.Dial calls. golang.org/x/crypto/ssh's
+	// Client.Dial is documented as safe to call concurrently, but in practice
+	// the kandev stream-manager opens its workspace + agent streams in
+	// parallel — and the second Dial occasionally returns io.EOF as if the
+	// channel-open response never came back. Serializing the opens makes
+	// the long-lived WS forward reliable; the throughput cost is negligible
+	// because channel-open completes in ~1ms.
+	dialMu sync.Mutex
 }
 
 // StartPortForward opens a fresh 127.0.0.1:<random> listener and tunnels each
@@ -456,17 +553,48 @@ func (f *SSHPortForwarder) serve(client *ssh.Client) {
 }
 
 func (f *SSHPortForwarder) handleLocal(client *ssh.Client, local net.Conn) {
-	defer func() { _ = local.Close() }()
+	f.dialMu.Lock()
 	remote, err := client.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(f.remotePort)))
+	f.dialMu.Unlock()
 	if err != nil {
+		_ = local.Close()
 		f.logger.Warn("ssh forwarder dial remote failed",
 			zap.Int("remote_port", f.remotePort),
+			zap.String("local_addr", local.LocalAddr().String()),
+			zap.String("remote_addr", local.RemoteAddr().String()),
+			zap.String("error_type", fmt.Sprintf("%T", err)),
 			zap.Error(err))
 		return
 	}
-	defer func() { _ = remote.Close() }()
-	go func() { _, _ = io.Copy(remote, local) }()
-	_, _ = io.Copy(local, remote)
+
+	// Bidirectional copy. The kandev backend's WS streams (agent + workspace)
+	// drive their own Close-frame teardown; when either side finishes the
+	// frame exchange the underlying TCP closes naturally, the io.Copy on
+	// that direction returns, we Close the conn we own, the OTHER io.Copy
+	// gets an error from the closed conn and returns, and we exit cleanly.
+	//
+	// We avoid CloseWrite-style half-close on the SSH channel: sending
+	// channel-eof while the WS server still has frames to send is sometimes
+	// observed as "abnormal closure" on the kandev side. Letting the WS
+	// protocol layer drive teardown — and only fully closing the conns once
+	// both io.Copy goroutines return — produces a clean 1000 close.
+	errc := make(chan error, 2)
+	go func() {
+		_, err := io.Copy(remote, local)
+		// Closing remote on our way out signals to agentctl that the client
+		// half is gone; agentctl will close its WS side which closes its
+		// read of our channel, which surfaces as EOF in the other goroutine.
+		_ = remote.Close()
+		errc <- err
+	}()
+	go func() {
+		_, err := io.Copy(local, remote)
+		// Closing local sends FIN to kandev so its read side EOFs cleanly.
+		_ = local.Close()
+		errc <- err
+	}()
+	<-errc
+	<-errc
 }
 
 // LocalPort returns the local TCP port the forwarder is listening on.

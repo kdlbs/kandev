@@ -28,10 +28,13 @@ const (
 )
 
 // sshSessionState tracks per-session resources we need to clean up later:
-// the SSH target (so we can release the pooled connection) and the local
-// port forwarder.
+// the SSH target (so we can dial again on Stop), the per-session SSH client
+// (no shared pool — the Go SSH client's direct-tcpip mux gets unreliable
+// when many short-lived channels race the long-lived stream channels), and
+// the local port forwarder.
 type sshSessionState struct {
 	target    *SSHTarget
+	client    *ssh.Client
 	forwarder *SSHPortForwarder
 	pid       int
 	remoteDir string
@@ -137,14 +140,14 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	if err != nil {
 		return nil, err
 	}
-	client, err := r.pool.Get(ctx, target)
+	client, err := dialSSH(ctx, target)
 	if err != nil {
 		return nil, fmt.Errorf("ssh: connect to %s@%s: %w", target.User, target.Host, err)
 	}
 	released := false
 	defer func() {
 		if !released {
-			r.pool.Release(target)
+			_ = client.Close()
 		}
 	}()
 	r.report(req.OnProgress, "Connecting to SSH host", PrepareStepCompleted, "")
@@ -169,6 +172,7 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	r.mu.Lock()
 	r.sessions[req.InstanceID] = &sshSessionState{
 		target:    target,
+		client:    client,
 		forwarder: fwd,
 		pid:       pid,
 		remoteDir: sessionDir,
@@ -219,20 +223,44 @@ func (r *SSHExecutor) prepareRemoteDirs(ctx context.Context, client *ssh.Client,
 	return taskDir, sessionDir, nil
 }
 
-// startAndForwardAgentctl spawns the per-session agentctl on the remote and
-// stands up the SSH local port forward. Cleans up both on failure.
+// startAndForwardAgentctl spawns the per-session agentctl on the remote,
+// creates a per-instance sub-server inside it, and stands up the SSH local
+// port forward to the *instance* port (not the control port). Returns the
+// instance port, the agentctl PID, and the forwarder. Cleans up everything
+// it created on any failure.
+//
+// Lifecycle mirrors what executor_sprites.go does inside its sprite:
+//  1. agentctl --workdir <taskDir> binds the control API on a random port.
+//  2. POST /api/v1/instances on that control port creates a session-scoped
+//     sub-server with its own port (allocated from agentctl's instance pool).
+//  3. The SSH executor's clients (agent stream, workspace, etc.) all talk to
+//     that sub-server, so the local port forward points there.
 func (r *SSHExecutor) startAndForwardAgentctl(
 	ctx context.Context, client *ssh.Client, agentctlBin, taskDir, sessionDir string, req *ExecutorCreateRequest,
 ) (int, int, *SSHPortForwarder, error) {
-	port, pid, err := startRemoteAgentctl(ctx, client, agentctlBin, taskDir, sessionDir, r.logger)
+	controlPort, pid, err := startRemoteAgentctl(ctx, client, agentctlBin, taskDir, sessionDir, r.logger)
 	if err != nil {
 		r.report(req.OnProgress, "Starting agent controller", PrepareStepFailed, err.Error())
 		return 0, 0, nil, err
 	}
 	r.report(req.OnProgress, "Starting agent controller", PrepareStepCompleted,
-		fmt.Sprintf("pid=%d port=%d", pid, port))
+		fmt.Sprintf("pid=%d control_port=%d", pid, controlPort))
 
-	fwd, err := StartPortForward(client, port, r.logger)
+	// Override req.WorkspacePath to the remote task dir so the per-instance
+	// server's workspace points at the SSH workspace, not the host one.
+	origWorkspace := req.WorkspacePath
+	req.WorkspacePath = taskDir
+	instancePort, ierr := createRemoteAgentInstance(ctx, client, controlPort, req, r.logger)
+	req.WorkspacePath = origWorkspace
+	if ierr != nil {
+		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
+		r.report(req.OnProgress, "Creating agent instance", PrepareStepFailed, ierr.Error())
+		return 0, 0, nil, ierr
+	}
+	r.report(req.OnProgress, "Creating agent instance", PrepareStepCompleted,
+		fmt.Sprintf("instance_port=%d", instancePort))
+
+	fwd, err := StartPortForward(client, instancePort, r.logger)
 	if err != nil {
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
 		return 0, 0, nil, fmt.Errorf("ssh: port forward: %w", err)
@@ -243,8 +271,8 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 		return 0, 0, nil, fmt.Errorf("ssh: agentctl health: %w", err)
 	}
 	r.report(req.OnProgress, "Connecting to agent controller", PrepareStepCompleted,
-		fmt.Sprintf("local:%d -> remote:%d", fwd.LocalPort(), port))
-	return port, pid, fwd, nil
+		fmt.Sprintf("local:%d -> remote:%d", fwd.LocalPort(), instancePort))
+	return instancePort, pid, fwd, nil
 }
 
 func (r *SSHExecutor) buildInstance(
@@ -299,14 +327,12 @@ func (r *SSHExecutor) StopInstance(ctx context.Context, instance *ExecutorInstan
 	if state.forwarder != nil {
 		_ = state.forwarder.Close()
 	}
-	if state.target != nil {
-		// Re-acquire so the pool ref is balanced for our previous Get().
-		client, err := r.pool.Get(ctx, state.target)
-		if err == nil {
-			_ = stopRemoteAgentctl(ctx, client, state.remoteDir, state.pid)
-			r.pool.Release(state.target) // for the Get we just did
-		}
-		r.pool.Release(state.target) // for the Get done in CreateInstance
+	// Use the same SSH client we used for CreateInstance — if it's still
+	// alive we can kill the remote agentctl gracefully; otherwise just drop
+	// the connection on the floor.
+	if state.client != nil {
+		_ = stopRemoteAgentctl(ctx, state.client, state.remoteDir, state.pid)
+		_ = state.client.Close()
 	}
 	return nil
 }
@@ -341,32 +367,33 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 	if err != nil {
 		return err
 	}
-	client, err := r.pool.Get(ctx, target)
+	client, err := dialSSH(ctx, target)
 	if err != nil {
 		return fmt.Errorf("ssh resume: connect: %w", err)
 	}
 
 	pid, _ := strconv.Atoi(pidStr)
 	if !isRemoteAgentctlAlive(ctx, client, pid) {
-		r.pool.Release(target)
+		_ = client.Close()
 		return fmt.Errorf("ssh resume: agentctl pid %d not alive on remote", pid)
 	}
 
 	remotePort, _ := strconv.Atoi(portStr)
 	fwd, err := StartPortForward(client, remotePort, r.logger)
 	if err != nil {
-		r.pool.Release(target)
+		_ = client.Close()
 		return fmt.Errorf("ssh resume: port forward: %w", err)
 	}
 	if err := waitAgentctlHealthy(ctx, fwd.LocalPort(), sshAgentctlHealthTimeout); err != nil {
 		_ = fwd.Close()
-		r.pool.Release(target)
+		_ = client.Close()
 		return fmt.Errorf("ssh resume: agentctl health: %w", err)
 	}
 
 	r.mu.Lock()
 	r.sessions[req.InstanceID] = &sshSessionState{
 		target:    target,
+		client:    client,
 		forwarder: fwd,
 		pid:       pid,
 		remoteDir: sessionDir,
@@ -411,15 +438,11 @@ func (r *SSHExecutor) GetRemoteStatus(ctx context.Context, instance *ExecutorIns
 
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	probeClient, err := r.pool.Get(probeCtx, state.target)
-	if err != nil {
+	if state.client == nil {
 		status.State = sshStatusDisconnected
-		status.ErrorMessage = err.Error()
 		return status, nil
 	}
-	defer r.pool.Release(state.target)
-
-	if !isRemoteAgentctlAlive(probeCtx, probeClient, state.pid) {
+	if !isRemoteAgentctlAlive(probeCtx, state.client, state.pid) {
 		status.State = sshStatusAgentctlDown
 		return status, nil
 	}
