@@ -7,6 +7,7 @@ import {
   IconFolders,
   IconServer,
   IconServerOff,
+  IconTerminal2,
 } from "@tabler/icons-react";
 
 export const EXECUTOR_ICON_MAP: Record<string, typeof IconFolder> = {
@@ -15,6 +16,7 @@ export const EXECUTOR_ICON_MAP: Record<string, typeof IconFolder> = {
   local_docker: IconBox,
   remote_docker: IconBox,
   sprites: IconCloud,
+  ssh: IconTerminal2,
 };
 
 export function getExecutorIcon(type: string): typeof IconFolder {
@@ -27,6 +29,7 @@ const EXECUTOR_LABEL_MAP: Record<string, string> = {
   local_docker: "Local Docker",
   remote_docker: "Remote Docker",
   sprites: "Sprites.dev",
+  ssh: "SSH",
 };
 
 export function getExecutorLabel(type: string): string {
@@ -53,6 +56,12 @@ export function getExecutorStatusIcon(
     return {
       Icon: hasError ? IconCloudOff : IconCloud,
       testId: "executor-status-cloud-icon",
+    };
+  }
+  if (executorType === "ssh") {
+    return {
+      Icon: hasError ? IconServerOff : IconTerminal2,
+      testId: "executor-status-ssh-icon",
     };
   }
   return {
