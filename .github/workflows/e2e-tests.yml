@@ -139,10 +139,11 @@ jobs:
         working-directory: apps/web
         run: tar -xf next-build.tar && rm next-build.tar
 
-      # Pinned to chromium + mobile-chrome so the dedicated `e2e-docker` job
-      # below owns the real-Docker project. Without --project the docker spec
-      # would run here too, fail seeding (KANDEV_DOCKER_ENABLED is off), and
-      # spam every shard.
+      # Pinned to chromium + mobile-chrome so the dedicated `e2e-containers`
+      # job below owns the real-Docker project (which covers both the Docker
+      # executor and the SSH executor's sshd target). Without --project the
+      # container-bound specs would run here too, fail seeding (Docker not
+      # enabled for these shards), and spam every shard.
       - name: Run E2E tests (shard ${{ matrix.shard }}/10)
         working-directory: apps/web
         run: npx playwright test --config e2e/playwright.config.ts --project=chromium --project=mobile-chrome --shard=${{ matrix.shard }}/10
@@ -169,11 +170,16 @@ jobs:
   # 6 runners — Playwright's --shard splits the project's tests into N groups.
   # Cleans up any leftover kandev-managed containers at the end so a leaky
   # process doesn't poison the next run on the same self-hosted runner.
-  e2e-docker:
-    name: E2E Docker Shard ${{ matrix.shard }}/6
+  #
+  # This job runs the `containers` Playwright project, which covers both the
+  # Docker executor and the SSH executor (since the SSH executor's e2e tests
+  # also rely on Docker to host a real sshd container as the remote target).
+  # Sharded 6 ways — each shard is its own runner. See apps/web/e2e/README.md.
+  e2e-containers:
+    name: E2E Containers Shard ${{ matrix.shard }}/6
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -223,38 +229,38 @@ jobs:
         working-directory: apps/web
         run: tar -xf next-build.tar && rm next-build.tar
 
-      - name: Run Docker E2E tests (shard ${{ matrix.shard }}/6)
+      - name: Run container-backed E2E tests shard ${{ matrix.shard }}/6 (Docker executor + SSH executor)
         working-directory: apps/web
         env:
-          KANDEV_E2E_DOCKER: "1"
-        run: npx playwright test --config e2e/playwright.config.ts --project=docker --shard=${{ matrix.shard }}/6
+          KANDEV_E2E_CONTAINERS: "1"
+        run: npx playwright test --config e2e/playwright.config.ts --project=containers --shard=${{ matrix.shard }}/6
 
       - name: Cleanup leftover kandev containers
         if: always()
         run: docker ps -aq --filter label=kandev.managed=true | xargs -r docker rm -f
 
       # Named with the same `blob-report-*` prefix the merge job globs for
-      # so the docker results land in the unified HTML report alongside the
-      # sharded chromium/mobile-chrome runs.
-      - name: Upload Docker blob report
+      # so the containers results land in the unified HTML report alongside
+      # the sharded chromium/mobile-chrome runs.
+      - name: Upload containers blob report
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: blob-report-docker-${{ matrix.shard }}
+          name: blob-report-containers-${{ matrix.shard }}
           path: apps/web/e2e/blob-report/
           retention-days: 3
 
-      - name: Upload Docker E2E results
+      - name: Upload containers E2E results
         if: failure()
         uses: actions/upload-artifact@v5
         with:
-          name: docker-e2e-test-results-${{ matrix.shard }}
+          name: containers-e2e-test-results-${{ matrix.shard }}
           path: apps/web/e2e/test-results/
           retention-days: 7
 
   e2e-report:
     name: Merge E2E Reports
-    needs: [e2e, e2e-docker]
+    needs: [e2e, e2e-containers]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
