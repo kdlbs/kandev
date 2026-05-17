@@ -1,6 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
+import os from "node:os";
 
-import { buildWebEnv, type PortConfig } from "./shared";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { buildWebEnv, listHostNetworkAddresses, type PortConfig } from "./shared";
 
 const ports: PortConfig = {
   backendPort: 38429,
@@ -57,5 +59,123 @@ describe("buildWebEnv", () => {
   it("enables debug flag when requested", () => {
     expect(buildWebEnv({ ports, debug: true }).NEXT_PUBLIC_KANDEV_DEBUG).toBe("true");
     expect(buildWebEnv({ ports }).NEXT_PUBLIC_KANDEV_DEBUG).toBeUndefined();
+  });
+});
+
+describe("buildWebEnv allowedDevOrigins", () => {
+  const originalAllowed = process.env.NEXT_ALLOWED_DEV_ORIGINS;
+
+  beforeEach(() => {
+    vi.spyOn(os, "networkInterfaces").mockReturnValue({
+      lo: [
+        {
+          address: "127.0.0.1",
+          netmask: "255.0.0.0",
+          family: "IPv4",
+          mac: "00:00:00:00:00:00",
+          internal: true,
+          cidr: "127.0.0.1/8",
+        },
+      ],
+      eth0: [
+        {
+          address: "192.168.1.34",
+          netmask: "255.255.252.0",
+          family: "IPv4",
+          mac: "aa:bb:cc:dd:ee:ff",
+          internal: false,
+          cidr: "192.168.1.34/22",
+        },
+        {
+          address: "fe80::1",
+          netmask: "ffff:ffff:ffff:ffff::",
+          family: "IPv6",
+          mac: "aa:bb:cc:dd:ee:ff",
+          internal: false,
+          cidr: "fe80::1/64",
+          scopeid: 2,
+        },
+      ],
+      tailscale0: [
+        {
+          address: "100.94.173.104",
+          netmask: "255.255.255.255",
+          family: "IPv4",
+          mac: "00:00:00:00:00:00",
+          internal: false,
+          cidr: "100.94.173.104/32",
+        },
+      ],
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalAllowed === undefined) {
+      delete process.env.NEXT_ALLOWED_DEV_ORIGINS;
+    } else {
+      process.env.NEXT_ALLOWED_DEV_ORIGINS = originalAllowed;
+    }
+  });
+
+  it("populates NEXT_ALLOWED_DEV_ORIGINS with LAN + Tailscale IPs in dev mode", () => {
+    delete process.env.NEXT_ALLOWED_DEV_ORIGINS;
+    const env = buildWebEnv({ ports });
+    const origins = (env.NEXT_ALLOWED_DEV_ORIGINS ?? "").split(",");
+    expect(origins).toContain("192.168.1.34");
+    expect(origins).toContain("100.94.173.104");
+  });
+
+  it("excludes loopback and link-local IPv6 addresses", () => {
+    delete process.env.NEXT_ALLOWED_DEV_ORIGINS;
+    const env = buildWebEnv({ ports });
+    const origins = (env.NEXT_ALLOWED_DEV_ORIGINS ?? "").split(",");
+    expect(origins).not.toContain("127.0.0.1");
+    expect(origins).not.toContain("fe80::1");
+  });
+
+  it("merges with a user-supplied NEXT_ALLOWED_DEV_ORIGINS, deduped", () => {
+    process.env.NEXT_ALLOWED_DEV_ORIGINS = "dev.example, 192.168.1.34";
+    const env = buildWebEnv({ ports });
+    const origins = (env.NEXT_ALLOWED_DEV_ORIGINS ?? "").split(",");
+    expect(origins).toContain("dev.example");
+    expect(origins).toContain("192.168.1.34");
+    expect(origins).toContain("100.94.173.104");
+    expect(origins.filter((s) => s === "192.168.1.34")).toHaveLength(1);
+  });
+
+  it("does not set NEXT_ALLOWED_DEV_ORIGINS in production", () => {
+    delete process.env.NEXT_ALLOWED_DEV_ORIGINS;
+    const env = buildWebEnv({ ports, production: true });
+    expect(env.NEXT_ALLOWED_DEV_ORIGINS).toBeUndefined();
+  });
+});
+
+describe("listHostNetworkAddresses", () => {
+  it("returns a deduplicated list of non-internal addresses", () => {
+    vi.spyOn(os, "networkInterfaces").mockReturnValue({
+      eth0: [
+        {
+          address: "10.0.0.1",
+          netmask: "255.0.0.0",
+          family: "IPv4",
+          mac: "aa:bb:cc:dd:ee:ff",
+          internal: false,
+          cidr: "10.0.0.1/8",
+        },
+      ],
+      eth1: [
+        {
+          address: "10.0.0.1",
+          netmask: "255.0.0.0",
+          family: "IPv4",
+          mac: "11:22:33:44:55:66",
+          internal: false,
+          cidr: "10.0.0.1/8",
+        },
+      ],
+    });
+    expect(listHostNetworkAddresses()).toEqual(["10.0.0.1"]);
+    vi.restoreAllMocks();
   });
 });

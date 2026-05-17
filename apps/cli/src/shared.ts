@@ -6,6 +6,7 @@
  */
 
 import type { ChildProcess } from "node:child_process";
+import os from "node:os";
 
 import { DEFAULT_AGENTCTL_PORT, DEFAULT_BACKEND_PORT, DEFAULT_WEB_PORT } from "./constants";
 import { pickAvailablePort } from "./ports";
@@ -105,6 +106,15 @@ export function buildWebEnv(options: WebEnvOptions): NodeJS.ProcessEnv {
     // URLs like `https://host:38429/...` that aren't reachable behind a
     // reverse proxy / ingress / Cloudflare tunnel.
     env.NEXT_PUBLIC_KANDEV_API_PORT = String(ports.backendPort);
+
+    // Auto-allow the host's own LAN / VPN addresses so a dev hitting the dev
+    // server from another device on the same network (Tailscale, LAN IP, WSL
+    // mirrored mode, etc.) passes Next.js's allowedDevOrigins check and HMR
+    // works. The user can still extend the list via NEXT_ALLOWED_DEV_ORIGINS.
+    env.NEXT_ALLOWED_DEV_ORIGINS = mergeAllowedDevOrigins(
+      process.env.NEXT_ALLOWED_DEV_ORIGINS,
+      listHostNetworkAddresses(),
+    );
   }
 
   if (debug) {
@@ -112,6 +122,38 @@ export function buildWebEnv(options: WebEnvOptions): NodeJS.ProcessEnv {
   }
 
   return env;
+}
+
+/**
+ * Returns the host's non-loopback, non-internal IPv4/IPv6 addresses. Used to
+ * auto-populate Next.js `allowedDevOrigins` so the dev server accepts
+ * connections from LAN / Tailscale / SSH-forwarded clients.
+ */
+export function listHostNetworkAddresses(): string[] {
+  const out = new Set<string>();
+  const interfaces = os.networkInterfaces();
+  for (const addrs of Object.values(interfaces)) {
+    if (!addrs) continue;
+    for (const addr of addrs) {
+      if (addr.internal) continue;
+      // Skip link-local IPv6 (fe80::) — it isn't a useful origin.
+      if (addr.family === "IPv6" && addr.address.toLowerCase().startsWith("fe80")) continue;
+      out.add(addr.address);
+    }
+  }
+  return [...out];
+}
+
+function mergeAllowedDevOrigins(existing: string | undefined, extra: string[]): string {
+  const set = new Set<string>();
+  if (existing) {
+    for (const s of existing.split(",")) {
+      const trimmed = s.trim();
+      if (trimmed) set.add(trimmed);
+    }
+  }
+  for (const s of extra) set.add(s);
+  return [...set].join(",");
 }
 
 export type StartupInfoOptions = {

@@ -1,13 +1,14 @@
 import type { NextConfig } from "next";
 
-const defaultDevOrigins = [
-  "localhost",
-  "localhost:37429",
-  "192.168.1.116", // Maintainer dev server
-  "100.105.155.17", // Maintainer dev server (Tailscale)
-];
+// The kandev CLI auto-populates NEXT_ALLOWED_DEV_ORIGINS with the host's
+// non-loopback addresses (see apps/cli/src/shared.ts) so LAN / Tailscale /
+// SSH-forwarded clients pass Next.js's allowedDevOrigins check. Users running
+// `next dev` directly can still extend the list manually via that env var.
+const defaultDevOrigins = ["localhost", "localhost:37429"];
 const extraDevOrigins = process.env.NEXT_ALLOWED_DEV_ORIGINS
-  ? process.env.NEXT_ALLOWED_DEV_ORIGINS.split(",").map((s) => s.trim())
+  ? process.env.NEXT_ALLOWED_DEV_ORIGINS.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
   : [];
 
 const nextConfig: NextConfig = {
