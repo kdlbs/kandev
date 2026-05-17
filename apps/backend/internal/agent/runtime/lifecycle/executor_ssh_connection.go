@@ -98,9 +98,15 @@ func initialTargetFromConfig(cfg SSHConnConfig) *SSHTarget {
 
 // inheritFromSSHConfig fills empty fields on target from the matching Host
 // block in ~/.ssh/config. Explicit form values are never overwritten.
+//
+// Reads $HOME/.ssh/config on every call (no caching). The kevinburke/ssh_config
+// package's package-level Get/GetStrict use a sync.Once to load the config once
+// per process, which breaks tests (and any user who edits their config) — each
+// resolve should see the current on-disk state.
 func inheritFromSSHConfig(alias string, t *SSHTarget) {
+	cfg := loadUserSSHConfig()
 	if t.Host == "" {
-		if v, _ := ssh_config.GetStrict(alias, "HostName"); v != "" {
+		if v := lookupSSHConfig(cfg, alias, "HostName"); v != "" {
 			t.Host = strings.TrimSpace(v)
 		}
 	}
@@ -108,28 +114,59 @@ func inheritFromSSHConfig(alias string, t *SSHTarget) {
 		t.Host = alias
 	}
 	if t.Port == 0 {
-		if v, _ := ssh_config.GetStrict(alias, "Port"); v != "" {
+		if v := lookupSSHConfig(cfg, alias, "Port"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil {
 				t.Port = n
 			}
 		}
 	}
 	if t.User == "" {
-		if v, _ := ssh_config.GetStrict(alias, "User"); v != "" {
+		if v := lookupSSHConfig(cfg, alias, "User"); v != "" {
 			t.User = v
 		}
 	}
 	if t.IdentitySource == "" {
-		if v, _ := ssh_config.GetStrict(alias, "IdentityFile"); v != "" {
+		if v := lookupSSHConfig(cfg, alias, "IdentityFile"); v != "" {
 			t.IdentitySource = SSHIdentitySourceFile
 			t.IdentityFile = expandHome(v)
 		}
 	}
 	if t.ProxyJump == "" {
-		if v, _ := ssh_config.GetStrict(alias, "ProxyJump"); v != "" {
+		if v := lookupSSHConfig(cfg, alias, "ProxyJump"); v != "" {
 			t.ProxyJump = v
 		}
 	}
+}
+
+// loadUserSSHConfig parses $HOME/.ssh/config on demand. Returns nil if the
+// file is absent or unreadable; lookupSSHConfig handles a nil config by
+// returning the empty string.
+func loadUserSSHConfig() *ssh_config.Config {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	f, err := os.Open(filepath.Join(home, ".ssh", "config"))
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+	cfg, err := ssh_config.Decode(f)
+	if err != nil {
+		return nil
+	}
+	return cfg
+}
+
+func lookupSSHConfig(cfg *ssh_config.Config, alias, key string) string {
+	if cfg == nil {
+		return ""
+	}
+	v, err := cfg.Get(alias, key)
+	if err != nil {
+		return ""
+	}
+	return v
 }
 
 // applyTargetDefaults fills in port/user/identity defaults and validates that
