@@ -22,6 +22,20 @@ const FRONTEND_BASE_PORT = 13000 + E2E_PORT_OFFSET;
 const HEALTH_TIMEOUT_MS = 30_000;
 const HEALTH_POLL_MS = 250;
 
+/**
+ * Returns true when the current run is the heavyweight container-backed
+ * Playwright project (Docker executor + SSH executor tests live here). The
+ * project was renamed `docker` → `containers` when SSH e2e tests joined it;
+ * the legacy name + env var are honored as deprecated aliases for one
+ * release. See apps/web/e2e/README.md.
+ */
+function isContainerProjectActive(projectName: string): boolean {
+  if (projectName === "containers" || projectName === "docker") return true;
+  if (process.env.KANDEV_E2E_CONTAINERS === "1") return true;
+  if (process.env.KANDEV_E2E_DOCKER === "1") return true;
+  return false;
+}
+
 export type BackendContext = {
   port: number;
   baseUrl: string;
@@ -237,9 +251,8 @@ exec git "$@"
 
       // Opt-in: Docker E2E project or KANDEV_E2E_DOCKER=1 enables real
       // container execution. Default is off so the regular suite stays fast
-      // and runs without a Docker daemon.
-      const dockerEnabled =
-        workerInfo.project.name === "docker" || process.env.KANDEV_E2E_DOCKER === "1";
+      // and runs without a Docker daemon. See e2e/README.md.
+      const dockerEnabled = isContainerProjectActive(workerInfo.project.name);
       const mockAgentLinuxBinary = path.join(BACKEND_DIR, "bin", "mock-agent-linux-amd64");
       const agentctlLinuxBinary = path.join(BACKEND_DIR, "bin", "agentctl-linux-amd64");
 

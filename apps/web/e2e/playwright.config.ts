@@ -26,7 +26,14 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: [/mobile-.*\.spec\.ts/, /docker\/.*\.spec\.ts/],
+      testIgnore: [
+        /mobile-.*\.spec\.ts/,
+        // Container-backed tests (Docker executor, SSH executor) live in the
+        // `containers` project and skip when Docker is not available locally.
+        // See apps/web/e2e/README.md for what runs there.
+        /docker\/.*\.spec\.ts/,
+        /ssh\/.*\.spec\.ts/,
+      ],
       use: { ...devices["Desktop Chrome"] },
     },
     {
@@ -35,13 +42,18 @@ export default defineConfig({
       use: { ...devices["Pixel 5"] },
     },
     {
-      // Real-Docker E2E. Opt-in: run with `playwright test --project=docker`.
-      // Spawns the backend with KANDEV_E2E_DOCKER=1, builds the
-      // kandev-agent:e2e image, and skips entirely on hosts without a Docker
-      // daemon. Container-bound tests are slow (~10-30s each) so they live
-      // in their own project to keep the default CI fast.
-      name: "docker",
-      testMatch: /docker\/.*\.spec\.ts/,
+      // Real-container E2E. Opt-in: run with `playwright test --project=containers`.
+      // Spawns the backend with KANDEV_E2E_CONTAINERS=1 (KANDEV_E2E_DOCKER=1
+      // is honored as a deprecated alias for one release). Builds the
+      // kandev-agent:e2e and kandev-sshd:e2e images and skips entirely on
+      // hosts without a Docker daemon — Docker is used as the runtime for
+      // both the Docker executor's own containers AND the sshd target the
+      // SSH executor connects to. Container-bound tests are slow (~10-30s
+      // each) so they live in their own project to keep the default CI fast.
+      //
+      // See apps/web/e2e/README.md for context and how to run locally.
+      name: "containers",
+      testMatch: [/docker\/.*\.spec\.ts/, /ssh\/.*\.spec\.ts/],
       use: { ...devices["Desktop Chrome"] },
       timeout: 180_000,
     },
