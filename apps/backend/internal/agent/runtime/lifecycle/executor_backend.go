@@ -82,6 +82,22 @@ const (
 
 	// Office metadata keys
 	MetadataKeySkillManifestJSON = "skill_manifest_json"
+
+	// SSH runtime metadata keys (per-session, except SSHWorkdirRoot which is per-profile).
+	MetadataKeySSHHost               = "ssh_host"
+	MetadataKeySSHPort               = "ssh_port"
+	MetadataKeySSHUser               = "ssh_user"
+	MetadataKeySSHHostFingerprint    = "ssh_host_fingerprint"
+	MetadataKeySSHRemoteTaskDir      = "ssh_remote_task_dir"
+	MetadataKeySSHRemoteSessionDir   = "ssh_remote_session_dir"
+	MetadataKeySSHRemoteAgentctlPort = "ssh_remote_agentctl_port"
+	MetadataKeySSHRemoteAgentctlPID  = "ssh_remote_agentctl_pid"
+	MetadataKeySSHLocalForwardPort   = "ssh_local_forward_port"
+	MetadataKeySSHRemoteAgentctlURL  = "ssh_remote_agentctl_url"
+	MetadataKeySSHWorkdirRoot        = "ssh_workdir_root"
+	MetadataKeySSHProxyJump          = "ssh_proxy_jump"
+	MetadataKeySSHIdentitySource     = "ssh_identity_source"
+	MetadataKeySSHIdentityFile       = "ssh_identity_file"
 )
 
 // persistentMetadataKeys lists metadata keys carried forward from a previous
@@ -94,6 +110,22 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySpriteState:     true,
 	MetadataKeySpriteCreatedAt: true,
 	MetadataKeyLocalPort:       true,
+
+	// SSH runtime
+	MetadataKeySSHHost:               true,
+	MetadataKeySSHPort:               true,
+	MetadataKeySSHUser:               true,
+	MetadataKeySSHHostFingerprint:    true,
+	MetadataKeySSHRemoteTaskDir:      true,
+	MetadataKeySSHRemoteSessionDir:   true,
+	MetadataKeySSHRemoteAgentctlPort: true,
+	MetadataKeySSHRemoteAgentctlPID:  true,
+	MetadataKeySSHLocalForwardPort:   true,
+	MetadataKeySSHRemoteAgentctlURL:  true,
+	MetadataKeySSHWorkdirRoot:        true,
+	MetadataKeySSHProxyJump:          true,
+	MetadataKeySSHIdentitySource:     true,
+	MetadataKeySSHIdentityFile:       true,
 
 	// Executor type marker
 	MetadataKeyIsRemote: true,

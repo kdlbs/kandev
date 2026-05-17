@@ -76,6 +76,11 @@ func provideLifecycleManager(
 	executorRegistry.Register(spritesExec)
 	log.Info("Sprites runtime registered")
 
+	// Register SSH runtime (run an agent on any Linux box reachable over SSH).
+	sshExec := lifecycle.NewSSHExecutor(secretStore, agentRegistry, agentctlResolver, log)
+	executorRegistry.Register(sshExec)
+	log.Info("SSH runtime registered")
+
 	credsMgr := credentials.NewManager(log)
 	if secretStore != nil {
 		credsMgr.AddProvider(secrets.NewSecretStoreProvider(secretStore))
@@ -111,6 +116,7 @@ func provideLifecycleManager(
 	preparerRegistry.Register(models.ExecutorTypeMockRemote, localPreparer)
 	preparerRegistry.Register(models.ExecutorTypeLocalDocker, lifecycle.NewDockerPreparer(log))
 	preparerRegistry.Register(models.ExecutorTypeSprites, lifecycle.NewSpritesPreparer(log))
+	preparerRegistry.Register(models.ExecutorTypeSSH, lifecycle.NewSSHPreparer(log))
 	lifecycleMgr.SetPreparerRegistry(preparerRegistry)
 	lifecycleMgr.SetSecretStore(secretStore)
 	// Wire the agent_profiles reader so the launch-prep skill deploy hook

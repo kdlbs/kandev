@@ -235,6 +235,9 @@ func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *exec
 	if imageTag := profile.Config["image_tag"]; imageTag != "" {
 		metadata["image_tag_override"] = imageTag
 	}
+	if workdirRoot := profile.Config["ssh_workdir_root"]; workdirRoot != "" {
+		metadata["ssh_workdir_root"] = workdirRoot
+	}
 }
 
 // resolveProfileEnvVars resolves profile env vars, dereferencing secret IDs to their values.
