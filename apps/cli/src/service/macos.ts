@@ -195,7 +195,19 @@ export function readInstalledLogPaths(plistPath: string): { out: string; err: st
   const outMatch = /<key>StandardOutPath<\/key>\s*<string>([^<]+)<\/string>/.exec(content);
   const errMatch = /<key>StandardErrorPath<\/key>\s*<string>([^<]+)<\/string>/.exec(content);
   if (!outMatch || !errMatch) return null;
-  return { out: outMatch[1], err: errMatch[1] };
+  // `renderLaunchdPlist` runs values through `escapeXml`, so a path containing
+  // `&`, `<`, etc. is stored escaped in the plist. Decode before returning so
+  // the caller can stat/tail the actual file on disk.
+  return { out: unescapeXml(outMatch[1]), err: unescapeXml(errMatch[1]) };
+}
+
+function unescapeXml(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&"); // last — must not re-decode a `&amp;amp;`-style sequence
 }
 
 function runLaunchctl(args: string[], opts: { allowFailure?: boolean } = {}): void {

@@ -29,6 +29,30 @@ describe("readInstalledLogPaths", () => {
     expect(readInstalledLogPaths(plistPath)).toBeNull();
   });
 
+  it("decodes XML-escaped paths so they match real filesystem locations", () => {
+    // Regression: renderLaunchdPlist runs values through escapeXml, so paths
+    // containing &, <, etc. are stored escaped in the plist. Without the
+    // inverse decode, readInstalledLogPaths would return `/home/a&amp;b/...`
+    // which never matches the actual `/home/a&b/...` file on disk.
+    const plist = renderLaunchdPlist({
+      launcher: {
+        nodePath: "/usr/local/bin/node",
+        cliEntry: "/usr/local/lib/node_modules/kandev/bin/cli.js",
+        kind: "npm",
+      },
+      homeDir: "/home/john&doe/.kandev",
+      logDir: "/home/john&doe/.kandev/logs",
+      mode: "user",
+    });
+    fs.writeFileSync(plistPath, plist);
+
+    const installed = readInstalledLogPaths(plistPath);
+    expect(installed).toEqual({
+      out: "/home/john&doe/.kandev/logs/service.out",
+      err: "/home/john&doe/.kandev/logs/service.err",
+    });
+  });
+
   it("reads back the same paths the renderer wrote (round-trip with custom home dir)", () => {
     // Regression for the showLogs-with-custom-home-dir bug: showLogs has no
     // access to args.homeDir (install-only), so it must derive log paths
