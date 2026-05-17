@@ -9,6 +9,8 @@
     "build": "cross-env NODE_ENV=production next build",
     "start": "cross-env NODE_ENV=production next start",
     "lint": "eslint --max-warnings 0",
+    "pretypecheck": "node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "e2e": "playwright test --config e2e/playwright.config.ts",
     "e2e:ui": "playwright test --config e2e/playwright.config.ts --ui",
