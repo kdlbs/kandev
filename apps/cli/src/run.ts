@@ -29,6 +29,8 @@ export type RunOptions = {
   verbose?: boolean;
   /** Show debug logs + agent message dumps */
   debug?: boolean;
+  /** Skip browser open. Set by service units. */
+  headless?: boolean;
 };
 
 type PreparedBundle = {
@@ -297,6 +299,7 @@ export async function runRelease({
   webPort,
   verbose = false,
   debug = false,
+  headless = false,
 }: RunOptions): Promise<void> {
   const prepared = await prepareBundleForLaunch({
     runtimeVersion,
@@ -323,6 +326,10 @@ export async function runRelease({
     quiet: !prepared.showOutput,
   });
   await waitForUrlReady(webUrl, webProc, healthTimeoutMs);
+  if (headless) {
+    console.log(`[kandev] ready (headless) at ${prepared.backendUrl}`);
+    return;
+  }
   console.log("[kandev] open: " + prepared.backendUrl);
   openBrowser(prepared.backendUrl);
 }
