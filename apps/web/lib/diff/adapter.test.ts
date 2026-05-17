@@ -116,6 +116,22 @@ index 0000000..e69de29`;
     expect(lines[3]).toBe(NEW_HEADER);
   });
 
+  it("strips the trailing header in a header-only rename diff (no @@ body)", () => {
+    // 100%-similarity renames have no hunk body, so the *last* header line
+    // (`rename to ...`) has no trailing \n after trim. The strip regex
+    // needs to see a terminator, which is why we append `\n` before
+    // matching — otherwise `rename to ...` leaks into `body` and breaks
+    // the reconstructed patch.
+    const diff = `diff --git a/old.ts b/${FILE}
+similarity index 100%
+rename from old.ts
+rename to ${FILE}`;
+    const result = normalizeDiffString(diff, FILE);
+    expect(result).not.toContain("rename to");
+    expect(result).not.toContain("similarity index");
+    expect(result).not.toContain("a/old.ts");
+  });
+
   it("strips rename headers so the canonical --- / +++ pair survives", () => {
     // `git diff --find-renames` produces `similarity index`, `rename from`,
     // `rename to` lines that our older regex left in place — the duplicated

@@ -53,7 +53,10 @@ export function normalizeDiffString(diff: string, filePath: string): string {
   // Covers diff --git, index, mode change, similarity/dissimilarity, rename
   // and copy markers, and the --- / +++ pair. Hunk content (lines starting
   // with @@) and everything after stays untouched.
-  const body = trimmed.replace(
+  // Append `\n` before matching so the last header line in a header-only
+  // diff (e.g. 100%-similarity rename with no `@@` body) still terminates
+  // and gets stripped — otherwise it leaks into `body`.
+  const body = (trimmed + "\n").replace(
     /^(?:(?:diff --git|index |(?:new|deleted) file mode |(?:old|new) mode |(?:similarity|dissimilarity) index |(?:rename|copy) (?:from|to) |Binary files |--- |\+\+\+ )[^\n]*\n)+/,
     "",
   );
