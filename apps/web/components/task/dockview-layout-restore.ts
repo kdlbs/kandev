@@ -1,9 +1,11 @@
 import type { DockviewReadyEvent, SerializedDockview } from "dockview-react";
+import type { StoreApi } from "zustand";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { applyLayoutFixups } from "@/lib/state/dockview-layout-builders";
 import { isLayoutShapeHealthy } from "@/lib/state/dockview-layout-health";
 import { measureDockviewContainer } from "@/lib/state/dockview-measure";
 import type { LayoutState } from "@/lib/state/layout-manager";
+import type { AppState } from "@/lib/state/store";
 import { getEnvLayout, getEnvMaximizeState, removeEnvMaximizeState } from "@/lib/local-storage";
 
 const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
@@ -180,4 +182,40 @@ export function tryRestoreLayout(
   }
 
   return false;
+}
+
+/**
+ * Collect session ids that DEFINITIVELY belong to a different env than `envId`.
+ * These are phantoms (typically from a previously-deleted task) that must be
+ * stripped on env-layout restore.
+ *
+ * Sessions absent from `environmentIdBySessionId` are NOT classified as
+ * phantoms — they may be a still-loading WS arrival that legitimately belongs
+ * to this env. `useAutoSessionTab`'s reconcile cleans up anything that turns
+ * out to be stale once the store catches up.
+ */
+export function collectPhantomSessionIdsForEnv(
+  state: { environmentIdBySessionId: Record<string, string> },
+  envId: string,
+): Set<string> {
+  const result = new Set<string>();
+  for (const [sessionId, mappedEnv] of Object.entries(state.environmentIdBySessionId)) {
+    if (mappedEnv && mappedEnv !== envId) result.add(sessionId);
+  }
+  return result;
+}
+
+/**
+ * Restore the env's saved layout, stripping session panels that we KNOW
+ * belong to a different env — guards against phantom panels from
+ * previously-deleted tasks resurfacing on restore.
+ */
+export function restoreEnvLayout(
+  api: DockviewReadyEvent["api"],
+  envId: string | null,
+  appStore: StoreApi<AppState>,
+  validComponents: Set<string>,
+): boolean {
+  const phantoms = envId ? collectPhantomSessionIdsForEnv(appStore.getState(), envId) : undefined;
+  return tryRestoreLayout(api, envId, validComponents, phantoms);
 }

@@ -10,7 +10,7 @@ import {
 } from "dockview-react";
 import { themeKandev } from "@/lib/layout/dockview-theme";
 import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
-import { tryRestoreLayout } from "./dockview-layout-restore";
+import { restoreEnvLayout } from "./dockview-layout-restore";
 import {
   setupContainerResizeSync,
   setupGroupTracking,
@@ -67,8 +67,6 @@ import { ReviewDialog } from "@/components/review/review-dialog";
 import { BottomTerminalPanel } from "./bottom-terminal-panel";
 import { useReviewDialog } from "./use-review-dialog";
 
-import type { StoreApi } from "zustand";
-import type { AppState } from "@/lib/state/store";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 
@@ -434,41 +432,6 @@ function renderPanel(
 
 const VALID_COMPONENTS = new Set(Object.keys(components));
 
-/**
- * Collect session ids that DEFINITIVELY belong to a different env than `envId`.
- * These are phantoms (typically from a previously-deleted task) that must be
- * stripped on env-layout restore.
- *
- * Sessions absent from `environmentIdBySessionId` are NOT classified as
- * phantoms — they may be a still-loading WS arrival that legitimately belongs
- * to this env. `useAutoSessionTab`'s reconcile cleans up anything that turns
- * out to be stale once the store catches up.
- */
-export function collectPhantomSessionIdsForEnv(
-  state: { environmentIdBySessionId: Record<string, string> },
-  envId: string,
-): Set<string> {
-  const result = new Set<string>();
-  for (const [sessionId, mappedEnv] of Object.entries(state.environmentIdBySessionId)) {
-    if (mappedEnv && mappedEnv !== envId) result.add(sessionId);
-  }
-  return result;
-}
-
-/**
- * Restore the env's saved layout, stripping session panels that we KNOW
- * belong to a different env — guards against phantom panels from
- * previously-deleted tasks resurfacing on restore.
- */
-function restoreEnvLayout(
-  api: DockviewReadyEvent["api"],
-  envId: string | null,
-  appStore: StoreApi<AppState>,
-): boolean {
-  const phantoms = envId ? collectPhantomSessionIdsForEnv(appStore.getState(), envId) : undefined;
-  return tryRestoreLayout(api, envId, VALID_COMPONENTS, phantoms);
-}
-
 // ---------------------------------------------------------------------------
 // useEnvSwitchCleanup — backup layout switch for external session changes
 // ---------------------------------------------------------------------------
@@ -550,7 +513,8 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       setApi(api);
 
       const currentEnvId = envIdRef.current;
-      const restored = !initialLayout && restoreEnvLayout(api, currentEnvId, appStore);
+      const restored =
+        !initialLayout && restoreEnvLayout(api, currentEnvId, appStore, VALID_COMPONENTS);
       if (!restored) {
         buildDefaultLayout(api, initialLayout ?? (compact ? "compact" : undefined));
       }
