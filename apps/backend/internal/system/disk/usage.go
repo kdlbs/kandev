@@ -54,9 +54,10 @@ type Service struct {
 	jobs    *jobs.Tracker
 	log     *logger.Logger
 
-	mu        sync.Mutex
-	value     *Breakdown
-	computing bool
+	mu          sync.Mutex
+	value       *Breakdown
+	computing   bool
+	activeJobID string
 }
 
 // NewService constructs a Service for the given home directory. The home
@@ -95,11 +96,16 @@ func (s *Service) Get(ctx context.Context) GetResult {
 	return GetResult{Data: value, Computing: computing || stale}
 }
 
-// Refresh always kicks off a walk (even if one is already in flight) and
-// returns the job ID. The fresh value replaces the cache when the walk
-// finishes.
+// Refresh kicks off a walk and returns the job ID. If a walk is already in
+// flight the in-flight job ID is returned and no new walk is started — a
+// concurrent recompute would race on the cache and waste IO.
 func (s *Service) Refresh(ctx context.Context) string {
 	s.mu.Lock()
+	if s.computing && s.activeJobID != "" {
+		id := s.activeJobID
+		s.mu.Unlock()
+		return id
+	}
 	s.computing = true
 	s.mu.Unlock()
 	return s.kickJob(ctx)
@@ -114,13 +120,18 @@ func (s *Service) startWalk(ctx context.Context) {
 // kickJob hands the walk off to the jobs.Tracker so progress flows through
 // the standard system.job.update channel. The fn updates the cache before
 // returning so observers reading Service state after the job completes see
-// the fresh value.
+// the fresh value. The active job ID is tracked so concurrent Refresh
+// callers can be coalesced onto the in-flight walk.
 func (s *Service) kickJob(ctx context.Context) string {
-	return s.jobs.Start(ctx, jobKind, func(jobCtx context.Context) (map[string]interface{}, error) {
+	id := s.jobs.Start(ctx, jobKind, func(jobCtx context.Context) (map[string]interface{}, error) {
 		breakdown := s.computeBreakdown(jobCtx)
 		s.storeBreakdown(breakdown)
 		return map[string]interface{}{"total_bytes": breakdown.Total}, nil
 	})
+	s.mu.Lock()
+	s.activeJobID = id
+	s.mu.Unlock()
+	return id
 }
 
 // computeBreakdown walks every configured subdir, aggregating sizes and
@@ -175,6 +186,7 @@ func (s *Service) storeBreakdown(b *Breakdown) {
 	defer s.mu.Unlock()
 	s.value = b
 	s.computing = false
+	s.activeJobID = ""
 }
 
 // setComputedAt is a test-only helper that rewinds the cached value's

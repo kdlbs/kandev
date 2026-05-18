@@ -110,6 +110,15 @@ func (s *Service) Open(name string) (*os.File, int64, error) {
 		return nil, 0, err
 	}
 	full := filepath.Join(s.logDir, clean)
+	// Reject symlinks and other non-regular files before opening so an
+	// adversarial link placed inside the log directory cannot escape it.
+	lstat, err := os.Lstat(full)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !lstat.Mode().IsRegular() {
+		return nil, 0, errors.New("logs: not a regular file")
+	}
 	f, err := os.Open(full)
 	if err != nil {
 		return nil, 0, err
