@@ -1,7 +1,10 @@
-import { describe, it, expect } from "vitest";
-import { sanitizeLayout } from "./dockview-layout-restore";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { sanitizeLayout, tryRestoreLayout } from "./dockview-layout-restore";
+import * as localStorage from "@/lib/local-storage";
 
 const VALID_COMPONENTS = new Set<string>(["chat", "files", "shell", "git", "terminal"]);
+const PHANTOM_PANEL_ID = "session:phantom";
+const ALIVE_PANEL_ID = "session:alive-1";
 
 /**
  * Build a minimal valid SerializedDockview-shaped object — matches what
@@ -187,7 +190,7 @@ describe("sanitizeLayout - session panel handling", () => {
     expect(Object.keys(result.panels)).toContain("chat");
   });
 
-  describe("keepOnlySessionIds (per-env restore filter)", () => {
+  describe("excludeSessionIds (per-env restore filter)", () => {
     function buildLayoutWithTwoSessions(sidA: string, sidB: string) {
       const layout = buildLayout();
       layout.grid.root.data[1].data.views = [`session:${sidA}`, `session:${sidB}`];
@@ -203,38 +206,41 @@ describe("sanitizeLayout - session panel handling", () => {
       return layout;
     }
 
-    it("strips session panels whose ids are not in keepOnlySessionIds (phantom panels from deleted tasks)", () => {
+    it("strips session panels whose ids are in excludeSessionIds (phantom panels from deleted tasks)", () => {
       // Regression for "phantom panels from local/session storage": a stale
       // session id from a previously-deleted task can end up serialized in an
       // env-layout (e.g. via a debounced save firing during a task switch).
-      // The env restore must drop session panels for sessions not belonging
-      // to this env, otherwise the deleted task's chat reappears as a tab.
-      const layout = buildLayoutWithTwoSessions("alive-1", "phantom-deleted");
+      // The env restore must drop session panels we know belong to another env.
+      const aliveId = "alive-1";
+      const phantomId = "phantom-deleted";
+      const layout = buildLayoutWithTwoSessions(aliveId, phantomId);
       const result = sanitizeLayout(layout, VALID_COMPONENTS, {
-        keepOnlySessionIds: new Set(["alive-1"]),
+        excludeSessionIds: new Set([phantomId]),
       });
       expect(result).not.toBeNull();
-      expect(Object.keys(result.panels)).toContain("session:alive-1");
-      expect(Object.keys(result.panels)).not.toContain("session:phantom-deleted");
+      const alivePanel = `session:${aliveId}`;
+      expect(Object.keys(result.panels)).toContain(alivePanel);
+      expect(Object.keys(result.panels)).not.toContain(`session:${phantomId}`);
       // The leaf's views list also drops the phantom.
       const centerLeaf = result.grid.root.data[1];
-      expect(centerLeaf.data.views).toEqual(["session:alive-1"]);
-      expect(centerLeaf.data.activeView).toBe("session:alive-1");
+      expect(centerLeaf.data.views).toEqual([alivePanel]);
+      expect(centerLeaf.data.activeView).toBe(alivePanel);
     });
 
-    it("strips ALL session panels when keepOnlySessionIds is an empty set", () => {
-      // A new env that has no sessions yet (e.g. brand-new task) — no session
-      // panel from a saved layout should leak through.
+    it("keeps unmapped session ids (preserves still-loading sessions across restore)", () => {
+      // A session id present in the saved layout that the store has not yet
+      // mapped (WS hasn't arrived) MUST be kept — otherwise the user loses
+      // their valid chat tab on load. Reconcile cleans it up later if stale.
       const layout = buildLayoutWithTwoSessions("a", "b");
       const result = sanitizeLayout(layout, VALID_COMPONENTS, {
-        keepOnlySessionIds: new Set<string>(),
+        excludeSessionIds: new Set<string>(),
       });
       expect(result).not.toBeNull();
-      expect(Object.keys(result.panels)).not.toContain("session:a");
-      expect(Object.keys(result.panels)).not.toContain("session:b");
+      expect(Object.keys(result.panels)).toContain("session:a");
+      expect(Object.keys(result.panels)).toContain("session:b");
     });
 
-    it("ignores keepOnlySessionIds when undefined (preserves default per-env behavior)", () => {
+    it("ignores excludeSessionIds when undefined (preserves default per-env behavior)", () => {
       // Without the option, behavior is unchanged: session panels are kept.
       const layout = buildLayoutWithTwoSessions("a", "b");
       const result = sanitizeLayout(layout, VALID_COMPONENTS);
@@ -242,5 +248,91 @@ describe("sanitizeLayout - session panel handling", () => {
       expect(Object.keys(result.panels)).toContain("session:a");
       expect(Object.keys(result.panels)).toContain("session:b");
     });
+
+    it("rejects mixing stripSessionPanels with excludeSessionIds at the type level", () => {
+      // The two options are intent-mutually-exclusive; the type union enforces
+      // it so a caller can't silently get strip-wins behavior.
+      const layout = buildLayoutWithTwoSessions("a", "b");
+      const result = sanitizeLayout(layout, VALID_COMPONENTS, {
+        stripSessionPanels: true,
+        // @ts-expect-error - the discriminated union forbids passing both
+        excludeSessionIds: new Set(["a"]),
+      });
+      // Compile-time guard is the contract; this just asserts the call still
+      // returns a usable value so the test isn't a no-op at runtime.
+      expect(result).not.toBeNull();
+    });
+  });
+});
+
+
+describe("tryRestoreLayout - phantom-only env layout falls back to default", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function makeFakeApi() {
+    return {
+      fromJSON: vi.fn(),
+      layout: vi.fn(),
+      width: 1600,
+      height: 600,
+      groups: [],
+      panels: [],
+      activeGroup: { id: "g-center" },
+      getPanel: vi.fn(() => null),
+      onDidActiveGroupChange: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidLayoutChange: vi.fn(() => ({ dispose: vi.fn() })),
+    } as unknown as Parameters<typeof tryRestoreLayout>[0];
+  }
+
+  it("returns false when every session in the saved env-layout is a phantom (so caller builds default)", () => {
+    // Saved layout's center group had a single session panel — a phantom from
+    // a previously-deleted task. Stripping it would leave the layout
+    // session-less and the center column pruned. Falling back to default
+    // lets the caller rebuild a proper 3-column layout.
+    const layout = buildLayout();
+    layout.grid.root.data[1].data.views = [PHANTOM_PANEL_ID];
+    layout.grid.root.data[1].data.activeView = PHANTOM_PANEL_ID;
+    Object.assign(layout.panels, {
+      [PHANTOM_PANEL_ID]: { id: PHANTOM_PANEL_ID, contentComponent: "chat" },
+    });
+    vi.spyOn(localStorage, "getEnvLayout").mockReturnValue(layout);
+    vi.spyOn(localStorage, "getEnvMaximizeState").mockReturnValue(null);
+
+    const api = makeFakeApi();
+    const restored = tryRestoreLayout(api, "env-new", VALID_COMPONENTS, new Set(["phantom"]));
+    expect(restored).toBe(false);
+    expect(api.fromJSON).not.toHaveBeenCalled();
+  });
+
+  it("restores normally when at least one session panel survives the filter", () => {
+    const layout = buildLayout();
+    layout.grid.root.data[1].data.views = [ALIVE_PANEL_ID, PHANTOM_PANEL_ID];
+    layout.grid.root.data[1].data.activeView = ALIVE_PANEL_ID;
+    Object.assign(layout.panels, {
+      [ALIVE_PANEL_ID]: { id: ALIVE_PANEL_ID, contentComponent: "chat" },
+      [PHANTOM_PANEL_ID]: { id: PHANTOM_PANEL_ID, contentComponent: "chat" },
+    });
+    vi.spyOn(localStorage, "getEnvLayout").mockReturnValue(layout);
+    vi.spyOn(localStorage, "getEnvMaximizeState").mockReturnValue(null);
+
+    const api = makeFakeApi();
+    const restored = tryRestoreLayout(api, "env-X", VALID_COMPONENTS, new Set(["phantom"]));
+    expect(restored).toBe(true);
+    expect(api.fromJSON).toHaveBeenCalledOnce();
+  });
+
+  it("restores normally when the saved layout has no session panels at all (legit non-session env layout)", () => {
+    // An env may persist a layout with only files/terminal/etc. — no session
+    // panels to begin with. The fallback guard must NOT discard this layout.
+    const layout = buildLayout(); // center has "chat" only, no session:* ids
+    vi.spyOn(localStorage, "getEnvLayout").mockReturnValue(layout);
+    vi.spyOn(localStorage, "getEnvMaximizeState").mockReturnValue(null);
+
+    const api = makeFakeApi();
+    const restored = tryRestoreLayout(api, "env-X", VALID_COMPONENTS, new Set());
+    expect(restored).toBe(true);
+    expect(api.fromJSON).toHaveBeenCalledOnce();
   });
 });

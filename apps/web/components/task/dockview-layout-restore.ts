@@ -12,7 +12,9 @@ const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
 export function sanitizeLayout(
   layout: any,
   validComponents: Set<string>,
-  options: { stripSessionPanels?: boolean; keepOnlySessionIds?: Set<string> } = {},
+  options:
+    | { stripSessionPanels: true; excludeSessionIds?: never }
+    | { stripSessionPanels?: false | undefined; excludeSessionIds?: Set<string> } = {},
 ): any {
   if (!isLayoutShapeHealthy(layout)) return null;
 
@@ -29,15 +31,17 @@ export function sanitizeLayout(
     if (id.startsWith("session:")) {
       if (options.stripSessionPanels) {
         invalidIds.add(id);
-      } else if (options.keepOnlySessionIds) {
-        // Per-env restore: drop session panels for sessions that don't belong
-        // to this env (e.g. a stale id from a previously-deleted task that
-        // leaked into storage). Guards against phantom-panel resurrection.
+      } else if (options.excludeSessionIds) {
+        // Per-env restore: drop session panels that we know belong to a
+        // different env (a phantom from a previously-deleted task). Sessions
+        // we have no mapping for are kept — they may be a still-loading WS
+        // arrival, and useAutoSessionTab's reconcile will clean them up if
+        // they turn out to be stale.
         const sid = id.slice("session:".length);
-        if (options.keepOnlySessionIds.has(sid)) {
-          validPanels[id] = panel;
-        } else {
+        if (options.excludeSessionIds.has(sid)) {
           invalidIds.add(id);
+        } else {
+          validPanels[id] = panel;
         }
       } else {
         validPanels[id] = panel;
@@ -121,24 +125,56 @@ function tryRestoreMaximizeOnly(api: DockviewReadyEvent["api"], envId: string): 
   }
 }
 
+/** Count session:* panel ids in a serialized layout. */
+function countSessionPanels(layout: { panels?: Record<string, unknown> } | null): number {
+  if (!layout?.panels) return 0;
+  let n = 0;
+  for (const id of Object.keys(layout.panels)) if (id.startsWith("session:")) n++;
+  return n;
+}
+
+/**
+ * Restore the per-env saved layout, after sanitizing phantom session panels.
+ * Returns true on a successful fromJSON, false when no usable saved layout
+ * exists (caller falls through to maximize-only / global / default build).
+ */
+function tryRestoreEnvLayout(
+  api: DockviewReadyEvent["api"],
+  envId: string,
+  validComponents: Set<string>,
+  phantomSessionIds: Set<string> | undefined,
+): boolean {
+  const envLayout = getEnvLayout(envId);
+  if (!envLayout) return false;
+  const sanitized = sanitizeLayout(envLayout, validComponents, {
+    excludeSessionIds: phantomSessionIds,
+  });
+  if (!sanitized) return false;
+  // If every session panel in the saved layout was a phantom and got
+  // stripped, restoring the now-session-less layout would leave the center
+  // column pruned. Fall back to the default build so the user gets a
+  // coherent 3-column layout with the active session in the middle.
+  if (
+    phantomSessionIds !== undefined &&
+    countSessionPanels(envLayout) > 0 &&
+    countSessionPanels(sanitized) === 0
+  ) {
+    return false;
+  }
+  api.fromJSON(sanitized as SerializedDockview);
+  applyFixupsWithMaximize(api, envId);
+  return true;
+}
+
 export function tryRestoreLayout(
   api: DockviewReadyEvent["api"],
   currentEnvId: string | null,
   validComponents: Set<string>,
-  validSessionIdsForEnv?: Set<string>,
+  phantomSessionIds?: Set<string>,
 ): boolean {
   if (currentEnvId) {
     try {
-      const envLayout = getEnvLayout(currentEnvId);
-      if (envLayout) {
-        const sanitized = sanitizeLayout(envLayout, validComponents, {
-          keepOnlySessionIds: validSessionIdsForEnv,
-        });
-        if (!sanitized) return false;
-        api.fromJSON(sanitized as SerializedDockview);
-        applyFixupsWithMaximize(api, currentEnvId);
-        return true;
-      }
+      if (tryRestoreEnvLayout(api, currentEnvId, validComponents, phantomSessionIds)) return true;
     } catch {
       // fall through to maximize-only / global fallback
     }

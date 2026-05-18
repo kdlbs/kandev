@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   CHAT_PANEL_FALLBACK_LABEL,
-  collectSessionIdsForEnv,
+  collectPhantomSessionIdsForEnv,
   resolveChatPanelTitle,
 } from "./dockview-desktop-layout";
 
@@ -39,12 +39,12 @@ describe("resolveChatPanelTitle", () => {
 
 /**
  * Regression: an env-layout could be restored with a session panel whose id
- * referred to a previously-deleted task's session. The fix filters session
- * panels against the env's currently-known session ids at restore time;
- * this helper extracts that set from the appStore.
+ * referred to a previously-deleted task's session. The fix strips session
+ * panels we KNOW belong to a different env; sessions not yet mapped in the
+ * store are preserved (they may still be loading via WS).
  */
-describe("collectSessionIdsForEnv", () => {
-  it("returns only session ids whose mapping matches the env", () => {
+describe("collectPhantomSessionIdsForEnv", () => {
+  it("returns session ids whose mapping is a different env", () => {
     const state = {
       environmentIdBySessionId: {
         "sess-1": "env-A",
@@ -52,16 +52,20 @@ describe("collectSessionIdsForEnv", () => {
         "sess-3": "env-B",
       },
     };
-    expect(collectSessionIdsForEnv(state, "env-A")).toEqual(new Set(["sess-1", "sess-2"]));
-    expect(collectSessionIdsForEnv(state, "env-B")).toEqual(new Set(["sess-3"]));
+    expect(collectPhantomSessionIdsForEnv(state, "env-A")).toEqual(new Set(["sess-3"]));
+    expect(collectPhantomSessionIdsForEnv(state, "env-B")).toEqual(new Set(["sess-1", "sess-2"]));
   });
 
-  it("returns an empty set when no sessions map to the env (e.g. brand-new task)", () => {
+  it("returns every mapped session as phantom when the env has no own sessions yet", () => {
     const state = { environmentIdBySessionId: { "sess-1": "env-A" } };
-    expect(collectSessionIdsForEnv(state, "env-new")).toEqual(new Set());
+    expect(collectPhantomSessionIdsForEnv(state, "env-new")).toEqual(new Set(["sess-1"]));
   });
 
-  it("returns an empty set when the mapping is empty", () => {
-    expect(collectSessionIdsForEnv({ environmentIdBySessionId: {} }, "env-A")).toEqual(new Set());
+  it("does NOT classify a session as a phantom when its mapping is absent (still loading via WS)", () => {
+    // A session id present in a saved layout but not in environmentIdBySessionId
+    // could be a not-yet-arrived session for this very env. Keep it; reconcile
+    // will clean it up later if it really is stale.
+    const state = { environmentIdBySessionId: {} };
+    expect(collectPhantomSessionIdsForEnv(state, "env-A")).toEqual(new Set());
   });
 });

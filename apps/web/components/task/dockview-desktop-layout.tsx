@@ -435,37 +435,38 @@ function renderPanel(
 const VALID_COMPONENTS = new Set(Object.keys(components));
 
 /**
- * Collect every session id currently mapped to `envId` in the store. Used to
- * filter out phantom session panels (from previously-deleted tasks) during
- * env-layout restore.
+ * Collect session ids that DEFINITIVELY belong to a different env than `envId`.
+ * These are phantoms (typically from a previously-deleted task) that must be
+ * stripped on env-layout restore.
+ *
+ * Sessions absent from `environmentIdBySessionId` are NOT classified as
+ * phantoms — they may be a still-loading WS arrival that legitimately belongs
+ * to this env. `useAutoSessionTab`'s reconcile cleans up anything that turns
+ * out to be stale once the store catches up.
  */
-export function collectSessionIdsForEnv(
+export function collectPhantomSessionIdsForEnv(
   state: { environmentIdBySessionId: Record<string, string> },
   envId: string,
 ): Set<string> {
   const result = new Set<string>();
   for (const [sessionId, mappedEnv] of Object.entries(state.environmentIdBySessionId)) {
-    if (mappedEnv === envId) result.add(sessionId);
+    if (mappedEnv && mappedEnv !== envId) result.add(sessionId);
   }
   return result;
 }
 
 /**
- * Restore the env's saved layout, whitelisting only session panels that
- * legitimately belong to `envId` — guards against phantom panels from
+ * Restore the env's saved layout, stripping session panels that we KNOW
+ * belong to a different env — guards against phantom panels from
  * previously-deleted tasks resurfacing on restore.
- *
- * Phantom session ids are excluded because they map to a different env in
- * `environmentIdBySessionId` (the env they were created under), so they are
- * simply absent from the set returned by `collectSessionIdsForEnv`.
  */
 function restoreEnvLayout(
   api: DockviewReadyEvent["api"],
   envId: string | null,
   appStore: StoreApi<AppState>,
 ): boolean {
-  const validSessionIds = envId ? collectSessionIdsForEnv(appStore.getState(), envId) : undefined;
-  return tryRestoreLayout(api, envId, VALID_COMPONENTS, validSessionIds);
+  const phantoms = envId ? collectPhantomSessionIdsForEnv(appStore.getState(), envId) : undefined;
+  return tryRestoreLayout(api, envId, VALID_COMPONENTS, phantoms);
 }
 
 // ---------------------------------------------------------------------------

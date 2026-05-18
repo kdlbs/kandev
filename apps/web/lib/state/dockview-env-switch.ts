@@ -257,7 +257,7 @@ function addIncomingSessionPanel(
  * env-scoped portals before calling this function.
  */
 export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
-  const { api, newEnvId, safeWidth, safeHeight, buildDefault } = params;
+  const { api, newEnvId, activeSessionId, safeWidth, safeHeight, buildDefault } = params;
 
   const fastResult = tryFastEnvSwitch(params);
   if (fastResult) return fastResult;
@@ -266,6 +266,11 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
   if (saved) {
     try {
       api.fromJSON(saved as SerializedDockview);
+      // Saved layout may carry a stale session panel from a previously-deleted
+      // task (phantom). Mirror the fast path: drop session panels that don't
+      // belong to the incoming active session. useAutoSessionTab will add the
+      // current session's panel if it's missing.
+      removeEphemeralPanels(api, activeSessionId);
       api.layout(safeWidth, safeHeight);
       return applyLayoutFixups(api);
     } catch (err) {
