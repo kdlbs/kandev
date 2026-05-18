@@ -108,7 +108,7 @@ func (r *SSHExecutor) Close() error {
 // propagated via buildLaunchMetadata (req.ExecutorConfig keys merged in).
 func (r *SSHExecutor) targetFromMetadata(md map[string]interface{}) (*SSHTarget, error) {
 	host := getMetadataString(md, MetadataKeySSHHost)
-	hostAlias := getMetadataString(md, "ssh_host_alias")
+	hostAlias := getMetadataString(md, MetadataKeySSHHostAlias)
 	if host == "" && hostAlias == "" {
 		return nil, errors.New("ssh executor: host (or host_alias) is required in executor config")
 	}

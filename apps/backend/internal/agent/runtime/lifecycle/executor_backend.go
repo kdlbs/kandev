@@ -84,6 +84,7 @@ const (
 	MetadataKeySkillManifestJSON = "skill_manifest_json"
 
 	// SSH runtime metadata keys (per-session, except SSHWorkdirRoot which is per-profile).
+	MetadataKeySSHHostAlias          = "ssh_host_alias"
 	MetadataKeySSHHost               = "ssh_host"
 	MetadataKeySSHPort               = "ssh_port"
 	MetadataKeySSHUser               = "ssh_user"

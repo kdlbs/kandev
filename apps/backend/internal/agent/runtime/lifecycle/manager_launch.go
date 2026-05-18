@@ -80,6 +80,7 @@ func applyRouteOverrideToProfile(profile *AgentProfileInfo, req *LaunchRequest) 
 // or bypassing the pinned host-key.
 var trustedExecutorConfigKeys = map[string]bool{
 	MetadataKeySSHHost:            true,
+	MetadataKeySSHHostAlias:       true,
 	MetadataKeySSHPort:            true,
 	MetadataKeySSHUser:            true,
 	MetadataKeySSHHostFingerprint: true,
