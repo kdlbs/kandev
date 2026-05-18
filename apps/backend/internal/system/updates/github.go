@@ -7,7 +7,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
+
+// defaultClientTimeout caps the GitHub poll when the caller passes a nil
+// http.Client. The 6h interval already provides plenty of slack; an
+// unbounded timeout could hang a goroutine for hours on a stalled socket.
+const defaultClientTimeout = 30 * time.Second
 
 // DefaultReleaseURL is the GitHub Releases API endpoint polled by the updates
 // service. Exposed as a package-level variable so tests can point a stub
@@ -36,7 +42,7 @@ func FetchLatestRelease(ctx context.Context, client *http.Client) (string, strin
 // URL. Used internally and by tests pointing at a stub server.
 func FetchLatestReleaseFrom(ctx context.Context, client *http.Client, url string) (string, string, error) {
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{Timeout: defaultClientTimeout}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -51,7 +57,11 @@ func FetchLatestReleaseFrom(ctx context.Context, client *http.Client, url string
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode == http.StatusForbidden && resp.Header.Get("X-RateLimit-Remaining") == "0" {
+	// GitHub returns 403 with X-RateLimit-Remaining: 0 for the primary unauth
+	// rate limit, and 429 for secondary/abuse-detection limits — both should
+	// surface as ErrGitHubRateLimited so the poller backs off identically.
+	if resp.StatusCode == http.StatusTooManyRequests ||
+		(resp.StatusCode == http.StatusForbidden && resp.Header.Get("X-RateLimit-Remaining") == "0") {
 		return "", "", ErrGitHubRateLimited
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

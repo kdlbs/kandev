@@ -55,9 +55,14 @@ func parseSemver(s string) ([3]int, string, bool) {
 	if s == "" {
 		return out, "", false
 	}
-	// Split off pre-release / build metadata.
+	// Strip build metadata (semver: build metadata does not affect
+	// precedence). The remaining string may still carry a `-pre` suffix.
+	if i := strings.Index(s, "+"); i >= 0 {
+		s = s[:i]
+	}
+	// Split off the pre-release suffix.
 	pre := ""
-	if i := strings.IndexAny(s, "-+"); i >= 0 {
+	if i := strings.Index(s, "-"); i >= 0 {
 		pre = s[i+1:]
 		s = s[:i]
 	}
