@@ -733,8 +733,11 @@ test.describe("Workflow agent profile switching", () => {
     const step2 = await apiClient.createWorkflowStep(workflow.id, "Step2", 1);
     await apiClient.createWorkflowStep(workflow.id, "Done", 2);
 
+    // step1 has auto_start + on_turn_complete:move_to_next but NO startup
+    // prompt — a prompt would race the user's New Agent launch and could
+    // advance the task to step2 before the user-added session even exists,
+    // letting this test pass without exercising the bug path.
     await apiClient.updateWorkflowStep(step1.id, {
-      prompt: 'e2e:message("step1 done")',
       events: {
         on_enter: [{ type: "auto_start_agent" }],
         on_turn_complete: [{ type: "move_to_next" }],
@@ -754,7 +757,9 @@ test.describe("Workflow agent profile switching", () => {
       },
     );
 
-    // Wait for the auto-started profileA session to be ready.
+    // Wait for the auto-started profileA session to be ready AND confirm the
+    // task is still on step1 — without a startup prompt the only way to
+    // advance is via the user-added session's turn-complete below.
     await expect
       .poll(
         async () => {
@@ -764,6 +769,12 @@ test.describe("Workflow agent profile switching", () => {
         { timeout: 30_000, message: "Waiting for profileA session to be ready" },
       )
       .toBe("WAITING_FOR_INPUT");
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id, {
+        timeout: 5_000,
+        message: "Task should still be on step1 before New Agent",
+      })
+      .toBe(step1.id);
 
     // User clicks "New Agent" — launch a profileB session on the same task.
     await apiClient.launchSession({
@@ -785,6 +796,17 @@ test.describe("Workflow agent profile switching", () => {
         { timeout: 30_000, message: "Waiting for task to advance to step2" },
       )
       .toBe(step2.id);
+
+    // The handler runs in a goroutine after the step-id write, so a buggy
+    // respawn could land a few moments after the advance is visible. Poll
+    // briefly for session-count stability before the final assertion to
+    // close that race.
+    await expect
+      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
+        timeout: 5_000,
+        message: "Checking no extra session is spawned",
+      })
+      .toBe(2);
 
     // Critical assertion: no extra profileA session was spawned after the
     // user's profileB turn completed. The task must still have exactly two

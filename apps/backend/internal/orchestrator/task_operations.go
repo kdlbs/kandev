@@ -337,10 +337,7 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 		// profile mutation here is invisible to maybySwitchSessionForProfile,
 		// which would treat the session as user-chosen and leave it on the
 		// override forever.
-		if session.Metadata == nil {
-			session.Metadata = map[string]interface{}{}
-		}
-		session.Metadata[models.SessionMetaKeyCreatedBy] = models.SessionCreatedByWorkflowSwitch
+		s.tagSessionAsWorkflowSwitched(ctx, sessionID)
 		// Re-resolve the agent profile snapshot so the tab shows the correct agent logo/name.
 		// Set a minimal snapshot first so stale data is never persisted if resolution fails.
 		session.AgentProfileSnapshot = map[string]interface{}{"id": effectiveProfileID}

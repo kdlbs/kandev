@@ -481,23 +481,10 @@ func sessionWasWorkflowSwitched(session *models.TaskSession) bool {
 // tagSessionAsWorkflowSwitched marks a session's metadata so it's recognised
 // as workflow-spawned by sessionWasWorkflowSwitched. Used by every code path
 // that ends up with a session whose agent_profile_id was decided by the
-// workflow step override rather than by the user.
+// workflow step override rather than by the user. Uses the atomic
+// SetSessionMetadataKey (json_set) so other metadata keys are preserved.
 func (s *Service) tagSessionAsWorkflowSwitched(ctx context.Context, sessionID string) {
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil {
-		s.logger.Warn("failed to load session for workflow-switch tagging",
-			zap.String("session_id", sessionID), zap.Error(err))
-		return
-	}
-	if session.Metadata == nil {
-		session.Metadata = map[string]interface{}{}
-	}
-	if existing, _ := session.Metadata[models.SessionMetaKeyCreatedBy].(string); existing == models.SessionCreatedByWorkflowSwitch {
-		return
-	}
-	session.Metadata[models.SessionMetaKeyCreatedBy] = models.SessionCreatedByWorkflowSwitch
-	session.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyCreatedBy, models.SessionCreatedByWorkflowSwitch); err != nil {
 		s.logger.Warn("failed to persist workflow-switch tag",
 			zap.String("session_id", sessionID), zap.Error(err))
 	}
@@ -594,21 +581,11 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 		s.reviveReusedSession(ctx, existing)
 	}
 
-	// Tag the reused session as workflow-spawned so a later transition to a
-	// plain step knows it can revert to the task default — same rationale as
-	// the tag in createNewSessionForStep. Without this, reusing a session
-	// across two workflow overrides (X → Y → X) and then entering a plain
-	// step would leave the reused session untagged and incorrectly
-	// indistinguishable from a user-created one.
-	if existing.Metadata == nil {
-		existing.Metadata = map[string]interface{}{}
-	}
-	existing.Metadata[models.SessionMetaKeyCreatedBy] = models.SessionCreatedByWorkflowSwitch
-	existing.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTaskSession(ctx, existing); err != nil {
-		s.logger.Warn("failed to persist workflow-switch metadata on reused session",
-			zap.String("session_id", existing.ID), zap.Error(err))
-	}
+	// Note: do not stamp created_by here. Reused sessions keep whatever tag
+	// they had when first created — workflow-spawned ones (createNewSessionForStep,
+	// StartCreatedSession, startTask) already carry the workflow_switch tag,
+	// and user-created ones must stay untagged so a later plain step doesn't
+	// silently revert their explicit profile choice to the task default.
 
 	if err := s.SetPrimarySession(ctx, existing.ID); err != nil {
 		s.logger.Warn("failed to set reused session as primary",
@@ -696,22 +673,19 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 	// step (no agent_profile override) knows it's safe to revert to the task
 	// default. User-created sessions intentionally lack this tag — reverting
 	// them would override an explicit user choice.
-	if newSession.Metadata == nil {
-		newSession.Metadata = map[string]interface{}{}
-	}
-	newSession.Metadata[models.SessionMetaKeyCreatedBy] = models.SessionCreatedByWorkflowSwitch
+	s.tagSessionAsWorkflowSwitched(ctx, newSession.ID)
 
 	// Inherit the task environment from the old session — the workspace is shared
 	// across sessions within the same task, so the new session can reuse the
 	// existing agentctl connection and workspace files.
 	if currentSession.TaskEnvironmentID != "" && newSession.TaskEnvironmentID == "" {
 		newSession.TaskEnvironmentID = currentSession.TaskEnvironmentID
-	}
-	newSession.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTaskSession(ctx, newSession); err != nil {
-		s.logger.Warn("failed to persist workflow-switch metadata on new session",
-			zap.String("session_id", newSession.ID),
-			zap.Error(err))
+		newSession.UpdatedAt = time.Now().UTC()
+		if err := s.repo.UpdateTaskSession(ctx, newSession); err != nil {
+			s.logger.Warn("failed to copy task_environment_id to new session",
+				zap.String("session_id", newSession.ID),
+				zap.Error(err))
+		}
 	}
 
 	// Transfer any queued message (e.g. a move_task_kandev hand-off prompt) and
