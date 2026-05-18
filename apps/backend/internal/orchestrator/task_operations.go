@@ -660,6 +660,15 @@ func (s *Service) prepareSessionForStart(
 		if ensureErr != nil {
 			return "", ensureErr
 		}
+		// The office/assignee path bypasses StartCreatedSession's override
+		// mutation: the session is created directly with the assignee
+		// profile (which falls back to the step's agent_profile_id via the
+		// runner projection). If that profile differs from the caller's,
+		// the assignment was workflow-driven — tag so a later transition
+		// to a plain step knows it can revert to the task default.
+		if agentProfileID != "" && session.AgentProfileID != "" && session.AgentProfileID != agentProfileID {
+			s.tagSessionAsWorkflowSwitched(ctx, session.ID)
+		}
 		return session.ID, nil
 	}
 	return s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
