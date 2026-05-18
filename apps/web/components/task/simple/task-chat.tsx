@@ -348,7 +348,7 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
                 <IconPaperclip className="h-3.5 w-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Attach file</TooltipContent>
+            <TooltipContent>Attach files</TooltipContent>
           </Tooltip>
           <EnhancePromptButton
             onClick={handleEnhance}
