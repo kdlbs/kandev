@@ -329,6 +329,11 @@ export class SessionPage {
     return this.clarificationQuestionCardById(questionId).getByTestId("clarification-input");
   }
 
+  /** Container around the custom text input — exposes data-active for selection state. */
+  clarificationCustomInputContainerForQuestion(questionId: string): Locator {
+    return this.clarificationQuestionCardById(questionId).getByTestId("clarification-custom-input");
+  }
+
   /** Option button (by visible label text) inside a specific question card. */
   clarificationOptionForQuestion(questionId: string, text: string): Locator {
     return this.clarificationQuestionCardById(questionId)

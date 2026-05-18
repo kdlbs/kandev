@@ -473,4 +473,127 @@ test.describe("Multi-question clarification carousel", () => {
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
     await expect(session.clarificationPrev()).toBeDisabled();
   });
+
+  test("typing in the custom input auto-selects it and deselects the picked option", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q custom auto-selects",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    // Pick an option on Q1 (auto-advances to Q2), then jump back to Q1.
+    await session.clarificationOption("PostgreSQL").click();
+    await session.clarificationStep(0).click();
+    const selectedBefore = session
+      .clarificationQuestionCardById("db")
+      .locator('[data-testid="clarification-option"][data-selected="true"]');
+    await expect(selectedBefore).toContainText("PostgreSQL");
+
+    // Type into the custom input — it should light up and the option should
+    // deselect, while the stepper keeps step 0 marked as answered.
+    const input = session.clarificationInputForQuestion("db");
+    await input.click();
+    await input.fill("Bespoke KV store");
+
+    const customContainer = session.clarificationCustomInputContainerForQuestion("db");
+    await expect(customContainer).toHaveAttribute("data-active", "true");
+    await expect(
+      session
+        .clarificationQuestionCardById("db")
+        .locator('[data-testid="clarification-option"][data-selected="true"]'),
+    ).toHaveCount(0);
+    await expect(session.clarificationStep(0)).toHaveAttribute("data-answered", "true");
+    await expect(session.clarificationGroupProgress()).toContainText("1 of 3 answered");
+  });
+
+  test("emptying the custom draft clears the answer and reverts the stepper", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q draft clears answer",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    const input = session.clarificationInputForQuestion("db");
+    await input.click();
+    await input.fill("Bespoke KV store");
+    await expect(session.clarificationStep(0)).toHaveAttribute("data-answered", "true");
+    await expect(session.clarificationGroupProgress()).toContainText("1 of 3 answered");
+
+    await input.fill("");
+    await expect(session.clarificationStep(0)).toHaveAttribute("data-answered", "false");
+    await expect(session.clarificationGroupProgress()).toContainText("0 of 3 answered");
+    await expect(session.clarificationCustomInputContainerForQuestion("db")).toHaveAttribute(
+      "data-active",
+      "false",
+    );
+  });
+
+  test("Cmd+Enter from the last step's custom input submits the bundle", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q cmd+enter from input",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    await session.clarificationOption("PostgreSQL").click();
+    await session.clarificationOption("Go").click();
+
+    const deployInput = session.clarificationInputForQuestion("deploy");
+    await deployInput.click();
+    await deployInput.fill("Nomad cluster");
+    await deployInput.press("ControlOrMeta+Enter");
+
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat).toContainText("Nomad cluster");
+  });
+
+  test("Cmd+Enter from outside the input submits when all questions are answered", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q cmd+enter global",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    await session.clarificationOption("PostgreSQL").click();
+    await session.clarificationOption("Go").click();
+    await session.clarificationOption("Docker").click();
+
+    // Focus is on the last option button, not the input.
+    await testPage.keyboard.press("ControlOrMeta+Enter");
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  });
 });
