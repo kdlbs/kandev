@@ -204,6 +204,47 @@ describe("performEnvSwitch", () => {
   });
 });
 
+describe("performEnvSwitch slow-path stale session strip", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("closes stale session chat panels after the slow-path fromJSON", () => {
+    // Regression: a saved env layout could carry a `session:*` panel from a
+    // previously-deleted task (phantom). On the slow-path restore, that
+    // panel would land in the live api as a stray tab. removeStaleSessionPanels
+    // must close any session:* panel whose id != the incoming active session.
+    vi.mocked(getEnvLayout)
+      .mockReturnValueOnce(makeHealthyLayoutWith({}))
+      .mockReturnValueOnce(makeHealthyLayoutWith({}));
+    // Force the slow path: layouts don't structurally match.
+    vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(false);
+
+    const closeStale = vi.fn();
+    const closeFileEditor = vi.fn();
+    const closeKeep = vi.fn();
+    const api = {
+      ...makeMockApi(),
+      // api.fromJSON is a no-op mock; populate `panels` with what would exist
+      // post-restore so removeStaleSessionPanels' filter has something to act on.
+      panels: [
+        { id: "session:old-session", api: { component: "chat", close: closeStale } },
+        { id: NEW_SESSION_PANEL_ID, api: { component: "chat", close: closeKeep } },
+        // file editors are NOT session panels — they must NOT be closed.
+        { id: "preview:file-editor", api: { component: "file-editor", close: closeFileEditor } },
+      ],
+    } as unknown as EnvSwitchParams["api"];
+    const params = makeParams({ api });
+
+    performEnvSwitch(params);
+
+    expect(closeStale).toHaveBeenCalledOnce();
+    expect(closeKeep).not.toHaveBeenCalled();
+    expect(closeFileEditor).not.toHaveBeenCalled();
+    expect(params.api.fromJSON).toHaveBeenCalledOnce();
+  });
+});
+
 describe("performEnvSwitch fast-path active view restoration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
