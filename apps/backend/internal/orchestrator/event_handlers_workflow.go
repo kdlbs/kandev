@@ -466,6 +466,18 @@ func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 	return ""
 }
 
+// sessionWasWorkflowSwitched reports whether the session was spawned by a
+// previous workflow step's agent_profile override (createNewSessionForStep)
+// rather than by the user. Used to decide whether transitioning to a step
+// with no override should revert to the task default.
+func sessionWasWorkflowSwitched(session *models.TaskSession) bool {
+	if session == nil || session.Metadata == nil {
+		return false
+	}
+	v, _ := session.Metadata[models.SessionMetaKeyCreatedBy].(string)
+	return v == models.SessionCreatedByWorkflowSwitch
+}
+
 // switchSessionForStep activates a session for the new agent profile.
 // If an existing session on this task already uses the target profile it is
 // reused (re-promoted to primary, brought out of COMPLETED if it had been
@@ -639,17 +651,26 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 		return nil, fmt.Errorf("failed to get new session: %w", err)
 	}
 
+	// Tag the session as workflow-spawned so a later transition to a plain
+	// step (no agent_profile override) knows it's safe to revert to the task
+	// default. User-created sessions intentionally lack this tag — reverting
+	// them would override an explicit user choice.
+	if newSession.Metadata == nil {
+		newSession.Metadata = map[string]interface{}{}
+	}
+	newSession.Metadata[models.SessionMetaKeyCreatedBy] = models.SessionCreatedByWorkflowSwitch
+
 	// Inherit the task environment from the old session — the workspace is shared
 	// across sessions within the same task, so the new session can reuse the
 	// existing agentctl connection and workspace files.
 	if currentSession.TaskEnvironmentID != "" && newSession.TaskEnvironmentID == "" {
 		newSession.TaskEnvironmentID = currentSession.TaskEnvironmentID
-		newSession.UpdatedAt = time.Now().UTC()
-		if err := s.repo.UpdateTaskSession(ctx, newSession); err != nil {
-			s.logger.Warn("failed to copy task_environment_id to new session",
-				zap.String("session_id", newSession.ID),
-				zap.Error(err))
-		}
+	}
+	newSession.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateTaskSession(ctx, newSession); err != nil {
+		s.logger.Warn("failed to persist workflow-switch metadata on new session",
+			zap.String("session_id", newSession.ID),
+			zap.Error(err))
 	}
 
 	// Transfer any queued message (e.g. a move_task_kandev hand-off prompt) and
@@ -732,9 +753,13 @@ func (s *Service) maybySwitchSessionForProfile(
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
 
-	// When the step has no override, fall back to the task's original agent profile
-	// so that moving to a step without an agent_profile reverts to the default.
-	if effectiveProfile == "" {
+	// When the step has no override, fall back to the task's original agent
+	// profile so that moving to a step without an agent_profile reverts to the
+	// default. Only do this when the current session was itself spawned by a
+	// previous step's override — a user-chosen session (e.g. "New Agent"
+	// button) must not be silently replaced by the task default, which would
+	// override the user's explicit choice.
+	if effectiveProfile == "" && sessionWasWorkflowSwitched(session) {
 		task, err := s.repo.GetTask(ctx, taskID)
 		if err == nil && task.Metadata != nil {
 			if pid, ok := task.Metadata[models.MetaKeyAgentProfileID].(string); ok && pid != "" {
