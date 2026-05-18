@@ -52,6 +52,13 @@ const DIFF_UNSAFE_CSS = `
     padding-inline: 12px !important;
     background: var(--card) !important;
   }
+  /* Vertically center the "Add comment" hover button in the line gutter.
+     Pierre 1.1.22 declares the slot wrapper as display:flex with top:0/bottom:0
+     but no align-items, so our fixed-size button pins to the top of the line
+     cell instead of centering on the line number. */
+  [data-gutter-utility-slot] {
+    align-items: center !important;
+  }
 `;
 
 type UseDiffOptionsArgs = {

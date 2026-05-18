@@ -103,6 +103,41 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     expect(colors.pre).toBe(colors.expected);
   });
 
+  test("Add-comment hover button is vertically centered in the line gutter", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedExpansionTask(testPage, apiClient, seedData);
+    await openChangesTab(testPage);
+    await openExpansionFileDiff(testPage);
+
+    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 60_000 });
+
+    // Pierre 1.1.22 declares [data-gutter-utility-slot] as display:flex with
+    // top:0/bottom:0 but no align-items, so a fixed-size hover button pins to
+    // the top of the line cell instead of centering on the line number.
+    // We override align-items: center in unsafeCSS — verify the rule actually
+    // reaches the shadow DOM's adopted stylesheets.
+    const slotAlignItems = await testPage.evaluate(() => {
+      const container = document.querySelector("diffs-container");
+      if (!container?.shadowRoot) throw new Error("diffs-container shadow root missing");
+
+      // Inject a probe with the slot's data attribute into the shadow root and
+      // read its computed style — this measures the actual cascade end result
+      // without depending on lazy hover-triggered slot creation.
+      const probe = document.createElement("div");
+      probe.setAttribute("data-gutter-utility-slot", "");
+      container.shadowRoot.appendChild(probe);
+      const computed = getComputedStyle(probe).alignItems;
+      probe.remove();
+      return computed;
+    });
+
+    await testPage.screenshot({ path: "test-results/diff-hover-button-regression.png" });
+    expect(slotAlignItems).toBe("center");
+  });
+
   test("renders Pierre Diffs viewer and shows both hunks", async ({
     testPage,
     apiClient,
