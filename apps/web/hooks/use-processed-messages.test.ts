@@ -5,7 +5,12 @@ import {
   type Message,
   type MessageType,
 } from "@/lib/types/http";
-import { deduplicateAgentBootResumes, isAgentBootResumeMessage } from "./use-processed-messages";
+import type { RichMetadata } from "@/components/task/chat/types";
+import {
+  collapseTodoSnapshotsPerTurn,
+  deduplicateAgentBootResumes,
+  isAgentBootResumeMessage,
+} from "./use-processed-messages";
 
 function makeMessage(
   id: string,
@@ -23,6 +28,14 @@ function makeMessage(
     metadata,
     created_at: "",
   };
+}
+
+function makeTodo(
+  id: string,
+  turnId: string | undefined,
+  todos: Array<{ text: string; done?: boolean }>,
+): Message {
+  return { ...makeMessage(id, "todo", { todos }), turn_id: turnId };
 }
 
 function bootStarted(id: string): Message {
@@ -117,5 +130,74 @@ describe("deduplicateAgentBootResumes", () => {
     const messages = [setup, bootResumed("r1"), bootResumed("r2")];
     const result = deduplicateAgentBootResumes(messages);
     expect(result.map((m) => m.id)).toEqual(["x", "r2"]);
+  });
+});
+
+describe("collapseTodoSnapshotsPerTurn", () => {
+  it("returns the list unchanged when there are no todo messages", () => {
+    const messages = [makeMessage("m1", "message", undefined, "hi")];
+    expect(collapseTodoSnapshotsPerTurn(messages)).toEqual(messages);
+  });
+
+  it("returns a single todo message unchanged", () => {
+    const todo = makeTodo("t1", "turn-1", [{ text: "step 1" }]);
+    const result = collapseTodoSnapshotsPerTurn([todo]);
+    expect(result).toEqual([todo]);
+    expect((result[0].metadata as RichMetadata).previous_todo_snapshots).toBeUndefined();
+  });
+
+  it("keeps only the latest todo per turn and attaches prior snapshots", () => {
+    const userMsg = makeMessage("u1", "message", undefined, "go");
+    const t1 = makeTodo("t1", "turn-1", [{ text: "a" }]);
+    const t2 = makeTodo("t2", "turn-1", [{ text: "a", done: true }, { text: "b" }]);
+    const t3 = makeTodo("t3", "turn-1", [
+      { text: "a", done: true },
+      { text: "b", done: true },
+      { text: "c" },
+    ]);
+    const result = collapseTodoSnapshotsPerTurn([userMsg, t1, t2, t3]);
+
+    expect(result.map((m) => m.id)).toEqual(["u1", "t3"]);
+    const meta = result[1].metadata as RichMetadata;
+    expect(meta.previous_todo_snapshots).toHaveLength(2);
+    expect(meta.previous_todo_snapshots?.[0].todos).toEqual([{ text: "a" }]);
+    expect(meta.previous_todo_snapshots?.[1].todos).toEqual([
+      { text: "a", done: true },
+      { text: "b" },
+    ]);
+    // Latest todos remain reachable on the kept message.
+    expect(meta.todos).toEqual([
+      { text: "a", done: true },
+      { text: "b", done: true },
+      { text: "c" },
+    ]);
+  });
+
+  it("collapses todos independently per turn", () => {
+    const a1 = makeTodo("a1", "turn-A", [{ text: "x" }]);
+    const a2 = makeTodo("a2", "turn-A", [{ text: "x", done: true }]);
+    const b1 = makeTodo("b1", "turn-B", [{ text: "y" }]);
+    const result = collapseTodoSnapshotsPerTurn([a1, a2, b1]);
+
+    expect(result.map((m) => m.id)).toEqual(["a2", "b1"]);
+    expect((result[0].metadata as RichMetadata).previous_todo_snapshots).toHaveLength(1);
+    expect((result[1].metadata as RichMetadata).previous_todo_snapshots).toBeUndefined();
+  });
+
+  it("preserves todo messages without a turn_id", () => {
+    const orphan = makeTodo("o1", undefined, [{ text: "orphan" }]);
+    const t1 = makeTodo("t1", "turn-1", [{ text: "a" }]);
+    const t2 = makeTodo("t2", "turn-1", [{ text: "a", done: true }]);
+    const result = collapseTodoSnapshotsPerTurn([orphan, t1, t2]);
+
+    expect(result.map((m) => m.id)).toEqual(["o1", "t2"]);
+  });
+
+  it("does not mutate input messages", () => {
+    const t1 = makeTodo("t1", "turn-1", [{ text: "a" }]);
+    const t2 = makeTodo("t2", "turn-1", [{ text: "a", done: true }]);
+    collapseTodoSnapshotsPerTurn([t1, t2]);
+    expect(t1.metadata).toEqual({ todos: [{ text: "a" }] });
+    expect(t2.metadata).toEqual({ todos: [{ text: "a", done: true }] });
   });
 });

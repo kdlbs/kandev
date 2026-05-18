@@ -13,6 +13,70 @@ import { isMermaidContent } from "@/components/editors/tiptap/tiptap-mermaid-ext
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const remarkPlugins: any[] = [remarkGfm, remarkBreaks, remarkGemoji];
 
+const FENCE_OPEN_RE = /^ {0,3}(`{3,})/;
+const TRAILING_FENCE_RE = /(`{3,})\s*$/;
+
+function pureCloseLength(line: string, openCount: number): number | null {
+  const match = /^ {0,3}(`{3,})\s*$/.exec(line);
+  if (!match || match[1].length < openCount) return null;
+  return match[1].length;
+}
+
+function gluedCloseLength(line: string, openCount: number): number | null {
+  const match = TRAILING_FENCE_RE.exec(line);
+  if (!match || match[1].length < openCount) return null;
+  // Reject pure-fence lines (already handled by pureCloseLength) and lines
+  // where everything before the trailing run is whitespace only.
+  const head = line.slice(0, line.length - match[0].length).trimEnd();
+  if (head.length === 0) return null;
+  return match[1].length;
+}
+
+/**
+ * Pre-process a markdown string to repair fenced code blocks that have their
+ * closing fence glued to the last code line (`...}\`\`\`\n`prose`). Without
+ * this, CommonMark/GFM treats the glued backticks as code content, so the
+ * fence never closes and following prose gets swallowed into one huge code
+ * node. We split such lines into `<content>\n<backticks>` only when we're
+ * inside an open fence whose opener run length is ≤ the trailing run length.
+ *
+ * Pure string preprocessing, intentionally not a remark plugin.
+ */
+export function normalizeMarkdown(input: string): string {
+  if (!input || input.length === 0) return input;
+  const hadTrailingNewline = input.endsWith("\n");
+  const lines = input.split("\n");
+  const out: string[] = [];
+  let openCount: number | null = null;
+
+  for (const line of lines) {
+    if (openCount === null) {
+      const opener = FENCE_OPEN_RE.exec(line);
+      if (opener) openCount = opener[1].length;
+      out.push(line);
+      continue;
+    }
+    if (pureCloseLength(line, openCount) !== null) {
+      openCount = null;
+      out.push(line);
+      continue;
+    }
+    const glued = gluedCloseLength(line, openCount);
+    if (glued !== null) {
+      const trailingMatch = TRAILING_FENCE_RE.exec(line)!;
+      const head = line.slice(0, line.length - trailingMatch[0].length);
+      out.push(head);
+      out.push("`".repeat(glued));
+      openCount = null;
+      continue;
+    }
+    out.push(line);
+  }
+
+  const result = out.join("\n");
+  return hadTrailingNewline && !result.endsWith("\n") ? result + "\n" : result;
+}
+
 /**
  * Recursively extracts text content from React children.
  * Optimized with fast paths for common cases (string/number).

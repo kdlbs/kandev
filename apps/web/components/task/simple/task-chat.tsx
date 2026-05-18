@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { toast } from "sonner";
-import { IconCode, IconChevronDown, IconSend, IconUpload, IconUser } from "@tabler/icons-react";
+import { IconCode, IconChevronDown, IconSend, IconPaperclip, IconUser } from "@tabler/icons-react";
 import { AgentAvatar } from "@/app/office/components/agent-avatar";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -345,10 +345,10 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
                 className="h-7 w-7 cursor-pointer"
                 onClick={() => fileInputRef.current?.click()}
               >
-                <IconUpload className="h-3.5 w-3.5" />
+                <IconPaperclip className="h-3.5 w-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Attach file</TooltipContent>
+            <TooltipContent>Attach files</TooltipContent>
           </Tooltip>
           <EnhancePromptButton
             onClick={handleEnhance}
