@@ -739,15 +739,16 @@
 }
 
 /* Code wrapped in a link reads as a link: no fill, link color,
-   background appears on hover for affordance. */
-.markdown-body a > code,
-.markdown-body a code:not(pre code) {
+   background appears on hover for affordance. Scoped to exclude
+   user bubbles so they keep their primary-tinted chip styling. */
+.markdown-body:not(.markdown-body-user) a > code,
+.markdown-body:not(.markdown-body-user) a code:not(pre code) {
   background: transparent;
   color: inherit;
 }
 
-.markdown-body a:hover > code,
-.markdown-body a:hover code:not(pre code) {
+.markdown-body:not(.markdown-body-user) a:hover > code,
+.markdown-body:not(.markdown-body-user) a:hover code:not(pre code) {
   background: var(--muted);
 }
 

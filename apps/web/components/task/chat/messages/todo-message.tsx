@@ -44,14 +44,17 @@ function SnapshotHistory({ snapshots }: { snapshots: TodoSnapshot[] }) {
         {snapshots.map((snap, i) => {
           const items = normalizeTodos(snap.todos);
           const done = countCompleted(items);
+          // Todos may not be ordered with completed-first, so find the first
+          // non-completed entry rather than indexing by the completed count.
+          const nextItem = items.find((t) => resolveStatus(t) !== "completed");
           return (
             <div key={i} className="flex items-baseline gap-2">
               <span className="font-mono shrink-0">#{i + 1}</span>
               <span className="shrink-0">
                 {done}/{items.length}
               </span>
-              {items[done] && (
-                <span className="truncate text-muted-foreground/60">- {items[done].text}</span>
+              {nextItem && (
+                <span className="truncate text-muted-foreground/60">- {nextItem.text}</span>
               )}
             </div>
           );

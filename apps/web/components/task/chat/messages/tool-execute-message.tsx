@@ -114,42 +114,59 @@ function parseExecuteMetadata(comment: Message) {
   const output = shellExec?.output;
   const workDir = shellExec?.work_dir;
   const hasOutput = !!(output?.stdout || output?.stderr);
-  const isCommandLong = (comment.content?.length ?? 0) > LONG_COMMAND_THRESHOLD;
-  const hasExpandableContent = hasOutput || !!workDir || isCommandLong;
   const isSuccess = isExecuteSuccess(status, output);
-  return { status, output, workDir, hasOutput, isCommandLong, hasExpandableContent, isSuccess };
+  return { status, output, workDir, hasOutput, isSuccess };
+}
+
+function CommandHeader({
+  displayCommand,
+  isCommandLong,
+}: {
+  displayCommand: string;
+  isCommandLong: boolean;
+}) {
+  const className = "font-mono text-xs text-muted-foreground truncate min-w-0 flex-1 text-left";
+  if (!isCommandLong) {
+    return <span className={className}>{displayCommand}</span>;
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type="button" className={`${className} cursor-pointer bg-transparent border-0 p-0`}>
+          {displayCommand}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent
+        side="bottom"
+        align="start"
+        className="max-w-[min(90vw,640px)] whitespace-pre-wrap break-all font-mono text-xs"
+      >
+        {displayCommand}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 export const ToolExecuteMessage = memo(function ToolExecuteMessage({
   comment,
   worktreePath,
 }: ToolExecuteMessageProps) {
-  const { status, output, workDir, isCommandLong, hasExpandableContent, isSuccess } =
-    parseExecuteMetadata(comment);
+  const { status, output, workDir, hasOutput, isSuccess } = parseExecuteMetadata(comment);
   const autoExpanded = status === "running";
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
   const displayCommand = transformPathsInText(comment.content, worktreePath);
   const displayWorkDir = workDir ? transformPathsInText(workDir, worktreePath) : null;
+  // Measure after path transform so a long absolute path that gets shortened
+  // to a relative one is correctly treated as short.
+  const isCommandLong = displayCommand.length > LONG_COMMAND_THRESHOLD;
+  const hasExpandableContent = hasOutput || !!workDir || isCommandLong;
 
   return (
     <ExpandableRow
       icon={<IconTerminal className="h-4 w-4 text-muted-foreground" />}
       header={
         <div className="flex items-center gap-2 text-xs min-w-0">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="font-mono text-xs text-muted-foreground truncate min-w-0 flex-1">
-                {displayCommand}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent
-              side="bottom"
-              align="start"
-              className="max-w-[min(90vw,640px)] whitespace-pre-wrap break-all font-mono text-xs"
-            >
-              {displayCommand}
-            </TooltipContent>
-          </Tooltip>
+          <CommandHeader displayCommand={displayCommand} isCommandLong={isCommandLong} />
           {!isSuccess && (
             <span className="shrink-0">
               <ExecuteStatusIcon status={status} exitCode={output?.exit_code} />
