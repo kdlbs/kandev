@@ -984,6 +984,7 @@ export class ApiClient {
       prompt?: string;
       review_scope?: string;
       poll_interval_seconds?: number;
+      cleanup_policy?: "auto" | "always" | "never";
     },
   ): Promise<{ id: string }> {
     return this.request("POST", "/api/v1/github/watches/review", {
@@ -995,11 +996,55 @@ export class ApiClient {
       prompt: opts?.prompt ?? "",
       review_scope: opts?.review_scope ?? "user_and_teams",
       poll_interval_seconds: opts?.poll_interval_seconds ?? 300,
+      cleanup_policy: opts?.cleanup_policy ?? "auto",
     });
+  }
+
+  async updateReviewWatch(
+    watchId: string,
+    patch: {
+      enabled?: boolean;
+      cleanup_policy?: "auto" | "always" | "never";
+      prompt?: string;
+      repos?: Array<{ owner: string; name: string }>;
+    },
+  ): Promise<void> {
+    await this.request("PUT", `/api/v1/github/watches/review/${watchId}`, patch);
+  }
+
+  async deleteReviewWatch(watchId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/github/watches/review/${watchId}`);
   }
 
   async triggerReviewWatch(watchId: string): Promise<{ new_prs: number; cleaned?: number }> {
     return this.request("POST", `/api/v1/github/watches/review/${watchId}/trigger`, undefined);
+  }
+
+  /**
+   * Invokes the manual cleanup sweep — same code path the settings-page
+   * "Clean up merged" button uses. Returns the number of tasks deleted.
+   */
+  async cleanupMergedReviewTasks(): Promise<{ deleted: number }> {
+    return this.request("POST", "/api/v1/github/cleanup/review-tasks", undefined);
+  }
+
+  async cleanupClosedIssueTasks(): Promise<{ deleted: number }> {
+    return this.request("POST", "/api/v1/github/cleanup/issue-tasks", undefined);
+  }
+
+  /**
+   * Posts a user-authored message on an existing task session via the same WS
+   * action the chat UI uses. The resulting message lacks the auto_start
+   * metadata flag, so the cleanup loop counts it as real user engagement.
+   * Use after the auto-started agent finishes so the session is in a state
+   * that accepts new prompts.
+   */
+  async addUserMessage(taskId: string, sessionId: string, content: string): Promise<void> {
+    await this.wsRequest("message.add", {
+      task_id: taskId,
+      session_id: sessionId,
+      content,
+    });
   }
 
   // --- Integration config seeding (real API, not mock) ---
