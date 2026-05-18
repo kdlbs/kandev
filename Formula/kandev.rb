@@ -10,11 +10,11 @@ class Kandev < Formula
     regex(/^v?(\d+(?:\.\d+)+)$/i)
   end
 
-  depends_on "go"    => :build
-  depends_on "pnpm"  => :build
-  depends_on "rsync" => :build
+  depends_on "go"   => :build
+  depends_on "pnpm" => :build
   depends_on "node"
 
+  uses_from_macos "rsync"  => :build
   uses_from_macos "sqlite"
 
   def install
