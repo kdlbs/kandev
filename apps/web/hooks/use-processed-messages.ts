@@ -6,7 +6,7 @@ import {
   type Message,
   type MessageType,
 } from "@/lib/types/http";
-import type { ToolCallMetadata } from "@/components/task/chat/types";
+import type { RichMetadata, ToolCallMetadata, TodoSnapshot } from "@/components/task/chat/types";
 import {
   findPendingClarification,
   findPendingClarificationGroup,
@@ -182,7 +182,60 @@ function filterVisibleMessages(
     return false;
   });
 
-  return deduplicateAgentBootResumes(deduplicateRecoveryMessages(filtered));
+  return collapseTodoSnapshotsPerTurn(
+    deduplicateAgentBootResumes(deduplicateRecoveryMessages(filtered)),
+  );
+}
+
+function findLatestTodoIdsByTurn(messages: Message[]): Map<string, string> {
+  const latest = new Map<string, string>();
+  for (const message of messages) {
+    if (message.type === "todo" && message.turn_id) {
+      latest.set(message.turn_id, message.id);
+    }
+  }
+  return latest;
+}
+
+function collectPriorSnapshotsByLatestId(
+  messages: Message[],
+  latestTodoIdByTurn: Map<string, string>,
+): Map<string, TodoSnapshot[]> {
+  const previousByLatestId = new Map<string, TodoSnapshot[]>();
+  for (const message of messages) {
+    if (message.type !== "todo" || !message.turn_id) continue;
+    const latestId = latestTodoIdByTurn.get(message.turn_id);
+    if (!latestId || latestId === message.id) continue;
+    const snapshot: TodoSnapshot = {
+      todos: (message.metadata as RichMetadata | undefined)?.todos ?? [],
+      created_at: message.created_at,
+    };
+    const list = previousByLatestId.get(latestId) ?? [];
+    list.push(snapshot);
+    previousByLatestId.set(latestId, list);
+  }
+  return previousByLatestId;
+}
+
+/** Some agents (Claude Opus/Sonnet) emit a fresh `todo` message every time
+ *  they update their plan, producing a long stack of "Updated Todos" rows in
+ *  the chat. Each todo message is a full snapshot of the list, so all but the
+ *  latest in a turn are strictly stale. Collapse them: keep only the latest
+ *  per `turn_id` and attach the earlier snapshots to its metadata as
+ *  `previous_todo_snapshots` so the UI can show the progression on expand. */
+export function collapseTodoSnapshotsPerTurn(messages: Message[]): Message[] {
+  const latestTodoIdByTurn = findLatestTodoIdsByTurn(messages);
+  if (latestTodoIdByTurn.size === 0) return messages;
+
+  const previousByLatestId = collectPriorSnapshotsByLatestId(messages, latestTodoIdByTurn);
+
+  return messages.flatMap((message) => {
+    if (message.type !== "todo" || !message.turn_id) return [message];
+    if (latestTodoIdByTurn.get(message.turn_id) !== message.id) return [];
+    const previous = previousByLatestId.get(message.id);
+    if (!previous || previous.length === 0) return [message];
+    return [{ ...message, metadata: { ...message.metadata, previous_todo_snapshots: previous } }];
+  });
 }
 
 function groupActivityMessages(allMessages: Message[]): RenderItem[] {

@@ -715,11 +715,13 @@
   margin-bottom: 0.25rem;
 }
 
-/* Inline code accent color */
+/* Inline code: neutral foreground on a soft muted background.
+   Linked code (a > code) drops the background and inherits the link
+   color so file references read as links, not as another code chip. */
 .markdown-body :not(pre) > code,
 .markdown-body code:not(pre code) {
   background: var(--muted);
-  color: var(--accent);
+  color: var(--foreground);
   padding: 0.1rem 0.375rem;
   border-radius: 0.25rem;
   font-size: 0.9em;
@@ -734,6 +736,19 @@
 
 .markdown-body a:hover {
   text-decoration-line: underline;
+}
+
+/* Code wrapped in a link reads as a link: no fill, link color,
+   background appears on hover for affordance. */
+.markdown-body a > code,
+.markdown-body a code:not(pre code) {
+  background: transparent;
+  color: inherit;
+}
+
+.markdown-body a:hover > code,
+.markdown-body a:hover code:not(pre code) {
+  background: var(--muted);
 }
 
 .markdown-body blockquote {
