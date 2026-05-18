@@ -18,10 +18,10 @@ Kandev is currently installable via `brew install kdlbs/kandev/kandev` from the 
 
 - Author a homebrew-core-compliant `Formula/kandev.rb` that **builds entirely from source** — Go backend (cgo + sqlite via `mattn/go-sqlite3`), Next.js standalone web bundle, and the TypeScript CLI esbuild bundle.
 - Source comes from the GitHub-generated tag archive (`https://github.com/kdlbs/kandev/archive/refs/tags/vX.Y.Z.tar.gz`); per-release sha256 is captured at submission/bump time.
-- Build deps: `go => :build`, `pnpm => :build`. Runtime dep: `node` (CLI launcher + Next.js standalone server).
+- Build deps: `go => :build`, `pnpm => :build`, `rsync => :build` (used by `scripts/release/package-web.sh` to dereference symlinks in the Next.js standalone output). Runtime dep: `node` (CLI launcher + Next.js standalone server). `uses_from_macos "sqlite"` for the cgo sqlite3 link.
 - Install layout: `libexec/{bin,web,cli}` plus a single `bin/kandev` wrapper produced by `write_env_script`, setting `KANDEV_BUNDLE_DIR=<libexec>` and `KANDEV_VERSION=<version>`. This is the contract `apps/cli/src/runtime.ts` already honors.
-- `livecheck do; url :stable; strategy :github_latest; end` for auto-bump support.
-- Test block: `kandev --help` plus a `kandev --version` regex check.
+- `livecheck do; url :stable; regex(/^v?(\d+(?:\.\d+)+)$/i); end` — Git strategy (the default for `url :stable`) checks tags directly and avoids the GitHub API rate limit.
+- Test block: spawns `libexec/bin/kandev` with an isolated `KANDEV_HOME_DIR` and random `KANDEV_SERVER_PORT`, polls `/api/v1/system/health` until the response contains `"healthy"` (60s timeout), then shuts the backend down. Also asserts the formula `version` appears in `bin/kandev --version`.
 - Tap (`kdlbs/homebrew-kandev`) and its update script (`scripts/release/update-homebrew-tap.sh`) stay untouched — it remains the binary-install fast path; the homebrew-core formula is a parallel, source-built distribution.
 
 ## Scenarios
