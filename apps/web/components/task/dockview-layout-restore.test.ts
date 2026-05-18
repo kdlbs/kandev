@@ -265,7 +265,7 @@ describe("sanitizeLayout - session panel handling", () => {
   });
 });
 
-describe("tryRestoreLayout - phantom-only env layout falls back to default", () => {
+describe("tryRestoreLayout - phantom session panel filtering", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });

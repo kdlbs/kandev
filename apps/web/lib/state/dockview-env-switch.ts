@@ -155,6 +155,10 @@ function removeEphemeralPanels(api: DockviewApi, keepSessionId: string | null): 
  */
 function removeStaleSessionPanels(api: DockviewApi, keepSessionId: string | null): void {
   const keepId = keepSessionId ? `session:${keepSessionId}` : null;
+  // keepId=null (sessionless task) → strips all session panels, unlike the
+  // fast path's shouldRemoveDuringSwitch which keeps them. In practice
+  // sessionless tasks should have no session panels; useAutoSessionTab
+  // re-adds the panel when a session arrives.
   const toRemove = api.panels.filter(
     (p) => p.api.component === "chat" && p.id.startsWith("session:") && p.id !== keepId,
   );
