@@ -23,27 +23,24 @@ class Kandev < Formula
 
     system "pnpm", "-C", "apps", "install", "--frozen-lockfile"
     system "pnpm", "-C", "apps", "--filter", "@kandev/web", "build"
-    system "bash", "scripts/release/package-web.sh"
-    system "bash", "scripts/release/package-cli.sh"
+    system "./scripts/release/package-web.sh"
+    system "./scripts/release/package-cli.sh"
 
     bundle = buildpath/"dist/kandev"
     (bundle/"bin").mkpath
-    (bundle/"web").mkpath
 
     cd "apps/backend" do
       system "go", "build",
-             "-ldflags", "-s -w -X main.Version=#{version}",
-             "-o", bundle/"bin/kandev",
+             *std_go_args(ldflags: "-s -w -X main.Version=#{version}",
+                          output:  bundle/"bin/kandev"),
              "./cmd/kandev"
       system "go", "build",
-             "-ldflags", "-s -w",
-             "-o", bundle/"bin/agentctl",
+             *std_go_args(ldflags: "-s -w", output: bundle/"bin/agentctl"),
              "./cmd/agentctl"
     end
 
-    cp_r Dir[buildpath/"dist/web/*"], bundle/"web"
+    system "./scripts/release/package-bundle.sh"
 
-    chmod 0755, bundle/"cli/bin/cli.js"
     libexec.install Dir[bundle/"*"]
 
     (bin/"kandev").write_env_script libexec/"cli/bin/cli.js",
@@ -52,7 +49,32 @@ class Kandev < Formula
   end
 
   test do
-    assert_match "kandev launcher", shell_output("#{bin}/kandev --help")
-    assert_match(/\d+\.\d+\.\d+/, shell_output("#{bin}/kandev --version"))
+    # Wrapper sanity: confirms write_env_script wired KANDEV_BUNDLE_DIR
+    # and the launcher reads the bundled package.json version.
+    assert_match version.to_s, shell_output("#{bin}/kandev --version")
+
+    # Functional test: boot the Go backend with an isolated data dir,
+    # poll /api/v1/system/health until it responds, then shut down.
+    # Exercises the cgo+sqlite linkage, migration runner, and HTTP
+    # server — the parts most likely to break across platforms.
+    port = free_port
+    pid = spawn({ "KANDEV_HOME_DIR"    => testpath.to_s,
+                  "KANDEV_SERVER_PORT" => port.to_s,
+                  "KANDEV_LOG_LEVEL"   => "warn" },
+                libexec/"bin/kandev")
+    begin
+      deadline = Time.now + 60
+      until system("curl", "-sf", "-o", "/dev/null",
+                   "http://127.0.0.1:#{port}/api/v1/system/health")
+        raise "kandev backend did not start within 60s" if Time.now > deadline
+
+        sleep 1
+      end
+      assert_match "healthy",
+                   shell_output("curl -s http://127.0.0.1:#{port}/api/v1/system/health")
+    ensure
+      Process.kill("TERM", pid)
+      Process.wait(pid)
+    end
   end
 end
