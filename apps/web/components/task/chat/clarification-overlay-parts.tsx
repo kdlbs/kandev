@@ -76,24 +76,24 @@ type OptionListProps = {
   options: ClarificationOption[];
   selectedOption: string | null;
   isSubmitting: boolean;
+  // When the custom-text input is the active answer (user is typing or has
+  // committed a draft), options visually deselect — the two are mutually
+  // exclusive at commit time, so the highlight tracks whichever is active.
+  customActive: boolean;
   onSelectOption: (optionId: string) => void;
 };
 
-// The agent receives both the selected option id and the custom text when
-// both are present, so we never visually grey out one when the other is
-// active — that previously created an asymmetric dimming bug where typing
-// a custom answer dimmed the options but selecting an option did not dim
-// the custom input.
 export function ClarificationOptions({
   options,
   selectedOption,
   isSubmitting,
+  customActive,
   onSelectOption,
 }: OptionListProps) {
   return (
     <div className="space-y-1.5">
       {options.map((option, idx) => {
-        const isSelected = selectedOption === option.option_id;
+        const isSelected = !customActive && selectedOption === option.option_id;
         return (
           <button
             key={option.option_id}
@@ -144,20 +144,43 @@ type CustomInputProps = {
   draft: string;
   isSubmitting: boolean;
   committedText: string | null;
+  // True when the custom input is the active answer (non-empty draft or a
+  // committed custom_text and no option selected). Drives the blue ring +
+  // check icon so it matches the visual language of a selected option.
+  active: boolean;
   onChange: (text: string) => void;
   onSubmit: (text: string) => void;
+  // Called after Cmd/Ctrl+Enter so the parent can attempt a batch submit
+  // (no-op when not all questions are answered yet).
+  onRequestFinalSubmit?: () => void;
 };
 
 export function ClarificationCustomInput({
   draft,
   isSubmitting,
   committedText,
+  active,
   onChange,
   onSubmit,
+  onRequestFinalSubmit,
 }: CustomInputProps) {
   return (
-    <div className="mt-2.5 flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-border/70 bg-muted/30">
-      <span className="text-muted-foreground text-xs">↳</span>
+    <div
+      data-testid="clarification-custom-input"
+      data-active={active ? "true" : "false"}
+      className={cn(
+        "mt-2.5 flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors",
+        active
+          ? "bg-blue-500/15 border-blue-500/50 text-foreground"
+          : "border-dashed border-border/70 bg-muted/30",
+      )}
+    >
+      <span
+        className={cn("text-xs", active ? "text-blue-500" : "text-muted-foreground")}
+        aria-hidden="true"
+      >
+        ↳
+      </span>
       <input
         type="text"
         placeholder={
@@ -169,7 +192,14 @@ export function ClarificationCustomInput({
         data-testid="clarification-input"
         className="flex-1 text-sm bg-transparent placeholder:text-muted-foreground/60 focus:outline-none"
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && draft.trim()) {
+          if (e.key !== "Enter" || e.shiftKey || e.altKey) return;
+          if (e.metaKey || e.ctrlKey) {
+            e.preventDefault();
+            if (draft.trim()) onSubmit(draft.trim());
+            onRequestFinalSubmit?.();
+            return;
+          }
+          if (draft.trim()) {
             e.preventDefault();
             onSubmit(draft.trim());
           }
@@ -182,6 +212,7 @@ export function ClarificationCustomInput({
         <IconCornerDownLeft className="h-2.5 w-2.5" />
         Enter
       </kbd>
+      {active && <IconCheck className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />}
     </div>
   );
 }
