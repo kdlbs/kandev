@@ -882,12 +882,21 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to list sessions: %v", err)
 		}
+		if len(sessions) != 2 {
+			t.Fatalf("expected exactly 2 sessions (old + reverted), got %d", len(sessions))
+		}
 		var newSession *models.TaskSession
+		profileACount := 0
 		for _, s := range sessions {
+			if s.AgentProfileID == "profile-a" {
+				profileACount++
+			}
 			if s.ID != "s1" {
 				newSession = s
-				break
 			}
+		}
+		if profileACount != 1 {
+			t.Fatalf("expected exactly one profile-a session after revert, got %d", profileACount)
 		}
 		if newSession == nil {
 			t.Fatal("expected a new session for task default profile")

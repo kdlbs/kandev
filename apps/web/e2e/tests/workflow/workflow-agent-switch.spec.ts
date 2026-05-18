@@ -730,7 +730,7 @@ test.describe("Workflow agent profile switching", () => {
     const step1 = await apiClient.createWorkflowStep(workflow.id, "Step1", 0, {
       is_start_step: true,
     });
-    await apiClient.createWorkflowStep(workflow.id, "Step2", 1);
+    const step2 = await apiClient.createWorkflowStep(workflow.id, "Step2", 1);
     await apiClient.createWorkflowStep(workflow.id, "Done", 2);
 
     await apiClient.updateWorkflowStep(step1.id, {
@@ -784,7 +784,7 @@ test.describe("Workflow agent profile switching", () => {
         },
         { timeout: 30_000, message: "Waiting for task to advance to step2" },
       )
-      .not.toBe(step1.id);
+      .toBe(step2.id);
 
     // Critical assertion: no extra profileA session was spawned after the
     // user's profileB turn completed. The task must still have exactly two
