@@ -478,6 +478,31 @@ func sessionWasWorkflowSwitched(session *models.TaskSession) bool {
 	return v == models.SessionCreatedByWorkflowSwitch
 }
 
+// tagSessionAsWorkflowSwitched marks a session's metadata so it's recognised
+// as workflow-spawned by sessionWasWorkflowSwitched. Used by every code path
+// that ends up with a session whose agent_profile_id was decided by the
+// workflow step override rather than by the user.
+func (s *Service) tagSessionAsWorkflowSwitched(ctx context.Context, sessionID string) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		s.logger.Warn("failed to load session for workflow-switch tagging",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]interface{}{}
+	}
+	if existing, _ := session.Metadata[models.SessionMetaKeyCreatedBy].(string); existing == models.SessionCreatedByWorkflowSwitch {
+		return
+	}
+	session.Metadata[models.SessionMetaKeyCreatedBy] = models.SessionCreatedByWorkflowSwitch
+	session.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+		s.logger.Warn("failed to persist workflow-switch tag",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
 // switchSessionForStep activates a session for the new agent profile.
 // If an existing session on this task already uses the target profile it is
 // reused (re-promoted to primary, brought out of COMPLETED if it had been

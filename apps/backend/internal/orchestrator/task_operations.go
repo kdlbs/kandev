@@ -332,6 +332,15 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 			zap.String("old_profile", session.AgentProfileID),
 			zap.String("new_profile", effectiveProfileID))
 		session.AgentProfileID = effectiveProfileID
+		// Tag as workflow-spawned so a later transition to a plain step can
+		// correctly revert to the task default. Without this, the in-place
+		// profile mutation here is invisible to maybySwitchSessionForProfile,
+		// which would treat the session as user-chosen and leave it on the
+		// override forever.
+		if session.Metadata == nil {
+			session.Metadata = map[string]interface{}{}
+		}
+		session.Metadata[models.SessionMetaKeyCreatedBy] = models.SessionCreatedByWorkflowSwitch
 		// Re-resolve the agent profile snapshot so the tab shows the correct agent logo/name.
 		// Set a minimal snapshot first so stale data is never persisted if resolution fails.
 		session.AgentProfileSnapshot = map[string]interface{}{"id": effectiveProfileID}
@@ -551,7 +560,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// Resolve the workflow step's agent profile override.
 	// The frontend may pass the workspace default profile, but the step may
 	// require a different agent (e.g., Codex on "In Progress", Auggie on "Review").
+	callerProfileID := agentProfileID
 	agentProfileID = s.resolveEffectiveAgentProfile(ctx, taskID, workflowStepID, agentProfileID)
+	overrideApplied := agentProfileID != callerProfileID
 
 	// Fetch the task from the repository to get complete task info
 	task, err := s.scheduler.GetTask(ctx, taskID)
@@ -579,6 +590,14 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	sessionID, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		return nil, err
+	}
+
+	// When the workflow step overrode the caller's profile, tag the session
+	// so maybySwitchSessionForProfile knows it can revert to the task default
+	// on a later plain-step transition. Without this tag, the session looks
+	// indistinguishable from a user-chosen one and stays on the override.
+	if overrideApplied {
+		s.tagSessionAsWorkflowSwitched(ctx, sessionID)
 	}
 
 	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, sessionID, workflowStepID, planMode, task.IsEphemeral)
