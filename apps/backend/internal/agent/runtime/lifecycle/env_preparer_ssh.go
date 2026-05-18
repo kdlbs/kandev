@@ -39,7 +39,7 @@ func (p *SSHPreparer) Prepare(_ context.Context, req *EnvPrepareRequest, onProgr
 	step := beginStep("Validate SSH executor configuration")
 	reportProgress(onProgress, step, 0, 1)
 	completeStepSuccess(&step)
-	reportProgress(onProgress, step, 0, 1)
+	reportProgress(onProgress, step, 1, 1)
 	return &EnvPrepareResult{
 		Success:        true,
 		Steps:          []PrepareStep{step},
