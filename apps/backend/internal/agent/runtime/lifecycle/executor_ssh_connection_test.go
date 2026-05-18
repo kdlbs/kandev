@@ -146,3 +146,120 @@ func TestShellQuote(t *testing.T) {
 		}
 	}
 }
+
+func TestParsePortString(t *testing.T) {
+	cases := []struct {
+		in      string
+		wantN   int
+		wantOK  bool
+		comment string
+	}{
+		{"22", 22, true, "low canonical port"},
+		{"1", 1, true, "min port"},
+		{"65535", 65535, true, "max port"},
+		{"0", 0, false, "zero is reserved"},
+		{"65536", 0, false, "above 16-bit range"},
+		{"-1", 0, false, "negative"},
+		{"", 0, false, "empty"},
+		{"abc", 0, false, "non-numeric"},
+		{"22 ", 0, false, "trailing whitespace not stripped here"},
+	}
+	for _, c := range cases {
+		t.Run(c.in+"/"+c.comment, func(t *testing.T) {
+			n, ok := parsePortString(c.in)
+			if ok != c.wantOK || n != c.wantN {
+				t.Errorf("parsePortString(%q) = (%d, %v), want (%d, %v)", c.in, n, ok, c.wantN, c.wantOK)
+			}
+		})
+	}
+}
+
+func TestParseBracketedHostPort(t *testing.T) {
+	cases := []struct {
+		in       string
+		wantHost string
+		wantPort int
+		wantOK   bool
+		comment  string
+	}{
+		{"[2001:db8::1]", "2001:db8::1", 0, true, "ipv6 no port"},
+		{"[2001:db8::1]:22", "2001:db8::1", 22, true, "ipv6 with port"},
+		{"[::1]:2200", "::1", 2200, true, "ipv6 loopback"},
+		{"[host.example.com]:22", "host.example.com", 22, true, "hostname in brackets"},
+		{"[2001:db8::1", "", 0, false, "missing close bracket"},
+		{"[2001:db8::1]extra", "", 0, false, "junk after close bracket"},
+		{"[2001:db8::1]:0", "", 0, false, "port out of range"},
+		{"[2001:db8::1]:abc", "", 0, false, "non-numeric port"},
+	}
+	for _, c := range cases {
+		t.Run(c.in+"/"+c.comment, func(t *testing.T) {
+			host, port, ok := parseBracketedHostPort(c.in)
+			if ok != c.wantOK || host != c.wantHost || port != c.wantPort {
+				t.Errorf("parseBracketedHostPort(%q) = (%q, %d, %v), want (%q, %d, %v)",
+					c.in, host, port, ok, c.wantHost, c.wantPort, c.wantOK)
+			}
+		})
+	}
+}
+
+func TestParseProxyJumpHostPort(t *testing.T) {
+	cases := []struct {
+		in       string
+		wantHost string
+		wantPort int
+		wantOK   bool
+		comment  string
+	}{
+		{"bastion.example.com", "bastion.example.com", 0, true, "host only"},
+		{"bastion.example.com:2222", "bastion.example.com", 2222, true, "host + port"},
+		{"[2001:db8::1]:22", "2001:db8::1", 22, true, "bracketed ipv6 + port"},
+		{"[2001:db8::1]", "2001:db8::1", 0, true, "bracketed ipv6 no port"},
+		{"bastion.example.com:abc", "", 0, false, "bad port"},
+		{"bastion.example.com:0", "", 0, false, "port out of range"},
+	}
+	for _, c := range cases {
+		t.Run(c.in+"/"+c.comment, func(t *testing.T) {
+			host, port, ok := parseProxyJumpHostPort(c.in)
+			if ok != c.wantOK || host != c.wantHost || port != c.wantPort {
+				t.Errorf("parseProxyJumpHostPort(%q) = (%q, %d, %v), want (%q, %d, %v)",
+					c.in, host, port, ok, c.wantHost, c.wantPort, c.wantOK)
+			}
+		})
+	}
+}
+
+func TestParseLiteralProxyJump(t *testing.T) {
+	cases := []struct {
+		in       string
+		wantUser string
+		wantHost string
+		wantPort int
+		wantOK   bool
+		comment  string
+	}{
+		{"jump.example.com", "", "", 0, false, "alias only — no @ or : — defers to alias path"},
+		{"alice@jump.example.com", "alice", "jump.example.com", 0, true, "user + host"},
+		{"alice@jump.example.com:2222", "alice", "jump.example.com", 2222, true, "user + host + port"},
+		{"jump.example.com:2222", "", "jump.example.com", 2222, true, "host + port, no user"},
+		{"alice@[2001:db8::1]:22", "alice", "2001:db8::1", 22, true, "user + bracketed ipv6 + port"},
+		{"[2001:db8::1]:22", "", "2001:db8::1", 22, true, "bracketed ipv6 + port, no user"},
+		{"[2001:db8::1]", "", "2001:db8::1", 0, true, "bracketed ipv6 no port"},
+		{"alice@", "", "", 0, false, "empty host after @"},
+		{"alice@jump:0", "", "", 0, false, "invalid port"},
+		{"", "", "", 0, false, "empty"},
+		{"   ", "", "", 0, false, "whitespace only"},
+		// IPv6 ProxyJump regression guard — the bracketed-host parser must
+		// strip brackets so callers can feed host straight into net.JoinHostPort
+		// without producing `[[2001:db8::1]]:22`.
+		{"deploy@[2001:db8:dead:beef::42]:2200", "deploy", "2001:db8:dead:beef::42", 2200, true, "ipv6 ProxyJump regression"},
+	}
+	for _, c := range cases {
+		t.Run(c.in+"/"+c.comment, func(t *testing.T) {
+			user, host, port, ok := parseLiteralProxyJump(c.in)
+			if ok != c.wantOK || user != c.wantUser || host != c.wantHost || port != c.wantPort {
+				t.Errorf("parseLiteralProxyJump(%q) = (%q, %q, %d, %v), want (%q, %q, %d, %v)",
+					c.in, user, host, port, ok, c.wantUser, c.wantHost, c.wantPort, c.wantOK)
+			}
+		})
+	}
+}

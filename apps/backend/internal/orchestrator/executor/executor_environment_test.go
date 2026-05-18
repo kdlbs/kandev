@@ -347,6 +347,113 @@ func TestReuseExistingEnvironment_EmptyEnvFieldsDoNothing(t *testing.T) {
 	}
 }
 
+// TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys pins the guard
+// that prevents a SECOND session on the same task from inheriting the FIRST
+// session's session-scoped runtime resources — agentctl PID/port, remote
+// session dir, local forward port. Without this filter, the SSH executor's
+// ResumeRemoteInstance would interpret those keys as a resume hint and
+// reattach to session-1's agentctl process, so session 2 would end up
+// sharing session 1's ACP session and instance port and never finish its
+// own initialize.
+//
+// Connection / task-environment-wide keys (host, port, user, fingerprint,
+// remote task dir, workdir root, proxy jump) MUST still propagate so the
+// second session connects to the same host and reuses the task dir.
+func TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys(t *testing.T) {
+	req := &LaunchAgentRequest{TaskID: "task-1"}
+	running := &models.ExecutorRunning{
+		AgentExecutionID: "exec-prev",
+		Metadata: map[string]interface{}{
+			// Connection config — should propagate.
+			lifecycle.MetadataKeySSHHost:            "example.com",
+			lifecycle.MetadataKeySSHPort:            "2200",
+			lifecycle.MetadataKeySSHUser:            "deploy",
+			lifecycle.MetadataKeySSHHostFingerprint: "SHA256:aaa",
+			lifecycle.MetadataKeySSHRemoteTaskDir:   "/home/deploy/.kandev/tasks/task-1",
+			lifecycle.MetadataKeySSHWorkdirRoot:     "/home/deploy/.kandev",
+			lifecycle.MetadataKeySSHProxyJump:       "bastion",
+			// Session-scoped runtime resources — must NOT propagate.
+			lifecycle.MetadataKeySSHRemoteSessionDir:   "/home/deploy/.kandev/tasks/task-1/.kandev/sessions/sess-1",
+			lifecycle.MetadataKeySSHRemoteAgentctlPort: "41001",
+			lifecycle.MetadataKeySSHRemoteAgentctlPID:  "12345",
+			lifecycle.MetadataKeySSHLocalForwardPort:   "59123",
+			lifecycle.MetadataKeySSHRemoteAgentctlURL:  "http://127.0.0.1:59123",
+			// Non-persistent key — must NOT propagate (not in persistentMetadataKeys).
+			"task_description": "session 1 prompt",
+		},
+	}
+
+	applyExecutorRunningMetadata(req, running)
+
+	if req.PreviousExecutionID != "exec-prev" {
+		t.Errorf("PreviousExecutionID = %q, want exec-prev", req.PreviousExecutionID)
+	}
+	if req.Metadata == nil {
+		t.Fatal("req.Metadata is nil; expected propagated keys")
+	}
+
+	propagated := []string{
+		lifecycle.MetadataKeySSHHost,
+		lifecycle.MetadataKeySSHPort,
+		lifecycle.MetadataKeySSHUser,
+		lifecycle.MetadataKeySSHHostFingerprint,
+		lifecycle.MetadataKeySSHRemoteTaskDir,
+		lifecycle.MetadataKeySSHWorkdirRoot,
+		lifecycle.MetadataKeySSHProxyJump,
+	}
+	for _, k := range propagated {
+		if _, ok := req.Metadata[k]; !ok {
+			t.Errorf("expected connection key %q to propagate", k)
+		}
+	}
+
+	sessionScoped := []string{
+		lifecycle.MetadataKeySSHRemoteSessionDir,
+		lifecycle.MetadataKeySSHRemoteAgentctlPort,
+		lifecycle.MetadataKeySSHRemoteAgentctlPID,
+		lifecycle.MetadataKeySSHLocalForwardPort,
+		lifecycle.MetadataKeySSHRemoteAgentctlURL,
+	}
+	for _, k := range sessionScoped {
+		if v, ok := req.Metadata[k]; ok {
+			t.Errorf("session-scoped key %q leaked into sibling-session request (value=%v)", k, v)
+		}
+		if !lifecycle.IsSessionScopedMetadataKey(k) {
+			t.Errorf("IsSessionScopedMetadataKey(%q) = false; expected true", k)
+		}
+	}
+
+	// task_description is not in persistentMetadataKeys at all, so the
+	// pre-existing ShouldPersistMetadataKey gate already drops it.
+	if _, ok := req.Metadata["task_description"]; ok {
+		t.Error("task_description (non-persistent) leaked into sibling-session request")
+	}
+}
+
+// TestApplyExecutorRunningMetadata_RequestKeysWin documents that an explicit
+// value already on the request (e.g. set by the caller from launch options)
+// is not overwritten by the previous ExecutorRunning record. This applies to
+// every persistent key, not just the connection ones.
+func TestApplyExecutorRunningMetadata_RequestKeysWin(t *testing.T) {
+	req := &LaunchAgentRequest{
+		TaskID: "task-1",
+		Metadata: map[string]interface{}{
+			lifecycle.MetadataKeySSHHost: "user-override.example.com",
+		},
+	}
+	running := &models.ExecutorRunning{
+		Metadata: map[string]interface{}{
+			lifecycle.MetadataKeySSHHost: "stale.example.com",
+		},
+	}
+
+	applyExecutorRunningMetadata(req, running)
+
+	if got := req.Metadata[lifecycle.MetadataKeySSHHost]; got != "user-override.example.com" {
+		t.Errorf("ssh_host = %q, want user-override.example.com (request value should win)", got)
+	}
+}
+
 func TestExtractSandboxID(t *testing.T) {
 	tests := []struct {
 		name     string
