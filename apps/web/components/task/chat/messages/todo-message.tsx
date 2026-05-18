@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { IconListCheck } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronRight, IconListCheck } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import type { RichMetadata, TodoMetadata, TodoSnapshot } from "@/components/task/chat/types";
@@ -35,31 +35,44 @@ function countCompleted(items: TodoItem[]): number {
 }
 
 function SnapshotHistory({ snapshots }: { snapshots: TodoSnapshot[] }) {
+  const [isOpen, setIsOpen] = useState(false);
   return (
     <div className="mt-3 pt-2 border-t border-border/30">
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1.5">
+      <button
+        type="button"
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground/60 hover:text-muted-foreground cursor-pointer"
+        aria-expanded={isOpen}
+      >
+        {isOpen ? (
+          <IconChevronDown className="h-3 w-3" />
+        ) : (
+          <IconChevronRight className="h-3 w-3" />
+        )}
         Earlier updates ({snapshots.length})
-      </div>
-      <div className="space-y-1 text-[11px] text-muted-foreground/80">
-        {snapshots.map((snap, i) => {
-          const items = normalizeTodos(snap.todos);
-          const done = countCompleted(items);
-          // Todos may not be ordered with completed-first, so find the first
-          // non-completed entry rather than indexing by the completed count.
-          const nextItem = items.find((t) => resolveStatus(t) !== "completed");
-          return (
-            <div key={i} className="flex items-baseline gap-2">
-              <span className="font-mono shrink-0">#{i + 1}</span>
-              <span className="shrink-0">
-                {done}/{items.length}
-              </span>
-              {nextItem && (
-                <span className="truncate text-muted-foreground/60">- {nextItem.text}</span>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      </button>
+      {isOpen && (
+        <div className="mt-1.5 space-y-1 text-[11px] text-muted-foreground/80">
+          {snapshots.map((snap, i) => {
+            const items = normalizeTodos(snap.todos);
+            const done = countCompleted(items);
+            // Todos may not be ordered with completed-first, so find the first
+            // non-completed entry rather than indexing by the completed count.
+            const nextItem = items.find((t) => resolveStatus(t) !== "completed");
+            return (
+              <div key={i} className="flex items-baseline gap-2">
+                <span className="font-mono shrink-0">#{i + 1}</span>
+                <span className="shrink-0">
+                  {done}/{items.length}
+                </span>
+                {nextItem && (
+                  <span className="truncate text-muted-foreground/60">- {nextItem.text}</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
