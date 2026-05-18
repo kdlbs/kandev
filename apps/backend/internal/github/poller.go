@@ -582,6 +582,15 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 				zap.String("watch_id", watch.ID), zap.Int("deleted", cleaned))
 		}
 	}
+	// Global orphan sweep: catches dedup rows whose watch was deleted or
+	// disabled. Without this pass those rows (and the tasks they reference)
+	// would never be re-examined, since the per-watch loop only iterates
+	// enabled watches.
+	if cleaned, err := p.service.CleanupAllOrphanedReviewTasks(ctx); err != nil {
+		p.logger.Warn("failed to sweep orphaned review tasks", zap.Error(err))
+	} else if cleaned > 0 {
+		p.logger.Info("swept orphaned review tasks", zap.Int("deleted", cleaned))
+	}
 }
 
 // issueWatchLoop polls issue watches for new GitHub issues.
@@ -653,5 +662,10 @@ func (p *Poller) checkIssueWatches(ctx context.Context) {
 			p.logger.Info("cleaned up closed issue tasks",
 				zap.String("watch_id", watch.ID), zap.Int("deleted", cleaned))
 		}
+	}
+	if cleaned, err := p.service.CleanupAllOrphanedIssueTasks(ctx); err != nil {
+		p.logger.Warn("failed to sweep orphaned issue tasks", zap.Error(err))
+	} else if cleaned > 0 {
+		p.logger.Info("swept orphaned issue tasks", zap.Int("deleted", cleaned))
 	}
 }

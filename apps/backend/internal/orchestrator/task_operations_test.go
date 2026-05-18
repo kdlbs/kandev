@@ -481,7 +481,7 @@ func TestRecordInitialMessage_DoesNotChangeSessionState(t *testing.T) {
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.messageCreator = mc
 
-	svc.recordInitialMessage(ctx, "task1", "session1", "hello world", false, nil)
+	svc.recordInitialMessage(ctx, "task1", "session1", "hello world", false, false, nil)
 
 	// Session state must remain STARTING — recordInitialMessage should not modify state.
 	session, err := repo.GetTaskSession(ctx, "session1")

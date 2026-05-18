@@ -40,9 +40,11 @@ type TaskDeleter interface {
 	DeleteTask(ctx context.Context, taskID string) error
 }
 
-// TaskSessionChecker checks if a task has any sessions (user interacted with it).
+// TaskSessionChecker checks whether the user genuinely engaged with a task
+// (authored at least one non-auto-start message). Used by cleanup logic to
+// preserve tasks the user touched while sweeping auto-started-only ones.
 type TaskSessionChecker interface {
-	HasTaskSessions(ctx context.Context, taskID string) (bool, error)
+	HasUserAuthoredMessage(ctx context.Context, taskID string) (bool, error)
 }
 
 // SecretManager handles secret creation, update, and deletion.
@@ -54,6 +56,13 @@ type SecretManager interface {
 
 // prSyncFreshnessWindow is how long PR data is considered fresh (skip GitHub API).
 const prSyncFreshnessWindow = 30 * time.Second
+
+// cleanupFetchFailureThreshold is the number of consecutive GetPRFeedback /
+// GetIssueState errors a single dedup row may accumulate before the cleanup
+// loop logs a Warn. The previous behavior swallowed the error at Debug level
+// so transient outages — auth-token expiry, rate-limit exhaustion — silently
+// blocked cleanup forever.
+const cleanupFetchFailureThreshold = 5
 
 // Service coordinates GitHub integration operations.
 type Service struct {
@@ -73,21 +82,28 @@ type Service struct {
 	prStatusCache      *ttlCache
 	protectionCache    *branchProtectionCache
 	rateTracker        *RateTracker
+
+	// cleanupFailureMu guards cleanupFailureCounts; the cleanup loop is the
+	// only writer but the global sweep + per-watch sweep can run concurrently
+	// in different goroutines, and the map is shared between them.
+	cleanupFailureMu     sync.Mutex
+	cleanupFailureCounts map[string]int
 }
 
 // NewService creates a new GitHub service.
 func NewService(client Client, authMethod string, secrets SecretProvider, store *Store, eventBus bus.EventBus, log *logger.Logger) *Service {
 	return &Service{
-		client:          client,
-		authMethod:      authMethod,
-		secrets:         secrets,
-		store:           store,
-		eventBus:        eventBus,
-		logger:          log,
-		searchCache:     newTTLCache(),
-		prStatusCache:   newTTLCache(),
-		protectionCache: newBranchProtectionCache(),
-		rateTracker:     NewRateTracker(eventBus, log),
+		client:               client,
+		authMethod:           authMethod,
+		secrets:              secrets,
+		store:                store,
+		eventBus:             eventBus,
+		logger:               log,
+		searchCache:          newTTLCache(),
+		prStatusCache:        newTTLCache(),
+		protectionCache:      newBranchProtectionCache(),
+		rateTracker:          NewRateTracker(eventBus, log),
+		cleanupFailureCounts: make(map[string]int),
 	}
 }
 
@@ -1141,6 +1157,9 @@ func (s *Service) CreateReviewWatch(ctx context.Context, req *CreateReviewWatchR
 	if reviewScope == "" {
 		reviewScope = ReviewScopeUserAndTeams
 	}
+	if !IsValidCleanupPolicy(req.CleanupPolicy) {
+		return nil, fmt.Errorf("invalid cleanup_policy: %q", req.CleanupPolicy)
+	}
 	rw := &ReviewWatch{
 		WorkspaceID:         req.WorkspaceID,
 		WorkflowID:          req.WorkflowID,
@@ -1153,6 +1172,7 @@ func (s *Service) CreateReviewWatch(ctx context.Context, req *CreateReviewWatchR
 		CustomQuery:         req.CustomQuery,
 		Enabled:             true,
 		PollIntervalSeconds: req.PollIntervalSeconds,
+		CleanupPolicy:       NormalizeCleanupPolicy(req.CleanupPolicy),
 	}
 	if err := s.store.CreateReviewWatch(ctx, rw); err != nil {
 		return nil, fmt.Errorf("create review watch: %w", err)
@@ -1235,6 +1255,12 @@ func (s *Service) UpdateReviewWatch(ctx context.Context, id string, req *UpdateR
 	}
 	if req.PollIntervalSeconds != nil {
 		rw.PollIntervalSeconds = *req.PollIntervalSeconds
+	}
+	if req.CleanupPolicy != nil {
+		if !IsValidCleanupPolicy(*req.CleanupPolicy) {
+			return fmt.Errorf("invalid cleanup_policy: %q", *req.CleanupPolicy)
+		}
+		rw.CleanupPolicy = NormalizeCleanupPolicy(*req.CleanupPolicy)
 	}
 	return s.store.UpdateReviewWatch(ctx, rw)
 }
@@ -1676,20 +1702,83 @@ func (s *Service) CleanupMergedReviewTasks(ctx context.Context, watch *ReviewWat
 	if err != nil {
 		return 0, fmt.Errorf("list review PR tasks: %w", err)
 	}
+	policy := NormalizeCleanupPolicy(watch.CleanupPolicy)
+	return s.cleanupReviewPRTaskBatch(ctx, prTasks, func(_ *ReviewPRTask) string { return policy }), nil
+}
+
+// CleanupAllOrphanedReviewTasks sweeps every dedup row across all review
+// watches — including rows whose watch was deleted or disabled — and applies
+// the per-watch cleanup policy. Orphaned rows (watch missing) default to
+// CleanupPolicyAuto, matching the user-friendly fix-forward behavior.
+// Returns the number of tasks deleted.
+func (s *Service) CleanupAllOrphanedReviewTasks(ctx context.Context) (int, error) {
+	if s.client == nil || s.taskDeleter == nil {
+		return 0, nil
+	}
+	prTasks, err := s.store.ListAllReviewPRTasks(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list all review PR tasks: %w", err)
+	}
+	if len(prTasks) == 0 {
+		return 0, nil
+	}
+	policyCache, err := s.buildReviewWatchPolicyCache(ctx, prTasks)
+	if err != nil {
+		return 0, err
+	}
+	return s.cleanupReviewPRTaskBatch(ctx, prTasks, func(rpt *ReviewPRTask) string {
+		if p, ok := policyCache[rpt.ReviewWatchID]; ok {
+			return p
+		}
+		// Watch was deleted: fall back to the documented default so the row
+		// (and any task it points at) can still be reaped.
+		return CleanupPolicyAuto
+	}), nil
+}
+
+// buildReviewWatchPolicyCache loads the cleanup policy for each distinct
+// watch ID referenced by prTasks. Missing watches (deleted) are simply absent
+// from the returned map.
+func (s *Service) buildReviewWatchPolicyCache(ctx context.Context, prTasks []*ReviewPRTask) (map[string]string, error) {
+	seen := make(map[string]struct{})
+	for _, rpt := range prTasks {
+		seen[rpt.ReviewWatchID] = struct{}{}
+	}
+	cache := make(map[string]string, len(seen))
+	for watchID := range seen {
+		watch, err := s.store.GetReviewWatch(ctx, watchID)
+		if err != nil {
+			return nil, fmt.Errorf("get review watch %s: %w", watchID, err)
+		}
+		if watch == nil {
+			continue
+		}
+		cache[watchID] = NormalizeCleanupPolicy(watch.CleanupPolicy)
+	}
+	return cache, nil
+}
+
+// cleanupReviewPRTaskBatch runs the deletion gate over a slice of dedup rows.
+// resolvePolicy returns the effective cleanup policy for each row; callers
+// supply it so per-watch and global-sweep paths can share this body.
+//
+//nolint:dupl // mirrors cleanupIssueTaskBatch — different types, same structure
+func (s *Service) cleanupReviewPRTaskBatch(ctx context.Context, prTasks []*ReviewPRTask, resolvePolicy func(*ReviewPRTask) string) int {
 	deleted := 0
 	for _, rpt := range prTasks {
+		policy := resolvePolicy(rpt)
 		// Orphan reservation: process was killed after ReserveReviewPRTask
 		// succeeded but before AssignReviewPRTaskID ran, so task_id is empty
 		// and there is no task to delete. Clean up the dedup row once the PR
 		// reaches a terminal state, same gating as the normal path.
 		if rpt.TaskID == "" {
-			if should, _ := s.shouldDeleteReviewTask(ctx, rpt); should {
+			if should, _ := s.shouldDeleteReviewTask(ctx, rpt, policy); should {
 				_ = s.store.DeleteReviewPRTask(ctx, rpt.ID)
 				deleted++
 			}
 			continue
 		}
-		shouldDelete, reason := s.shouldDeleteReviewTask(ctx, rpt)
+		shouldDelete, reason := s.shouldDeleteReviewTask(ctx, rpt, policy)
 		if !shouldDelete {
 			continue
 		}
@@ -1708,24 +1797,33 @@ func (s *Service) CleanupMergedReviewTasks(ctx context.Context, watch *ReviewWat
 		s.logger.Info("deleted review task",
 			zap.String("task_id", rpt.TaskID),
 			zap.String("reason", reason),
+			zap.String("policy", policy),
 			zap.Int("pr_number", rpt.PRNumber),
 			zap.String("repo", rpt.RepoOwner+"/"+rpt.RepoName))
 		deleted++
 	}
-	return deleted, nil
+	return deleted
 }
 
-// shouldDeleteReviewTask checks if a review PR task should be cleaned up.
-// Returns true + reason if the PR is done (merged/closed/approved) AND the user
-// hasn't interacted with the task yet (no sessions). Tasks with sessions are
-// preserved so the user can see the PR merged banner and their work history.
-func (s *Service) shouldDeleteReviewTask(ctx context.Context, rpt *ReviewPRTask) (bool, string) {
-	feedback, err := s.client.GetPRFeedback(ctx, rpt.RepoOwner, rpt.RepoName, rpt.PRNumber)
-	if err != nil {
-		s.logger.Debug("failed to fetch PR feedback for cleanup",
-			zap.Int("pr_number", rpt.PRNumber), zap.Error(err))
+// shouldDeleteReviewTask checks whether a review PR task is eligible for
+// cleanup under the supplied policy. Returns true + a short reason on hit.
+//   - CleanupPolicyNever  → always false.
+//   - CleanupPolicyAlways → terminal state alone is enough.
+//   - CleanupPolicyAuto   → terminal state + no user-authored messages.
+//
+// Terminal state covers: PR merged/closed, OR the authenticated user already
+// approved the PR on GitHub (so it's effectively done from their POV).
+func (s *Service) shouldDeleteReviewTask(ctx context.Context, rpt *ReviewPRTask, policy string) (bool, string) {
+	if policy == CleanupPolicyNever {
 		return false, ""
 	}
+	failureKey := reviewFailureKey(rpt)
+	feedback, err := s.client.GetPRFeedback(ctx, rpt.RepoOwner, rpt.RepoName, rpt.PRNumber)
+	if err != nil {
+		s.trackCleanupFailure(failureKey, "review", rpt.RepoOwner+"/"+rpt.RepoName, rpt.PRNumber, err)
+		return false, ""
+	}
+	s.resetCleanupFailure(failureKey)
 	if feedback.PR == nil {
 		return false, ""
 	}
@@ -1745,20 +1843,59 @@ func (s *Service) shouldDeleteReviewTask(ctx context.Context, rpt *ReviewPRTask)
 	if reason == "" {
 		return false, ""
 	}
-	// Don't delete tasks the user has interacted with (has sessions).
-	// Those show the PR merged banner instead.
-	if s.taskSessionChecker != nil {
-		hasSessions, err := s.taskSessionChecker.HasTaskSessions(ctx, rpt.TaskID)
-		if err != nil {
-			s.logger.Debug("failed to check task sessions",
-				zap.String("task_id", rpt.TaskID), zap.Error(err))
-			return false, ""
-		}
-		if hasSessions {
-			return false, ""
-		}
+	if policy == CleanupPolicyAlways || rpt.TaskID == "" || s.taskSessionChecker == nil {
+		return true, reason
+	}
+	hasUserMsg, err := s.taskSessionChecker.HasUserAuthoredMessage(ctx, rpt.TaskID)
+	if err != nil {
+		s.logger.Debug("failed to check task user messages",
+			zap.String("task_id", rpt.TaskID), zap.Error(err))
+		return false, ""
+	}
+	if hasUserMsg {
+		return false, ""
 	}
 	return true, reason
+}
+
+// reviewFailureKey builds the stable per-row identifier used for failure
+// tracking. Stable across polls so consecutive errors increment the same
+// counter and a recovery resets it cleanly.
+func reviewFailureKey(rpt *ReviewPRTask) string {
+	return fmt.Sprintf("review:%s/%s#%d", rpt.RepoOwner, rpt.RepoName, rpt.PRNumber)
+}
+
+// trackCleanupFailure increments the failure counter for key and emits a
+// Warn log once the consecutive-failure threshold is crossed. Below the
+// threshold the failure is recorded at Debug so the normal log isn't flooded.
+func (s *Service) trackCleanupFailure(key, kind, repo string, number int, cause error) {
+	s.cleanupFailureMu.Lock()
+	s.cleanupFailureCounts[key]++
+	n := s.cleanupFailureCounts[key]
+	s.cleanupFailureMu.Unlock()
+	if n < cleanupFetchFailureThreshold {
+		s.logger.Debug("cleanup state fetch failed",
+			zap.String("kind", kind),
+			zap.String("repo", repo),
+			zap.Int("number", number),
+			zap.Int("consecutive_failures", n),
+			zap.Error(cause))
+		return
+	}
+	s.logger.Warn("cleanup state fetch failing repeatedly — blocked task deletion",
+		zap.String("kind", kind),
+		zap.String("repo", repo),
+		zap.Int("number", number),
+		zap.Int("consecutive_failures", n),
+		zap.Error(cause))
+}
+
+// resetCleanupFailure drops the counter for key once the upstream fetch
+// recovers, so a future flap doesn't cross the threshold prematurely.
+func (s *Service) resetCleanupFailure(key string) {
+	s.cleanupFailureMu.Lock()
+	delete(s.cleanupFailureCounts, key)
+	s.cleanupFailureMu.Unlock()
 }
 
 // TriggerAllReviewChecks triggers all review watches for a workspace.
@@ -1842,6 +1979,9 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 	if labels == nil {
 		labels = []string{}
 	}
+	if !IsValidCleanupPolicy(req.CleanupPolicy) {
+		return nil, fmt.Errorf("invalid cleanup_policy: %q", req.CleanupPolicy)
+	}
 	iw := &IssueWatch{
 		WorkspaceID:         req.WorkspaceID,
 		WorkflowID:          req.WorkflowID,
@@ -1854,6 +1994,7 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 		CustomQuery:         req.CustomQuery,
 		Enabled:             true,
 		PollIntervalSeconds: req.PollIntervalSeconds,
+		CleanupPolicy:       NormalizeCleanupPolicy(req.CleanupPolicy),
 	}
 	if err := s.store.CreateIssueWatch(ctx, iw); err != nil {
 		return nil, fmt.Errorf("create issue watch: %w", err)
@@ -1942,6 +2083,12 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 			v = minWatchPollIntervalSec
 		}
 		iw.PollIntervalSeconds = v
+	}
+	if req.CleanupPolicy != nil {
+		if !IsValidCleanupPolicy(*req.CleanupPolicy) {
+			return fmt.Errorf("invalid cleanup_policy: %q", *req.CleanupPolicy)
+		}
+		iw.CleanupPolicy = NormalizeCleanupPolicy(*req.CleanupPolicy)
 	}
 	return s.store.UpdateIssueWatch(ctx, iw)
 }
@@ -2120,29 +2267,79 @@ func (s *Service) TriggerAllIssueChecks(ctx context.Context, workspaceID string)
 }
 
 // CleanupClosedIssueTasks checks issues tracked by a watch and deletes
-// tasks whose issues are closed and the user hasn't interacted with.
+// tasks whose issues are closed under the watch's cleanup policy.
 //
 //nolint:dupl // mirrors CleanupMergedReviewTasks — different types, same structure
 func (s *Service) CleanupClosedIssueTasks(ctx context.Context, watch *IssueWatch) (int, error) {
-	if s.client == nil || s.taskDeleter == nil || s.taskSessionChecker == nil {
+	if s.client == nil || s.taskDeleter == nil {
 		return 0, nil
 	}
 	issueTasks, err := s.store.ListIssueWatchTasksByWatch(ctx, watch.ID)
 	if err != nil {
 		return 0, fmt.Errorf("list issue watch tasks: %w", err)
 	}
+	policy := NormalizeCleanupPolicy(watch.CleanupPolicy)
+	return s.cleanupIssueTaskBatch(ctx, issueTasks, func(_ *IssueWatchTask) string { return policy }), nil
+}
+
+// CleanupAllOrphanedIssueTasks sweeps every dedup row across all issue
+// watches, applying per-watch policy and defaulting orphans to
+// CleanupPolicyAuto. Returns the number of tasks deleted.
+func (s *Service) CleanupAllOrphanedIssueTasks(ctx context.Context) (int, error) {
+	if s.client == nil || s.taskDeleter == nil {
+		return 0, nil
+	}
+	issueTasks, err := s.store.ListAllIssueWatchTasks(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list all issue watch tasks: %w", err)
+	}
+	if len(issueTasks) == 0 {
+		return 0, nil
+	}
+	policyCache, err := s.buildIssueWatchPolicyCache(ctx, issueTasks)
+	if err != nil {
+		return 0, err
+	}
+	return s.cleanupIssueTaskBatch(ctx, issueTasks, func(it *IssueWatchTask) string {
+		if p, ok := policyCache[it.IssueWatchID]; ok {
+			return p
+		}
+		return CleanupPolicyAuto
+	}), nil
+}
+
+func (s *Service) buildIssueWatchPolicyCache(ctx context.Context, issueTasks []*IssueWatchTask) (map[string]string, error) {
+	seen := make(map[string]struct{})
+	for _, it := range issueTasks {
+		seen[it.IssueWatchID] = struct{}{}
+	}
+	cache := make(map[string]string, len(seen))
+	for watchID := range seen {
+		watch, err := s.store.GetIssueWatch(ctx, watchID)
+		if err != nil {
+			return nil, fmt.Errorf("get issue watch %s: %w", watchID, err)
+		}
+		if watch == nil {
+			continue
+		}
+		cache[watchID] = NormalizeCleanupPolicy(watch.CleanupPolicy)
+	}
+	return cache, nil
+}
+
+//nolint:dupl // mirrors cleanupReviewPRTaskBatch — different types, same structure
+func (s *Service) cleanupIssueTaskBatch(ctx context.Context, issueTasks []*IssueWatchTask, resolvePolicy func(*IssueWatchTask) string) int {
 	deleted := 0
 	for _, it := range issueTasks {
-		// Orphan reservation: task_id is empty because the process was
-		// killed between Reserve and Assign. Clean up once the issue is closed.
+		policy := resolvePolicy(it)
 		if it.TaskID == "" {
-			if should, _ := s.shouldDeleteIssueTask(ctx, it); should {
+			if should, _ := s.shouldDeleteIssueTask(ctx, it, policy); should {
 				_ = s.store.DeleteIssueWatchTask(ctx, it.ID)
 				deleted++
 			}
 			continue
 		}
-		shouldDelete, reason := s.shouldDeleteIssueTask(ctx, it)
+		shouldDelete, reason := s.shouldDeleteIssueTask(ctx, it, policy)
 		if !shouldDelete {
 			continue
 		}
@@ -2160,40 +2357,48 @@ func (s *Service) CleanupClosedIssueTasks(ctx context.Context, watch *IssueWatch
 		s.logger.Info("deleted issue task",
 			zap.String("task_id", it.TaskID),
 			zap.String("reason", reason),
+			zap.String("policy", policy),
 			zap.Int("issue_number", it.IssueNumber),
 			zap.String("repo", it.RepoOwner+"/"+it.RepoName))
 		deleted++
 	}
-	return deleted, nil
+	return deleted
 }
 
-// shouldDeleteIssueTask checks if an issue task should be cleaned up.
-// Returns true + reason if the issue is closed AND the user hasn't interacted
-// with the task yet (no sessions).
-func (s *Service) shouldDeleteIssueTask(ctx context.Context, it *IssueWatchTask) (bool, string) {
-	state, err := s.client.GetIssueState(ctx, it.RepoOwner, it.RepoName, it.IssueNumber)
-	if err != nil {
-		s.logger.Debug("failed to fetch issue state for cleanup",
-			zap.Int("issue_number", it.IssueNumber), zap.Error(err))
+// shouldDeleteIssueTask checks whether an issue task is eligible for cleanup.
+// Policy gating mirrors shouldDeleteReviewTask.
+func (s *Service) shouldDeleteIssueTask(ctx context.Context, it *IssueWatchTask, policy string) (bool, string) {
+	if policy == CleanupPolicyNever {
 		return false, ""
 	}
+	failureKey := issueFailureKey(it)
+	state, err := s.client.GetIssueState(ctx, it.RepoOwner, it.RepoName, it.IssueNumber)
+	if err != nil {
+		s.trackCleanupFailure(failureKey, "issue", it.RepoOwner+"/"+it.RepoName, it.IssueNumber, err)
+		return false, ""
+	}
+	s.resetCleanupFailure(failureKey)
 	if state != "closed" {
 		return false, ""
 	}
 	reason := "issue_closed"
-	// Don't delete tasks the user has interacted with (has sessions).
-	if it.TaskID != "" {
-		hasSessions, err := s.taskSessionChecker.HasTaskSessions(ctx, it.TaskID)
-		if err != nil {
-			s.logger.Debug("failed to check task sessions",
-				zap.String("task_id", it.TaskID), zap.Error(err))
-			return false, ""
-		}
-		if hasSessions {
-			return false, ""
-		}
+	if policy == CleanupPolicyAlways || it.TaskID == "" || s.taskSessionChecker == nil {
+		return true, reason
+	}
+	hasUserMsg, err := s.taskSessionChecker.HasUserAuthoredMessage(ctx, it.TaskID)
+	if err != nil {
+		s.logger.Debug("failed to check task user messages",
+			zap.String("task_id", it.TaskID), zap.Error(err))
+		return false, ""
+	}
+	if hasUserMsg {
+		return false, ""
 	}
 	return true, reason
+}
+
+func issueFailureKey(it *IssueWatchTask) string {
+	return fmt.Sprintf("issue:%s/%s#%d", it.RepoOwner, it.RepoName, it.IssueNumber)
 }
 
 func (s *Service) publishNewIssueEvent(ctx context.Context, watch *IssueWatch, issue *Issue) {

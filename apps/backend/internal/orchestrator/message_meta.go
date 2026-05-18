@@ -7,6 +7,7 @@ import v1 "github.com/kandev/kandev/pkg/api/v1"
 type UserMessageMeta struct {
 	PlanMode          bool
 	HasReviewComments bool
+	AutoStart         bool
 	Attachments       []v1.MessageAttachment
 	ContextFiles      []v1.ContextFileMeta
 	SenderTaskID      string
@@ -28,6 +29,15 @@ func (m *UserMessageMeta) WithPlanMode(enabled bool) *UserMessageMeta {
 // WithReviewComments marks the message as containing review comments.
 func (m *UserMessageMeta) WithReviewComments(has bool) *UserMessageMeta {
 	m.HasReviewComments = has
+	return m
+}
+
+// WithAutoStart marks the message as having been created by an automated
+// trigger (workflow auto-start, PR/issue watch, Jira/Linear integration)
+// rather than direct user input. Used by the GitHub cleanup logic to
+// distinguish "the agent ran on its own" from "the user actually engaged".
+func (m *UserMessageMeta) WithAutoStart(enabled bool) *UserMessageMeta {
+	m.AutoStart = enabled
 	return m
 }
 
@@ -56,7 +66,7 @@ func (m *UserMessageMeta) WithSenderTask(taskID, taskTitle, sessionID string) *U
 // ToMap returns the metadata as a map suitable for message creation.
 // Returns nil if no metadata fields are set.
 func (m *UserMessageMeta) ToMap() map[string]interface{} {
-	if !m.PlanMode && !m.HasReviewComments && len(m.Attachments) == 0 && len(m.ContextFiles) == 0 && m.SenderTaskID == "" {
+	if !m.PlanMode && !m.HasReviewComments && !m.AutoStart && len(m.Attachments) == 0 && len(m.ContextFiles) == 0 && m.SenderTaskID == "" {
 		return nil
 	}
 	meta := make(map[string]interface{})
@@ -65,6 +75,9 @@ func (m *UserMessageMeta) ToMap() map[string]interface{} {
 	}
 	if m.HasReviewComments {
 		meta["has_review_comments"] = true
+	}
+	if m.AutoStart {
+		meta["auto_start"] = true
 	}
 	if len(m.Attachments) > 0 {
 		meta["attachments"] = m.Attachments

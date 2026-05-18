@@ -262,7 +262,7 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 	}
 
 	if execution.SessionID != "" {
-		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive, nil)
+		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive, false, nil)
 
 		if planModeActive {
 			sess, sessErr := s.repo.GetTaskSession(ctx, execution.SessionID)
@@ -431,7 +431,7 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 // (handleAgentReady) handle the transition to WAITING_FOR_INPUT.
 func (s *Service) postLaunchCreated(ctx context.Context, taskID, sessionID, prompt string, skipMessage, planModeActive bool, attachments []v1.MessageAttachment) {
 	if !skipMessage {
-		s.recordInitialMessage(ctx, taskID, sessionID, prompt, planModeActive, attachments)
+		s.recordInitialMessage(ctx, taskID, sessionID, prompt, planModeActive, false, attachments)
 	}
 
 	if planModeActive {
@@ -448,7 +448,7 @@ func (s *Service) postLaunchCreated(ctx context.Context, taskID, sessionID, prom
 // applied if the step has plan_mode enabled.
 // If planMode is true and the workflow step doesn't already apply plan mode,
 // default plan mode instructions are injected into the prompt.
-func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority int, prompt string, workflowStepID string, planMode bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error) {
+func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority int, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error) {
 	s.logger.Debug("manually starting task",
 		zap.String("task_id", taskID),
 		zap.String("agent_profile_id", agentProfileID),
@@ -457,6 +457,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		zap.Int("prompt_length", len(prompt)),
 		zap.String("workflow_step_id", workflowStepID),
 		zap.Bool("plan_mode", planMode),
+		zap.Bool("auto_start", autoStart),
 		zap.Int("attachments", len(attachments)))
 
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
@@ -519,7 +520,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		return nil, err
 	}
 
-	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, attachments)
+	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, autoStart, attachments)
 
 	// Note: Task stays in SCHEDULING state until the agent is fully initialized.
 	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
@@ -618,9 +619,9 @@ func (s *Service) resolveEffectiveAgentProfile(ctx context.Context, taskID, work
 }
 
 // postLaunchStart records the initial message and sets plan mode after a successful launch.
-func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution *executor.TaskExecution, prompt string, recordPlanMode, setPlanMode bool, attachments []v1.MessageAttachment) {
+func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution *executor.TaskExecution, prompt string, recordPlanMode, setPlanMode, autoStart bool, attachments []v1.MessageAttachment) {
 	if execution.SessionID != "" {
-		s.recordInitialMessage(ctx, taskID, execution.SessionID, prompt, recordPlanMode, attachments)
+		s.recordInitialMessage(ctx, taskID, execution.SessionID, prompt, recordPlanMode, autoStart, attachments)
 
 		if setPlanMode {
 			session, err := s.repo.GetTaskSession(ctx, execution.SessionID)
@@ -674,9 +675,12 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 }
 
 // recordInitialMessage creates the initial user message and updates session state after launch.
-func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, prompt string, planModeActive bool, attachments []v1.MessageAttachment) {
+// autoStart marks the message as having been created by an automated trigger
+// (workflow auto-start, PR/issue watch, Jira/Linear integration) so cleanup
+// logic can distinguish "agent ran on its own" from "user actually engaged".
+func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, prompt string, planModeActive, autoStart bool, attachments []v1.MessageAttachment) {
 	if s.messageCreator != nil && (prompt != "" || len(attachments) > 0) {
-		meta := NewUserMessageMeta().WithPlanMode(planModeActive).WithAttachments(attachments)
+		meta := NewUserMessageMeta().WithPlanMode(planModeActive).WithAutoStart(autoStart).WithAttachments(attachments)
 		if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, s.getActiveTurnID(sessionID), meta.ToMap()); err != nil {
 			s.logger.Error("failed to create initial user message",
 				zap.String("task_id", taskID),

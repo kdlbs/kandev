@@ -57,6 +57,9 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.POST("/watches/issue/:id/trigger", c.httpTriggerIssueWatch)
 	api.POST("/watches/issue/trigger-all", c.httpTriggerAllIssueChecks)
 
+	api.POST("/cleanup/review-tasks", c.httpCleanupReviewTasks)
+	api.POST("/cleanup/issue-tasks", c.httpCleanupIssueTasks)
+
 	api.GET("/orgs", c.httpListUserOrgs)
 	api.GET("/repos/search", c.httpSearchRepos)
 	api.GET("/repos/:owner/:repo/branches", c.httpListRepoBranches)
@@ -692,4 +695,27 @@ func (c *Controller) httpResetActionPresets(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, presets)
+}
+
+// httpCleanupReviewTasks runs a global sweep over every review-PR dedup row
+// applying each watch's cleanup policy, returning the number of tasks
+// removed. Manual trigger for users to drain a pile of merged-PR tasks that
+// accumulated before the cleanup policy was in place.
+func (c *Controller) httpCleanupReviewTasks(ctx *gin.Context) {
+	deleted, err := c.service.CleanupAllOrphanedReviewTasks(ctx.Request.Context())
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"deleted": deleted})
+}
+
+// httpCleanupIssueTasks mirrors httpCleanupReviewTasks for issue watches.
+func (c *Controller) httpCleanupIssueTasks(ctx *gin.Context) {
+	deleted, err := c.service.CleanupAllOrphanedIssueTasks(ctx.Request.Context())
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"deleted": deleted})
 }
