@@ -80,10 +80,13 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     // matching (as happened on the 1.0.11 -> 1.1.22 bump that renamed
     // data-diffs -> data-diff), pierre's dark default (#0a0c10) leaks through.
     const colors = await testPage.evaluate(() => {
-      const container = document.querySelector("diffs-container")!;
-      const pre = container.shadowRoot!.querySelector("pre[data-diff]")! as HTMLElement;
-      const appBg = getComputedStyle(document.documentElement).getPropertyValue("--background");
-      // Resolve the CSS variable to a concrete rgb() via a probe element so we
+      const container = document.querySelector("diffs-container");
+      if (!container) throw new Error("diffs-container element not found");
+      const shadow = container.shadowRoot;
+      if (!shadow) throw new Error("diffs-container shadow root is closed or not yet attached");
+      const pre = shadow.querySelector<HTMLElement>("pre[data-diff]");
+      if (!pre) throw new Error("pre[data-diff] not found in diffs-container shadow root");
+      // Resolve var(--background) to a concrete rgb() via a probe element so we
       // can compare it byte-for-byte to the shadow-DOM pre's computed bg.
       const probe = document.createElement("div");
       probe.style.backgroundColor = `var(--background)`;
@@ -92,7 +95,6 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
       probe.remove();
       return {
         pre: getComputedStyle(pre).backgroundColor,
-        appBg: appBg.trim(),
         expected,
       };
     });
