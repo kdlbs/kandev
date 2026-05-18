@@ -223,10 +223,14 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// reveals it). The orchestrator's wrap in StartCreatedSession is
 	// idempotent (HasKandevContext guard), so passing the wrapped content
 	// through dispatchPromptAsync does not double-wrap downstream.
-	// HasKandevContext also guards this call: any upstream caller that ever
-	// pre-wraps the content (none today) won't get double-wrapped here.
+	// NOTE: req.Content is user-controlled — do NOT guard this wrap on
+	// HasKandevContext. A malicious or naive client could craft a body
+	// containing a fake "<kandev-system>KANDEV MCP TOOLS</kandev-system>"
+	// block and bypass server-side injection of the canonical task/session/
+	// tool context. Wrap unconditionally; the orchestrator's own guard sees
+	// our wrap downstream and skips its second pass.
 	storedContent := req.Content
-	if isCreatedSession && (req.Content != "" || len(req.Attachments) > 0) && !sysprompt.HasKandevContext(req.Content) {
+	if isCreatedSession && (req.Content != "" || len(req.Attachments) > 0) {
 		storedContent = sysprompt.InjectKandevContext(req.TaskID, req.TaskSessionID, req.Content)
 		req.Content = storedContent
 	}

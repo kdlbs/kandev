@@ -63,6 +63,12 @@ test.describe("Kandev system prompt wrap on first launch", () => {
     const raw = recorded.raw_content ?? "";
     expect(raw).toContain("<kandev-system>");
     expect(raw).toContain("</kandev-system>");
+    // Exactly-once: if any future call site (wsAddMessage, recordAutoStartMessage,
+    // StartCreatedSession) lost its idempotency guard and double-wrapped, the
+    // backend unit test catches it but the agent-facing boundary needs its own
+    // assertion too — nested <kandev-system> blocks break the strip regex.
+    expect((raw.match(/<kandev-system>/g) ?? []).length).toBe(1);
+    expect((raw.match(/<\/kandev-system>/g) ?? []).length).toBe(1);
     expect(raw).toContain(`Kandev Task ID: ${task.id}`);
     expect(raw).toContain(`Kandev Session ID: ${task.session_id}`);
     // Guard one representative MCP tool from kandev-context.md — if the
