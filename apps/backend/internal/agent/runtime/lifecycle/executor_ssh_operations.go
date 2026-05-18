@@ -228,6 +228,14 @@ func ensureAgentctlOnHost(ctx context.Context, client *ssh.Client, resolver *Age
 
 // sftpUploadBytes writes data to remotePath via SFTP with the given mode.
 // Intermediate directories must already exist.
+//
+// The temp filename includes a random suffix so two concurrent uploaders
+// targeting the same remotePath don't collide: with a shared `.tmp` name
+// the second rename would error with "file does not exist" once the first
+// uploader's rename consumed the temp file. Each uploader writes to its
+// own temp, then races on the rename — last-writer-wins is safe because
+// callers always upload identical content (sha256-keyed binary) or
+// content that doesn't matter if it loses the race (the sha256 sidecar).
 func sftpUploadBytes(client *ssh.Client, remotePath string, data []byte, mode os.FileMode) error {
 	c, err := sftp.NewClient(client)
 	if err != nil {
@@ -235,9 +243,7 @@ func sftpUploadBytes(client *ssh.Client, remotePath string, data []byte, mode os
 	}
 	defer func() { _ = c.Close() }()
 
-	// Stream to a temp path then rename, so a half-uploaded file never appears
-	// as the final name (matters most for the agentctl binary).
-	tmp := remotePath + ".tmp"
+	tmp := fmt.Sprintf("%s.tmp.%d.%d", remotePath, os.Getpid(), mrand.Uint64())
 	f, err := c.Create(tmp)
 	if err != nil {
 		return fmt.Errorf("sftp: create %s: %w", tmp, err)
@@ -252,11 +258,13 @@ func sftpUploadBytes(client *ssh.Client, remotePath string, data []byte, mode os
 		return fmt.Errorf("sftp: close %s: %w", tmp, err)
 	}
 	if err := c.Chmod(tmp, mode); err != nil {
+		_ = c.Remove(tmp)
 		return fmt.Errorf("sftp: chmod %s: %w", tmp, err)
 	}
 	if err := c.PosixRename(tmp, remotePath); err != nil {
 		// Some servers don't support POSIX rename; fall back to a non-atomic rename.
 		if rerr := c.Rename(tmp, remotePath); rerr != nil {
+			_ = c.Remove(tmp)
 			return fmt.Errorf("sftp: rename %s -> %s: %w", tmp, remotePath, rerr)
 		}
 	}
