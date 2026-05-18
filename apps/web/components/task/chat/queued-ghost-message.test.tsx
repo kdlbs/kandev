@@ -17,6 +17,8 @@ vi.mock("@kandev/ui/tooltip", () => ({
 const PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 
+const ATTACHMENT_1_ALT = "Attachment 1";
+
 function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   return {
     id: "q-1",
@@ -42,7 +44,7 @@ describe("QueuedGhostMessage attachment thumbnails", () => {
         onRemove={() => {}}
       />,
     );
-    const img = screen.getByAltText("Attachment 1") as HTMLImageElement;
+    const img = screen.getByAltText(ATTACHMENT_1_ALT) as HTMLImageElement;
     expect(img.src).toBe(`data:image/png;base64,${PNG_BASE64}`);
     expect(img.className).toContain("cursor-pointer");
   });
@@ -52,13 +54,7 @@ describe("QueuedGhostMessage attachment thumbnails", () => {
       <QueuedGhostMessage
         entry={entry({
           content: "",
-          attachments: [
-            {
-              type: "resource",
-              data: "ZmlsZQ==",
-              mime_type: "text/plain",
-            } as QueuedMessage["attachments"] extends Array<infer T> | undefined ? T : never,
-          ],
+          attachments: [{ type: "resource", data: "ZmlsZQ==", mime_type: "text/plain" }],
         })}
         canEdit
         onSave={async () => {}}
@@ -66,6 +62,26 @@ describe("QueuedGhostMessage attachment thumbnails", () => {
       />,
     );
     expect(screen.getByText("Attachment")).toBeTruthy();
+  });
+
+  it("opens the image via keyboard (Enter) when focused in display mode", () => {
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    render(
+      <QueuedGhostMessage
+        entry={entry({
+          attachments: [{ type: "image", data: PNG_BASE64, mime_type: "image/png" }],
+        })}
+        canEdit
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+    const img = screen.getByAltText(ATTACHMENT_1_ALT) as HTMLImageElement;
+    expect(img.getAttribute("role")).toBe("button");
+    expect(img.getAttribute("tabindex")).toBe("0");
+    fireEvent.keyDown(img, { key: "Enter" });
+    expect(openSpy).toHaveBeenCalledOnce();
+    openSpy.mockRestore();
   });
 
   it("opens the image in a new window when clicked in display mode", () => {
@@ -80,7 +96,7 @@ describe("QueuedGhostMessage attachment thumbnails", () => {
         onRemove={() => {}}
       />,
     );
-    fireEvent.click(screen.getByAltText("Attachment 1"));
+    fireEvent.click(screen.getByAltText(ATTACHMENT_1_ALT));
     expect(openSpy).toHaveBeenCalledOnce();
     openSpy.mockRestore();
   });
@@ -98,7 +114,7 @@ describe("QueuedGhostMessage attachment thumbnails", () => {
       />,
     );
     fireEvent.click(screen.getByTitle("Edit queued message"));
-    const img = screen.getByAltText("Attachment 1") as HTMLImageElement;
+    const img = screen.getByAltText(ATTACHMENT_1_ALT) as HTMLImageElement;
     expect(img.className).not.toContain("cursor-pointer");
     fireEvent.click(img);
     expect(openSpy).not.toHaveBeenCalled();

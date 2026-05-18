@@ -19,7 +19,7 @@ import { QueueEntryNotFoundError } from "@/lib/api/domains/queue-api";
 import { openImageInWindow } from "@/components/task/chat/file-attachment";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 
-type QueuedAttachment = NonNullable<QueuedMessage["attachments"]>[number] & { name?: string };
+type QueuedAttachment = NonNullable<QueuedMessage["attachments"]>[number];
 
 type AttachmentRowProps = {
   attachments: QueuedAttachment[];
@@ -36,6 +36,12 @@ function AttachmentRow({ attachments, interactive }: AttachmentRowProps) {
   if (attachments.length === 0) return null;
   const images = attachments.filter((a) => a.type === "image");
   const files = attachments.filter((a) => a.type !== "image");
+  const onImageKeyDown = (att: QueuedAttachment) => (e: React.KeyboardEvent<HTMLImageElement>) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openImageInWindow(att.mime_type, att.data);
+    }
+  };
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {images.map((att, i) => (
@@ -43,21 +49,25 @@ function AttachmentRow({ attachments, interactive }: AttachmentRowProps) {
         <img
           key={`img-${i}`}
           src={`data:${att.mime_type};base64,${att.data}`}
-          alt={att.name || `Attachment ${i + 1}`}
+          alt={`Attachment ${i + 1}`}
+          role={interactive ? "button" : undefined}
+          tabIndex={interactive ? 0 : undefined}
           className={cn(
             "h-10 w-10 rounded-md border border-border object-cover",
-            interactive && "cursor-pointer hover:opacity-90 transition-opacity",
+            interactive &&
+              "cursor-pointer hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-primary",
           )}
           onClick={interactive ? () => openImageInWindow(att.mime_type, att.data) : undefined}
+          onKeyDown={interactive ? onImageKeyDown(att) : undefined}
         />
       ))}
-      {files.map((att, i) => (
+      {files.map((_, i) => (
         <span
           key={`file-${i}`}
           className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground"
         >
           <IconFile className="h-3 w-3" />
-          {att.name || "Attachment"}
+          Attachment
         </span>
       ))}
     </div>
