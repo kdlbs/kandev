@@ -6,21 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-
-	"github.com/kandev/kandev/internal/common/logger"
 )
-
-// RegisterRoutes wires the updates endpoints onto the existing system API
-// group. Callers may either call this helper or use HandleGet / HandleCheck
-// directly when composing routes elsewhere.
-func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
-	api := router.Group("/api/v1/system")
-	api.GET("/updates", HandleGet(svc))
-	api.POST("/updates/check", HandleCheck(svc))
-	if log != nil {
-		log.Debug("Registered System Updates handlers (HTTP)")
-	}
-}
 
 // HandleGet returns the cached kandev_meta view of latest version. It never
 // hits GitHub. Errors from the meta read are surfaced as 500.

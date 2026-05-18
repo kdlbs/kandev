@@ -17,7 +17,9 @@ func init() {
 
 func newRouter(svc *Service) *gin.Engine {
 	r := gin.New()
-	RegisterRoutes(r, svc, logger.Default())
+	api := r.Group("/api/v1/system")
+	api.GET("/updates", HandleGet(svc))
+	api.POST("/updates/check", HandleCheck(svc))
 	return r
 }
 

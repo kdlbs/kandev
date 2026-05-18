@@ -3,6 +3,7 @@ package backups
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -52,7 +53,7 @@ func HandleDownload(svc *Service) gin.HandlerFunc {
 			return
 		}
 		defer func() { _ = f.Close() }()
-		c.Header("Content-Disposition", `attachment; filename="`+name+`"`)
+		c.Header("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(name, `"`, `\"`)+`"`)
 		c.Header("Content-Type", "application/octet-stream")
 		c.DataFromReader(http.StatusOK, size, "application/octet-stream", f, nil)
 	}

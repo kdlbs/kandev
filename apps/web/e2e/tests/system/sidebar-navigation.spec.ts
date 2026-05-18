@@ -30,7 +30,7 @@ test.describe("System sidebar navigation", () => {
     // Click each entry and confirm the URL + page title.
     for (const entry of SYSTEM_ENTRIES) {
       await testPage.locator(`a[href="${entry.href}"]`).first().click();
-      await expect(testPage).toHaveURL(new RegExp(`${entry.href.replace(/\//g, "\\/")}$`), {
+      await expect(testPage).toHaveURL((url) => new URL(url).pathname === entry.href, {
         timeout: 10_000,
       });
       await expect(testPage.getByTestId("system-page-title")).toHaveText(entry.title, {
