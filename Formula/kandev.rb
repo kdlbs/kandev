@@ -73,8 +73,15 @@ class Kandev < Formula
       assert_match "healthy",
                    shell_output("curl -s http://127.0.0.1:#{port}/api/v1/system/health")
     ensure
-      Process.kill("TERM", pid)
-      Process.wait(pid)
+      # Guard against ESRCH if the backend already crashed — without
+      # this, an exception in `ensure` masks the original failure
+      # diagnostic (e.g. the "did not start within 60s" message).
+      begin
+        Process.kill("TERM", pid)
+        Process.wait(pid)
+      rescue Errno::ESRCH, Errno::ECHILD
+        nil
+      end
     end
   end
 end

@@ -10,7 +10,7 @@ owner: tbd
 
 Kandev is currently installable via `brew install kdlbs/kandev/kandev` from the `kdlbs/homebrew-kandev` tap. The tap formula downloads pre-built release tarballs, which works for end users but is rejected by `homebrew/homebrew-core` policy. Landing in homebrew-core means:
 
-- `brew install kandev` (no tap-tap required) — lower friction discovery.
+- `brew install kandev` (no tap required) — lower friction discovery.
 - Bottles are built and signed by Homebrew's CI, eliminating per-platform GH-release tarballs as the install path.
 - Automated version bumps via `brew bump-formula-pr` once `livecheck` is wired up.
 

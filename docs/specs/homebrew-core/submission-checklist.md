@@ -12,7 +12,7 @@ Step-by-step for submitting `kandev` to `Homebrew/homebrew-core`. Reference form
 ## 1. Refresh sha256 for the pinned tag
 
 ```bash
-TAG=v0.41.0   # whatever tag the formula points at
+TAG=v0.49.0   # whatever tag the formula points at
 curl -sL -o /tmp/kandev-src.tar.gz "https://github.com/kdlbs/kandev/archive/refs/tags/${TAG}.tar.gz"
 shasum -a 256 /tmp/kandev-src.tar.gz
 ```
@@ -39,7 +39,7 @@ Expected:
 
 ```bash
 kandev --help          # → "kandev launcher" header
-kandev --version       # → 0.41.0 (or whatever tag)
+kandev --version       # → 0.49.0 (or whatever tag)
 which kandev           # → $HOMEBREW_PREFIX/bin/kandev
 otool -L $(brew --cellar kandev)/*/libexec/bin/kandev   # cgo libs sane
 ```
@@ -91,13 +91,13 @@ cp <kandev repo>/Formula/kandev.rb Formula/k/kandev.rb
 # 3. Branch + commit
 git checkout -b kandev-new-formula
 git add Formula/k/kandev.rb
-git commit -m "kandev 0.41.0 (new formula)"
+git commit -m "kandev 0.49.0 (new formula)"
 git push origin kandev-new-formula
 
 # 4. Open PR
 gh pr create \
   --repo Homebrew/homebrew-core \
-  --title "kandev 0.41.0 (new formula)" \
+  --title "kandev 0.49.0 (new formula)" \
   --body "$(cat <<'EOF'
 Adds `kandev`, an AI Kanban & development environment.
 
