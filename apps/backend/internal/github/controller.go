@@ -697,12 +697,12 @@ func (c *Controller) httpResetActionPresets(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, presets)
 }
 
-// httpCleanupReviewTasks runs a global sweep over every review-PR dedup row
-// applying each watch's cleanup policy, returning the number of tasks
-// removed. Manual trigger for users to drain a pile of merged-PR tasks that
-// accumulated before the cleanup policy was in place.
+// httpCleanupReviewTasks runs a sweep over every review-PR dedup row
+// (including rows under enabled watches) applying each watch's cleanup
+// policy. Manual trigger for users to drain a pile of merged-PR tasks
+// without waiting for the next 5-minute poller cycle.
 func (c *Controller) httpCleanupReviewTasks(ctx *gin.Context) {
-	deleted, err := c.service.CleanupAllOrphanedReviewTasks(ctx.Request.Context())
+	deleted, err := c.service.CleanupAllReviewTasks(ctx.Request.Context())
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -712,7 +712,7 @@ func (c *Controller) httpCleanupReviewTasks(ctx *gin.Context) {
 
 // httpCleanupIssueTasks mirrors httpCleanupReviewTasks for issue watches.
 func (c *Controller) httpCleanupIssueTasks(ctx *gin.Context) {
-	deleted, err := c.service.CleanupAllOrphanedIssueTasks(ctx.Request.Context())
+	deleted, err := c.service.CleanupAllIssueTasks(ctx.Request.Context())
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

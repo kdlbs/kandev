@@ -544,10 +544,11 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 	p.logger.Debug("checking review watches", zap.Int("count", len(watches)))
 	for _, watch := range watches {
 		// A previous iteration in this same cycle may have exhausted the
-		// search bucket. Stop early instead of issuing another doomed search
-		// that would only deepen the secondary-limit penalty.
+		// search bucket. Skip remaining per-watch checks instead of issuing
+		// another doomed search, but fall through to the orphan sweep below
+		// since it doesn't touch the search API.
 		if p.searchBucketExhausted("review_watch") {
-			return
+			break
 		}
 		p.logger.Debug("polling review watch",
 			zap.String("watch_id", watch.ID),
@@ -629,7 +630,7 @@ func (p *Poller) checkIssueWatches(ctx context.Context) {
 	p.logger.Debug("checking issue watches", zap.Int("count", len(watches)))
 	for _, watch := range watches {
 		if p.searchBucketExhausted("issue_watch") {
-			return
+			break
 		}
 		p.logger.Debug("polling issue watch",
 			zap.String("watch_id", watch.ID),

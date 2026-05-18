@@ -72,10 +72,12 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionGitHubCleanupIssueTasks, wsCleanupIssueTasks(svc))
 }
 
-// wsCleanupReviewTasks runs the global sweep and returns the count deleted.
+// wsCleanupReviewTasks runs the manual full sweep and returns the count
+// deleted. Manual users want everything drained now, so this skips the
+// poller's "orphans only" optimization.
 func wsCleanupReviewTasks(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-		deleted, err := svc.CleanupAllOrphanedReviewTasks(ctx)
+		deleted, err := svc.CleanupAllReviewTasks(ctx)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
@@ -83,10 +85,10 @@ func wsCleanupReviewTasks(svc *Service) func(ctx context.Context, msg *ws.Messag
 	}
 }
 
-// wsCleanupIssueTasks runs the global sweep and returns the count deleted.
+// wsCleanupIssueTasks mirrors wsCleanupReviewTasks for issue watches.
 func wsCleanupIssueTasks(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-		deleted, err := svc.CleanupAllOrphanedIssueTasks(ctx)
+		deleted, err := svc.CleanupAllIssueTasks(ctx)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}

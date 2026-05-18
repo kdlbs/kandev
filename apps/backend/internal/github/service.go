@@ -1269,23 +1269,27 @@ func (s *Service) UpdateReviewWatch(ctx context.Context, id string, req *UpdateR
 // it owned. The store layer drops the dedup rows transactionally with the
 // watch row, but tasks live in a separate domain and would leak forever
 // without this pre-pass (the global sweep can no longer find them after the
-// dedup rows are gone).
+// dedup rows are gone). True best-effort: a list error logs Warn and lets
+// the watch delete proceed so the user's primary action isn't blocked by
+// transient task-domain failures.
 func (s *Service) DeleteReviewWatch(ctx context.Context, id string) error {
 	if s.taskDeleter != nil {
 		prTasks, err := s.store.ListReviewPRTasksByWatch(ctx, id)
 		if err != nil {
-			return fmt.Errorf("list review PR tasks for watch %s: %w", id, err)
-		}
-		for _, rpt := range prTasks {
-			if rpt.TaskID == "" {
-				continue
-			}
-			if err := s.taskDeleter.DeleteTask(ctx, rpt.TaskID); err != nil &&
-				!strings.Contains(err.Error(), "not found") {
-				s.logger.Warn("failed to delete review task during watch cleanup",
-					zap.String("watch_id", id),
-					zap.String("task_id", rpt.TaskID),
-					zap.Error(err))
+			s.logger.Warn("failed to list review PR tasks for pre-delete sweep",
+				zap.String("watch_id", id), zap.Error(err))
+		} else {
+			for _, rpt := range prTasks {
+				if rpt.TaskID == "" {
+					continue
+				}
+				if err := s.taskDeleter.DeleteTask(ctx, rpt.TaskID); err != nil &&
+					!strings.Contains(err.Error(), "not found") {
+					s.logger.Warn("failed to delete review task during watch cleanup",
+						zap.String("watch_id", id),
+						zap.String("task_id", rpt.TaskID),
+						zap.Error(err))
+				}
 			}
 		}
 	}
@@ -1728,12 +1732,27 @@ func (s *Service) CleanupMergedReviewTasks(ctx context.Context, watch *ReviewWat
 	return s.cleanupReviewPRTaskBatch(ctx, prTasks, func(_ *ReviewPRTask) string { return policy }), nil
 }
 
-// CleanupAllOrphanedReviewTasks sweeps every dedup row across all review
-// watches — including rows whose watch was deleted or disabled — and applies
-// the per-watch cleanup policy. Orphaned rows (watch missing) default to
-// CleanupPolicyAuto, matching the user-friendly fix-forward behavior.
-// Returns the number of tasks deleted.
+// CleanupAllOrphanedReviewTasks sweeps dedup rows whose watch is deleted or
+// disabled. The per-watch poller loop already processes enabled-watch rows
+// in the same cycle, so re-walking them here would double GitHub API
+// consumption (the GetPRFeedback path bypasses prStatusCache). Returns the
+// number of tasks deleted.
 func (s *Service) CleanupAllOrphanedReviewTasks(ctx context.Context) (int, error) {
+	return s.cleanupAllReviewTasks(ctx, true)
+}
+
+// CleanupAllReviewTasks sweeps every dedup row across all review watches,
+// including rows owned by currently-enabled watches. Used by the manual
+// settings-page cleanup button so the user can drain everything on demand
+// without waiting for the next 5-minute poll cycle.
+func (s *Service) CleanupAllReviewTasks(ctx context.Context) (int, error) {
+	return s.cleanupAllReviewTasks(ctx, false)
+}
+
+// cleanupAllReviewTasks is the shared body. When orphansOnly is true, rows
+// whose watch is currently enabled are skipped (the per-watch poller will
+// handle them in the same cycle).
+func (s *Service) cleanupAllReviewTasks(ctx context.Context, orphansOnly bool) (int, error) {
 	if s.client == nil || s.taskDeleter == nil {
 		return 0, nil
 	}
@@ -1744,11 +1763,24 @@ func (s *Service) CleanupAllOrphanedReviewTasks(ctx context.Context) (int, error
 	if len(prTasks) == 0 {
 		return 0, nil
 	}
-	policyCache, err := s.buildReviewWatchPolicyCache(ctx, prTasks)
+	policyCache, enabledCache, err := s.buildReviewWatchCaches(ctx, prTasks)
 	if err != nil {
 		return 0, err
 	}
-	return s.cleanupReviewPRTaskBatch(ctx, prTasks, func(rpt *ReviewPRTask) string {
+	candidates := prTasks
+	if orphansOnly {
+		candidates = candidates[:0]
+		for _, rpt := range prTasks {
+			if enabledCache[rpt.ReviewWatchID] {
+				continue
+			}
+			candidates = append(candidates, rpt)
+		}
+		if len(candidates) == 0 {
+			return 0, nil
+		}
+	}
+	return s.cleanupReviewPRTaskBatch(ctx, candidates, func(rpt *ReviewPRTask) string {
 		if p, ok := policyCache[rpt.ReviewWatchID]; ok {
 			return p
 		}
@@ -1758,26 +1790,29 @@ func (s *Service) CleanupAllOrphanedReviewTasks(ctx context.Context) (int, error
 	}), nil
 }
 
-// buildReviewWatchPolicyCache loads the cleanup policy for each distinct
-// watch ID referenced by prTasks. Missing watches (deleted) are simply absent
-// from the returned map.
-func (s *Service) buildReviewWatchPolicyCache(ctx context.Context, prTasks []*ReviewPRTask) (map[string]string, error) {
+// buildReviewWatchCaches loads the cleanup policy + enabled flag for each
+// distinct watch ID referenced by prTasks. Missing watches (deleted) are
+// absent from both maps; caller treats absence as "policy = auto, enabled =
+// false" — the orphan defaults that keep stale rows reachable.
+func (s *Service) buildReviewWatchCaches(ctx context.Context, prTasks []*ReviewPRTask) (map[string]string, map[string]bool, error) {
 	seen := make(map[string]struct{})
 	for _, rpt := range prTasks {
 		seen[rpt.ReviewWatchID] = struct{}{}
 	}
-	cache := make(map[string]string, len(seen))
+	policy := make(map[string]string, len(seen))
+	enabled := make(map[string]bool, len(seen))
 	for watchID := range seen {
 		watch, err := s.store.GetReviewWatch(ctx, watchID)
 		if err != nil {
-			return nil, fmt.Errorf("get review watch %s: %w", watchID, err)
+			return nil, nil, fmt.Errorf("get review watch %s: %w", watchID, err)
 		}
 		if watch == nil {
 			continue
 		}
-		cache[watchID] = NormalizeCleanupPolicy(watch.CleanupPolicy)
+		policy[watchID] = NormalizeCleanupPolicy(watch.CleanupPolicy)
+		enabled[watchID] = watch.Enabled
 	}
-	return cache, nil
+	return policy, enabled, nil
 }
 
 // cleanupReviewPRTaskBatch runs the deletion gate over a slice of dedup rows.
@@ -2116,23 +2151,26 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 }
 
 // DeleteIssueWatch deletes an issue watch and best-effort reaps any tasks
-// it owned (mirrors DeleteReviewWatch).
+// it owned (mirrors DeleteReviewWatch — list errors log Warn and let the
+// watch delete proceed).
 func (s *Service) DeleteIssueWatch(ctx context.Context, id string) error {
 	if s.taskDeleter != nil {
 		issueTasks, err := s.store.ListIssueWatchTasksByWatch(ctx, id)
 		if err != nil {
-			return fmt.Errorf("list issue tasks for watch %s: %w", id, err)
-		}
-		for _, it := range issueTasks {
-			if it.TaskID == "" {
-				continue
-			}
-			if err := s.taskDeleter.DeleteTask(ctx, it.TaskID); err != nil &&
-				!strings.Contains(err.Error(), "not found") {
-				s.logger.Warn("failed to delete issue task during watch cleanup",
-					zap.String("watch_id", id),
-					zap.String("task_id", it.TaskID),
-					zap.Error(err))
+			s.logger.Warn("failed to list issue tasks for pre-delete sweep",
+				zap.String("watch_id", id), zap.Error(err))
+		} else {
+			for _, it := range issueTasks {
+				if it.TaskID == "" {
+					continue
+				}
+				if err := s.taskDeleter.DeleteTask(ctx, it.TaskID); err != nil &&
+					!strings.Contains(err.Error(), "not found") {
+					s.logger.Warn("failed to delete issue task during watch cleanup",
+						zap.String("watch_id", id),
+						zap.String("task_id", it.TaskID),
+						zap.Error(err))
+				}
 			}
 		}
 	}
@@ -2323,10 +2361,19 @@ func (s *Service) CleanupClosedIssueTasks(ctx context.Context, watch *IssueWatch
 	return s.cleanupIssueTaskBatch(ctx, issueTasks, func(_ *IssueWatchTask) string { return policy }), nil
 }
 
-// CleanupAllOrphanedIssueTasks sweeps every dedup row across all issue
-// watches, applying per-watch policy and defaulting orphans to
-// CleanupPolicyAuto. Returns the number of tasks deleted.
+// CleanupAllOrphanedIssueTasks sweeps dedup rows whose watch is deleted or
+// disabled (mirrors CleanupAllOrphanedReviewTasks).
 func (s *Service) CleanupAllOrphanedIssueTasks(ctx context.Context) (int, error) {
+	return s.cleanupAllIssueTasks(ctx, true)
+}
+
+// CleanupAllIssueTasks sweeps every dedup row across all issue watches for
+// the manual settings-page button.
+func (s *Service) CleanupAllIssueTasks(ctx context.Context) (int, error) {
+	return s.cleanupAllIssueTasks(ctx, false)
+}
+
+func (s *Service) cleanupAllIssueTasks(ctx context.Context, orphansOnly bool) (int, error) {
 	if s.client == nil || s.taskDeleter == nil {
 		return 0, nil
 	}
@@ -2337,11 +2384,24 @@ func (s *Service) CleanupAllOrphanedIssueTasks(ctx context.Context) (int, error)
 	if len(issueTasks) == 0 {
 		return 0, nil
 	}
-	policyCache, err := s.buildIssueWatchPolicyCache(ctx, issueTasks)
+	policyCache, enabledCache, err := s.buildIssueWatchCaches(ctx, issueTasks)
 	if err != nil {
 		return 0, err
 	}
-	return s.cleanupIssueTaskBatch(ctx, issueTasks, func(it *IssueWatchTask) string {
+	candidates := issueTasks
+	if orphansOnly {
+		candidates = candidates[:0]
+		for _, it := range issueTasks {
+			if enabledCache[it.IssueWatchID] {
+				continue
+			}
+			candidates = append(candidates, it)
+		}
+		if len(candidates) == 0 {
+			return 0, nil
+		}
+	}
+	return s.cleanupIssueTaskBatch(ctx, candidates, func(it *IssueWatchTask) string {
 		if p, ok := policyCache[it.IssueWatchID]; ok {
 			return p
 		}
@@ -2349,23 +2409,25 @@ func (s *Service) CleanupAllOrphanedIssueTasks(ctx context.Context) (int, error)
 	}), nil
 }
 
-func (s *Service) buildIssueWatchPolicyCache(ctx context.Context, issueTasks []*IssueWatchTask) (map[string]string, error) {
+func (s *Service) buildIssueWatchCaches(ctx context.Context, issueTasks []*IssueWatchTask) (map[string]string, map[string]bool, error) {
 	seen := make(map[string]struct{})
 	for _, it := range issueTasks {
 		seen[it.IssueWatchID] = struct{}{}
 	}
-	cache := make(map[string]string, len(seen))
+	policy := make(map[string]string, len(seen))
+	enabled := make(map[string]bool, len(seen))
 	for watchID := range seen {
 		watch, err := s.store.GetIssueWatch(ctx, watchID)
 		if err != nil {
-			return nil, fmt.Errorf("get issue watch %s: %w", watchID, err)
+			return nil, nil, fmt.Errorf("get issue watch %s: %w", watchID, err)
 		}
 		if watch == nil {
 			continue
 		}
-		cache[watchID] = NormalizeCleanupPolicy(watch.CleanupPolicy)
+		policy[watchID] = NormalizeCleanupPolicy(watch.CleanupPolicy)
+		enabled[watchID] = watch.Enabled
 	}
-	return cache, nil
+	return policy, enabled, nil
 }
 
 //nolint:dupl // mirrors cleanupReviewPRTaskBatch — different types, same structure

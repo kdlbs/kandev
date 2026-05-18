@@ -244,6 +244,56 @@ func TestCleanupAllOrphanedReviewTasks_DisabledWatch_StillCleansUp(t *testing.T)
 	}
 }
 
+// Regression for greptile P2: the global sweep must not re-hit GitHub for
+// dedup rows the per-watch loop already processed in the same cycle.
+// CleanupAllOrphanedReviewTasks skips rows whose watch is currently
+// enabled — the per-watch loop is responsible for those.
+func TestCleanupAllOrphanedReviewTasks_SkipsEnabledWatchRows(t *testing.T) {
+	_, svc, mockClient, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	watch := &ReviewWatch{WorkspaceID: "ws-1", Enabled: true}
+	if err := store.CreateReviewWatch(ctx, watch); err != nil {
+		t.Fatalf("CreateReviewWatch: %v", err)
+	}
+	rpt := &ReviewPRTask{
+		ReviewWatchID: watch.ID,
+		RepoOwner:     "acme",
+		RepoName:      "widget",
+		PRNumber:      111,
+		TaskID:        "task-111",
+	}
+	if err := store.CreateReviewPRTask(ctx, rpt); err != nil {
+		t.Fatalf("CreateReviewPRTask: %v", err)
+	}
+	// PR is merged — without the skip, the orphan sweep would happily
+	// delete it on top of the per-watch loop.
+	mockClient.AddPR(&PR{Number: 111, State: prStateMerged, RepoOwner: "acme", RepoName: "widget"})
+
+	rec := &recordingTaskDeleter{}
+	svc.SetTaskDeleter(rec)
+
+	deleted, err := svc.CleanupAllOrphanedReviewTasks(ctx)
+	if err != nil {
+		t.Fatalf("CleanupAllOrphanedReviewTasks: %v", err)
+	}
+	if deleted != 0 {
+		t.Fatalf("deleted=%d, want 0 (enabled-watch rows must be skipped by the orphan sweep)", deleted)
+	}
+	if len(rec.calls) != 0 {
+		t.Fatalf("DeleteTask called %d times, want 0", len(rec.calls))
+	}
+
+	// And CleanupAllReviewTasks (manual button path) reaps the same row.
+	deleted, err = svc.CleanupAllReviewTasks(ctx)
+	if err != nil {
+		t.Fatalf("CleanupAllReviewTasks: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("manual sweep deleted=%d, want 1", deleted)
+	}
+}
+
 func TestCleanupAllOrphanedReviewTasks_RespectsNeverPolicy(t *testing.T) {
 	_, svc, mockClient, store := setupPollerTest(t)
 	ctx := context.Background()

@@ -148,7 +148,7 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 	execution, err := s.StartTask(
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
-		req.WorkflowStepID, req.PlanMode, false, req.Attachments,
+		req.WorkflowStepID, req.PlanMode, req.AutoStart, req.Attachments,
 	)
 	if err != nil {
 		return nil, err
