@@ -1763,10 +1763,7 @@ func (s *Service) cleanupAllReviewTasks(ctx context.Context, orphansOnly bool) (
 	if len(prTasks) == 0 {
 		return 0, nil
 	}
-	policyCache, enabledCache, err := s.buildReviewWatchCaches(ctx, prTasks)
-	if err != nil {
-		return 0, err
-	}
+	policyCache, enabledCache := s.buildReviewWatchCaches(ctx, prTasks)
 	candidates := prTasks
 	if orphansOnly {
 		candidates = candidates[:0]
@@ -1793,8 +1790,11 @@ func (s *Service) cleanupAllReviewTasks(ctx context.Context, orphansOnly bool) (
 // buildReviewWatchCaches loads the cleanup policy + enabled flag for each
 // distinct watch ID referenced by prTasks. Missing watches (deleted) are
 // absent from both maps; caller treats absence as "policy = auto, enabled =
-// false" — the orphan defaults that keep stale rows reachable.
-func (s *Service) buildReviewWatchCaches(ctx context.Context, prTasks []*ReviewPRTask) (map[string]string, map[string]bool, error) {
+// false" — the orphan defaults that keep stale rows reachable. A per-row
+// fetch error is logged and the watch is left out of both maps so its rows
+// take the orphan path, matching the per-watch loop's "skip and continue"
+// behavior — a single transient DB hiccup must not abort the whole sweep.
+func (s *Service) buildReviewWatchCaches(ctx context.Context, prTasks []*ReviewPRTask) (map[string]string, map[string]bool) {
 	seen := make(map[string]struct{})
 	for _, rpt := range prTasks {
 		seen[rpt.ReviewWatchID] = struct{}{}
@@ -1804,7 +1804,9 @@ func (s *Service) buildReviewWatchCaches(ctx context.Context, prTasks []*ReviewP
 	for watchID := range seen {
 		watch, err := s.store.GetReviewWatch(ctx, watchID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("get review watch %s: %w", watchID, err)
+			s.logger.Warn("failed to fetch review watch during orphan sweep",
+				zap.String("watch_id", watchID), zap.Error(err))
+			continue
 		}
 		if watch == nil {
 			continue
@@ -1812,7 +1814,7 @@ func (s *Service) buildReviewWatchCaches(ctx context.Context, prTasks []*ReviewP
 		policy[watchID] = NormalizeCleanupPolicy(watch.CleanupPolicy)
 		enabled[watchID] = watch.Enabled
 	}
-	return policy, enabled, nil
+	return policy, enabled
 }
 
 // cleanupReviewPRTaskBatch runs the deletion gate over a slice of dedup rows.
@@ -2384,10 +2386,7 @@ func (s *Service) cleanupAllIssueTasks(ctx context.Context, orphansOnly bool) (i
 	if len(issueTasks) == 0 {
 		return 0, nil
 	}
-	policyCache, enabledCache, err := s.buildIssueWatchCaches(ctx, issueTasks)
-	if err != nil {
-		return 0, err
-	}
+	policyCache, enabledCache := s.buildIssueWatchCaches(ctx, issueTasks)
 	candidates := issueTasks
 	if orphansOnly {
 		candidates = candidates[:0]
@@ -2409,7 +2408,7 @@ func (s *Service) cleanupAllIssueTasks(ctx context.Context, orphansOnly bool) (i
 	}), nil
 }
 
-func (s *Service) buildIssueWatchCaches(ctx context.Context, issueTasks []*IssueWatchTask) (map[string]string, map[string]bool, error) {
+func (s *Service) buildIssueWatchCaches(ctx context.Context, issueTasks []*IssueWatchTask) (map[string]string, map[string]bool) {
 	seen := make(map[string]struct{})
 	for _, it := range issueTasks {
 		seen[it.IssueWatchID] = struct{}{}
@@ -2419,7 +2418,9 @@ func (s *Service) buildIssueWatchCaches(ctx context.Context, issueTasks []*Issue
 	for watchID := range seen {
 		watch, err := s.store.GetIssueWatch(ctx, watchID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("get issue watch %s: %w", watchID, err)
+			s.logger.Warn("failed to fetch issue watch during orphan sweep",
+				zap.String("watch_id", watchID), zap.Error(err))
+			continue
 		}
 		if watch == nil {
 			continue
@@ -2427,7 +2428,7 @@ func (s *Service) buildIssueWatchCaches(ctx context.Context, issueTasks []*Issue
 		policy[watchID] = NormalizeCleanupPolicy(watch.CleanupPolicy)
 		enabled[watchID] = watch.Enabled
 	}
-	return policy, enabled, nil
+	return policy, enabled
 }
 
 //nolint:dupl // mirrors cleanupReviewPRTaskBatch — different types, same structure
