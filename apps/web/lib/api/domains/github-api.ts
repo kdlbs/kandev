@@ -24,6 +24,7 @@ import type {
   GitHubPRStatus,
   GitHubActionPresets,
   UpdateGitHubActionPresetsRequest,
+  CleanupTasksResponse,
 } from "@/lib/types/github";
 
 // Status
@@ -288,6 +289,23 @@ export async function triggerAllIssueWatches(workspaceId: string, options?: ApiR
       init: { method: "POST", ...(options?.init ?? {}) },
     },
   );
+}
+
+// Manual cleanup sweeps. The poller runs these every 5min per watch, but a
+// user with a pile of legacy merged-PR tasks (created before the cleanup
+// policy was in place) can invoke them on demand from the settings page.
+export async function cleanupMergedReviewTasks(options?: ApiRequestOptions) {
+  return fetchJson<CleanupTasksResponse>("/api/v1/github/cleanup/review-tasks", {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
+}
+
+export async function cleanupClosedIssueTasks(options?: ApiRequestOptions) {
+  return fetchJson<CleanupTasksResponse>("/api/v1/github/cleanup/issue-tasks", {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
 }
 
 // User PR / issue search (for the /github page).
