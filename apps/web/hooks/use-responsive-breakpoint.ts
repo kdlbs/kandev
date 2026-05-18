@@ -21,6 +21,8 @@ function getBreakpoint(width: number, isFinePointer: boolean): Breakpoint {
   if (width < MOBILE_BREAKPOINT) {
     return "mobile";
   }
+  // Fine-pointer devices below 768px stay on the tablet layout; that range is
+  // too narrow to host the full workbench even with a mouse.
   if (width >= COMPACT_DESKTOP_BREAKPOINT && width < DESKTOP_BREAKPOINT && isFinePointer) {
     return "compactDesktop";
   }
@@ -49,9 +51,7 @@ function getPointerMode(): boolean {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
     return true;
   }
-  return (
-    window.matchMedia("(pointer: fine)").matches || window.matchMedia("(hover: hover)").matches
-  );
+  return window.matchMedia("(pointer: fine)").matches;
 }
 
 function getCurrentResponsiveBreakpoint(): ResponsiveBreakpoint {
@@ -81,7 +81,6 @@ export function useResponsiveBreakpoint(): ResponsiveBreakpoint {
       `(min-width: ${COMPACT_DESKTOP_BREAKPOINT}px) and (max-width: ${DESKTOP_BREAKPOINT - 1}px)`,
       `(min-width: ${DESKTOP_BREAKPOINT}px)`,
       "(pointer: fine)",
-      "(hover: hover)",
     ];
     const mediaQueryLists = mediaQueries.map((query) => window.matchMedia(query));
 

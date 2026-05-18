@@ -4,7 +4,11 @@ import { useResponsiveBreakpoint } from "./use-responsive-breakpoint";
 
 type Listener = (event: MediaQueryListEvent) => void;
 
-function setViewport(width: number, pointer: "fine" | "coarse" = "fine") {
+function setViewport(
+  width: number,
+  pointer: "fine" | "coarse" = "fine",
+  hover: "hover" | "none" = pointer === "fine" ? "hover" : "none",
+) {
   Object.defineProperty(window, "innerWidth", {
     configurable: true,
     writable: true,
@@ -16,7 +20,7 @@ function setViewport(width: number, pointer: "fine" | "coarse" = "fine") {
       media: query,
       matches:
         (query.includes("pointer: fine") && pointer === "fine") ||
-        (query.includes("hover: hover") && pointer === "fine") ||
+        (query.includes("hover: hover") && hover === "hover") ||
         (query.includes("pointer: coarse") && pointer === "coarse") ||
         (query.includes("max-width: 639px") && width <= 639) ||
         (query.includes("min-width: 640px") && width >= 640 && width <= 1023) ||
@@ -75,6 +79,16 @@ describe("useResponsiveBreakpoint", () => {
 
     expect(result.current.breakpoint).toBe("tablet");
     expect(result.current.isTablet).toBe(true);
+    expect(result.current.usesDesktopWorkbench).toBe(false);
+  });
+
+  it("keeps hover-only hybrid half-screen widths in tablet fallback", () => {
+    setViewport(900, "coarse", "hover");
+
+    const { result } = renderHook(() => useResponsiveBreakpoint());
+
+    expect(result.current.breakpoint).toBe("tablet");
+    expect(result.current.isFinePointer).toBe(false);
     expect(result.current.usesDesktopWorkbench).toBe(false);
   });
 

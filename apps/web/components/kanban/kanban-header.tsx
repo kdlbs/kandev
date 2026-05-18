@@ -409,7 +409,7 @@ function DesktopHeader({
     isHome && searchInput && !isNarrow ? (
       <div data-testid="kanban-header-search">{searchInput}</div>
     ) : null;
-  const actionsSearch = searchInput && (!isHome || isNarrow) ? searchInput : null;
+  const actionsSearch = !isHome || isNarrow ? searchInput : null;
   const leftActions = isHome ? (
     <HomeLeftActions workspaceId={workspaceId} />
   ) : (
