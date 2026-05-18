@@ -798,15 +798,20 @@ test.describe("Workflow agent profile switching", () => {
       .toBe(step2.id);
 
     // The handler runs in a goroutine after the step-id write, so a buggy
-    // respawn could land a few moments after the advance is visible. Poll
-    // briefly for session-count stability before the final assertion to
-    // close that race.
-    await expect
-      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
-        timeout: 5_000,
-        message: "Checking no extra session is spawned",
-      })
-      .toBe(2);
+    // respawn could land a few moments after the advance is visible. Sample
+    // the session count repeatedly across a short window and fail fast if
+    // it ever exceeds 2. `expect.poll(...).toBe(2)` would return on the
+    // first matching sample and miss a delayed respawn — we need to prove
+    // the count *stays* at 2.
+    const stabilityWindowMs = 3_000;
+    const stabilityStart = Date.now();
+    while (Date.now() - stabilityStart < stabilityWindowMs) {
+      const { sessions: stableSessions } = await apiClient.listTaskSessions(task.id);
+      expect(stableSessions.length, "no extra session should spawn within stability window").toBe(
+        2,
+      );
+      await new Promise((r) => setTimeout(r, 250));
+    }
 
     // Critical assertion: no extra profileA session was spawned after the
     // user's profileB turn completed. The task must still have exactly two
