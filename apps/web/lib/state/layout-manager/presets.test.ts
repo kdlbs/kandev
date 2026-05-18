@@ -5,7 +5,9 @@ describe("layout presets", () => {
   it("keeps the compact workbench on Dockview while prioritizing the center panel", () => {
     const compact = compactLayout();
     const compactSidebar = compact.columns.find((column) => column.id === "sidebar");
-    const defaultSidebarMaxWidth = defaultLayout().columns[0].maxWidth ?? Number.POSITIVE_INFINITY;
+    const defaultSidebarMaxWidth =
+      defaultLayout().columns.find((column) => column.id === "sidebar")?.maxWidth ??
+      Number.POSITIVE_INFINITY;
 
     expect(compact.columns.map((column) => column.id)).toEqual(["sidebar", "center"]);
     const compactSidebarWidth = compactSidebar?.width ?? Number.POSITIVE_INFINITY;
