@@ -415,6 +415,13 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
 	}
 
+	// Wrap the first prompt with the Kandev MCP system block. See the
+	// matching block in startTask for the rationale (DB stores wrapped form;
+	// Message.ToAPI strips for display).
+	if effectivePrompt != "" || len(attachments) > 0 {
+		effectivePrompt = sysprompt.InjectKandevContext(taskID, sessionID, effectivePrompt)
+	}
+
 	executorID := session.ExecutorID
 
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, Attachments: attachments})
@@ -588,6 +595,16 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if cm, ok := task.Metadata["config_mode"].(bool); ok && cm {
 		configMode = true
 		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
+	}
+
+	// Wrap the first prompt with the Kandev MCP system block (task/session IDs +
+	// tool list). Done at the orchestrator layer so recordInitialMessage persists
+	// the wrapped form to task_session_messages; Message.ToAPI strips the
+	// <kandev-system> block for the UI bubble and exposes it via raw_content.
+	// Only the first launch carries this wrap — follow-up prompts and resumes
+	// rely on the agent CLI's conversation history retaining it.
+	if effectivePrompt != "" || len(attachments) > 0 {
+		effectivePrompt = sysprompt.InjectKandevContext(task.ID, sessionID, effectivePrompt)
 	}
 
 	// Office tasks restrict the MCP toolset: kanban tools (move/update/list
