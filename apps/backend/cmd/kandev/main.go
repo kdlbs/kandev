@@ -104,6 +104,9 @@ import (
 	// Secrets
 	"github.com/kandev/kandev/internal/secrets"
 
+	// System pages (status / database / backups / logs / updates / about)
+	systemsvc "github.com/kandev/kandev/internal/system"
+
 	// Database
 	"github.com/kandev/kandev/internal/db"
 
@@ -478,7 +481,7 @@ func startAgentInfrastructure(
 		log.Info("Automation scheduler and evaluator started")
 	}
 
-	return startGatewayAndServe(ctx, cfg, log, eventBus, repos, services,
+	return startGatewayAndServe(ctx, cfg, log, eventBus, dbPool, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath, addCleanup, runCleanups)
 }
 
@@ -489,6 +492,7 @@ func startGatewayAndServe(
 	cfg *config.Config,
 	log *logger.Logger,
 	eventBus bus.EventBus,
+	dbPool *db.Pool,
 	repos *Repositories,
 	services *Services,
 	agentSettingsController *agentsettingscontroller.Controller,
@@ -596,10 +600,27 @@ func startGatewayAndServe(
 	services.Task.StartAutoArchiveLoop(ctx)
 
 	// ============================================
+	// SYSTEM PAGES
+	// ============================================
+	// Composed before HTTP routes so the registration pass below can mount
+	// the /api/v1/system/* group; started before the listener so the
+	// updates poller is alive as soon as we accept connections.
+	systemSvc := systemsvc.Provide(cfg, log, dbPool, eventBus, systemsvc.BuildInfo{
+		Version:   Version,
+		Commit:    Commit,
+		BuildTime: BuildTime,
+	}, systemsvc.Wiring{
+		OrchestratorShutdown: func() { _ = orchestratorSvc.Stop() },
+		Restart:              func() { triggerProcessRestart(log) },
+	})
+	systemSvc.StartBackground(ctx)
+	gateways.RegisterSystemNotifications(ctx, eventBus, gateway.Hub, log)
+
+	// ============================================
 	// HTTP SERVER
 	// ============================================
 	server := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
-		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr, addCleanup, repoCloner)
+		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr, addCleanup, repoCloner, systemSvc)
 
 	port := cfg.Server.Port
 	if port == 0 {
@@ -1443,6 +1464,7 @@ func buildHTTPServer(
 	hostUtilityMgr *hostutility.Manager,
 	addCleanup func(func() error),
 	repoCloner *repoclone.Cloner,
+	systemSvc *systemsvc.Service,
 ) *http.Server {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -1468,6 +1490,7 @@ func buildHTTPServer(
 		hostUtilityMgr:          hostUtilityMgr,
 		eventBus:                eventBus,
 		services:                services,
+		systemSvc:               systemSvc,
 		agentSettingsController: agentSettingsController,
 		agentSettingsRepo:       repos.AgentSettings,
 		agentList:               agentRegistry,
@@ -1496,6 +1519,23 @@ func buildHTTPServer(
 		Handler:      router,
 		ReadTimeout:  cfg.Server.ReadTimeoutDuration(),
 		WriteTimeout: cfg.Server.WriteTimeoutDuration(),
+	}
+}
+
+// triggerProcessRestart re-execs the current process so all in-memory caches
+// are cleared after destructive operations (factory reset, snapshot restore).
+// Logs and best-effort exits non-zero if exec fails; under a supervisor the
+// process will be restarted regardless.
+func triggerProcessRestart(log *logger.Logger) {
+	log.Info("System restart requested - re-execing process")
+	exe, err := os.Executable()
+	if err != nil {
+		log.Error("failed to resolve executable for restart", zap.Error(err))
+		os.Exit(1)
+	}
+	if err := syscall.Exec(exe, os.Args, os.Environ()); err != nil {
+		log.Error("syscall.Exec failed during restart", zap.Error(err))
+		os.Exit(1)
 	}
 }
 

@@ -15,13 +15,20 @@ import {
   IconBrandGithub,
   IconBrandSlack,
   IconHexagon,
-  IconSparkles,
   IconWand,
   IconGitBranch,
   IconArrowsShuffle,
   IconTicket,
   IconPlugConnected,
   IconBolt,
+  IconActivity,
+  IconDatabase,
+  IconArchive,
+  IconFileText,
+  IconRefresh,
+  IconScale,
+  IconInfoCircle,
+  IconServerCog,
 } from "@tabler/icons-react";
 import {
   Sidebar,
@@ -148,6 +155,41 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
           })}
         </SidebarMenuSub>
       )}
+    </SidebarMenuItem>
+  );
+}
+
+function SystemSidebarSection({ pathname }: { pathname: string }) {
+  const items: Array<{ href: string; label: string; Icon: typeof IconBrandGithub }> = [
+    { href: "/settings/system/status", label: "Status", Icon: IconActivity },
+    { href: "/settings/system/database", label: "Database", Icon: IconDatabase },
+    { href: "/settings/system/backups", label: "Backups", Icon: IconArchive },
+    { href: "/settings/system/logs", label: "Logs", Icon: IconFileText },
+    { href: "/settings/system/updates", label: "Updates", Icon: IconRefresh },
+    { href: "/settings/system/licenses", label: "Licenses", Icon: IconScale },
+    { href: "/settings/system/about", label: "About", Icon: IconInfoCircle },
+  ];
+  const isSystem = pathname.startsWith("/settings/system");
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild tooltip="System" isActive={isSystem}>
+        <Link href="/settings/system/status">
+          <IconServerCog className="h-4 w-4" />
+          <span>System</span>
+        </Link>
+      </SidebarMenuButton>
+      <SidebarMenuSub className="ml-3 mt-1">
+        {items.map(({ href, label, Icon }) => (
+          <SidebarMenuSubItem key={href}>
+            <SidebarMenuSubButton asChild size="sm" isActive={pathname === href}>
+              <Link href={href}>
+                <Icon className="h-3.5 w-3.5" />
+                <span>{label}</span>
+              </Link>
+            </SidebarMenuSubButton>
+          </SidebarMenuSubItem>
+        ))}
+      </SidebarMenuSub>
     </SidebarMenuItem>
   );
 }
@@ -375,15 +417,8 @@ export function SettingsAppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
 
-                {/* Changelog */}
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={pathname === "/settings/changelog"}>
-                    <Link href="/settings/changelog">
-                      <IconSparkles className="h-4 w-4" />
-                      <span>Changelog</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
+                {/* System */}
+                <SystemSidebarSection pathname={pathname} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

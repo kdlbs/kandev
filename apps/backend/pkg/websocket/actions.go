@@ -279,6 +279,11 @@ const (
 	ActionUserSettingsUpdate  = "user.settings.update"
 	ActionUserSettingsUpdated = "user.settings.updated"
 
+	// System maintenance jobs (VACUUM, factory reset, snapshot create/restore,
+	// disk walk). Broadcast to all connected clients so the System pages can
+	// render progress.
+	ActionSystemJobUpdate = "system.job.update"
+
 	// VS Code server actions
 	ActionVscodeStart    = "vscode.start"    // Start code-server for a session
 	ActionVscodeStop     = "vscode.stop"     // Stop code-server for a session

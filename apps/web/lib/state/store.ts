@@ -37,6 +37,7 @@ import {
   createOfficeSlice,
   createFeaturesSlice,
   createAutomationsSlice,
+  createSystemSlice,
   defaultKanbanState,
   defaultWorkspaceState,
   defaultSettingsState,
@@ -49,6 +50,7 @@ import {
   defaultOfficeState,
   defaultFeaturesState,
   defaultAutomationsState,
+  defaultSystemState,
   type WorkspaceState,
   type WorkflowsState,
   type ExecutorsState,
@@ -202,6 +204,24 @@ export type AppState = {
   // Automations slice
   automations: (typeof defaultAutomationsState)["automations"];
   automationRuns: (typeof defaultAutomationsState)["automationRuns"];
+
+  // System slice
+  system: (typeof defaultSystemState)["system"];
+  setSystemInfo: (info: NonNullable<(typeof defaultSystemState)["system"]["info"]>) => void;
+  setSystemDiskUsage: (
+    usage: NonNullable<(typeof defaultSystemState)["system"]["diskUsage"]>,
+  ) => void;
+  setSystemDatabase: (
+    stats: NonNullable<(typeof defaultSystemState)["system"]["database"]>,
+  ) => void;
+  setSystemBackups: (items: (typeof defaultSystemState)["system"]["backups"]["items"]) => void;
+  setSystemLogs: (files: (typeof defaultSystemState)["system"]["logs"]["files"]) => void;
+  setSystemLogTail: (lines: string[]) => void;
+  setSystemUpdates: (
+    updates: NonNullable<(typeof defaultSystemState)["system"]["updates"]>,
+  ) => void;
+  upsertSystemJob: (job: (typeof defaultSystemState)["system"]["jobs"][string]) => void;
+  clearSystemJob: (jobId: string) => void;
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
@@ -569,6 +589,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createFeaturesSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createSystemSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createUISlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createAutomationsSlice(set as any, get as any, api as any),
@@ -628,6 +650,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       features: merged.features,
       automations: merged.automations,
       automationRuns: merged.automationRuns,
+      system: merged.system,
       previewPanel: merged.previewPanel,
       rightPanel: merged.rightPanel,
       diffs: merged.diffs,

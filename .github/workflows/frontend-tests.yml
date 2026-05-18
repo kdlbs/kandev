@@ -11,6 +11,8 @@ on:
       - "apps/web/**"
       - "apps/packages/**"
       - "apps/pnpm-lock.yaml"
+      - "apps/backend/go.mod"
+      - "apps/backend/go.sum"
       - ".github/workflows/frontend-tests.yml"
       - "!**/*.md"
       - "!**/*.mdx"
@@ -25,6 +27,8 @@ on:
       - "apps/web/**"
       - "apps/packages/**"
       - "apps/pnpm-lock.yaml"
+      - "apps/backend/go.mod"
+      - "apps/backend/go.sum"
       - ".github/workflows/frontend-tests.yml"
       - "!**/*.md"
       - "!**/*.mdx"
@@ -60,6 +64,30 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: apps/backend/go.sum
+
+      - name: Install go-licenses
+        run: go install github.com/google/go-licenses@latest
+
+      - name: Regenerate OSS licenses manifest
+        run: pnpm --filter @kandev/web licenses:gen
+
+      - name: Verify licenses manifest is fresh
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `defaults.run.working-directory` is `apps`, so the path is relative.
+          if ! git diff --quiet --exit-code web/generated/licenses.json; then
+            echo "::error::apps/web/generated/licenses.json is stale."
+            echo "::error::Run 'pnpm --filter @kandev/web licenses:gen' and commit the result."
+            git --no-pager diff --stat web/generated/licenses.json
+            exit 1
+          fi
 
       - name: Check formatting
         shell: bash

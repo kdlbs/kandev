@@ -18,6 +18,7 @@ export type BackendMessageType =
   | "diff.update"
   | "session.git.event"
   | "system.error"
+  | "system.job.update"
   | "workspace.created"
   | "workspace.updated"
   | "workspace.deleted"
@@ -505,6 +506,7 @@ export type BackendMessageMap = OfficeBackendMessageMap & {
   "diff.update": BackendMessage<"diff.update", DiffUpdatePayload>;
   "session.git.event": BackendMessage<"session.git.event", GitEventPayload>;
   "system.error": BackendMessage<"system.error", SystemErrorPayload>;
+  "system.job.update": BackendMessage<"system.job.update", import("./system").SystemJob>;
   "workspace.created": BackendMessage<"workspace.created", WorkspacePayload>;
   "workspace.updated": BackendMessage<"workspace.updated", WorkspacePayload>;
   "workspace.deleted": BackendMessage<"workspace.deleted", WorkspacePayload>;
