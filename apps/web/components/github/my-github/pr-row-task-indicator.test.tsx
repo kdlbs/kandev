@@ -61,12 +61,13 @@ describe("PRRowTaskIndicator", () => {
     expect(btn.textContent).toContain("My Feature PR");
   });
 
-  it("shows a count badge when there are multiple tasks", () => {
+  it("shows 'Tasks' trigger with count badge for multiple tasks", () => {
     const tasks = [
-      makeTaskPR({ id: "a", pr_title: "First PR" }),
-      makeTaskPR({ id: "b", pr_title: "Second PR" }),
+      makeTaskPR({ id: "a", task_id: "t1", pr_title: "First PR" }),
+      makeTaskPR({ id: "b", task_id: "t2", pr_title: "Second PR" }),
     ];
     const { container } = renderWithStore(<PRRowTaskIndicator tasks={tasks} />);
+    expect(screen.getByRole("button").textContent).toContain("Tasks");
     expect(container.textContent).toContain("2");
   });
 

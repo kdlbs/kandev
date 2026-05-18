@@ -41,6 +41,7 @@ import {
   resolveIssuePresets,
 } from "@/components/github/my-github/action-presets";
 import { useGitHubActionPresets } from "@/hooks/domains/github/use-github-action-presets";
+import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 
 type GitHubPageClientProps = {
   workspaceId?: string;
@@ -291,6 +292,7 @@ function AuthenticatedLayout({
 }) {
   const { selection, search, repoOptions, title } = state;
   const prKeyToTasks = usePRKeyToTasks(workspaceId ?? null);
+  useAllWorkflowSnapshots(workspaceId ?? null);
   return (
     <div className="flex-1 flex min-h-0">
       <aside className="w-60 border-r overflow-y-auto shrink-0">
