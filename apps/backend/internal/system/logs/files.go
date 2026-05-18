@@ -5,6 +5,7 @@ package logs
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -109,9 +110,12 @@ func (s *Service) Open(name string) (*os.File, int64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	full := filepath.Join(s.logDir, clean)
+	full, err := s.containedPath(clean)
+	if err != nil {
+		return nil, 0, err
+	}
 	// Reject symlinks and other non-regular files before opening so an
-	// adversarial link placed inside the log directory cannot escape it.
+	// adversarial link planted in the log directory cannot escape it.
 	lstat, err := os.Lstat(full)
 	if err != nil {
 		return nil, 0, err
@@ -129,6 +133,27 @@ func (s *Service) Open(name string) (*os.File, int64, error) {
 		return nil, 0, err
 	}
 	return f, fi.Size(), nil
+}
+
+// containedPath joins the (already-safeName-validated) clean filename to the
+// configured log directory and verifies that the resolved absolute path is
+// still a child of the log directory. This is belt-and-braces alongside
+// safeName and gives CodeQL's taint-tracking a syntactic sanitizer it
+// recognises ("go/path-injection").
+func (s *Service) containedPath(clean string) (string, error) {
+	root, err := filepath.Abs(s.logDir)
+	if err != nil {
+		return "", fmt.Errorf("logs: resolve log dir: %w", err)
+	}
+	joined, err := filepath.Abs(filepath.Join(root, clean))
+	if err != nil {
+		return "", fmt.Errorf("logs: resolve filename: %w", err)
+	}
+	rel, err := filepath.Rel(root, joined)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", errors.New("logs: resolved path escapes the log directory")
+	}
+	return joined, nil
 }
 
 // safeName rejects any name that resolves outside the log directory.
