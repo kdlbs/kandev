@@ -244,6 +244,55 @@ func TestCleanupAllOrphanedReviewTasks_DisabledWatch_StillCleansUp(t *testing.T)
 	}
 }
 
+// Regression for cubic P1: when GetReviewWatch fails for a watch, the row
+// MUST be skipped this cycle. Treating it as orphan would fail-open under
+// the auto policy, reaping enabled-watch rows (potentially even rows whose
+// real watch is configured as `never`) on a transient DB hiccup.
+func TestCleanupAllOrphanedReviewTasks_UnknownWatchSkipped(t *testing.T) {
+	_, svc, mockClient, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	watch := &ReviewWatch{WorkspaceID: "ws-1", Enabled: true, CleanupPolicy: CleanupPolicyNever}
+	if err := store.CreateReviewWatch(ctx, watch); err != nil {
+		t.Fatalf("CreateReviewWatch: %v", err)
+	}
+	rpt := &ReviewPRTask{
+		ReviewWatchID: watch.ID,
+		RepoOwner:     "acme",
+		RepoName:      "widget",
+		PRNumber:      222,
+		TaskID:        "task-222",
+	}
+	if err := store.CreateReviewPRTask(ctx, rpt); err != nil {
+		t.Fatalf("CreateReviewPRTask: %v", err)
+	}
+	mockClient.AddPR(&PR{Number: 222, State: prStateMerged, RepoOwner: "acme", RepoName: "widget"})
+
+	// Wedge the watch row so GetReviewWatch errors. Setting a bad enum value
+	// would still parse; instead, drop the table briefly. We simulate the
+	// store error by closing the read DB connection.
+	if _, err := store.db.Exec(`ALTER TABLE github_review_watches RENAME TO github_review_watches_x`); err != nil {
+		t.Fatalf("rename watches table: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = store.db.Exec(`ALTER TABLE github_review_watches_x RENAME TO github_review_watches`)
+	})
+
+	rec := &recordingTaskDeleter{}
+	svc.SetTaskDeleter(rec)
+
+	deleted, err := svc.CleanupAllOrphanedReviewTasks(ctx)
+	if err != nil {
+		t.Fatalf("CleanupAllOrphanedReviewTasks: %v", err)
+	}
+	if deleted != 0 {
+		t.Fatalf("deleted=%d, want 0 (row whose watch fetch errored must be skipped, not fail-open as orphan)", deleted)
+	}
+	if len(rec.calls) != 0 {
+		t.Fatalf("DeleteTask called %d times, want 0", len(rec.calls))
+	}
+}
+
 // Regression for greptile P2: the global sweep must not re-hit GitHub for
 // dedup rows the per-watch loop already processed in the same cycle.
 // CleanupAllOrphanedReviewTasks skips rows whose watch is currently

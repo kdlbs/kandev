@@ -1763,19 +1763,23 @@ func (s *Service) cleanupAllReviewTasks(ctx context.Context, orphansOnly bool) (
 	if len(prTasks) == 0 {
 		return 0, nil
 	}
-	policyCache, enabledCache := s.buildReviewWatchCaches(ctx, prTasks)
-	candidates := prTasks
-	if orphansOnly {
-		candidates = candidates[:0]
-		for _, rpt := range prTasks {
-			if enabledCache[rpt.ReviewWatchID] {
-				continue
-			}
-			candidates = append(candidates, rpt)
+	policyCache, enabledCache, unknownCache := s.buildReviewWatchCaches(ctx, prTasks)
+	candidates := prTasks[:0]
+	for _, rpt := range prTasks {
+		// Watch fetch failed — skip this cycle so we don't fail-open and
+		// reap an enabled-watch row under the wrong policy.
+		if unknownCache[rpt.ReviewWatchID] {
+			continue
 		}
-		if len(candidates) == 0 {
-			return 0, nil
+		// Orphan-only path skips rows owned by an enabled watch; the
+		// per-watch loop already handled them in the same cycle.
+		if orphansOnly && enabledCache[rpt.ReviewWatchID] {
+			continue
 		}
+		candidates = append(candidates, rpt)
+	}
+	if len(candidates) == 0 {
+		return 0, nil
 	}
 	return s.cleanupReviewPRTaskBatch(ctx, candidates, func(rpt *ReviewPRTask) string {
 		if p, ok := policyCache[rpt.ReviewWatchID]; ok {
@@ -1788,24 +1792,29 @@ func (s *Service) cleanupAllReviewTasks(ctx context.Context, orphansOnly bool) (
 }
 
 // buildReviewWatchCaches loads the cleanup policy + enabled flag for each
-// distinct watch ID referenced by prTasks. Missing watches (deleted) are
-// absent from both maps; caller treats absence as "policy = auto, enabled =
-// false" — the orphan defaults that keep stale rows reachable. A per-row
-// fetch error is logged and the watch is left out of both maps so its rows
-// take the orphan path, matching the per-watch loop's "skip and continue"
-// behavior — a single transient DB hiccup must not abort the whole sweep.
-func (s *Service) buildReviewWatchCaches(ctx context.Context, prTasks []*ReviewPRTask) (map[string]string, map[string]bool) {
+// distinct watch ID referenced by prTasks. A per-row fetch error logs Warn
+// and adds the watch ID to the returned `unknown` set — the caller MUST
+// skip those rows this cycle. Without that signal a transient DB hiccup
+// would silently fail-open: rows for the failed watch would be treated as
+// orphaned and reaped under the fallback auto policy, potentially losing
+// tasks the user wanted preserved under `never`. The next sweep cycle
+// retries the fetch and recovers naturally. Missing watches (deleted) are
+// distinct: they're absent from both `policy` and `enabled` but NOT in
+// `unknown`, so callers treat them as legitimate orphans.
+func (s *Service) buildReviewWatchCaches(ctx context.Context, prTasks []*ReviewPRTask) (policy map[string]string, enabled map[string]bool, unknown map[string]bool) {
 	seen := make(map[string]struct{})
 	for _, rpt := range prTasks {
 		seen[rpt.ReviewWatchID] = struct{}{}
 	}
-	policy := make(map[string]string, len(seen))
-	enabled := make(map[string]bool, len(seen))
+	policy = make(map[string]string, len(seen))
+	enabled = make(map[string]bool, len(seen))
+	unknown = make(map[string]bool)
 	for watchID := range seen {
 		watch, err := s.store.GetReviewWatch(ctx, watchID)
 		if err != nil {
 			s.logger.Warn("failed to fetch review watch during orphan sweep",
 				zap.String("watch_id", watchID), zap.Error(err))
+			unknown[watchID] = true
 			continue
 		}
 		if watch == nil {
@@ -1814,7 +1823,7 @@ func (s *Service) buildReviewWatchCaches(ctx context.Context, prTasks []*ReviewP
 		policy[watchID] = NormalizeCleanupPolicy(watch.CleanupPolicy)
 		enabled[watchID] = watch.Enabled
 	}
-	return policy, enabled
+	return policy, enabled, unknown
 }
 
 // cleanupReviewPRTaskBatch runs the deletion gate over a slice of dedup rows.
@@ -2386,19 +2395,19 @@ func (s *Service) cleanupAllIssueTasks(ctx context.Context, orphansOnly bool) (i
 	if len(issueTasks) == 0 {
 		return 0, nil
 	}
-	policyCache, enabledCache := s.buildIssueWatchCaches(ctx, issueTasks)
-	candidates := issueTasks
-	if orphansOnly {
-		candidates = candidates[:0]
-		for _, it := range issueTasks {
-			if enabledCache[it.IssueWatchID] {
-				continue
-			}
-			candidates = append(candidates, it)
+	policyCache, enabledCache, unknownCache := s.buildIssueWatchCaches(ctx, issueTasks)
+	candidates := issueTasks[:0]
+	for _, it := range issueTasks {
+		if unknownCache[it.IssueWatchID] {
+			continue
 		}
-		if len(candidates) == 0 {
-			return 0, nil
+		if orphansOnly && enabledCache[it.IssueWatchID] {
+			continue
 		}
+		candidates = append(candidates, it)
+	}
+	if len(candidates) == 0 {
+		return 0, nil
 	}
 	return s.cleanupIssueTaskBatch(ctx, candidates, func(it *IssueWatchTask) string {
 		if p, ok := policyCache[it.IssueWatchID]; ok {
@@ -2408,18 +2417,20 @@ func (s *Service) cleanupAllIssueTasks(ctx context.Context, orphansOnly bool) (i
 	}), nil
 }
 
-func (s *Service) buildIssueWatchCaches(ctx context.Context, issueTasks []*IssueWatchTask) (map[string]string, map[string]bool) {
+func (s *Service) buildIssueWatchCaches(ctx context.Context, issueTasks []*IssueWatchTask) (policy map[string]string, enabled map[string]bool, unknown map[string]bool) {
 	seen := make(map[string]struct{})
 	for _, it := range issueTasks {
 		seen[it.IssueWatchID] = struct{}{}
 	}
-	policy := make(map[string]string, len(seen))
-	enabled := make(map[string]bool, len(seen))
+	policy = make(map[string]string, len(seen))
+	enabled = make(map[string]bool, len(seen))
+	unknown = make(map[string]bool)
 	for watchID := range seen {
 		watch, err := s.store.GetIssueWatch(ctx, watchID)
 		if err != nil {
 			s.logger.Warn("failed to fetch issue watch during orphan sweep",
 				zap.String("watch_id", watchID), zap.Error(err))
+			unknown[watchID] = true
 			continue
 		}
 		if watch == nil {
@@ -2428,7 +2439,7 @@ func (s *Service) buildIssueWatchCaches(ctx context.Context, issueTasks []*Issue
 		policy[watchID] = NormalizeCleanupPolicy(watch.CleanupPolicy)
 		enabled[watchID] = watch.Enabled
 	}
-	return policy, enabled
+	return policy, enabled, unknown
 }
 
 //nolint:dupl // mirrors cleanupReviewPRTaskBatch — different types, same structure
