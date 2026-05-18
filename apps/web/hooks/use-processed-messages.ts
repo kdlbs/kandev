@@ -210,9 +210,8 @@ function collectPriorSnapshotsByLatestId(
       todos: (message.metadata as RichMetadata | undefined)?.todos ?? [],
       created_at: message.created_at,
     };
-    const list = previousByLatestId.get(latestId) ?? [];
-    list.push(snapshot);
-    previousByLatestId.set(latestId, list);
+    if (!previousByLatestId.has(latestId)) previousByLatestId.set(latestId, []);
+    previousByLatestId.get(latestId)!.push(snapshot);
   }
   return previousByLatestId;
 }
