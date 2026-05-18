@@ -37,6 +37,7 @@ type: lowercase description
 - Include PR/issue number when relevant: `feat: add release notes (#295)`
 - Breaking changes: add `!` after type: `feat!: remove legacy API`
 - Keep the first line under 72 characters
+- **Body lines must be ≤100 characters** (commitlint `body-max-line-length`). Hard-wrap bullet points before committing; long URLs or prose lines that exceed 100 chars will fail the hook with `body's lines must not be longer than 100 characters`. If a HEREDOC body fails, re-wrap and create a *new* commit — do not amend.
 
 ## Examples
 

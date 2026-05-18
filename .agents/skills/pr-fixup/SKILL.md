@@ -245,6 +245,12 @@ After the push, CI restarts and bots may re-review. Delegate to `pr-poller` agai
 - If new review comments appeared after the push → loop back to task 3.
 - If the poller hit its cap (`recommendation:` mentions "timed out") → surface the remaining pending items to the user and stop.
 
+**Force-push (rebase) can re-open previously resolved inline threads.** GitHub treats the new commit's diff as a fresh review surface, so threads you already replied-to-and-resolved may come back unresolved with their original bodies. Before re-fixing, fetch the comments and check the body — if the issue is already addressed in the new tip, reply "Already fixed in `<sha>`" and resolve again rather than re-implementing.
+
+**Mergeable status lags after a force-push.** `gh pr view --json mergeable` can show `CONFLICTING` / `mergeStateStatus: DIRTY` for ~5-10s while GitHub recomputes against the new tip. Wait briefly before deciding there's a real conflict, and confirm with `git fetch origin main && git diff --name-only HEAD origin/main` locally.
+
+**Polling that times out is often a "main moved" signal.** A 20-min E2E window is long enough for `main` to ship one or two PRs. Before the next iteration, run `git fetch origin main && git log HEAD..origin/main --oneline` — a non-empty result means a rebase is coming. Rebase, force-push, and re-poll once rather than chasing flaky test reruns.
+
 Cap re-check loops at **3 iterations** to prevent runaway sessions. After 3, surface the remaining state to the user and stop.
 
 Mark task 6 as completed.
