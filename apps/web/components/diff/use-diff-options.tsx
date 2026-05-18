@@ -9,9 +9,7 @@ import type { AnnotationMetadata } from "./use-diff-annotation-renderer";
 
 /** CSS overrides for the Pierre diff viewer, injected via unsafeCSS. */
 const DIFF_UNSAFE_CSS = `
-  [data-diffs],
-  pre[data-diffs] {
-    background-color: var(--background) !important;
+  :host {
     --diffs-bg: var(--background) !important;
     --diffs-bg-context: var(--background) !important;
     --diffs-bg-buffer: var(--card) !important;

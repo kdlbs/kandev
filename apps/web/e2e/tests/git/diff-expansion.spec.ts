@@ -63,6 +63,44 @@ async function openExpansionFileDiff(testPage: Page) {
 test.describe("Diff expansion — Pierre Diffs provider", () => {
   test.describe.configure({ retries: 2, timeout: 120_000 });
 
+  test("diff viewer background matches app --background (regression for pierre 1.1.22 selector rename)", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedExpansionTask(testPage, apiClient, seedData);
+    await openChangesTab(testPage);
+    await openExpansionFileDiff(testPage);
+
+    await expect(testPage.locator("diffs-container")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 60_000 });
+
+    // Pierre's <pre data-diff> uses var(--diffs-bg); our unsafeCSS overrides
+    // that variable to var(--background) on :host. If the selector ever stops
+    // matching (as happened on the 1.0.11 -> 1.1.22 bump that renamed
+    // data-diffs -> data-diff), pierre's dark default (#0a0c10) leaks through.
+    const colors = await testPage.evaluate(() => {
+      const container = document.querySelector("diffs-container")!;
+      const pre = container.shadowRoot!.querySelector("pre[data-diff]")! as HTMLElement;
+      const appBg = getComputedStyle(document.documentElement).getPropertyValue("--background");
+      // Resolve the CSS variable to a concrete rgb() via a probe element so we
+      // can compare it byte-for-byte to the shadow-DOM pre's computed bg.
+      const probe = document.createElement("div");
+      probe.style.backgroundColor = `var(--background)`;
+      document.body.appendChild(probe);
+      const expected = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return {
+        pre: getComputedStyle(pre).backgroundColor,
+        appBg: appBg.trim(),
+        expected,
+      };
+    });
+
+    await testPage.screenshot({ path: "test-results/diff-bg-regression.png", fullPage: false });
+    expect(colors.pre).toBe(colors.expected);
+  });
+
   test("renders Pierre Diffs viewer and shows both hunks", async ({
     testPage,
     apiClient,
