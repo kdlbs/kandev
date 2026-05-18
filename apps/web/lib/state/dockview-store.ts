@@ -15,6 +15,7 @@ import {
   RIGHT_BOTTOM_GROUP,
   TERMINAL_DEFAULT_ID,
   getPresetLayout,
+  getPresetSidebarColumn,
   applyLayout,
   getRootSplitview,
   fromDockviewApi,
@@ -291,7 +292,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
         });
       } else {
         const current = fromDockviewApi(api);
-        const sidebarCol = defaultLayout().columns[0];
+        const sidebarCol = getPresetSidebarColumn(get().defaultPreset);
         const withSidebar: LayoutState = {
           columns: [sidebarCol, ...current.columns],
         };

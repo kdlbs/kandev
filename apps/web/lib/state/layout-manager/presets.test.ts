@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compactLayout, defaultLayout } from "./presets";
+import { compactLayout, defaultLayout, getPresetSidebarColumn } from "./presets";
 
 describe("layout presets", () => {
   it("keeps the compact workbench on Dockview while prioritizing the center panel", () => {
@@ -15,5 +15,13 @@ describe("layout presets", () => {
     expect(compact.columns.find((column) => column.id === "center")?.groups[0].panels[0].id).toBe(
       "chat",
     );
+  });
+
+  it("returns compact sidebar sizing for compact preset restoration", () => {
+    const compactSidebar = compactLayout().columns.find((column) => column.id === "sidebar");
+
+    expect(getPresetSidebarColumn("compact")).toEqual(compactSidebar);
+    expect(getPresetSidebarColumn("compact").width).toBe(220);
+    expect(getPresetSidebarColumn("compact").maxWidth).toBe(260);
   });
 });

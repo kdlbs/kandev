@@ -1,4 +1,4 @@
-import type { LayoutState } from "./types";
+import type { LayoutColumn, LayoutState } from "./types";
 import {
   LAYOUT_SIDEBAR_MAX_PX,
   LAYOUT_RIGHT_MAX_PX,
@@ -138,4 +138,11 @@ const PRESET_MAP: Record<BuiltInPreset, () => LayoutState> = {
 
 export function getPresetLayout(preset: BuiltInPreset): LayoutState {
   return PRESET_MAP[preset]();
+}
+
+export function getPresetSidebarColumn(preset: BuiltInPreset): LayoutColumn {
+  return (
+    getPresetLayout(preset).columns.find((column) => column.id === "sidebar") ??
+    defaultLayout().columns[0]
+  );
 }

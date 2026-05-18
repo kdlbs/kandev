@@ -35,6 +35,7 @@ export {
   planLayout,
   previewLayout,
   getPresetLayout,
+  getPresetSidebarColumn,
 } from "./presets";
 export type { BuiltInPreset } from "./presets";
 
