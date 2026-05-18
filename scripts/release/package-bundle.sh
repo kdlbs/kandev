@@ -23,6 +23,5 @@ if [ ! -f "$BUNDLE/cli/bin/cli.js" ]; then
   echo "Missing $BUNDLE/cli/bin/cli.js; run scripts/release/package-cli.sh first" >&2
   exit 1
 fi
-chmod 0755 "$BUNDLE/cli/bin/cli.js"
 
 echo "Bundle assembled at $BUNDLE"
