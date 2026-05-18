@@ -28,7 +28,7 @@ func (s *Server) registerConfigWorkflowTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_repositories_kandev",
-			mcp.WithDescription("List repositories in a workspace. Use this to find a repository_id to attach to create_task_kandev when the task should target a specific codebase."),
+			mcp.WithDescription("List repositories in a workspace. Use this to find a repository_id to attach to create_task_kandev when the task should target a specific codebase. Each repository entry includes default_branch — use it to pick or confirm a base_branch when creating a subtask in a different repo."),
 			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
 		),
 		s.wrapHandler("list_repositories_kandev", s.listRepositoriesHandler()),

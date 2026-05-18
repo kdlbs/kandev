@@ -278,5 +278,15 @@ test.describe("Preview auto-prepare", () => {
         { timeout: 30_000, message: "Waiting for session created with step's profile" },
       )
       .toBe(stepProfile.id);
+
+    // Restore the workflow step's agent_profile_id to null so subsequent
+    // tests don't inherit a stale step-level override. The per-test
+    // cleanupTestProfiles deletes stepProfile, but it doesn't touch the
+    // workflow step itself; without this reset the next test creates a
+    // task whose session resolves the (now-deleted) stepProfile.id and
+    // fails with "agent profile not found".
+    await apiClient
+      .updateWorkflowStep(seedData.startStepId, { agent_profile_id: "" })
+      .catch(() => undefined);
   });
 });

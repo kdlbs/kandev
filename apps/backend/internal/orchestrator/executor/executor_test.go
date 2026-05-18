@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -239,6 +240,84 @@ func TestAssignLaunchTaskEnvironmentID(t *testing.T) {
 			t.Fatal("expected non-empty TaskEnvironmentID")
 		}
 	})
+}
+
+// TestLaunchPreparedSession_InheritsEnvFromSessionEnvironmentID pins the
+// office task-handoffs inheritance contract: when a child task's session
+// already has TaskEnvironmentID pointing at a parent / shared-group env,
+// the launch path must consult that env (via GetTaskEnvironment) instead
+// of creating a fresh worktree.
+//
+// Regression guard for the bug where executor_execute.go only called
+// GetTaskEnvironmentByTaskID(task.ID) — which always missed the parent's
+// env row because that row is indexed by the parent's task id.
+func TestLaunchPreparedSession_InheritsEnvFromSessionEnvironmentID(t *testing.T) {
+	repo := newMockRepository()
+
+	// Seed a parent-owned env that is NOT indexed by the child's task id.
+	parentEnv := &models.TaskEnvironment{
+		ID:            "env-parent",
+		TaskID:        "task-parent",
+		WorktreeID:    "wt-parent",
+		WorktreePath:  "/tmp/parent",
+		WorkspacePath: "/tmp/parent",
+		Status:        models.TaskEnvironmentStatusReady,
+	}
+	repo.taskEnvironments[parentEnv.ID] = parentEnv
+
+	// Child session already points at the parent env (set earlier by
+	// propagateInheritedEnvironment in internal/orchestrator/handoff_inheritance.go).
+	session := &models.TaskSession{
+		ID:                "session-child",
+		TaskID:            "task-child",
+		AgentProfileID:    "profile-123",
+		TaskEnvironmentID: parentEnv.ID,
+		State:             models.TaskSessionStateCreated,
+		StartedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+	}
+	repo.sessions[session.ID] = session
+
+	gotEnvID := ""
+	gotUseWorktree := false
+	gotWorktreeID := ""
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			gotEnvID = req.TaskEnvironmentID
+			gotUseWorktree = req.UseWorktree
+			gotWorktreeID = req.WorktreeID
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-1",
+				ContainerID:      "container-1",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+	}
+	executor := newTestExecutor(t, agentManager, repo)
+
+	task := &v1.Task{ID: "task-child", WorkspaceID: "ws-1"}
+	if _, err := executor.LaunchPreparedSession(context.Background(), task, "session-child",
+		LaunchOptions{AgentProfileID: "profile-123", Prompt: "test", StartAgent: true}); err != nil {
+		t.Fatalf("LaunchPreparedSession: %v", err)
+	}
+
+	if gotEnvID != parentEnv.ID {
+		t.Errorf("expected inherited TaskEnvironmentID=%q on launch req; got %q",
+			parentEnv.ID, gotEnvID)
+	}
+	// When the executor type elected a worktree-backed launch, the
+	// existingEnv.WorktreeID must flow through. When it didn't, this
+	// assertion is a no-op — the env-id inheritance above is the load-
+	// bearing check for the regression we're guarding against.
+	if gotUseWorktree && gotWorktreeID != parentEnv.WorktreeID {
+		t.Errorf("expected reused WorktreeID=%q from inherited env; got %q",
+			parentEnv.WorktreeID, gotWorktreeID)
+	}
+	// No fresh env row should be created — the inherited one was reused.
+	if len(repo.createTaskEnvironmentCalls) != 0 {
+		t.Errorf("expected zero CreateTaskEnvironment calls (env inherited); got %d",
+			len(repo.createTaskEnvironmentCalls))
+	}
 }
 
 func TestLaunchPreparedSession_SessionNotBelongsToTask(t *testing.T) {
@@ -506,6 +585,152 @@ func TestLaunchPreparedSession_StaleExecution_FallsThroughToLaunchAgent(t *testi
 			got = updatedRunning.AgentExecutionID
 		}
 		t.Errorf("Expected executors_running.agent_execution_id to be 'new-exec-id', got %q", got)
+	}
+}
+
+// TestLaunchPreparedSession_FullPath_CarriesResumeToken verifies that when the
+// full LaunchAgent path runs (e.g. office wakeup falling through after an IDLE
+// session tore down the in-memory execution), the prior ACP session id is read
+// from executors_running.resume_token and passed as req.ACPSessionID so the
+// agent CLI resumes the conversation via session/load instead of starting a
+// fresh session/new. The wakeup prompt (TaskDescription) must NOT be cleared —
+// office wakeups deliver the new comment / event as the prompt.
+func TestLaunchPreparedSession_FullPath_CarriesResumeToken(t *testing.T) {
+	repo := newMockRepository()
+
+	session := &models.TaskSession{
+		ID:             "session-123",
+		TaskID:         "task-123",
+		AgentProfileID: "profile-123",
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	repo.sessions[session.ID] = session
+	// executors_running row carries the prior ACP session id (resume token).
+	// HasExecutorRunningRow is true → fast path is tried; the live execution
+	// is gone (office IDLE) → ErrStaleExecution → fall through to full path.
+	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
+		ID:               session.ID,
+		SessionID:        session.ID,
+		TaskID:           session.TaskID,
+		AgentExecutionID: "stale-exec-id",
+		ResumeToken:      "acp-session-abc",
+		Status:           "ready",
+	}
+
+	var capturedReq *LaunchAgentRequest
+	agentManager := &mockAgentManager{
+		// No live execution — simulates office IDLE / backend restart.
+		getExecutionIDForSessionFunc: func(ctx context.Context, sessionID string) (string, error) {
+			return "", fmt.Errorf("no execution found for session %s", sessionID)
+		},
+		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			capturedReq = req
+			repo.executorsRunning[req.SessionID] = &models.ExecutorRunning{
+				ID:               req.SessionID,
+				SessionID:        req.SessionID,
+				TaskID:           req.TaskID,
+				AgentExecutionID: "new-exec-id",
+				ResumeToken:      "acp-session-abc",
+				Status:           "starting",
+			}
+			return &LaunchAgentResponse{
+				AgentExecutionID: "new-exec-id",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+	}
+
+	executor := newTestExecutor(t, agentManager, repo)
+
+	task := &v1.Task{
+		ID:          "task-123",
+		WorkspaceID: "workspace-123",
+		Title:       "Test Task",
+	}
+
+	_, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{
+		AgentProfileID: "profile-123",
+		Prompt:         "follow-up wakeup prompt",
+		StartAgent:     true,
+	})
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession failed: %v", err)
+	}
+
+	if capturedReq == nil {
+		t.Fatal("Expected LaunchAgent to be called")
+	}
+	if capturedReq.ACPSessionID != "acp-session-abc" {
+		t.Errorf("Expected req.ACPSessionID to be carried from resume_token, got %q", capturedReq.ACPSessionID)
+	}
+	// Wakeup must still deliver the prompt — unlike the explicit ResumeSession
+	// path we do NOT clear TaskDescription.
+	if capturedReq.TaskDescription == "" {
+		t.Error("Expected req.TaskDescription to remain set for wakeup; it was cleared")
+	}
+}
+
+// TestLaunchPreparedSession_FullPath_WorkspaceOnly_DoesNotResume verifies that
+// when startAgent is false (workspace-only prep) we do NOT carry the resume
+// token forward, mirroring the gating in ResumeSession.
+func TestLaunchPreparedSession_FullPath_WorkspaceOnly_DoesNotResume(t *testing.T) {
+	repo := newMockRepository()
+
+	session := &models.TaskSession{
+		ID:             "session-456",
+		TaskID:         "task-456",
+		AgentProfileID: "profile-456",
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	repo.sessions[session.ID] = session
+	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
+		ID:               session.ID,
+		SessionID:        session.ID,
+		TaskID:           session.TaskID,
+		AgentExecutionID: "stale-exec-id",
+		ResumeToken:      "acp-session-xyz",
+		Status:           "ready",
+	}
+
+	var capturedReq *LaunchAgentRequest
+	agentManager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(ctx context.Context, sessionID string) (string, error) {
+			return "", fmt.Errorf("no execution found for session %s", sessionID)
+		},
+		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			capturedReq = req
+			return &LaunchAgentResponse{
+				AgentExecutionID: "new-exec-id",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+	}
+
+	executor := newTestExecutor(t, agentManager, repo)
+
+	task := &v1.Task{
+		ID:          "task-456",
+		WorkspaceID: "workspace-456",
+		Title:       "Test Task",
+	}
+
+	_, err := executor.LaunchPreparedSession(context.Background(), task, "session-456", LaunchOptions{
+		AgentProfileID: "profile-456",
+		StartAgent:     false,
+	})
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession failed: %v", err)
+	}
+
+	if capturedReq == nil {
+		t.Fatal("Expected LaunchAgent to be called")
+	}
+	if capturedReq.ACPSessionID != "" {
+		t.Errorf("Expected req.ACPSessionID to remain empty when startAgent=false, got %q", capturedReq.ACPSessionID)
 	}
 }
 
@@ -824,6 +1049,60 @@ func TestRepositoryCloneURL(t *testing.T) {
 	}
 }
 
+// TestRepositoryCloneURL_LocalPathFallback covers the second code path
+// added to support Docker E2E tests: when the repository has no
+// ProviderOwner/ProviderName, the function shells out to
+// `git -C LocalPath remote get-url origin` and returns the result.
+// Without these tests the file://-remote E2E fixture would have no
+// regression guard.
+func TestRepositoryCloneURL_LocalPathFallback(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	t.Run("local-only repo with valid git remote", func(t *testing.T) {
+		dir := t.TempDir()
+		mustRunGit(t, dir, "init", "--quiet")
+		mustRunGit(t, dir, "remote", "add", "origin", "file:///some/path.git")
+
+		got := repositoryCloneURL(&models.Repository{LocalPath: dir})
+		if got != "file:///some/path.git" {
+			t.Errorf("got %q, want file:///some/path.git", got)
+		}
+	})
+
+	t.Run("local-only repo without remote returns empty", func(t *testing.T) {
+		dir := t.TempDir()
+		mustRunGit(t, dir, "init", "--quiet")
+
+		if got := repositoryCloneURL(&models.Repository{LocalPath: dir}); got != "" {
+			t.Errorf("repo without origin remote should return empty, got %q", got)
+		}
+	})
+
+	t.Run("local-only non-git dir returns empty", func(t *testing.T) {
+		if got := repositoryCloneURL(&models.Repository{LocalPath: t.TempDir()}); got != "" {
+			t.Errorf("non-git dir should return empty, got %q", got)
+		}
+	})
+
+	t.Run("no provider and no local path returns empty", func(t *testing.T) {
+		if got := repositoryCloneURL(&models.Repository{}); got != "" {
+			t.Errorf("empty repository should return empty, got %q", got)
+		}
+	})
+}
+
+// mustRunGit fails the test if `git -C dir <args...>` exits non-zero.
+// Kept tiny on purpose — only used by the LocalPath-fallback tests.
+func mustRunGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
 func TestPersistResumeState_SetsStartingState(t *testing.T) {
 	repo := newMockRepository()
 	agentManager := &mockAgentManager{}
@@ -841,8 +1120,7 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 		}
 		repo.sessions[session.ID] = session
 
-		resp := &LaunchAgentResponse{AgentExecutionID: "exec-1"}
-		executor.persistResumeState(context.Background(), "task-1", session, resp, true, executorConfig{}, nil)
+		executor.persistResumeState(context.Background(), "task-1", session, true)
 
 		if session.State != models.TaskSessionStateStarting {
 			t.Errorf("expected state STARTING, got %s", session.State)
@@ -861,8 +1139,7 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 		}
 		repo.sessions[session.ID] = session
 
-		resp := &LaunchAgentResponse{AgentExecutionID: "exec-2"}
-		executor.persistResumeState(context.Background(), "task-1", session, resp, false, executorConfig{}, nil)
+		executor.persistResumeState(context.Background(), "task-1", session, false)
 
 		if session.State != models.TaskSessionStateWaitingForInput {
 			t.Errorf("expected state WAITING_FOR_INPUT, got %s", session.State)
@@ -871,7 +1148,7 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 }
 
 // Regression: PrepareTaskSession launches the workspace in a background
-// goroutine while StartTaskWithSession runs a foreground launch when the
+// goroutine while StartCreatedSession runs a foreground launch when the
 // agent is started. Both call LaunchPreparedSession on the same session.
 // Without per-session serialisation the two launches both reach
 // agentManager.LaunchAgent and the second one errors with

@@ -58,6 +58,11 @@ var ErrPathNotAllowed = errors.New("path is not within an allowed root")
 // gitHEAD is the HEAD git ref.
 const gitHEAD = "HEAD"
 
+// sourceTypeLocal is the Repository.SourceType value for on-machine repos
+// (a path the user discovered or added manually). Provider-backed repos use
+// other values like "provider".
+const sourceTypeLocal = "local"
+
 func (s *Service) DiscoverLocalRepositories(ctx context.Context, root string) (RepositoryDiscoveryResult, error) {
 	roots := s.discoveryRoots()
 	if root != "" {
@@ -149,7 +154,16 @@ type BranchListResult struct {
 // (by id, path resolved from the DB row) or an on-machine folder (by path
 // directly). Exactly one of `repoID` or `path` should be set; the caller
 // (the HTTP handler) validates that.
+//
+// For provider-backed workspace repos (the "Remote" badge in the UI), the
+// branches come from the remote API rather than a local clone. This makes
+// the picker work the moment a URL is added - before the orchestrator's
+// async clone finishes, and even when no clone ever happens because the
+// chosen executor runs the agent in a container that clones on its own.
 func (s *Service) ListBranches(ctx context.Context, repoID, path string) ([]Branch, error) {
+	if remote, ok, err := s.listRemoteBranchesIfApplicable(ctx, repoID); ok {
+		return remote, err
+	}
 	resolved, err := s.resolveBranchListingPath(ctx, repoID, path)
 	if err != nil {
 		return nil, err
@@ -160,6 +174,14 @@ func (s *Service) ListBranches(ctx context.Context, repoID, path string) ([]Bran
 // ListBranchesWithCurrent is ListBranches plus the current-branch readout.
 // One method so the handler resolves the path once instead of twice.
 func (s *Service) ListBranchesWithCurrent(ctx context.Context, repoID, path string) (BranchListResult, error) {
+	if remote, ok, err := s.listRemoteBranchesIfApplicable(ctx, repoID); ok {
+		if err != nil {
+			return BranchListResult{}, err
+		}
+		// No CurrentBranch for remote: there's no working tree to check.
+		// The dialog falls back to its preferred-default-branch heuristic.
+		return BranchListResult{Branches: remote}, nil
+	}
 	resolved, err := s.resolveBranchListingPath(ctx, repoID, path)
 	if err != nil {
 		return BranchListResult{}, err
@@ -174,6 +196,36 @@ func (s *Service) ListBranchesWithCurrent(ctx context.Context, repoID, path stri
 		Branches:      branches,
 		CurrentBranch: readGitCurrentBranch(resolved, s.discoveryRoots()),
 	}, nil
+}
+
+// listRemoteBranchesIfApplicable returns (branches, true, err) when the repo
+// should be answered from a remote provider, and (_, false, _) when the
+// caller should fall through to the local-path code path.
+//
+// "Applicable" means: a repository id is supplied, the repo has a non-local
+// source_type (i.e. is provider-backed), and the provider has a registered
+// remote lister. The local-path arm of ListBranches stays untouched; this
+// only widens the answer for the existing repository-id arm.
+//
+// Errors from GetRepository propagate with handled=true so callers
+// short-circuit instead of falling through to resolveBranchListingPath,
+// which would re-issue the same DB lookup. Repo-not-found falls through.
+func (s *Service) listRemoteBranchesIfApplicable(ctx context.Context, repoID string) ([]Branch, bool, error) {
+	if repoID == "" || s.remoteBranchLister == nil {
+		return nil, false, nil
+	}
+	repo, err := s.repoEntities.GetRepository(ctx, repoID)
+	if err != nil {
+		return nil, true, err
+	}
+	if repo == nil {
+		return nil, false, nil
+	}
+	if repo.SourceType == sourceTypeLocal || repo.ProviderOwner == "" || repo.ProviderName == "" {
+		return nil, false, nil
+	}
+	branches, err := s.remoteBranchLister.ListRepoBranches(ctx, repo.ProviderOwner, repo.ProviderName)
+	return branches, true, err
 }
 
 // resolveBranchListingPath turns the request inputs into a validated
@@ -292,14 +344,24 @@ func pathWithinRoots(abs string, roots []string) (string, error) {
 }
 
 func (s *Service) discoveryRoots() []string {
+	var roots []string
 	if len(s.discoveryConfig.Roots) > 0 {
-		return normalizeRoots(s.discoveryConfig.Roots)
+		roots = append(roots, s.discoveryConfig.Roots...)
+	} else if home, err := os.UserHomeDir(); err == nil {
+		roots = append(roots, home)
 	}
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return []string{}
+	// The orchestrator clones provider-backed repos into a configurable base
+	// path. When that base path sits outside HOME (e.g. /data/repos in a
+	// container deployment) it would otherwise be rejected by the allow-list
+	// and local branch listing would silently return nothing. Adding it here
+	// keeps the allow-list narrow while still covering kandev's own clone
+	// destination.
+	if s.repoCloneLocation != nil {
+		if base, err := s.repoCloneLocation.ExpandedBasePath(); err == nil && base != "" {
+			roots = append(roots, base)
+		}
 	}
-	return []string{filepath.Clean(homeDir)}
+	return normalizeRoots(roots)
 }
 
 func (s *Service) discoveryMaxDepth() int {

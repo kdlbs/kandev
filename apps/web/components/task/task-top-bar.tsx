@@ -32,8 +32,8 @@ import { LinearLinkButton } from "@/components/linear/linear-link-button";
 import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
+import { ExecutorSettingsButton } from "@/components/task/executor-settings-button";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
-import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { QuickChatButton } from "@/components/task/quick-chat-button";
 import {
   TopbarActionOverflow,
@@ -59,25 +59,16 @@ type TaskTopBarProps = {
   isArchived?: boolean;
   isRemoteExecutor?: boolean;
   isAgentctlReady?: boolean;
-  remoteExecutorName?: string | null;
   remoteExecutorType?: string | null;
-  remoteState?: string | null;
-  remoteCreatedAt?: string | null;
-  remoteCheckedAt?: string | null;
-  remoteStatusError?: string | null;
+  officeTaskHref?: string | null;
 };
 
 type TopBarLeftProps = {
   taskId?: string | null;
   activeSessionId?: string | null;
   taskTitle?: string;
-  isRemoteExecutor?: boolean;
-  remoteExecutorName?: string | null;
   remoteExecutorType?: string | null;
-  remoteState?: string | null;
-  remoteCreatedAt?: string | null;
-  remoteCheckedAt?: string | null;
-  remoteStatusError?: string | null;
+  isArchived?: boolean;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
@@ -93,12 +84,8 @@ const TaskTopBar = memo(function TaskTopBar({
   isArchived,
   isRemoteExecutor,
   isAgentctlReady,
-  remoteExecutorName,
   remoteExecutorType,
-  remoteState,
-  remoteCreatedAt,
-  remoteCheckedAt,
-  remoteStatusError,
+  officeTaskHref,
 }: TaskTopBarProps) {
   return (
     <header
@@ -109,13 +96,8 @@ const TaskTopBar = memo(function TaskTopBar({
         taskId={taskId}
         activeSessionId={activeSessionId}
         taskTitle={taskTitle}
-        isRemoteExecutor={isRemoteExecutor}
-        remoteExecutorName={remoteExecutorName}
         remoteExecutorType={remoteExecutorType}
-        remoteState={remoteState}
-        remoteCreatedAt={remoteCreatedAt}
-        remoteCheckedAt={remoteCheckedAt}
-        remoteStatusError={remoteStatusError}
+        isArchived={isArchived}
       />
       <div className="min-w-0 justify-self-center overflow-hidden">
         {workflowSteps && workflowSteps.length > 0 && (
@@ -138,6 +120,7 @@ const TaskTopBar = memo(function TaskTopBar({
         isRemoteExecutor={isRemoteExecutor}
         isAgentctlReady={isAgentctlReady}
         taskTitle={taskTitle}
+        officeTaskHref={officeTaskHref}
       />
     </header>
   );
@@ -177,19 +160,15 @@ function IssueTrackerButtons({
   );
 }
 
-/** Left section: home → task name breadcrumb, integrations menu, remote indicator */
+/** Left section: home → task name breadcrumb, integrations menu, executor info */
 function TopBarLeft({
   taskId,
   activeSessionId,
   taskTitle,
-  isRemoteExecutor,
-  remoteExecutorName,
   remoteExecutorType,
-  remoteState,
-  remoteCreatedAt,
-  remoteCheckedAt,
-  remoteStatusError,
+  isArchived,
 }: TopBarLeftProps) {
+  const showExecutorSettings = shouldShowExecutorEnvironmentControls(remoteExecutorType);
   return (
     <div className="flex items-center gap-2.5 min-w-0 overflow-hidden">
       <Breadcrumb className="min-w-0">
@@ -221,20 +200,8 @@ function TopBarLeft({
 
       <IntegrationsMenu />
 
-      {isRemoteExecutor && (
-        <RemoteCloudTooltip
-          taskId={taskId ?? ""}
-          sessionId={activeSessionId}
-          fallbackName={remoteExecutorName ?? remoteExecutorType}
-          iconClassName="h-4 w-4"
-          status={{
-            remote_name: remoteExecutorName ?? undefined,
-            remote_state: remoteState ?? undefined,
-            remote_created_at: remoteCreatedAt ?? undefined,
-            remote_checked_at: remoteCheckedAt ?? undefined,
-            remote_status_error: remoteStatusError ?? undefined,
-          }}
-        />
+      {!isArchived && showExecutorSettings && (
+        <ExecutorSettingsButton taskId={taskId} sessionId={activeSessionId ?? null} />
       )}
     </div>
   );
@@ -402,6 +369,7 @@ function TopBarRight({
   isRemoteExecutor,
   isAgentctlReady,
   taskTitle,
+  officeTaskHref,
 }: {
   taskId?: string | null;
   activeSessionId?: string | null;
@@ -412,8 +380,24 @@ function TopBarRight({
   isRemoteExecutor?: boolean;
   isAgentctlReady?: boolean;
   taskTitle?: string;
+  officeTaskHref?: string | null;
 }) {
   const items: TopbarOverflowItem[] = [];
+
+  if (officeTaskHref) {
+    items.push({
+      id: "office-view",
+      label: "Open in office view",
+      priority: 90,
+      content: (
+        <TopbarCluster label="Open in office view" className="[&_a]:h-8 [&_a]:text-xs">
+          <Button asChild size="sm" variant="outline" className="h-8 cursor-pointer px-2">
+            <Link href={officeTaskHref}>Open in office view</Link>
+          </Button>
+        </TopbarCluster>
+      ),
+    });
+  }
 
   if (!isArchived && workspaceId) {
     items.push({
@@ -462,6 +446,17 @@ function TopBarRight({
   return (
     <TopbarActionOverflow items={items} className="justify-self-end [&_button]:whitespace-nowrap" />
   );
+}
+
+function shouldShowExecutorEnvironmentControls(executorType?: string | null): boolean {
+  switch (executorType) {
+    case "local_docker":
+    case "remote_docker":
+    case "sprites":
+      return true;
+    default:
+      return false;
+  }
 }
 
 export { TaskTopBar };

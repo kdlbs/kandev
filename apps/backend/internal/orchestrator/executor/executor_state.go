@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -231,6 +231,9 @@ func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *exec
 	}
 	if gitUserEmail := profile.Config["git_user_email"]; gitUserEmail != "" {
 		metadata["git_user_email"] = gitUserEmail
+	}
+	if imageTag := profile.Config["image_tag"]; imageTag != "" {
+		metadata["image_tag_override"] = imageTag
 	}
 }
 

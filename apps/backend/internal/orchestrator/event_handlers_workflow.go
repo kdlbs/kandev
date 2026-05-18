@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -348,7 +349,7 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 	// Async: event bus delivers synchronously; blocking here → HTTP timeout (see handleTaskMovedWithSession doc).
 	go func() {
 		asyncCtx := context.WithoutCancel(ctx)
-		_, err := s.StartTask(asyncCtx, task.ID, agentProfileID, "", executorProfileID, 0, task.Description, data.ToStepID, planMode, nil)
+		_, err := s.StartTask(asyncCtx, task.ID, agentProfileID, "", executorProfileID, "", task.Description, data.ToStepID, planMode, nil)
 		if err != nil {
 			s.logger.Error("task.moved: failed to auto-start task",
 				zap.String("task_id", data.TaskID),
@@ -568,7 +569,13 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 	// and gets delivered to the wrong agent the next time that previous
 	// session is reused (e.g. on the on_turn_complete bounce back).
 	if s.messageQueue != nil {
-		s.messageQueue.TransferSession(ctx, currentSession.ID, existing.ID)
+		if err := s.messageQueue.TransferSession(ctx, currentSession.ID, existing.ID); err != nil {
+			// Fail closed: the workflow switch reuses an existing session, but
+			// orphaning a queued hand-off prompt on the previous session would
+			// silently misroute the next prompt. Stop here and surface the
+			// error so the caller can decide whether to retry.
+			return nil, fmt.Errorf("transfer queued state to reused session: %w", err)
+		}
 	}
 
 	s.completeAndStopSession(ctx, taskID, currentSession)
@@ -650,7 +657,17 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 	// pending move from the old session to the new one — the queue is keyed by
 	// session ID, and without this the prompt would never reach the new agent.
 	if s.messageQueue != nil {
-		s.messageQueue.TransferSession(ctx, currentSession.ID, newSession.ID)
+		if err := s.messageQueue.TransferSession(ctx, currentSession.ID, newSession.ID); err != nil {
+			s.logger.Error("transfer queue to new session failed; queued prompts on the previous session will not be drained",
+				zap.String("from_session_id", currentSession.ID),
+				zap.String("to_session_id", newSession.ID),
+				zap.Error(err))
+			// Continue anyway: the new session is already created and committed
+			// upstream. Failing closed here would leave the workflow in a
+			// half-switched state (new session exists but caller thinks it
+			// failed). The error is surfaced via logs and the orphaned entries
+			// stay safely in the old session for manual recovery.
+		}
 	}
 
 	// Promote the new session to primary so it's loaded when navigating back to this task.
@@ -1071,8 +1088,19 @@ func (s *Service) autoStartStepPrompt(
 		}
 	}
 
-	// Record a user message so the auto-start prompt is visible in chat history.
-	s.recordAutoStartMessage(ctx, taskID, sessionID, prompt, planMode)
+	// Record a user message so the auto-start prompt is visible in chat
+	// history. For CREATED sessions the agent has not started yet, so this is
+	// the first prompt of the task — wrap with the Kandev MCP system block
+	// before persisting (and before passing downstream) so the DB row matches
+	// what the agent receives. StartCreatedSession's wrap is idempotent
+	// (HasKandevContext guard) so the pre-wrap doesn't double.
+	// The HasKandevContext check on `prompt` also guards against any future
+	// caller that ever pre-wraps before reaching here (none today).
+	recordedPrompt := prompt
+	if session.State == models.TaskSessionStateCreated && (prompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(prompt) {
+		recordedPrompt = sysprompt.InjectKandevContext(taskID, sessionID, prompt)
+	}
+	s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode)
 
 	// If the session is in CREATED state, the agent was never started (e.g. workspace-only
 	// preparation from a blocked auto-start). PromptTask will reject CREATED sessions,
@@ -1083,7 +1111,7 @@ func (s *Service) autoStartStepPrompt(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName))
-		_, err := s.StartCreatedSession(ctx, taskID, sessionID, session.AgentProfileID, prompt, true, planMode, attachments)
+		_, err := s.StartCreatedSession(ctx, taskID, sessionID, session.AgentProfileID, recordedPrompt, true, planMode, attachments)
 		if err != nil {
 			requeueTaken()
 		}

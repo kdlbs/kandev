@@ -11,7 +11,7 @@ import (
 
 // Provide creates the workflow repository and service using separate writer and reader pools.
 func Provide(writer, reader *sqlx.DB, log *logger.Logger) (*repository.Repository, *service.Service, func() error, error) {
-	repo, err := repository.NewWithDB(writer, reader)
+	repo, err := repository.NewWithDB(writer, reader, log)
 	if err != nil {
 		return nil, nil, nil, err
 	}

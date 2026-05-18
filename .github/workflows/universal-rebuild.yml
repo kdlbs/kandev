@@ -1,0 +1,115 @@
+name: universal-rebuild
+
+# Weekly rebuild of the universal image on top of the current :latest
+# vanilla image, so apt security updates flow into universal even when
+# kandev itself hasn't been re-released.
+#
+# - Pushes a moving `:universal-weekly-YYYYMMDD` tag plus refreshes
+#   `:universal` (the "latest universal" alias).
+# - Does NOT push `:vX.Y.Z-universal`. Those are immutable per release;
+#   only the floating `:universal` and the dated weekly tags move here.
+#
+# Build flow mirrors release.yml's docker-universal: push to a per-run
+# staging tag, gate on size against the staging tag, then promote the
+# manifest to the user-facing tags via `buildx imagetools create`. The
+# promote step is metadata-only - no rebuild, no extra layer upload - so
+# a failed size gate aborts before `:universal` ever points at an
+# oversized image (the previous week's tag remains live).
+#
+# Tradeoff: staging tags (one per weekly run) accumulate in GHCR. See the
+# comment in release.yml's docker-universal job for why per-run cleanup
+# isn't safe (shared manifest digest with promoted tags). A separate
+# cleanup workflow filtering for `universal-staging-*` versions whose
+# only tag matches is the right escape hatch if accumulation becomes a
+# problem; ~52 stale tags/year is acceptable in the meantime.
+#
+# Manual trigger is also wired up so a maintainer can force a rebuild
+# after a known CVE without waiting for the cron.
+
+on:
+  schedule:
+    # Mondays 06:00 UTC. Picks up the previous week's Debian security
+    # patches without colliding with most weekday release work.
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild:
+    name: Rebuild universal on top of :latest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      STAGING_IMAGE: ghcr.io/kdlbs/kandev:universal-staging-weekly-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Compute date tag
+        id: date
+        run: echo "tag=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Rebuild against :latest deliberately - the whole point of the
+      # weekly is to pick up any base-image moves. Use --pull so the
+      # current :latest is freshly fetched, not whatever's in BuildKit's
+      # cache from a previous run.
+      - name: Build and push (staging tag)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.universal
+          push: true
+          pull: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            BASE_IMAGE=ghcr.io/kdlbs/kandev:latest
+          tags: ${{ env.STAGING_IMAGE }}
+          cache-from: type=gha,scope=universal
+          cache-to: type=gha,mode=max,scope=universal
+
+      # Same size gate as release.yml's docker-universal job. A base-image
+      # update that adds significant weight (e.g. a new Debian dep pulled by
+      # apt security updates) is caught here before :universal is promoted.
+      # Keep MAX in sync with release.yml.
+      - name: Enforce size budget
+        env:
+          MAX_COMPRESSED_BYTES: "2684354560"   # 2.5 GiB
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "$STAGING_IMAGE" --raw \
+              > /tmp/index.json
+          AMD64_DIGEST="$(jq -r '
+              .manifests[]
+              | select(.platform.architecture == "amd64" and .platform.os == "linux")
+              | .digest
+            ' /tmp/index.json)"
+          docker buildx imagetools inspect "ghcr.io/kdlbs/kandev@${AMD64_DIGEST}" --raw \
+              > /tmp/manifest.json
+          TOTAL="$(jq '[.layers[].size] | add' /tmp/manifest.json)"
+          echo "Universal image (amd64) compressed size: $TOTAL bytes (max: $MAX_COMPRESSED_BYTES)"
+          if [ "$TOTAL" -gt "$MAX_COMPRESSED_BYTES" ]; then
+            echo "::error::Universal weekly rebuild exceeds compressed-size budget. Staging tag $STAGING_IMAGE will not be promoted; previous :universal remains live. See docs/images.md inclusion policy." >&2
+            exit 1
+          fi
+
+      # Promote: metadata-only retag from staging to the user-facing tags.
+      # If any earlier step fails, the previous :universal stays in place.
+      - name: Promote staging to final tags
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "ghcr.io/kdlbs/kandev:universal" \
+            --tag "ghcr.io/kdlbs/kandev:universal-weekly-${{ steps.date.outputs.tag }}" \
+            "$STAGING_IMAGE"

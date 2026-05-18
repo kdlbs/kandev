@@ -42,7 +42,7 @@ async function stopRunningSession(session: SessionPage) {
   await session.contextMenuItem("Stop").click();
 
   // Wait for the FailedSessionBanner's resume button to appear (isFailed = FAILED | CANCELLED)
-  await expect(session.failedSessionResumeButton()).toBeVisible({ timeout: 30_000 });
+  await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
 }
 
 test.describe("New session with deleted agent profile", () => {
@@ -85,7 +85,7 @@ test.describe("New session with deleted agent profile", () => {
     await apiClient.deleteAgentProfile(profile.id, true);
 
     // 5. Wait for the resume button to become disabled (store has updated)
-    await expect(session.failedSessionResumeButton()).toBeDisabled({ timeout: 10_000 });
+    await expect(session.recoveryResumeButton()).toBeDisabled({ timeout: 10_000 });
 
     // 6. Hover the span wrapper (tooltip trigger) and verify the tooltip text
     await testPage.getByTestId("failed-session-resume-wrapper").hover();
@@ -133,10 +133,12 @@ test.describe("New session with deleted agent profile", () => {
     await apiClient.deleteAgentProfile(profile.id, true);
 
     // 5. Wait for the resume button to become disabled (confirms store updated)
-    await expect(session.failedSessionResumeButton()).toBeDisabled({ timeout: 10_000 });
+    await expect(session.recoveryResumeButton()).toBeDisabled({ timeout: 10_000 });
 
-    // 6. Click the "New Agent" button in the FailedSessionBanner to open the dialog
-    await testPage.getByRole("button", { name: "New Agent" }).click();
+    // 6. Click "Start fresh session" in the FailedSessionBanner — when the
+    //    profile is missing this opens the new session dialog instead of
+    //    triggering an immediate fresh_start recover.
+    await session.recoveryFreshButton().click();
 
     // 7. Dialog should be visible
     await expect(session.newSessionDialog()).toBeVisible({ timeout: 5_000 });

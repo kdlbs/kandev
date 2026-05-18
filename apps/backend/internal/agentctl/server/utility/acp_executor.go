@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -128,8 +129,12 @@ func (e *ACPInferenceExecutor) executeACPSession(
 
 	updateHandler := func(n acp.SessionNotification) {
 		if n.Update.AgentMessageChunk != nil && n.Update.AgentMessageChunk.Content.Text != nil {
+			chunk := sanitizeInferenceChunk(n.Update.AgentMessageChunk.Content.Text.Text)
+			if chunk == "" {
+				return
+			}
 			mu.Lock()
-			responseText.WriteString(n.Update.AgentMessageChunk.Content.Text.Text)
+			responseText.WriteString(chunk)
 			mu.Unlock()
 		}
 	}
@@ -210,14 +215,12 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	return result, nil
 }
 
-// toACPMcpServers converts the cross-process DTO list into the ACP SDK
-// shape. Uses the *Inline variants because the agentcooper fork (vendored
-// via go.mod replace) names them that way; the upstream SDK would call them
-// McpServerHttp / McpServerSse. Returns nil when there are no entries so
-// callers can use the nil-as-empty convention upstream. The second return
-// value carries the names of any DTOs we couldn't convert (unsupported
-// transport, e.g. stdio) so the caller can surface them in logs rather than
-// having them silently disappear from the agent's tool surface.
+// toACPMcpServers converts the cross-process DTO list into the ACP SDK shape.
+// Returns nil when there are no entries so callers can use the nil-as-empty
+// convention. The second return value carries the names of any DTOs we
+// couldn't convert (unsupported transport, e.g. stdio) so the caller can
+// surface them in logs rather than having them silently disappear from the
+// agent's tool surface.
 func toACPMcpServers(in []MCPServerDTO) ([]acp.McpServer, []string) {
 	if len(in) == 0 {
 		return nil, nil
@@ -419,11 +422,15 @@ func buildInitProbeFields(initResp acp.InitializeResponse) *ProbeResponse {
 		out.AgentVersion = initResp.AgentInfo.Version
 	}
 	for _, m := range initResp.AuthMethods {
+		id, name, desc, meta := acpclient.AuthMethodFields(m)
+		if id == "" && name == "" {
+			continue
+		}
 		out.AuthMethods = append(out.AuthMethods, ProbeAuthMethod{
-			ID:          string(m.Id), //nolint:unconvert // AuthMethodId is a named string type; conversion required
-			Name:        m.Name,
-			Description: derefString(m.Description),
-			Meta:        m.Meta,
+			ID:          id,
+			Name:        name,
+			Description: derefString(desc),
+			Meta:        meta,
 		})
 	}
 	return out
@@ -494,4 +501,29 @@ func buildACPCommand(cfg *InferenceConfigDTO, model string) []string {
 	}
 
 	return args
+}
+
+var piVersionBannerLineRE = regexp.MustCompile(`^\s*pi v\d+\.\d+\.\d+\s*$`)
+
+// sanitizeInferenceChunk removes known non-content banner lines emitted by
+// some CLIs (e.g. pi-acp printing "pi vX.Y.Z") so utility outputs like
+// commit-message generation only contain model response content.
+// Note: pi-acp is always launched via "npx" (see PiACP.InferenceConfig),
+// so "npx" is the allowedProbeCommand entry that gates execution here.
+func sanitizeInferenceChunk(chunk string) string {
+	if chunk == "" {
+		return ""
+	}
+	lines := strings.Split(chunk, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if piVersionBannerLineRE.MatchString(line) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	return strings.Join(kept, "\n")
 }

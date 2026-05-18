@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/ports"
+	"github.com/kandev/kandev/internal/profiles"
 	"github.com/spf13/viper"
 )
 
@@ -39,6 +40,8 @@ type Config struct {
 	Worktree            WorktreeConfig            `mapstructure:"worktree"`
 	RepoClone           RepoCloneConfig           `mapstructure:"repoClone"`
 	Debug               DebugConfig               `mapstructure:"debug"`
+	Office              OfficeConfig              `mapstructure:"office"`
+	Features            FeaturesConfig            `mapstructure:"features"`
 }
 
 // expandTilde expands a leading "~/" to the user's home directory.
@@ -135,11 +138,46 @@ type AuthConfig struct {
 	TokenDuration int    `mapstructure:"tokenDuration"` // in seconds
 }
 
+// OfficeConfig holds configuration for the office (autonomous agents) feature.
+type OfficeConfig struct {
+	// JWTSigningKey is the HMAC key used to sign agent runtime JWTs.
+	// When empty, a random key is generated at startup — fine for dev, but
+	// means every restart invalidates outstanding agent tokens. Production
+	// deployments should set a stable value (e.g. via KANDEV_OFFICE_JWTSIGNINGKEY).
+	JWTSigningKey string `mapstructure:"jwtSigningKey"`
+}
+
+// FeaturesConfig is the central registry of runtime feature flags. Every flag
+// defaults to false so production binaries ship with new work hidden until a
+// deployment explicitly opts in (env var, e.g. KANDEV_FEATURES_OFFICE=true).
+//
+// The struct doubles as the wire shape for GET /api/v1/features — `json` tags
+// keep the field names lowercase and the handler in helpers.go just calls
+// `c.JSON(200, p.features)` so new fields are picked up automatically.
+//
+// See docs/decisions/0007-runtime-feature-flags.md for the pattern and rollout policy.
+type FeaturesConfig struct {
+	// Office gates the autonomous-agent feature: backend service construction,
+	// HTTP/WS route registration, and frontend nav/route visibility.
+	Office bool `mapstructure:"office" json:"office"`
+}
+
 // LoggingConfig holds logging configuration.
 type LoggingConfig struct {
 	Level      string `mapstructure:"level"`
 	Format     string `mapstructure:"format"`
 	OutputPath string `mapstructure:"outputPath"`
+
+	// Rotation options - apply only when OutputPath is a file path
+	// (ignored for stdout/stderr). Backed by lumberjack.
+	//
+	// Note: lumberjack creates the active log file with mode 0600 (owner read/write
+	// only); the previous os.OpenFile path used 0644. External log shippers or
+	// sidecars running as a different user will need to run as the same user.
+	MaxSizeMB  int  `mapstructure:"maxSizeMb"`  // rotate when file exceeds this size; 0 = lumberjack default (100MB)
+	MaxBackups int  `mapstructure:"maxBackups"` // max number of rotated files to retain; 0 = unlimited
+	MaxAgeDays int  `mapstructure:"maxAgeDays"` // max age in days of rotated files; 0 = unlimited
+	Compress   bool `mapstructure:"compress"`   // gzip rotated files
 }
 
 // RepositoryDiscoveryConfig holds configuration for local repository scanning.
@@ -164,7 +202,11 @@ type RepoCloneConfig struct {
 
 // DebugConfig holds debug/profiling configuration.
 type DebugConfig struct {
-	// PprofEnabled enables pprof endpoints at /debug/pprof/ and /api/v1/debug/memory.
+	// DevMode enables all developer-only endpoints (pprof, memory, debug export).
+	// Controlled via KANDEV_DEBUG_DEV_MODE env var. Default: false.
+	DevMode bool `mapstructure:"devMode"`
+
+	// PprofEnabled is a legacy alias — if set, it also enables DevMode.
 	// Controlled via KANDEV_DEBUG_PPROF_ENABLED env var. Default: false.
 	PprofEnabled bool `mapstructure:"pprofEnabled"`
 }
@@ -267,10 +309,24 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("auth.jwtSecret", "")
 	v.SetDefault("auth.tokenDuration", 3600) // 1 hour
 
+	// Office defaults
+	v.SetDefault("office.jwtSigningKey", "")
+
+	// Feature-flag defaults live in ./features.yaml (symlinked to
+	// apps/backend/internal/features/features.yaml). LoadWithPath applies
+	// them via features.ApplyDefaults after this function returns so the
+	// embedded YAML, not a Go literal, is the source of truth. Env vars
+	// (KANDEV_FEATURES_<NAME>) and the deployment's config.yaml still
+	// override. See docs/decisions/0007-runtime-feature-flags.md.
+
 	// Logging defaults
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", detectDefaultLogFormat())
 	v.SetDefault("logging.outputPath", "stdout")
+	v.SetDefault("logging.maxSizeMb", 100)
+	v.SetDefault("logging.maxBackups", 5)
+	v.SetDefault("logging.maxAgeDays", 30)
+	v.SetDefault("logging.compress", true)
 
 	// Repository discovery defaults
 	v.SetDefault("repositoryDiscovery.roots", []string{})
@@ -325,8 +381,36 @@ func Load() (*Config, error) {
 func LoadWithPath(configPath string) (*Config, error) {
 	v := viper.New()
 
-	// Set defaults first
+	// Apply the active runtime profile (prod / dev / e2e) from the
+	// embedded profiles.yaml. This writes env vars onto our own
+	// process so the subsequent AutomaticEnv and the rest of the
+	// codebase's os.Getenv reads see the YAML-declared values.
+	// Vars already set by the launcher / shell / per-spec override
+	// are left alone, giving precedence:
+	//
+	//   shell env / launcher env > profiles.yaml > Go zero values
+	//
+	// A parse error here means someone committed a malformed
+	// profiles.yaml; fail loud so CI catches it before a release ships.
+	if _, _, err := profiles.ApplyProfile(); err != nil {
+		return nil, fmt.Errorf("apply profile defaults: %w", err)
+	}
+
+	// Set defaults next. setDefaults seeds non-feature config
+	// (server, database, logging, …); feature-flag defaults flow
+	// through env via ApplyProfile + AutomaticEnv below.
 	setDefaults(v)
+
+	// Seed Viper's features.* keyspace from profiles.yaml so the
+	// typed Config struct populates correctly even in tests that
+	// bypass AutomaticEnv. AutomaticEnv still wins at runtime.
+	flags, err := profiles.FeatureFlagDefaults()
+	if err != nil {
+		return nil, fmt.Errorf("read feature flag defaults: %w", err)
+	}
+	for name, value := range flags {
+		v.SetDefault("features."+name, value == "true")
+	}
 
 	// Configure environment variables
 	v.SetEnvPrefix("KANDEV")
@@ -342,6 +426,7 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv("homeDir", "KANDEV_HOME_DIR")
 	_ = v.BindEnv("logging.level", "KANDEV_LOG_LEVEL")
 	_ = v.BindEnv("events.namespace", "KANDEV_EVENTS_NAMESPACE")
+	_ = v.BindEnv("debug.devMode", "KANDEV_DEBUG_DEV_MODE")
 	_ = v.BindEnv("debug.pprofEnabled", "KANDEV_DEBUG_PPROF_ENABLED")
 
 	// Configure config file
@@ -383,7 +468,14 @@ func validate(cfg *Config) error {
 		errs = append(errs, "server.port must be between 1 and 65535")
 	}
 
-	// Database validation
+	// Database validation. Normalize the driver in place so downstream
+	// case-sensitive comparisons (and the postgres-only branch below) see
+	// a canonical value.
+	cfg.Database.Driver = strings.ToLower(cfg.Database.Driver)
+	validDrivers := map[string]bool{"sqlite": true, "postgres": true}
+	if !validDrivers[cfg.Database.Driver] {
+		errs = append(errs, "database.driver must be one of: sqlite, postgres")
+	}
 	if cfg.Database.Driver == "postgres" {
 		if cfg.Database.Port <= 0 || cfg.Database.Port > 65535 {
 			errs = append(errs, "database.port must be between 1 and 65535")
@@ -393,6 +485,12 @@ func validate(cfg *Config) error {
 		}
 		if cfg.Database.DBName == "" {
 			errs = append(errs, "database.dbName is required for postgres driver")
+		}
+		validSSLModes := map[string]bool{
+			"disable": true, "require": true, "verify-ca": true, "verify-full": true,
+		}
+		if !validSSLModes[strings.ToLower(cfg.Database.SSLMode)] {
+			errs = append(errs, "database.sslMode must be one of: disable, require, verify-ca, verify-full")
 		}
 	}
 

@@ -8,6 +8,14 @@ export default defineConfig({
   // runners (each gets its own 4 vCPUs). Tests run serially within the worker
   // because the testPage fixture does e2eReset on a shared worker-scoped
   // backend before each test.
+  //
+  // Isolation strategy: office-routing-* specs are gathered into their own
+  // Playwright project (see below) so the worker-scoped backend env
+  // (KANDEV_MOCK_PROVIDERS, KANDEV_PROVIDER_FAILURES) that those specs
+  // restart with cannot leak into specs that count agents or read the
+  // topbar agent name. Each routing spec restarts the backend back to
+  // baseline in `afterAll` (see backend.restart() — no args = revert to
+  // the fixture's baseline env snapshot).
   fullyParallel: false,
   forbidOnly: CI,
   retries: CI ? 2 : 0,
@@ -25,14 +33,45 @@ export default defineConfig({
 
   projects: [
     {
+      // The office-routing-* specs call `backend.restart()` with
+      // KANDEV_MOCK_PROVIDERS, which permanently mutates the backend's
+      // env for the lifetime of the worker (and registers extra
+      // canonical providers). Run them in their own project so that
+      // pollution can never leak into specs that count agents or read
+      // the topbar agent name — see CLAUDE.md's note on
+      // KANDEV_MOCK_PROVIDERS for the underlying invariant.
+      name: "routing",
+      testMatch: /office-routing-.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
       name: "chromium",
-      testIgnore: /mobile-.*\.spec\.ts/,
+      testIgnore: [/mobile-.*\.spec\.ts/, /docker\/.*\.spec\.ts/, /office-routing-.*\.spec\.ts/],
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "mobile-chrome",
       testMatch: /mobile-.*\.spec\.ts/,
       use: { ...devices["Pixel 5"] },
+    },
+    {
+      // Real-Docker E2E. Opt-in: run with `playwright test --project=docker`.
+      // Spawns the backend with KANDEV_E2E_DOCKER=1, builds the
+      // kandev-agent:e2e image, and skips entirely on hosts without a Docker
+      // daemon. Container-bound tests are slow (~10-30s each) so they live
+      // in their own project to keep the default CI fast.
+      name: "docker",
+      testMatch: /docker\/.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+      timeout: 180_000,
+      // Per-test sharding: CI runs `--shard=N/6` to split this project's
+      // tests across runners. Playwright only shards at the test level
+      // when fullyParallel is true (otherwise sharding is by file, and
+      // since this project has a single spec file every test would land
+      // in shard 1). Each shard is its own process with its own backend,
+      // and workers:1 still serializes tests within a shard, so this is
+      // safe.
+      fullyParallel: true,
     },
   ],
 

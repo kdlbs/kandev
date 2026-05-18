@@ -103,6 +103,16 @@ func (s *mockStore) ListActiveWorktrees(ctx context.Context) ([]*Worktree, error
 	return result, nil
 }
 
+func (s *mockStore) ListActiveWorktreePaths(_ context.Context) ([]string, error) {
+	var paths []string
+	for _, wt := range s.worktrees {
+		if wt.Status == StatusActive && wt.Path != "" {
+			paths = append(paths, wt.Path)
+		}
+	}
+	return paths, nil
+}
+
 // GetWorktreesBySessionID — MultiRepoStore.
 func (s *mockStore) GetWorktreesBySessionID(_ context.Context, sessionID string) ([]*Worktree, error) {
 	var out []*Worktree

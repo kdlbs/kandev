@@ -132,7 +132,7 @@ func (h *TaskHandlers) wsDeleteTaskPlan(ctx context.Context, msg *ws.Message) (*
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete task plan: "+err.Error(), nil)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{responseKeySuccess: true})
 }
 
 // wsListTaskPlanRevisions returns revision metadata newest-first (no content).

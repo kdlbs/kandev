@@ -8,16 +8,37 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// createTestTask creates a task for testing with the given parameters
+// createTestTask creates a task for testing with the given parameters.
+// `priority` is the integer rank used in legacy tests; it is mapped to the
+// equivalent priority label so the queue test fixtures keep their ordering.
 func createTestTask(id string, priority int) *v1.Task {
 	return &v1.Task{
 		ID:         id,
 		WorkflowID: "test-wf",
 		Title:      "Test Task " + id,
-		Priority:   priority,
+		Priority:   priorityRankToLabel(priority),
 		State:      v1.TaskStateTODO,
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
+	}
+}
+
+// priorityRankToLabel converts a legacy integer priority back to the text
+// label form used by v1.Task. The mapping is monotonic so existing tests that
+// enqueue multiple priorities keep their relative ordering: higher integer
+// inputs land in higher-rank labels.
+func priorityRankToLabel(p int) string {
+	switch {
+	case p >= 8:
+		return "critical"
+	case p >= 4:
+		return "high"
+	case p >= 2:
+		return "medium"
+	case p >= 1:
+		return "low"
+	default:
+		return "medium"
 	}
 }
 

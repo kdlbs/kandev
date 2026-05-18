@@ -63,13 +63,22 @@ test.describe("Config chat popover", () => {
     // but the command panel should still open config chat globally.
     await testPage.goto("/");
     await testPage.waitForLoadState("networkidle");
+    // Wait for the kanban board to render — networkidle alone fires before
+    // React hydration finishes, so the global Cmd+K listener may not be
+    // wired up yet under CI load.
+    await expect(testPage.getByTestId("kanban-board")).toBeVisible({ timeout: 15_000 });
 
-    // Open the command panel via Cmd+K.
+    // Open the command panel via Cmd+K. Retry once if the dialog doesn't
+    // appear: the listener may register a beat after hydration.
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
-    await testPage.keyboard.press(`${modifier}+k`);
-
     const cmdPanel = testPage.getByRole("dialog", { name: "Command Palette" });
-    await expect(cmdPanel).toBeVisible({ timeout: 5_000 });
+    await testPage.keyboard.press(`${modifier}+k`);
+    try {
+      await expect(cmdPanel).toBeVisible({ timeout: 5_000 });
+    } catch {
+      await testPage.keyboard.press(`${modifier}+k`);
+      await expect(cmdPanel).toBeVisible({ timeout: 5_000 });
+    }
 
     // Type to find the config chat command.
     await cmdPanel.locator("input").fill("Configuration Chat");

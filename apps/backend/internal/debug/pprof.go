@@ -1,6 +1,7 @@
 package debug
 
 import (
+	"expvar"
 	"net/http"
 	"net/http/pprof"
 	"runtime"
@@ -24,7 +25,12 @@ func RegisterPprofRoutes(router *gin.Engine, log *logger.Logger) {
 		g.GET("/"+name, gin.WrapH(pprof.Handler(name)))
 	}
 
-	log.Info("pprof endpoints registered at /debug/pprof/")
+	// Stdlib expvar handler exposes the runtime/memstats counters and
+	// any expvar.Map/expvar.Int published by code at package init —
+	// notably the routing_* metrics in internal/office/scheduler.
+	router.GET("/debug/vars", gin.WrapH(expvar.Handler()))
+
+	log.Info("pprof endpoints registered at /debug/pprof/ and /debug/vars")
 }
 
 // RegisterMemoryRoute registers GET /api/v1/debug/memory which returns a JSON summary

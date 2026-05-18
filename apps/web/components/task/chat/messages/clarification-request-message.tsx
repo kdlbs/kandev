@@ -25,12 +25,13 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
   const isAnswered = status === "answered";
   const isSkipped = status === "rejected";
   const isExpired = status === "expired";
+  const isCancelled = status === "cancelled";
 
   const getStatusIndicator = () => {
     if (isAnswered) {
       return <IconCheck className="h-3.5 w-3.5 text-green-500" />;
     }
-    if (isSkipped) {
+    if (isSkipped || isCancelled) {
       return <IconX className="h-3.5 w-3.5 text-muted-foreground" />;
     }
     if (isExpired) {
@@ -95,6 +96,12 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
             <div className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-muted-foreground">
               {getStatusIndicator()}
               Skipped
+            </div>
+          )}
+          {isCancelled && (
+            <div className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+              {getStatusIndicator()}
+              Cancelled
             </div>
           )}
           {isExpired && (

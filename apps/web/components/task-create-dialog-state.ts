@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import type { LocalRepository, Workspace, ExecutorProfile, Branch } from "@/lib/types/http";
+import type { LocalRepository, ExecutorProfile, Branch } from "@/lib/types/http";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
@@ -27,6 +27,33 @@ function nonWorktreeDisabledReason(profile: ExecutorProfile): string | null {
   if ((profile.executor_type ?? "") === "worktree") return null;
   return "Multi-repo tasks only support the git-worktree executor.";
 }
+
+/**
+ * Worktree executor needs a repository to create the worktree from. Disable
+ * it when the task is in no-repository mode so the picker doesn't offer an
+ * unworkable choice (the backend would silently fall back to local).
+ */
+function worktreeDisabledReason(profile: ExecutorProfile): string | null {
+  if ((profile.executor_type ?? "") !== "worktree") return null;
+  return "Worktree executor requires a repository.";
+}
+
+/**
+ * Combines the two executor-disable rules into a single resolver:
+ *   - no-repository mode → disable worktree (it needs a repo)
+ *   - multi-repo selection → disable everything except worktree
+ *   - otherwise → no disabling
+ * The two never co-occur (no-repository implies zero repos, so multi-repo
+ * cannot be true at the same time), so a simple priority order is enough.
+ */
+function pickExecutorDisabledReason(
+  noRepository: boolean,
+  isMultiRepoSelection: boolean,
+): ((profile: ExecutorProfile) => string | null) | undefined {
+  if (noRepository) return worktreeDisabledReason;
+  if (isMultiRepoSelection) return nonWorktreeDisabledReason;
+  return undefined;
+}
 import type {
   StepType,
   TaskCreateDialogInitialValues,
@@ -41,6 +68,8 @@ import {
   computeDialogDefaultStepId,
   computeSingleWorkflowFallbackId,
 } from "@/components/task-create-dialog-defaults";
+import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
+import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
 
 export type {
   StepType,
@@ -64,6 +93,8 @@ type FormResetters = {
   setDiscoverReposLoaded: (v: boolean) => void;
   setUseGitHubUrl: (v: boolean) => void;
   setGitHubUrl: (v: string) => void;
+  setNoRepository: (v: boolean) => void;
+  setWorkspacePath: (v: string) => void;
   setGitHubBranches: (v: Branch[]) => void;
   setGitHubUrlError: (v: string | null) => void;
   setGitHubPrHeadBranch: (v: string | null) => void;
@@ -187,6 +218,10 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   resetters.setGitHubPrHeadBranch(iv?.checkoutBranch ?? null);
   resetters.setFreshBranchEnabled(false);
   resetters.setCurrentLocalBranch("");
+  // Source-mode toggle resets — without these, opening the dialog in "None"
+  // mode and reopening for a different task would land in None mode again.
+  resetters.setNoRepository(false);
+  resetters.setWorkspacePath("");
 }
 
 /** Hook to manage draft persistence for task creation dialog */
@@ -310,6 +345,11 @@ function useFormStateValues(
   const [fetchedSteps, setFetchedSteps] = useState<StepType[] | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
+  // No-repo mode: when true, the task is created with no repositories. The
+  // optional workspacePath points the agent at an existing host folder; empty
+  // means kandev creates a scratch workspace.
+  const [noRepository, setNoRepository] = useState(false);
+  const [workspacePath, setWorkspacePath] = useState("");
   return {
     taskName,
     setTaskName,
@@ -341,6 +381,10 @@ function useFormStateValues(
     currentDefaults,
     setCurrentDefaults,
     prevOpenRef,
+    noRepository,
+    setNoRepository,
+    workspacePath,
+    setWorkspacePath,
   };
 }
 
@@ -404,6 +448,8 @@ export function useDialogFormState(
       setGitHubPrHeadBranch: ghUrl.setGitHubPrHeadBranch,
       setFreshBranchEnabled: freshBranch.setFreshBranchEnabled,
       setCurrentLocalBranch: freshBranch.setCurrentLocalBranch,
+      setNoRepository: form.setNoRepository,
+      setWorkspacePath: form.setWorkspacePath,
     },
   });
 
@@ -472,13 +518,12 @@ export function useDialogComputed({
     effectiveWorkflowId,
     snapshots,
   });
-  const workspaceDefaults = workspaceId
-    ? workspaces.find((ws: Workspace) => ws.id === workspaceId)
-    : null;
+  const workspaceDefaults = workspaceId ? workspaces.find((ws) => ws.id === workspaceId) : null;
   // The form has a repo selection when either: (a) any chip in the unified
-  // list has a repo set, or (b) URL mode has a non-empty URL. The chip row
-  // takes care of branch state per row; there is no global branch.
+  // list has a repo set, (b) URL mode has a non-empty URL, or (c) the task
+  // is intentionally repo-less (noRepository toggle on).
   const hasRepositorySelection = Boolean(
+    fs.noRepository ||
     fs.repositories.some((r) => r.repositoryId || r.localPath) ||
     (fs.useGitHubUrl && fs.githubUrl.trim()),
   );
@@ -486,7 +531,6 @@ export function useDialogComputed({
   // pill loads branches per-repo). Keep the computed value but always feed it
   // the URL branches when in URL mode.
   const branchOptions = useBranchOptions(fs.useGitHubUrl ? fs.githubBranches : []);
-  const agentProfileOptions = useAgentProfileOptions(agentProfiles);
   const allExecutorProfiles = useMemo<ExecutorProfile[]>(() => {
     return executors.flatMap((executor) =>
       (executor.profiles ?? []).map((p) => ({
@@ -502,9 +546,23 @@ export function useDialogComputed({
   // keep the full executor catalogue.
   const selectedRepoCount = fs.repositories.filter((r) => r.repositoryId || r.localPath).length;
   const isMultiRepoSelection = selectedRepoCount > 1;
-  const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles, {
-    disabledReasonFor: isMultiRepoSelection ? nonWorktreeDisabledReason : undefined,
-  });
+  // `pickExecutorDisabledReason` came from main — folds two disable rules
+  // (no-repository disables worktree; multi-repo disables non-worktree) into
+  // one resolver. Plug it into our existing useExecutorProfileCompat wrapper
+  // so the downstream consumer still gets selectedExecutorProfile /
+  // noCompatibleAgent metadata.
+  // Use the effective agent ID (form value OR the workflow-locked override)
+  // so the compatibility gate catches the override case too — passing the
+  // raw fs.agentProfileId would let workflow-locked sessions slip past with
+  // an empty selection.
+  const exec = useExecutorProfileCompat(
+    allExecutorProfiles,
+    fs.executorProfileId,
+    effectiveAgentProfileId,
+    agentProfiles,
+    pickExecutorDisabledReason(fs.noRepository, isMultiRepoSelection),
+  );
+  const agentProfileOptions = useAgentProfileOptions(exec.compatibleAgentProfiles);
   const executorHint = useExecutorHint(executors, fs.executorId, selectedRepoCount);
   const isLocalExecutor = useIsLocalExecutor(executors, fs.executorId);
   const { headerRepositoryOptions } = useRepositoryOptions(repositories, fs.discoveredRepositories);
@@ -524,7 +582,7 @@ export function useDialogComputed({
     hasRepositorySelection,
     branchOptions,
     agentProfileOptions,
-    executorProfileOptions,
+    executorProfileOptions: exec.executorProfileOptions,
     executorHint,
     isLocalExecutor,
     headerRepositoryOptions,
@@ -533,6 +591,49 @@ export function useDialogComputed({
     workflowAgentLocked,
     workflowAgentProfileId,
     effectiveAgentProfileId,
+    selectedExecutorProfileName: exec.selectedExecutorProfile?.name ?? null,
+    noCompatibleAgent: exec.noCompatibleAgent,
+  };
+}
+
+function useExecutorProfileCompat(
+  allExecutorProfiles: ExecutorProfile[],
+  selectedProfileId: string,
+  selectedAgentProfileId: string,
+  agentProfiles: DialogComputedArgs["agentProfiles"],
+  disabledReasonFor?: (profile: ExecutorProfile) => string | null,
+) {
+  const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles, {
+    disabledReasonFor,
+  });
+  const selectedExecutorProfile = useMemo(
+    () => allExecutorProfiles.find((p) => p.id === selectedProfileId) ?? null,
+    [allExecutorProfiles, selectedProfileId],
+  );
+  const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
+  const compatibleAgentProfiles = useMemo(() => {
+    if (!selectedExecutorProfile || !authLoaded) return agentProfiles;
+    return agentProfiles.filter((ap) =>
+      isAgentConfiguredOnExecutor(ap, selectedExecutorProfile, authSpecs),
+    );
+  }, [agentProfiles, selectedExecutorProfile, authSpecs, authLoaded]);
+  // `noCompatibleAgent` gates the submit button. It must catch BOTH cases:
+  //   1. The selected executor has no compatible agents at all.
+  //   2. The user picked an agent that isn't compatible with the executor
+  //      (e.g. switched executor after the agent was chosen).
+  // Previously this only checked case 1, so case 2 silently let the user
+  // submit with a known-incompatible combination.
+  const noCompatibleAgent = useMemo(() => {
+    if (!selectedExecutorProfile) return false;
+    if (compatibleAgentProfiles.length === 0) return true;
+    if (!selectedAgentProfileId) return false;
+    return !compatibleAgentProfiles.some((ap) => ap.id === selectedAgentProfileId);
+  }, [selectedExecutorProfile, compatibleAgentProfiles, selectedAgentProfileId]);
+  return {
+    selectedExecutorProfile,
+    compatibleAgentProfiles,
+    executorProfileOptions,
+    noCompatibleAgent,
   };
 }
 

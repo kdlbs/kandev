@@ -2,7 +2,7 @@
 
 Manage and run tasks in parallel. Orchestrate agents. Review changes. Ship value.
 
-[Workflows](docs/workflow-tips.md) | [Roadmap](docs/roadmap.md) | [Contributing](CONTRIBUTING.md) | [Architecture](docs/ARCHITECTURE.md) | [Discord](https://discord.gg/gWdCPGcFCD)
+[Workflows](docs/workflow-tips.md) | [Run as a Service](docs/run-as-a-service.md) | [Roadmap](docs/roadmap.md) | [Contributing](CONTRIBUTING.md) | [Architecture](docs/ARCHITECTURE.md) | [Discord](https://discord.gg/gWdCPGcFCD)
 
 <p align="center">
   <img src="docs/screenshots/readme-intro.gif" alt="Kandev Demo">

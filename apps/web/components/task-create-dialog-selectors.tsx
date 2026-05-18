@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState, memo, useCallback, useMemo } from "react";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { IconPaperclip } from "@tabler/icons-react";
+import { IconUpload } from "@tabler/icons-react";
 import { Combobox } from "./combobox";
 import { scoreBranch } from "@/lib/utils/branch-filter";
 import { BranchRefreshButton } from "./branch-refresh-button";
@@ -441,7 +441,7 @@ function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: b
             onClick={onClick}
             disabled={disabled}
           >
-            <IconPaperclip className="h-4 w-4" />
+            <IconUpload className="h-4 w-4" />
           </button>
         </TooltipTrigger>
         <TooltipContent>Attach files</TooltipContent>

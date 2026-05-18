@@ -52,11 +52,22 @@ func (wt *WorkspaceTracker) RefreshGitStatus(ctx context.Context) {
 // GetCurrentGitStatus returns the current cached git status.
 // If no status has been cached yet, it fetches fresh status.
 func (wt *WorkspaceTracker) GetCurrentGitStatus(ctx context.Context) (types.GitStatusUpdate, error) {
+	return wt.GetGitStatus(ctx, false)
+}
+
+// GetGitStatus returns git status. When fresh is false, the cached value is
+// returned (with a fresh fallback if no cache exists). When fresh is true, a
+// new git query is always executed, bypassing the cache. Callers that need
+// up-to-date data after the agent just committed changes should pass fresh=true.
+func (wt *WorkspaceTracker) GetGitStatus(ctx context.Context, fresh bool) (types.GitStatusUpdate, error) {
+	if fresh {
+		return wt.getGitStatus(ctx)
+	}
+
 	wt.mu.RLock()
 	status := wt.currentStatus
 	wt.mu.RUnlock()
 
-	// If no status cached yet (timestamp is zero), fetch fresh status
 	if status.Timestamp.IsZero() {
 		return wt.getGitStatus(ctx)
 	}

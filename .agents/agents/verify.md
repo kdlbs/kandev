@@ -34,12 +34,16 @@ Run the full verification pipeline for the monorepo, then fix any issues found.
    - `make -C apps/backend fmt`
    - `cd apps && pnpm format`
 
-3. **Verify in parallel** where possible:
-   - `make -C apps/backend test lint`
-   - `cd apps && pnpm --filter @kandev/web typecheck && pnpm --filter @kandev/web lint`
+3. **Verify** — always wrap heavy commands with `scripts/run-quiet <tag> -- <cmd>`. The wrapper redirects all output to a unique `/tmp/kandev-run.<tag>.<random>.log`, prints `exit=0 log=...` on success or an auto-grepped failure summary on error, and exits with the underlying command's exit code. Random suffix ⇒ safe under parallel invocations.
+   ```bash
+   scripts/run-quiet backend-test -- make -C apps/backend test lint
+   scripts/run-quiet web-lint -- bash -c 'cd apps && pnpm --filter @kandev/web lint'
+   ```
+   - If both print `exit=0`: done, nothing more to read.
+   - If non-zero: the failure summary is already in your context. `Read` only specific line ranges of the printed log path if you need more context — never `cat` the whole log.
 
 4. **Fix issues** — do NOT just report them:
-   - Read each failing file at the reported line number
+   - Read each failing file at the reported line number (use the `Read` tool with `offset`/`limit`, not `cat` of the whole file)
    - Fix the root cause (don't suppress warnings or add ignores)
    - Common fixes:
      - **Type errors**: fix the type, add a missing import, or correct the function signature
@@ -49,7 +53,7 @@ Run the full verification pipeline for the monorepo, then fix any issues found.
      - **Lint — unused imports**: remove them
      - **Lint — duplicate strings**: extract to a constant
      - **Test failures**: read the test, understand the assertion, fix the code (not the test) unless the test is outdated
-   - After fixing, re-run only the failed command to confirm the fix
+   - After fixing, re-run **only** the failed command via `scripts/run-quiet` to confirm the fix. Do not re-run the whole pipeline on every iteration.
 
 5. **Repeat** steps 3-4 until all commands pass. If a fix introduces new issues, address those too.
 

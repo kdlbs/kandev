@@ -422,7 +422,7 @@ export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps)
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="!max-w-[80vw] !w-[80vw] max-h-[85vh] h-[85vh] p-0 gap-0 flex flex-col shadow-2xl"
+        className="!max-w-[100vw] !w-[100vw] sm:!max-w-[80vw] sm:!w-[80vw] max-h-[85vh] h-[85vh] p-0 gap-0 flex flex-col shadow-2xl"
         showCloseButton={false}
         overlayClassName="bg-transparent"
       >
@@ -443,7 +443,7 @@ export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps)
           markCommentsSent={s.markCommentsSent}
         />
         <div className="flex flex-1 min-h-0">
-          <div className="w-[280px] min-w-[220px] border-r border-border flex-shrink-0 overflow-hidden">
+          <div className="w-[280px] sm:w-[220px] min-w-[100px] border-r border-border flex-shrink-0 overflow-hidden hidden sm:flex flex-col">
             <ReviewFileTree
               files={s.filteredFiles}
               reviewedFiles={s.reviewedFiles}

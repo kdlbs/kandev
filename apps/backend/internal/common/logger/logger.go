@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/kandev/kandev/internal/common/logger/buffer"
 )
@@ -21,17 +22,29 @@ const (
 )
 
 // LoggingConfig holds the configuration for the logger.
+//
+// This struct is constructed in Go (not unmarshaled via viper/mapstructure),
+// so it does not carry struct tags. Callers map their own config types
+// (e.g. config.LoggingConfig) into these fields explicitly.
 type LoggingConfig struct {
-	Level      string `mapstructure:"level"`       // debug, info, warn, error
-	Format     string `mapstructure:"format"`      // json, console
-	OutputPath string `mapstructure:"output_path"` // stdout, stderr, or file path
+	Level      string // debug, info, warn, error
+	Format     string // json, console
+	OutputPath string // stdout, stderr, or file path
+
+	// Rotation options - apply only when OutputPath is a file path
+	// (ignored for stdout/stderr). Backed by lumberjack.
+	MaxSizeMB  int  // rotate when file exceeds this size; 0 = lumberjack default (100MB)
+	MaxBackups int  // max number of rotated files to retain; 0 = unlimited
+	MaxAgeDays int  // max age of rotated files; 0 = unlimited
+	Compress   bool // gzip rotated files
 }
 
 // Logger wraps zap.Logger to provide structured logging with helper methods.
 type Logger struct {
-	zap    *zap.Logger
-	sugar  *zap.SugaredLogger
-	fields []zap.Field
+	zap     *zap.Logger
+	sugar   *zap.SugaredLogger
+	fields  []zap.Field
+	rotator *lumberjack.Logger // non-nil only when OutputPath is a file path
 }
 
 var (
@@ -66,6 +79,15 @@ func SetDefault(logger *Logger) {
 	defaultLogger = logger
 }
 
+// NewFromZap wraps an existing *zap.Logger in a Logger. Useful in tests
+// where the caller provides a custom core (e.g. zaptest/observer).
+func NewFromZap(z *zap.Logger) (*Logger, error) {
+	return &Logger{
+		zap:   z,
+		sugar: z.Sugar(),
+	}, nil
+}
+
 // NewLogger creates a new Logger with the given configuration.
 func NewLogger(cfg LoggingConfig) (*Logger, error) {
 	level, err := parseLevel(cfg.Level)
@@ -87,18 +109,24 @@ func NewLogger(cfg LoggingConfig) (*Logger, error) {
 		encoder = zapcore.NewJSONEncoder(encoderConfig)
 	}
 
-	var writeSyncer zapcore.WriteSyncer
+	var (
+		writeSyncer zapcore.WriteSyncer
+		rotator     *lumberjack.Logger
+	)
 	switch cfg.OutputPath {
 	case "", "stdout":
 		writeSyncer = zapcore.AddSync(os.Stdout)
 	case "stderr":
 		writeSyncer = zapcore.AddSync(os.Stderr)
 	default:
-		file, err := os.OpenFile(cfg.OutputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return nil, err
+		rotator = &lumberjack.Logger{
+			Filename:   cfg.OutputPath,
+			MaxSize:    cfg.MaxSizeMB,
+			MaxBackups: cfg.MaxBackups,
+			MaxAge:     cfg.MaxAgeDays,
+			Compress:   cfg.Compress,
 		}
-		writeSyncer = zapcore.AddSync(file)
+		writeSyncer = zapcore.AddSync(rotator)
 	}
 
 	outputCore := zapcore.NewCore(encoder, writeSyncer, level)
@@ -107,8 +135,9 @@ func NewLogger(cfg LoggingConfig) (*Logger, error) {
 	zapLogger := zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
 
 	return &Logger{
-		zap:   zapLogger,
-		sugar: zapLogger.Sugar(),
+		zap:     zapLogger,
+		sugar:   zapLogger.Sugar(),
+		rotator: rotator,
 	}, nil
 }
 
@@ -141,12 +170,28 @@ func (l *Logger) Sync() error {
 	return l.zap.Sync()
 }
 
+// Close flushes pending log entries and releases the file handle held by the
+// rotating file sink, if any. Safe to call on a stdout/stderr logger (no-op).
+// Call before process shutdown to ensure the final batch reaches disk and the
+// rotation cycle can complete cleanly.
+func (l *Logger) Close() error {
+	_ = l.zap.Sync()
+	if l.rotator != nil {
+		return l.rotator.Close()
+	}
+	return nil
+}
+
 // WithFields returns a new Logger with the given fields added.
+// The rotator reference is propagated so Close() on a derived logger
+// still releases the underlying file handle.
 func (l *Logger) WithFields(fields ...zap.Field) *Logger {
+	z := l.zap.With(fields...)
 	return &Logger{
-		zap:    l.zap.With(fields...),
-		sugar:  l.zap.With(fields...).Sugar(),
-		fields: append(l.fields, fields...),
+		zap:     z,
+		sugar:   z.Sugar(),
+		fields:  append(l.fields, fields...),
+		rotator: l.rotator,
 	}
 }
 

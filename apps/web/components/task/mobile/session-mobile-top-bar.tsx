@@ -119,6 +119,7 @@ function MobileTopBarActions({
         <RemoteCloudTooltip
           taskId={taskId ?? ""}
           sessionId={sessionId}
+          executorType={remoteExecutorType}
           fallbackName={remoteExecutorName ?? remoteExecutorType}
           iconClassName="h-4 w-4"
           status={{

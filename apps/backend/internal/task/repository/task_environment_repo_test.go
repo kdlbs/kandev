@@ -214,7 +214,7 @@ func TestTaskEnvironmentRepo_BackfillFromLegacyEnv(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repo, err := sqlite.NewWithDB(sqlxDB, sqlxDB)
+	repo, err := sqlite.NewWithDB(sqlxDB, sqlxDB, nil)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestTaskEnvironmentRepo_BackfillFromLegacyEnv(t *testing.T) {
 		t.Fatalf("reopen db: %v", err)
 	}
 	sqlxDB2 := sqlx.NewDb(dbConn2, "sqlite3")
-	repo2, err := sqlite.NewWithDB(sqlxDB2, sqlxDB2)
+	repo2, err := sqlite.NewWithDB(sqlxDB2, sqlxDB2, nil)
 	if err != nil {
 		t.Fatalf("reopen repo: %v", err)
 	}

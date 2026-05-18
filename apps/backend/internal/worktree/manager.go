@@ -82,6 +82,10 @@ type Store interface {
 	DeleteWorktree(ctx context.Context, id string) error
 	// ListActiveWorktrees returns all active worktrees.
 	ListActiveWorktrees(ctx context.Context) ([]*Worktree, error)
+	// ListActiveWorktreePaths returns the worktree_path of every active,
+	// non-deleted worktree row that has a non-empty path. Used by the
+	// office GC to identify live worktrees that must not be swept.
+	ListActiveWorktreePaths(ctx context.Context) ([]string, error)
 }
 
 // MultiRepoStore is an optional capability some stores implement to support
@@ -147,6 +151,13 @@ func (m *Manager) SetRepositoryProvider(provider RepositoryProvider) {
 // SetScriptMessageHandler sets the script message handler for executing setup/cleanup scripts.
 func (m *Manager) SetScriptMessageHandler(handler ScriptMessageHandler) {
 	m.scriptMsgHandler = handler
+}
+
+// ListActiveWorktreePaths returns the absolute on-disk paths of all
+// currently active, non-deleted worktrees. Used by the office GC as the
+// authoritative inventory of paths that must not be swept.
+func (m *Manager) ListActiveWorktreePaths(ctx context.Context) ([]string, error) {
+	return m.store.ListActiveWorktreePaths(ctx)
 }
 
 // getRepoLock returns a mutex for the given repository path and increments its reference count.
@@ -274,9 +285,44 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		baseRef = m.pullBaseBranch(ctx, req.RepositoryPath, req.BaseBranch, req.OnSyncProgress)
 	}
 
-	// Check base branch exists
+	// Check base branch exists. When the requested branch is missing and the
+	// caller supplied a FallbackBaseBranch (typically the repo's default_branch)
+	// that does exist, recover automatically and surface a non-fatal warning on
+	// the resulting worktree. This handles the common case where a parent task
+	// was anchored to a PR head or fresh branch that has been deleted upstream
+	// or never existed in a sibling repo.
+	fallbackWarning, fallbackDetail := "", ""
 	if !m.branchExists(ctx, req.RepositoryPath, baseRef) {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidBaseBranch, baseRef)
+		fallback := strings.TrimSpace(req.FallbackBaseBranch)
+		if fallback == "" || fallback == baseRef {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidBaseBranch, baseRef)
+		}
+		// Best-effort fetch of the fallback so it is available locally in
+		// containerized / shallow-clone environments where the fallback may
+		// only exist on the remote. pullBaseBranch may resolve the name to a
+		// remote-tracking ref (e.g. "main" -> "origin/main") which we must use
+		// for the existence check and downstream git operations.
+		resolvedFallback := fallback
+		if req.PullBeforeWorktree {
+			resolvedFallback = m.pullBaseBranch(ctx, req.RepositoryPath, fallback, nil)
+		}
+		if !m.branchExists(ctx, req.RepositoryPath, resolvedFallback) {
+			return nil, fmt.Errorf("%w: %s (fallback %q also not found)", ErrInvalidBaseBranch, baseRef, fallback)
+		}
+		m.logger.Warn("requested base branch not found, falling back",
+			zap.String("repository_path", req.RepositoryPath),
+			zap.String("requested_branch", baseRef),
+			zap.String("fallback_branch", fallback))
+		// Use req.BaseBranch (the user-supplied name) in the user-facing warning
+		// rather than baseRef, which may carry an internal "origin/<x>" form
+		// produced by pullBaseBranch when PullBeforeWorktree is set.
+		fallbackWarning = fmt.Sprintf("Requested base branch %q not found, used %q instead", req.BaseBranch, fallback)
+		fallbackDetail = fmt.Sprintf("git rev-parse --verify %s failed; recovered using fallback branch %q (typically the repository's default_branch)", baseRef, fallback)
+		baseRef = resolvedFallback
+		// Reflect the resolved branch in the persisted worktree record so
+		// downstream consumers (UI, queries, debug logs) see the actual base
+		// rather than the requested-but-missing one.
+		req.BaseBranch = fallback
 	}
 
 	// Worktrees are always placed under ~/.kandev/tasks/{taskDir}/{repo}/.
@@ -285,7 +331,15 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	if req.TaskDirName == "" || req.RepoName == "" {
 		return nil, ErrTaskDirRequired
 	}
-	return m.createInTaskDir(ctx, req, baseRef)
+	wt, err := m.createInTaskDir(ctx, req, baseRef)
+	if err != nil {
+		return nil, err
+	}
+	if fallbackWarning != "" {
+		wt.BaseBranchFallbackWarning = fallbackWarning
+		wt.BaseBranchFallbackDetail = fallbackDetail
+	}
+	return wt, nil
 }
 
 // createInTaskDir creates a worktree inside the task directory structure:
@@ -643,15 +697,11 @@ func (m *Manager) buildWorktreeNames(req CreateRequest) (dirName, branchName str
 	if req.TaskTitle != "" {
 		// Use semantic naming: {sanitized-title}_{suffix}
 		dirName = SemanticWorktreeName(req.TaskTitle, dirSuffix)
-		sanitizedTitle := SanitizeForBranch(req.TaskTitle, 20)
-		if sanitizedTitle == "" {
-			sanitizedTitle = SanitizeForBranch(req.TaskID, 20)
-		}
-		branchName = prefix + sanitizedTitle + "-" + branchSuffix
+		branchName = TaskBranchNameWithSuffix(req.TaskTitle, req.TaskID, prefix, branchSuffix)
 	} else {
 		// Fallback to task ID based naming
 		dirName = req.TaskID + "_" + dirSuffix
-		branchName = prefix + SanitizeForBranch(req.TaskID, 20) + "-" + branchSuffix
+		branchName = TaskBranchNameWithSuffix("", req.TaskID, prefix, branchSuffix)
 	}
 	return dirName, branchName
 }

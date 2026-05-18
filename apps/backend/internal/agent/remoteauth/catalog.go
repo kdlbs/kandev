@@ -123,9 +123,10 @@ func BuildCatalogForHost(enabledAgents []agents.Agent, currentOS, homeDir string
 			}
 		}
 
-		if len(spec.Methods) > 0 {
-			specs = append(specs, spec)
-		}
+		// Include the spec even when it has no methods — this is the
+		// "no remote credentials needed" signal (e.g. mock agent for tests).
+		// Frontend gating treats a methods-less spec as "always configured".
+		specs = append(specs, spec)
 	}
 
 	return Catalog{Specs: specs, methodsByID: methodsByID}

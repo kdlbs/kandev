@@ -85,10 +85,29 @@ export function usePortalSlot(
 
     const entry = panelPortalManager.acquire(panelId, component, params, props.api, envId);
 
-    // Reparent the portal element into this panel's DOM slot.
+    // Reparent the portal element into this panel's DOM slot, then restore any
+    // scroll positions captured before the previous detach. Browsers reset
+    // scrollTop/scrollLeft when an element is removed from the DOM, so without
+    // this the sidebar (and any other scrollable descendant of a portal) jumps
+    // back to the top after every dockview layout switch.
     container.appendChild(entry.element);
+    const cancelRestore = restorePortalScroll(entry.element);
+    // Track every scroll inside this portal so we always have an up-to-date
+    // snapshot to restore after the next reattach. We do this via a capturing
+    // listener because dockview can rip the DOM apart before React runs the
+    // cleanup below (removeChild fires too late to read scrollTop reliably).
+    const onScroll = (e: Event) => {
+      const target = e.target;
+      if (target instanceof Element && entry.element.contains(target)) {
+        const html = target as HTMLElement;
+        scrollSnapshots.set(target, { top: html.scrollTop, left: html.scrollLeft });
+      }
+    };
+    entry.element.addEventListener("scroll", onScroll, true);
 
     return () => {
+      cancelRestore();
+      entry.element.removeEventListener("scroll", onScroll, true);
       // Detach only — do NOT release.  The element stays in the manager
       // and will be re-adopted when the panel remounts after fromJSON().
       if (entry.element.parentNode === container) {
@@ -112,4 +131,97 @@ export function usePortalSlot(
   }, [panelId, props.api]);
 
   return containerRef;
+}
+
+// ---------------------------------------------------------------------------
+// Scroll preservation across portal detach/reattach
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-element scroll snapshots, kept up-to-date by a capturing scroll
+ * listener attached to each portal element. Stored in a WeakMap so detached
+ * subtrees can be garbage collected if the portal is ever released.
+ */
+const scrollSnapshots = new WeakMap<Element, { top: number; left: number }>();
+
+/** Window during which we keep re-applying snapshots after attach. */
+const RESTORE_WINDOW_MS = 1500;
+
+/**
+ * Restore captured scroll positions on every scrollable descendant of `portal`,
+ * then keep re-applying for a short window so that a snapshot which gets
+ * clamped by a not-yet-laid-out container (`scrollTop` capped to
+ * `scrollHeight - clientHeight`) is corrected once layout settles.
+ *
+ * Returns a function that cancels any pending retries (call from cleanup so
+ * we never write to a detached subtree).
+ */
+function restorePortalScroll(portal: Element): () => void {
+  // Collect every descendant that has a snapshot up front so we don't re-walk
+  // the tree on each retry.
+  const targets: Array<{ el: HTMLElement; snap: { top: number; left: number } }> = [];
+  const walker = document.createTreeWalker(portal, NodeFilter.SHOW_ELEMENT);
+  // Skip the portal element itself — it is never user-scrolled, and the loop
+  // body assumes Element nodes (guaranteed by SHOW_ELEMENT for descendants).
+  let node = walker.nextNode() as HTMLElement | null;
+  while (node) {
+    const snap = scrollSnapshots.get(node);
+    if (snap && (snap.top > 0 || snap.left > 0)) {
+      targets.push({ el: node, snap });
+    }
+    node = walker.nextNode() as HTMLElement | null;
+  }
+  if (targets.length === 0) return () => {};
+
+  // Track which elements still need retrying. An element is removed from
+  // `pending` once the layout has grown enough to accommodate the snapshot,
+  // so subsequent ResizeObserver/rAF callbacks won't fight a deliberate user
+  // scroll (including scrolling upward, away from the snapshot position).
+  const pending = new Set(targets.map((t) => t.el));
+  let cancelled = false;
+  let stopId = 0;
+  let ro: ResizeObserver | null = null;
+
+  const stop = () => {
+    cancelled = true;
+    ro?.disconnect();
+    window.clearTimeout(stopId);
+  };
+
+  const apply = () => {
+    for (const { el, snap } of targets) {
+      if (!pending.has(el)) continue;
+      if (el.scrollTop < snap.top) el.scrollTop = snap.top;
+      if (el.scrollLeft < snap.left) el.scrollLeft = snap.left;
+      // Once layout can fully accommodate the snapshot, the clamping bug is
+      // resolved — drop the element from pending so future ticks stay out of
+      // the way of any user-initiated scroll.
+      const canReachTop = el.scrollHeight - el.clientHeight >= snap.top;
+      const canReachLeft = el.scrollWidth - el.clientWidth >= snap.left;
+      if (canReachTop && canReachLeft) pending.delete(el);
+    }
+    if (pending.size === 0) stop();
+  };
+  apply();
+
+  if (!cancelled) {
+    ro = new ResizeObserver(() => {
+      if (cancelled) return;
+      apply();
+    });
+    for (const { el } of targets) ro.observe(el);
+    // A short rAF chain catches the common case where layout settles within
+    // the next two frames without a measurable size change.
+    requestAnimationFrame(() => {
+      if (cancelled) return;
+      apply();
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        apply();
+      });
+    });
+    stopId = window.setTimeout(stop, RESTORE_WINDOW_MS);
+  }
+
+  return stop;
 }

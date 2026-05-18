@@ -1,11 +1,11 @@
 ---
 name: record
-description: Record an architectural decision (ADR) or save an implementation plan. Use after making significant design choices or completing features.
+description: Keep docs/decisions/ ADRs and docs/specs/ specs in sync with the work happening in the conversation. AUTO-INVOKE proactively the moment the user asks for any change that will alter architecture or observable product behavior — new feature, cross-cutting refactor, dependency swap, data-model or public-API change, new pattern, or a bug fix that changes documented behavior or reveals a spec gap. Also invoke on explicit triggers: "record this", "create an ADR", "document this decision", "update the spec", "ADR for X". Run BEFORE coding when the decision is upfront, or AFTER landing when the right call only became clear during implementation. SKIP for typo/lint fixes, refactors that preserve behavior within an existing pattern, and obvious uncontested choices.
 ---
 
 # Record Knowledge
 
-Record architectural decisions and implementation plans for future reference.
+Record architectural decisions for future reference, and keep related feature specs in sync.
 
 ## Record a decision
 
@@ -14,6 +14,7 @@ When a significant architectural or design choice is made, create an ADR:
 1. Read `docs/decisions/INDEX.md` to find the next number
 2. Create `docs/decisions/NNNN-short-title.md` using the template below
 3. Update `docs/decisions/INDEX.md` with the new entry
+4. **Reconcile specs** — see "Update or create a spec" below
 
 ### ADR template
 
@@ -50,30 +51,15 @@ What else was considered and why it was rejected.
 - Bug fixes, refactors within the same pattern, simple features
 - Anything where the choice is obvious and uncontested
 
-## Save a plan
+## Update or create a spec
 
-After implementing a feature, save the design as a permanent record:
+ADRs capture *why* a decision was made. Specs capture *what* a feature does and why it exists. After recording an ADR, reconcile the affected spec — specs are the canonical product record kept in git, so they must stay accurate.
 
-1. Read `docs/plans/INDEX.md` to check for existing plan
-2. Create `docs/plans/YYYY-MM-feature-name.md` using the template below
-3. Update `docs/plans/INDEX.md` with the new entry
+1. Read `docs/specs/INDEX.md` and identify any spec whose scope the decision touches (e.g., a routing decision affects `office-provider-routing/spec.md`).
+2. For each affected spec:
+   - **If the decision changes observable behavior, scope, or scenarios:** update `docs/specs/<slug>/spec.md` so the "What" and "Why" sections reflect the new direction. Add a `Decision: ADR-NNNN` reference where relevant.
+   - **If the decision is purely internal (implementation choice with no spec-visible change):** no spec edit needed — the ADR alone is sufficient.
+3. If the decision introduces a new product feature that has no spec yet, invoke `/spec` to create one rather than writing it ad-hoc here.
+4. If no spec applies (pure infra/process decision, like this knowledge system itself), skip — note in the ADR that no spec is needed.
 
-### Plan template
-
-```markdown
-# Feature/Plan Title
-
-**Date:** YYYY-MM-DD
-**Status:** proposed | approved | implemented | abandoned
-**PR:** #NNN
-**Decision:** ADR-NNNN (if applicable)
-
-## Problem
-What problem this solves.
-
-## Design
-File paths, interfaces, data flow. Mermaid diagrams where useful.
-
-## Implementation Notes
-Post-implementation: what changed from the plan, gotchas, things the next person should know.
-```
+Do not duplicate ADR content inside the spec. Specs reference ADRs; they don't restate them.

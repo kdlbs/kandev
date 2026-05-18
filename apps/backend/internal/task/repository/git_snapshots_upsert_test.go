@@ -173,3 +173,150 @@ func TestUpsertLatestLiveGitSnapshot(t *testing.T) {
 		}
 	})
 }
+
+func TestGetLatestGitSnapshot_PrefersAgentCompleted(t *testing.T) {
+	ctx := context.Background()
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+
+	const taskID = "task-pref"
+	const sessionID = "session-pref"
+	seedTaskAndSession(t, ctx, repo, taskID, sessionID)
+
+	// Insert a live_monitor snapshot first (earlier timestamp).
+	live := &models.GitSnapshot{
+		SessionID:  sessionID,
+		Branch:     "feature",
+		HeadCommit: "live-head",
+		Metadata:   map[string]interface{}{"branch_additions": float64(0), "branch_deletions": float64(0)},
+	}
+	if err := repo.UpsertLatestLiveGitSnapshot(ctx, live); err != nil {
+		t.Fatalf("upsert live: %v", err)
+	}
+
+	// Insert an agent_completed snapshot (later timestamp, better data).
+	completed := &models.GitSnapshot{
+		SessionID:   sessionID,
+		Branch:      "feature",
+		HeadCommit:  "completed-head",
+		TriggeredBy: "agent_completed",
+		Metadata:    map[string]interface{}{"branch_additions": float64(5), "branch_deletions": float64(2)},
+	}
+	if err := repo.CreateGitSnapshot(ctx, completed); err != nil {
+		t.Fatalf("create agent_completed: %v", err)
+	}
+
+	// GetLatestGitSnapshot should return the agent_completed snapshot.
+	got, err := repo.GetLatestGitSnapshot(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetLatestGitSnapshot: %v", err)
+	}
+	if got.HeadCommit != "completed-head" {
+		t.Errorf("expected completed-head, got %q", got.HeadCommit)
+	}
+	if got.TriggeredBy != "agent_completed" {
+		t.Errorf("expected triggered_by=agent_completed, got %q", got.TriggeredBy)
+	}
+}
+
+func TestGetLatestGitSnapshot_PrefersAgentCompletedOverNewerLiveMonitor(t *testing.T) {
+	ctx := context.Background()
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+
+	const taskID = "task-race"
+	const sessionID = "session-race"
+	seedTaskAndSession(t, ctx, repo, taskID, sessionID)
+
+	// Insert agent_completed snapshot first (older timestamp).
+	completed := &models.GitSnapshot{
+		SessionID:   sessionID,
+		Branch:      "feature",
+		HeadCommit:  "completed-head",
+		TriggeredBy: "agent_completed",
+		Metadata:    map[string]interface{}{"branch_additions": float64(10), "branch_deletions": float64(3)},
+	}
+	if err := repo.CreateGitSnapshot(ctx, completed); err != nil {
+		t.Fatalf("create agent_completed: %v", err)
+	}
+
+	// Insert a live_monitor snapshot AFTER (newer timestamp, stale data).
+	// This simulates a poll racing with agent completion.
+	live := &models.GitSnapshot{
+		SessionID:  sessionID,
+		Branch:     "feature",
+		HeadCommit: "live-head-stale",
+		Metadata:   map[string]interface{}{"branch_additions": float64(0), "branch_deletions": float64(0)},
+	}
+	if err := repo.UpsertLatestLiveGitSnapshot(ctx, live); err != nil {
+		t.Fatalf("upsert live: %v", err)
+	}
+
+	// agent_completed should still win despite having an older timestamp.
+	got, err := repo.GetLatestGitSnapshot(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetLatestGitSnapshot: %v", err)
+	}
+	if got.HeadCommit != "completed-head" {
+		t.Errorf("expected completed-head, got %q — live_monitor snapshot incorrectly won", got.HeadCommit)
+	}
+}
+
+func TestDeleteLiveMonitorSnapshots(t *testing.T) {
+	ctx := context.Background()
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+
+	const taskID = "task-del"
+	const sessionID = "session-del"
+	seedTaskAndSession(t, ctx, repo, taskID, sessionID)
+
+	// Create a live_monitor snapshot.
+	live := &models.GitSnapshot{
+		SessionID:  sessionID,
+		Branch:     "feature",
+		HeadCommit: "live-head",
+		Metadata:   map[string]interface{}{"branch_additions": float64(1)},
+	}
+	if err := repo.UpsertLatestLiveGitSnapshot(ctx, live); err != nil {
+		t.Fatalf("upsert live: %v", err)
+	}
+
+	// Create an agent_completed snapshot.
+	completed := &models.GitSnapshot{
+		SessionID:   sessionID,
+		Branch:      "feature",
+		HeadCommit:  "completed-head",
+		TriggeredBy: "agent_completed",
+		Metadata:    map[string]interface{}{"branch_additions": float64(5)},
+	}
+	if err := repo.CreateGitSnapshot(ctx, completed); err != nil {
+		t.Fatalf("create agent_completed: %v", err)
+	}
+
+	// Verify both exist.
+	all, err := repo.GetGitSnapshotsBySession(ctx, sessionID, 0)
+	if err != nil {
+		t.Fatalf("list before delete: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("expected 2 snapshots before delete, got %d", len(all))
+	}
+
+	// Delete live_monitor snapshots.
+	if err := repo.DeleteLiveMonitorSnapshots(ctx, sessionID); err != nil {
+		t.Fatalf("DeleteLiveMonitorSnapshots: %v", err)
+	}
+
+	// Only agent_completed should remain.
+	all, err = repo.GetGitSnapshotsBySession(ctx, sessionID, 0)
+	if err != nil {
+		t.Fatalf("list after delete: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("expected 1 snapshot after delete, got %d", len(all))
+	}
+	if all[0].TriggeredBy != "agent_completed" {
+		t.Errorf("expected remaining snapshot to be agent_completed, got %q", all[0].TriggeredBy)
+	}
+}

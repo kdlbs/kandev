@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -82,11 +83,12 @@ func (a *Gemini) BuildCommand(opts CommandOptions) Command {
 func (a *Gemini) Runtime() *RuntimeConfig {
 	canRecover := false
 	return &RuntimeConfig{
-		Cmd:            Cmd("npx", "-y", geminiPkg, "--acp").Build(),
-		WorkingDir:     "{workspace}",
-		Env:            map[string]string{},
-		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Protocol:       agent.ProtocolACP,
+		Cmd:             Cmd("npx", "-y", geminiPkg, "--acp").Build(),
+		WorkingDir:      "{workspace}",
+		Env:             map[string]string{},
+		ResourceLimits:  ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
+		Protocol:        agent.ProtocolACP,
+		ProjectSkillDir: ".agents/skills",
 		SessionConfig: SessionConfig{
 			CanRecover:         &canRecover,
 			SessionDirTemplate: "{home}/.gemini",
@@ -114,9 +116,21 @@ func (a *Gemini) RemoteAuth() *RemoteAuth {
 	}
 }
 
+// Gemini has no dedicated login subcommand — the first run of `gemini` drops
+// the user into the TUI's "Sign in with Google" flow. Spawn the bare CLI
+// under the PTY so the user can complete that flow inline.
+func (a *Gemini) LoginCommand() *LoginCommand {
+	return &LoginCommand{
+		Cmd:         []string{"gemini"},
+		Description: "Sign in with your Google account (use the TUI's Sign in option, then quit).",
+	}
+}
+
 func (a *Gemini) InstallScript() string {
 	return "npm install -g " + geminiPkg
 }
+
+func (a *Gemini) BillingType() usage.BillingType { return defaultBillingType() }
 
 func (a *Gemini) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings

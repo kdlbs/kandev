@@ -21,7 +21,7 @@ import { updateExecutorAction, deleteExecutorAction } from "@/app/actions/execut
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore } from "@/components/state-provider";
 import { ExecutorProfilesCard } from "@/components/settings/executor-profiles-card";
-import type { Executor } from "@/lib/types/http";
+import type { Executor, ExecutorType } from "@/lib/types/http";
 import { EXECUTOR_ICON_MAP } from "@/lib/executor-icons";
 
 const EXECUTORS_ROUTE = "/settings/executors";
@@ -51,8 +51,8 @@ export default function ExecutorEditPage({ params }: { params: Promise<{ id: str
   return <ExecutorEditForm key={executor.id} executor={executor} />;
 }
 
-function getExecutorDescription(type: string): string {
-  if (type === "local") return "Runs agents directly in the repository folder.";
+function getExecutorDescription(type: ExecutorType): string {
+  if (type === "local_pc") return "Runs agents directly in the repository folder.";
   if (type === "worktree") return "Creates git worktrees for isolated agent sessions.";
   if (type === "local_docker") return "Runs Docker containers on this machine.";
   if (type === "remote_docker") return "Connects to a remote Docker host.";

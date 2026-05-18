@@ -312,7 +312,7 @@ func createEngineService(t *testing.T, repo *sqliterepo.Repository, sg *mockStep
 		repo:         repo,
 		taskRepo:     newMockTaskRepo(),
 		agentManager: agentMgr,
-		messageQueue: messagequeue.NewService(log),
+		messageQueue: messagequeue.NewServiceMemory(log),
 		executor:     executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}),
 	}
 	svc.SetWorkflowStepGetter(sg)
@@ -381,8 +381,9 @@ func assertResetCalls(t *testing.T, agentMgr *mockAgentManager, expectCount int)
 func assertQueueState(t *testing.T, ctx context.Context, svc *Service, sessionID string, expectQueued bool) {
 	t.Helper()
 	status := svc.messageQueue.GetStatus(ctx, sessionID)
-	if status.IsQueued != expectQueued {
-		t.Errorf("queue.IsQueued = %v, want %v", status.IsQueued, expectQueued)
+	queued := status.Count > 0
+	if queued != expectQueued {
+		t.Errorf("queue is queued = %v, want %v (count=%d)", queued, expectQueued, status.Count)
 	}
 }
 

@@ -8,9 +8,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
-	"github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -66,15 +66,22 @@ func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *lo
 // LaunchAgent creates a new agentctl instance for a task.
 // Agent subprocess is NOT started - call StartAgentProcess() explicitly.
 func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
-	// The RepositoryURL field contains a local filesystem path for the workspace
-	// If empty, the agent will run without a mounted workspace
+	// WorkspacePath wins when set (repo-less task with picked folder); otherwise
+	// fall back to RepositoryURL (legacy: this carries a local filesystem path
+	// for the workspace). Empty is also valid — lifecycle manager creates a
+	// scratch workspace.
+	workspacePath := req.WorkspacePath
+	if workspacePath == "" {
+		workspacePath = req.RepositoryURL
+	}
 	launchReq := &lifecycle.LaunchRequest{
 		TaskID:              req.TaskID,
+		WorkspaceID:         req.WorkspaceID,
 		SessionID:           req.SessionID,
 		TaskEnvironmentID:   req.TaskEnvironmentID,
 		TaskTitle:           req.TaskTitle,
 		AgentProfileID:      req.AgentProfileID,
-		WorkspacePath:       req.RepositoryURL, // May be empty - lifecycle manager handles this
+		WorkspacePath:       workspacePath,
 		TaskDescription:     req.TaskDescription,
 		Attachments:         convertToLifecycleAttachments(req.Attachments),
 		Env:                 req.Env,
@@ -93,12 +100,24 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		RepositoryID:         req.RepositoryID,
 		RepositoryPath:       req.RepositoryPath,
 		BaseBranch:           req.BaseBranch,
+		DefaultBranch:        req.DefaultBranch,
 		CheckoutBranch:       req.CheckoutBranch,
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
 		PullBeforeWorktree:   req.PullBeforeWorktree,
 		// Task directory mode
 		TaskDirName: req.TaskDirName,
 		RepoName:    req.RepoName,
+	}
+
+	if req.RouteOverride != nil {
+		launchReq.RouteOverride = &lifecycle.RouteOverride{
+			ProviderID: req.RouteOverride.ProviderID,
+			Model:      req.RouteOverride.Model,
+			Tier:       req.RouteOverride.Tier,
+			Mode:       req.RouteOverride.Mode,
+			Flags:      req.RouteOverride.Flags,
+			Env:        req.RouteOverride.Env,
+		}
 	}
 
 	// Multi-repo: forward the explicit repo list when the orchestrator built one.
@@ -111,6 +130,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 				RepositoryURL:        r.RepositoryURL,
 				RepoName:             r.RepoName,
 				BaseBranch:           r.BaseBranch,
+				DefaultBranch:        r.DefaultBranch,
 				CheckoutBranch:       r.CheckoutBranch,
 				WorktreeID:           r.WorktreeID,
 				WorktreeBranchPrefix: r.WorktreeBranchPrefix,
@@ -166,6 +186,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		WorktreeID:       worktreeID,
 		WorktreePath:     worktreePath,
 		WorktreeBranch:   worktreeBranch,
+		WorkspacePath:    execution.WorkspacePath,
 		Metadata:         execution.Metadata,
 		PrepareResult:    execution.PrepareResult,
 		Worktrees:        worktrees,
@@ -192,6 +213,23 @@ func convertToLifecycleAttachments(attachments []v1.MessageAttachment) []lifecyc
 // SetExecutionDescription updates the task description in an existing execution's metadata.
 func (a *lifecycleAdapter) SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error {
 	return a.mgr.SetExecutionDescription(ctx, agentExecutionID, description)
+}
+
+// RequiresCloneURL implements executor.ExecutorTypeCapabilities by delegating to
+// the lifecycle manager. Without this, executor types like local_docker and
+// sprites can't tell the orchestrator they need a clone URL.
+func (a *lifecycleAdapter) RequiresCloneURL(executorType string) bool {
+	return a.mgr.RequiresCloneURL(executorType)
+}
+
+// ShouldApplyPreferredShell implements executor.ExecutorTypeCapabilities.
+func (a *lifecycleAdapter) ShouldApplyPreferredShell(executorType string) bool {
+	return a.mgr.ShouldApplyPreferredShell(executorType)
+}
+
+// SetExecutionEnv updates per-run env vars in an existing execution.
+func (a *lifecycleAdapter) SetExecutionEnv(ctx context.Context, agentExecutionID string, env map[string]string) error {
+	return a.mgr.SetExecutionEnv(ctx, agentExecutionID, env)
 }
 
 // SetMcpMode changes the MCP tool mode on an existing execution's agentctl instance.
@@ -423,6 +461,19 @@ func (a *lifecycleAdapter) GetGitStatus(ctx context.Context, sessionID string) (
 		return nil, nil
 	}
 	return agentClient.GetGitStatus(ctx)
+}
+
+// GetGitStatusFresh retrieves a fresh (non-cached) git status for a session.
+func (a *lifecycleAdapter) GetGitStatusFresh(ctx context.Context, sessionID string) (*client.GitStatusResult, error) {
+	execution, ok := a.mgr.GetExecutionBySessionID(sessionID)
+	if !ok {
+		return nil, nil
+	}
+	agentClient := execution.GetAgentCtlClient()
+	if agentClient == nil {
+		return nil, nil
+	}
+	return agentClient.GetGitStatusFresh(ctx)
 }
 
 // WaitForAgentctlReady waits for the agentctl HTTP server to be ready for a session.
@@ -751,44 +802,4 @@ func (a *messageCreatorAdapter) CreateThinkingMessageStreaming(ctx context.Conte
 // AppendThinkingMessage appends additional content to an existing streaming thinking message.
 func (a *messageCreatorAdapter) AppendThinkingMessage(ctx context.Context, messageID, additionalContent string) error {
 	return a.svc.AppendThinkingContent(ctx, messageID, additionalContent)
-}
-
-// turnServiceAdapter adapts the task service to the orchestrator.TurnService interface
-type turnServiceAdapter struct {
-	svc *taskservice.Service
-}
-
-func (a *turnServiceAdapter) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
-	return a.svc.StartTurn(ctx, sessionID)
-}
-
-func (a *turnServiceAdapter) CompleteTurn(ctx context.Context, turnID string) error {
-	return a.svc.CompleteTurn(ctx, turnID)
-}
-
-func (a *turnServiceAdapter) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
-	return a.svc.GetActiveTurn(ctx, sessionID)
-}
-
-func (a *turnServiceAdapter) AbandonOpenTurns(ctx context.Context, sessionID string) error {
-	return a.svc.AbandonOpenTurns(ctx, sessionID)
-}
-
-func newTurnServiceAdapter(svc *taskservice.Service) *turnServiceAdapter {
-	return &turnServiceAdapter{svc: svc}
-}
-
-// taskSessionCheckerAdapter adapts the task repository for github.TaskSessionChecker.
-type taskSessionCheckerAdapter struct {
-	repo interface {
-		ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
-	}
-}
-
-func (a *taskSessionCheckerAdapter) HasTaskSessions(ctx context.Context, taskID string) (bool, error) {
-	sessions, err := a.repo.ListTaskSessions(ctx, taskID)
-	if err != nil {
-		return false, err
-	}
-	return len(sessions) > 0, nil
 }

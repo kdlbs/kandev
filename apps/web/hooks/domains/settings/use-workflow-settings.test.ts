@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import type { Workflow } from "@/lib/types/http";
+import {
+  workflowId as toWorkflowId,
+  workspaceId as toWorkspaceId,
+  type Workflow,
+} from "@/lib/types/http";
 
 type StoreWorkflow = {
   id: string;
@@ -24,9 +28,9 @@ function setStore(items: StoreWorkflow[]) {
   mockState = { workflows: { items } };
 }
 
-const wf = (id: string, workspaceId: string, name: string): Workflow => ({
-  id,
-  workspace_id: workspaceId,
+const wf = (id: string, wsId: string, name: string): Workflow => ({
+  id: toWorkflowId(id),
+  workspace_id: toWorkspaceId(wsId),
   name,
   description: "",
   created_at: "",

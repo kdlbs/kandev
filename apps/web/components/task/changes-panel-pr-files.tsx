@@ -6,10 +6,11 @@ import { LineStat } from "@/components/diff-stat";
 import { FileStatusIcon } from "./file-status-icon";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import type { PRChangedFile } from "./changes-panel-timeline";
+import type { OpenDiffOptions } from "./changes-diff-target";
 
 type PRFilesSectionContentProps = {
   files: PRChangedFile[];
-  onOpenDiff: (path: string) => void;
+  onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
   /** Maps a repository_name to a human-readable label for the per-repo header. */
   repoDisplayName?: (repositoryName: string) => string | undefined;
 };
@@ -54,7 +55,7 @@ function PRFilesRepoGroup({
   displayName?: string;
   files: PRChangedFile[];
   showHeader: boolean;
-  onOpenDiff: (path: string) => void;
+  onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const label = displayName ?? repositoryName ?? "";
@@ -95,7 +96,7 @@ function PRFileRow({
   onOpenDiff,
 }: {
   file: PRChangedFile;
-  onOpenDiff: (path: string) => void;
+  onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
 }) {
   const lastSlash = file.path.lastIndexOf("/");
   const folder = lastSlash === -1 ? "" : file.path.slice(0, lastSlash);
@@ -103,8 +104,13 @@ function PRFileRow({
 
   return (
     <li
-      className="group flex items-center justify-between gap-2 text-sm rounded-md px-1 py-0.5 -mx-1 hover:bg-muted/60 cursor-pointer"
-      onClick={() => onOpenDiff(file.path)}
+      className="group flex items-center justify-between gap-2 text-sm rounded-md px-2 py-1.5 -mx-1 hover:bg-muted/60 cursor-pointer md:px-1 md:py-0.5"
+      onClick={() =>
+        onOpenDiff(file.path, {
+          source: "pr",
+          repositoryName: file.repository_name,
+        })
+      }
     >
       <div className="flex items-center gap-2 min-w-0">
         <div className="flex-shrink-0 flex items-center justify-center size-4">

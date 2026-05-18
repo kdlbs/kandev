@@ -100,7 +100,7 @@ test.describe("Quick chat queue", () => {
     await testPage.keyboard.press(`${modifier}+Enter`);
 
     // Verify the queued message indicator with cancel button appears.
-    const cancelBtn = dialog.getByTitle("Cancel queued message");
+    const cancelBtn = dialog.getByTitle("Remove queued message");
     await expect(cancelBtn).toBeVisible({ timeout: 10_000 });
 
     // Wait for the first (slow) response to complete.
@@ -149,7 +149,7 @@ test.describe("Quick chat queue", () => {
     await submitBtn.click();
 
     // Verify the queued message indicator with cancel button appears.
-    const cancelBtn = dialog.getByTitle("Cancel queued message");
+    const cancelBtn = dialog.getByTitle("Remove queued message");
     await expect(cancelBtn).toBeVisible({ timeout: 10_000 });
 
     // Verify the cancel-agent button is also visible alongside submit.
@@ -233,7 +233,7 @@ test.describe("Task session queue", () => {
     await submitBtn.click();
 
     // Verify the queued message indicator appears.
-    await expect(testPage.getByTitle("Cancel queued message")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTitle("Remove queued message")).toBeVisible({ timeout: 10_000 });
 
     // Wait for the queued message to auto-execute and agent to become idle.
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
@@ -267,7 +267,7 @@ test.describe("Task session queue", () => {
     await submitBtn.click();
 
     // Verify the queued indicator appears, then click edit.
-    const editBtn = testPage.getByTitle("Edit message");
+    const editBtn = testPage.getByTitle("Edit queued message");
     await expect(editBtn).toBeVisible({ timeout: 10_000 });
     await editBtn.click();
 
@@ -339,8 +339,8 @@ test.describe("Task session queue", () => {
     // Click the submit button to queue the message.
     await submitBtn.click();
 
-    // Verify the queued message indicator shows clean text (no system tags).
-    const queueIndicator = testPage.getByTitle("Cancel queued message").locator("..");
+    // Verify the queued ghost list shows clean text (no system tags).
+    const queueIndicator = testPage.getByTestId("queued-ghost-list");
     await expect(queueIndicator).toBeVisible({ timeout: 10_000 });
     await expect(queueIndicator).not.toContainText("kandev-system");
 

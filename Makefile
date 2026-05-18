@@ -54,9 +54,11 @@ help:
 	@echo ""
 	@echo "Development Commands:"
 	@echo "  dev              Run backend + web via CLI (auto ports)"
+	@echo "  dev-prod-db      Run dev mode against the production db at ~/.kandev"
 	@echo "  dev-backend      Run backend in development mode (port 38429)"
 	@echo "  dev-web          Run web app in development mode (port 37429)"
 	@echo "  dev              Note: Uses apps/cli launcher (auto ports)"
+	@echo "  doctor           Idempotently wire up pre-commit hooks (runs automatically before dev)"
 	@echo ""
 	@echo "Production Commands:"
 	@echo "  start            Install deps, build, and start backend + web in production mode"
@@ -75,6 +77,7 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  test             Run all tests (backend + web + cli)"
+	@echo "  test-windows     Run Windows-clean subset (curated backend + web + cli)"
 	@echo "  test-backend     Run backend tests"
 	@echo "  test-web         Run web app tests"
 	@echo "  test-cli         Run CLI tests"
@@ -103,14 +106,69 @@ help:
 # Development
 #
 
+# Build the linux/amd64 agentctl on every host except Linux/x86_64 (where the
+# host build IS already linux/amd64). Computed up here, OS-conditionally, so
+# the recipe doesn't shell out to `uname` — that fails on Windows under cmd
+# and produces spurious "CreateProcess(NULL, uname -s, ...) failed" warnings
+# on every Make invocation.
+ifeq ($(OS),Windows_NT)
+  HOST_IS_LINUX_AMD64 := 0
+else
+  ifeq ($(shell uname -s)/$(shell uname -m),Linux/x86_64)
+    HOST_IS_LINUX_AMD64 := 1
+  else
+    HOST_IS_LINUX_AMD64 := 0
+  endif
+endif
+
+# Idempotent: wires the pre-commit framework into git's hook system
+# (.pre-commit-config.yaml at the repo root drives it). Runs as a
+# dependency of `dev` so every fresh clone / worktree picks up the
+# format + lint hooks the first time a contributor starts the dev
+# server, without anyone having to remember a setup step.
+#
+# Silent unless pre-commit is missing — in that case it prints a
+# one-line note instead of failing, because `make dev` should not
+# block on an optional tool. CI still runs the real linters.
+#
+# Quirks handled:
+#   - pre-commit refuses to install when core.hooksPath is set, even
+#     when it's set to the default location (a leftover from a stale
+#     setup). Detect that exact case and unset it before installing.
+#   - core.hooksPath is shared between the main repo and every
+#     worktree, so a single install covers all of them.
+.PHONY: doctor
+doctor:
+	@if ! command -v pre-commit >/dev/null 2>&1; then \
+		echo "⚠  pre-commit not found on PATH — install with 'pip install pre-commit' to enable hook-based format/lint on commit."; \
+		exit 0; \
+	fi; \
+	default_hooks="$$(git rev-parse --git-common-dir)/hooks"; \
+	current="$$(git config --get core.hooksPath 2>/dev/null || true)"; \
+	if [ -n "$$current" ] && [ "$$current" = "$$default_hooks" ]; then \
+		git config --unset core.hooksPath 2>/dev/null || true; \
+	fi; \
+	pre-commit install -t pre-commit -t commit-msg --overwrite >/dev/null 2>&1 || true
+
 .PHONY: dev
-dev:
-ifneq ($(shell uname -s)/$(shell uname -m),Linux/x86_64)
+dev: doctor
+ifneq ($(HOST_IS_LINUX_AMD64),1)
 	@echo "Building Linux agentctl for remote executors..."
 	@$(MAKE) -C $(BACKEND_DIR) build-agentctl-linux
 endif
+ifeq ($(OS),Windows_NT)
+	@echo "Building winjob (Ctrl-C-safe wrapper for Windows)..."
+	@$(MAKE) -C $(BACKEND_DIR) build-winjob
+endif
 	@echo "Launching via CLI (auto ports)..."
 	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- dev
+
+.PHONY: dev-prod-db
+dev-prod-db: export KANDEV_DATABASE_PATH := $(HOME)/.kandev/data/kandev.db
+dev-prod-db:
+	@echo "⚠  dev mode against PRODUCTION db at $(KANDEV_DATABASE_PATH)"
+	@echo "   back it up first; dev binary may run unmigrated schema changes"
+	@$(MAKE) dev
 
 .PHONY: dev-backend
 dev-backend:
@@ -162,6 +220,11 @@ build-backend:
 	@printf "$(CYAN)Building backend...$(RESET)\n"
 	@$(MAKE) -C $(BACKEND_DIR) build
 
+.PHONY: build-backend-linux-helpers
+build-backend-linux-helpers:
+	@printf "$(CYAN)Building linux/amd64 helper binaries (agentctl + mock-agent) for Docker E2E...$(RESET)\n"
+	@$(MAKE) -C $(BACKEND_DIR) build-agentctl-linux build-mock-agent-linux
+
 .PHONY: acpdbg
 acpdbg:
 	@$(MAKE) -s -C $(BACKEND_DIR) acpdbg ARGS="$(ARGS)"
@@ -208,6 +271,27 @@ install-web:
 .PHONY: test
 test: test-backend test-web test-cli
 	@printf "\n$(GREEN)$(BOLD)✓ All tests complete!$(RESET)\n"
+
+# Curated Windows-clean test run. Mirrors the test-windows job in
+# .github/workflows/backend-tests.yml: the backend portion skips ~24 tests
+# with Unix-only fixtures (sleep/cat/echo in test inputs, POSIX symlinks,
+# delete-while-open). Web and CLI use vitest, which is cross-platform.
+# Shrink the backend skip list as fixtures get cleaned up.
+#
+# Deliberately uses plain `echo` and inlines pnpm invocations (rather than
+# depending on test-backend/test-web/test-cli) so it does not pull in the
+# `@printf` and `$(shell uname ...)` calls used by other targets — those
+# fail on cmd.exe (no printf.exe, no uname.exe) and would break the run on
+# Windows even though they are cosmetic on Unix.
+.PHONY: test-windows
+test-windows:
+	@echo "[backend] Running Windows-clean subset..."
+	@$(MAKE) -C $(BACKEND_DIR) test-windows
+	@echo "[web] Running tests..."
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web test
+	@echo "[cli] Running tests..."
+	@cd $(APPS_DIR) && $(PNPM) --filter kandev test
+	@echo "Windows-clean test subset complete."
 
 .PHONY: test-sprites-e2e
 test-sprites-e2e:

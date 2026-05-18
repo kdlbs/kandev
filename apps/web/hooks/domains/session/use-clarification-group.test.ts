@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import type { Message } from "@/lib/types/http";
+import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 
 vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({ apiBaseUrl: "https://api.test" }),
@@ -17,8 +17,8 @@ function clarMessage(opts: {
 }): Message {
   return {
     id: opts.id,
-    session_id: "s1",
-    task_id: "t1",
+    session_id: toSessionId("s1"),
+    task_id: toTaskId("t1"),
     author_type: "agent",
     content: "Q",
     type: "clarification_request",

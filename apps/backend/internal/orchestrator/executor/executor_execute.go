@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -28,9 +29,11 @@ func isConfigModeSession(session *models.TaskSession) bool {
 	return ok && cm
 }
 
-// isContainerizedExecutor returns true for executor types that run in containers.
-// These executors need GitHub token injection for git operations since they don't
-// have access to the host's git credentials.
+// isContainerizedExecutor returns true for executor types that run agents in
+// containers or remote sandboxes (Docker variants + Sprites). These executors
+// need GitHub token injection for git operations since they don't have access
+// to the host's git credentials, and they're the same set that needs the
+// kandev-managed feature branch propagated through env metadata.
 func isContainerizedExecutor(executorType string) bool {
 	switch models.ExecutorType(executorType) {
 	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker, models.ExecutorTypeSprites:
@@ -125,25 +128,37 @@ func shouldUseWorktree(executorType string) bool {
 	return models.ExecutorType(executorType) == models.ExecutorTypeWorktree
 }
 
-// repositoryCloneURL builds an HTTPS clone URL from the repository's provider info.
-// Returns an empty string if the repository has no provider owner/name or if the
-// provider is not recognized.
+const providerGitHub = "github"
+
+// repositoryCloneURL builds a clone URL for the repository. It prefers the
+// provider info when present (HTTPS GitHub/GitLab/Bitbucket URL); otherwise
+// it inspects the local checkout's `origin` remote. The latter lets local-only
+// repos with a real remote (or a file:// remote, used by Docker E2E tests)
+// participate in remote executors that clone inside the container/sandbox.
 func repositoryCloneURL(repo *models.Repository) string {
-	if repo.ProviderOwner == "" || repo.ProviderName == "" {
+	if repo.ProviderOwner != "" && repo.ProviderName != "" {
+		var host string
+		switch strings.ToLower(repo.Provider) {
+		case providerGitHub, "":
+			host = "github.com"
+		case "gitlab":
+			host = "gitlab.com"
+		case "bitbucket":
+			host = "bitbucket.org"
+		default:
+			return ""
+		}
+		return fmt.Sprintf("https://%s/%s/%s.git", host, repo.ProviderOwner, repo.ProviderName)
+	}
+	if repo.LocalPath == "" {
 		return ""
 	}
-	var host string
-	switch strings.ToLower(repo.Provider) {
-	case "github", "":
-		host = "github.com"
-	case "gitlab":
-		host = "gitlab.com"
-	case "bitbucket":
-		host = "bitbucket.org"
-	default:
+	cmd := exec.Command("git", "-C", repo.LocalPath, "remote", "get-url", "origin")
+	out, err := cmd.Output()
+	if err != nil {
 		return ""
 	}
-	return fmt.Sprintf("https://%s/%s/%s.git", host, repo.ProviderOwner, repo.ProviderName)
+	return strings.TrimSpace(string(out))
 }
 
 // getSessionLock returns a per-session mutex, creating one if it doesn't exist.
@@ -252,7 +267,9 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 	}
 	isFirstSession := !hasPrimary
 
-	// Create agent session in database
+	// Create agent session in database. WorkspacePath is propagated from task
+	// metadata for repo-less tasks where the user picked a starting folder.
+	workspacePath, _ := task.Metadata[models.MetaKeyWorkspacePath].(string)
 	sessionID := uuid.New().String()
 	now := time.Now().UTC()
 	session := &models.TaskSession{
@@ -261,6 +278,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 		AgentProfileID:       agentProfileID,
 		RepositoryID:         repositoryID,
 		BaseBranch:           baseBranch,
+		WorkspacePath:        workspacePath,
 		State:                models.TaskSessionStateCreated,
 		StartedAt:            now,
 		UpdatedAt:            now,
@@ -348,7 +366,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	startAgent := opts.StartAgent
 	// Serialise concurrent launches for the same session. Two callers reach
 	// this path on every task: PrepareTaskSession spawns a background launch
-	// (workspace only) the moment a session is created, and StartTaskWithSession
+	// (workspace only) the moment a session is created, and StartCreatedSession
 	// is called when the agent is actually started (auto-start, user click).
 	// Without this lock both run env-prep + executionStore.Add in parallel and
 	// the second one fails at register with "already has an agent running
@@ -385,7 +403,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// overwrite the stale row.
 	hasRunning, _ := e.repo.HasExecutorRunningRow(ctx, sessionID)
 	if hasRunning {
-		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode)
+		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode, opts.Env)
 		if !errors.Is(err, ErrStaleExecution) {
 			return result, err
 		}
@@ -410,13 +428,34 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 
 	// Resolve the env ID before LaunchAgent so the in-memory AgentExecution
 	// is env-scoped from the first shell/layout request, not only after DB
-	// persistence succeeds.
-	existingEnv, _ := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
+	// persistence succeeds. GetTaskEnvironmentByTaskID returns (nil, nil)
+	// when no row exists; a real DB error must propagate so the launch
+	// fails closed instead of silently launching a fresh environment that
+	// orphans the existing container/sandbox/worktree.
+	existingEnv, err := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
+	if err != nil {
+		return nil, fmt.Errorf("lookup existing task environment: %w", err)
+	}
+	// Child tasks created by office task-handoffs may have had
+	// session.TaskEnvironmentID rewritten to point at the parent's /
+	// shared group's env (see internal/orchestrator/handoff_inheritance.go).
+	// The by-task-id lookup misses that row because it indexes by the
+	// child task id, so without this fallback the launch path creates a
+	// fresh worktree and the inheritance contract silently breaks.
+	if existingEnv == nil && session.TaskEnvironmentID != "" {
+		if inherited, err := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID); err == nil {
+			existingEnv = inherited
+		}
+	}
 	assignLaunchTaskEnvironmentID(session, existingEnv)
 
 	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, primaryRepo, allRepos)
 	if err != nil {
 		return nil, err
+	}
+	mergeEnv(req, opts.Env)
+	if opts.RouteOverride != nil {
+		req.RouteOverride = opts.RouteOverride
 	}
 
 	// Apply McpMode from options (takes precedence over session metadata check in buildLaunchAgentRequest)
@@ -424,18 +463,31 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		req.McpMode = opts.McpMode
 	}
 
+	// Carry the prior ACP session id forward so the agent CLI resumes the
+	// existing conversation (session/load) instead of opening a fresh one.
+	// Reading from executors_running covers both:
+	//   - office wakeups where startAgentOnExistingWorkspace returned
+	//     ErrStaleExecution (in-memory exec gone after IDLE), and
+	//   - kanban / quick-chat re-launches that hit the full path.
+	// Unlike ResumeSession we do NOT clear req.TaskDescription — wakeups
+	// deliver the new comment / event as the prompt.
+	if startAgent {
+		if running, _ := e.repo.GetExecutorRunningBySessionID(ctx, sessionID); running != nil && running.ResumeToken != "" {
+			req.ACPSessionID = running.ResumeToken
+			e.logger.Info("resuming ACP session via stored resume token",
+				zap.String("task_id", task.ID),
+				zap.String("session_id", sessionID),
+				zap.String("acp_session_id", running.ResumeToken))
+		}
+	}
+
 	// Pass attachments for the initial prompt
 	if len(opts.Attachments) > 0 {
 		req.Attachments = opts.Attachments
 	}
 
-	// Check for an existing task environment to reuse its worktree
-	if existingEnv != nil && existingEnv.WorktreeID != "" && req.UseWorktree {
-		req.WorktreeID = existingEnv.WorktreeID
-		e.logger.Info("reusing existing task environment worktree",
-			zap.String("task_id", task.ID),
-			zap.String("worktree_id", existingEnv.WorktreeID))
-	}
+	// Check for an existing task environment to reuse worktree, container, or sandbox
+	e.reuseExistingEnvironment(ctx, req, existingEnv)
 
 	e.logger.Info("launching agent for prepared session",
 		zap.String("task_id", task.ID),
@@ -497,8 +549,7 @@ func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID st
 // finalizeLaunch persists launch state and returns the resulting TaskExecution.
 func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, sessionID string, repoInfo *repoInfo, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig) (*TaskExecution, error) {
 	now := time.Now().UTC()
-	// On initial launch there is no existing ExecutorRunning record to carry forward.
-	e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now, execCfg, nil)
+	e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now)
 	e.persistWorktreeAssociation(ctx, task.ID, session, repoInfo.RepositoryID, resp)
 
 	sessionState := v1.TaskSessionStateCreated
@@ -555,6 +606,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	sessionID := session.ID
 	req := &LaunchAgentRequest{
 		TaskID:            task.ID,
+		WorkspaceID:       task.WorkspaceID,
 		TaskTitle:         task.Title,
 		AgentProfileID:    agentProfileID,
 		TaskDescription:   prompt,
@@ -562,6 +614,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		SessionID:         sessionID,
 		TaskEnvironmentID: session.TaskEnvironmentID,
 		IsEphemeral:       task.IsEphemeral,
+		WorkspacePath:     session.WorkspacePath,
 	}
 
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
@@ -615,6 +668,18 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	return req, execConfig, nil
 }
 
+func mergeEnv(req *LaunchAgentRequest, env map[string]string) {
+	if len(env) == 0 {
+		return
+	}
+	if req.Env == nil {
+		req.Env = make(map[string]string, len(env))
+	}
+	for k, v := range env {
+		req.Env[k] = v
+	}
+}
+
 // applyContainerCredentials resolves and injects credentials for containerized executors.
 func (e *Executor) applyContainerCredentials(ctx context.Context, req *LaunchAgentRequest, metadata map[string]interface{}) {
 	e.resolveRemoteCredentials(ctx, req, metadata)
@@ -639,6 +704,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			spec.RepoName = info.Repository.Name
 			spec.RepoSetupScript = info.Repository.SetupScript
 			spec.RepoCleanupScript = info.Repository.CleanupScript
+			spec.DefaultBranch = info.Repository.DefaultBranch
 		}
 		// Containerized executors need a clone URL; reuse the same helper as
 		// the single-repo path (best-effort — skipped if Repository is nil).
@@ -661,6 +727,9 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.CheckoutBranch = repoInfo.CheckoutBranch
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
+		if repoInfo.Repository != nil {
+			req.DefaultBranch = repoInfo.Repository.DefaultBranch
+		}
 		// Task directory mode: place worktree inside per-task directory
 		if req.UseWorktree && repoInfo.Repository != nil && repoInfo.Repository.Name != "" {
 			req.TaskDirName = worktree.SemanticWorktreeName(task.Title, worktree.SmallSuffix(3))
@@ -681,6 +750,12 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 			return metadata, ErrNoCloneURL
 		}
 		req.RepositoryURL = cloneURL
+		// Surface the clone URL to the script engine so {{repository.clone_url}}
+		// resolves in prepare scripts even when no host repo path is mounted.
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata["repository_clone_url"] = cloneURL
 	}
 
 	return metadata, nil
@@ -695,7 +770,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 // re-launch path. Pre-refactor this also consulted session.AgentExecutionID and
 // reconciled DB drift; that's now structurally impossible because executors_running
 // is owned by the lifecycle manager and writes are atomic with executionStore.Add.
-func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string) (*TaskExecution, error) {
+func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string, env map[string]string) (*TaskExecution, error) {
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
 	if err != nil || executionID == "" {
 		// No execution exists in memory (e.g. backend restarted since workspace was prepared).
@@ -730,6 +805,14 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 				zap.String("agent_execution_id", executionID),
 				zap.Error(err))
 			// Non-fatal: agent may start without description
+		}
+	}
+	if len(env) > 0 {
+		if err := e.agentManager.SetExecutionEnv(ctx, executionID, env); err != nil {
+			e.logger.Warn("failed to set execution env for existing workspace",
+				zap.String("session_id", session.ID),
+				zap.String("agent_execution_id", executionID),
+				zap.Error(err))
 		}
 	}
 
@@ -801,6 +884,12 @@ func (e *Executor) captureBaseCommit(ctx context.Context, sessionID string) {
 		e.logger.Warn("failed to get git status for base commit capture",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return
+	}
+	// GetGitStatus returns (nil, nil) when the execution or agentctl client
+	// has been torn down (e.g. the task was deleted between LaunchAgent and
+	// this async capture). Skip silently — there's nothing to record.
+	if status == nil {
 		return
 	}
 
@@ -890,6 +979,11 @@ func computeWorkspacePath(req *LaunchAgentRequest, resp *LaunchAgentResponse) st
 	if workspacePath == "" {
 		workspacePath = req.RepositoryPath
 	}
+	// Quick-chat sessions have no worktree/repo but the lifecycle manager
+	// creates a workspace directory — use it as fallback.
+	if workspacePath == "" && resp.WorkspacePath != "" {
+		workspacePath = resp.WorkspacePath
+	}
 	if req.TaskDirName == "" || resp.WorktreePath == "" {
 		return workspacePath
 	}
@@ -938,9 +1032,11 @@ func (e *Executor) persistTaskEnvironment(
 		// is being dropped (executors_running is the single source of truth).
 		// Status, worktree, and container fields are still env-row-owned.
 		existingEnv.Status = models.TaskEnvironmentStatusReady
-		// Refresh worktree + workspace fields. The original update branch only
-		// touched AgentExecutionID/Status, so envs created with empty paths
-		// (e.g. before the worktree resolved) stayed permanently broken.
+		// Refresh worktree + workspace + container/sandbox fields. The original
+		// update branch only touched AgentExecutionID/Status, so envs created
+		// with empty paths (e.g. before the worktree resolved) stayed
+		// permanently broken. Sandbox ID gets refreshed too in case a fallback
+		// created a new sprite.
 		if resp.WorktreeID != "" {
 			existingEnv.WorktreeID = resp.WorktreeID
 		}
@@ -955,6 +1051,9 @@ func (e *Executor) persistTaskEnvironment(
 		}
 		if resp.ContainerID != "" {
 			existingEnv.ContainerID = resp.ContainerID
+		}
+		if sandboxID := extractSandboxID(resp.Metadata); sandboxID != "" {
+			existingEnv.SandboxID = sandboxID
 		}
 		if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
 			e.logger.Warn("failed to update task environment",
@@ -984,6 +1083,7 @@ func (e *Executor) persistTaskEnvironment(
 		WorkspacePath:  workspacePath,
 		ContainerID:    resp.ContainerID,
 		TaskDirName:    req.TaskDirName,
+		SandboxID:      extractSandboxID(resp.Metadata),
 	}
 	// Embed per-repo rows in the same create transaction when multi-repo.
 	if len(resp.Worktrees) > 0 {
@@ -1053,4 +1153,16 @@ func (e *Executor) persistTaskEnvironmentRepos(ctx context.Context, envID string
 				zap.Error(createErr))
 		}
 	}
+}
+
+// extractSandboxID extracts the sandbox identifier from launch response metadata.
+// For Sprites executors, this is the sprite_name.
+func extractSandboxID(metadata map[string]interface{}) string {
+	if metadata == nil {
+		return ""
+	}
+	if name, ok := metadata["sprite_name"].(string); ok {
+		return name
+	}
+	return ""
 }

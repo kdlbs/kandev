@@ -1,4 +1,4 @@
-import { fetchJson, type ApiRequestOptions } from "../client";
+import { fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client";
 import type {
   ListWorkspacesResponse,
   ListRepositoriesResponse,
@@ -19,7 +19,7 @@ export async function createWorkspace(
 }
 
 export async function listWorkspaces(options?: ApiRequestOptions) {
-  return fetchJson<ListWorkspacesResponse>("/api/v1/workspaces", options);
+  return fetchJsonWithRetry<ListWorkspacesResponse>("/api/v1/workspaces", options);
 }
 
 // Repository operations

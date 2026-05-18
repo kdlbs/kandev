@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -96,8 +97,10 @@ func (a *ClaudeACP) Runtime() *RuntimeConfig {
 		Mounts: []MountTemplate{
 			{Source: "{workspace}", Target: "/workspace"},
 		},
-		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Protocol:       agent.ProtocolACP,
+		ResourceLimits:  ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
+		Protocol:        agent.ProtocolACP,
+		ProjectSkillDir: ".claude/skills",
+		UserSkillDir:    ".claude/skills",
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
@@ -127,9 +130,23 @@ chmod 600 "${HOME}/.claude.json"`,
 	}
 }
 
-func (a *ClaudeACP) InstallScript() string {
-	return "npm install -g " + claudeACPPkg
+// Verified: `claude --help` documents `claude auth login` as the dedicated
+// sign-in subcommand (also `claude auth logout` / `claude auth status`).
+// Source: https://code.claude.com/docs/en/cli-reference
+func (a *ClaudeACP) LoginCommand() *LoginCommand {
+	return &LoginCommand{
+		Cmd:         []string{"claude", "auth", "login"},
+		Description: "Sign in with your Anthropic account.",
+	}
 }
+
+func (a *ClaudeACP) InstallScript() string {
+	// Install both the user-facing Anthropic CLI (which IsInstalled probes for
+	// and which `claude /login` runs against) and the ACP bridge package.
+	return "npm install -g @anthropic-ai/claude-code " + claudeACPPkg
+}
+
+func (a *ClaudeACP) BillingType() usage.BillingType { return claudeBillingType() }
 
 func (a *ClaudeACP) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings

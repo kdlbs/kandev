@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
-import type { Workflow } from "@/lib/types/http";
+import { workflowId, workspaceId as toWorkspaceId, type Workflow } from "@/lib/types/http";
 
 /**
  * Manages workflow list state for the settings page, synced with WS events
@@ -74,7 +74,11 @@ export function useWorkflowSettings(initialWorkflows: Workflow[], workspaceId?: 
         prev.filter((w) => w.id.startsWith("temp-")).map((w) => w.workspace_id),
       );
       return scopedStoreWorkflows
-        .filter((sw) => !localIds.has(sw.id) && !tempWorkspaceIds.has(sw.workspaceId))
+        .filter(
+          (sw) =>
+            !localIds.has(workflowId(sw.id)) &&
+            !tempWorkspaceIds.has(toWorkspaceId(sw.workspaceId)),
+        )
         .map((sw) => storeItemToWorkflow(sw));
     };
 
@@ -138,8 +142,8 @@ function storeItemToWorkflow(sw: {
   description?: string | null;
 }): Workflow {
   return {
-    id: sw.id,
-    workspace_id: sw.workspaceId,
+    id: workflowId(sw.id),
+    workspace_id: toWorkspaceId(sw.workspaceId),
     name: sw.name,
     description: sw.description,
     created_at: "",

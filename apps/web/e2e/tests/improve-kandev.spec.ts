@@ -19,6 +19,12 @@ type BootstrapOverrides = {
   has_write_access?: boolean;
   fork_status?: ForkStatus;
   fork_message?: string;
+  /**
+   * When provided, the bootstrap route handler awaits this promise before
+   * fulfilling the response. Tests use it to keep the dialog in its
+   * `loading` state long enough to assert the disabled submit UI.
+   */
+  bootstrapHold?: Promise<void>;
 };
 
 async function mockImproveKandevApis(
@@ -41,8 +47,11 @@ async function mockImproveKandevApis(
     }),
   );
 
-  await page.route(BOOTSTRAP_URL, (route) =>
-    route.fulfill({
+  await page.route(BOOTSTRAP_URL, async (route) => {
+    if (overrides.bootstrapHold) {
+      await overrides.bootstrapHold;
+    }
+    await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
@@ -60,8 +69,8 @@ async function mockImproveKandevApis(
         fork_status: forkStatus,
         ...(overrides.fork_message ? { fork_message: overrides.fork_message } : {}),
       }),
-    }),
-  );
+    });
+  });
 
   await page.route(FRONTEND_LOG_URL, (route) =>
     route.fulfill({
@@ -185,5 +194,99 @@ test.describe("Improve Kandev dialog", () => {
     // Close button is the only action; clicking it dismisses the dialog.
     await testPage.getByTestId("improve-kandev-blocked-close").click();
     await expect(blockedDialog).toBeHidden();
+  });
+
+  test("locked mode hides workflow picker and source-mode switch (URL / None)", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Add a second workflow to the seeded workspace so the create dialog
+    // would normally render the workflow selector (workflows.length > 1).
+    // The locked-fields path in WorkflowSection must still suppress it.
+    await apiClient.createWorkflow(seedData.workspaceId, "Extra Workflow", "simple");
+
+    await mockImproveKandevApis(testPage, seedData);
+
+    await testPage.goto("/");
+    await testPage.getByTestId("improve-kandev-button").first().click();
+
+    const contribute = testPage.getByTestId("improve-kandev-proceed");
+    await expect(contribute).toBeEnabled({ timeout: 10_000 });
+    await contribute.click();
+
+    const createDialog = testPage.getByTestId("create-task-dialog");
+    await expect(createDialog).toBeVisible({ timeout: 10_000 });
+
+    // The workflow selector trigger must not render — it would let the user
+    // switch away from the kandev contribution workflow that the bootstrap
+    // probe already locked in.
+    await expect(createDialog.getByTestId("workflow-selector-trigger")).toHaveCount(0);
+
+    // Source-mode switch must be hidden entirely when the repo is locked:
+    // neither the URL nor the None ("scratch") modes can be reached, so the
+    // dialog can only ever submit against the bootstrapped kandev repository.
+    await expect(createDialog.getByTestId("toggle-github-url")).toHaveCount(0);
+    await expect(createDialog.getByTestId("source-mode-scratch")).toHaveCount(0);
+    await expect(createDialog.getByTestId("source-mode-workspace")).toHaveCount(0);
+  });
+
+  test("submit button stays disabled with bootstrap reason while bootstrap is in flight", async ({
+    testPage,
+    seedData,
+  }) => {
+    let releaseBootstrap: () => void = () => {};
+    const bootstrapHold = new Promise<void>((resolve) => {
+      releaseBootstrap = resolve;
+    });
+
+    await mockImproveKandevApis(testPage, seedData, { bootstrapHold });
+
+    await testPage.goto("/");
+    await testPage.getByTestId("improve-kandev-button").first().click();
+
+    const contribute = testPage.getByTestId("improve-kandev-proceed");
+    await expect(contribute).toBeEnabled({ timeout: 10_000 });
+    await contribute.click();
+
+    const createDialog = testPage.getByTestId("create-task-dialog");
+    await expect(createDialog).toBeVisible({ timeout: 10_000 });
+
+    // Banner that explains why the form is partially blocked.
+    await expect(
+      createDialog.getByText(/Preparing kandev repository in background/i),
+    ).toBeVisible();
+
+    // Fill in title and description so every other submit-blocking reason is
+    // satisfied — the only remaining blocker should be the pending bootstrap.
+    await createDialog.getByTestId("task-title-input").fill("Fix overlapping header");
+    await createDialog
+      .getByTestId("task-description-input")
+      .fill("Steps to reproduce: open kanban on a narrow viewport.");
+
+    const submit = createDialog.getByTestId("submit-start-agent");
+    await expect(submit).toBeDisabled();
+
+    // Hover the wrapper so the keyboard-shortcut tooltip (which carries the
+    // disabled reason as its description) becomes visible.
+    await createDialog.getByTestId("submit-start-agent-wrapper").hover();
+    await expect(testPage.getByText(/Preparing kandev repository/i).first()).toBeVisible({
+      timeout: 5_000,
+    });
+
+    // Pressing the Cmd/Ctrl+Enter shortcut must also be gated by the bootstrap
+    // guard — if it bypassed guardedHandleSubmit, the dialog would close and
+    // a task would be created with an empty repositoryId.
+    await createDialog.getByTestId("task-description-input").focus();
+    await testPage.keyboard.press("ControlOrMeta+Enter");
+    await expect(createDialog).toBeVisible();
+    await expect(
+      createDialog.getByText(/Preparing kandev repository in background/i),
+    ).toBeVisible();
+
+    // Releasing the bootstrap response transitions the dialog to "ready" and
+    // the submit button must become actionable.
+    releaseBootstrap();
+    await expect(submit).toBeEnabled({ timeout: 10_000 });
   });
 });

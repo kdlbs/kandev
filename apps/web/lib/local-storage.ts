@@ -183,74 +183,9 @@ export function setCenterPanelTab(tab: string): void {
 
 // Internal storage keys for files panel (uses sessionStorage for per-tab persistence)
 const FILES_PANEL_KEYS = {
-  TAB: "kandev.filesPanel.tab",
-  USER_SELECTED: "kandev.filesPanel.userSelected",
   EXPANDED: "kandev.filesPanel.expanded",
   SCROLL: "kandev.filesPanel.scroll",
 } as const;
-
-/**
- * Get the saved files panel tab for a session
- * @param sessionId - The session ID
- * @param fallback - Default tab if not found
- * @returns The saved tab ('diff' or 'files')
- */
-export function getFilesPanelTab(sessionId: string, fallback: "diff" | "files"): "diff" | "files" {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const key = `${FILES_PANEL_KEYS.TAB}.${sessionId}`;
-    const raw = window.sessionStorage.getItem(key);
-    if (!raw) return fallback;
-    const value = JSON.parse(raw) as string;
-    return value === "diff" || value === "files" ? value : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-/**
- * Save the files panel tab for a session
- * @param sessionId - The session ID
- * @param tab - The tab to save ('diff' or 'files')
- */
-export function setFilesPanelTab(sessionId: string, tab: "diff" | "files"): void {
-  if (typeof window === "undefined") return;
-  try {
-    const key = `${FILES_PANEL_KEYS.TAB}.${sessionId}`;
-    window.sessionStorage.setItem(key, JSON.stringify(tab));
-  } catch {
-    // Ignore write failures
-  }
-}
-
-/**
- * Check if user has explicitly selected a tab for this session
- * @param sessionId - The session ID
- * @returns true if user has made a selection
- */
-export function hasUserSelectedFilesPanelTab(sessionId: string): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    const key = `${FILES_PANEL_KEYS.USER_SELECTED}.${sessionId}`;
-    return window.sessionStorage.getItem(key) === "true";
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Mark that user has explicitly selected a tab for this session
- * @param sessionId - The session ID
- */
-export function setUserSelectedFilesPanelTab(sessionId: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    const key = `${FILES_PANEL_KEYS.USER_SELECTED}.${sessionId}`;
-    window.sessionStorage.setItem(key, "true");
-  } catch {
-    // Ignore write failures
-  }
-}
 
 /**
  * Get the saved expanded paths for file browser
@@ -659,8 +594,6 @@ export function cleanupTaskStorage(
     removeSessionStorage(`${CHAT_DRAFT_CONTENT_KEY}.${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`);
     removeSessionStorage(`${CHAT_INPUT_HEIGHT_KEY}.${sessionId}`);
-    removeSessionStorage(`${FILES_PANEL_KEYS.TAB}.${sessionId}`);
-    removeSessionStorage(`${FILES_PANEL_KEYS.USER_SELECTED}.${sessionId}`);
     removeSessionStorage(`${FILES_PANEL_KEYS.EXPANDED}.${sessionId}`);
     removeSessionStorage(`${FILES_PANEL_KEYS.SCROLL}.${sessionId}`);
     removeSessionStorage(`${OPEN_FILES_KEY}.${sessionId}`);

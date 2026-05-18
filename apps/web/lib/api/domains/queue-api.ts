@@ -3,6 +3,65 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 
 const WS_CLIENT_UNAVAILABLE = "WebSocket client not available";
 
+/** Error thrown when the queue would exceed its per-session cap. */
+export class QueueFullError extends Error {
+  readonly code = "queue_full";
+  readonly queueSize: number;
+  readonly max: number;
+
+  constructor(queueSize: number, max: number) {
+    super(`Queue is full (${queueSize}/${max} pending). Wait for the next turn to drain.`);
+    this.name = "QueueFullError";
+    this.queueSize = queueSize;
+    this.max = max;
+  }
+}
+
+/** Error thrown when the targeted entry was already drained or does not exist. */
+export class QueueEntryNotFoundError extends Error {
+  readonly code = "entry_not_found";
+  constructor() {
+    super("Queue entry was already drained or no longer exists.");
+    this.name = "QueueEntryNotFoundError";
+  }
+}
+
+type WSError = {
+  code?: string;
+  message?: string;
+  details?: { queue_size?: number; max?: number; [k: string]: unknown };
+};
+
+function asWSError(err: unknown): WSError | undefined {
+  // Some WS error payloads omit `code` and only carry `message`/`details`;
+  // narrowing on `code` alone would drop those and stringify the whole object
+  // as the eventual Error message ("[object Object]"). Real Error instances
+  // are skipped so they pass through unchanged in `rethrowQueueError`.
+  if (typeof err !== "object" || err === null || err instanceof Error) {
+    return undefined;
+  }
+  if ("code" in err || "message" in err || "details" in err) {
+    return err as WSError;
+  }
+  return undefined;
+}
+
+export function rethrowQueueError(err: unknown): never {
+  const wsErr = asWSError(err);
+  if (wsErr?.code === "queue_full") {
+    const size = typeof wsErr.details?.queue_size === "number" ? wsErr.details.queue_size : 0;
+    const max = typeof wsErr.details?.max === "number" ? wsErr.details.max : 0;
+    throw new QueueFullError(size, max);
+  }
+  if (wsErr?.code === "entry_not_found") {
+    throw new QueueEntryNotFoundError();
+  }
+  if (wsErr?.message) {
+    throw new Error(wsErr.message);
+  }
+  throw err instanceof Error ? err : new Error(String(err));
+}
+
 export type QueueMessageParams = {
   session_id: string;
   task_id: string;
@@ -13,61 +72,91 @@ export type QueueMessageParams = {
   user_id?: string;
 };
 
-// Queue a message for auto-execution
+/** Append a new entry to the session's FIFO queue. Throws QueueFullError on overflow. */
 export async function queueMessage(params: QueueMessageParams): Promise<QueuedMessage> {
   const client = getWebSocketClient();
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
-
-  return client.request<QueuedMessage>("message.queue.add", params);
+  try {
+    return await client.request<QueuedMessage>("message.queue.add", params);
+  } catch (err) {
+    rethrowQueueError(err);
+  }
 }
 
-// Cancel a queued message
-export async function cancelQueuedMessage(sessionId: string): Promise<QueuedMessage> {
+/** Clear every pending entry for the session. */
+export async function clearQueue(sessionId: string): Promise<{ removed: number }> {
   const client = getWebSocketClient();
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
-
-  return client.request<QueuedMessage>("message.queue.cancel", { session_id: sessionId });
+  return client.request<{ removed: number }>("message.queue.cancel", { session_id: sessionId });
 }
 
-// Get queue status for a session
+/** Fetch the full queue snapshot (entries + capacity). */
 export async function getQueueStatus(sessionId: string): Promise<QueueStatus> {
   const client = getWebSocketClient();
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
-
   return client.request<QueueStatus>("message.queue.get", { session_id: sessionId });
 }
 
-// Append content to an existing queued message, or create a new one if none exists
+/** Append content onto the tail entry when the same caller authored it; otherwise insert a new entry. */
 export async function appendToQueue(params: {
   session_id: string;
   task_id: string;
   content: string;
   model?: string;
   plan_mode?: boolean;
-}): Promise<QueueStatus> {
+  user_id?: string;
+}): Promise<{ entry_id: string; was_append: boolean }> {
   const client = getWebSocketClient();
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
-
-  return client.request<QueueStatus>("message.queue.append", params);
+  try {
+    return await client.request<{ entry_id: string; was_append: boolean }>(
+      "message.queue.append",
+      params,
+    );
+  } catch (err) {
+    rethrowQueueError(err);
+  }
 }
 
-// Update queued message content (for arrow up editing)
-export async function updateQueuedMessage(
-  sessionId: string,
-  content: string,
-): Promise<QueueStatus> {
+/** Replace the content/attachments of a queued entry. Throws QueueEntryNotFoundError if drained. */
+export async function updateQueuedMessage(params: {
+  session_id: string;
+  entry_id: string;
+  content: string;
+  attachments?: Array<{ type: string; data: string; mime_type: string }>;
+  user_id?: string;
+}): Promise<{ entry_id: string }> {
   const client = getWebSocketClient();
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
+  try {
+    return await client.request<{ entry_id: string }>("message.queue.update", params);
+  } catch (err) {
+    rethrowQueueError(err);
+  }
+}
 
-  return client.request<QueueStatus>("message.queue.update", { session_id: sessionId, content });
+/** Remove a single queued entry by id. Throws QueueEntryNotFoundError if drained. */
+export async function removeQueuedEntry(params: {
+  session_id: string;
+  entry_id: string;
+}): Promise<{ entry_id: string }> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+  try {
+    return await client.request<{ entry_id: string }>("message.queue.remove", params);
+  } catch (err) {
+    rethrowQueueError(err);
+  }
 }

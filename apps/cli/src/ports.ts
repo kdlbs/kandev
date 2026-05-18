@@ -3,6 +3,8 @@ import net from "node:net";
 
 import { RANDOM_PORT_MAX, RANDOM_PORT_MIN, RANDOM_PORT_RETRIES } from "./constants";
 
+const CONNECT_PROBE_TIMEOUT_MS = 500;
+
 export function ensureValidPort(port: number | undefined, name: string): number | undefined {
   if (port === undefined) {
     return undefined;
@@ -15,21 +17,53 @@ export function ensureValidPort(port: number | undefined, name: string): number 
 
 /**
  * Tries to connect to a port on the given host. Returns true if something
- * is already listening (i.e. the port is in use).
+ * is already listening (i.e. the port is in use). Returns false on connection
+ * refused, on any other socket error, or when the probe takes longer than
+ * `timeoutMs` — under WSL2 mirrored networking the kernel can silently drop
+ * the SYN to an unbound loopback port, so an unbounded connect would hang
+ * forever and deadlock isPortAvailable.
  *
- * This is more reliable than a bind-based check on macOS where
- * SO_REUSEADDR (set by default in Node.js) can allow a bind to succeed
- * even when another process is already listening on the same port.
+ * Used alongside canBindPort because it detects ports where a listener is
+ * bound with SO_REUSEADDR (Node's default on macOS), which a bind-only check
+ * would miss.
  */
-function isPortInUse(port: number, host: string): Promise<boolean> {
+function isPortInUse(
+  port: number,
+  host: string,
+  timeoutMs = CONNECT_PROBE_TIMEOUT_MS,
+): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = net.createConnection({ port, host });
-    socket.once("connect", () => {
+    let settled = false;
+    const done = (v: boolean) => {
+      if (settled) return;
+      settled = true;
       socket.destroy();
-      resolve(true);
-    });
-    socket.once("error", () => {
-      resolve(false);
+      resolve(v);
+    };
+    socket.once("connect", () => done(true));
+    socket.once("error", () => done(false));
+    setTimeout(() => done(false), timeoutMs).unref();
+  });
+}
+
+/**
+ * Tries to bind a port on the given host. Returns true if the bind succeeds
+ * (port is free). Closes immediately on success.
+ *
+ * This catches Windows "phantom" port reservations: Hyper-V/WSL silently
+ * reserve random port ranges at boot that don't appear in netstat or via a
+ * connect probe (nothing is listening, so connect-check thinks the port is
+ * free) — but bind fails with "Only one usage of each socket address". A
+ * connect-only check causes kandev's backend to choose a reserved port and
+ * then die when it tries to actually listen on it.
+ */
+function canBindPort(port: number, host: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once("error", () => resolve(false));
+    server.listen(port, host, () => {
+      server.close(() => resolve(true));
     });
   });
 }
@@ -37,15 +71,28 @@ function isPortInUse(port: number, host: string): Promise<boolean> {
 /**
  * Checks if a port is available by probing both IPv4 and IPv6 loopback.
  *
- * Uses a connect-based check: if we can connect to the port on either
- * 127.0.0.1 or ::1, something is already listening and the port is taken.
+ * Uses BOTH a connect check and a bind check:
+ *   - connect: detects ports where a listener is bound with SO_REUSEADDR
+ *     (Node's default on macOS — bind-only check would falsely succeed)
+ *   - bind:    detects Windows phantom reservations (Hyper-V/WSL) and
+ *     ports in TIME_WAIT that connect-only check misses
+ *
+ * The port is available IFF nobody answers a connect AND a fresh bind
+ * succeeds — covers macOS, Linux, and Windows.
  */
 async function isPortAvailable(port: number): Promise<boolean> {
+  // Run connect probes first, then the bind probe — they cannot share the
+  // port concurrently. On loopback, server.listen() completes in the kernel
+  // before a connect SYN to the same address is processed, so a concurrent
+  // canBindPort+isPortInUse pair can answer each other and report a free
+  // port as occupied. Sequencing keeps the bind probe's temporary listener
+  // out of the connect probes' view.
   const [v4InUse, v6InUse] = await Promise.all([
     isPortInUse(port, "127.0.0.1"),
     isPortInUse(port, "::1"),
   ]);
-  return !v4InUse && !v6InUse;
+  if (v4InUse || v6InUse) return false;
+  return canBindPort(port, "127.0.0.1");
 }
 
 async function reserveSpecificPort(port: number, host = "127.0.0.1"): Promise<net.Server | null> {
@@ -100,3 +147,6 @@ export async function pickAndReservePort(
 
   throw new Error(`Unable to reserve a free port after ${retries + 1} attempts`);
 }
+
+// Exported for tests only.
+export const __testing = { isPortInUse, isPortAvailable };

@@ -18,6 +18,11 @@ type mockGitHubProvider struct {
 func (m *mockGitHubProvider) IsAuthenticated() bool { return m.authenticated }
 func (m *mockGitHubProvider) AuthMethod() string    { return m.authMethod }
 
+// expectedGitHubFixURL is the live route in apps/web/app/settings/integrations/github.
+// Kept here so a typo or accidental rename breaks a single test instead of
+// shipping a 404 to users.
+const expectedGitHubFixURL = "/settings/integrations/github"
+
 func TestGitHubChecker_NilProvider(t *testing.T) {
 	checker := NewGitHubChecker(nil)
 	issues := checker.Check(context.Background())
@@ -33,6 +38,9 @@ func TestGitHubChecker_NilProvider(t *testing.T) {
 	if issues[0].Category != "github" {
 		t.Errorf("category = %q, want %q", issues[0].Category, "github")
 	}
+	if issues[0].FixURL != expectedGitHubFixURL {
+		t.Errorf("FixURL = %q, want %q", issues[0].FixURL, expectedGitHubFixURL)
+	}
 }
 
 func TestGitHubChecker_NotAuthenticated(t *testing.T) {
@@ -46,6 +54,9 @@ func TestGitHubChecker_NotAuthenticated(t *testing.T) {
 	}
 	if issues[0].Severity != SeverityWarning {
 		t.Errorf("severity = %q, want %q", issues[0].Severity, SeverityWarning)
+	}
+	if issues[0].FixURL != expectedGitHubFixURL {
+		t.Errorf("FixURL = %q, want %q", issues[0].FixURL, expectedGitHubFixURL)
 	}
 }
 
@@ -80,6 +91,9 @@ func TestGitHubChecker_AuthenticatedButRateLimited(t *testing.T) {
 	}
 	if !strings.Contains(issues[0].Message, "resets in") {
 		t.Errorf("message should include reset countdown, got %q", issues[0].Message)
+	}
+	if issues[0].FixURL != expectedGitHubFixURL {
+		t.Errorf("FixURL = %q, want %q", issues[0].FixURL, expectedGitHubFixURL)
 	}
 }
 

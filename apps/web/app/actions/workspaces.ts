@@ -1,6 +1,7 @@
 "use server";
 
 import { getBackendConfig } from "@/lib/config";
+import { workflowId as toWorkflowId } from "@/lib/types/ids";
 import type {
   ApproveSessionResponse,
   Workflow,
@@ -87,7 +88,7 @@ export async function updateWorkspaceAction(
 }
 
 export async function deleteWorkspaceAction(id: string) {
-  await fetchJson<void>(`${apiBaseUrl}/api/v1/workspaces/${id}`, { method: "DELETE" });
+  await fetchJson<void>(`${apiBaseUrl}/api/v1/office/workspaces/${id}`, { method: "DELETE" });
 }
 
 export async function listWorkflowsAction(workspaceId: string): Promise<ListWorkflowsResponse> {
@@ -349,7 +350,7 @@ type BackendWorkflowStep = {
 
 const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   id: step.id,
-  workflow_id: step.workflow_id,
+  workflow_id: toWorkflowId(step.workflow_id),
   name: step.name,
   position: step.position,
   color: step.color,

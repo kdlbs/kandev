@@ -1,10 +1,26 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// minimalValidConfig returns a Config that passes validate() out of the box.
+// Tests modify a copy to exercise individual validation branches.
+func minimalValidConfig() *Config {
+	return &Config{
+		Server:   ServerConfig{Port: 38429},
+		Database: DatabaseConfig{Driver: "sqlite"},
+		Auth:     AuthConfig{TokenDuration: 3600},
+		Logging:  LoggingConfig{Level: "info", Format: "text"},
+		RepositoryDiscovery: RepositoryDiscoveryConfig{
+			MaxDepth: 5,
+		},
+	}
+}
 
 func TestResolvedHomeDir_Default(t *testing.T) {
 	cfg := &Config{}
@@ -55,5 +71,137 @@ func TestResolvedDataDir_DerivedFromHomeDir(t *testing.T) {
 	want := filepath.Join("/custom/kandev", "data")
 	if got := cfg.ResolvedDataDir(); got != want {
 		t.Errorf("ResolvedDataDir() = %q, want %q", got, want)
+	}
+}
+
+func TestValidate_DatabaseDriver(t *testing.T) {
+	t.Run("sqlite_ok", func(t *testing.T) {
+		cfg := minimalValidConfig()
+		if err := validate(cfg); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("mixed_case_postgres_normalized", func(t *testing.T) {
+		cfg := minimalValidConfig()
+		cfg.Database.Driver = "Postgres"
+		cfg.Database.Port = 5432
+		cfg.Database.User = "u"
+		cfg.Database.DBName = "db"
+		cfg.Database.SSLMode = "disable"
+		if err := validate(cfg); err != nil {
+			t.Fatalf("expected mixed-case 'Postgres' to normalize, got %v", err)
+		}
+		if cfg.Database.Driver != "postgres" {
+			t.Errorf("driver not normalized: got %q, want %q", cfg.Database.Driver, "postgres")
+		}
+	})
+
+	t.Run("unknown_driver_rejected", func(t *testing.T) {
+		cfg := minimalValidConfig()
+		cfg.Database.Driver = "mysql"
+		err := validate(cfg)
+		if err == nil || !strings.Contains(err.Error(), "database.driver") {
+			t.Fatalf("expected database.driver error, got %v", err)
+		}
+	})
+}
+
+func TestValidate_PostgresSSLMode(t *testing.T) {
+	for _, mode := range []string{"disable", "require", "verify-ca", "verify-full"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := minimalValidConfig()
+			cfg.Database.Driver = "postgres"
+			cfg.Database.Port = 5432
+			cfg.Database.User = "u"
+			cfg.Database.DBName = "db"
+			cfg.Database.SSLMode = mode
+			if err := validate(cfg); err != nil && strings.Contains(err.Error(), "sslMode") {
+				t.Errorf("sslMode %q rejected unexpectedly: %v", mode, err)
+			}
+		})
+	}
+
+	t.Run("invalid_rejected", func(t *testing.T) {
+		cfg := minimalValidConfig()
+		cfg.Database.Driver = "postgres"
+		cfg.Database.Port = 5432
+		cfg.Database.User = "u"
+		cfg.Database.DBName = "db"
+		cfg.Database.SSLMode = "bogus"
+		err := validate(cfg)
+		if err == nil || !strings.Contains(err.Error(), "sslMode") {
+			t.Fatalf("expected sslMode error, got %v", err)
+		}
+	})
+
+	t.Run("sqlite_ignores_sslmode", func(t *testing.T) {
+		cfg := minimalValidConfig()
+		cfg.Database.SSLMode = "bogus"
+		if err := validate(cfg); err != nil {
+			t.Errorf("sqlite should ignore sslMode, got %v", err)
+		}
+	})
+}
+
+// TestFeatures_DefaultOff pins the production-safety invariant: every
+// feature flag in FeaturesConfig is false unless the deployment explicitly
+// sets the matching env var. A regression that flips a default to true
+// would ship an in-progress feature to users on the next release.
+// See docs/decisions/0007-runtime-feature-flags.md.
+func TestFeatures_DefaultOff(t *testing.T) {
+	// Force a clean env so KANDEV_FEATURES_* and profile-selector vars
+	// from the host shell can't bleed in and turn a default-off check
+	// into a default-on accident. Clearing the profile selectors ensures
+	// DetectEnvironment returns prod, so FeatureFlagDefaults uses the
+	// prod value ("false") rather than the dev value ("true").
+	t.Setenv("KANDEV_FEATURES_OFFICE", "")
+	t.Setenv("KANDEV_DEBUG_DEV_MODE", "")
+	t.Setenv("KANDEV_DEBUG_PPROF_ENABLED", "")
+	t.Setenv("KANDEV_E2E_MOCK", "")
+
+	dir := t.TempDir()
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if cfg.Features.Office {
+		t.Errorf("Features.Office = true, want false (production default must be off)")
+	}
+}
+
+// TestFeatures_OfficeEnabledByEnv proves the documented opt-in path:
+// setting KANDEV_FEATURES_OFFICE=true flips Features.Office to true. This
+// is what `apps/cli/src/dev.ts` relies on for dev mode and what release
+// deployments would set if they ever wanted Office on.
+func TestFeatures_OfficeEnabledByEnv(t *testing.T) {
+	t.Setenv("KANDEV_FEATURES_OFFICE", "true")
+
+	dir := t.TempDir()
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if !cfg.Features.Office {
+		t.Errorf("Features.Office = false, want true (KANDEV_FEATURES_OFFICE=true must flip the flag)")
+	}
+}
+
+// TestFeaturesConfig_JSONShape pins the wire format of GET /api/v1/features.
+// The handler in helpers.go serializes FeaturesConfig directly so new
+// fields flow through without an extra edit; this test guarantees the
+// `json` tag is present on every field. A regression (struct field added
+// without a tag) would surface as a capitalized JSON key and break the
+// frontend's case-sensitive read in apps/web/app/actions/features.ts.
+func TestFeaturesConfig_JSONShape(t *testing.T) {
+	cfg := FeaturesConfig{Office: true}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	got := string(raw)
+	want := `{"office":true}`
+	if got != want {
+		t.Errorf("FeaturesConfig JSON = %s; want %s — missing or wrong `json:` struct tag", got, want)
 	}
 }

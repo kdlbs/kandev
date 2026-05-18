@@ -1,4 +1,4 @@
-import type { AgentProfile, PermissionSetting } from "@/lib/types/http";
+import type { PermissionSetting } from "@/lib/types/http";
 
 /**
  * Permission keys retained on the frontend. After the ACP-first migration the
@@ -6,24 +6,17 @@ import type { AgentProfile, PermissionSetting } from "@/lib/types/http";
  * other agents express permission stance through ACP session modes (rendered
  * as a separate Mode picker) and the interactive permission_request message UI.
  *
- * This file is kept as a thin compatibility shim so call sites that still use
- * the old permission-map helpers continue to compile. Non-auggie agents will
- * simply have an empty permission_settings map from the backend, causing the
- * UI to render no toggles at all.
+ * Keys are kept in **snake_case wire format** because they pass straight
+ * through to backend permission-payload bodies and the `permissionSettings`
+ * map keyed by snake_case agent metadata.
  */
 export const PERMISSION_KEYS = ["allow_indexing"] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
 
-// Compile-time check: every PermissionKey must be a boolean key on AgentProfile.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-type _AssertKeysExist = {
-  [K in PermissionKey]: AgentProfile[K] extends boolean ? true : never;
-};
-
-/** Extract permission booleans from a profile-like object, using backend defaults for missing values. */
+/** Extract permission booleans from a profile-like (snake_case) object. */
 export function profileToPermissionsMap(
-  profile: Partial<Pick<AgentProfile, PermissionKey>>,
+  profile: Partial<Record<PermissionKey, boolean>>,
   permissionSettings: Record<string, PermissionSetting>,
 ): Record<PermissionKey, boolean> {
   const result = {} as Record<PermissionKey, boolean>;
@@ -37,8 +30,8 @@ export function profileToPermissionsMap(
 /** Convert an object containing permission keys to a typed patch for API calls. */
 export function permissionsToProfilePatch(
   perms: Partial<Record<PermissionKey, boolean>>,
-): Pick<AgentProfile, PermissionKey> {
-  const result = {} as Pick<AgentProfile, PermissionKey>;
+): Record<PermissionKey, boolean> {
+  const result = {} as Record<PermissionKey, boolean>;
   for (const key of PERMISSION_KEYS) {
     result[key] = perms[key] ?? false;
   }
@@ -56,10 +49,10 @@ export function buildDefaultPermissions(
   return result;
 }
 
-/** Compare permission fields between two profile-like objects. */
+/** Compare permission fields between two snake_case permission-bearing objects. */
 export function arePermissionsDirty(
-  draft: Partial<Pick<AgentProfile, PermissionKey>>,
-  saved: Partial<Pick<AgentProfile, PermissionKey>>,
+  draft: Partial<Record<PermissionKey, boolean>>,
+  saved: Partial<Record<PermissionKey, boolean>>,
 ): boolean {
   for (const key of PERMISSION_KEYS) {
     if (draft[key] !== saved[key]) return true;

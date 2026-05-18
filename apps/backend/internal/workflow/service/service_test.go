@@ -32,7 +32,7 @@ func setupTestService(t *testing.T) (*Service, *sqlx.DB) {
 	)`)
 	require.NoError(t, err)
 
-	repo, err := repository.NewWithDB(sqlxDB, sqlxDB)
+	repo, err := repository.NewWithDB(sqlxDB, sqlxDB, nil)
 	require.NoError(t, err)
 
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})

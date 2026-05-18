@@ -1,12 +1,7 @@
 "use client";
 
-import {
-  IconRefresh,
-  IconAlertCircle,
-  IconLock,
-  IconPackageOff,
-  IconTerminal2,
-} from "@tabler/icons-react";
+import { IconAlertCircle, IconRefresh, IconTerminal2 } from "@tabler/icons-react";
+import { NoAuthPanel, ProbingPanel } from "@/components/settings/profile-status-panels";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -317,79 +312,6 @@ function CommandsButton({ commands }: { commands: CommandEntry[] }) {
   );
 }
 
-function NoAuthPanel({
-  agentName,
-  status,
-  isLoading,
-  onRefresh,
-  error,
-  rawError,
-}: {
-  agentName: string;
-  status: "auth_required" | "not_installed";
-  isLoading: boolean;
-  onRefresh: () => Promise<void>;
-  error: string | null;
-  rawError: string | null;
-}) {
-  const isAuth = status === "auth_required";
-  const Icon = isAuth ? IconLock : IconPackageOff;
-  const title = isAuth ? "No auth — login required" : "Not installed";
-  const hint = isAuth ? (
-    <>
-      Run <code className="font-mono bg-muted px-1 py-0.5 rounded">{agentName} login</code> in your
-      terminal, then click Refresh.
-    </>
-  ) : (
-    <>Install the agent CLI, then click Refresh.</>
-  );
-  const detail = error || rawError;
-  return (
-    <div
-      data-testid="profile-no-auth-panel"
-      data-status={status}
-      className="flex items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-3"
-    >
-      <Icon className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
-      <div className="flex-1 min-w-0 space-y-1">
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-medium">{title}</p>
-          {detail && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-foreground cursor-help"
-                  data-testid="profile-no-auth-details"
-                >
-                  <IconAlertCircle className="h-3 w-3" />
-                  details
-                </button>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-md">
-                <p className="whitespace-pre-wrap break-words text-xs">{detail}</p>
-              </TooltipContent>
-            </Tooltip>
-          )}
-        </div>
-        <p className="text-xs text-muted-foreground">{hint}</p>
-      </div>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={onRefresh}
-        disabled={isLoading}
-        className="cursor-pointer shrink-0"
-        data-testid="profile-no-auth-refresh"
-      >
-        <IconRefresh className={`mr-2 h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-        Refresh
-      </Button>
-    </div>
-  );
-}
-
 function CapabilitiesRow({
   profile,
   models,
@@ -436,6 +358,9 @@ function CapabilitiesRow({
   }
 
   const status = modelConfig.status;
+  if (status === "probing") {
+    return <ProbingPanel />;
+  }
   if (status === "auth_required" || status === "not_installed") {
     return (
       <NoAuthPanel

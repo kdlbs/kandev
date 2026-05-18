@@ -6,6 +6,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
+import { sessionId as toSessionId } from "@/lib/types/ids";
 
 /**
  * Sync `activeSessionId` in the store when the user clicks a session tab.
@@ -217,26 +218,43 @@ function ensureSessionPanel(
   createdSet.add(sessionId);
 }
 
-/** Close panels we previously created for sessions no longer in the task's list. */
-function reconcileRemovedSessionPanels(
+/**
+ * Close session panels that no longer belong to the active task.
+ *
+ * Iterates `api.panels` (not `createdSet`) as the source of truth — `createdSet`
+ * is unreliable because session panels can enter dockview via `tryRestoreLayout`
+ * /`fromJSON` (never going through `ensureSessionPanel`) and can leave via
+ * external removals like the right-click delete handler. Trusting it caused
+ * tabs from a previous task to leak into the current task's view.
+ */
+export function reconcileRemovedSessionPanels(
   api: DockviewApi,
   createdSet: Set<string>,
   currentSessionIds: string[],
   keepSessionId: string,
 ): void {
   const currentIds = new Set(currentSessionIds);
-  for (const createdId of [...createdSet]) {
-    if (createdId === keepSessionId) continue;
-    if (currentIds.has(createdId)) continue;
-    const stalePanel = api.getPanel(`session:${createdId}`);
-    if (stalePanel) {
-      try {
-        stalePanel.api.close();
-      } catch {
-        /* already gone */
-      }
+  // Snapshot before iterating: closing a panel can mutate `api.panels`
+  // synchronously, which would skip elements in a `for...of` over the live
+  // array. Matches the pattern in `removeEphemeralPanels`.
+  for (const panel of [...api.panels]) {
+    if (!panel.id.startsWith("session:")) continue;
+    const sid = panel.id.slice("session:".length);
+    if (sid === keepSessionId) continue;
+    if (currentIds.has(sid)) continue;
+    try {
+      panel.api.close();
+    } catch {
+      /* already gone */
     }
-    createdSet.delete(createdId);
+    createdSet.delete(sid);
+  }
+  // Drop any remaining stale entries (panel already removed externally, e.g.
+  // by the right-click delete handler) so the ref stays in sync with reality.
+  for (const sid of [...createdSet]) {
+    if (sid === keepSessionId) continue;
+    if (currentIds.has(sid)) continue;
+    createdSet.delete(sid);
   }
 }
 
@@ -350,7 +368,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     // guards against a race where removeTaskSession fires before the active
     // session is switched, which would cause the deleted session's panel to
     // be re-created by ensureSessionPanel.
-    if (!currentSessionIds.includes(effectiveSessionId)) return;
+    if (!currentSessionIds.includes(toSessionId(effectiveSessionId))) return;
 
     if (!prepareLayoutForSessionPanels(api)) {
       sessionTabCreatedRef.current.add(effectiveSessionId);

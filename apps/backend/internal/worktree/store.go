@@ -396,6 +396,35 @@ func (s *SQLiteStore) ListActiveWorktrees(ctx context.Context) ([]*Worktree, err
 	return s.scanWorktrees(rows)
 }
 
+// ListActiveWorktreePaths returns the worktree_path of every active,
+// non-deleted task_session_worktrees row that has a non-empty path. The
+// office GC uses this set as the authoritative inventory of live worktrees;
+// any directory under the worktree base that does not appear here (and is
+// older than the GC grace period) is considered orphaned.
+func (s *SQLiteStore) ListActiveWorktreePaths(ctx context.Context) ([]string, error) {
+	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`
+		SELECT worktree_path
+		FROM task_session_worktrees
+		WHERE status = ?
+		  AND deleted_at IS NULL
+		  AND worktree_path <> ''
+	`), StatusActive)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var paths []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		paths = append(paths, p)
+	}
+	return paths, rows.Err()
+}
+
 // scanWorktrees is a helper to scan multiple worktree rows.
 func (s *SQLiteStore) scanWorktrees(rows *sql.Rows) ([]*Worktree, error) {
 	var result []*Worktree

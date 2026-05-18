@@ -17,6 +17,33 @@ async function openTaskSession(page: Page, title: string): Promise<SessionPage> 
   return session;
 }
 
+/**
+ * Wait for the chat input to become idle, recovering from the transient
+ * "Environment setup failed" state that can appear after a backend restart
+ * (documented race in `executor_execute.go:356`). Mirrors what real users do:
+ * click "Resume" when the recovery prompt appears, then wait for idle.
+ */
+async function waitForIdleWithRecovery(session: SessionPage, timeoutMs: number): Promise<void> {
+  const start = Date.now();
+  for (;;) {
+    const remaining = timeoutMs - (Date.now() - start);
+    if (remaining <= 0) {
+      // Fall through to a final assertion so failure messages are useful.
+      await expect(session.idleInput()).toBeVisible({ timeout: 1_000 });
+      return;
+    }
+    if (await session.idleInput().isVisible()) return;
+    if (await session.recoveryResumeButton().isVisible()) {
+      await session.recoveryResumeButton().click();
+      continue;
+    }
+    await session
+      .idleInput()
+      .waitFor({ state: "visible", timeout: Math.min(remaining, 1_500) })
+      .catch(() => undefined);
+  }
+}
+
 test.describe("Session resume boot-message dedup", () => {
   // Test restarts the backend multiple times — can be flaky under CI load.
   test.describe.configure({ retries: 1 });
@@ -46,7 +73,7 @@ test.describe("Session resume boot-message dedup", () => {
     await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
       timeout: 30_000,
     });
-    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+    await waitForIdleWithRecovery(session, 30_000);
 
     // 2. Initial "Started agent Mock" row should be visible exactly once.
     await expect(session.chat.getByText("Started agent Mock", { exact: false })).toHaveCount(1, {
@@ -60,8 +87,9 @@ test.describe("Session resume boot-message dedup", () => {
       await backend.restart();
       await testPage.reload();
       await session.waitForLoad();
-      // Auto-resume + agent turn completion can be slow under CI load.
-      await expect(session.idleInput()).toBeVisible({ timeout: 60_000 });
+      // Auto-resume + agent turn completion can be slow under CI load, and
+      // can transit through the env-setup-failed recovery state.
+      await waitForIdleWithRecovery(session, 60_000);
       await expect(session.chat.getByText("Resumed agent Mock", { exact: false })).toBeVisible({
         timeout: 30_000,
       });

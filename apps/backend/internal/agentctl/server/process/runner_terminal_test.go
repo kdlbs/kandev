@@ -60,9 +60,11 @@ func TestInteractiveRunner_ResizeByProcessID(t *testing.T) {
 	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
 
 	// Start a deferred process
+	cmd, env := fixtureExec("cat")
 	req := InteractiveStartRequest{
 		SessionID: "resize-pid-test",
-		Command:   []string{"cat"},
+		Command:   cmd,
+		Env:       env,
 	}
 	info, err := runner.Start(context.Background(), req)
 	if err != nil {

@@ -34,6 +34,8 @@ function makeProps(
     workspaceId: "ws-1",
     effectiveWorkflowId: "wf-1",
     executorHint: null,
+    noCompatibleAgent: false,
+    executorProfileName: null,
     onCancel: () => {},
     onUpdateWithoutAgent: () => {},
     onCreateWithoutAgent: () => {},
@@ -97,6 +99,19 @@ describe("computeDisabledReason (start-task)", () => {
 
   it("flags missing agent profile for start-task button", () => {
     expect(computeDisabledReason(makeProps({ agentProfileId: "" }), KIND_START)).toBe(REASON_AGENT);
+  });
+
+  it("flags no compatible agent for the selected executor profile", () => {
+    const reason = computeDisabledReason(
+      makeProps({
+        agentProfileId: "",
+        noCompatibleAgent: true,
+        executorProfileName: "Docker (sandbox)",
+      }),
+      KIND_START,
+    );
+    expect(reason).toContain("Docker (sandbox)");
+    expect(reason).toContain("credentials");
   });
 });
 
@@ -164,5 +179,44 @@ describe("computeDisabledReason (default)", () => {
         KIND_DEFAULT,
       ),
     ).toBeNull();
+  });
+});
+
+describe("computeDisabledReason (submitBlockedReason)", () => {
+  const REASON = "Preparing kandev repository…";
+
+  it("returns the supplied reason for start-task even when nothing is missing", () => {
+    expect(computeDisabledReason(makeProps({ submitBlockedReason: REASON }), KIND_START)).toBe(
+      REASON,
+    );
+  });
+
+  it("returns the supplied reason for default in create mode", () => {
+    expect(computeDisabledReason(makeProps({ submitBlockedReason: REASON }), KIND_DEFAULT)).toBe(
+      REASON,
+    );
+  });
+
+  it("returns the supplied reason for update mode (overrides title check)", () => {
+    expect(
+      computeDisabledReason(
+        makeProps({ submitBlockedReason: REASON, hasTitle: false }),
+        KIND_UPDATE,
+      ),
+    ).toBe(REASON);
+  });
+
+  it("still suppresses the reason while a submission is in flight", () => {
+    expect(
+      computeDisabledReason(
+        makeProps({ submitBlockedReason: REASON, isCreatingTask: true }),
+        KIND_START,
+      ),
+    ).toBeNull();
+  });
+
+  it("ignores empty/null reason and falls back to normal logic", () => {
+    expect(computeDisabledReason(makeProps({ submitBlockedReason: null }), KIND_START)).toBeNull();
+    expect(computeDisabledReason(makeProps({ submitBlockedReason: "" }), KIND_START)).toBeNull();
   });
 });

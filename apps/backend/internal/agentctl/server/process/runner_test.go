@@ -48,10 +48,12 @@ func TestProcessRunnerCapturesOutput(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	cmd, env := fixtureShellExec("echo-then-sleep hello 2")
 	info, err := runner.Start(ctx, StartProcessRequest{
 		SessionID:  "session-1",
 		Kind:       "dev",
-		Command:    "printf 'hello'; sleep 2",
+		Command:    cmd,
+		Env:        env,
 		WorkingDir: "",
 	})
 	if err != nil {

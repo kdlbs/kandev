@@ -15,8 +15,10 @@ import {
   IconChartBar,
   IconTimeline,
   IconStethoscope,
+  IconBuildings,
 } from "@tabler/icons-react";
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { IntegrationsTopbarLinks } from "@/components/integrations/integrations-menu";
 import { PageTopbar } from "@/components/page-topbar";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
@@ -136,11 +138,32 @@ function StatsTopbarButton() {
   );
 }
 
+function OfficeTopbarButton() {
+  // Hidden in production where features.office=false. The hook reads SSR-
+  // hydrated state, so the button never appears for a single frame on
+  // first paint.
+  const officeEnabled = useFeature("office");
+  if (!officeEnabled) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button asChild variant="outline" size="icon-lg" className="cursor-pointer">
+          <Link href="/office" aria-label="Office">
+            <IconBuildings className="h-4 w-4" />
+          </Link>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Office</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function HomeLeftActions({ workspaceId }: { workspaceId?: string }) {
   return (
     <>
       <IntegrationsTopbarLinks />
       <StatsTopbarButton />
+      <OfficeTopbarButton />
       <ImproveKandevTopbarButton workspaceId={workspaceId} />
     </>
   );
@@ -150,6 +173,7 @@ function WorkspaceLeftActions({ workspaceId }: { workspaceId?: string }) {
   return (
     <>
       <IntegrationsTopbarLinks />
+      <OfficeTopbarButton />
       <ImproveKandevTopbarButton workspaceId={workspaceId} />
     </>
   );

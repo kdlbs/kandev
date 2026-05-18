@@ -195,6 +195,85 @@ test.describe("Dockview repository scripts in + menu", () => {
     await expect(testPage.getByTestId(`run-script-${customScript.id}`)).toBeVisible();
   });
 
+  test("header run script dropdown shows reasonable script names and commands", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.createRepositoryScript(
+      seedData.repositoryId,
+      "Windows",
+      "flutter run -d windows",
+      0,
+    );
+
+    await seedTaskWithSession(testPage, apiClient, seedData, "Readable Script Menu");
+    await testPage.getByRole("button", { name: "Run script" }).click();
+
+    const menu = testPage.locator('[data-slot="dropdown-menu-content"]:visible');
+    await expect(menu).toHaveCount(1);
+    await expect(menu).toBeVisible();
+    const menuBox = await menu.boundingBox();
+    expect(menuBox?.width).toBeGreaterThanOrEqual(260);
+    expect(menuBox?.width).toBeLessThanOrEqual(320);
+
+    const item = testPage
+      .getByRole("menuitem")
+      .filter({ hasText: "Windows" })
+      .filter({ hasText: "flutter run -d windows" });
+    await expect(item).toHaveCount(1);
+    await expect(item).toBeVisible();
+
+    const clippedText = await item.evaluate((element) =>
+      Array.from(element.querySelectorAll("span"))
+        .filter((span) =>
+          ["Windows", "flutter run -d windows"].includes(span.textContent?.trim() ?? ""),
+        )
+        .filter((span) => span.scrollWidth > span.clientWidth + 1)
+        .map((span) => span.textContent?.trim()),
+    );
+    expect(clippedText).toEqual([]);
+  });
+
+  test("header run script dropdown caps long script previews", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.createRepositoryScript(
+      seedData.repositoryId,
+      "Start desktop target",
+      "set -e\nflutter clean\nflutter pub get\nflutter run -d windows --dart-define=ENV=local",
+      0,
+    );
+
+    await seedTaskWithSession(testPage, apiClient, seedData, "Compact Script Preview");
+    await testPage.getByRole("button", { name: "Run script" }).click();
+
+    const item = testPage.getByRole("menuitem").filter({ hasText: "Start desktop target" });
+    await expect(item).toHaveCount(1);
+    await expect(item).toBeVisible();
+
+    const metrics = await item.evaluate((element) => {
+      const commandSpan = Array.from(element.querySelectorAll("span")).find(
+        (span) => span.children.length === 0 && span.textContent?.includes("flutter clean"),
+      );
+      if (!commandSpan) {
+        throw new Error("Expected command preview span");
+      }
+      const style = window.getComputedStyle(commandSpan);
+      return {
+        commandClientHeight: commandSpan.clientHeight,
+        commandScrollHeight: commandSpan.scrollHeight,
+        commandWhiteSpace: style.whiteSpace,
+        itemHeight: element.getBoundingClientRect().height,
+      };
+    });
+    expect(metrics.commandWhiteSpace).toBe("nowrap");
+    expect(metrics.commandScrollHeight).toBeLessThanOrEqual(metrics.commandClientHeight + 1);
+    expect(metrics.itemHeight).toBeLessThanOrEqual(44);
+  });
+
   test("clicking Dev Server opens a terminal that runs the dev_script command", async ({
     testPage,
     apiClient,

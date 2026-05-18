@@ -44,7 +44,19 @@ export function buildSwitchToSession(
     const oldEnvId = oldSessionId ? (state.environmentIdBySessionId[oldSessionId] ?? null) : null;
     const newEnvId = state.environmentIdBySessionId[sessionId] ?? null;
     setActiveSession(taskId, sessionId);
-    if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, sessionId);
+    if (newEnvId) {
+      performLayoutSwitch(oldEnvId, newEnvId, sessionId);
+      return;
+    }
+    // The new session's task_environment_id has not been loaded into the store
+    // yet (e.g. auto-started sessions whose WS payload hasn't arrived). If we
+    // skip the layout switch entirely, env-scoped panels from the outgoing
+    // task (plan, files, vscode, …) remain visible. Release the outgoing env's
+    // layout to default so the new task starts from a clean slate; when the
+    // new env id arrives, useEnvSwitchCleanup will adopt it without rebuild.
+    if (oldEnvId || oldSessionId !== sessionId) {
+      releaseLayoutToDefault(oldEnvId);
+    }
   };
 }
 

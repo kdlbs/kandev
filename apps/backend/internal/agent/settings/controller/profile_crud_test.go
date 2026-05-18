@@ -8,14 +8,16 @@ import (
 )
 
 // TestSeedCLIFlags_FromCopilot verifies that a fresh Copilot profile gets
-// the four curated CLI-flag suggestions with Enabled=false, so users see
-// them in the UI but nothing changes subprocess behaviour until opt-in.
+// the four curated CLI-flag suggestions seeded with the expected default
+// state. `--allow-all-tools` is on by default so autonomous runs don't
+// stall on per-tool-call permission prompts; the other --allow-all-* and
+// --no-ask-user flags stay off as safe defaults until users opt in.
 func TestSeedCLIFlags_FromCopilot(t *testing.T) {
 	ag := agents.NewCopilotACP()
 	flags := seedCLIFlags(ag)
 
 	wantFlags := map[string]bool{
-		"--allow-all-tools": false,
+		"--allow-all-tools": true,
 		"--allow-all-paths": false,
 		"--allow-all-urls":  false,
 		"--no-ask-user":     false,

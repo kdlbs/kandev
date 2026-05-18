@@ -13,8 +13,8 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
-	"github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -127,6 +127,8 @@ type mockAgentManager struct {
 
 	mu                      sync.Mutex
 	stopAgentWithReasonArgs []stopAgentCall // tracks StopAgentWithReason calls
+	stopAgentArgs           []stopAgentCall // tracks StopAgent calls (no reason)
+	stopAgentErr            error           // optional error to return from StopAgent
 
 	// Prompt tracking — capturedPrompts records prompts only (legacy, several
 	// tests assert on it directly). capturedPromptCalls records the same with
@@ -188,7 +190,12 @@ func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *executor.Launch
 	return nil, nil
 }
 func (m *mockAgentManager) StartAgentProcess(_ context.Context, _ string) error { return nil }
-func (m *mockAgentManager) StopAgent(_ context.Context, _ string, _ bool) error { return nil }
+func (m *mockAgentManager) StopAgent(_ context.Context, agentExecutionID string, force bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stopAgentArgs = append(m.stopAgentArgs, stopAgentCall{ExecutionID: agentExecutionID, Force: force})
+	return m.stopAgentErr
+}
 func (m *mockAgentManager) StopAgentWithReason(_ context.Context, agentExecutionID, reason string, force bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -259,6 +266,9 @@ func (m *mockAgentManager) ResetAgentContext(ctx context.Context, agentExecution
 func (m *mockAgentManager) SetExecutionDescription(_ context.Context, _, _ string) error {
 	return nil
 }
+func (m *mockAgentManager) SetExecutionEnv(_ context.Context, _ string, _ map[string]string) error {
+	return nil
+}
 func (m *mockAgentManager) SetSessionModelBySessionID(_ context.Context, _, _ string) error {
 	return fmt.Errorf("not supported")
 }
@@ -322,6 +332,9 @@ func (m *mockAgentManager) GetGitStatus(_ context.Context, _ string) (*client.Gi
 		HeadCommit: "mock-commit",
 	}, nil
 }
+func (m *mockAgentManager) GetGitStatusFresh(_ context.Context, _ string) (*client.GitStatusResult, error) {
+	return nil, nil
+}
 func (m *mockAgentManager) WaitForAgentctlReady(_ context.Context, _ string) error {
 	return nil
 }
@@ -349,7 +362,7 @@ func setupTestRepo(t *testing.T) *sqliterepo.Repository {
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
 
-	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB)
+	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
@@ -443,7 +456,7 @@ func createTestServiceWithAgent(repo *sqliterepo.Repository, stepGetter *mockSte
 		workflowStepGetter: stepGetter,
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewService(log),
+		messageQueue:       messagequeue.NewServiceMemory(log),
 	}
 }
 
@@ -574,7 +587,7 @@ func TestHandleAgentReadyGuards(t *testing.T) {
 			t.Fatalf("expected workflow step to remain step1, got %q", updatedTask.WorkflowStepID)
 		}
 		status := svc.messageQueue.GetStatus(ctx, "s1")
-		if !status.IsQueued {
+		if status.Count == 0 {
 			t.Fatalf("expected queued message to remain queued")
 		}
 	})
@@ -680,11 +693,11 @@ func TestExecuteQueuedMessage_RequeuesTransientPromptFailure(t *testing.T) {
 	svc.executeQueuedMessage("s1", queuedMsg)
 
 	status := svc.messageQueue.GetStatus(ctx, "s1")
-	if !status.IsQueued || status.Message == nil {
-		t.Fatalf("expected queued message to be requeued after transient failure")
+	if status.Count != 1 {
+		t.Fatalf("expected queued message to be requeued after transient failure, count=%d", status.Count)
 	}
-	if status.Message.Content != "hello" {
-		t.Fatalf("expected queued content to be preserved, got %q", status.Message.Content)
+	if status.Entries[0].Content != "hello" {
+		t.Fatalf("expected queued content to be preserved, got %q", status.Entries[0].Content)
 	}
 }
 
@@ -729,7 +742,7 @@ func TestExecuteQueuedMessage_FiresOnTurnStart(t *testing.T) {
 		repo:         repo,
 		taskRepo:     taskRepo,
 		agentManager: agentMgr,
-		messageQueue: messagequeue.NewService(log),
+		messageQueue: messagequeue.NewServiceMemory(log),
 	}
 	svc.SetWorkflowStepGetter(stepGetter)
 	svc.executor = executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
@@ -784,7 +797,7 @@ func TestExecuteQueuedMessage_NoOnTurnStart_StepUnchanged(t *testing.T) {
 		repo:         repo,
 		taskRepo:     taskRepo,
 		agentManager: agentMgr,
-		messageQueue: messagequeue.NewService(log),
+		messageQueue: messagequeue.NewServiceMemory(log),
 	}
 	svc.SetWorkflowStepGetter(stepGetter)
 	svc.executor = executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
@@ -819,7 +832,7 @@ func createTestServiceWithScheduler(repo *sqliterepo.Repository, stepGetter *moc
 		workflowStepGetter: stepGetter,
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewService(log),
+		messageQueue:       messagequeue.NewServiceMemory(log),
 		executor:           exec,
 		scheduler:          sched,
 	}
@@ -1074,8 +1087,8 @@ func TestHandleAgentReady_PassthroughQueuedMessage(t *testing.T) {
 
 		// Queue should be empty after delivery
 		status := svc.messageQueue.GetStatus(ctx, "s1")
-		if status.IsQueued {
-			t.Error("expected queue to be empty after delivery")
+		if status.Count != 0 {
+			t.Errorf("expected queue to be empty after delivery, count=%d", status.Count)
 		}
 	})
 
@@ -1502,6 +1515,36 @@ func TestHandleAgentStopped_PreservesRecoveryState(t *testing.T) {
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.State != models.TaskSessionStateCancelled {
 			t.Errorf("expected state %q, got %q", models.TaskSessionStateCancelled, updated.State)
+		}
+	})
+
+	// Office fire-and-forget regression: when the office turn-complete
+	// handler sets the session to IDLE before stopping the agent, the
+	// resulting agent.stopped event must NOT clobber IDLE → CANCELLED.
+	// Without this guard, the next office run's EnsureSessionForAgent
+	// sees a terminal session, tries to INSERT a new row, and the partial
+	// unique index on (task_id, agent_profile_id) rejects it. Comments
+	// silently fail to wake the agent.
+	t.Run("does not clobber IDLE state (office fire-and-forget)", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateIdle
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+		svc.handleAgentStopped(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+		})
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.State != models.TaskSessionStateIdle {
+			t.Errorf("expected state to remain %q, got %q (would break next office run)",
+				models.TaskSessionStateIdle, updated.State)
 		}
 	})
 }

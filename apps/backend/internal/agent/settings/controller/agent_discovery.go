@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
-
+	"os"
 	"os/exec"
 	"runtime"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
@@ -23,6 +23,10 @@ func (c *Controller) ListDiscovery(ctx context.Context) (*dto.ListDiscoveryRespo
 	}
 	payload := make([]dto.AgentDiscoveryDTO, 0, len(results))
 	for _, result := range results {
+		var loginCmd *dto.LoginCommandDTO
+		if ag, ok := c.agentRegistry.Get(result.Name); ok {
+			loginCmd = buildLoginCommandDTO(ag)
+		}
 		payload = append(payload, dto.AgentDiscoveryDTO{
 			Name:              result.Name,
 			SupportsMCP:       result.SupportsMCP,
@@ -30,6 +34,7 @@ func (c *Controller) ListDiscovery(ctx context.Context) (*dto.ListDiscoveryRespo
 			InstallationPaths: result.InstallationPaths,
 			Available:         result.Available,
 			MatchedPath:       result.MatchedPath,
+			LoginCommand:      loginCmd,
 		})
 	}
 	return &dto.ListDiscoveryResponse{Agents: payload, Total: len(payload)}, nil
@@ -120,6 +125,8 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 		}
 	}
 
+	loginCommand := buildLoginCommandDTO(ag)
+
 	return dto.AvailableAgentDTO{
 		Name:               ag.ID(),
 		DisplayName:        displayName,
@@ -134,7 +141,25 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 		ModelConfig:        modelConfig,
 		PermissionSettings: permissionSettings,
 		PassthroughConfig:  passthroughConfig,
+		LoginCommand:       loginCommand,
 		UpdatedAt:          now,
+	}
+}
+
+// buildLoginCommandDTO surfaces the interactive login command for agents that
+// implement LoginAgent. Nil for agents without an interactive login.
+func buildLoginCommandDTO(ag agents.Agent) *dto.LoginCommandDTO {
+	loginAg, ok := ag.(agents.LoginAgent)
+	if !ok {
+		return nil
+	}
+	lc := loginAg.LoginCommand()
+	if lc == nil || len(lc.Cmd) == 0 {
+		return nil
+	}
+	return &dto.LoginCommandDTO{
+		Cmd:         lc.Cmd,
+		Description: lc.Description,
 	}
 }
 
@@ -424,7 +449,15 @@ func (c *Controller) detectTools() []dto.ToolStatusDTO {
 }
 
 // detectAgents runs discovery and forces mock-agent available when enabled.
+//
+// In E2E mock mode (KANDEV_E2E_MOCK=true) the filesystem discovery walk is
+// skipped entirely: all enabled agents are synthesised as available. This
+// avoids the 15-second detectAll timeout under CPU contention and prevents
+// the "seedData fixture timeout: listAgents returned 0 agents" flake.
 func (c *Controller) detectAgents(ctx context.Context) ([]discovery.Availability, error) {
+	if os.Getenv("KANDEV_E2E_MOCK") == "true" {
+		return c.synthAvailabilityFromRegistry(), nil
+	}
 	results, err := c.discovery.Detect(ctx)
 	if err != nil {
 		return nil, err
@@ -440,4 +473,39 @@ func (c *Controller) detectAgents(ctx context.Context) ([]discovery.Availability
 		}
 	}
 	return results, nil
+}
+
+// synthAvailabilityFromRegistry builds Availability records for every enabled
+// agent without hitting the filesystem. All agents are marked Available=true
+// because in E2E mode only MockAgent instances are registered and they are
+// always available by definition.
+//
+// We still call IsInstalled() per-agent to copy over the agent's static
+// capability flags (SupportsMCP, MCPConfigPaths). Without those, downstream
+// code sees SupportsMCP=false for every mock agent — which silently disables
+// plan mode in the chat UI (planModeAvailable is false → the toggle only
+// flips the layout, not the chat input state).
+func (c *Controller) synthAvailabilityFromRegistry() []discovery.Availability {
+	enabled := c.agentRegistry.ListEnabled()
+	results := make([]discovery.Availability, 0, len(enabled))
+	for _, ag := range enabled {
+		av := discovery.Availability{
+			Name:      ag.ID(),
+			Available: true,
+			Capabilities: discovery.Capabilities{
+				SupportsSessionResume: true,
+			},
+		}
+		// IsInstalled is a pure local check on mock-agent (no filesystem walk),
+		// so it's safe to call here without contention. Pull the static
+		// SupportsMCP flag so the UI can offer plan mode in E2E runs.
+		if probe, err := ag.IsInstalled(context.Background()); err == nil && probe != nil {
+			av.SupportsMCP = probe.SupportsMCP
+			if len(probe.MCPConfigPaths) > 0 {
+				av.MCPConfigPath = probe.MCPConfigPaths[0]
+			}
+		}
+		results = append(results, av)
+	}
+	return results
 }

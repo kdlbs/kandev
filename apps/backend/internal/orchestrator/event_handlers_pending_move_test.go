@@ -160,7 +160,7 @@ func buildPendingMoveScenario(t *testing.T) *pendingMoveScenario {
 		workflowStepGetter: stepGetter,
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewService(log),
+		messageQueue:       messagequeue.NewServiceMemory(log),
 		executor:           exec,
 		scheduler:          sched,
 	}
@@ -400,7 +400,7 @@ func (sc *pendingMoveScenario) assertHandoffDeliveredOrQueued(t *testing.T) {
 	implPrompts := capturedPromptsForExecution(sc.agentMgr, sc.implRelaunchExec)
 	implQueued := sc.svc.messageQueue.GetStatus(sc.ctx, sc.implSessionID)
 
-	if len(implPrompts) == 0 && !implQueued.IsQueued {
+	if len(implPrompts) == 0 && implQueued.Count == 0 {
 		t.Error("hand-off prompt was neither delivered to the impl session nor queued for it")
 		return
 	}
@@ -409,9 +409,10 @@ func (sc *pendingMoveScenario) assertHandoffDeliveredOrQueued(t *testing.T) {
 			return
 		}
 	}
-	if implQueued.IsQueued && implQueued.Message != nil &&
-		strings.Contains(implQueued.Message.Content, "fibonacci.py has two bugs") {
-		return
+	for _, entry := range implQueued.Entries {
+		if strings.Contains(entry.Content, "fibonacci.py has two bugs") {
+			return
+		}
 	}
 	t.Errorf("hand-off prompt was neither delivered nor queued with the expected content")
 }
@@ -564,7 +565,7 @@ func TestHandleAgentBootReady_DoesNotTriggerOnTurnComplete(t *testing.T) {
 				workflowStepGetter: stepGetter,
 				taskRepo:           taskRepo,
 				agentManager:       agentMgr,
-				messageQueue:       messagequeue.NewService(log),
+				messageQueue:       messagequeue.NewServiceMemory(log),
 				executor:           exec,
 			}
 			svc.SetWorkflowStepGetter(stepGetter)

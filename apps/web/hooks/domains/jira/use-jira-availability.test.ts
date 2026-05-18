@@ -10,6 +10,27 @@ vi.mock("@/lib/api/domains/jira-api", () => ({
 
 import { useJiraAvailable } from "./use-jira-availability";
 
+function makeLocalStorageMock() {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => store.set(key, value),
+    removeItem: (key: string) => store.delete(key),
+    clear: () => store.clear(),
+    get length() {
+      return store.size;
+    },
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+  };
+}
+
+const localStorageMock = makeLocalStorageMock();
+vi.stubGlobal("localStorage", localStorageMock);
+Object.defineProperty(window, "localStorage", {
+  value: localStorageMock,
+  configurable: true,
+});
+
 function makeConfig(overrides: Partial<JiraConfig>): JiraConfig {
   return {
     siteUrl: "https://example.atlassian.net",

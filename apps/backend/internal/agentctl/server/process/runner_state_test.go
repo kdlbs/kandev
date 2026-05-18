@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -14,9 +15,11 @@ func TestInteractiveRunner_GetBuffer(t *testing.T) {
 	log := newTestLogger(t)
 	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
 
+	cmd, env := fixtureExec("echo buffered")
 	req := InteractiveStartRequest{
 		SessionID:      "buffer-test",
-		Command:        []string{"echo", "buffered output"},
+		Command:        cmd,
+		Env:            env,
 		ImmediateStart: true,
 		DefaultCols:    80,
 		DefaultRows:    24,
@@ -65,9 +68,11 @@ func TestInteractiveRunner_Callbacks(t *testing.T) {
 		mu.Unlock()
 	})
 
+	cmd, env := fixtureExec("echo callback")
 	req := InteractiveStartRequest{
 		SessionID:      "callback-test",
-		Command:        []string{"echo", "callback test"},
+		Command:        cmd,
+		Env:            env,
 		ImmediateStart: true,
 		DefaultCols:    80,
 		DefaultRows:    24,
@@ -90,6 +95,15 @@ func TestInteractiveRunner_Callbacks(t *testing.T) {
 }
 
 func TestInteractiveRunner_TurnCompleteCallback(t *testing.T) {
+	// This test hardcodes `bash -c "echo '$ '"` to produce a literal "$ "
+	// prompt and exercise the PromptPattern turn-complete detector. Migrating
+	// it to fixtureExec would lose the bash-only quoting/echo semantics the
+	// detector depends on. Windows CI passes only because windows-latest ships
+	// Git Bash in PATH; a bare Windows host without Git Bash would fail at
+	// runner.Start. Skip rather than pretend it's portable.
+	if runtime.GOOS == "windows" {
+		t.Skip("requires bash on PATH (Git Bash on Windows); turn-complete pattern is bash-specific")
+	}
 	log := newTestLogger(t)
 	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
 
@@ -133,9 +147,11 @@ func TestInteractiveRunner_DirectOutput(t *testing.T) {
 	log := newTestLogger(t)
 	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
 
+	cmd, env := fixtureExec("cat")
 	req := InteractiveStartRequest{
 		SessionID:      "direct-output-test",
-		Command:        []string{"cat"},
+		Command:        cmd,
+		Env:            env,
 		ImmediateStart: true,
 		DefaultCols:    80,
 		DefaultRows:    24,
@@ -201,9 +217,11 @@ func TestInteractiveRunner_GetPtyWriter(t *testing.T) {
 	log := newTestLogger(t)
 	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
 
+	cmd, env := fixtureExec("cat")
 	req := InteractiveStartRequest{
 		SessionID:      "pty-writer-test",
-		Command:        []string{"cat"},
+		Command:        cmd,
+		Env:            env,
 		ImmediateStart: true,
 		DefaultCols:    80,
 		DefaultRows:    24,
@@ -307,9 +325,11 @@ func TestInteractiveRunner_IsProcessRunning(t *testing.T) {
 	}
 
 	// Start a process
+	cmd, env := fixtureExec("sleep 10")
 	req := InteractiveStartRequest{
 		SessionID:      "running-test",
-		Command:        []string{"sleep", "10"},
+		Command:        cmd,
+		Env:            env,
 		ImmediateStart: true,
 		DefaultCols:    80,
 		DefaultRows:    24,
@@ -352,9 +372,11 @@ func TestInteractiveRunner_IsProcessReadyOrPending(t *testing.T) {
 	}
 
 	// Start a deferred process (not started yet)
+	cmd, env := fixtureExec("cat")
 	req := InteractiveStartRequest{
 		SessionID: "pending-test",
-		Command:   []string{"cat"},
+		Command:   cmd,
+		Env:       env,
 		// ImmediateStart: false (deferred)
 	}
 

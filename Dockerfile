@@ -1,65 +1,28 @@
 # Kandev Server Dockerfile
-# Multi-stage build: Go backend + Next.js frontend + CLI launcher
 #
-# Build:
-#   docker build -t kandev:latest .
+# Single-stage build that consumes prebuilt artifacts. The release workflow
+# (.github/workflows/release.yml) extracts the per-arch release bundle
+# (`kandev-linux-{x64,arm64}.tar.gz`) into the build context, then this file
+# just COPYs the binaries + web standalone + CLI into the runtime layout.
+#
+# Building this file outside CI (manual `docker build .`) will fail because
+# the `bundle/` directory isn't present in the build context. To build
+# locally, extract a release tarball into ./ctx/bundle/ alongside
+# ./ctx/docker-entrypoint.sh and run:
+#   docker build -f Dockerfile ./ctx
 #
 # Run:
-#   docker run -p 38429:38429 -v kandev-data:/data kandev:latest
+#   docker run -p 38429:38429 -v kandev-data:/data ghcr.io/kdlbs/kandev:latest
 
-# ---------------------------------------------------------------------------
-# Stage 1: Go builder — compile kandev + agentctl binaries
-# ---------------------------------------------------------------------------
-FROM golang:1.26-bookworm AS go-builder
+FROM node:24-bookworm-slim
 
-WORKDIR /build
-
-# Cache Go module downloads
-COPY apps/backend/go.mod apps/backend/go.sum ./
-RUN go mod download
-
-# Copy backend source and build
-COPY apps/backend/ ./
-
-RUN go build -ldflags "-s -w" -o /out/kandev ./cmd/kandev && \
-    go build -ldflags "-s -w" -o /out/agentctl ./cmd/agentctl
-
-# ---------------------------------------------------------------------------
-# Stage 2: Web + CLI builder — build Next.js standalone + CLI
-# ---------------------------------------------------------------------------
-FROM node:24-slim AS web-builder
-
-ARG PNPM_VERSION=9.15.9
-RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
-
-WORKDIR /build/apps
-
-# Copy workspace config and all package.json files for dependency caching
-COPY apps/package.json apps/pnpm-workspace.yaml apps/pnpm-lock.yaml ./
-COPY apps/web/package.json ./web/package.json
-COPY apps/cli/package.json ./cli/package.json
-COPY apps/packages/ui/package.json ./packages/ui/package.json
-COPY apps/packages/theme/package.json ./packages/theme/package.json
-COPY apps/packages/types/package.json ./packages/types/package.json
-
-RUN pnpm install --frozen-lockfile
-
-# Copy full source for build
-COPY apps/ ./
-
-# Build shared packages, web app, and CLI
-RUN pnpm --filter @kandev/web build && \
-    pnpm --filter kandev build
-
-# ---------------------------------------------------------------------------
-# Stage 3: Runtime — minimal image with both services
-# ---------------------------------------------------------------------------
-FROM node:24-bookworm-slim AS runtime
-
-# Install only essential runtime dependencies, then clean up
+# Install runtime dependencies. gh is included because the GitHub integration
+# (PR review, webhooks) shells out to it for auth fallback when GITHUB_TOKEN
+# is not set. apprise is installed via pipx for notification fan-out.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         git \
+        gh \
         ca-certificates \
         gosu \
         tini \
@@ -69,49 +32,62 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* && \
     PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install apprise
 
-# Replace the node base image's default user so we own uid 1000
-RUN userdel -r node && groupadd -r kandev && useradd -r -g kandev -u 1000 -m kandev
+# Replace the node base image's default user so we own uid 1000.
+# Home is placed under /data so agent CLI auth state (gh, claude, codex, auggie,
+# copilot, amp, ...) lives on the PV and survives pod restarts and image upgrades.
+RUN userdel -r node && groupadd -r kandev && useradd -r -g kandev -u 1000 -d /data/home -M kandev
 
-# Create app directory structure matching what the CLI expects:
+# Create app directory structure matching what `kandev start` expects:
 #   /app/apps/backend/bin/kandev
 #   /app/apps/web/.next/standalone/web/server.js
-RUN mkdir -p /app/apps/backend/bin /app/apps/web/.next /data/worktrees
+RUN mkdir -p /app/apps/backend/bin /app/apps/web/.next/standalone /usr/local/lib/kandev-cli /data/worktrees
 
-# Copy Go binaries
-COPY --from=go-builder /out/kandev /app/apps/backend/bin/kandev
-COPY --from=go-builder /out/agentctl /usr/local/bin/agentctl
+# Build context layout (prepared by the release workflow from the extracted
+# bundle tarball):
+#   bundle/bin/kandev                  - native Go backend (per-arch)
+#   bundle/bin/agentctl                - native agentctl (per-arch)
+#   bundle/bin/agentctl-linux-amd64    - amd64 agentctl helper (always amd64)
+#   bundle/web/...                     - Next.js standalone + static + public
+#   bundle/cli/bin/cli.js              - CLI entrypoint (calls cli.bundle.js)
+#   bundle/cli/dist/cli.bundle.js      - self-contained CLI bundle (deps inlined)
+#   bundle/cli/package.json            - package metadata (version, etc.)
+#
+# The bundle's `bin/agentctl-linux-amd64` variant is bind-mounted into
+# Docker-executor sandboxes by the lifecycle manager; ship it next to kandev
+# so the AgentctlResolver finds it without manual configuration.
+COPY bundle/bin/kandev               /app/apps/backend/bin/kandev
+COPY bundle/bin/agentctl-linux-amd64 /app/apps/backend/bin/agentctl-linux-amd64
+COPY bundle/bin/agentctl             /usr/local/bin/agentctl
+COPY bundle/web/                     /app/apps/web/.next/standalone/
+COPY bundle/cli/                     /usr/local/lib/kandev-cli/
+COPY docker-entrypoint.sh            /usr/local/bin/docker-entrypoint.sh
 
-# Copy Next.js standalone output
-COPY --from=web-builder /build/apps/web/.next/standalone/ /app/apps/web/.next/standalone/
-
-# Copy static assets and public directory into standalone output
-COPY --from=web-builder /build/apps/web/.next/static/ /app/apps/web/.next/standalone/web/.next/static/
-COPY --from=web-builder /build/apps/web/public/ /app/apps/web/.next/standalone/web/public/
-
-# Install CLI: copy built output + package.json, install prod deps, link binary
-COPY --from=web-builder /build/apps/cli/dist/ /usr/local/lib/kandev-cli/dist/
-COPY --from=web-builder /build/apps/cli/bin/ /usr/local/lib/kandev-cli/bin/
-COPY --from=web-builder /build/apps/cli/package.json /usr/local/lib/kandev-cli/
-RUN cd /usr/local/lib/kandev-cli && npm install --omit=dev && \
-    chmod +x bin/cli.js && \
-    ln -s /usr/local/lib/kandev-cli/bin/cli.js /usr/local/bin/kandev
+# Re-apply executable bits stripped by tar/COPY edge cases, then link the
+# CLI launcher onto PATH. The CLI's deps are inlined into dist/cli.bundle.js
+# by the release bundle step, so no `npm install` is needed here.
+RUN chmod +x \
+        /app/apps/backend/bin/kandev \
+        /app/apps/backend/bin/agentctl-linux-amd64 \
+        /usr/local/bin/agentctl \
+        /usr/local/lib/kandev-cli/bin/cli.js \
+        /usr/local/bin/docker-entrypoint.sh && \
+    ln -s /usr/local/lib/kandev-cli/bin/cli.js /usr/local/bin/kandev && \
+    chown -R kandev:kandev /app /data
 
 # Kandev home directory (DB, worktrees, sessions, repos)
 VOLUME ["/data"]
 
-# Environment defaults for containerized operation
+# Environment defaults for containerized operation.
+# NPM_CONFIG_PREFIX points npm global installs at the PV so user-installed
+# agent CLIs (claude-code, codex, auggie, ...) survive pod restarts.
 ENV KANDEV_NO_BROWSER=1 \
     KANDEV_HOME_DIR=/data \
     KANDEV_DOCKER_ENABLED=false \
+    HOME=/data/home \
+    NPM_CONFIG_PREFIX=/data/.npm-global \
+    PATH=/data/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     HOSTNAME=0.0.0.0 \
     NODE_ENV=production
-
-# Copy entrypoint script
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-
-# Set build-time ownership of /app and /data
-RUN chown -R kandev:kandev /app /data
 
 WORKDIR /app
 

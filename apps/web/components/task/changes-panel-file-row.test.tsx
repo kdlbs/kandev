@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { render } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { render, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { FileRow } from "./changes-panel-file-row";
 
@@ -78,5 +78,33 @@ describe("FileRow truncation (regression: path overlaps diff stats in narrow pan
     // No folder element when there's no slash in the path.
     const folderSpan = container.querySelector("span.text-foreground\\/60");
     expect(folderSpan).toBeNull();
+  });
+
+  it("passes diff source + repository context on open diff", () => {
+    const onOpenDiff = vi.fn();
+    const { container } = render(
+      <TooltipProvider>
+        <ul>
+          <FileRow
+            file={{ ...baseFile, path: "README.md", repositoryName: "frontend" }}
+            isPending={false}
+            onSelect={noopSelect}
+            onOpenDiff={onOpenDiff}
+            onStage={noop}
+            onUnstage={noop}
+            onDiscard={noop}
+            onEditFile={noop}
+          />
+        </ul>
+      </TooltipProvider>,
+    );
+
+    const row = container.querySelector("[data-testid='file-row-README.md']") as HTMLElement | null;
+    expect(row).not.toBeNull();
+    fireEvent.click(row!);
+    expect(onOpenDiff).toHaveBeenCalledWith("README.md", {
+      source: "uncommitted",
+      repositoryName: "frontend",
+    });
   });
 });

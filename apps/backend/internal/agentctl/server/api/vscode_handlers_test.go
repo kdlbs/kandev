@@ -2,9 +2,11 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -132,15 +134,43 @@ func TestHandleVscodeOpenFile_InvalidBody(t *testing.T) {
 }
 
 func TestHandleVscodeOpenFile_NotRunning_AutoStartAttempted(t *testing.T) {
+	// Isolate HOME so ResolveBinary won't find a real code-server install,
+	// AND so the auto-install goroutine writes into a path that survives
+	// the test's lifetime. We deliberately don't use t.TempDir for HOME:
+	// StartVscode races a background tarball extract that, on fast CI
+	// runners, keeps writing files for minutes after the assertions run.
+	// t.TempDir's RemoveAll cleanup would race with that and fail the test.
+	// Allocate outside any t.TempDir hierarchy so Go's testing-framework
+	// cleanup never touches it.
+	homeDir, err := os.MkdirTemp(os.TempDir(), "kandev-vscode-home-*")
+	if err != nil {
+		t.Fatalf("mktemp home: %v", err)
+	}
+	t.Setenv("HOME", homeDir)
 	// Use isolated TMPDIR so the IPC socket search finds no sockets.
+	// Done after homeDir so the install dir doesn't end up nested inside it.
 	t.Setenv("TMPDIR", t.TempDir())
-	// Isolate HOME so ResolveBinary won't find a real code-server install.
-	t.Setenv("HOME", t.TempDir())
 
 	s := newTestServer(t)
 
+	// Cancel the in-flight install goroutine on test exit, then best-effort
+	// remove the home dir. Ignore errors — OS temp gets pruned anyway.
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = s.procMgr.StopVscode(stopCtx)
+		_ = os.RemoveAll(homeDir)
+	})
+
 	body, _ := json.Marshal(types.VscodeOpenFileRequest{Path: "main.go", Line: 10, Col: 5})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/vscode/open-file", bytes.NewReader(body))
+	// Short context: StartVscode flips status to "installing" synchronously
+	// before kicking off the background tarball install; WaitForRunning then
+	// blocks until the install finishes or ctx fires. On runners with fast
+	// GitHub egress the real download can run for many minutes — we only
+	// want to observe the status transition, so 2s is plenty.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/vscode/open-file", bytes.NewReader(body)).WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 

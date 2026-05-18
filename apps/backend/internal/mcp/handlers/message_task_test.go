@@ -85,7 +85,7 @@ func (f *fakeOrchestrator) GetMessageQueue() *messagequeue.Service { return f.qu
 func newMessageTaskHandler(t *testing.T, svc *service.Service) (*Handlers, *fakeOrchestrator) {
 	t.Helper()
 	log := testLogger(t)
-	orch := &fakeOrchestrator{queue: messagequeue.NewService(log)}
+	orch := &fakeOrchestrator{queue: messagequeue.NewServiceMemory(log)}
 	h := &Handlers{
 		taskSvc:         svc,
 		sessionLauncher: orch,
@@ -205,15 +205,47 @@ func TestHandleMessageTask_RunningSession_Queues(t *testing.T) {
 	// and structured sender metadata so the drain path can write a Message row
 	// the UI can render with a sender badge.
 	status := orch.queue.GetStatus(context.Background(), sess.ID)
-	require.True(t, status.IsQueued)
-	assert.Contains(t, status.Message.Content, "follow-up message")
-	assert.Contains(t, status.Message.Content, "<kandev-system>")
-	assert.Contains(t, status.Message.Content, "Sender task")
-	assert.Equal(t, sender.ID, status.Message.Metadata["sender_task_id"])
-	assert.Equal(t, "Sender task", status.Message.Metadata["sender_task_title"])
-	assert.Equal(t, "sender-sess-1", status.Message.Metadata["sender_session_id"])
+	require.Equal(t, 1, status.Count)
+	entry := status.Entries[0]
+	assert.Contains(t, entry.Content, "follow-up message")
+	assert.Contains(t, entry.Content, "<kandev-system>")
+	assert.Contains(t, entry.Content, "Sender task")
+	assert.Equal(t, sender.ID, entry.Metadata["sender_task_id"])
+	assert.Equal(t, "Sender task", entry.Metadata["sender_task_title"])
+	assert.Equal(t, "sender-sess-1", entry.Metadata["sender_session_id"])
 	assert.Empty(t, orch.promptCalls)
 	assert.Empty(t, orch.startCreatedCalls)
+}
+
+func TestHandleMessageTask_QueueFull_ReturnsStructuredError(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	// Saturate the receiver's queue.
+	for i := 0; i < messagequeue.DefaultMaxPerSession; i++ {
+		_, err := orch.queue.QueueMessageWithMetadata(context.Background(), sess.ID, target.ID,
+			"prefill", "", "agent", false, nil, nil)
+		require.NoError(t, err)
+	}
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "overflow message", sender.ID))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeError, resp.Type)
+
+	var errResp ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &errResp))
+	assert.Equal(t, "queue_full", errResp.Code)
+	assert.Equal(t, "queue_full", errResp.Details["error"])
+	assert.EqualValues(t, messagequeue.DefaultMaxPerSession, errResp.Details["queue_size"])
+	assert.EqualValues(t, messagequeue.DefaultMaxPerSession, errResp.Details["max"])
+	assert.Equal(t, "next_turn", errResp.Details["retry_after"])
+	queued, ok := errResp.Details["queued_messages"].([]interface{})
+	require.True(t, ok, "queued_messages should be an array")
+	assert.Len(t, queued, messagequeue.DefaultMaxPerSession)
 }
 
 func TestHandleMessageTask_WaitingForInput_PromptsAgent(t *testing.T) {

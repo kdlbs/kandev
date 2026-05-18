@@ -7,9 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
-	"github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -31,6 +32,7 @@ type executorStore interface {
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
+	GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
@@ -48,6 +50,7 @@ type executorStore interface {
 	// Workspace
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	// Task environment
+	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
@@ -113,6 +116,9 @@ type AgentManagerClient interface {
 	// SetExecutionDescription updates the task description in an existing execution's metadata.
 	// Used when starting an agent on a session whose workspace was already launched.
 	SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error
+
+	// SetExecutionEnv updates per-run env vars in an existing execution before subprocess start.
+	SetExecutionEnv(ctx context.Context, agentExecutionID string, env map[string]string) error
 
 	// SetMcpMode changes the MCP tool mode on an existing execution's agentctl instance.
 	// Used when a session transitions to config mode after the workspace was prepared with default mode.
@@ -184,9 +190,14 @@ type AgentManagerClient interface {
 	// Returns nil, nil if no execution exists.
 	GetCumulativeDiff(ctx context.Context, sessionID, baseCommit string) (*client.CumulativeDiffResult, error)
 
-	// GetGitStatus retrieves the current git status for a session.
+	// GetGitStatus retrieves the current (cached) git status for a session.
 	// Returns nil, nil if no execution exists.
 	GetGitStatus(ctx context.Context, sessionID string) (*client.GitStatusResult, error)
+
+	// GetGitStatusFresh retrieves a fresh (non-cached) git status for a session.
+	// Bypasses the workspace tracker's poll cache. Use after the agent commits.
+	// Returns nil, nil if no execution exists.
+	GetGitStatusFresh(ctx context.Context, sessionID string) (*client.GitStatusResult, error)
 
 	// WaitForAgentctlReady waits for the agentctl HTTP server to be ready for a session.
 	// This must be called before other agentctl operations (git status, shell, etc.).
@@ -195,7 +206,7 @@ type AgentManagerClient interface {
 
 // RemoteRuntimeStatus mirrors runtime status details needed by orchestrator/UI.
 type RemoteRuntimeStatus struct {
-	RuntimeName   string
+	RuntimeName   agentruntime.Runtime
 	RemoteName    string
 	State         string
 	CreatedAt     *time.Time
@@ -206,7 +217,7 @@ type RemoteRuntimeStatus struct {
 // RemoteStatusPollRequest contains the fields from ExecutorRunning needed for remote status polling.
 type RemoteStatusPollRequest struct {
 	SessionID        string
-	Runtime          string
+	Runtime          agentruntime.Runtime
 	AgentExecutionID string
 	ContainerID      string
 	Metadata         map[string]interface{}
@@ -229,6 +240,7 @@ type AgentProfileInfo struct {
 // LaunchAgentRequest contains parameters for launching an agent
 type LaunchAgentRequest struct {
 	TaskID              string
+	WorkspaceID         string // Kandev workspace ID — used to build scratch dir for repo-less tasks
 	SessionID           string
 	TaskEnvironmentID   string // Env owning this session (shared across sessions in the same task)
 	TaskTitle           string // Human-readable task title for semantic worktree naming
@@ -237,7 +249,7 @@ type LaunchAgentRequest struct {
 	Branch              string
 	TaskDescription     string                 // Task description to send via ACP prompt
 	Attachments         []v1.MessageAttachment // Attachments for the initial prompt (images/files)
-	Priority            int
+	Priority            string
 	Metadata            map[string]interface{}
 	Env                 map[string]string
 	ACPSessionID        string            // ACP session ID to resume, if available
@@ -247,6 +259,7 @@ type LaunchAgentRequest struct {
 	PreviousExecutionID string            // Previous execution ID for runtime reconnect
 	McpMode             string            // MCP tool mode: "config" activates config-mode tools
 	IsEphemeral         bool              // Ephemeral task (quick chat) — enables fallback workspace creation
+	WorkspacePath       string            // Optional host folder for repo-less tasks (overrides scratch fallback)
 
 	// Setup script from executor profile (runs in execution environment before agent starts)
 	SetupScript string
@@ -257,6 +270,7 @@ type LaunchAgentRequest struct {
 	RepositoryID         string // Repository ID for worktree tracking
 	RepositoryPath       string // Path to the main repository (for worktree creation)
 	BaseBranch           string // Base branch for the worktree (e.g., "main")
+	DefaultBranch        string // Repository's default_branch, used as a fallback when BaseBranch is missing
 	CheckoutBranch       string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	WorktreeBranchPrefix string // Branch prefix for worktree branches
 	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
@@ -270,6 +284,11 @@ type LaunchAgentRequest struct {
 	// top-level fields above are populated from Repositories[0] for backwards
 	// compatibility with code paths that have not yet been updated.
 	Repositories []RepoSpec
+
+	// RouteOverride carries a provider-routing override resolved by the
+	// office scheduler. nil when routing is disabled or this is a kanban
+	// launch.
+	RouteOverride *RouteOverride
 }
 
 // RepoSpec describes one repository for a multi-repo task launch from the
@@ -282,6 +301,7 @@ type RepoSpec struct {
 	RepositoryURL        string
 	RepoName             string
 	BaseBranch           string
+	DefaultBranch        string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch       string
 	WorktreeID           string
 	WorktreeBranchPrefix string
@@ -294,6 +314,12 @@ type RepoSpec struct {
 // config, tasks). Used when plan_mode is enabled on a session.
 const McpModeConfig = "config"
 
+// McpModeOffice restricts the MCP toolset for office (autonomous) agents to
+// interaction + plan tools. Office agents manage tasks via the kandev CLI
+// (exposed through agentctl + $KANDEV_CLI), not MCP — see
+// docs/specs/office-agent-cli/spec.md.
+const McpModeOffice = "office"
+
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
 	AgentProfileID string
@@ -303,6 +329,37 @@ type LaunchOptions struct {
 	StartAgent     bool
 	McpMode        string // MCP tool mode: McpModeConfig activates config-mode tools
 	Attachments    []v1.MessageAttachment
+	Env            map[string]string
+	// RouteOverride carries a provider-routing override resolved by the
+	// office scheduler. When nil, launch behavior is identical to today.
+	RouteOverride *RouteOverride
+}
+
+// RouteOverride is the orchestrator-side mirror of routing.Candidate
+// fields that need to flow into the lifecycle launch.
+type RouteOverride struct {
+	ProviderID string
+	Model      string
+	Tier       string
+	Mode       string
+	Flags      []string
+	Env        map[string]string
+}
+
+// LaunchContext is the orchestrator-side mirror of the Office launch
+// context (prompt, executor selection, workflow step, attachments,
+// plan-mode flag, env, profile). Routed launches use this so they
+// preserve the Office-built prompt and configuration that the legacy
+// path receives via StartTaskWithEnv.
+type LaunchContext struct {
+	ExecutorID        string
+	ExecutorProfileID string
+	Priority          string
+	Prompt            string
+	WorkflowStepID    string
+	PlanMode          bool
+	Attachments       []v1.MessageAttachment
+	Env               map[string]string
 }
 
 // LaunchAgentResponse contains the result of launching an agent
@@ -313,6 +370,7 @@ type LaunchAgentResponse struct {
 	WorktreeID       string
 	WorktreePath     string
 	WorktreeBranch   string
+	WorkspacePath    string // Effective workspace path (may differ from WorktreePath for quick-chat sessions)
 	Metadata         map[string]interface{}
 	PrepareResult    *lifecycle.EnvPrepareResult `json:"-"` // Carried from lifecycle.Launch for synchronous persistence
 
@@ -477,6 +535,11 @@ type RepoCloner interface {
 // RepoUpdater updates repository records in the database.
 type RepoUpdater interface {
 	UpdateRepositoryLocalPath(ctx context.Context, repositoryID, localPath string) error
+	// UpdateRepositoryDefaultBranch persists the integration branch detected
+	// from the local clone. Called after a fresh provider-backed clone when
+	// the repository row was created without an upstream-derived value
+	// (e.g. via the MCP create_task path that takes a bare github URL).
+	UpdateRepositoryDefaultBranch(ctx context.Context, repositoryID, defaultBranch string) error
 }
 
 // ExecutorConfig holds configuration for the Executor

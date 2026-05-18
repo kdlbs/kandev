@@ -26,30 +26,44 @@ steps:
 
       {{task_prompt}}
 
-      HARD RULE — READ THIS FIRST
-      You are reviewing the PR's DIFF, not the repository. Findings are only valid on lines that were ADDED or MODIFIED in this PR. Unchanged lines in changed files, and any code in files the PR did not touch, are OFF-LIMITS even if they contain real bugs. If you cannot point to the exact added/modified line in the PR diff that triggers a finding, discard the finding.
+      SCOPE OVERRIDE (read first):
+      This task overrides any general "completeness" or "find all downstream changes"
+      instruction you may have. Scope is strictly the diff. Under-reporting is
+      acceptable; reporting on lines outside the diff is a failure of the task.
 
-      STEP 0: CREATE A TASK LIST
-      Before anything else, create a task list tracking the substeps below (use your todo/task tracking tool if available). Mark each task in_progress when you begin it and completed when you finish. Do not skip ahead — each step feeds the next.
+      STEP 1: DETERMINE WHAT TO REVIEW
 
-      STEP 1: GET THE PR DIFF AND ENUMERATE CHANGED LINES
+      The PR branch is checked out and the full codebase is available. You can and
+      should read surrounding code to understand changes in context.
+      - Extract the PR number from the task description (e.g. from the GitHub URL)
+      - Run: gh pr view <number> --json headRefName,baseRefName to confirm branch and base
+      - Run: git fetch origin <base_branch> to make sure your base ref is up to date
+      - Run: git diff origin/<base_branch>...HEAD --name-only to get the list of changed files
+      - Run: git diff origin/<base_branch>...HEAD to see the full diff
+      - Read each changed file in full — understand the surrounding code, not just the diff
+      - Navigate related files (callers, interfaces, tests) to understand the change end-to-end
+      - USE the full codebase for context; only REPORT issues on lines the PR added or modified
 
-      - Extract the PR number from the task description (e.g. from the GitHub URL).
-      - Run: gh pr view <number> --json headRefName,baseRefName,title,body to confirm branch, base, and intent.
-      - Run: gh pr diff <number> to fetch the canonical PR diff (this is what GitHub shows reviewers).
-      - For each file in the diff, list the changed hunks as (file, start_line-end_line) for the NEW side (added/modified lines only — ignore removed-only lines and unchanged context lines).
-      - Write this "changed-lines map" down at the top of your review notes. Every finding you later report must cite a (file, line) pair that falls inside this map.
+      STEP 1.5: BUILD AN ALLOWED-LINES SET (HARD GATE)
 
-      STEP 2: READ FOR CONTEXT, NOT FOR FINDINGS
+      - Run: git diff origin/<base_branch>...HEAD --unified=0
+      - Extract the (file, line-range) tuples of every "+" line. This is your allow-list.
+      - Findings on any line outside the allow-list are forbidden, no exceptions.
+      - A finding is forbidden even if:
+        - the PR description mentions or acknowledges the issue
+        - the line is in a file the PR modified, but on a line it didn't touch
+        - the line is in a file imported by, or imports, a changed file
+        - removing or fixing it would improve the codebase
+        - it is a "good follow-up"
 
-      Context reading is allowed only to understand whether a changed line is correct. It is never a source of findings.
-      - Open each changed file and read the surrounding function / block so you understand what the added lines do.
-      - Navigate to callers, interfaces, or tests only if needed to judge a changed line.
-      - Do NOT scan unchanged code looking for issues. Do NOT review files outside the diff.
+      The PR description is context, not scope. Acknowledged pre-existing issues,
+      planned follow-ups, and "known limitations" called out by the author are OUT
+      of scope. Do not comment on them even if they are real. The author already
+      knows.
 
-      STEP 3: REVIEW THE CHANGED LINES
+      STEP 2: REVIEW THE CHANGES
 
-      Walk through the changed-lines map hunk by hunk. For each hunk, consider these layers (skip layers that don't apply):
+      Review across these layers (skip layers that don't apply):
 
       Security (blockers if found):
       - No secrets, tokens, or credentials in code
@@ -82,30 +96,30 @@ steps:
       - as any / as unknown casts to dodge type errors instead of fixing types
       - Redundant validation where inputs are already parsed/typed
 
-      STEP 4: SELF-CHECK EVERY FINDING BEFORE REPORTING
+      OUTPUT FORMAT:
 
-      For each candidate finding, do this check. Drop the finding if any answer is "no":
-      1. Is the cited (file, line) inside the changed-lines map from STEP 1?
-      2. Can you quote the exact added/modified line from the PR diff that triggers it? (Include that quoted line in your notes.)
-      3. Is the issue caused by this PR, not pre-existing?
-      4. Are you >=80% confident it's a real issue?
+      For each finding, provide:
+      - file:line
+      - The exact "+" line from the diff the finding refers to (one-line quote).
+        If you cannot quote a "+" line from the diff, the finding is invalid — drop it.
+      - Description, why it matters, how to fix it.
 
-      STEP 5: OUTPUT
+      Only report findings you're >=80% confident about.
 
-      For each finding: file:line - description, why it matters, how to fix it, and the quoted diff line.
       Use these sections (omit empty ones):
 
       BLOCKER (must fix before merge — security, data loss, broken logic):
-      - file:line - description
+      - file:line — "+ <quoted diff line>" — description
 
       SUGGESTION (recommended, doesn't block — performance, architecture, missing tests):
-      - file:line - description
+      - file:line — "+ <quoted diff line>" — description
 
       End with a verdict: Ready to merge / Ready with suggestions / Blocked
 
-      NOT A FINDING (never report these):
-      - Any line not in the changed-lines map — even if it's a real bug
+      NOT A FINDING (skip these):
+      - Issues on lines or files the PR didn't modify — even if they are real bugs
       - Pre-existing code patterns that this PR didn't introduce or change
+      - Issues acknowledged in the PR description as known / follow-up
       - Things linters, typecheckers, or CI catch (imports, types, formatting)
       - Intentional functionality changes directly related to the PR's purpose
       - Issues explicitly suppressed in code (lint-ignore, nolint comments)

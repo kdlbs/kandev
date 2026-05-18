@@ -61,3 +61,35 @@ export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOption
   if (!text) return undefined as T;
   return JSON.parse(text) as T;
 }
+
+/**
+ * Wraps fetchJson with up to `maxAttempts` retries (default 3) and
+ * exponential backoff starting at `baseDelayMs` (default 100 ms).
+ *
+ * Only transient network errors (TypeError: fetch failed, ECONNRESET,
+ * ECONNREFUSED) are retried. ApiError (non-2xx HTTP status) propagates
+ * immediately — the backend response is authoritative.
+ *
+ * Use for idempotent SSR and client-side reads that can race against a
+ * backend restart or a saturated connection pool.
+ */
+export async function fetchJsonWithRetry<T>(
+  pathOrUrl: string,
+  options?: ApiRequestOptions,
+  maxAttempts = 3,
+  baseDelayMs = 100,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await fetchJson<T>(pathOrUrl, options);
+    } catch (err) {
+      if (err instanceof ApiError) throw err; // do not retry HTTP errors
+      lastError = err;
+      if (attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, baseDelayMs * 2 ** attempt));
+      }
+    }
+  }
+  throw lastError;
+}

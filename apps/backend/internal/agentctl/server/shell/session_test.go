@@ -55,9 +55,12 @@ func assertUnixShell(t *testing.T, shell string, args []string) {
 	if _, err := os.Stat(shell); err != nil && shell != os.Getenv("SHELL") {
 		t.Logf("Warning: detected shell %q may not exist: %v", shell, err)
 	}
-	// Unix shells should have -l flag for login shell
-	if len(args) > 0 && args[0] != "-l" {
-		t.Errorf("expected Unix shell args to contain '-l', got %v", args)
+	// No -l flag: login mode lets /etc/profile reset PATH and lose the
+	// container-set entries needed to find agent CLIs.
+	for _, a := range args {
+		if a == "-l" {
+			t.Errorf("expected no -l flag in Unix shell args, got %v", args)
+		}
 	}
 }
 
@@ -91,8 +94,10 @@ func TestDetectShellWithSHELLEnv(t *testing.T) {
 	if shell != "/bin/sh" {
 		t.Errorf("expected shell from SHELL env (/bin/sh), got %q", shell)
 	}
-	if len(args) == 0 || args[0] != "-l" {
-		t.Errorf("expected args to contain '-l', got %v", args)
+	for _, a := range args {
+		if a == "-l" {
+			t.Errorf("expected no -l flag, got %v", args)
+		}
 	}
 }
 

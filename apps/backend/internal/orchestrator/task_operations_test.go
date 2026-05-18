@@ -10,13 +10,14 @@ import (
 
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -578,6 +579,153 @@ func TestPostLaunchCreated_PlanMode_SetsMetadata(t *testing.T) {
 	}
 }
 
+// --- StartCreatedSession: Kandev system prompt wrap on first launch ---
+
+// TestStartCreatedSession_WrapsFirstPromptWithKandevSystemBlock verifies that
+// the recorded user message persists the <kandev-system> wrap that the
+// orchestrator now injects in startTask / StartCreatedSession. The wrap must
+// be in the raw row so the chat UI can show it under "Show formatted" and the
+// agent CLI's first ACP prompt includes the MCP tools list and task/session
+// IDs. Regression guard for the case the user reported: "tasks I create from
+// the kanban mode don't have the kandev system prompt."
+func TestStartCreatedSession_WrapsFirstPromptWithKandevSystemBlock(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	// Seed executors_running so LaunchPreparedSession takes the fast path
+	// (startAgentOnExistingWorkspace) and never reaches the real LaunchAgent.
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:          "task1",
+		Title:       "Test Task",
+		Description: "Original task description",
+		State:       v1.TaskStateInProgress,
+	}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+
+	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "Build me a feature", false, false, nil)
+	if err != nil {
+		t.Fatalf("StartCreatedSession failed: %v", err)
+	}
+
+	if len(mc.userMessages) != 1 {
+		t.Fatalf("expected 1 user message recorded, got %d", len(mc.userMessages))
+	}
+	content := mc.userMessages[0].content
+
+	// The wrap is the outermost layer; the user's typed text must still be inside it.
+	if !strings.Contains(content, "<kandev-system>") {
+		t.Errorf("expected <kandev-system> opening tag in recorded content, got %q", content)
+	}
+	if !strings.Contains(content, "</kandev-system>") {
+		t.Errorf("expected </kandev-system> closing tag in recorded content, got %q", content)
+	}
+	if !strings.Contains(content, "Build me a feature") {
+		t.Errorf("expected user text preserved in recorded content, got %q", content)
+	}
+	// The wrap must carry the task and session IDs so the agent can call the
+	// kandev MCP tools without re-discovering its own identifiers.
+	if !strings.Contains(content, "Kandev Task ID: task1") {
+		t.Errorf("expected Kandev Task ID in wrap, got %q", content)
+	}
+	if !strings.Contains(content, "Kandev Session ID: session1") {
+		t.Errorf("expected Kandev Session ID in wrap, got %q", content)
+	}
+	// The MCP tool list is the whole point of the wrap — guard a representative one.
+	if !strings.Contains(content, "ask_user_question_kandev") {
+		t.Errorf("expected ask_user_question_kandev tool in wrap, got %q", content)
+	}
+}
+
+// TestStartCreatedSession_DoesNotDoubleWrapPreWrappedPrompt verifies the
+// idempotency guard on the orchestrator's wrap step. Upstream call sites
+// (wsAddMessage on CREATED sessions, recordAutoStartMessage) wrap before
+// recording the user message so the DB row carries the <kandev-system>
+// block. When the wrapped content is later passed through StartCreatedSession,
+// the orchestrator must NOT wrap it a second time — otherwise the agent
+// receives nested system blocks and the strip pipeline behaves unpredictably.
+func TestStartCreatedSession_DoesNotDoubleWrapPreWrappedPrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:    "task1",
+		Title: "Test Task",
+		State: v1.TaskStateInProgress,
+	}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+
+	// Simulate an upstream caller (e.g. wsAddMessage) that has already wrapped.
+	preWrapped := sysprompt.InjectKandevContext("task1", "session1", "Build me a feature")
+
+	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", preWrapped, false, false, nil)
+	if err != nil {
+		t.Fatalf("StartCreatedSession failed: %v", err)
+	}
+
+	if len(mc.userMessages) != 1 {
+		t.Fatalf("expected 1 user message recorded, got %d", len(mc.userMessages))
+	}
+	content := mc.userMessages[0].content
+
+	// Exactly one opening tag and one closing tag — not nested.
+	openCount := strings.Count(content, "<kandev-system>")
+	closeCount := strings.Count(content, "</kandev-system>")
+	if openCount != 1 {
+		t.Errorf("expected exactly 1 <kandev-system> tag, got %d in %q", openCount, content)
+	}
+	if closeCount != 1 {
+		t.Errorf("expected exactly 1 </kandev-system> tag, got %d in %q", closeCount, content)
+	}
+	// The user's text is preserved.
+	if !strings.Contains(content, "Build me a feature") {
+		t.Errorf("expected user text preserved, got %q", content)
+	}
+}
+
+// TestStartCreatedSession_EmptyPromptSkipsWrap verifies the orchestrator does
+// not synthesize a <kandev-system>-only message when the user has nothing to
+// say yet. recordInitialMessage already skips empty prompts, but wrapping
+// "" would defeat that guard and pollute the chat with a tag-only row.
+func TestStartCreatedSession_EmptyPromptSkipsWrap(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	taskRepo := newMockTaskRepo()
+	// No description on the task and no prompt from the caller — startTask's
+	// `effectivePrompt == ""` branch must short-circuit before InjectKandevContext.
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Empty", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+
+	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "", false, false, nil)
+	if err != nil {
+		t.Fatalf("StartCreatedSession failed: %v", err)
+	}
+
+	// No user message should be recorded — wrapping an empty prompt would
+	// produce a tag-only row.
+	if len(mc.userMessages) != 0 {
+		t.Fatalf("expected 0 user messages for empty prompt, got %d (content=%q)",
+			len(mc.userMessages), mc.userMessages[0].content)
+	}
+}
+
 // --- ResumeTaskSession ---
 
 func TestResumeTaskSession_WrongTask(t *testing.T) {
@@ -903,6 +1051,50 @@ func TestGetTaskSessionStatus_HealsStuckStartingSession(t *testing.T) {
 // mismatch this test simulated cannot occur, and the band-aid was removed
 // (see shouldHealStuckStartingSession in task_operations.go).
 
+func TestGetTaskSessionStatus_UsesTaskEnvironmentBranchForDocker(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.TaskEnvironmentID = "env1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID:             "env1",
+		TaskID:         "task1",
+		ExecutorType:   string(models.ExecutorTypeLocalDocker),
+		WorktreePath:   "/workspace",
+		WorktreeBranch: "feature/test-task-abc",
+		WorkspacePath:  "/workspace",
+		Status:         models.TaskEnvironmentStatusReady,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}); err != nil {
+		t.Fatalf("failed to create task environment: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus returned error: %v", err)
+	}
+	if resp.WorktreeBranch == nil || *resp.WorktreeBranch != "feature/test-task-abc" {
+		t.Fatalf("worktree_branch = %v, want feature/test-task-abc", resp.WorktreeBranch)
+	}
+	if resp.WorktreePath == nil || *resp.WorktreePath != "/workspace" {
+		t.Fatalf("worktree_path = %v, want /workspace", resp.WorktreePath)
+	}
+}
+
 // --- ReconcileSessionsOnStartup ---
 
 func TestReconcileSessionsOnStartup(t *testing.T) {
@@ -1003,6 +1195,52 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 			t.Fatalf("expected ExecutorRunning to be preserved for resumable failed session, got error: %v", err)
 		}
 		if er.ResumeToken != "acp-session-abc" {
+			t.Fatalf("expected resume token to be preserved, got %q", er.ResumeToken)
+		}
+	})
+
+	// Pins office IDLE preservation: an office session sitting in IDLE
+	// (agent torn down between turns, conversation parked for the next
+	// run) MUST stay IDLE after backend restart. The previous code
+	// path flipped any non-WAITING_FOR_INPUT active state — including
+	// IDLE — to WAITING_FOR_INPUT, which made the chat UI render as
+	// "Agent working" on a restored task even when nothing was running.
+	t.Run("idle_office_session_state_preserved", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		seedTaskAndSession(t, repo, "task-idle", "session-idle", models.TaskSessionStateIdle)
+
+		err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:          "er-idle",
+			SessionID:   "session-idle",
+			TaskID:      "task-idle",
+			ResumeToken: "acp-session-xyz",
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+		if err != nil {
+			t.Fatalf("failed to upsert executor running: %v", err)
+		}
+
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+		svc.reconcileSessionsOnStartup(ctx)
+
+		session, err := repo.GetTaskSession(ctx, "session-idle")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		if session.State != models.TaskSessionStateIdle {
+			t.Fatalf("expected IDLE to be preserved, got %q", session.State)
+		}
+		// ExecutorRunning row must be preserved — the resume token is
+		// what powers the next run's session/load.
+		er, err := repo.GetExecutorRunningBySessionID(ctx, "session-idle")
+		if err != nil {
+			t.Fatalf("expected ExecutorRunning to be preserved for IDLE office session: %v", err)
+		}
+		if er.ResumeToken != "acp-session-xyz" {
 			t.Fatalf("expected resume token to be preserved, got %q", er.ResumeToken)
 		}
 	})

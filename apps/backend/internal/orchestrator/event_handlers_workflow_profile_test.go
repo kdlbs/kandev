@@ -127,7 +127,7 @@ func TestSwitchSessionForStep(t *testing.T) {
 			workflowStepGetter: newMockStepGetter(),
 			taskRepo:           taskRepo,
 			agentManager:       agentMgr,
-			messageQueue:       messagequeue.NewService(log),
+			messageQueue:       messagequeue.NewServiceMemory(log),
 			executor:           exec,
 			scheduler:          sched,
 		}
@@ -231,7 +231,7 @@ func TestSwitchSessionForStep_ReusesExistingProfileSession(t *testing.T) {
 		workflowStepGetter: newMockStepGetter(),
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewService(log),
+		messageQueue:       messagequeue.NewServiceMemory(log),
 		executor:           exec,
 		scheduler:          sched,
 	}
@@ -359,7 +359,7 @@ func TestSwitchSessionForStep_ReusesPreviouslyLaunchedSession(t *testing.T) {
 		workflowStepGetter: newMockStepGetter(),
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewService(log),
+		messageQueue:       messagequeue.NewServiceMemory(log),
 		executor:           exec,
 		scheduler:          sched,
 	}
@@ -451,7 +451,7 @@ func TestSwitchSessionForStep_ReusesFailedSession(t *testing.T) {
 		workflowStepGetter: newMockStepGetter(),
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewService(log),
+		messageQueue:       messagequeue.NewServiceMemory(log),
 		executor:           exec,
 		scheduler:          sched,
 	}
@@ -542,7 +542,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			workflowStepGetter: sg,
 			taskRepo:           taskRepo,
 			agentManager:       agentMgr,
-			messageQueue:       messagequeue.NewService(log),
+			messageQueue:       messagequeue.NewServiceMemory(log),
 			executor:           exec,
 			scheduler:          sched,
 		}
@@ -779,7 +779,7 @@ func TestSwitchSessionForStep_PreservesOldSessionOnFailure(t *testing.T) {
 			workflowStepGetter: newMockStepGetter(),
 			taskRepo:           taskRepo,
 			agentManager:       agentMgr,
-			messageQueue:       messagequeue.NewService(log),
+			messageQueue:       messagequeue.NewServiceMemory(log),
 			executor:           exec,
 			scheduler:          sched,
 		}

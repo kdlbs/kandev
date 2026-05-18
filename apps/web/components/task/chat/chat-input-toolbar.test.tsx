@@ -12,6 +12,21 @@ vi.mock("@kandev/ui/tooltip", () => ({
   TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+vi.mock("@/components/keyboard-shortcut-tooltip", () => ({
+  KeyboardShortcutTooltip: ({
+    children,
+    description,
+  }: {
+    children: React.ReactNode;
+    description?: string;
+  }) => (
+    <>
+      {children}
+      {description ? <span>{description}</span> : null}
+    </>
+  ),
+}));
+
 import { ChatInputToolbar } from "./chat-input-toolbar";
 
 function deferred<T>() {
@@ -93,5 +108,30 @@ describe("ChatInputToolbar cancel button", () => {
       await new Promise((r) => setTimeout(r, 0));
     });
     expect(button.disabled).toBe(false);
+  });
+});
+
+describe("ChatInputToolbar submit button", () => {
+  it("shows the setup-disabled reason while keeping the submit button disabled", () => {
+    render(
+      <ChatInputToolbar
+        planModeEnabled={false}
+        onPlanModeChange={() => {}}
+        sessionId="s1"
+        taskId="t1"
+        taskDescription=""
+        isAgentBusy={false}
+        hasContent
+        isDisabled
+        submitDisabledReason="The agent is still being set up."
+        isSending={false}
+        onCancel={() => {}}
+        onSubmit={() => {}}
+        minimalToolbar
+      />,
+    );
+
+    expect((screen.getByTestId("submit-message-button") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("The agent is still being set up.")).toBeTruthy();
   });
 });

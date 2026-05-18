@@ -87,21 +87,33 @@ export type QueuedMessage = {
   id: string;
   session_id: string;
   task_id: string;
+  position?: number;
   content: string;
   model?: string;
   plan_mode: boolean;
   attachments?: Array<{ type: string; data: string; mime_type: string }>;
+  metadata?: Record<string, unknown>;
   queued_at: string;
   queued_by?: string;
 };
 
+/** Capacity info kept alongside the entry list. */
+export type QueueMeta = {
+  count: number;
+  max: number;
+};
+
 export type QueueStatus = {
-  is_queued: boolean;
-  message?: QueuedMessage | null;
+  entries: QueuedMessage[];
+  count: number;
+  max: number;
 };
 
 export type QueueState = {
-  bySessionId: Record<string, QueueStatus>;
+  /** Ordered list of pending entries per session (FIFO; head at index 0). */
+  bySessionId: Record<string, QueuedMessage[]>;
+  /** Per-session capacity snapshot from the latest server response. */
+  metaBySessionId: Record<string, QueueMeta>;
   isLoading: Record<string, boolean>;
 };
 
@@ -167,7 +179,8 @@ export type SessionSliceActions = {
   toggleComparePair: (taskId: string, revisionId: string) => void;
   clearComparePair: (taskId: string) => void;
   // Queue actions
-  setQueueStatus: (sessionId: string, status: QueueStatus) => void;
+  setQueueEntries: (sessionId: string, entries: QueuedMessage[], meta: QueueMeta) => void;
+  removeQueueEntry: (sessionId: string, entryId: string) => void;
   setQueueLoading: (sessionId: string, loading: boolean) => void;
   clearQueueStatus: (sessionId: string) => void;
 };

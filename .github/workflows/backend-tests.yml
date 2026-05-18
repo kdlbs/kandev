@@ -32,7 +32,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -57,8 +57,9 @@ jobs:
       - name: Build
         run: go build -v ./cmd/kandev
 
-      - name: Check gofmt
+      - name: Resolve base SHA
         shell: bash
+        working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
 
@@ -71,6 +72,14 @@ jobs:
           if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
             BASE_SHA="$(git rev-list --max-parents=0 HEAD)"
           fi
+
+          echo "BASE_SHA=${BASE_SHA}" >> "$GITHUB_ENV"
+          echo "Base SHA: ${BASE_SHA}"
+
+      - name: Check gofmt
+        shell: bash
+        run: |
+          set -euo pipefail
 
           CHANGED_GO_FILES="$(
             git diff --name-only --diff-filter=ACMRT "${BASE_SHA}"..."${{ github.sha }}" -- apps/backend \
@@ -94,9 +103,8 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.9
-          args: ./...
+          args: ./... --new-from-rev=${{ env.BASE_SHA }}
           working-directory: apps/backend
-          only-new-issues: true
 
       - name: Run tests
         run: |
@@ -110,7 +118,7 @@ jobs:
           fromJSONFile: apps/backend/test-results.json
 
       - name: Upload test artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: always()
         with:
           name: test-results
@@ -118,3 +126,44 @@ jobs:
             apps/backend/coverage.out
             apps/backend/test-results.json
           retention-days: 30
+
+  test-windows:
+    name: Backend (windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    # Least-privilege: this job only reads source and runs tests, no PR/issue
+    # writes or release operations. Flagged by CodeQL workflow audit + matching
+    # CodeRabbit nitpick.
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: apps/backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: apps/backend/go.sum
+
+      # Compile-checks every `*_windows.go` file (pty/conpty wrapper, job-object
+      # launcher, shell, signals, sysprocattr, vscode cleanup, …). The rest of
+      # the suite is build-tag-gated out automatically.
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      # Scope to packages with non-trivial Windows-specific code paths.
+      # Tests that genuinely cannot run on Windows (Unix sockets, POSIX
+      # symlinks under default Windows ACLs, delete-while-open) call t.Skip
+      # in source with a documented reason. The shell-fixture tests now use
+      # a self-hosting Go helper (see testmain_test.go) so they run on
+      # every platform.
+      - name: Test windows-sensitive packages
+        run: go test -race -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/...

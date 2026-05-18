@@ -1,3 +1,4 @@
+import type { ConnectionStatus } from "@/lib/types/connection";
 import type { HealthIssue, SystemHealthResponse } from "@/lib/types/health";
 import type {
   FilterClause,
@@ -30,7 +31,7 @@ export type DiffState = {
 };
 
 export type ConnectionState = {
-  status: "disconnected" | "connecting" | "connected" | "error" | "reconnecting";
+  status: ConnectionStatus;
   error: string | null;
 };
 

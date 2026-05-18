@@ -25,6 +25,8 @@ type Hub struct {
 	sessionSubscribers map[string]map[*Client]bool
 	// Clients subscribed to specific users (for user settings notifications)
 	userSubscribers map[string]map[*Client]bool
+	// Clients subscribed to specific office run ids (for run.event.appended).
+	runSubscribers map[string]map[*Client]bool
 
 	// Channels for client management
 	register   chan *Client
@@ -54,6 +56,7 @@ func NewHub(dispatcher *ws.Dispatcher, log *logger.Logger) *Hub {
 		taskSubscribers:    make(map[string]map[*Client]bool),
 		sessionSubscribers: make(map[string]map[*Client]bool),
 		userSubscribers:    make(map[string]map[*Client]bool),
+		runSubscribers:     make(map[string]map[*Client]bool),
 		register:           make(chan *Client),
 		unregister:         make(chan *Client),
 		broadcast:          make(chan *ws.Message, 256),
@@ -100,6 +103,7 @@ func (h *Hub) closeAllClients() {
 	}
 	h.taskSubscribers = make(map[string]map[*Client]bool)
 	h.sessionSubscribers = make(map[string]map[*Client]bool)
+	h.runSubscribers = make(map[string]map[*Client]bool)
 	h.sessionMode.focusByClient = make(map[string]map[*Client]bool)
 	h.mu.Unlock()
 
@@ -137,6 +141,9 @@ func (h *Hub) removeClient(client *Client) {
 	}
 	for userID := range client.userSubscriptions {
 		removeClientFromSubscriberMap(h.userSubscribers, userID, client)
+	}
+	for runID := range client.runSubscriptions {
+		removeClientFromSubscriberMap(h.runSubscribers, runID, client)
 	}
 	h.mu.Unlock()
 
@@ -355,6 +362,51 @@ func (h *Hub) UnsubscribeFromUser(client *Client, userID string) {
 		delete(clients, client)
 		if len(clients) == 0 {
 			delete(h.userSubscribers, userID)
+		}
+	}
+}
+
+// BroadcastToRun sends a notification to clients subscribed to a specific office run id.
+func (h *Hub) BroadcastToRun(runID string, msg *ws.Message) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error("Failed to marshal message", zap.Error(err))
+		return
+	}
+	clients := h.getSubscribersLocked(h.runSubscribers, runID)
+	h.logger.Debug("BroadcastToRun",
+		zap.String("run_id", runID),
+		zap.String("action", msg.Action),
+		zap.Int("subscriber_count", len(clients)))
+	h.sendToClients(data, clients, msg.Action)
+}
+
+// SubscribeToRun subscribes a client to office run-event notifications.
+func (h *Hub) SubscribeToRun(client *Client, runID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if _, ok := h.runSubscribers[runID]; !ok {
+		h.runSubscribers[runID] = make(map[*Client]bool)
+	}
+	h.runSubscribers[runID][client] = true
+	client.runSubscriptions[runID] = true
+
+	h.logger.Debug("Client subscribed to run",
+		zap.String("client_id", client.ID),
+		zap.String("run_id", runID))
+}
+
+// UnsubscribeFromRun unsubscribes a client from office run-event notifications.
+func (h *Hub) UnsubscribeFromRun(client *Client, runID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	delete(client.runSubscriptions, runID)
+	if clients, ok := h.runSubscribers[runID]; ok {
+		delete(clients, client)
+		if len(clients) == 0 {
+			delete(h.runSubscribers, runID)
 		}
 	}
 }

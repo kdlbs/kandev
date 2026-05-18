@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -49,6 +49,10 @@ func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *executor.Launch
 }
 
 func (m *mockAgentManager) SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error {
+	return nil
+}
+
+func (m *mockAgentManager) SetExecutionEnv(ctx context.Context, agentExecutionID string, env map[string]string) error {
 	return nil
 }
 
@@ -146,6 +150,9 @@ func (m *mockAgentManager) GetGitStatus(_ context.Context, _ string) (*client.Gi
 		HeadCommit: "test-commit",
 	}, nil
 }
+func (m *mockAgentManager) GetGitStatusFresh(_ context.Context, _ string) (*client.GitStatusResult, error) {
+	return nil, nil
+}
 func (m *mockAgentManager) WaitForAgentctlReady(_ context.Context, _ string) error {
 	return nil
 }
@@ -205,7 +212,7 @@ func createTestExecutor(t *testing.T, agentMgr *mockAgentManager, log *logger.Lo
 		t.Fatalf("failed to open test database: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repoImpl, cleanup, err := repository.Provide(sqlxDB, sqlxDB)
+	repoImpl, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
@@ -227,10 +234,27 @@ func createTestTask(id string, priority int) *v1.Task {
 		ID:         id,
 		WorkflowID: "test-wf",
 		Title:      "Test Task " + id,
-		Priority:   priority,
+		Priority:   intPriorityToLabel(priority),
 		State:      v1.TaskStateTODO,
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
+	}
+}
+
+// intPriorityToLabel mirrors the legacy integer priority semantics for tests
+// that pre-date the TEXT priority migration.
+func intPriorityToLabel(p int) string {
+	switch {
+	case p >= 8:
+		return "critical"
+	case p >= 4:
+		return "high"
+	case p >= 2:
+		return "medium"
+	case p >= 1:
+		return "low"
+	default:
+		return "medium"
 	}
 }
 

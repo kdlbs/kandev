@@ -2,6 +2,102 @@
 
 All notable changes to Kandev.
 
+## 0.49.0 - 2026-05-16
+
+### Bug Fixes
+
+- ignore pi version banner in utility inference output ([#915](https://github.com/kdlbs/kandev/pull/915))
+- show PR diff when clicking file row that has local changes ([#908](https://github.com/kdlbs/kandev/pull/908))
+
+## 0.48.0 - 2026-05-15
+
+### Bug Fixes
+
+- fetch Go sha256 from JSON index, bump to 1.26.3 ([#912](https://github.com/kdlbs/kandev/pull/912))
+
+## 0.47.0 - 2026-05-15
+
+### Bug Fixes
+
+- install curl in universal image ([#910](https://github.com/kdlbs/kandev/pull/910))
+
+## 0.46.0 - 2026-05-15
+
+### Features
+
+- docker and sprites executor improvements ([#738](https://github.com/kdlbs/kandev/pull/738))
+- replace merged-diff view with timeline + overlay sheets on Changes tab ([#902](https://github.com/kdlbs/kandev/pull/902))
+- publish universal image flavor with toolchains + customize docs ([#891](https://github.com/kdlbs/kandev/pull/891))
+- differentiate pending permission icon from turn finished in sidebar ([#882](https://github.com/kdlbs/kandev/pull/882))
+
+### Bug Fixes
+
+- make conpty Close idempotent and kill orphan agentctl ([#900](https://github.com/kdlbs/kandev/pull/900))
+- improve custom script menu readability ([#905](https://github.com/kdlbs/kandev/pull/905))
+- use clipboard hook with HTTP fallback for stats copy ([#903](https://github.com/kdlbs/kandev/pull/903))
+- anchor manual PR panel open to the session's live group ([#901](https://github.com/kdlbs/kandev/pull/901))
+- scope pending-permission scan to current turn ([#899](https://github.com/kdlbs/kandev/pull/899))
+- prevent duplicate execution of repository setup scripts ([#898](https://github.com/kdlbs/kandev/pull/898))
+- hide stuck Resume session button after click + cover with e2e ([#890](https://github.com/kdlbs/kandev/pull/890))
+- drop -l from task shells so PATH keeps agent CLI bin dir ([#889](https://github.com/kdlbs/kandev/pull/889))
+- session tab leak, PR icon crash, and PR review prompt scope ([#897](https://github.com/kdlbs/kandev/pull/897))
+- release agent ports during E2E reset to prevent shard exhaustion ([#888](https://github.com/kdlbs/kandev/pull/888))
+
+## 0.45.0 - 2026-05-12
+
+### Features
+
+- support tasks without a repository ([#850](https://github.com/kdlbs/kandev/pull/850))
+
+### Bug Fixes
+
+- allow delete/archive of kanban cards in All Workflows view ([#886](https://github.com/kdlbs/kandev/pull/886))
+- preserve sidebar scroll position across task switches ([#884](https://github.com/kdlbs/kandev/pull/884))
+- lock workflow, block submit during bootstrap, hide None mode ([#885](https://github.com/kdlbs/kandev/pull/885))
+- persist container auth, restore tasks filter, refine PR status UI ([#883](https://github.com/kdlbs/kandev/pull/883))
+
+## 0.44.0 - 2026-05-11
+
+### Features
+
+- persist N-entry FIFO message queue ([#864](https://github.com/kdlbs/kandev/pull/864))
+- add size/age/backup rotation for file output ([#874](https://github.com/kdlbs/kandev/pull/874))
+
+### Bug Fixes
+
+- list remote branches for provider-backed workspace repos ([#876](https://github.com/kdlbs/kandev/pull/876))
+
+### Refactoring
+
+- close rotating sink on shutdown, add config docs ([#877](https://github.com/kdlbs/kandev/pull/877))
+
+## 0.43.0 - 2026-05-11
+
+### Bug Fixes
+
+- resolve subtask base_branch correctly across repos ([#870](https://github.com/kdlbs/kandev/pull/870))
+- skip NEXT_PUBLIC_KANDEV_API_PORT in production single-port mode ([#872](https://github.com/kdlbs/kandev/pull/872))
+
+## 0.42.0 - 2026-05-11
+
+### Features
+
+- streaming agent install, PTY login terminal, docker container UX ([#869](https://github.com/kdlbs/kandev/pull/869))
+- add CI hover popover on PR top-bar button ([#846](https://github.com/kdlbs/kandev/pull/846))
+- prettify Kandev MCP tool titles in chat ([#858](https://github.com/kdlbs/kandev/pull/858))
+- show repo name and enable multi-select in pipeline view ([#831](https://github.com/kdlbs/kandev/pull/831))
+- extend implement plan button with fresh-agent path and server-side plan mode ([#832](https://github.com/kdlbs/kandev/pull/832))
+
+### Bug Fixes
+
+- keep task and session state in sync on tool-event wake ([#865](https://github.com/kdlbs/kandev/pull/865))
+- close kanban preview when opening the edit dialog ([#868](https://github.com/kdlbs/kandev/pull/868))
+- wire logging.outputPath from config to logger ([#866](https://github.com/kdlbs/kandev/pull/866))
+- harden release package publishing ([#862](https://github.com/kdlbs/kandev/pull/862))
+- unify Kandev branding ([#863](https://github.com/kdlbs/kandev/pull/863))
+- warn on duplicate custom prompt name instead of 500 ([#859](https://github.com/kdlbs/kandev/pull/859))
+- mobile task switcher sheet skeleton while snapshot loads ([#860](https://github.com/kdlbs/kandev/pull/860))
+
 ## 0.41.0 - 2026-05-09
 
 ### Features

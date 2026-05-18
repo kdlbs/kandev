@@ -18,6 +18,8 @@ import {
 } from "@kandev/ui/dialog";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
+import { RequestIndicator } from "@/components/request-indicator";
+import { useToast } from "@/components/toast-provider";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import {
   updateExecutorProfile,
@@ -25,6 +27,11 @@ import {
   listScriptPlaceholders,
 } from "@/lib/api/domains/settings-api";
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
+import {
+  getSaveButtonLabel,
+  upsertExecutorProfile,
+  type SaveStatus,
+} from "@/components/settings/profile-edit/profile-edit-page-chrome";
 import {
   SpritesConnectionCard,
   SpritesInstancesCard,
@@ -234,18 +241,20 @@ function EnvVarsCard({
 
 function ProfileActions({
   executorId,
-  saving,
+  saveStatus,
   nameValid,
   onSave,
   onRequestDelete,
 }: {
   executorId: string;
-  saving: boolean;
+  saveStatus: SaveStatus;
   nameValid: boolean;
   onSave: () => void;
   onRequestDelete: () => void;
 }) {
   const router = useRouter();
+  const isSaving = saveStatus === "loading";
+  const saveLabel = getSaveButtonLabel(saveStatus);
   return (
     <div className="flex items-center justify-between">
       <Button variant="destructive" size="sm" onClick={onRequestDelete} className="cursor-pointer">
@@ -260,8 +269,17 @@ function ProfileActions({
         >
           Cancel
         </Button>
-        <Button onClick={onSave} disabled={!nameValid || saving} className="cursor-pointer">
-          {saving ? "Saving..." : "Save Changes"}
+        <Button
+          onClick={onSave}
+          disabled={!nameValid || isSaving}
+          className="min-w-36 cursor-pointer"
+        >
+          {saveLabel}
+          {saveStatus !== "idle" && (
+            <span className="ml-2">
+              <RequestIndicator status={saveStatus} />
+            </span>
+          )}
         </Button>
       </div>
     </div>
@@ -303,9 +321,10 @@ function DeleteProfileDialog({
 
 function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
   const router = useRouter();
+  const { toast } = useToast();
   const executors = useAppStore((state) => state.executors.items);
   const setExecutors = useAppStore((state) => state.setExecutors);
-  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -317,24 +336,22 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
       cleanup_script: string;
       env_vars: ProfileEnvVar[];
     }) => {
-      setSaving(true);
+      setSaveStatus("loading");
       setError(null);
       try {
         const updated = await updateExecutorProfile(executor.id, profile.id, data);
-        setExecutors(
-          executors.map((e: Executor) =>
-            e.id === executor.id
-              ? { ...e, profiles: e.profiles?.map((p) => (p.id === updated.id ? updated : p)) }
-              : e,
-          ),
-        );
+        setSaveStatus("success");
+        toast({ title: "Profile saved", variant: "success" });
+        setExecutors(upsertExecutorProfile(executors, executor, updated));
+        window.setTimeout(() => setSaveStatus("idle"), 1500);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to save profile");
-      } finally {
-        setSaving(false);
+        const message = err instanceof Error ? err.message : "Failed to save profile";
+        setError(message);
+        setSaveStatus("error");
+        toast({ title: "Failed to save profile", description: message, variant: "error" });
       }
     },
-    [executor.id, profile.id, executors, setExecutors],
+    [executor, profile.id, executors, setExecutors, toast],
   );
 
   const remove = useCallback(async () => {
@@ -355,7 +372,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
     }
   }, [executor.id, profile.id, executors, setExecutors, router]);
 
-  return { saving, error, deleting, deleteDialogOpen, setDeleteDialogOpen, save, remove };
+  return { saveStatus, error, deleting, deleteDialogOpen, setDeleteDialogOpen, save, remove };
 }
 
 function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
@@ -485,7 +502,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       {persistence.error && <p className="text-sm text-destructive">{persistence.error}</p>}
       <ProfileActions
         executorId={executor.id}
-        saving={persistence.saving}
+        saveStatus={persistence.saveStatus}
         nameValid={Boolean(form.name.trim())}
         onSave={handleSave}
         onRequestDelete={() => persistence.setDeleteDialogOpen(true)}

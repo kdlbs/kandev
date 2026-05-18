@@ -8,6 +8,7 @@ let mockActiveSessionId: string | null = null;
 let mockSessionItems: Record<string, TaskSession> = {};
 let mockSession: TaskSession | null = null;
 let mockTask: { id: string; description: string } | null = null;
+let mockPrepareProgress: Record<string, { status: string }> = {};
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
@@ -18,6 +19,9 @@ vi.mock("@/components/state-provider", () => ({
       },
       taskSessions: {
         items: mockSessionItems,
+      },
+      prepareProgress: {
+        bySessionId: mockPrepareProgress,
       },
     }),
 }));
@@ -52,6 +56,7 @@ describe("useSessionState", () => {
     mockSessionItems = {};
     mockSession = null;
     mockTask = null;
+    mockPrepareProgress = {};
   });
 
   describe("resolvedSessionId", () => {
@@ -133,6 +138,16 @@ describe("useSessionState", () => {
 
       expect(result.current.isStarting).toBe(false);
       expect(result.current.isWorking).toBe(false);
+    });
+
+    it("sets isStarting while environment preparation is still live", () => {
+      mockSession = createMockSession("session-1", "task-1", "WAITING_FOR_INPUT");
+      mockPrepareProgress = { "session-1": { status: "preparing" } };
+
+      const { result } = renderHook(() => useSessionState("session-1"));
+
+      expect(result.current.isStarting).toBe(true);
+      expect(result.current.isWorking).toBe(true);
     });
 
     it("sets isAgentBusy when session state is RUNNING", () => {

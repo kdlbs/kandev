@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import type { Message, MessageType } from "@/lib/types/http";
+import {
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type Message,
+  type MessageType,
+} from "@/lib/types/http";
 import { deduplicateAgentBootResumes, isAgentBootResumeMessage } from "./use-processed-messages";
 
 function makeMessage(
@@ -10,8 +15,8 @@ function makeMessage(
 ): Message {
   return {
     id,
-    session_id: "s1",
-    task_id: "t1",
+    session_id: toSessionId("s1"),
+    task_id: toTaskId("t1"),
     author_type: "agent",
     content,
     type,

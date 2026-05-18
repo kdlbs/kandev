@@ -1,6 +1,7 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
+import { sessionId, taskId } from "@/lib/types/http";
 
 export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
@@ -11,8 +12,8 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
       }
       store.getState().addTurn({
         id: payload.id,
-        session_id: payload.session_id,
-        task_id: payload.task_id,
+        session_id: sessionId(payload.session_id),
+        task_id: taskId(payload.task_id),
         started_at: payload.started_at,
         completed_at: payload.completed_at,
         metadata: payload.metadata,

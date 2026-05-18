@@ -402,6 +402,68 @@ func TestResumeSession_AbortsIfSessionReReadFails(t *testing.T) {
 
 // TestIsTerminalSessionState is a small unit test for the helper that drives
 // both the preemptive cleanup and the validateAndLockResume carve-out.
+// TestApplyResumeRepoConfig_BaseBranchByExecutorType locks in the per-executor
+// rules for BaseBranch propagation on resume:
+//   - clone-based remote executors (Sprites, Docker variants) MUST receive
+//     BaseBranch so the in-sandbox prepare script's `git clone --branch <X>`
+//     resolves;
+//   - the worktree executor receives BaseBranch via its dedicated block;
+//   - the local executor MUST NOT receive BaseBranch — LocalPreparer reads it
+//     and would force a `git fetch && git checkout` against the user's actual
+//     workspace, clobbering the "use current state" UX.
+func TestApplyResumeRepoConfig_BaseBranchByExecutorType(t *testing.T) {
+	cases := []struct {
+		executorType        string
+		wantBaseBranch      string
+		wantWorktreeApplied bool
+	}{
+		{executorType: "sprites", wantBaseBranch: "main"},
+		{executorType: "local_docker", wantBaseBranch: "main"},
+		{executorType: "remote_docker", wantBaseBranch: "main"},
+		{executorType: "worktree", wantBaseBranch: "main", wantWorktreeApplied: true},
+		{executorType: "local", wantBaseBranch: ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.executorType, func(t *testing.T) {
+			repo := newMockRepository()
+			repo.repositories["repo-1"] = &models.Repository{
+				ID:            "repo-1",
+				LocalPath:     "/tmp/repo",
+				Provider:      "github",
+				ProviderOwner: "kdlbs",
+				ProviderName:  "kandev",
+			}
+			task := &v1.Task{ID: "task-1"}
+			repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+			session := &models.TaskSession{
+				ID:           "sess-1",
+				TaskID:       "task-1",
+				RepositoryID: "repo-1",
+				BaseBranch:   "main",
+			}
+			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+			req := &LaunchAgentRequest{
+				TaskID:       "task-1",
+				SessionID:    "sess-1",
+				ExecutorType: tc.executorType,
+			}
+
+			if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req); err != nil {
+				t.Fatalf("applyResumeRepoConfig: %v", err)
+			}
+
+			if req.BaseBranch != tc.wantBaseBranch {
+				t.Fatalf("BaseBranch = %q, want %q", req.BaseBranch, tc.wantBaseBranch)
+			}
+			if tc.wantWorktreeApplied != req.UseWorktree {
+				t.Fatalf("UseWorktree = %v, want %v", req.UseWorktree, tc.wantWorktreeApplied)
+			}
+		})
+	}
+}
+
 func TestIsTerminalSessionState(t *testing.T) {
 	cases := []struct {
 		state models.TaskSessionState

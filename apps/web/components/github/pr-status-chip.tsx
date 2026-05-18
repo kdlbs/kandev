@@ -12,7 +12,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
 import { PRCIPopover } from "@/components/github/pr-ci-popover";
-import { isPRReadyToMerge } from "@/components/github/pr-task-icon";
+import { isPRAwaitingReview, isPRReadyToMerge } from "@/components/github/pr-task-icon";
 import type { TaskPR } from "@/lib/types/github";
 
 const HOVER_OPEN_DELAY_MS = 150;
@@ -27,8 +27,12 @@ function chipStatus(pr: TaskPR): ChipStatus {
   // Pending checks / pending review must beat checks_state === "success" so a
   // PR with all checks green but reviewers still outstanding renders as
   // in-progress, not passed. Without this order, the chip flips to green the
-  // moment CI finishes and ignores the human gate.
+  // moment CI finishes and ignores the human gate. isPRAwaitingReview also
+  // covers approved PRs where branch protection requires more reviewers.
   if (pr.checks_state === "pending" || pr.review_state === "pending") return "in_progress";
+  // Mirror getPRStatusColor priority: ready-to-merge beats awaiting-review so
+  // the chip and icon never disagree on a (theoretical) clean+approved+pending PR.
+  if (isPRAwaitingReview(pr) && !isPRReadyToMerge(pr)) return "in_progress";
   if (pr.checks_state === "success") return "passed";
   return "neutral";
 }
@@ -105,8 +109,13 @@ function ChipStatusGlyph({ status }: { status: ChipStatus }) {
     case "failed":
       return <IconCircleXFilled className="h-3.5 w-3.5 text-red-500" aria-hidden="true" />;
     case "in_progress":
+      // CI runs take minutes, so slow the spin to ~3s/rotation — the default
+      // animate-spin (1s) feels frantic for a long-running task.
       return (
-        <IconLoader2 className="h-3.5 w-3.5 text-yellow-500 animate-spin" aria-hidden="true" />
+        <IconLoader2
+          className="h-3.5 w-3.5 text-yellow-500 animate-spin [animation-duration:3s]"
+          aria-hidden="true"
+        />
       );
     case "merged":
       return <IconPointFilled className="h-3.5 w-3.5 text-purple-500" aria-hidden="true" />;

@@ -88,7 +88,7 @@ export const defaultSessionState: SessionSliceState = {
     comparePairByTaskId: {},
     lastSeenUpdatedAtByTaskId: {},
   },
-  queue: { bySessionId: {}, isLoading: {} },
+  queue: { bySessionId: {}, metaBySessionId: {}, isLoading: {} },
 };
 
 type ImmerSet = Parameters<typeof createSessionSlice>[0];
@@ -413,9 +413,20 @@ export const createSessionSlice: StateCreator<
       draft.activeModel.bySessionId[sessionId] = modelId;
     }),
   ...buildTaskPlanActions(set),
-  setQueueStatus: (sessionId, status) =>
+  setQueueEntries: (sessionId, entries, meta) =>
     set((draft) => {
-      draft.queue.bySessionId[sessionId] = status;
+      draft.queue.bySessionId[sessionId] = entries;
+      draft.queue.metaBySessionId[sessionId] = meta;
+    }),
+  removeQueueEntry: (sessionId, entryId) =>
+    set((draft) => {
+      const list = draft.queue.bySessionId[sessionId];
+      if (!list) return;
+      draft.queue.bySessionId[sessionId] = list.filter((entry) => entry.id !== entryId);
+      const meta = draft.queue.metaBySessionId[sessionId];
+      if (meta) {
+        meta.count = draft.queue.bySessionId[sessionId].length;
+      }
     }),
   setQueueLoading: (sessionId, loading) =>
     set((draft) => {
@@ -424,6 +435,7 @@ export const createSessionSlice: StateCreator<
   clearQueueStatus: (sessionId) =>
     set((draft) => {
       delete draft.queue.bySessionId[sessionId];
+      delete draft.queue.metaBySessionId[sessionId];
       delete draft.queue.isLoading[sessionId];
     }),
 });

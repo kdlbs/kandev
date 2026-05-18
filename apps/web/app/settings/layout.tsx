@@ -1,6 +1,12 @@
 import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
 import { StateHydrator } from "@/components/state-hydrator";
-import { listAgents, listExecutors, listWorkspaces } from "@/lib/api";
+import {
+  listAgentDiscovery,
+  listAgents,
+  listAvailableAgents,
+  listExecutors,
+  listWorkspaces,
+} from "@/lib/api";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
@@ -10,10 +16,15 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
 async function SettingsLayoutServer({ children }: { children: React.ReactNode }) {
   let initialState = {};
   try {
-    const [workspaces, executors, agents] = await Promise.all([
+    // Fetch discovery + available agents alongside the DB-backed list so a
+    // hard refresh of /settings/agents/[name] (where no profile exists yet)
+    // can still render the agent from the discovered set.
+    const [workspaces, executors, agents, discovery, available] = await Promise.all([
       listWorkspaces({ cache: "no-store" }),
       listExecutors({ cache: "no-store" }),
       listAgents({ cache: "no-store" }),
+      listAgentDiscovery({ cache: "no-store" }),
+      listAvailableAgents({ cache: "no-store" }),
     ]);
     initialState = {
       workspaces: {
@@ -37,6 +48,17 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
       },
       settingsAgents: {
         items: agents.agents,
+      },
+      agentDiscovery: {
+        items: discovery.agents,
+        loading: false,
+        loaded: true,
+      },
+      availableAgents: {
+        items: available.agents,
+        tools: available.tools ?? [],
+        loading: false,
+        loaded: true,
       },
       settingsData: {
         executorsLoaded: true,

@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -88,13 +89,21 @@ func (a *CodexACP) Runtime() *RuntimeConfig {
 		Env:         map[string]string{},
 		Mounts: []MountTemplate{
 			{Source: "{workspace}", Target: "/workspace"},
-			{Source: "{home}/.codex", Target: "/root/.codex"},
 		},
-		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Protocol:       agent.ProtocolACP,
+		ResourceLimits:  ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
+		Protocol:        agent.ProtocolACP,
+		ProjectSkillDir: ".agents/skills",
+		UserSkillDir:    ".codex/skills",
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
+			// Use the same SessionDirTemplate pattern every other ACP agent
+			// uses; the docker container manager wires this into a kandev-owned
+			// per-container session dir, isolated from the host's ~/.codex
+			// (which carries host-absolute rollout paths in state.db that
+			// don't resolve inside the container).
+			SessionDirTemplate: "{home}/.codex",
+			SessionDirTarget:   "/root/.codex",
 		},
 	}
 }
@@ -119,9 +128,25 @@ func (a *CodexACP) RemoteAuth() *RemoteAuth {
 	}
 }
 
-func (a *CodexACP) InstallScript() string {
-	return "npm install -g " + codexACPPkg
+// Verified against `codex --help`: `codex login --device-auth` is the
+// dedicated sign-in subcommand. Device-auth prints a code + URL that works
+// even when the kandev process can't open a browser (containers, SSH,
+// headless dev boxes), and falls back to a local browser flow otherwise.
+func (a *CodexACP) LoginCommand() *LoginCommand {
+	return &LoginCommand{
+		Cmd:         []string{"codex", "login", "--device-auth"},
+		Description: "Sign in with your OpenAI account.",
+	}
 }
+
+// Install both the user-facing OpenAI codex CLI (which `codex login` runs
+// against) and the ACP bridge package — the bridge wraps codex internally
+// and depends on it being on PATH.
+func (a *CodexACP) InstallScript() string {
+	return "npm install -g @openai/codex " + codexACPPkg
+}
+
+func (a *CodexACP) BillingType() usage.BillingType { return codexBillingType() }
 
 func (a *CodexACP) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings

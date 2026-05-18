@@ -224,6 +224,68 @@ test.describe("Session tab management — close behavior", () => {
     await testPage.waitForTimeout(800);
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible();
   });
+
+  test("session tabs from one task do not leak into another task's view", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+
+    const {
+      session,
+      session1Id: sessionA1Id,
+      session2Id: sessionA2Id,
+    } = await createTaskWithTwoSessions(testPage, apiClient, seedData, "Tab Leak Source A");
+
+    // Task B has only one session — never visited from the UI yet.
+    const taskB = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Tab Leak Target B",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(taskB.id);
+          return DONE_STATES.includes(sessions[0]?.state ?? "");
+        },
+        { timeout: 30_000, message: "Waiting for taskB session" },
+      )
+      .toBe(true);
+    const { sessions: bSessions } = await apiClient.listTaskSessions(taskB.id);
+    const sessionB1Id = bSessions[0].id;
+
+    // Sanity: while on task A, both A sessions are visible.
+    await expect(session.sessionTabBySessionId(sessionA1Id)).toBeVisible({ timeout: 10_000 });
+    await expect(session.sessionTabBySessionId(sessionA2Id)).toBeVisible({ timeout: 5_000 });
+
+    // Switch from A → B via the sidebar.
+    await session.clickTaskInSidebar("Tab Leak Target B");
+    await expect(testPage).toHaveURL(new RegExp(`/t/${taskB.id}`), { timeout: 15_000 });
+    await session.waitForLoad();
+
+    // Task B's only session must be visible…
+    await expect(session.sessionTabBySessionId(sessionB1Id)).toBeVisible({ timeout: 10_000 });
+
+    // …and neither of task A's session tabs should have followed us in.
+    await testPage.waitForTimeout(800);
+    await expect(session.sessionTabBySessionId(sessionA1Id)).not.toBeVisible();
+    await expect(session.sessionTabBySessionId(sessionA2Id)).not.toBeVisible();
+
+    // Reload to make sure the persisted layout for task B doesn't bring them back either.
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(session.sessionTabBySessionId(sessionB1Id)).toBeVisible({ timeout: 10_000 });
+    await expect(session.sessionTabBySessionId(sessionA1Id)).not.toBeVisible();
+    await expect(session.sessionTabBySessionId(sessionA2Id)).not.toBeVisible();
+  });
 });
 
 test.describe("Session tab management — primary session persistence", () => {

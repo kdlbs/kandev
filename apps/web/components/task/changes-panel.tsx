@@ -35,11 +35,12 @@ import {
   mapToChangedFiles,
   mergeCommits,
 } from "./changes-panel-helpers";
+import type { OpenDiffOptions } from "./changes-diff-target";
 
 export { filterUnpushedCommits, mergeCommits };
 
 type ChangesPanelProps = {
-  onOpenDiffFile: (path: string) => void;
+  onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
   onEditFile: (path: string) => void;
   onOpenCommitDetail?: (sha: string, repo?: string) => void;
   onOpenDiffAll?: () => void;
@@ -105,7 +106,7 @@ type ChangesPanelBodyProps = {
   isLoading: boolean;
   loadingOperation: string | null;
   dialogs: DialogsType;
-  onOpenDiffFile: (path: string) => void;
+  onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
   onEditFile: (path: string) => void;
   onOpenCommitDetail?: (sha: string, repo?: string) => void;
   onOpenReview?: () => void;
@@ -616,4 +617,5 @@ const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
   );
 });
 
-export { ChangesPanel };
+export { ChangesPanel, ChangesPanelBody, useChangesPanelData, buildChangesPanelBodyProps };
+export type { ChangesPanelBodyProps };

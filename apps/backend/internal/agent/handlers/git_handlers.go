@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
-	"github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -802,7 +802,12 @@ func (h *GitHandlers) wsCumulativeDiff(ctx context.Context, msg *ws.Message) (*w
 				zap.String("session_id", req.SessionID),
 				zap.String("base_commit", baseCommit))
 		} else {
-			return nil, fmt.Errorf("no base commit available for cumulative diff")
+			// Repo-less tasks (no git workspace) have no base commit — return an
+			// empty diff instead of erroring so the frontend's polling doesn't
+			// spam the logs.
+			return ws.NewResponse(msg.ID, msg.Action, map[string]any{
+				"cumulative_diff": nil,
+			})
 		}
 	}
 

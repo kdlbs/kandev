@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
-	"github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -128,6 +128,10 @@ func (s *SimulatedAgentManagerClient) LaunchAgent(ctx context.Context, req *exec
 
 // SetExecutionDescription updates the task description for an execution
 func (s *SimulatedAgentManagerClient) SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error {
+	return nil
+}
+
+func (s *SimulatedAgentManagerClient) SetExecutionEnv(ctx context.Context, agentExecutionID string, env map[string]string) error {
 	return nil
 }
 
@@ -525,6 +529,9 @@ func (s *SimulatedAgentManagerClient) GetGitStatus(_ context.Context, _ string) 
 		Branch:     "main",
 		HeadCommit: "simulated-commit",
 	}, nil
+}
+func (s *SimulatedAgentManagerClient) GetGitStatusFresh(_ context.Context, _ string) (*client.GitStatusResult, error) {
+	return nil, nil
 }
 func (s *SimulatedAgentManagerClient) WaitForAgentctlReady(_ context.Context, _ string) error {
 	return nil

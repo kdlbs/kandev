@@ -54,20 +54,30 @@ ci: add PR title linting workflow
 
 1. **Understand changes:** Run `git status` and `git diff` to understand all changes. Review recent commits with `git log --oneline -10` to match project style.
 
-2. **Check pre-commit hooks:** Run:
+2. **Ensure pre-commit hooks are wired up.** This must work in worktrees too, where `.git/` is a file (not a directory) and the real hooks path is shared with the main repo via `core.hooksPath`. Use `git rev-parse --git-path` so the check resolves correctly regardless:
+
    ```bash
-   pre-commit --version 2>/dev/null && echo "INSTALLED" || echo "NOT_INSTALLED"
+   # Is the framework on PATH?
+   pre-commit --version >/dev/null 2>&1 && echo "INSTALLED" || echo "NOT_INSTALLED"
+
+   # Is the hook actually wired into git's hook system?
+   HOOK_PATH=$(git rev-parse --git-path hooks/pre-commit)
+   test -f "$HOOK_PATH" && grep -q "pre-commit" "$HOOK_PATH" && echo "ACTIVE" || echo "INACTIVE"
    ```
-   - If **not installed**, warn the user: _"⚠️ pre-commit is not installed. Install it with `pip install pre-commit && pre-commit install` for automatic formatting and lint checks on every commit."_
-   - If installed, check hooks are active:
+
+   - If **NOT_INSTALLED**, tell the user once: _"⚠️ pre-commit is not on PATH. Install it with `pip install pre-commit` so format/lint runs on every commit."_ Then continue (don't block).
+   - If installed but **INACTIVE**, **install it yourself** — the project ships `.pre-commit-config.yaml` and `make doctor` is a no-op-on-already-installed wrapper around the same command:
      ```bash
-     test -f .git/hooks/pre-commit && grep -q "pre-commit" .git/hooks/pre-commit && echo "ACTIVE" || echo "INACTIVE"
+     pre-commit install -t pre-commit -t commit-msg --overwrite
      ```
-   - If **inactive**, warn the user: _"⚠️ pre-commit hooks are not active. Run `pre-commit install` to enable them."_
-   - **Do not block** — continue with the remaining steps regardless.
+     Mention that you wired it up. Subsequent commits will run hooks automatically.
+   - If both checks pass, no output needed.
+
+   Why this matters: a missing hook lets lint regressions slip past local commits and only surface in CI (e.g. funlen / cognitive complexity on backend Go code). The hook catches them in <1s at commit time. See `Makefile`'s `doctor` target for the idempotent install command.
 
 3. **Run verify (MANDATORY — do NOT skip):** Delegate to the `verify` subagent to run the full verification pipeline (rebase, format, typecheck, test, lint). It will fix any issues it finds. **Wait for it to complete before proceeding.** Do NOT proceed to step 4 until verify passes. If verify cannot fix the failures, stop and surface the errors to the user — do not commit. Do NOT substitute this with a partial check (e.g. running only the changed package's tests).
 
 4. **Stage files:** Stage relevant files (prefer specific files over `git add -A`).
+   - **Splitting commits with new files:** When introducing a brand-new file alongside the file that uses it, stage them together. The Go lint pre-commit hook stashes *unstaged* changes before linting but keeps *untracked* files in the working tree — so a new helper committed alone, while its (still-unstaged) caller sits in the working tree, lints as `unused` and rejects the commit.
 
 5. **Commit:** Write a commit message following the format above. If changes span multiple concerns, consider separate commits.

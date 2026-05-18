@@ -27,7 +27,7 @@ import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-s
 import { replaceTaskUrl } from "@/lib/links";
 import type { Task, ProcessInfo } from "@/lib/types/http";
 import type { ProcessStatusEntry } from "@/lib/state/slices";
-import { AddPanelMenuItems, MENU_ICON_CLASS, MENU_ITEM_CLASS } from "./dockview-add-panel-items";
+import { AddPanelMenuItems, MENU_ITEM_CLASS } from "./dockview-add-panel-items";
 import { NewSessionDialog } from "./new-session-dialog";
 import { NewTaskDropdown } from "./new-task-dropdown";
 import { useActiveSessionDevScript } from "./repository-scripts-menu";
@@ -450,17 +450,24 @@ function TerminalScriptsDropdown({
           <IconPlayerPlay className={HEADER_ICON_CLASS} />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52">
+      <DropdownMenuContent align="end" className="w-[min(18rem,calc(100vw-1rem))]">
         {scripts.map((script) => (
           <DropdownMenuItem
             key={script.id}
             onClick={() => handleRunScript(script.id)}
-            className={MENU_ITEM_CLASS}
+            className={`${MENU_ITEM_CLASS} grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-0 py-1.5`}
           >
-            <IconTerminal2 className={MENU_ICON_CLASS} />
-            <span className="truncate">{script.name}</span>
-            <span className="ml-auto text-muted-foreground font-mono text-[10px] truncate max-w-[120px]">
-              {script.command}
+            <IconTerminal2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 overflow-hidden">
+              <span className="block truncate leading-4" title={script.name}>
+                {script.name}
+              </span>
+              <span
+                className="mt-0.5 block truncate font-mono text-[10px] leading-3 text-muted-foreground"
+                title={script.command}
+              >
+                {script.command}
+              </span>
             </span>
           </DropdownMenuItem>
         ))}

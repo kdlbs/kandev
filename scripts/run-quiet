@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# run-quiet — wrap a long-running command so its output stays out of agent
+# context. Redirects stdout+stderr to a unique /tmp log, prints a one-line
+# success summary, and on failure auto-greps for the relevant error pattern
+# based on the tag. Exits with the underlying command's exit code.
+#
+# Usage:
+#   scripts/run-quiet <tag> -- <command...>
+#   scripts/run-quiet <tag> [--tail N] -- <command...>
+#
+# Tags drive the error-extraction pattern (see grep_for_tag below). Unknown
+# tags fall back to a generic error/FAIL grep, then to the last 40 lines if
+# nothing matches.
+#
+# Example:
+#   scripts/run-quiet backend-test -- make -C apps/backend test lint
+#
+# Concurrency: each invocation gets a unique mktemp path
+# (/tmp/kandev-run.<tag>.<random>.log), so parallel agents never clobber
+# each other.
+
+set -u
+
+# How many lines of failure context to surface inline.
+TAIL_LINES=40
+
+# Tag is required, must come first.
+if [[ $# -lt 1 ]]; then
+  echo "usage: run-quiet <tag> [--tail N] -- <command...>" >&2
+  exit 2
+fi
+TAG="$1"
+shift
+
+# Parse optional flags before the `--` separator.
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --tail)
+      TAIL_LINES="$2"
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      echo "run-quiet: expected -- before command, got '$1'" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ $# -eq 0 ]]; then
+  echo "run-quiet: no command supplied after --" >&2
+  exit 2
+fi
+
+# Sanitize tag for filename use: keep alnum, dash, underscore.
+SAFE_TAG="$(printf '%s' "$TAG" | tr -c 'a-zA-Z0-9_-' '-')"
+
+# Best-effort cleanup of old logs (>24h). Failure is non-fatal.
+find /tmp -maxdepth 1 -name 'kandev-run.*.log' -mtime +0 -delete 2>/dev/null || true
+
+LOG="$(mktemp "/tmp/kandev-run.${SAFE_TAG}.XXXXXXXX")"
+mv "$LOG" "${LOG}.log"
+LOG="${LOG}.log"
+
+# Run the command. Keep stdin attached so things like `pnpm exec` that
+# probe TTY don't misbehave; redirect both stdout and stderr to LOG.
+"$@" > "$LOG" 2>&1
+RC=$?
+
+if [[ $RC -eq 0 ]]; then
+  echo "exit=0 log=$LOG"
+  exit 0
+fi
+
+echo "exit=$RC log=$LOG"
+
+# Strip ANSI colour codes once so grep patterns work on `\033[…m`-rich logs
+# (eslint, playwright, golangci, gh).
+PLAIN="$(mktemp "/tmp/kandev-run.${SAFE_TAG}.plain.XXXXXXXX")"
+mv "$PLAIN" "${PLAIN}.log"
+PLAIN="${PLAIN}.log"
+# shellcheck disable=SC2016  # we want $0 inside awk, not shell expansion
+sed $'s/\033\\[[0-9;]*[a-zA-Z]//g' "$LOG" > "$PLAIN" 2>/dev/null || cp "$LOG" "$PLAIN"
+
+grep_for_tag() {
+  case "$TAG" in
+    backend-test|go-test)
+      # `go test` failures: FAIL <pkg>, --- FAIL, panic, compile errors
+      # (file:line:), build failures. Do NOT match `ok` (passing packages)
+      # or `PASS` (passing tests).
+      grep -nE '^(FAIL\b|--- FAIL|panic:|.+\.go:[0-9]+:.*|.*\[build failed\])' "$PLAIN"
+      ;;
+    backend-lint|golangci)
+      # golangci-lint output: file:line:col: message (linter).
+      grep -nE '^[^[:space:]].*:[0-9]+:[0-9]+:|^level=error|^Error:' "$PLAIN"
+      ;;
+    web-lint|eslint)
+      # ESLint compact-ish format: "  N:N  error/warning  message  rule"
+      grep -nE '^\s+[0-9]+:[0-9]+\s+(error|warning)|^/.*\.(ts|tsx|js|jsx)$|^✖ ' "$PLAIN"
+      ;;
+    web-test|vitest)
+      grep -nE '(FAIL|✗|AssertionError|Expected|Received|Test Files\s+[0-9]+ failed)' "$PLAIN"
+      ;;
+    e2e|playwright)
+      grep -nE '(✘|×|Error:|TimeoutError|expect\(.*\)|.*\.spec\.ts:[0-9]+|.*failed \([0-9]+\.[0-9]+s\))' "$PLAIN"
+      ;;
+    gh-run|ci|gh-run-view)
+      # GitHub Actions log lines: "JOB\tSTEP\t...". Pull anything that
+      # mentions error/failed/FAIL, plus the surrounding job context line.
+      grep -nE '^\S+\s+\S+\s+.*(error|failed|FAIL|Error:|exit code)' "$PLAIN"
+      ;;
+    *)
+      grep -nE '(error|Error|FAIL|panic:|Failed|✘|✗)' "$PLAIN"
+      ;;
+  esac
+}
+
+MATCHES="$(grep_for_tag | head -n "$TAIL_LINES")"
+
+if [[ -n "$MATCHES" ]]; then
+  echo "--- failures ($(printf '%s\n' "$MATCHES" | wc -l | tr -d ' ') lines, of tag=$TAG) ---"
+  printf '%s\n' "$MATCHES"
+else
+  # Fallback: grep found nothing useful; surface the last N lines verbatim.
+  echo "--- no tag matches; tail $TAIL_LINES lines of $LOG ---"
+  tail -n "$TAIL_LINES" "$PLAIN"
+fi
+
+rm -f "$PLAIN"
+exit "$RC"

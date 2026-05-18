@@ -402,8 +402,8 @@ func TestProcessOnEnter(t *testing.T) {
 			t.Fatalf("agent received %q, want %q", got, "user queued msg")
 		}
 
-		if status := svc.messageQueue.GetStatus(ctx, "s1"); status.IsQueued {
-			t.Fatalf("expected queue to be drained, still queued: %+v", status.Message)
+		if status := svc.messageQueue.GetStatus(ctx, "s1"); status.Count != 0 {
+			t.Fatalf("expected queue to be drained, count=%d entries=%+v", status.Count, status.Entries)
 		}
 	})
 
@@ -429,14 +429,11 @@ func TestProcessOnEnter(t *testing.T) {
 		deadline := time.Now().Add(2 * time.Second)
 		for {
 			status := svc.messageQueue.GetStatus(ctx, "s1")
-			if status.IsQueued {
-				if status.Message == nil {
-					t.Fatal("expected queued message payload")
+			if status.Count > 0 {
+				if status.Entries[0].TaskID != "t1" {
+					t.Fatalf("expected queued task_id t1, got %s", status.Entries[0].TaskID)
 				}
-				if status.Message.TaskID != "t1" {
-					t.Fatalf("expected queued task_id t1, got %s", status.Message.TaskID)
-				}
-				if status.Message.Content == "" {
+				if status.Entries[0].Content == "" {
 					t.Fatal("expected queued content to be populated")
 				}
 				break

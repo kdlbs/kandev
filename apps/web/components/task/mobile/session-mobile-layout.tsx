@@ -6,7 +6,9 @@ import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
 import { SessionTaskSwitcherSheet } from "./session-task-switcher-sheet";
 import { TaskChatPanel } from "../task-chat-panel";
 import { TaskPlanPanel } from "../task-plan-panel";
-import { TaskChangesPanel } from "../task-changes-panel";
+import { MobileChangesPanel } from "./mobile-changes-panel";
+import { ReviewDialog } from "@/components/review/review-dialog";
+import { useReviewDialog } from "../use-review-dialog";
 import { TaskFilesPanel } from "../task-files-panel";
 import { PassthroughTerminal } from "../passthrough-terminal";
 import { MobileTerminalKeybar, KEYBAR_HEIGHT_PX } from "./mobile-terminal-keybar";
@@ -82,7 +84,6 @@ type MobilePanelAreaProps = {
   selectedDiff: { path: string; content?: string } | null;
   handleOpenFileFromChat: (path: string) => void;
   handleClearSelectedDiff: () => void;
-  handleSelectDiffAndSwitchPanel: (path: string, content?: string) => void;
   handleOpenFile: (file: { path: string }) => void;
   topNavHeight: string;
   bottomNavHeight: string;
@@ -96,7 +97,6 @@ function MobilePanelArea({
   selectedDiff,
   handleOpenFileFromChat,
   handleClearSelectedDiff,
-  handleSelectDiffAndSwitchPanel,
   handleOpenFile,
   topNavHeight,
   bottomNavHeight,
@@ -135,7 +135,7 @@ function MobilePanelArea({
       )}
       {currentMobilePanel === "changes" && (
         <div className="flex-1 min-h-0 flex flex-col p-2">
-          <TaskChangesPanel
+          <MobileChangesPanel
             selectedDiff={selectedDiff}
             onClearSelected={handleClearSelectedDiff}
             onOpenFile={handleOpenFileFromChat}
@@ -144,10 +144,7 @@ function MobilePanelArea({
       )}
       {currentMobilePanel === "files" && (
         <div className="flex-1 min-h-0 flex flex-col">
-          <TaskFilesPanel
-            onSelectDiff={handleSelectDiffAndSwitchPanel}
-            onOpenFile={handleOpenFile}
-          />
+          <TaskFilesPanel onOpenFile={handleOpenFile} />
         </div>
       )}
       {currentMobilePanel === "terminal" && (
@@ -212,6 +209,29 @@ function MobileTopBarSticky(props: MobileTopBarStickyProps) {
   );
 }
 
+function MobileReviewDialogMount({
+  sessionId,
+  review,
+}: {
+  sessionId: string | null;
+  review: ReturnType<typeof useReviewDialog>;
+}) {
+  if (!sessionId) return null;
+  return (
+    <ReviewDialog
+      open={review.reviewDialogOpen}
+      onOpenChange={review.setReviewDialogOpen}
+      sessionId={sessionId}
+      baseBranch={review.baseBranch}
+      onSendComments={review.handleReviewSendComments}
+      onOpenFile={review.reviewOpenFile}
+      gitStatusFiles={review.reviewGitStatusFiles}
+      cumulativeDiff={review.reviewCumulativeDiff}
+      prDiffFiles={review.reviewPRDiffFiles}
+    />
+  );
+}
+
 function useMobilePanelHandlers({
   handleSelectDiff,
   handlePanelChange,
@@ -219,14 +239,6 @@ function useMobilePanelHandlers({
   handleSelectDiff: (path: string, content?: string) => void;
   handlePanelChange: (panel: MobileSessionPanel) => void;
 }) {
-  const handleSelectDiffAndSwitchPanel = useCallback(
-    (path: string, content?: string) => {
-      handleSelectDiff(path, content);
-      handlePanelChange("changes");
-    },
-    [handleSelectDiff, handlePanelChange],
-  );
-
   const handleOpenFileFromChat = useCallback(
     (path: string) => {
       handleSelectDiff(path);
@@ -243,7 +255,7 @@ function useMobilePanelHandlers({
     [handleSelectDiff, handlePanelChange],
   );
 
-  return { handleSelectDiffAndSwitchPanel, handleOpenFileFromChat, handleOpenFile };
+  return { handleOpenFileFromChat, handleOpenFile };
 }
 
 export const SessionMobileLayout = memo(function SessionMobileLayout({
@@ -280,11 +292,12 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
     setMobileSessionTaskSwitcherOpen,
   } = useSessionLayoutState({ sessionId });
 
-  const { handleSelectDiffAndSwitchPanel, handleOpenFileFromChat, handleOpenFile } =
-    useMobilePanelHandlers({
-      handleSelectDiff,
-      handlePanelChange,
-    });
+  const { handleOpenFileFromChat, handleOpenFile } = useMobilePanelHandlers({
+    handleSelectDiff,
+    handlePanelChange,
+  });
+
+  const review = useReviewDialog(effectiveSessionId);
 
   return (
     <div className="h-dvh relative bg-background">
@@ -316,7 +329,6 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         selectedDiff={selectedDiff}
         handleOpenFileFromChat={handleOpenFileFromChat}
         handleClearSelectedDiff={handleClearSelectedDiff}
-        handleSelectDiffAndSwitchPanel={handleSelectDiffAndSwitchPanel}
         handleOpenFile={handleOpenFile}
         topNavHeight={TOP_NAV_HEIGHT}
         bottomNavHeight={BOTTOM_NAV_HEIGHT}
@@ -344,6 +356,8 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         workspaceId={workspaceId}
         workflowId={workflowId}
       />
+
+      <MobileReviewDialogMount sessionId={effectiveSessionId} review={review} />
     </div>
   );
 });

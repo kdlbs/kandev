@@ -10,13 +10,17 @@ import { useTasks } from "@/hooks/use-tasks";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
-import { hasPendingClarificationForSession } from "@/lib/utils/pending-clarification";
-import type {
-  TaskState,
-  TaskSessionState,
-  Repository,
-  Task,
-  WorkflowSnapshot,
+import {
+  hasPendingClarificationForSession,
+  hasPendingPermissionForSession,
+} from "@/lib/utils/pending-clarification";
+import {
+  repositoryId as toRepositoryId,
+  type TaskState,
+  type TaskSessionState,
+  type Repository,
+  type Task,
+  type WorkflowSnapshot,
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
 
@@ -117,7 +121,9 @@ export function useSheetData(workspaceId: string | null, workflowId: string | nu
           sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined),
         description: task.description,
         workflowStepId: task.workflowStepId,
-        repositoryPath: task.repositoryId ? repositoryPathsById.get(task.repositoryId) : undefined,
+        repositoryPath: task.repositoryId
+          ? repositoryPathsById.get(toRepositoryId(task.repositoryId))
+          : undefined,
         diffStats: sessionInfo.diffStats,
         updatedAt: sessionInfo.updatedAt ?? task.updatedAt,
         isRemoteExecutor: task.isRemoteExecutor,
@@ -125,6 +131,10 @@ export function useSheetData(workspaceId: string | null, workflowId: string | nu
         remoteExecutorName: task.primaryExecutorName ?? undefined,
         primarySessionId: task.primarySessionId ?? null,
         hasPendingClarification: hasPendingClarificationForSession(
+          messagesBySession,
+          task.primarySessionId,
+        ),
+        hasPendingPermission: hasPendingPermissionForSession(
           messagesBySession,
           task.primarySessionId,
         ),

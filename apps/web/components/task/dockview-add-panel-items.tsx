@@ -14,6 +14,7 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "@kandev/ui/dropdown-men
 import { prPanelLabel } from "@/components/github/pr-utils";
 import { prTaskKey } from "@/components/github/pr-detail-panel";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 import { RepositoryScriptsMenuItems } from "./repository-scripts-menu";
 import { SessionReopenMenuItems } from "./session-reopen-menu";
@@ -53,6 +54,7 @@ export function AddPanelMenuItems({
   const addFilesPanel = useDockviewStore((s) => s.addFilesPanel);
   const addChangesPanel = useDockviewStore((s) => s.addChangesPanel);
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
+  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
 
   return (
     <>
@@ -106,7 +108,7 @@ export function AddPanelMenuItems({
       {state.prs.map((pr) => (
         <DropdownMenuItem
           key={pr.id}
-          onClick={() => addPRPanel(prTaskKey(pr))}
+          onClick={() => addPRPanel(prTaskKey(pr), activeSessionId)}
           className={MENU_ITEM_CLASS}
         >
           <IconGitPullRequest className={MENU_ICON_CLASS} />

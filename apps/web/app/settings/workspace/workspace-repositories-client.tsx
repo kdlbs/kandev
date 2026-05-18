@@ -19,7 +19,13 @@ import {
   updateRepositoryScriptAction,
   validateRepositoryPathAction,
 } from "@/app/actions/workspaces";
-import type { LocalRepository, Repository, RepositoryScript, Workspace } from "@/lib/types/http";
+import {
+  repositoryId as toRepositoryId,
+  type LocalRepository,
+  type Repository,
+  type RepositoryScript,
+  type Workspace,
+} from "@/lib/types/http";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
@@ -92,7 +98,7 @@ function buildDraftRepo(
   const name =
     selectedRepo?.name ?? path.split("/").filter(Boolean).slice(-1)[0] ?? "New Repository";
   return {
-    id: `temp-repo-${generateUUID()}`,
+    id: toRepositoryId(`temp-repo-${generateUUID()}`),
     workspace_id: workspace.id,
     name,
     source_type: "local",
@@ -242,7 +248,7 @@ function useRepositoryHandlers({
   const handleAddRepositoryScript = (repoId: string) => {
     const script: RepositoryScript = {
       id: `temp-script-${generateUUID()}`,
-      repository_id: repoId,
+      repository_id: toRepositoryId(repoId),
       name: "",
       command: "",
       position: repositoryItems.find((repo) => repo.id === repoId)?.scripts.length ?? 0,

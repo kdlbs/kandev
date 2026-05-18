@@ -15,26 +15,13 @@ export function useWebSocket(store: StoreApi<AppState>, url: string) {
       url,
       (status) => {
         const setConnectionStatus = store.getState().setConnectionStatus;
-        switch (status) {
-          case "connecting":
-            setConnectionStatus("connecting", null);
-            break;
-          case "open":
-            setConnectionStatus("connected", null);
-            client.subscribeUser();
-            break;
-          case "reconnecting":
-            setConnectionStatus("reconnecting", null);
-            break;
-          case "error":
-            setConnectionStatus("error", "WebSocket connection failed");
-            break;
-          case "closed":
-          case "idle":
-          default:
-            setConnectionStatus("disconnected", null);
-            break;
+        // WS client and ConnectionState share one ConnectionStatus vocabulary,
+        // so this is a 1:1 forward with an `error` message attached and a
+        // `subscribeUser()` side-effect on first connect.
+        if (status === "connected") {
+          client.subscribeUser();
         }
+        setConnectionStatus(status, status === "error" ? "WebSocket connection failed" : null);
       },
       {
         enabled: true,

@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { WorkflowSection } from "./task-create-dialog-form-body";
+import { CreateEditSelectors, WorkflowSection } from "./task-create-dialog-form-body";
 
 vi.mock("@/components/workflow-selector-row", () => ({
   WorkflowSelectorRow: ({ selectedWorkflowId }: { selectedWorkflowId: string | null }) => (
@@ -35,5 +35,36 @@ describe("WorkflowSection", () => {
     const { container } = renderWorkflowSection("wf-1");
 
     expect(container.textContent).toBe("");
+  });
+});
+
+describe("CreateEditSelectors", () => {
+  it("links credential setup to the selected executor profile", () => {
+    const EmptySelector = () => <button type="button">selector</button>;
+
+    render(
+      <CreateEditSelectors
+        isTaskStarted={false}
+        agentProfiles={[{ id: "agent-1", label: "Codex", agent_name: "codex" } as never]}
+        agentProfilesLoading={false}
+        agentProfileOptions={[]}
+        agentProfileId=""
+        onAgentProfileChange={() => {}}
+        isCreatingSession={false}
+        executorProfileOptions={[]}
+        executorProfileId="exec-profile-1"
+        onExecutorProfileChange={() => {}}
+        executorsLoading={false}
+        AgentSelectorComponent={EmptySelector}
+        ExecutorProfileSelectorComponent={EmptySelector}
+        workflowAgentLocked={false}
+        noCompatibleAgent={true}
+        executorProfileName="Docker"
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /configure credentials/i }).getAttribute("href")).toBe(
+      "/settings/executors/exec-profile-1",
+    );
   });
 });

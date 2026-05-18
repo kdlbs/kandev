@@ -44,6 +44,11 @@ function hasGitStatusChanged(existing: GitStatusEntry, incoming: GitStatusEntry)
   if (existing.branch !== incoming.branch || existing.remote_branch !== incoming.remote_branch)
     return true;
   if (existing.ahead !== incoming.ahead || existing.behind !== incoming.behind) return true;
+  if (
+    existing.branch_additions !== incoming.branch_additions ||
+    existing.branch_deletions !== incoming.branch_deletions
+  )
+    return true;
 
   const existingFileKeys = existing.files ? Object.keys(existing.files).sort().join(",") : "";
   const newFileKeys = incoming.files ? Object.keys(incoming.files).sort().join(",") : "";
@@ -159,6 +164,12 @@ function buildSessionCommitActions(set: ImmerSet) {
     ) =>
       set((draft) => {
         const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        const existing = draft.sessionCommits.byEnvironmentId[envKey];
+        // Prevent a stale empty-array response from overwriting commits that
+        // arrived via incremental notifications while the request was in flight.
+        if (commits.length === 0 && existing && existing.length > 0) {
+          return;
+        }
         draft.sessionCommits.byEnvironmentId[envKey] = commits;
       }),
     setSessionCommitsLoading: (sessionId: string, loading: boolean) =>

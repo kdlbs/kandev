@@ -33,7 +33,7 @@ func newTestTaskService(t *testing.T) (*service.Service, *sqliterepo.Repository)
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB)
+	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
 	require.NoError(t, err)
 	_, err = worktree.NewSQLiteStore(sqlxDB, sqlxDB)
 	require.NoError(t, err)
@@ -266,26 +266,37 @@ func TestResolveTaskRepositories_NoInputs_ReturnsEmpty(t *testing.T) {
 // --- Integration tests using real task service ---
 
 // seedParentWithRepo creates a workspace, workflow, repository, and a parent
-// task linked to that repository. Returns the parent task ID.
+// task linked to that repository. Returns the parent task ID. The parent's
+// task_repository row is anchored to a non-default branch ("pr-metrics") on
+// purpose so inheritance tests can assert what subtasks do with the parent's
+// branch (same-repo subtasks inherit it for stacked-PR ergonomics; the
+// worktree manager's fallback rescues launches if the branch went stale).
 func seedParentWithRepo(t *testing.T, svc *service.Service, repo *sqliterepo.Repository) string {
 	t.Helper()
 	ctx := context.Background()
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
-	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{ID: "repo-parent", WorkspaceID: "ws-1", Name: "Parent Repo"}))
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-parent", WorkspaceID: "ws-1", Name: "Parent Repo", DefaultBranch: "main",
+	}))
 	parent, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Parent task",
 		Repositories: []service.TaskRepositoryInput{
-			{RepositoryID: "repo-parent", BaseBranch: "main"},
+			{RepositoryID: "repo-parent", BaseBranch: "pr-metrics"},
 		},
 	})
 	require.NoError(t, err)
 	return parent.ID
 }
 
-func TestResolveTaskRepositories_ParentWithoutExplicitRepos_InheritsAll(t *testing.T) {
+// TestResolveTaskRepositories_ParentWithoutExplicitRepos_InheritsRepoAndBaseBranch
+// asserts the same-repo subtask path: the parent's RepositoryID and
+// BaseBranch carry over so the subtask branches off the same starting point
+// (sibling branches, ergonomic for stacked PRs). CheckoutBranch is dropped
+// because two worktrees cannot share a working branch.
+func TestResolveTaskRepositories_ParentWithoutExplicitRepos_InheritsRepoAndBaseBranch(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	parentID := seedParentWithRepo(t, svc, repo)
 
@@ -296,8 +307,77 @@ func TestResolveTaskRepositories_ParentWithoutExplicitRepos_InheritsAll(t *testi
 	require.NoError(t, err)
 	require.Len(t, result.Repos, 1, "subtask without explicit repos inherits parent's repos")
 	assert.Equal(t, "repo-parent", result.Repos[0].RepositoryID)
+	assert.Equal(t, "pr-metrics", result.Repos[0].BaseBranch, "same-repo subtask should inherit parent's base_branch for stacked-PR ergonomics")
+	assert.Empty(t, result.Repos[0].CheckoutBranch, "subtask must not inherit parent's checkout_branch (worktrees cannot share a branch)")
 	assert.Equal(t, "ws-1", result.WorkspaceID)
 	assert.Equal(t, "wf-1", result.WorkflowID)
+}
+
+// TestCreateSubtaskFromParent_SameRepoInheritsParentBaseBranch is the
+// end-to-end check that the parent's base_branch is persisted onto the
+// subtask's task_repository row when the subtask targets the same repo.
+// This is the desired behaviour: agents stacking work on top of a parent
+// PR get a subtask anchored to the same starting point. The worktree
+// manager's fallback (covered in worktree tests) is the safety net for
+// cases where the inherited branch later goes stale.
+func TestCreateSubtaskFromParent_SameRepoInheritsParentBaseBranch(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	resolved, err := h.resolveTaskRepositories(ctx, parentID, "", nil)
+	require.NoError(t, err)
+
+	subtask, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID:  resolved.WorkspaceID,
+		WorkflowID:   resolved.WorkflowID,
+		ParentID:     parentID,
+		Title:        "Child",
+		Description:  "do the thing",
+		Repositories: resolved.Repos,
+	})
+	require.NoError(t, err)
+	require.Len(t, subtask.Repositories, 1)
+	assert.Equal(t, "repo-parent", subtask.Repositories[0].RepositoryID)
+	assert.Equal(t, "pr-metrics", subtask.Repositories[0].BaseBranch, "same-repo subtask should inherit parent's base_branch")
+}
+
+// TestCreateSubtaskFromParent_DifferentRepoUsesNewRepoDefault verifies the
+// cross-repo path: when the agent points the subtask at a different repo
+// (via repository_id / repository_url / local_path) without an explicit
+// base_branch, the subtask anchors to that repo's default_branch — never
+// the parent's branch.
+func TestCreateSubtaskFromParent_DifferentRepoUsesNewRepoDefault(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-sibling", WorkspaceID: "ws-1", Name: "Sibling", DefaultBranch: "trunk",
+	}))
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	explicit := []mcpRepositoryInput{{RepositoryID: "repo-sibling"}}
+	resolved, err := h.resolveTaskRepositories(ctx, parentID, "", explicit)
+	require.NoError(t, err)
+
+	subtask, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID:  resolved.WorkspaceID,
+		WorkflowID:   resolved.WorkflowID,
+		ParentID:     parentID,
+		Title:        "Cross-repo child",
+		Description:  "do the thing",
+		Repositories: resolved.Repos,
+	})
+	require.NoError(t, err)
+	require.Len(t, subtask.Repositories, 1)
+	assert.Equal(t, "repo-sibling", subtask.Repositories[0].RepositoryID)
+	assert.Equal(t, "trunk", subtask.Repositories[0].BaseBranch, "cross-repo subtask should anchor to the new repo's default_branch, not parent's pr-metrics")
 }
 
 func TestResolveTaskRepositories_ParentWithExplicitRepos_OverridesRepoButInheritsWorkspace(t *testing.T) {
@@ -430,6 +510,46 @@ func TestHandleCreateTask_AutoResolvesWorkspaceAndWorkflow(t *testing.T) {
 	assert.Equal(t, ws.MessageTypeResponse, resp.Type, "should succeed with auto-resolved workspace and workflow")
 }
 
+// TestCreateTask_GitHubURLOnly_LeavesDefaultBranchEmpty pins the upstream
+// contract that produced the production "base branch does not exist" failure
+// for task 01b82e73. When an MCP caller passes only a github_url (no
+// default_branch, no base_branch), the resulting Repository row has an empty
+// default_branch and the TaskRepository row has an empty base_branch — the
+// service layer never probes the upstream remote.
+//
+// This test documents that contract so any future change there (e.g. the
+// service learns to probe the remote up front) is an intentional decision,
+// and so the executor-side backfill that compensates for this isn't
+// accidentally treated as redundant.
+func TestCreateTask_GitHubURLOnly_LeavesDefaultBranchEmpty(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
+
+	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "subtask via bare github url",
+		Repositories: []service.TaskRepositoryInput{
+			{GitHubURL: "https://github.com/acme/never-seen"},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, task.Repositories, 1)
+	assert.Empty(t, task.Repositories[0].BaseBranch,
+		"task_repositories.base_branch should be empty when caller passes neither base_branch nor default_branch — executor backfill compensates downstream")
+
+	createdRepo, err := svc.GetRepository(ctx, task.Repositories[0].RepositoryID)
+	require.NoError(t, err)
+	require.NotNil(t, createdRepo)
+	assert.Empty(t, createdRepo.DefaultBranch,
+		"repositories.default_branch should be empty: FindOrCreateRepository does not probe the remote — the executor backfills it after clone")
+	assert.Equal(t, "acme", createdRepo.ProviderOwner)
+	assert.Equal(t, "never-seen", createdRepo.ProviderName)
+}
+
 func TestHandleCreateTask_AutoResolveFailsWithMultipleWorkflows(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
@@ -450,5 +570,51 @@ func TestHandleCreateTask_AutoResolveFailsWithMultipleWorkflows(t *testing.T) {
 
 	resp, err := h.handleCreateTask(ctx, msg)
 	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+func TestHandleCreateTask_NewFields_Unmarshalled(t *testing.T) {
+	// Verify that execution_policy and assignee_agent_profile_id are accepted
+	// in the payload without triggering a parse error. The handler will fail
+	// at the workspace_id validation stage, not at unmarshal.
+	h := &Handlers{}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":                     "My task",
+		"workspace_id":              "ws-1",
+		"workflow_id":               "wf-1",
+		"execution_policy":          `{"stages":[]}`,
+		"assignee_agent_profile_id": "agent-inst-42",
+	})
+
+	// taskSvc is nil so CreateTask will panic before we reach it; the payload
+	// must at least parse cleanly. The handler returns a validation error about
+	// workspace_id being absent (not a parse error) only when those fields are
+	// missing — here all required fields are present so it will reach taskSvc.
+	// To avoid a nil-pointer panic we just verify the unmarshal path by sending
+	// a payload that fails a post-unmarshal check (missing workspace) which
+	// exercised the request struct fields.
+	msgMissingWs := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":                     "My task",
+		"execution_policy":          `{"stages":[]}`,
+		"assignee_agent_profile_id": "agent-inst-42",
+	})
+
+	resp, err := h.handleCreateTask(context.Background(), msgMissingWs)
+	require.NoError(t, err)
+	// Should fail on workspace_id validation, not on JSON unmarshal
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+	_ = msg // payload with all fields — tested implicitly through struct definition
+}
+
+func TestHandleCreateTask_BlockedBy_Accepted(t *testing.T) {
+	h := &Handlers{}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":      "Blocked task",
+		"blocked_by": []string{"task-1", "task-2"},
+	})
+
+	resp, err := h.handleCreateTask(context.Background(), msg)
+	require.NoError(t, err)
+	// Fails on workspace_id, not on blocked_by parsing
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }

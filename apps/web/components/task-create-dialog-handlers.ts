@@ -143,10 +143,40 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
     [fs],
   );
 
+  /**
+   * Toggles "no repository" mode. Replaces the chip row with a folder picker.
+   * Clears the URL-mode state and the workspace_path so flipping back returns
+   * the user to a clean slate.
+   */
+  const handleToggleNoRepository = useCallback(() => {
+    const next = !fs.noRepository;
+    fs.setNoRepository(next);
+    if (next) {
+      fs.setUseGitHubUrl(false);
+      fs.setGitHubUrl("");
+      fs.setGitHubBranch("");
+      // Clear the executor selection so the auto-fill effect re-picks a
+      // non-worktree default (worktree is unworkable in no-repo mode).
+      fs.setExecutorId("");
+      fs.setExecutorProfileId("");
+    } else {
+      fs.setWorkspacePath("");
+    }
+  }, [fs]);
+
+  const handleWorkspacePathChange = useCallback(
+    (value: string) => {
+      fs.setWorkspacePath(value);
+    },
+    [fs],
+  );
+
   return {
     handleToggleGitHubUrl,
     handleToggleFreshBranch,
     handleGitHubUrlChange,
+    handleToggleNoRepository,
+    handleWorkspacePathChange,
   };
 }
 

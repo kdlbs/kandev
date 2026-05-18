@@ -14,6 +14,10 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
+// remoteResolver resolves a local repo's origin remote into provider/owner/name.
+// Injectable so tests can avoid touching real git directories.
+type remoteResolver func(localPath string) (provider, owner, name string)
+
 // Constants identifying the canonical kandev repository and the workflow
 // template loaded from apps/backend/config/workflows/improve-kandev.yml.
 const (
@@ -46,17 +50,21 @@ type Handler struct {
 	// gh resolves the authenticated user's login and write access. Defaults
 	// to a gh-CLI shell-out; tests can substitute a fake.
 	gh GitHubInfo
+	// resolveRemote resolves a local repo path's origin remote. Defaults to
+	// service.ResolveGitRemoteProvider; tests can substitute a fake.
+	resolveRemote remoteResolver
 }
 
 // NewHandler constructs a Handler. version is embedded into bundle metadata.
 func NewHandler(taskSvc *taskservice.Service, cloner Cloner, version string, log *logger.Logger) *Handler {
 	return &Handler{
-		taskSvc:  taskSvc,
-		cloner:   cloner,
-		log:      log,
-		version:  version,
-		snapshot: func() []buffer.Entry { return buffer.Default().Snapshot() },
-		gh:       newDefaultGitHubInfo(),
+		taskSvc:       taskSvc,
+		cloner:        cloner,
+		log:           log,
+		version:       version,
+		snapshot:      func() []buffer.Entry { return buffer.Default().Snapshot() },
+		gh:            newDefaultGitHubInfo(),
+		resolveRemote: taskservice.ResolveGitRemoteProvider,
 	}
 }
 
@@ -118,21 +126,7 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	localPath, err := h.cloner.EnsureCloned(ctx, repoCloneURL, repoOwner, repoName)
-	if err != nil {
-		h.log.Error("improve-kandev: clone failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clone kandev repo"})
-		return
-	}
-
-	repo, err := h.taskSvc.FindOrCreateRepository(ctx, &taskservice.FindOrCreateRepositoryRequest{
-		WorkspaceID:   req.WorkspaceID,
-		Provider:      repoProvider,
-		ProviderOwner: repoOwner,
-		ProviderName:  repoName,
-		DefaultBranch: defaultBranch,
-		LocalPath:     localPath,
-	})
+	repo, err := h.resolveOrCloneRepo(ctx, req.WorkspaceID)
 	if err != nil {
 		h.log.Error("improve-kandev: repository upsert failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to register kandev repository"})
@@ -180,6 +174,94 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 		ForkStatus:     access.forkStatus,
 		ForkMessage:    access.forkMessage,
 	})
+}
+
+// resolveOrCloneRepo returns the workspace's kandev repository, preferring an
+// existing entry — even one the user added themselves with no provider info —
+// over cloning a managed copy into ~/.kandev/repos. Order:
+//  1. Match by provider info (workspace + github + kdlbs + kandev).
+//  2. Match by scanning workspace repos whose origin remote resolves to
+//     kdlbs/kandev; backfill provider info on the match.
+//  3. Fall back to cloning into the managed location and registering it.
+func (h *Handler) resolveOrCloneRepo(ctx context.Context, workspaceID string) (*taskmodels.Repository, error) {
+	if existing, err := h.taskSvc.GetRepositoryByProviderInfo(ctx, workspaceID, repoProvider, repoOwner, repoName); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return existing, nil
+	}
+
+	repos, err := h.taskSvc.ListRepositories(ctx, workspaceID)
+	if err != nil {
+		// Listing failed — log and fall through to clone path; we'd rather
+		// risk a duplicate than fail the bootstrap entirely.
+		h.log.Warn("improve-kandev: list repositories failed; falling back to clone", zap.Error(err))
+	} else if match := findKandevRepoByLocalRemote(repos, h.resolveRemote); match != nil {
+		h.backfillKandevProviderInfo(ctx, match)
+		return match, nil
+	}
+
+	localPath, err := h.cloner.EnsureCloned(ctx, repoCloneURL, repoOwner, repoName)
+	if err != nil {
+		return nil, err
+	}
+	return h.taskSvc.FindOrCreateRepository(ctx, &taskservice.FindOrCreateRepositoryRequest{
+		WorkspaceID:   workspaceID,
+		Provider:      repoProvider,
+		ProviderOwner: repoOwner,
+		ProviderName:  repoName,
+		DefaultBranch: defaultBranch,
+		LocalPath:     localPath,
+	})
+}
+
+// findKandevRepoByLocalRemote returns the first repo with a local path whose
+// origin remote resolves to kdlbs/kandev. Skips rows that already declare
+// non-matching provider info to avoid hijacking unrelated entries.
+func findKandevRepoByLocalRemote(repos []*taskmodels.Repository, resolve remoteResolver) *taskmodels.Repository {
+	if resolve == nil {
+		return nil
+	}
+	for _, r := range repos {
+		if r == nil || r.LocalPath == "" {
+			continue
+		}
+		if r.Provider != "" && (r.Provider != repoProvider || r.ProviderOwner != repoOwner || r.ProviderName != repoName) {
+			continue
+		}
+		p, o, n := resolve(r.LocalPath)
+		if p == repoProvider && o == repoOwner && n == repoName {
+			return r
+		}
+	}
+	return nil
+}
+
+// backfillKandevProviderInfo fills missing provider/owner/name on an existing
+// repo so subsequent lookups by provider info hit the fast path. Failures are
+// logged but non-fatal — we still return the matched repo to the caller.
+func (h *Handler) backfillKandevProviderInfo(ctx context.Context, repo *taskmodels.Repository) {
+	if repo.Provider == repoProvider && repo.ProviderOwner == repoOwner && repo.ProviderName == repoName {
+		return
+	}
+	provider, owner, name := repoProvider, repoOwner, repoName
+	branch := repo.DefaultBranch
+	if branch == "" {
+		branch = defaultBranch
+	}
+	if _, err := h.taskSvc.UpdateRepository(ctx, repo.ID, &taskservice.UpdateRepositoryRequest{
+		Provider:      &provider,
+		ProviderOwner: &owner,
+		ProviderName:  &name,
+		DefaultBranch: &branch,
+	}); err != nil {
+		h.log.Warn("improve-kandev: backfill provider info failed",
+			zap.String("repository_id", repo.ID), zap.Error(err))
+		return
+	}
+	repo.Provider = provider
+	repo.ProviderOwner = owner
+	repo.ProviderName = name
+	repo.DefaultBranch = branch
 }
 
 // emuBlockedMessage explains the EMU-restriction case to the contributor in

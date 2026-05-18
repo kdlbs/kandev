@@ -3,8 +3,9 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSessionRuntimeSlice } from "./session-runtime-slice";
 import { createSessionSlice } from "../session/session-slice";
-import type { SessionRuntimeSlice } from "./types";
+import type { SessionCommit, SessionRuntimeSlice } from "./types";
 import type { SessionSlice } from "../session/types";
+import { sessionId as toSessionId, taskId as toTaskId } from "@/lib/types/ids";
 
 function makeStore() {
   return create<SessionRuntimeSlice>()(immer(createSessionRuntimeSlice));
@@ -21,6 +22,23 @@ function makeCombinedStore() {
       ...(createSessionRuntimeSlice as any)(set),
     })),
   );
+}
+
+function commit(sha: string): SessionCommit {
+  return {
+    id: `commit-${sha}`,
+    session_id: "sess-1",
+    commit_sha: sha,
+    parent_sha: `parent-${sha}`,
+    author_name: "Test User",
+    author_email: "test@example.com",
+    commit_message: `Commit ${sha}`,
+    committed_at: "2026-05-09T00:00:00Z",
+    files_changed: 1,
+    insertions: 1,
+    deletions: 0,
+    created_at: "2026-05-09T00:00:00Z",
+  };
 }
 
 describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
@@ -126,6 +144,39 @@ describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
   });
 });
 
+describe("setGitStatus", () => {
+  it("updates cached status when only branch diff totals change", () => {
+    const store = makeStore();
+
+    store.getState().setGitStatus("sess-1", {
+      branch: "feature",
+      remote_branch: "",
+      ahead: 0,
+      behind: 0,
+      files: {},
+      timestamp: "same-timestamp",
+      branch_additions: 0,
+      branch_deletions: 0,
+    } as never);
+
+    store.getState().setGitStatus("sess-1", {
+      branch: "feature",
+      remote_branch: "",
+      ahead: 0,
+      behind: 0,
+      files: {},
+      timestamp: "same-timestamp",
+      branch_additions: 3,
+      branch_deletions: 1,
+    } as never);
+
+    expect(store.getState().gitStatus.byEnvironmentId["sess-1"]).toMatchObject({
+      branch_additions: 3,
+      branch_deletions: 1,
+    });
+  });
+});
+
 describe("setTaskSession — cross-slice migration", () => {
   it("migrates env-keyed data when task_environment_id is set", () => {
     const store = makeCombinedStore();
@@ -136,8 +187,8 @@ describe("setTaskSession — cross-slice migration", () => {
 
     // Session update arrives with task_environment_id
     store.getState().setTaskSession({
-      id: "sess-1",
-      task_id: "task-1",
+      id: toSessionId("sess-1"),
+      task_id: toTaskId("task-1"),
       state: "RUNNING",
       task_environment_id: "env-1",
       started_at: "",
@@ -158,8 +209,8 @@ describe("setTaskSession — cross-slice migration", () => {
     store.getState().setGitStatus("sess-2", { branch: "dev" } as never);
 
     store.getState().setTaskSession({
-      id: "sess-2",
-      task_id: "task-2",
+      id: toSessionId("sess-2"),
+      task_id: toTaskId("task-2"),
       state: "RUNNING",
       started_at: "",
       updated_at: "",
@@ -181,16 +232,16 @@ describe("setTaskSessionsForTask — bulk cross-slice migration", () => {
 
     store.getState().setTaskSessionsForTask("task-1", [
       {
-        id: "sess-a",
-        task_id: "task-1",
+        id: toSessionId("sess-a"),
+        task_id: toTaskId("task-1"),
         state: "COMPLETED",
         task_environment_id: "env-x",
         started_at: "",
         updated_at: "",
       },
       {
-        id: "sess-b",
-        task_id: "task-1",
+        id: toSessionId("sess-b"),
+        task_id: toTaskId("task-1"),
         state: "RUNNING",
         task_environment_id: "env-y",
         started_at: "",
@@ -203,5 +254,47 @@ describe("setTaskSessionsForTask — bulk cross-slice migration", () => {
     expect(state.gitStatus.byEnvironmentId["sess-a"]).toBeUndefined();
     expect(state.shell.outputs["env-y"]).toBe("hello");
     expect(state.shell.outputs["sess-b"]).toBeUndefined();
+  });
+});
+
+describe("setSessionCommits — stale response protection", () => {
+  it("does not overwrite existing commits with an empty array", () => {
+    const store = makeStore();
+
+    store.getState().setSessionCommits("sess-1", [commit("abc")]);
+    store.getState().setSessionCommits("sess-1", []);
+
+    const state = store.getState();
+    expect(state.sessionCommits.byEnvironmentId["sess-1"]).toEqual([commit("abc")]);
+  });
+
+  it("sets an empty array when no existing commits are present", () => {
+    const store = makeStore();
+
+    store.getState().setSessionCommits("sess-1", []);
+
+    const state = store.getState();
+    expect(state.sessionCommits.byEnvironmentId["sess-1"]).toEqual([]);
+  });
+
+  it("overwrites existing commits with a non-empty array", () => {
+    const store = makeStore();
+
+    store.getState().setSessionCommits("sess-1", [commit("abc")]);
+    store.getState().setSessionCommits("sess-1", [commit("def")]);
+
+    const state = store.getState();
+    expect(state.sessionCommits.byEnvironmentId["sess-1"]).toEqual([commit("def")]);
+  });
+
+  it("allows an empty response after commits are explicitly cleared", () => {
+    const store = makeStore();
+
+    store.getState().setSessionCommits("sess-1", [commit("abc")]);
+    store.getState().clearSessionCommits("sess-1");
+    store.getState().setSessionCommits("sess-1", []);
+
+    const state = store.getState();
+    expect(state.sessionCommits.byEnvironmentId["sess-1"]).toEqual([]);
   });
 });

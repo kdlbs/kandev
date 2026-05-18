@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -85,11 +86,13 @@ func (a *CopilotACP) BuildCommand(opts CommandOptions) Command {
 func (a *CopilotACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd("npx", "-y", copilotACPPkg, "--acp").Build(),
-		WorkingDir:     "{workspace}",
-		Env:            map[string]string{},
-		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Protocol:       agent.ProtocolACP,
+		Cmd:             Cmd("npx", "-y", copilotACPPkg, "--acp").Build(),
+		WorkingDir:      "{workspace}",
+		Env:             map[string]string{},
+		ResourceLimits:  ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
+		Protocol:        agent.ProtocolACP,
+		ProjectSkillDir: ".agents/skills",
+		UserSkillDir:    ".copilot/skills",
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
@@ -100,9 +103,20 @@ func (a *CopilotACP) Runtime() *RuntimeConfig {
 
 func (a *CopilotACP) RemoteAuth() *RemoteAuth { return nil }
 
+// Verified per the user: `copilot login` is the dedicated sign-in
+// subcommand for the GitHub Copilot CLI.
+func (a *CopilotACP) LoginCommand() *LoginCommand {
+	return &LoginCommand{
+		Cmd:         []string{"copilot", "login"},
+		Description: "Sign in with your GitHub account.",
+	}
+}
+
 func (a *CopilotACP) InstallScript() string {
 	return "npm install -g " + copilotACPPkg
 }
+
+func (a *CopilotACP) BillingType() usage.BillingType { return defaultBillingType() }
 
 func (a *CopilotACP) PermissionSettings() map[string]PermissionSetting {
 	return copilotPermSettings
@@ -118,8 +132,12 @@ func (a *CopilotACP) PermissionSettings() map[string]PermissionSetting {
 // frames. Only `--allow-all-tools` and the other `--allow-all-*` flags do.
 var copilotPermSettings = map[string]PermissionSetting{
 	"allow_all_tools": {
-		Supported:   true,
-		Default:     false,
+		Supported: true,
+		// Enabled by default so autonomous runs don't stall on per-tool-call
+		// permission_request frames. kandev's UI can still surface and approve
+		// them, but for typical orchestration it's just noise. The other
+		// --allow-all-* toggles stay off as security defaults.
+		Default:     true,
 		Label:       "Allow all tools",
 		Description: "Skip confirmation for every tool call (--allow-all-tools)",
 		ApplyMethod: PermissionApplyMethodCLIFlag,

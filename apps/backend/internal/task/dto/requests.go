@@ -260,18 +260,26 @@ type CreateTaskRequest struct {
 	WorkflowStepID string
 	Title          string
 	Description    string
-	Priority       int
+	Priority       string
 	State          *v1.TaskState
 	Repositories   []TaskRepositoryInput
 	Position       int
 	Metadata       map[string]interface{}
+
+	// Office extensions
+	AssigneeAgentProfileID string
+	Origin                 string
+	ProjectID              string
+	Labels                 string
+	ParentID               string
+	BlockedBy              []string
 }
 
 type UpdateTaskRequest struct {
 	ID           string
 	Title        *string
 	Description  *string
-	Priority     *int
+	Priority     *string
 	State        *v1.TaskState
 	Repositories []TaskRepositoryInput
 	Position     *int

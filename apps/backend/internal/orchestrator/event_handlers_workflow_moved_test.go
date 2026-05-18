@@ -236,7 +236,7 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 			synctest.Wait()
 
 			updated, _ := repo.GetTaskSession(ctx, "s1")
-			if updated.ReviewStatus == nil || *updated.ReviewStatus != "pending" {
+			if updated.ReviewStatus != models.ReviewStatusPending {
 				t.Fatalf("expected pending review status to be preserved, got %#v", updated.ReviewStatus)
 			}
 		})
@@ -275,8 +275,8 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 			synctest.Wait()
 
 			updated, _ := repo.GetTaskSession(ctx, "s1")
-			if updated.ReviewStatus != nil && *updated.ReviewStatus != "" {
-				t.Fatalf("expected review status to be cleared, got %q", *updated.ReviewStatus)
+			if updated.ReviewStatus != models.ReviewStatusNone {
+				t.Fatalf("expected review status to be cleared, got %q", updated.ReviewStatus)
 			}
 		})
 	})
@@ -312,12 +312,9 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 		deadline := time.Now().Add(2 * time.Second)
 		for {
 			status := svc.messageQueue.GetStatus(ctx, "s1")
-			if status.IsQueued {
-				if status.Message == nil {
-					t.Fatal("expected queued message payload")
-				}
-				if status.Message.TaskID != "t1" {
-					t.Fatalf("expected queued task_id t1, got %s", status.Message.TaskID)
+			if status.Count > 0 {
+				if status.Entries[0].TaskID != "t1" {
+					t.Fatalf("expected queued task_id t1, got %s", status.Entries[0].TaskID)
 				}
 				break
 			}

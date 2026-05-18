@@ -37,6 +37,40 @@ export const test = backendFixture.extend<
   apiClient: [
     async ({ backend }, use) => {
       const client = new ApiClient(backend.baseUrl);
+      // Confirm the E2E mock routes mounted. They are gated by KANDEV_E2E_MOCK
+      // in fixtures/backend.ts; if the env var isn't propagating, /api/v1/_test
+      // returns 404 and every session-driven test would fail with a confusing
+      // network error.
+      //
+      // The backend's `/health` endpoint can flip green before every router
+      // group has been registered — the office testharness mount runs from
+      // a post-init goroutine on some boot paths. Poll the test-harness
+      // health for a short window before raising the "not mounted" error so
+      // a startup race doesn't poison the worker-scoped fixture for every
+      // subsequent test in the file.
+      const probeDeadline = Date.now() + 10_000;
+      let lastStatus = 0;
+      let lastText = "";
+      while (Date.now() < probeDeadline) {
+        const probe = await client.rawRequest("GET", "/api/v1/_test/health");
+        lastStatus = probe.status;
+        if (probe.ok) break;
+        if (probe.status !== 404 && probe.status !== 503) {
+          lastText = await probe.text();
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      if (lastStatus === 404) {
+        throw new Error(
+          "E2E mock harness not mounted: /api/v1/_test/health returned 404 after 10s of polling. " +
+            "Verify KANDEV_E2E_MOCK=true is propagated to the backend (fixtures/backend.ts) " +
+            "and that the backend was rebuilt after the testharness package was added.",
+        );
+      }
+      if (lastStatus !== 200) {
+        throw new Error(`E2E mock harness probe failed: ${lastStatus} ${lastText}`);
+      }
       await use(client);
     },
     { scope: "worker" },
@@ -64,10 +98,31 @@ export const test = backendFixture.extend<
       execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
       const repo = await apiClient.createRepository(workspace.id, repoDir);
 
-      const { agents } = await apiClient.listAgents();
-      const agentProfileId = agents[0]?.profiles[0]?.id;
+      // Agent registry seeding (runInitialAgentSetup → discovery) is
+      // synchronous before `/health` flips green in main.go, BUT
+      // `EnsureInitialAgentProfiles` failures are non-fatal (warn-only),
+      // so a discovery hiccup leaves the registry permanently empty
+      // until the next restart. Poll long enough to ride out a slow
+      // discovery walk and capture diagnostics if it really fails so
+      // the next debug run isn't blind.
+      let agentProfileId: string | undefined;
+      let lastAgentCount = -1;
+      const agentsDeadline = Date.now() + 30_000;
+      while (Date.now() < agentsDeadline) {
+        const { agents } = await apiClient.listAgents();
+        lastAgentCount = agents.length;
+        agentProfileId = agents[0]?.profiles[0]?.id;
+        if (agentProfileId) break;
+        await new Promise((r) => setTimeout(r, 250));
+      }
       if (!agentProfileId) {
-        throw new Error("E2E seed failed: no agent profile available");
+        throw new Error(
+          `E2E seed failed: no agent profile available after 30s of polling ` +
+            `(listAgents returned ${lastAgentCount} agent(s) on the last attempt). ` +
+            `Likely cause: runInitialAgentSetup in main.go warn-logged a discovery ` +
+            `failure and the backend started anyway with an empty registry. ` +
+            `Check the backend log for "Failed to run initial agent setup".`,
+        );
       }
 
       // Find the worktree executor's profile so tests can opt in to worktree-based sessions.
@@ -108,11 +163,21 @@ export const test = backendFixture.extend<
       keyboard_shortcuts: {},
       enable_preview_on_click: false,
       sidebar_views: [],
+      // Reset to default kanban view. Pipeline-view tests switch this to
+      // "graph2", which persists per-workspace; without this reset the next
+      // test renders cards with data-testid="pipeline-task-<id>" instead of
+      // "task-card-<id>", breaking taskCardByTitle locators.
+      kanban_view_mode: "",
     });
     const context = await browser.newContext({
       baseURL: backend.frontendUrl,
     });
     const page = await context.newPage();
+    if (process.env.E2E_BROWSER_CONSOLE === "1") {
+      page.on("console", (msg) => {
+        console.log(`[browser:${msg.type()}]`, msg.text());
+      });
+    }
     await setupPage(page, backend, seedData);
     await use(page);
     await context.close();
@@ -141,6 +206,22 @@ export const test = backendFixture.extend<
   ],
 });
 
+// Reset the active workspace pointer before every test so that specs which
+// do not use the testPage fixture (e.g. API-only routing tests) start from
+// a known workspace_id instead of whatever a previous test's completeOnboarding
+// call wrote into user_settings. This is idempotent — the testPage fixture
+// also calls saveUserSettings, so tests that do use testPage are unaffected.
+test.beforeEach(async ({ apiClient, seedData }) => {
+  await apiClient.saveUserSettings({
+    workspace_id: seedData.workspaceId,
+    workflow_filter_id: seedData.workflowId,
+    keyboard_shortcuts: {},
+    enable_preview_on_click: false,
+    sidebar_views: [],
+    kanban_view_mode: "",
+  });
+});
+
 export { expect } from "@playwright/test";
 
 async function setupPage(page: Page, backend: BackendContext, seedData: SeedData): Promise<void> {
@@ -163,6 +244,41 @@ async function setupPage(page: Page, backend: BackendContext, seedData: SeedData
       // Set the window global that getBackendConfig() reads for API/WS connections
       // (e2e tests run frontend and backend on separate ports, like dev mode)
       window.__KANDEV_API_PORT = backendPort;
+
+      // Replace native Notification with a capture stub so e2e runs never
+      // pop OS-level toasts on the developer's machine. Tests that want to
+      // assert read window.__kandevTestNotifications via the helpers in
+      // e2e/helpers/notifications-capture.ts. permission stays "granted"
+      // so the WS handler at apps/web/lib/ws/handlers/notifications.ts
+      // (which early-returns when not granted) still runs its full logic.
+      const captured: { title: string; body?: string }[] = [];
+      (
+        window as unknown as { __kandevTestNotifications: typeof captured }
+      ).__kandevTestNotifications = captured;
+      class NotificationStub {
+        static permission: NotificationPermission = "granted";
+        static async requestPermission(): Promise<NotificationPermission> {
+          return "granted";
+        }
+        title: string;
+        body?: string;
+        constructor(title: string, opts?: NotificationOptions) {
+          this.title = title;
+          this.body = opts?.body;
+          captured.push({ title, body: opts?.body });
+        }
+        close(): void {}
+        addEventListener(): void {}
+        removeEventListener(): void {}
+        dispatchEvent(): boolean {
+          return false;
+        }
+      }
+      Object.defineProperty(window, "Notification", {
+        configurable: true,
+        writable: true,
+        value: NotificationStub,
+      });
     },
     {
       backendPort: String(backend.port),

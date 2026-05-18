@@ -16,7 +16,11 @@ import { useAgentProfileOptions } from "@/components/task-create-dialog-options"
 import { toMessageAttachments } from "@/components/task-create-dialog-helpers";
 import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
+import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
+import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
+import { fetchTaskEnvironment } from "@/lib/api/domains/task-environment-api";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import type { ExecutorProfile } from "@/lib/types/http";
 import { IconLoader2 } from "@tabler/icons-react";
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
@@ -36,6 +40,37 @@ type NewSessionDialogProps = {
   taskId: string;
   groupId?: string;
 };
+
+function useTaskExecutorProfile(taskId: string, open: boolean): ExecutorProfile | null {
+  const executors = useAppStore((state) => state.executors.items);
+  const [profile, setProfile] = useState<ExecutorProfile | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    void fetchTaskEnvironment(taskId)
+      .then((env) => {
+        if (!active || !env) return;
+        for (const executor of executors) {
+          const match = (executor.profiles ?? []).find((p) => p.id === env.executor_profile_id);
+          if (match) {
+            setProfile({
+              ...match,
+              executor_type: match.executor_type ?? executor.type,
+              executor_name: match.executor_name ?? executor.name,
+            });
+            return;
+          }
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [open, taskId, executors]);
+
+  return profile;
+}
 
 function useNewSessionDialogState(taskId: string) {
   const taskTitle = useAppStore((state) => {
@@ -123,6 +158,42 @@ function useSessionOptions(taskId: string) {
   }, [sessions, agentProfiles]);
 }
 
+function isMissingCompatibleProfile(
+  executorProfile: ExecutorProfile | null,
+  totalAgentCount: number,
+  hasCompatibleProfiles: boolean,
+): boolean {
+  if (!executorProfile) return false;
+  if (totalAgentCount === 0) return false;
+  return !hasCompatibleProfiles;
+}
+
+function useCompatibleAgentProfiles(
+  agentProfiles: AgentProfileOption[],
+  executorProfile: ExecutorProfile | null,
+): AgentProfileOption[] {
+  const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
+  return useMemo(() => {
+    if (!executorProfile || !authLoaded) return agentProfiles;
+    return agentProfiles.filter((ap) =>
+      isAgentConfiguredOnExecutor(ap, executorProfile, authSpecs),
+    );
+  }, [agentProfiles, executorProfile, authSpecs, authLoaded]);
+}
+
+function useEnforceCompatibleProfile(
+  hasExecutorProfile: boolean,
+  compatible: AgentProfileOption[],
+  selectedId: string,
+  setSelected: (id: string) => void,
+) {
+  useEffect(() => {
+    if (!hasExecutorProfile) return;
+    if (compatible.some((p) => p.id === selectedId)) return;
+    if (compatible.length > 0) setSelected(compatible[0].id);
+  }, [hasExecutorProfile, compatible, selectedId, setSelected]);
+}
+
 // eslint-disable-next-line max-lines-per-function
 function NewSessionForm({
   taskId,
@@ -130,6 +201,7 @@ function NewSessionForm({
   initialProfileId,
   executorId,
   executorLabel,
+  executorProfile,
   worktreeBranch,
   initialPrompt,
   agentProfiles,
@@ -141,6 +213,7 @@ function NewSessionForm({
   initialProfileId?: string;
   executorId: string;
   executorLabel: string | null;
+  executorProfile: ExecutorProfile | null;
   worktreeBranch: string | null;
   initialPrompt: string | null;
   agentProfiles: AgentProfileOption[];
@@ -171,7 +244,14 @@ function NewSessionForm({
     () => toContextItems(attachments, handleRemoveAttachment),
     [attachments, handleRemoveAttachment],
   );
-  const profileOptions = useAgentProfileOptions(agentProfiles);
+  const compatibleAgentProfiles = useCompatibleAgentProfiles(agentProfiles, executorProfile);
+  useEnforceCompatibleProfile(
+    Boolean(executorProfile),
+    compatibleAgentProfiles,
+    selectedProfileId,
+    setSelectedProfileId,
+  );
+  const profileOptions = useAgentProfileOptions(compatibleAgentProfiles);
   const sessionOptions = useSessionOptions(taskId);
   const isUtilityConfigured = useIsUtilityConfigured();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({ sessionId: null });
@@ -186,6 +266,11 @@ function NewSessionForm({
     });
   }, [enhancePrompt]);
   const hasProfiles = profileOptions.length > 0;
+  const noCompatibleProfiles = isMissingCompatibleProfile(
+    executorProfile,
+    agentProfiles.length,
+    hasProfiles,
+  );
   const showAgentSelector =
     hasProfiles &&
     (profileOptions.length > 1 ||
@@ -277,11 +362,11 @@ function NewSessionForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <EnvironmentBadges executorLabel={executorLabel} worktreeBranch={worktreeBranch} />
-      {!hasProfiles && (
-        <p className="text-xs text-center text-muted-foreground">
-          No agent profiles configured. Add one in Settings → Agents first.
-        </p>
-      )}
+      <NoAgentBanner
+        noCompatibleProfiles={noCompatibleProfiles}
+        hasProfiles={hasProfiles}
+        executorProfileName={executorProfile?.name ?? null}
+      />
       {showAgentSelector && (
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">Agent Profile</label>
@@ -383,6 +468,34 @@ function NewSessionForm({
   );
 }
 
+function NoAgentBanner({
+  noCompatibleProfiles,
+  hasProfiles,
+  executorProfileName,
+}: {
+  noCompatibleProfiles: boolean;
+  hasProfiles: boolean;
+  executorProfileName: string | null;
+}) {
+  if (noCompatibleProfiles) {
+    return (
+      <p className="text-xs text-center text-muted-foreground">
+        No agent profile is configured for{" "}
+        <span className="text-foreground">“{executorProfileName}”</span>. Configure credentials in
+        Settings → Executors.
+      </p>
+    );
+  }
+  if (!hasProfiles) {
+    return (
+      <p className="text-xs text-center text-muted-foreground">
+        No agent profiles configured. Add one in Settings → Agents first.
+      </p>
+    );
+  }
+  return null;
+}
+
 export function NewSessionDialog({ open, onOpenChange, taskId, groupId }: NewSessionDialogProps) {
   const {
     taskTitle,
@@ -394,6 +507,7 @@ export function NewSessionDialog({ open, onOpenChange, taskId, groupId }: NewSes
     sessionProfileId,
     effectiveDefaultProfileId,
   } = useNewSessionDialogState(taskId);
+  const executorProfile = useTaskExecutorProfile(taskId, open);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -410,6 +524,7 @@ export function NewSessionDialog({ open, onOpenChange, taskId, groupId }: NewSes
           initialProfileId={effectiveDefaultProfileId}
           executorId={currentSession?.executor_id ?? ""}
           executorLabel={executorLabel}
+          executorProfile={executorProfile}
           worktreeBranch={worktreeBranch}
           initialPrompt={initialPrompt}
           agentProfiles={agentProfiles}

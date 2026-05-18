@@ -25,6 +25,7 @@ import { usePlanPanelAutoOpen } from "@/hooks/use-plan-panel-auto-open";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
+import { useActiveTaskHasRepos } from "@/hooks/domains/kanban/use-active-task-has-repos";
 
 // Panel components (rendered via portals, not directly by dockview)
 import { TaskSessionSidebar } from "./task-session-sidebar";
@@ -32,6 +33,8 @@ import { LeftHeaderActions, RightHeaderActions } from "./dockview-header-actions
 import { DockviewWatermark } from "./dockview-watermark";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskChangesPanel } from "./task-changes-panel";
+import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
+import type { OpenDiffOptions } from "./changes-diff-target";
 import { ChangesPanel } from "./changes-panel";
 import { FilesPanel } from "./files-panel";
 import { TaskPlanPanel } from "./task-plan-panel";
@@ -276,6 +279,7 @@ function DiffViewerContent({
   const { openFile } = useFileEditors();
   const panelKind = (params?.kind as string) ?? "all";
   const selectedPath = panelKind === "file" ? (params?.path as string) : undefined;
+  const sourceFilter = ((params?.source as string) || "all") as "all" | ReviewSource;
   const panelSelectedDiff = panelKind === "all" ? selectedDiff : null;
   const handleClosePanel = useCallback(() => {
     const dockApi = useDockviewStore.getState().api;
@@ -287,6 +291,7 @@ function DiffViewerContent({
     <TaskChangesPanel
       mode={panelKind as "all" | "file"}
       filePath={selectedPath}
+      sourceFilter={sourceFilter}
       selectedDiff={panelSelectedDiff}
       onClearSelected={() => setSelectedDiff(null)}
       onOpenFile={openFile}
@@ -309,6 +314,18 @@ function ChangesContent({ panelId }: { panelId: string }) {
   const fileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
   const totalCount = fileCount + commits.length;
 
+  // Repo-less tasks have no git changes ever — auto-close the panel so users
+  // don't see a permanently empty Changes tab. Gate on a confirmed `false`:
+  // `null` means the task hasn't loaded yet, and removing the panel during
+  // that window is unrecoverable in the same session.
+  const taskHasRepos = useActiveTaskHasRepos();
+  useEffect(() => {
+    if (taskHasRepos !== false) return;
+    const dockApi = useDockviewStore.getState().api;
+    const panel = dockApi?.getPanel(panelId);
+    if (dockApi && panel) dockApi.removePanel(panel);
+  }, [taskHasRepos, panelId]);
+
   useEffect(() => {
     const title = totalCount > 0 ? `Changes (${totalCount})` : "Changes";
     setPanelTitle(panelId, title);
@@ -316,7 +333,8 @@ function ChangesContent({ panelId }: { panelId: string }) {
 
   const handleEditFile = useCallback((path: string) => openFile(path), [openFile]);
   const handleOpenDiffFile = useCallback(
-    (path: string) => addFileDiffPanel(path),
+    (path: string, options?: OpenDiffOptions) =>
+      addFileDiffPanel(path, { source: options?.source, repositoryName: options?.repositoryName }),
     [addFileDiffPanel],
   );
   const handleOpenCommitDetail = useCallback(

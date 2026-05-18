@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { IconCloud, IconCloudOff } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { getExecutorStatusIcon } from "@/lib/executor-icons";
 
 type RemoteStatusData = {
   remote_name?: string;
@@ -16,6 +16,7 @@ type RemoteStatusData = {
 type RemoteCloudTooltipProps = {
   taskId: string;
   sessionId?: string | null;
+  executorType?: string | null;
   fallbackName?: string | null;
   iconClassName?: string;
   /** When provided, uses this data directly instead of fetching via WS on hover. */
@@ -77,6 +78,7 @@ const CLOUD_STATE_CLASSES: Record<ReturnType<typeof getCloudState>, string> = {
 export function RemoteCloudTooltip({
   taskId,
   sessionId,
+  executorType,
   fallbackName,
   iconClassName = "h-3.5 w-3.5",
   status: externalStatus,
@@ -110,13 +112,17 @@ export function RemoteCloudTooltip({
   const loading = Boolean(
     !hasExternalStatus && open && sessionId && fetchedSessionId !== sessionId,
   );
-  const Icon = cloudState === "error" ? IconCloudOff : IconCloud;
+  const icon = getExecutorStatusIcon(executorType, cloudState === "error");
+  const Icon = icon.Icon;
 
   return (
     <Tooltip onOpenChange={setOpen}>
       <TooltipTrigger asChild>
         <span className="cursor-default">
-          <Icon className={`${iconClassName} ${CLOUD_STATE_CLASSES[cloudState]}`} />
+          <Icon
+            data-testid={icon.testId}
+            className={`${iconClassName} ${CLOUD_STATE_CLASSES[cloudState]}`}
+          />
         </span>
       </TooltipTrigger>
       <RemoteCloudStatusContent

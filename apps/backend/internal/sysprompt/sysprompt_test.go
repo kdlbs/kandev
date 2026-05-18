@@ -121,6 +121,31 @@ func TestInjectKandevContext_SystemContentStrippable(t *testing.T) {
 	assert.Equal(t, "Do something", stripped)
 }
 
+func TestHasKandevContext_DetectsInjectedWrap(t *testing.T) {
+	// Any prompt produced by InjectKandevContext must be detectable so call
+	// sites can make the wrap step idempotent.
+	wrapped := InjectKandevContext("task-abc", "session-xyz", "Do something")
+	assert.True(t, HasKandevContext(wrapped))
+
+	// A bare user message has no marker.
+	assert.False(t, HasKandevContext("Do something"))
+
+	// A different <kandev-system> block (e.g. active-document context from
+	// the frontend) must NOT trigger a false positive — otherwise the
+	// orchestrator's idempotency guard would skip the real kandev-context
+	// wrap.
+	other := Wrap("ACTIVE DOCUMENT: some file") + "\n\nuser text"
+	assert.False(t, HasKandevContext(other))
+
+	// A user message body that happens to mention the marker phrase must
+	// NOT short-circuit the wrap — only an actual <kandev-system> block
+	// containing the marker counts. Without the regex scope, "how do I use
+	// the KANDEV MCP TOOLS?" would falsely register as already wrapped and
+	// the first-turn injection would be skipped.
+	userMentions := "how do I use the KANDEV MCP TOOLS?"
+	assert.False(t, HasKandevContext(userMentions))
+}
+
 // --- StripSystemContent tests ---
 
 func TestStripSystemContent_NoTags(t *testing.T) {

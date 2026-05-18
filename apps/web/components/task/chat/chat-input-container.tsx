@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useCallback, useState } from "react";
-import { IconAlertTriangle, IconPlus, IconPlayerPlay } from "@tabler/icons-react";
+import { IconAlertTriangle, IconPlayerPlay, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
@@ -58,6 +58,11 @@ type ChatInputContainerProps = {
   onPlanModeChange: (enabled: boolean) => void;
   isAgentBusy: boolean;
   isStarting: boolean;
+  /** True only while a containerized executor is bootstrapping (Docker
+   * prepare, Sprites sandbox spin-up). Distinct from the brief STARTING
+   * state every session — including local quick-chat — passes through;
+   * see useSessionState. */
+  isPreparingEnvironment?: boolean;
   isMoving?: boolean;
   isSending: boolean;
   onCancel: () => void;
@@ -72,6 +77,8 @@ type ChatInputContainerProps = {
   hasAgentCommands?: boolean;
   isFailed?: boolean;
   needsRecovery?: boolean;
+  executorUnavailable?: boolean;
+  executorUnavailableReason?: string;
   contextItems?: ContextItem[];
   planContextEnabled?: boolean;
   contextFiles?: ContextFile[];
@@ -84,18 +91,46 @@ type ChatInputContainerProps = {
   hidePlanMode?: boolean;
 };
 
+async function requestSessionRecover(
+  taskId: string,
+  sessionId: string,
+  action: "resume" | "fresh_start",
+): Promise<boolean> {
+  const client = getWebSocketClient();
+  if (!client) return false;
+  try {
+    await client.request(
+      "session.recover",
+      { task_id: taskId, session_id: sessionId, action },
+      30000,
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function FailedSessionBanner({
   showDialog,
   onShowDialog,
   taskId,
   sessionId,
+  message = "This agent has stopped.",
+  detail,
+  resumeLabel = "Resume",
+  resumingLabel = "Resuming...",
 }: {
   showDialog: boolean;
   onShowDialog: (open: boolean) => void;
   taskId: string | null;
   sessionId: string | null;
+  message?: string;
+  detail?: string;
+  resumeLabel?: string;
+  resumingLabel?: string;
 }) {
   const [isResuming, setIsResuming] = useState(false);
+  const [isStartingFresh, setIsStartingFresh] = useState(false);
 
   const agentProfileId = useAppStore((s) =>
     sessionId ? (s.taskSessions.items[sessionId]?.agent_profile_id ?? "") : "",
@@ -106,29 +141,34 @@ function FailedSessionBanner({
       s.agentProfiles.items.some((p: { id: string }) => p.id === agentProfileId),
   );
 
-  const handleResume = useCallback(async () => {
-    if (!sessionId || !taskId) return;
-    const client = getWebSocketClient();
-    if (!client) return;
-    setIsResuming(true);
-    try {
-      await client.request(
-        "session.launch",
-        { task_id: taskId, intent: "resume", session_id: sessionId },
-        30000,
-      );
-    } catch {
-      setIsResuming(false);
+  const handleRecover = useCallback(
+    async (action: "resume" | "fresh_start") => {
+      if (!sessionId || !taskId) return;
+      const setBusy = action === "resume" ? setIsResuming : setIsStartingFresh;
+      setBusy(true);
+      const ok = await requestSessionRecover(taskId, sessionId, action);
+      if (!ok) setBusy(false);
+    },
+    [sessionId, taskId],
+  );
+
+  const handleResume = useCallback(() => handleRecover("resume"), [handleRecover]);
+  const handleFreshStart = useCallback(() => {
+    if (!profileExists) {
+      onShowDialog(true);
+      return;
     }
-  }, [sessionId, taskId]);
+    void handleRecover("fresh_start");
+  }, [profileExists, onShowDialog, handleRecover]);
 
   return (
     <>
       <div className="rounded border border-border overflow-hidden">
         <div className="flex items-center justify-between gap-3 px-4 py-3">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
             <IconAlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
-            <span>This agent has stopped.</span>
+            <span className="truncate">{message}</span>
+            {detail && <span className="shrink-0 text-xs text-muted-foreground">({detail})</span>}
           </div>
           <div className="flex items-center gap-2">
             {sessionId && taskId && (
@@ -138,13 +178,13 @@ function FailedSessionBanner({
                     <Button
                       variant="default"
                       size="sm"
-                      data-testid="failed-session-resume-button"
+                      data-testid="recovery-resume-button"
                       className="shrink-0 gap-1.5 cursor-pointer"
                       onClick={handleResume}
                       disabled={isResuming || !profileExists}
                     >
                       <IconPlayerPlay className="h-3.5 w-3.5" />
-                      {isResuming ? "Resuming..." : "Resume"}
+                      {isResuming ? resumingLabel : resumeLabel}
                     </Button>
                   </span>
                 </TooltipTrigger>
@@ -155,10 +195,12 @@ function FailedSessionBanner({
               variant="outline"
               size="sm"
               className="shrink-0 gap-1.5 cursor-pointer"
-              onClick={() => onShowDialog(true)}
+              onClick={handleFreshStart}
+              disabled={isStartingFresh}
+              data-testid="recovery-fresh-button"
             >
-              <IconPlus className="h-3.5 w-3.5" />
-              New Agent
+              <IconRefresh className="h-3.5 w-3.5" />
+              {isStartingFresh ? "Starting..." : "Start fresh session"}
             </Button>
           </div>
         </div>
@@ -169,6 +211,28 @@ function FailedSessionBanner({
 }
 
 type ContainerState = ReturnType<typeof useChatInputContainer>;
+type NormalizedChatInputProps = ChatInputContainerProps & {
+  isFailed: boolean;
+  hasAgentCommands: boolean;
+  submitKey: "enter" | "cmd_enter";
+  planContextEnabled: boolean;
+  contextFiles: ContextFile[];
+  contextItems: ContextItem[];
+  showRequestChangesTooltip: boolean;
+};
+
+function normalizeChatInputProps(p: ChatInputContainerProps): NormalizedChatInputProps {
+  return {
+    ...p,
+    isFailed: p.isFailed ?? false,
+    hasAgentCommands: p.hasAgentCommands ?? false,
+    submitKey: p.submitKey ?? "cmd_enter",
+    planContextEnabled: p.planContextEnabled ?? false,
+    contextFiles: p.contextFiles ?? [],
+    contextItems: p.contextItems ?? [],
+    showRequestChangesTooltip: p.showRequestChangesTooltip ?? false,
+  };
+}
 
 function buildContextAreaProps(
   s: ContainerState,
@@ -189,7 +253,7 @@ type EnhancePromptExtras = {
 
 function buildEditorAreaProps(
   s: ContainerState,
-  p: ChatInputContainerProps,
+  p: NormalizedChatInputProps,
   extras: EnhancePromptExtras = {},
 ): ChatInputEditorAreaProps {
   return {
@@ -199,21 +263,23 @@ function buildEditorAreaProps(
     handleSubmitWithReset: s.handleSubmitWithReset,
     inputPlaceholder: s.inputPlaceholder,
     isDisabled: s.isDisabled,
+    submitDisabled: s.submitDisabled,
+    submitDisabledReason: s.submitDisabledReason,
     hasClarification: s.hasClarification,
     planModeEnabled: p.planModeEnabled,
     planModeAvailable: p.planModeAvailable ?? true,
     mcpServers: p.mcpServers ?? [],
-    submitKey: p.submitKey ?? "cmd_enter",
+    submitKey: p.submitKey,
     setIsInputFocused: s.setIsInputFocused,
     sessionId: p.sessionId,
     taskId: p.taskId,
     onAddContextFile: p.onAddContextFile,
     onToggleContextFile: p.onToggleContextFile,
-    planContextEnabled: p.planContextEnabled ?? false,
+    planContextEnabled: p.planContextEnabled,
     handleAgentCommand: s.handleAgentCommand,
     addFiles: s.addFiles,
     fileInputRef: s.fileInputRef,
-    showRequestChangesTooltip: p.showRequestChangesTooltip ?? false,
+    showRequestChangesTooltip: p.showRequestChangesTooltip,
     isAgentBusy: p.isAgentBusy,
     onPlanModeChange: p.onPlanModeChange,
     taskTitle: p.taskTitle,
@@ -223,7 +289,7 @@ function buildEditorAreaProps(
     contextCount: s.allItems.length,
     contextPopoverOpen: s.contextPopoverOpen,
     setContextPopoverOpen: s.setContextPopoverOpen,
-    contextFiles: p.contextFiles ?? [],
+    contextFiles: p.contextFiles,
     onImplementPlan: p.onImplementPlan,
     onEnhancePrompt: extras.onEnhancePrompt,
     isEnhancingPrompt: extras.isEnhancingPrompt,
@@ -234,41 +300,35 @@ function buildEditorAreaProps(
   };
 }
 
+function buildStoppedBannerProps(p: ChatInputContainerProps) {
+  if (!p.executorUnavailable) return {};
+  return {
+    message: "Executor environment is unavailable.",
+    detail: p.executorUnavailableReason,
+    resumeLabel: "Restart",
+    resumingLabel: "Restarting...",
+  };
+}
+
 export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInputContainerProps>(
   function ChatInputContainer(props, ref) {
-    const {
-      sessionId,
-      taskId,
-      taskTitle,
-      taskDescription,
-      isAgentBusy,
-      isStarting,
-      isMoving = false,
-      isSending,
-      isFailed = false,
-      showRequestChangesTooltip = false,
-    } = props;
+    const { sessionId, taskId, taskTitle, taskDescription, isAgentBusy, isStarting, isSending } =
+      props;
+    const p = normalizeChatInputProps(props);
+    const isMoving = props.isMoving ?? false;
+    const executorUnavailable = props.executorUnavailable ?? false;
     const isBusyVisual = isStarting || isMoving;
-
-    const p = {
-      ...props,
-      isFailed: isFailed ?? false,
-      hasAgentCommands: props.hasAgentCommands ?? false,
-      submitKey: props.submitKey ?? "cmd_enter",
-      planContextEnabled: props.planContextEnabled ?? false,
-      contextFiles: props.contextFiles ?? [],
-      contextItems: props.contextItems ?? [],
-      showRequestChangesTooltip,
-    } as const;
 
     const s = useChatInputContainer({
       ref,
       sessionId,
       isSending,
       isStarting,
+      isPreparingEnvironment: props.isPreparingEnvironment ?? false,
       isMoving,
       isFailed: p.isFailed,
       needsRecovery: props.needsRecovery ?? false,
+      executorUnavailable,
       isAgentBusy,
       hasAgentCommands: p.hasAgentCommands,
       placeholder: props.placeholder,
@@ -277,7 +337,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       onClarificationResolved: props.onClarificationResolved,
       pendingCommentsByFile: props.pendingCommentsByFile,
       hasContextComments: props.hasContextComments ?? false,
-      showRequestChangesTooltip,
+      showRequestChangesTooltip: p.showRequestChangesTooltip,
       onRequestChangesTooltipDismiss: props.onRequestChangesTooltipDismiss,
       onSubmit: props.onSubmit,
     });
@@ -298,13 +358,14 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       });
     }, [s, enhancePrompt]);
 
-    if (p.isFailed) {
+    if (p.isFailed || executorUnavailable) {
       return (
         <FailedSessionBanner
           showDialog={s.showNewSessionDialog}
           onShowDialog={s.setShowNewSessionDialog}
           taskId={taskId}
           sessionId={sessionId}
+          {...buildStoppedBannerProps(props)}
         />
       );
     }
@@ -317,11 +378,11 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
         isStarting={isBusyVisual}
         isAgentBusy={isAgentBusy}
         hasClarification={s.hasClarification}
-        showRequestChangesTooltip={showRequestChangesTooltip}
+        showRequestChangesTooltip={p.showRequestChangesTooltip}
         hasPendingComments={s.hasPendingComments}
         planModeEnabled={props.planModeEnabled}
         showFocusHint={s.showFocusHint}
-        needsRecovery={props.needsRecovery ?? false}
+        needsRecovery={(props.needsRecovery ?? false) || executorUnavailable}
         addFiles={s.addFiles}
         contextAreaProps={buildContextAreaProps(s, p)}
         editorAreaProps={buildEditorAreaProps(s, p, {

@@ -110,7 +110,6 @@ export const SessionTabletLayout = memo(function SessionTabletLayout({
     effectiveSessionId,
     sessionKey,
     selectedDiff,
-    handleSelectDiff,
     handleClearSelectedDiff,
     openFileRequest,
     handleOpenFile,
@@ -128,9 +127,7 @@ export const SessionTabletLayout = memo(function SessionTabletLayout({
   const hasDevScript = Boolean(repository?.dev_script?.trim());
   const sessionForPreview = effectiveSessionId;
 
-  const topFilesPanel = (
-    <TaskFilesPanel onSelectDiff={handleSelectDiff} onOpenFile={handleOpenFile} />
-  );
+  const topFilesPanel = <TaskFilesPanel onOpenFile={handleOpenFile} />;
 
   // Tablet layout: two columns (left for chat/plan/changes, right for files+terminal)
   const tabletLayoutKey = "task-layout-tablet-v1";

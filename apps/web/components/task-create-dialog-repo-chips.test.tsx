@@ -64,7 +64,6 @@ function makeFs(overrides: Partial<DialogFormState>): DialogFormState {
   } as unknown as DialogFormState;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- noop for test-only callback signature
 const NOOP = (_key: string, _value: string) => undefined;
 
 function renderInProvider(ui: Parameters<typeof render>[0]) {

@@ -3,6 +3,7 @@ package docker
 
 import (
 	"bufio"
+	"context"
 	"net/http"
 	"time"
 
@@ -20,12 +21,13 @@ type buildImageRequest struct {
 
 // containerResponse is the JSON representation of a container in list responses.
 type containerResponse struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Image     string    `json:"image"`
-	State     string    `json:"state"`
-	Status    string    `json:"status"`
-	StartedAt time.Time `json:"started_at"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Image     string            `json:"image"`
+	State     string            `json:"state"`
+	Status    string            `json:"status"`
+	StartedAt time.Time         `json:"started_at"`
+	Labels    map[string]string `json:"labels,omitempty"`
 }
 
 // stopContainerRequest is the optional JSON body for POST /api/v1/docker/containers/:id/stop.
@@ -36,12 +38,15 @@ type stopContainerRequest struct {
 // ClientProvider lazily resolves the Docker client. Returns nil if Docker is unavailable.
 type ClientProvider func() *Client
 
+// TaskTitleProvider resolves a task ID to its display title for container listings.
+type TaskTitleProvider func(ctx context.Context, taskID string) (string, bool)
+
 // RegisterDockerRoutes registers Docker management HTTP routes on the given router.
 // The clientProvider lazily resolves the Docker client on each request.
-func RegisterDockerRoutes(router *gin.Engine, clientProvider ClientProvider, log *logger.Logger) {
+func RegisterDockerRoutes(router *gin.Engine, clientProvider ClientProvider, taskTitleProvider TaskTitleProvider, log *logger.Logger) {
 	api := router.Group("/api/v1/docker")
 	api.POST("/build", handleBuildImage(clientProvider, log))
-	api.GET("/containers", handleListContainers(clientProvider, log))
+	api.GET("/containers", handleListContainers(clientProvider, taskTitleProvider, log))
 	api.POST("/containers/:id/stop", handleStopContainer(clientProvider, log))
 	api.DELETE("/containers/:id", handleRemoveContainer(clientProvider, log))
 }
@@ -113,7 +118,7 @@ func streamBuildOutput(c *gin.Context, reader interface{ Read([]byte) (int, erro
 
 // handleListContainers handles GET /api/v1/docker/containers.
 // Supports optional query params: image, labels (comma-separated key=value pairs).
-func handleListContainers(clientProvider ClientProvider, log *logger.Logger) gin.HandlerFunc {
+func handleListContainers(clientProvider ClientProvider, taskTitleProvider TaskTitleProvider, log *logger.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		dockerClient := requireDocker(c, clientProvider)
 		if dockerClient == nil {
@@ -130,20 +135,48 @@ func handleListContainers(clientProvider ClientProvider, log *logger.Logger) gin
 			return
 		}
 
-		resp := make([]containerResponse, len(containers))
-		for i, ctr := range containers {
-			resp[i] = containerResponse{
-				ID:        ctr.ID,
-				Name:      ctr.Name,
-				Image:     ctr.Image,
-				State:     ctr.State,
-				Status:    ctr.Status,
-				StartedAt: ctr.StartedAt,
-			}
-		}
+		resp := newContainerResponsesWithTaskTitles(c.Request.Context(), containers, taskTitleProvider)
 
 		c.JSON(http.StatusOK, gin.H{"containers": resp})
 	}
+}
+
+func newContainerResponses(containers []ContainerInfo) []containerResponse {
+	return newContainerResponsesWithTaskTitles(context.Background(), containers, nil)
+}
+
+func newContainerResponsesWithTaskTitles(ctx context.Context, containers []ContainerInfo, taskTitleProvider TaskTitleProvider) []containerResponse {
+	resp := make([]containerResponse, len(containers))
+	for i, ctr := range containers {
+		resp[i] = containerResponse{
+			ID:        ctr.ID,
+			Name:      ctr.Name,
+			Image:     ctr.Image,
+			State:     ctr.State,
+			Status:    ctr.Status,
+			StartedAt: ctr.StartedAt,
+			Labels:    labelsWithTaskTitle(ctx, ctr.Labels, taskTitleProvider),
+		}
+	}
+	return resp
+}
+
+func labelsWithTaskTitle(ctx context.Context, labels map[string]string, taskTitleProvider TaskTitleProvider) map[string]string {
+	if len(labels) == 0 {
+		return labels
+	}
+	result := make(map[string]string, len(labels)+1)
+	for key, value := range labels {
+		result[key] = value
+	}
+	if result["kandev.task_title"] != "" || taskTitleProvider == nil {
+		return result
+	}
+	title, ok := taskTitleProvider(ctx, result["kandev.task_id"])
+	if ok && title != "" {
+		result["kandev.task_title"] = title
+	}
+	return result
 }
 
 // parseLabelsQuery extracts label filters from the "labels" query parameter.
