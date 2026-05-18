@@ -1148,7 +1148,7 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 }
 
 // Regression: PrepareTaskSession launches the workspace in a background
-// goroutine while StartTaskWithSession runs a foreground launch when the
+// goroutine while StartCreatedSession runs a foreground launch when the
 // agent is started. Both call LaunchPreparedSession on the same session.
 // Without per-session serialisation the two launches both reach
 // agentManager.LaunchAgent and the second one errors with

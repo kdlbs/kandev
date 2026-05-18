@@ -366,7 +366,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	startAgent := opts.StartAgent
 	// Serialise concurrent launches for the same session. Two callers reach
 	// this path on every task: PrepareTaskSession spawns a background launch
-	// (workspace only) the moment a session is created, and StartTaskWithSession
+	// (workspace only) the moment a session is created, and StartCreatedSession
 	// is called when the agent is actually started (auto-start, user click).
 	// Without this lock both run env-prep + executionStore.Add in parallel and
 	// the second one fails at register with "already has an agent running

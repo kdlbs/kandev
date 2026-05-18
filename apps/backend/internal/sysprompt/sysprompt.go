@@ -47,6 +47,21 @@ func HasSystemContent(text string) bool {
 	return systemTagRegex.MatchString(text)
 }
 
+// kandevContextMarker is a stable string from kandev-context.md that lets
+// callers detect a prompt that has already been wrapped with the Kandev MCP
+// system block. Used by [HasKandevContext] to make the wrap step idempotent
+// across the multiple call sites that record first-turn prompts (WS handler,
+// workflow auto-start, orchestrator).
+const kandevContextMarker = "KANDEV MCP TOOLS"
+
+// HasKandevContext reports whether the prompt already contains the Kandev MCP
+// system block produced by [InjectKandevContext]. Use this to gate a wrap at
+// any call site so the same prompt never gets double-wrapped on its way down
+// to the agent or the DB.
+func HasKandevContext(text string) bool {
+	return strings.Contains(text, kandevContextMarker)
+}
+
 // PlanMode returns the system prompt prepended when plan mode is enabled.
 // It instructs agents to collaborate on the plan without implementing changes.
 func PlanMode() string { return prompts.Get("plan-mode") }

@@ -90,7 +90,7 @@ func (s *Service) EnqueueTask(ctx context.Context, task *v1.Task) error {
 
 // PrepareTaskSession creates a session entry without launching the agent.
 // This allows the WS handler to return the session ID immediately while workspace setup
-// continues in the background. Use StartTaskWithSession to continue with agent launch.
+// continues in the background. Use StartCreatedSession to continue with agent launch.
 // When launchWorkspace is true, workspace infrastructure (agentctl) is launched asynchronously;
 // the frontend receives preparation progress via executor.prepare.progress WS events.
 func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, launchWorkspace bool) (string, error) {
@@ -209,81 +209,6 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 		zap.String("session_id", sessionID))
 
 	return sessionID, nil
-}
-
-// StartTaskWithSession starts agent execution for a task using a pre-created session.
-// This is used after PrepareTaskSession to continue with the agent launch.
-// If planMode is true and the workflow step doesn't already apply plan mode,
-// default plan mode instructions are injected into the prompt.
-func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error) {
-	s.logger.Debug("starting task with existing session",
-		zap.String("task_id", taskID),
-		zap.String("session_id", sessionID),
-		zap.String("agent_profile_id", agentProfileID),
-		zap.Bool("plan_mode", planMode))
-
-	// Process on_turn_start before launching the agent.
-	// If the target step has a different agent profile, executeStepTransition will switch
-	// the session — so we need to pick up the new session afterwards.
-	if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil {
-		s.processOnTurnStartViaEngine(ctx, taskID, session)
-	}
-
-	// Re-read the session — on_turn_start may have switched it (agent profile change).
-	reloadedSession, reloadErr := s.repo.GetTaskSession(ctx, sessionID)
-	if reloadErr != nil {
-		return nil, fmt.Errorf("failed to reload session after on_turn_start: %w", reloadErr)
-	}
-	if reloadedSession.State == models.TaskSessionStateCompleted {
-		activeSession, activeErr := s.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
-		if activeErr != nil || activeSession == nil {
-			return nil, fmt.Errorf("session was switched during on_turn_start but no active session found: %w", activeErr)
-		}
-		sessionID = activeSession.ID
-		agentProfileID = activeSession.AgentProfileID
-		executorID = activeSession.ExecutorID
-	}
-
-	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
-		s.logger.Warn("failed to update task state to SCHEDULING",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-	}
-
-	task, err := s.scheduler.GetTask(ctx, taskID)
-	if err != nil {
-		return nil, err
-	}
-
-	if priority != "" {
-		task.Priority = priority
-	}
-
-	effectivePrompt := prompt
-	if effectivePrompt == "" {
-		effectivePrompt = task.Description
-	}
-
-	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, sessionID, workflowStepID, planMode, task.IsEphemeral)
-
-	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: agentProfileID, ExecutorID: executorID, Prompt: effectivePrompt, WorkflowStepID: workflowStepID, StartAgent: true})
-	if err != nil {
-		return nil, err
-	}
-
-	if execution.SessionID != "" {
-		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive, nil)
-
-		if planModeActive {
-			sess, sessErr := s.repo.GetTaskSession(ctx, execution.SessionID)
-			if sessErr == nil {
-				s.setSessionPlanMode(ctx, sess, true)
-			}
-		}
-	}
-	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
-
-	return execution, nil
 }
 
 // StartCreatedSession starts agent execution for a task using a session that is in CREATED state.
@@ -417,8 +342,10 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 
 	// Wrap the first prompt with the Kandev MCP system block. See the
 	// matching block in startTask for the rationale (DB stores wrapped form;
-	// Message.ToAPI strips for display).
-	if effectivePrompt != "" || len(attachments) > 0 {
+	// Message.ToAPI strips for display). Idempotent — upstream call sites that
+	// record the user message themselves (wsAddMessage on CREATED sessions)
+	// wrap first, and the HasKandevContext guard prevents a second wrap here.
+	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) {
 		effectivePrompt = sysprompt.InjectKandevContext(taskID, sessionID, effectivePrompt)
 	}
 
@@ -603,7 +530,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// <kandev-system> block for the UI bubble and exposes it via raw_content.
 	// Only the first launch carries this wrap — follow-up prompts and resumes
 	// rely on the agent CLI's conversation history retaining it.
-	if effectivePrompt != "" || len(attachments) > 0 {
+	// Idempotent: upstream call sites (wsAddMessage on CREATED sessions,
+	// recordAutoStartMessage) wrap before recording the user message so the DB
+	// row carries the block; the HasKandevContext guard makes this orchestrator
+	// pass a no-op in those cases instead of double-wrapping.
+	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) {
 		effectivePrompt = sysprompt.InjectKandevContext(task.ID, sessionID, effectivePrompt)
 	}
 

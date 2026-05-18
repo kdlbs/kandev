@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -1087,8 +1088,17 @@ func (s *Service) autoStartStepPrompt(
 		}
 	}
 
-	// Record a user message so the auto-start prompt is visible in chat history.
-	s.recordAutoStartMessage(ctx, taskID, sessionID, prompt, planMode)
+	// Record a user message so the auto-start prompt is visible in chat
+	// history. For CREATED sessions the agent has not started yet, so this is
+	// the first prompt of the task — wrap with the Kandev MCP system block
+	// before persisting (and before passing downstream) so the DB row matches
+	// what the agent receives. StartCreatedSession's wrap is idempotent
+	// (HasKandevContext guard) so the pre-wrap doesn't double.
+	recordedPrompt := prompt
+	if session.State == models.TaskSessionStateCreated && (prompt != "" || len(attachments) > 0) {
+		recordedPrompt = sysprompt.InjectKandevContext(taskID, sessionID, prompt)
+	}
+	s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode)
 
 	// If the session is in CREATED state, the agent was never started (e.g. workspace-only
 	// preparation from a blocked auto-start). PromptTask will reject CREATED sessions,
@@ -1099,7 +1109,7 @@ func (s *Service) autoStartStepPrompt(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName))
-		_, err := s.StartCreatedSession(ctx, taskID, sessionID, session.AgentProfileID, prompt, true, planMode, attachments)
+		_, err := s.StartCreatedSession(ctx, taskID, sessionID, session.AgentProfileID, recordedPrompt, true, planMode, attachments)
 		if err != nil {
 			requeueTaken()
 		}

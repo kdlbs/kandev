@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -638,6 +639,58 @@ func TestStartCreatedSession_WrapsFirstPromptWithKandevSystemBlock(t *testing.T)
 	// The MCP tool list is the whole point of the wrap — guard a representative one.
 	if !strings.Contains(content, "ask_user_question_kandev") {
 		t.Errorf("expected ask_user_question_kandev tool in wrap, got %q", content)
+	}
+}
+
+// TestStartCreatedSession_DoesNotDoubleWrapPreWrappedPrompt verifies the
+// idempotency guard on the orchestrator's wrap step. Upstream call sites
+// (wsAddMessage on CREATED sessions, recordAutoStartMessage) wrap before
+// recording the user message so the DB row carries the <kandev-system>
+// block. When the wrapped content is later passed through StartCreatedSession,
+// the orchestrator must NOT wrap it a second time — otherwise the agent
+// receives nested system blocks and the strip pipeline behaves unpredictably.
+func TestStartCreatedSession_DoesNotDoubleWrapPreWrappedPrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:    "task1",
+		Title: "Test Task",
+		State: v1.TaskStateInProgress,
+	}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+
+	// Simulate an upstream caller (e.g. wsAddMessage) that has already wrapped.
+	preWrapped := sysprompt.InjectKandevContext("task1", "session1", "Build me a feature")
+
+	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", preWrapped, false, false, nil)
+	if err != nil {
+		t.Fatalf("StartCreatedSession failed: %v", err)
+	}
+
+	if len(mc.userMessages) != 1 {
+		t.Fatalf("expected 1 user message recorded, got %d", len(mc.userMessages))
+	}
+	content := mc.userMessages[0].content
+
+	// Exactly one opening tag and one closing tag — not nested.
+	openCount := strings.Count(content, "<kandev-system>")
+	closeCount := strings.Count(content, "</kandev-system>")
+	if openCount != 1 {
+		t.Errorf("expected exactly 1 <kandev-system> tag, got %d in %q", openCount, content)
+	}
+	if closeCount != 1 {
+		t.Errorf("expected exactly 1 </kandev-system> tag, got %d in %q", closeCount, content)
+	}
+	// The user's text is preserved.
+	if !strings.Contains(content, "Build me a feature") {
+		t.Errorf("expected user text preserved, got %q", content)
 	}
 }
 
