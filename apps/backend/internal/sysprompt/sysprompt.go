@@ -58,8 +58,17 @@ const kandevContextMarker = "KANDEV MCP TOOLS"
 // system block produced by [InjectKandevContext]. Use this to gate a wrap at
 // any call site so the same prompt never gets double-wrapped on its way down
 // to the agent or the DB.
+//
+// The marker is matched only inside a <kandev-system>...</kandev-system>
+// block — a user message body that happens to mention "KANDEV MCP TOOLS"
+// would not falsely signal that the wrap is already applied.
 func HasKandevContext(text string) bool {
-	return strings.Contains(text, kandevContextMarker)
+	for _, block := range systemTagRegex.FindAllString(text, -1) {
+		if strings.Contains(block, kandevContextMarker) {
+			return true
+		}
+	}
+	return false
 }
 
 // PlanMode returns the system prompt prepended when plan mode is enabled.

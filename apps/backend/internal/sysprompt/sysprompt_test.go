@@ -136,6 +136,14 @@ func TestHasKandevContext_DetectsInjectedWrap(t *testing.T) {
 	// wrap.
 	other := Wrap("ACTIVE DOCUMENT: some file") + "\n\nuser text"
 	assert.False(t, HasKandevContext(other))
+
+	// A user message body that happens to mention the marker phrase must
+	// NOT short-circuit the wrap — only an actual <kandev-system> block
+	// containing the marker counts. Without the regex scope, "how do I use
+	// the KANDEV MCP TOOLS?" would falsely register as already wrapped and
+	// the first-turn injection would be skipped.
+	userMentions := "how do I use the KANDEV MCP TOOLS?"
+	assert.False(t, HasKandevContext(userMentions))
 }
 
 // --- StripSystemContent tests ---

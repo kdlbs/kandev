@@ -1094,8 +1094,10 @@ func (s *Service) autoStartStepPrompt(
 	// before persisting (and before passing downstream) so the DB row matches
 	// what the agent receives. StartCreatedSession's wrap is idempotent
 	// (HasKandevContext guard) so the pre-wrap doesn't double.
+	// The HasKandevContext check on `prompt` also guards against any future
+	// caller that ever pre-wraps before reaching here (none today).
 	recordedPrompt := prompt
-	if session.State == models.TaskSessionStateCreated && (prompt != "" || len(attachments) > 0) {
+	if session.State == models.TaskSessionStateCreated && (prompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(prompt) {
 		recordedPrompt = sysprompt.InjectKandevContext(taskID, sessionID, prompt)
 	}
 	s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode)
