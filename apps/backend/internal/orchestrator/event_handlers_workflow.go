@@ -569,6 +569,22 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 		s.reviveReusedSession(ctx, existing)
 	}
 
+	// Tag the reused session as workflow-spawned so a later transition to a
+	// plain step knows it can revert to the task default — same rationale as
+	// the tag in createNewSessionForStep. Without this, reusing a session
+	// across two workflow overrides (X → Y → X) and then entering a plain
+	// step would leave the reused session untagged and incorrectly
+	// indistinguishable from a user-created one.
+	if existing.Metadata == nil {
+		existing.Metadata = map[string]interface{}{}
+	}
+	existing.Metadata[models.SessionMetaKeyCreatedBy] = models.SessionCreatedByWorkflowSwitch
+	existing.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateTaskSession(ctx, existing); err != nil {
+		s.logger.Warn("failed to persist workflow-switch metadata on reused session",
+			zap.String("session_id", existing.ID), zap.Error(err))
+	}
+
 	if err := s.SetPrimarySession(ctx, existing.ID); err != nil {
 		s.logger.Warn("failed to set reused session as primary",
 			zap.String("session_id", existing.ID), zap.Error(err))

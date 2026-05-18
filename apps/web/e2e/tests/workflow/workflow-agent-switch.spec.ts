@@ -773,22 +773,18 @@ test.describe("Workflow agent profile switching", () => {
       intent: "start",
     });
 
-    // Wait for the profileB session to complete its turn (mock agent finishes
-    // the e2e:message and emits agent.ready). The on_turn_complete handler
-    // then evaluates the transition to Step2.
+    // Wait for the on_turn_complete handler to advance the task to Step2 —
+    // a deterministic signal that the handler ran (and either spawned a new
+    // session, the bug, or correctly did not).
     await expect
       .poll(
         async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions.find((s) => s.agent_profile_id === profileB.id)?.state ?? "";
+          const t = await apiClient.getTask(task.id);
+          return t.workflow_step_id;
         },
-        { timeout: 30_000, message: "Waiting for profileB session to settle after turn" },
+        { timeout: 30_000, message: "Waiting for task to advance to step2" },
       )
-      .toMatch(/WAITING_FOR_INPUT|COMPLETED/);
-
-    // Give the on_turn_complete handler time to (incorrectly) spawn a new
-    // session if the bug is present.
-    await new Promise((r) => setTimeout(r, 2000));
+      .not.toBe(step1.id);
 
     // Critical assertion: no extra profileA session was spawned after the
     // user's profileB turn completed. The task must still have exactly two

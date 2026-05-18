@@ -47,9 +47,9 @@ const (
 
 // TaskSession.Metadata key that records how the session came into existence.
 // Read by maybySwitchSessionForProfile to decide whether transitioning to a
-// step with no agent_profile override should revert to the task default
-// (workflow-spawned sessions: yes) or preserve the user's explicit choice
-// (user-created sessions: yes — they have no created_by tag).
+// step with no agent_profile override should revert to the task default:
+// workflow-spawned sessions (created_by=workflow_switch) -> yes, revert.
+// user-created sessions (no created_by tag)              -> no, preserve.
 const (
 	SessionMetaKeyCreatedBy        = "created_by"
 	SessionCreatedByWorkflowSwitch = "workflow_switch"

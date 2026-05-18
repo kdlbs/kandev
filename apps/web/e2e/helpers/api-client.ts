@@ -1011,6 +1011,7 @@ export class ApiClient {
     title: string;
     primary_session_id?: string | null;
     state?: string;
+    workflow_step_id?: string;
     repositories?: Array<{
       id: string;
       task_id: string;
