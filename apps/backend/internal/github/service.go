@@ -1265,8 +1265,30 @@ func (s *Service) UpdateReviewWatch(ctx context.Context, id string, req *UpdateR
 	return s.store.UpdateReviewWatch(ctx, rw)
 }
 
-// DeleteReviewWatch deletes a review watch.
+// DeleteReviewWatch deletes a review watch and best-effort reaps any tasks
+// it owned. The store layer drops the dedup rows transactionally with the
+// watch row, but tasks live in a separate domain and would leak forever
+// without this pre-pass (the global sweep can no longer find them after the
+// dedup rows are gone).
 func (s *Service) DeleteReviewWatch(ctx context.Context, id string) error {
+	if s.taskDeleter != nil {
+		prTasks, err := s.store.ListReviewPRTasksByWatch(ctx, id)
+		if err != nil {
+			return fmt.Errorf("list review PR tasks for watch %s: %w", id, err)
+		}
+		for _, rpt := range prTasks {
+			if rpt.TaskID == "" {
+				continue
+			}
+			if err := s.taskDeleter.DeleteTask(ctx, rpt.TaskID); err != nil &&
+				!strings.Contains(err.Error(), "not found") {
+				s.logger.Warn("failed to delete review task during watch cleanup",
+					zap.String("watch_id", id),
+					zap.String("task_id", rpt.TaskID),
+					zap.Error(err))
+			}
+		}
+	}
 	return s.store.DeleteReviewWatch(ctx, id)
 }
 
@@ -2093,8 +2115,27 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	return s.store.UpdateIssueWatch(ctx, iw)
 }
 
-// DeleteIssueWatch deletes an issue watch.
+// DeleteIssueWatch deletes an issue watch and best-effort reaps any tasks
+// it owned (mirrors DeleteReviewWatch).
 func (s *Service) DeleteIssueWatch(ctx context.Context, id string) error {
+	if s.taskDeleter != nil {
+		issueTasks, err := s.store.ListIssueWatchTasksByWatch(ctx, id)
+		if err != nil {
+			return fmt.Errorf("list issue tasks for watch %s: %w", id, err)
+		}
+		for _, it := range issueTasks {
+			if it.TaskID == "" {
+				continue
+			}
+			if err := s.taskDeleter.DeleteTask(ctx, it.TaskID); err != nil &&
+				!strings.Contains(err.Error(), "not found") {
+				s.logger.Warn("failed to delete issue task during watch cleanup",
+					zap.String("watch_id", id),
+					zap.String("task_id", it.TaskID),
+					zap.Error(err))
+			}
+		}
+	}
 	return s.store.DeleteIssueWatch(ctx, id)
 }
 
