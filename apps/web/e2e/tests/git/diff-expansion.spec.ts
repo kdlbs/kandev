@@ -138,6 +138,69 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     expect(slotAlignItems).toBe("center");
   });
 
+  test("Add-comment hover button extrudes past the line-number cell", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedExpansionTask(testPage, apiClient, seedData);
+    await openChangesTab(testPage);
+    await openExpansionFileDiff(testPage);
+
+    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 60_000 });
+
+    // Pierre appends the gutter-utility slot wrapper INSIDE the line's
+    // numberElement on pointer-move (InteractionManager.js: target.numberElement
+    // .appendChild(this.gutterUtilityContainer)). The wrapper is right:0 of
+    // that cell, so a button with default 0 margin sits inside the cell and
+    // overlaps the line number digits. We compensate with margin-right:
+    // calc(1ch - 1lh) on our slotted button — same trick pierre uses on its
+    // built-in [data-utility-button] — to push it outside the cell into the
+    // code area. Verify the button's right edge ends up past the cell's right.
+    const lineCentre = await testPage.evaluate(() => {
+      const container = document.querySelector("diffs-container");
+      const shadow = container?.shadowRoot;
+      if (!shadow) throw new Error("diffs-container shadow root missing");
+      const line = shadow.querySelector<HTMLElement>("[data-line]");
+      if (!line) throw new Error("no [data-line] found to hover");
+      const r = line.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    });
+    await testPage.mouse.move(lineCentre.x, lineCentre.y);
+
+    const geometry = await testPage.evaluate(async () => {
+      const container = document.querySelector("diffs-container")!;
+      const shadow = container.shadowRoot!;
+      const deadline = Date.now() + 5_000;
+      let slotWrapper: HTMLElement | null = null;
+      while (Date.now() < deadline) {
+        slotWrapper = shadow.querySelector<HTMLElement>("[data-gutter-utility-slot]");
+        if (slotWrapper && slotWrapper.parentElement) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      if (!slotWrapper) throw new Error("gutter-utility-slot did not appear after hover");
+      const numberCell = slotWrapper.parentElement!;
+      // The slot wrapper is appended INTO numberCell; our React-rendered button
+      // is projected through the named <slot>. Its computed marginRight must
+      // resolve to a negative px value for the extrusion to work.
+      const slottedLight = document.querySelector<HTMLElement>('[slot="gutter-utility-slot"]');
+      if (!slottedLight) throw new Error("light-DOM [slot=gutter-utility-slot] not found");
+      const button = slottedLight.firstElementChild as HTMLElement | null;
+      if (!button) throw new Error("no button rendered inside slot");
+      const buttonRect = button.getBoundingClientRect();
+      const cellRect = numberCell.getBoundingClientRect();
+      return {
+        marginRight: parseFloat(getComputedStyle(button).marginRight),
+        buttonRight: buttonRect.right,
+        cellRight: cellRect.right,
+      };
+    });
+
+    await testPage.screenshot({ path: "test-results/diff-hover-button-extrusion.png" });
+    expect(geometry.marginRight).toBeLessThan(0);
+    expect(geometry.buttonRight).toBeGreaterThan(geometry.cellRight);
+  });
+
   test("renders Pierre Diffs viewer and shows both hunks", async ({
     testPage,
     apiClient,
