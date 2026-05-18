@@ -100,7 +100,7 @@ type TestResult struct {
 	UnameAll        string     `json:"uname_all,omitempty"`
 	Arch            string     `json:"arch,omitempty"`
 	GitVersion      string     `json:"git_version,omitempty"`
-	AgentctlAction  string     `json:"agentctl_action,omitempty"` // "cached" | "uploaded" | "skipped"
+	AgentctlAction  string     `json:"agentctl_action,omitempty"` // "cached" | "needs_upload" | "skipped"
 	Steps           []TestStep `json:"steps"`
 	TotalDurationMs int64      `json:"total_duration_ms"`
 	Error           string     `json:"error,omitempty"`
@@ -319,7 +319,12 @@ func (h *Handler) testAgentctlCache(ctx context.Context, client *ssh.Client, res
 		result.AgentctlAction = "cached"
 	} else {
 		upStep.Output = "will upload on first launch"
-		result.AgentctlAction = "uploaded"
+		// "needs_upload": the binary is absent on the remote and will be
+		// uploaded the first time a session launches; the test endpoint
+		// only probes for the sha256 sidecar, it doesn't push the binary.
+		// Anything that wants to assert an upload actually happened needs
+		// to drive a real launch.
+		result.AgentctlAction = "needs_upload"
 	}
 	result.Steps = append(result.Steps, upStep)
 }

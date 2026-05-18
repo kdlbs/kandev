@@ -25,7 +25,7 @@ export interface SSHTestResult {
   uname_all?: string;
   arch?: string;
   git_version?: string;
-  agentctl_action?: "cached" | "uploaded" | "skipped";
+  agentctl_action?: "cached" | "needs_upload" | "skipped";
   steps: SSHTestStep[];
   total_duration_ms: number;
   error?: string;

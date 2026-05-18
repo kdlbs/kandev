@@ -102,7 +102,9 @@ test.describe("ssh test-endpoint contract", () => {
       "/home/kandev/.kandev/bin/agentctl.sha256",
     ]);
 
-    // First test run: agentctl has never been uploaded, status = "uploaded".
+    // First test run: agentctl has never been uploaded, status = "needs_upload"
+    // (the test endpoint only probes for the sidecar; the actual upload runs
+    // on the first real launch below).
     const before = await apiClient.testSSHConnection({
       name: "F5-before",
       host: seedData.sshTarget.host,
@@ -112,7 +114,7 @@ test.describe("ssh test-endpoint contract", () => {
       identity_file: seedData.sshTarget.identityFile,
     });
     expect(before.success).toBe(true);
-    expect(before.agentctl_action).toBe("uploaded");
+    expect(before.agentctl_action).toBe("needs_upload");
 
     // Now actually run a task so the SSH executor uploads agentctl + sidecar.
     const task = await apiClient.createTaskWithAgent(

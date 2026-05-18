@@ -30,7 +30,7 @@ export type SSHTestResultBody = {
   uname_all?: string;
   arch?: string;
   git_version?: string;
-  agentctl_action?: "cached" | "uploaded" | "skipped";
+  agentctl_action?: "cached" | "needs_upload" | "skipped";
   steps: SSHTestStepBody[];
   total_duration_ms: number;
   error?: string;
