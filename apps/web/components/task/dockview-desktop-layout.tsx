@@ -454,6 +454,10 @@ export function collectSessionIdsForEnv(
  * Restore the env's saved layout, whitelisting only session panels that
  * legitimately belong to `envId` — guards against phantom panels from
  * previously-deleted tasks resurfacing on restore.
+ *
+ * Phantom session ids are excluded because they map to a different env in
+ * `environmentIdBySessionId` (the env they were created under), so they are
+ * simply absent from the set returned by `collectSessionIdsForEnv`.
  */
 function restoreEnvLayout(
   api: DockviewReadyEvent["api"],
