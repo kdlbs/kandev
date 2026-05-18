@@ -150,9 +150,15 @@ func TestValidate_PostgresSSLMode(t *testing.T) {
 // would ship an in-progress feature to users on the next release.
 // See docs/decisions/0007-runtime-feature-flags.md.
 func TestFeatures_DefaultOff(t *testing.T) {
-	// Force a clean env so KANDEV_FEATURES_* from the host shell can't
-	// bleed in and turn a default-off check into a default-on accident.
+	// Force a clean env so KANDEV_FEATURES_* and profile-selector vars
+	// from the host shell can't bleed in and turn a default-off check
+	// into a default-on accident. Clearing the profile selectors ensures
+	// DetectEnvironment returns prod, so FeatureFlagDefaults uses the
+	// prod value ("false") rather than the dev value ("true").
 	t.Setenv("KANDEV_FEATURES_OFFICE", "")
+	t.Setenv("KANDEV_DEBUG_DEV_MODE", "")
+	t.Setenv("KANDEV_DEBUG_PPROF_ENABLED", "")
+	t.Setenv("KANDEV_E2E_MOCK", "")
 
 	dir := t.TempDir()
 	cfg, err := LoadWithPath(dir)
