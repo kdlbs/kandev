@@ -13,6 +13,7 @@ import { useMessageNavigation } from "@/hooks/use-message-navigation";
 import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { linkToTask } from "@/lib/links";
 import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
+import { openImageInWindow } from "@/components/task/chat/file-attachment";
 
 type ChatMessageProps = {
   comment: Message;
@@ -232,15 +233,6 @@ function UserContextBadges({
       ))}
     </div>
   );
-}
-
-function openImageInWindow(mimeType: string, data: string) {
-  const win = window.open();
-  if (win) {
-    win.document.write(
-      `<img src="data:${mimeType};base64,${data}" style="max-width:100%;height:auto;" />`,
-    );
-  }
 }
 
 function UserMessageContent({

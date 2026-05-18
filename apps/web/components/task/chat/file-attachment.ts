@@ -29,6 +29,16 @@ export function formatBytes(bytes: number): string {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
+/** Open a base64-encoded image in a new browser window for full-size viewing. */
+export function openImageInWindow(mimeType: string, data: string): void {
+  const win = window.open();
+  if (win) {
+    win.document.write(
+      `<img src="data:${mimeType};base64,${data}" style="max-width:100%;height:auto;" />`,
+    );
+  }
+}
+
 function isPreviewableImage(mimeType: string): boolean {
   return PREVIEWABLE_IMAGE_TYPES.includes(mimeType);
 }
