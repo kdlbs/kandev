@@ -12,7 +12,11 @@ import { MessageActions } from "@/components/task/chat/messages/message-actions"
 import { useMessageNavigation } from "@/hooks/use-message-navigation";
 import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { linkToTask } from "@/lib/links";
-import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
+import {
+  markdownComponents,
+  normalizeMarkdown,
+  remarkPlugins,
+} from "@/components/shared/markdown-components";
 import { openImageInWindow } from "@/components/task/chat/file-attachment";
 
 type ChatMessageProps = {
@@ -82,7 +86,7 @@ function renderUserMessageBody(
     return (
       <div className="markdown-body markdown-body-user max-w-none">
         <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-          {content}
+          {normalizeMarkdown(content)}
         </ReactMarkdown>
       </div>
     );
@@ -340,7 +344,7 @@ function AgentMessageContent({ comment, showRaw, onToggleRaw, showRichBlocks }: 
         ) : (
           <div className="markdown-body max-w-none">
             <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-              {comment.content || "(empty)"}
+              {normalizeMarkdown(comment.content || "(empty)")}
             </ReactMarkdown>
             {showRichBlocks ? <RichBlocks comment={comment} /> : null}
           </div>

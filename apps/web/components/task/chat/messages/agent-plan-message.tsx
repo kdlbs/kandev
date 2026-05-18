@@ -5,7 +5,11 @@ import ReactMarkdown from "react-markdown";
 import { IconMinus, IconPlus, IconMaximize } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
-import { remarkPlugins, markdownComponents } from "@/components/shared/markdown-components";
+import {
+  markdownComponents,
+  normalizeMarkdown,
+  remarkPlugins,
+} from "@/components/shared/markdown-components";
 import type { Message } from "@/lib/types/http";
 
 function parsePlanContent(text: string): { title: string; body: string } {
@@ -25,7 +29,7 @@ function PlanMarkdownBody({ text, className }: { text: string; className?: strin
       className={`markdown-body max-w-none text-sm [&>*]:my-2 [&>p]:my-2 [&>ul]:my-2 [&>ol]:my-2 ${className ?? ""}`}
     >
       <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-        {text}
+        {normalizeMarkdown(text)}
       </ReactMarkdown>
     </div>
   );
