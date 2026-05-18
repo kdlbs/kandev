@@ -28,6 +28,8 @@ const OTHER_FILE: OpenFileTab = {
   name: "bar.ts",
 };
 
+const CHAT_LINK_PATH = "src/chat-link.ts";
+
 function renderHandlers(initialSid: string | null = "s1") {
   const handlePanelChange = vi.fn();
   const view = renderHook(
@@ -54,11 +56,11 @@ describe("useMobilePanelHandlers", () => {
 
   it("handleOpenFileFromChat fetches and opens the viewer panel", () => {
     const { result, handlePanelChange } = renderHandlers();
-    act(() => result.current.handleOpenFileFromChat("src/chat-link.ts"));
+    act(() => result.current.handleOpenFileFromChat(CHAT_LINK_PATH));
 
     expect(fetchAndOpenFileMock).toHaveBeenCalledWith(
       "s1",
-      "src/chat-link.ts",
+      CHAT_LINK_PATH,
       expect.any(Function),
       expect.any(Function),
     );
@@ -72,7 +74,7 @@ describe("useMobilePanelHandlers", () => {
 
   it("handleOpenFileFromChat no-ops when no active session", () => {
     const { result } = renderHandlers(null);
-    act(() => result.current.handleOpenFileFromChat("src/chat-link.ts"));
+    act(() => result.current.handleOpenFileFromChat(CHAT_LINK_PATH));
 
     expect(fetchAndOpenFileMock).not.toHaveBeenCalled();
     expect(result.current.selectedFile).toBeNull();
@@ -103,6 +105,29 @@ describe("useMobilePanelHandlers", () => {
     act(() => result.current.handleOpenFile(MOCK_FILE));
     rerender({ sid: "s1" });
     expect(result.current.selectedFile).toEqual(MOCK_FILE);
+  });
+
+  it("rejects stale handleOpenFileFromChat callback after session change", () => {
+    const { result, rerender } = renderHandlers();
+    act(() => result.current.handleOpenFileFromChat(CHAT_LINK_PATH));
+
+    expect(fetchAndOpenFileMock).toHaveBeenCalledWith(
+      "s1",
+      CHAT_LINK_PATH,
+      expect.any(Function),
+      expect.any(Function),
+    );
+
+    // Simulate session switch before the async callback fires
+    rerender({ sid: "s2" });
+    expect(result.current.selectedFile).toBeNull();
+
+    // Invoke the stale callback that was registered for session s1
+    const staleCallback = fetchAndOpenFileMock.mock.calls[0]?.[2] as (file: OpenFileTab) => void;
+    act(() => staleCallback(MOCK_FILE));
+
+    // Should still be null because the callback belongs to the old session
+    expect(result.current.selectedFile).toBeNull();
   });
 
   it("latest handleOpenFile call wins", () => {

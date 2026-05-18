@@ -52,6 +52,7 @@ export function MobileFileViewerPanel({ file, sessionId, onClose }: MobileFileVi
                 className="cursor-pointer px-2"
                 onClick={() => setMarkdownPreview(true)}
                 data-testid="markdown-preview-toggle"
+                aria-label="Open markdown preview"
               >
                 <IconEye className="h-4 w-4" />
               </Button>

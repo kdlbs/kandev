@@ -190,7 +190,9 @@ test.describe("Mobile file viewer panel", () => {
 
     // CodeMirror's `.cm-scroller` owns the scroll for text files (matches the
     // desktop editor tab). Verify it's the element that actually scrolls.
-    const cmScroller = viewer.locator(".cm-scroller").first();
+    const cmScrollerLocator = viewer.locator(".cm-scroller");
+    await expect(cmScrollerLocator).toHaveCount(1);
+    const cmScroller = cmScrollerLocator.first();
     await expect(cmScroller).toBeVisible();
 
     const metrics = await cmScroller.evaluate((element) => ({

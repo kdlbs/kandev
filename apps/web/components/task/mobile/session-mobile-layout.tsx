@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { SessionMobileTopBar } from "./session-mobile-top-bar";
 import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
 import { SessionTaskSwitcherSheet } from "./session-task-switcher-sheet";
@@ -259,6 +259,7 @@ export function useMobilePanelHandlers({
   const { toast } = useToast();
   const [selectedFile, setSelectedFile] = useState<OpenFileTab | null>(null);
   const [trackedSessionId, setTrackedSessionId] = useState<string | null>(effectiveSessionId);
+  const latestRequestIdRef = useRef(0);
 
   // Reset viewer when switching sessions — adjust state during render per
   // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
@@ -267,13 +268,19 @@ export function useMobilePanelHandlers({
     setSelectedFile(null);
   }
 
+  useEffect(() => {
+    latestRequestIdRef.current += 1;
+  }, [effectiveSessionId]);
+
   const handleOpenFileFromChat = useCallback(
     (path: string) => {
       if (!effectiveSessionId) return;
+      const requestId = (latestRequestIdRef.current += 1);
       void fetchAndOpenFile(
         effectiveSessionId,
         path,
         (file) => {
+          if (requestId !== latestRequestIdRef.current) return;
           setSelectedFile(file);
           handlePanelChange("files");
         },
@@ -285,6 +292,7 @@ export function useMobilePanelHandlers({
 
   const handleOpenFile = useCallback(
     (file: OpenFileTab) => {
+      latestRequestIdRef.current += 1;
       setSelectedFile(file);
       handlePanelChange("files");
     },
@@ -293,6 +301,7 @@ export function useMobilePanelHandlers({
 
   const handlePanelChangeAndClearSheet = useCallback(
     (panel: MobileSessionPanel) => {
+      latestRequestIdRef.current += 1;
       setSelectedFile(null);
       handlePanelChange(panel);
     },
