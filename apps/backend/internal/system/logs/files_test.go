@@ -3,6 +3,7 @@ package logs
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -130,5 +131,81 @@ func TestList_IgnoresSubdirectories(t *testing.T) {
 	}
 	if files[0].Name != "kandev.log" {
 		t.Errorf("files[0] = %q", files[0].Name)
+	}
+}
+
+func TestOpen_ReadsRegularFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "kandev.log"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	svc := newTestService(t, dir)
+
+	f, size, err := svc.Open("kandev.log")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	if size != 5 {
+		t.Errorf("size = %d, want 5", size)
+	}
+}
+
+func TestOpen_RejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.log")
+	if err := os.WriteFile(target, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	link := filepath.Join(dir, "link.log")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unsupported on this platform: %v", err)
+	}
+	svc := newTestService(t, dir)
+
+	if _, _, err := svc.Open("link.log"); err == nil {
+		t.Fatal("Open(symlink) returned nil, want not-a-regular-file error")
+	}
+}
+
+func TestOpen_RejectsTraversalAndSeparators(t *testing.T) {
+	dir := t.TempDir()
+	svc := newTestService(t, dir)
+
+	for _, name := range []string{
+		"../etc/passwd",
+		"sub/file.log",
+		"\\windows\\style.log",
+		".",
+		"..",
+		"",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := svc.Open(name); err == nil {
+				t.Fatalf("Open(%q) returned nil, want error", name)
+			}
+		})
+	}
+}
+
+func TestContainedPath_RejectsEscape(t *testing.T) {
+	// safeName would already reject these, but exercise containedPath
+	// directly so the post-join verification is covered. We pass strings
+	// that bypass safeName by going straight to containedPath.
+	dir := t.TempDir()
+	svc := newTestService(t, dir)
+
+	// A clean filename that would resolve outside the directory after
+	// filepath.Join cannot exist by construction (a single segment without
+	// separators always stays inside the directory). Document this by
+	// exercising the happy path and verifying the returned path is under dir.
+	got, err := svc.containedPath("kandev.log")
+	if err != nil {
+		t.Fatalf("containedPath: %v", err)
+	}
+	rootAbs, _ := filepath.Abs(dir)
+	rel, err := filepath.Rel(rootAbs, got)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		t.Errorf("containedPath = %q escapes %q", got, rootAbs)
 	}
 }

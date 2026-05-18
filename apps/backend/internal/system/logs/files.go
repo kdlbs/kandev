@@ -110,7 +110,10 @@ func (s *Service) Open(name string) (*os.File, int64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	full, err := s.containedPath(clean)
+	// filepath.Base is redundant given safeName already rejects separators,
+	// but it acts as a syntactic sanitiser for CodeQL's go/path-injection
+	// taint tracker which does not see safeName as cutting the chain.
+	full, err := s.containedPath(filepath.Base(clean))
 	if err != nil {
 		return nil, 0, err
 	}
