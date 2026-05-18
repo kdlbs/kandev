@@ -13,6 +13,7 @@ export type ClarificationGroupApi = {
   answers: Record<string, ClarificationAnswer>;
   submitState: SubmitState;
   recordAnswer: (questionId: string, answer: ClarificationAnswer) => void;
+  clearAnswer: (questionId: string) => void;
   // Submits every recorded answer in a single batch. An optional `override`
   // map is merged into the current answers right before the POST so callers
   // can safely auto-submit immediately after recording an answer (the React
@@ -88,6 +89,11 @@ export function useClarificationGroup(
     answersRef.current = answers;
   }, [answers]);
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
+  // Re-entry guard: multiple submit paths can race (Cmd+Enter inside the
+  // custom input fires both the input's onSubmit and onRequestFinalSubmit;
+  // a double-click on the Submit button can also race). The hook owns the
+  // guarantee that only one POST is in flight at a time.
+  const inflightRef = useRef(false);
 
   const pendingId = useMemo(() => {
     if (!messages || messages.length === 0) return null;
@@ -106,12 +112,23 @@ export function useClarificationGroup(
     setAnswers((prev) => ({ ...prev, [questionId]: answer }));
   }, []);
 
+  const clearAnswer = useCallback((questionId: string) => {
+    setAnswers((prev) => {
+      if (!(questionId in prev)) return prev;
+      const next = { ...prev };
+      delete next[questionId];
+      return next;
+    });
+  }, []);
+
   const submitCollected = useCallback(
     async (override?: Record<string, ClarificationAnswer>) => {
       if (!pendingId) return;
+      if (inflightRef.current) return;
       const current = { ...answersRef.current, ...(override ?? {}) };
       const haveAll = questionIds.every((id) => Boolean(current[id]));
       if (!haveAll) return;
+      inflightRef.current = true;
       setSubmitState("submitting");
       const ordered = questionIds
         .map((id) => current[id])
@@ -121,6 +138,8 @@ export function useClarificationGroup(
       } catch (err) {
         console.error("Clarification submit threw:", err);
         setSubmitState("error");
+      } finally {
+        inflightRef.current = false;
       }
     },
     [pendingId, questionIds],
@@ -129,12 +148,16 @@ export function useClarificationGroup(
   const skipAll = useCallback(
     async (reason?: string) => {
       if (!pendingId) return;
+      if (inflightRef.current) return;
+      inflightRef.current = true;
       setSubmitState("submitting");
       try {
         setSubmitState(await postClarificationSkip(pendingId, reason ?? "User skipped"));
       } catch (err) {
         console.error("Clarification skip threw:", err);
         setSubmitState("error");
+      } finally {
+        inflightRef.current = false;
       }
     },
     [pendingId],
@@ -147,6 +170,7 @@ export function useClarificationGroup(
     answers,
     submitState,
     recordAnswer,
+    clearAnswer,
     submitCollected,
     skipAll,
   };

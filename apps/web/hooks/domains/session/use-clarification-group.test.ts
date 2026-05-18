@@ -77,6 +77,31 @@ describe("useClarificationGroup — derived state", () => {
     expect(result.current.answeredCount).toBe(1);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("clearAnswer removes the entry and decrements answeredCount", async () => {
+    const msgs = [
+      clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 2 }),
+      clarMessage({ id: "m2", pendingId: "p1", questionId: "q2", index: 1, total: 2 }),
+    ];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    await act(async () => {
+      result.current.recordAnswer("q1", { question_id: "q1", custom_text: "draft" });
+    });
+    expect(result.current.answeredCount).toBe(1);
+
+    await act(async () => {
+      result.current.clearAnswer("q1");
+    });
+    expect(result.current.answers["q1"]).toBeUndefined();
+    expect(result.current.answeredCount).toBe(0);
+
+    // Clearing a question that was never recorded is a no-op.
+    await act(async () => {
+      result.current.clearAnswer("q-missing");
+    });
+    expect(result.current.answeredCount).toBe(0);
+  });
 });
 
 describe("useClarificationGroup — submit + skip", () => {
