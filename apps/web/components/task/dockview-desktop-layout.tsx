@@ -53,6 +53,10 @@ import {
   useAutoSessionTab,
   useAutoPRPanel,
 } from "./dockview-session-tabs";
+import {
+  useCompactDockviewDefault,
+  useDockviewUnmountCleanup,
+} from "./dockview-desktop-layout-hooks";
 import { TerminalPanel } from "./terminal-panel";
 import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
@@ -67,7 +71,7 @@ import type { Repository, RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 
 // Portal system
-import { panelPortalManager, setPanelTitle } from "@/lib/layout/panel-portal-manager";
+import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { PanelPortalHost, usePortalSlot } from "@/lib/layout/panel-portal-host";
 
 // ---------------------------------------------------------------------------
@@ -454,29 +458,6 @@ function useEnvSwitchCleanup(effectiveSessionId: string | null, effectiveEnvId: 
       performLayoutSwitch(oldEnvId, newEnvId, effectiveSessionId);
     }
   }, [effectiveEnvId, effectiveSessionId]);
-}
-
-function useCompactDockviewDefault(compact: boolean) {
-  const setDefaultPreset = useDockviewStore((s) => s.setDefaultPreset);
-  useEffect(() => {
-    setDefaultPreset(compact ? "compact" : "default");
-    return () => setDefaultPreset("default");
-  }, [compact, setDefaultPreset]);
-}
-
-function useDockviewUnmountCleanup(
-  saveTimerRef: React.RefObject<ReturnType<typeof setTimeout> | null>,
-  readyDisposersRef: React.RefObject<Array<() => void>>,
-) {
-  useEffect(() => {
-    const timerRef = saveTimerRef;
-    const disposersRef = readyDisposersRef;
-    return () => {
-      for (const dispose of disposersRef.current.splice(0)) dispose();
-      if (timerRef.current) clearTimeout(timerRef.current);
-      panelPortalManager.releaseAll();
-    };
-  }, [readyDisposersRef, saveTimerRef]);
 }
 
 // ---------------------------------------------------------------------------
