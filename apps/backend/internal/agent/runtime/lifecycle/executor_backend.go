@@ -152,6 +152,21 @@ var persistentMetadataPrefixes = []string{
 	"env_secret_id_", // Secret store UUIDs for profile env vars
 }
 
+// sessionScopedMetadataKeys lists metadata keys that point to per-session
+// runtime resources (process PIDs, allocated ports, session directories on
+// the remote). These keys ARE persisted across a SAME-session resume — that's
+// how a backend restart reattaches to a still-running remote agent — but they
+// MUST NOT be carried across SIBLING sessions on the same task. If they were,
+// the second session would try to attach to the first session's agentctl
+// process and end up sharing its ACP session and instance port.
+var sessionScopedMetadataKeys = map[string]bool{
+	MetadataKeySSHRemoteSessionDir:   true,
+	MetadataKeySSHRemoteAgentctlPort: true,
+	MetadataKeySSHRemoteAgentctlPID:  true,
+	MetadataKeySSHLocalForwardPort:   true,
+	MetadataKeySSHRemoteAgentctlURL:  true,
+}
+
 // ShouldPersistMetadataKey returns true if the given metadata key should
 // be carried forward when resuming a session from an ExecutorRunning record.
 func ShouldPersistMetadataKey(key string) bool {
@@ -164,6 +179,13 @@ func ShouldPersistMetadataKey(key string) bool {
 		}
 	}
 	return false
+}
+
+// IsSessionScopedMetadataKey reports whether key references per-session
+// runtime resources that must not leak across sibling sessions on the same
+// task environment.
+func IsSessionScopedMetadataKey(key string) bool {
+	return sessionScopedMetadataKeys[key]
 }
 
 // FilterPersistentMetadata returns a copy of src containing only keys that

@@ -133,9 +133,21 @@ func applyExecutorRunningMetadata(req *LaunchAgentRequest, running *models.Execu
 		if metadata == nil {
 			metadata = ensureLaunchMetadata(req)
 		}
-		if _, exists := metadata[k]; !exists && lifecycle.ShouldPersistMetadataKey(k) {
-			metadata[k] = v
+		if _, exists := metadata[k]; exists {
+			continue
 		}
+		if !lifecycle.ShouldPersistMetadataKey(k) {
+			continue
+		}
+		// Skip session-scoped runtime resources (PIDs, ports, session dirs).
+		// Carrying these across sibling sessions on the same task makes a
+		// fresh launch look like a same-session resume — see SSH executor's
+		// ResumeRemoteInstance — and the new session ends up sharing the
+		// previous session's agentctl process.
+		if lifecycle.IsSessionScopedMetadataKey(k) {
+			continue
+		}
+		metadata[k] = v
 	}
 }
 
