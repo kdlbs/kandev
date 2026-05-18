@@ -58,7 +58,7 @@ export const TaskLayout = memo(function TaskLayout({
   remoteStatusError,
   initialLayout,
 }: TaskLayoutProps) {
-  const { isMobile, isTablet } = useResponsiveBreakpoint();
+  const { isMobile, usesDesktopWorkbench, isFullDesktop } = useResponsiveBreakpoint();
 
   // Mobile layout
   if (isMobile) {
@@ -81,8 +81,8 @@ export const TaskLayout = memo(function TaskLayout({
     );
   }
 
-  // Tablet layout
-  if (isTablet) {
+  // Tablet fallback for coarse-pointer half-screen devices.
+  if (!usesDesktopWorkbench) {
     return (
       <SessionTabletLayout
         workspaceId={workspaceId}
@@ -104,6 +104,7 @@ export const TaskLayout = memo(function TaskLayout({
       initialScripts={initialScripts}
       initialTerminals={initialTerminals}
       initialLayout={initialLayout}
+      compact={!isFullDesktop}
     />
   );
 });

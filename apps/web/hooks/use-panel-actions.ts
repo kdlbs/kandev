@@ -13,8 +13,7 @@ import { useFileEditors } from "@/hooks/use-file-editors";
  * On mobile/tablet: delegates to layout store (kept for backward compat).
  */
 export function usePanelActions() {
-  const { isMobile, isTablet } = useResponsiveBreakpoint();
-  const isDesktop = !isMobile && !isTablet;
+  const { usesDesktopWorkbench } = useResponsiveBreakpoint();
 
   // Desktop: dockview store
   const dockAddBrowser = useDockviewStore((s) => s.addBrowserPanel);
@@ -37,18 +36,18 @@ export function usePanelActions() {
 
   const addBrowser = useCallback(
     (url?: string) => {
-      if (isDesktop) {
+      if (usesDesktopWorkbench) {
         dockAddBrowser(url);
       } else if (activeSessionId) {
         // Mobile/tablet: use layout store to open preview
         useLayoutStore.getState().openPreview(activeSessionId);
       }
     },
-    [isDesktop, dockAddBrowser, activeSessionId],
+    [usesDesktopWorkbench, dockAddBrowser, activeSessionId],
   );
 
   const addPlan = useCallback(() => {
-    if (isDesktop) {
+    if (usesDesktopWorkbench) {
       dockAddPlan();
     } else if (activeSessionId && activeTaskId) {
       // Mobile/tablet: open document panel with plan
@@ -57,7 +56,7 @@ export function usePanelActions() {
       setPlanMode(activeSessionId, true);
     }
   }, [
-    isDesktop,
+    usesDesktopWorkbench,
     dockAddPlan,
     activeSessionId,
     activeTaskId,
@@ -67,48 +66,48 @@ export function usePanelActions() {
   ]);
 
   const addChat = useCallback(() => {
-    if (isDesktop) {
+    if (usesDesktopWorkbench) {
       dockAddChat();
     }
-  }, [isDesktop, dockAddChat]);
+  }, [usesDesktopWorkbench, dockAddChat]);
 
   const addChanges = useCallback(() => {
-    if (isDesktop) {
+    if (usesDesktopWorkbench) {
       dockAddChanges();
     }
-  }, [isDesktop, dockAddChanges]);
+  }, [usesDesktopWorkbench, dockAddChanges]);
 
   const addTerminal = useCallback(
     (terminalId?: string) => {
-      if (isDesktop) {
+      if (usesDesktopWorkbench) {
         dockAddTerminal(terminalId);
       }
     },
-    [isDesktop, dockAddTerminal],
+    [usesDesktopWorkbench, dockAddTerminal],
   );
 
   const addVscode = useCallback(() => {
-    if (isDesktop) {
+    if (usesDesktopWorkbench) {
       dockAddVscode();
     }
-  }, [isDesktop, dockAddVscode]);
+  }, [usesDesktopWorkbench, dockAddVscode]);
 
   const openFile = useCallback(
     (filePath: string) => {
-      if (isDesktop) {
+      if (usesDesktopWorkbench) {
         dockOpenFile(filePath);
       }
     },
-    [isDesktop, dockOpenFile],
+    [usesDesktopWorkbench, dockOpenFile],
   );
 
   const openFileInMarkdownPreview = useCallback(
     (filePath: string) => {
-      if (isDesktop) {
+      if (usesDesktopWorkbench) {
         dockOpenFileInPreview(filePath);
       }
     },
-    [isDesktop, dockOpenFileInPreview],
+    [usesDesktopWorkbench, dockOpenFileInPreview],
   );
 
   return {

@@ -456,6 +456,29 @@ function useEnvSwitchCleanup(effectiveSessionId: string | null, effectiveEnvId: 
   }, [effectiveEnvId, effectiveSessionId]);
 }
 
+function useCompactDockviewDefault(compact: boolean) {
+  const setDefaultPreset = useDockviewStore((s) => s.setDefaultPreset);
+  useEffect(() => {
+    setDefaultPreset(compact ? "compact" : "default");
+    return () => setDefaultPreset("default");
+  }, [compact, setDefaultPreset]);
+}
+
+function useDockviewUnmountCleanup(
+  saveTimerRef: React.RefObject<ReturnType<typeof setTimeout> | null>,
+  readyDisposersRef: React.RefObject<Array<() => void>>,
+) {
+  useEffect(() => {
+    const timerRef = saveTimerRef;
+    const disposersRef = readyDisposersRef;
+    return () => {
+      for (const dispose of disposersRef.current.splice(0)) dispose();
+      if (timerRef.current) clearTimeout(timerRef.current);
+      panelPortalManager.releaseAll();
+    };
+  }, [readyDisposersRef, saveTimerRef]);
+}
+
 // ---------------------------------------------------------------------------
 // MAIN LAYOUT COMPONENT
 // ---------------------------------------------------------------------------
@@ -468,12 +491,14 @@ type DockviewDesktopLayoutProps = {
   initialScripts?: RepositoryScript[];
   initialTerminals?: Terminal[];
   initialLayout?: string | null;
+  compact?: boolean;
 };
 
 export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   sessionId,
   repository,
   initialLayout,
+  compact = false,
 }: DockviewDesktopLayoutProps) {
   const setApi = useDockviewStore((s) => s.setApi);
   const buildDefaultLayout = useDockviewStore((s) => s.buildDefaultLayout);
@@ -495,6 +520,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   useLspFileOpener();
   useEditorKeybinds();
   usePlanPanelAutoOpen();
+  useCompactDockviewDefault(compact);
 
   useEffect(() => {
     envIdRef.current = effectiveEnvId;
@@ -509,7 +535,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       // If a layout intent was passed via URL, skip saved layout restoration
       const restored = !initialLayout && tryRestoreLayout(api, currentEnvId, VALID_COMPONENTS);
       if (!restored) {
-        buildDefaultLayout(api, initialLayout ?? undefined);
+        buildDefaultLayout(api, initialLayout ?? (compact ? "compact" : undefined));
       }
 
       useDockviewStore.setState({ currentLayoutEnvId: currentEnvId });
@@ -521,7 +547,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       setupPortalCleanup(api, appStore);
       readyDisposersRef.current.push(setupContainerResizeSync(api));
     },
-    [setApi, buildDefaultLayout, initialLayout, appStore],
+    [setApi, buildDefaultLayout, initialLayout, compact, appStore],
   );
 
   // Release session-scoped portals + trigger layout switch on session change.
@@ -535,17 +561,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   // Auto-show PR detail panel when the task has an associated PR
   useAutoPRPanel();
-
-  // Clean up on unmount (e.g. navigating away from session page)
-  useEffect(() => {
-    const timerRef = saveTimerRef;
-    const disposersRef = readyDisposersRef;
-    return () => {
-      for (const dispose of disposersRef.current.splice(0)) dispose();
-      if (timerRef.current) clearTimeout(timerRef.current);
-      panelPortalManager.releaseAll();
-    };
-  }, []);
+  useDockviewUnmountCleanup(saveTimerRef, readyDisposersRef);
 
   // Visual masking: hide the dockview container during slow-path layout
   // switches (full fromJSON rebuild) to prevent the old layout from flashing.
@@ -553,6 +569,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   return (
     <div
+      data-testid="dockview-task-layout"
       className="flex-1 min-h-0 grid grid-rows-[1fr_auto]"
       aria-busy={isRestoringLayout}
       style={{

@@ -22,6 +22,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { MobileColumnTabs } from "./mobile-column-tabs";
 import { SwipeableColumns } from "./swipeable-columns";
 import { MobileDropTargets } from "./mobile-drop-targets";
+import { getKanbanColumnGridTemplate } from "./kanban-grid-template";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 
 export type SwimlaneKanbanContentProps = {
@@ -328,6 +329,7 @@ function DesktopKanbanLayout({
   selectedIds,
   onToggleSelect,
   isMultiSelectMode,
+  isCompactDesktop,
 }: {
   steps: WorkflowStep[];
   tasks: Task[];
@@ -343,13 +345,17 @@ function DesktopKanbanLayout({
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
   isMultiSelectMode?: boolean;
+  isCompactDesktop: boolean;
 }) {
   const getTasksForStep = useTasksByStep(tasks);
 
   return (
     <div
-      className="grid gap-0"
-      style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}
+      data-testid="desktop-kanban-layout"
+      className="grid min-w-full gap-0"
+      style={{
+        gridTemplateColumns: getKanbanColumnGridTemplate(steps.length, isCompactDesktop),
+      }}
     >
       {steps.map((step) => (
         <KanbanColumn
@@ -392,7 +398,7 @@ export function SwimlaneKanbanContent({
   onToggleSelect,
   isMultiSelectMode,
 }: SwimlaneKanbanContentProps) {
-  const { isMobile, isTablet } = useResponsiveBreakpoint();
+  const { isMobile, isTablet, isCompactDesktop } = useResponsiveBreakpoint();
   const { activeIndex, setActiveIndex } = useMobileColumnIndex(steps, tasks);
   const { sensors, handleDragStart, handleDragEnd, handleDragCancel, moveTaskToStep, activeTask } =
     useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError });
@@ -429,7 +435,11 @@ export function SwimlaneKanbanContent({
   } else if (isTablet) {
     layoutContent = <TabletKanbanLayout {...sharedProps} />;
   } else {
-    layoutContent = <DesktopKanbanLayout {...sharedProps} />;
+    layoutContent = (
+      <div className="h-full overflow-x-auto">
+        <DesktopKanbanLayout {...sharedProps} isCompactDesktop={isCompactDesktop} />
+      </div>
+    );
   }
 
   return (
