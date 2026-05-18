@@ -210,3 +210,37 @@ describe("useClarificationGroup — submit + skip", () => {
     expect(result.current.submitState).toBe("ok");
   });
 });
+
+describe("useClarificationGroup — inflight guard", () => {
+  beforeEach(setupFetchMock);
+
+  // Cmd+Enter inside the custom-text input historically reached both onSubmit
+  // and onRequestFinalSubmit, which could fire submitCollected twice in the
+  // same tick. The hook's inflight ref must keep the wire count at 1 even if
+  // the UI races; the backend would otherwise see a duplicate POST.
+  it("submitCollected guards against concurrent calls", async () => {
+    let resolveFetch: ((res: Response) => void) | null = null;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    await act(async () => {
+      result.current.recordAnswer("q1", { question_id: "q1", selected_options: ["o1"] });
+    });
+
+    await act(async () => {
+      const first = result.current.submitCollected();
+      const second = result.current.submitCollected();
+      resolveFetch?.(new Response(null, { status: 200 }));
+      await Promise.all([first, second]);
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.submitState).toBe("ok");
+  });
+});

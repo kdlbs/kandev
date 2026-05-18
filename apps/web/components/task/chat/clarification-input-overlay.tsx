@@ -354,9 +354,13 @@ function ClarificationCarouselBody({
     return id ? Boolean(group.answers[id]) : false;
   });
 
+  // group is a fresh object every render, but its submitCollected callback is
+  // memoised by the hook — depend on the function only so this useCallback
+  // doesn't churn on every keystroke (via the live-record path).
+  const submitCollected = group.submitCollected;
   const handleSubmit = useCallback(() => {
-    if (allAnswered) void group.submitCollected();
-  }, [allAnswered, group]);
+    if (allAnswered) void submitCollected();
+  }, [allAnswered, submitCollected]);
 
   if (!meta) return null;
 

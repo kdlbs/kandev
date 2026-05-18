@@ -194,8 +194,11 @@ export function ClarificationCustomInput({
         onKeyDown={(e) => {
           if (e.key !== "Enter" || e.shiftKey || e.altKey) return;
           if (e.metaKey || e.ctrlKey) {
+            // Cmd/Ctrl+Enter only asks the parent to finalize. The draft was
+            // already live-recorded via onChange, so we skip the per-question
+            // commit path (which would also advance the carousel one step on
+            // multi-question bundles — wasted state churn before submit).
             e.preventDefault();
-            if (draft.trim()) onSubmit(draft.trim());
             onRequestFinalSubmit?.();
             return;
           }
