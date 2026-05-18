@@ -67,6 +67,8 @@ import { ReviewDialog } from "@/components/review/review-dialog";
 import { BottomTerminalPanel } from "./bottom-terminal-panel";
 import { useReviewDialog } from "./use-review-dialog";
 
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 
@@ -432,6 +434,36 @@ function renderPanel(
 
 const VALID_COMPONENTS = new Set(Object.keys(components));
 
+/**
+ * Collect every session id currently mapped to `envId` in the store. Used to
+ * filter out phantom session panels (from previously-deleted tasks) during
+ * env-layout restore.
+ */
+export function collectSessionIdsForEnv(
+  state: { environmentIdBySessionId: Record<string, string> },
+  envId: string,
+): Set<string> {
+  const result = new Set<string>();
+  for (const [sessionId, mappedEnv] of Object.entries(state.environmentIdBySessionId)) {
+    if (mappedEnv === envId) result.add(sessionId);
+  }
+  return result;
+}
+
+/**
+ * Restore the env's saved layout, whitelisting only session panels that
+ * legitimately belong to `envId` — guards against phantom panels from
+ * previously-deleted tasks resurfacing on restore.
+ */
+function restoreEnvLayout(
+  api: DockviewReadyEvent["api"],
+  envId: string | null,
+  appStore: StoreApi<AppState>,
+): boolean {
+  const validSessionIds = envId ? collectSessionIdsForEnv(appStore.getState(), envId) : undefined;
+  return tryRestoreLayout(api, envId, VALID_COMPONENTS, validSessionIds);
+}
+
 // ---------------------------------------------------------------------------
 // useEnvSwitchCleanup — backup layout switch for external session changes
 // ---------------------------------------------------------------------------
@@ -513,8 +545,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       setApi(api);
 
       const currentEnvId = envIdRef.current;
-      // If a layout intent was passed via URL, skip saved layout restoration
-      const restored = !initialLayout && tryRestoreLayout(api, currentEnvId, VALID_COMPONENTS);
+      const restored = !initialLayout && restoreEnvLayout(api, currentEnvId, appStore);
       if (!restored) {
         buildDefaultLayout(api, initialLayout ?? (compact ? "compact" : undefined));
       }

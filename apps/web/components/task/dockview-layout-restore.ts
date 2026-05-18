@@ -12,7 +12,7 @@ const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
 export function sanitizeLayout(
   layout: any,
   validComponents: Set<string>,
-  options: { stripSessionPanels?: boolean } = {},
+  options: { stripSessionPanels?: boolean; keepOnlySessionIds?: Set<string> } = {},
 ): any {
   if (!isLayoutShapeHealthy(layout)) return null;
 
@@ -29,6 +29,16 @@ export function sanitizeLayout(
     if (id.startsWith("session:")) {
       if (options.stripSessionPanels) {
         invalidIds.add(id);
+      } else if (options.keepOnlySessionIds) {
+        // Per-env restore: drop session panels for sessions that don't belong
+        // to this env (e.g. a stale id from a previously-deleted task that
+        // leaked into storage). Guards against phantom-panel resurrection.
+        const sid = id.slice("session:".length);
+        if (options.keepOnlySessionIds.has(sid)) {
+          validPanels[id] = panel;
+        } else {
+          invalidIds.add(id);
+        }
       } else {
         validPanels[id] = panel;
       }
@@ -115,12 +125,15 @@ export function tryRestoreLayout(
   api: DockviewReadyEvent["api"],
   currentEnvId: string | null,
   validComponents: Set<string>,
+  validSessionIdsForEnv?: Set<string>,
 ): boolean {
   if (currentEnvId) {
     try {
       const envLayout = getEnvLayout(currentEnvId);
       if (envLayout) {
-        const sanitized = sanitizeLayout(envLayout, validComponents);
+        const sanitized = sanitizeLayout(envLayout, validComponents, {
+          keepOnlySessionIds: validSessionIdsForEnv,
+        });
         if (!sanitized) return false;
         api.fromJSON(sanitized as SerializedDockview);
         applyFixupsWithMaximize(api, currentEnvId);

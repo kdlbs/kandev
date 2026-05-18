@@ -186,4 +186,61 @@ describe("sanitizeLayout - session panel handling", () => {
     expect(Object.keys(result.panels)).not.toContain(SESSION_PANEL_ID);
     expect(Object.keys(result.panels)).toContain("chat");
   });
+
+  describe("keepOnlySessionIds (per-env restore filter)", () => {
+    function buildLayoutWithTwoSessions(sidA: string, sidB: string) {
+      const layout = buildLayout();
+      layout.grid.root.data[1].data.views = [`session:${sidA}`, `session:${sidB}`];
+      layout.grid.root.data[1].data.activeView = `session:${sidA}`;
+      layout.panels = {
+        files: { id: "files", contentComponent: "files" },
+        chat: { id: "chat", contentComponent: "chat" },
+        git: { id: "git", contentComponent: "git" },
+        shell: { id: "shell", contentComponent: "shell" },
+        [`session:${sidA}`]: { id: `session:${sidA}`, contentComponent: "chat" },
+        [`session:${sidB}`]: { id: `session:${sidB}`, contentComponent: "chat" },
+      };
+      return layout;
+    }
+
+    it("strips session panels whose ids are not in keepOnlySessionIds (phantom panels from deleted tasks)", () => {
+      // Regression for "phantom panels from local/session storage": a stale
+      // session id from a previously-deleted task can end up serialized in an
+      // env-layout (e.g. via a debounced save firing during a task switch).
+      // The env restore must drop session panels for sessions not belonging
+      // to this env, otherwise the deleted task's chat reappears as a tab.
+      const layout = buildLayoutWithTwoSessions("alive-1", "phantom-deleted");
+      const result = sanitizeLayout(layout, VALID_COMPONENTS, {
+        keepOnlySessionIds: new Set(["alive-1"]),
+      });
+      expect(result).not.toBeNull();
+      expect(Object.keys(result.panels)).toContain("session:alive-1");
+      expect(Object.keys(result.panels)).not.toContain("session:phantom-deleted");
+      // The leaf's views list also drops the phantom.
+      const centerLeaf = result.grid.root.data[1];
+      expect(centerLeaf.data.views).toEqual(["session:alive-1"]);
+      expect(centerLeaf.data.activeView).toBe("session:alive-1");
+    });
+
+    it("strips ALL session panels when keepOnlySessionIds is an empty set", () => {
+      // A new env that has no sessions yet (e.g. brand-new task) — no session
+      // panel from a saved layout should leak through.
+      const layout = buildLayoutWithTwoSessions("a", "b");
+      const result = sanitizeLayout(layout, VALID_COMPONENTS, {
+        keepOnlySessionIds: new Set<string>(),
+      });
+      expect(result).not.toBeNull();
+      expect(Object.keys(result.panels)).not.toContain("session:a");
+      expect(Object.keys(result.panels)).not.toContain("session:b");
+    });
+
+    it("ignores keepOnlySessionIds when undefined (preserves default per-env behavior)", () => {
+      // Without the option, behavior is unchanged: session panels are kept.
+      const layout = buildLayoutWithTwoSessions("a", "b");
+      const result = sanitizeLayout(layout, VALID_COMPONENTS);
+      expect(result).not.toBeNull();
+      expect(Object.keys(result.panels)).toContain("session:a");
+      expect(Object.keys(result.panels)).toContain("session:b");
+    });
+  });
 });
