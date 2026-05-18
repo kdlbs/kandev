@@ -148,6 +148,26 @@ function removeEphemeralPanels(api: DockviewApi, keepSessionId: string | null): 
 }
 
 /**
+ * Close stale session chat panels — any `session:*` panel whose id isn't
+ * `session:${keepSessionId}`. Used after `fromJSON` in the slow path to
+ * strip phantom sessions carried in from a saved layout, WITHOUT touching
+ * file-editors/diffs/browser/etc. that legitimately belong to this env.
+ */
+function removeStaleSessionPanels(api: DockviewApi, keepSessionId: string | null): void {
+  const keepId = keepSessionId ? `session:${keepSessionId}` : null;
+  const toRemove = api.panels.filter(
+    (p) => p.api.component === "chat" && p.id.startsWith("session:") && p.id !== keepId,
+  );
+  for (const p of toRemove) {
+    try {
+      p.api.close();
+    } catch {
+      /* panel may already be gone */
+    }
+  }
+}
+
+/**
  * Given the panels of a group and the id of the panel being replaced, return
  * the target tab index for the replacement among the siblings that will
  * survive `removeEphemeralPanels`. Returns -1 if the panel isn't in the group.
@@ -267,10 +287,11 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
     try {
       api.fromJSON(saved as SerializedDockview);
       // Saved layout may carry a stale session panel from a previously-deleted
-      // task (phantom). Mirror the fast path: drop session panels that don't
-      // belong to the incoming active session. useAutoSessionTab will add the
-      // current session's panel if it's missing.
-      removeEphemeralPanels(api, activeSessionId);
+      // task (phantom). Strip session panels that don't belong to the incoming
+      // active session — file editors/diffs/etc. were legitimately part of
+      // this env's saved state and must NOT be touched.
+      // useAutoSessionTab will add the current session's panel if missing.
+      removeStaleSessionPanels(api, activeSessionId);
       api.layout(safeWidth, safeHeight);
       return applyLayoutFixups(api);
     } catch (err) {

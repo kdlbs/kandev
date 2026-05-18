@@ -286,11 +286,11 @@ describe("tryRestoreLayout - phantom-only env layout falls back to default", () 
     } as unknown as Parameters<typeof tryRestoreLayout>[0];
   }
 
-  it("returns false when every session in the saved env-layout is a phantom (so caller builds default)", () => {
-    // Saved layout's center group had a single session panel — a phantom from
-    // a previously-deleted task. Stripping it would leave the layout
-    // session-less and the center column pruned. Falling back to default
-    // lets the caller rebuild a proper 3-column layout.
+  it("restores the (stripped) layout when every session in the saved env-layout is a phantom", () => {
+    // Saved layout had a single session panel — a phantom from a previously-
+    // deleted task. After stripping, no session panels remain. We still
+    // restore the (truncated) layout; useAutoSessionTab will add the active
+    // session's chat panel afterwards.
     const layout = buildLayout();
     layout.grid.root.data[1].data.views = [PHANTOM_PANEL_ID];
     layout.grid.root.data[1].data.activeView = PHANTOM_PANEL_ID;
@@ -302,8 +302,11 @@ describe("tryRestoreLayout - phantom-only env layout falls back to default", () 
 
     const api = makeFakeApi();
     const restored = tryRestoreLayout(api, "env-new", VALID_COMPONENTS, new Set(["phantom"]));
-    expect(restored).toBe(false);
-    expect(api.fromJSON).not.toHaveBeenCalled();
+    expect(restored).toBe(true);
+    expect(api.fromJSON).toHaveBeenCalledOnce();
+    // The phantom was stripped from the layout passed to fromJSON.
+    const restoredLayout = (api.fromJSON as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(Object.keys(restoredLayout.panels)).not.toContain(PHANTOM_PANEL_ID);
   });
 
   it("restores normally when at least one session panel survives the filter", () => {

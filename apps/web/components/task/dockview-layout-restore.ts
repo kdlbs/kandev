@@ -125,14 +125,6 @@ function tryRestoreMaximizeOnly(api: DockviewReadyEvent["api"], envId: string): 
   }
 }
 
-/** Count session:* panel ids in a serialized layout. */
-function countSessionPanels(layout: { panels?: Record<string, unknown> } | null): number {
-  if (!layout?.panels) return 0;
-  let n = 0;
-  for (const id of Object.keys(layout.panels)) if (id.startsWith("session:")) n++;
-  return n;
-}
-
 /**
  * Restore the per-env saved layout, after sanitizing phantom session panels.
  * Returns true on a successful fromJSON, false when no usable saved layout
@@ -150,17 +142,6 @@ function tryRestoreEnvLayout(
     excludeSessionIds: phantomSessionIds,
   });
   if (!sanitized) return false;
-  // If every session panel in the saved layout was a phantom and got
-  // stripped, restoring the now-session-less layout would leave the center
-  // column pruned. Fall back to the default build so the user gets a
-  // coherent 3-column layout with the active session in the middle.
-  if (
-    phantomSessionIds !== undefined &&
-    countSessionPanels(envLayout) > 0 &&
-    countSessionPanels(sanitized) === 0
-  ) {
-    return false;
-  }
   api.fromJSON(sanitized as SerializedDockview);
   applyFixupsWithMaximize(api, envId);
   return true;
