@@ -7,7 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { IconTerminal2 } from "@tabler/icons-react";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStoreApi } from "@/components/state-provider";
 import { fetchExecutor, listExecutors, updateExecutor } from "@/lib/api/domains/settings-api";
 import { SSHConnectionCard } from "@/components/settings/ssh-connection-card";
 import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
@@ -168,8 +168,7 @@ function useRunningSessionCount(executorId: string): number {
 }
 
 function useSaveExecutor(executorId: string, onSaved: () => void | Promise<void>) {
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
+  const store = useAppStoreApi();
 
   return useCallback(
     async (cfg: SSHExecutorConfig) => {
@@ -178,17 +177,23 @@ function useSaveExecutor(executorId: string, onSaved: () => void | Promise<void>
       // Refresh the store so the executor list reflects the new name + config.
       try {
         const fresh = await listExecutors();
-        setExecutors(fresh.executors);
+        store.getState().setExecutors(fresh.executors);
       } catch {
-        // Non-fatal: the local view still reloads via onSaved().
-        setExecutors(
-          executors.map((e: Executor) =>
-            e.id === executorId ? { ...e, name: cfg.name, config } : e,
-          ),
-        );
+        // Non-fatal: the local view still reloads via onSaved(). Read the
+        // current snapshot at write time so a WS event that updated the
+        // executor list mid-flight doesn't get overwritten with a stale
+        // captured copy.
+        const current = store.getState().executors.items;
+        store
+          .getState()
+          .setExecutors(
+            current.map((e: Executor) =>
+              e.id === executorId ? { ...e, name: cfg.name, config } : e,
+            ),
+          );
       }
       await onSaved();
     },
-    [executorId, executors, setExecutors, onSaved],
+    [executorId, store, onSaved],
   );
 }

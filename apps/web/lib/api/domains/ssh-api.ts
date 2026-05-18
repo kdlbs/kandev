@@ -8,10 +8,14 @@ export async function testSSHConnection(
   return fetchJson<SSHTestResult>("/api/v1/ssh/test", {
     ...options,
     init: {
+      // Caller overrides come first so an extension can add e.g. an extra
+      // header or signal, then the required POST + JSON body + Content-Type
+      // win — otherwise a caller passing `init.headers` would clobber the
+      // Content-Type and break server-side parsing.
+      ...(options?.init ?? {}),
       method: "POST",
       headers: { "Content-Type": "application/json", ...(options?.init?.headers ?? {}) },
       body: JSON.stringify(request),
-      ...(options?.init ?? {}),
     },
   });
 }
