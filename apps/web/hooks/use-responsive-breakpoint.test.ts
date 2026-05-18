@@ -4,6 +4,16 @@ import { useResponsiveBreakpoint } from "./use-responsive-breakpoint";
 
 type Listener = (event: MediaQueryListEvent) => void;
 
+function matchesWidthQuery(query: string, width: number) {
+  const minWidth = query.match(/min-width:\s*(\d+)px/);
+  const maxWidth = query.match(/max-width:\s*(\d+)px/);
+  if (!minWidth && !maxWidth) return false;
+
+  const minMatches = !minWidth || width >= Number(minWidth[1]);
+  const maxMatches = !maxWidth || width <= Number(maxWidth[1]);
+  return minMatches && maxMatches;
+}
+
 function setViewport(
   width: number,
   pointer: "fine" | "coarse" = "fine",
@@ -22,9 +32,7 @@ function setViewport(
         (query.includes("pointer: fine") && pointer === "fine") ||
         (query.includes("hover: hover") && hover === "hover") ||
         (query.includes("pointer: coarse") && pointer === "coarse") ||
-        (query.includes("max-width: 639px") && width <= 639) ||
-        (query.includes("min-width: 640px") && width >= 640 && width <= 1023) ||
-        (query.includes("min-width: 1024px") && width >= 1024),
+        matchesWidthQuery(query, width),
       onchange: null,
       addEventListener: vi.fn((_event: string, listener: Listener) => {
         listeners.add(listener);

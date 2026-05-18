@@ -8,8 +8,10 @@ describe("layout presets", () => {
     const defaultSidebarMaxWidth = defaultLayout().columns[0].maxWidth ?? Number.POSITIVE_INFINITY;
 
     expect(compact.columns.map((column) => column.id)).toEqual(["sidebar", "center"]);
-    expect(compactSidebar?.width).toBeLessThan(defaultSidebarMaxWidth);
-    expect(compactSidebar?.maxWidth).toBeLessThan(defaultSidebarMaxWidth);
+    const compactSidebarWidth = compactSidebar?.width ?? Number.POSITIVE_INFINITY;
+    const compactSidebarMaxWidth = compactSidebar?.maxWidth ?? Number.POSITIVE_INFINITY;
+    expect(compactSidebarWidth).toBeLessThan(defaultSidebarMaxWidth);
+    expect(compactSidebarMaxWidth).toBeLessThan(defaultSidebarMaxWidth);
     expect(compact.columns.find((column) => column.id === "center")?.groups[0].panels[0].id).toBe(
       "chat",
     );

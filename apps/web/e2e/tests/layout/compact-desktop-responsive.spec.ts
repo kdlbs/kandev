@@ -60,7 +60,8 @@ test.describe("compact desktop responsive layout", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    const desktopLayout = testPage.getByTestId("desktop-kanban-layout").first();
+    const desktopLayout = testPage.getByTestId("desktop-kanban-layout");
+    await expect(desktopLayout).toHaveCount(1);
     await expect(desktopLayout).toBeVisible();
     await expect(desktopLayout).toHaveAttribute("style", /minmax\(260px, 1fr\)/);
     await expect(testPage.getByTestId("tablet-kanban-layout")).toHaveCount(0);
@@ -68,9 +69,9 @@ test.describe("compact desktop responsive layout", () => {
     await expect(testPage.getByRole("button", { name: "Open menu" })).toHaveCount(0);
 
     await expect(testPage.getByPlaceholder("Search tasks...")).toBeVisible();
-    await expect(kanban.createTaskButton.first()).toBeVisible();
+    await expect(kanban.createTaskButton).toBeVisible();
     await expect(testPage.getByRole("button", { name: "Quick Chat" })).toBeVisible();
-    await expect(kanban.viewTogglePipeline.first()).toBeVisible();
+    await expect(kanban.viewTogglePipeline).toBeVisible();
 
     for (const step of seedData.steps) {
       await expect(kanban.columnByStepId(step.id)).toBeAttached();

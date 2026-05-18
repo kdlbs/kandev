@@ -305,8 +305,9 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       }
     },
     toggleRightPanels: () => {
-      const { api, rightPanelsVisible } = get();
+      const { api, rightPanelsVisible, defaultPreset } = get();
       if (!api) return;
+      if (!rightPanelsVisible && defaultPreset === "compact") return;
       const liveWidths = captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
       const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
