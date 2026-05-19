@@ -8,6 +8,8 @@ vi.mock("@/lib/recent-tasks", () => ({
   removeRecentTask: vi.fn(),
 }));
 
+const SESS_OTHER = "sess-other";
+
 type Listener = (state: AppState) => void;
 
 /**
@@ -145,8 +147,8 @@ describe("task.updated primary-session focus follow", () => {
       } as unknown as AppState["kanban"],
       tasks: {
         activeTaskId: "t1",
-        activeSessionId: "sess-other",
-        pinnedSessionId: "sess-other",
+        activeSessionId: SESS_OTHER,
+        pinnedSessionId: SESS_OTHER,
         lastSessionByTaskId: {},
       },
       setActiveSessionAuto,
@@ -292,5 +294,29 @@ describe("task.deleted cleanup", () => {
 
     expect(removeRecentTask).toHaveBeenCalledTimes(1);
     expect(removeRecentTask).toHaveBeenCalledWith("t1");
+  });
+
+  it("removes the deleted task from lastSessionByTaskId", () => {
+    const store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
+      } as unknown as AppState["kanban"],
+      tasks: {
+        activeTaskId: null,
+        activeSessionId: null,
+        pinnedSessionId: null,
+        lastSessionByTaskId: { t1: "sess-old", t2: SESS_OTHER },
+      },
+      environmentIdBySessionId: {},
+    });
+
+    const handlers = registerTasksHandlers(store);
+    handlers["task.deleted"]!(makeDeletedMessage({ task_id: "t1", workflow_id: "wf1" }));
+
+    const state = store.getState();
+    expect(state.tasks.lastSessionByTaskId).not.toHaveProperty("t1");
+    expect(state.tasks.lastSessionByTaskId).toHaveProperty("t2", SESS_OTHER);
   });
 });

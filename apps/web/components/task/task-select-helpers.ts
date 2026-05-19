@@ -51,7 +51,7 @@ export function resolvePreferredSessionId(
   environmentIdBySessionId: Record<string, string>,
 ): string {
   const last = lastSessionByTaskId[taskId];
-  if (last && last !== primarySessionId && environmentIdBySessionId[last]) {
+  if (last && environmentIdBySessionId[last]) {
     return last;
   }
   return primarySessionId;
