@@ -1028,6 +1028,22 @@ export class SessionPage {
     return this.changes.locator("[data-selected='true']");
   }
 
+  /** All file rows in the changes panel currently marked as the active tab. */
+  changesActiveRows(): Locator {
+    return this.changes.locator("[data-active='true']");
+  }
+
+  /** Close the dockview file-diff preview panel (if open). */
+  async closeFileDiffPreview(): Promise<void> {
+    await this.page.evaluate(() => {
+      type PanelApi = { close: () => void };
+      type Panel = { api: PanelApi };
+      type Api = { getPanel: (i: string) => Panel | undefined };
+      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+      api?.getPanel("preview:file-diff")?.api.close();
+    });
+  }
+
   /** Bulk action bar for a variant (unstaged/staged). */
   changesBulkActionBar(variant: "unstaged" | "staged"): Locator {
     return this.changes.getByTestId(`bulk-actions-${variant}`);
