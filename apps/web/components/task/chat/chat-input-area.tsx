@@ -79,7 +79,9 @@ type PlaceholderArgs = {
 
 function pickInputPlaceholder(a: PlaceholderArgs): string {
   if (a.isMoving) return "Switching agent...";
-  if (a.override) return a.override;
+  // Preserve the prior `??` semantics: an explicit "" override (caller wants
+  // no placeholder text) must NOT fall through to the resolver default.
+  if (a.override !== undefined) return a.override;
   return resolveInputPlaceholder(
     a.isAgentBusy,
     a.activeDocumentType,

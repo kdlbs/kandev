@@ -99,8 +99,7 @@ describe("QueueAffordance", () => {
     render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
     const chip = screen.getByTestId(CHIP_ID);
     expect(chip.textContent).toContain("2 queued");
-    expect(chip.getAttribute("data-open")).toBe("false");
-    expect(chip.getAttribute("aria-expanded")).toBe("false");
+    expect(chip.getAttribute("aria-label")).toContain("click to expand");
     expect(screen.queryByTestId(PANEL_ID)).toBeNull();
   });
 

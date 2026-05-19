@@ -8,6 +8,7 @@ import { Button } from "@kandev/ui";
 import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { stripSystemTags } from "@/lib/utils/system-tags";
 import { useQueue } from "@/hooks/domains/session/use-queue";
 import { QueuedGhostMessage } from "./queued-ghost-message";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
@@ -19,10 +20,6 @@ function canUserEditEntry(entry: QueuedMessage): boolean {
   return entry.queued_by !== "agent";
 }
 
-function stripSystemTags(text: string): string {
-  return text.replace(/<kandev-system>[\s\S]*?<\/kandev-system>/g, "").trim();
-}
-
 function headPreviewText(entries: QueuedMessage[]): string {
   const first = entries[0];
   if (!first) return "";
@@ -31,15 +28,24 @@ function headPreviewText(entries: QueuedMessage[]): string {
   return clean.slice(0, HEAD_PREVIEW_MAX).trimEnd() + "…";
 }
 
+function isEditableTarget(el: EventTarget | null): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  // contentEditable covers the TipTap chat editor and any rich-text surface.
+  // `el.isContentEditable` walks up the contenteditable inheritance chain.
+  return el.isContentEditable;
+}
+
 function useEscToClose(open: boolean, onClose: () => void): void {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      const t = e.target;
-      // Don't hijack Esc while the user is editing inside the queue textarea or
-      // any other input on the page (clarification overlay, etc.).
-      if (t instanceof HTMLElement && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+      // Don't hijack Esc while the user is editing inside any input control on
+      // the page (queue textarea, TipTap chat editor, native input/select, or
+      // the clarification overlay).
+      if (isEditableTarget(e.target)) return;
       e.preventDefault();
       onClose();
     };
@@ -132,11 +138,10 @@ export function QueueAffordance({ sessionId, children }: QueueAffordanceProps) {
         </CollapsibleContent>
       </Collapsible>
       {!isOpen && (
-        <div className="flex items-center px-1 pb-1 animate-in fade-in-0 slide-in-from-bottom-1 duration-150">
+        <div className="flex items-center px-1 pb-1 animate-in fade-in-0 slide-in-from-bottom-1 duration-150 motion-reduce:animate-none">
           <QueueChip
             count={count}
             isFull={isFull}
-            isOpen={isOpen}
             previewText={headPreviewText(entries)}
             onToggle={() => setIsOpen((v) => !v)}
           />
@@ -150,36 +155,34 @@ export function QueueAffordance({ sessionId, children }: QueueAffordanceProps) {
 type QueueChipProps = {
   count: number;
   isFull: boolean;
-  isOpen: boolean;
   previewText: string;
   onToggle: () => void;
 };
 
-function chipPalette(isOpen: boolean, isFull: boolean): string {
-  if (isOpen) {
-    return "text-blue-600 dark:text-blue-300 border-blue-500/50 bg-blue-500/10";
-  }
+function chipPalette(isFull: boolean): string {
   if (isFull) {
     return "text-amber-600 dark:text-amber-400 border-amber-500/40 hover:bg-amber-500/10";
   }
   return "text-muted-foreground border-border hover:text-foreground hover:border-border/80";
 }
 
-function QueueChip({ count, isFull, isOpen, previewText, onToggle }: QueueChipProps) {
+function QueueChip({ count, isFull, previewText, onToggle }: QueueChipProps) {
+  // aria-expanded/aria-controls are intentionally omitted: the chip and the
+  // expanded panel are mutually exclusive in the DOM (clicking the chip swaps
+  // it for the panel header, which carries its own collapse controls). Pointing
+  // aria-controls at an element that isn't currently mounted would be a worse
+  // a11y signal than the descriptive aria-label below.
   const button = (
     <button
       type="button"
       data-testid="queue-chip"
-      data-open={isOpen ? "true" : "false"}
       data-full={isFull ? "true" : "false"}
-      aria-expanded={isOpen}
-      aria-controls="queue-panel"
-      aria-label={`${count} queued message${count === 1 ? "" : "s"}`}
+      aria-label={`${count} queued message${count === 1 ? "" : "s"}, click to expand`}
       onClick={onToggle}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5",
         "text-[11px] font-medium cursor-pointer transition-colors",
-        chipPalette(isOpen, isFull),
+        chipPalette(isFull),
       )}
     >
       <IconLayoutList className="h-3 w-3" />
@@ -187,7 +190,7 @@ function QueueChip({ count, isFull, isOpen, previewText, onToggle }: QueueChipPr
       {isFull && <span className="opacity-80">· full</span>}
     </button>
   );
-  if (!previewText || isOpen) return button;
+  if (!previewText) return button;
   return (
     <Tooltip>
       <TooltipTrigger asChild>{button}</TooltipTrigger>

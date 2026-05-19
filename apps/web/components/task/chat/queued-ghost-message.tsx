@@ -7,6 +7,7 @@ import {
   IconChevronUp,
   IconEdit,
   IconFile,
+  IconInfoCircle,
   IconRobot,
   IconUser,
   IconX,
@@ -17,6 +18,7 @@ import { Button } from "@kandev/ui";
 import { Textarea } from "@kandev/ui/textarea";
 import { cn } from "@/lib/utils";
 import { QueueEntryNotFoundError } from "@/lib/api/domains/queue-api";
+import { stripSystemTags } from "@/lib/utils/system-tags";
 import { openImageInWindow } from "@/components/task/chat/file-attachment";
 import {
   SenderTaskBadge,
@@ -80,11 +82,6 @@ function AttachmentRow({ attachments, interactive }: AttachmentRowProps) {
   );
 }
 
-/** Strip internal <kandev-system>...</kandev-system> blocks from display text. */
-function stripSystemTags(text: string): string {
-  return text.replace(/<kandev-system>[\s\S]*?<\/kandev-system>/g, "").trim();
-}
-
 /** Imperative handle for the ghost row, used by chat input "edit last queued" affordance. */
 export type QueuedGhostMessageHandle = {
   startEdit: () => void;
@@ -112,11 +109,18 @@ function senderLabel(entry: QueuedMessage): string {
 
 type SenderIconProps = { entry: QueuedMessage };
 
+function senderIconFor(kind: SenderKind): { Icon: typeof IconUser; tone: string } {
+  if (kind === "agent") {
+    return { Icon: IconRobot, tone: "text-amber-500 dark:text-amber-400" };
+  }
+  if (kind === "system") {
+    return { Icon: IconInfoCircle, tone: "text-muted-foreground" };
+  }
+  return { Icon: IconUser, tone: "text-blue-500 dark:text-blue-300" };
+}
+
 function SenderIcon({ entry }: SenderIconProps) {
-  const kind = senderKindOf(entry);
-  const Icon = kind === "agent" ? IconRobot : IconUser;
-  const tone =
-    kind === "agent" ? "text-amber-500 dark:text-amber-400" : "text-blue-500 dark:text-blue-300";
+  const { Icon, tone } = senderIconFor(senderKindOf(entry));
   return <Icon className={cn("h-3.5 w-3.5 flex-shrink-0", tone)} aria-label={senderLabel(entry)} />;
 }
 
@@ -215,15 +219,21 @@ type DisplayViewProps = {
 };
 
 /** Rough threshold above which we offer a per-row expand toggle. Two lines of
- * the row's text width fit ~80 chars; anything longer is likely clamped. */
+ * the row's text width fit ~80 chars OR any explicit newline implies overflow,
+ * so we use either signal to surface the chevron — short multi-line messages
+ * (lists, code blocks) would otherwise be silently truncated. */
 const EXPAND_THRESHOLD = 80;
+
+function shouldOfferExpand(text: string): boolean {
+  return text.length > EXPAND_THRESHOLD || text.includes("\n");
+}
 
 function DisplayView({ entry, positionLabel, canEdit, onStartEdit, onRemove }: DisplayViewProps) {
   const visible = stripSystemTags(entry.content);
   const attachments = (entry.attachments ?? []) as QueuedAttachment[];
   const senderTask = getSenderTaskInfo(entry);
   const [expanded, setExpanded] = useState(false);
-  const canExpand = visible.length > EXPAND_THRESHOLD;
+  const canExpand = shouldOfferExpand(visible);
   return (
     <div className="group flex items-start gap-2 py-1.5">
       <span className="flex items-center gap-1.5 mt-0.5 text-muted-foreground">
@@ -244,7 +254,7 @@ function DisplayView({ entry, positionLabel, canEdit, onStartEdit, onRemove }: D
             className={cn(
               "markdown-body max-w-none text-sm text-foreground/80 break-words overflow-hidden",
               "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-              "transition-[max-height] duration-200 ease-out",
+              "transition-[max-height] duration-200 ease-out motion-reduce:transition-none",
               expanded ? "max-h-[40rem]" : "max-h-[2.75rem]",
             )}
           >
@@ -255,7 +265,15 @@ function DisplayView({ entry, positionLabel, canEdit, onStartEdit, onRemove }: D
         )}
         <AttachmentRow attachments={attachments} interactive={true} />
       </div>
-      <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+      <div
+        className={cn(
+          "flex items-center gap-0.5 flex-shrink-0 transition-opacity",
+          // Hover-reveal on devices that support hover (desktop); always
+          // visible on touch surfaces where there's no hover affordance.
+          "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
+          "[@media(hover:none)]:opacity-100",
+        )}
+      >
         {canExpand && (
           <Button
             variant="ghost"

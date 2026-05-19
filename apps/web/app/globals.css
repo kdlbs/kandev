@@ -470,7 +470,9 @@
   .chat-input-running,
   .chat-input-running-plan,
   .chat-input-starting,
-  .search-flash {
+  .search-flash,
+  .animate-queue-open,
+  .animate-queue-close {
     animation: none;
   }
 }
