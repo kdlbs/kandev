@@ -878,6 +878,93 @@ func TestResumeTaskSession_FailedKeepsResumeToken(t *testing.T) {
 	}
 }
 
+// ctxAwareTaskRepo wraps mockTaskRepo and respects ctx cancellation. Used to
+// prove that ResumeTaskSession's failure-recording path is insulated from a
+// pre-cancelled caller ctx (the WS-disconnect scenario).
+type ctxAwareTaskRepo struct {
+	inner *mockTaskRepo
+}
+
+func (c *ctxAwareTaskRepo) GetTask(ctx context.Context, taskID string) (*v1.Task, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return c.inner.GetTask(ctx, taskID)
+}
+
+func (c *ctxAwareTaskRepo) UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return c.inner.UpdateTaskState(ctx, taskID, state)
+}
+
+// TestResumeTaskSession_FailedStateWriteSurvivesCancelledCallerCtx verifies the
+// fix for the WS-disconnect cascade: when the caller's ctx was already
+// cancelled (e.g. the user navigated away mid-resume) and the launch then
+// failed, the FAILED state-update writes must still go through using the
+// detached resumeCtx — otherwise the task is stuck looking "running" forever.
+//
+// Before the fix, lines 886-892 used the original ctx, so the failure-state
+// write itself returned "context canceled" and the WARN "failed to update task
+// state to FAILED after resume error: context canceled" appeared in the logs.
+func TestResumeTaskSession_FailedStateWriteSurvivesCancelledCallerCtx(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	repo := setupTestRepo(t)
+	mockTR := newMockTaskRepo()
+	taskRepo := &ctxAwareTaskRepo{inner: mockTR}
+
+	// Cancel the caller ctx the moment launch is invoked. This mirrors the
+	// WS-disconnect race: the request handler's ctx is alive when the
+	// resume path starts (so it gets through the early-exit checks against
+	// sqlite/etc.) and dies mid-launch. The post-launch failure-recording
+	// writes use resumeCtx (WithoutCancel) and must still succeed.
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			cancel()
+			return nil, errors.New("simulated launch failure")
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), mockTR, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	// Override with the ctx-aware wrapper so we can detect ctx-canceled
+	// writes — the bare mockTaskRepo ignores ctx entirely.
+	svc.taskRepo = taskRepo
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, _ := repo.GetTaskSession(ctx, "session1")
+	session.AgentProfileID = "profile-1"
+	_ = repo.UpdateTaskSession(ctx, session)
+
+	now := time.Now().UTC()
+	_ = repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "er1", SessionID: "session1", TaskID: "task1",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	_, err := svc.ResumeTaskSession(ctx, "task1", "session1")
+	if err == nil {
+		t.Fatal("expected ResumeTaskSession to return an error from the simulated launch failure")
+	}
+
+	state, ok := mockTR.updatedStates["task1"]
+	if !ok {
+		t.Fatal("task FAILED state was NOT persisted; the failure-recording write was cancelled by the caller ctx")
+	}
+	if state != v1.TaskStateFailed {
+		t.Errorf("expected task1 state=FAILED, got %v", state)
+	}
+
+	persisted, getErr := repo.GetTaskSession(context.Background(), "session1")
+	if getErr != nil {
+		t.Fatalf("failed to reload session: %v", getErr)
+	}
+	if persisted.State != models.TaskSessionStateFailed {
+		t.Errorf("expected session1 state=FAILED, got %v", persisted.State)
+	}
+}
+
 // --- CompleteTask ---
 
 func TestCompleteTask_UpdatesTaskState(t *testing.T) {
