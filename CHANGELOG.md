@@ -2,6 +2,50 @@
 
 All notable changes to Kandev.
 
+## 0.50.0 - 2026-05-19
+
+### Features
+
+- add dev debug logging for git-status, dockview, and chat messages ([#961](https://github.com/kdlbs/kandev/pull/961))
+- highlight active-tab file row in Changes panel ([#954](https://github.com/kdlbs/kandev/pull/954))
+- mobile file viewer with desktop parity ([#945](https://github.com/kdlbs/kandev/pull/945))
+- clearer custom-answer state and Cmd+Enter submit on clarifications ([#934](https://github.com/kdlbs/kandev/pull/934))
+- polish chat message rendering ([#935](https://github.com/kdlbs/kandev/pull/935))
+- show attachment thumbnails on queued messages ([#936](https://github.com/kdlbs/kandev/pull/936))
+- kandev service install for systemd and launchd ([#926](https://github.com/kdlbs/kandev/pull/926))
+- autonomous agent management layer ([#914](https://github.com/kdlbs/kandev/pull/914))
+
+### Bug Fixes
+
+- cap clarification overlay height and add mock agent ask commands ([#956](https://github.com/kdlbs/kandev/pull/956))
+- pre-fill PR head branch when launching task from GitHub PR list ([#960](https://github.com/kdlbs/kandev/pull/960))
+- restore last-selected session tab on task re-entry ([#951](https://github.com/kdlbs/kandev/pull/951))
+- detach dispatched handler ctx from WS connection lifetime ([#959](https://github.com/kdlbs/kandev/pull/959))
+- persist worktree subdir as workspace_path ([#958](https://github.com/kdlbs/kandev/pull/958))
+- mobile-layout fixes for onboarding wizard + dialog ([#955](https://github.com/kdlbs/kandev/pull/955))
+- skip redundant task-state writes when session state is unchanged ([#953](https://github.com/kdlbs/kandev/pull/953))
+- improve inline code chip visibility in markdown ([#948](https://github.com/kdlbs/kandev/pull/948))
+- add delete confirmation dialog in task sidebar and mobile sheet ([#949](https://github.com/kdlbs/kandev/pull/949))
+- stop inventing currentModelId from AvailableModels[0] ([#947](https://github.com/kdlbs/kandev/pull/947))
+- strip phantom session panels on env-layout restore ([#944](https://github.com/kdlbs/kandev/pull/944))
+- respect user-chosen agent on workflow step transitions ([#941](https://github.com/kdlbs/kandev/pull/941))
+- restore diff viewer bg override after pierre 1.1.22 rename ([#939](https://github.com/kdlbs/kandev/pull/939))
+- persist kandev-system wrap on first task prompt ([#940](https://github.com/kdlbs/kandev/pull/940))
+- defer Enter to slash/mention suggestion when menu is open ([#928](https://github.com/kdlbs/kandev/pull/928))
+- unblock make dev on WSL2 mirrored networking ([#924](https://github.com/kdlbs/kandev/pull/924))
+
+### Refactoring
+
+- improve compact desktop layouts ([#937](https://github.com/kdlbs/kandev/pull/937))
+- unify file-tree components on a useTree headless hook ([#919](https://github.com/kdlbs/kandev/pull/919))
+- tighten type system across backend + frontend ([#920](https://github.com/kdlbs/kandev/pull/920))
+
+### Documentation
+
+- update roadmap with current priorities and completed items ([#965](https://github.com/kdlbs/kandev/pull/965))
+- draft homebrew-core formula and submission spec ([#904](https://github.com/kdlbs/kandev/pull/904))
+- capture commit + pr-fixup learnings from #935 ([#943](https://github.com/kdlbs/kandev/pull/943))
+
 ## 0.49.0 - 2026-05-16
 
 ### Bug Fixes
