@@ -90,22 +90,23 @@ function ClarificationCard(props: CardProps) {
       data-testid="clarification-question-card"
       data-question-id={meta.questionId}
       data-question-index={String(index)}
-      className="px-4 pt-3 pb-4"
+      className="px-4 pt-1 pb-4"
     >
-      <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
-        <IconMessageQuestion className="h-4 w-4 text-blue-500" />
-        {total > 1 && (
-          <span data-testid="clarification-progress-chip">
-            Question {index + 1} of {total}
-          </span>
-        )}
-        {metadata.question.title && (
-          <span className="text-muted-foreground/70">
-            {total > 1 ? "· " : ""}
-            {metadata.question.title}
-          </span>
-        )}
-      </div>
+      {(total > 1 || metadata.question.title) && (
+        <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
+          {total > 1 && (
+            <span data-testid="clarification-progress-chip">
+              Question {index + 1} of {total}
+            </span>
+          )}
+          {metadata.question.title && (
+            <span className="text-muted-foreground/70">
+              {total > 1 ? "· " : ""}
+              {metadata.question.title}
+            </span>
+          )}
+        </div>
+      )}
       <div className="markdown-body max-w-none text-sm font-medium [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 mb-3">
         <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
           {question.prompt}
@@ -453,8 +454,9 @@ export function ClarificationInputOverlay({
 
   return (
     <div className="relative" data-testid="clarification-overlay">
-      <div className="flex items-center justify-between gap-3 px-4 pt-3 pb-2">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between gap-3 px-4 pt-2 pb-1">
+        <div className="flex items-center gap-3 min-w-0">
+          <IconMessageQuestion className="h-4 w-4 text-blue-500 flex-shrink-0" />
           {total > 1 && (
             <ClarificationStepper
               total={total}

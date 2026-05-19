@@ -74,6 +74,12 @@ func handlePrompt(e *emitter, prompt, model string) {
 		rest := strings.TrimPrefix(cmd, "/e2e:")
 		scenarioName, _, _ := strings.Cut(strings.TrimSpace(rest), " ")
 		emitPredefinedScenario(e, scenarioName)
+	// Friendly aliases for the two clarification e2e scenarios so the slash menu
+	// exposes them without forcing users to type /e2e:clarification(-multi).
+	case strings.EqualFold(cmd, "/ask-single"):
+		emitPredefinedScenario(e, "clarification")
+	case strings.EqualFold(cmd, "/ask-multiple"):
+		emitPredefinedScenario(e, "clarification-multi")
 	case strings.EqualFold(cmd, "/crash"):
 		emitCrash(e, model)
 	case strings.HasPrefix(cmd, "/todo"):

@@ -12,6 +12,8 @@ import {
   useChatPanelHandlers,
 } from "@/components/task/chat/chat-input-area";
 import { ClarificationInputOverlay } from "@/components/task/chat/clarification-input-overlay";
+import { ResizeHandle } from "@/components/task/chat/resize-handle";
+import { useResizableClarificationOverlay } from "@/hooks/use-resizable-clarification-overlay";
 
 type QuickChatContentProps = {
   sessionId: string;
@@ -73,6 +75,18 @@ export const QuickChatContent = memo(function QuickChatContent({
   }, [initialPrompt, taskId, handleSubmit, onInitialPromptSent]);
 
   const handleClarificationResolved = useCallback(() => setClarificationKey((k) => k + 1), []);
+  const {
+    height: clarificationHeight,
+    containerRef: clarificationContainerRef,
+    resetHeight: clarificationResetHeight,
+    resizeHandleProps: clarificationResizeProps,
+  } = useResizableClarificationOverlay();
+
+  // Reset the dragged height when the overlay closes so a fresh
+  // clarification starts auto-sized instead of inheriting a stale value.
+  useEffect(() => {
+    if (!pendingClarification) clarificationResetHeight();
+  }, [pendingClarification, clarificationResetHeight]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -93,11 +107,19 @@ export const QuickChatContent = memo(function QuickChatContent({
         />
       </div>
       {pendingClarification && (
-        <div className="flex-shrink-0 border-t border-sky-400/30 bg-card px-1">
-          <ClarificationInputOverlay
-            messages={pendingClarificationGroup}
-            onResolved={handleClarificationResolved}
-          />
+        <div className="relative flex-shrink-0 border-t border-sky-400/30 bg-card">
+          <ResizeHandle {...clarificationResizeProps} />
+          <div
+            ref={clarificationContainerRef}
+            data-testid="clarification-overlay-container"
+            className="px-1 overflow-y-auto overscroll-contain max-h-[50vh]"
+            style={clarificationHeight === null ? undefined : { height: clarificationHeight }}
+          >
+            <ClarificationInputOverlay
+              messages={pendingClarificationGroup}
+              onResolved={handleClarificationResolved}
+            />
+          </div>
         </div>
       )}
       <QueuedGhostList sessionId={panelState.resolvedSessionId} isArchived={false} />
