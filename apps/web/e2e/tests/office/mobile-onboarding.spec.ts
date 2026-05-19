@@ -1,36 +1,33 @@
 import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/office-fixture";
+import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 
 // These tests run under the mobile-chrome Playwright project (Pixel 5,
 // viewport 393x851). They catch layout regressions that a desktop viewport
 // hides: horizontal overflow and clipped-off-viewport interactive elements
 // on the office onboarding wizard.
 
+const SETUP_ROUTE = "/office/setup?mode=new";
+const STEP_0_HEADING = "Set up your Office workspace";
+const STEP_1_HEADING = "Create your coordinator agent";
+
 test.describe("Office onboarding — mobile layout", () => {
   test("setup wizard does not overflow horizontally on Pixel 5", async ({
     testPage,
     officeSeed: _,
   }) => {
-    await testPage.goto("/office/setup?mode=new");
-    await expect(
-      testPage.getByRole("heading", { name: "Set up your Office workspace" }),
-    ).toBeVisible();
+    await testPage.goto(SETUP_ROUTE);
+    await expect(testPage.getByRole("heading", { name: STEP_0_HEADING })).toBeVisible();
 
-    const overflow = await testPage.evaluate(() => ({
-      scroll: document.documentElement.scrollWidth,
-      client: document.documentElement.clientWidth,
-    }));
-    expect(overflow.scroll).toBeLessThanOrEqual(overflow.client);
+    await assertNoDocumentHorizontalOverflow(testPage, "setup wizard Step 0");
   });
 
   test("close button is fully inside the viewport on mobile", async ({
     testPage,
     officeSeed: _,
   }) => {
-    await testPage.goto("/office/setup?mode=new");
-    await expect(
-      testPage.getByRole("heading", { name: "Set up your Office workspace" }),
-    ).toBeVisible();
+    await testPage.goto(SETUP_ROUTE);
+    await expect(testPage.getByRole("heading", { name: STEP_0_HEADING })).toBeVisible();
 
     const close = testPage.getByRole("button", { name: "Cancel" });
     const box = await close.boundingBox();
@@ -48,20 +45,12 @@ test.describe("Office onboarding — mobile layout", () => {
     testPage,
     officeSeed: _,
   }) => {
-    await testPage.goto("/office/setup?mode=new");
-    await expect(
-      testPage.getByRole("heading", { name: "Set up your Office workspace" }),
-    ).toBeVisible();
+    await testPage.goto(SETUP_ROUTE);
+    await expect(testPage.getByRole("heading", { name: STEP_0_HEADING })).toBeVisible();
     await testPage.getByRole("button", { name: /next/i }).click();
-    await expect(
-      testPage.getByRole("heading", { name: "Create your coordinator agent" }),
-    ).toBeVisible();
+    await expect(testPage.getByRole("heading", { name: STEP_1_HEADING })).toBeVisible();
 
-    const overflow = await testPage.evaluate(() => ({
-      scroll: document.documentElement.scrollWidth,
-      client: document.documentElement.clientWidth,
-    }));
-    expect(overflow.scroll).toBeLessThanOrEqual(overflow.client);
+    await assertNoDocumentHorizontalOverflow(testPage, "agent step (Step 1)");
 
     const viewport = testPage.viewportSize();
     expect(viewport).not.toBeNull();
@@ -91,13 +80,11 @@ test.describe("Office onboarding — mobile layout", () => {
     // (top of Step 1) and the Next button (bottom of Step 1) end up clipped
     // off-screen — and because the wrapper has no overflow-y-auto, the user
     // cannot scroll to reach them. The whole step becomes unusable.
-    await testPage.goto("/office/setup?mode=new");
-    await expect(
-      testPage.getByRole("heading", { name: "Set up your Office workspace" }),
-    ).toBeVisible();
+    await testPage.goto(SETUP_ROUTE);
+    await expect(testPage.getByRole("heading", { name: STEP_0_HEADING })).toBeVisible();
     await testPage.getByRole("button", { name: /next/i }).click();
 
-    const heading = testPage.getByRole("heading", { name: "Create your coordinator agent" });
+    const heading = testPage.getByRole("heading", { name: STEP_1_HEADING });
     await expect(heading).toBeVisible();
 
     const viewport = testPage.viewportSize();
@@ -140,11 +127,9 @@ test.describe("Office onboarding — mobile layout", () => {
     testPage,
     officeSeed: _,
   }) => {
-    await testPage.goto("/office/setup?mode=new");
+    await testPage.goto(SETUP_ROUTE);
     await testPage.getByRole("button", { name: /next/i }).click();
-    await expect(
-      testPage.getByRole("heading", { name: "Create your coordinator agent" }),
-    ).toBeVisible();
+    await expect(testPage.getByRole("heading", { name: STEP_1_HEADING })).toBeVisible();
 
     await testPage.getByTestId("agent-profile-selector").click();
     // Wait for the popover to actually mount instead of sleeping — the
@@ -155,11 +140,7 @@ test.describe("Office onboarding — mobile layout", () => {
       .first()
       .waitFor({ state: "visible" });
 
-    const overflow = await testPage.evaluate(() => ({
-      scroll: document.documentElement.scrollWidth,
-      client: document.documentElement.clientWidth,
-    }));
-    expect(overflow.scroll).toBeLessThanOrEqual(overflow.client);
+    await assertNoDocumentHorizontalOverflow(testPage, "agent profile combobox open");
   });
 });
 

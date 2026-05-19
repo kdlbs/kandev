@@ -46,7 +46,7 @@ function CopyButton({ text }: { text: string }) {
     <button
       type="button"
       onClick={handleCopy}
-      className="p-0.5 cursor-pointer hover:text-foreground text-muted-foreground transition-colors"
+      className="p-0.5 cursor-pointer hover:text-foreground text-muted-foreground transition-colors shrink-0"
     >
       {copied ? (
         <IconCheck className="h-3 w-3 text-green-500" />
@@ -232,7 +232,7 @@ function NotInstalledItems({
               href={tool.info_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-muted-foreground hover:text-foreground shrink-0"
+              className="text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
             >
               <IconExternalLink className="h-3.5 w-3.5" />
             </a>
