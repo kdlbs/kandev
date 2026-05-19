@@ -1474,6 +1474,10 @@ func (a *Adapter) emitSessionModels(sessionID string, models *acp.SessionModelSt
 func (a *Adapter) emitSetModelEvent(sessionID, modelID string, cachedModels []acp.ModelInfo, cachedConfig []streams.ConfigOption) {
 	outConfig := cachedConfig
 	if len(cachedConfig) > 0 {
+		// Shallow copy: only CurrentValue (a string) is rewritten below, so
+		// sharing the inner Options slice with the caller is safe today. If a
+		// future caller mutates ConfigOption.Options in place, switch to a
+		// deep copy to avoid aliasing the caller's backing array.
 		outConfig = make([]streams.ConfigOption, len(cachedConfig))
 		copy(outConfig, cachedConfig)
 		for i := range outConfig {

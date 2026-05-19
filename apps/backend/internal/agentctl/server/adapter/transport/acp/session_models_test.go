@@ -180,6 +180,9 @@ func TestConfigOptionUpdate_RefreshesCachedConfig(t *testing.T) {
 	if ev == nil {
 		t.Fatalf("expected a session_models event from ConfigOptionUpdate")
 	}
+	if ev.CurrentModelID != "fresh" {
+		t.Errorf("event CurrentModelID = %q, want %q (resolved from refreshed configOption)", ev.CurrentModelID, "fresh")
+	}
 
 	a.mu.RLock()
 	got := a.availableConfigOptions
