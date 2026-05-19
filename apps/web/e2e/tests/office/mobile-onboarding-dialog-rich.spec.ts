@@ -1,5 +1,5 @@
-import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { assertNoDescendantOverflowsRight } from "../../helpers/layout-assertions";
 
 // Reproduces the "agents section content comes out of the modal on the right"
 // bug on Pixel-class mobile widths. The default mock-agent has a short
@@ -77,7 +77,9 @@ const FAKE_AVAILABLE_AGENTS = {
 };
 
 test.describe("OnboardingDialog with realistic agent data — mobile layout", () => {
-  test("no content overflows the dialog on Pixel-7-class width (412)", async ({ testPage }) => {
+  test("AI Agents step does not overflow the dialog with realistic agent data (Pixel 7)", async ({
+    testPage,
+  }) => {
     await testPage.route("**/api/v1/agents/available**", async (route) => {
       await route.fulfill({
         status: 200,
@@ -100,43 +102,6 @@ test.describe("OnboardingDialog with realistic agent data — mobile layout", ()
     // Wait for the agent rows to render — listAvailableAgents resolves async.
     await expect(testPage.getByText("Claude Code (Anthropic CLI)", { exact: true })).toBeVisible();
 
-    await assertNoChildOverflowsDialog(dialog);
+    await assertNoDescendantOverflowsRight(dialog, "Pixel 7 AI Agents");
   });
 });
-
-async function assertNoChildOverflowsDialog(dialog: Locator): Promise<void> {
-  const dialogBox = await dialog.boundingBox();
-  expect(dialogBox).not.toBeNull();
-  if (!dialogBox) return;
-  const dialogRight = dialogBox.x + dialogBox.width;
-
-  const overflowing = await dialog.evaluate((root, dialogRightArg) => {
-    const limit = dialogRightArg as number;
-    const results: { tag: string; text: string; right: number }[] = [];
-    const skip = new Set(["SVG", "PATH", "CIRCLE", "RECT", "LINE", "G"]);
-    const all = root.querySelectorAll("*");
-    for (const node of all) {
-      if (skip.has(node.tagName)) continue;
-      const rect = node.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) continue;
-      if (rect.right > limit + 1) {
-        results.push({
-          tag: node.tagName.toLowerCase(),
-          text: (node.textContent ?? "").trim().slice(0, 80),
-          right: rect.right,
-        });
-      }
-    }
-    return results;
-  }, dialogRight);
-
-  expect(
-    overflowing,
-    `Pixel 7 AI Agents: ${overflowing.length} element(s) overflow the dialog right edge (${dialogRight.toFixed(
-      1,
-    )}). First few:\n${overflowing
-      .slice(0, 8)
-      .map((o) => `  <${o.tag}> right=${o.right.toFixed(1)} text="${o.text}"`)
-      .join("\n")}`,
-  ).toHaveLength(0);
-}

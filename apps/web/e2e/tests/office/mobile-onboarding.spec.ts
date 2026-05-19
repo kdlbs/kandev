@@ -147,7 +147,13 @@ test.describe("Office onboarding — mobile layout", () => {
     ).toBeVisible();
 
     await testPage.getByTestId("agent-profile-selector").click();
-    await testPage.waitForTimeout(150); // let the popover position
+    // Wait for the popover to actually mount instead of sleeping — the
+    // Radix popover renders as `[data-radix-popper-content-wrapper]` and
+    // is positioned synchronously once present.
+    await testPage
+      .locator("[data-radix-popper-content-wrapper], [role=listbox]")
+      .first()
+      .waitFor({ state: "visible" });
 
     const overflow = await testPage.evaluate(() => ({
       scroll: document.documentElement.scrollWidth,
