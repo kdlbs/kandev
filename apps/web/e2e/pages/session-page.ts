@@ -1033,14 +1033,23 @@ export class SessionPage {
     return this.changes.locator("[data-active='true']");
   }
 
-  /** Close the dockview file-diff preview panel (if open). */
+  /**
+   * Close every file-diff panel in dockview: the `preview:file-diff` slot AND
+   * any pinned `diff:file:<path>` panels created by promoting the preview.
+   * After this resolves, no diff tab is active so the changes-panel rows
+   * settle to `data-active="false"`.
+   */
   async closeFileDiffPreview(): Promise<void> {
     await this.page.evaluate(() => {
       type PanelApi = { close: () => void };
-      type Panel = { api: PanelApi };
-      type Api = { getPanel: (i: string) => Panel | undefined };
+      type Panel = { id: string; api: PanelApi };
+      type Api = { panels: Panel[]; getPanel: (i: string) => Panel | undefined };
       const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
-      api?.getPanel("preview:file-diff")?.api.close();
+      if (!api) return;
+      api.getPanel("preview:file-diff")?.api.close();
+      for (const panel of api.panels) {
+        if (panel.id.startsWith("diff:file:")) panel.api.close();
+      }
     });
   }
 
