@@ -36,6 +36,10 @@ function matchRepo(repos: Repository[], owner: string, name: string): Repository
   );
 }
 
+function emptyToUndefined(value: string | undefined): string | undefined {
+  return value ? value : undefined;
+}
+
 function extractPayload(payload: LaunchPayload) {
   if (payload.kind === "pr") {
     return {
@@ -43,7 +47,7 @@ function extractPayload(payload: LaunchPayload) {
       title: payload.pr.title,
       owner: payload.pr.repo_owner,
       name: payload.pr.repo_name,
-      branch: payload.pr.head_branch,
+      branch: emptyToUndefined(payload.pr.head_branch),
     };
   }
   return {
@@ -60,6 +64,10 @@ function buildDialogState(payload: LaunchPayload, repositories: Repository[]): D
   const repo = matchRepo(repositories, data.owner, data.name);
   const description = payload.preset.prompt({ url: data.url, title: data.title });
   const title = `${payload.preset.label}: ${data.title}`;
+  // For a PR launch we want the dialog to display and check out the PR's head
+  // branch — matching the GitHub-URL-paste flow, where the branch selector
+  // auto-resolves to the PR head. Same branch for both: the chip shows it and
+  // the worktree checks it out.
   const checkoutBranch = payload.kind === "pr" ? data.branch : undefined;
   if (repo) {
     return {
