@@ -205,21 +205,23 @@ func TestRefresh_AlwaysKicksWalkAndReturnsJobID(t *testing.T) {
 	waitForBreakdown(t, svc)
 }
 
-func TestGet_SecondColdCallWhileComputingReturnsComputing(t *testing.T) {
-	// Build a Service with a tracker we control so we can prove a second
-	// Get during the in-flight walk does not double-schedule. The walker
-	// runs fast on a tmp dir, so we just check the synchronous return
-	// shape: Data nil, Computing true, no panic.
+func TestGet_ColdComputingReturnsNilDataAndComputingTrue(t *testing.T) {
+	// Directly exercises the "cold-computing" branch of Get (value==nil,
+	// computing==true) by setting the flag under the mutex before calling Get.
+	// This avoids a timing dependency: the previous approach called Get twice
+	// and hoped the background walk hadn't finished yet, which is unreliable on
+	// fast hardware with a small tmp dir.
 	svc, _ := newServiceWithTmpHome(t)
 
-	first := svc.Get(context.Background())
-	second := svc.Get(context.Background())
+	svc.mu.Lock()
+	svc.computing = true
+	svc.mu.Unlock()
 
-	if first.Data != nil || second.Data != nil {
-		t.Errorf("expected both cold Gets to return nil Data, got %+v / %+v", first.Data, second.Data)
+	res := svc.Get(context.Background())
+	if res.Data != nil {
+		t.Errorf("Get.Data = %+v, want nil", res.Data)
 	}
-	if !first.Computing || !second.Computing {
-		t.Errorf("expected both cold Gets to report Computing=true, got %v / %v", first.Computing, second.Computing)
+	if !res.Computing {
+		t.Error("Get.Computing = false, want true")
 	}
-	waitForBreakdown(t, svc)
 }
