@@ -10,6 +10,8 @@ import { useIsTaskArchived } from "./task-archived-context";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
 import { ChatInputArea, useSubmitHandler, useChatPanelHandlers } from "./chat/chat-input-area";
 import { ClarificationInputOverlay } from "./chat/clarification-input-overlay";
+import { ResizeHandle } from "./chat/resize-handle";
+import { useResizableClarificationOverlay } from "@/hooks/use-resizable-clarification-overlay";
 import { PanelSearchBar } from "@/components/search/panel-search-bar";
 import { SessionSearchHits } from "@/components/task/chat/session-search-hits";
 import { usePanelSearch } from "@/hooks/use-panel-search";
@@ -157,6 +159,11 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   } = panelState;
   const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, clearQueue, chatInputRef);
   const { clarificationKey, handleClarificationResolved } = useClarificationKey(agentMessageCount);
+  const {
+    height: clarificationHeight,
+    containerRef: clarificationContainerRef,
+    resizeHandleProps: clarificationResizeProps,
+  } = useResizableClarificationOverlay();
 
   const panelRef = useRef<HTMLDivElement>(null);
   const { loadMore } = useLazyLoadMessages(resolvedSessionId);
@@ -216,14 +223,19 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
       </PanelBody>
       {pendingClarification && !isArchived && (
-        <div
-          data-testid="clarification-overlay-container"
-          className="flex-shrink-0 border-t border-sky-400/30 bg-card px-1 max-h-[50vh] overflow-y-auto overscroll-contain"
-        >
-          <ClarificationInputOverlay
-            messages={pendingClarificationGroup}
-            onResolved={handleClarificationResolved}
-          />
+        <div className="relative flex-shrink-0 border-t border-sky-400/30 bg-card">
+          <ResizeHandle {...clarificationResizeProps} />
+          <div
+            ref={clarificationContainerRef}
+            data-testid="clarification-overlay-container"
+            className="px-1 overflow-y-auto overscroll-contain max-h-[80vh]"
+            style={clarificationHeight === null ? undefined : { height: clarificationHeight }}
+          >
+            <ClarificationInputOverlay
+              messages={pendingClarificationGroup}
+              onResolved={handleClarificationResolved}
+            />
+          </div>
         </div>
       )}
       <QueuedGhostList sessionId={resolvedSessionId} isArchived={isArchived} />

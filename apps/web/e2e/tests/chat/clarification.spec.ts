@@ -679,24 +679,21 @@ test.describe("Mock agent clarification slash commands", () => {
   });
 });
 
-test.describe("Clarification overlay responsive layout", () => {
-  test("caps height at 50vh and scrolls when content overflows", async ({
+test.describe("Clarification overlay resizable layout", () => {
+  test("starts content-sized, drag grows the overlay, double-click resets", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    // 500px tall viewport guarantees the multi-question card overflows the
-    // 50vh (=250px) cap: a card with prompt + 3 options + custom input +
-    // carousel nav cannot fit in 250px.
-    const viewportHeight = 500;
-    const expectedMaxHeightPx = viewportHeight / 2;
-    await testPage.setViewportSize({ width: 1280, height: viewportHeight });
+    // Tall viewport so the content-sized overlay has plenty of room to grow
+    // without bumping into the 80vh safety cap on the first drag.
+    await testPage.setViewportSize({ width: 1280, height: 1000 });
 
     const session = await seedTaskAndWaitForIdle(
       testPage,
       apiClient,
       seedData,
-      "Clarification Max Height",
+      "Clarification Resize",
     );
 
     await session.sendMessage("/ask-multiple");
@@ -705,25 +702,54 @@ test.describe("Clarification overlay responsive layout", () => {
     const container = testPage.getByTestId("clarification-overlay-container");
     await expect(container).toBeVisible();
 
-    const box = await container.boundingBox();
-    expect(box).not.toBeNull();
-
-    const metrics = await container.evaluate((el) => {
+    const initial = await container.evaluate((el) => {
       const computed = window.getComputedStyle(el);
       return {
         overflowY: computed.overflowY,
-        maxHeight: computed.maxHeight,
-        scrollHeight: el.scrollHeight,
-        clientHeight: el.clientHeight,
+        height: el.getBoundingClientRect().height,
+        // Inline style is what disambiguates "auto-sized" from "user-dragged".
+        inlineHeight: (el as HTMLElement).style.height,
       };
     });
 
-    expect(metrics.overflowY).toBe("auto");
-    // getComputedStyle always returns a resolved pixel value (e.g. "250px").
-    expect(metrics.maxHeight).toMatch(new RegExp(`^${expectedMaxHeightPx}(\\.\\d+)?px$`));
-    // Rendered height must respect the cap.
-    expect(box!.height).toBeLessThanOrEqual(expectedMaxHeightPx + 1);
-    // Content overflows the cap → container is genuinely scrollable.
-    expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+    expect(initial.overflowY).toBe("auto");
+    // Default state: no inline height → container sizes to its content.
+    expect(initial.inlineHeight).toBe("");
+    // Sanity check: content-sized overlay is at least tall enough for the
+    // question card but well under the 80vh cap.
+    expect(initial.height).toBeGreaterThan(200);
+    expect(initial.height).toBeLessThan(1000 * 0.8);
+
+    const handle = container.locator("button[aria-label='Resize']").first();
+    await expect(handle).toBeVisible();
+
+    // Drag the handle upward by 120px → overlay should grow by ~120px.
+    const handleBox = await handle.boundingBox();
+    expect(handleBox).not.toBeNull();
+    const dragDistance = 120;
+    const startX = handleBox!.x + handleBox!.width / 2;
+    const startY = handleBox!.y + handleBox!.height / 2;
+    await testPage.mouse.move(startX, startY);
+    await testPage.mouse.down();
+    await testPage.mouse.move(startX, startY - dragDistance, { steps: 10 });
+    await testPage.mouse.up();
+
+    const afterDrag = await container.evaluate((el) => ({
+      height: el.getBoundingClientRect().height,
+      inlineHeight: (el as HTMLElement).style.height,
+    }));
+    // Drag flipped the container to an explicit pixel height.
+    expect(afterDrag.inlineHeight).toMatch(/^\d+(\.\d+)?px$/);
+    // Allow ±10px tolerance for rounding / mouse event coalescing.
+    expect(afterDrag.height).toBeGreaterThan(initial.height + dragDistance - 10);
+
+    // Double-click the handle → back to auto-sized.
+    await handle.dblclick();
+    const afterReset = await container.evaluate((el) => ({
+      height: el.getBoundingClientRect().height,
+      inlineHeight: (el as HTMLElement).style.height,
+    }));
+    expect(afterReset.inlineHeight).toBe("");
+    expect(Math.abs(afterReset.height - initial.height)).toBeLessThanOrEqual(2);
   });
 });
