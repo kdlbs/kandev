@@ -600,6 +600,7 @@ function useFileDerivations(
     [statusByRepo, gitStatus],
   );
   useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
     debugDeriv("aggregate", {
       path: statusByRepo.length > 0 ? "multi-repo" : "single-repo-fallback",
       statusByRepoEntries: statusByRepo.map((s) => ({

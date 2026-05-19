@@ -33,6 +33,7 @@ function useDebugProcessedPipeline(args: {
 }) {
   const { sessionId, messages, visibleMessages, footerActionCount, groupedItems } = args;
   useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
     debug("pipeline", {
       sessionId,
       input: { count: messages.length, byType: countByType(messages) },

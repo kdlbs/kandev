@@ -2,8 +2,15 @@
  * Namespaced debug logger for development.
  *
  * In production (`NODE_ENV === "production"`) the factory returns a no-op
- * function, so debug call sites have zero runtime cost — Next.js inlines the
- * `process.env.NODE_ENV` check at build time and tree-shakes the branch.
+ * function. The `debug()` call itself is free, but JavaScript evaluates its
+ * arguments before the call — so callers that compute expensive values (O(n)
+ * maps, `.reduce()`, spread of large objects) must guard with:
+ *
+ *   if (process.env.NODE_ENV !== "production") { debug(...); }
+ *
+ * Next.js inlines the `process.env.NODE_ENV` check and dead-code-eliminates
+ * the entire block in production builds. Simple scalar reads (lengths,
+ * boolean flags, already-computed IDs) are cheap enough to leave unguarded.
  *
  * Output format is logfmt-ish so logs are flat and grep/copy-friendly:
  *

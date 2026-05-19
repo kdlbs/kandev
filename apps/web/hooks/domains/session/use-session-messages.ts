@@ -9,7 +9,7 @@ const INITIAL_FETCH_LIMIT = 100;
 const BACKFILL_PAGE_LIMIT = 100;
 const MAX_BACKFILL_ROUNDS = 3;
 
-function hasUserOrAgentMessage(messages: Message[]): boolean {
+export function hasUserOrAgentMessage(messages: Message[]): boolean {
   return messages.some(
     (m) => m.type === "message" && (m.author_type === "user" || m.author_type === "agent"),
   );
@@ -74,21 +74,23 @@ async function fetchAndStoreMessages(
   debug("message.list request", requestParams);
   const response = await client.request<MessageListResponse>("message.list", requestParams, 10000);
   const fetched = [...(response.messages ?? [])].reverse();
-  const summary = summarizeMessages(fetched);
-  debug("message.list response", {
-    sessionId,
-    hasMore: response.has_more ?? false,
-    cursor: response.cursor ?? null,
-    ...summary,
-  });
-  if (fetched.length > 0 && summary.userMessageCount === 0 && summary.agentMessageCount === 0) {
-    debug("WARNING: fetched window contains no user/agent message rows", {
+  if (process.env.NODE_ENV !== "production") {
+    const summary = summarizeMessages(fetched);
+    debug("message.list response", {
       sessionId,
-      limit: requestParams.limit,
       hasMore: response.has_more ?? false,
-      byType: summary.byType,
-      hint: "The fetch limit may be too small for this session's last turn — user prompt and agent replies live further back. Paginate or raise the limit to see them.",
+      cursor: response.cursor ?? null,
+      ...summary,
     });
+    if (fetched.length > 0 && summary.userMessageCount === 0 && summary.agentMessageCount === 0) {
+      debug("WARNING: fetched window contains no user/agent message rows", {
+        sessionId,
+        limit: requestParams.limit,
+        hasMore: response.has_more ?? false,
+        byType: summary.byType,
+        hint: "The fetch limit may be too small for this session's last turn — user prompt and agent replies live further back. Paginate or raise the limit to see them.",
+      });
+    }
   }
   // Merge: keep WS-delivered messages that aren't in the fetch response.
   // This prevents a slow fetch (sent before messages existed) from wiping
@@ -120,7 +122,7 @@ async function fetchAndStoreMessages(
  * endpoint `useLazyLoadMessages` uses until we span at least one user/agent
  * message or hit the round cap.
  */
-type BackfillStep = "continue" | "stop";
+export type BackfillStep = "continue" | "stop";
 
 async function fetchAndPrependOlder(
   sessionId: string,
@@ -141,7 +143,7 @@ async function fetchAndPrependOlder(
   return ordered.length;
 }
 
-async function runBackfillRound(
+export async function runBackfillRound(
   sessionId: string,
   store: ReturnType<typeof useAppStoreApi>,
   round: number,
@@ -172,7 +174,7 @@ async function runBackfillRound(
   }
 }
 
-async function autoBackfillUntilUserMessage(
+export async function autoBackfillUntilUserMessage(
   sessionId: string,
   store: ReturnType<typeof useAppStoreApi>,
 ): Promise<void> {
