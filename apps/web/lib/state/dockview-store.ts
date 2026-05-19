@@ -687,7 +687,8 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
       const resolveFilePath = (panelId: string | undefined): string | null => {
         if (!panelId) return null;
         if (panelId.startsWith("file:")) return panelId.slice(5);
-        if (panelId === "preview:file-editor") {
+        if (panelId.startsWith("diff:file:")) return panelId.slice("diff:file:".length);
+        if (panelId === "preview:file-editor" || panelId === "preview:file-diff") {
           const path = (api.getPanel(panelId)?.params as Record<string, unknown> | undefined)
             ?.path as string | undefined;
           return path ?? null;
@@ -707,7 +708,7 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
         // different file. Dockview does not refire `onDidActivePanelChange` for
         // params-only updates on an already-active panel, so subscribe to the
         // panel's own parameter-change event and refresh `activeFilePath`.
-        if (panel.id !== "preview:file-editor") return;
+        if (panel.id !== "preview:file-editor" && panel.id !== "preview:file-diff") return;
         paramSubs.get(panel.id)?.dispose();
         const sub = panel.api.onDidParametersChange(() => {
           if (!panel.api.isActive) return;
