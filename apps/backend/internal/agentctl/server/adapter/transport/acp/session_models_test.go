@@ -103,9 +103,12 @@ func TestEmitSetModelEvent_EmitsSessionModelsWithCachedState(t *testing.T) {
 		{ModelId: "claude-opus-4-7", Name: "Opus 4.7"},
 		{ModelId: "build-analyzer", Name: "Build Analyzer"},
 	}
+	// Cover both rewrite paths: ID == "model" and Category == "model"
+	// (some agents identify the model option by category, not ID).
 	cachedConfig := []streams.ConfigOption{
 		{Type: "select", ID: "other", Name: "Other", CurrentValue: "keep-me"},
 		{Type: "select", ID: "model", Name: "Model", CurrentValue: "old-model"},
+		{Type: "select", ID: "model-cat", Category: "model", Name: "ModelCat", CurrentValue: "old-model"},
 	}
 
 	a.emitSetModelEvent("sess-1", "claude-opus-4-7", cachedModels, cachedConfig)
@@ -120,18 +123,18 @@ func TestEmitSetModelEvent_EmitsSessionModelsWithCachedState(t *testing.T) {
 	if len(ev.SessionModels) != 2 {
 		t.Errorf("SessionModels len = %d, want 2", len(ev.SessionModels))
 	}
-	if len(ev.ConfigOptions) != 2 {
-		t.Fatalf("ConfigOptions len = %d, want 2", len(ev.ConfigOptions))
+	if len(ev.ConfigOptions) != 3 {
+		t.Fatalf("ConfigOptions len = %d, want 3", len(ev.ConfigOptions))
 	}
 
-	// Model-shaped option's CurrentValue must be rewritten to the new model
-	// so consumers reading ConfigOptions[model].CurrentValue (codex-style
-	// agents surface the current model there) don't see a stale value.
+	// Both the ID-matched and Category-matched model options must have their
+	// CurrentValue rewritten to the new model so consumers reading either
+	// don't see a stale value. Non-model options are untouched.
 	for _, opt := range ev.ConfigOptions {
 		switch opt.ID {
-		case "model":
+		case "model", "model-cat":
 			if opt.CurrentValue != "claude-opus-4-7" {
-				t.Errorf("model option CurrentValue = %q, want %q", opt.CurrentValue, "claude-opus-4-7")
+				t.Errorf("option %q CurrentValue = %q, want %q", opt.ID, opt.CurrentValue, "claude-opus-4-7")
 			}
 		case "other":
 			if opt.CurrentValue != "keep-me" {
@@ -141,9 +144,8 @@ func TestEmitSetModelEvent_EmitsSessionModelsWithCachedState(t *testing.T) {
 	}
 
 	// The caller's cachedConfig must not be mutated — we copy before rewrite.
-	if cachedConfig[1].CurrentValue != "old-model" {
-		t.Errorf("caller cachedConfig was mutated: model.CurrentValue = %q, want %q",
-			cachedConfig[1].CurrentValue, "old-model")
+	if cachedConfig[1].CurrentValue != "old-model" || cachedConfig[2].CurrentValue != "old-model" {
+		t.Errorf("caller cachedConfig was mutated: got %+v", cachedConfig)
 	}
 }
 
