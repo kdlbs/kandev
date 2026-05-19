@@ -7,6 +7,9 @@ import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
 import { sessionId as toSessionId } from "@/lib/types/ids";
+import { createDebugLogger } from "@/lib/debug/log";
+
+const debug = createDebugLogger("dockview:session-tabs");
 
 /**
  * Sync `activeSessionId` in the store when the user clicks a session tab.
@@ -234,6 +237,8 @@ export function reconcileRemovedSessionPanels(
   keepSessionId: string,
 ): void {
   const currentIds = new Set(currentSessionIds);
+  const sessionPanels = api.panels.filter((p) => p.id.startsWith("session:"));
+  const removed: string[] = [];
   // Snapshot before iterating: closing a panel can mutate `api.panels`
   // synchronously, which would skip elements in a `for...of` over the live
   // array. Matches the pattern in `removeEphemeralPanels`.
@@ -244,11 +249,19 @@ export function reconcileRemovedSessionPanels(
     if (currentIds.has(sid)) continue;
     try {
       panel.api.close();
+      removed.push(panel.id);
     } catch {
       /* already gone */
     }
     createdSet.delete(sid);
   }
+  debug("reconcileRemovedSessionPanels", {
+    keepSessionId,
+    currentSessionIds,
+    liveSessionPanelIds: sessionPanels.map((p) => p.id),
+    removed,
+    createdSetAfter: Array.from(createdSet),
+  });
   // Drop any remaining stale entries (panel already removed externally, e.g.
   // by the right-click delete handler) so the ref stays in sync with reality.
   for (const sid of [...createdSet]) {

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -11,6 +11,44 @@ import {
   findPendingClarification,
   findPendingClarificationGroup,
 } from "@/lib/utils/pending-clarification";
+import { createDebugLogger } from "@/lib/debug/log";
+
+const debug = createDebugLogger("messages:process");
+
+function countByType(messages: Message[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const m of messages) {
+    const t = m.type ?? "unknown";
+    out[t] = (out[t] ?? 0) + 1;
+  }
+  return out;
+}
+
+function useDebugProcessedPipeline(args: {
+  sessionId: string | null;
+  messages: Message[];
+  visibleMessages: Message[];
+  footerActionCount: number;
+  groupedItems: RenderItem[];
+}) {
+  const { sessionId, messages, visibleMessages, footerActionCount, groupedItems } = args;
+  useEffect(() => {
+    debug("pipeline", {
+      sessionId,
+      input: { count: messages.length, byType: countByType(messages) },
+      afterFilter: { count: visibleMessages.length, byType: countByType(visibleMessages) },
+      droppedByFilter: messages.length - visibleMessages.length,
+      footerActionCount,
+      groupedItemKinds: groupedItems.reduce<Record<string, number>>((acc, item) => {
+        acc[item.type] = (acc[item.type] ?? 0) + 1;
+        return acc;
+      }, {}),
+      turnGroupSizes: groupedItems
+        .filter((i): i is TurnGroup => i.type === "turn_group")
+        .map((g) => ({ turnId: g.turnId, size: g.messages.length })),
+    });
+  }, [sessionId, messages, visibleMessages, footerActionCount, groupedItems]);
+}
 
 const ACTIVITY_MESSAGE_TYPES: Set<MessageType> = new Set([
   "thinking",
@@ -376,6 +414,14 @@ export function useProcessedMessages(
   const groupedItems = useMemo<RenderItem[]>(() => {
     return injectPrepareProgressItem(groupActivityMessages(regularMessages), resolvedSessionId);
   }, [regularMessages, resolvedSessionId]);
+
+  useDebugProcessedPipeline({
+    sessionId: resolvedSessionId,
+    messages,
+    visibleMessages,
+    footerActionCount: footerActionMessages.length,
+    groupedItems,
+  });
 
   return {
     visibleMessages,

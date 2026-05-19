@@ -41,6 +41,10 @@ import {
 import { preserveChatScrollDuringLayout } from "./dockview-scroll-preserve";
 import { measureDockviewContainer } from "./dockview-measure";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
+import { createDebugLogger } from "@/lib/debug/log";
+
+const debugSwitch = createDebugLogger("dockview:store-switch");
+const debugSave = createDebugLogger("dockview:save");
 
 const RIGHT_PANEL_IDS = new Set(["changes", "files", TERMINAL_DEFAULT_ID]);
 
@@ -469,7 +473,15 @@ function saveOutgoingEnv(
   preMaximizeLayout: LayoutState | null,
   pinnedWidths: Map<string, number>,
 ): void {
-  if (!oldEnvId) return;
+  if (!oldEnvId) {
+    debugSave("saveOutgoingEnv: skip (no oldEnvId)");
+    return;
+  }
+  debugSave("saveOutgoingEnv: entry", {
+    oldEnvId,
+    livePanelIds: api.panels.map((p) => p.id),
+    maximized: !!preMaximizeLayout,
+  });
   if (preMaximizeLayout) {
     // While maximized, `api.toJSON()` is the 2-column maximize overlay, NOT
     // the user's intended layout. Persist the pre-max layout under both keys:
@@ -513,10 +525,24 @@ function saveOutgoingEnv(
 function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
   return (oldEnvId: string | null, newEnvId: string, activeSessionId: string | null) => {
     const { api, currentLayoutEnvId, preMaximizeLayout } = get();
-    if (!api) return;
+    if (!api) {
+      debugSwitch("envSwitch: skip (no api)", { oldEnvId, newEnvId, activeSessionId });
+      return;
+    }
+    debugSwitch("envSwitch: entry", {
+      oldEnvId,
+      newEnvId,
+      activeSessionId,
+      currentLayoutEnvId,
+      maximized: !!preMaximizeLayout,
+      livePanelIds: api.panels.map((p) => p.id),
+    });
     // Same-env switch (e.g. between sessions of the same task) is a no-op.
     // The layout, terminals, and env-scoped portals already belong to this env.
-    if (currentLayoutEnvId === newEnvId) return;
+    if (currentLayoutEnvId === newEnvId) {
+      debugSwitch("envSwitch: skip (same env)", { newEnvId });
+      return;
+    }
     // First adoption — onReady already built the layout; just adopt it.
     if (!oldEnvId && !currentLayoutEnvId) {
       set({ isRestoringLayout: true, currentLayoutEnvId: newEnvId });

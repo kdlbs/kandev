@@ -7,8 +7,40 @@ import { measureDockviewContainer } from "@/lib/state/dockview-measure";
 import type { LayoutState } from "@/lib/state/layout-manager";
 import type { AppState } from "@/lib/state/store";
 import { getEnvLayout, getEnvMaximizeState, removeEnvMaximizeState } from "@/lib/local-storage";
+import { createDebugLogger } from "@/lib/debug/log";
+
+const debug = createDebugLogger("dockview:restore");
 
 const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function describeSanitizeMode(options: {
+  stripSessionPanels?: boolean;
+  excludeSessionIds?: Set<string>;
+}): string {
+  if (options.stripSessionPanels) return "stripAllSessions";
+  if (options.excludeSessionIds) return "excludeSpecificSessions";
+  return "keepAll";
+}
+
+function logSanitizeOutcome(
+  options: { stripSessionPanels?: boolean; excludeSessionIds?: Set<string> },
+  totalPanels: Record<string, any>,
+  validPanels: Record<string, any>,
+  invalidIds: Set<string>,
+): void {
+  debug("sanitizeLayout", {
+    mode: describeSanitizeMode(options),
+    excludeSessionCount: options.excludeSessionIds?.size ?? 0,
+    excludeSessionIds: options.excludeSessionIds
+      ? Array.from(options.excludeSessionIds)
+      : undefined,
+    totalPanels: Object.keys(totalPanels).length,
+    keptPanels: Object.keys(validPanels).length,
+    strippedPanels: Array.from(invalidIds),
+  });
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export function sanitizeLayout(
@@ -18,7 +50,10 @@ export function sanitizeLayout(
     | { stripSessionPanels: true; excludeSessionIds?: never }
     | { stripSessionPanels?: false | undefined; excludeSessionIds?: Set<string> } = {},
 ): any {
-  if (!isLayoutShapeHealthy(layout)) return null;
+  if (!isLayoutShapeHealthy(layout)) {
+    debug("sanitizeLayout: layout shape unhealthy, returning null");
+    return null;
+  }
 
   const invalidIds = new Set<string>();
   const validPanels: Record<string, any> = {};
@@ -55,6 +90,8 @@ export function sanitizeLayout(
     }
   }
 
+  logSanitizeOutcome(options, layout.panels, validPanels, invalidIds);
+
   if (invalidIds.size === 0) return layout;
 
   function cleanNode(node: any): any {
@@ -73,7 +110,10 @@ export function sanitizeLayout(
   }
 
   const cleanedRoot = cleanNode(layout.grid.root);
-  if (!cleanedRoot) return null;
+  if (!cleanedRoot) {
+    debug("sanitizeLayout: cleanedRoot is null after stripping, returning null");
+    return null;
+  }
 
   return {
     ...layout,
@@ -139,11 +179,29 @@ function tryRestoreEnvLayout(
   phantomSessionIds: Set<string> | undefined,
 ): boolean {
   const envLayout = getEnvLayout(envId);
-  if (!envLayout) return false;
+  if (!envLayout) {
+    debug("tryRestoreEnvLayout: no saved layout for env", { envId });
+    return false;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rawPanelIds = Object.keys((envLayout as any).panels ?? {});
+  debug("tryRestoreEnvLayout: loaded saved layout", {
+    envId,
+    rawPanelCount: rawPanelIds.length,
+    rawPanelIds,
+    phantomSessionIds: phantomSessionIds ? Array.from(phantomSessionIds) : [],
+  });
   const sanitized = sanitizeLayout(envLayout, validComponents, {
     excludeSessionIds: phantomSessionIds,
   });
-  if (!sanitized) return false;
+  if (!sanitized) {
+    debug("tryRestoreEnvLayout: sanitize returned null", { envId });
+    return false;
+  }
+  debug("tryRestoreEnvLayout: calling api.fromJSON", {
+    envId,
+    sanitizedPanelIds: Object.keys(sanitized.panels),
+  });
   api.fromJSON(sanitized as SerializedDockview);
   applyFixupsWithMaximize(api, envId);
   return true;
@@ -217,5 +275,17 @@ export function restoreEnvLayout(
   validComponents: Set<string>,
 ): boolean {
   const phantoms = envId ? collectPhantomSessionIdsForEnv(appStore.getState(), envId) : undefined;
-  return tryRestoreLayout(api, envId, validComponents, phantoms);
+  debug("restoreEnvLayout: entry", {
+    envId,
+    phantomCount: phantoms?.size ?? 0,
+    phantomSessionIds: phantoms ? Array.from(phantoms) : [],
+    livePanelIdsBefore: api.panels.map((p) => p.id),
+  });
+  const result = tryRestoreLayout(api, envId, validComponents, phantoms);
+  debug("restoreEnvLayout: result", {
+    envId,
+    restored: result,
+    livePanelIdsAfter: api.panels.map((p) => p.id),
+  });
+  return result;
 }

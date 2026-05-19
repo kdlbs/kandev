@@ -13,6 +13,30 @@ import { applyLayoutFixups } from "./dockview-layout-builders";
 import { isLayoutShapeHealthy } from "./dockview-layout-health";
 import { fromDockviewApi, savedLayoutMatchesLive, layoutStructuresMatch } from "./layout-manager";
 import type { LayoutState, LayoutGroupIds } from "./layout-manager";
+import { createDebugLogger } from "@/lib/debug/log";
+
+const debug = createDebugLogger("dockview:env-switch");
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function snapshotGridShape(node: any, depth = 0): unknown {
+  if (!node || depth > 6) return null;
+  if (node.type === "leaf") {
+    return {
+      type: "leaf",
+      groupId: node.data?.id,
+      activeView: node.data?.activeView,
+      views: node.data?.views,
+    };
+  }
+  if (node.type === "branch" && Array.isArray(node.data)) {
+    return {
+      type: "branch",
+      orientation: node.orientation,
+      children: node.data.map((c: unknown) => snapshotGridShape(c, depth + 1)),
+    };
+  }
+  return null;
+}
 
 const EPHEMERAL_COMPONENTS = new Set([
   "file-editor",
@@ -162,6 +186,11 @@ function removeStaleSessionPanels(api: DockviewApi, keepSessionId: string | null
   const toRemove = api.panels.filter(
     (p) => p.api.component === "chat" && p.id.startsWith("session:") && p.id !== keepId,
   );
+  debug("removeStaleSessionPanels", {
+    keepSessionId,
+    livePanelIds: api.panels.map((p) => p.id),
+    removingIds: toRemove.map((p) => p.id),
+  });
   for (const p of toRemove) {
     try {
       p.api.close();
@@ -208,8 +237,26 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
     structuresMatch = layoutStructuresMatch(currentLayout, getDefaultLayout());
   }
 
-  if (!structuresMatch) return null;
-  if (saved && savedLayoutHasEphemeralPanels(saved as SerializedDockview)) return null;
+  if (!structuresMatch) {
+    debug("tryFastEnvSwitch: structures do not match, falling back to slow path", {
+      newEnvId,
+      hasSaved: !!saved,
+      currentPanelIds: api.panels.map((p) => p.id),
+    });
+    return null;
+  }
+  if (saved && savedLayoutHasEphemeralPanels(saved as SerializedDockview)) {
+    debug("tryFastEnvSwitch: saved layout has ephemeral panels, falling back to slow path", {
+      newEnvId,
+    });
+    return null;
+  }
+  debug("tryFastEnvSwitch: taking fast path", {
+    newEnvId,
+    activeSessionId,
+    hasSaved: !!saved,
+    currentPanelIds: api.panels.map((p) => p.id),
+  });
 
   // Prefer the active session panel so multi-session tasks anchor the
   // incoming panel to the group the user was looking at, not whichever
@@ -281,14 +328,35 @@ function addIncomingSessionPanel(
  * env-scoped portals before calling this function.
  */
 export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
-  const { api, newEnvId, activeSessionId, safeWidth, safeHeight, buildDefault } = params;
+  const { api, oldEnvId, newEnvId, activeSessionId, safeWidth, safeHeight, buildDefault } = params;
+  debug("performEnvSwitch: entry", {
+    oldEnvId,
+    newEnvId,
+    activeSessionId,
+    livePanelIdsBefore: api.panels.map((p) => p.id),
+  });
 
   const fastResult = tryFastEnvSwitch(params);
-  if (fastResult) return fastResult;
+  if (fastResult) {
+    debug("performEnvSwitch: completed via fast path", {
+      newEnvId,
+      livePanelIdsAfter: api.panels.map((p) => p.id),
+    });
+    return fastResult;
+  }
 
   const saved = getHealthyEnvLayout(newEnvId);
   if (saved) {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const savedPanelIds = Object.keys((saved as any).panels ?? {});
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const savedShape = snapshotGridShape((saved as any).grid?.root);
+      debug("performEnvSwitch: slow path - calling api.fromJSON", {
+        newEnvId,
+        savedPanelIds,
+        savedShape,
+      });
       api.fromJSON(saved as SerializedDockview);
       // Saved layout may carry a stale session panel from a previously-deleted
       // task (phantom). Strip session panels that don't belong to the incoming
@@ -297,13 +365,23 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
       // useAutoSessionTab will add the current session's panel if missing.
       removeStaleSessionPanels(api, activeSessionId);
       api.layout(safeWidth, safeHeight);
+      debug("performEnvSwitch: completed via slow path (fromJSON)", {
+        newEnvId,
+        livePanelIdsAfter: api.panels.map((p) => p.id),
+      });
       return applyLayoutFixups(api);
     } catch (err) {
       console.warn("performEnvSwitch: fromJSON threw", err);
+      debug("performEnvSwitch: fromJSON threw, falling through to default", { newEnvId, err });
       /* fall through to default layout build */
     }
   }
+  debug("performEnvSwitch: building default layout", { newEnvId, hasSaved: !!saved });
   buildDefault(api);
   api.layout(safeWidth, safeHeight);
+  debug("performEnvSwitch: completed via default build", {
+    newEnvId,
+    livePanelIdsAfter: api.panels.map((p) => p.id),
+  });
   return applyLayoutFixups(api);
 }

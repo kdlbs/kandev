@@ -5,6 +5,7 @@ import { useSessionGitStatus, useSessionGitStatusByRepo } from "./use-session-gi
 import { useSessionCommits } from "./use-session-commits";
 import { useCumulativeDiff } from "./use-cumulative-diff";
 import { useGitOperations } from "@/hooks/use-git-operations";
+import { createDebugLogger } from "@/lib/debug/log";
 import type {
   FileInfo,
   SessionCommit,
@@ -40,6 +41,8 @@ export type GitOperationResult = RawGitOperationResult & {
 };
 
 export type { PRCreateResult };
+
+const debugDeriv = createDebugLogger("git-status:derive");
 
 export type SessionGit = {
   // Branch info
@@ -596,6 +599,17 @@ function useFileDerivations(
     () => aggregateFilesAcrossRepos(statusByRepo, gitStatus),
     [statusByRepo, gitStatus],
   );
+  useEffect(() => {
+    debugDeriv("aggregate", {
+      path: statusByRepo.length > 0 ? "multi-repo" : "single-repo-fallback",
+      statusByRepoEntries: statusByRepo.map((s) => ({
+        repo: s.repository_name,
+        files: Object.keys(s.status?.files ?? {}).length,
+      })),
+      legacyGitStatusFiles: Object.keys(gitStatus?.files ?? {}).length,
+      allFilesCount: allFiles.length,
+    });
+  }, [statusByRepo, gitStatus, allFiles]);
   const unstagedFiles = useMemo(() => allFiles.filter((f) => !f.staged), [allFiles]);
   const stagedFiles = useMemo(() => allFiles.filter((f) => f.staged), [allFiles]);
   const repoForPath = useMemo(() => {
