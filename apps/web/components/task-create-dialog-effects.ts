@@ -530,6 +530,9 @@ function useResetBranchOnLocalSwitchEffect(
       // when launching from a GitHub PR). Without this, the executor's async
       // settle on dialog open looks like a worktree→local switch and clobbers
       // the explicit branch choice, leaving the chip showing "current: main".
+      // Both `row.branch` and `preserveBranch` are bare branch names with no
+      // remote prefix — current callers (`initialValues.checkoutBranch` /
+      // `initialValues.branch`) never pass `origin/...` here.
       if (row.branch && row.branch !== preserveBranch) {
         updateRepository(row.key, { branch: "" });
       }

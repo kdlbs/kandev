@@ -254,7 +254,6 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     toast,
     workflows,
     isLocalExecutor: computed.isLocalExecutor,
-    preserveBranch: initialValues?.checkoutBranch || initialValues?.branch,
   });
   useLockedFieldSync(open, workflowId, initialValues, fs);
   const handlers = useDialogHandlers(fs, repositories);
