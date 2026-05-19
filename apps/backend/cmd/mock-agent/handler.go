@@ -82,9 +82,27 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitMermaidSequence(e, model)
 	case strings.EqualFold(cmd, "/markdown"):
 		emitMarkdownShowcase(e, model)
+	case strings.EqualFold(cmd, "/sleep") || strings.HasPrefix(strings.ToLower(cmd), "/sleep "):
+		emitSleep(e, cmd)
 	default:
 		emitRandomResponse(e, cmd, model)
 	}
+}
+
+// emitSleep sleeps for the requested duration (default 10s) then responds.
+// Useful for simulating a slow agent turn without any tool calls.
+func emitSleep(e *emitter, cmd string) {
+	d := 10 * time.Second
+	parts := strings.Fields(cmd)
+	if len(parts) >= 2 {
+		if secs, err := time.ParseDuration(parts[1] + "s"); err == nil && secs > 0 {
+			d = secs
+		} else if parsed, err2 := time.ParseDuration(parts[1]); err2 == nil && parsed > 0 {
+			d = parsed
+		}
+	}
+	time.Sleep(d)
+	e.text(fmt.Sprintf("Slept for %s.", d))
 }
 
 // emitError emits an error message.

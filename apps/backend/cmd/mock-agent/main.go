@@ -265,6 +265,7 @@ func mockAvailableCommands() []acp.AvailableCommand {
 		{Name: "tool:exec", Description: "Emit a shell exec tool call"},
 		{Name: "tool:search", Description: "Emit a search tool call"},
 		{Name: "markdown", Description: "Render all markdown/text types"},
+		{Name: "sleep", Description: "Sleep without output (default 10s)", Input: hint("seconds (e.g. 30)")},
 	}
 }
 
