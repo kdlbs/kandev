@@ -883,8 +883,13 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		if task, taskErr := s.repo.GetTask(resumeCtx, taskID); taskErr == nil && task != nil && task.ArchivedAt != nil {
 			return nil, executor.ErrTaskArchived
 		}
-		s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
-		if stateErr := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateFailed); stateErr != nil {
+		// Use resumeCtx (WithoutCancel) for the failure-recording writes too —
+		// if the caller's ctx was already cancelled (e.g. WS client navigated
+		// away), the SessionStateFailed and TaskStateFailed updates would
+		// themselves fail with "context canceled" and leave the task stuck
+		// looking "running" forever.
+		s.updateTaskSessionState(resumeCtx, taskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
+		if stateErr := s.taskRepo.UpdateTaskState(resumeCtx, taskID, v1.TaskStateFailed); stateErr != nil {
 			s.logger.Warn("failed to update task state to FAILED after resume error",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),

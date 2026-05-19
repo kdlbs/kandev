@@ -45,6 +45,13 @@ type Hub struct {
 	// effective mode (paused/slow/fast) transitions. See hub_session_mode.go.
 	sessionMode *sessionModeTracker
 
+	// dispatchCtx is the hub's lifetime context, set by Run. Dispatched
+	// message handlers use it instead of the per-connection context so that
+	// a client disconnecting mid-flight does not SIGKILL exec subprocesses
+	// (gh, git, agentctl HTTP calls) or otherwise abort side-effecting work
+	// like session.launch. It still cancels on server shutdown.
+	dispatchCtx context.Context
+
 	mu     sync.RWMutex
 	logger *logger.Logger
 }
@@ -70,6 +77,10 @@ func NewHub(dispatcher *ws.Dispatcher, log *logger.Logger) *Hub {
 func (h *Hub) Run(ctx context.Context) {
 	h.logger.Info("WebSocket hub started")
 	defer h.logger.Info("WebSocket hub stopped")
+
+	h.mu.Lock()
+	h.dispatchCtx = ctx
+	h.mu.Unlock()
 
 	for {
 		select {
@@ -435,6 +446,20 @@ func (h *Hub) GetClientCount() int {
 // GetDispatcher returns the message dispatcher
 func (h *Hub) GetDispatcher() *ws.Dispatcher {
 	return h.dispatcher
+}
+
+// DispatchContext returns a context whose lifetime is tied to the hub (and
+// therefore the server) rather than any single client connection. Dispatched
+// handlers should use this so that a client disconnecting mid-flight does not
+// cancel in-progress writes, exec subprocesses, or downstream HTTP calls.
+// Falls back to context.Background when Run has not been called (test setups).
+func (h *Hub) DispatchContext() context.Context {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.dispatchCtx == nil {
+		return context.Background()
+	}
+	return h.dispatchCtx
 }
 
 // SetSessionDataProvider sets the provider for session data on subscription
