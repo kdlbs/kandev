@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
-import { QueuedGhostList } from "@/components/task/chat/queued-ghost-list";
 import { MessageList } from "@/components/task/chat/message-list";
 import { useIsTaskArchived } from "./task-archived-context";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
@@ -223,7 +222,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           />
         </div>
       )}
-      <QueuedGhostList sessionId={resolvedSessionId} isArchived={isArchived} />
       {isArchived ? (
         <div className="bg-muted/50 flex-shrink-0 px-4 py-3 text-center text-sm text-muted-foreground border-t">
           This task is archived and read-only.

@@ -1427,3 +1427,33 @@
     background-color: transparent;
   }
 }
+
+/* Queue panel collapsible — animate height + opacity using the Radix
+ * Collapsible CSS variable. Used by QueueAffordance so opening/closing the
+ * queued-messages panel feels intentional rather than popping. */
+@keyframes queue-panel-open {
+  from {
+    height: 0;
+    opacity: 0;
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+  }
+}
+@keyframes queue-panel-close {
+  from {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+  }
+  to {
+    height: 0;
+    opacity: 0;
+  }
+}
+.animate-queue-open {
+  animation: queue-panel-open 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.animate-queue-close {
+  animation: queue-panel-close 180ms cubic-bezier(0.32, 0.72, 0, 1);
+}
