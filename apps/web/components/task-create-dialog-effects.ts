@@ -99,11 +99,21 @@ export function useRepositoryAutoSelectEffect(
     } else if (repositories.length === 1) {
       pickId = repositories[0].id;
     }
-    void Promise.resolve().then(() =>
-      setRepositories([
-        pickId ? { key: "row-0", repositoryId: pickId, branch: "" } : { key: "row-0", branch: "" },
-      ]),
-    );
+    // Use the functional setter so the deferred microtask sees fresh state.
+    // Without this, a sibling effect (resetTaskForm / useLockedFieldSync) that
+    // seeds rows from `initialValues.repositoryId` synchronously races with
+    // this microtask — the microtask captured rows.length === 0 at queue time
+    // and would blindly clobber the initialValues-seeded row.
+    void Promise.resolve().then(() => {
+      setRepositories((prev) => {
+        if (prev.length > 0) return prev;
+        return [
+          pickId
+            ? { key: "row-0", repositoryId: pickId, branch: "" }
+            : { key: "row-0", branch: "" },
+        ];
+      });
+    });
   }, [open, repositories, rows, useGitHubUrl, workspaceId, setRepositories]);
 }
 
@@ -490,7 +500,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
   useDiscoverReposEffect(fs, open, workspaceId, repositoriesLoading, toast);
   useBranchAutoSelectEffect(fs);
   useCurrentLocalBranchEffect(fs, open, workspaceId, repositories);
-  useResetBranchOnLocalSwitchEffect(fs, isLocalExecutor);
+  useResetBranchOnLocalSwitchEffect(fs, isLocalExecutor, args.preserveBranch);
   useDefaultSelectionsEffect(fs, open, { agentProfiles, executors, workspaceDefaults }, workflows);
   useGitHubUrlBranchesEffect(fs, open);
 }
@@ -504,7 +514,11 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
 // tree. With the reset, switching to local always defaults to "current
 // branch on disk" and the user has to opt back into a different branch
 // explicitly.
-function useResetBranchOnLocalSwitchEffect(fs: DialogFormState, isLocalExecutor: boolean) {
+function useResetBranchOnLocalSwitchEffect(
+  fs: DialogFormState,
+  isLocalExecutor: boolean,
+  preserveBranch: string | undefined,
+) {
   const { repositories: rows, updateRepository } = fs;
   const wasLocalRef = useRef(isLocalExecutor);
   useEffect(() => {
@@ -512,7 +526,13 @@ function useResetBranchOnLocalSwitchEffect(fs: DialogFormState, isLocalExecutor:
     wasLocalRef.current = isLocalExecutor;
     if (!isLocalExecutor || prev) return; // only fire on false → true transition
     for (const row of rows) {
-      if (row.branch) updateRepository(row.key, { branch: "" });
+      // Preserve a branch the caller asked us to keep (e.g. the PR head branch
+      // when launching from a GitHub PR). Without this, the executor's async
+      // settle on dialog open looks like a worktree→local switch and clobbers
+      // the explicit branch choice, leaving the chip showing "current: main".
+      if (row.branch && row.branch !== preserveBranch) {
+        updateRepository(row.key, { branch: "" });
+      }
     }
-  }, [isLocalExecutor, rows, updateRepository]);
+  }, [isLocalExecutor, rows, updateRepository, preserveBranch]);
 }

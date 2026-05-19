@@ -31,6 +31,13 @@ type PRListProps = {
   onStartTask: (payload: LaunchPayload) => void;
 };
 
+// Prefer the enriched PR returned by the batched status endpoint — the search
+// API used to populate `items` does not include head/base branches, so the
+// launcher needs the enriched copy to pre-fill the task dialog correctly.
+export function pickPRForLaunch(pr: GitHubPR, status: GitHubPRStatus | null | undefined): GitHubPR {
+  return status?.pr ?? pr;
+}
+
 function prStateIcon(pr: GitHubPR): { Icon: Icon; className: string } {
   if (pr.state === "merged")
     return { Icon: IconGitMerge, className: "text-purple-600 dark:text-purple-400" };
@@ -53,7 +60,12 @@ function StartTaskMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="outline" className="h-7 gap-1 cursor-pointer">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1 cursor-pointer"
+          data-testid="pr-start-task-trigger"
+        >
           <IconPlus className="h-3.5 w-3.5" />
           Task
           <IconChevronDown className="h-3 w-3" />
@@ -67,6 +79,8 @@ function StartTaskMenu({
               key={p.id}
               className="cursor-pointer gap-2 py-1.5"
               onSelect={() => launch(p)}
+              data-testid="pr-start-task-preset"
+              data-preset-id={p.id}
             >
               <ItemIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               <div className="flex flex-col min-w-0">
@@ -94,7 +108,11 @@ function PRRow({
 }) {
   const { Icon: StateIcon, className: stateIconClass } = prStateIcon(pr);
   return (
-    <div className="flex items-start gap-3 px-4 py-3 hover:bg-muted/40 transition-colors">
+    <div
+      className="flex items-start gap-3 px-4 py-3 hover:bg-muted/40 transition-colors"
+      data-testid="pr-row"
+      data-pr-number={pr.number}
+    >
       <StateIcon className={cn("h-4 w-4 mt-1 shrink-0", stateIconClass)} />
       <div className="min-w-0 flex-1">
         <Link
@@ -117,7 +135,11 @@ function PRRow({
         </div>
       </div>
       <div className="shrink-0">
-        <StartTaskMenu pr={pr} presets={presets} onStartTask={onStartTask} />
+        <StartTaskMenu
+          pr={pickPRForLaunch(pr, status)}
+          presets={presets}
+          onStartTask={onStartTask}
+        />
       </div>
     </div>
   );
