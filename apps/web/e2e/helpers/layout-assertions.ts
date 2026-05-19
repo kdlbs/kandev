@@ -23,10 +23,12 @@ export async function assertNoDescendantOverflowsRight(
     (node, rightArg) => {
       const limit = rightArg as number;
       const results: { tag: string; text: string; right: number }[] = [];
-      const skip = new Set(["SVG", "PATH", "CIRCLE", "RECT", "LINE", "G"]);
+      // SVG elements in HTML documents report `tagName` lowercase (per the
+      // SVG namespace) while HTML elements report uppercase, so normalize.
+      const skip = new Set(["svg", "path", "circle", "rect", "line", "g"]);
       const all = node.querySelectorAll("*");
       for (const el of all) {
-        if (skip.has(el.tagName)) continue;
+        if (skip.has(el.tagName.toLowerCase())) continue;
         const rect = el.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) continue;
         if (rect.right > limit + 1) {
