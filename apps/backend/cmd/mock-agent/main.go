@@ -266,8 +266,9 @@ func mockAvailableCommands() []acp.AvailableCommand {
 		{Name: "tool:search", Description: "Emit a search tool call"},
 		{Name: "markdown", Description: "Render all markdown/text types"},
 		{Name: "sleep", Description: "Sleep without output (default 10s)", Input: hint("seconds (e.g. 30)")},
+		{Name: "ask-single", Description: "Ask a single clarification question"},
+		{Name: "ask-multiple", Description: "Ask multiple clarification questions"},
 	}
-}
 
 // extractPromptText concatenates text content blocks from the prompt.
 func extractPromptText(blocks []acp.ContentBlock) string {

@@ -216,7 +216,10 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
       </PanelBody>
       {pendingClarification && !isArchived && (
-        <div className="flex-shrink-0 border-t border-sky-400/30 bg-card px-1">
+        <div
+          data-testid="clarification-overlay-container"
+          className="flex-shrink-0 border-t border-sky-400/30 bg-card px-1 max-h-[50vh] overflow-y-auto overscroll-contain"
+        >
           <ClarificationInputOverlay
             messages={pendingClarificationGroup}
             onResolved={handleClarificationResolved}

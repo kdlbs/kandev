@@ -597,3 +597,133 @@ test.describe("Multi-question clarification carousel", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 });
+
+/**
+ * Helper to create a regular task, navigate to it, and wait for idle.
+ */
+async function seedTaskAndWaitForIdle(
+  testPage: Page,
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+): Promise<SessionPage> {
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    title,
+    seedData.agentProfileId,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+
+  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+  await testPage.goto(`/t/${task.id}`);
+
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
+  await session.waitForChatIdle();
+
+  return session;
+}
+
+test.describe("Mock agent clarification slash commands", () => {
+  test.describe.configure({ retries: 1 });
+
+  // Smoke test that the /ask-single alias routes to the clarification scenario.
+  // The underlying clarification behaviour (option click, multi-question carousel,
+  // submit, etc.) is exhaustively covered by the suites above — this only proves
+  // the alias is wired up. /ask-multiple shares the same routing code path.
+  test("/ask-single alias triggers the clarification overlay", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedTaskAndWaitForIdle(testPage, apiClient, seedData, "Ask Single Alias");
+
+    await session.sendMessage("/ask-single");
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await session.clarificationOption("PostgreSQL").click();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("/ask-multiple alias triggers the multi-question carousel", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Ask Multiple Alias",
+    );
+
+    await session.sendMessage("/ask-multiple");
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await expect(session.clarificationSteps()).toHaveCount(3);
+    await expect(session.clarificationOverlay()).toContainText("Which database");
+
+    await session.clarificationOption("PostgreSQL").click();
+    await session.clarificationOption("Go").click();
+    await session.clarificationOption("Docker").click();
+
+    await session.clarificationSubmit().click();
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  });
+});
+
+test.describe("Clarification overlay responsive layout", () => {
+  test("caps height at 50vh and scrolls when content overflows", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // 500px tall viewport guarantees the multi-question card overflows the
+    // 50vh (=250px) cap: a card with prompt + 3 options + custom input +
+    // carousel nav cannot fit in 250px.
+    const viewportHeight = 500;
+    const expectedMaxHeightPx = viewportHeight / 2;
+    await testPage.setViewportSize({ width: 1280, height: viewportHeight });
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Max Height",
+    );
+
+    await session.sendMessage("/ask-multiple");
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    const container = testPage.getByTestId("clarification-overlay-container");
+    await expect(container).toBeVisible();
+
+    const box = await container.boundingBox();
+    expect(box).not.toBeNull();
+
+    const metrics = await container.evaluate((el) => {
+      const computed = window.getComputedStyle(el);
+      return {
+        overflowY: computed.overflowY,
+        maxHeight: computed.maxHeight,
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+      };
+    });
+
+    expect(metrics.overflowY).toBe("auto");
+    // getComputedStyle always returns a resolved pixel value (e.g. "250px").
+    expect(metrics.maxHeight).toMatch(new RegExp(`^${expectedMaxHeightPx}(\\.\\d+)?px$`));
+    // Rendered height must respect the cap.
+    expect(box!.height).toBeLessThanOrEqual(expectedMaxHeightPx + 1);
+    // Content overflows the cap → container is genuinely scrollable.
+    expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+  });
+});
