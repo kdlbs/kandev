@@ -28,6 +28,11 @@ const (
 	AuthMethodPAT  = "pat"
 )
 
+// ErrInvalidPRURL signals that a caller-supplied PR URL could not be parsed.
+// Used by AssociateExistingPRByURL so HTTP callers can translate the failure
+// into a 400 instead of a generic 500.
+var ErrInvalidPRURL = errors.New("invalid PR URL")
+
 // defaultBranchMain and defaultBranchMaster are the conventional default branch
 // names sorted to the top of branch pickers.
 const (
@@ -612,7 +617,7 @@ func (s *Service) AssociateExistingPRByURL(ctx context.Context, taskID, reposito
 	}
 	owner, repo, prNumber, err := parsePRURL(prURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse PR URL: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrInvalidPRURL, err)
 	}
 	pr, err := s.client.GetPR(ctx, owner, repo, prNumber)
 	if err != nil {

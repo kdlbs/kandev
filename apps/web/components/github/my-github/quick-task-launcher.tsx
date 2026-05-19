@@ -42,16 +42,23 @@ function emptyToUndefined(value: string | undefined): string | undefined {
 }
 
 // Multi-repo tasks have one task_repository row per repo; pick the one that
-// matches the PR's owner/repo by checking against the matching `repositoryId`
-// captured at dialog-time. Fallback to the first row so single-repo tasks
-// without that info still associate.
+// matches the PR's owner/repo. Preference order:
+//   1. preferredRepositoryId (the id captured at dialog-time by repo matching)
+//   2. checkout_branch matching the PR head — handles cases where dialog
+//      didn't set a repositoryId (legacy github_url flow)
+//   3. first row (safest fallback for single-repo tasks)
+// Branch-only matching can mis-select when two task repos share branch names,
+// so the dialog-time hint wins when present.
 function pickRepositoryIdForPR(
   taskRepos: TaskRepository[] | undefined,
   pr: GitHubPR,
+  preferredRepositoryId?: string,
 ): string | undefined {
-  if (!taskRepos || taskRepos.length === 0) return undefined;
-  // The dialog only sets one repository_id (the matched repo's id); if the
-  // task has multiple, we still want the one with the PR's head_branch.
+  if (!taskRepos || taskRepos.length === 0) return preferredRepositoryId;
+  if (preferredRepositoryId) {
+    const preferred = taskRepos.find((r) => r.repository_id === preferredRepositoryId);
+    if (preferred) return preferred.repository_id;
+  }
   const byBranch = taskRepos.find((r) => r.checkout_branch === pr.head_branch);
   return (byBranch ?? taskRepos[0]).repository_id;
 }
@@ -146,7 +153,11 @@ export function QuickTaskLauncher({
   };
   const handleSuccess = (task: Task) => {
     if (payload?.kind === "pr") {
-      const repositoryId = pickRepositoryIdForPR(task.repositories, payload.pr);
+      const repositoryId = pickRepositoryIdForPR(
+        task.repositories,
+        payload.pr,
+        dialog?.repositoryId,
+      );
       // Fire-and-forget: associating the PR is best-effort. A failure (network,
       // missing GH client) shouldn't block navigation — the existing
       // branch-based poller will still try once the agent starts.

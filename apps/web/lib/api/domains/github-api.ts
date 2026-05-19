@@ -72,9 +72,9 @@ export async function createTaskPR(
   return fetchJson<TaskPR>(`/api/v1/github/task-prs`, {
     ...options,
     init: {
+      ...(options?.init ?? {}),
       method: "POST",
       body: JSON.stringify(data),
-      ...(options?.init ?? {}),
     },
   });
 }

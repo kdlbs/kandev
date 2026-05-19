@@ -158,7 +158,11 @@ func (c *Controller) httpCreateTaskPR(ctx *gin.Context) {
 	}
 	tp, err := c.service.AssociateExistingPRByURL(ctx.Request.Context(), req.TaskID, req.RepositoryID, req.PRURL)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrInvalidPRURL) {
+			status = http.StatusBadRequest
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, tp)
