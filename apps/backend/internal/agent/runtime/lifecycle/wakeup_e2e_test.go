@@ -200,7 +200,7 @@ func TestWakeupE2EFullPipeline_BridgeToEventBus(t *testing.T) {
 	// ---- Create the execution that ties the adapter session to the manager ----
 	executionID := "wakeup-e2e-exec-1"
 	taskID := "wakeup-e2e-task-1"
-	exec := &AgentExecution{
+	agentExec := &AgentExecution{
 		ID:             executionID,
 		TaskID:         taskID,
 		Status:         v1.AgentStatusRunning,
@@ -208,7 +208,7 @@ func TestWakeupE2EFullPipeline_BridgeToEventBus(t *testing.T) {
 		promptDoneCh:   make(chan PromptCompletionSignal, 1),
 		historyEnabled: false, // skip history writes — we're only checking event flow
 	}
-	mgr.executionStore.Add(exec)
+	mgr.executionStore.Add(agentExec)
 
 	// ---- Forward adapter events into the manager ----
 	// This mirrors what StreamManager.connectUpdatesStream does in production
@@ -232,12 +232,12 @@ func TestWakeupE2EFullPipeline_BridgeToEventBus(t *testing.T) {
 				// Stamp the execution session ID into the event if not set
 				// (the adapter only knows its own session id after NewSession,
 				// but events emitted before that don't carry it).
-				if ev.SessionID != "" && exec.SessionID == "" {
-					exec.SessionID = ev.SessionID
+				if ev.SessionID != "" && agentExec.SessionID == "" {
+					agentExec.SessionID = ev.SessionID
 				}
 				fmt.Fprintf(os.Stderr, "[adapter→mgr] event type=%s sessionID=%s text=%q\n",
 					ev.Type, ev.SessionID, truncateE2E(ev.Text, 80))
-				mgr.handleAgentEvent(exec, ev)
+				mgr.handleAgentEvent(agentExec, ev)
 			case <-stopForward:
 				return
 			}
@@ -261,7 +261,7 @@ func TestWakeupE2EFullPipeline_BridgeToEventBus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	exec.SessionID = sid
+	agentExec.SessionID = sid
 	t.Logf("session=%s", sid)
 
 	prompt := fmt.Sprintf(
