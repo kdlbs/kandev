@@ -124,10 +124,13 @@ func TestList_IgnoresNeighboringNonLogFiles(t *testing.T) {
 		".env",
 		"config.yaml",
 		"secrets",
-		"kandev",                       // no extension
-		"other.log",                    // different base
-		"kandev-suffixed.txt",          // wrong extension
-		"kandevish-2026-01-01.000.log", // base mismatch (no leading "kandev-")
+		"kandev",                         // no extension
+		"other.log",                      // different base
+		"kandev-suffixed.txt",            // wrong extension
+		"kandevish-2026-01-01.000.log",   // base mismatch (no leading "kandev-")
+		"kandev-cli.log",                 // matching prefix but not a timestamp
+		"kandev-2026-01-01.log",          // timestamp missing time part
+		"kandev-2026-01-01T00-00-00.log", // timestamp missing milliseconds
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o600); err != nil {
 			t.Fatalf("seed %s: %v", name, err)
@@ -154,7 +157,11 @@ func TestList_IgnoresNeighboringNonLogFiles(t *testing.T) {
 			t.Errorf("List() missing %q", w)
 		}
 	}
-	for _, ban := range []string{".env", "config.yaml", "secrets", "kandev", "other.log", "kandev-suffixed.txt", "kandevish-2026-01-01.000.log"} {
+	for _, ban := range []string{
+		".env", "config.yaml", "secrets", "kandev", "other.log",
+		"kandev-suffixed.txt", "kandevish-2026-01-01.000.log",
+		"kandev-cli.log", "kandev-2026-01-01.log", "kandev-2026-01-01T00-00-00.log",
+	} {
 		if got[ban] {
 			t.Errorf("List() leaked %q (not a log file)", ban)
 		}
@@ -251,10 +258,12 @@ func TestOpen_RejectsTraversalAndSeparators(t *testing.T) {
 	}
 }
 
-func TestContainedPath_RejectsEscape(t *testing.T) {
-	// safeName would already reject these, but exercise containedPath
-	// directly so the post-join verification is covered. We pass strings
-	// that bypass safeName by going straight to containedPath.
+func TestContainedPath_ReturnedPathIsInsideLogDir(t *testing.T) {
+	// containedPath's escape-rejection branch is architecturally unreachable
+	// for single-segment clean names (filepath.Join of a non-empty rootAbs
+	// and a bare filename without separators always stays inside the root).
+	// This test exercises the happy path and verifies the postcondition:
+	// the returned absolute path must be a child of the log directory.
 	dir := t.TempDir()
 	svc := newTestService(t, dir)
 

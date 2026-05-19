@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -105,11 +106,21 @@ func (s *Service) isCurrent(name string) bool {
 	return s.currentName != "" && name == s.currentName
 }
 
+// lumberjackTimestamp matches the timestamp lumberjack injects between the
+// base name and extension when it rotates a log file. Lumberjack formats the
+// stamp as time.Format("2006-01-02T15-04-05.000"), so the pattern is exactly
+// four digits, a dash, two digits, a dash, two digits, a T, two digits, a
+// dash, two digits, a dash, two digits, a dot, three digits — nothing else.
+// This is tighter than the previous "non-empty string" check and prevents
+// unrelated files like "kandev-cli.log" from matching in shared directories.
+var lumberjackTimestamp = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}$`)
+
 // isAllowed reports whether name belongs to the configured log set: either
 // the active log file itself, or a lumberjack-rotated sibling. Lumberjack
 // rotates "<base>.<ext>" into "<base>-<timestamp>.<ext>" (optionally gzipped
-// to ".<ext>.gz"). Anything else — unrelated files that happen to share the
-// log directory — is rejected so List/Open cannot leak them.
+// to ".<ext>.gz"). Only names whose embedded timestamp matches lumberjack's
+// exact YYYY-MM-DDTHH-MM-SS.sss format are accepted — this prevents unrelated
+// files with a matching base prefix from being exposed in shared log dirs.
 func (s *Service) isAllowed(name string) bool {
 	if s.currentName == "" {
 		return false
@@ -126,9 +137,8 @@ func (s *Service) isAllowed(name string) bool {
 		return false
 	}
 	rest := strings.TrimPrefix(name, base+"-")
-	// rest must be "<timestamp><ext>" or "<timestamp><ext>.gz"; the timestamp
-	// segment is opaque from our point of view — we only enforce that the
-	// extension suffix matches the active log file's.
+	// rest must be "<timestamp><ext>" or "<timestamp><ext>.gz"; strip the
+	// extension suffix to isolate the timestamp segment.
 	switch {
 	case strings.HasSuffix(rest, ext+".gz"):
 		rest = strings.TrimSuffix(rest, ext+".gz")
@@ -137,9 +147,9 @@ func (s *Service) isAllowed(name string) bool {
 	default:
 		return false
 	}
-	// A non-empty timestamp segment must remain — otherwise the candidate
-	// reduces to "<base>-<ext>[.gz]", which is not a lumberjack rotation.
-	return rest != ""
+	// Require an exact lumberjack timestamp so files like "kandev-cli.log"
+	// in a shared directory cannot slip through the allow-list.
+	return lumberjackTimestamp.MatchString(rest)
 }
 
 // Open returns an *os.File for download, plus its size. name must be a bare

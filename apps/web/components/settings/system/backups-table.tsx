@@ -152,6 +152,10 @@ export function BackupsTable() {
   const onCreate = async () => {
     setCreating(true);
     setError(null);
+    // Clear both the stale job id and the terminal-state guard before
+    // starting a new backup so a previous job's success/failure can't
+    // suppress reload/error handling for this new attempt.
+    setCreateJobId(null);
     resetJobTracking();
     try {
       const { job_id } = await createBackup();
