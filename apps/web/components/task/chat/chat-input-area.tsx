@@ -12,6 +12,7 @@ import { useMessageHandler } from "@/hooks/use-message-handler";
 import { useAppStore } from "@/components/state-provider";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { type ContextFile } from "@/lib/state/context-files-store";
+import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import {
   ChatInputContainer,
   type ChatInputContainerHandle,
@@ -107,6 +108,7 @@ export function useSubmitHandler(
       reviewComments?: DiffComment[],
       attachments?: MessageAttachment[],
       inlineMentions?: ContextFile[],
+      inlineTaskMentions?: TaskMentionData[],
     ) => {
       if (isSending) return;
       setIsSending(true);
@@ -121,7 +123,13 @@ export function useSubmitHandler(
         if (onSend) {
           await onSend(finalMessage);
         } else {
-          await handleSendMessage(finalMessage, attachments, hasReviewComments, inlineMentions);
+          await handleSendMessage(
+            finalMessage,
+            attachments,
+            hasReviewComments,
+            inlineMentions,
+            inlineTaskMentions,
+          );
         }
         if (reviewComments && reviewComments.length > 0)
           markCommentsSent(reviewComments.map((c) => c.id));
@@ -326,6 +334,7 @@ type ChatInputAreaProps = {
     reviewComments?: DiffComment[],
     attachments?: MessageAttachment[],
     inlineMentions?: ContextFile[],
+    inlineTaskMentions?: TaskMentionData[],
   ) => Promise<void>;
   handleCancelTurn: () => Promise<void>;
   showRequestChangesTooltip: boolean;

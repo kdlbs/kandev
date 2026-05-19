@@ -43,6 +43,7 @@ type UseChatInputContainerParams = {
     reviewComments?: DiffComment[],
     attachments?: MessageAttachment[],
     inlineMentions?: ContextFile[],
+    inlineTaskMentions?: import("@/hooks/use-inline-mention").TaskMentionData[],
   ) => void;
 };
 

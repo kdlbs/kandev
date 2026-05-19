@@ -1,6 +1,12 @@
 "use client";
 
-import { IconAt, IconFile, IconFolder, IconListCheck } from "@tabler/icons-react";
+import {
+  IconAt,
+  IconFile,
+  IconFolder,
+  IconListCheck,
+  IconClipboardList,
+} from "@tabler/icons-react";
 import type { MentionItem } from "@/hooks/use-inline-mention";
 import { getFileName, isDirectory } from "@/lib/utils/file-path";
 import { PopupMenu, PopupMenuItem, useMenuItemRefs } from "./popup-menu";
@@ -26,13 +32,16 @@ function getItemIcon(item: MentionItem) {
   if (item.kind === "plan") {
     return <IconListCheck className="h-4 w-4" />;
   }
+  if (item.kind === "task") {
+    return <IconClipboardList className="h-4 w-4" />;
+  }
   const isDir = isDirectory(item.label);
   return isDir ? <IconFolder className="h-4 w-4" /> : <IconFile className="h-4 w-4" />;
 }
 
 // Get the label and description for an item
 function getItemDisplay(item: MentionItem): { label: string; description?: string } {
-  if (item.kind === "prompt" || item.kind === "plan") {
+  if (item.kind === "prompt" || item.kind === "plan" || item.kind === "task") {
     return { label: item.label, description: item.description };
   }
   const name = getFileName(item.label);
@@ -69,7 +78,7 @@ export function MentionMenu({
       isOpen={isOpen}
       position={position ?? null}
       clientRect={clientRect}
-      title="Mention files, prompts"
+      title="Mention tasks, files, prompts"
       selectedIndex={selectedIndex}
       onClose={onClose}
       hasItems={items.length > 0}

@@ -51,13 +51,22 @@ export const MentionSuggestionPluginKey = new PluginKey("mentionSuggestion");
  * `setMenuState` drives the React rendering of MentionMenu.
  * `onKeyDown` is a stable callback the parent uses to delegate keystrokes.
  */
+type MentionAttrs = {
+  id: string;
+  label: string;
+  kind: MentionKind;
+  path: string;
+  taskId?: string | null;
+  workflowId?: string | null;
+  workflowStepId?: string | null;
+  taskState?: string | null;
+};
+
 export function createMentionSuggestion(
   callbacks: MentionSuggestionCallbacks,
   setMenuState: (state: MenuState<MentionItem>) => void,
   onKeyDown: (event: KeyboardEvent) => boolean,
-): Partial<
-  SuggestionOptions<MentionItem, { id: string; label: string; kind: MentionKind; path: string }>
-> {
+): Partial<SuggestionOptions<MentionItem, MentionAttrs>> {
   return {
     char: "@",
     pluginKey: MentionSuggestionPluginKey,
@@ -120,24 +129,29 @@ export function createMentionSuggestion(
   };
 }
 
-function mentionItemToAttrs(item: MentionItem): {
-  id: string;
-  label: string;
-  kind: MentionKind;
-  path: string;
-} {
-  const name = item.kind === "file" ? getFileName(item.label) : item.label;
+function mentionItemPath(item: MentionItem): string {
+  if (item.kind === "file") return item.label;
+  if (item.kind === "prompt") return `prompt:${item.id}`;
+  if (item.kind === "task") return `task:${item.task?.taskId ?? item.id}`;
+  return "plan:context";
+}
 
-  return {
-    id: item.id,
-    label: name,
-    kind: item.kind,
-    path: (() => {
-      if (item.kind === "file") return item.label;
-      if (item.kind === "prompt") return `prompt:${item.id}`;
-      return "plan:context";
-    })(),
-  };
+function mentionItemToAttrs(item: MentionItem): MentionAttrs {
+  const name = item.kind === "file" ? getFileName(item.label) : item.label;
+  const path = mentionItemPath(item);
+  if (item.kind === "task" && item.task) {
+    return {
+      id: item.id,
+      label: name,
+      kind: item.kind,
+      path,
+      taskId: item.task.taskId,
+      workflowId: item.task.workflowId,
+      workflowStepId: item.task.workflowStepId,
+      taskState: item.task.state ?? null,
+    };
+  }
+  return { id: item.id, label: name, kind: item.kind, path };
 }
 
 // ── Slash command suggestion ────────────────────────────────────────
