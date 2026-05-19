@@ -41,7 +41,7 @@ import {
 import { preserveChatScrollDuringLayout } from "./dockview-scroll-preserve";
 import { measureDockviewContainer } from "./dockview-measure";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
-import { createDebugLogger } from "@/lib/debug/log";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
 const debugSwitch = createDebugLogger("dockview:store-switch");
 const debugSave = createDebugLogger("dockview:save");
@@ -477,11 +477,13 @@ function saveOutgoingEnv(
     debugSave("saveOutgoingEnv: skip (no oldEnvId)");
     return;
   }
-  debugSave("saveOutgoingEnv: entry", {
-    oldEnvId,
-    livePanelIds: api.panels.map((p) => p.id),
-    maximized: !!preMaximizeLayout,
-  });
+  if (IS_DEBUG) {
+    debugSave("saveOutgoingEnv: entry", {
+      oldEnvId,
+      livePanelIds: api.panels.map((p) => p.id),
+      maximized: !!preMaximizeLayout,
+    });
+  }
   if (preMaximizeLayout) {
     // While maximized, `api.toJSON()` is the 2-column maximize overlay, NOT
     // the user's intended layout. Persist the pre-max layout under both keys:
@@ -529,14 +531,16 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
       debugSwitch("envSwitch: skip (no api)", { oldEnvId, newEnvId, activeSessionId });
       return;
     }
-    debugSwitch("envSwitch: entry", {
-      oldEnvId,
-      newEnvId,
-      activeSessionId,
-      currentLayoutEnvId,
-      maximized: !!preMaximizeLayout,
-      livePanelIds: api.panels.map((p) => p.id),
-    });
+    if (IS_DEBUG) {
+      debugSwitch("envSwitch: entry", {
+        oldEnvId,
+        newEnvId,
+        activeSessionId,
+        currentLayoutEnvId,
+        maximized: !!preMaximizeLayout,
+        livePanelIds: api.panels.map((p) => p.id),
+      });
+    }
     // Same-env switch (e.g. between sessions of the same task) is a no-op.
     // The layout, terminals, and env-scoped portals already belong to this env.
     if (currentLayoutEnvId === newEnvId) {

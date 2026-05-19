@@ -3,7 +3,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { TaskSessionState, Message } from "@/lib/types/http";
 import { listTaskSessionMessages } from "@/lib/api";
-import { createDebugLogger } from "@/lib/debug/log";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
 const INITIAL_FETCH_LIMIT = 100;
 const BACKFILL_PAGE_LIMIT = 100;
@@ -74,7 +74,7 @@ async function fetchAndStoreMessages(
   debug("message.list request", requestParams);
   const response = await client.request<MessageListResponse>("message.list", requestParams, 10000);
   const fetched = [...(response.messages ?? [])].reverse();
-  if (process.env.NODE_ENV !== "production") {
+  if (IS_DEBUG) {
     const summary = summarizeMessages(fetched);
     debug("message.list response", {
       sessionId,
