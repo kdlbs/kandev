@@ -9,7 +9,7 @@ import type {
   GitBranchSwitchedEvent,
 } from "@/lib/types/git-events";
 import { invalidateCumulativeDiffCache } from "@/hooks/domains/session/use-cumulative-diff";
-import { createDebugLogger } from "@/lib/debug/log";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
 const debug = createDebugLogger("git-status:ws");
 
@@ -28,7 +28,7 @@ function resolveEnvKey(store: StoreApi<AppState>, sessionId: string): string {
 
 const gitEventHandlers: GitEventHandlers = {
   status_update: (store, event) => {
-    if (process.env.NODE_ENV !== "production") {
+    if (IS_DEBUG) {
       debug("status_update", {
         sessionId: event.session_id,
         repositoryName: event.status.repository_name ?? null,

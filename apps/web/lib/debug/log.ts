@@ -1,16 +1,20 @@
 /**
  * Namespaced debug logger for development.
  *
- * In production (`NODE_ENV === "production"`) the factory returns a no-op
- * function. The `debug()` call itself is free, but JavaScript evaluates its
- * arguments before the call — so callers that compute expensive values (O(n)
- * maps, `.reduce()`, spread of large objects) must guard with:
+ * Active when `NODE_ENV !== "production"` (i.e. `make dev`) **or** when
+ * `NEXT_PUBLIC_KANDEV_DEBUG=true` is set at build time (i.e. `make
+ * start-debug`). In a plain production build both conditions are false and
+ * Next.js dead-code-eliminates everything.
  *
- *   if (process.env.NODE_ENV !== "production") { debug(...); }
+ * The `debug()` call itself is free, but JavaScript evaluates its arguments
+ * before the call — so callers that compute expensive values (O(n) maps,
+ * `.reduce()`, spread of large objects) must guard with the exported constant:
  *
- * Next.js inlines the `process.env.NODE_ENV` check and dead-code-eliminates
- * the entire block in production builds. Simple scalar reads (lengths,
- * boolean flags, already-computed IDs) are cheap enough to leave unguarded.
+ *   if (IS_DEBUG) { debug(...); }
+ *
+ * Next.js inlines both `process.env` checks at build time and Terser folds
+ * `IS_DEBUG` to a boolean literal, dead-code-eliminating the block in regular
+ * production builds. Simple scalar reads are cheap enough to leave unguarded.
  *
  * Output format is logfmt-ish so logs are flat and grep/copy-friendly:
  *
@@ -27,7 +31,8 @@
 
 export type DebugLogger = (...args: unknown[]) => void;
 
-const DEV = process.env.NODE_ENV !== "production";
+export const IS_DEBUG =
+  process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_KANDEV_DEBUG === "true";
 
 const NOOP: DebugLogger = () => {};
 
@@ -78,7 +83,7 @@ function flattenArgs(args: unknown[]): string {
 }
 
 export function createDebugLogger(namespace: string): DebugLogger {
-  if (!DEV) return NOOP;
+  if (!IS_DEBUG) return NOOP;
   const prefix = `[${namespace}]`;
   return (...args: unknown[]) => {
     console.debug(`${prefix} ${flattenArgs(args)}`);

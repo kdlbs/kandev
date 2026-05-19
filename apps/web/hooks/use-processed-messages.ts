@@ -11,7 +11,7 @@ import {
   findPendingClarification,
   findPendingClarificationGroup,
 } from "@/lib/utils/pending-clarification";
-import { createDebugLogger } from "@/lib/debug/log";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
 const debug = createDebugLogger("messages:process");
 
@@ -33,7 +33,7 @@ function useDebugProcessedPipeline(args: {
 }) {
   const { sessionId, messages, visibleMessages, footerActionCount, groupedItems } = args;
   useEffect(() => {
-    if (process.env.NODE_ENV === "production") return;
+    if (!IS_DEBUG) return;
     debug("pipeline", {
       sessionId,
       input: { count: messages.length, byType: countByType(messages) },

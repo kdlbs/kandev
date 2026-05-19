@@ -6,7 +6,7 @@ import type {
   GitStatusEntry,
   FileInfo,
 } from "./types";
-import { createDebugLogger } from "@/lib/debug/log";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
 const debugGit = createDebugLogger("git-status:store");
 
@@ -293,7 +293,7 @@ export const createSessionRuntimeSlice: StateCreator<
       // empty key so consumers using only byEnvironmentRepo still see it.
       const repoName = gitStatus.repository_name ?? "";
       const existing = draft.gitStatus.byEnvironmentId[envKey];
-      if (process.env.NODE_ENV !== "production") {
+      if (IS_DEBUG) {
         debugGit("setGitStatus", {
           sessionId,
           envKey,

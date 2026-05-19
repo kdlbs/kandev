@@ -7,7 +7,7 @@ import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
 import { sessionId as toSessionId } from "@/lib/types/ids";
-import { createDebugLogger } from "@/lib/debug/log";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -254,7 +254,7 @@ export function reconcileRemovedSessionPanels(
     }
     createdSet.delete(sid);
   }
-  if (process.env.NODE_ENV !== "production") {
+  if (IS_DEBUG) {
     const sessionPanels = api.panels.filter((p) => p.id.startsWith("session:"));
     debug("reconcileRemovedSessionPanels", {
       keepSessionId,
