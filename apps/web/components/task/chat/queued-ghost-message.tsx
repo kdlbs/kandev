@@ -11,6 +11,7 @@ import {
   IconUser,
   IconX,
 } from "@tabler/icons-react";
+import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { Button } from "@kandev/ui";
 import { Textarea } from "@kandev/ui/textarea";
@@ -21,6 +22,7 @@ import {
   SenderTaskBadge,
   type SenderTaskInfo,
 } from "@/components/task/chat/messages/sender-task-badge";
+import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 
 type QueuedAttachment = NonNullable<QueuedMessage["attachments"]>[number];
@@ -240,12 +242,15 @@ function DisplayView({ entry, positionLabel, canEdit, onStartEdit, onRemove }: D
             data-testid="queue-entry-text"
             data-expanded={expanded ? "true" : "false"}
             className={cn(
-              "text-sm text-foreground/80 whitespace-pre-wrap break-words overflow-hidden",
+              "markdown-body max-w-none text-sm text-foreground/80 break-words overflow-hidden",
+              "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
               "transition-[max-height] duration-200 ease-out",
               expanded ? "max-h-[40rem]" : "max-h-[2.75rem]",
             )}
           >
-            {visible}
+            <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+              {visible}
+            </ReactMarkdown>
           </div>
         )}
         <AttachmentRow attachments={attachments} interactive={true} />
