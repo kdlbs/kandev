@@ -293,18 +293,18 @@ export const createSessionRuntimeSlice: StateCreator<
       // empty key so consumers using only byEnvironmentRepo still see it.
       const repoName = gitStatus.repository_name ?? "";
       const existing = draft.gitStatus.byEnvironmentId[envKey];
-      const prevFileCount = Object.keys(existing?.files ?? {}).length;
-      const nextFileCount = Object.keys(gitStatus.files ?? {}).length;
-      debugGit("setGitStatus", {
-        sessionId,
-        envKey,
-        usingFallbackKey: envKey === sessionId,
-        repoName,
-        prevFileCount,
-        nextFileCount,
-        prevRepoKeys: Object.keys(draft.gitStatus.byEnvironmentRepo[envKey] ?? {}),
-        willOverwriteByEnv: !existing || hasGitStatusChanged(existing, gitStatus),
-      });
+      if (process.env.NODE_ENV !== "production") {
+        debugGit("setGitStatus", {
+          sessionId,
+          envKey,
+          usingFallbackKey: envKey === sessionId,
+          repoName,
+          prevFileCount: Object.keys(existing?.files ?? {}).length,
+          nextFileCount: Object.keys(gitStatus.files ?? {}).length,
+          prevRepoKeys: Object.keys(draft.gitStatus.byEnvironmentRepo[envKey] ?? {}),
+          willOverwriteByEnv: !existing || hasGitStatusChanged(existing, gitStatus),
+        });
+      }
       if (!existing || hasGitStatusChanged(existing, gitStatus)) {
         draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
       }

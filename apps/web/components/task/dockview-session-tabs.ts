@@ -237,7 +237,6 @@ export function reconcileRemovedSessionPanels(
   keepSessionId: string,
 ): void {
   const currentIds = new Set(currentSessionIds);
-  const sessionPanels = api.panels.filter((p) => p.id.startsWith("session:"));
   const removed: string[] = [];
   // Snapshot before iterating: closing a panel can mutate `api.panels`
   // synchronously, which would skip elements in a `for...of` over the live
@@ -255,13 +254,16 @@ export function reconcileRemovedSessionPanels(
     }
     createdSet.delete(sid);
   }
-  debug("reconcileRemovedSessionPanels", {
-    keepSessionId,
-    currentSessionIds,
-    liveSessionPanelIds: sessionPanels.map((p) => p.id),
-    removed,
-    createdSetAfter: Array.from(createdSet),
-  });
+  if (process.env.NODE_ENV !== "production") {
+    const sessionPanels = api.panels.filter((p) => p.id.startsWith("session:"));
+    debug("reconcileRemovedSessionPanels", {
+      keepSessionId,
+      currentSessionIds,
+      liveSessionPanelIds: sessionPanels.map((p) => p.id),
+      removed,
+      createdSetAfter: Array.from(createdSet),
+    });
+  }
   // Drop any remaining stale entries (panel already removed externally, e.g.
   // by the right-click delete handler) so the ref stays in sync with reality.
   for (const sid of [...createdSet]) {

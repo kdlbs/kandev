@@ -47,18 +47,20 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
 function syncEnvironmentMapping(draft: any, sessionId: string, environmentId: string | undefined) {
   if (!environmentId) return;
   const previous = draft.environmentIdBySessionId[sessionId];
-  debugEnv("syncEnvironmentMapping", {
-    sessionId,
-    environmentId,
-    previous: previous ?? null,
-    changed: previous !== environmentId,
-    fallbackGitStatusFileCount: Object.keys(
-      draft.gitStatus?.byEnvironmentId?.[sessionId]?.files ?? {},
-    ).length,
-    targetGitStatusFileCount: Object.keys(
-      draft.gitStatus?.byEnvironmentId?.[environmentId]?.files ?? {},
-    ).length,
-  });
+  if (process.env.NODE_ENV !== "production") {
+    debugEnv("syncEnvironmentMapping", {
+      sessionId,
+      environmentId,
+      previous: previous ?? null,
+      changed: previous !== environmentId,
+      fallbackGitStatusFileCount: Object.keys(
+        draft.gitStatus?.byEnvironmentId?.[sessionId]?.files ?? {},
+      ).length,
+      targetGitStatusFileCount: Object.keys(
+        draft.gitStatus?.byEnvironmentId?.[environmentId]?.files ?? {},
+      ).length,
+    });
+  }
   draft.environmentIdBySessionId[sessionId] = environmentId;
   migrateEnvKeyedData(draft, sessionId, environmentId);
 }
