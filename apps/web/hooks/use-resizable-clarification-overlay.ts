@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const MIN_HEIGHT = 120;
-const MAX_VIEWPORT_RATIO = 0.8;
+const MAX_VIEWPORT_RATIO = 0.5;
 
 function viewportHeight(): number {
   return typeof window === "undefined" ? 800 : window.innerHeight;
@@ -23,8 +23,9 @@ function clampHeight(value: number): number {
  * MIN_HEIGHT and 80% of the viewport. Double-clicking the handle returns to
  * the auto-sized default.
  *
- * The hook is intentionally non-persistent — clarifications are transient
- * and a fresh one shouldn't inherit a stale dragged height.
+ * Callers MUST invoke `resetHeight()` when the overlay closes so a fresh
+ * clarification starts with auto-sized height instead of inheriting a
+ * dragged value.
  */
 export function useResizableClarificationOverlay() {
   // null = auto-size to content; number = user-driven pixel height.
@@ -67,12 +68,18 @@ export function useResizableClarificationOverlay() {
     return () => {
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
+      if (isDragging.current) {
+        isDragging.current = false;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      }
     };
   }, []);
 
   return {
     height,
     containerRef,
+    resetHeight,
     resizeHandleProps: { onMouseDown: handleMouseDown, onDoubleClick: resetHeight },
   };
 }

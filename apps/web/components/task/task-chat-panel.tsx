@@ -162,8 +162,15 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const {
     height: clarificationHeight,
     containerRef: clarificationContainerRef,
+    resetHeight: clarificationResetHeight,
     resizeHandleProps: clarificationResizeProps,
   } = useResizableClarificationOverlay();
+
+  // Reset the dragged height when the overlay closes so a fresh
+  // clarification starts auto-sized instead of inheriting a stale value.
+  useEffect(() => {
+    if (!pendingClarification) clarificationResetHeight();
+  }, [pendingClarification, clarificationResetHeight]);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const { loadMore } = useLazyLoadMessages(resolvedSessionId);
@@ -228,7 +235,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           <div
             ref={clarificationContainerRef}
             data-testid="clarification-overlay-container"
-            className="px-1 overflow-y-auto overscroll-contain max-h-[80vh]"
+            className="px-1 overflow-y-auto overscroll-contain max-h-[50vh]"
             style={clarificationHeight === null ? undefined : { height: clarificationHeight }}
           >
             <ClarificationInputOverlay

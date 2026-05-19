@@ -718,9 +718,9 @@ test.describe("Clarification overlay resizable layout", () => {
     // Sanity check: content-sized overlay is at least tall enough for the
     // question card but well under the 80vh cap.
     expect(initial.height).toBeGreaterThan(200);
-    expect(initial.height).toBeLessThan(1000 * 0.8);
+    expect(initial.height).toBeLessThan(1000 * 0.5);
 
-    const handle = container.locator("button[aria-label='Resize']").first();
+    const handle = container.locator("xpath=..").locator("button[aria-label='Resize']");
     await expect(handle).toBeVisible();
 
     // Drag the handle upward by 120px → overlay should grow by ~120px.
