@@ -28,6 +28,11 @@ test.describe("OnboardingDialog — mobile layout", () => {
     // Step 0 — AI Agents
     await assertNoDocumentHorizontalOverflow(testPage, "AI Agents");
     await assertNoDescendantOverflowsRight(dialog, "AI Agents");
+    // The DialogTitle ("AI Agents") renders synchronously regardless of
+    // loading state — StepAgents only mounts the `.grid.gap-2` once the
+    // /api/v1/agents/available probe resolves, so wait for an actual row
+    // before asserting padding or the selector matches nothing.
+    await expect(dialog.locator(".grid.gap-2 > *").first()).toBeVisible();
     // Padding around the agent row must match left/right — i.e. the gap from
     // the agent row to the dialog's left edge equals the gap to the right
     // edge. The `pr-1` scrollbar-gutter on the grid used to break this:
