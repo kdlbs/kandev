@@ -955,6 +955,14 @@ func TestResumeTaskSession_FailedStateWriteSurvivesCancelledCallerCtx(t *testing
 	if state != v1.TaskStateFailed {
 		t.Errorf("expected task1 state=FAILED, got %v", state)
 	}
+
+	persisted, getErr := repo.GetTaskSession(context.Background(), "session1")
+	if getErr != nil {
+		t.Fatalf("failed to reload session: %v", getErr)
+	}
+	if persisted.State != models.TaskSessionStateFailed {
+		t.Errorf("expected session1 state=FAILED, got %v", persisted.State)
+	}
 }
 
 // --- CompleteTask ---

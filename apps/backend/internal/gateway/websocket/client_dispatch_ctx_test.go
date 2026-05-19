@@ -65,16 +65,12 @@ func TestClient_HandleMessageUsesHubCtxNotConnCtx(t *testing.T) {
 
 	hubCtx, hubCancel := context.WithCancel(context.Background())
 	defer hubCancel()
-	go h.Run(hubCtx)
 
-	// Let Run install its ctx.
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if h.DispatchContext() != context.Background() {
-			break
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
+	// Set directly before Run so the goroutine has no scheduling race.
+	h.mu.Lock()
+	h.dispatchCtx = hubCtx
+	h.mu.Unlock()
+	go h.Run(hubCtx)
 
 	// Handler that records what ctx it received and waits long enough for
 	// the test to cancel a fake connection ctx before returning. If the
@@ -120,15 +116,9 @@ func TestClient_HandleMessageUsesHubCtxNotConnCtx(t *testing.T) {
 	}
 
 	// Sanity: the handler ctx must be the hub's lifetime ctx (or derived
-	// from it). Cancel the hub and observe.
+	// from it). Cancel the hub and observe. Cancellation is synchronous
+	// because gotCtx IS hubCtx (DispatchContext returns the field directly).
 	hubCancel()
-	deadline = time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if gotCtx.Err() != nil {
-			break
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
 	if !errors.Is(gotCtx.Err(), context.Canceled) {
 		t.Fatalf("handler ctx should cancel with hub shutdown, got err=%v", gotCtx.Err())
 	}
@@ -148,15 +138,11 @@ func TestClient_HandleMessageSurvivesConnectionTeardown(t *testing.T) {
 
 	hubCtx, hubCancel := context.WithCancel(context.Background())
 	defer hubCancel()
-	go h.Run(hubCtx)
 
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if h.DispatchContext() != context.Background() {
-			break
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
+	h.mu.Lock()
+	h.dispatchCtx = hubCtx
+	h.mu.Unlock()
+	go h.Run(hubCtx)
 
 	handlerEntered := make(chan struct{})
 	handlerCompleted := make(chan error, 1)
