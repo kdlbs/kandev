@@ -20,7 +20,7 @@ function clampHeight(value: number): number {
  * Default behaviour: the container sizes to its content (`height === null` →
  * caller omits the inline height style). Once the user drags the resize
  * handle, the height switches to an explicit pixel value clamped between
- * MIN_HEIGHT and 80% of the viewport. Double-clicking the handle returns to
+ * MIN_HEIGHT and 50% of the viewport. Double-clicking the handle returns to
  * the auto-sized default.
  *
  * Callers MUST invoke `resetHeight()` when the overlay closes so a fresh

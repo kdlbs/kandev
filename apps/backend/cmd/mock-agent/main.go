@@ -269,6 +269,7 @@ func mockAvailableCommands() []acp.AvailableCommand {
 		{Name: "ask-single", Description: "Ask a single clarification question"},
 		{Name: "ask-multiple", Description: "Ask multiple clarification questions"},
 	}
+}
 
 // extractPromptText concatenates text content blocks from the prompt.
 func extractPromptText(blocks []acp.ContentBlock) string {
