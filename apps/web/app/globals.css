@@ -724,7 +724,7 @@
   background: color-mix(in oklch, var(--foreground) 10%, var(--muted));
   border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
   color: var(--foreground);
-  padding: 0.1rem 0.35rem;
+  padding: 0.1rem 0.375rem;
   border-radius: 0.25rem;
   font-size: 0.9em;
   font-family: var(--font-mono);
@@ -746,6 +746,7 @@
 .markdown-body:not(.markdown-body-user) a > code,
 .markdown-body:not(.markdown-body-user) a code:not(pre code) {
   background: transparent;
+  border: none;
   color: inherit;
 }
 
