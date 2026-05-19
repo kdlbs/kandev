@@ -6,6 +6,7 @@ import { useMultiSelect } from "@/hooks/use-multi-select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { FileInfo } from "@/lib/state/store";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import { FileRow, BulkActionBar } from "./changes-panel-file-row";
 import { type CommitItem } from "./commit-row";
 import { groupByRepositoryName, isSingleRepoGroup } from "@/lib/group-by-repo";
@@ -274,6 +275,10 @@ type FileListBodyProps = {
 
 function FileListBody(props: FileListBodyProps) {
   const { variant, files, pendingStageFiles, multiSelect } = props;
+  // Multi-repo nuance: activeFilePath carries the path but not repo; same path
+  // in two repos will light up both rows. Matches existing routing limit noted
+  // in FileRowProps comments.
+  const activeFilePath = useDockviewStore((s) => s.activeFilePath);
   const groups = useMemo(() => groupByRepositoryName(files, (f) => f.repositoryName), [files]);
   // Per-repo collapsed state: keyed by repositoryName. Default expanded;
   // setting an entry to true collapses that group. Persists across re-renders
@@ -294,6 +299,7 @@ function FileListBody(props: FileListBodyProps) {
       file={file}
       isPending={pendingStageFiles.has(`${file.repositoryName ?? ""}::${file.path}`)}
       isSelected={multiSelect.isSelected(file.path)}
+      isActive={file.path === activeFilePath}
       onSelect={multiSelect.handleClick}
       onOpenDiff={props.onOpenDiff}
       onStage={props.onStage}

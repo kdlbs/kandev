@@ -41,6 +41,8 @@ type FileRowProps = {
   file: ChangedFile;
   isPending: boolean;
   isSelected?: boolean;
+  /** True when this file's diff/editor tab is the currently active dockview panel. */
+  isActive?: boolean;
   onSelect?: (path: string, e: React.MouseEvent) => boolean;
   onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
   // Multi-repo: handlers receive the file's repository_name so the per-file
@@ -56,6 +58,7 @@ export function FileRow({
   file,
   isPending,
   isSelected,
+  isActive,
   onSelect,
   onOpenDiff,
   onStage,
@@ -81,10 +84,13 @@ export function FileRow({
       data-testid={`file-row-${file.path.replace(/[/\\]/g, "-")}`}
       data-changes-file={file.path}
       data-selected={isSelected ? "true" : "false"}
+      data-active={isActive ? "true" : "false"}
       className={cn(
         "group flex items-center justify-between gap-2 text-sm rounded-md px-2 py-1.5 -mx-1 cursor-pointer",
         "md:px-1 md:py-0.5",
-        isSelected ? "bg-accent/60 text-accent-foreground hover:bg-accent/50" : "hover:bg-muted/60",
+        isSelected || isActive
+          ? "bg-accent/60 text-accent-foreground hover:bg-accent/50"
+          : "hover:bg-muted/60",
       )}
       onClick={handleClick}
     >
