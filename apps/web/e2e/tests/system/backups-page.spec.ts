@@ -36,15 +36,10 @@ test.describe("System Backups page", () => {
     // Empty state shows initially (no auto snapshots exist on this fresh boot path).
     await expect(testPage.getByTestId("system-backups-empty")).toBeVisible({ timeout: 10_000 });
 
-    // Click create snapshot. The backend runs VACUUM INTO asynchronously and
-    // reports progress via system.job.update WS events. Wait for the job
-    // progress indicator to reach "succeeded" before expecting the table,
-    // which is populated by the reload that fires on job success.
+    // Click create snapshot; the UI polls until the async VACUUM INTO job
+    // has produced a new manual snapshot, then renders the table.
     await testPage.getByTestId("system-backups-create").click();
-    await expect(
-      testPage.locator('[data-testid="system-job-backup-create"][data-state="succeeded"]'),
-    ).toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByTestId("system-backups-table")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("system-backups-table")).toBeVisible({ timeout: 15_000 });
 
     const rows = testPage.locator('[data-testid="system-backups-row"]');
     await expect(rows.first()).toBeVisible();
