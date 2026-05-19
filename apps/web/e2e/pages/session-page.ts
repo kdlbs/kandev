@@ -1047,9 +1047,10 @@ export class SessionPage {
       const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
       if (!api) return;
       api.getPanel("preview:file-diff")?.api.close();
-      for (const panel of api.panels) {
-        if (panel.id.startsWith("diff:file:")) panel.api.close();
-      }
+      // Snapshot before iterating: panel.api.close() mutates api.panels in
+      // place, so iterating the live array would skip every other panel.
+      const pinned = [...api.panels].filter((p) => p.id.startsWith("diff:file:"));
+      for (const panel of pinned) panel.api.close();
     });
   }
 
