@@ -40,7 +40,7 @@ func (s *Service) FactoryReset(ctx context.Context, confirm string) (string, err
 	if confirm != resetConfirmToken {
 		return "", ErrResetNotConfirmed
 	}
-	return s.jobs.Start(ctx, "reset", func(jobCtx context.Context) (map[string]interface{}, error) {
+	return s.jobs.Start(ctx, "factory-reset", func(jobCtx context.Context) (map[string]interface{}, error) {
 		return s.runFactoryReset(jobCtx)
 	}), nil
 }

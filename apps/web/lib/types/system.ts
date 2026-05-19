@@ -35,8 +35,8 @@ export interface DatabaseStats {
   size_bytes: number;
   wal_size_bytes: number;
   schema_version: string;
-  /** ISO timestamp; empty string when no backup has been taken yet. */
-  last_backup_at: string;
+  /** ISO timestamp; null when no backup has been taken yet. */
+  last_backup_at: string | null;
 }
 
 export type SnapshotKind = "auto" | "manual";

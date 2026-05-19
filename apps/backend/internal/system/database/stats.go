@@ -24,12 +24,16 @@ import (
 )
 
 // Stats is the read-only SQLite-state payload returned to the frontend.
+//
+// LastBackupAt is a pointer so the JSON shape is `null` when no backup
+// exists. Serialising a zero time.Time as "0001-01-01T00:00:00Z" would
+// defeat the frontend's "Never" fallback in database-stats-card.tsx.
 type Stats struct {
-	Path          string    `json:"path"`
-	SizeBytes     int64     `json:"size_bytes"`
-	WALSizeBytes  int64     `json:"wal_size_bytes"`
-	SchemaVersion string    `json:"schema_version"`
-	LastBackupAt  time.Time `json:"last_backup_at"`
+	Path          string     `json:"path"`
+	SizeBytes     int64      `json:"size_bytes"`
+	WALSizeBytes  int64      `json:"wal_size_bytes"`
+	SchemaVersion string     `json:"schema_version"`
+	LastBackupAt  *time.Time `json:"last_backup_at"`
 }
 
 // ResetDirs lists the on-disk directories factory-reset wipes. The Service
@@ -106,7 +110,9 @@ func (s *Service) Stats() (Stats, error) {
 		out.WALSizeBytes = wal
 	}
 
-	out.LastBackupAt = lastBackupAt(filepath.Join(s.dataDir, "backups"))
+	if last := lastBackupAt(filepath.Join(s.dataDir, "backups")); !last.IsZero() {
+		out.LastBackupAt = &last
+	}
 	return out, nil
 }
 

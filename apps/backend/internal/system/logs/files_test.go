@@ -112,6 +112,69 @@ func TestList_SortsNewestFirstAndMarksCurrent(t *testing.T) {
 	}
 }
 
+func TestList_IgnoresNeighboringNonLogFiles(t *testing.T) {
+	// Simulate logging.outputPath pointing at a shared directory: List must
+	// only surface the active log + lumberjack rotations, never unrelated
+	// neighbours like ".env" or "config.yaml".
+	dir := t.TempDir()
+	for _, name := range []string{
+		"kandev.log",
+		"kandev-2026-01-01T00-00-00.000.log",
+		"kandev-2026-05-01T00-00-00.000.log.gz",
+		".env",
+		"config.yaml",
+		"secrets",
+		"kandev",                       // no extension
+		"other.log",                    // different base
+		"kandev-suffixed.txt",          // wrong extension
+		"kandevish-2026-01-01.000.log", // base mismatch (no leading "kandev-")
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o600); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+
+	svc := newTestService(t, dir)
+	files, err := svc.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	got := map[string]bool{}
+	for _, f := range files {
+		got[f.Name] = true
+	}
+	want := []string{
+		"kandev.log",
+		"kandev-2026-01-01T00-00-00.000.log",
+		"kandev-2026-05-01T00-00-00.000.log.gz",
+	}
+	for _, w := range want {
+		if !got[w] {
+			t.Errorf("List() missing %q", w)
+		}
+	}
+	for _, ban := range []string{".env", "config.yaml", "secrets", "kandev", "other.log", "kandev-suffixed.txt", "kandevish-2026-01-01.000.log"} {
+		if got[ban] {
+			t.Errorf("List() leaked %q (not a log file)", ban)
+		}
+	}
+	if len(files) != len(want) {
+		t.Errorf("len(files) = %d, want %d", len(files), len(want))
+	}
+}
+
+func TestOpen_RejectsNeighboringNonLogFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("SECRET=hunter2"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	svc := newTestService(t, dir)
+	if _, _, err := svc.Open(".env"); err == nil {
+		t.Fatal("Open(\".env\") returned nil, want allow-list rejection")
+	}
+}
+
 func TestList_IgnoresSubdirectories(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "subdir"), 0o755); err != nil {

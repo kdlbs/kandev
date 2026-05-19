@@ -202,7 +202,10 @@ func TestHandleDownload_Missing404(t *testing.T) {
 	svc := newTestService(t, dir)
 	r := newRouter(svc)
 
-	req := httptest.NewRequest("GET", "/logs/nope.log/download", nil)
+	// Use a name that matches the lumberjack rotation pattern so the
+	// allow-list lets it through; with the file missing on disk the
+	// handler must surface os.ErrNotExist as a 404.
+	req := httptest.NewRequest("GET", "/logs/kandev-2099-01-01T00-00-00.000.log/download", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 

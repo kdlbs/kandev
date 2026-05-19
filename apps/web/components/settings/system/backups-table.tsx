@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
@@ -8,6 +8,7 @@ import { Spinner } from "@kandev/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { IconDownload, IconTrash, IconArchive, IconRotateClockwise } from "@tabler/icons-react";
 import { useBackups } from "@/hooks/domains/system/use-backups";
+import { useSystemJob } from "@/hooks/domains/system/use-system-jobs";
 import { buildBackupDownloadUrl, createBackup, deleteBackup } from "@/lib/api/domains/system-api";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { JobProgressIndicator } from "./job-progress-indicator";
@@ -79,18 +80,82 @@ function BackupRow({
   );
 }
 
+function BackupsList({
+  items,
+  onRestore,
+  onDelete,
+}: {
+  items: SnapshotInfo[];
+  onRestore: (name: string) => void;
+  onDelete: (name: string) => void;
+}) {
+  return (
+    <Table data-testid="system-backups-table">
+      <TableHeader>
+        <TableRow>
+          <TableHead>Name</TableHead>
+          <TableHead>Kind</TableHead>
+          <TableHead className="text-right">Size</TableHead>
+          <TableHead>Created</TableHead>
+          <TableHead className="text-right">Actions</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {items.map((row) => (
+          <BackupRow key={row.name} row={row} onRestore={onRestore} onDelete={onDelete} />
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+// useTerminalJobReload observes a single system job by id and fires onSuccess
+// when the job transitions into "succeeded", or surfaces job.message via
+// onError on "failed". Exits early until a terminal state lands so reloads
+// don't fire on intermediate progress events.
+function useTerminalJobReload(
+  jobId: string | null,
+  onSuccess: () => void,
+  onError: (message: string) => void,
+) {
+  const job = useSystemJob(jobId);
+  const lastObservedState = useRef<string | null>(null);
+  useEffect(() => {
+    if (!job) return;
+    if (job.state !== "succeeded" && job.state !== "failed") return;
+    if (lastObservedState.current === job.state) return;
+    lastObservedState.current = job.state;
+    if (job.state === "succeeded") {
+      onSuccess();
+    } else if (job.message) {
+      onError(job.message);
+    }
+  }, [job, onSuccess, onError]);
+  return { reset: () => (lastObservedState.current = null) };
+}
+
 export function BackupsTable() {
   const { backups, loaded, isLoading, reload } = useBackups();
   const [creating, setCreating] = useState(false);
   const [restoreName, setRestoreName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // POST /backups returns 202 immediately; track the returned job_id and
+  // reload only when that job lands in a terminal state, so we don't flash
+  // an empty table while VACUUM INTO is still running.
+  const [createJobId, setCreateJobId] = useState<string | null>(null);
+  const { reset: resetJobTracking } = useTerminalJobReload(
+    createJobId,
+    () => void reload(),
+    setError,
+  );
 
   const onCreate = async () => {
     setCreating(true);
     setError(null);
+    resetJobTracking();
     try {
-      await createBackup();
-      void reload();
+      const { job_id } = await createBackup();
+      setCreateJobId(job_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Create snapshot failed");
     } finally {
@@ -144,31 +209,15 @@ export function BackupsTable() {
           </p>
         )}
         {items.length > 0 && (
-          <Table data-testid="system-backups-table">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Kind</TableHead>
-                <TableHead className="text-right">Size</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.map((row) => (
-                <BackupRow
-                  key={row.name}
-                  row={row}
-                  onRestore={(n) => setRestoreName(n)}
-                  onDelete={(n) => void onDelete(n)}
-                />
-              ))}
-            </TableBody>
-          </Table>
+          <BackupsList
+            items={items}
+            onRestore={(n) => setRestoreName(n)}
+            onDelete={(n) => void onDelete(n)}
+          />
         )}
 
         <div className="flex flex-col gap-1">
-          <JobProgressIndicator kind="backup-create" />
+          <JobProgressIndicator kind="backup-create" jobId={createJobId ?? undefined} />
           <JobProgressIndicator kind="restore" />
         </div>
 

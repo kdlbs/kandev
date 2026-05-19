@@ -78,6 +78,12 @@ func (s *Service) List() ([]FileInfo, error) {
 			continue
 		}
 		name := entry.Name()
+		// Allow-list: only the active log and lumberjack rotations of it.
+		// A shared logging.outputPath directory may hold unrelated files —
+		// we must never enumerate them through this endpoint.
+		if !s.isAllowed(name) {
+			continue
+		}
 		out = append(out, FileInfo{
 			Name:    name,
 			Size:    fi.Size(),
@@ -99,6 +105,43 @@ func (s *Service) isCurrent(name string) bool {
 	return s.currentName != "" && name == s.currentName
 }
 
+// isAllowed reports whether name belongs to the configured log set: either
+// the active log file itself, or a lumberjack-rotated sibling. Lumberjack
+// rotates "<base>.<ext>" into "<base>-<timestamp>.<ext>" (optionally gzipped
+// to ".<ext>.gz"). Anything else — unrelated files that happen to share the
+// log directory — is rejected so List/Open cannot leak them.
+func (s *Service) isAllowed(name string) bool {
+	if s.currentName == "" {
+		return false
+	}
+	if name == s.currentName {
+		return true
+	}
+	ext := filepath.Ext(s.currentName)
+	base := strings.TrimSuffix(s.currentName, ext)
+	if base == "" || ext == "" {
+		return false
+	}
+	if !strings.HasPrefix(name, base+"-") {
+		return false
+	}
+	rest := strings.TrimPrefix(name, base+"-")
+	// rest must be "<timestamp><ext>" or "<timestamp><ext>.gz"; the timestamp
+	// segment is opaque from our point of view — we only enforce that the
+	// extension suffix matches the active log file's.
+	switch {
+	case strings.HasSuffix(rest, ext+".gz"):
+		rest = strings.TrimSuffix(rest, ext+".gz")
+	case strings.HasSuffix(rest, ext):
+		rest = strings.TrimSuffix(rest, ext)
+	default:
+		return false
+	}
+	// A non-empty timestamp segment must remain — otherwise the candidate
+	// reduces to "<base>-<ext>[.gz]", which is not a lumberjack rotation.
+	return rest != ""
+}
+
 // Open returns an *os.File for download, plus its size. name must be a bare
 // filename inside the log directory — any path separator, traversal segment,
 // or empty value is rejected. Caller closes the returned file.
@@ -109,6 +152,12 @@ func (s *Service) Open(name string) (*os.File, int64, error) {
 	clean, err := s.safeName(name)
 	if err != nil {
 		return nil, 0, err
+	}
+	// Allow-list check: only the active log file and its lumberjack
+	// rotations are downloadable. This prevents a shared logging.outputPath
+	// directory from exposing unrelated files via the download endpoint.
+	if !s.isAllowed(clean) {
+		return nil, 0, errors.New("logs: not a log file")
 	}
 	// filepath.Base is redundant given safeName already rejects separators,
 	// but it acts as a syntactic sanitiser for CodeQL's go/path-injection

@@ -164,8 +164,8 @@ func TestStats_ReturnsPathSizeAndSchemaVersion(t *testing.T) {
 	if stats.SchemaVersion != "v0.99.0" {
 		t.Errorf("SchemaVersion = %q, want v0.99.0", stats.SchemaVersion)
 	}
-	if !stats.LastBackupAt.IsZero() {
-		t.Errorf("LastBackupAt = %v, want zero (no backups yet)", stats.LastBackupAt)
+	if stats.LastBackupAt != nil {
+		t.Errorf("LastBackupAt = %v, want nil (no backups yet)", *stats.LastBackupAt)
 	}
 }
 
@@ -193,11 +193,11 @@ func TestStats_LastBackupAtPicksNewestFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stats: %v", err)
 	}
-	if stats.LastBackupAt.IsZero() {
+	if stats.LastBackupAt == nil {
 		t.Fatalf("LastBackupAt should be set when a backup file exists")
 	}
 	if !stats.LastBackupAt.After(earlier.Add(time.Hour)) {
-		t.Errorf("LastBackupAt %v should be more recent than %v", stats.LastBackupAt, earlier)
+		t.Errorf("LastBackupAt %v should be more recent than %v", *stats.LastBackupAt, earlier)
 	}
 }
 

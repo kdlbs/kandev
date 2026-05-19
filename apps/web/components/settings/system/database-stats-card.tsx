@@ -36,7 +36,7 @@ type DBStats = {
   size_bytes: number;
   wal_size_bytes: number;
   schema_version: string;
-  last_backup_at: string;
+  last_backup_at: string | null;
 };
 
 function StatsTable({ database }: { database: DBStats }) {

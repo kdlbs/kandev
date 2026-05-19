@@ -76,12 +76,14 @@ type Service struct {
 // the poller and Check() without spinning up an httptest server.
 type Fetcher func(ctx context.Context) (tag, url string, err error)
 
-// NewService constructs the updates service. httpClient defaults to
-// http.DefaultClient when nil. current is the running binary version (typically
+// NewService constructs the updates service. When httpClient is nil, a fresh
+// client carrying defaultClientTimeout is allocated — http.DefaultClient has
+// no timeout, so handing it the poller would let a stalled socket hang a
+// goroutine for hours. current is the running binary version (typically
 // injected via ldflags); the sentinel "dev" disables UpdateAvailable.
 func NewService(pool *db.Pool, current string, httpClient *http.Client, log *logger.Logger) *Service {
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = &http.Client{Timeout: defaultClientTimeout}
 	}
 	if log == nil {
 		log = logger.Default()
