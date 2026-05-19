@@ -715,14 +715,16 @@
   margin-bottom: 0.25rem;
 }
 
-/* Inline code: neutral foreground on a soft muted background.
+/* Inline code: neutral foreground on a slightly elevated background with a
+   subtle border so chips read clearly against the card surface.
    Linked code (a > code) drops the background and inherits the link
    color so file references read as links, not as another code chip. */
 .markdown-body :not(pre) > code,
 .markdown-body code:not(pre code) {
-  background: var(--muted);
+  background: color-mix(in oklch, var(--foreground) 10%, var(--muted));
+  border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
   color: var(--foreground);
-  padding: 0.1rem 0.375rem;
+  padding: 0.1rem 0.35rem;
   border-radius: 0.25rem;
   font-size: 0.9em;
   font-family: var(--font-mono);
@@ -749,7 +751,7 @@
 
 .markdown-body:not(.markdown-body-user) a:hover > code,
 .markdown-body:not(.markdown-body-user) a:hover code:not(pre code) {
-  background: var(--muted);
+  background: color-mix(in oklch, var(--foreground) 10%, var(--muted));
 }
 
 .markdown-body blockquote {
