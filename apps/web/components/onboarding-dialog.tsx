@@ -389,7 +389,7 @@ function StepWorkflows({
 
   return (
     <div className="space-y-3">
-      <div className="grid gap-2 max-h-[320px] overflow-y-auto">
+      <div className="grid grid-cols-1 gap-2 max-h-[320px] overflow-y-auto">
         {defaultTemplate && <TemplateCard template={defaultTemplate} isDefault />}
         {otherTemplates.length > 0 && (
           <>
