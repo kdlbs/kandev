@@ -246,6 +246,14 @@ func (c *PATClient) SearchGroupProjects(ctx context.Context, group, query string
 }
 
 func (c *PATClient) ListMRApprovals(ctx context.Context, projectPath string, iid int) ([]MRApproval, error) {
+	approvals, _, err := c.fetchApprovals(ctx, projectPath, iid)
+	return approvals, err
+}
+
+// fetchApprovals issues a single GET against /approvals and returns both the
+// list of approvers and the required-approvals count. Consolidating these so
+// GetMRStatus doesn't have to hit the same endpoint twice per poll.
+func (c *PATClient) fetchApprovals(ctx context.Context, projectPath string, iid int) ([]MRApproval, int, error) {
 	var raw struct {
 		ApprovedBy []struct {
 			User struct {
@@ -253,11 +261,12 @@ func (c *PATClient) ListMRApprovals(ctx context.Context, projectPath string, iid
 				AvatarURL string `json:"avatar_url"`
 			} `json:"user"`
 		} `json:"approved_by"`
-		UpdatedAt time.Time `json:"updated_at"`
+		ApprovalsRequired int       `json:"approvals_required"`
+		UpdatedAt         time.Time `json:"updated_at"`
 	}
 	endpoint := fmt.Sprintf("/projects/%s/merge_requests/%d/approvals", projectRef(projectPath), iid)
 	if err := c.get(ctx, endpoint, &raw); err != nil {
-		return nil, fmt.Errorf("list approvals: %w", err)
+		return nil, 0, fmt.Errorf("list approvals: %w", err)
 	}
 	approvals := make([]MRApproval, 0, len(raw.ApprovedBy))
 	for _, a := range raw.ApprovedBy {
@@ -267,7 +276,7 @@ func (c *PATClient) ListMRApprovals(ctx context.Context, projectPath string, iid
 			CreatedAt: raw.UpdatedAt,
 		})
 	}
-	return approvals, nil
+	return approvals, raw.ApprovalsRequired, nil
 }
 
 func (c *PATClient) ListMRDiscussions(ctx context.Context, projectPath string, iid int, since *time.Time) ([]MRDiscussion, error) {
@@ -362,11 +371,7 @@ func (c *PATClient) GetMRStatus(ctx context.Context, projectPath string, iid int
 	if err != nil {
 		return nil, err
 	}
-	approvals, err := c.ListMRApprovals(ctx, projectPath, iid)
-	if err != nil {
-		return nil, err
-	}
-	required, err := c.getRequiredApprovals(ctx, projectPath, iid)
+	approvals, required, err := c.fetchApprovals(ctx, projectPath, iid)
 	if err != nil {
 		return nil, err
 	}
@@ -499,17 +504,6 @@ func (c *PATClient) ListProjectBranches(ctx context.Context, projectPath string)
 		endpoint = nextLink
 	}
 	return branches, nil
-}
-
-func (c *PATClient) getRequiredApprovals(ctx context.Context, projectPath string, iid int) (int, error) {
-	var raw struct {
-		ApprovalsRequired int `json:"approvals_required"`
-	}
-	endpoint := fmt.Sprintf("/projects/%s/merge_requests/%d/approvals", projectRef(projectPath), iid)
-	if err := c.get(ctx, endpoint, &raw); err != nil {
-		return 0, err
-	}
-	return raw.ApprovalsRequired, nil
 }
 
 // --- HTTP plumbing ---

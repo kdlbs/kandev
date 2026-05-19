@@ -24,8 +24,9 @@ func CheckHost(ctx context.Context, host string) error {
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: connectivityTimeout}
-	resp, err := client.Do(req)
+	// Context already carries the timeout; an http.Client.Timeout here would
+	// be redundant since cctx will cancel the request first.
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}

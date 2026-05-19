@@ -146,9 +146,9 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 		return fmt.Errorf("invalid token: %w", err)
 	}
 
-	id, secretID := s.findTokenSecret(ctx)
+	configured, secretID := s.findTokenSecret(ctx)
 	switch {
-	case id && secretID != "":
+	case configured && secretID != "":
 		if err := s.secretManager.Update(ctx, secretID, token); err != nil {
 			return fmt.Errorf("update token: %w", err)
 		}

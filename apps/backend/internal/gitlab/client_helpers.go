@@ -259,12 +259,16 @@ func convertRawPipeline(raw *rawPipeline) Pipeline {
 	}
 }
 
+// mrStateOpen is the normalized "open" state value shared with the GitHub
+// integration vocabulary. GitLab's API returns "opened"; we expose "open".
+const mrStateOpen = "open"
+
 // normalizeMRState converts GitLab's "opened" to "open" and leaves the rest
 // alone so the UI shares the GitHub vocabulary.
 func normalizeMRState(state string) string {
 	switch state {
 	case "opened":
-		return "open"
+		return mrStateOpen
 	case "merged", "closed", "locked":
 		return state
 	default:

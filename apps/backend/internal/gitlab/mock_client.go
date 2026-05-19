@@ -126,7 +126,7 @@ func (c *MockClient) FindMRByBranch(_ context.Context, projectPath, branch strin
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, mr := range c.mrs {
-		if mr.ProjectPath == projectPath && mr.HeadBranch == branch && mr.State == "open" {
+		if mr.ProjectPath == projectPath && mr.HeadBranch == branch && mr.State == mrStateOpen {
 			return mr, nil
 		}
 	}
@@ -270,7 +270,7 @@ func (c *MockClient) CreateMR(_ context.Context, projectPath, sourceBranch, targ
 		Body:           description,
 		HeadBranch:     sourceBranch,
 		BaseBranch:     targetBranch,
-		State:          "open",
+		State:          mrStateOpen,
 		Draft:          draft,
 		AuthorUsername: c.username,
 		ProjectPath:    projectPath,

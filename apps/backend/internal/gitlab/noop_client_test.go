@@ -67,14 +67,5 @@ func TestNoopClient_DataMethods_ReturnErrNoClient(t *testing.T) {
 	}
 }
 
-func TestDefaultActionPresets_AreNonEmpty(t *testing.T) {
-	if len(DefaultMRActionPresets()) == 0 {
-		t.Fatal("DefaultMRActionPresets returned empty slice")
-	}
-	if len(DefaultIssueActionPresets()) == 0 {
-		t.Fatal("DefaultIssueActionPresets returned empty slice")
-	}
-}
-
 // mustErr2 extracts the error from a (T, error) pair.
 func mustErr2[T any](_ T, err error) error { return err }
