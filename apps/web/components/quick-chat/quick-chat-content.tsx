@@ -30,12 +30,7 @@ function useQuickChatState(sessionId: string) {
     onOpenFileAtLine: undefined,
   });
   const { isSending, handleSubmit } = useSubmitHandler(panelState, undefined);
-  const { clearQueue } = panelState;
-  const { handleCancelTurn } = useChatPanelHandlers(
-    panelState.resolvedSessionId,
-    clearQueue,
-    chatInputRef,
-  );
+  const { handleCancelTurn } = useChatPanelHandlers(panelState.resolvedSessionId, chatInputRef);
 
   return {
     chatInputRef,

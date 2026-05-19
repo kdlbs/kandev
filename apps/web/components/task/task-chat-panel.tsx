@@ -150,11 +150,10 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     permissionsByToolCallId,
     childrenByParentToolCallId,
     agentMessageCount,
-    clearQueue,
     pendingClarification,
     pendingClarificationGroup,
   } = panelState;
-  const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, clearQueue, chatInputRef);
+  const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, chatInputRef);
   const { clarificationKey, handleClarificationResolved } = useClarificationKey(agentMessageCount);
 
   const panelRef = useRef<HTMLDivElement>(null);

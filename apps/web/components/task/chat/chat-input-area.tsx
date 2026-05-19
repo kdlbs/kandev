@@ -184,7 +184,6 @@ export function useSubmitHandler(
 
 export function useChatPanelHandlers(
   resolvedSessionId: string | null,
-  clearQueue: () => Promise<void>,
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>,
 ) {
   const handleCancelTurn = useCallback(async () => {
@@ -197,18 +196,6 @@ export function useChatPanelHandlers(
       console.error("Failed to cancel agent turn:", error);
     }
   }, [resolvedSessionId]);
-
-  const handleClearQueue = useCallback(async () => {
-    try {
-      await clearQueue();
-    } catch (error) {
-      console.error("Failed to clear queue:", error);
-    }
-  }, [clearQueue]);
-
-  const handleQueueEditComplete = useCallback(() => {
-    chatInputRef.current?.focusInput();
-  }, [chatInputRef]);
 
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   useKeyboardShortcut(
@@ -232,7 +219,7 @@ export function useChatPanelHandlers(
     { enabled: true, preventDefault: false },
   );
 
-  return { handleCancelTurn, handleClearQueue, handleQueueEditComplete };
+  return { handleCancelTurn };
 }
 
 function PRMergedBanner({ taskId }: { taskId: string }) {
