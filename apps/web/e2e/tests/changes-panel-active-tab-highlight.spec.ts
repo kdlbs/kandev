@@ -17,7 +17,7 @@ test.describe("Changes Panel — Active-Tab Highlight", () => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
 
-    const profile = await createStandardProfile(apiClient, "changes-active-highlight");
+    const profile = await createStandardProfile(apiClient, "active-highlight");
     await apiClient.createTaskWithAgent(seedData.workspaceId, "Active Highlight Test", profile.id, {
       description: "/e2e:simple-message",
       workflow_id: seedData.workflowId,
@@ -69,7 +69,7 @@ test.describe("Changes Panel — Active-Tab Highlight", () => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
 
-    const profile = await createStandardProfile(apiClient, "changes-active-highlight-staged");
+    const profile = await createStandardProfile(apiClient, "active-highlight-staged");
     await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Active Highlight Staged Test",
