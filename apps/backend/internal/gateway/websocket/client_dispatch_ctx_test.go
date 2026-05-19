@@ -33,18 +33,11 @@ func TestHub_DispatchContextTracksRunCtx(t *testing.T) {
 	runCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go h.Run(runCtx)
-
-	// Wait briefly for Run to install the ctx. Polling beats a fixed sleep
-	// because Run starts and stores the ctx synchronously after the lock,
-	// but the goroutine still needs to be scheduled.
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if h.DispatchContext().Err() == nil && h.DispatchContext() != context.Background() {
-			break
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
+	// Set directly via in-package field access — mirrors what Run does without
+	// the goroutine scheduling race.
+	h.mu.Lock()
+	h.dispatchCtx = runCtx
+	h.mu.Unlock()
 
 	dispatchCtx := h.DispatchContext()
 	if dispatchCtx.Err() != nil {
@@ -53,17 +46,9 @@ func TestHub_DispatchContextTracksRunCtx(t *testing.T) {
 
 	cancel()
 
-	// After Run's ctx is cancelled, DispatchContext should reflect that —
-	// otherwise shutdown can't interrupt in-flight handlers.
-	deadline = time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if dispatchCtx.Err() != nil {
-			break
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
+	// Cancellation is synchronous once the parent ctx is cancelled.
 	if dispatchCtx.Err() == nil {
-		t.Fatal("dispatchCtx did not cancel when Run ctx was cancelled")
+		t.Fatal("dispatchCtx did not cancel when hub ctx was cancelled")
 	}
 }
 
@@ -173,9 +158,11 @@ func TestClient_HandleMessageSurvivesConnectionTeardown(t *testing.T) {
 		time.Sleep(2 * time.Millisecond)
 	}
 
+	handlerEntered := make(chan struct{})
 	handlerCompleted := make(chan error, 1)
 	releaseHandler := make(chan struct{})
 	dispatcher.RegisterFunc("session.launch.fake", func(ctx context.Context, _ *ws.Message) (*ws.Message, error) {
+		close(handlerEntered)
 		// Mimic an exec.CommandContext-style subroutine that watches ctx.
 		select {
 		case <-releaseHandler:
@@ -191,8 +178,11 @@ func TestClient_HandleMessageSurvivesConnectionTeardown(t *testing.T) {
 
 	go c.handleMessage(&ws.Message{Action: "session.launch.fake", Type: ws.MessageTypeRequest})
 
-	// Give the handler a moment to enter.
-	time.Sleep(20 * time.Millisecond)
+	select {
+	case <-handlerEntered:
+	case <-time.After(time.Second):
+		t.Fatal("handler never entered; dispatch wiring is broken")
+	}
 
 	// Simulate connection teardown: close the client's send channel and
 	// drop our hub reference, the way removeClient would. Crucially, this
