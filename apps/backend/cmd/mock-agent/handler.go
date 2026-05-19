@@ -80,6 +80,8 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitTodoSequence(e, model)
 	case strings.EqualFold(cmd, "/mermaid"):
 		emitMermaidSequence(e, model)
+	case strings.EqualFold(cmd, "/markdown"):
+		emitMarkdownShowcase(e, model)
 	default:
 		emitRandomResponse(e, cmd, model)
 	}
