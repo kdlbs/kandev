@@ -269,7 +269,7 @@ export function StepAgents({
 
   return (
     <div className="space-y-3">
-      <div className="grid gap-2 max-h-[320px] overflow-y-auto pr-1">
+      <div className="grid gap-2 max-h-[320px] overflow-y-auto">
         {installedAgents.map((agent) => (
           <InstalledAgentRow
             key={agent.name}

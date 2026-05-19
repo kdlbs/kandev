@@ -24,6 +24,12 @@ test.describe("OnboardingDialog — mobile layout", () => {
     // Step 0 — AI Agents
     await assertNoHorizontalOverflow(dialog, "AI Agents");
     await assertChildrenFitInDialog(dialog, "AI Agents");
+    // Padding around the agent row must match left/right — i.e. the gap from
+    // the agent row to the dialog's left edge equals the gap from the agent
+    // row to the dialog's right edge. The `pr-1` scrollbar-gutter on the
+    // grid breaks this symmetry; the surrounding paragraphs sit at 17/17
+    // while the row sits at 17/21 (4 px wider gap on the right).
+    await assertHorizontalPaddingSymmetric(dialog, "AI Agents agent row", ".grid.gap-2 > *");
 
     // Step 1 — Executors
     await dialog.getByRole("button", { name: /next/i }).click();
@@ -99,4 +105,29 @@ async function assertChildrenFitInDialog(dialog: Locator, label: string): Promis
       .map((o) => `  <${o.tag}> right=${o.right.toFixed(1)} text="${o.text}"`)
       .join("\n")}`,
   ).toHaveLength(0);
+}
+
+async function assertHorizontalPaddingSymmetric(
+  dialog: Locator,
+  label: string,
+  selector: string,
+): Promise<void> {
+  const result = await dialog.evaluate((root, sel) => {
+    const dialogRect = root.getBoundingClientRect();
+    const el = root.querySelector(sel as string) as HTMLElement | null;
+    if (!el) return { missing: true as const };
+    const r = el.getBoundingClientRect();
+    return {
+      missing: false as const,
+      leftGap: Math.round(r.left - dialogRect.left),
+      rightGap: Math.round(dialogRect.right - r.right),
+    };
+  }, selector);
+  expect(result.missing, `${label}: selector "${selector}" matched nothing`).toBe(false);
+  if (result.missing) return;
+  // Allow 1 px of sub-pixel rounding slack — anything more is asymmetric.
+  expect(
+    Math.abs(result.leftGap - result.rightGap),
+    `${label}: leftGap=${result.leftGap}px, rightGap=${result.rightGap}px (selector "${selector}")`,
+  ).toBeLessThanOrEqual(1);
 }
