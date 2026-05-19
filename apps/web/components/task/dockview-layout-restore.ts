@@ -7,7 +7,7 @@ import { measureDockviewContainer } from "@/lib/state/dockview-measure";
 import type { LayoutState } from "@/lib/state/layout-manager";
 import type { AppState } from "@/lib/state/store";
 import { getEnvLayout, getEnvMaximizeState, removeEnvMaximizeState } from "@/lib/local-storage";
-import { createDebugLogger } from "@/lib/debug/log";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
 const debug = createDebugLogger("dockview:restore");
 
@@ -29,6 +29,7 @@ function logSanitizeOutcome(
   validPanels: Record<string, any>,
   invalidIds: Set<string>,
 ): void {
+  if (!IS_DEBUG) return;
   debug("sanitizeLayout", {
     mode: describeSanitizeMode(options),
     excludeSessionCount: options.excludeSessionIds?.size ?? 0,
