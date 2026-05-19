@@ -283,3 +283,29 @@ func TestSetSessionRunning_WritesOnTransition(t *testing.T) {
 		"setSessionRunning must write tasks.state on actual transition")
 	require.Equal(t, v1.TaskStateInProgress, taskRepo.updatedStates["t1"])
 }
+
+// TestSetSessionWaitingForInput_WritesOnTransition is the symmetric counterpart
+// to TestSetSessionRunning_WritesOnTransition: when the session is NOT already
+// WAITING_FOR_INPUT, setSessionWaitingForInput MUST still fire the task write.
+// Without this guard an accidental inversion of wasAlreadyWaiting would silently
+// stop tasks from ever reaching REVIEW.
+func TestSetSessionWaitingForInput_WritesOnTransition(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	// Seed session in RUNNING state (the normal pre-condition for a turn completing).
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateRunning
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.setSessionWaitingForInput(ctx, "t1", "s1")
+
+	require.Equal(t, 1, taskRepo.stateWrites["t1"],
+		"setSessionWaitingForInput must write tasks.state on actual transition")
+	require.Equal(t, v1.TaskStateReview, taskRepo.updatedStates["t1"])
+}
