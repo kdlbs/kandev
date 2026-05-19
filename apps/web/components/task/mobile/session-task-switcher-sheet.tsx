@@ -42,11 +42,22 @@ function MobileTaskList({
   isLoading?: boolean;
 }) {
   const view = useEffectiveSidebarView();
-  const { pinnedTaskIds, orderedTaskIds, togglePinnedTask, handleReorderGroup } =
-    useSidebarTaskPrefs();
+  const {
+    pinnedTaskIds,
+    orderedTaskIds,
+    subtaskOrderByParentId,
+    togglePinnedTask,
+    handleReorderGroup,
+    handleReorderSubtasks,
+  } = useSidebarTaskPrefs();
   const grouped = useMemo(
-    () => applyView(tasks, view, { pinnedTaskIds, orderedTaskIds }),
-    [tasks, view, pinnedTaskIds, orderedTaskIds],
+    () =>
+      applyView(tasks, view, {
+        pinnedTaskIds,
+        orderedTaskIds,
+        subtaskOrderByParentId,
+      }),
+    [tasks, view, pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId],
   );
   return (
     <TaskSwitcher
@@ -58,6 +69,7 @@ function MobileTaskList({
       onDeleteTask={onDeleteTask}
       onTogglePin={togglePinnedTask}
       onReorderGroup={handleReorderGroup}
+      onReorderSubtasks={handleReorderSubtasks}
       pinnedTaskIds={pinnedTaskIds}
       deletingTaskId={deletingTaskId}
       isLoading={isLoading}

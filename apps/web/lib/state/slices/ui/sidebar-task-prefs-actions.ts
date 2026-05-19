@@ -1,4 +1,8 @@
-import { setStoredOrderedTaskIds, setStoredPinnedTaskIds } from "@/lib/local-storage";
+import {
+  setStoredOrderedTaskIds,
+  setStoredPinnedTaskIds,
+  setStoredSubtaskOrderByParentId,
+} from "@/lib/local-storage";
 import type { UISlice } from "./types";
 
 type ImmerSet = (recipe: (draft: UISlice) => void, shouldReplace?: false | undefined) => void;
@@ -18,6 +22,13 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet) {
         draft.sidebarTaskPrefs.orderedTaskIds = orderedTaskIds;
         setStoredOrderedTaskIds(orderedTaskIds);
       }),
+    setSubtaskOrder: (parentTaskId: string, orderedSubtaskIds: string[]) =>
+      set((draft) => {
+        const map = draft.sidebarTaskPrefs.subtaskOrderByParentId;
+        if (orderedSubtaskIds.length === 0) delete map[parentTaskId];
+        else map[parentTaskId] = orderedSubtaskIds;
+        setStoredSubtaskOrderByParentId(map);
+      }),
     removeTaskFromSidebarPrefs: (taskId: string) =>
       set((draft) => {
         const prefs = draft.sidebarTaskPrefs;
@@ -31,6 +42,20 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet) {
           prefs.orderedTaskIds.splice(orderIdx, 1);
           setStoredOrderedTaskIds(prefs.orderedTaskIds);
         }
+        const subOrder = prefs.subtaskOrderByParentId;
+        let subOrderChanged = false;
+        if (taskId in subOrder) {
+          delete subOrder[taskId];
+          subOrderChanged = true;
+        }
+        for (const [parentId, ids] of Object.entries(subOrder)) {
+          if (!ids.includes(taskId)) continue;
+          const next = ids.filter((id) => id !== taskId);
+          if (next.length === 0) delete subOrder[parentId];
+          else subOrder[parentId] = next;
+          subOrderChanged = true;
+        }
+        if (subOrderChanged) setStoredSubtaskOrderByParentId(subOrder);
       }),
   };
 }

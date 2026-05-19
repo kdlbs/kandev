@@ -580,6 +580,23 @@ export function cleanupTaskStorage(
     setStoredOrderedTaskIds(ordered.filter((id) => id !== taskId));
   }
 
+  // Per-parent subtask order: drop the deleted task as a parent key, and strip
+  // it from any other parent's subtask-order list (in case it was a subtask).
+  const subOrder = getStoredSubtaskOrderByParentId();
+  let subOrderChanged = false;
+  if (taskId in subOrder) {
+    delete subOrder[taskId];
+    subOrderChanged = true;
+  }
+  for (const [parentId, ids] of Object.entries(subOrder)) {
+    if (!ids.includes(taskId)) continue;
+    const next = ids.filter((id) => id !== taskId);
+    if (next.length === 0) delete subOrder[parentId];
+    else subOrder[parentId] = next;
+    subOrderChanged = true;
+  }
+  if (subOrderChanged) setStoredSubtaskOrderByParentId(subOrder);
+
   // Env-keyed storage — dockview layout + maximize live under task envs.
   for (const envId of envIds) {
     removeEnvMaximizeState(envId);
@@ -695,6 +712,24 @@ export function getStoredOrderedTaskIds(): string[] {
 
 export function setStoredOrderedTaskIds(ids: string[]): void {
   setLocalStorage(SIDEBAR_TASK_ORDER_KEY, ids);
+}
+
+const SIDEBAR_SUBTASK_ORDER_KEY = "kandev.sidebar.subtaskOrderByParentId";
+
+export function getStoredSubtaskOrderByParentId(): Record<string, string[]> {
+  const raw = getLocalStorage<Record<string, string[]>>(SIDEBAR_SUBTASK_ORDER_KEY, {}) as unknown;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [parentId, ids] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof parentId !== "string" || !Array.isArray(ids)) continue;
+    const filtered = ids.filter((id): id is string => typeof id === "string");
+    if (filtered.length > 0) out[parentId] = filtered;
+  }
+  return out;
+}
+
+export function setStoredSubtaskOrderByParentId(map: Record<string, string[]>): void {
+  setLocalStorage(SIDEBAR_SUBTASK_ORDER_KEY, map);
 }
 
 // --- Sidebar collapsed subtask parents (sessionStorage, tab-scoped) ---
