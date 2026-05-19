@@ -82,6 +82,7 @@ type CreateRepositoryRequest struct {
 	SetupScript          string
 	CleanupScript        string
 	DevScript            string
+	CopyFiles            string
 }
 
 type UpdateRepositoryRequest struct {
@@ -99,6 +100,7 @@ type UpdateRepositoryRequest struct {
 	SetupScript          *string
 	CleanupScript        *string
 	DevScript            *string
+	CopyFiles            *string
 }
 
 type DeleteRepositoryRequest struct {

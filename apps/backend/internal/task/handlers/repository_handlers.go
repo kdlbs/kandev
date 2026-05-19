@@ -267,6 +267,7 @@ type httpCreateRepositoryRequest struct {
 	SetupScript          string `json:"setup_script"`
 	CleanupScript        string `json:"cleanup_script"`
 	DevScript            string `json:"dev_script"`
+	CopyFiles            string `json:"copy_files"`
 }
 
 func (h *RepositoryHandlers) httpCreateRepository(c *gin.Context) {
@@ -294,6 +295,7 @@ func (h *RepositoryHandlers) httpCreateRepository(c *gin.Context) {
 		SetupScript:          body.SetupScript,
 		CleanupScript:        body.CleanupScript,
 		DevScript:            body.DevScript,
+		CopyFiles:            body.CopyFiles,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidRepositorySettings) {
@@ -402,6 +404,7 @@ type httpUpdateRepositoryRequest struct {
 	SetupScript          *string `json:"setup_script"`
 	CleanupScript        *string `json:"cleanup_script"`
 	DevScript            *string `json:"dev_script"`
+	CopyFiles            *string `json:"copy_files"`
 }
 
 func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
@@ -424,6 +427,7 @@ func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
 		SetupScript:          body.SetupScript,
 		CleanupScript:        body.CleanupScript,
 		DevScript:            body.DevScript,
+		CopyFiles:            body.CopyFiles,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidRepositorySettings) {
@@ -499,6 +503,7 @@ type wsCreateRepositoryRequest struct {
 	SetupScript          string `json:"setup_script"`
 	CleanupScript        string `json:"cleanup_script"`
 	DevScript            string `json:"dev_script"`
+	CopyFiles            string `json:"copy_files"`
 }
 
 func (h *RepositoryHandlers) wsCreateRepository(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -523,6 +528,7 @@ func (h *RepositoryHandlers) wsCreateRepository(ctx context.Context, msg *ws.Mes
 		SetupScript:          req.SetupScript,
 		CleanupScript:        req.CleanupScript,
 		DevScript:            req.DevScript,
+		CopyFiles:            req.CopyFiles,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidRepositorySettings) {
@@ -567,6 +573,7 @@ type wsUpdateRepositoryRequest struct {
 	SetupScript          *string `json:"setup_script,omitempty"`
 	CleanupScript        *string `json:"cleanup_script,omitempty"`
 	DevScript            *string `json:"dev_script,omitempty"`
+	CopyFiles            *string `json:"copy_files,omitempty"`
 }
 
 func (h *RepositoryHandlers) wsUpdateRepository(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -590,6 +597,7 @@ func (h *RepositoryHandlers) wsUpdateRepository(ctx context.Context, msg *ws.Mes
 		SetupScript:          req.SetupScript,
 		CleanupScript:        req.CleanupScript,
 		DevScript:            req.DevScript,
+		CopyFiles:            req.CopyFiles,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidRepositorySettings) {

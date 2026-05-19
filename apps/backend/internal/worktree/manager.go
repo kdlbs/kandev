@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/worktree/copyfiles"
 )
 
 const (
@@ -395,6 +396,8 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 	if err := m.persistAndCacheWorktree(ctx, wt, req, worktreePath); err != nil {
 		return nil, err
 	}
+
+	m.copyConfiguredFiles(ctx, req, worktreePath)
 
 	if err := m.runWorktreeSetupScript(ctx, wt, req.RepositoryPath); err != nil {
 		return nil, err
@@ -1126,6 +1129,36 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		zap.Bool("branch_removed", removeBranch))
 
 	return nil
+}
+
+// copyConfiguredFiles copies user-specified files from the source repo into
+// the freshly created worktree. Failures are logged but never propagated —
+// worktree creation must succeed even if file seeding partially fails.
+func (m *Manager) copyConfiguredFiles(ctx context.Context, req CreateRequest, worktreePath string) {
+	if m.repoProvider == nil || req.RepositoryID == "" {
+		return
+	}
+	repo, err := m.repoProvider.GetRepository(ctx, req.RepositoryID)
+	if err != nil || repo == nil || repo.CopyFiles == "" {
+		return
+	}
+	patterns := copyfiles.Parse(repo.CopyFiles)
+	if len(patterns) == 0 {
+		return
+	}
+	warnings, err := copyfiles.Copy(ctx, req.RepositoryPath, worktreePath, patterns, m.logger.Zap())
+	if err != nil {
+		m.logger.Warn("worktree copy-files failed",
+			zap.String("session_id", req.SessionID),
+			zap.String("repo_id", req.RepositoryID),
+			zap.Error(err))
+	}
+	for _, w := range warnings {
+		m.logger.Warn("worktree copy-files warning",
+			zap.String("repo_id", req.RepositoryID),
+			zap.String("path", worktreePath),
+			zap.String("warning", w))
+	}
 }
 
 func (m *Manager) runWorktreeSetupScript(ctx context.Context, wt *Worktree, repositoryPath string) error {

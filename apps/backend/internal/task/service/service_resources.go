@@ -284,6 +284,7 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 		SetupScript:          req.SetupScript,
 		CleanupScript:        req.CleanupScript,
 		DevScript:            req.DevScript,
+		CopyFiles:            req.CopyFiles,
 	}
 
 	// Auto-detect GitHub provider info from git remote if not provided
@@ -411,6 +412,9 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 	}
 	if req.DevScript != nil {
 		repository.DevScript = *req.DevScript
+	}
+	if req.CopyFiles != nil {
+		repository.CopyFiles = *req.CopyFiles
 	}
 	return nil
 }

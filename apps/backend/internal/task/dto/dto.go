@@ -55,6 +55,7 @@ type RepositoryDTO struct {
 	SetupScript          string                `json:"setup_script"`
 	CleanupScript        string                `json:"cleanup_script"`
 	DevScript            string                `json:"dev_script"`
+	CopyFiles            string                `json:"copy_files"`
 	CreatedAt            time.Time             `json:"created_at"`
 	UpdatedAt            time.Time             `json:"updated_at"`
 	Scripts              []RepositoryScriptDTO `json:"scripts,omitempty"`
@@ -443,6 +444,7 @@ func FromRepository(repository *models.Repository) RepositoryDTO {
 		SetupScript:          repository.SetupScript,
 		CleanupScript:        repository.CleanupScript,
 		DevScript:            repository.DevScript,
+		CopyFiles:            repository.CopyFiles,
 		CreatedAt:            repository.CreatedAt,
 		UpdatedAt:            repository.UpdatedAt,
 	}
