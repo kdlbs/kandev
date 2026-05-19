@@ -154,6 +154,12 @@ type Adapter struct {
 	// frontend mode selector can render available options.
 	availableModes []streams.SessionModeInfo
 
+	// Available config options from the most recent session creation/load.
+	// Used by emitSetModelEvent to include cached options in the convergence
+	// event emitted after SetModel succeeds so the frontend doesn't lose
+	// the options list when the model is changed.
+	availableConfigOptions []streams.ConfigOption
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -1416,16 +1422,21 @@ func (a *Adapter) emitSessionModels(sessionID string, models *acp.SessionModelSt
 	}
 
 	// Fallback: if the SDK didn't parse currentModelId (some agents omit it),
-	// try to resolve it from configOptions or the first available model.
+	// try to resolve it from a model-shaped configOption. We deliberately do
+	// NOT fall back to AvailableModels[0]: agents like auggie return an
+	// alphabetically-sorted list whose first entry is a pseudo-agent ("Build
+	// Analyzer"), which clobbered the profile model in the UI. When neither
+	// CurrentModelId nor a configOption surface a value, emit empty and let
+	// the frontend fall through to its profile/snapshot resolution.
 	if currentModelID == "" {
 		currentModelID = resolveCurrentModelFromConfig(configOptions)
 	}
-	if currentModelID == "" && len(models.AvailableModels) > 0 {
-		currentModelID = string(models.AvailableModels[0].ModelId)
-		a.logger.Info("currentModelId empty, using first available model as fallback",
-			zap.String("fallback_model", currentModelID),
-		)
-	}
+
+	// Cache config options so emitSetModelEvent can include them in the
+	// convergence event emitted after a successful SetModel call.
+	a.mu.Lock()
+	a.availableConfigOptions = configOptions
+	a.mu.Unlock()
 
 	a.logger.Info("emitting session_models event",
 		zap.String("session_id", sessionID),
@@ -1438,6 +1449,26 @@ func (a *Adapter) emitSessionModels(sessionID string, models *acp.SessionModelSt
 		CurrentModelID: currentModelID,
 		SessionModels:  convertSessionModels(models.AvailableModels),
 		ConfigOptions:  configOptions,
+	})
+}
+
+// emitSetModelEvent emits a session_models convergence event after SetModel
+// applies a new model. The frontend uses this to update its current-model
+// view: without it the only session_models event is the one from session/new,
+// which carries the agent's (possibly stale or empty) currentModelId.
+func (a *Adapter) emitSetModelEvent(modelID string) {
+	a.mu.RLock()
+	sessionID := a.sessionID
+	cachedModels := a.availableModels
+	cachedConfig := a.availableConfigOptions
+	a.mu.RUnlock()
+
+	a.sendUpdate(AgentEvent{
+		Type:           streams.EventTypeSessionModels,
+		SessionID:      sessionID,
+		CurrentModelID: modelID,
+		SessionModels:  convertSessionModels(cachedModels),
+		ConfigOptions:  cachedConfig,
 	})
 }
 
@@ -1520,6 +1551,7 @@ func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
 	if err != nil {
 		return fmt.Errorf("set session model failed: %w", err)
 	}
+	a.emitSetModelEvent(modelID)
 	return nil
 }
 
