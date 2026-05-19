@@ -1139,7 +1139,13 @@ func (m *Manager) copyConfiguredFiles(ctx context.Context, req CreateRequest, wo
 		return
 	}
 	repo, err := m.repoProvider.GetRepository(ctx, req.RepositoryID)
-	if err != nil || repo == nil || repo.CopyFiles == "" {
+	if err != nil {
+		m.logger.Warn("copy-files: failed to fetch repository",
+			zap.String("repository_id", req.RepositoryID),
+			zap.Error(err))
+		return
+	}
+	if repo == nil || repo.CopyFiles == "" {
 		return
 	}
 	patterns := copyfiles.Parse(repo.CopyFiles)

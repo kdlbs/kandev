@@ -218,6 +218,7 @@ func (s *copyState) copyDir(src, relRoot string) error {
 				return nil
 			}
 			if ri.IsDir() {
+				s.warn("symlink %q resolves to a directory, skipping", path)
 				return nil
 			}
 			info = ri
@@ -231,6 +232,10 @@ func (s *copyState) copyDir(src, relRoot string) error {
 func (s *copyState) copyFile(src, rel string, info os.FileInfo) error {
 	if err := s.ctx.Err(); err != nil {
 		return fmt.Errorf("copyfiles: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		s.warn("skipping non-regular file %q (mode %s)", rel, info.Mode())
+		return nil
 	}
 	dst := filepath.Join(s.targetDir, rel)
 	if _, dup := s.copied[dst]; dup {
@@ -265,6 +270,7 @@ func (s *copyState) copyFile(src, rel string, info os.FileInfo) error {
 		return fmt.Errorf("copyfiles: copy %s: %w", dst, err)
 	}
 	if err := out.Close(); err != nil {
+		_ = os.Remove(dst)
 		return fmt.Errorf("copyfiles: close %s: %w", dst, err)
 	}
 	if err := os.Chmod(dst, info.Mode().Perm()); err != nil {
