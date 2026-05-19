@@ -18,19 +18,14 @@ test.describe("Changes Panel — Active-Tab Highlight", () => {
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
 
     const profile = await createStandardProfile(apiClient, "changes-active-highlight");
-    await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Changes Active Highlight Test",
-      profile.id,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
+    await apiClient.createTaskWithAgent(seedData.workspaceId, "Active Highlight Test", profile.id, {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
 
-    const session = await openTaskSession(testPage, "Changes Active Highlight Test");
+    const session = await openTaskSession(testPage, "Active Highlight Test");
     await session.clickTab("Changes");
 
     git.createFile("active-a.ts", "a");
@@ -77,7 +72,7 @@ test.describe("Changes Panel — Active-Tab Highlight", () => {
     const profile = await createStandardProfile(apiClient, "changes-active-highlight-staged");
     await apiClient.createTaskWithAgent(
       seedData.workspaceId,
-      "Changes Active Highlight Staged Test",
+      "Active Highlight Staged Test",
       profile.id,
       {
         description: "/e2e:simple-message",
@@ -87,7 +82,7 @@ test.describe("Changes Panel — Active-Tab Highlight", () => {
       },
     );
 
-    const session = await openTaskSession(testPage, "Changes Active Highlight Staged Test");
+    const session = await openTaskSession(testPage, "Active Highlight Staged Test");
     await session.clickTab("Changes");
 
     git.createFile("staged-active.ts", "a");
