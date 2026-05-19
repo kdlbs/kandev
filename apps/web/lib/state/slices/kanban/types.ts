@@ -107,6 +107,11 @@ export type TaskState = {
   // pinnedSessionId alone — and skip auto-replace when the terminating session
   // matches the pin (the user wants to stay even though the workflow moved on).
   pinnedSessionId: string | null;
+  // lastSessionByTaskId remembers the most-recent active session for each task.
+  // Unlike pinnedSessionId (single global slot, cleared on task change), this
+  // map survives task switches so navigating back to a task can restore the
+  // user's last-selected session instead of always jumping to primary.
+  lastSessionByTaskId: Record<string, string>;
 };
 
 export type KanbanSliceState = {

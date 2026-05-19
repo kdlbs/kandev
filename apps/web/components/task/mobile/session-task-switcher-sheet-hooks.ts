@@ -23,6 +23,7 @@ import {
   type WorkflowSnapshot,
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
+import { resolvePreferredSessionId } from "../task-select-helpers";
 
 // Map workflow snapshot to kanban state on workspace switch.
 function mapSnapshotToKanban(snapshot: WorkflowSnapshot, newWorkflowId: string) {
@@ -453,10 +454,16 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
 
   const handleSelectTask = useCallback(
     (taskId: string) => {
-      const kanbanTasks = store.getState().kanban.tasks;
-      const task = kanbanTasks.find((t) => t.id === taskId);
+      const state = store.getState();
+      const task = state.kanban.tasks.find((t) => t.id === taskId);
       if (task?.primarySessionId) {
-        setActiveSession(taskId, task.primarySessionId);
+        const targetSessionId = resolvePreferredSessionId(
+          taskId,
+          task.primarySessionId,
+          state.tasks.lastSessionByTaskId,
+          state.environmentIdBySessionId,
+        );
+        setActiveSession(taskId, targetSessionId);
         loadTaskSessionsForTask(taskId);
         replaceTaskUrl(taskId);
         onOpenChange(false);
