@@ -88,6 +88,8 @@ function PRFilesRepoGroup({
       )}
       {!collapsed && (
         <ul className="space-y-0.5">
+          {/* Multi-repo: activeFilePath carries no repo context, so identical
+              paths across repos light up both rows. Matches FileListBody. */}
           {files.map((file) => (
             <PRFileRow
               key={file.path}
