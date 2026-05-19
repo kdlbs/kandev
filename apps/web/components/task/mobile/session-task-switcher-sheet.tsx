@@ -12,6 +12,7 @@ import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-pr
 import { WorkspaceSwitcher } from "../workspace-switcher";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { TaskArchiveConfirmDialog } from "../task-archive-confirm-dialog";
+import { TaskDeleteConfirmDialog } from "../task-delete-confirm-dialog";
 import { useSheetData, useSheetActions } from "./session-task-switcher-sheet-hooks";
 
 type SessionTaskSwitcherSheetProps = {
@@ -137,6 +138,15 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         taskTitle={actions.archivingTask?.title ?? ""}
         isArchiving={actions.isArchiving}
         onConfirm={actions.handleArchiveConfirm}
+      />
+      <TaskDeleteConfirmDialog
+        open={actions.deletingTask !== null}
+        onOpenChange={(open) => {
+          if (!open) actions.setDeletingTask(null);
+        }}
+        taskTitle={actions.deletingTask?.title ?? ""}
+        isDeleting={actions.isDeleting}
+        onConfirm={actions.handleDeleteConfirm}
       />
     </Sheet>
   );

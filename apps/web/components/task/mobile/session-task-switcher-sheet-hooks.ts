@@ -396,14 +396,60 @@ async function selectTaskWithoutPrimarySession(taskId: string, opts: SelectTaskO
   onOpenChange(false);
 }
 
+function useSheetDeleteActions(
+  store: ReturnType<typeof useAppStoreApi>,
+  removeTaskFromBoard: ReturnType<typeof useTaskRemoval>["removeTaskFromBoard"],
+) {
+  const { deleteTaskById } = useTaskActions();
+  const [deletingTask, setDeletingTask] = useState<{ id: string; title: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteTask = useCallback(
+    (taskId: string) => {
+      const task = store.getState().kanban.tasks.find((t) => t.id === taskId);
+      setDeletingTask({ id: taskId, title: task?.title ?? "this task" });
+    },
+    [store],
+  );
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deletingTask || isDeleting) return;
+    const taskId = deletingTask.id;
+    setIsDeleting(true);
+    // Capture active state before the async API call — the WS "task.deleted"
+    // handler may clear activeTaskId/activeSessionId before removeTaskFromBoard runs.
+    const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
+      store.getState().tasks;
+    try {
+      await deleteTaskById(taskId);
+      await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
+    } catch (error) {
+      console.error("Failed to delete task:", error);
+    } finally {
+      setIsDeleting(false);
+      setDeletingTask(null);
+    }
+  }, [deletingTask, isDeleting, deleteTaskById, removeTaskFromBoard, store]);
+
+  const deletingTaskId = isDeleting ? (deletingTask?.id ?? null) : null;
+
+  return {
+    deletingTaskId,
+    deletingTask,
+    setDeletingTask,
+    isDeleting,
+    handleDeleteTask,
+    handleDeleteConfirm,
+  };
+}
+
 export function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolean) => void) {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const store = useAppStoreApi();
-  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
-  const { deleteTaskById } = useTaskActions();
   const archiveAndSwitch = useArchiveAndSwitchTask();
   const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({ store });
+  const deleteActions = useSheetDeleteActions(store, removeTaskFromBoard);
 
   const handleSelectTask = useCallback(
     (taskId: string) => {
@@ -450,23 +496,6 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
     }
   }, [archivingTask, archiveAndSwitch]);
 
-  const handleDeleteTask = useCallback(
-    async (taskId: string) => {
-      setDeletingTaskId(taskId);
-      // Capture active state before the async API call — the WS "task.deleted"
-      // handler may clear activeTaskId/activeSessionId before removeTaskFromBoard runs.
-      const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
-        store.getState().tasks;
-      try {
-        await deleteTaskById(taskId);
-        await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
-      } finally {
-        setDeletingTaskId(null);
-      }
-    },
-    [deleteTaskById, removeTaskFromBoard, store],
-  );
-
   const { handleWorkspaceChange, handleTaskCreated } = useWorkspaceAndTaskCreatedActions({
     workspaceId,
     store,
@@ -477,15 +506,14 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
   });
 
   return {
-    deletingTaskId,
     handleSelectTask,
     handleArchiveTask,
-    handleDeleteTask,
     handleWorkspaceChange,
     handleTaskCreated,
     archivingTask,
     setArchivingTask,
     isArchiving,
     handleArchiveConfirm,
+    ...deleteActions,
   };
 }

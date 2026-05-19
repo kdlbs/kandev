@@ -405,10 +405,15 @@ export class SessionPage {
 
   /**
    * Delete a task via the sidebar context menu.
-   * Hovers to reveal the menu trigger, opens it, and clicks "Delete".
+   * Hovers to reveal the menu trigger, opens it, clicks "Delete",
+   * and confirms the delete dialog.
    */
   async deleteTaskInSidebar(title: string): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Delete");
+    const confirmButton = this.page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Delete" });
+    await confirmButton.click();
   }
 
   /**
@@ -430,11 +435,7 @@ export class SessionPage {
    * Retries the full open-click sequence if the menu gets detached by a
    * React re-render (e.g. WS-driven sidebar update) between open and click.
    */
-  private async openSidebarMenuAndClick(
-    title: string,
-    itemName: string,
-    retries = 3,
-  ): Promise<void> {
+  async openSidebarMenuAndClick(title: string, itemName: string, retries = 3): Promise<void> {
     const taskRow = this.sidebar.locator('[role="button"]').filter({ hasText: title });
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
