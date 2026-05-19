@@ -99,18 +99,16 @@ func TestEmitSessionModels_NonEmptyCurrentIDPreserved(t *testing.T) {
 func TestEmitSetModelEvent_EmitsSessionModelsWithCachedState(t *testing.T) {
 	a := newTestAdapter()
 
-	a.mu.Lock()
-	a.sessionID = "sess-1"
-	a.availableModels = []acp.ModelInfo{
+	cachedModels := []acp.ModelInfo{
 		{ModelId: "claude-opus-4-7", Name: "Opus 4.7"},
 		{ModelId: "build-analyzer", Name: "Build Analyzer"},
 	}
-	a.availableConfigOptions = []streams.ConfigOption{
-		{Type: "select", ID: "model", Name: "Model", CurrentValue: "claude-opus-4-7"},
+	cachedConfig := []streams.ConfigOption{
+		{Type: "select", ID: "other", Name: "Other", CurrentValue: "keep-me"},
+		{Type: "select", ID: "model", Name: "Model", CurrentValue: "old-model"},
 	}
-	a.mu.Unlock()
 
-	a.emitSetModelEvent("claude-opus-4-7")
+	a.emitSetModelEvent("sess-1", "claude-opus-4-7", cachedModels, cachedConfig)
 
 	ev := findSessionModelsEvent(t, drainEvents(a))
 	if ev.SessionID != "sess-1" {
@@ -122,7 +120,72 @@ func TestEmitSetModelEvent_EmitsSessionModelsWithCachedState(t *testing.T) {
 	if len(ev.SessionModels) != 2 {
 		t.Errorf("SessionModels len = %d, want 2", len(ev.SessionModels))
 	}
-	if len(ev.ConfigOptions) != 1 || ev.ConfigOptions[0].ID != "model" {
-		t.Errorf("ConfigOptions = %+v, want one option with ID=model", ev.ConfigOptions)
+	if len(ev.ConfigOptions) != 2 {
+		t.Fatalf("ConfigOptions len = %d, want 2", len(ev.ConfigOptions))
+	}
+
+	// Model-shaped option's CurrentValue must be rewritten to the new model
+	// so consumers reading ConfigOptions[model].CurrentValue (codex-style
+	// agents surface the current model there) don't see a stale value.
+	for _, opt := range ev.ConfigOptions {
+		switch opt.ID {
+		case "model":
+			if opt.CurrentValue != "claude-opus-4-7" {
+				t.Errorf("model option CurrentValue = %q, want %q", opt.CurrentValue, "claude-opus-4-7")
+			}
+		case "other":
+			if opt.CurrentValue != "keep-me" {
+				t.Errorf("non-model option CurrentValue = %q, want %q (untouched)", opt.CurrentValue, "keep-me")
+			}
+		}
+	}
+
+	// The caller's cachedConfig must not be mutated — we copy before rewrite.
+	if cachedConfig[1].CurrentValue != "old-model" {
+		t.Errorf("caller cachedConfig was mutated: model.CurrentValue = %q, want %q",
+			cachedConfig[1].CurrentValue, "old-model")
+	}
+}
+
+// TestConfigOptionUpdate_RefreshesCachedConfig pins that an inbound
+// ConfigOptionUpdate notification refreshes the adapter's availableConfigOptions
+// cache, so a subsequent SetModel convergence event emits the latest options
+// instead of the snapshot taken at session/new.
+func TestConfigOptionUpdate_RefreshesCachedConfig(t *testing.T) {
+	a := newTestAdapter()
+
+	a.mu.Lock()
+	a.availableConfigOptions = []streams.ConfigOption{
+		{Type: "select", ID: "model", Name: "Model", CurrentValue: "stale"},
+	}
+	a.mu.Unlock()
+
+	notif := acp.SessionNotification{
+		SessionId: "sess-1",
+		Update: acp.SessionUpdate{
+			ConfigOptionUpdate: &acp.SessionConfigOptionUpdate{
+				ConfigOptions: []acp.SessionConfigOption{
+					{Select: &acp.SessionConfigOptionSelect{
+						Type:         "select",
+						Id:           "model",
+						Name:         "Model",
+						CurrentValue: "fresh",
+					}},
+				},
+			},
+		},
+	}
+
+	ev := a.convertNotification(notif)
+	if ev == nil {
+		t.Fatalf("expected a session_models event from ConfigOptionUpdate")
+	}
+
+	a.mu.RLock()
+	got := a.availableConfigOptions
+	a.mu.RUnlock()
+
+	if len(got) != 1 || got[0].CurrentValue != "fresh" {
+		t.Errorf("availableConfigOptions = %+v, want one option with CurrentValue=fresh", got)
 	}
 }
