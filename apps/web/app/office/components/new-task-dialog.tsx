@@ -163,7 +163,7 @@ function NewIssueDialogBody({
           placeholder="Task title"
           value={draft.title}
           onChange={(e) => updateDraft({ title: e.target.value })}
-          className="text-lg font-medium border-0 resize-none p-0 focus-visible:ring-0 min-h-[40px]"
+          className="text-lg font-medium border-0 resize-none focus-visible:ring-0 min-h-[40px]"
           rows={1}
           autoFocus
         />
