@@ -65,11 +65,11 @@ export async function getTaskPR(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<TaskPR>(`/api/v1/github/task-prs/${taskId}`, options);
 }
 
-export async function associateTaskPR(
+export async function createTaskPR(
   data: { task_id: string; repository_id?: string; pr_url: string },
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<TaskPR>(`/api/v1/github/task-prs/associate`, {
+  return fetchJson<TaskPR>(`/api/v1/github/task-prs`, {
     ...options,
     init: {
       method: "POST",

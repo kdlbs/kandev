@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import type { Icon } from "@tabler/icons-react";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
-import { associateTaskPR } from "@/lib/api/domains/github-api";
+import { createTaskPR } from "@/lib/api/domains/github-api";
 import type { Repository, Task, TaskRepository, Workflow, WorkflowStep } from "@/lib/types/http";
 import type { GitHubPR, GitHubIssue } from "@/lib/types/github";
 
@@ -150,7 +150,7 @@ export function QuickTaskLauncher({
       // Fire-and-forget: associating the PR is best-effort. A failure (network,
       // missing GH client) shouldn't block navigation — the existing
       // branch-based poller will still try once the agent starts.
-      void associateTaskPR({
+      void createTaskPR({
         task_id: task.id,
         repository_id: repositoryId,
         pr_url: payload.pr.html_url,

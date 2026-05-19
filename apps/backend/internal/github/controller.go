@@ -32,8 +32,8 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.DELETE("/token", c.httpClearToken)
 
 	api.GET("/task-prs", c.httpListTaskPRs)
+	api.POST("/task-prs", c.httpCreateTaskPR)
 	api.GET("/task-prs/:taskId", c.httpGetTaskPR)
-	api.POST("/task-prs/associate", c.httpAssociateTaskPR)
 
 	api.GET("/prs/:owner/:repo/:number", c.httpGetPRFeedback)
 	api.GET("/prs/:owner/:repo/:number/info", c.httpGetPRInfo)
@@ -137,12 +137,12 @@ func (c *Controller) httpListTaskPRs(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"task_prs": result})
 }
 
-// httpAssociateTaskPR creates a task-PR association from a known PR URL.
-// Used by the GitHub PR list "+ Task" flow: the PR is already known, so we
+// httpCreateTaskPR creates a task-PR association from a known PR URL. Used
+// by the GitHub PR list "+ Task" flow: the PR is already known, so we
 // persist the linkage immediately instead of waiting for branch-based
 // discovery (which fails for review tasks that use synthetic worktree
 // branches that don't exist on GitHub).
-func (c *Controller) httpAssociateTaskPR(ctx *gin.Context) {
+func (c *Controller) httpCreateTaskPR(ctx *gin.Context) {
 	var req struct {
 		TaskID       string `json:"task_id"`
 		RepositoryID string `json:"repository_id"`
