@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { IconChecklist } from "@tabler/icons-react";
 import {
   DropdownMenu,
@@ -12,7 +13,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
-import { replaceTaskUrl } from "@/lib/links";
+import { linkToTask } from "@/lib/links";
 import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import type { KanbanState } from "@/lib/state/slices";
 import type { TaskPR } from "@/lib/types/github";
@@ -88,13 +89,14 @@ const iconClass = "h-3 w-3 shrink-0 text-muted-foreground";
 
 export function PRRowTaskIndicator({ tasks }: PRRowTaskIndicatorProps) {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
+  const router = useRouter();
 
   const navigate = useCallback(
     (taskId: string) => {
       setActiveTask(taskId);
-      replaceTaskUrl(taskId);
+      router.push(linkToTask(taskId));
     },
-    [setActiveTask],
+    [setActiveTask, router],
   );
 
   if (!tasks || tasks.length === 0) {
