@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { prepareAndSwitchTask, buildSwitchToSession } from "./task-select-helpers";
+import {
+  prepareAndSwitchTask,
+  buildSwitchToSession,
+  selectTaskWithLayout,
+} from "./task-select-helpers";
 
 vi.mock("@/lib/services/session-launch-service", () => ({
   launchSession: vi.fn(),
@@ -161,5 +165,122 @@ describe("buildSwitchToSession", () => {
     expect(setActiveSession).toHaveBeenCalledWith("task-new", "sess-x");
     expect(performLayoutSwitch).not.toHaveBeenCalled();
     expect(releaseLayoutToDefault).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Regression for "switching tasks loses the user's last-selected session":
+ *
+ *   1. Task A has sessions [primary, gpt]; user clicks the gpt tab.
+ *   2. User clicks Task B in the sidebar.
+ *   3. User clicks Task A in the sidebar — expected the gpt tab still active.
+ *
+ * Before the fix, `selectTaskWithLayout` always switched to `primarySessionId`,
+ * so step 3 set activeSessionId back to "primary". The dockview slow-path then
+ * closed the gpt panel (it didn't match activeSessionId), and the surviving
+ * sibling tab (Diff) auto-promoted to active.
+ *
+ * The fix tracks the user's last-selected session per task in
+ * `tasks.lastSessionByTaskId` and prefers it over `primarySessionId` on
+ * re-entry, as long as the session still has a known environment.
+ */
+describe("selectTaskWithLayout — last-selected session preference", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function makeKanbanStore(args: {
+    activeSessionId: string | null;
+    envIds: Record<string, string>;
+    lastSessionByTaskId?: Record<string, string>;
+  }): StoreApi<AppState> {
+    const state = {
+      tasks: {
+        activeSessionId: args.activeSessionId,
+        lastSessionByTaskId: args.lastSessionByTaskId ?? {},
+      },
+      taskPRs: { byTaskId: {} as Record<string, unknown[]> },
+      environmentIdBySessionId: args.envIds,
+    };
+    return {
+      getState: () => state as unknown as AppState,
+      setState: vi.fn(),
+      subscribe: vi.fn(),
+    } as unknown as StoreApi<AppState>;
+  }
+
+  it("prefers the user's last-selected session over primarySessionId on re-entry", () => {
+    const TASK_ID = "task-A";
+    const PRIMARY = "sess-primary";
+    const LAST = "sess-gpt";
+    const store = makeKanbanStore({
+      activeSessionId: "sess-other-task",
+      envIds: {
+        "sess-other-task": "env-B",
+        [PRIMARY]: "env-A",
+        [LAST]: "env-A",
+      },
+      lastSessionByTaskId: { [TASK_ID]: LAST },
+    });
+    const switchToSession = vi.fn();
+
+    selectTaskWithLayout({
+      taskId: TASK_ID,
+      task: { primarySessionId: PRIMARY },
+      store,
+      switchToSession,
+      loadTaskSessionsForTask: vi.fn(async () => []),
+      setActiveTask: vi.fn(),
+      setPreparingTaskId: vi.fn(),
+    });
+
+    expect(switchToSession).toHaveBeenCalledWith(TASK_ID, LAST, "sess-other-task");
+  });
+
+  it("falls back to primarySessionId when the remembered session has no env mapping", () => {
+    const TASK_ID = "task-A";
+    const PRIMARY = "sess-primary";
+    const LAST = "sess-stale";
+    const store = makeKanbanStore({
+      activeSessionId: null,
+      envIds: { [PRIMARY]: "env-A" },
+      lastSessionByTaskId: { [TASK_ID]: LAST },
+    });
+    const switchToSession = vi.fn();
+
+    selectTaskWithLayout({
+      taskId: TASK_ID,
+      task: { primarySessionId: PRIMARY },
+      store,
+      switchToSession,
+      loadTaskSessionsForTask: vi.fn(async () => []),
+      setActiveTask: vi.fn(),
+      setPreparingTaskId: vi.fn(),
+    });
+
+    expect(switchToSession).toHaveBeenCalledWith(TASK_ID, PRIMARY, null);
+  });
+
+  it("uses primarySessionId when no last-selected session is recorded for the task", () => {
+    const TASK_ID = "task-A";
+    const PRIMARY = "sess-primary";
+    const store = makeKanbanStore({
+      activeSessionId: null,
+      envIds: { [PRIMARY]: "env-A" },
+      lastSessionByTaskId: {},
+    });
+    const switchToSession = vi.fn();
+
+    selectTaskWithLayout({
+      taskId: TASK_ID,
+      task: { primarySessionId: PRIMARY },
+      store,
+      switchToSession,
+      loadTaskSessionsForTask: vi.fn(async () => []),
+      setActiveTask: vi.fn(),
+      setPreparingTaskId: vi.fn(),
+    });
+
+    expect(switchToSession).toHaveBeenCalledWith(TASK_ID, PRIMARY, null);
   });
 });
