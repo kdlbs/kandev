@@ -97,6 +97,5 @@ export const createKanbanSlice: StateCreator<
       const snapshot = draft.kanbanMulti.snapshots[workflowId];
       if (!snapshot) return;
       snapshot.tasks = snapshot.tasks.filter((t) => t.id !== taskId);
-      delete draft.tasks.lastSessionByTaskId[taskId];
     }),
 });
