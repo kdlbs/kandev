@@ -19,7 +19,6 @@ class Kandev < Formula
 
   def install
     ENV["KANDEV_VERSION"] = version.to_s
-    ENV["CGO_ENABLED"]    = "1"
 
     system "pnpm", "-C", "apps", "install", "--frozen-lockfile"
     system "pnpm", "-C", "apps", "--filter", "@kandev/web", "build"
@@ -30,13 +29,20 @@ class Kandev < Formula
     (bundle/"bin").mkpath
 
     cd "apps/backend" do
-      system "go", "build",
-             *std_go_args(ldflags: "-s -w -X main.Version=#{version}",
-                          output:  bundle/"bin/kandev"),
-             "./cmd/kandev"
-      system "go", "build",
-             *std_go_args(ldflags: "-s -w", output: bundle/"bin/agentctl"),
-             "./cmd/agentctl"
+      # kandev backend needs cgo for mattn/go-sqlite3.
+      with_env(CGO_ENABLED: "1") do
+        system "go", "build",
+               *std_go_args(ldflags: "-s -w -X main.Version=#{version}",
+                            output:  bundle/"bin/kandev"),
+               "./cmd/kandev"
+      end
+      # agentctl is pure-Go; build it static to avoid a dynamic linker
+      # crash observed on Linuxbrew arm64 bottle CI.
+      with_env(CGO_ENABLED: "0") do
+        system "go", "build",
+               *std_go_args(ldflags: "-s -w", output: bundle/"bin/agentctl"),
+               "./cmd/agentctl"
+      end
     end
 
     system "./scripts/release/package-bundle.sh"
