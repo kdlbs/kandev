@@ -14,7 +14,7 @@ class Kandev < Formula
   depends_on "pnpm" => :build
   depends_on "node"
 
-  uses_from_macos "rsync"  => :build
+  uses_from_macos "rsync" => :build
   uses_from_macos "sqlite"
 
   def install
@@ -64,7 +64,7 @@ class Kandev < Formula
                 libexec/"bin/kandev")
     begin
       deadline = Time.now + 60
-      until system("curl", "-sf", "-o", "/dev/null",
+      until system("curl", "-sf", "-o", File::NULL,
                    "http://127.0.0.1:#{port}/api/v1/system/health")
         raise "kandev backend did not start within 60s" if Time.now > deadline
 
