@@ -380,7 +380,7 @@ func TestStartCreatedSession_WrongTask(t *testing.T) {
 	// Session belongs to "task-other", not "task1"
 	seedTaskAndSession(t, repo, "task-other", "session1", models.TaskSessionStateCreated)
 
-	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false, false, nil)
+	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false, false, false, nil)
 	if err == nil {
 		t.Fatal("expected error when session does not belong to task")
 	}
@@ -392,7 +392,7 @@ func TestStartCreatedSession_NotInCreatedState(t *testing.T) {
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 
-	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false, false, nil)
+	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false, false, false, nil)
 	if err == nil {
 		t.Fatal("expected error when session is not in CREATED state")
 	}
@@ -509,7 +509,7 @@ func TestPostLaunchCreated_SkipMessage_DoesNotChangeSessionState(t *testing.T) {
 
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
-	svc.postLaunchCreated(ctx, "task1", "session1", "prompt", true, false, nil)
+	svc.postLaunchCreated(ctx, "task1", "session1", "prompt", true, false, false, nil)
 
 	// Session state must remain STARTING when skipMessage=true.
 	session, err := repo.GetTaskSession(ctx, "session1")
@@ -530,7 +530,7 @@ func TestPostLaunchCreated_WithMessage_DoesNotChangeSessionState(t *testing.T) {
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.messageCreator = mc
 
-	svc.postLaunchCreated(ctx, "task1", "session1", "hello", false, false, nil)
+	svc.postLaunchCreated(ctx, "task1", "session1", "hello", false, false, false, nil)
 
 	// Session state must remain STARTING — postLaunchCreated delegates to
 	// recordInitialMessage which only creates the message.
@@ -556,7 +556,7 @@ func TestPostLaunchCreated_PlanMode_SetsMetadata(t *testing.T) {
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.messageCreator = mc
 
-	svc.postLaunchCreated(ctx, "task1", "session1", "plan this", false, true, nil)
+	svc.postLaunchCreated(ctx, "task1", "session1", "plan this", false, true, false, nil)
 
 	// User message should have plan_mode metadata.
 	if len(mc.userMessages) != 1 {
@@ -608,7 +608,7 @@ func TestStartCreatedSession_WrapsFirstPromptWithKandevSystemBlock(t *testing.T)
 	mc := &mockMessageCreator{}
 	svc.messageCreator = mc
 
-	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "Build me a feature", false, false, nil)
+	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "Build me a feature", false, false, false, nil)
 	if err != nil {
 		t.Fatalf("StartCreatedSession failed: %v", err)
 	}
@@ -669,7 +669,7 @@ func TestStartCreatedSession_DoesNotDoubleWrapPreWrappedPrompt(t *testing.T) {
 	// Simulate an upstream caller (e.g. wsAddMessage) that has already wrapped.
 	preWrapped := sysprompt.InjectKandevContext("task1", "session1", "Build me a feature")
 
-	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", preWrapped, false, false, nil)
+	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", preWrapped, false, false, false, nil)
 	if err != nil {
 		t.Fatalf("StartCreatedSession failed: %v", err)
 	}
@@ -713,7 +713,7 @@ func TestStartCreatedSession_EmptyPromptSkipsWrap(t *testing.T) {
 	mc := &mockMessageCreator{}
 	svc.messageCreator = mc
 
-	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "", false, false, nil)
+	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "", false, false, false, nil)
 	if err != nil {
 		t.Fatalf("StartCreatedSession failed: %v", err)
 	}

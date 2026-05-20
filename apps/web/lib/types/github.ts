@@ -218,8 +218,6 @@ export type ReviewScope = "user" | "user_and_teams";
  */
 export type CleanupPolicy = "auto" | "always" | "never";
 
-export const CLEANUP_POLICY_VALUES: CleanupPolicy[] = ["auto", "always", "never"];
-
 export type ReviewWatch = {
   id: string;
   workspace_id: string;

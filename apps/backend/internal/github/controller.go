@@ -733,6 +733,13 @@ func (c *Controller) httpResetActionPresets(ctx *gin.Context) {
 // (including rows under enabled watches) applying each watch's cleanup
 // policy. Manual trigger for users to drain a pile of merged-PR tasks
 // without waiting for the next 5-minute poller cycle.
+//
+// SCOPE: install-wide — walks dedup rows across all workspaces. The
+// trigger-all endpoints (httpTriggerAllReviewChecks /
+// httpTriggerAllIssueChecks) take a required workspace_id, but cleanup
+// is install-wide on purpose so a user can drain orphans whose original
+// watch lived in a workspace they no longer have open. A future
+// multi-tenant rollout would add an optional workspace_id query param.
 func (c *Controller) httpCleanupReviewTasks(ctx *gin.Context) {
 	deleted, err := c.service.CleanupAllReviewTasks(ctx.Request.Context())
 	if err != nil {

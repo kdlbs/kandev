@@ -378,6 +378,225 @@ func TestCleanupAllOrphanedReviewTasks_RespectsNeverPolicy(t *testing.T) {
 	}
 }
 
+// --- Issue-side mirrors ---
+// These tests mirror the review-side coverage above for the symmetric
+// issue path. Without them a copy-paste divergence between
+// cleanupAllReviewTasks and cleanupAllIssueTasks — wrong cache key,
+// inverted predicate, forgotten unknown-watch guard — would only surface
+// in a production incident.
+
+// issueStateMockClient extends the default MockClient with per-issue state
+// lookup. MockClient.GetIssueState always returns "open"; cleanup tests
+// need to flip individual issues to "closed".
+type issueStateMockClient struct {
+	*MockClient
+	states map[int]string // issue number -> state
+}
+
+func newIssueStateMockClient(states map[int]string) *issueStateMockClient {
+	return &issueStateMockClient{MockClient: NewMockClient(), states: states}
+}
+
+func (c *issueStateMockClient) GetIssueState(_ context.Context, _, _ string, number int) (string, error) {
+	if s, ok := c.states[number]; ok {
+		return s, nil
+	}
+	return "open", nil
+}
+
+func TestCleanupAllOrphanedIssueTasks_DeletedWatchOrphans(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	svc.client = newIssueStateMockClient(map[int]string{77: "closed"})
+
+	watch := &IssueWatch{WorkspaceID: "ws-1", Enabled: true}
+	if err := store.CreateIssueWatch(ctx, watch); err != nil {
+		t.Fatalf("CreateIssueWatch: %v", err)
+	}
+	reserved, err := store.ReserveIssueWatchTask(ctx, watch.ID, "acme", "widget", 77, "https://example/77")
+	if err != nil || !reserved {
+		t.Fatalf("ReserveIssueWatchTask: ok=%v err=%v", reserved, err)
+	}
+	if err := store.AssignIssueWatchTaskID(ctx, watch.ID, "acme", "widget", 77, "task-77"); err != nil {
+		t.Fatalf("AssignIssueWatchTaskID: %v", err)
+	}
+
+	if _, err := store.db.Exec(`DELETE FROM github_issue_watches WHERE id = ?`, watch.ID); err != nil {
+		t.Fatalf("manual watch delete: %v", err)
+	}
+
+	rec := &recordingTaskDeleter{}
+	svc.SetTaskDeleter(rec)
+
+	deleted, err := svc.CleanupAllOrphanedIssueTasks(ctx)
+	if err != nil {
+		t.Fatalf("CleanupAllOrphanedIssueTasks: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted=%d, want 1 (orphan with missing watch should fall back to auto policy and reap)", deleted)
+	}
+	if len(rec.calls) != 1 || rec.calls[0] != "task-77" {
+		t.Fatalf("DeleteTask calls=%v, want [task-77]", rec.calls)
+	}
+}
+
+func TestCleanupAllOrphanedIssueTasks_DisabledWatch_StillCleansUp(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	svc.client = newIssueStateMockClient(map[int]string{88: "closed"})
+
+	watch := &IssueWatch{WorkspaceID: "ws-1", Enabled: false}
+	if err := store.CreateIssueWatch(ctx, watch); err != nil {
+		t.Fatalf("CreateIssueWatch: %v", err)
+	}
+	_, _ = store.ReserveIssueWatchTask(ctx, watch.ID, "acme", "widget", 88, "https://example/88")
+	if err := store.AssignIssueWatchTaskID(ctx, watch.ID, "acme", "widget", 88, "task-88"); err != nil {
+		t.Fatalf("AssignIssueWatchTaskID: %v", err)
+	}
+
+	rec := &recordingTaskDeleter{}
+	svc.SetTaskDeleter(rec)
+
+	deleted, err := svc.CleanupAllOrphanedIssueTasks(ctx)
+	if err != nil {
+		t.Fatalf("CleanupAllOrphanedIssueTasks: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted=%d, want 1 (disabled watch's issue task should still be reaped by global sweep)", deleted)
+	}
+}
+
+func TestCleanupAllOrphanedIssueTasks_UnknownWatchSkipped(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	svc.client = newIssueStateMockClient(map[int]string{222: "closed"})
+
+	watch := &IssueWatch{WorkspaceID: "ws-1", Enabled: true, CleanupPolicy: CleanupPolicyNever}
+	if err := store.CreateIssueWatch(ctx, watch); err != nil {
+		t.Fatalf("CreateIssueWatch: %v", err)
+	}
+	_, _ = store.ReserveIssueWatchTask(ctx, watch.ID, "acme", "widget", 222, "https://example/222")
+	if err := store.AssignIssueWatchTaskID(ctx, watch.ID, "acme", "widget", 222, "task-222"); err != nil {
+		t.Fatalf("AssignIssueWatchTaskID: %v", err)
+	}
+
+	if _, err := store.db.Exec(`ALTER TABLE github_issue_watches RENAME TO github_issue_watches_x`); err != nil {
+		t.Fatalf("rename watches table: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = store.db.Exec(`ALTER TABLE github_issue_watches_x RENAME TO github_issue_watches`)
+	})
+
+	rec := &recordingTaskDeleter{}
+	svc.SetTaskDeleter(rec)
+
+	deleted, err := svc.CleanupAllOrphanedIssueTasks(ctx)
+	if err != nil {
+		t.Fatalf("CleanupAllOrphanedIssueTasks: %v", err)
+	}
+	if deleted != 0 {
+		t.Fatalf("deleted=%d, want 0 (row whose watch fetch errored must be skipped, not fail-open as orphan)", deleted)
+	}
+	if len(rec.calls) != 0 {
+		t.Fatalf("DeleteTask called %d times, want 0", len(rec.calls))
+	}
+}
+
+func TestCleanupAllOrphanedIssueTasks_SkipsEnabledWatchRows(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	svc.client = newIssueStateMockClient(map[int]string{111: "closed"})
+
+	watch := &IssueWatch{WorkspaceID: "ws-1", Enabled: true}
+	if err := store.CreateIssueWatch(ctx, watch); err != nil {
+		t.Fatalf("CreateIssueWatch: %v", err)
+	}
+	_, _ = store.ReserveIssueWatchTask(ctx, watch.ID, "acme", "widget", 111, "https://example/111")
+	if err := store.AssignIssueWatchTaskID(ctx, watch.ID, "acme", "widget", 111, "task-111"); err != nil {
+		t.Fatalf("AssignIssueWatchTaskID: %v", err)
+	}
+
+	rec := &recordingTaskDeleter{}
+	svc.SetTaskDeleter(rec)
+
+	deleted, err := svc.CleanupAllOrphanedIssueTasks(ctx)
+	if err != nil {
+		t.Fatalf("CleanupAllOrphanedIssueTasks: %v", err)
+	}
+	if deleted != 0 {
+		t.Fatalf("deleted=%d, want 0 (enabled-watch rows must be skipped by the orphan sweep)", deleted)
+	}
+	if len(rec.calls) != 0 {
+		t.Fatalf("DeleteTask called %d times, want 0", len(rec.calls))
+	}
+
+	// And CleanupAllIssueTasks (manual button path) reaps the same row.
+	deleted, err = svc.CleanupAllIssueTasks(ctx)
+	if err != nil {
+		t.Fatalf("CleanupAllIssueTasks: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("manual sweep deleted=%d, want 1", deleted)
+	}
+}
+
+func TestCleanupAllOrphanedIssueTasks_RespectsNeverPolicy(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	svc.client = newIssueStateMockClient(map[int]string{55: "closed"})
+
+	watch := &IssueWatch{WorkspaceID: "ws-1", Enabled: true, CleanupPolicy: CleanupPolicyNever}
+	if err := store.CreateIssueWatch(ctx, watch); err != nil {
+		t.Fatalf("CreateIssueWatch: %v", err)
+	}
+	_, _ = store.ReserveIssueWatchTask(ctx, watch.ID, "acme", "widget", 55, "https://example/55")
+	if err := store.AssignIssueWatchTaskID(ctx, watch.ID, "acme", "widget", 55, "task-55"); err != nil {
+		t.Fatalf("AssignIssueWatchTaskID: %v", err)
+	}
+
+	rec := &recordingTaskDeleter{}
+	svc.SetTaskDeleter(rec)
+
+	deleted, err := svc.CleanupAllOrphanedIssueTasks(ctx)
+	if err != nil {
+		t.Fatalf("CleanupAllOrphanedIssueTasks: %v", err)
+	}
+	if deleted != 0 {
+		t.Fatalf("deleted=%d, want 0 (never-policy must keep tasks even when issue closes)", deleted)
+	}
+	if len(rec.calls) != 0 {
+		t.Fatalf("DeleteTask calls=%v, want none", rec.calls)
+	}
+}
+
+func TestDeleteIssueWatch_CascadesDedupRows(t *testing.T) {
+	_, _, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	watch := &IssueWatch{WorkspaceID: "ws-1", Enabled: true}
+	if err := store.CreateIssueWatch(ctx, watch); err != nil {
+		t.Fatalf("CreateIssueWatch: %v", err)
+	}
+	for _, n := range []int{1, 2, 3} {
+		_, _ = store.ReserveIssueWatchTask(ctx, watch.ID, "acme", "widget", n, fmt.Sprintf("https://example/%d", n))
+		if err := store.AssignIssueWatchTaskID(ctx, watch.ID, "acme", "widget", n, fmt.Sprintf("task-%d", n)); err != nil {
+			t.Fatalf("AssignIssueWatchTaskID: %v", err)
+		}
+	}
+
+	if err := store.DeleteIssueWatch(ctx, watch.ID); err != nil {
+		t.Fatalf("DeleteIssueWatch: %v", err)
+	}
+
+	remaining, err := store.ListIssueWatchTasksByWatch(ctx, watch.ID)
+	if err != nil {
+		t.Fatalf("ListIssueWatchTasksByWatch: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("dedup rows leaked after watch delete: %d remaining", len(remaining))
+	}
+}
+
 func TestDeleteReviewWatch_CascadesDedupRows(t *testing.T) {
 	_, _, _, store := setupPollerTest(t)
 	ctx := context.Background()

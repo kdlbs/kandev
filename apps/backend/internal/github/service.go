@@ -40,9 +40,32 @@ const (
 	defaultBranchMaster = "master"
 )
 
+// ErrTaskNotFound is the sentinel cleanup paths check for to distinguish
+// "the task is already gone — fine, mop up the dedup row" from a real
+// upstream failure. Adapter implementations of TaskDeleter wrap this when
+// the task domain reports a missing row so the github layer can recognize
+// the case without string-matching the underlying error message.
+var ErrTaskNotFound = errors.New("github: task not found for cleanup")
+
 // TaskDeleter deletes tasks by ID. Used for cleaning up merged PR tasks.
+// Implementations should return errors wrapping ErrTaskNotFound when the
+// task is already gone.
 type TaskDeleter interface {
 	DeleteTask(ctx context.Context, taskID string) error
+}
+
+// isTaskNotFound recognizes both the typed sentinel and the legacy
+// "not found" substring used by older adapters that haven't migrated yet.
+// String matching stays as a fallback so this PR doesn't regress installs
+// where the adapter wasn't updated in lockstep.
+func isTaskNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrTaskNotFound) {
+		return true
+	}
+	return strings.Contains(err.Error(), "not found")
 }
 
 // TaskSessionChecker checks whether the user genuinely engaged with a task
@@ -1330,7 +1353,7 @@ func (s *Service) DeleteReviewWatch(ctx context.Context, id string) error {
 					continue
 				}
 				if err := s.taskDeleter.DeleteTask(ctx, rpt.TaskID); err != nil &&
-					!strings.Contains(err.Error(), "not found") {
+					!isTaskNotFound(err) {
 					s.logger.Warn("failed to delete review task during watch cleanup",
 						zap.String("watch_id", id),
 						zap.String("task_id", rpt.TaskID),
@@ -1812,7 +1835,11 @@ func (s *Service) cleanupAllReviewTasks(ctx context.Context, orphansOnly bool) (
 		return 0, nil
 	}
 	policyCache, enabledCache, unknownCache := s.buildReviewWatchCaches(ctx, prTasks)
-	candidates := prTasks[:0]
+	// Allocate a fresh slice rather than reusing prTasks' backing array
+	// via prTasks[:0]; the in-place version is safe today (write index
+	// always trails read index) but silently breaks if a future caller
+	// reads prTasks after the filter.
+	candidates := make([]*ReviewPRTask, 0, len(prTasks))
 	for _, rpt := range prTasks {
 		// Watch fetch failed — skip this cycle so we don't fail-open and
 		// reap an enabled-watch row under the wrong policy.
@@ -1899,7 +1926,7 @@ func (s *Service) cleanupReviewPRTaskBatch(ctx context.Context, prTasks []*Revie
 			continue
 		}
 		if err := s.taskDeleter.DeleteTask(ctx, rpt.TaskID); err != nil {
-			if strings.Contains(err.Error(), "not found") {
+			if isTaskNotFound(err) {
 				// Task already deleted; clean up the orphaned dedup record.
 				_ = s.store.DeleteReviewPRTask(ctx, rpt.ID)
 				deleted++
@@ -1976,9 +2003,11 @@ func (s *Service) shouldDeleteReviewTask(ctx context.Context, rpt *ReviewPRTask,
 
 // reviewFailureKey builds the stable per-row identifier used for failure
 // tracking. Stable across polls so consecutive errors increment the same
-// counter and a recovery resets it cleanly.
+// counter and a recovery resets it cleanly. Includes the watch ID so two
+// watches monitoring the same (owner, repo, PR) don't collide and reset
+// each other's failure counters, suppressing the threshold-crossing Warn.
 func reviewFailureKey(rpt *ReviewPRTask) string {
-	return fmt.Sprintf("review:%s/%s#%d", rpt.RepoOwner, rpt.RepoName, rpt.PRNumber)
+	return fmt.Sprintf("review:%s:%s/%s#%d", rpt.ReviewWatchID, rpt.RepoOwner, rpt.RepoName, rpt.PRNumber)
 }
 
 // trackCleanupFailure increments the failure counter for key and emits a
@@ -2226,7 +2255,7 @@ func (s *Service) DeleteIssueWatch(ctx context.Context, id string) error {
 					continue
 				}
 				if err := s.taskDeleter.DeleteTask(ctx, it.TaskID); err != nil &&
-					!strings.Contains(err.Error(), "not found") {
+					!isTaskNotFound(err) {
 					s.logger.Warn("failed to delete issue task during watch cleanup",
 						zap.String("watch_id", id),
 						zap.String("task_id", it.TaskID),
@@ -2447,7 +2476,7 @@ func (s *Service) cleanupAllIssueTasks(ctx context.Context, orphansOnly bool) (i
 		return 0, nil
 	}
 	policyCache, enabledCache, unknownCache := s.buildIssueWatchCaches(ctx, issueTasks)
-	candidates := issueTasks[:0]
+	candidates := make([]*IssueWatchTask, 0, len(issueTasks))
 	for _, it := range issueTasks {
 		if unknownCache[it.IssueWatchID] {
 			continue
@@ -2510,7 +2539,7 @@ func (s *Service) cleanupIssueTaskBatch(ctx context.Context, issueTasks []*Issue
 			continue
 		}
 		if err := s.taskDeleter.DeleteTask(ctx, it.TaskID); err != nil {
-			if strings.Contains(err.Error(), "not found") {
+			if isTaskNotFound(err) {
 				_ = s.store.DeleteIssueWatchTask(ctx, it.ID)
 				deleted++
 				continue
@@ -2564,7 +2593,7 @@ func (s *Service) shouldDeleteIssueTask(ctx context.Context, it *IssueWatchTask,
 }
 
 func issueFailureKey(it *IssueWatchTask) string {
-	return fmt.Sprintf("issue:%s/%s#%d", it.RepoOwner, it.RepoName, it.IssueNumber)
+	return fmt.Sprintf("issue:%s:%s/%s#%d", it.IssueWatchID, it.RepoOwner, it.RepoName, it.IssueNumber)
 }
 
 func (s *Service) publishNewIssueEvent(ctx context.Context, watch *IssueWatch, issue *Issue) {

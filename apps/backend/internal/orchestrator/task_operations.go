@@ -216,7 +216,12 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 // and the user now wants to start the agent with a prompt (e.g., from the plan panel or chat).
 // When skipMessageRecord is true, only the session state is updated (the caller already stored the user message).
 // When planMode is true, plan mode instructions are injected into the prompt and session metadata is set.
-func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error) {
+// autoStart marks the launch as having been triggered by an automated path
+// (only consumed when skipMessageRecord is false — callers that store their
+// own message control its metadata directly).
+//
+//nolint:cyclop,funlen // existing complexity inherited from main's session-lifecycle handling; signature touched here only to thread autoStart
+func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error) {
 	s.logger.Debug("starting created session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -365,7 +370,7 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	// Record the initial user message and set plan mode metadata after launch.
 	// Note: we do NOT set session state here — the executor sets it to STARTING,
 	// and event handlers (handleAgentReady) transition it to WAITING_FOR_INPUT.
-	s.postLaunchCreated(ctx, taskID, sessionID, effectivePrompt, skipMessageRecord, planModeActive, attachments)
+	s.postLaunchCreated(ctx, taskID, sessionID, effectivePrompt, skipMessageRecord, planModeActive, autoStart, attachments)
 
 	// Ensure a PR watch exists so the poller can detect PRs created by the agent.
 	// PrepareTaskSession may have already created one, but if that goroutine failed
@@ -379,9 +384,13 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 // records the initial user message (unless skipped) and sets plan mode metadata.
 // It does NOT modify session state — the executor sets STARTING, and event handlers
 // (handleAgentReady) handle the transition to WAITING_FOR_INPUT.
-func (s *Service) postLaunchCreated(ctx context.Context, taskID, sessionID, prompt string, skipMessage, planModeActive bool, attachments []v1.MessageAttachment) {
+// autoStart marks the message as having been created by an automated trigger
+// (preserved through to recordInitialMessage's auto_start metadata tag); the
+// flag is only consumed when skipMessage is false (callers that store their
+// own message control its metadata directly).
+func (s *Service) postLaunchCreated(ctx context.Context, taskID, sessionID, prompt string, skipMessage, planModeActive, autoStart bool, attachments []v1.MessageAttachment) {
 	if !skipMessage {
-		s.recordInitialMessage(ctx, taskID, sessionID, prompt, planModeActive, false, attachments)
+		s.recordInitialMessage(ctx, taskID, sessionID, prompt, planModeActive, autoStart, attachments)
 	}
 
 	if planModeActive {
