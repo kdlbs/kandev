@@ -221,6 +221,12 @@ func validateFilterBounds(f SearchFilter) error {
 	if f.Priority != nil && (*f.Priority < 0 || *f.Priority > 4) {
 		return fmt.Errorf("%w: priority must be between 0 and 4", ErrInvalidConfig)
 	}
+	if f.EstimateMin != nil && *f.EstimateMin < 0 {
+		return fmt.Errorf("%w: estimateMin must be non-negative", ErrInvalidConfig)
+	}
+	if f.EstimateMax != nil && *f.EstimateMax < 0 {
+		return fmt.Errorf("%w: estimateMax must be non-negative", ErrInvalidConfig)
+	}
 	if f.EstimateMin != nil && f.EstimateMax != nil && *f.EstimateMin > *f.EstimateMax {
 		return fmt.Errorf("%w: estimateMin cannot be greater than estimateMax", ErrInvalidConfig)
 	}

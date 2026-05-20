@@ -197,15 +197,15 @@ func parseSearchNumericFilters(ctx *gin.Context, filter *SearchFilter) error {
 	}
 	if v := ctx.Query("estimate_min"); v != "" {
 		f, err := strconv.ParseFloat(v, 64)
-		if err != nil {
-			return fmt.Errorf("estimate_min must be a number")
+		if err != nil || f < 0 {
+			return fmt.Errorf("estimate_min must be a non-negative number")
 		}
 		filter.EstimateMin = &f
 	}
 	if v := ctx.Query("estimate_max"); v != "" {
 		f, err := strconv.ParseFloat(v, 64)
-		if err != nil {
-			return fmt.Errorf("estimate_max must be a number")
+		if err != nil || f < 0 {
+			return fmt.Errorf("estimate_max must be a non-negative number")
 		}
 		filter.EstimateMax = &f
 	}

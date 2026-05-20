@@ -561,9 +561,16 @@ func buildIssueFilter(f SearchFilter) map[string]interface{} {
 
 // --- labels ---
 
+// Linear's GraphQL API caps `first` at 250. We don't paginate labels/users
+// because the watcher dialog renders them as a single dropdown — a workspace
+// with >250 labels or members would have UX problems regardless of how the
+// data is fetched. If this limit is hit in practice, switch to cursor-based
+// pagination here and lazy-load in the UI.
+const linearMaxPageSize = 250
+
 const teamLabelsQuery = `
-query TeamLabels($filter: IssueLabelFilter!) {
-	issueLabels(first: 100, filter: $filter) {
+query TeamLabels($filter: IssueLabelFilter!, $first: Int!) {
+	issueLabels(first: $first, filter: $filter) {
 		nodes { id name color }
 	}
 }`
@@ -589,6 +596,7 @@ func (c *GraphQLClient) ListLabels(ctx context.Context, teamKey string) ([]Linea
 		"filter": map[string]interface{}{
 			"team": map[string]interface{}{"key": map[string]interface{}{"eq": teamKey}},
 		},
+		"first": linearMaxPageSize,
 	}
 	var data labelsData
 	if err := c.do(ctx, teamLabelsQuery, vars, &data); err != nil {
@@ -604,8 +612,8 @@ func (c *GraphQLClient) ListLabels(ctx context.Context, teamKey string) ([]Linea
 // --- users ---
 
 const teamMembersQuery = `
-query TeamMembers($filter: UserFilter!) {
-	users(first: 100, filter: $filter, orderBy: updatedAt) {
+query TeamMembers($filter: UserFilter!, $first: Int!) {
+	users(first: $first, filter: $filter, orderBy: updatedAt) {
 		nodes { id name displayName email avatarUrl }
 	}
 }`
@@ -636,6 +644,7 @@ func (c *GraphQLClient) ListUsers(ctx context.Context, teamKey string) ([]Linear
 				},
 			},
 		},
+		"first": linearMaxPageSize,
 	}
 	var data usersData
 	if err := c.do(ctx, teamMembersQuery, vars, &data); err != nil {

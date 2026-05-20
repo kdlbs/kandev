@@ -37,11 +37,15 @@ export function useTeamsAndStates(teamKey: string) {
   }, []);
 
   useEffect(() => {
-    if (!teamKey || fetchedTeams.current.has(teamKey)) return;
+    // Capture the Set once so cleanup uses the exact instance the effect
+    // body added to (ref.current is stable across renders, but eslint can't
+    // prove that — so we assign to a local).
+    const fetched = fetchedTeams.current;
+    if (!teamKey || fetched.has(teamKey)) return;
     // Mark in-flight so concurrent renders don't double-fetch; clear on
     // failure so a subsequent remount can retry instead of being stuck with
     // an empty cached entry.
-    fetchedTeams.current.add(teamKey);
+    fetched.add(teamKey);
     let cancelled = false;
     let anyFailed = false;
     const markFailed = () => {
@@ -73,13 +77,18 @@ export function useTeamsAndStates(teamKey: string) {
           if (!cancelled) setUsersByTeam((prev) => ({ ...prev, [teamKey]: [] }));
         }),
     ]).finally(() => {
-      // Clear the marker on failure OR cancellation so a remount can retry
-      // — leaving it set would permanently strand the team's data as
-      // whatever partial result the previous effect left behind.
-      if (anyFailed || cancelled) fetchedTeams.current.delete(teamKey);
+      // If a fetch failed (and we didn't cancel), drop the marker so the
+      // next visit to this team can retry. Success-path marker stays so
+      // cached data is reused.
+      if (anyFailed) fetched.delete(teamKey);
     });
     return () => {
       cancelled = true;
+      // Drop the marker on cleanup so rapid team switches (A → B → A)
+      // re-fetch on return. The fetch promise's late-arriving `if
+      // (!cancelled)` guard already prevents stale writes; without this
+      // delete the team could otherwise be stranded mid-load.
+      fetched.delete(teamKey);
     };
   }, [teamKey]);
 
