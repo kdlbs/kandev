@@ -505,13 +505,14 @@ function useEditorImperativeHandle(
         editor.state.doc.descendants((node) => {
           if (node.type.name !== "contextMention") return;
           const { kind, label, taskId, workflowId, workflowStepId, taskState } = node.attrs;
-          if (kind !== "task" || !taskId || seen.has(taskId)) return;
+          if (kind !== "task" || !taskId || !workflowId || !workflowStepId || seen.has(taskId))
+            return;
           seen.add(taskId);
           mentions.push({
             taskId,
             title: label ?? taskId,
-            workflowId: workflowId ?? "",
-            workflowStepId: workflowStepId ?? "",
+            workflowId,
+            workflowStepId,
             state: taskState ?? null,
           });
         });
