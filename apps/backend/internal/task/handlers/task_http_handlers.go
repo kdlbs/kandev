@@ -409,6 +409,7 @@ type httpCreateTaskRequest struct {
 	ParentID          string                    `json:"parent_id,omitempty"`
 	WorkspacePath     string                    `json:"workspace_path,omitempty"`
 	BlockedBy         []string                  `json:"blocked_by,omitempty"`
+	ProjectID         string                    `json:"project_id,omitempty"`
 	// Office task-handoffs phase 5 — workspace policy. Optional; same
 	// shape as the MCP create_task_kandev fields.
 	WorkspaceMode         string `json:"workspace_mode,omitempty"`
@@ -527,6 +528,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		ParentID:       body.ParentID,
 		WorkspacePath:  body.WorkspacePath,
 		BlockedBy:      body.BlockedBy,
+		ProjectID:      body.ProjectID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
