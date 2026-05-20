@@ -153,7 +153,9 @@ function FilterFields({
       <div className="space-y-1.5">
         <Label>States</Label>
         <p className="text-xs text-muted-foreground">
-          Click states to toggle. Empty matches every state on the team.
+          {form.teamKey
+            ? "Click states to toggle. Empty matches every state on the team."
+            : "Pick a team to choose specific workflow states."}
         </p>
         <StateMultiSelect
           states={states}
@@ -166,7 +168,9 @@ function FilterFields({
       <div className="space-y-1.5">
         <Label>Labels</Label>
         <p className="text-xs text-muted-foreground">
-          Click to toggle. Matches issues that have ANY of the selected labels.
+          {form.teamKey
+            ? "Click to toggle. Matches ANY of the selected labels."
+            : "Pick a team to choose specific labels."}
         </p>
         <LabelMultiSelect
           labels={labels}
@@ -263,9 +267,7 @@ function EstimateRow({ form, setForm }: { form: FormState; setForm: FormSetter }
     <div className="grid grid-cols-2 gap-4">
       <div className="space-y-1.5">
         <Label>Estimate min</Label>
-        <p className="text-xs text-muted-foreground">
-          Lower bound (points). Leave empty for no minimum.
-        </p>
+        <p className="text-xs text-muted-foreground">Lower bound in points (optional).</p>
         <Input
           type="number"
           value={form.estimateMin}
@@ -277,9 +279,7 @@ function EstimateRow({ form, setForm }: { form: FormState; setForm: FormSetter }
       </div>
       <div className="space-y-1.5">
         <Label>Estimate max</Label>
-        <p className="text-xs text-muted-foreground">
-          Upper bound (points). Leave empty for no maximum.
-        </p>
+        <p className="text-xs text-muted-foreground">Upper bound in points (optional).</p>
         <Input
           type="number"
           value={form.estimateMax}

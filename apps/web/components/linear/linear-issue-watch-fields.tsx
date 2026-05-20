@@ -115,11 +115,9 @@ export function StateMultiSelect({
   disabled: boolean;
 }) {
   if (disabled) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        Pick a team to choose specific workflow states.
-      </p>
-    );
+    // Caller's row description already explains the disabled state — render
+    // nothing here to avoid duplicate prose.
+    return null;
   }
   if (loading) {
     return <p className="text-xs text-muted-foreground">Loading states…</p>;
@@ -161,7 +159,9 @@ export function LabelMultiSelect({
   disabled: boolean;
 }) {
   if (disabled) {
-    return <p className="text-xs text-muted-foreground">Pick a team to choose specific labels.</p>;
+    // Caller's row description already explains the disabled state — render
+    // nothing here to avoid duplicate prose.
+    return null;
   }
   if (loading) {
     return <p className="text-xs text-muted-foreground">Loading labels…</p>;
