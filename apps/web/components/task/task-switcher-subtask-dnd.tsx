@@ -19,7 +19,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { cn } from "@/lib/utils";
 import type { TaskSwitcherItem } from "./task-switcher";
 
-const DRAG_ACTIVATION_DISTANCE = 8;
+export const DRAG_ACTIVATION_DISTANCE = 8;
 
 function SortableSubtaskRow({ taskId, children }: { taskId: string; children: React.ReactNode }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({

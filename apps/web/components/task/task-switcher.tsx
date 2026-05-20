@@ -23,9 +23,7 @@ import { TaskItem } from "./task-item";
 import { TaskItemWithContextMenu, type StepDef } from "./task-switcher-context-menu";
 import type { GroupedSidebarList, SidebarGroup } from "@/lib/sidebar/apply-view";
 import { type TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
-import { SortableSubtaskList } from "./task-switcher-subtask-dnd";
-
-const DRAG_ACTIVATION_DISTANCE = 8;
+import { DRAG_ACTIVATION_DISTANCE, SortableSubtaskList } from "./task-switcher-subtask-dnd";
 
 export type TaskSwitcherItem = {
   id: string;
