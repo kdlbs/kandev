@@ -12,7 +12,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
   return { ...base, ...overrides } as AppState;
 }
 
-describe("buildTaskMentionItems", () => {
+describe("buildTaskMentionItems / basics", () => {
   it("returns tasks from the current workflow with workflow/step names resolved", () => {
     const state = makeState({
       kanban: {
@@ -65,7 +65,9 @@ describe("buildTaskMentionItems", () => {
     const items = buildTaskMentionItems(state, "task-a");
     expect(items.map((i) => i.task?.taskId)).toEqual(["task-b"]);
   });
+});
 
+describe("buildTaskMentionItems / merging and filtering", () => {
   it("merges tasks from kanbanMulti snapshots and dedupes by id", () => {
     const state = makeState({
       kanban: {
@@ -97,6 +99,24 @@ describe("buildTaskMentionItems", () => {
 
     const ids = buildTaskMentionItems(state, null).map((i) => i.task?.taskId);
     expect(ids).toEqual(["task-a", "task-c", "task-d"]);
+  });
+
+  it("skips stale kanban tasks whose step is not in the current workflow's steps", () => {
+    const state = makeState({
+      kanban: {
+        workflowId: "wf-1",
+        steps: [{ id: "step-current", title: "Todo", color: "", position: 0 }],
+        tasks: [
+          { id: "task-fresh", workflowStepId: "step-current", title: "Fresh", position: 0 },
+          // Left over from a previous workflow: its step is not in wf-1's steps,
+          // so tagging it with wf-1 would be wrong.
+          { id: "task-stale", workflowStepId: "step-other", title: "Stale", position: 1 },
+        ],
+      },
+    } as unknown as Partial<AppState>);
+
+    const ids = buildTaskMentionItems(state, null).map((i) => i.task?.taskId);
+    expect(ids).toEqual(["task-fresh"]);
   });
 
   it("falls back to placeholder names when workflow/step are missing", () => {

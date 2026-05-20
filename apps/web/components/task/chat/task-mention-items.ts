@@ -61,7 +61,14 @@ export function buildTaskMentionItems(
   };
 
   if (state.kanban.workflowId) {
-    for (const t of state.kanban.tasks) addTask(t, state.kanban.workflowId);
+    // Guard against stale tasks left over from a previous workflow: only add
+    // entries whose workflowStepId belongs to the current workflow's steps,
+    // since we tag them with state.kanban.workflowId here.
+    const activeStepIds = new Set(state.kanban.steps.map((s) => s.id));
+    for (const t of state.kanban.tasks) {
+      if (activeStepIds.size > 0 && !activeStepIds.has(t.workflowStepId)) continue;
+      addTask(t, state.kanban.workflowId);
+    }
   }
   for (const [wfId, snap] of Object.entries(state.kanbanMulti.snapshots)) {
     for (const t of snap.tasks) addTask(t, wfId);

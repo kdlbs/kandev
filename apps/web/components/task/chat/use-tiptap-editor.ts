@@ -500,11 +500,13 @@ function useEditorImperativeHandle(
       },
       getTaskMentions: () => {
         if (!editor) return [];
+        const seen = new Set<string>();
         const mentions: TaskMentionData[] = [];
         editor.state.doc.descendants((node) => {
           if (node.type.name !== "contextMention") return;
           const { kind, label, taskId, workflowId, workflowStepId, taskState } = node.attrs;
-          if (kind !== "task" || !taskId) return;
+          if (kind !== "task" || !taskId || seen.has(taskId)) return;
+          seen.add(taskId);
           mentions.push({
             taskId,
             title: label ?? taskId,

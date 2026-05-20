@@ -50,12 +50,24 @@ function resolveStepTitle(stepId: string, state: AppState): string {
   return "Step";
 }
 
+// Strips characters that could break out of the <kandev-system> block when
+// task strings are interpolated verbatim — newlines (close-tag injection)
+// and angle brackets. Task titles can come from Jira/Linear sync or other
+// users in a shared workspace, so the data is not trusted.
+function sanitizeForPrompt(value: string): string {
+  return value.replace(/[\r\n<>]/g, " ");
+}
+
 export function buildTaskMentionsContext(tasks: TaskMentionData[], state: AppState): string {
   if (tasks.length === 0) return "";
   const lines = tasks.map((t) => {
     const stepTitle = resolveStepTitle(t.workflowStepId, state);
-    const stateSuffix = t.state ? `, state: ${t.state}` : "";
-    return `- ${t.title} (id: ${t.taskId}, workflow_id: ${t.workflowId}, step: ${stepTitle}${stateSuffix})`;
+    const title = sanitizeForPrompt(t.title);
+    const taskId = sanitizeForPrompt(t.taskId);
+    const workflowId = sanitizeForPrompt(t.workflowId);
+    const step = sanitizeForPrompt(stepTitle);
+    const stateSuffix = t.state ? `, state: ${sanitizeForPrompt(t.state)}` : "";
+    return `- ${title} (id: ${taskId}, workflow_id: ${workflowId}, step: ${step}${stateSuffix})`;
   });
   return (
     `\n\n<kandev-system>\n` +
