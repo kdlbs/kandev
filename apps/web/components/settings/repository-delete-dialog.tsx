@@ -26,18 +26,18 @@ export function DeleteRepositoryDialog({
   deleteLoading,
 }: DeleteRepositoryDialogProps) {
   const hasActiveSessions = activeSessionCount > 0;
-  const sessionWord = activeSessionCount === 1 ? "session" : "sessions";
   const isOne = activeSessionCount === 1;
+  const sessionWord = isOne ? "session" : "sessions";
+  const pronoun = isOne ? "it" : "them";
+  const description = hasActiveSessions
+    ? `This repository is used by ${activeSessionCount} active agent ${sessionWord}. Stop or finish ${pronoun} before deleting the repository.`
+    : "This will remove the repository and its scripts. This action cannot be undone.";
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Delete repository</DialogTitle>
-          <DialogDescription>
-            {hasActiveSessions
-              ? `This repository is used by ${activeSessionCount} active agent ${sessionWord}. Stop or finish ${isOne ? "it" : "them"} before deleting the repository.`
-              : "This will remove the repository and its scripts. This action cannot be undone."}
-          </DialogDescription>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button
