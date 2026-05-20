@@ -7,7 +7,7 @@ header = """# Changelog
 All notable changes to Kandev.\n
 """
 body = """
-{% set maintainers = ["carlosmflorencio"] %}\
+{% set maintainers = ["carlosflorencio", "jcfs", "zeval"] %}\
 {% if version %}\
 ## {{ version | trim_start_matches(pat="v") }} - {{ timestamp | date(format="%Y-%m-%d") }}
 {% else %}\
