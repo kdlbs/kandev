@@ -73,7 +73,10 @@ export function useTeamsAndStates(teamKey: string) {
           if (!cancelled) setUsersByTeam((prev) => ({ ...prev, [teamKey]: [] }));
         }),
     ]).finally(() => {
-      if (anyFailed) fetchedTeams.current.delete(teamKey);
+      // Clear the marker on failure OR cancellation so a remount can retry
+      // — leaving it set would permanently strand the team's data as
+      // whatever partial result the previous effect left behind.
+      if (anyFailed || cancelled) fetchedTeams.current.delete(teamKey);
     });
     return () => {
       cancelled = true;

@@ -81,7 +81,7 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	}
 	applyIssueWatchPatch(w, req)
 	if filterIsEmpty(w.Filter) {
-		return nil, fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, or assigned", ErrInvalidConfig)
+		return nil, fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, assigned, priority, labelIds, creatorId, or estimate range", ErrInvalidConfig)
 	}
 	if err := validateFilterBounds(w.Filter); err != nil {
 		return nil, err
