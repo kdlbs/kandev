@@ -363,7 +363,7 @@ export class SessionPage {
     return this.clarificationOverlay().getByTestId("clarification-next");
   }
 
-  /** Final "Submit answers" button (rendered only on the last step). */
+  /** Sticky "Submit" button in the overlay header (multi-question only). */
   clarificationSubmit(): Locator {
     return this.clarificationOverlay().getByTestId("clarification-submit");
   }

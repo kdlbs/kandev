@@ -235,7 +235,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           <div
             ref={clarificationContainerRef}
             data-testid="clarification-overlay-container"
-            className="px-1 overflow-y-auto overscroll-contain max-h-[50vh]"
+            className="px-1 overflow-y-scroll overscroll-contain max-h-[50vh]"
             style={clarificationHeight === null ? undefined : { height: clarificationHeight }}
           >
             <ClarificationInputOverlay
