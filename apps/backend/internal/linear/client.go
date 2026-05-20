@@ -18,6 +18,8 @@ type Client interface {
 	ListStates(ctx context.Context, teamKey string) ([]LinearWorkflowState, error)
 	SetIssueState(ctx context.Context, issueID, stateID string) error
 	ListTeams(ctx context.Context) ([]LinearTeam, error)
+	ListLabels(ctx context.Context, teamKey string) ([]LinearLabel, error)
+	ListUsers(ctx context.Context, teamKey string) ([]LinearUser, error)
 	SearchIssues(ctx context.Context, filter SearchFilter, pageToken string, maxResults int) (*SearchResult, error)
 }
 

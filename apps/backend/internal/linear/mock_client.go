@@ -15,6 +15,8 @@ type MockClient struct {
 	authResult   *TestConnectionResult
 	teams        []LinearTeam
 	statesByTeam map[string][]LinearWorkflowState
+	labelsByTeam map[string][]LinearLabel
+	usersByTeam  map[string][]LinearUser
 	issues       map[string]*LinearIssue // identifier (e.g. ENG-12) → issue
 	// issueOrder preserves insertion order so SearchIssues returns a stable
 	// sequence — Go map range is randomised, which would make any future test
@@ -42,6 +44,8 @@ func NewMockClient() *MockClient {
 			OrgName:     "Mock Org",
 		},
 		statesByTeam: make(map[string][]LinearWorkflowState),
+		labelsByTeam: make(map[string][]LinearLabel),
+		usersByTeam:  make(map[string][]LinearUser),
 		issues:       make(map[string]*LinearIssue),
 	}
 }
@@ -87,6 +91,24 @@ func (m *MockClient) SetIssueState(_ context.Context, issueID, stateID string) e
 	defer m.mu.Unlock()
 	m.setStateCalls = append(m.setStateCalls, setStateCall{IssueID: issueID, StateID: stateID})
 	return nil
+}
+
+func (m *MockClient) ListLabels(_ context.Context, teamKey string) ([]LinearLabel, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	src := m.labelsByTeam[teamKey]
+	out := make([]LinearLabel, len(src))
+	copy(out, src)
+	return out, nil
+}
+
+func (m *MockClient) ListUsers(_ context.Context, teamKey string) ([]LinearUser, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	src := m.usersByTeam[teamKey]
+	out := make([]LinearUser, len(src))
+	copy(out, src)
+	return out, nil
 }
 
 func (m *MockClient) ListTeams(context.Context) ([]LinearTeam, error) {
@@ -143,6 +165,24 @@ func (m *MockClient) SetStates(teamKey string, states []LinearWorkflowState) {
 	m.statesByTeam[teamKey] = cp
 }
 
+// SetLabels replaces the labels returned by ListLabels for a team.
+func (m *MockClient) SetLabels(teamKey string, labels []LinearLabel) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]LinearLabel, len(labels))
+	copy(cp, labels)
+	m.labelsByTeam[teamKey] = cp
+}
+
+// SetUsers replaces the users returned by ListUsers for a team.
+func (m *MockClient) SetUsers(teamKey string, users []LinearUser) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]LinearUser, len(users))
+	copy(cp, users)
+	m.usersByTeam[teamKey] = cp
+}
+
 // AddIssue inserts (or replaces) an issue keyed by its Identifier.
 func (m *MockClient) AddIssue(issue *LinearIssue) {
 	m.mu.Lock()
@@ -184,6 +224,8 @@ func (m *MockClient) Reset() {
 	}
 	m.teams = nil
 	m.statesByTeam = make(map[string][]LinearWorkflowState)
+	m.labelsByTeam = make(map[string][]LinearLabel)
+	m.usersByTeam = make(map[string][]LinearUser)
 	m.issues = make(map[string]*LinearIssue)
 	m.issueOrder = nil
 	m.getError = nil

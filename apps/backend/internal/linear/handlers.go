@@ -36,6 +36,8 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.POST("/config/test", c.httpTestConfig)
 	api.GET("/teams", c.httpListTeams)
 	api.GET("/states", c.httpListStates)
+	api.GET("/labels", c.httpListLabels)
+	api.GET("/users", c.httpListUsers)
 	api.GET("/issues", c.httpSearchIssues)
 	api.GET("/issues/:id", c.httpGetIssue)
 	api.POST("/issues/:id/state", c.httpSetIssueState)
@@ -125,14 +127,61 @@ func (c *Controller) httpListStates(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"states": states})
 }
 
+func (c *Controller) httpListLabels(ctx *gin.Context) {
+	teamKey := ctx.Query("team_key")
+	if teamKey == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "team_key required"})
+		return
+	}
+	labels, err := c.service.ListLabels(ctx.Request.Context(), teamKey)
+	if err != nil {
+		c.writeClientError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"labels": labels})
+}
+
+func (c *Controller) httpListUsers(ctx *gin.Context) {
+	teamKey := ctx.Query("team_key")
+	if teamKey == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "team_key required"})
+		return
+	}
+	users, err := c.service.ListUsers(ctx.Request.Context(), teamKey)
+	if err != nil {
+		c.writeClientError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"users": users})
+}
+
 func (c *Controller) httpSearchIssues(ctx *gin.Context) {
 	filter := SearchFilter{
-		Query:    ctx.Query("query"),
-		TeamKey:  ctx.Query("team_key"),
-		Assigned: ctx.Query("assigned"),
+		Query:     ctx.Query("query"),
+		TeamKey:   ctx.Query("team_key"),
+		Assigned:  ctx.Query("assigned"),
+		CreatorID: ctx.Query("creator_id"),
 	}
 	if states := ctx.Query("state_ids"); states != "" {
 		filter.StateIDs = splitCSV(states)
+	}
+	if labels := ctx.Query("label_ids"); labels != "" {
+		filter.LabelIDs = splitCSV(labels)
+	}
+	if p := ctx.Query("priority"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil {
+			filter.Priority = &v
+		}
+	}
+	if v := ctx.Query("estimate_min"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			filter.EstimateMin = &f
+		}
+	}
+	if v := ctx.Query("estimate_max"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			filter.EstimateMax = &f
+		}
 	}
 	pageToken := ctx.Query("page_token")
 	maxResults, _ := strconv.Atoi(ctx.Query("max_results"))

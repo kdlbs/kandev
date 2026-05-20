@@ -6,6 +6,34 @@ import (
 	"testing"
 )
 
+func TestService_CreateIssueWatch_AcceptsRichFilters(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	prio := 1
+	min := 1.0
+	cases := map[string]SearchFilter{
+		"priority":    {Priority: &prio},
+		"labels":      {LabelIDs: []string{"l1"}},
+		"creator":     {CreatorID: "u1"},
+		"estimateMin": {EstimateMin: &min},
+	}
+	for name, filter := range cases {
+		w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+			WorkspaceID:    "ws-1",
+			WorkflowID:     "wf",
+			WorkflowStepID: "step",
+			Filter:         filter,
+		})
+		if err != nil {
+			t.Errorf("%s: create rejected: %v", name, err)
+			continue
+		}
+		if w.ID == "" {
+			t.Errorf("%s: expected ID assigned", name)
+		}
+	}
+}
+
 // withSearchResults returns a fakeClient that always returns the given issues
 // for SearchIssues, ignoring the filter.
 func (c *fakeClient) withSearchResults(issues []LinearIssue) *fakeClient {

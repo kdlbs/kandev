@@ -254,3 +254,48 @@ func TestBuildIssueFilter_DropsEmpty(t *testing.T) {
 		t.Error("expected assignee filter")
 	}
 }
+
+func TestBuildIssueFilter_RichFilters(t *testing.T) {
+	prio := 2
+	min := 1.0
+	max := 5.0
+	got := buildIssueFilter(SearchFilter{
+		Priority:    &prio,
+		LabelIDs:    []string{"l1", "l2"},
+		CreatorID:   "u1",
+		EstimateMin: &min,
+		EstimateMax: &max,
+	})
+	prioBlock, ok := got["priority"].(map[string]interface{})
+	if !ok || prioBlock["eq"] != 2 {
+		t.Errorf("priority filter mismatch: %+v", got["priority"])
+	}
+	labelBlock, ok := got["labels"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("missing labels filter: %+v", got)
+	}
+	some, _ := labelBlock["some"].(map[string]interface{})
+	idBlock, _ := some["id"].(map[string]interface{})
+	in, _ := idBlock["in"].([]string)
+	if len(in) != 2 || in[0] != "l1" {
+		t.Errorf("label ids mismatch: %+v", labelBlock)
+	}
+	creator, _ := got["creator"].(map[string]interface{})
+	idEq, _ := creator["id"].(map[string]interface{})
+	if idEq["eq"] != "u1" {
+		t.Errorf("creator filter mismatch: %+v", got["creator"])
+	}
+	est, ok := got["estimate"].(map[string]interface{})
+	if !ok || est["gte"] != 1.0 || est["lte"] != 5.0 {
+		t.Errorf("estimate filter mismatch: %+v", got["estimate"])
+	}
+}
+
+func TestBuildIssueFilter_PriorityZero(t *testing.T) {
+	zero := 0
+	got := buildIssueFilter(SearchFilter{Priority: &zero})
+	prio, _ := got["priority"].(map[string]interface{})
+	if prio["eq"] != 0 {
+		t.Errorf("priority=0 should map to eq:0, got %+v", prio)
+	}
+}

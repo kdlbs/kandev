@@ -4,9 +4,11 @@ import type {
   LinearConfig,
   LinearIssue,
   LinearIssueWatch,
+  LinearLabel,
   LinearSearchFilter,
   LinearSearchResult,
   LinearTeam,
+  LinearUser,
   LinearWorkflowState,
   SetLinearConfigRequest,
   TestLinearConnectionResult,
@@ -57,6 +59,20 @@ export async function listLinearStates(teamKey: string, options?: ApiRequestOpti
   );
 }
 
+export async function listLinearLabels(teamKey: string, options?: ApiRequestOptions) {
+  return fetchJson<{ labels: LinearLabel[] }>(
+    `/api/v1/linear/labels?team_key=${encodeURIComponent(teamKey)}`,
+    options,
+  );
+}
+
+export async function listLinearUsers(teamKey: string, options?: ApiRequestOptions) {
+  return fetchJson<{ users: LinearUser[] }>(
+    `/api/v1/linear/users?team_key=${encodeURIComponent(teamKey)}`,
+    options,
+  );
+}
+
 export async function getLinearIssue(identifier: string, options?: ApiRequestOptions) {
   return fetchJson<LinearIssue>(`/api/v1/linear/issues/${encodeURIComponent(identifier)}`, options);
 }
@@ -70,6 +86,11 @@ export async function searchLinearIssues(
   if (params.teamKey) search.set("team_key", params.teamKey);
   if (params.stateIds?.length) search.set("state_ids", params.stateIds.join(","));
   if (params.assigned) search.set("assigned", params.assigned);
+  if (params.labelIds?.length) search.set("label_ids", params.labelIds.join(","));
+  if (params.priority !== undefined) search.set("priority", String(params.priority));
+  if (params.creatorId) search.set("creator_id", params.creatorId);
+  if (params.estimateMin !== undefined) search.set("estimate_min", String(params.estimateMin));
+  if (params.estimateMax !== undefined) search.set("estimate_max", String(params.estimateMax));
   if (params.pageToken) search.set("page_token", params.pageToken);
   if (params.maxResults) search.set("max_results", String(params.maxResults));
   const qs = search.toString();
