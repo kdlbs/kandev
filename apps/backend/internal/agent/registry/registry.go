@@ -61,6 +61,7 @@ func (r *Registry) LoadDefaults() {
 		agents.NewKiroACP(),
 		agents.NewQoderACP(),
 		agents.NewTraeACP(),
+		agents.NewOmpACP(),
 		agents.NewMockAgent(),
 	}
 

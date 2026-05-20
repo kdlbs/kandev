@@ -104,6 +104,13 @@ var newACPAgentSpecs = []struct {
 		passthroughArgv: []string{"traecli"},
 		installViaNpm:   false,
 	}},
+	{func() Agent { return NewOmpACP() }, acpAgentSpec{
+		id: "omp-acp", displayName: "omp", detectBinaries: []string{"omp"},
+		expectedArgv:    []string{"omp", "acp"},
+		inferenceArgv:   []string{"omp", "acp"},
+		passthroughArgv: []string{"omp"},
+		installViaNpm:   false,
+	}},
 }
 
 func TestNewACPAgents_IDAndDisplay(t *testing.T) {
