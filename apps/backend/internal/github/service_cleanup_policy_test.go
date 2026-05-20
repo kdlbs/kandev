@@ -378,6 +378,69 @@ func TestCleanupAllOrphanedReviewTasks_RespectsNeverPolicy(t *testing.T) {
 	}
 }
 
+// Regression for claude blocker on c4d0a678: when ListEnabledReviewWatches
+// returns an empty slice (user disabled or deleted every watch), the
+// poller used to early-return BEFORE running the orphan sweep — so the
+// sweep that exists precisely for this scenario never fired. Verify the
+// poller's checkReviewWatches now runs the sweep through to completion
+// and reaps the orphan task.
+func TestCheckReviewWatches_RunsOrphanSweepWhenNoEnabledWatches(t *testing.T) {
+	poller, svc, mockClient, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	// Create a watch + dedup row, then disable the watch so
+	// ListEnabledReviewWatches returns empty. The dedup row + task survive.
+	watch := &ReviewWatch{WorkspaceID: "ws-1", Enabled: false}
+	if err := store.CreateReviewWatch(ctx, watch); err != nil {
+		t.Fatalf("CreateReviewWatch: %v", err)
+	}
+	rpt := &ReviewPRTask{
+		ReviewWatchID: watch.ID,
+		RepoOwner:     "acme",
+		RepoName:      "widget",
+		PRNumber:      9001,
+		TaskID:        "task-9001",
+	}
+	if err := store.CreateReviewPRTask(ctx, rpt); err != nil {
+		t.Fatalf("CreateReviewPRTask: %v", err)
+	}
+	mockClient.AddPR(&PR{Number: 9001, State: prStateMerged, RepoOwner: "acme", RepoName: "widget"})
+
+	rec := &recordingTaskDeleter{}
+	svc.SetTaskDeleter(rec)
+
+	poller.checkReviewWatches(ctx)
+
+	if len(rec.calls) != 1 || rec.calls[0] != "task-9001" {
+		t.Fatalf("DeleteTask calls=%v, want [task-9001] (orphan sweep must run even with zero enabled watches)", rec.calls)
+	}
+}
+
+// Same regression on the issue side.
+func TestCheckIssueWatches_RunsOrphanSweepWhenNoEnabledWatches(t *testing.T) {
+	poller, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	svc.client = newIssueStateMockClient(map[int]string{9002: "closed"})
+
+	watch := &IssueWatch{WorkspaceID: "ws-1", Enabled: false}
+	if err := store.CreateIssueWatch(ctx, watch); err != nil {
+		t.Fatalf("CreateIssueWatch: %v", err)
+	}
+	_, _ = store.ReserveIssueWatchTask(ctx, watch.ID, "acme", "widget", 9002, "https://example/9002")
+	if err := store.AssignIssueWatchTaskID(ctx, watch.ID, "acme", "widget", 9002, "task-9002"); err != nil {
+		t.Fatalf("AssignIssueWatchTaskID: %v", err)
+	}
+
+	rec := &recordingTaskDeleter{}
+	svc.SetTaskDeleter(rec)
+
+	poller.checkIssueWatches(ctx)
+
+	if len(rec.calls) != 1 || rec.calls[0] != "task-9002" {
+		t.Fatalf("DeleteTask calls=%v, want [task-9002] (orphan sweep must run even with zero enabled watches)", rec.calls)
+	}
+}
+
 // --- Issue-side mirrors ---
 // These tests mirror the review-side coverage above for the symmetric
 // issue path. Without them a copy-paste divergence between

@@ -538,9 +538,9 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 		p.logger.Error("failed to list review watches", zap.Error(err))
 		return
 	}
-	if len(watches) == 0 {
-		return
-	}
+	// Note: do NOT early-return on len(watches) == 0 — the global orphan
+	// sweep below is precisely what handles the "user disabled / deleted
+	// every watch" case. Fall through to the no-op loop and run the sweep.
 	p.logger.Debug("checking review watches", zap.Int("count", len(watches)))
 	for _, watch := range watches {
 		// A previous iteration in this same cycle may have exhausted the
@@ -624,9 +624,8 @@ func (p *Poller) checkIssueWatches(ctx context.Context) {
 		p.logger.Error("failed to list issue watches", zap.Error(err))
 		return
 	}
-	if len(watches) == 0 {
-		return
-	}
+	// Note: do NOT early-return on len(watches) == 0 — the orphan sweep
+	// below is what reaps tasks for disabled/deleted watches. Fall through.
 	p.logger.Debug("checking issue watches", zap.Int("count", len(watches)))
 	for _, watch := range watches {
 		if p.searchBucketExhausted("issue_watch") {

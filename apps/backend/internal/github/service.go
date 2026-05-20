@@ -1916,7 +1916,11 @@ func (s *Service) cleanupReviewPRTaskBatch(ctx context.Context, prTasks []*Revie
 		// reaches a terminal state, same gating as the normal path.
 		if rpt.TaskID == "" {
 			if should, _ := s.shouldDeleteReviewTask(ctx, rpt, policy); should {
-				_ = s.store.DeleteReviewPRTask(ctx, rpt.ID)
+				if err := s.store.DeleteReviewPRTask(ctx, rpt.ID); err != nil {
+					s.logger.Warn("failed to delete orphan dedup row",
+						zap.String("dedup_id", rpt.ID), zap.Error(err))
+					continue
+				}
 				deleted++
 			}
 			continue
@@ -1928,7 +1932,11 @@ func (s *Service) cleanupReviewPRTaskBatch(ctx context.Context, prTasks []*Revie
 		if err := s.taskDeleter.DeleteTask(ctx, rpt.TaskID); err != nil {
 			if isTaskNotFound(err) {
 				// Task already deleted; clean up the orphaned dedup record.
-				_ = s.store.DeleteReviewPRTask(ctx, rpt.ID)
+				if err := s.store.DeleteReviewPRTask(ctx, rpt.ID); err != nil {
+					s.logger.Warn("failed to delete orphan dedup row after task-not-found",
+						zap.String("dedup_id", rpt.ID), zap.Error(err))
+					continue
+				}
 				deleted++
 				continue
 			}
@@ -1936,7 +1944,15 @@ func (s *Service) cleanupReviewPRTaskBatch(ctx context.Context, prTasks []*Revie
 				zap.String("task_id", rpt.TaskID), zap.Error(err))
 			continue
 		}
-		_ = s.store.DeleteReviewPRTask(ctx, rpt.ID)
+		if err := s.store.DeleteReviewPRTask(ctx, rpt.ID); err != nil {
+			// Task is gone but dedup row survived: log Warn and DON'T
+			// increment deleted (the next sweep cycle will retry and the
+			// settings-page toast stays accurate).
+			s.logger.Warn("deleted task but failed to remove dedup row",
+				zap.String("task_id", rpt.TaskID),
+				zap.String("dedup_id", rpt.ID), zap.Error(err))
+			continue
+		}
 		s.logger.Info("deleted review task",
 			zap.String("task_id", rpt.TaskID),
 			zap.String("reason", reason),
@@ -2529,7 +2545,11 @@ func (s *Service) cleanupIssueTaskBatch(ctx context.Context, issueTasks []*Issue
 		policy := resolvePolicy(it)
 		if it.TaskID == "" {
 			if should, _ := s.shouldDeleteIssueTask(ctx, it, policy); should {
-				_ = s.store.DeleteIssueWatchTask(ctx, it.ID)
+				if err := s.store.DeleteIssueWatchTask(ctx, it.ID); err != nil {
+					s.logger.Warn("failed to delete orphan dedup row",
+						zap.String("dedup_id", it.ID), zap.Error(err))
+					continue
+				}
 				deleted++
 			}
 			continue
@@ -2540,7 +2560,11 @@ func (s *Service) cleanupIssueTaskBatch(ctx context.Context, issueTasks []*Issue
 		}
 		if err := s.taskDeleter.DeleteTask(ctx, it.TaskID); err != nil {
 			if isTaskNotFound(err) {
-				_ = s.store.DeleteIssueWatchTask(ctx, it.ID)
+				if err := s.store.DeleteIssueWatchTask(ctx, it.ID); err != nil {
+					s.logger.Warn("failed to delete orphan dedup row after task-not-found",
+						zap.String("dedup_id", it.ID), zap.Error(err))
+					continue
+				}
 				deleted++
 				continue
 			}
@@ -2548,7 +2572,12 @@ func (s *Service) cleanupIssueTaskBatch(ctx context.Context, issueTasks []*Issue
 				zap.String("task_id", it.TaskID), zap.Error(err))
 			continue
 		}
-		_ = s.store.DeleteIssueWatchTask(ctx, it.ID)
+		if err := s.store.DeleteIssueWatchTask(ctx, it.ID); err != nil {
+			s.logger.Warn("deleted task but failed to remove dedup row",
+				zap.String("task_id", it.TaskID),
+				zap.String("dedup_id", it.ID), zap.Error(err))
+			continue
+		}
 		s.logger.Info("deleted issue task",
 			zap.String("task_id", it.TaskID),
 			zap.String("reason", reason),
