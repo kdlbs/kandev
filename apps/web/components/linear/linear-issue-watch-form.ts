@@ -16,13 +16,15 @@ export const PRIORITY_OPTIONS: { id: string; label: string }[] = [
   { id: "4", label: "Low" },
 ];
 
-export type FormState = {
+export type LinearPriority = 0 | 1 | 2 | 3 | 4;
+
+export interface FormState {
   workspaceId: string;
   query: string;
   teamKey: string;
   stateIds: string[];
   assigned: string;
-  priority: number | null;
+  priority: LinearPriority | null;
   labelIds: string[];
   creatorId: string;
   estimateMin: string;
@@ -34,7 +36,7 @@ export type FormState = {
   prompt: string;
   enabled: boolean;
   pollInterval: number;
-};
+}
 
 export function makeEmptyForm(workspaceId: string): FormState {
   return {
@@ -83,6 +85,13 @@ export function formStateFromWatch(w: LinearIssueWatch): FormState {
     enabled: w.enabled,
     pollInterval: w.pollIntervalSeconds,
   };
+}
+
+export function parsePriority(raw: string): LinearPriority | null {
+  if (raw === PRIORITY_ANY) return null;
+  const n = Number(raw);
+  if (n === 0 || n === 1 || n === 2 || n === 3 || n === 4) return n;
+  return null;
 }
 
 export function parseEstimate(raw: string): number | undefined {

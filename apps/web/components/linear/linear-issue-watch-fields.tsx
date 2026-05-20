@@ -38,29 +38,43 @@ export function useTeamsAndStates(teamKey: string) {
 
   useEffect(() => {
     if (!teamKey || fetchedTeams.current.has(teamKey)) return;
+    // Mark in-flight so concurrent renders don't double-fetch; clear on
+    // failure so a subsequent remount can retry instead of being stuck with
+    // an empty cached entry.
     fetchedTeams.current.add(teamKey);
     let cancelled = false;
-    listLinearStates(teamKey)
-      .then((res) => {
-        if (!cancelled) setStatesByTeam((prev) => ({ ...prev, [teamKey]: res.states ?? [] }));
-      })
-      .catch(() => {
-        if (!cancelled) setStatesByTeam((prev) => ({ ...prev, [teamKey]: [] }));
-      });
-    listLinearLabels(teamKey)
-      .then((res) => {
-        if (!cancelled) setLabelsByTeam((prev) => ({ ...prev, [teamKey]: res.labels ?? [] }));
-      })
-      .catch(() => {
-        if (!cancelled) setLabelsByTeam((prev) => ({ ...prev, [teamKey]: [] }));
-      });
-    listLinearUsers(teamKey)
-      .then((res) => {
-        if (!cancelled) setUsersByTeam((prev) => ({ ...prev, [teamKey]: res.users ?? [] }));
-      })
-      .catch(() => {
-        if (!cancelled) setUsersByTeam((prev) => ({ ...prev, [teamKey]: [] }));
-      });
+    let anyFailed = false;
+    const markFailed = () => {
+      anyFailed = true;
+    };
+    Promise.allSettled([
+      listLinearStates(teamKey)
+        .then((res) => {
+          if (!cancelled) setStatesByTeam((prev) => ({ ...prev, [teamKey]: res.states ?? [] }));
+        })
+        .catch(() => {
+          markFailed();
+          if (!cancelled) setStatesByTeam((prev) => ({ ...prev, [teamKey]: [] }));
+        }),
+      listLinearLabels(teamKey)
+        .then((res) => {
+          if (!cancelled) setLabelsByTeam((prev) => ({ ...prev, [teamKey]: res.labels ?? [] }));
+        })
+        .catch(() => {
+          markFailed();
+          if (!cancelled) setLabelsByTeam((prev) => ({ ...prev, [teamKey]: [] }));
+        }),
+      listLinearUsers(teamKey)
+        .then((res) => {
+          if (!cancelled) setUsersByTeam((prev) => ({ ...prev, [teamKey]: res.users ?? [] }));
+        })
+        .catch(() => {
+          markFailed();
+          if (!cancelled) setUsersByTeam((prev) => ({ ...prev, [teamKey]: [] }));
+        }),
+    ]).finally(() => {
+      if (anyFailed) fetchedTeams.current.delete(teamKey);
+    });
     return () => {
       cancelled = true;
     };
@@ -106,14 +120,15 @@ export function StateMultiSelect({
       {states.map((s) => {
         const active = selected.includes(s.id);
         return (
-          <Badge
+          <button
             key={s.id}
-            variant={active ? "default" : "outline"}
-            className="cursor-pointer"
+            type="button"
             onClick={() => onToggle(s.id)}
+            aria-pressed={active}
+            className="cursor-pointer"
           >
-            {s.name}
-          </Badge>
+            <Badge variant={active ? "default" : "outline"}>{s.name}</Badge>
+          </button>
         );
       })}
     </div>
@@ -147,14 +162,15 @@ export function LabelMultiSelect({
       {labels.map((l) => {
         const active = selected.includes(l.id);
         return (
-          <Badge
+          <button
             key={l.id}
-            variant={active ? "default" : "outline"}
-            className="cursor-pointer"
+            type="button"
             onClick={() => onToggle(l.id)}
+            aria-pressed={active}
+            className="cursor-pointer"
           >
-            {l.name}
-          </Badge>
+            <Badge variant={active ? "default" : "outline"}>{l.name}</Badge>
+          </button>
         );
       })}
     </div>

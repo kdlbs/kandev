@@ -96,7 +96,7 @@ export interface LinearSearchFilter {
   /** "me" | "unassigned" | "" (any) */
   assigned?: string;
   /** 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low. Omit for no priority filter. */
-  priority?: number;
+  priority?: 0 | 1 | 2 | 3 | 4;
   /** Issue labels (OR semantics — match any). */
   labelIds?: string[];
   /** Filter by issue creator UUID. */

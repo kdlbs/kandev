@@ -37,6 +37,7 @@ import {
   filterIsEmpty,
   formStateFromWatch,
   makeEmptyForm,
+  parsePriority,
   userOptionLabel,
 } from "./linear-issue-watch-form";
 import type {
@@ -237,9 +238,7 @@ function PriorityAndCreatorRow({
         label="Priority"
         description="Match issues at one priority level."
         value={form.priority === null ? PRIORITY_ANY : String(form.priority)}
-        onChange={(v) =>
-          setForm((p) => ({ ...p, priority: v === PRIORITY_ANY ? null : Number(v) }))
-        }
+        onChange={(v) => setForm((p) => ({ ...p, priority: parsePriority(v) }))}
         placeholder="(any)"
         items={PRIORITY_OPTIONS}
       />

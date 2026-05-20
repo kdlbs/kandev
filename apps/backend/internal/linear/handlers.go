@@ -3,6 +3,7 @@ package linear
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -168,20 +169,9 @@ func (c *Controller) httpSearchIssues(ctx *gin.Context) {
 	if labels := ctx.Query("label_ids"); labels != "" {
 		filter.LabelIDs = splitCSV(labels)
 	}
-	if p := ctx.Query("priority"); p != "" {
-		if v, err := strconv.Atoi(p); err == nil {
-			filter.Priority = &v
-		}
-	}
-	if v := ctx.Query("estimate_min"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			filter.EstimateMin = &f
-		}
-	}
-	if v := ctx.Query("estimate_max"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			filter.EstimateMax = &f
-		}
+	if err := parseSearchNumericFilters(ctx, &filter); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 	pageToken := ctx.Query("page_token")
 	maxResults, _ := strconv.Atoi(ctx.Query("max_results"))
@@ -191,6 +181,38 @@ func (c *Controller) httpSearchIssues(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, result)
+}
+
+// parseSearchNumericFilters parses priority + estimate query params onto the
+// filter and returns a 400-worthy error when any are malformed. Invalid input
+// is rejected rather than silently dropped so callers don't accidentally widen
+// the search by typoing a number.
+func parseSearchNumericFilters(ctx *gin.Context, filter *SearchFilter) error {
+	if p := ctx.Query("priority"); p != "" {
+		v, err := strconv.Atoi(p)
+		if err != nil || v < 0 || v > 4 {
+			return fmt.Errorf("priority must be an integer between 0 and 4")
+		}
+		filter.Priority = &v
+	}
+	if v := ctx.Query("estimate_min"); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return fmt.Errorf("estimate_min must be a number")
+		}
+		filter.EstimateMin = &f
+	}
+	if v := ctx.Query("estimate_max"); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return fmt.Errorf("estimate_max must be a number")
+		}
+		filter.EstimateMax = &f
+	}
+	if filter.EstimateMin != nil && filter.EstimateMax != nil && *filter.EstimateMin > *filter.EstimateMax {
+		return fmt.Errorf("estimate_min cannot be greater than estimate_max")
+	}
+	return nil
 }
 
 func (c *Controller) httpGetIssue(ctx *gin.Context) {

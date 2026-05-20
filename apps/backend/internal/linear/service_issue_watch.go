@@ -83,6 +83,9 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	if filterIsEmpty(w.Filter) {
 		return nil, fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, or assigned", ErrInvalidConfig)
 	}
+	if err := validateFilterBounds(w.Filter); err != nil {
+		return nil, err
+	}
 	if w.WorkflowID == "" || w.WorkflowStepID == "" {
 		return nil, fmt.Errorf("%w: workflowId and workflowStepId cannot be empty", ErrInvalidConfig)
 	}
@@ -200,10 +203,26 @@ func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 	if filterIsEmpty(normalizeFilter(req.Filter)) {
 		return fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, assigned, priority, labelIds, creatorId, or estimate range", ErrInvalidConfig)
 	}
+	if err := validateFilterBounds(req.Filter); err != nil {
+		return err
+	}
 	if req.PollIntervalSeconds != 0 {
 		if err := validatePollInterval(req.PollIntervalSeconds); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validateFilterBounds rejects out-of-range values for fields where the wire
+// type permits invalid values (e.g. Priority being an unconstrained int).
+// Empty / unset fields pass without check.
+func validateFilterBounds(f SearchFilter) error {
+	if f.Priority != nil && (*f.Priority < 0 || *f.Priority > 4) {
+		return fmt.Errorf("%w: priority must be between 0 and 4", ErrInvalidConfig)
+	}
+	if f.EstimateMin != nil && f.EstimateMax != nil && *f.EstimateMin > *f.EstimateMax {
+		return fmt.Errorf("%w: estimateMin cannot be greater than estimateMax", ErrInvalidConfig)
 	}
 	return nil
 }
