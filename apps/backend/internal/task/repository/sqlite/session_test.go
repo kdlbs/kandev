@@ -191,3 +191,119 @@ func TestIncrementTaskSessionUsage_EmptySessionIDNoOp(t *testing.T) {
 		t.Errorf("empty session id should be a no-op, got %v", err)
 	}
 }
+
+// seedRepoLink wires up a workspace, repository, task, task_repositories link
+// row, and a task_session row in the given state. Used to exercise the join
+// in CountActiveTaskSessionsByRepository.
+func seedRepoLink(t *testing.T, repo *Repository, workspaceID, repositoryID, taskID, sessionID, state string) {
+	t.Helper()
+	now := time.Now().UTC()
+	_, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT OR IGNORE INTO workspaces (id, name, created_at, updated_at)
+		VALUES (?, 'ws', ?, ?)
+	`), workspaceID, now, now)
+	if err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	_, err = repo.db.Exec(repo.db.Rebind(`
+		INSERT OR IGNORE INTO repositories (id, workspace_id, name, created_at, updated_at)
+		VALUES (?, ?, 'repo', ?, ?)
+	`), repositoryID, workspaceID, now, now)
+	if err != nil {
+		t.Fatalf("seed repository: %v", err)
+	}
+	_, err = repo.db.Exec(repo.db.Rebind(`
+		INSERT OR IGNORE INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, ?, 'test task', ?, ?)
+	`), taskID, workspaceID, now, now)
+	if err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	_, err = repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO task_repositories (id, task_id, repository_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), "tr-"+taskID+"-"+repositoryID, taskID, repositoryID, now, now)
+	if err != nil {
+		t.Fatalf("seed task_repositories: %v", err)
+	}
+	_, err = repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO task_sessions (id, task_id, state, started_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), sessionID, taskID, state, now, now)
+	if err != nil {
+		t.Fatalf("seed task_session: %v", err)
+	}
+}
+
+// TestCountActiveTaskSessionsByRepository_NoSessions verifies the count is
+// zero when no sessions reference the repository at all.
+func TestCountActiveTaskSessionsByRepository_NoSessions(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	count, err := repo.CountActiveTaskSessionsByRepository(context.Background(), "repo-empty")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0, got %d", count)
+	}
+}
+
+// TestCountActiveTaskSessionsByRepository_CountsActiveOnly verifies the join
+// counts sessions in active states (CREATED, STARTING, RUNNING,
+// WAITING_FOR_INPUT) and excludes sessions in terminal states.
+func TestCountActiveTaskSessionsByRepository_CountsActiveOnly(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	// Two active sessions across two tasks linked to the repo.
+	seedRepoLink(t, repo, "ws-a", "repo-a", "task-a1", "sess-a1", "RUNNING")
+	seedRepoLink(t, repo, "ws-a", "repo-a", "task-a2", "sess-a2", "WAITING_FOR_INPUT")
+	// Terminal-state session linked to the repo — must NOT count.
+	seedRepoLink(t, repo, "ws-a", "repo-a", "task-a3", "sess-a3", "COMPLETED")
+	// Active session linked to a different repo — must NOT count.
+	seedRepoLink(t, repo, "ws-a", "repo-b", "task-b1", "sess-b1", "RUNNING")
+
+	count, err := repo.CountActiveTaskSessionsByRepository(ctx, "repo-a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("expected 2 active sessions, got %d", count)
+	}
+}
+
+// TestCountActiveTaskSessionsByRepository_RequiresJoinRow verifies that a
+// session whose task is NOT linked via task_repositories is not counted, even
+// if the session is active. This guards against accidentally widening the
+// query to use task_sessions.repository_id.
+func TestCountActiveTaskSessionsByRepository_RequiresJoinRow(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	// Seed workspace, repo, and a task with the link.
+	seedRepoLink(t, repo, "ws-j", "repo-j", "task-j1", "sess-j1", "RUNNING")
+
+	// Seed a second task in the same workspace with an active session, but
+	// without inserting a task_repositories row pointing at repo-j.
+	now := time.Now().UTC()
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES ('task-j2', 'ws-j', 'orphan', ?, ?)
+	`), now, now); err != nil {
+		t.Fatalf("seed orphan task: %v", err)
+	}
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO task_sessions (id, task_id, state, started_at, updated_at)
+		VALUES ('sess-j2', 'task-j2', 'RUNNING', ?, ?)
+	`), now, now); err != nil {
+		t.Fatalf("seed orphan session: %v", err)
+	}
+
+	count, err := repo.CountActiveTaskSessionsByRepository(ctx, "repo-j")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected only the linked session to be counted, got %d", count)
+	}
+}

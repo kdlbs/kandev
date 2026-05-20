@@ -40,7 +40,9 @@ test.describe("Repository deletion", () => {
   }) => {
     test.setTimeout(60_000);
 
-    const suffix = `ok-${Date.now()}`;
+    // testPage runs e2eReset before every test/retry, so a static suffix is
+    // safe and keeps test output deterministic.
+    const suffix = "ok";
     const repo = await makeRepo({
       apiClient,
       backendTmpDir: backend.tmpDir,
@@ -74,7 +76,7 @@ test.describe("Repository deletion", () => {
   }) => {
     test.setTimeout(90_000);
 
-    const suffix = `blocked-${Date.now()}`;
+    const suffix = "blocked";
     const repo = await makeRepo({
       apiClient,
       backendTmpDir: backend.tmpDir,
@@ -133,10 +135,12 @@ test.describe("Repository deletion", () => {
     // count > 0 path must not render it.
     await expect(dialog.getByRole("button", { name: "Delete Repository" })).toHaveCount(0);
 
-    // Radix DialogContent renders its own X close icon also named "Close", so
-    // pin to the footer button via .first() (the footer button precedes the X
-    // in DOM order in this dialog).
-    const closeButton = dialog.getByRole("button", { name: "Close", exact: true }).first();
+    // Radix DialogContent renders its own X close icon also labelled "Close";
+    // scope to the footer slot so the locator resolves strictly to the visible
+    // footer button instead of silently disambiguating with .first().
+    const closeButton = dialog
+      .locator('[data-slot="dialog-footer"]')
+      .getByRole("button", { name: "Close", exact: true });
     await expect(closeButton).toBeVisible();
     await closeButton.click();
     await expect(dialog).toBeHidden({ timeout: 5_000 });

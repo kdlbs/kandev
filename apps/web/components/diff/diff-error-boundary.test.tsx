@@ -7,7 +7,10 @@ function Boom({ message = "boom" }: { message?: string }): never {
   throw new Error(message);
 }
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 beforeEach(() => {
   // React logs caught errors to console.error — silence so test output stays clean.

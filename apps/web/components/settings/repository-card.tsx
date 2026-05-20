@@ -495,8 +495,11 @@ function useRepositoryDelete(
   });
 
   const handleOpenDelete = async () => {
+    // Reset count up-front so a stale value from a previous open can't flash
+    // the destructive button between dialog mount and the async fetch
+    // resolving with the fresh count.
+    setActiveSessionCount(0);
     if (repositoryId.startsWith("temp-repo-")) {
-      setActiveSessionCount(0);
       setDeleteOpen(true);
       return;
     }
