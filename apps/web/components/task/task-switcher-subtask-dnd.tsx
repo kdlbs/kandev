@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { Fragment, useCallback, useMemo } from "react";
 import {
   DndContext,
   PointerSensor,
@@ -92,7 +92,13 @@ export function SortableSubtaskList({
   renderRow: (sub: TaskSwitcherItem) => React.ReactNode;
 }) {
   if (!onReorderSubtasks) {
-    return <>{subtasks.map((sub) => renderRow(sub))}</>;
+    return (
+      <>
+        {subtasks.map((sub) => (
+          <Fragment key={sub.id}>{renderRow(sub)}</Fragment>
+        ))}
+      </>
+    );
   }
   return (
     <SortableSubtaskListInner
