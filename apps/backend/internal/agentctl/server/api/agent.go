@@ -313,8 +313,10 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 }
 
 // injectKandevMcpServers prepends the local kandev MCP server to the list of MCP servers.
-// Both SSE and HTTP variants are injected - the agent's capability filtering will select
-// the appropriate one based on what the agent supports (SSE for Claude Code, HTTP for Codex ACP).
+// Both HTTP and SSE variants are injected - the agent's capability filtering will select
+// the appropriate one based on what the agent supports. HTTP is listed first so that
+// when an agent advertises both transports the "first surviving entry wins" dedup keeps
+// the HTTP entry (modern streamable MCP); SSE remains as a fallback for SSE-only agents.
 // Any existing kandev server in the list is filtered out to avoid duplicates.
 func (s *Server) injectKandevMcpServers(mcpServers []types.McpServer) []types.McpServer {
 	kandevMcpSse := types.McpServer{
@@ -328,15 +330,15 @@ func (s *Server) injectKandevMcpServers(mcpServers []types.McpServer) []types.Mc
 		URL:  fmt.Sprintf("http://localhost:%d%s", s.cfg.Port, mcpPathHTTP),
 	}
 	filtered := make([]types.McpServer, 0, len(mcpServers)+2)
-	filtered = append(filtered, kandevMcpSse, kandevMcpHttp)
+	filtered = append(filtered, kandevMcpHttp, kandevMcpSse)
 	for _, srv := range mcpServers {
 		if srv.Name != kandevMcpServerName {
 			filtered = append(filtered, srv)
 		}
 	}
-	s.logger.Debug("injected local kandev MCP servers (sse+http)",
-		zap.String("sse_url", kandevMcpSse.URL),
+	s.logger.Debug("injected local kandev MCP servers (http+sse)",
 		zap.String("http_url", kandevMcpHttp.URL),
+		zap.String("sse_url", kandevMcpSse.URL),
 		zap.Int("total_servers", len(filtered)))
 	return filtered
 }

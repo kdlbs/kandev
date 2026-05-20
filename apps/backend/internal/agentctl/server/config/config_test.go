@@ -75,3 +75,43 @@ func TestGenerateSelfToken(t *testing.T) {
 		t.Fatal("expected unique tokens, got identical")
 	}
 }
+
+// TestInjectKandevMcpServer_HttpFirst is the McpServerConfig counterpart to
+// api.TestInjectKandevMcpServers_HttpFirst. HTTP must appear before SSE so the
+// downstream capability filter dedup keeps the HTTP transport for agents that
+// advertise both transports.
+func TestInjectKandevMcpServer_HttpFirst(t *testing.T) {
+	got := injectKandevMcpServer(nil, 12345)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 kandev entries, got %d: %+v", len(got), got)
+	}
+	if got[0].Name != kandevMcpServerName || got[0].Type != "http" {
+		t.Errorf("expected first entry name=%q type=http, got name=%q type=%q",
+			kandevMcpServerName, got[0].Name, got[0].Type)
+	}
+	if got[0].URL != "http://localhost:12345/mcp" {
+		t.Errorf("expected http URL .../mcp, got %q", got[0].URL)
+	}
+	if got[1].Name != kandevMcpServerName || got[1].Type != "sse" {
+		t.Errorf("expected second entry name=%q type=sse, got name=%q type=%q",
+			kandevMcpServerName, got[1].Name, got[1].Type)
+	}
+	if got[1].URL != "http://localhost:12345/sse" {
+		t.Errorf("expected sse URL .../sse, got %q", got[1].URL)
+	}
+
+	upstream := []McpServerConfig{
+		{Name: "other", Type: "stdio", Command: "x"},
+		{Name: kandevMcpServerName, Type: "sse", URL: "http://stale/sse"},
+	}
+	got = injectKandevMcpServer(upstream, 12345)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 entries (http+sse+other), got %d: %+v", len(got), got)
+	}
+	if got[0].Type != "http" || got[1].Type != "sse" {
+		t.Errorf("expected injected order http,sse; got %q,%q", got[0].Type, got[1].Type)
+	}
+	if got[2].Name != "other" || got[2].Command != "x" {
+		t.Errorf("expected upstream 'other' entry last, got %+v", got[2])
+	}
+}
