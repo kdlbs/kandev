@@ -71,7 +71,7 @@ export default async function RootLayout({
             <DiffWorkerPoolProvider>
               <TooltipProvider>
                 <ToastProvider>
-                  <SonnerToaster richColors position="bottom-right" />
+                  <SonnerToaster richColors position="top-right" />
                   <SessionFailureToastBridge />
                   <SidebarViewsSyncBridge />
                   <LogBufferBridge />

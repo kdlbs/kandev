@@ -66,7 +66,7 @@ export function NewTaskDialog({
         title: draft.title.trim(),
         description: draft.description.trim() || undefined,
         parent_id: parentTaskId,
-        priority: draft.priority || undefined,
+        priority: draft.priority,
         project_id: draft.projectId || undefined,
         metadata: executionPolicy ? { ...metadata, execution_policy: executionPolicy } : metadata,
       });
