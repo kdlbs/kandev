@@ -742,6 +742,21 @@ func (r *Repository) HasActiveTaskSessionsByRepository(ctx context.Context, repo
 	return err == nil, err
 }
 
+func (r *Repository) CountActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (int, error) {
+	var count int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT COUNT(*)
+		FROM task_sessions s
+		INNER JOIN task_repositories tr ON tr.task_id = s.task_id
+		WHERE s.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+			AND tr.repository_id = ?
+	`), repositoryID).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // DeleteEphemeralTasksByAgentProfile deletes all ephemeral tasks (and their sessions)
 // that are using the specified agent profile. This is used during profile deletion
 // to clean up transient quick chat / config chat tasks.
