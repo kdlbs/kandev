@@ -1,8 +1,8 @@
 class Kandev < Formula
   desc "Manage tasks, orchestrate agents, review changes, and ship value"
   homepage "https://github.com/kdlbs/kandev"
-  url "https://github.com/kdlbs/kandev/archive/refs/tags/v0.49.0.tar.gz"
-  sha256 "a97f93b7733656d2c128998bce10dd804c7f192bf03112540198aa96e005a449"
+  url "https://github.com/kdlbs/kandev/archive/refs/tags/v0.50.0.tar.gz"
+  sha256 "270d4c17f0cdd8b431e050f130dfee7d0f962149e3e0f50e149efec21a95954c"
   license "AGPL-3.0-only"
 
   livecheck do
@@ -41,6 +41,11 @@ class Kandev < Formula
 
     system "./scripts/release/package-bundle.sh"
 
+    # The Next.js standalone tracer pulls platform-tagged native modules
+    # into the bundle, including musl-libc variants of sharp/@swc/lightningcss
+    # that brew linkage --test flags on glibc-only Linuxbrew. Strip them.
+    Pathname.glob("#{bundle}/web/**/*musl*").each { |p| rm_r(p) if p.directory? }
+
     libexec.install Dir[bundle/"*"]
 
     (bin/"kandev").write_env_script libexec/"cli/bin/cli.js",
@@ -57,10 +62,12 @@ class Kandev < Formula
     # poll /api/v1/system/health until it responds, then shut down.
     # Exercises the cgo+sqlite linkage, migration runner, and HTTP
     # server — the parts most likely to break across platforms.
-    port = free_port
-    pid = spawn({ "KANDEV_HOME_DIR"    => testpath.to_s,
-                  "KANDEV_SERVER_PORT" => port.to_s,
-                  "KANDEV_LOG_LEVEL"   => "warn" },
+    port          = free_port
+    agentctl_port = free_port
+    pid = spawn({ "KANDEV_HOME_DIR"              => testpath.to_s,
+                  "KANDEV_SERVER_PORT"           => port.to_s,
+                  "KANDEV_AGENT_STANDALONE_PORT" => agentctl_port.to_s,
+                  "KANDEV_LOG_LEVEL"             => "warn" },
                 libexec/"bin/kandev")
     begin
       deadline = Time.now + 60
