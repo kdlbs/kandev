@@ -583,19 +583,7 @@ export function cleanupTaskStorage(
   // Per-parent subtask order: drop the deleted task as a parent key, and strip
   // it from any other parent's subtask-order list (in case it was a subtask).
   const subOrder = getStoredSubtaskOrderByParentId();
-  let subOrderChanged = false;
-  if (taskId in subOrder) {
-    delete subOrder[taskId];
-    subOrderChanged = true;
-  }
-  for (const [parentId, ids] of Object.entries(subOrder)) {
-    if (!ids.includes(taskId)) continue;
-    const next = ids.filter((id) => id !== taskId);
-    if (next.length === 0) delete subOrder[parentId];
-    else subOrder[parentId] = next;
-    subOrderChanged = true;
-  }
-  if (subOrderChanged) setStoredSubtaskOrderByParentId(subOrder);
+  if (pruneSubtaskOrder(subOrder, taskId)) setStoredSubtaskOrderByParentId(subOrder);
 
   // Env-keyed storage — dockview layout + maximize live under task envs.
   for (const envId of envIds) {
@@ -730,6 +718,30 @@ export function getStoredSubtaskOrderByParentId(): Record<string, string[]> {
 
 export function setStoredSubtaskOrderByParentId(map: Record<string, string[]>): void {
   setLocalStorage(SIDEBAR_SUBTASK_ORDER_KEY, map);
+}
+
+/**
+ * Strip a task id from a subtask-order map: drop it as a parent key, and
+ * remove it from every other parent's subtask list (cleaning up the parent
+ * entry if its list becomes empty). Mutates `map` in place and returns
+ * `true` if anything changed. Used by both `cleanupTaskStorage` (plain
+ * object) and `removeTaskFromSidebarPrefs` (Immer draft) to keep the two
+ * cleanup paths in lockstep.
+ */
+export function pruneSubtaskOrder(map: Record<string, string[]>, taskId: string): boolean {
+  let changed = false;
+  if (taskId in map) {
+    delete map[taskId];
+    changed = true;
+  }
+  for (const [parentId, ids] of Object.entries(map)) {
+    if (!ids.includes(taskId)) continue;
+    const next = ids.filter((id) => id !== taskId);
+    if (next.length === 0) delete map[parentId];
+    else map[parentId] = next;
+    changed = true;
+  }
+  return changed;
 }
 
 // --- Sidebar collapsed subtask parents (sessionStorage, tab-scoped) ---

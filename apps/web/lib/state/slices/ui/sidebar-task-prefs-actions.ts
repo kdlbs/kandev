@@ -1,4 +1,5 @@
 import {
+  pruneSubtaskOrder,
   setStoredOrderedTaskIds,
   setStoredPinnedTaskIds,
   setStoredSubtaskOrderByParentId,
@@ -42,20 +43,9 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet) {
           prefs.orderedTaskIds.splice(orderIdx, 1);
           setStoredOrderedTaskIds(prefs.orderedTaskIds);
         }
-        const subOrder = prefs.subtaskOrderByParentId;
-        let subOrderChanged = false;
-        if (taskId in subOrder) {
-          delete subOrder[taskId];
-          subOrderChanged = true;
+        if (pruneSubtaskOrder(prefs.subtaskOrderByParentId, taskId)) {
+          setStoredSubtaskOrderByParentId(prefs.subtaskOrderByParentId);
         }
-        for (const [parentId, ids] of Object.entries(subOrder)) {
-          if (!ids.includes(taskId)) continue;
-          const next = ids.filter((id) => id !== taskId);
-          if (next.length === 0) delete subOrder[parentId];
-          else subOrder[parentId] = next;
-          subOrderChanged = true;
-        }
-        if (subOrderChanged) setStoredSubtaskOrderByParentId(subOrder);
       }),
   };
 }
