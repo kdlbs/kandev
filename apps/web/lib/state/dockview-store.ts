@@ -13,7 +13,9 @@ import {
   CENTER_GROUP,
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
+  TERMINAL_DEFAULT_ID,
   getPresetLayout,
+  getPresetSidebarColumn,
   applyLayout,
   getRootSplitview,
   fromDockviewApi,
@@ -39,6 +41,12 @@ import {
 import { preserveChatScrollDuringLayout } from "./dockview-scroll-preserve";
 import { measureDockviewContainer } from "./dockview-measure";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+
+const debugSwitch = createDebugLogger("dockview:store-switch");
+const debugSave = createDebugLogger("dockview:save");
+
+const RIGHT_PANEL_IDS = new Set(["changes", "files", TERMINAL_DEFAULT_ID]);
 
 // Re-export types and constants used by other modules
 export type { BuiltInPreset } from "./layout-manager";
@@ -103,7 +111,12 @@ type DockviewStore = {
   addDiffViewerPanel: (path?: string, content?: string, groupId?: string) => void;
   addFileDiffPanel: (
     path: string,
-    opts?: OpenPanelOpts & { content?: string; groupId?: string },
+    opts?: OpenPanelOpts & {
+      content?: string;
+      groupId?: string;
+      source?: string;
+      repositoryName?: string;
+    },
   ) => void;
   addCommitDetailPanel: (
     sha: string,
@@ -134,6 +147,8 @@ type DockviewStore = {
   setSidebarVisible: (visible: boolean) => void;
   setRightPanelsVisible: (visible: boolean) => void;
   applyBuiltInPreset: (preset: BuiltInPreset) => void;
+  defaultPreset: BuiltInPreset;
+  setDefaultPreset: (preset: BuiltInPreset) => void;
   applyCustomLayout: (layout: SavedLayoutConfig) => void;
   captureCurrentLayout: () => Record<string, unknown>;
   isRestoringLayout: boolean;
@@ -240,6 +255,25 @@ function applyLayoutAndSet(
   return ids;
 }
 
+function removeRightPanelTabs(state: LayoutState): LayoutState {
+  const columns = state.columns
+    .map((col) => {
+      const groups = col.groups
+        .map((group) => {
+          const panels = group.panels.filter((panel) => !RIGHT_PANEL_IDS.has(panel.id));
+          if (panels.length === group.panels.length) return group;
+          const activePanel = panels.some((panel) => panel.id === group.activePanel)
+            ? group.activePanel
+            : panels[0]?.id;
+          return { ...group, panels, activePanel };
+        })
+        .filter((group) => group.panels.length > 0);
+      return { ...col, groups };
+    })
+    .filter((col) => col.groups.length > 0);
+  return { columns };
+}
+
 function buildVisibilityActions(set: StoreSet, get: StoreGet) {
   return {
     toggleSidebar: () => {
@@ -262,7 +296,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
         });
       } else {
         const current = fromDockviewApi(api);
-        const sidebarCol = defaultLayout().columns[0];
+        const sidebarCol = getPresetSidebarColumn(get().defaultPreset);
         const withSidebar: LayoutState = {
           columns: [sidebarCol, ...current.columns],
         };
@@ -276,8 +310,9 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       }
     },
     toggleRightPanels: () => {
-      const { api, rightPanelsVisible } = get();
+      const { api, rightPanelsVisible, defaultPreset } = get();
       if (!api) return;
+      if (!rightPanelsVisible && defaultPreset === "compact") return;
       const liveWidths = captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
       const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
@@ -300,7 +335,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
         const defLayout = defaultLayout();
         const rightCol = defLayout.columns.find((c) => c.id === "right");
         if (!rightCol) return;
-        const current = fromDockviewApi(api);
+        const current = removeRightPanelTabs(fromDockviewApi(api));
         const withRight: LayoutState = {
           columns: [...current.columns, rightCol],
         };
@@ -438,7 +473,17 @@ function saveOutgoingEnv(
   preMaximizeLayout: LayoutState | null,
   pinnedWidths: Map<string, number>,
 ): void {
-  if (!oldEnvId) return;
+  if (!oldEnvId) {
+    debugSave("saveOutgoingEnv: skip (no oldEnvId)");
+    return;
+  }
+  if (IS_DEBUG) {
+    debugSave("saveOutgoingEnv: entry", {
+      oldEnvId,
+      livePanelIds: api.panels.map((p) => p.id),
+      maximized: !!preMaximizeLayout,
+    });
+  }
   if (preMaximizeLayout) {
     // While maximized, `api.toJSON()` is the 2-column maximize overlay, NOT
     // the user's intended layout. Persist the pre-max layout under both keys:
@@ -482,10 +527,26 @@ function saveOutgoingEnv(
 function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
   return (oldEnvId: string | null, newEnvId: string, activeSessionId: string | null) => {
     const { api, currentLayoutEnvId, preMaximizeLayout } = get();
-    if (!api) return;
+    if (!api) {
+      debugSwitch("envSwitch: skip (no api)", { oldEnvId, newEnvId, activeSessionId });
+      return;
+    }
+    if (IS_DEBUG) {
+      debugSwitch("envSwitch: entry", {
+        oldEnvId,
+        newEnvId,
+        activeSessionId,
+        currentLayoutEnvId,
+        maximized: !!preMaximizeLayout,
+        livePanelIds: api.panels.map((p) => p.id),
+      });
+    }
     // Same-env switch (e.g. between sessions of the same task) is a no-op.
     // The layout, terminals, and env-scoped portals already belong to this env.
-    if (currentLayoutEnvId === newEnvId) return;
+    if (currentLayoutEnvId === newEnvId) {
+      debugSwitch("envSwitch: skip (same env)", { newEnvId });
+      return;
+    }
     // First adoption — onReady already built the layout; just adopt it.
     if (!oldEnvId && !currentLayoutEnvId) {
       set({ isRestoringLayout: true, currentLayoutEnvId: newEnvId });
@@ -517,7 +578,7 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
         safeWidth: measured.width,
         safeHeight: measured.height,
         buildDefault: (a) => get().buildDefaultLayout(a),
-        getDefaultLayout: () => get().userDefaultLayout ?? getPresetLayout("default"),
+        getDefaultLayout: () => get().userDefaultLayout ?? getPresetLayout(get().defaultPreset),
       });
       set(ids);
       set({ isRestoringLayout: false });
@@ -615,7 +676,7 @@ function performBuildDefault(
   const basePreset = intent?.preset as BuiltInPreset | undefined;
   let state = basePreset
     ? getPresetLayout(basePreset)
-    : (userDefaultLayout ?? getPresetLayout("default"));
+    : (userDefaultLayout ?? getPresetLayout(get().defaultPreset));
 
   if (intent?.panels?.length) {
     state = injectIntentPanels(state, intent.panels);
@@ -656,7 +717,8 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
       const resolveFilePath = (panelId: string | undefined): string | null => {
         if (!panelId) return null;
         if (panelId.startsWith("file:")) return panelId.slice(5);
-        if (panelId === "preview:file-editor") {
+        if (panelId.startsWith("diff:file:")) return panelId.slice("diff:file:".length);
+        if (panelId === "preview:file-editor" || panelId === "preview:file-diff") {
           const path = (api.getPanel(panelId)?.params as Record<string, unknown> | undefined)
             ?.path as string | undefined;
           return path ?? null;
@@ -676,7 +738,7 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
         // different file. Dockview does not refire `onDidActivePanelChange` for
         // params-only updates on an already-active panel, so subscribe to the
         // panel's own parameter-change event and refresh `activeFilePath`.
-        if (panel.id !== "preview:file-editor") return;
+        if (panel.id !== "preview:file-editor" && panel.id !== "preview:file-diff") return;
         paramSubs.get(panel.id)?.dispose();
         const sub = panel.api.onDidParametersChange(() => {
           if (!panel.api.isActive) return;
@@ -716,6 +778,8 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   setUserDefaultLayout: (layout) => set({ userDefaultLayout: layout }),
   ...buildVisibilityActions(set, get),
   ...buildPresetActions(set, get),
+  defaultPreset: "default",
+  setDefaultPreset: (preset) => set({ defaultPreset: preset }),
   isRestoringLayout: false,
   currentLayoutEnvId: null,
   deferredPanelActions: [],

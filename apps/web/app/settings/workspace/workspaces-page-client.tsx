@@ -13,7 +13,9 @@ import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { RequestIndicator } from "@/components/request-indicator";
 import { useAppStore } from "@/components/state-provider";
-import type { Workspace } from "@/lib/types/http";
+import type { WorkspaceState } from "@/lib/state/slices";
+
+type Workspace = WorkspaceState["items"][number];
 
 type AddWorkspaceFormProps = {
   newWorkspaceName: string;

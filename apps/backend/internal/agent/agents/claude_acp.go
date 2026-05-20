@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -96,8 +97,10 @@ func (a *ClaudeACP) Runtime() *RuntimeConfig {
 		Mounts: []MountTemplate{
 			{Source: "{workspace}", Target: "/workspace"},
 		},
-		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Protocol:       agent.ProtocolACP,
+		ResourceLimits:  ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
+		Protocol:        agent.ProtocolACP,
+		ProjectSkillDir: ".claude/skills",
+		UserSkillDir:    ".claude/skills",
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
@@ -142,6 +145,8 @@ func (a *ClaudeACP) InstallScript() string {
 	// and which `claude /login` runs against) and the ACP bridge package.
 	return "npm install -g @anthropic-ai/claude-code " + claudeACPPkg
 }
+
+func (a *ClaudeACP) BillingType() usage.BillingType { return claudeBillingType() }
 
 func (a *ClaudeACP) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings

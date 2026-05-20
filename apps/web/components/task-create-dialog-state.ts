@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import type { LocalRepository, Workspace, ExecutorProfile, Branch } from "@/lib/types/http";
+import type { LocalRepository, ExecutorProfile, Branch } from "@/lib/types/http";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
@@ -518,9 +518,7 @@ export function useDialogComputed({
     effectiveWorkflowId,
     snapshots,
   });
-  const workspaceDefaults = workspaceId
-    ? workspaces.find((ws: Workspace) => ws.id === workspaceId)
-    : null;
+  const workspaceDefaults = workspaceId ? workspaces.find((ws) => ws.id === workspaceId) : null;
   // The form has a repo selection when either: (a) any chip in the unified
   // list has a repo set, (b) URL mode has a non-empty URL, or (c) the task
   // is intentionally repo-less (noRepository toggle on).

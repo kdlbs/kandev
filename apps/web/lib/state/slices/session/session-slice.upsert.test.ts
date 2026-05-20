@@ -5,7 +5,13 @@ import { createSessionSlice } from "./session-slice";
 import { createSessionRuntimeSlice } from "../session-runtime/session-runtime-slice";
 import type { QueuedMessage, SessionSlice } from "./types";
 import type { SessionRuntimeSlice } from "../session-runtime/types";
-import type { TaskSession } from "@/lib/types/http";
+import {
+  agentProfileId as toAgentProfileId,
+  repositoryId as toRepositoryId,
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type TaskSession,
+} from "@/lib/types/http";
 
 type CombinedSlice = SessionSlice & SessionRuntimeSlice;
 
@@ -20,18 +26,29 @@ function makeStore() {
   );
 }
 
-const TASK_ID = "task-1";
-const SESSION_ID = "session-1";
+const TASK_ID = toTaskId("task-1");
+const SESSION_ID = toSessionId("session-1");
 const TS = "2026-04-20T00:00:00Z";
 
-function makeSession(overrides: Partial<TaskSession> = {}): TaskSession {
+type SessionOverrides = Partial<Omit<TaskSession, "id" | "agent_profile_id" | "repository_id">> & {
+  id?: string;
+  agent_profile_id?: string;
+  repository_id?: string;
+};
+
+function makeSession(overrides: SessionOverrides = {}): TaskSession {
+  const { id, agent_profile_id, repository_id, ...rest } = overrides;
   return {
-    id: SESSION_ID,
+    id: id ? toSessionId(id) : SESSION_ID,
     task_id: TASK_ID,
     state: "RUNNING",
     started_at: TS,
     updated_at: TS,
-    ...overrides,
+    ...(agent_profile_id !== undefined
+      ? { agent_profile_id: toAgentProfileId(agent_profile_id) }
+      : {}),
+    ...(repository_id !== undefined ? { repository_id: toRepositoryId(repository_id) } : {}),
+    ...rest,
   };
 }
 

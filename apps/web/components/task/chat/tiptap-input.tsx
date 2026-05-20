@@ -379,6 +379,10 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     setSlashMenu,
   });
 
+  const isSuggestionMenuOpen =
+    (mentionMenu.isOpen && mentionMenu.items.length > 0) ||
+    (slashMenu.isOpen && slashMenu.items.length > 0);
+
   const editor = useTipTapEditor({
     value,
     onChange,
@@ -395,6 +399,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     onImagePaste,
     mentionSuggestion,
     slashSuggestion,
+    isSuggestionMenuOpen,
     ref,
   });
 

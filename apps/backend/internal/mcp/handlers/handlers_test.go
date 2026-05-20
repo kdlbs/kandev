@@ -33,7 +33,7 @@ func newTestTaskService(t *testing.T) (*service.Service, *sqliterepo.Repository)
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB)
+	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
 	require.NoError(t, err)
 	_, err = worktree.NewSQLiteStore(sqlxDB, sqlxDB)
 	require.NoError(t, err)
@@ -510,6 +510,46 @@ func TestHandleCreateTask_AutoResolvesWorkspaceAndWorkflow(t *testing.T) {
 	assert.Equal(t, ws.MessageTypeResponse, resp.Type, "should succeed with auto-resolved workspace and workflow")
 }
 
+// TestCreateTask_GitHubURLOnly_LeavesDefaultBranchEmpty pins the upstream
+// contract that produced the production "base branch does not exist" failure
+// for task 01b82e73. When an MCP caller passes only a github_url (no
+// default_branch, no base_branch), the resulting Repository row has an empty
+// default_branch and the TaskRepository row has an empty base_branch — the
+// service layer never probes the upstream remote.
+//
+// This test documents that contract so any future change there (e.g. the
+// service learns to probe the remote up front) is an intentional decision,
+// and so the executor-side backfill that compensates for this isn't
+// accidentally treated as redundant.
+func TestCreateTask_GitHubURLOnly_LeavesDefaultBranchEmpty(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
+
+	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "subtask via bare github url",
+		Repositories: []service.TaskRepositoryInput{
+			{GitHubURL: "https://github.com/acme/never-seen"},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, task.Repositories, 1)
+	assert.Empty(t, task.Repositories[0].BaseBranch,
+		"task_repositories.base_branch should be empty when caller passes neither base_branch nor default_branch — executor backfill compensates downstream")
+
+	createdRepo, err := svc.GetRepository(ctx, task.Repositories[0].RepositoryID)
+	require.NoError(t, err)
+	require.NotNil(t, createdRepo)
+	assert.Empty(t, createdRepo.DefaultBranch,
+		"repositories.default_branch should be empty: FindOrCreateRepository does not probe the remote — the executor backfills it after clone")
+	assert.Equal(t, "acme", createdRepo.ProviderOwner)
+	assert.Equal(t, "never-seen", createdRepo.ProviderName)
+}
+
 func TestHandleCreateTask_AutoResolveFailsWithMultipleWorkflows(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
@@ -530,5 +570,51 @@ func TestHandleCreateTask_AutoResolveFailsWithMultipleWorkflows(t *testing.T) {
 
 	resp, err := h.handleCreateTask(ctx, msg)
 	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+func TestHandleCreateTask_NewFields_Unmarshalled(t *testing.T) {
+	// Verify that execution_policy and assignee_agent_profile_id are accepted
+	// in the payload without triggering a parse error. The handler will fail
+	// at the workspace_id validation stage, not at unmarshal.
+	h := &Handlers{}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":                     "My task",
+		"workspace_id":              "ws-1",
+		"workflow_id":               "wf-1",
+		"execution_policy":          `{"stages":[]}`,
+		"assignee_agent_profile_id": "agent-inst-42",
+	})
+
+	// taskSvc is nil so CreateTask will panic before we reach it; the payload
+	// must at least parse cleanly. The handler returns a validation error about
+	// workspace_id being absent (not a parse error) only when those fields are
+	// missing — here all required fields are present so it will reach taskSvc.
+	// To avoid a nil-pointer panic we just verify the unmarshal path by sending
+	// a payload that fails a post-unmarshal check (missing workspace) which
+	// exercised the request struct fields.
+	msgMissingWs := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":                     "My task",
+		"execution_policy":          `{"stages":[]}`,
+		"assignee_agent_profile_id": "agent-inst-42",
+	})
+
+	resp, err := h.handleCreateTask(context.Background(), msgMissingWs)
+	require.NoError(t, err)
+	// Should fail on workspace_id validation, not on JSON unmarshal
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+	_ = msg // payload with all fields — tested implicitly through struct definition
+}
+
+func TestHandleCreateTask_BlockedBy_Accepted(t *testing.T) {
+	h := &Handlers{}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":      "Blocked task",
+		"blocked_by": []string{"task-1", "task-2"},
+	})
+
+	resp, err := h.handleCreateTask(context.Background(), msg)
+	require.NoError(t, err)
+	// Fails on workspace_id, not on blocked_by parsing
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }

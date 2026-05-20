@@ -37,6 +37,18 @@ async function typeWhileBusy(page: Page, editor: Locator, text: string): Promise
 // Quick Chat queue tests
 // ---------------------------------------------------------------------------
 
+/**
+ * Open the collapsed queue panel by clicking the floating chip. The chip
+ * appears above the chat input once at least one message is queued; the
+ * panel only mounts after a click (collapsed by default).
+ */
+async function openQueuePanel(scope: Locator | Page): Promise<void> {
+  const chip = scope.getByTestId("queue-chip");
+  await expect(chip).toBeVisible({ timeout: 10_000 });
+  await chip.click();
+  await expect(scope.getByTestId("queued-ghost-list")).toBeVisible({ timeout: 5_000 });
+}
+
 async function openQuickChatWithAgent(page: Page): Promise<Locator> {
   await page.goto("/");
   await page.waitForLoadState("networkidle");
@@ -99,9 +111,11 @@ test.describe("Quick chat queue", () => {
     await typeWhileBusy(testPage, editor, "hello world");
     await testPage.keyboard.press(`${modifier}+Enter`);
 
-    // Verify the queued message indicator with cancel button appears.
-    const cancelBtn = dialog.getByTitle("Remove queued message");
-    await expect(cancelBtn).toBeVisible({ timeout: 10_000 });
+    // Collapsed-by-default chip is the new queued-message indicator.
+    const chip = dialog.getByTestId("queue-chip");
+    await expect(chip).toBeVisible({ timeout: 10_000 });
+    // The chip is only rendered while the queue panel is collapsed, so its
+    // mere presence implies the closed state — no data-open assertion needed.
 
     // Wait for the first (slow) response to complete.
     await expect(dialog.getByText("Slow response complete", { exact: false })).toBeVisible({
@@ -148,9 +162,8 @@ test.describe("Quick chat queue", () => {
     // Click the submit button (not keyboard shortcut) to queue the message.
     await submitBtn.click();
 
-    // Verify the queued message indicator with cancel button appears.
-    const cancelBtn = dialog.getByTitle("Remove queued message");
-    await expect(cancelBtn).toBeVisible({ timeout: 10_000 });
+    // Verify the collapsed chip appears as the queued-message indicator.
+    await expect(dialog.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
 
     // Verify the cancel-agent button is also visible alongside submit.
     const cancelAgentBtn = dialog.getByTestId("cancel-agent-button");
@@ -232,8 +245,12 @@ test.describe("Task session queue", () => {
     // Click the submit button to queue the message.
     await submitBtn.click();
 
-    // Verify the queued message indicator appears.
-    await expect(testPage.getByTitle("Remove queued message")).toBeVisible({ timeout: 10_000 });
+    // Collapsed chip is the queued-message indicator on the task session page.
+    await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
+
+    // Expand once so we can verify the per-entry Remove control is present.
+    await openQueuePanel(testPage);
+    await expect(testPage.getByTitle("Remove queued message")).toBeVisible({ timeout: 5_000 });
 
     // Wait for the queued message to auto-execute and agent to become idle.
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
@@ -266,7 +283,9 @@ test.describe("Task session queue", () => {
     await expect(submitBtn).toBeVisible({ timeout: 5_000 });
     await submitBtn.click();
 
-    // Verify the queued indicator appears, then click edit.
+    // Expand the collapsed queue panel to reveal the per-entry Edit affordance.
+    await openQueuePanel(testPage);
+
     const editBtn = testPage.getByTitle("Edit queued message");
     await expect(editBtn).toBeVisible({ timeout: 10_000 });
     await editBtn.click();
@@ -339,6 +358,9 @@ test.describe("Task session queue", () => {
     // Click the submit button to queue the message.
     await submitBtn.click();
 
+    // Expand the chip first; the panel is collapsed by default.
+    await openQueuePanel(testPage);
+
     // Verify the queued ghost list shows clean text (no system tags).
     const queueIndicator = testPage.getByTestId("queued-ghost-list");
     await expect(queueIndicator).toBeVisible({ timeout: 10_000 });
@@ -346,5 +368,113 @@ test.describe("Task session queue", () => {
 
     // Wait for agent to finish processing.
     await expect(session.planModeInput()).toBeVisible({ timeout: 30_000 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Queue affordance — chip & panel behavior
+// ---------------------------------------------------------------------------
+
+test.describe("Queue affordance", () => {
+  test.describe.configure({ retries: 1 });
+
+  test("queue chip stays collapsed by default and toggles via panel close button", async ({
+    testPage,
+  }) => {
+    test.setTimeout(90_000);
+
+    const dialog = await openQuickChatWithAgent(testPage);
+
+    // Send a slow command so the agent stays busy long enough to queue.
+    const editor = dialog.locator(".tiptap.ProseMirror");
+    await editor.click();
+    await editor.fill("/slow 10s");
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await editor.press(`${modifier}+Enter`);
+
+    await expect(testPage.getByRole("status", { name: /Agent is (starting|running)/ })).toBeVisible(
+      { timeout: 15_000 },
+    );
+    await testPage.waitForTimeout(500);
+
+    await typeWhileBusy(testPage, editor, "first queued");
+    await testPage.keyboard.press(`${modifier}+Enter`);
+
+    // Chip is present and collapsed by default.
+    const chip = dialog.getByTestId("queue-chip");
+    await expect(chip).toBeVisible({ timeout: 10_000 });
+    await expect(chip).toContainText("queued");
+    await expect(dialog.getByTestId("queued-ghost-list")).not.toBeVisible();
+
+    // Clicking the chip expands the panel; the chip itself unmounts because the
+    // panel header carries the same affordance.
+    await chip.click();
+    await expect(dialog.getByTestId("queued-ghost-list")).toBeVisible({ timeout: 5_000 });
+    await expect(dialog.getByTestId("queue-chip")).not.toBeVisible();
+
+    // The panel header's X button collapses back to the chip.
+    await dialog.getByTestId("queue-close").click();
+    await expect(dialog.getByTestId("queued-ghost-list")).not.toBeVisible();
+    await expect(dialog.getByTestId("queue-chip")).toBeVisible({ timeout: 5_000 });
+  });
+
+  test("Escape collapses an open queue panel", async ({ testPage }) => {
+    test.setTimeout(90_000);
+
+    const dialog = await openQuickChatWithAgent(testPage);
+
+    const editor = dialog.locator(".tiptap.ProseMirror");
+    await editor.click();
+    await editor.fill("/slow 10s");
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await editor.press(`${modifier}+Enter`);
+
+    await expect(testPage.getByRole("status", { name: /Agent is (starting|running)/ })).toBeVisible(
+      { timeout: 15_000 },
+    );
+    await testPage.waitForTimeout(500);
+
+    await typeWhileBusy(testPage, editor, "queued for esc");
+    await testPage.keyboard.press(`${modifier}+Enter`);
+
+    await openQueuePanel(dialog);
+    // Move focus out of the editor so Escape isn't swallowed by the textarea guard.
+    await dialog.getByTestId("queue-close").focus();
+    await testPage.keyboard.press("Escape");
+
+    await expect(dialog.getByTestId("queued-ghost-list")).not.toBeVisible({ timeout: 5_000 });
+    await expect(dialog.getByTestId("queue-chip")).toBeVisible({ timeout: 5_000 });
+  });
+
+  test("clear-all from the panel empties the queue and hides the chip", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Queue clear-all test",
+    );
+
+    await session.sendMessage("/slow 10s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await testPage.waitForTimeout(500);
+
+    const editor = testPage.locator(".tiptap.ProseMirror").first();
+    await typeWhileBusy(testPage, editor, "to be cleared");
+    const submitBtn = testPage.getByTestId("submit-message-button");
+    await expect(submitBtn).toBeVisible({ timeout: 5_000 });
+    await submitBtn.click();
+
+    await openQueuePanel(testPage);
+    await testPage.getByTestId("queue-clear-all").click();
+
+    // Panel and chip both disappear once the queue is empty.
+    await expect(testPage.getByTestId("queued-ghost-list")).not.toBeVisible({ timeout: 5_000 });
+    await expect(testPage.getByTestId("queue-chip")).not.toBeVisible({ timeout: 5_000 });
   });
 });

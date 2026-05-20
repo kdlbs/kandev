@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -90,6 +91,7 @@ func (a *PiACP) Runtime() *RuntimeConfig {
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
 		Protocol:       agent.ProtocolACP,
+		UserSkillDir:   ".pi/agent/skills",
 		SessionConfig: SessionConfig{
 			// TODO: set SessionDirTemplate once the Pi session dir is
 			// confirmed. Without it, the Docker runtime skips mounting the
@@ -117,3 +119,5 @@ func (a *PiACP) InferenceConfig() *InferenceConfig {
 		Command:   NewCommand("npx", "-y", piACPPkg),
 	}
 }
+
+func (a *PiACP) BillingType() usage.BillingType { return defaultBillingType() }

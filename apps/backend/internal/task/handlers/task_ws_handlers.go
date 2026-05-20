@@ -80,7 +80,7 @@ type wsCreateTaskRequest struct {
 	WorkflowStepID    string                    `json:"workflow_step_id"`
 	Title             string                    `json:"title"`
 	Description       string                    `json:"description,omitempty"`
-	Priority          int                       `json:"priority,omitempty"`
+	Priority          string                    `json:"priority,omitempty"`
 	State             *v1.TaskState             `json:"state,omitempty"`
 	Repositories      []httpTaskRepositoryInput `json:"repositories,omitempty"`
 	Position          int                       `json:"position,omitempty"`
@@ -228,7 +228,7 @@ type wsUpdateTaskRequest struct {
 	ID           string                    `json:"id"`
 	Title        *string                   `json:"title,omitempty"`
 	Description  *string                   `json:"description,omitempty"`
-	Priority     *int                      `json:"priority,omitempty"`
+	Priority     *string                   `json:"priority,omitempty"`
 	State        *v1.TaskState             `json:"state,omitempty"`
 	Repositories []httpTaskRepositoryInput `json:"repositories,omitempty"`
 	Position     *int                      `json:"position,omitempty"`

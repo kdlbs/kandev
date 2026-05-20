@@ -118,9 +118,9 @@ export function ProfileCardItem({
             name: profile.name,
             model: profile.model,
             mode: profile.mode ?? "",
-            allow_indexing: profile.allow_indexing ?? false,
-            cli_passthrough: profile.cli_passthrough,
-            cli_flags: profile.cli_flags ?? [],
+            allow_indexing: profile.allow_indexing ?? profile.allowIndexing ?? false,
+            cli_passthrough: profile.cliPassthrough ?? false,
+            cli_flags: profile.cliFlags ?? [],
           }}
           onChange={(patch) => onProfileChange(profile.id, patch)}
           modelConfig={currentAgentModelConfig}

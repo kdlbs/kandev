@@ -59,11 +59,13 @@ type CardProps = {
   selectedOption: string | null;
   customCommittedText: string | null;
   customDraft: string;
+  customActive: boolean;
   isSubmitting: boolean;
   showAgentDisconnected: boolean;
   onSelectOption: (optionId: string) => void;
   onCustomDraftChange: (text: string) => void;
   onSubmitCustom: (text: string) => void;
+  onRequestFinalSubmit: () => void;
 };
 
 function ClarificationCard(props: CardProps) {
@@ -74,11 +76,13 @@ function ClarificationCard(props: CardProps) {
     selectedOption,
     customCommittedText,
     customDraft,
+    customActive,
     isSubmitting,
     showAgentDisconnected,
     onSelectOption,
     onCustomDraftChange,
     onSubmitCustom,
+    onRequestFinalSubmit,
   } = props;
   const { question, metadata } = meta;
   return (
@@ -86,22 +90,23 @@ function ClarificationCard(props: CardProps) {
       data-testid="clarification-question-card"
       data-question-id={meta.questionId}
       data-question-index={String(index)}
-      className="px-4 pt-3 pb-4"
+      className="px-4 pt-1 pb-4"
     >
-      <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
-        <IconMessageQuestion className="h-4 w-4 text-blue-500" />
-        {total > 1 && (
-          <span data-testid="clarification-progress-chip">
-            Question {index + 1} of {total}
-          </span>
-        )}
-        {metadata.question.title && (
-          <span className="text-muted-foreground/70">
-            {total > 1 ? "· " : ""}
-            {metadata.question.title}
-          </span>
-        )}
-      </div>
+      {(total > 1 || metadata.question.title) && (
+        <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
+          {total > 1 && (
+            <span data-testid="clarification-progress-chip">
+              Question {index + 1} of {total}
+            </span>
+          )}
+          {metadata.question.title && (
+            <span className="text-muted-foreground/70">
+              {total > 1 ? "· " : ""}
+              {metadata.question.title}
+            </span>
+          )}
+        </div>
+      )}
       <div className="markdown-body max-w-none text-sm font-medium [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 mb-3">
         <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
           {question.prompt}
@@ -111,6 +116,7 @@ function ClarificationCard(props: CardProps) {
         options={question.options}
         selectedOption={selectedOption}
         isSubmitting={isSubmitting}
+        customActive={customActive}
         onSelectOption={onSelectOption}
       />
       {showAgentDisconnected && (
@@ -126,8 +132,10 @@ function ClarificationCard(props: CardProps) {
         draft={customDraft}
         isSubmitting={isSubmitting}
         committedText={customCommittedText}
+        active={customActive}
         onChange={onCustomDraftChange}
         onSubmit={onSubmitCustom}
+        onRequestFinalSubmit={onRequestFinalSubmit}
       />
     </div>
   );
@@ -172,12 +180,29 @@ function shouldIgnoreShortcut(e: KeyboardEvent): boolean {
   return e.metaKey || e.ctrlKey || e.altKey || e.shiftKey;
 }
 
+// tryHandleMetaEnter returns true when the event was Cmd/Ctrl+Enter, so the
+// caller can short-circuit. When focus is inside the custom-text input it
+// returns true *without* invoking onSubmit — the input's own keydown handler
+// owns that path and is responsible for committing the draft + final submit.
+function tryHandleMetaEnter(e: KeyboardEvent, canSubmit: boolean, onSubmit: () => void): boolean {
+  if (e.key !== "Enter" || e.shiftKey || e.altKey) return false;
+  if (!e.metaKey && !e.ctrlKey) return false;
+  const inEditable =
+    e.target instanceof HTMLElement &&
+    (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA");
+  if (inEditable) return true;
+  e.preventDefault();
+  if (canSubmit) onSubmit();
+  return true;
+}
+
 function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
   const optionsCount = args.meta.question.options.length;
   const isLast = args.activeIndex === args.total - 1;
   const { canSubmit, onPick, onPrev, onNext, onSkip, onSubmit } = args;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (tryHandleMetaEnter(e, canSubmit, onSubmit)) return;
       if (shouldIgnoreShortcut(e)) return;
       if (e.key === "Escape") {
         e.preventDefault();
@@ -216,6 +241,98 @@ type CarouselBodyProps = {
   setCustomDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
 };
 
+type QuestionHandlerCtx = {
+  meta: SingleQuestionMeta;
+  group: ReturnType<typeof useClarificationGroup>;
+  isSingleQuestion: boolean;
+  activeIndex: number;
+  total: number;
+  setActiveIndex: (idx: number) => void;
+  setCustomDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+};
+
+type QuestionHandlers = {
+  onSelectOption: (optionId: string) => void;
+  onCustomDraftChange: (value: string) => void;
+  onSubmitCustom: (text: string) => void;
+};
+
+type SelectionState = {
+  selectedOption: string | null;
+  customCommittedText: string | null;
+  draft: string;
+  customActive: boolean;
+};
+
+function deriveSelectionState(
+  meta: SingleQuestionMeta,
+  answers: Record<string, ClarificationAnswer>,
+  customDrafts: Record<string, string>,
+): SelectionState {
+  const stored = answers[meta.questionId];
+  const selected = stored?.selected_options ?? [];
+  const selectedOption = selected.length > 0 ? selected[0] : null;
+  const customCommittedText = stored?.custom_text ?? null;
+  const draft = customDrafts[meta.questionId] ?? "";
+  const hasCustomText = draft.trim().length > 0 || (customCommittedText?.length ?? 0) > 0;
+  const customActive = !selectedOption && hasCustomText;
+  return { selectedOption, customCommittedText, draft, customActive };
+}
+
+function buildQuestionHandlers(ctx: QuestionHandlerCtx): QuestionHandlers {
+  const { meta, group, isSingleQuestion, activeIndex, total, setActiveIndex, setCustomDrafts } =
+    ctx;
+
+  // Records the answer, then auto-submits (single-question — uses the override
+  // path because setState is async) or auto-advances to the next step.
+  const commitAnswer = (answer: ClarificationAnswer) => {
+    group.recordAnswer(meta.questionId, answer);
+    if (isSingleQuestion) {
+      void group.submitCollected({ [meta.questionId]: answer });
+      return;
+    }
+    if (activeIndex < total - 1) setActiveIndex(activeIndex + 1);
+  };
+
+  return {
+    onSelectOption(optionId) {
+      // Picking an option wipes any in-flight draft so the answer state and
+      // the visible input agree (custom_text and selected_options are mutually
+      // exclusive at commit time).
+      setCustomDrafts((prev) => {
+        if (!prev[meta.questionId]) return prev;
+        return { ...prev, [meta.questionId]: "" };
+      });
+      commitAnswer({ question_id: meta.questionId, selected_options: [optionId] });
+    },
+    // Live-record the draft so the stepper updates and the custom input lights
+    // up the moment the user types. Emptying the draft clears the answer so
+    // allAnswered reverts to false. Enter/Cmd+Enter still drives advance/submit.
+    onCustomDraftChange(value) {
+      setCustomDrafts((prev) => ({ ...prev, [meta.questionId]: value }));
+      const trimmed = value.trim();
+      if (trimmed.length === 0) {
+        group.clearAnswer(meta.questionId);
+        return;
+      }
+      group.recordAnswer(meta.questionId, {
+        question_id: meta.questionId,
+        selected_options: [],
+        custom_text: trimmed,
+      });
+    },
+    onSubmitCustom(text) {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      commitAnswer({
+        question_id: meta.questionId,
+        selected_options: [],
+        custom_text: trimmed,
+      });
+    },
+  };
+}
+
 function ClarificationCarouselBody({
   sortedMessages,
   group,
@@ -231,7 +348,6 @@ function ClarificationCarouselBody({
     (m) => (m.metadata as ClarificationRequestMetadata | undefined)?.agent_disconnected === true,
   );
   const isSubmitting = group.submitState === "submitting";
-
   const isSingleQuestion = total === 1;
 
   const allAnswered = sortedMessages.every((m) => {
@@ -239,48 +355,31 @@ function ClarificationCarouselBody({
     return id ? Boolean(group.answers[id]) : false;
   });
 
+  // group is a fresh object every render, but its submitCollected callback is
+  // memoised by the hook — depend on the function only so this useCallback
+  // doesn't churn on every keystroke (via the live-record path).
+  const submitCollected = group.submitCollected;
   const handleSubmit = useCallback(() => {
-    if (allAnswered) void group.submitCollected();
-  }, [allAnswered, group]);
+    if (allAnswered) void submitCollected();
+  }, [allAnswered, submitCollected]);
 
   if (!meta) return null;
 
-  const stored = group.answers[meta.questionId];
-  const selectedOption =
-    stored?.selected_options && stored.selected_options.length > 0
-      ? stored.selected_options[0]
-      : null;
-  const customCommittedText = stored?.custom_text ?? null;
-  const draft = customDrafts[meta.questionId] ?? "";
+  const { selectedOption, customCommittedText, draft, customActive } = deriveSelectionState(
+    meta,
+    group.answers,
+    customDrafts,
+  );
 
-  // Records the new answer, then either auto-submits (single-question case
-  // takes the override path so the freshly recorded answer is included even
-  // though setState is async) or auto-advances to the next step.
-  const commitAnswer = (answer: ClarificationAnswer) => {
-    group.recordAnswer(meta.questionId, answer);
-    if (isSingleQuestion) {
-      void group.submitCollected({ [meta.questionId]: answer });
-      return;
-    }
-    if (activeIndex < total - 1) {
-      setActiveIndex(activeIndex + 1);
-    }
-  };
-
-  const onSelectOption = (optionId: string) => {
-    commitAnswer({
-      question_id: meta.questionId,
-      selected_options: [optionId],
-    });
-  };
-  const onSubmitCustom = (text: string) => {
-    if (!text.trim()) return;
-    commitAnswer({
-      question_id: meta.questionId,
-      selected_options: [],
-      custom_text: text.trim(),
-    });
-  };
+  const { onSelectOption, onCustomDraftChange, onSubmitCustom } = buildQuestionHandlers({
+    meta,
+    group,
+    isSingleQuestion,
+    activeIndex,
+    total,
+    setActiveIndex,
+    setCustomDrafts,
+  });
 
   return (
     <>
@@ -291,13 +390,13 @@ function ClarificationCarouselBody({
         selectedOption={selectedOption}
         customCommittedText={customCommittedText}
         customDraft={draft}
+        customActive={customActive}
         isSubmitting={isSubmitting}
         showAgentDisconnected={activeIndex === 0 && showAgentDisconnectedAtTop}
         onSelectOption={onSelectOption}
-        onCustomDraftChange={(value) =>
-          setCustomDrafts((prev) => ({ ...prev, [meta.questionId]: value }))
-        }
+        onCustomDraftChange={onCustomDraftChange}
         onSubmitCustom={onSubmitCustom}
+        onRequestFinalSubmit={handleSubmit}
       />
       {!isSingleQuestion && (
         <ClarificationCarouselNav
@@ -355,8 +454,9 @@ export function ClarificationInputOverlay({
 
   return (
     <div className="relative" data-testid="clarification-overlay">
-      <div className="flex items-center justify-between gap-3 px-4 pt-3 pb-2">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between gap-3 px-4 pt-2 pb-1">
+        <div className="flex items-center gap-3 min-w-0">
+          <IconMessageQuestion className="h-4 w-4 text-blue-500 flex-shrink-0" />
           {total > 1 && (
             <ClarificationStepper
               total={total}

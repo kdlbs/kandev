@@ -28,6 +28,11 @@ const (
 	AuthMethodPAT  = "pat"
 )
 
+// ErrInvalidPRURL signals that a caller-supplied PR URL could not be parsed.
+// Used by AssociateExistingPRByURL so HTTP callers can translate the failure
+// into a 400 instead of a generic 500.
+var ErrInvalidPRURL = errors.New("invalid PR URL")
+
 // defaultBranchMain and defaultBranchMaster are the conventional default branch
 // names sorted to the top of branch pickers.
 const (
@@ -194,6 +199,16 @@ func (s *Service) Client() Client {
 // TestStore returns the store for test/mock use only.
 func (s *Service) TestStore() *Store {
 	return s.store
+}
+
+// ListTaskPRsByTaskIDs forwards to the underlying store. Exposed so other
+// packages (e.g. internal/office) can read PR associations without
+// importing internal/github/store.
+func (s *Service) ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*TaskPR, error) {
+	if s.store == nil {
+		return map[string][]*TaskPR{}, nil
+	}
+	return s.store.ListTaskPRsByTaskIDs(ctx, taskIDs)
 }
 
 // TestEventBus returns the event bus for test/mock use only.
@@ -599,6 +614,35 @@ func (s *Service) AssociatePRWithTask(ctx context.Context, taskID, repositoryID 
 		zap.String("task_id", taskID),
 		zap.String("repository_id", repositoryID),
 		zap.Int("pr_number", pr.Number))
+	return tp, nil
+}
+
+// AssociateExistingPRByURL parses a GitHub PR URL, fetches the PR data, and
+// associates it with the given task. No PR watch is created — this is used
+// when the caller already knows the PR (e.g. user clicked "+ Task" on a PR
+// in the GitHub page), so branch-based discovery is unnecessary. The watch
+// for ongoing status sync is still created later when the agent session
+// starts (see ensureSessionPRWatch).
+//
+// Returns the persisted TaskPR row so callers can confirm the association
+// and react to errors synchronously, in contrast to AssociatePRByURL's
+// fire-and-forget logging.
+func (s *Service) AssociateExistingPRByURL(ctx context.Context, taskID, repositoryID, prURL string) (*TaskPR, error) {
+	if s.client == nil {
+		return nil, fmt.Errorf("github client not available")
+	}
+	owner, repo, prNumber, err := parsePRURL(prURL)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidPRURL, err)
+	}
+	pr, err := s.client.GetPR(ctx, owner, repo, prNumber)
+	if err != nil {
+		return nil, fmt.Errorf("fetch PR: %w", err)
+	}
+	tp, err := s.AssociatePRWithTask(ctx, taskID, repositoryID, pr)
+	if err != nil {
+		return nil, fmt.Errorf("associate PR with task: %w", err)
+	}
 	return tp, nil
 }
 
@@ -1272,6 +1316,8 @@ func (s *Service) UpdateReviewWatch(ctx context.Context, id string, req *UpdateR
 // dedup rows are gone). True best-effort: a list error logs Warn and lets
 // the watch delete proceed so the user's primary action isn't blocked by
 // transient task-domain failures.
+//
+//nolint:nestif // straight-line list → for-loop → conditional delete; readable as-is
 func (s *Service) DeleteReviewWatch(ctx context.Context, id string) error {
 	if s.taskDeleter != nil {
 		prTasks, err := s.store.ListReviewPRTasksByWatch(ctx, id)
@@ -1752,6 +1798,8 @@ func (s *Service) CleanupAllReviewTasks(ctx context.Context) (int, error) {
 // cleanupAllReviewTasks is the shared body. When orphansOnly is true, rows
 // whose watch is currently enabled are skipped (the per-watch poller will
 // handle them in the same cycle).
+//
+//nolint:dupl // mirrors cleanupAllIssueTasks — different types, same orchestration
 func (s *Service) cleanupAllReviewTasks(ctx context.Context, orphansOnly bool) (int, error) {
 	if s.client == nil || s.taskDeleter == nil {
 		return 0, nil
@@ -2164,6 +2212,8 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 // DeleteIssueWatch deletes an issue watch and best-effort reaps any tasks
 // it owned (mirrors DeleteReviewWatch — list errors log Warn and let the
 // watch delete proceed).
+//
+//nolint:nestif // mirrors DeleteReviewWatch shape
 func (s *Service) DeleteIssueWatch(ctx context.Context, id string) error {
 	if s.taskDeleter != nil {
 		issueTasks, err := s.store.ListIssueWatchTasksByWatch(ctx, id)
@@ -2384,6 +2434,7 @@ func (s *Service) CleanupAllIssueTasks(ctx context.Context) (int, error) {
 	return s.cleanupAllIssueTasks(ctx, false)
 }
 
+//nolint:dupl // mirrors cleanupAllReviewTasks — different types, same orchestration
 func (s *Service) cleanupAllIssueTasks(ctx context.Context, orphansOnly bool) (int, error) {
 	if s.client == nil || s.taskDeleter == nil {
 		return 0, nil

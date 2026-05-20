@@ -20,6 +20,12 @@ export type KanbanState = {
     is_start_step?: boolean;
     show_in_command_panel?: boolean;
     agent_profile_id?: string;
+    /**
+     * Phase 2 (ADR-0004) semantic UX hint. Read by `<TaskMetaRail>` to
+     * pick the right meta surface (review/approval shows multi-agent
+     * decisions). Backend never branches on this field.
+     */
+    stage_type?: "work" | "review" | "approval" | "custom";
   }>;
   tasks: Array<{
     id: string;
@@ -82,6 +88,12 @@ export type WorkflowsState = {
     sortOrder?: number;
     agent_profile_id?: string;
     hidden?: boolean;
+    /**
+     * Phase 2 (ADR-0004) UX hint. Read by `<TaskMetaRail>` to choose the
+     * right meta surface (kanban / office / multi-agent). Backend never
+     * branches on this field.
+     */
+    style?: "kanban" | "office" | "custom";
   }>;
   activeId: string | null;
 };
@@ -95,6 +107,11 @@ export type TaskState = {
   // pinnedSessionId alone — and skip auto-replace when the terminating session
   // matches the pin (the user wants to stay even though the workflow moved on).
   pinnedSessionId: string | null;
+  // lastSessionByTaskId remembers the most-recent active session for each task.
+  // Unlike pinnedSessionId (single global slot, cleared on task change), this
+  // map survives task switches so navigating back to a task can restore the
+  // user's last-selected session instead of always jumping to primary.
+  lastSessionByTaskId: Record<string, string>;
 };
 
 export type KanbanSliceState = {

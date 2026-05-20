@@ -81,6 +81,9 @@ func TestFindVscodeIPCSocket_NoSockets(t *testing.T) {
 }
 
 func TestFindVscodeIPCSocket_ReturnsMostRecent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("vscode IPC uses Unix sockets on Linux/macOS and named pipes on Windows; no shared production code path here")
+	}
 	// Use /tmp directly to avoid macOS Unix socket path length limits.
 	tmpDir, err := os.MkdirTemp("/tmp", "vscode-ipc-test-")
 	require.NoError(t, err)
@@ -118,6 +121,9 @@ func TestFindVscodeIPCSocket_IgnoresNonSockFiles(t *testing.T) {
 }
 
 func TestWaitForVscodeIPCSocket_SocketAppearsAfterDelay(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("vscode IPC uses Unix sockets on Linux/macOS and named pipes on Windows; no shared production code path here")
+	}
 	tmpDir, err := os.MkdirTemp("/tmp", "vscode-ipc-test-")
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir) //nolint:errcheck

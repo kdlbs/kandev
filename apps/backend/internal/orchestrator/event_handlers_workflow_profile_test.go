@@ -731,6 +731,180 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			t.Errorf("expected 1 session, got %d", len(sessions))
 		}
 	})
+
+	// The user created the task with profile-a, then manually added a new
+	// session with profile-b ("New Agent" button). When the workflow
+	// transitions to a step with no agent_profile_id override, the user's
+	// explicit choice (profile-b) must win — we must NOT silently switch
+	// back to the task's original profile-a just because that's what
+	// task.Metadata[agent_profile_id] still says.
+	t.Run("keeps user-chosen session when step has no override", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+
+		ws := &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}
+		_ = repo.CreateWorkspace(ctx, ws)
+		wf := &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}
+		_ = repo.CreateWorkflow(ctx, wf)
+		// Task was created with profile-a as the default agent.
+		task := &models.Task{
+			ID: "t1", WorkflowID: "wf1", WorkflowStepID: "step1",
+			Title: "Test", Description: "desc", State: v1.TaskStateInProgress,
+			Metadata:  map[string]interface{}{models.MetaKeyAgentProfileID: "profile-a"},
+			CreatedAt: now, UpdatedAt: now,
+		}
+		_ = repo.CreateTask(ctx, task)
+
+		// User clicked "New Agent" and started a profile-b session — it has
+		// no created_by metadata tag because it was user-chosen, not spawned
+		// by a workflow step override.
+		session := &models.TaskSession{
+			ID:                "s1",
+			TaskID:            "t1",
+			AgentProfileID:    "profile-b",
+			ExecutorID:        "exec-local",
+			ExecutorProfileID: "ep1",
+			State:             models.TaskSessionStateWaitingForInput,
+			IsPrimary:         true,
+			StartedAt:         now,
+			UpdatedAt:         now,
+		}
+		_ = repo.CreateTaskSession(ctx, session)
+
+		sg := newMockStepGetter()
+		step := &wfmodels.WorkflowStep{
+			ID:         "step1",
+			WorkflowID: "wf1",
+			Name:       "Review",
+			// No AgentProfileID — step has no override.
+		}
+		sg.steps["step1"] = step
+
+		svc := createTestService(repo, sg, newMockTaskRepo())
+		svc.processOnEnter(ctx, "t1", session, step, "desc")
+
+		// Critical: no new profile-a session should be spawned, and the
+		// user-chosen profile-b session must NOT be marked COMPLETED.
+		sessions, err := repo.ListTaskSessions(ctx, "t1")
+		if err != nil {
+			t.Fatalf("failed to list sessions: %v", err)
+		}
+		if len(sessions) != 1 {
+			t.Errorf("expected 1 session (no respawn), got %d", len(sessions))
+		}
+		updated, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		if updated.State == models.TaskSessionStateCompleted {
+			t.Error("user-chosen session must not be completed when step has no override")
+		}
+		if updated.AgentProfileID != "profile-b" {
+			t.Errorf("primary session must remain profile-b, got %q", updated.AgentProfileID)
+		}
+	})
+
+	// Inverse of the above: when the current session was spawned by a
+	// previous step's agent_profile override, transitioning to a plain step
+	// SHOULD revert to the task default.
+	t.Run("reverts to task default when current session was workflow-spawned", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+
+		ws := &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}
+		_ = repo.CreateWorkspace(ctx, ws)
+		wf := &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}
+		_ = repo.CreateWorkflow(ctx, wf)
+		task := &models.Task{
+			ID: "t1", WorkflowID: "wf1", WorkflowStepID: "step2",
+			Title: "Test", Description: "desc", State: v1.TaskStateInProgress,
+			Metadata:  map[string]interface{}{models.MetaKeyAgentProfileID: "profile-a"},
+			CreatedAt: now, UpdatedAt: now,
+		}
+		_ = repo.CreateTask(ctx, task)
+
+		// Session was spawned by createNewSessionForStep — tagged accordingly.
+		session := &models.TaskSession{
+			ID:                "s1",
+			TaskID:            "t1",
+			AgentProfileID:    "profile-b",
+			ExecutorID:        "exec-local",
+			ExecutorProfileID: "ep1",
+			State:             models.TaskSessionStateWaitingForInput,
+			IsPrimary:         true,
+			Metadata:          map[string]interface{}{models.SessionMetaKeyCreatedBy: models.SessionCreatedByWorkflowSwitch},
+			StartedAt:         now,
+			UpdatedAt:         now,
+		}
+		_ = repo.CreateTaskSession(ctx, session)
+
+		taskRepo := newMockTaskRepo()
+		taskRepo.tasks["t1"] = &v1.Task{
+			ID: "t1", WorkspaceID: "ws1", WorkflowID: "wf1",
+			Title: "Test", Description: "desc", State: v1.TaskStateInProgress,
+		}
+
+		sg := newMockStepGetter()
+		step := &wfmodels.WorkflowStep{
+			ID:         "step2",
+			WorkflowID: "wf1",
+			Name:       "Done",
+			// No AgentProfileID — plain step.
+		}
+		sg.steps["step2"] = step
+
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		log := testLogger()
+		exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+		sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
+		svc := &Service{
+			logger:             log,
+			repo:               repo,
+			workflowStepGetter: sg,
+			taskRepo:           taskRepo,
+			agentManager:       agentMgr,
+			messageQueue:       messagequeue.NewServiceMemory(log),
+			executor:           exec,
+			scheduler:          sched,
+		}
+
+		svc.processOnEnter(ctx, "t1", session, step, "desc")
+
+		oldSession, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get old session: %v", err)
+		}
+		if oldSession.State != models.TaskSessionStateCompleted {
+			t.Errorf("workflow-spawned session should be completed when reverting to default, got %s", oldSession.State)
+		}
+
+		sessions, err := repo.ListTaskSessions(ctx, "t1")
+		if err != nil {
+			t.Fatalf("failed to list sessions: %v", err)
+		}
+		if len(sessions) != 2 {
+			t.Fatalf("expected exactly 2 sessions (old + reverted), got %d", len(sessions))
+		}
+		var newSession *models.TaskSession
+		profileACount := 0
+		for _, s := range sessions {
+			if s.AgentProfileID == "profile-a" {
+				profileACount++
+			}
+			if s.ID != "s1" {
+				newSession = s
+			}
+		}
+		if profileACount != 1 {
+			t.Fatalf("expected exactly one profile-a session after revert, got %d", profileACount)
+		}
+		if newSession == nil {
+			t.Fatal("expected a new session for task default profile")
+		}
+		if newSession.AgentProfileID != "profile-a" {
+			t.Errorf("expected reverted profile-a, got %q", newSession.AgentProfileID)
+		}
+	})
 }
 
 func TestSwitchSessionForStep_PreservesOldSessionOnFailure(t *testing.T) {

@@ -221,6 +221,27 @@ func (r *Registry) Register(ag agents.Agent) error {
 	return nil
 }
 
+// Replace registers ag under its ID, overwriting any previously
+// registered agent for that ID. Returns an error only when ag has no
+// ID. Used by the dev/E2E mock-provider seam to swap a real provider
+// agent for a MockAgent alias without going through Unregister +
+// Register (which would race with concurrent readers).
+func (r *Registry) Replace(ag agents.Agent) error {
+	if ag.ID() == "" {
+		return fmt.Errorf("agent type ID is required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, existed := r.agents[ag.ID()]
+	r.agents[ag.ID()] = ag
+	if existed {
+		r.logger.Info("replaced agent type", zap.String("id", ag.ID()))
+	} else {
+		r.logger.Info("registered agent type", zap.String("id", ag.ID()))
+	}
+	return nil
+}
+
 // Unregister removes an agent
 func (r *Registry) Unregister(id string) error {
 	r.mu.Lock()

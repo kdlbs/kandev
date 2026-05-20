@@ -17,7 +17,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
-	agentctlclient "github.com/kandev/kandev/internal/agentctl/client"
+	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"

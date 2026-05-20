@@ -11,6 +11,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { formatDistanceToNow } from "date-fns";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
+import { linkToTask } from "@/lib/links";
 
 type TaskWithResolution = Task & {
   workflowName?: string;
@@ -42,7 +43,7 @@ function TitleCell({
   return (
     <div className="flex flex-col gap-0.5 py-0.5">
       <div className="flex items-center gap-2">
-        <Link href={`/t/${task.id}`} className="text-primary font-medium text-sm">
+        <Link href={linkToTask(task.id)} className="text-primary font-medium text-sm">
           {task.title}
         </Link>
         {isArchived && (

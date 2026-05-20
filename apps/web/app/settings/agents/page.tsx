@@ -8,7 +8,9 @@ import {
   IconClipboard,
   IconDownload,
   IconExternalLink,
+  IconLoader2,
   IconPlus,
+  IconRefresh,
   IconTerminal2,
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
@@ -179,7 +181,7 @@ function ProfileListItem({ agent, profile }: ProfileListItemProps) {
           <div className="flex items-center gap-2">
             <AgentLogo agentName={agent.name} className="shrink-0" />
             <span className="text-sm font-medium">
-              {agent.profiles[0]?.agent_display_name ?? agent.name}
+              {agent.profiles[0]?.agentDisplayName ?? agent.name}
             </span>
             {agent.supports_mcp && <Badge variant="secondary">MCP</Badge>}
             <span className="text-sm text-muted-foreground">{profile.name}</span>
@@ -249,7 +251,12 @@ function InstalledAgentsSection({
             disabled={rescanning}
             className="cursor-pointer"
           >
-            {rescanning ? "Rescanning..." : "Rescan"}
+            {rescanning ? (
+              <IconLoader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <IconRefresh className="h-4 w-4 mr-2" />
+            )}
+            Rescan
           </Button>
         </div>
       </div>
@@ -468,7 +475,9 @@ function useAgentPageState() {
     availableAgents.find((item: AvailableAgent) => item.name === name)?.model_config?.status;
 
   const handleRescan = async () => {
-    if (rescanning) return;
+    if (rescanning) {
+      return;
+    }
     setRescanning(true);
     try {
       const [discoveryResp, availableResp] = await Promise.all([

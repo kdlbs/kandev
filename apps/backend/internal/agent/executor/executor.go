@@ -2,19 +2,22 @@
 package executor
 
 import (
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// Name identifies the execution backend.
-type Name string
+// Name identifies the execution backend. It aliases agentruntime.Runtime
+// so the executor and runtime layers share a single typed vocabulary
+// without forcing every existing consumer to switch import paths.
+type Name = agentruntime.Runtime
 
 const (
 	NameUnknown      Name = ""
-	NameDocker       Name = "docker"
-	NameStandalone   Name = "standalone"
+	NameDocker            = agentruntime.RuntimeDocker
+	NameStandalone        = agentruntime.RuntimeStandalone
 	NameLocal        Name = "local"
-	NameRemoteDocker Name = "remote_docker"
-	NameSprites      Name = "sprites"
+	NameRemoteDocker      = agentruntime.RuntimeRemoteDocker
+	NameSprites           = agentruntime.RuntimeSprites
 )
 
 // ExecutorTypeToBackend maps an ExecutorType to its corresponding executor Name.

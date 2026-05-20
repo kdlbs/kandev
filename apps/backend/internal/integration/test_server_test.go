@@ -242,7 +242,7 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
 	require.NoError(t, err)
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	taskRepoImpl, cleanup, err := repository.Provide(sqlxDB, sqlxDB)
+	taskRepoImpl, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
 	require.NoError(t, err)
 	taskRepo := taskRepoImpl
 	t.Cleanup(func() {
@@ -392,7 +392,7 @@ func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentProfileID st
 		WorkflowStepID: workflowStepID,
 		Title:          "Test Task",
 		Description:    "This is a test task for the orchestrator",
-		Priority:       priority,
+		Priority:       intPriorityForTest(priority),
 		Repositories: []taskservice.TaskRepositoryInput{
 			{
 				RepositoryID: repository.ID,
@@ -403,4 +403,21 @@ func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentProfileID st
 	require.NoError(t, err)
 
 	return task.ID
+}
+
+// intPriorityForTest maps a legacy integer priority to the TEXT priority
+// label form used after the priority column migration.
+func intPriorityForTest(p int) string {
+	switch {
+	case p >= 8:
+		return "critical"
+	case p >= 4:
+		return "high"
+	case p >= 2:
+		return "medium"
+	case p >= 1:
+		return "low"
+	default:
+		return "medium"
+	}
 }

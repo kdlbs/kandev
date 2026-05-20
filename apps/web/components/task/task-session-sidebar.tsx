@@ -15,8 +15,7 @@ import { TaskSwitcher } from "./task-switcher";
 import { applyView } from "@/lib/sidebar/apply-view";
 import { SidebarFilterBar } from "./sidebar-filter/sidebar-filter-bar";
 import { MOCK_ITEMS, MOCK_SIDEBAR } from "./sidebar-mock-data";
-import { TaskRenameDialog } from "./task-rename-dialog";
-import { TaskArchiveConfirmDialog } from "./task-archive-confirm-dialog";
+import { SidebarDialogs } from "./task-session-sidebar-dialogs";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
@@ -34,6 +33,7 @@ import {
   hasPendingClarificationForSession,
   hasPendingPermissionForSession,
 } from "@/lib/utils/pending-clarification";
+import { aggregateSidebarTasks } from "./task-session-sidebar-aggregate";
 
 /**
  * Stabilize a derived array of primary session IDs so the reference only
@@ -190,13 +190,6 @@ type TaskSessionSidebarProps = {
   workflowId: string | null;
 };
 
-type StepInfo = {
-  id: string;
-  title: string;
-  color: string;
-  position: number;
-  events?: { on_enter?: Array<{ type: string; config?: Record<string, unknown> }> };
-};
 type SidebarItem = Omit<ReturnType<typeof toSidebarItem>, "workflowId"> & { workflowId?: string };
 
 function buildArchivedItem(s: ReturnType<typeof useArchivedTaskState>): SidebarItem {
@@ -230,6 +223,51 @@ function buildArchivedItem(s: ReturnType<typeof useArchivedTaskState>): SidebarI
   };
 }
 
+// Restrict snapshots and the active-kanban fallback to the current workspace.
+// Snapshots can briefly persist from a previously-active workspace (SSR
+// hydration on first sidebar mount, in-flight task.created WS events that
+// raced the workspace switch, etc.), and those would otherwise leak into
+// the sidebar after switching workspaces.
+function useScopedAggregation(workspaceId: string | null) {
+  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const workflows = useAppStore((state) => state.workflows.items);
+  const activeKanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
+  const activeKanbanTasks = useAppStore((state) => state.kanban.tasks);
+  const activeKanbanSteps = useAppStore((state) => state.kanban.steps);
+
+  const workspaceWorkflowIds = useMemo(
+    () =>
+      new Set(
+        workflows.filter((w) => !workspaceId || w.workspaceId === workspaceId).map((w) => w.id),
+      ),
+    [workflows, workspaceId],
+  );
+  const scopedSnapshots = useMemo(() => {
+    const result: typeof snapshots = {};
+    for (const [wfId, snap] of Object.entries(snapshots)) {
+      if (workspaceWorkflowIds.has(wfId)) result[wfId] = snap;
+    }
+    return result;
+  }, [snapshots, workspaceWorkflowIds]);
+  const fallbackWorkflowId =
+    activeKanbanWorkflowId && workspaceWorkflowIds.has(activeKanbanWorkflowId)
+      ? activeKanbanWorkflowId
+      : null;
+
+  const aggregated = useMemo(
+    () =>
+      aggregateSidebarTasks(
+        scopedSnapshots,
+        fallbackWorkflowId,
+        activeKanbanTasks,
+        activeKanbanSteps,
+      ),
+    [scopedSnapshots, fallbackWorkflowId, activeKanbanTasks, activeKanbanSteps],
+  );
+
+  return { aggregated, scopedSnapshots, snapshots };
+}
+
 function useSidebarData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
@@ -237,7 +275,6 @@ function useSidebarData(workspaceId: string | null) {
   const sessionsByTaskId = useAppStore((state) => state.taskSessionsByTask.itemsByTaskId);
   const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
   const envIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const workflows = useAppStore((state) => state.workflows.items);
   const isMultiLoading = useAppStore((state) => state.kanbanMulti.isLoading);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
@@ -250,20 +287,10 @@ function useSidebarData(workspaceId: string | null) {
     return activeTaskId;
   }, [activeSessionId, activeTaskId, sessionsById]);
 
-  const isLoadingWorkflow = isMultiLoading && Object.keys(snapshots).length === 0;
+  const { aggregated, scopedSnapshots, snapshots } = useScopedAggregation(workspaceId);
+  const { allTasks, allSteps, stepsByWorkflowId } = aggregated;
 
-  const { allTasks, allSteps, stepsByWorkflowId } = useMemo(() => {
-    const tasks: Array<KanbanState["tasks"][number] & { _workflowId: string }> = [];
-    const stepMap = new Map<string, StepInfo>();
-    const wfSteps: Record<string, StepInfo[]> = {};
-    for (const [wfId, snapshot] of Object.entries(snapshots)) {
-      for (const step of snapshot.steps) if (!stepMap.has(step.id)) stepMap.set(step.id, step);
-      wfSteps[wfId] = [...snapshot.steps].sort((a, b) => a.position - b.position);
-      tasks.push(...snapshot.tasks.map((t) => ({ ...t, _workflowId: wfId })));
-    }
-    const sortedSteps = [...stepMap.values()].sort((a, b) => a.position - b.position);
-    return { allTasks: tasks, allSteps: sortedSteps, stepsByWorkflowId: wfSteps };
-  }, [snapshots]);
+  const isLoadingWorkflow = isMultiLoading && Object.keys(snapshots).length === 0;
 
   const tasksWithRepositories = useMemo(() => {
     const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
@@ -277,7 +304,7 @@ function useSidebarData(workspaceId: string | null) {
     );
     const titleById = new Map(allTasks.map((t) => [t.id, t.title]));
     const workflowNameById = new Map(
-      Object.entries(snapshots).map(([wfId, snap]) => [wfId, snap.workflowName]),
+      Object.entries(scopedSnapshots).map(([wfId, snap]) => [wfId, snap.workflowName]),
     );
     const stepTitleById = new Map(allSteps.map((s) => [s.id, s.title]));
     const mapCtx = {
@@ -304,7 +331,7 @@ function useSidebarData(workspaceId: string | null) {
     repositoriesByWorkspace,
     allTasks,
     allSteps,
-    snapshots,
+    scopedSnapshots,
     workspaceId,
     sessionsByTaskId,
     gitStatusByEnvId,
@@ -419,12 +446,56 @@ function useArchiveActions(store: StoreApi) {
   return { archivingTask, setArchivingTask, isArchiving, handleArchiveTask, handleArchiveConfirm };
 }
 
+function useDeleteActions(
+  store: StoreApi,
+  removeTaskFromBoard: ReturnType<typeof useTaskRemoval>["removeTaskFromBoard"],
+) {
+  const { deleteTaskById } = useTaskActions();
+  const [deletingTask, setDeletingTask] = useState<{ id: string; title: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteTask = useCallback(
+    (taskId: string) => {
+      const task = findTaskInSnapshots(store.getState().kanbanMulti.snapshots, taskId);
+      setDeletingTask({ id: taskId, title: task?.title ?? "this task" });
+    },
+    [store],
+  );
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deletingTask || isDeleting) return;
+    const taskId = deletingTask.id;
+    setIsDeleting(true);
+    const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
+      store.getState().tasks;
+    try {
+      await deleteTaskById(taskId);
+      await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
+    } catch (error) {
+      console.error("Failed to delete task:", error);
+    } finally {
+      setIsDeleting(false);
+      setDeletingTask(null);
+    }
+  }, [deletingTask, isDeleting, deleteTaskById, removeTaskFromBoard, store]);
+
+  const deletingTaskId = isDeleting ? (deletingTask?.id ?? null) : null;
+
+  return {
+    deletingTask,
+    setDeletingTask,
+    deletingTaskId,
+    isDeleting,
+    handleDeleteTask,
+    handleDeleteConfirm,
+  };
+}
+
 function useSidebarActions(store: StoreApi) {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
-  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [preparingTaskId, setPreparingTaskId] = useState<string | null>(null);
-  const { deleteTaskById, renameTaskById } = useTaskActions();
+  const { renameTaskById } = useTaskActions();
   const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({
     store,
     useLayoutSwitch: true,
@@ -452,21 +523,7 @@ function useSidebarActions(store: StoreApi) {
   );
 
   const archiveActions = useArchiveActions(store);
-
-  const handleDeleteTask = useCallback(
-    async (taskId: string) => {
-      setDeletingTaskId(taskId);
-      const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
-        store.getState().tasks;
-      try {
-        await deleteTaskById(taskId);
-        await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
-      } finally {
-        setDeletingTaskId(null);
-      }
-    },
-    [deleteTaskById, removeTaskFromBoard, store],
-  );
+  const deleteActions = useDeleteActions(store, removeTaskFromBoard);
 
   const [renamingTask, setRenamingTask] = useState<{ id: string; title: string } | null>(null);
 
@@ -490,16 +547,15 @@ function useSidebarActions(store: StoreApi) {
   const handleMoveToStep = useMoveToStep(store);
 
   return {
-    deletingTaskId,
     preparingTaskId,
     handleSelectTask,
-    handleDeleteTask,
     handleMoveToStep,
     renamingTask,
     setRenamingTask,
     handleRenameTask,
     handleRenameSubmit,
     ...archiveActions,
+    ...deleteActions,
   };
 }
 
@@ -547,14 +603,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     handleArchiveTask,
     handleDeleteTask,
     handleMoveToStep,
-    renamingTask,
-    setRenamingTask,
     handleRenameTask,
-    handleRenameSubmit,
-    archivingTask,
-    setArchivingTask,
-    isArchiving,
-    handleArchiveConfirm,
   } = sidebarActions;
 
   const displayTasks = useMemo(() => {
@@ -603,23 +652,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
           totalTaskCount={displayTasks.length}
         />
       </PanelBody>
-      <TaskRenameDialog
-        open={renamingTask !== null}
-        onOpenChange={(open) => {
-          if (!open) setRenamingTask(null);
-        }}
-        currentTitle={renamingTask?.title ?? ""}
-        onSubmit={handleRenameSubmit}
-      />
-      <TaskArchiveConfirmDialog
-        open={archivingTask !== null}
-        onOpenChange={(open) => {
-          if (!open) setArchivingTask(null);
-        }}
-        taskTitle={archivingTask?.title ?? ""}
-        isArchiving={isArchiving}
-        onConfirm={handleArchiveConfirm}
-      />
+      <SidebarDialogs actions={sidebarActions} />
     </PanelRoot>
   );
 });

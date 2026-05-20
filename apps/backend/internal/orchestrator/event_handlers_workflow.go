@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -348,7 +349,7 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 	// Async: event bus delivers synchronously; blocking here → HTTP timeout (see handleTaskMovedWithSession doc).
 	go func() {
 		asyncCtx := context.WithoutCancel(ctx)
-		_, err := s.StartTask(asyncCtx, task.ID, agentProfileID, "", executorProfileID, 0, task.Description, data.ToStepID, planMode, true, nil)
+		_, err := s.StartTask(asyncCtx, task.ID, agentProfileID, "", executorProfileID, "", task.Description, data.ToStepID, planMode, true, nil)
 		if err != nil {
 			s.logger.Error("task.moved: failed to auto-start task",
 				zap.String("task_id", data.TaskID),
@@ -466,6 +467,30 @@ func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 	return ""
 }
 
+// sessionWasWorkflowSwitched reports whether the session was spawned by a
+// previous workflow step's agent_profile override (createNewSessionForStep)
+// rather than by the user. Used to decide whether transitioning to a step
+// with no override should revert to the task default.
+func sessionWasWorkflowSwitched(session *models.TaskSession) bool {
+	if session == nil || session.Metadata == nil {
+		return false
+	}
+	v, _ := session.Metadata[models.SessionMetaKeyCreatedBy].(string)
+	return v == models.SessionCreatedByWorkflowSwitch
+}
+
+// tagSessionAsWorkflowSwitched marks a session's metadata so it's recognised
+// as workflow-spawned by sessionWasWorkflowSwitched. Used by every code path
+// that ends up with a session whose agent_profile_id was decided by the
+// workflow step override rather than by the user. Uses the atomic
+// SetSessionMetadataKey (json_set) so other metadata keys are preserved.
+func (s *Service) tagSessionAsWorkflowSwitched(ctx context.Context, sessionID string) {
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyCreatedBy, models.SessionCreatedByWorkflowSwitch); err != nil {
+		s.logger.Warn("failed to persist workflow-switch tag",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
 // switchSessionForStep activates a session for the new agent profile.
 // If an existing session on this task already uses the target profile it is
 // reused (re-promoted to primary, brought out of COMPLETED if it had been
@@ -557,6 +582,12 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 		s.reviveReusedSession(ctx, existing)
 	}
 
+	// Note: do not stamp created_by here. Reused sessions keep whatever tag
+	// they had when first created — workflow-spawned ones (createNewSessionForStep,
+	// StartCreatedSession, startTask) already carry the workflow_switch tag,
+	// and user-created ones must stay untagged so a later plain step doesn't
+	// silently revert their explicit profile choice to the task default.
+
 	if err := s.SetPrimarySession(ctx, existing.ID); err != nil {
 		s.logger.Warn("failed to set reused session as primary",
 			zap.String("session_id", existing.ID), zap.Error(err))
@@ -638,6 +669,12 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 	if err != nil {
 		return nil, fmt.Errorf("failed to get new session: %w", err)
 	}
+
+	// Tag the session as workflow-spawned so a later transition to a plain
+	// step (no agent_profile override) knows it's safe to revert to the task
+	// default. User-created sessions intentionally lack this tag — reverting
+	// them would override an explicit user choice.
+	s.tagSessionAsWorkflowSwitched(ctx, newSession.ID)
 
 	// Inherit the task environment from the old session — the workspace is shared
 	// across sessions within the same task, so the new session can reuse the
@@ -732,9 +769,13 @@ func (s *Service) maybySwitchSessionForProfile(
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
 
-	// When the step has no override, fall back to the task's original agent profile
-	// so that moving to a step without an agent_profile reverts to the default.
-	if effectiveProfile == "" {
+	// When the step has no override, fall back to the task's original agent
+	// profile so that moving to a step without an agent_profile reverts to the
+	// default. Only do this when the current session was itself spawned by a
+	// previous step's override — a user-chosen session (e.g. "New Agent"
+	// button) must not be silently replaced by the task default, which would
+	// override the user's explicit choice.
+	if effectiveProfile == "" && sessionWasWorkflowSwitched(session) {
 		task, err := s.repo.GetTask(ctx, taskID)
 		if err == nil && task.Metadata != nil {
 			if pid, ok := task.Metadata[models.MetaKeyAgentProfileID].(string); ok && pid != "" {
@@ -1087,8 +1128,19 @@ func (s *Service) autoStartStepPrompt(
 		}
 	}
 
-	// Record a user message so the auto-start prompt is visible in chat history.
-	s.recordAutoStartMessage(ctx, taskID, sessionID, prompt, planMode)
+	// Record a user message so the auto-start prompt is visible in chat
+	// history. For CREATED sessions the agent has not started yet, so this is
+	// the first prompt of the task — wrap with the Kandev MCP system block
+	// before persisting (and before passing downstream) so the DB row matches
+	// what the agent receives. StartCreatedSession's wrap is idempotent
+	// (HasKandevContext guard) so the pre-wrap doesn't double.
+	// The HasKandevContext check on `prompt` also guards against any future
+	// caller that ever pre-wraps before reaching here (none today).
+	recordedPrompt := prompt
+	if session.State == models.TaskSessionStateCreated && (prompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(prompt) {
+		recordedPrompt = sysprompt.InjectKandevContext(taskID, sessionID, prompt)
+	}
+	s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode)
 
 	// If the session is in CREATED state, the agent was never started (e.g. workspace-only
 	// preparation from a blocked auto-start). PromptTask will reject CREATED sessions,
@@ -1099,7 +1151,7 @@ func (s *Service) autoStartStepPrompt(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName))
-		_, err := s.StartCreatedSession(ctx, taskID, sessionID, session.AgentProfileID, prompt, true, planMode, attachments)
+		_, err := s.StartCreatedSession(ctx, taskID, sessionID, session.AgentProfileID, recordedPrompt, true, planMode, attachments)
 		if err != nil {
 			requeueTaken()
 		}

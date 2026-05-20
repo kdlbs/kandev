@@ -103,7 +103,7 @@ func TestMigration_LegacyDB_DropCheckConstraint(t *testing.T) {
 	}
 
 	// Now open the store — this runs initSchema which should migrate the table.
-	repo, err := newSQLiteRepository(db, db, false)
+	repo, err := newSQLiteRepository(db, db, nil, false)
 	if err != nil {
 		t.Fatalf("newSQLiteRepository on legacy DB: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestMigration_LegacyDB_PreservesAllColumns(t *testing.T) {
 	_, _ = db.Exec(`INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, auto_approve, allow_indexing, cli_passthrough, created_at, updated_at)
 		VALUES ('p1', 'a1', 'Test Profile', 'Test', 'some-model', 1, 0, 1, datetime('now'), datetime('now'))`)
 
-	repo, err := newSQLiteRepository(db, db, false)
+	repo, err := newSQLiteRepository(db, db, nil, false)
 	if err != nil {
 		t.Fatalf("newSQLiteRepository: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestMigration_LegacyDB_MCPConfigSurvives(t *testing.T) {
 		t.Fatalf("seed mcp config: %v", err)
 	}
 
-	repo, err := newSQLiteRepository(db, db, false)
+	repo, err := newSQLiteRepository(db, db, nil, false)
 	if err != nil {
 		t.Fatalf("newSQLiteRepository: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestMigration_FreshDB_NoOp(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	repo, err := newSQLiteRepository(db, db, false)
+	repo, err := newSQLiteRepository(db, db, nil, false)
 	if err != nil {
 		t.Fatalf("newSQLiteRepository on fresh DB: %v", err)
 	}
@@ -251,14 +251,14 @@ func TestMigration_Idempotent(t *testing.T) {
 	db := newLegacyDB(t)
 
 	// First init — runs the migration.
-	repo1, err := newSQLiteRepository(db, db, false)
+	repo1, err := newSQLiteRepository(db, db, nil, false)
 	if err != nil {
 		t.Fatalf("first init: %v", err)
 	}
 	_ = repo1
 
 	// Second init — migration should detect no CHECK and skip.
-	repo2, err := newSQLiteRepository(db, db, false)
+	repo2, err := newSQLiteRepository(db, db, nil, false)
 	if err != nil {
 		t.Fatalf("second init (idempotent): %v", err)
 	}

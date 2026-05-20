@@ -14,6 +14,17 @@ Systematic bug fixing: reproduce the problem, find the root cause, apply a minim
 - **`/verify`** — Run after fixing to ensure nothing else broke.
 - **`/record`** — Record architectural decisions or insights discovered during the fix.
 
+## What a fix produces (and what it doesn't)
+
+The artifacts for a bug fix are:
+- A regression test that fails before the fix and passes after.
+- The minimal code change.
+- A clear commit message capturing the root cause.
+- **An ADR (via `/record decision`) IF the fix encoded a new project-wide convention** (e.g., "GC code must fail-closed", "all repo deletes must be transactional"). Most fixes don't need one.
+- **An update to the related feature spec IF the bug exposed a requirement gap** (see Phase 5).
+
+A bug fix does **not** produce a spec. Specs describe product features; bugs are corrections to existing features and are tracked in tests + commits.
+
 ---
 
 ## Before anything else: create the pipeline
@@ -24,7 +35,7 @@ Create these tasks immediately (use your task/todo tracking tool if available):
 2. **Find the root cause** — Trace the code path, narrow the scope, state the cause clearly
 3. **Fix with TDD** — Minimal fix with regression test, no surrounding refactors
 4. **Verify** — Run full verification, check for similar patterns elsewhere
-5. **Record** — Save any architectural decisions or insights for future sessions
+5. **Record** — Save any architectural decisions or insights, AND update the related feature spec if the bug exposed a requirement gap
 
 Then start with task 1. Mark each task in_progress when you begin it and completed when you finish it. Do not skip ahead — fixing without reproducing leads to patches that don't address the real problem. Fixing without understanding the root cause leads to whack-a-mole.
 
@@ -100,11 +111,24 @@ Mark task 4 as completed.
 
 Mark task 5 as in_progress.
 
-Check if the fix revealed any insights worth recording for future sessions:
+Two questions, in order:
 
-1. If the root cause exposed an architectural gap or non-obvious constraint, run `/record decision`
-2. If you discovered a pattern that would help debug similar issues, save it
-3. If nothing worth recording, skip this phase
+**1. Did the fix expose a requirement gap in an existing spec?**
+
+A bug can mean the spec was wrong, ambiguous, or silent about the scenario that broke. Ask: "If someone re-implemented this feature from the spec alone, would they reproduce this bug?" If yes, the spec is incomplete.
+
+- Find the related spec under `docs/specs/<slug>/spec.md` (check `docs/specs/INDEX.md`).
+- Update it to cover the missing requirement — usually a new line under **What** and/or a new **GIVEN/WHEN/THEN** scenario. Keep it observable and behavior-focused; don't paste the root cause or the fix.
+- If no spec exists yet but should (this category of behavior is feature-shaped and load-bearing), flag it to the user — don't create one unilaterally during a fix.
+- If the bug was in infra, tooling, or behavior not covered by any feature spec, skip — there is nothing to update.
+
+**Do NOT create a new spec for the bug fix itself.** Bugs aren't features.
+
+**2. Did the fix encode a new project-wide convention?**
+
+If the root cause exposed an architectural gap, a non-obvious constraint, or a rule that should bind future code (e.g., "GC code must fail-closed", "all bulk deletes must be transactional"), run `/record decision` to capture it as an ADR.
+
+If neither question applies, skip this phase.
 
 Mark task 5 as completed.
 

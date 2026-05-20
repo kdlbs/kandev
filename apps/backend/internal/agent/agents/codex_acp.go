@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -89,8 +90,10 @@ func (a *CodexACP) Runtime() *RuntimeConfig {
 		Mounts: []MountTemplate{
 			{Source: "{workspace}", Target: "/workspace"},
 		},
-		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Protocol:       agent.ProtocolACP,
+		ResourceLimits:  ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
+		Protocol:        agent.ProtocolACP,
+		ProjectSkillDir: ".agents/skills",
+		UserSkillDir:    ".codex/skills",
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
@@ -142,6 +145,8 @@ func (a *CodexACP) LoginCommand() *LoginCommand {
 func (a *CodexACP) InstallScript() string {
 	return "npm install -g @openai/codex " + codexACPPkg
 }
+
+func (a *CodexACP) BillingType() usage.BillingType { return codexBillingType() }
 
 func (a *CodexACP) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings

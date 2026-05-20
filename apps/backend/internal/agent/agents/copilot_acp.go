@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -85,11 +86,13 @@ func (a *CopilotACP) BuildCommand(opts CommandOptions) Command {
 func (a *CopilotACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd("npx", "-y", copilotACPPkg, "--acp").Build(),
-		WorkingDir:     "{workspace}",
-		Env:            map[string]string{},
-		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Protocol:       agent.ProtocolACP,
+		Cmd:             Cmd("npx", "-y", copilotACPPkg, "--acp").Build(),
+		WorkingDir:      "{workspace}",
+		Env:             map[string]string{},
+		ResourceLimits:  ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
+		Protocol:        agent.ProtocolACP,
+		ProjectSkillDir: ".agents/skills",
+		UserSkillDir:    ".copilot/skills",
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
@@ -112,6 +115,8 @@ func (a *CopilotACP) LoginCommand() *LoginCommand {
 func (a *CopilotACP) InstallScript() string {
 	return "npm install -g " + copilotACPPkg
 }
+
+func (a *CopilotACP) BillingType() usage.BillingType { return defaultBillingType() }
 
 func (a *CopilotACP) PermissionSettings() map[string]PermissionSetting {
 	return copilotPermSettings

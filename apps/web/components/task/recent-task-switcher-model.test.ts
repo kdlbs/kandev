@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { RecentTaskEntry } from "@/lib/recent-tasks";
-import type { Repository, TaskSession } from "@/lib/types/http";
+import {
+  repositoryId as toRepositoryId,
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  workspaceId as toWorkspaceId,
+  type Repository,
+  type TaskSession,
+} from "@/lib/types/http";
 import {
   buildRecentTaskDisplayItems,
   buildRecentTaskEntry,
@@ -34,10 +41,10 @@ function recent(taskId: string, title: string): RecentTaskEntry {
   };
 }
 
-function session(taskId: string, state: TaskSession["state"]): TaskSession {
+function session(taskIdStr: string, state: TaskSession["state"]): TaskSession {
   return {
-    id: `${taskId}-session`,
-    task_id: taskId,
+    id: toSessionId(`${taskIdStr}-session`),
+    task_id: toTaskId(taskIdStr),
     state,
     started_at: visitedAt,
     updated_at: visitedAt,
@@ -47,8 +54,8 @@ function session(taskId: string, state: TaskSession["state"]): TaskSession {
 
 function buildContext(): RecentTaskBuildContext {
   const repository: Repository = {
-    id: REPOSITORY_ID,
-    workspace_id: WORKSPACE_ID,
+    id: toRepositoryId(REPOSITORY_ID),
+    workspace_id: toWorkspaceId(WORKSPACE_ID),
     name: "Local Repo",
     source_type: "local",
     local_path: "/tmp/local-repo",

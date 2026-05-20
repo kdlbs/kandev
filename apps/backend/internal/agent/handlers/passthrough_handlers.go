@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"

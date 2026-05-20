@@ -38,6 +38,7 @@ type Client struct {
 	sessionSubscriptions map[string]bool // Session IDs this client is subscribed to
 	sessionFocus         map[string]bool // Session IDs this client has focused (a strict subset of subscriptions, conceptually — see hub_session_mode.go)
 	userSubscriptions    map[string]bool // User IDs this client is subscribed to
+	runSubscriptions     map[string]bool // Office run IDs this client is subscribed to (for run.event.appended)
 	mu                   sync.RWMutex
 	closed               bool
 	logger               *logger.Logger
@@ -54,12 +55,19 @@ func NewClient(id string, conn *websocket.Conn, hub *Hub, log *logger.Logger) *C
 		sessionSubscriptions: make(map[string]bool),
 		sessionFocus:         make(map[string]bool),
 		userSubscriptions:    make(map[string]bool),
+		runSubscriptions:     make(map[string]bool),
 		logger:               log.WithFields(zap.String("client_id", id)),
 	}
 }
 
-// ReadPump pumps messages from the WebSocket connection to the hub
-func (c *Client) ReadPump(ctx context.Context) {
+// ReadPump pumps messages from the WebSocket connection to the hub.
+//
+// The ctx argument is retained for API stability but is not consulted by the
+// pump itself — Gorilla's ReadMessage blocks on the conn only, so teardown
+// happens via the conn close path (driven by client disconnect, server
+// shutdown closing all conns, or pong timeout). Dispatched handlers use the
+// hub's lifetime context instead; see handleMessage.
+func (c *Client) ReadPump(_ context.Context) {
 	defer func() {
 		c.hub.Unregister(c)
 		if err := c.conn.Close(); err != nil {
@@ -98,12 +106,16 @@ func (c *Client) ReadPump(ctx context.Context) {
 		// Process the message in a goroutine to avoid blocking the read pump
 		// This allows concurrent message handling so long-running handlers
 		// (like orchestrator.prompt) don't block other requests (like workspace.tree.get)
-		go c.handleMessage(ctx, &msg)
+		go c.handleMessage(&msg)
 	}
 }
 
-// handleMessage processes an incoming message
-func (c *Client) handleMessage(ctx context.Context, msg *ws.Message) {
+// handleMessage processes an incoming message.
+//
+// Intentionally does NOT take the connection context. Dispatched handlers run
+// under the hub's lifetime context so a mid-flight client disconnect doesn't
+// abort in-progress side effects (see the comment on Dispatch below).
+func (c *Client) handleMessage(msg *ws.Message) {
 	c.logger.Debug("Received message",
 		zap.String("action", msg.Action),
 		zap.String("id", msg.ID))
@@ -134,10 +146,25 @@ func (c *Client) handleMessage(ctx context.Context, msg *ws.Message) {
 	case ws.ActionUserUnsubscribe:
 		c.handleUserUnsubscribe(msg)
 		return
+	case ws.ActionRunSubscribe:
+		c.handleRunSubscribe(msg)
+		return
+	case ws.ActionRunUnsubscribe:
+		c.handleRunUnsubscribe(msg)
+		return
 	}
 
-	// Dispatch to handler
-	response, err := c.hub.dispatcher.Dispatch(ctx, msg)
+	// Dispatch to handler using the hub's lifetime context, not the per-
+	// connection one. The connection ctx is cancelled when the client
+	// disconnects (page reload, nav, network drop). Using it here would
+	// SIGKILL any exec.CommandContext subprocesses the handler spawned
+	// (e.g. `gh pr`, `git`, agentctl HTTP requests) and abort
+	// side-effecting work like session.launch mid-flight. We can't deliver
+	// the response either way once the connection is gone, but the
+	// handler's work should run to completion so it doesn't leave partial
+	// state behind. The dispatch ctx still cancels on server shutdown.
+	dispatchCtx := c.hub.DispatchContext()
+	response, err := c.hub.dispatcher.Dispatch(dispatchCtx, msg)
 	if err != nil {
 		c.logger.Error("Handler error",
 			zap.String("action", msg.Action),
@@ -299,6 +326,53 @@ func (c *Client) handleUnsubscribe(msg *ws.Message) {
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success": true,
 		"task_id": req.TaskID,
+	})
+	c.sendMessage(resp)
+}
+
+// RunSubscribeRequest is the payload for run.subscribe / run.unsubscribe.
+type RunSubscribeRequest struct {
+	RunID string `json:"run_id"`
+}
+
+// handleRunSubscribe handles run.subscribe action — registers this
+// client on the per-run topic so it receives run.event.appended
+// notifications. Clients fetch the snapshot via REST and only need
+// the diff stream from this point forward; we deliberately replay no
+// state on subscribe.
+func (c *Client) handleRunSubscribe(msg *ws.Message) {
+	var req RunSubscribeRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return
+	}
+	if req.RunID == "" {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "run_id is required", nil)
+		return
+	}
+	c.hub.SubscribeToRun(c, req.RunID)
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success": true,
+		"run_id":  req.RunID,
+	})
+	c.sendMessage(resp)
+}
+
+// handleRunUnsubscribe handles run.unsubscribe action.
+func (c *Client) handleRunUnsubscribe(msg *ws.Message) {
+	var req RunSubscribeRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return
+	}
+	if req.RunID == "" {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "run_id is required", nil)
+		return
+	}
+	c.hub.UnsubscribeFromRun(c, req.RunID)
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success": true,
+		"run_id":  req.RunID,
 	})
 	c.sendMessage(resp)
 }

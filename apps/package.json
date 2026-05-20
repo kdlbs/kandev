@@ -2,6 +2,10 @@
   "name": "kandev-monorepo",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": "^24"
+  },
   "scripts": {
     "dev": "pnpm -r run dev",
     "dev:web": "pnpm --filter @kandev/web dev",
@@ -23,6 +27,12 @@
     "overrides": {
       "@codemirror/state": "6.5.3",
       "@codemirror/view": "6.39.10"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "msw",
+      "sharp",
+      "unrs-resolver"
+    ]
   }
 }

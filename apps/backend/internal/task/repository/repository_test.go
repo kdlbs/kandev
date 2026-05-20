@@ -21,7 +21,7 @@ func createTestSQLiteRepo(t *testing.T) (*sqlite.Repository, func()) {
 		t.Fatalf("failed to open SQLite database: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repo, err := sqlite.NewWithDB(sqlxDB, sqlxDB)
+	repo, err := sqlite.NewWithDB(sqlxDB, sqlxDB, nil)
 	if err != nil {
 		t.Fatalf("failed to create SQLite repository: %v", err)
 	}

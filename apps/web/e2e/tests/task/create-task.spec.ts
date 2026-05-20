@@ -144,6 +144,43 @@ test.describe("Task creation", () => {
     }
   });
 
+  test("falls back to a valid profile when localStorage holds a stale agent id", async ({
+    testPage,
+  }) => {
+    // Reproduces the "No compatible agent profiles for 'Worktree'" regression
+    // that fires after a DB reset: localStorage still carries the previous
+    // run's agent profile UUID, which no longer exists in the fresh DB.
+    // The dialog must reject the stale id and fall back through the
+    // workspace default / first-profile chain instead of locking in a
+    // bogus selection that the compatibility check then rejects.
+    await testPage.addInitScript(() => {
+      localStorage.setItem(
+        "kandev.dialog.lastAgentProfileId",
+        JSON.stringify("00000000-0000-0000-0000-000000000000"),
+      );
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await kanban.createTaskButton.first().click();
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+
+    await testPage.getByTestId("task-title-input").fill("Stale LS Task");
+    await testPage.getByTestId("task-description-input").fill("stale localStorage repro");
+
+    // The bug surfaces as the "No compatible agent profiles" empty state.
+    await expect(testPage.getByTestId("agent-profile-empty-state")).toHaveCount(0);
+
+    // Auto-select must resolve to a real profile, and the start button must
+    // become enabled - these are the user-visible symptoms of the fix.
+    await expect(testPage.getByTestId(START_AGENT_TEST_ID)).toBeEnabled({
+      timeout: START_ENABLED_TIMEOUT,
+    });
+    await expect(testPage.getByTestId("agent-profile-selector")).not.toContainText("Select agent");
+  });
+
   test("can fill in task title and description", async ({ testPage }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();

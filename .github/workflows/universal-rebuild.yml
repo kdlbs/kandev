@@ -46,7 +46,7 @@ jobs:
     env:
       STAGING_IMAGE: ghcr.io/kdlbs/kandev:universal-staging-weekly-${{ github.run_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Compute date tag
         id: date

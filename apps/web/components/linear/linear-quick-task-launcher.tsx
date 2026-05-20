@@ -83,7 +83,7 @@ export function LinearQuickTaskLauncher({
   };
   const handleSuccess = (task: Task) => {
     onClose();
-    router.push(`/t/${task.id}`);
+    router.push(`/tasks/${task.id}`);
   };
 
   if (!workspaceId || !defaultWorkflow || !defaultStep || !dialog) return null;

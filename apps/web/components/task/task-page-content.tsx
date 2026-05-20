@@ -4,7 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { TaskTopBar } from "@/components/task/task-top-bar";
 import { TaskLayout } from "@/components/task/task-layout";
 import { DebugOverlay } from "@/components/debug-overlay";
-import type { Repository, RepositoryScript, Task } from "@/lib/types/http";
+import {
+  taskId as toTaskId,
+  workflowId as toWorkflowId,
+  workspaceId as toWorkspaceId,
+  type Repository,
+  type RepositoryScript,
+  type Task,
+} from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import type { KanbanState } from "@/lib/state/slices";
 import { DEBUG_UI } from "@/lib/config";
@@ -39,6 +46,7 @@ type TaskPageContentProps = {
   initialTerminals?: Terminal[];
   defaultLayouts?: Record<string, Layout>;
   initialLayout?: string | null;
+  officeTaskHref?: string | null;
 };
 
 function resolveEffectiveTask(
@@ -82,19 +90,19 @@ function buildTaskFromKanban(
   const prevWorkspaceId = taskDetails?.workspace_id ?? initialTask?.workspace_id;
   const prevBoardId = taskDetails?.workflow_id ?? initialTask?.workflow_id;
   return {
-    id: kanbanTask.id,
+    id: toTaskId(kanbanTask.id),
     title: kanbanTask.title,
     description: kanbanTask.description ?? "",
     workflow_step_id: kanbanTask.workflowStepId,
     position: kanbanTask.position,
     state: kanbanTask.state ?? "CREATED",
-    workspace_id: prevWorkspaceId ?? "",
-    workflow_id: prevBoardId ?? "",
+    workspace_id: prevWorkspaceId ?? toWorkspaceId(""),
+    workflow_id: prevBoardId ?? toWorkflowId(""),
     priority: 0,
     repositories: [],
     created_at: "",
     updated_at: kanbanTask.updatedAt ?? "",
-  } as Task;
+  };
 }
 
 function useWorkflowStepsMapped() {
@@ -209,6 +217,7 @@ type TaskPageInnerProps = {
   initialTerminals?: Terminal[];
   defaultLayouts: Record<string, Layout>;
   initialLayout?: string | null;
+  officeTaskHref?: string | null;
 };
 
 type RemoteExecutorStatus = {
@@ -261,6 +270,7 @@ function buildTaskTopBarProps(params: {
   remote: ReturnType<typeof resolveRemoteExecutor>;
   sessionWorkflowStepId: string | null;
   agentctlReady: boolean;
+  officeTaskHref?: string | null;
 }) {
   const { taskProps, agent, merged, workflowSteps, showDebugOverlay, onToggleDebugOverlay } =
     params;
@@ -282,6 +292,7 @@ function buildTaskTopBarProps(params: {
     isRemoteExecutor: params.remote.isRemoteExecutor,
     isAgentctlReady: params.agentctlReady,
     remoteExecutorType: params.remote.remoteExecutorType,
+    officeTaskHref: params.officeTaskHref,
   };
 }
 
@@ -366,6 +377,7 @@ function TaskPageInner({
   initialTerminals,
   defaultLayouts,
   initialLayout,
+  officeTaskHref,
 }: TaskPageInnerProps) {
   const taskProps = resolveTaskProps(task, repository);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
@@ -390,6 +402,7 @@ function TaskPageInner({
     remote,
     sessionWorkflowStepId: sessionPanel.sessionWorkflowStepId,
     agentctlReady: agentctlStatus.isReady,
+    officeTaskHref,
   });
   const layoutProps = buildTaskLayoutProps({
     taskProps,
@@ -534,6 +547,7 @@ export function TaskPageContent({
   initialTerminals,
   defaultLayouts = {},
   initialLayout,
+  officeTaskHref = null,
 }: TaskPageContentProps) {
   const [isMounted, setIsMounted] = useState(false);
   const [showDebugOverlay, setShowDebugOverlay] = useState(false);
@@ -583,6 +597,7 @@ export function TaskPageContent({
       initialTerminals={initialTerminals}
       defaultLayouts={defaultLayouts}
       initialLayout={initialLayout}
+      officeTaskHref={officeTaskHref}
     />
   );
 }

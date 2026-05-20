@@ -220,6 +220,8 @@ function PlanToggleButton({
           variant="ghost"
           size="sm"
           data-testid="plan-mode-toggle-button"
+          data-plan-available={planModeAvailable}
+          data-plan-enabled={planModeEnabled}
           className={cn(
             "h-7 gap-1.5 px-2 hover:bg-muted/40 cursor-pointer",
             planModeEnabled && planModeAvailable && "bg-violet-500/15 text-violet-400",

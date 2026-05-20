@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useCallback, useState } from "react";
-import { IconAlertTriangle, IconPlus, IconPlayerPlay } from "@tabler/icons-react";
+import { IconAlertTriangle, IconPlayerPlay, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
@@ -91,6 +91,25 @@ type ChatInputContainerProps = {
   hidePlanMode?: boolean;
 };
 
+async function requestSessionRecover(
+  taskId: string,
+  sessionId: string,
+  action: "resume" | "fresh_start",
+): Promise<boolean> {
+  const client = getWebSocketClient();
+  if (!client) return false;
+  try {
+    await client.request(
+      "session.recover",
+      { task_id: taskId, session_id: sessionId, action },
+      30000,
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function FailedSessionBanner({
   showDialog,
   onShowDialog,
@@ -111,6 +130,7 @@ function FailedSessionBanner({
   resumingLabel?: string;
 }) {
   const [isResuming, setIsResuming] = useState(false);
+  const [isStartingFresh, setIsStartingFresh] = useState(false);
 
   const agentProfileId = useAppStore((s) =>
     sessionId ? (s.taskSessions.items[sessionId]?.agent_profile_id ?? "") : "",
@@ -121,21 +141,25 @@ function FailedSessionBanner({
       s.agentProfiles.items.some((p: { id: string }) => p.id === agentProfileId),
   );
 
-  const handleResume = useCallback(async () => {
-    if (!sessionId || !taskId) return;
-    const client = getWebSocketClient();
-    if (!client) return;
-    setIsResuming(true);
-    try {
-      await client.request(
-        "session.launch",
-        { task_id: taskId, intent: "resume", session_id: sessionId },
-        30000,
-      );
-    } catch {
-      setIsResuming(false);
+  const handleRecover = useCallback(
+    async (action: "resume" | "fresh_start") => {
+      if (!sessionId || !taskId) return;
+      const setBusy = action === "resume" ? setIsResuming : setIsStartingFresh;
+      setBusy(true);
+      const ok = await requestSessionRecover(taskId, sessionId, action);
+      if (!ok) setBusy(false);
+    },
+    [sessionId, taskId],
+  );
+
+  const handleResume = useCallback(() => handleRecover("resume"), [handleRecover]);
+  const handleFreshStart = useCallback(() => {
+    if (!profileExists) {
+      onShowDialog(true);
+      return;
     }
-  }, [sessionId, taskId]);
+    void handleRecover("fresh_start");
+  }, [profileExists, onShowDialog, handleRecover]);
 
   return (
     <>
@@ -154,7 +178,7 @@ function FailedSessionBanner({
                     <Button
                       variant="default"
                       size="sm"
-                      data-testid="failed-session-resume-button"
+                      data-testid="recovery-resume-button"
                       className="shrink-0 gap-1.5 cursor-pointer"
                       onClick={handleResume}
                       disabled={isResuming || !profileExists}
@@ -171,10 +195,12 @@ function FailedSessionBanner({
               variant="outline"
               size="sm"
               className="shrink-0 gap-1.5 cursor-pointer"
-              onClick={() => onShowDialog(true)}
+              onClick={handleFreshStart}
+              disabled={isStartingFresh}
+              data-testid="recovery-fresh-button"
             >
-              <IconPlus className="h-3.5 w-3.5" />
-              New Agent
+              <IconRefresh className="h-3.5 w-3.5" />
+              {isStartingFresh ? "Starting..." : "Start fresh session"}
             </Button>
           </div>
         </div>

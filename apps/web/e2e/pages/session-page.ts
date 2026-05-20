@@ -61,10 +61,6 @@ export class SessionPage {
   todoIndicator() {
     return this.page.getByTestId("todo-indicator");
   }
-  /** Resume button shown in the FailedSessionBanner. */
-  failedSessionResumeButton(): Locator {
-    return this.page.getByTestId("failed-session-resume-button");
-  }
   /** Span wrapper around the resume button — used to trigger tooltip on disabled state. */
   failedSessionResumeWrapper(): Locator {
     return this.page.getByTestId("failed-session-resume-wrapper");
@@ -73,15 +69,56 @@ export class SessionPage {
   cancelAgentButton(): Locator {
     return this.page.getByTestId("cancel-agent-button");
   }
+  /** The currently visible chat panel when dockview keeps background panels mounted. */
+  activeChat(): Locator {
+    return this.page.locator("[data-testid='session-chat']:visible").first();
+  }
 
   async waitForLoad(timeout = 15_000) {
     // When multiple session tabs are open, multiple session-chat panels exist in
     // the DOM but only the active one is visible. Use :visible to avoid matching
     // a hidden background panel (which would cause the wait to time out).
-    await this.page
-      .locator("[data-testid='session-chat']:visible")
-      .first()
-      .waitFor({ state: "visible", timeout });
+    await this.activeChat().waitFor({ state: "visible", timeout });
+  }
+
+  /**
+   * Wait for the chat to be idle (input placeholder visible, agent not busy).
+   *
+   * On mobile-chrome (and occasionally desktop), there's a WS subscribe race:
+   * a fresh task auto-starts its agent, the mock agent completes in <1s, and
+   * the session_state transition (RUNNING -> AWAITING_INPUT) can fan out
+   * before the client's WS subscription registers server-side. The client
+   * then sits with `isAgentBusy=true` forever and the idle placeholder
+   * never renders. SSR picks up the right state on the next page load, so
+   * one targeted reload-and-retry is enough to recover.
+   *
+   * This is the same race the office agent-run-live spec rides out with
+   * `expect.poll`-based re-seeding.
+   */
+  // opts.timeout is a soft cap on the *post-attempt* wait, not a hard cap
+  // on total elapsed time. Worst-case wall-clock is roughly
+  //   attemptTimeout + reload + activeChat-wait + remaining
+  // where `remaining` is at least `attemptTimeout` so the second wait isn't
+  // starved when `timeout - attemptTimeout` is too small. The race we're
+  // covering resolves on the reload's SSR, so the second wait normally
+  // returns in well under a second; the generous floor exists for the
+  // pathological "page didn't fully load yet" cases.
+  async waitForChatIdle(opts: { timeout?: number; attemptTimeout?: number } = {}) {
+    const softTotalTimeout = opts.timeout ?? 45_000;
+    const attemptTimeout = opts.attemptTimeout ?? 15_000;
+    const idle = this.idleInput();
+    try {
+      await idle.waitFor({ state: "visible", timeout: attemptTimeout });
+      return;
+    } catch {
+      // Reload once to re-SSR with the latest session state, then wait the
+      // remaining budget. If the placeholder still doesn't appear after a
+      // reload, fall through to the original error semantics.
+    }
+    await this.page.reload();
+    await this.activeChat().waitFor({ state: "visible", timeout: attemptTimeout });
+    const remaining = Math.max(attemptTimeout, softTotalTimeout - attemptTimeout);
+    await idle.waitFor({ state: "visible", timeout: remaining });
   }
 
   /** Wait for the passthrough terminal to be visible (for TUI/passthrough sessions). */
@@ -292,6 +329,11 @@ export class SessionPage {
     return this.clarificationQuestionCardById(questionId).getByTestId("clarification-input");
   }
 
+  /** Container around the custom text input — exposes data-active for selection state. */
+  clarificationCustomInputContainerForQuestion(questionId: string): Locator {
+    return this.clarificationQuestionCardById(questionId).getByTestId("clarification-custom-input");
+  }
+
   /** Option button (by visible label text) inside a specific question card. */
   clarificationOptionForQuestion(questionId: string, text: string): Locator {
     return this.clarificationQuestionCardById(questionId)
@@ -363,10 +405,15 @@ export class SessionPage {
 
   /**
    * Delete a task via the sidebar context menu.
-   * Hovers to reveal the menu trigger, opens it, and clicks "Delete".
+   * Hovers to reveal the menu trigger, opens it, clicks "Delete",
+   * and confirms the delete dialog.
    */
   async deleteTaskInSidebar(title: string): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Delete");
+    const confirmButton = this.page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Delete" });
+    await confirmButton.click();
   }
 
   /**
@@ -388,11 +435,7 @@ export class SessionPage {
    * Retries the full open-click sequence if the menu gets detached by a
    * React re-render (e.g. WS-driven sidebar update) between open and click.
    */
-  private async openSidebarMenuAndClick(
-    title: string,
-    itemName: string,
-    retries = 3,
-  ): Promise<void> {
+  async openSidebarMenuAndClick(title: string, itemName: string, retries = 3): Promise<void> {
     const taskRow = this.sidebar.locator('[role="button"]').filter({ hasText: title });
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
@@ -651,10 +694,21 @@ export class SessionPage {
     await editor.press(`${modifier}+Enter`);
   }
 
-  /** Toggle plan mode on/off by clicking the plan mode toggle button in the toolbar. */
+  /** Toggle plan mode on/off by clicking the plan mode toggle button in the toolbar.
+   *
+   * Waits for the button to advertise `data-plan-available="true"` before clicking.
+   * Without this gate the click can fire before `useSessionMcp` has resolved
+   * `supports_mcp` for the session's agent profile (e.g. the agent type data
+   * hasn't propagated into `settingsAgents.items` yet). The button is always
+   * rendered, but with `planModeAvailable=false` the click only toggles the
+   * plan layout — it does NOT enable plan mode on the chat input, so the
+   * downstream `planModeInput()` assertion would time out for a race rather
+   * than a real bug.
+   */
   async togglePlanMode() {
     const btn = this.page.getByTestId("plan-mode-toggle-button");
     await expect(btn).toBeVisible({ timeout: 10_000 });
+    await expect(btn).toHaveAttribute("data-plan-available", "true", { timeout: 10_000 });
     await btn.click();
   }
 
@@ -729,6 +783,30 @@ export class SessionPage {
     await expect(this.files).toBeVisible({ timeout: 10_000 });
     await expect(this.sidebar).toBeVisible();
     await this.expectNoLayoutGap();
+  }
+
+  /**
+   * Wait until the dockview api is exposed on `window` and reports at least
+   * one group with a positive width. Use this as a layout-ready gate for tests
+   * that assert on layout state but don't need the agent to be idle (the
+   * agent may keep cycling Starting → idle → Starting under workflow
+   * auto-start, never settling within a single polling window).
+   */
+  async waitForDockviewReady(timeout = 15_000): Promise<void> {
+    await expect
+      .poll(
+        async () => {
+          return this.page.evaluate(() => {
+            type Group = { id: string; width: number };
+            type Api = { groups: Group[] };
+            const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+            if (!api) return false;
+            return api.groups.some((g) => g.width > 1);
+          });
+        },
+        { timeout, message: "Waiting for dockview api with positive-width groups" },
+      )
+      .toBe(true);
   }
 
   /**
@@ -949,6 +1027,32 @@ export class SessionPage {
   /** All selected file rows in the changes panel. */
   changesSelectedRows(): Locator {
     return this.changes.locator("[data-selected='true']");
+  }
+
+  /** All file rows in the changes panel currently marked as the active tab. */
+  changesActiveRows(): Locator {
+    return this.changes.locator("[data-active='true']");
+  }
+
+  /**
+   * Close every file-diff panel in dockview: the `preview:file-diff` slot AND
+   * any pinned `diff:file:<path>` panels created by promoting the preview.
+   * After this resolves, no diff tab is active so the changes-panel rows
+   * settle to `data-active="false"`.
+   */
+  async closeFileDiffPreview(): Promise<void> {
+    await this.page.evaluate(() => {
+      type PanelApi = { close: () => void };
+      type Panel = { id: string; api: PanelApi };
+      type Api = { panels: Panel[]; getPanel: (i: string) => Panel | undefined };
+      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+      if (!api) return;
+      api.getPanel("preview:file-diff")?.api.close();
+      // Snapshot before iterating: panel.api.close() mutates api.panels in
+      // place, so iterating the live array would skip every other panel.
+      const pinned = [...api.panels].filter((p) => p.id.startsWith("diff:file:"));
+      for (const panel of pinned) panel.api.close();
+    });
   }
 
   /** Bulk action bar for a variant (unstaged/staged). */

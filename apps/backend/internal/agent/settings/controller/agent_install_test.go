@@ -242,3 +242,81 @@ func TestRingBuffer_DropsOldestOnLineBoundary(t *testing.T) {
 		t.Errorf("ring buffer missing newest write, got %q", got)
 	}
 }
+
+// TestIsInstallNpmEnvVar mirrors TestIsNpmEnvVar in agentctl/server/process,
+// guarding against the two filters drifting apart and verifying that
+// legitimate npm config (registry, proxy, auth, custom .npmrc) survives so
+// install scripts behind corporate registries still work.
+func TestIsInstallNpmEnvVar(t *testing.T) {
+	tests := []struct {
+		key      string
+		expected bool
+	}{
+		// Poison: pnpm-injected workspace dir.
+		{"npm_config_prefix", true},
+		{"npm_config_dir", true},
+		{"npm_config_user_agent", true},
+		{"npm_execpath", true},
+		{"npm_node_execpath", true},
+		// Per-script context, never user config.
+		{"npm_package_name", true},
+		{"npm_package_version", true},
+		{"npm_lifecycle_event", true},
+
+		// Legitimate npm config that must survive (would break installs
+		// behind corporate registries / proxies / private auth otherwise).
+		{"npm_config_registry", false},
+		{"npm_config_proxy", false},
+		{"npm_config_https-proxy", false},
+		{"npm_config_userconfig", false},
+		{"npm_config_globalconfig", false},
+		{"npm_config_//registry.npmjs.org/:_authToken", false},
+		{"npm_config_strict-ssl", false},
+		{"npm_config_cafile", false},
+
+		// Unrelated env.
+		{"PATH", false},
+		{"HOME", false},
+		{"NPM_TOKEN", false},
+		{"NPMRC", false},
+		{"npm_not_a_config", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			if got := isInstallNpmEnvVar(tt.key); got != tt.expected {
+				t.Errorf("isInstallNpmEnvVar(%q) = %v, want %v", tt.key, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFilteredInstallEnv(t *testing.T) {
+	// Poison vars pnpm injects.
+	t.Setenv("npm_config_prefix", "/workspace/apps/cli")
+	t.Setenv("npm_config_user_agent", "pnpm/9.15.9")
+	t.Setenv("npm_package_name", "kandev")
+	t.Setenv("npm_lifecycle_event", "dev")
+	// Legitimate config a user might have in their shell.
+	t.Setenv("npm_config_registry", "https://registry.corp.example.com/")
+	t.Setenv("npm_config_https-proxy", "http://proxy.corp.example.com:8080")
+	// Unrelated env.
+	t.Setenv("KANDEV_TEST_KEEP", "yes")
+
+	got := make(map[string]string)
+	for _, entry := range filteredInstallEnv() {
+		if eq := strings.IndexByte(entry, '='); eq > 0 {
+			got[entry[:eq]] = entry[eq+1:]
+		}
+	}
+
+	for _, k := range []string{"npm_config_prefix", "npm_config_user_agent", "npm_package_name", "npm_lifecycle_event"} {
+		if _, ok := got[k]; ok {
+			t.Errorf("%s should have been filtered", k)
+		}
+	}
+	for _, k := range []string{"npm_config_registry", "npm_config_https-proxy", "KANDEV_TEST_KEEP"} {
+		if _, ok := got[k]; !ok {
+			t.Errorf("%s should have been kept", k)
+		}
+	}
+}

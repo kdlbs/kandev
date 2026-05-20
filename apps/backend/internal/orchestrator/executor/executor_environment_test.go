@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -262,7 +262,7 @@ func TestBuildResumeRequest_ReusesTaskEnvironmentRuntimeMetadata(t *testing.T) {
 		TaskID:           "task-1",
 		AgentExecutionID: "exec-old",
 		ContainerID:      "container-old",
-		Runtime:          string(models.ExecutorTypeLocalDocker),
+		Runtime:          models.ExecutorTypeLocalDocker.Runtime(),
 		Metadata: map[string]interface{}{
 			lifecycle.MetadataKeyAuthTokenSecret: "secret-token",
 			"task_description":                   "drop me",

@@ -6,6 +6,21 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
+ * Format a cost stored in subcents (hundredths of a cent) as a USD
+ * dollar string. The backend persists every cost figure as int64
+ * subcents so token-rate math stays integer-only;
+ * docs/specs/office-costs/spec.md. UI consumers should never multiply
+ * or divide the raw value themselves — call this helper so the unit
+ * boundary lives in one place.
+ */
+export function formatDollars(subcents: number | null | undefined): string {
+  if (subcents == null || !Number.isFinite(subcents)) {
+    return "$0.00";
+  }
+  return `$${(subcents / 10000).toFixed(2)}`;
+}
+
+/**
  * Generate a UUID. Falls back to a custom implementation in non-secure contexts
  * (e.g., HTTP on non-localhost where crypto.randomUUID is unavailable).
  */

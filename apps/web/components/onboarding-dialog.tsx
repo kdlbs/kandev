@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -78,13 +78,7 @@ function buildAgentSettings(
   avail: AvailableAgent[],
   saved: {
     name: string;
-    profiles?: {
-      id: string;
-      name: string;
-      model?: string | null;
-      cli_passthrough?: boolean | null;
-      cli_flags?: AgentProfile["cli_flags"] | null;
-    }[];
+    profiles?: AgentProfile[];
   }[],
 ): Record<string, AgentSetting> {
   const settings: Record<string, AgentSetting> = {};
@@ -93,7 +87,7 @@ function buildAgentSettings(
     const profile = dbAgent?.profiles?.[0];
     if (profile) {
       const perms = profileToPermissionsMap(
-        profile as Partial<Pick<AgentProfile, "allow_indexing">>,
+        { allow_indexing: profile.allowIndexing },
         aa.permission_settings ?? {},
       );
       settings[aa.name] = {
@@ -101,9 +95,9 @@ function buildAgentSettings(
         formData: {
           name: profile.name,
           model: profile.model || aa.model_config.default_model,
-          mode: (profile as { mode?: string }).mode ?? aa.model_config.current_mode_id ?? "",
-          cli_passthrough: profile.cli_passthrough ?? false,
-          cli_flags: profile.cli_flags ?? [],
+          mode: profile.mode ?? aa.model_config.current_mode_id ?? "",
+          cli_passthrough: profile.cliPassthrough ?? false,
+          cli_flags: profile.cliFlags ?? [],
           ...perms,
         },
         dirty: false,
@@ -395,7 +389,7 @@ function StepWorkflows({
 
   return (
     <div className="space-y-3">
-      <div className="grid gap-2 max-h-[320px] overflow-y-auto pr-1">
+      <div className="grid grid-cols-1 gap-2 max-h-[320px] overflow-y-auto">
         {defaultTemplate && <TemplateCard template={defaultTemplate} isDefault />}
         {otherTemplates.length > 0 && (
           <>
@@ -514,9 +508,9 @@ function TemplateCard({
         <p className="text-xs text-muted-foreground mt-0.5">{template.description}</p>
       )}
       {steps.length > 0 && (
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap mt-2">
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground mt-2">
           {steps.map((s, i) => (
-            <Fragment key={s.name}>
+            <span key={s.name} className="flex items-center gap-1.5">
               {i > 0 && <span className="text-muted-foreground/40">→</span>}
               <span className="flex items-center gap-1">
                 <span
@@ -525,7 +519,7 @@ function TemplateCard({
                 />
                 {s.name}
               </span>
-            </Fragment>
+            </span>
           ))}
         </div>
       )}

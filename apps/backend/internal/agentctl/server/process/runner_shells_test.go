@@ -12,9 +12,11 @@ func TestInteractiveRunner_IsUserShellIsolation(t *testing.T) {
 	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
 
 	// Start a regular (non-user-shell) process
+	cmd, env := fixtureExec("cat")
 	agentReq := InteractiveStartRequest{
 		SessionID:      "isolation-test",
-		Command:        []string{"cat"},
+		Command:        cmd,
+		Env:            env,
 		ImmediateStart: true,
 		DefaultCols:    80,
 		DefaultRows:    24,
@@ -27,7 +29,8 @@ func TestInteractiveRunner_IsUserShellIsolation(t *testing.T) {
 	// Start a user shell process for the same session
 	shellReq := InteractiveStartRequest{
 		SessionID:      "isolation-test",
-		Command:        []string{"cat"},
+		Command:        cmd,
+		Env:            env,
 		IsUserShell:    true,
 		ImmediateStart: true,
 		DefaultCols:    80,

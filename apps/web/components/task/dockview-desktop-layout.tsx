@@ -10,7 +10,7 @@ import {
 } from "dockview-react";
 import { themeKandev } from "@/lib/layout/dockview-theme";
 import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
-import { tryRestoreLayout } from "./dockview-layout-restore";
+import { restoreEnvLayout } from "./dockview-layout-restore";
 import {
   setupContainerResizeSync,
   setupGroupTracking,
@@ -33,6 +33,8 @@ import { LeftHeaderActions, RightHeaderActions } from "./dockview-header-actions
 import { DockviewWatermark } from "./dockview-watermark";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskChangesPanel } from "./task-changes-panel";
+import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
+import type { OpenDiffOptions } from "./changes-diff-target";
 import { ChangesPanel } from "./changes-panel";
 import { FilesPanel } from "./files-panel";
 import { TaskPlanPanel } from "./task-plan-panel";
@@ -51,6 +53,10 @@ import {
   useAutoSessionTab,
   useAutoPRPanel,
 } from "./dockview-session-tabs";
+import {
+  useCompactDockviewDefault,
+  useDockviewUnmountCleanup,
+} from "./dockview-desktop-layout-hooks";
 import { TerminalPanel } from "./terminal-panel";
 import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
@@ -65,7 +71,7 @@ import type { Repository, RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 
 // Portal system
-import { panelPortalManager, setPanelTitle } from "@/lib/layout/panel-portal-manager";
+import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { PanelPortalHost, usePortalSlot } from "@/lib/layout/panel-portal-host";
 
 // ---------------------------------------------------------------------------
@@ -277,6 +283,7 @@ function DiffViewerContent({
   const { openFile } = useFileEditors();
   const panelKind = (params?.kind as string) ?? "all";
   const selectedPath = panelKind === "file" ? (params?.path as string) : undefined;
+  const sourceFilter = ((params?.source as string) || "all") as "all" | ReviewSource;
   const panelSelectedDiff = panelKind === "all" ? selectedDiff : null;
   const handleClosePanel = useCallback(() => {
     const dockApi = useDockviewStore.getState().api;
@@ -288,6 +295,7 @@ function DiffViewerContent({
     <TaskChangesPanel
       mode={panelKind as "all" | "file"}
       filePath={selectedPath}
+      sourceFilter={sourceFilter}
       selectedDiff={panelSelectedDiff}
       onClearSelected={() => setSelectedDiff(null)}
       onOpenFile={openFile}
@@ -329,7 +337,8 @@ function ChangesContent({ panelId }: { panelId: string }) {
 
   const handleEditFile = useCallback((path: string) => openFile(path), [openFile]);
   const handleOpenDiffFile = useCallback(
-    (path: string) => addFileDiffPanel(path),
+    (path: string, options?: OpenDiffOptions) =>
+      addFileDiffPanel(path, { source: options?.source, repositoryName: options?.repositoryName }),
     [addFileDiffPanel],
   );
   const handleOpenCommitDetail = useCallback(
@@ -463,12 +472,14 @@ type DockviewDesktopLayoutProps = {
   initialScripts?: RepositoryScript[];
   initialTerminals?: Terminal[];
   initialLayout?: string | null;
+  compact?: boolean;
 };
 
 export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   sessionId,
   repository,
   initialLayout,
+  compact = false,
 }: DockviewDesktopLayoutProps) {
   const setApi = useDockviewStore((s) => s.setApi);
   const buildDefaultLayout = useDockviewStore((s) => s.buildDefaultLayout);
@@ -490,6 +501,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   useLspFileOpener();
   useEditorKeybinds();
   usePlanPanelAutoOpen();
+  useCompactDockviewDefault(compact);
 
   useEffect(() => {
     envIdRef.current = effectiveEnvId;
@@ -501,10 +513,10 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       setApi(api);
 
       const currentEnvId = envIdRef.current;
-      // If a layout intent was passed via URL, skip saved layout restoration
-      const restored = !initialLayout && tryRestoreLayout(api, currentEnvId, VALID_COMPONENTS);
+      const restored =
+        !initialLayout && restoreEnvLayout(api, currentEnvId, appStore, VALID_COMPONENTS);
       if (!restored) {
-        buildDefaultLayout(api, initialLayout ?? undefined);
+        buildDefaultLayout(api, initialLayout ?? (compact ? "compact" : undefined));
       }
 
       useDockviewStore.setState({ currentLayoutEnvId: currentEnvId });
@@ -516,7 +528,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       setupPortalCleanup(api, appStore);
       readyDisposersRef.current.push(setupContainerResizeSync(api));
     },
-    [setApi, buildDefaultLayout, initialLayout, appStore],
+    [setApi, buildDefaultLayout, initialLayout, compact, appStore],
   );
 
   // Release session-scoped portals + trigger layout switch on session change.
@@ -530,17 +542,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   // Auto-show PR detail panel when the task has an associated PR
   useAutoPRPanel();
-
-  // Clean up on unmount (e.g. navigating away from session page)
-  useEffect(() => {
-    const timerRef = saveTimerRef;
-    const disposersRef = readyDisposersRef;
-    return () => {
-      for (const dispose of disposersRef.current.splice(0)) dispose();
-      if (timerRef.current) clearTimeout(timerRef.current);
-      panelPortalManager.releaseAll();
-    };
-  }, []);
+  useDockviewUnmountCleanup(saveTimerRef, readyDisposersRef);
 
   // Visual masking: hide the dockview container during slow-path layout
   // switches (full fromJSON rebuild) to prevent the old layout from flashing.
@@ -548,6 +550,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   return (
     <div
+      data-testid="dockview-task-layout"
       className="flex-1 min-h-0 grid grid-rows-[1fr_auto]"
       aria-busy={isRestoringLayout}
       style={{

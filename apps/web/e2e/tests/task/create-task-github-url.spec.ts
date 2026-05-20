@@ -485,6 +485,14 @@ test.describe("Task creation from GitHub URL", () => {
     await expect(session.terminal).toBeVisible({ timeout: 15_000 });
     await session.typeInTerminal("git branch --show-current");
     await session.expectTerminalHasText("feature/pr-branch");
+
+    // Restore the shared worker-scoped repo to main so the next test's
+    // local-executor branch detection sees a clean baseline. The agent
+    // session above checked out feature/pr-branch on this repo; without
+    // this cleanup the next test that reads currentLocalBranch (e.g.
+    // create-task.spec.ts's "dialog pre-selects" check) sees the wrong
+    // branch and asserts against "main" fail.
+    execSync("git checkout -f main", { cwd: repoDir, env: gitEnv });
   });
 
   test("creates task from PR URL with worktree executor and verifies branch", async ({

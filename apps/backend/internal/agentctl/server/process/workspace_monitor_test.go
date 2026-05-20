@@ -4,11 +4,15 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
 
 func TestWorkspaceTracker_StopsWhenWorkDirDeleted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows refuses to unlink a directory while a process holds a handle inside it; the scenario this test exercises cannot occur on Windows")
+	}
 	isolateTestGitEnv(t)
 
 	repoDir, cleanup := setupTestRepo(t)

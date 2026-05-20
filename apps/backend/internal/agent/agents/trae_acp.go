@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -111,3 +112,5 @@ func (a *TraeACP) InferenceConfig() *InferenceConfig {
 		Command:   NewCommand(traeACPBin, "acp", "serve"),
 	}
 }
+
+func (a *TraeACP) BillingType() usage.BillingType { return defaultBillingType() }

@@ -6,19 +6,35 @@ import {
   resolveAgentLabelFor,
   sortSessions,
 } from "./session-sort";
-import type { TaskSession, TaskSessionState } from "@/lib/types/http";
+import {
+  agentProfileId as toAgentProfileId,
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type TaskSession,
+  type TaskSessionState,
+} from "@/lib/types/http";
 
 const EPOCH = "2025-01-01T00:00:00Z";
 
-function makeSession(overrides: Partial<TaskSession>): TaskSession {
+type SessionOverrides = Partial<Omit<TaskSession, "id" | "task_id" | "agent_profile_id">> & {
+  id?: string;
+  task_id?: string;
+  agent_profile_id?: string;
+};
+
+function makeSession(overrides: SessionOverrides): TaskSession {
+  const { id, task_id, agent_profile_id, ...rest } = overrides;
   return {
-    id: "s1",
-    task_id: "t1",
+    id: toSessionId(id ?? "s1"),
+    task_id: toTaskId(task_id ?? "t1"),
+    ...(agent_profile_id !== undefined
+      ? { agent_profile_id: toAgentProfileId(agent_profile_id) }
+      : {}),
     environment_id: "e1",
     state: "CREATED" as TaskSessionState,
     started_at: EPOCH,
     updated_at: EPOCH,
-    ...overrides,
+    ...rest,
   } as TaskSession;
 }
 

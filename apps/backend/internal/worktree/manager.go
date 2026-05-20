@@ -82,6 +82,10 @@ type Store interface {
 	DeleteWorktree(ctx context.Context, id string) error
 	// ListActiveWorktrees returns all active worktrees.
 	ListActiveWorktrees(ctx context.Context) ([]*Worktree, error)
+	// ListActiveWorktreePaths returns the worktree_path of every active,
+	// non-deleted worktree row that has a non-empty path. Used by the
+	// office GC to identify live worktrees that must not be swept.
+	ListActiveWorktreePaths(ctx context.Context) ([]string, error)
 }
 
 // MultiRepoStore is an optional capability some stores implement to support
@@ -147,6 +151,13 @@ func (m *Manager) SetRepositoryProvider(provider RepositoryProvider) {
 // SetScriptMessageHandler sets the script message handler for executing setup/cleanup scripts.
 func (m *Manager) SetScriptMessageHandler(handler ScriptMessageHandler) {
 	m.scriptMsgHandler = handler
+}
+
+// ListActiveWorktreePaths returns the absolute on-disk paths of all
+// currently active, non-deleted worktrees. Used by the office GC as the
+// authoritative inventory of paths that must not be swept.
+func (m *Manager) ListActiveWorktreePaths(ctx context.Context) ([]string, error) {
+	return m.store.ListActiveWorktreePaths(ctx)
 }
 
 // getRepoLock returns a mutex for the given repository path and increments its reference count.

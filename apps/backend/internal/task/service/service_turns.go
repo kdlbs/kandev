@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
@@ -464,7 +464,16 @@ func (s *Service) GetWorkspaceInfoForEnvironment(ctx context.Context, taskEnviro
 			}
 			return matching[i].ID > matching[j].ID
 		})
-		return s.GetWorkspaceInfoForSession(ctx, env.TaskID, matching[0].ID)
+		info, err := s.GetWorkspaceInfoForSession(ctx, env.TaskID, matching[0].ID)
+		if err != nil {
+			return nil, err
+		}
+		// Fall back to the task environment's workspace path for quick-chat
+		// sessions that have no worktree or repository path on the session.
+		if info.WorkspacePath == "" && env.WorkspacePath != "" {
+			info.WorkspacePath = env.WorkspacePath
+		}
+		return info, nil
 	}
 	return nil, fmt.Errorf("task environment %s has no linked task session", taskEnvironmentID)
 }

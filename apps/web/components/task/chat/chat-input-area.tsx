@@ -17,6 +17,7 @@ import {
   type ChatInputContainerHandle,
   type MessageAttachment,
 } from "@/components/task/chat/chat-input-container";
+import { QueueAffordance } from "@/components/task/chat/queued-ghost-list";
 import {
   formatReviewCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
@@ -64,6 +65,30 @@ function resolveInputPlaceholder(
   if (activeDocumentType === "file") return "Continue working on the file...";
   if (planModeEnabled) return "Continue working on the plan...";
   return "Continue working on the task...";
+}
+
+type PlaceholderArgs = {
+  override: string | undefined;
+  isMoving: boolean;
+  isAgentBusy: boolean;
+  activeDocumentType: string | undefined;
+  planModeEnabled: boolean;
+  hasClarification: boolean;
+  needsRecovery: boolean;
+};
+
+function pickInputPlaceholder(a: PlaceholderArgs): string {
+  if (a.isMoving) return "Switching agent...";
+  // Preserve the prior `??` semantics: an explicit "" override (caller wants
+  // no placeholder text) must NOT fall through to the resolver default.
+  if (a.override !== undefined) return a.override;
+  return resolveInputPlaceholder(
+    a.isAgentBusy,
+    a.activeDocumentType,
+    a.planModeEnabled,
+    a.hasClarification,
+    a.needsRecovery,
+  );
 }
 
 export function useSubmitHandler(
@@ -159,7 +184,6 @@ export function useSubmitHandler(
 
 export function useChatPanelHandlers(
   resolvedSessionId: string | null,
-  clearQueue: () => Promise<void>,
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>,
 ) {
   const handleCancelTurn = useCallback(async () => {
@@ -172,18 +196,6 @@ export function useChatPanelHandlers(
       console.error("Failed to cancel agent turn:", error);
     }
   }, [resolvedSessionId]);
-
-  const handleClearQueue = useCallback(async () => {
-    try {
-      await clearQueue();
-    } catch (error) {
-      console.error("Failed to clear queue:", error);
-    }
-  }, [clearQueue]);
-
-  const handleQueueEditComplete = useCallback(() => {
-    chatInputRef.current?.focusInput();
-  }, [chatInputRef]);
 
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   useKeyboardShortcut(
@@ -207,7 +219,7 @@ export function useChatPanelHandlers(
     { enabled: true, preventDefault: false },
   );
 
-  return { handleCancelTurn, handleClearQueue, handleQueueEditComplete };
+  return { handleCancelTurn };
 }
 
 function PRMergedBanner({ taskId }: { taskId: string }) {
@@ -347,6 +359,34 @@ function useExecutorUnavailable(taskId: string | null, sessionId: string | null)
   };
 }
 
+function useChatInputDerived(
+  panelState: ReturnType<typeof useChatPanelState>,
+  chatInputRef: React.RefObject<ChatInputContainerHandle | null>,
+  placeholderOverride: string | undefined,
+) {
+  const { resolvedSessionId, taskId, isAgentBusy, needsRecovery, planModeEnabled, activeDocument } =
+    panelState;
+  const planActions = usePlanActions({
+    resolvedSessionId,
+    taskId,
+    planModeEnabled,
+    handlePlanModeChange: panelState.handlePlanModeChange,
+    chatInputRef,
+  });
+  const hasClarification = !!panelState.pendingClarification;
+  const executor = useExecutorUnavailable(taskId, resolvedSessionId);
+  const placeholder = pickInputPlaceholder({
+    override: placeholderOverride,
+    isMoving: planActions.isMoving,
+    isAgentBusy,
+    activeDocumentType: activeDocument?.type,
+    planModeEnabled,
+    hasClarification,
+    needsRecovery,
+  });
+  return { planActions, executor, placeholder };
+}
+
 export function ChatInputArea({
   chatInputRef,
   clarificationKey,
@@ -362,35 +402,14 @@ export function ChatInputArea({
   hidePlanMode,
   placeholderOverride,
 }: ChatInputAreaProps) {
-  const {
-    resolvedSessionId,
-    taskId,
-    isAgentBusy,
-    needsRecovery,
-    planModeEnabled,
-    activeDocument,
-    handlePlanModeChange,
-    todoItems,
-  } = panelState;
-  const { implementPlanHandler, proceedStepName, proceed, isMoving } = usePlanActions({
-    resolvedSessionId,
-    taskId,
-    planModeEnabled,
-    handlePlanModeChange,
+  const { resolvedSessionId, taskId, isAgentBusy, needsRecovery, planModeEnabled, todoItems } =
+    panelState;
+  const { planActions, executor, placeholder } = useChatInputDerived(
+    panelState,
     chatInputRef,
-  });
-  const hasClarification = !!panelState.pendingClarification;
-  const executor = useExecutorUnavailable(taskId, resolvedSessionId);
-  const placeholder = isMoving
-    ? "Switching agent..."
-    : (placeholderOverride ??
-      resolveInputPlaceholder(
-        isAgentBusy,
-        activeDocument?.type,
-        planModeEnabled,
-        hasClarification,
-        needsRecovery,
-      ));
+    placeholderOverride,
+  );
+  const { implementPlanHandler, proceedStepName, proceed, isMoving } = planActions;
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
       <ChatStatusBar
@@ -401,49 +420,51 @@ export function ChatInputArea({
         isAgentBusy={isAgentBusy}
         isMoving={isMoving}
       />
-      <ChatInputContainer
-        ref={chatInputRef}
-        key={clarificationKey}
-        onSubmit={handleSubmit}
-        sessionId={resolvedSessionId}
-        taskId={taskId}
-        taskTitle={panelState.task?.title}
-        taskDescription={panelState.taskDescription ?? ""}
-        planModeEnabled={planModeEnabled}
-        planModeAvailable={panelState.planModeAvailable}
-        mcpServers={panelState.mcpServers}
-        onPlanModeChange={handlePlanModeChange}
-        isAgentBusy={isAgentBusy}
-        isStarting={panelState.isStarting}
-        isPreparingEnvironment={panelState.isPreparingEnvironment}
-        isMoving={isMoving}
-        isSending={isSending}
-        onCancel={handleCancelTurn}
-        placeholder={placeholder}
-        pendingClarification={panelState.pendingClarification}
-        onClarificationResolved={onClarificationResolved}
-        showRequestChangesTooltip={showRequestChangesTooltip}
-        onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
-        pendingCommentsByFile={panelState.pendingCommentsByFile}
-        hasContextComments={
-          panelState.planComments.length > 0 || panelState.pendingPRFeedback.length > 0
-        }
-        submitKey={panelState.chatSubmitKey}
-        hasAgentCommands={!!(panelState.agentCommands && panelState.agentCommands.length > 0)}
-        isFailed={panelState.isFailed}
-        needsRecovery={needsRecovery}
-        executorUnavailable={executor.unavailable}
-        executorUnavailableReason={executor.reason}
-        contextItems={panelState.contextItems}
-        planContextEnabled={panelState.planContextEnabled}
-        contextFiles={panelState.contextFiles}
-        onToggleContextFile={panelState.handleToggleContextFile}
-        onAddContextFile={panelState.handleAddContextFile}
-        onImplementPlan={implementPlanHandler}
-        hideSessionsDropdown={hideSessionsDropdown}
-        minimalToolbar={minimalToolbar}
-        hidePlanMode={hidePlanMode}
-      />
+      <QueueAffordance sessionId={resolvedSessionId}>
+        <ChatInputContainer
+          ref={chatInputRef}
+          key={clarificationKey}
+          onSubmit={handleSubmit}
+          sessionId={resolvedSessionId}
+          taskId={taskId}
+          taskTitle={panelState.task?.title}
+          taskDescription={panelState.taskDescription ?? ""}
+          planModeEnabled={planModeEnabled}
+          planModeAvailable={panelState.planModeAvailable}
+          mcpServers={panelState.mcpServers}
+          onPlanModeChange={panelState.handlePlanModeChange}
+          isAgentBusy={isAgentBusy}
+          isStarting={panelState.isStarting}
+          isPreparingEnvironment={panelState.isPreparingEnvironment}
+          isMoving={isMoving}
+          isSending={isSending}
+          onCancel={handleCancelTurn}
+          placeholder={placeholder}
+          pendingClarification={panelState.pendingClarification}
+          onClarificationResolved={onClarificationResolved}
+          showRequestChangesTooltip={showRequestChangesTooltip}
+          onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
+          pendingCommentsByFile={panelState.pendingCommentsByFile}
+          hasContextComments={
+            panelState.planComments.length > 0 || panelState.pendingPRFeedback.length > 0
+          }
+          submitKey={panelState.chatSubmitKey}
+          hasAgentCommands={!!(panelState.agentCommands && panelState.agentCommands.length > 0)}
+          isFailed={panelState.isFailed}
+          needsRecovery={needsRecovery}
+          executorUnavailable={executor.unavailable}
+          executorUnavailableReason={executor.reason}
+          contextItems={panelState.contextItems}
+          planContextEnabled={panelState.planContextEnabled}
+          contextFiles={panelState.contextFiles}
+          onToggleContextFile={panelState.handleToggleContextFile}
+          onAddContextFile={panelState.handleAddContextFile}
+          onImplementPlan={implementPlanHandler}
+          hideSessionsDropdown={hideSessionsDropdown}
+          minimalToolbar={minimalToolbar}
+          hidePlanMode={hidePlanMode}
+        />
+      </QueueAffordance>
     </div>
   );
 }

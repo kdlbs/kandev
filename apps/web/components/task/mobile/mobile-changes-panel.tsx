@@ -68,7 +68,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
       kind: "file",
       path,
       sourceFilter: options?.source ?? "all",
-      repositoryName: options?.repositoryName,
+      repositoryName: options?.repositoryName || undefined,
     });
   }, []);
 

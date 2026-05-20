@@ -1,0 +1,119 @@
+# profiles.yaml — runtime defaults for prod / dev / e2e environments.
+# ─────────────────────────────────────────────────────────────────────
+# This file is the ONE place to look for "what does dev mode set?" /
+# "what does e2e mode set?" / "what ships off in production?". The
+# backend embeds it (//go:embed in apps/backend/internal/profiles) and
+# at startup applies the matching profile's values to its own env
+# *unless the variable is already set*. That last point matters: any
+# launcher, per-spec override, or self-hoster's shell still wins.
+# profiles.yaml only fills in the gaps.
+#
+# ── How profile selection works ────────────────────────────────────
+#
+# Detection at backend startup, in order:
+#   • KANDEV_E2E_MOCK=true        → e2e   (set by playwright fixtures)
+#   • KANDEV_DEBUG_DEV_MODE=true  → dev   (set by `make dev`)
+#   • (neither)                   → prod  (the safe default)
+#
+# Each leaf below lists the value for each profile. A missing profile
+# inherits the prod value, so a knob that never changes only needs to
+# declare `prod`. An empty string ("") means "leave the env var unset"
+# — handy for prod when the var simply shouldn't exist.
+#
+# ── How to flip a feature on for every user ────────────────────────
+#
+# Set its `prod` value to `true`. Ship the next release. Once the
+# feature has been on by default for a release or two and is
+# permanent, rip the flag out of the codebase entirely.
+#
+# ── See also ───────────────────────────────────────────────────────
+#
+#   docs/decisions/0007-runtime-feature-flags.md  pattern + rationale
+#   apps/backend/internal/profiles/profiles.go    loader + parser
+
+# ── Feature flags ─────────────────────────────────────────────────
+# Gate in-progress code that ships disabled to production. New flags
+# go here as `KANDEV_FEATURES_<NAME>` — the backend's config package
+# maps them to `features.<name>` Viper keys automatically.
+features:
+  # Office (autonomous agent surface). Off in prod until the feature
+  # is user-ready; on in dev/e2e so contributors and tests exercise it.
+  KANDEV_FEATURES_OFFICE:
+    prod: "false"
+    dev:  "true"
+    e2e:  "true"
+
+# ── Mock providers ────────────────────────────────────────────────
+# Swap real third-party services for in-memory fakes. Production
+# leaves all of these unset (real APIs). Dev opts into the mock agent
+# CLI alongside real CLIs; e2e isolates to mocks only.
+mocks:
+  # Mock agent CLI registration.
+  #   ""     real CLIs only (prod)
+  #   "true" mock alongside real CLIs (dev — try the UI without installing every agent)
+  #   "only" mock is the SOLE agent (e2e isolation)
+  KANDEV_MOCK_AGENT:
+    prod: ""
+    dev:  "true"
+    e2e:  "only"
+
+  # Mount the /api/v1/_test/* test-harness routes. Hard-gated off in
+  # production — never enable on a public backend.
+  KANDEV_E2E_MOCK:
+    prod: ""
+    dev:  ""
+    e2e:  "true"
+
+  # Replace the GitHub / Jira / Linear clients with in-memory fakes
+  # so e2e specs don't hit live APIs (and dev doesn't need tokens).
+  KANDEV_MOCK_GITHUB:
+    prod: ""
+    dev:  ""
+    e2e:  "true"
+  KANDEV_MOCK_JIRA:
+    prod: ""
+    dev:  ""
+    e2e:  "true"
+  KANDEV_MOCK_LINEAR:
+    prod: ""
+    dev:  ""
+    e2e:  "true"
+
+# ── Debug / observability ─────────────────────────────────────────
+# Production keeps these off so /debug/* endpoints and pprof aren't
+# exposed publicly. Dev turns everything on.
+debug:
+  # Enables /debug/vars (expvar), /debug/pprof/*, and dev-only routes.
+  KANDEV_DEBUG_DEV_MODE:
+    prod: ""
+    dev:  "true"
+    e2e:  ""
+
+  # Legacy alias for KANDEV_DEBUG_DEV_MODE — kept for compatibility
+  # with older deploy scripts that grep for "pprof".
+  KANDEV_DEBUG_PPROF_ENABLED:
+    prod: ""
+    dev:  "true"
+    e2e:  ""
+
+# ── E2E test tuning ───────────────────────────────────────────────
+# Behaviour knobs that only matter when running playwright. These
+# don't belong in dev (would mask real interactions) and never in
+# prod (would leak test-only behaviour).
+e2eTuning:
+  # Auto-approve every permission request in agentctl so e2e specs
+  # don't have to script the approval UI. Read by the agentctl child
+  # process; the backend forwards its env to children, so setting it
+  # here lands in the right place.
+  AGENTCTL_AUTO_APPROVE_PERMISSIONS:
+    prod: ""
+    dev:  ""
+    e2e:  "true"
+
+  # Short plan-coalesce window so coalesce-boundary specs don't have
+  # to wait for the production-default delay. Read by the planning
+  # service at startup.
+  KANDEV_PLAN_COALESCE_WINDOW_MS:
+    prod: ""
+    dev:  ""
+    e2e:  "2000"

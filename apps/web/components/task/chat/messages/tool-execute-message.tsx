@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import { IconCheck, IconX, IconTerminal } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { GridSpinner } from "@/components/grid-spinner";
 import { transformPathsInText } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
@@ -51,16 +52,28 @@ function ExecuteStatusIcon({
 }
 
 type ExecuteOutputProps = {
+  displayCommand: string;
+  isCommandLong: boolean;
   displayWorkDir: string | null;
   workDir: string | undefined;
-  hasOutput: string | undefined | false;
   output: ShellExecOutput | undefined;
 };
 
-function ExecuteOutputContent({ displayWorkDir, workDir, hasOutput, output }: ExecuteOutputProps) {
+function ExecuteOutputContent({
+  displayCommand,
+  isCommandLong,
+  displayWorkDir,
+  workDir,
+  output,
+}: ExecuteOutputProps) {
   return (
     <div className="pl-4 border-l-2 border-border/30 space-y-2">
-      {displayWorkDir && !hasOutput && (
+      {isCommandLong && (
+        <pre className="text-xs bg-muted/30 rounded p-2 whitespace-pre-wrap break-all font-mono">
+          {displayCommand}
+        </pre>
+      )}
+      {displayWorkDir && (
         <div className="text-xs text-muted-foreground">
           <span className="opacity-60">cwd:</span>{" "}
           <span className="font-mono" title={workDir}>
@@ -82,50 +95,94 @@ function ExecuteOutputContent({ displayWorkDir, workDir, hasOutput, output }: Ex
   );
 }
 
+// Threshold beyond which the command is considered "long" and worth surfacing
+// in the expanded view (the header always truncates via CSS regardless).
+const LONG_COMMAND_THRESHOLD = 60;
+
+function isExecuteSuccess(
+  status: ToolExecuteMetadata["status"],
+  output: ShellExecOutput | undefined,
+): boolean {
+  if (status !== "complete") return false;
+  return output?.exit_code === 0 || output?.exit_code === undefined;
+}
+
 function parseExecuteMetadata(comment: Message) {
   const metadata = comment.metadata as ToolExecuteMetadata | undefined;
   const status = metadata?.status;
   const shellExec = metadata?.normalized?.shell_exec;
   const output = shellExec?.output;
   const workDir = shellExec?.work_dir;
-  const hasOutput = output?.stdout || output?.stderr;
-  const hasExpandableContent = hasOutput || workDir;
-  const isSuccess =
-    status === "complete" && (output?.exit_code === 0 || output?.exit_code === undefined);
-  return { status, output, workDir, hasOutput, hasExpandableContent, isSuccess };
+  const hasOutput = !!(output?.stdout || output?.stderr);
+  const isSuccess = isExecuteSuccess(status, output);
+  return { status, output, workDir, hasOutput, isSuccess };
+}
+
+function CommandHeader({
+  displayCommand,
+  isCommandLong,
+}: {
+  displayCommand: string;
+  isCommandLong: boolean;
+}) {
+  const className = "font-mono text-xs text-muted-foreground truncate min-w-0 flex-1 text-left";
+  if (!isCommandLong) {
+    return <span className={className}>{displayCommand}</span>;
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type="button" className={`${className} cursor-pointer bg-transparent border-0 p-0`}>
+          {displayCommand}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent
+        side="bottom"
+        align="start"
+        className="max-w-[min(90vw,640px)] whitespace-pre-wrap break-all font-mono text-xs"
+      >
+        {displayCommand}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 export const ToolExecuteMessage = memo(function ToolExecuteMessage({
   comment,
   worktreePath,
 }: ToolExecuteMessageProps) {
-  const { status, output, workDir, hasOutput, hasExpandableContent, isSuccess } =
-    parseExecuteMetadata(comment);
+  const { status, output, workDir, hasOutput, isSuccess } = parseExecuteMetadata(comment);
   const autoExpanded = status === "running";
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
+  const displayCommand = transformPathsInText(comment.content, worktreePath);
   const displayWorkDir = workDir ? transformPathsInText(workDir, worktreePath) : null;
+  // Measure after path transform so a long absolute path that gets shortened
+  // to a relative one is correctly treated as short.
+  const isCommandLong = displayCommand.length > LONG_COMMAND_THRESHOLD;
+  const hasExpandableContent = hasOutput || !!workDir || isCommandLong;
 
   return (
     <ExpandableRow
       icon={<IconTerminal className="h-4 w-4 text-muted-foreground" />}
       header={
-        <div className="flex items-center gap-2 text-xs">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="font-mono text-xs text-muted-foreground">
-              {transformPathsInText(comment.content, worktreePath)}
+        <div className="flex items-center gap-2 text-xs min-w-0">
+          <CommandHeader displayCommand={displayCommand} isCommandLong={isCommandLong} />
+          {!isSuccess && (
+            <span className="shrink-0">
+              <ExecuteStatusIcon status={status} exitCode={output?.exit_code} />
             </span>
-            {!isSuccess && <ExecuteStatusIcon status={status} exitCode={output?.exit_code} />}
-          </span>
+          )}
         </div>
       }
-      hasExpandableContent={!!hasExpandableContent}
+      hasExpandableContent={hasExpandableContent}
       isExpanded={isExpanded}
       onToggle={handleToggle}
     >
       <ExecuteOutputContent
+        displayCommand={displayCommand}
+        isCommandLong={isCommandLong}
         displayWorkDir={displayWorkDir}
         workDir={workDir}
-        hasOutput={hasOutput}
         output={output}
       />
     </ExpandableRow>

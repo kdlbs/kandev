@@ -1,33 +1,22 @@
-// Agent, model, clarification, plan, and stats types extracted from http.ts
+// Agent, model, clarification, plan, and stats types extracted from http.ts.
+//
+// Per ADR 0005 Wave E the canonical `AgentProfile` lives in
+// `./agent-profile.ts` (camelCase, single source of truth for both kanban and
+// office consumers). The kanban HTTP payload shape (snake_case wire format) is
+// `AgentProfilePayload`, also exported from there.
 
-export type AgentProfile = {
-  id: string;
-  agent_id: string;
-  name: string;
-  agent_display_name: string;
-  /** Model ID applied via ACP session/set_model at session start. */
-  model: string;
-  /** Optional ACP session mode applied via session/set_mode at session start. */
-  mode?: string;
-  /** @deprecated Use cli_flags. Retained for legacy clients. */
-  allow_indexing: boolean;
-  /**
-   * User-configurable CLI flags passed to the agent subprocess. Seeded
-   * from the agent's curated suggestions at profile creation; users
-   * toggle/edit entries in the profile editor.
-   */
-  cli_flags: CLIFlag[];
-  cli_passthrough: boolean;
-  user_modified?: boolean;
-  created_at: string;
-  updated_at: string;
-};
+export type {
+  AgentProfile,
+  AgentProfilePayload,
+  AgentRole,
+  AgentStatus,
+  BillingType,
+  CLIFlag,
+  UtilizationWindow,
+  ProviderUsage,
+} from "./agent-profile";
 
-export type CLIFlag = {
-  description: string;
-  flag: string;
-  enabled: boolean;
-};
+import type { AgentProfile } from "./agent-profile";
 
 export type TUIConfig = {
   command: string;
@@ -250,7 +239,7 @@ export type ClarificationRequestMetadata = {
   question_index?: number;
   question_total?: number;
   context?: string;
-  status?: "pending" | "answered" | "rejected" | "expired";
+  status?: "pending" | "answered" | "rejected" | "expired" | "cancelled";
   response?: ClarificationAnswer;
   agent_disconnected?: boolean;
 };

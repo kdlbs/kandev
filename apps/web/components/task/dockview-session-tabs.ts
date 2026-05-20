@@ -6,6 +6,10 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
+import { sessionId as toSessionId } from "@/lib/types/ids";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+
+const debug = createDebugLogger("dockview:session-tabs");
 
 /**
  * Sync `activeSessionId` in the store when the user clicks a session tab.
@@ -233,6 +237,7 @@ export function reconcileRemovedSessionPanels(
   keepSessionId: string,
 ): void {
   const currentIds = new Set(currentSessionIds);
+  const removed: string[] = [];
   // Snapshot before iterating: closing a panel can mutate `api.panels`
   // synchronously, which would skip elements in a `for...of` over the live
   // array. Matches the pattern in `removeEphemeralPanels`.
@@ -243,10 +248,21 @@ export function reconcileRemovedSessionPanels(
     if (currentIds.has(sid)) continue;
     try {
       panel.api.close();
+      removed.push(panel.id);
     } catch {
       /* already gone */
     }
     createdSet.delete(sid);
+  }
+  if (IS_DEBUG) {
+    const sessionPanels = api.panels.filter((p) => p.id.startsWith("session:"));
+    debug("reconcileRemovedSessionPanels", {
+      keepSessionId,
+      currentSessionIds,
+      liveSessionPanelIds: sessionPanels.map((p) => p.id),
+      removed,
+      createdSetAfter: Array.from(createdSet),
+    });
   }
   // Drop any remaining stale entries (panel already removed externally, e.g.
   // by the right-click delete handler) so the ref stays in sync with reality.
@@ -367,7 +383,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     // guards against a race where removeTaskSession fires before the active
     // session is switched, which would cause the deleted session's panel to
     // be re-created by ensureSessionPanel.
-    if (!currentSessionIds.includes(effectiveSessionId)) return;
+    if (!currentSessionIds.includes(toSessionId(effectiveSessionId))) return;
 
     if (!prepareLayoutForSessionPanels(api)) {
       sessionTabCreatedRef.current.add(effectiveSessionId);

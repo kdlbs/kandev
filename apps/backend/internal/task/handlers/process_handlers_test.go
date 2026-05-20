@@ -16,9 +16,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
-	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
-	agentctlclient "github.com/kandev/kandev/internal/agentctl/client"
+	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -81,6 +81,36 @@ func (m *mockRepository) AddTaskToWorkflow(ctx context.Context, taskID, workflow
 }
 func (m *mockRepository) RemoveTaskFromWorkflow(ctx context.Context, taskID, workflowID string) error {
 	return nil
+}
+func (m *mockRepository) ListTasksByProject(_ context.Context, _ string) ([]*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) ListTasksByAssignee(_ context.Context, _ string) ([]*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) ListTaskTree(_ context.Context, _ string, _ models.TaskTreeFilters) ([]*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) ListChildren(_ context.Context, _ string) ([]*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) ListChildrenIncludingArchived(_ context.Context, _ string) ([]*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) ListSiblings(_ context.Context, _ string) ([]*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) ArchiveTaskIfActive(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
+}
+func (m *mockRepository) UnarchiveTaskByCascade(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
+}
+func (m *mockRepository) IncrementTaskSequence(_ context.Context, _ string) (int, error) {
+	return 0, nil
+}
+func (m *mockRepository) GetWorkspaceTaskPrefix(_ context.Context, _ string) (string, string, error) {
+	return "KAN", "", nil
 }
 func (m *mockRepository) CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
 	return nil
@@ -436,6 +466,9 @@ func (m *mockRepository) UpdateSessionMetadata(ctx context.Context, sessionID st
 }
 func (m *mockRepository) SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
 	return nil
+}
+func (m *mockRepository) GetLastAgentMessage(_ context.Context, _ string) (string, error) {
+	return "", nil
 }
 
 // Task Plan operations

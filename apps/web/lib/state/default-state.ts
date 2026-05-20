@@ -8,6 +8,8 @@ import {
   defaultGitHubState,
   defaultJiraState,
   defaultLinearState,
+  defaultOfficeState,
+  defaultFeaturesState,
 } from "./slices";
 
 export const defaultState = {
@@ -66,6 +68,8 @@ export const defaultState = {
   actionPresets: defaultGitHubState.actionPresets,
   jiraIssueWatches: defaultJiraState.jiraIssueWatches,
   linearIssueWatches: defaultLinearState.linearIssueWatches,
+  office: defaultOfficeState.office,
+  features: defaultFeaturesState.features,
   previewPanel: defaultUIState.previewPanel,
   rightPanel: defaultUIState.rightPanel,
   diffs: defaultUIState.diffs,
@@ -155,6 +159,8 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
       ...defaultState.linearIssueWatches,
       ...initialState.linearIssueWatches,
     },
+    office: { ...defaultState.office, ...initialState.office },
+    features: { ...defaultState.features, ...initialState.features },
     previewPanel: { ...defaultState.previewPanel, ...initialState.previewPanel },
     rightPanel: { ...defaultState.rightPanel, ...initialState.rightPanel },
     diffs: { ...defaultState.diffs, ...initialState.diffs },

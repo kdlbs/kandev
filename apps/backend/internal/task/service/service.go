@@ -140,6 +140,8 @@ type Service struct {
 	sessionRunningChecker SessionRunningChecker
 	remoteBranchLister    RemoteBranchLister
 	repoCloneLocation     RepoCloneLocation
+	blockers              BlockerRepository
+	comments              CommentRepository
 }
 
 // NewService creates a new task service
@@ -196,7 +198,7 @@ func (s *Service) SetStartStepResolver(resolver StartStepResolver) {
 }
 
 // SetQuickChatDir sets the directory for quick-chat workspaces.
-// When set, ephemeral task cleanup will delete the session directory under this path.
+// When set, task cleanup deletes the session directory under this path for all tasks.
 func (s *Service) SetQuickChatDir(dir string) {
 	s.quickChatDir = dir
 }

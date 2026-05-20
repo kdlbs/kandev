@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -156,7 +156,7 @@ func (h *VscodeProxyHandler) resolveProxy(c *gin.Context, sessionID string) (*ht
 	h.logger.Info("created vscode proxy for session",
 		zap.String("session_id", sessionID),
 		zap.String("execution_id", execution.ID),
-		zap.String("runtime", execution.RuntimeName),
+		zap.Stringer("runtime", execution.RuntimeName),
 		zap.String("target", baseURL))
 	return proxy, nil
 }

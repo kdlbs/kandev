@@ -71,6 +71,12 @@ describe("parseArgs", () => {
     expect(parseArgs(["-V"]).options.showVersion).toBe(true);
   });
 
+  it("parses --headless and --no-browser as headless", () => {
+    expect(parseArgs(["--headless"]).options.headless).toBe(true);
+    expect(parseArgs(["--no-browser"]).options.headless).toBe(true);
+    expect(parseArgs([]).options.headless).toBeUndefined();
+  });
+
   it("parses --runtime-version as runtimeVersion", () => {
     expect(parseArgs(["--runtime-version", "v0.16.0"]).options.runtimeVersion).toBe("v0.16.0");
     expect(parseArgs(["--runtime-version=v0.16.0"]).options.runtimeVersion).toBe("v0.16.0");

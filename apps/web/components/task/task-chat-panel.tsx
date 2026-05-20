@@ -4,12 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
-import { QueuedGhostList } from "@/components/task/chat/queued-ghost-list";
 import { MessageList } from "@/components/task/chat/message-list";
 import { useIsTaskArchived } from "./task-archived-context";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
 import { ChatInputArea, useSubmitHandler, useChatPanelHandlers } from "./chat/chat-input-area";
 import { ClarificationInputOverlay } from "./chat/clarification-input-overlay";
+import { ResizeHandle } from "./chat/resize-handle";
+import { useResizableClarificationOverlay } from "@/hooks/use-resizable-clarification-overlay";
 import { PanelSearchBar } from "@/components/search/panel-search-bar";
 import { SessionSearchHits } from "@/components/task/chat/session-search-hits";
 import { usePanelSearch } from "@/hooks/use-panel-search";
@@ -151,12 +152,23 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     permissionsByToolCallId,
     childrenByParentToolCallId,
     agentMessageCount,
-    clearQueue,
     pendingClarification,
     pendingClarificationGroup,
   } = panelState;
-  const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, clearQueue, chatInputRef);
+  const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, chatInputRef);
   const { clarificationKey, handleClarificationResolved } = useClarificationKey(agentMessageCount);
+  const {
+    height: clarificationHeight,
+    containerRef: clarificationContainerRef,
+    resetHeight: clarificationResetHeight,
+    resizeHandleProps: clarificationResizeProps,
+  } = useResizableClarificationOverlay();
+
+  // Reset the dragged height when the overlay closes so a fresh
+  // clarification starts auto-sized instead of inheriting a stale value.
+  useEffect(() => {
+    if (!pendingClarification) clarificationResetHeight();
+  }, [pendingClarification, clarificationResetHeight]);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const { loadMore } = useLazyLoadMessages(resolvedSessionId);
@@ -216,14 +228,21 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
       </PanelBody>
       {pendingClarification && !isArchived && (
-        <div className="flex-shrink-0 border-t border-sky-400/30 bg-card px-1">
-          <ClarificationInputOverlay
-            messages={pendingClarificationGroup}
-            onResolved={handleClarificationResolved}
-          />
+        <div className="relative flex-shrink-0 border-t border-sky-400/30 bg-card">
+          <ResizeHandle {...clarificationResizeProps} />
+          <div
+            ref={clarificationContainerRef}
+            data-testid="clarification-overlay-container"
+            className="px-1 overflow-y-auto overscroll-contain max-h-[50vh]"
+            style={clarificationHeight === null ? undefined : { height: clarificationHeight }}
+          >
+            <ClarificationInputOverlay
+              messages={pendingClarificationGroup}
+              onResolved={handleClarificationResolved}
+            />
+          </div>
         </div>
       )}
-      <QueuedGhostList sessionId={resolvedSessionId} isArchived={isArchived} />
       {isArchived ? (
         <div className="bg-muted/50 flex-shrink-0 px-4 py-3 text-center text-sm text-muted-foreground border-t">
           This task is archived and read-only.

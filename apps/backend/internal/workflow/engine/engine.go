@@ -24,6 +24,15 @@ type ActionInput struct {
 	State   MachineState
 	Step    StepSpec
 	Action  Action
+	// Payload is the typed trigger payload (one of *Payload structs in
+	// payloads.go). Nil for kanban-era triggers; callbacks for the new
+	// Phase 2 triggers type-assert to the matching struct.
+	Payload any
+	// OperationID is the engine's idempotency key for this trigger
+	// invocation. Callbacks that themselves need a deterministic
+	// idempotency key (e.g. queue_run) should derive theirs from this
+	// value combined with action-specific salt.
+	OperationID string
 }
 
 // ActionResult communicates side effects back to the engine.
@@ -64,6 +73,9 @@ type HandleInput struct {
 	// PreloadedState, when set, skips the LoadState call in the engine.
 	// Use this to avoid redundant DB reads when the caller already loaded the session and task.
 	PreloadedState *MachineState
+
+	// Payload is the typed trigger payload — nil for kanban-era triggers.
+	Payload any
 }
 
 // HandleResult summarizes engine work for a trigger.
@@ -75,15 +87,80 @@ type HandleResult struct {
 	Idempotent   bool
 }
 
+// Option configures an Engine at construction time. Use With* helpers below.
+type Option func(*Engine)
+
+// WithRunQueue wires the engine's RunQueueAdapter for queue_run actions.
+// When unset, queue_run callbacks return an error — kanban workflows that
+// never use queue_run are unaffected.
+func WithRunQueue(adapter RunQueueAdapter) Option {
+	return func(e *Engine) { e.runQueue = adapter }
+}
+
+// WithParticipantStore wires read access to step participants.
+func WithParticipantStore(store ParticipantStore) Option {
+	return func(e *Engine) { e.participants = store }
+}
+
+// WithDecisionStore wires read/write access to step decisions.
+func WithDecisionStore(store DecisionStore) Option {
+	return func(e *Engine) { e.decisions = store }
+}
+
+// WithCEOAgentResolver wires resolution for the "workspace.ceo_agent"
+// QueueRun target.
+func WithCEOAgentResolver(resolver CEOAgentResolver) Option {
+	return func(e *Engine) { e.ceoResolver = resolver }
+}
+
+// WithTaskCreator wires the engine's TaskCreator for the create_child_task
+// action. When unset, create_child_task callbacks return ErrActionNotYetWired.
+func WithTaskCreator(creator TaskCreator) Option {
+	return func(e *Engine) { e.taskCreator = creator }
+}
+
+// WithWorkflowSwitcher wires the engine's WorkflowSwitcher for the
+// switch_workflow action. When unset, switch_workflow callbacks return
+// ErrActionNotYetWired.
+func WithWorkflowSwitcher(switcher WorkflowSwitcher) Option {
+	return func(e *Engine) { e.workflowSwitcher = switcher }
+}
+
 // Engine evaluates step actions and applies transitions.
 type Engine struct {
 	store     TransitionStore
 	callbacks CallbackRegistry
+
+	// Phase 2 (ADR-0004) dependencies — nil-safe: an Engine wired only with
+	// store + callbacks behaves identically to today's kanban engine.
+	runQueue     RunQueueAdapter
+	participants ParticipantStore
+	decisions    DecisionStore
+	ceoResolver  CEOAgentResolver
+	// Phase 8 (ADR-0004) dependencies — also nil-safe.
+	taskCreator      TaskCreator
+	workflowSwitcher WorkflowSwitcher
 }
 
-// New creates a workflow engine.
-func New(store TransitionStore, callbacks CallbackRegistry) *Engine {
-	return &Engine{store: store, callbacks: callbacks}
+// TaskCreatorAdapter exposes the wired TaskCreator (or nil if unset).
+// Used by callbacks that resolve TaskCreator at registration time.
+func (e *Engine) TaskCreatorAdapter() TaskCreator { return e.taskCreator }
+
+// WorkflowSwitcherAdapter exposes the wired WorkflowSwitcher (or nil if
+// unset). Used by callbacks that resolve the switcher at registration
+// time.
+func (e *Engine) WorkflowSwitcherAdapter() WorkflowSwitcher { return e.workflowSwitcher }
+
+// New creates a workflow engine. Phase 2 dependencies (RunQueueAdapter,
+// ParticipantStore, DecisionStore, CEOAgentResolver) are wired via Option.
+// Without them, the engine still serves today's kanban workflows: queue_run
+// and friends are inert because no kanban step references them.
+func New(store TransitionStore, callbacks CallbackRegistry, opts ...Option) *Engine {
+	e := &Engine{store: store, callbacks: callbacks}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
 }
 
 // HandleTrigger executes actions for the provided trigger.
@@ -125,7 +202,7 @@ func (e *Engine) processActions(
 	step StepSpec,
 	actions []Action,
 ) (HandleResult, error) {
-	targetStepID, dataPatch, err := e.evaluateActions(ctx, in.Trigger, state, step, actions)
+	targetStepID, dataPatch, err := e.evaluateActions(ctx, in, state, step, actions)
 	if err != nil {
 		return HandleResult{}, err
 	}
@@ -185,7 +262,7 @@ func (e *Engine) loadExecutionContext(ctx context.Context, in HandleInput) (Mach
 
 func (e *Engine) evaluateActions(
 	ctx context.Context,
-	trigger Trigger,
+	in HandleInput,
 	state MachineState,
 	step StepSpec,
 	actions []Action,
@@ -194,6 +271,13 @@ func (e *Engine) evaluateActions(
 	dataPatch := map[string]any{}
 	for _, action := range actions {
 		if targetStepID == "" && isTransitionAction(action.Kind) && !action.RequiresApproval {
+			permitted, err := e.evaluateTransitionGuard(ctx, state, action)
+			if err != nil {
+				return "", nil, err
+			}
+			if !permitted {
+				continue
+			}
 			resolvedTarget, err := e.resolveTransitionTarget(ctx, state, step, action)
 			if err != nil {
 				return "", nil, err
@@ -201,7 +285,7 @@ func (e *Engine) evaluateActions(
 			targetStepID = resolvedTarget
 			continue
 		}
-		if err := e.executeCallback(ctx, trigger, state, step, action, dataPatch); err != nil {
+		if err := e.executeCallback(ctx, in, state, step, action, dataPatch); err != nil {
 			return "", nil, err
 		}
 	}
@@ -214,7 +298,7 @@ func (e *Engine) applyTransition(ctx context.Context, in HandleInput, state Mach
 
 func (e *Engine) executeCallback(
 	ctx context.Context,
-	trigger Trigger,
+	in HandleInput,
 	state MachineState,
 	step StepSpec,
 	action Action,
@@ -225,10 +309,12 @@ func (e *Engine) executeCallback(
 		return nil
 	}
 	res, err := callback.Execute(ctx, ActionInput{
-		Trigger: trigger,
-		State:   state,
-		Step:    step,
-		Action:  action,
+		Trigger:     in.Trigger,
+		State:       state,
+		Step:        step,
+		Action:      action,
+		Payload:     in.Payload,
+		OperationID: in.OperationID,
 	})
 	if err != nil {
 		return err

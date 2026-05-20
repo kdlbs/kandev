@@ -26,7 +26,7 @@ type CreateTaskRequest struct {
 	WorkflowStepID string                 `json:"workflow_step_id"`
 	Title          string                 `json:"title"`
 	Description    string                 `json:"description"`
-	Priority       int                    `json:"priority"`
+	Priority       string                 `json:"priority"`
 	State          *v1.TaskState          `json:"state,omitempty"`
 	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
 	Position       int                    `json:"position"`
@@ -35,13 +35,20 @@ type CreateTaskRequest struct {
 	IsEphemeral    bool                   `json:"is_ephemeral,omitempty"` // Ephemeral tasks are hidden from kanban, used for quick chat
 	ParentID       string                 `json:"parent_id,omitempty"`
 	WorkspacePath  string                 `json:"workspace_path,omitempty"` // Optional host folder for repo-less tasks
+
+	// Office extensions
+	AssigneeAgentProfileID string   `json:"assignee_agent_profile_id,omitempty"`
+	Origin                 string   `json:"origin,omitempty"`
+	ProjectID              string   `json:"project_id,omitempty"`
+	Labels                 string   `json:"labels,omitempty"`
+	BlockedBy              []string `json:"blocked_by,omitempty"`
 }
 
 // UpdateTaskRequest contains the data for updating a task
 type UpdateTaskRequest struct {
 	Title        *string                `json:"title,omitempty"`
 	Description  *string                `json:"description,omitempty"`
-	Priority     *int                   `json:"priority,omitempty"`
+	Priority     *string                `json:"priority,omitempty"`
 	State        *v1.TaskState          `json:"state,omitempty"`
 	Repositories []TaskRepositoryInput  `json:"repositories,omitempty"`
 	Position     *int                   `json:"position,omitempty"`

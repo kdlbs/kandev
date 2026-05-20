@@ -137,8 +137,8 @@ func TestWorkflowStore_ApplyTransition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get session: %v", err)
 	}
-	if session.ReviewStatus != nil && *session.ReviewStatus != "" {
-		t.Errorf("expected review status to be cleared, got %q", *session.ReviewStatus)
+	if session.ReviewStatus != models.ReviewStatusNone {
+		t.Errorf("expected review status to be cleared, got %q", session.ReviewStatus)
 	}
 }
 

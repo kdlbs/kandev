@@ -4,7 +4,10 @@ import { useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import type { BeforeMount, OnMount } from "@monaco-editor/react";
 import { KANDEV_MONACO_DARK } from "@/lib/theme/editor-theme";
-import type { ScriptPlaceholder } from "./script-editor-completions";
+import {
+  createPlaceholderCompletionProvider,
+  type ScriptPlaceholder,
+} from "./script-editor-completions";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.default), {
   ssr: false,
@@ -17,53 +20,39 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.
 
 type Monaco = typeof import("monaco-editor");
 
-// Module-level singleton: only one completion provider registered for "shell" at a time.
-let globalDisposable: { dispose: () => void } | null = null;
-let registeredInstanceCount = 0;
-
-function swapProvider(
+export type CompletionProviderFactory = (
   monaco: Monaco,
-  language: string,
-  placeholders: ScriptPlaceholder[],
-  executorType?: string,
-) {
-  globalDisposable?.dispose();
-  import("./script-editor-completions").then(({ createPlaceholderCompletionProvider }) => {
-    globalDisposable?.dispose();
-    globalDisposable = monaco.languages.registerCompletionItemProvider(
-      language,
-      createPlaceholderCompletionProvider(monaco, placeholders, executorType),
-    );
-  });
-}
+) => import("monaco-editor").languages.CompletionItemProvider;
 
-function registerProvider(
-  monaco: Monaco,
-  language: string,
-  placeholders: ScriptPlaceholder[],
-  executorType?: string,
-) {
-  swapProvider(monaco, language, placeholders, executorType);
-  registeredInstanceCount++;
-}
+// Per-language singletons so a markdown editor and a shell editor can coexist
+// without their providers fighting over the same global slot.
+const disposablesByLanguage: Map<string, { dispose: () => void }> = new Map();
+const instanceCountsByLanguage: Map<string, number> = new Map();
 
-// Re-register without incrementing the lifecycle counter (e.g., when placeholders change)
-function reRegisterProvider(
-  monaco: Monaco,
-  language: string,
-  placeholders: ScriptPlaceholder[],
-  executorType?: string,
-) {
-  swapProvider(monaco, language, placeholders, executorType);
-}
-
-function unregisterProvider() {
-  registeredInstanceCount--;
-  if (registeredInstanceCount <= 0) {
-    globalDisposable?.dispose();
-    globalDisposable = null;
-    registeredInstanceCount = 0;
+function disposeFor(language: string) {
+  const existing = disposablesByLanguage.get(language);
+  if (existing) {
+    existing.dispose();
+    disposablesByLanguage.delete(language);
   }
+}
+
+function swapProvider(monaco: Monaco, language: string, factory: CompletionProviderFactory) {
+  disposeFor(language);
+  disposablesByLanguage.set(
+    language,
+    monaco.languages.registerCompletionItemProvider(language, factory(monaco)),
+  );
+}
+
+function unregisterProvider(language: string) {
+  const next = (instanceCountsByLanguage.get(language) ?? 1) - 1;
+  if (next <= 0) {
+    disposeFor(language);
+    instanceCountsByLanguage.delete(language);
+    return;
+  }
+  instanceCountsByLanguage.set(language, next);
 }
 
 /** Compute editor height from content lines (min 80px, max 400px). */
@@ -82,6 +71,12 @@ type ScriptEditorProps = {
   height?: string | number;
   placeholders?: ScriptPlaceholder[];
   executorType?: string;
+  /**
+   * Optional custom completion provider factory. Takes precedence over
+   * `placeholders` — use for non-placeholder languages (e.g. markdown
+   * file-path autocomplete).
+   */
+  completionProvider?: CompletionProviderFactory;
   readOnly?: boolean;
   lineNumbers?: "on" | "off";
 };
@@ -93,6 +88,7 @@ export function ScriptEditor({
   height = "300px",
   placeholders,
   executorType,
+  completionProvider,
   readOnly = false,
   lineNumbers = "on",
 }: ScriptEditorProps) {
@@ -102,26 +98,23 @@ export function ScriptEditor({
   useEffect(() => {
     return () => {
       if (mountedRef.current) {
-        unregisterProvider();
+        unregisterProvider(language);
         mountedRef.current = false;
       }
     };
-  }, []);
+  }, [language]);
 
-  // Register/re-register the provider whenever Monaco is mounted and placeholders
-  // change. The singleton `registerProvider` disposes any previous registration,
-  // so swapping is idempotent. `mountedRef` guards the lifecycle counter.
   const ensureProviderRegistered = useCallback(
     (monaco: Monaco) => {
-      if (!placeholders || placeholders.length === 0) return;
+      const factory = resolveFactory(completionProvider, placeholders, executorType);
+      if (!factory) return;
       if (!mountedRef.current) {
         mountedRef.current = true;
-        registerProvider(monaco, language, placeholders, executorType);
-      } else {
-        reRegisterProvider(monaco, language, placeholders, executorType);
+        instanceCountsByLanguage.set(language, (instanceCountsByLanguage.get(language) ?? 0) + 1);
       }
+      swapProvider(monaco, language, factory);
     },
-    [placeholders, executorType, language],
+    [completionProvider, placeholders, executorType, language],
   );
 
   useEffect(() => {
@@ -170,4 +163,16 @@ export function ScriptEditor({
       }}
     />
   );
+}
+
+function resolveFactory(
+  custom: CompletionProviderFactory | undefined,
+  placeholders: ScriptPlaceholder[] | undefined,
+  executorType: string | undefined,
+): CompletionProviderFactory | null {
+  if (custom) return custom;
+  if (placeholders && placeholders.length > 0) {
+    return (monaco) => createPlaceholderCompletionProvider(monaco, placeholders, executorType);
+  }
+  return null;
 }

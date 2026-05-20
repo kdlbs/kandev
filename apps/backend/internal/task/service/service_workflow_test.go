@@ -129,8 +129,7 @@ func TestService_MoveTaskAllowsPendingReviewWhenSessionIdle(t *testing.T) {
 	seedMoveWorkflows(t, ctx, repo)
 	seedMoveSteps(svc)
 	createMoveTask(t, ctx, repo, "task-pending-review", "wf-source", "step-source", nil)
-	pending := "pending"
-	createMoveSession(t, ctx, repo, "session-pending-review", "task-pending-review", models.TaskSessionStateWaitingForInput, &pending)
+	createMoveSession(t, ctx, repo, "session-pending-review", "task-pending-review", models.TaskSessionStateWaitingForInput, models.ReviewStatusPending)
 
 	moved, err := svc.MoveTask(ctx, "task-pending-review", "wf-source", "step-review-target", 0)
 	if err != nil {
@@ -147,7 +146,7 @@ func TestService_MoveTaskRejectsRunningSession(t *testing.T) {
 	seedMoveWorkflows(t, ctx, repo)
 	seedMoveSteps(svc)
 	createMoveTask(t, ctx, repo, "task-running", "wf-source", "step-source", nil)
-	createMoveSession(t, ctx, repo, "session-running", "task-running", models.TaskSessionStateRunning, nil)
+	createMoveSession(t, ctx, repo, "session-running", "task-running", models.TaskSessionStateRunning, models.ReviewStatusNone)
 
 	_, err := svc.MoveTask(ctx, "task-running", "wf-source", "step-review-target", 0)
 	if err == nil {
@@ -241,7 +240,7 @@ func TestService_BulkMoveSelectedTasksValidatesBatchBeforeMoving(t *testing.T) {
 	seedMoveSteps(svc)
 	createMoveTask(t, ctx, repo, "task-batch-ok", "wf-source", "step-source", nil)
 	createMoveTask(t, ctx, repo, "task-batch-running", "wf-source", "step-source", nil)
-	createMoveSession(t, ctx, repo, "session-batch-running", "task-batch-running", models.TaskSessionStateRunning, nil)
+	createMoveSession(t, ctx, repo, "session-batch-running", "task-batch-running", models.TaskSessionStateRunning, models.ReviewStatusNone)
 
 	_, err := svc.BulkMoveSelectedTasks(ctx, []string{"task-batch-ok", "task-batch-running"}, "wf-target", "step-target")
 	if err == nil {
@@ -348,7 +347,7 @@ func createMoveTask(t *testing.T, ctx context.Context, repo interface {
 
 func createMoveSession(t *testing.T, ctx context.Context, repo interface {
 	CreateTaskSession(context.Context, *models.TaskSession) error
-}, id, taskID string, state models.TaskSessionState, reviewStatus *string) {
+}, id, taskID string, state models.TaskSessionState, reviewStatus models.ReviewStatus) {
 	t.Helper()
 	must(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID:           id,

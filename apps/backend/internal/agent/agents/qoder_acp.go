@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -112,3 +113,5 @@ func (a *QoderACP) InferenceConfig() *InferenceConfig {
 		Command:   NewCommand(qoderACPBin, "--acp"),
 	}
 }
+
+func (a *QoderACP) BillingType() usage.BillingType { return defaultBillingType() }

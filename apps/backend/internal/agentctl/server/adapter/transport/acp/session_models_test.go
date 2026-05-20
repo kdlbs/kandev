@@ -1,0 +1,196 @@
+package acp
+
+import (
+	"testing"
+
+	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+)
+
+// findSessionModelsEvent returns the first session_models event in events,
+// or fails the test if none is present.
+func findSessionModelsEvent(t *testing.T, events []AgentEvent) AgentEvent {
+	t.Helper()
+	for _, ev := range events {
+		if ev.Type == streams.EventTypeSessionModels {
+			return ev
+		}
+	}
+	t.Fatalf("no %s event emitted; got %d events", streams.EventTypeSessionModels, len(events))
+	return AgentEvent{}
+}
+
+// auggieLikeModels mimics Auggie's response: empty CurrentModelId with an
+// alphabetically-sorted list whose [0] is a pseudo-agent ("Build Analyzer").
+func auggieLikeModels() *acp.SessionModelState {
+	return &acp.SessionModelState{
+		CurrentModelId: "",
+		AvailableModels: []acp.ModelInfo{
+			{ModelId: "build-fix-gpt5-2-responses-high-200k-v1-c4-p2-agent", Name: "Build Analyzer"},
+			{ModelId: "claude-opus-4-7", Name: "Opus 4.7"},
+		},
+	}
+}
+
+// TestEmitSessionModels_EmptyCurrentIDNoFallback pins the regression: when the
+// agent returns currentModelId="" with no model-shaped configOption, the
+// adapter must NOT invent a "current" model from AvailableModels[0]. Auggie
+// returns alphabetically-sorted models whose [0] is a pseudo-agent ("Build
+// Analyzer"), so the previous fallback caused the UI to show the wrong model.
+func TestEmitSessionModels_EmptyCurrentIDNoFallback(t *testing.T) {
+	a := newTestAdapter()
+	a.emitSessionModels("sess-1", auggieLikeModels(), nil, nil)
+
+	ev := findSessionModelsEvent(t, drainEvents(a))
+	if ev.CurrentModelID != "" {
+		t.Errorf("CurrentModelID = %q, want empty (let frontend fall through to profile)", ev.CurrentModelID)
+	}
+	if len(ev.SessionModels) != 2 {
+		t.Errorf("SessionModels len = %d, want 2", len(ev.SessionModels))
+	}
+}
+
+// TestEmitSessionModels_EmptyCurrentIDFromConfigOption pins the legitimate
+// fallback that we keep: some agents expose the current model via a
+// configOption (id="model") rather than CurrentModelId.
+func TestEmitSessionModels_EmptyCurrentIDFromConfigOption(t *testing.T) {
+	a := newTestAdapter()
+	meta := map[string]any{
+		"configOptions": []any{
+			map[string]any{
+				"type":         "select",
+				"id":           "model",
+				"name":         "Model",
+				"currentValue": "claude-opus-4-7",
+			},
+		},
+	}
+	a.emitSessionModels("sess-1", auggieLikeModels(), meta, nil)
+
+	ev := findSessionModelsEvent(t, drainEvents(a))
+	if ev.CurrentModelID != "claude-opus-4-7" {
+		t.Errorf("CurrentModelID = %q, want %q", ev.CurrentModelID, "claude-opus-4-7")
+	}
+}
+
+// TestEmitSessionModels_NonEmptyCurrentIDPreserved checks the happy path:
+// when the agent populates CurrentModelId, we propagate it verbatim.
+func TestEmitSessionModels_NonEmptyCurrentIDPreserved(t *testing.T) {
+	a := newTestAdapter()
+	models := &acp.SessionModelState{
+		CurrentModelId: "claude-opus-4-7",
+		AvailableModels: []acp.ModelInfo{
+			{ModelId: "claude-opus-4-7", Name: "Opus 4.7"},
+		},
+	}
+	a.emitSessionModels("sess-1", models, nil, nil)
+
+	ev := findSessionModelsEvent(t, drainEvents(a))
+	if ev.CurrentModelID != "claude-opus-4-7" {
+		t.Errorf("CurrentModelID = %q, want %q", ev.CurrentModelID, "claude-opus-4-7")
+	}
+}
+
+// TestEmitSetModelEvent_EmitsSessionModelsWithCachedState pins that after a
+// successful SetModel call the adapter emits a session_models convergence
+// event carrying the requested model and cached available models / config
+// options. This is what corrects the frontend after the lifecycle manager
+// applies the profile model at session init.
+func TestEmitSetModelEvent_EmitsSessionModelsWithCachedState(t *testing.T) {
+	a := newTestAdapter()
+
+	cachedModels := []acp.ModelInfo{
+		{ModelId: "claude-opus-4-7", Name: "Opus 4.7"},
+		{ModelId: "build-analyzer", Name: "Build Analyzer"},
+	}
+	// Cover both rewrite paths: ID == "model" and Category == "model"
+	// (some agents identify the model option by category, not ID).
+	cachedConfig := []streams.ConfigOption{
+		{Type: "select", ID: "other", Name: "Other", CurrentValue: "keep-me"},
+		{Type: "select", ID: "model", Name: "Model", CurrentValue: "old-model"},
+		{Type: "select", ID: "model-cat", Category: "model", Name: "ModelCat", CurrentValue: "old-model"},
+	}
+
+	a.emitSetModelEvent("sess-1", "claude-opus-4-7", cachedModels, cachedConfig)
+
+	ev := findSessionModelsEvent(t, drainEvents(a))
+	if ev.SessionID != "sess-1" {
+		t.Errorf("SessionID = %q, want %q", ev.SessionID, "sess-1")
+	}
+	if ev.CurrentModelID != "claude-opus-4-7" {
+		t.Errorf("CurrentModelID = %q, want %q", ev.CurrentModelID, "claude-opus-4-7")
+	}
+	if len(ev.SessionModels) != 2 {
+		t.Errorf("SessionModels len = %d, want 2", len(ev.SessionModels))
+	}
+	if len(ev.ConfigOptions) != 3 {
+		t.Fatalf("ConfigOptions len = %d, want 3", len(ev.ConfigOptions))
+	}
+
+	// Both the ID-matched and Category-matched model options must have their
+	// CurrentValue rewritten to the new model so consumers reading either
+	// don't see a stale value. Non-model options are untouched.
+	for _, opt := range ev.ConfigOptions {
+		switch opt.ID {
+		case "model", "model-cat":
+			if opt.CurrentValue != "claude-opus-4-7" {
+				t.Errorf("option %q CurrentValue = %q, want %q", opt.ID, opt.CurrentValue, "claude-opus-4-7")
+			}
+		case "other":
+			if opt.CurrentValue != "keep-me" {
+				t.Errorf("non-model option CurrentValue = %q, want %q (untouched)", opt.CurrentValue, "keep-me")
+			}
+		}
+	}
+
+	// The caller's cachedConfig must not be mutated — we copy before rewrite.
+	if cachedConfig[1].CurrentValue != "old-model" || cachedConfig[2].CurrentValue != "old-model" {
+		t.Errorf("caller cachedConfig was mutated: got %+v", cachedConfig)
+	}
+}
+
+// TestConfigOptionUpdate_RefreshesCachedConfig pins that an inbound
+// ConfigOptionUpdate notification refreshes the adapter's availableConfigOptions
+// cache, so a subsequent SetModel convergence event emits the latest options
+// instead of the snapshot taken at session/new.
+func TestConfigOptionUpdate_RefreshesCachedConfig(t *testing.T) {
+	a := newTestAdapter()
+
+	a.mu.Lock()
+	a.availableConfigOptions = []streams.ConfigOption{
+		{Type: "select", ID: "model", Name: "Model", CurrentValue: "stale"},
+	}
+	a.mu.Unlock()
+
+	notif := acp.SessionNotification{
+		SessionId: "sess-1",
+		Update: acp.SessionUpdate{
+			ConfigOptionUpdate: &acp.SessionConfigOptionUpdate{
+				ConfigOptions: []acp.SessionConfigOption{
+					{Select: &acp.SessionConfigOptionSelect{
+						Type:         "select",
+						Id:           "model",
+						Name:         "Model",
+						CurrentValue: "fresh",
+					}},
+				},
+			},
+		},
+	}
+
+	ev := a.convertNotification(notif)
+	if ev == nil {
+		t.Fatalf("expected a session_models event from ConfigOptionUpdate")
+	}
+	if ev.CurrentModelID != "fresh" {
+		t.Errorf("event CurrentModelID = %q, want %q (resolved from refreshed configOption)", ev.CurrentModelID, "fresh")
+	}
+
+	a.mu.RLock()
+	got := a.availableConfigOptions
+	a.mu.RUnlock()
+
+	if len(got) != 1 || got[0].CurrentValue != "fresh" {
+		t.Errorf("availableConfigOptions = %+v, want one option with CurrentValue=fresh", got)
+	}
+}

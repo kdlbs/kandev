@@ -1,18 +1,20 @@
 "use client";
 
 import { memo, useState, useCallback } from "react";
-import Link from "next/link";
 import ReactMarkdown from "react-markdown";
-import { IconWand, IconMessageDots, IconFile, IconRobot } from "@tabler/icons-react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
+import { IconWand, IconMessageDots, IconFile } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import { RichBlocks } from "@/components/task/chat/messages/rich-blocks";
 import { MessageActions } from "@/components/task/chat/messages/message-actions";
 import { useMessageNavigation } from "@/hooks/use-message-navigation";
-import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
-import { linkToTask } from "@/lib/links";
-import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
+import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
+import {
+  markdownComponents,
+  normalizeMarkdown,
+  remarkPlugins,
+} from "@/components/shared/markdown-components";
+import { openImageInWindow } from "@/components/task/chat/file-attachment";
 
 type ChatMessageProps = {
   comment: Message;
@@ -81,7 +83,7 @@ function renderUserMessageBody(
     return (
       <div className="markdown-body markdown-body-user max-w-none">
         <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-          {content}
+          {normalizeMarkdown(content)}
         </ReactMarkdown>
       </div>
     );
@@ -113,13 +115,6 @@ type UserMessageMetadata = {
   sender_session_id?: string;
 };
 
-type SenderTaskInfo = {
-  id: string;
-  // Snapshot title captured when the message was sent. May differ from the
-  // task's current title; used as a fallback when the live task isn't loaded.
-  snapshotTitle: string;
-};
-
 function parseUserMessageMetadata(comment: Message) {
   const metadata = comment.metadata as UserMessageMetadata | undefined;
   const imageAttachments = (metadata?.attachments || []).filter((att) => att.type === "image");
@@ -144,57 +139,6 @@ function parseUserMessageMetadata(comment: Message) {
     hasAttachments,
     senderTask,
   };
-}
-
-const SENDER_TITLE_MAX = 24;
-
-function truncateTitle(title: string): string {
-  if (title.length <= SENDER_TITLE_MAX) return title;
-  return title.slice(0, SENDER_TITLE_MAX - 1).trimEnd() + "…";
-}
-
-function SenderTaskBadge({ sender }: { sender: SenderTaskInfo }) {
-  // Live-resolve the sender task from the loaded kanban state so the badge
-  // reflects renames. When the sender task isn't loaded (cross-workspace,
-  // archived, etc.) we fall back to the snapshot title and render a static,
-  // non-clickable greyed-out badge — the source URL only works when we have
-  // routing context.
-  const liveTask = useTaskById(sender.id);
-  const fullTitle = liveTask?.title || sender.snapshotTitle || "(unknown task)";
-  const truncated = truncateTitle(fullTitle);
-
-  const inner = (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full bg-purple-500/20 px-2.5 py-1 text-xs font-medium text-purple-300",
-        liveTask && "cursor-pointer hover:bg-purple-500/30 transition-colors",
-        !liveTask && "opacity-60",
-      )}
-      data-testid="sender-task-badge"
-      data-sender-task-id={sender.id}
-    >
-      <IconRobot size={14} /> {truncated}
-    </span>
-  );
-
-  const wrapped = liveTask ? (
-    <Link href={linkToTask(sender.id)} aria-label={`Open source task ${fullTitle}`}>
-      {inner}
-    </Link>
-  ) : (
-    inner
-  );
-
-  return (
-    <TooltipProvider delayDuration={300}>
-      <Tooltip>
-        <TooltipTrigger asChild>{wrapped}</TooltipTrigger>
-        <TooltipContent>
-          From agent in task <span className="font-semibold">&ldquo;{fullTitle}&rdquo;</span>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
 }
 
 function UserContextBadges({
@@ -232,15 +176,6 @@ function UserContextBadges({
       ))}
     </div>
   );
-}
-
-function openImageInWindow(mimeType: string, data: string) {
-  const win = window.open();
-  if (win) {
-    win.document.write(
-      `<img src="data:${mimeType};base64,${data}" style="max-width:100%;height:auto;" />`,
-    );
-  }
 }
 
 function UserMessageContent({
@@ -348,7 +283,7 @@ function AgentMessageContent({ comment, showRaw, onToggleRaw, showRichBlocks }: 
         ) : (
           <div className="markdown-body max-w-none">
             <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-              {comment.content || "(empty)"}
+              {normalizeMarkdown(comment.content || "(empty)")}
             </ReactMarkdown>
             {showRichBlocks ? <RichBlocks comment={comment} /> : null}
           </div>

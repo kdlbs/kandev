@@ -470,7 +470,9 @@
   .chat-input-running,
   .chat-input-running-plan,
   .chat-input-starting,
-  .search-flash {
+  .search-flash,
+  .animate-queue-open,
+  .animate-queue-close {
     animation: none;
   }
 }
@@ -715,11 +717,15 @@
   margin-bottom: 0.25rem;
 }
 
-/* Inline code accent color */
+/* Inline code: neutral foreground on a slightly elevated background with a
+   subtle border so chips read clearly against the card surface.
+   Linked code (a > code) drops the background and inherits the link
+   color so file references read as links, not as another code chip. */
 .markdown-body :not(pre) > code,
 .markdown-body code:not(pre code) {
-  background: var(--muted);
-  color: var(--accent);
+  background: color-mix(in oklch, var(--foreground) 10%, var(--muted));
+  border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
+  color: var(--foreground);
   padding: 0.1rem 0.375rem;
   border-radius: 0.25rem;
   font-size: 0.9em;
@@ -734,6 +740,21 @@
 
 .markdown-body a:hover {
   text-decoration-line: underline;
+}
+
+/* Code wrapped in a link reads as a link: no fill, link color,
+   background appears on hover for affordance. Scoped to exclude
+   user bubbles so they keep their primary-tinted chip styling. */
+.markdown-body:not(.markdown-body-user) a > code,
+.markdown-body:not(.markdown-body-user) a code:not(pre code) {
+  background: transparent;
+  border: none;
+  color: inherit;
+}
+
+.markdown-body:not(.markdown-body-user) a:hover > code,
+.markdown-body:not(.markdown-body-user) a:hover code:not(pre code) {
+  background: color-mix(in oklch, var(--foreground) 10%, var(--muted));
 }
 
 .markdown-body blockquote {
@@ -1407,4 +1428,34 @@
   100% {
     background-color: transparent;
   }
+}
+
+/* Queue panel collapsible — animate height + opacity using the Radix
+ * Collapsible CSS variable. Used by QueueAffordance so opening/closing the
+ * queued-messages panel feels intentional rather than popping. */
+@keyframes queue-panel-open {
+  from {
+    height: 0;
+    opacity: 0;
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+  }
+}
+@keyframes queue-panel-close {
+  from {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+  }
+  to {
+    height: 0;
+    opacity: 0;
+  }
+}
+.animate-queue-open {
+  animation: queue-panel-open 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.animate-queue-close {
+  animation: queue-panel-close 180ms cubic-bezier(0.32, 0.72, 0, 1);
 }

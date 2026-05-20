@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -83,11 +84,12 @@ func (a *AmpACP) BuildCommand(opts CommandOptions) Command {
 func (a *AmpACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd("npx", "-y", ampACPPkg).Build(),
-		WorkingDir:     "{workspace}",
-		Env:            map[string]string{},
-		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Protocol:       agent.ProtocolACP,
+		Cmd:             Cmd("npx", "-y", ampACPPkg).Build(),
+		WorkingDir:      "{workspace}",
+		Env:             map[string]string{},
+		ResourceLimits:  ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
+		Protocol:        agent.ProtocolACP,
+		ProjectSkillDir: ".agents/skills",
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
@@ -101,6 +103,8 @@ func (a *AmpACP) RemoteAuth() *RemoteAuth { return nil }
 func (a *AmpACP) InstallScript() string {
 	return "npm install -g " + ampACPPkg
 }
+
+func (a *AmpACP) BillingType() usage.BillingType { return defaultBillingType() }
 
 func (a *AmpACP) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings

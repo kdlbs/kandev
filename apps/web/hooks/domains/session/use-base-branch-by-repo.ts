@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
-import type { Repository } from "@/lib/types/http";
+import { repositoryId, type Repository } from "@/lib/types/http";
 
 /**
  * Returns a map from `repository_name` to its task base_branch for the active
@@ -24,7 +24,7 @@ export function useBaseBranchByRepo(activeTaskId: string | null): Record<string,
     const repoNameById = new Map(allRepos.map((r) => [r.id, r.name]));
     const out: Record<string, string> = {};
     for (const link of task.repositories) {
-      const name = repoNameById.get(link.repository_id);
+      const name = repoNameById.get(repositoryId(link.repository_id));
       if (name && link.base_branch) out[name] = link.base_branch;
     }
     return out;

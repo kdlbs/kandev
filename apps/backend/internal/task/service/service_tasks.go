@@ -19,6 +19,10 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
+// defaultPriority is the default value for the task priority column.
+// Used when a caller omits priority so the DB CHECK constraint is satisfied.
+const defaultPriority = "medium"
+
 type taskStopTarget struct {
 	sessionID   string
 	executionID string
@@ -31,68 +35,51 @@ type taskEnvironmentCleanup struct {
 
 // Task operations
 
+// isOfficeRequest returns true if the request should create an office task.
+func isOfficeRequest(req *CreateTaskRequest) bool {
+	return req.ProjectID != "" ||
+		req.Origin == models.TaskOriginAgentCreated ||
+		req.Origin == models.TaskOriginRoutine ||
+		req.Origin == models.TaskOriginOnboarding
+}
+
 // CreateTask creates a new task and publishes a task.created event.
-// WorkflowID is required for non-ephemeral tasks (kanban tasks).
+// WorkflowID is required for non-ephemeral kanban tasks.
+// Office tasks (project_id set, or origin is agent_created/routine)
+// auto-resolve to the workspace's office workflow.
 // Ephemeral tasks (quick chat, config chat) must NOT have a workflow.
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*models.Task, error) {
-	// Non-ephemeral tasks require a workflow for kanban board placement
-	if !req.IsEphemeral && req.WorkflowID == "" {
-		return nil, fmt.Errorf("workflow_id is required for non-ephemeral tasks")
-	}
-	// Ephemeral tasks must not have a workflow - they exist outside the kanban board
-	if req.IsEphemeral && req.WorkflowID != "" {
-		return nil, fmt.Errorf("workflow_id must be empty for ephemeral tasks")
+	if err := s.validateCreateTaskRequest(req); err != nil {
+		return nil, err
 	}
 
-	// Auto-resolve start step if not provided
-	workflowStepID := req.WorkflowStepID
-	if workflowStepID == "" && req.WorkflowID != "" && s.startStepResolver != nil {
-		var resolvedID string
-		var err error
-		if req.PlanMode {
-			resolvedID, err = s.startStepResolver.ResolveFirstStep(ctx, req.WorkflowID)
-		} else {
-			resolvedID, err = s.startStepResolver.ResolveStartStep(ctx, req.WorkflowID)
-		}
-		if err != nil {
-			s.logger.Warn("failed to resolve start step, using empty",
-				zap.String("workflow_id", req.WorkflowID),
-				zap.Error(err))
-		} else {
-			workflowStepID = resolvedID
+	// For office tasks, resolve workflow from workspace
+	if isOfficeRequest(req) && req.WorkflowID == "" {
+		if err := s.resolveOfficeWorkflow(ctx, req); err != nil {
+			return nil, err
 		}
 	}
 
-	state := v1.TaskStateCreated
-	if req.State != nil {
-		state = *req.State
-	}
-	metadata := req.Metadata
-	workspacePath := strings.TrimSpace(req.WorkspacePath)
-	if workspacePath != "" {
-		if metadata == nil {
-			metadata = make(map[string]interface{})
+	workflowStepID := s.resolveWorkflowStep(ctx, req)
+	task := s.buildTask(req, workflowStepID)
+
+	// Auto-assign identifier for office tasks
+	if isOfficeRequest(req) {
+		if err := s.assignIdentifier(ctx, task); err != nil {
+			return nil, err
 		}
-		metadata[models.MetaKeyWorkspacePath] = workspacePath
-	}
-	task := &models.Task{
-		ID:             uuid.New().String(),
-		WorkspaceID:    req.WorkspaceID,
-		WorkflowID:     req.WorkflowID,
-		WorkflowStepID: workflowStepID,
-		Title:          req.Title,
-		Description:    req.Description,
-		State:          state,
-		Priority:       req.Priority,
-		Position:       req.Position,
-		Metadata:       metadata,
-		IsEphemeral:    req.IsEphemeral,
-		ParentID:       req.ParentID,
 	}
 
 	if err := s.tasks.CreateTask(ctx, task); err != nil {
 		s.logger.Error("failed to create task", zap.Error(err))
 		return nil, err
+	}
+
+	// Create blocker relationships if specified.
+	for _, blockerID := range req.BlockedBy {
+		if err := s.AddBlocker(ctx, task.ID, blockerID); err != nil {
+			return nil, fmt.Errorf("add blocker %s: %w", blockerID, err)
+		}
 	}
 
 	if err := s.createTaskRepositories(ctx, task.ID, req.WorkspaceID, req.Repositories); err != nil {
@@ -111,6 +98,115 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	s.logger.Info("task created", zap.String("task_id", task.ID), zap.String("title", task.Title))
 
 	return task, nil
+}
+
+// validateCreateTaskRequest validates constraints for task creation.
+func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
+	isOffice := isOfficeRequest(req)
+	if !req.IsEphemeral && !isOffice && req.WorkflowID == "" {
+		return fmt.Errorf("workflow_id is required for non-ephemeral tasks")
+	}
+	if req.IsEphemeral && req.WorkflowID != "" {
+		return fmt.Errorf("workflow_id must be empty for ephemeral tasks")
+	}
+	return nil
+}
+
+// resolveOfficeWorkflow sets WorkflowID on the request from the workspace's office workflow.
+func (s *Service) resolveOfficeWorkflow(ctx context.Context, req *CreateTaskRequest) error {
+	_, orchWorkflowID, err := s.tasks.GetWorkspaceTaskPrefix(ctx, req.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to get office workflow for workspace: %w", err)
+	}
+	if orchWorkflowID == "" {
+		return fmt.Errorf("workspace %s has no office workflow configured", req.WorkspaceID)
+	}
+	req.WorkflowID = orchWorkflowID
+	return nil
+}
+
+// resolveWorkflowStep resolves the starting workflow step for a new task.
+func (s *Service) resolveWorkflowStep(ctx context.Context, req *CreateTaskRequest) string {
+	workflowStepID := req.WorkflowStepID
+	if workflowStepID == "" && req.WorkflowID != "" && s.startStepResolver != nil {
+		var resolvedID string
+		var err error
+		if req.PlanMode {
+			resolvedID, err = s.startStepResolver.ResolveFirstStep(ctx, req.WorkflowID)
+		} else {
+			resolvedID, err = s.startStepResolver.ResolveStartStep(ctx, req.WorkflowID)
+		}
+		if err != nil {
+			s.logger.Warn("failed to resolve start step, using empty",
+				zap.String("workflow_id", req.WorkflowID),
+				zap.Error(err))
+		} else {
+			workflowStepID = resolvedID
+		}
+	}
+	return workflowStepID
+}
+
+// buildTask constructs a Task model from the CreateTaskRequest.
+func (s *Service) buildTask(req *CreateTaskRequest, workflowStepID string) *models.Task {
+	state := v1.TaskStateCreated
+	if req.State != nil {
+		state = *req.State
+	}
+	origin := req.Origin
+	if origin == "" {
+		origin = models.TaskOriginManual
+	}
+	labels := req.Labels
+	if labels == "" {
+		labels = "[]"
+	}
+	priority := req.Priority
+	if priority == "" {
+		// Office tasks have a TEXT priority column with a CHECK constraint
+		// against the canonical four-value enum; default empty to defaultPriority
+		// so callers (e.g. onboarding) can omit it.
+		priority = defaultPriority
+	}
+	metadata := req.Metadata
+	if wsPath := strings.TrimSpace(req.WorkspacePath); wsPath != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[models.MetaKeyWorkspacePath] = wsPath
+	}
+	return &models.Task{
+		ID:                     uuid.New().String(),
+		WorkspaceID:            req.WorkspaceID,
+		WorkflowID:             req.WorkflowID,
+		WorkflowStepID:         workflowStepID,
+		Title:                  req.Title,
+		Description:            req.Description,
+		State:                  state,
+		Priority:               priority,
+		Position:               req.Position,
+		Metadata:               metadata,
+		IsEphemeral:            req.IsEphemeral,
+		ParentID:               req.ParentID,
+		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
+		Origin:                 origin,
+		ProjectID:              req.ProjectID,
+		Labels:                 labels,
+	}
+}
+
+// assignIdentifier generates a sequential identifier (e.g. "KAN-1") for the task.
+func (s *Service) assignIdentifier(ctx context.Context, task *models.Task) error {
+	prefix, _, err := s.tasks.GetWorkspaceTaskPrefix(ctx, task.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to get task prefix: %w", err)
+	}
+	seq, err := s.tasks.IncrementTaskSequence(ctx, task.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to increment task sequence: %w", err)
+	}
+	task.Identifier = fmt.Sprintf("%s-%d", prefix, seq)
+	return nil
 }
 
 // createTaskRepositories creates task-repository associations, resolving local paths to repository IDs.
@@ -553,6 +649,41 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	return nil
 }
 
+// CleanupTaskResources tears down a task's runtime resources (container,
+// sandbox, worktree, executor_running rows, quick-chat dir, task_environment
+// row) AFTER the task row has been archived or deleted by another path.
+//
+// Used by HandoffService.ArchiveTaskTree / DeleteTaskTree, which bypass
+// Service.ArchiveTask / Service.DeleteTask and therefore miss the runtime
+// teardown those wrappers run via runAsyncTaskCleanup. Without this call the
+// agent gets stopped but its container/sandbox leaks indefinitely.
+//
+// The caller is expected to have cancelled active runs separately (cascade
+// does this via runCanceller before invoking us), so stopTargets is empty.
+// deleteEnvRow controls whether the task_environment row is removed (true
+// for delete cascade, false for archive — archive preserves the row).
+// Best-effort and idempotent; failures are logged.
+func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, deleteEnvRow bool) {
+	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to list sessions for cascade cleanup",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+	worktrees := s.gatherWorktreesForDelete(ctx, taskID)
+	taskEnv := s.gatherTaskEnvironmentForCleanup(ctx, taskID)
+	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: deleteEnvRow}
+	if len(sessions) == 0 && len(worktrees) == 0 && taskEnv == nil {
+		return
+	}
+	reason := "cascade archive"
+	if deleteEnvRow {
+		reason = "cascade delete"
+	}
+	s.runAsyncTaskCleanup(taskID, sessions, worktrees, nil, envCleanup, false,
+		reason, "failed to stop session on cascade cleanup", "cascade cleanup completed")
+}
+
 // gatherWorktreesForDelete collects worktrees for a task before it is deleted.
 // For legacy WorktreeCleanup implementations that do not implement WorktreeProvider,
 // it triggers cleanup immediately and returns nil.
@@ -710,13 +841,19 @@ func (s *Service) performTaskCleanup(
 		}
 	}
 
-	// Cleanup quick-chat workspace directories for ephemeral tasks
-	if isEphemeral && s.quickChatDir != "" {
+	// Cleanup quick-chat workspace directories for all tasks (not just ephemeral).
+	// Non-ephemeral office tasks also get quick-chat dirs allocated by manager_launch.go;
+	// both cases must be cleaned up to avoid a disk leak.
+	if s.quickChatDir != "" {
 		for _, session := range sessions {
 			if session == nil || session.ID == "" {
 				continue
 			}
 			sessionDir := filepath.Join(s.quickChatDir, session.ID)
+			if _, statErr := os.Stat(sessionDir); statErr != nil {
+				// Directory does not exist — nothing to remove.
+				continue
+			}
 			if err := os.RemoveAll(sessionDir); err != nil {
 				s.logger.Warn("failed to cleanup quick-chat workspace directory",
 					zap.String("task_id", taskID),

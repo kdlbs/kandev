@@ -11,10 +11,15 @@ import type { ComponentProps } from "react";
 type QuickChatButtonProps = {
   workspaceId?: string | null;
   size?: ComponentProps<typeof Button>["size"];
+  compact?: boolean;
 };
 
 /** Quick Chat button that opens the quick chat modal */
-export function QuickChatButton({ workspaceId, size = "default" }: QuickChatButtonProps) {
+export function QuickChatButton({
+  workspaceId,
+  size = "default",
+  compact = false,
+}: QuickChatButtonProps) {
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   const quickChatShortcut = getShortcut("QUICK_CHAT", keyboardShortcuts);
@@ -25,12 +30,13 @@ export function QuickChatButton({ workspaceId, size = "default" }: QuickChatButt
     <KeyboardShortcutTooltip shortcut={quickChatShortcut} description="Quick Chat">
       <Button
         variant="outline"
-        size={size}
+        size={compact ? "icon-lg" : size}
         className="cursor-pointer gap-2"
+        aria-label={compact ? "Quick Chat" : undefined}
         onClick={handleOpenQuickChat}
       >
         <IconMessageCircle className="h-4 w-4" />
-        Chat
+        {!compact && "Chat"}
       </Button>
     </KeyboardShortcutTooltip>
   );

@@ -1,0 +1,119 @@
+id: office-default
+name: Office Default
+description: >-
+  Five-step office workflow with a primary agent doing the work, multi-agent
+  reviewers, and multi-agent approvers. Tasks flow Backlog -> Work -> Review
+  -> Approval -> Done with quorum-gated transitions.
+
+steps:
+  - id: backlog
+    name: Backlog
+    position: 0
+    color: bg-neutral-400
+    stage_type: custom
+    allow_manual_move: true
+    show_in_command_panel: true
+
+  - id: work
+    name: Work
+    position: 1
+    color: bg-blue-500
+    stage_type: work
+    is_start_step: true
+    show_in_command_panel: true
+    allow_manual_move: true
+    events:
+      on_enter:
+        - type: auto_start_agent
+      on_comment:
+        - type: queue_run
+          config:
+            target: primary
+            task_id: this
+            reason: task_comment
+      on_blocker_resolved:
+        - type: queue_run
+          config:
+            target: primary
+            task_id: this
+            reason: blockers_resolved
+      on_children_completed:
+        - type: queue_run
+          config:
+            target: primary
+            task_id: this
+            reason: children_completed
+      on_agent_error:
+        - type: queue_run
+          config:
+            target: workspace.ceo_agent
+            task_id: this
+            reason: agent_error
+      on_turn_complete:
+        - type: move_to_step
+          config:
+            step_id: review
+
+  - id: review
+    name: Review
+    position: 2
+    color: bg-yellow-500
+    stage_type: review
+    show_in_command_panel: true
+    allow_manual_move: true
+    events:
+      on_enter:
+        - type: clear_decisions
+        - type: queue_run_for_each_participant
+          config:
+            role: reviewer
+            reason: review_started
+      on_turn_complete:
+        - type: move_to_step
+          config:
+            step_id: approval
+            wait_for_quorum:
+              role: reviewer
+              threshold: all_approve
+        - type: move_to_step
+          config:
+            step_id: work
+            wait_for_quorum:
+              role: reviewer
+              threshold: any_reject
+
+  - id: approval
+    name: Approval
+    position: 3
+    color: bg-violet-500
+    stage_type: approval
+    show_in_command_panel: true
+    allow_manual_move: true
+    events:
+      on_enter:
+        - type: clear_decisions
+        - type: queue_run_for_each_participant
+          config:
+            role: approver
+            reason: approval_started
+      on_turn_complete:
+        - type: move_to_step
+          config:
+            step_id: done
+            wait_for_quorum:
+              role: approver
+              threshold: all_approve
+        - type: move_to_step
+          config:
+            step_id: work
+            wait_for_quorum:
+              role: approver
+              threshold: any_reject
+
+  - id: done
+    name: Done
+    position: 4
+    color: bg-green-500
+    stage_type: custom
+    allow_manual_move: true
+    show_in_command_panel: true

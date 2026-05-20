@@ -13,6 +13,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// queryParamTrue is the string value used to indicate a true boolean in query parameters.
+const queryParamTrue = "true"
+
 // sortCommitsByCommittedAtDesc sorts commits newest-first using committed_at.
 // Commits with unparseable timestamps preserve their original relative order
 // (sort.SliceStable). Used when merging logs from multiple repos so the
@@ -1137,6 +1140,7 @@ func (s *Server) collectStatusForRepo(c *gin.Context, sub string) PerRepoGitStat
 // handleGitStatus handles GET /api/v1/git/status. Accepts an optional
 // ?repo=<subpath> query param that selects a sub-directory of the workspace
 // for multi-repo task roots; empty = workspace root (single-repo behavior).
+// Pass ?fresh=true to bypass the cached status and run a fresh git query.
 func (s *Server) handleGitStatus(c *gin.Context) {
 	wt, wtErr := s.procMgr.GetWorkspaceTrackerFor(c.Query("repo"))
 	if wtErr != nil {
@@ -1154,7 +1158,7 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 		return
 	}
 
-	status, err := wt.GetCurrentGitStatus(c.Request.Context())
+	status, err := wt.GetGitStatus(c.Request.Context(), c.Query("fresh") == queryParamTrue)
 	if err != nil {
 		s.logger.Error("git status failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, GitStatusResult{

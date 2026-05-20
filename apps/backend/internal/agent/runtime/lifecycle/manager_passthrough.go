@@ -1,0 +1,925 @@
+package lifecycle
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/executor"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/settings/cliflags"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/events"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
+)
+
+// MarkPassthroughRunning marks a passthrough execution as running when user submits input.
+// This is called when Enter key is detected in the terminal handler.
+// It updates the execution status and publishes an AgentRunning event.
+func (m *Manager) MarkPassthroughRunning(sessionID string) error {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return fmt.Errorf("no agent execution found for session: %s", sessionID)
+	}
+
+	if execution.PassthroughProcessID == "" {
+		return fmt.Errorf("session %s is not in passthrough mode", sessionID)
+	}
+
+	// Only publish if not already running (prevents duplicate events)
+	if execution.Status != v1.AgentStatusRunning {
+		m.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
+		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
+	}
+
+	return nil
+}
+
+// WritePassthroughStdin writes data to the agent process stdin in passthrough mode.
+// Returns an error if the session is not in passthrough mode or if writing fails.
+// Note: For terminal handler input, use MarkPassthroughRunning directly since
+// the terminal handler writes to PTY directly for performance.
+func (m *Manager) WritePassthroughStdin(ctx context.Context, sessionID string, data string) error {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return fmt.Errorf("no agent execution found for session: %s", sessionID)
+	}
+
+	if execution.PassthroughProcessID == "" {
+		return fmt.Errorf("session %s is not in passthrough mode", sessionID)
+	}
+
+	// Get the interactive runner from runtime
+	interactiveRunner := m.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		return fmt.Errorf("interactive runner not available")
+	}
+
+	// Write to stdin
+	if err := interactiveRunner.WriteStdin(execution.PassthroughProcessID, data); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
+func (m *Manager) IsPassthroughSession(ctx context.Context, sessionID string) bool {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return false
+	}
+	return execution.PassthroughProcessID != ""
+}
+
+// ResizePassthroughPTY resizes the PTY for a passthrough process.
+// Returns an error if the session is not in passthrough mode or if resizing fails.
+func (m *Manager) ResizePassthroughPTY(ctx context.Context, sessionID string, cols, rows uint16) error {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return fmt.Errorf("no agent execution found for session: %s", sessionID)
+	}
+
+	if execution.PassthroughProcessID == "" {
+		return fmt.Errorf("session %s is not in passthrough mode", sessionID)
+	}
+
+	// Get the interactive runner from runtime
+	interactiveRunner := m.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		return fmt.Errorf("interactive runner not available")
+	}
+
+	return interactiveRunner.ResizeBySession(sessionID, cols, rows)
+}
+
+// GetPassthroughBuffer returns the buffered output from the passthrough process.
+// This is used for new subscribers to catch up on output.
+func (m *Manager) GetPassthroughBuffer(ctx context.Context, sessionID string) (string, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return "", fmt.Errorf("no agent execution found for session: %s", sessionID)
+	}
+
+	if execution.PassthroughProcessID == "" {
+		return "", fmt.Errorf("session %s is not in passthrough mode", sessionID)
+	}
+
+	// Get the interactive runner from runtime
+	interactiveRunner := m.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		return "", fmt.Errorf("interactive runner not available")
+	}
+
+	chunks, ok := interactiveRunner.GetBuffer(execution.PassthroughProcessID)
+	if !ok {
+		return "", fmt.Errorf("passthrough process not found")
+	}
+
+	// Concatenate all chunks into a single string
+	var buffer strings.Builder
+	for _, chunk := range chunks {
+		buffer.WriteString(chunk.Data)
+	}
+
+	return buffer.String(), nil
+}
+
+// buildPassthroughEnv builds the environment map for a passthrough session,
+// including Kandev metadata and required credentials from the agent runtime config.
+func (m *Manager) buildPassthroughEnv(ctx context.Context, execution *AgentExecution, requiredEnv []string) map[string]string {
+	env := make(map[string]string)
+	env["KANDEV_TASK_ID"] = execution.TaskID
+	env["KANDEV_SESSION_ID"] = execution.SessionID
+	env["KANDEV_AGENT_PROFILE_ID"] = execution.AgentProfileID
+	if m.credsMgr != nil {
+		for _, credKey := range requiredEnv {
+			if value, err := m.credsMgr.GetCredentialValue(ctx, credKey); err == nil && value != "" {
+				env[credKey] = value
+			}
+		}
+	}
+	return env
+}
+
+// startPassthroughShell starts the shell session for a passthrough execution.
+// Non-fatal errors are logged with the provided warning message.
+func (m *Manager) startPassthroughShell(ctx context.Context, execution *AgentExecution, shellWarnMsg string) {
+	if execution.agentctl == nil {
+		return
+	}
+	if err := execution.agentctl.StartShell(ctx); err != nil {
+		m.logger.Warn(shellWarnMsg,
+			zap.String("execution_id", execution.ID),
+			zap.Error(err))
+	} else {
+		m.logger.Info("shell session started for passthrough mode",
+			zap.String("execution_id", execution.ID))
+	}
+}
+
+// resolvedPassthrough holds the agent config, passthrough config, runtime config, and profile
+// info resolved from an execution. Used as the basis for building passthrough commands.
+type resolvedPassthrough struct {
+	agentID string
+	agent   agents.PassthroughAgent
+	pt      agents.PassthroughConfig
+	rt      *agents.RuntimeConfig
+	profile *AgentProfileInfo
+}
+
+// resolvePassthroughAgent loads the agent config and profile for a passthrough execution.
+// Shared by passthroughAgentCommand, freshPassthroughCommand, and ResumePassthroughSession.
+func (m *Manager) resolvePassthroughAgent(ctx context.Context, execution *AgentExecution) (*resolvedPassthrough, error) {
+	agentConfig, err := m.getAgentConfigForExecution(execution)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get agent config: %w", err)
+	}
+
+	ptAgent, ok := agentConfig.(agents.PassthroughAgent)
+	if !ok {
+		return nil, fmt.Errorf("agent %s does not support passthrough mode", agentConfig.ID())
+	}
+
+	var profileInfo *AgentProfileInfo
+	if m.profileResolver != nil && execution.AgentProfileID != "" {
+		profileInfo, _ = m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
+	}
+
+	return &resolvedPassthrough{
+		agentID: agentConfig.ID(),
+		agent:   ptAgent,
+		pt:      ptAgent.PassthroughConfig(),
+		rt:      agentConfig.Runtime(),
+		profile: profileInfo,
+	}, nil
+}
+
+// passthroughAgentCommand validates passthrough support and builds the command for a passthrough session.
+// Returns the PassthroughAgent, PassthroughConfig, RuntimeConfig pointer, command, and any error.
+func (m *Manager) passthroughAgentCommand(execution *AgentExecution, profileInfo *AgentProfileInfo) (agents.PassthroughAgent, agents.PassthroughConfig, *agents.RuntimeConfig, agents.Command, error) {
+	agentConfig, err := m.getAgentConfigForExecution(execution)
+	if err != nil {
+		return nil, agents.PassthroughConfig{}, nil, agents.Command{}, fmt.Errorf("failed to get agent config: %w", err)
+	}
+
+	ptAgent, ok := agentConfig.(agents.PassthroughAgent)
+	if !ok {
+		return nil, agents.PassthroughConfig{}, nil, agents.Command{}, fmt.Errorf("agent %s does not support passthrough mode", agentConfig.ID())
+	}
+
+	pt := ptAgent.PassthroughConfig()
+	rt := agentConfig.Runtime()
+	taskDescription := getTaskDescriptionFromMetadata(execution)
+
+	cmd := ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
+		Model:            profileModel(profileInfo),
+		SessionID:        execution.ACPSessionID,
+		Prompt:           taskDescription,
+		PermissionValues: profilePermissionValues(profileInfo),
+		CLIFlagTokens:    m.profileCLIFlagTokens(profileInfo),
+	})
+	if cmd.IsEmpty() {
+		return nil, agents.PassthroughConfig{}, nil, agents.Command{}, fmt.Errorf("passthrough command is empty for agent %s", agentConfig.ID())
+	}
+	return ptAgent, pt, rt, cmd, nil
+}
+
+// profileCLIFlagTokens resolves the user-configured CLI flag argv tokens from
+// a profile, mirroring the ACP launch path (manager_launch.go). Returns nil
+// on resolve error and logs a warning so a malformed flag does not block the
+// session — matches the warn-and-continue behaviour of the ACP path.
+func (m *Manager) profileCLIFlagTokens(p *AgentProfileInfo) []string {
+	if p == nil {
+		return nil
+	}
+	tokens, err := cliflags.Resolve(p.CLIFlags)
+	if err != nil {
+		m.logger.Warn("failed to resolve cli_flags for passthrough profile, launching without user-configured flags",
+			zap.String("profile_id", p.ProfileID),
+			zap.Error(err))
+		return nil
+	}
+	return tokens
+}
+
+// buildInteractiveStartRequest builds the InteractiveStartRequest for a passthrough session.
+// immediateStart overrides pt.WaitForTerminal when true (used for restart/resume where the
+// terminal WebSocket is already connected).
+func buildInteractiveStartRequest(sessionID string, execution *AgentExecution, pt agents.PassthroughConfig, env map[string]string, cmd agents.Command, immediateStart bool) process.InteractiveStartRequest {
+	return process.InteractiveStartRequest{
+		SessionID:       sessionID,
+		Command:         cmd.Args(),
+		WorkingDir:      execution.WorkspacePath,
+		Env:             env,
+		PromptPattern:   pt.PromptPattern,
+		IdleTimeout:     pt.IdleTimeout,
+		BufferMaxBytes:  pt.BufferMaxBytes,
+		StatusDetector:  pt.StatusDetector,
+		CheckInterval:   pt.CheckInterval,
+		StabilityWindow: pt.StabilityWindow,
+		ImmediateStart:  immediateStart,
+		DefaultCols:     120,
+		DefaultRows:     40,
+	}
+}
+
+// startInteractiveProcess launches the interactive PTY process for a passthrough session.
+// Returns the process info on success.
+func (m *Manager) startInteractiveProcess(ctx context.Context, execution *AgentExecution, pt agents.PassthroughConfig, env map[string]string, cmd agents.Command) (*process.InteractiveProcessInfo, error) {
+	interactiveRunner := m.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		return nil, fmt.Errorf("interactive runner not available for passthrough mode")
+	}
+
+	// Always start immediately with default dimensions (120×40). The first resize
+	// from the terminal WebSocket will correct the size. Without immediate start,
+	// WaitForTerminal agents deadlock: the frontend won't connect the terminal
+	// until the session leaves STARTING, but the process never starts without a resize.
+	// This matches ResumePassthroughSession and restartPassthroughProcess.
+	startReq := buildInteractiveStartRequest(execution.SessionID, execution, pt, env, cmd, true)
+
+	processInfo, err := interactiveRunner.Start(ctx, startReq)
+	if err != nil {
+		m.updateExecutionError(execution.ID, "failed to start passthrough session: "+err.Error())
+		return nil, fmt.Errorf("failed to start passthrough session: %w", err)
+	}
+	return processInfo, nil
+}
+
+// startPassthroughSession starts an agent in passthrough mode (direct terminal interaction).
+// Instead of using ACP protocol, the agent's stdin/stdout is passed through directly.
+func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentExecution, profileInfo *AgentProfileInfo) error {
+	_, pt, rt, cmd, err := m.passthroughAgentCommand(execution, profileInfo)
+	if err != nil {
+		return err
+	}
+
+	m.logger.Info("passthrough command built",
+		zap.String("session_id", execution.SessionID),
+		zap.Strings("full_command", cmd.Args()))
+
+	env := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
+
+	processInfo, err := m.startInteractiveProcess(ctx, execution, pt, env, cmd)
+	if err != nil {
+		return err
+	}
+
+	execution.PassthroughProcessID = processInfo.ID
+	execution.PassthroughStartedAt = time.Now()
+	execution.passthroughLaunchUsedResume = false
+
+	m.logger.Info("passthrough session started",
+		zap.String("execution_id", execution.ID),
+		zap.String("task_id", execution.TaskID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("process_id", processInfo.ID),
+		zap.Strings("command", cmd.Args()))
+
+	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlReady, execution, "")
+	m.startPassthroughShell(ctx, execution, "failed to start shell for passthrough session")
+
+	if m.streamManager != nil && execution.agentctl != nil {
+		go m.streamManager.connectWorkspaceStream(execution, nil)
+	}
+
+	return nil
+}
+
+// profileModel extracts the model from profile info, returning empty string if nil.
+func profileModel(p *AgentProfileInfo) string {
+	if p == nil {
+		return ""
+	}
+	return p.Model
+}
+
+// profilePermissionValues builds a permission values map from profile info.
+func profilePermissionValues(p *AgentProfileInfo) map[string]bool {
+	if p == nil {
+		return nil
+	}
+	return map[string]bool{
+		"auto_approve":                 p.AutoApprove,
+		"dangerously_skip_permissions": p.DangerouslySkipPermissions,
+		"allow_indexing":               p.AllowIndexing,
+	}
+}
+
+// freshPassthroughCommand resolves the agent config and profile, and builds a
+// bare passthrough command with no session, resume, or prompt flags.
+func (m *Manager) freshPassthroughCommand(ctx context.Context, execution *AgentExecution) (agents.PassthroughConfig, *agents.RuntimeConfig, agents.Command, error) {
+	resolved, err := m.resolvePassthroughAgent(ctx, execution)
+	if err != nil {
+		return agents.PassthroughConfig{}, nil, agents.Command{}, err
+	}
+
+	cmd := resolved.agent.BuildPassthroughCommand(agents.PassthroughOptions{
+		Model:            profileModel(resolved.profile),
+		PermissionValues: profilePermissionValues(resolved.profile),
+		CLIFlagTokens:    m.profileCLIFlagTokens(resolved.profile),
+	})
+	if cmd.IsEmpty() {
+		return agents.PassthroughConfig{}, nil, agents.Command{}, fmt.Errorf("passthrough command is empty for agent %s", resolved.agentID)
+	}
+
+	return resolved.pt, resolved.rt, cmd, nil
+}
+
+// restartPassthroughProcess kills the current PTY process and relaunches a fresh one
+// without --resume, effectively clearing the agent's conversation context.
+// The workflow step prompt is delivered afterwards via stdin (autoStartPassthroughPrompt).
+func (m *Manager) restartPassthroughProcess(ctx context.Context, execution *AgentExecution) error {
+	m.logger.Info("restarting passthrough process for context reset",
+		zap.String("execution_id", execution.ID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("old_process_id", execution.PassthroughProcessID))
+
+	// 1. Stop the current PTY process.
+	// Clear PassthroughProcessID before stopping so that handlePassthroughStatus
+	// doesn't trigger auto-restart for the deliberately-killed process.
+	interactiveRunner := m.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		return fmt.Errorf("interactive runner not available")
+	}
+
+	oldProcessID := execution.PassthroughProcessID
+	execution.PassthroughProcessID = ""
+	execution.PassthroughStartedAt = time.Time{}
+
+	if err := interactiveRunner.Stop(ctx, oldProcessID); err != nil {
+		m.logger.Warn("failed to stop passthrough process during context reset",
+			zap.String("execution_id", execution.ID),
+			zap.String("process_id", oldProcessID),
+			zap.Error(err))
+	}
+
+	// 2. Build fresh command (no SessionID, no Resume, no Prompt)
+	pt, rt, cmd, err := m.freshPassthroughCommand(ctx, execution)
+	if err != nil {
+		return err
+	}
+
+	// 3. Start new PTY process with ImmediateStart (terminal is already connected)
+	env := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
+	startReq := buildInteractiveStartRequest(execution.SessionID, execution, pt, env, cmd, true)
+
+	processInfo, err := interactiveRunner.Start(ctx, startReq)
+	if err != nil {
+		m.updateExecutionError(execution.ID, "failed to restart passthrough session: "+err.Error())
+		return fmt.Errorf("failed to restart passthrough session: %w", err)
+	}
+
+	// 4. Update execution with new process ID
+	execution.PassthroughProcessID = processInfo.ID
+	execution.PassthroughStartedAt = time.Now()
+	execution.passthroughLaunchUsedResume = false
+
+	m.logger.Info("passthrough process restarted with fresh context",
+		zap.String("execution_id", execution.ID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("new_process_id", processInfo.ID))
+
+	// 5. Reconnect existing WebSocket to the new process
+	if interactiveRunner.ConnectSessionWebSocket(processInfo.ID) {
+		m.logger.Debug("reconnected WebSocket to restarted passthrough process",
+			zap.String("session_id", execution.SessionID),
+			zap.String("process_id", processInfo.ID))
+	}
+
+	// 6. Publish context reset event
+	m.eventPublisher.PublishAgentEvent(ctx, events.AgentContextReset, execution)
+
+	return nil
+}
+
+// ResumePassthroughSession restarts a passthrough session after backend restart.
+// This is called when user reconnects to a terminal but the PTY process is no longer running.
+// If the agent supports resume, it uses the resume flag to continue the last conversation.
+// Otherwise, it starts a fresh CLI session with the same profile settings.
+func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string) error {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return fmt.Errorf("no execution found for session: %s", sessionID)
+	}
+
+	resolved, err := m.resolvePassthroughAgent(ctx, execution)
+	if err != nil {
+		return err
+	}
+
+	// Skip the resume flag if a previous resume already fast-failed for this
+	// execution: re-attaching `-c` / `--resume` would just reproduce the same
+	// "No conversation found to continue" exit on every WS reconnect after
+	// backend restart. Once the sticky flag is set, every subsequent launch
+	// for this execution starts fresh.
+	useResume := !execution.passthroughResumeFailed
+	cmd := resolved.agent.BuildPassthroughCommand(agents.PassthroughOptions{
+		Model:            profileModel(resolved.profile),
+		Resume:           useResume,
+		PermissionValues: profilePermissionValues(resolved.profile),
+		CLIFlagTokens:    m.profileCLIFlagTokens(resolved.profile),
+	})
+	if cmd.IsEmpty() {
+		return fmt.Errorf("passthrough resume command is empty for agent %s", resolved.agentID)
+	}
+
+	m.logger.Info("resuming passthrough session",
+		zap.String("session_id", sessionID),
+		zap.String("execution_id", execution.ID),
+		zap.Bool("use_resume", useResume),
+		zap.Strings("command", cmd.Args()))
+
+	interactiveRunner := m.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		return fmt.Errorf("interactive runner not available")
+	}
+
+	env := m.buildPassthroughEnv(ctx, execution, resolved.rt.RequiredEnv)
+
+	// Always use immediate start on resume — the terminal WebSocket is already connected,
+	// so we don't need to wait for a resize to get exact dimensions. The first resize
+	// from the terminal will correct the dimensions. Without this, TUI apps that use
+	// WaitForTerminal would never start because the frontend may not send resizes
+	// to a process it doesn't know about yet.
+	startReq := buildInteractiveStartRequest(sessionID, execution, resolved.pt, env, cmd, true)
+
+	processInfo, err := interactiveRunner.Start(ctx, startReq)
+	if err != nil {
+		return fmt.Errorf("failed to start passthrough session: %w", err)
+	}
+
+	execution.PassthroughStartedAt = time.Now()
+	execution.passthroughLaunchUsedResume = useResume
+	execution.PassthroughProcessID = processInfo.ID
+
+	m.logger.Info("passthrough session resumed",
+		zap.String("session_id", sessionID),
+		zap.String("execution_id", execution.ID),
+		zap.String("process_id", processInfo.ID))
+
+	// Start shell session for workspace shell access (right panel terminal).
+	// This needs to be done after resume since the shell process was killed on backend restart.
+	m.startPassthroughShell(ctx, execution, "failed to start shell for resumed passthrough session")
+
+	// Connect to workspace stream for shell/git/file features.
+	// Only connect if not already connected (process restart reuses the same agentctl).
+	if m.streamManager != nil && execution.agentctl != nil && execution.GetWorkspaceStream() == nil {
+		go m.streamManager.connectWorkspaceStream(execution, nil)
+	}
+
+	return nil
+}
+
+// handlePassthroughTurnComplete is called when turn detection fires for a passthrough session.
+// This marks the execution as ready for follow-up prompts when the agent finishes processing.
+func (m *Manager) handlePassthroughTurnComplete(sessionID string) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		m.logger.Debug("turn complete for unknown session (may have ended)",
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	m.logger.Info("passthrough turn complete",
+		zap.String("session_id", sessionID),
+		zap.String("execution_id", execution.ID))
+
+	// Mark execution as ready for follow-up prompts
+	// This publishes AgentReady event to notify subscribers
+	if err := m.MarkReady(execution.ID); err != nil {
+		m.logger.Error("failed to mark execution as ready after passthrough turn complete",
+			zap.String("execution_id", execution.ID),
+			zap.Error(err))
+	}
+}
+
+// handlePassthroughOutput handles output from a passthrough process and publishes it to the event bus.
+// This is called when running in standalone mode without a WorkspaceTracker.
+func (m *Manager) handlePassthroughOutput(output *agentctltypes.ProcessOutput) {
+	if output == nil {
+		return
+	}
+
+	execution, exists := m.executionStore.GetBySessionID(output.SessionID)
+	if !exists {
+		m.logger.Debug("passthrough output for unknown session",
+			zap.String("session_id", output.SessionID))
+		return
+	}
+
+	// Convert to agentctl client type for event publisher
+	clientOutput := &agentctl.ProcessOutput{
+		SessionID: output.SessionID,
+		ProcessID: output.ProcessID,
+		Kind:      output.Kind,
+		Stream:    output.Stream,
+		Data:      output.Data,
+		Timestamp: output.Timestamp,
+	}
+
+	m.eventPublisher.PublishProcessOutput(execution, clientOutput)
+}
+
+// handlePassthroughStatus handles status updates from a passthrough process and publishes to the event bus.
+// This is called when running in standalone mode without a WorkspaceTracker.
+// When the process exits while a WebSocket is connected, it attempts auto-restart with rate limiting.
+func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpdate) {
+	if status == nil {
+		return
+	}
+
+	execution, exists := m.executionStore.GetBySessionID(status.SessionID)
+	if !exists {
+		m.logger.Debug("passthrough status for unknown session",
+			zap.String("session_id", status.SessionID))
+		return
+	}
+
+	// Convert to agentctl client type for event publisher
+	clientStatus := &agentctl.ProcessStatusUpdate{
+		SessionID:  status.SessionID,
+		ProcessID:  status.ProcessID,
+		Kind:       status.Kind,
+		Command:    status.Command,
+		ScriptName: status.ScriptName,
+		WorkingDir: status.WorkingDir,
+		Status:     status.Status,
+		ExitCode:   status.ExitCode,
+		Timestamp:  status.Timestamp,
+	}
+
+	m.eventPublisher.PublishProcessStatus(execution, clientStatus)
+
+	// Check if process exited and should be auto-restarted
+	// Only restart if this is the ACTUAL passthrough process, not user shell terminals
+	// Run asynchronously to allow the old process to be cleaned up first
+	if status.Status == agentctltypes.ProcessStatusExited || status.Status == agentctltypes.ProcessStatusFailed {
+		// Only trigger auto-restart for the passthrough process, not for user shell terminals
+		if execution.PassthroughProcessID != "" && status.ProcessID == execution.PassthroughProcessID {
+			// Snapshot the start time and resume-launch flag synchronously so the
+			// goroutine doesn't race the next launch's writes to those fields.
+			startedAt := execution.PassthroughStartedAt
+			usedResume := execution.passthroughLaunchUsedResume
+			// Detect fast-fail synchronously so we can flip the resume-failed
+			// flag before the next WS reconnect arrives. The goroutine below
+			// would otherwise miss this race: when the PTY exits the WS bridge
+			// closes too, and by the time the goroutine runs (after a 100ms
+			// cleanup delay) HasActiveWebSocketBySession returns false and it
+			// bails without setting any flags. Scoped to fast-fail+usedResume
+			// so a healthy resumed session that exits cleanly or crashes long
+			// after launch keeps its resume intent for auto-restart.
+			if usedResume && passthroughExitIsFastFail(startedAt, status) {
+				execution.passthroughResumeFailed = true
+				execution.isResumedSession = false
+				execution.passthroughLaunchUsedResume = false
+			}
+			go m.handlePassthroughExit(execution, status, startedAt, usedResume)
+		} else {
+			m.logger.Debug("process exited but not the passthrough process, skipping auto-restart",
+				zap.String("session_id", status.SessionID),
+				zap.String("exited_process_id", status.ProcessID),
+				zap.String("passthrough_process_id", execution.PassthroughProcessID))
+		}
+	}
+}
+
+// handlePassthroughExit handles auto-restart logic when a passthrough process exits.
+// This function is called asynchronously to allow the old process to be cleaned up first.
+// startedAt and usedResume are snapshots of the matching execution fields taken
+// synchronously at the call site — passed in rather than re-read here to avoid
+// racing with the next launch's writes to those fields.
+func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agentctltypes.ProcessStatusUpdate, startedAt time.Time, usedResume bool) {
+	const restartDelay = 500 * time.Millisecond
+	const cleanupDelay = 100 * time.Millisecond // Wait for old process cleanup
+	// fastFailWindow is short enough to catch launch-time failures (bad CLI
+	// flag, missing binary, immediate auth rejection) but long enough that a
+	// healthy agent that does any startup work won't be mistaken for one.
+	const fastFailWindow = 2 * time.Second
+
+	sessionID := execution.SessionID
+
+	if m.IsShuttingDown() {
+		m.logger.Debug("skipping passthrough auto-restart during shutdown",
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	// Wait a bit for the old process to be cleaned up from the process map
+	time.Sleep(cleanupDelay)
+
+	// Shutdown may have started during cleanupDelay; re-check before emitting
+	// the "attempting auto-restart" log and the terminal banner, which would
+	// otherwise mislead the user during a clean shutdown.
+	if m.IsShuttingDown() {
+		m.logger.Debug("skipping passthrough auto-restart during shutdown",
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	interactiveRunner := m.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		m.logger.Debug("no interactive runner available for auto-restart",
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	// Check if WebSocket is still connected (use session-level tracking which survives process deletion)
+	if !interactiveRunner.HasActiveWebSocketBySession(sessionID) {
+		m.logger.Debug("no active WebSocket, skipping auto-restart",
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	exitCode := 0
+	if status.ExitCode != nil {
+		exitCode = *status.ExitCode
+	}
+
+	// Use the exit timestamp from the status event (set when the child
+	// actually exited), not time.Now() — the cleanupDelay sleep and goroutine
+	// hops above would otherwise inflate the measured uptime by ~100 ms.
+	exitedAt := status.Timestamp
+	if exitedAt.IsZero() {
+		exitedAt = time.Now()
+	}
+
+	// Fast-fail short-circuit: a non-zero exit shortly after start almost
+	// always means the launch itself was wrong (bad CLI flag, missing binary,
+	// auth failure). Restarting just thrashes — the next run hits the same
+	// failure at the same speed. Surface the failure to the user instead.
+	if isFastFailExit(startedAt, exitedAt, exitCode, fastFailWindow) {
+		uptime := exitedAt.Sub(startedAt)
+		// If the failed launch was a resume (e.g. `--resume <id>` or `-c`),
+		// the most likely cause is a stale conversation ID after a backend
+		// restart — "No conversation found to continue". Retry once with a
+		// fresh command (no resume flag) before giving up.
+		if usedResume {
+			// Resume-failed flags have already been flipped synchronously in
+			// handlePassthroughStatus (see passthroughExitIsFastFail) so any
+			// concurrent WS reconnect that races this goroutine sees the new
+			// values immediately.
+			m.attemptResumeFallback(execution, interactiveRunner, sessionID, exitCode, uptime)
+			return
+		}
+		m.notifyFastFailExit(interactiveRunner, sessionID, uptime, exitCode, fastFailWindow)
+		return
+	}
+
+	m.attemptPassthroughRestart(execution, interactiveRunner, sessionID, exitCode, restartDelay)
+}
+
+// attemptResumeFallback recovers from a fast-failed resume launch by relaunching
+// once with a fresh command (no resume flag). This handles the common case where
+// the local CLI's conversation history is gone after a backend restart and
+// `claude -c` / `claude --resume <id>` exits with "No conversation found to
+// continue". On a successful fallback the user keeps a working session; on
+// continued failure we surface the existing red banner so they can fix their
+// profile.
+func (m *Manager) attemptResumeFallback(execution *AgentExecution, runner *process.InteractiveRunner, sessionID string, exitCode int, uptime time.Duration) {
+	m.logger.Info("passthrough resume launch fast-failed, retrying without resume flag",
+		zap.String("session_id", sessionID),
+		zap.String("execution_id", execution.ID),
+		zap.Int("exit_code", exitCode),
+		zap.Duration("uptime", uptime))
+
+	if m.IsShuttingDown() {
+		m.logger.Debug("skipping passthrough resume fallback during shutdown",
+			zap.String("session_id", sessionID))
+		return
+	}
+	if !runner.HasActiveWebSocketBySession(sessionID) {
+		m.logger.Debug("no active WebSocket, skipping passthrough resume fallback",
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	banner := "\r\n\x1b[33m[No prior conversation to resume — starting a fresh session...]\x1b[0m\r\n"
+	if err := runner.WriteToDirectOutputBySession(sessionID, []byte(banner)); err != nil {
+		m.logger.Debug("failed to write resume-fallback banner to terminal",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+
+	ctx := context.Background()
+	pt, rt, cmd, err := m.freshPassthroughCommand(ctx, execution)
+	if err != nil {
+		m.notifyFallbackInfrastructureFailure(runner, sessionID, "build fresh command", err)
+		return
+	}
+
+	env := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
+	startReq := buildInteractiveStartRequest(sessionID, execution, pt, env, cmd, true)
+
+	processInfo, err := runner.Start(ctx, startReq)
+	if err != nil {
+		m.notifyFallbackInfrastructureFailure(runner, sessionID, "start fresh process", err)
+		return
+	}
+
+	execution.PassthroughStartedAt = time.Now()
+	execution.passthroughLaunchUsedResume = false
+	execution.PassthroughProcessID = processInfo.ID
+
+	if runner.ConnectSessionWebSocket(processInfo.ID) {
+		m.logger.Info("passthrough resume fallback succeeded",
+			zap.String("session_id", sessionID),
+			zap.String("execution_id", execution.ID),
+			zap.String("new_process_id", processInfo.ID))
+	} else {
+		m.logger.Warn("passthrough resume fallback started but failed to reconnect WebSocket",
+			zap.String("session_id", sessionID),
+			zap.String("new_process_id", processInfo.ID))
+	}
+
+	// Mirror ResumePassthroughSession's post-launch bootstrap so right-panel
+	// shell/git/file features come back too — without this the main terminal
+	// works but the user's shell session and workspace stream stay torn down.
+	m.startPassthroughShell(ctx, execution, "failed to start shell after passthrough resume fallback")
+	if m.streamManager != nil && execution.agentctl != nil && execution.GetWorkspaceStream() == nil {
+		go m.streamManager.connectWorkspaceStream(execution, nil)
+	}
+}
+
+// attemptPassthroughRestart announces the restart on the terminal, waits the
+// restart delay, re-checks shutdown/WebSocket, and resumes the session.
+// Reconnects the existing WebSocket to the new process on success.
+func (m *Manager) attemptPassthroughRestart(execution *AgentExecution, runner *process.InteractiveRunner, sessionID string, exitCode int, restartDelay time.Duration) {
+	m.logger.Info("passthrough process exited with active WebSocket, attempting auto-restart",
+		zap.String("session_id", sessionID),
+		zap.Int("exit_code", exitCode))
+
+	restartMsg := "\r\n\x1b[33m[Agent exited. Restarting...]\x1b[0m\r\n"
+	if err := runner.WriteToDirectOutputBySession(sessionID, []byte(restartMsg)); err != nil {
+		m.logger.Debug("failed to write restart message to terminal",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+
+	time.Sleep(restartDelay)
+
+	// Shutdown may have started during the sleep; re-check before touching
+	// state that the teardown is racing to remove.
+	if m.IsShuttingDown() {
+		m.logger.Debug("skipping passthrough auto-restart during shutdown",
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	if !runner.HasActiveWebSocketBySession(sessionID) {
+		m.logger.Debug("WebSocket disconnected during restart delay, aborting",
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	if err := m.ResumePassthroughSession(context.Background(), sessionID); err != nil {
+		m.logger.Error("failed to auto-restart passthrough session",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+
+		errorMsg := fmt.Sprintf("\r\n\x1b[31m[Restart failed: %s]\x1b[0m\r\n", err.Error())
+		if writeErr := runner.WriteToDirectOutputBySession(sessionID, []byte(errorMsg)); writeErr != nil {
+			m.logger.Debug("failed to write restart error message to terminal",
+				zap.String("session_id", sessionID),
+				zap.Error(writeErr))
+		}
+		return
+	}
+
+	if runner.ConnectSessionWebSocket(execution.PassthroughProcessID) {
+		m.logger.Info("passthrough session auto-restarted and reconnected WebSocket",
+			zap.String("session_id", sessionID),
+			zap.String("new_process_id", execution.PassthroughProcessID))
+	} else {
+		m.logger.Warn("passthrough session restarted but failed to reconnect WebSocket",
+			zap.String("session_id", sessionID),
+			zap.String("new_process_id", execution.PassthroughProcessID))
+	}
+}
+
+// notifyFallbackInfrastructureFailure surfaces an attemptResumeFallback
+// failure that originated from kandev's own machinery (could not build the
+// fresh command, could not start the new process) rather than from the
+// agent CLI itself. The existing fast-fail banner blames a "bad CLI flag,
+// missing binary, or auth failure" — wrong copy for these paths, which
+// the user can't fix by editing their profile.
+func (m *Manager) notifyFallbackInfrastructureFailure(runner *process.InteractiveRunner, sessionID, stage string, err error) {
+	m.logger.Error("passthrough resume fallback failed",
+		zap.String("session_id", sessionID),
+		zap.String("stage", stage),
+		zap.Error(err))
+	failMsg := fmt.Sprintf("\r\n\x1b[31m[Resume fallback failed: could not %s — %s. Please reconnect to retry.]\x1b[0m\r\n",
+		stage, err.Error())
+	if writeErr := runner.WriteToDirectOutputBySession(sessionID, []byte(failMsg)); writeErr != nil {
+		m.logger.Debug("failed to write resume-fallback infra-failure banner to terminal",
+			zap.String("session_id", sessionID),
+			zap.Error(writeErr))
+	}
+}
+
+// notifyFastFailExit logs the fast-fail decision and writes a one-shot
+// banner to the terminal explaining why the auto-restart was skipped.
+// uptime is the measured process lifetime (status timestamp minus start
+// time), pre-computed by the caller so the log reflects true child uptime.
+func (m *Manager) notifyFastFailExit(runner *process.InteractiveRunner, sessionID string, uptime time.Duration, exitCode int, window time.Duration) {
+	m.logger.Warn("passthrough process exited fast with non-zero code, skipping auto-restart",
+		zap.String("session_id", sessionID),
+		zap.Int("exit_code", exitCode),
+		zap.Duration("uptime", uptime))
+	failMsg := fmt.Sprintf("\r\n\x1b[31m[Agent exited (code %d) within %s. Likely cause: bad CLI flag, missing binary, or auth failure. Edit your profile and reconnect to retry.]\x1b[0m\r\n",
+		exitCode, window)
+	if err := runner.WriteToDirectOutputBySession(sessionID, []byte(failMsg)); err != nil {
+		m.logger.Debug("failed to write fast-fail message to terminal",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}
+
+// passthroughExitIsFastFail wraps isFastFailExit for the synchronous
+// status-callback path that doesn't yet have the unpacked exit code or
+// timestamp. Same window/semantics as the goroutine path.
+func passthroughExitIsFastFail(startedAt time.Time, status *agentctltypes.ProcessStatusUpdate) bool {
+	const fastFailWindow = 2 * time.Second
+	exitCode := 0
+	if status.ExitCode != nil {
+		exitCode = *status.ExitCode
+	}
+	exitedAt := status.Timestamp
+	if exitedAt.IsZero() {
+		exitedAt = time.Now()
+	}
+	return isFastFailExit(startedAt, exitedAt, exitCode, fastFailWindow)
+}
+
+// isFastFailExit reports whether a passthrough process exit looks like a
+// launch failure rather than a runtime exit worth restarting. A zero start
+// time disables the check (e.g. recovered executions where the start time
+// is unknown), so the legacy restart path remains the default. exitedAt is
+// the wall-clock time the process actually exited (status.Timestamp), kept
+// distinct from time.Now() so the cleanupDelay sleep above the call site
+// doesn't shrink the effective window.
+func isFastFailExit(startedAt, exitedAt time.Time, exitCode int, window time.Duration) bool {
+	if exitCode == 0 || startedAt.IsZero() {
+		return false
+	}
+	return exitedAt.Sub(startedAt) < window
+}
+
+// GetInteractiveRunner returns the interactive runner for passthrough mode.
+// Returns nil if the runtime is not available or doesn't support passthrough.
+func (m *Manager) GetInteractiveRunner() *process.InteractiveRunner {
+	if m.executorRegistry == nil {
+		return nil
+	}
+	standaloneRT, err := m.executorRegistry.GetBackend(executor.NameStandalone)
+	if err != nil {
+		return nil
+	}
+	return standaloneRT.GetInteractiveRunner()
+}

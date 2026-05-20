@@ -7,12 +7,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/common/shellexec"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -57,7 +60,14 @@ func defaultStreamingInstallRunner(
 	script string,
 	onChunk func(chunk string),
 ) error {
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", script)
+	cmd := shellexec.CommandContext(ctx, shellexec.PosixSh, script)
+	// Strip npm/pnpm-injected env vars before invoking the install script.
+	// When kandev is launched via `pnpm dev`, pnpm sets npm_config_prefix
+	// (and friends) to the workspace package directory; if we let those
+	// flow through to `npm install -g ...` the package lands in the
+	// workspace's bin/ instead of the user's real npm prefix and the
+	// freshly installed CLI is invisible to the discovery LookPath check.
+	cmd.Env = filteredInstallEnv()
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -384,4 +394,45 @@ func (r *ringBuffer) String() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return string(r.data)
+}
+
+// filteredInstallEnv returns os.Environ() with npm/pnpm-injected configuration
+// variables removed. pnpm exports npm_config_prefix (and friends) to scripts
+// it spawns; if those leak into a child `npm install -g ...` the package gets
+// installed into the workspace package dir instead of the user's global npm
+// prefix. Diverges from isNpmEnvVar in agentctl/server/{config,process}: those
+// blanket-strip every npm_config_* to silence npx warnings, but install scripts
+// genuinely need the user's legitimate npm config (registry, proxy, auth
+// tokens, custom .npmrc) to reach private registries or work behind a corporate
+// proxy. We only strip the specific keys pnpm injects with workspace-local
+// values, plus the per-script context vars that npm install never reads.
+func filteredInstallEnv() []string {
+	parent := os.Environ()
+	out := make([]string, 0, len(parent))
+	for _, entry := range parent {
+		eq := strings.IndexByte(entry, '=')
+		if eq <= 0 {
+			out = append(out, entry)
+			continue
+		}
+		if isInstallNpmEnvVar(entry[:eq]) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func isInstallNpmEnvVar(key string) bool {
+	switch key {
+	case "npm_config_prefix", // pnpm sets to workspace dir; redirects -g installs
+		"npm_config_dir",        // same: pnpm-injected workspace dir
+		"npm_config_user_agent", // pnpm/X.Y.Z; misleading and harmless to drop
+		"npm_execpath",          // path to pnpm binary, not npm
+		"npm_node_execpath":     // node binary path from pnpm context
+		return true
+	}
+	// Per-script context, never user config.
+	return strings.HasPrefix(key, "npm_package_") ||
+		strings.HasPrefix(key, "npm_lifecycle_")
 }

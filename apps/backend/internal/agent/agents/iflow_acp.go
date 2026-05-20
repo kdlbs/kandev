@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -106,3 +107,5 @@ func (a *IFlowACP) InferenceConfig() *InferenceConfig {
 		Command:   NewCommand("npx", "-y", iflowACPPkg, "--experimental-acp"),
 	}
 }
+
+func (a *IFlowACP) BillingType() usage.BillingType { return defaultBillingType() }

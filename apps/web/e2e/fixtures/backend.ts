@@ -30,10 +30,11 @@ export type BackendContext = {
   tmpDir: string;
   /**
    * Kill the backend process and respawn with the same config (DB, ports,
-   * tmpDir persist). Optional `envOverrides` mutates the captured env *for the
-   * lifetime of the worker*; pass them again on a subsequent restart to
-   * revert. Only in-memory execution state (running agents, WS connections)
-   * is lost.
+   * tmpDir persist). The captured env is rebuilt from the baseline snapshot
+   * on every call, so `envOverrides` only apply to this restart — they do
+   * NOT leak into a subsequent restart. Call `restart()` with no args to
+   * revert to the baseline env. Only in-memory execution state (running
+   * agents, WS connections) is lost.
    */
   restart: (envOverrides?: Record<string, string>) => Promise<void>;
 };
@@ -83,6 +84,31 @@ function killProcess(proc: ChildProcess): Promise<void> {
       resolve();
     });
   });
+}
+
+/**
+ * Polls until the given TCP port is no longer accepting connections, or until
+ * timeoutMs elapses. Used after killProcessGroup to avoid a fixed sleep: the
+ * OS may hold the port in TIME_WAIT for up to 60 s under heavy load, and
+ * sleeping a fixed 2 s races against that window.
+ */
+async function waitForPortFree(port: number, timeoutMs = 10_000): Promise<void> {
+  const { createConnection } = await import("node:net");
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const free = await new Promise<boolean>((resolve) => {
+      const sock = createConnection({ port, host: "127.0.0.1" });
+      sock.once("connect", () => {
+        sock.destroy();
+        resolve(false); // port still occupied
+      });
+      sock.once("error", () => resolve(true)); // ECONNREFUSED → port is free
+    });
+    if (free) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  // Timeout expired — proceed anyway; the new process will fail-fast if the
+  // port is still held and waitForHealth will surface the error.
 }
 
 /**
@@ -256,10 +282,16 @@ exec git "$@"
         KANDEV_HOME_DIR: homeDir,
         KANDEV_SERVER_PORT: String(backendPort),
         KANDEV_DATABASE_PATH: dbPath,
-        KANDEV_MOCK_AGENT: "only",
-        KANDEV_MOCK_GITHUB: "true",
-        KANDEV_MOCK_JIRA: "true",
-        KANDEV_MOCK_LINEAR: "true",
+        // Profile selector. KANDEV_E2E_MOCK=true tells the backend to
+        // apply the `e2e:` profile from profiles.yaml at startup —
+        // which sets KANDEV_MOCK_AGENT, KANDEV_MOCK_GITHUB/JIRA/LINEAR,
+        // KANDEV_FEATURES_OFFICE, AGENTCTL_AUTO_APPROVE_PERMISSIONS,
+        // KANDEV_PLAN_COALESCE_WINDOW_MS, etc. We don't re-set those
+        // here. KANDEV_MOCK_PROVIDERS stays opt-in per-spec because it
+        // changes agent counts; the five office-routing-* specs pass
+        // it to backend.restart() when needed (see
+        // registry.RoutableProviderIDs).
+        KANDEV_E2E_MOCK: "true",
         KANDEV_DOCKER_ENABLED: dockerEnabled ? "true" : "false",
         // When Docker is on, point the lifecycle resolvers at the linux/amd64
         // binaries the test runner pre-built, so containers can bind-mount them.
@@ -275,13 +307,14 @@ exec git "$@"
         KANDEV_LOG_LEVEL: process.env.KANDEV_LOG_LEVEL ?? "warn",
         AGENTCTL_INSTANCE_PORT_BASE: String(agentctlPortBase),
         AGENTCTL_INSTANCE_PORT_MAX: String(agentctlPortMax),
-        // Most E2E tests rely on auto-approve being on so tools that require
-        // permission (Edit, Bash) just complete without UI interaction. Tests
-        // that exercise the approve/reject flow itself opt in by spawning their
-        // own backend with this env var set to "false" — see permission-approval.spec.ts.
-        AGENTCTL_AUTO_APPROVE_PERMISSIONS: process.env.AGENTCTL_AUTO_APPROVE_PERMISSIONS ?? "true",
-        // Short window makes coalesce-boundary tests practical without wall-clock waits.
-        KANDEV_PLAN_COALESCE_WINDOW_MS: process.env.KANDEV_PLAN_COALESCE_WINDOW_MS ?? "2000",
+        // AGENTCTL_AUTO_APPROVE_PERMISSIONS=true and
+        // KANDEV_PLAN_COALESCE_WINDOW_MS=2000 are applied by the
+        // backend's profile loader (profiles.yaml `e2e:` column).
+        // Specs that need different values (e.g.
+        // permission-approval.spec.ts setting auto-approve=false) set
+        // process.env.X before spawn — that already flows through the
+        // `...stripGitHubTokens(process.env)` spread above, and the
+        // backend's ApplyProfile leaves already-set vars alone.
         GIT_AUTHOR_NAME: "E2E Test",
         GIT_AUTHOR_EMAIL: "e2e@test.local",
         GIT_COMMITTER_NAME: "E2E Test",
@@ -290,6 +323,11 @@ exec git "$@"
 
       const debug = !!process.env.E2E_DEBUG;
       const baseUrl = `http://localhost:${backendPort}`;
+
+      // Snapshot the baseline env so `restart(envOverrides)` rebuilds from
+      // a clean copy each call instead of accumulating leftover keys (e.g.
+      // KANDEV_MOCK_PROVIDERS, KANDEV_PROVIDER_FAILURES) from prior tests.
+      const baselineEnv = { ...backendEnv } as Record<string, string>;
 
       // --- Spawn backend ---
       let backendProc = spawnBackendProcess(backendEnv, debug, backendPort);
@@ -334,15 +372,23 @@ exec git "$@"
        * Only in-memory execution state (running agents, WS connections) is lost.
        */
       const restart = async (envOverrides?: Record<string, string>) => {
+        // Rebuild from the baseline snapshot so a previous restart's
+        // overrides don't leak into this one (e.g. KANDEV_MOCK_PROVIDERS
+        // set by the routing specs would otherwise stick for the rest of
+        // the worker's lifetime and register canonical agent IDs that
+        // sibling specs count).
+        const nextEnv: Record<string, string> = { ...baselineEnv };
         if (envOverrides) {
           for (const [k, v] of Object.entries(envOverrides)) {
-            (backendEnv as Record<string, string>)[k] = v;
+            nextEnv[k] = v;
           }
         }
         await killProcessGroup(backendProc);
-        // Wait for OS to release the TCP port — Linux TIME_WAIT can exceed 500ms under load
-        await new Promise((r) => setTimeout(r, 2_000));
-        backendProc = spawnBackendProcess(backendEnv, debug, backendPort);
+        // Poll until the OS releases the TCP port rather than sleeping a fixed
+        // 2 s. TIME_WAIT can linger for 30–120 s under load; the probe exits
+        // as soon as the port stops accepting connections (typically <200 ms).
+        await waitForPortFree(backendPort);
+        backendProc = spawnBackendProcess(nextEnv, debug, backendPort);
         // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use)
         await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS, backendProc);
       };

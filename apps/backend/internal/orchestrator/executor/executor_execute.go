@@ -5,13 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -366,7 +365,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	startAgent := opts.StartAgent
 	// Serialise concurrent launches for the same session. Two callers reach
 	// this path on every task: PrepareTaskSession spawns a background launch
-	// (workspace only) the moment a session is created, and StartTaskWithSession
+	// (workspace only) the moment a session is created, and StartCreatedSession
 	// is called when the agent is actually started (auto-start, user click).
 	// Without this lock both run env-prep + executionStore.Add in parallel and
 	// the second one fails at register with "already has an agent running
@@ -403,7 +402,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// overwrite the stale row.
 	hasRunning, _ := e.repo.HasExecutorRunningRow(ctx, sessionID)
 	if hasRunning {
-		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode)
+		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode, opts.Env)
 		if !errors.Is(err, ErrStaleExecution) {
 			return result, err
 		}
@@ -436,16 +435,49 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if err != nil {
 		return nil, fmt.Errorf("lookup existing task environment: %w", err)
 	}
+	// Child tasks created by office task-handoffs may have had
+	// session.TaskEnvironmentID rewritten to point at the parent's /
+	// shared group's env (see internal/orchestrator/handoff_inheritance.go).
+	// The by-task-id lookup misses that row because it indexes by the
+	// child task id, so without this fallback the launch path creates a
+	// fresh worktree and the inheritance contract silently breaks.
+	if existingEnv == nil && session.TaskEnvironmentID != "" {
+		if inherited, err := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID); err == nil {
+			existingEnv = inherited
+		}
+	}
 	assignLaunchTaskEnvironmentID(session, existingEnv)
 
 	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, primaryRepo, allRepos)
 	if err != nil {
 		return nil, err
 	}
+	mergeEnv(req, opts.Env)
+	if opts.RouteOverride != nil {
+		req.RouteOverride = opts.RouteOverride
+	}
 
 	// Apply McpMode from options (takes precedence over session metadata check in buildLaunchAgentRequest)
 	if opts.McpMode != "" {
 		req.McpMode = opts.McpMode
+	}
+
+	// Carry the prior ACP session id forward so the agent CLI resumes the
+	// existing conversation (session/load) instead of opening a fresh one.
+	// Reading from executors_running covers both:
+	//   - office wakeups where startAgentOnExistingWorkspace returned
+	//     ErrStaleExecution (in-memory exec gone after IDLE), and
+	//   - kanban / quick-chat re-launches that hit the full path.
+	// Unlike ResumeSession we do NOT clear req.TaskDescription — wakeups
+	// deliver the new comment / event as the prompt.
+	if startAgent {
+		if running, _ := e.repo.GetExecutorRunningBySessionID(ctx, sessionID); running != nil && running.ResumeToken != "" {
+			req.ACPSessionID = running.ResumeToken
+			e.logger.Info("resuming ACP session via stored resume token",
+				zap.String("task_id", task.ID),
+				zap.String("session_id", sessionID),
+				zap.String("acp_session_id", running.ResumeToken))
+		}
 	}
 
 	// Pass attachments for the initial prompt
@@ -635,6 +667,18 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	return req, execConfig, nil
 }
 
+func mergeEnv(req *LaunchAgentRequest, env map[string]string) {
+	if len(env) == 0 {
+		return
+	}
+	if req.Env == nil {
+		req.Env = make(map[string]string, len(env))
+	}
+	for k, v := range env {
+		req.Env[k] = v
+	}
+}
+
 // applyContainerCredentials resolves and injects credentials for containerized executors.
 func (e *Executor) applyContainerCredentials(ctx context.Context, req *LaunchAgentRequest, metadata map[string]interface{}) {
 	e.resolveRemoteCredentials(ctx, req, metadata)
@@ -725,7 +769,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 // re-launch path. Pre-refactor this also consulted session.AgentExecutionID and
 // reconciled DB drift; that's now structurally impossible because executors_running
 // is owned by the lifecycle manager and writes are atomic with executionStore.Add.
-func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string) (*TaskExecution, error) {
+func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string, env map[string]string) (*TaskExecution, error) {
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
 	if err != nil || executionID == "" {
 		// No execution exists in memory (e.g. backend restarted since workspace was prepared).
@@ -760,6 +804,14 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 				zap.String("agent_execution_id", executionID),
 				zap.Error(err))
 			// Non-fatal: agent may start without description
+		}
+	}
+	if len(env) > 0 {
+		if err := e.agentManager.SetExecutionEnv(ctx, executionID, env); err != nil {
+			e.logger.Warn("failed to set execution env for existing workspace",
+				zap.String("session_id", session.ID),
+				zap.String("agent_execution_id", executionID),
+				zap.Error(err))
 		}
 	}
 
@@ -833,6 +885,12 @@ func (e *Executor) captureBaseCommit(ctx context.Context, sessionID string) {
 			zap.Error(err))
 		return
 	}
+	// GetGitStatus returns (nil, nil) when the execution or agentctl client
+	// has been torn down (e.g. the task was deleted between LaunchAgent and
+	// this async capture). Skip silently — there's nothing to record.
+	if status == nil {
+		return
+	}
 
 	// Prefer BaseCommit (merge-base with target branch) over HeadCommit.
 	// BaseCommit gives us the common ancestor with main/origin, which is correct
@@ -903,30 +961,27 @@ func (e *Executor) injectHandoverIfNeeded(ctx context.Context, taskID, currentSe
 }
 
 // computeWorkspacePath derives the env's workspace_path from the launch
-// request and response. Used for both create and update branches of
-// persistTaskEnvironment so the rule lives in exactly one place — without
-// this, the update branch silently leaves workspace_path empty, which
-// produces ErrSessionWorkspaceNotReady forever in the env terminal handler.
+// request and response. The value must mirror the agent process cwd
+// (cfg.WorkDir set from execution.WorkspacePath in utility.go) so that ACP
+// session/load on cold start finds the jsonl saved under the same
+// sanitized-cwd folder on hot start. Collapsing single-repo worktree paths
+// to the task root via filepath.Dir would diverge hot vs cold cwd and break
+// resume with -32002 Resource not found.
 //
-// In task-directory mode the desired value is always the task root that holds
-// every per-repo worktree as a sibling. The legacy single-repo path passes
-// resp.WorktreePath as that repo's subdir, so the parent is the task root.
-// The multi-repo path on the lifecycle adapter mirrors agentctl's WorkDir
-// (already the task root) into resp.WorktreePath, so it must be used as-is —
-// applying filepath.Dir would walk up one level too far and point at the
-// /tasks holder instead.
+// resp.WorktreePath here already mirrors what executor_standalone.go writes
+// into metadata["worktree_path"] (= req.WorkspacePath from the env preparer),
+// which is also what becomes cmd.Dir of the agent process. So persisting it
+// as-is keeps a single source of truth.
 func computeWorkspacePath(req *LaunchAgentRequest, resp *LaunchAgentResponse) string {
-	workspacePath := resp.WorktreePath
-	if workspacePath == "" {
-		workspacePath = req.RepositoryPath
-	}
-	if req.TaskDirName == "" || resp.WorktreePath == "" {
-		return workspacePath
-	}
-	if len(resp.Worktrees) > 1 {
+	if resp.WorktreePath != "" {
 		return resp.WorktreePath
 	}
-	return filepath.Dir(resp.WorktreePath)
+	if req.RepositoryPath != "" {
+		return req.RepositoryPath
+	}
+	// Quick-chat sessions have no worktree/repo but the lifecycle manager
+	// creates a workspace directory — use it as fallback.
+	return resp.WorkspacePath
 }
 
 // persistTaskEnvironment creates or updates the task environment record after a successful launch.

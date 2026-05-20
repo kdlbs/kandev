@@ -394,12 +394,30 @@ type ConfigOptionValue struct {
 }
 
 // PromptUsage contains token usage info from an ACP prompt response.
+//
+// ThoughtTokens is emitted by opencode-acp (reasoning models). It is
+// captured for forward use but does not feed the pricing math today.
+//
+// ProviderReportedCostSubcents is the CLI's own USD cost for the turn
+// (claude-acp emits this on usage_update.cost.amount; opencode-acp
+// sometimes emits 0 on BYOK). The amount is stored as int64 hundredths
+// of a cent (amount_usd * 10000). When > 0 the office subscriber records
+// it verbatim and skips the models.dev pricing lookup.
+//
+// Estimated is true when the adapter synthesised token counts (e.g.
+// codex-acp's cumulative-delta inference) rather than receiving an
+// authoritative per-turn usage frame. Rows flagged estimated still count
+// toward budget totals at face value per
+// docs/specs/office-costs/spec.md.
 type PromptUsage struct {
-	InputTokens       int64 `json:"input_tokens"`
-	OutputTokens      int64 `json:"output_tokens"`
-	CachedReadTokens  int64 `json:"cached_read_tokens,omitempty"`
-	CachedWriteTokens int64 `json:"cached_write_tokens,omitempty"`
-	TotalTokens       int64 `json:"total_tokens"`
+	InputTokens                  int64 `json:"input_tokens"`
+	OutputTokens                 int64 `json:"output_tokens"`
+	CachedReadTokens             int64 `json:"cached_read_tokens,omitempty"`
+	CachedWriteTokens            int64 `json:"cached_write_tokens,omitempty"`
+	ThoughtTokens                int64 `json:"thought_tokens,omitempty"`
+	TotalTokens                  int64 `json:"total_tokens"`
+	ProviderReportedCostSubcents int64 `json:"provider_reported_cost_subcents,omitempty"`
+	Estimated                    bool  `json:"estimated,omitempty"`
 }
 
 // ToolCallContentItem represents a content item produced by a tool call.

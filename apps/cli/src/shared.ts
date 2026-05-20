@@ -6,6 +6,7 @@
  */
 
 import type { ChildProcess } from "node:child_process";
+import os from "node:os";
 
 import { DEFAULT_AGENTCTL_PORT, DEFAULT_BACKEND_PORT, DEFAULT_WEB_PORT } from "./constants";
 import { pickAvailablePort } from "./ports";
@@ -105,6 +106,18 @@ export function buildWebEnv(options: WebEnvOptions): NodeJS.ProcessEnv {
     // URLs like `https://host:38429/...` that aren't reachable behind a
     // reverse proxy / ingress / Cloudflare tunnel.
     env.NEXT_PUBLIC_KANDEV_API_PORT = String(ports.backendPort);
+
+    // Auto-allow the host's own LAN / VPN addresses so a dev hitting the dev
+    // server from another device on the same network (Tailscale, LAN IP, WSL
+    // mirrored mode, etc.) passes Next.js's allowedDevOrigins check and HMR
+    // works. The user can still extend the list via NEXT_ALLOWED_DEV_ORIGINS.
+    // Skip the assignment when there's nothing to add — keeps the env clean
+    // for the loopback-only case.
+    const merged = mergeAllowedDevOrigins(
+      process.env.NEXT_ALLOWED_DEV_ORIGINS,
+      listHostNetworkAddresses(),
+    );
+    if (merged) env.NEXT_ALLOWED_DEV_ORIGINS = merged;
   }
 
   if (debug) {
@@ -114,10 +127,61 @@ export function buildWebEnv(options: WebEnvOptions): NodeJS.ProcessEnv {
   return env;
 }
 
+/**
+ * Returns the host's non-loopback, non-internal IPv4/IPv6 addresses. Used to
+ * auto-populate Next.js `allowedDevOrigins` so the dev server accepts
+ * connections from LAN / Tailscale / SSH-forwarded clients.
+ */
+export function listHostNetworkAddresses(): string[] {
+  const v4: string[] = [];
+  const v6: string[] = [];
+  const seen = new Set<string>();
+  const interfaces = os.networkInterfaces();
+  for (const addrs of Object.values(interfaces)) {
+    if (!addrs) continue;
+    for (const addr of addrs) {
+      if (addr.internal) continue;
+      // Skip link-local IPv6 (fe80::/10) and link-local IPv4 (169.254.0.0/16,
+      // RFC 3927) — neither is reachable from a remote machine, and the
+      // 169.254 range in particular is what Hyper-V assigns to its phantom
+      // WSL adapter, which clutters the startup output. The regex covers the
+      // full /10 (fe80::–febf::); OS stacks only assign fe80::/64 in practice
+      // but a stricter check is the same effort and removes the surprise.
+      if (addr.family === "IPv6" && /^fe[89ab]/i.test(addr.address)) continue;
+      if (addr.family === "IPv4" && addr.address.startsWith("169.254.")) continue;
+      if (seen.has(addr.address)) continue;
+      seen.add(addr.address);
+      if (addr.family === "IPv4") v4.push(addr.address);
+      else v6.push(addr.address);
+    }
+  }
+  // IPv4 first — LAN + Tailscale IPv4 are what people usually want.
+  return [...v4, ...v6];
+}
+
+function mergeAllowedDevOrigins(existing: string | undefined, extra: string[]): string {
+  const set = new Set<string>();
+  if (existing) {
+    for (const s of existing.split(",")) {
+      const trimmed = s.trim();
+      if (trimmed) set.add(trimmed);
+    }
+  }
+  for (const s of extra) set.add(s);
+  return [...set].join(",");
+}
+
 export type StartupInfoOptions = {
   /** Mode header line, e.g. "dev mode: using local repo" or "release: v0.0.12 (github latest)" */
   header: string;
   ports: PortConfig;
+  /**
+   * Which port a user actually opens in a browser. In `start`/`run` the Go
+   * backend reverse-proxies Next.js so the entry point is the backend port;
+   * in `dev` the browser hits Next.js directly. Network URLs are only listed
+   * under this port — the other one is internal-only. Defaults to "backend".
+   */
+  primary?: "backend" | "web";
   /** Database file path */
   dbPath?: string;
   /** Log level being used */
@@ -126,22 +190,43 @@ export type StartupInfoOptions = {
 
 /**
  * Logs a unified startup info block to the console.
+ *
+ * Shows only the URL the user actually opens — start/run modes have the Go
+ * backend reverse-proxy Next.js on a single port, dev mode hits Next.js
+ * directly. The other port and the agentctl port are internal plumbing and
+ * would only mislead. Below the URL, lists the same port on each non-loopback
+ * interface (LAN, Tailscale) so a user opening the app remotely sees the
+ * right address.
  */
 export function logStartupInfo(options: StartupInfoOptions): void {
-  const { header, ports, dbPath, logLevel } = options;
-  const backendUrl = ports.backendUrl;
-  const webUrl = `http://localhost:${ports.webPort}`;
+  const { header, ports, primary = "backend", dbPath, logLevel } = options;
+  const primaryPort = primary === "web" ? ports.webPort : ports.backendPort;
+  const primaryUrl = `http://localhost:${primaryPort}`;
+  const networkHosts = listHostNetworkAddresses();
+
   console.log(`[kandev] ${header}`);
-  console.log("[kandev] backend:", backendUrl);
-  console.log("[kandev] web:", webUrl);
-  console.log("[kandev] agentctl port:", ports.agentctlPort);
-  console.log("[kandev] mcp url:", `${backendUrl}/mcp`);
+  console.log("[kandev] url:", primaryUrl);
+  for (const url of networkUrlsForPort(primaryPort, networkHosts)) {
+    console.log("[kandev]   network:", url);
+  }
+  console.log("[kandev] mcp:", `${ports.backendUrl}/mcp`);
   if (dbPath) {
-    console.log("[kandev] db path:", dbPath);
+    console.log("[kandev] db:", dbPath);
   }
   if (logLevel) {
     console.log("[kandev] log level:", logLevel);
   }
+}
+
+/**
+ * Builds `http://<host>:<port>` URLs from a list of host addresses, wrapping
+ * IPv6 addresses in brackets per RFC 3986.
+ */
+export function networkUrlsForPort(port: number, hosts: string[]): string[] {
+  return hosts.map((host) => {
+    const formatted = host.includes(":") ? `[${host}]` : host;
+    return `http://${formatted}:${port}`;
+  });
 }
 
 /**

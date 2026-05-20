@@ -33,6 +33,8 @@ import {
   createGitHubSlice,
   createJiraSlice,
   createLinearSlice,
+  createOfficeSlice,
+  createFeaturesSlice,
   defaultKanbanState,
   defaultWorkspaceState,
   defaultSettingsState,
@@ -42,6 +44,8 @@ import {
   defaultGitHubState,
   defaultJiraState,
   defaultLinearState,
+  defaultOfficeState,
+  defaultFeaturesState,
   type WorkspaceState,
   type WorkflowsState,
   type ExecutorsState,
@@ -78,79 +82,36 @@ import type {
   UserShellInfo,
 } from "./slices/session-runtime/types";
 
-// Re-export all types from slices for backwards compatibility
-export type {
-  KanbanState,
-  KanbanMultiState,
-  WorkflowSnapshotData,
-  WorkflowsState,
-  TaskState,
-  WorkspaceState,
-  RepositoriesState,
-  RepositoryBranchesState,
-  RepositoryScriptsState,
-  ExecutorsState,
-  SettingsAgentsState,
-  AgentDiscoveryState,
-  AvailableAgentsState,
-  AgentProfileOption,
-  AgentProfilesState,
-  EditorsState,
-  PromptsState,
-  SecretsState,
-  NotificationProvidersState,
-  SettingsDataState,
-  UserSettingsState,
-  MessagesState,
-  TurnsState,
-  TaskSessionsState,
-  TaskSessionsByTaskState,
-  SessionAgentctlStatus,
-  SessionAgentctlState,
-  Worktree,
-  WorktreesState,
-  SessionWorktreesState,
-  PendingModelState,
-  ActiveModelState,
-  TerminalState,
-  ShellState,
-  ProcessStatusEntry,
-  ProcessState,
-  FileInfo,
-  GitStatusEntry,
-  GitStatusState,
-  ContextWindowEntry,
-  ContextWindowState,
-  AgentState,
-  UserShellInfo,
-  UserShellsState,
-  PreviewStage,
-  PreviewViewMode,
-  PreviewDevicePreset,
-  PreviewPanelState,
-  RightPanelState,
-  DiffState,
-  ConnectionState,
-  MobileKanbanState,
-  GitHubSlice,
-  GitHubSliceState,
-  GitHubSliceActions,
-  GitHubStatusState,
-  TaskPRsState,
-  PRWatchesState,
-  ReviewWatchesState,
-  IssueWatchesState,
-  JiraSlice,
-  JiraSliceState,
-  JiraSliceActions,
-  JiraIssueWatchesState,
-  LinearSlice,
-  LinearSliceState,
-  LinearSliceActions,
-  LinearIssueWatchesState,
-} from "./slices";
+// Re-export all types from slices for backwards compatibility (split out
+// to keep this file under the max-lines limit).
+export type * from "./store-reexports";
 import type { JiraIssueWatch } from "@/lib/types/jira";
 import type { LinearIssueWatch } from "@/lib/types/linear";
+import type {
+  AgentProfile,
+  AgentRoutePreview,
+  AgentRouteData,
+  Skill,
+  Project,
+  Approval,
+  ActivityEntry,
+  CostSummary,
+  BudgetPolicy,
+  Routine,
+  InboxItem,
+  OfficeMeta,
+  ProviderHealth,
+  RouteAttempt,
+  Run,
+  DashboardData,
+  OfficeTask,
+  TaskFilterState,
+  TaskViewMode,
+  TaskSortField,
+  TaskSortDir,
+  TaskGroupBy,
+  WorkspaceRouting,
+} from "./slices/office/types";
 
 // Combined AppState type
 export type AppState = {
@@ -227,6 +188,13 @@ export type AppState = {
 
   // Linear slice
   linearIssueWatches: (typeof defaultLinearState)["linearIssueWatches"];
+
+  // Office slice
+  office: (typeof defaultOfficeState)["office"];
+
+  // Feature flags slice
+  features: (typeof defaultFeaturesState)["features"];
+  setFeatures: (features: (typeof defaultFeaturesState)["features"]) => void;
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
@@ -511,6 +479,49 @@ export type AppState = {
   togglePinnedTask: UIA["togglePinnedTask"];
   setSidebarTaskOrder: UIA["setSidebarTaskOrder"];
   removeTaskFromSidebarPrefs: UIA["removeTaskFromSidebarPrefs"];
+  // Office actions
+  setOfficeAgentProfiles: (agents: AgentProfile[]) => void;
+  addOfficeAgentProfile: (agent: AgentProfile) => void;
+  updateOfficeAgentProfile: (id: string, patch: Partial<AgentProfile>) => void;
+  removeOfficeAgentProfile: (id: string) => void;
+  setSkills: (skills: Skill[]) => void;
+  addSkill: (skill: Skill) => void;
+  updateSkill: (id: string, patch: Partial<Skill>) => void;
+  removeSkill: (id: string) => void;
+  setProjects: (projects: Project[]) => void;
+  addProject: (project: Project) => void;
+  updateProject: (id: string, patch: Partial<Project>) => void;
+  removeProject: (id: string) => void;
+  setApprovals: (approvals: Approval[]) => void;
+  setActivity: (entries: ActivityEntry[]) => void;
+  setCostSummary: (summary: CostSummary | null) => void;
+  setBudgetPolicies: (policies: BudgetPolicy[]) => void;
+  setRoutines: (routines: Routine[]) => void;
+  setInboxItems: (items: InboxItem[]) => void;
+  setInboxCount: (count: number) => void;
+  setRuns: (runs: Run[]) => void;
+  setDashboard: (data: DashboardData | null) => void;
+  setTasks: (tasks: OfficeTask[]) => void;
+  appendTasks: (tasks: OfficeTask[]) => void;
+  patchTaskInStore: (taskId: string, patch: Partial<OfficeTask>) => void;
+  setTaskFilters: (filters: Partial<TaskFilterState>) => void;
+  setTaskViewMode: (mode: TaskViewMode) => void;
+  setTaskSortField: (field: TaskSortField) => void;
+  setTaskSortDir: (dir: TaskSortDir) => void;
+  setTaskGroupBy: (groupBy: TaskGroupBy) => void;
+  toggleNesting: () => void;
+  setTasksLoading: (loading: boolean) => void;
+  setMeta: (meta: OfficeMeta | null) => void;
+  setOfficeLoading: (loading: boolean) => void;
+  setOfficeRefetchTrigger: (type: string) => void;
+  setWorkspaceRouting: (workspaceId: string, cfg: WorkspaceRouting | undefined) => void;
+  setKnownProviders: (providers: string[]) => void;
+  setRoutingPreview: (workspaceId: string, agents: AgentRoutePreview[]) => void;
+  setProviderHealth: (workspaceId: string, health: ProviderHealth[]) => void;
+  upsertProviderHealth: (workspaceId: string, row: ProviderHealth) => void;
+  setRunAttempts: (runId: string, attempts: RouteAttempt[]) => void;
+  appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
+  setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
@@ -538,6 +549,10 @@ export function createAppStore(initialState?: Partial<AppState>) {
       ...createJiraSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createLinearSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createOfficeSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createFeaturesSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createUISlice(set as any, get as any, api as any),
       // Override state with merged initial state
@@ -592,6 +607,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       actionPresets: merged.actionPresets,
       jiraIssueWatches: merged.jiraIssueWatches,
       linearIssueWatches: merged.linearIssueWatches,
+      office: merged.office,
+      features: merged.features,
       previewPanel: merged.previewPanel,
       rightPanel: merged.rightPanel,
       diffs: merged.diffs,

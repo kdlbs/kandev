@@ -6,6 +6,9 @@ import type {
   GitStatusEntry,
   FileInfo,
 } from "./types";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+
+const debugGit = createDebugLogger("git-status:store");
 
 const maxProcessOutputBytes = 2 * 1024 * 1024;
 
@@ -44,6 +47,11 @@ function hasGitStatusChanged(existing: GitStatusEntry, incoming: GitStatusEntry)
   if (existing.branch !== incoming.branch || existing.remote_branch !== incoming.remote_branch)
     return true;
   if (existing.ahead !== incoming.ahead || existing.behind !== incoming.behind) return true;
+  if (
+    existing.branch_additions !== incoming.branch_additions ||
+    existing.branch_deletions !== incoming.branch_deletions
+  )
+    return true;
 
   const existingFileKeys = existing.files ? Object.keys(existing.files).sort().join(",") : "";
   const newFileKeys = incoming.files ? Object.keys(incoming.files).sort().join(",") : "";
@@ -159,6 +167,12 @@ function buildSessionCommitActions(set: ImmerSet) {
     ) =>
       set((draft) => {
         const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        const existing = draft.sessionCommits.byEnvironmentId[envKey];
+        // Prevent a stale empty-array response from overwriting commits that
+        // arrived via incremental notifications while the request was in flight.
+        if (commits.length === 0 && existing && existing.length > 0) {
+          return;
+        }
         draft.sessionCommits.byEnvironmentId[envKey] = commits;
       }),
     setSessionCommitsLoading: (sessionId: string, loading: boolean) =>
@@ -279,6 +293,18 @@ export const createSessionRuntimeSlice: StateCreator<
       // empty key so consumers using only byEnvironmentRepo still see it.
       const repoName = gitStatus.repository_name ?? "";
       const existing = draft.gitStatus.byEnvironmentId[envKey];
+      if (IS_DEBUG) {
+        debugGit("setGitStatus", {
+          sessionId,
+          envKey,
+          usingFallbackKey: envKey === sessionId,
+          repoName,
+          prevFileCount: Object.keys(existing?.files ?? {}).length,
+          nextFileCount: Object.keys(gitStatus.files ?? {}).length,
+          prevRepoKeys: Object.keys(draft.gitStatus.byEnvironmentRepo[envKey] ?? {}),
+          willOverwriteByEnv: !existing || hasGitStatusChanged(existing, gitStatus),
+        });
+      }
       if (!existing || hasGitStatusChanged(existing, gitStatus)) {
         draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
       }

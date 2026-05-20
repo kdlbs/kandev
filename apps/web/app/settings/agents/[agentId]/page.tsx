@@ -17,6 +17,7 @@ import type {
 import { buildDefaultPermissions } from "@/lib/agent-permissions";
 import { seedDefaultCLIFlags } from "@/lib/cli-flags";
 import { generateUUID } from "@/lib/utils";
+import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { deleteAgentAction } from "@/app/actions/agents";
@@ -45,16 +46,17 @@ const createDraftProfile = (
   defaultModel: string,
   permissionSettings?: Record<string, PermissionSetting>,
 ): DraftProfile => ({
-  id: `draft-${generateUUID()}`,
-  agent_id: agentId,
+  id: toAgentProfileId(`draft-${generateUUID()}`),
+  agentId,
   name: "",
-  agent_display_name: agentDisplayName,
+  agentDisplayName,
   model: defaultModel,
+  allowIndexing: false,
   ...buildDefaultPermissions(permissionSettings ?? {}),
-  cli_passthrough: false,
-  cli_flags: seedDefaultCLIFlags(permissionSettings ?? {}),
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
+  cliPassthrough: false,
+  cliFlags: seedDefaultCLIFlags(permissionSettings ?? {}),
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
   isNew: true,
   mcp_config: { ...defaultMcpConfig },
 });
@@ -155,10 +157,10 @@ function useAgentStoreSync() {
       nextAgents.flatMap((agent) =>
         agent.profiles.map((profile) => ({
           id: profile.id,
-          label: `${profile.agent_display_name} • ${profile.name}`,
+          label: `${profile.agentDisplayName ?? ""} • ${profile.name}`,
           agent_id: agent.id,
           agent_name: agent.name,
-          cli_passthrough: profile.cli_passthrough,
+          cli_passthrough: profile.cliPassthrough ?? false,
         })),
       ),
     );
@@ -265,7 +267,7 @@ function useProfileHandlers(
   const [newProfileId, setNewProfileId] = useState<string | null>(null);
 
   const handleAddProfile = () => {
-    const draftId = `draft-${generateUUID()}`;
+    const draftId = toAgentProfileId(`draft-${generateUUID()}`);
     setDraftAgent((current) => ({
       ...current,
       profiles: [
@@ -396,7 +398,7 @@ function AgentSetupForm({
     replaceRoute: (path: string) => router.replace(path),
   });
 
-  const displayName = draftAgent.profiles[0]?.agent_display_name ?? draftAgent.name;
+  const displayName = draftAgent.profiles[0]?.agentDisplayName ?? draftAgent.name;
 
   return (
     <div className="space-y-8">

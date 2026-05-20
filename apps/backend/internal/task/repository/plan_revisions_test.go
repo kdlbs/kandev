@@ -197,7 +197,7 @@ func TestPlanRevisions_BackfillsExistingPlan(t *testing.T) {
 		t.Fatalf("open 1: %v", err)
 	}
 	firstDB := sqlx.NewDb(firstConn, "sqlite3")
-	firstRepo, err := sqlite.NewWithDB(firstDB, firstDB)
+	firstRepo, err := sqlite.NewWithDB(firstDB, firstDB, nil)
 	if err != nil {
 		t.Fatalf("repo 1: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestPlanRevisions_BackfillsExistingPlan(t *testing.T) {
 		t.Fatalf("open 2: %v", err)
 	}
 	secondDB := sqlx.NewDb(secondConn, "sqlite3")
-	secondRepo, err := sqlite.NewWithDB(secondDB, secondDB)
+	secondRepo, err := sqlite.NewWithDB(secondDB, secondDB, nil)
 	if err != nil {
 		t.Fatalf("repo 2: %v", err)
 	}

@@ -10,6 +10,27 @@ import type {
 import { useRepositoriesState } from "@/components/task-create-dialog-repositories-state";
 
 /**
+ * Workspace mode the New Subtask dialog supports today. The shared_group
+ * mode is part of the office task-handoffs spec but only office agents
+ * surface it via MCP; the Kanban dialog covers the inherit_parent /
+ * new_workspace toggle (handoffs phase 5).
+ */
+export type SubtaskWorkspaceMode = "inherit_parent" | "new_workspace";
+
+/**
+ * Default workspace mode for the New Subtask dialog. When the parent
+ * task has an active worktree we default to inherit_parent so the
+ * subtask runs in the same materialized environment without forcing
+ * the user through the repo picker; otherwise (parent has no
+ * materialized workspace yet) we default to new_workspace.
+ */
+export function defaultSubtaskWorkspaceMode(
+  parentWorktreeBranch: string | null,
+): SubtaskWorkspaceMode {
+  return parentWorktreeBranch ? "inherit_parent" : "new_workspace";
+}
+
+/**
  * Returns a `DialogFormState`-shaped object for the New Subtask dialog so it
  * can reuse the create-task dialog's `RepoChipsRow`, `useDialogHandlers`, and
  * `useGitHubUrlBranchesEffect` without any forking of those components.

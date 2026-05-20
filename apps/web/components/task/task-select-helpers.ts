@@ -35,6 +35,28 @@ export function resolveLoadedSessionId(
   );
 }
 
+/**
+ * Pick the session to re-open when the user navigates back to a task.
+ *
+ * Prefers the user's last-selected session (tracked per task in
+ * `lastSessionByTaskId`) over `primarySessionId`, so opening a non-primary
+ * tab then bouncing through another task does not silently snap the user
+ * back to primary. Falls back to `primarySessionId` when the remembered
+ * session is unknown / missing an env mapping (e.g. it was deleted).
+ */
+export function resolvePreferredSessionId(
+  taskId: string,
+  primarySessionId: string,
+  lastSessionByTaskId: Record<string, string>,
+  environmentIdBySessionId: Record<string, string>,
+): string {
+  const last = lastSessionByTaskId[taskId];
+  if (last && environmentIdBySessionId[last]) {
+    return last;
+  }
+  return primarySessionId;
+}
+
 export function buildSwitchToSession(
   store: StoreApi<AppState>,
   setActiveSession: (taskId: string, sessionId: string) => void,
@@ -44,7 +66,19 @@ export function buildSwitchToSession(
     const oldEnvId = oldSessionId ? (state.environmentIdBySessionId[oldSessionId] ?? null) : null;
     const newEnvId = state.environmentIdBySessionId[sessionId] ?? null;
     setActiveSession(taskId, sessionId);
-    if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, sessionId);
+    if (newEnvId) {
+      performLayoutSwitch(oldEnvId, newEnvId, sessionId);
+      return;
+    }
+    // The new session's task_environment_id has not been loaded into the store
+    // yet (e.g. auto-started sessions whose WS payload hasn't arrived). If we
+    // skip the layout switch entirely, env-scoped panels from the outgoing
+    // task (plan, files, vscode, …) remain visible. Release the outgoing env's
+    // layout to default so the new task starts from a clean slate; when the
+    // new env id arrives, useEnvSwitchCleanup will adopt it without rebuild.
+    if (oldEnvId || oldSessionId !== sessionId) {
+      releaseLayoutToDefault(oldEnvId);
+    }
   };
 }
 
@@ -101,18 +135,24 @@ export function selectTaskWithLayout(params: {
   setPreparingTaskId: (id: string | null) => void;
 }): void {
   const { taskId, task, store, switchToSession, loadTaskSessionsForTask } = params;
-  const oldSessionId = store.getState().tasks.activeSessionId;
+  const state = store.getState();
+  const oldSessionId = state.tasks.activeSessionId;
   if (task?.primarySessionId) {
-    const primarySessionId = task.primarySessionId;
-    const hasEnvId = !!store.getState().environmentIdBySessionId[primarySessionId];
+    const targetSessionId = resolvePreferredSessionId(
+      taskId,
+      task.primarySessionId,
+      state.tasks.lastSessionByTaskId,
+      state.environmentIdBySessionId,
+    );
+    const hasEnvId = !!state.environmentIdBySessionId[targetSessionId];
     if (hasEnvId) {
-      switchToSession(taskId, primarySessionId, oldSessionId);
+      switchToSession(taskId, targetSessionId, oldSessionId);
       loadTaskSessionsForTask(taskId);
       replaceTaskUrl(taskId);
       return;
     }
     loadTaskSessionsForTask(taskId).then((sessions) => {
-      switchToSession(taskId, resolveLoadedSessionId(sessions, primarySessionId), oldSessionId);
+      switchToSession(taskId, resolveLoadedSessionId(sessions, targetSessionId), oldSessionId);
       replaceTaskUrl(taskId);
     });
     return;

@@ -2,6 +2,9 @@ import type { StateCreator } from "zustand";
 import type { TaskSession } from "@/lib/types/http";
 import type { SessionSlice, SessionSliceState } from "./types";
 import { migrateEnvKeyedData } from "@/lib/state/slices/session-runtime/session-runtime-slice";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+
+const debugEnv = createDebugLogger("session:env-mapping");
 
 /** Ensure message metadata exists for a session, initializing with defaults if needed. */
 function ensureMessageMeta(
@@ -43,6 +46,21 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function syncEnvironmentMapping(draft: any, sessionId: string, environmentId: string | undefined) {
   if (!environmentId) return;
+  const previous = draft.environmentIdBySessionId[sessionId];
+  if (IS_DEBUG) {
+    debugEnv("syncEnvironmentMapping", {
+      sessionId,
+      environmentId,
+      previous: previous ?? null,
+      changed: previous !== environmentId,
+      fallbackGitStatusFileCount: Object.keys(
+        draft.gitStatus?.byEnvironmentId?.[sessionId]?.files ?? {},
+      ).length,
+      targetGitStatusFileCount: Object.keys(
+        draft.gitStatus?.byEnvironmentId?.[environmentId]?.files ?? {},
+      ).length,
+    });
+  }
   draft.environmentIdBySessionId[sessionId] = environmentId;
   migrateEnvKeyedData(draft, sessionId, environmentId);
 }

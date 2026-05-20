@@ -34,12 +34,15 @@ const (
 	// (Claude Code, Cursor, etc.) that connect to the backend's MCP endpoint.
 	// No session-scoped tools (plan, ask_user_question) since there is no live session.
 	ModeExternal = "external"
+	// ModeOffice registers plan and interaction tools for office agents.
+	// Kanban tools are excluded because office agents use CLI commands instead.
+	ModeOffice = "office"
 )
 
 // normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
 func normalizeMode(mode string) string {
 	switch mode {
-	case ModeConfig, ModeExternal:
+	case ModeConfig, ModeExternal, ModeOffice:
 		return mode
 	default:
 		return ModeTask
@@ -52,7 +55,7 @@ type Server struct {
 	sessionID          string
 	taskID             string
 	disableAskQuestion bool
-	mode               string // "task" (default) or "config"
+	mode               string // "task" (default), "config", or "office"
 	mcpServer          *server.MCPServer
 	sseServer          *server.SSEServer
 	httpServer         *server.StreamableHTTPServer
@@ -305,6 +308,23 @@ func (s *Server) registerTools() {
 		count += 6
 		s.registerCreateTaskTool()
 		count++
+	case ModeOffice:
+		// Office agents use `agentctl kandev …` subcommands for every
+		// office mutation (create task, delegate, comment, …). The MCP
+		// surface for office mode only keeps:
+		//   - ask_user_question — interactive prompt path
+		//   - plan tools        — structured plan capture
+		//   - handoff tools     — workflow handoff between steps
+		// delegate_task was removed in favour of
+		// `agentctl kandev tasks create --parent $KANDEV_TASK_ID …`.
+		if !s.disableAskQuestion {
+			s.registerInteractionTools()
+			count++
+		}
+		s.registerPlanTools()
+		count += 4
+		s.registerHandoffTools()
+		count += 4
 	default: // ModeTask
 		s.registerKanbanTools()
 		count += 11
@@ -313,6 +333,8 @@ func (s *Server) registerTools() {
 			count++
 		}
 		s.registerPlanTools()
+		count += 4
+		s.registerHandoffTools()
 		count += 4
 	}
 	s.logger.Info("registered MCP tools",
@@ -481,6 +503,11 @@ IMPORTANT:
 			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Will create/find the repository automatically. Preferred for local worktree flow. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo'). The repository will be cloned automatically on first use. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional. Defaults: same-repo subtasks inherit the parent's base_branch; cross-repo subtasks and top-level tasks fall back to the repository's default_branch (visible via list_repositories_kandev).")),
+			// Office task-handoffs phase 4: workspace policy.
+			mcp.WithString("workspace_mode", mcp.Description("Workspace mode for this task: 'inherit_parent' (reuse the parent task's materialized workspace), 'new_workspace' (default — create a fresh workspace), or 'shared_group' (join an explicit shared workspace group via workspace_group_id).")),
+			mcp.WithString("workspace_group_id", mcp.Description("Required when workspace_mode='shared_group'. The ID of an existing task workspace group to join.")),
+			mcp.WithString("default_child_workspace", mcp.Description("Parent-only: default workspace mode applied to children created later. 'inherit_parent' or 'new_workspace'.")),
+			mcp.WithString("default_child_ordering", mcp.Description("Parent-only: ordering policy for children created later. 'sequential' creates dependency edges between siblings; 'parallel' lets them run concurrently.")),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
 	)

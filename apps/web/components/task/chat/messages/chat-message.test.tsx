@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { render } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import { ChatMessage } from "./chat-message";
-import type { Message } from "@/lib/types/http";
+import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 
 const SENDER_TASK_ID = "task-sender";
 const SENDER_TITLE = "Fix login bug";
@@ -12,8 +12,8 @@ const SENDER_BADGE_SELECTOR = "[data-testid='sender-task-badge']";
 function userMessage(overrides: Partial<Message>): Message {
   return {
     id: "msg-1",
-    session_id: "sess-1",
-    task_id: "task-target",
+    session_id: toSessionId("sess-1"),
+    task_id: toTaskId("task-target"),
     author_type: "user",
     content: "hello",
     type: "message",

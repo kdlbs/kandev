@@ -4,9 +4,11 @@ go 1.26.0
 
 require (
 	github.com/UserExistsError/conpty v0.1.4
-	github.com/coder/acp-go-sdk v0.6.3
+	github.com/coder/acp-go-sdk v0.13.0
 	github.com/creack/pty v1.1.21
 	github.com/docker/docker v28.5.2+incompatible
+	github.com/docker/go-connections v0.6.0
+	github.com/fsnotify/fsnotify v1.6.0
 	github.com/gin-gonic/gin v1.9.1
 	github.com/github/copilot-sdk/go v0.1.18
 	github.com/google/uuid v1.6.0
@@ -26,6 +28,8 @@ require (
 	go.opentelemetry.io/otel/trace v1.43.0
 	go.uber.org/zap v1.26.0
 	golang.org/x/sync v0.20.0
+	golang.org/x/sys v0.42.0
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -43,10 +47,8 @@ require (
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
-	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.2 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
@@ -101,7 +103,6 @@ require (
 	golang.org/x/arch v0.3.0 // indirect
 	golang.org/x/crypto v0.49.0 // indirect
 	golang.org/x/net v0.52.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/term v0.41.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
@@ -109,10 +110,5 @@ require (
 	google.golang.org/grpc v1.80.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
-	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 )
-
-// Fix for ACP notification ordering race condition
-// See: https://github.com/coder/acp-go-sdk/issues/20
-replace github.com/coder/acp-go-sdk => github.com/agentcooper/acp-go-sdk v0.0.0-20260227120930-f21f3950f56d

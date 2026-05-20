@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -87,6 +88,7 @@ func (a *CursorACP) Runtime() *RuntimeConfig {
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
 		Protocol:       agent.ProtocolACP,
+		UserSkillDir:   ".cursor/skills",
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
@@ -111,3 +113,5 @@ func (a *CursorACP) InferenceConfig() *InferenceConfig {
 		Command:   NewCommand(cursorACPBin, "acp"),
 	}
 }
+
+func (a *CursorACP) BillingType() usage.BillingType { return defaultBillingType() }

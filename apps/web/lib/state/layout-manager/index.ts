@@ -29,7 +29,14 @@ export {
 } from "./constants";
 
 // Presets
-export { defaultLayout, planLayout, previewLayout, getPresetLayout } from "./presets";
+export {
+  defaultLayout,
+  compactLayout,
+  planLayout,
+  previewLayout,
+  getPresetLayout,
+  getPresetSidebarColumn,
+} from "./presets";
 export type { BuiltInPreset } from "./presets";
 
 // Sizing
@@ -50,6 +57,7 @@ export { layoutStructuresMatch, savedLayoutMatchesLive } from "./comparator";
 
 // Intent
 export {
+  INTENT_COMPACT,
   INTENT_PLAN,
   INTENT_PR_REVIEW,
   injectIntentPanels,

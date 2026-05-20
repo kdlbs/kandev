@@ -1,7 +1,13 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
-import type { TaskSessionState } from "@/lib/types/http";
+import {
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type SessionId,
+  type TaskId,
+  type TaskSessionState,
+} from "@/lib/types/http";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 
 const TERMINAL_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
@@ -88,6 +94,7 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
   const update: Record<string, unknown> = {};
   if (payload.new_state) update.state = payload.new_state;
   if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
+  if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
   if (payload.review_status !== undefined) update.review_status = payload.review_status;
   if (payload.error_message !== undefined) update.error_message = payload.error_message;
   if (payload.agent_profile_snapshot)
@@ -104,8 +111,8 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
  *  fills in fields like agent_profile_id / repository_id / worktree_path. */
 function upsertTaskSessionList(
   store: StoreApi<AppState>,
-  taskId: string,
-  sessionId: string,
+  taskId: TaskId,
+  sessionId: SessionId,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: any,
   sessionUpdate: Record<string, unknown>,
@@ -123,6 +130,23 @@ function upsertTaskSessionList(
     ...(payload.agent_profile_id ? { agent_profile_id: payload.agent_profile_id } : {}),
     ...sessionUpdate,
   });
+}
+
+// Fan out the office refetch trigger only when the session's state
+// actually changed. The WS layer fires `session.state_changed` for
+// several adjacent reasons (agentctl status, context window, model
+// updates) where `new_state` is undefined or unchanged; without this
+// gate every one of those storms the dashboard-card re-render path.
+function maybeFanOutOfficeRefetch(
+  store: StoreApi<AppState>,
+  newState: TaskSessionState | undefined,
+  prevState: TaskSessionState | undefined,
+): void {
+  if (!newState || newState === prevState) return;
+  const setOfficeTrigger = store.getState().setOfficeRefetchTrigger;
+  if (!setOfficeTrigger) return;
+  setOfficeTrigger("dashboard");
+  setOfficeTrigger("agents");
 }
 
 /** Extract context window data from payload metadata and store it. */
@@ -206,10 +230,12 @@ function syncEnvFromAgentctlPayload(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: any,
 ): void {
-  const taskId = payload?.task_id;
-  const sessionId = payload?.session_id;
+  const rawTaskId = payload?.task_id;
+  const rawSessionId = payload?.session_id;
   const envId = payload?.task_environment_id;
-  if (!taskId || !sessionId || !envId) return;
+  if (!rawTaskId || !rawSessionId || !envId) return;
+  const taskId = toTaskId(rawTaskId);
+  const sessionId = toSessionId(rawSessionId);
   const existing = store.getState().taskSessions.items[sessionId];
   store.getState().upsertTaskSessionFromEvent(taskId, {
     id: sessionId,
@@ -253,8 +279,8 @@ function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
 }
 
 interface SessionFailureContext {
-  taskId: string;
-  sessionId: string;
+  taskId: TaskId;
+  sessionId: SessionId;
   newState: TaskSessionState | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: any;
@@ -302,10 +328,12 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
     "session.state_changed": (message) => {
       const payload = message.payload;
       if (!payload?.task_id) return;
-      const { task_id: taskId, session_id: sessionId } = payload;
+      const { task_id: rawTaskId, session_id: rawSessionId } = payload;
       const newState = payload.new_state as TaskSessionState | undefined;
 
-      if (!sessionId) return;
+      if (!rawSessionId) return;
+      const taskId = toTaskId(rawTaskId);
+      const sessionId = toSessionId(rawSessionId);
 
       const sessionUpdate = buildSessionUpdate(payload);
       const existingSession = store.getState().taskSessions.items[sessionId];
@@ -323,6 +351,8 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         payload,
         previousState: existingSession?.state,
       });
+
+      maybeFanOutOfficeRefetch(store, newState, existingSession?.state);
     },
     "session.agentctl_starting": (message) => {
       const payload = message.payload;

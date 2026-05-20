@@ -5,6 +5,9 @@ const STATUS_ORDER: Record<TaskSessionState, number> = {
   RUNNING: 1,
   STARTING: 1,
   WAITING_FOR_INPUT: 2,
+  // Office sessions sit IDLE between turns — order them with WAITING_FOR_INPUT
+  // (parked, conversation alive, just not currently running).
+  IDLE: 2,
   CREATED: 3,
   COMPLETED: 4,
   FAILED: 5,

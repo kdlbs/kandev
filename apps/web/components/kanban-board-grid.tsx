@@ -20,6 +20,7 @@ import { MobileDropTargets } from "./kanban/mobile-drop-targets";
 import { MobileFab } from "./kanban/mobile-fab";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
+import { getKanbanColumnGridTemplate } from "./kanban/kanban-grid-template";
 
 export type KanbanBoardGridProps = {
   steps: WorkflowStep[];
@@ -209,16 +210,24 @@ function DesktopLayout({
   archivingTaskId,
   showLoading,
   activeTask,
-}: ColumnGridProps & { showLoading: boolean; activeTask: Task | null }) {
+  isCompactDesktop,
+}: ColumnGridProps & {
+  showLoading: boolean;
+  activeTask: Task | null;
+  isCompactDesktop: boolean;
+}) {
   return (
     <>
-      <div className="flex-1 min-h-0 px-4 pb-4">
+      <div className="flex-1 min-h-0 overflow-x-auto px-4 pb-4">
         {showLoading || steps.length === 0 ? (
           <EmptyState showLoading={showLoading} />
         ) : (
           <div
-            className="grid gap-2 rounded-lg h-full"
-            style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}
+            data-testid="desktop-kanban-layout"
+            className="grid h-full min-w-full gap-2 rounded-lg"
+            style={{
+              gridTemplateColumns: getKanbanColumnGridTemplate(steps.length, isCompactDesktop),
+            }}
           >
             {steps.map((step) => (
               <KanbanColumn
@@ -258,6 +267,22 @@ function useShowLoading(isLoading: boolean | undefined, stepsLength: number) {
   );
 }
 
+function useKanbanBoardSensors() {
+  return useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 250,
+        tolerance: 5,
+      },
+    }),
+  );
+}
+
 export function KanbanBoardGrid({
   steps,
   tasks,
@@ -277,24 +302,10 @@ export function KanbanBoardGrid({
   onCreateTask,
   isLoading,
 }: KanbanBoardGridProps) {
-  const { isMobile, isTablet } = useResponsiveBreakpoint();
+  const { isMobile, isTablet, isCompactDesktop } = useResponsiveBreakpoint();
   const activeColumnIndex = useAppStore((state) => state.mobileKanban.activeColumnIndex);
   const setActiveColumnIndex = useAppStore((state) => state.setMobileKanbanColumnIndex);
-
-  // Use TouchSensor with delay for mobile (long-press to drag)
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
-    }),
-    useSensor(TouchSensor, {
-      activationConstraint: {
-        delay: 250,
-        tolerance: 5,
-      },
-    }),
-  );
+  const sensors = useKanbanBoardSensors();
 
   // Calculate task counts per step for tabs
   const taskCounts = useMemo(() => {
@@ -357,7 +368,12 @@ export function KanbanBoardGrid({
     );
   } else {
     layoutContent = (
-      <DesktopLayout {...columnProps} showLoading={!!showLoading} activeTask={activeTask} />
+      <DesktopLayout
+        {...columnProps}
+        showLoading={!!showLoading}
+        activeTask={activeTask}
+        isCompactDesktop={isCompactDesktop}
+      />
     );
   }
 

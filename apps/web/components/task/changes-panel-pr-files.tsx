@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { IconChevronDown, IconChevronRight, IconGitPullRequest } from "@tabler/icons-react";
 import { LineStat } from "@/components/diff-stat";
+import { cn } from "@/lib/utils";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import { FileStatusIcon } from "./file-status-icon";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import type { PRChangedFile } from "./changes-panel-timeline";
@@ -26,6 +28,7 @@ export function PRFilesGroupedList({
   onOpenDiff,
   repoDisplayName,
 }: PRFilesSectionContentProps) {
+  const activeFilePath = useDockviewStore((s) => s.activeFilePath);
   const groups = groupByRepositoryName(files, (f) => f.repository_name);
   const showRepoHeaders = groups.length > 1 || (groups[0]?.repositoryName ?? "") !== "";
   return (
@@ -38,6 +41,7 @@ export function PRFilesGroupedList({
           files={group.items}
           showHeader={showRepoHeaders}
           onOpenDiff={onOpenDiff}
+          activeFilePath={activeFilePath}
         />
       ))}
     </ul>
@@ -50,12 +54,14 @@ function PRFilesRepoGroup({
   files,
   showHeader,
   onOpenDiff,
+  activeFilePath,
 }: {
   repositoryName: string;
   displayName?: string;
   files: PRChangedFile[];
   showHeader: boolean;
   onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
+  activeFilePath: string | null;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const label = displayName ?? repositoryName ?? "";
@@ -82,8 +88,15 @@ function PRFilesRepoGroup({
       )}
       {!collapsed && (
         <ul className="space-y-0.5">
+          {/* Multi-repo: activeFilePath carries no repo context, so identical
+              paths across repos light up both rows. Matches FileListBody. */}
           {files.map((file) => (
-            <PRFileRow key={file.path} file={file} onOpenDiff={onOpenDiff} />
+            <PRFileRow
+              key={file.path}
+              file={file}
+              onOpenDiff={onOpenDiff}
+              isActive={file.path === activeFilePath}
+            />
           ))}
         </ul>
       )}
@@ -94,9 +107,11 @@ function PRFilesRepoGroup({
 function PRFileRow({
   file,
   onOpenDiff,
+  isActive,
 }: {
   file: PRChangedFile;
   onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
+  isActive?: boolean;
 }) {
   const lastSlash = file.path.lastIndexOf("/");
   const folder = lastSlash === -1 ? "" : file.path.slice(0, lastSlash);
@@ -104,7 +119,12 @@ function PRFileRow({
 
   return (
     <li
-      className="group flex items-center justify-between gap-2 text-sm rounded-md px-2 py-1.5 -mx-1 hover:bg-muted/60 cursor-pointer md:px-1 md:py-0.5"
+      data-changes-file={file.path}
+      data-active={isActive ? "true" : "false"}
+      className={cn(
+        "group flex items-center justify-between gap-2 text-sm rounded-md px-2 py-1.5 -mx-1 cursor-pointer md:px-1 md:py-0.5",
+        isActive ? "bg-accent/60 text-accent-foreground hover:bg-accent/50" : "hover:bg-muted/60",
+      )}
       onClick={() =>
         onOpenDiff(file.path, {
           source: "pr",

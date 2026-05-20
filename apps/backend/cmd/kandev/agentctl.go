@@ -4,19 +4,25 @@ import (
 	"context"
 	"time"
 
-	agentctlclient "github.com/kandev/kandev/internal/agentctl/client"
-	"github.com/kandev/kandev/internal/agentctl/client/launcher"
+	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
+
+// agentctlLauncherResult holds the outputs of provideAgentctlLauncher.
+type agentctlLauncherResult struct {
+	cleanup    func() error
+	binaryPath string
+}
 
 // provideAgentctlLauncher starts the agentctl launcher for standalone runtime.
 // agentctl is a core service that always runs - it's used by the Standalone runtime
 // for agent execution on the host machine.
 // If the configured port is unavailable, the launcher may fall back to an OS-assigned
 // port. In that case, cfg.Agent.StandalonePort is updated to reflect the actual port.
-func provideAgentctlLauncher(ctx context.Context, cfg *config.Config, log *logger.Logger) (func() error, error) {
+func provideAgentctlLauncher(ctx context.Context, cfg *config.Config, log *logger.Logger) (*agentctlLauncherResult, error) {
 	l, cleanup, err := launcher.Provide(ctx, launcher.Config{
 		Host: cfg.Agent.StandaloneHost,
 		Port: cfg.Agent.StandalonePort,
@@ -33,7 +39,10 @@ func provideAgentctlLauncher(ctx context.Context, cfg *config.Config, log *logge
 	}
 	// Store the per-launch auth token so downstream clients can authenticate
 	cfg.Agent.StandaloneAuthToken = l.AuthToken()
-	return cleanup, nil
+	return &agentctlLauncherResult{
+		cleanup:    cleanup,
+		binaryPath: l.BinaryPath(),
+	}, nil
 }
 
 // waitForAgentctlControlHealthy waits for the agentctl control server to be healthy.

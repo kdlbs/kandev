@@ -207,15 +207,19 @@ func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templ
 	for _, stepDef := range template.Steps {
 		events := models.RemapStepEvents(stepDef.Events, idMap)
 		step := &models.WorkflowStep{
-			ID:              idMap[stepDef.ID],
-			WorkflowID:      workflowID,
-			Name:            stepDef.Name,
-			Position:        stepDef.Position,
-			Color:           stepDef.Color,
-			Prompt:          stepDef.Prompt,
-			Events:          events,
-			AllowManualMove: stepDef.AllowManualMove,
-			IsStartStep:     stepDef.IsStartStep,
+			ID:                    idMap[stepDef.ID],
+			WorkflowID:            workflowID,
+			Name:                  stepDef.Name,
+			Position:              stepDef.Position,
+			Color:                 stepDef.Color,
+			Prompt:                stepDef.Prompt,
+			Events:                events,
+			AllowManualMove:       stepDef.AllowManualMove,
+			IsStartStep:           stepDef.IsStartStep,
+			ShowInCommandPanel:    stepDef.ShowInCommandPanel,
+			AutoArchiveAfterHours: stepDef.AutoArchiveAfterHours,
+			AgentProfileID:        stepDef.AgentProfileID,
+			StageType:             stepDef.StageType,
 		}
 
 		if err := s.repo.CreateStep(ctx, step); err != nil {

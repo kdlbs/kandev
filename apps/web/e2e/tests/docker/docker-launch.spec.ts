@@ -272,8 +272,8 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       .toBe("exited");
 
     await expect(editor).toBeHidden({ timeout: 15_000 });
-    await expect(session.failedSessionResumeButton()).toBeVisible();
-    await session.failedSessionResumeButton().click();
+    await expect(session.recoveryResumeButton()).toBeVisible();
+    await session.recoveryResumeButton().click();
 
     await expect
       .poll(

@@ -29,13 +29,13 @@ export class GitHelper {
     throw new Error(`git exec failed after 3 attempts: ${cmd}`);
   }
 
-  createFile(name: string, content: string) {
+  createFile(name: string, content: string | Buffer) {
     const filePath = path.join(this.repoDir, name);
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, content);
   }
 
-  modifyFile(name: string, content: string) {
+  modifyFile(name: string, content: string | Buffer) {
     this.createFile(name, content);
   }
 

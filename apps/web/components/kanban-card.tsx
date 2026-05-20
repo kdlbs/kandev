@@ -13,7 +13,7 @@ import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { getRepositoryDisplayName } from "@/lib/utils";
-import type { Repository, TaskState } from "@/lib/types/http";
+import { repositoryId as toRepositoryId, type Repository, type TaskState } from "@/lib/types/http";
 
 export interface Task {
   id: string;
@@ -269,7 +269,7 @@ export function resolveTaskRepositoryNames(task: Task, repositories: Repository[
 
   const push = (id: string | undefined) => {
     if (!id || seen.has(id)) return;
-    const repo = byId.get(id);
+    const repo = byId.get(toRepositoryId(id));
     if (!repo) return;
     seen.add(id);
     const display = getRepositoryDisplayName(repo.local_path);

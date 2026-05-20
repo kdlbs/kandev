@@ -36,7 +36,7 @@ type LaunchSessionRequest struct {
 	Prompt            string                 `json:"prompt,omitempty"`
 	PlanMode          bool                   `json:"plan_mode,omitempty"`
 	WorkflowStepID    string                 `json:"workflow_step_id,omitempty"`
-	Priority          int                    `json:"priority,omitempty"`
+	Priority          string                 `json:"priority,omitempty"`
 	LaunchWorkspace   bool                   `json:"launch_workspace,omitempty"`
 	SkipMessageRecord bool                   `json:"skip_message_record,omitempty"`
 	AutoStart         bool                   `json:"auto_start,omitempty"`

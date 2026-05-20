@@ -12,8 +12,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -330,6 +330,16 @@ func (u *repoLocalPathUpdater) UpdateRepositoryLocalPath(ctx context.Context, re
 	}
 	_, err := u.svc.UpdateRepository(ctx, repositoryID, &taskservice.UpdateRepositoryRequest{
 		LocalPath: &localPath,
+	})
+	return err
+}
+
+func (u *repoLocalPathUpdater) UpdateRepositoryDefaultBranch(ctx context.Context, repositoryID, defaultBranch string) error {
+	if repositoryID == "" || defaultBranch == "" {
+		return fmt.Errorf("UpdateRepositoryDefaultBranch: repositoryID and defaultBranch must be non-empty")
+	}
+	_, err := u.svc.UpdateRepository(ctx, repositoryID, &taskservice.UpdateRepositoryRequest{
+		DefaultBranch: &defaultBranch,
 	})
 	return err
 }

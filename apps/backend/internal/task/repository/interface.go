@@ -28,12 +28,35 @@ type TaskRepository interface {
 	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)
 	ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error)
 	ArchiveTask(ctx context.Context, id string) error
+	// ArchiveTaskIfActive is the CAS variant used by office task-handoffs
+	// cascade archives. Returns whether the row was updated.
+	ArchiveTaskIfActive(ctx context.Context, id, cascadeID string) (bool, error)
+	// UnarchiveTaskByCascade clears archived_at only when the task was
+	// archived by the named cascade. Returns whether the row was updated.
+	UnarchiveTaskByCascade(ctx context.Context, id, cascadeID string) (bool, error)
 	ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error)
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
 	CountTasksByWorkflow(ctx context.Context, workflowID string) (int, error)
 	CountTasksByWorkflowStep(ctx context.Context, stepID string) (int, error)
 	AddTaskToWorkflow(ctx context.Context, taskID, workflowID, workflowStepID string, position int) error
 	RemoveTaskFromWorkflow(ctx context.Context, taskID, workflowID string) error
+	ListTasksByProject(ctx context.Context, projectID string) ([]*models.Task, error)
+	ListTasksByAssignee(ctx context.Context, agentInstanceID string) ([]*models.Task, error)
+	ListTaskTree(ctx context.Context, workspaceID string, filters models.TaskTreeFilters) ([]*models.Task, error)
+	// ListChildren returns non-archived, non-ephemeral child tasks of parentID.
+	ListChildren(ctx context.Context, parentID string) ([]*models.Task, error)
+	// ListChildrenIncludingArchived returns ALL child tasks of parentID,
+	// including archived ones. Used by the office task-handoffs unarchive
+	// cascade (phase 6) to walk a previously-archived descendant tree.
+	ListChildrenIncludingArchived(ctx context.Context, parentID string) ([]*models.Task, error)
+	// ListSiblings returns non-archived, non-ephemeral sibling tasks for taskID.
+	// A task is a sibling of taskID when it shares a non-empty parent_id and
+	// the same workspace_id, and is not taskID itself. Root tasks (empty
+	// parent_id) intentionally have NO siblings — without a non-empty common
+	// parent, every other root in the workspace would falsely match.
+	ListSiblings(ctx context.Context, taskID string) ([]*models.Task, error)
+	IncrementTaskSequence(ctx context.Context, workspaceID string) (int, error)
+	GetWorkspaceTaskPrefix(ctx context.Context, workspaceID string) (prefix, officeWorkflowID string, err error)
 }
 
 // TaskRepoRepository handles the task↔repository junction table (models.TaskRepository rows).
@@ -113,6 +136,7 @@ type SessionRepository interface {
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
+	GetLastAgentMessage(ctx context.Context, sessionID string) (string, error)
 }
 
 // SessionWorktreeRepository handles the task session↔worktree association.
@@ -213,6 +237,27 @@ type ReviewRepository interface {
 	UpsertSessionFileReview(ctx context.Context, review *models.SessionFileReview) error
 	GetSessionFileReviews(ctx context.Context, sessionID string) ([]*models.SessionFileReview, error)
 	DeleteSessionFileReviews(ctx context.Context, sessionID string) error
+}
+
+// DocumentRepository handles task document CRUD and revision history.
+// Documents generalize plans: each document is identified by a unique key within a task.
+type DocumentRepository interface {
+	CreateDocument(ctx context.Context, doc *models.TaskDocument) error
+	GetDocument(ctx context.Context, taskID, key string) (*models.TaskDocument, error)
+	UpdateDocument(ctx context.Context, doc *models.TaskDocument) error
+	DeleteDocument(ctx context.Context, taskID, key string) error
+	ListDocuments(ctx context.Context, taskID string) ([]*models.TaskDocument, error)
+
+	// Revision history
+	InsertDocumentRevision(ctx context.Context, rev *models.TaskDocumentRevision) error
+	GetLatestDocumentRevision(ctx context.Context, taskID, key string) (*models.TaskDocumentRevision, error)
+	ListDocumentRevisions(ctx context.Context, taskID, key string, limit int) ([]*models.TaskDocumentRevision, error)
+	GetDocumentRevision(ctx context.Context, id string) (*models.TaskDocumentRevision, error)
+	NextDocumentRevisionNumber(ctx context.Context, taskID, key string) (int, error)
+	// WriteDocumentRevision atomically upserts the HEAD document and writes/merges a revision
+	// in a single transaction. Pass a non-nil coalesceLatestID to merge into an existing revision;
+	// otherwise a new revision is appended with revision_number computed inside the tx.
+	WriteDocumentRevision(ctx context.Context, head *models.TaskDocument, rev *models.TaskDocumentRevision, coalesceLatestID *string) error
 }
 
 // PlanRepository handles task plan CRUD and its revision history.

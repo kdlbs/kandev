@@ -56,7 +56,7 @@ func TestTaskCRUD(t *testing.T) {
 			"workflow_step_id": workflowStepID,
 			"title":            "Test Task",
 			"description":      "A test task for integration testing",
-			"priority":         3, // HIGH priority (1=LOW, 2=MEDIUM, 3=HIGH)
+			"priority":         "high",
 			"repository_id":    repositoryID,
 			"base_branch":      "main",
 		})

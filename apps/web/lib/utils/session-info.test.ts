@@ -1,17 +1,23 @@
 import { describe, it, expect } from "vitest";
 
 import { getSessionInfoForTask } from "./session-info";
-import type { TaskSession } from "@/lib/types/http";
+import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "@/lib/types/http";
 
-function session(overrides: Partial<TaskSession>): TaskSession {
+type SessionOverrides = Partial<Omit<TaskSession, "id" | "task_id">> & {
+  id?: string;
+  task_id?: string;
+};
+
+function session(overrides: SessionOverrides): TaskSession {
+  const { id, task_id, ...rest } = overrides;
   return {
-    id: overrides.id ?? "s1",
-    task_id: overrides.task_id ?? "t1",
+    id: toSessionId(id ?? "s1"),
+    task_id: toTaskId(task_id ?? "t1"),
     state: overrides.state ?? "WAITING_FOR_INPUT",
     started_at: overrides.started_at ?? "",
     updated_at: overrides.updated_at ?? "",
     is_primary: overrides.is_primary ?? false,
-    ...overrides,
+    ...rest,
   } as TaskSession;
 }
 

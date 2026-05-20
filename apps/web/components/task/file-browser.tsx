@@ -399,7 +399,7 @@ export function FileBrowser({
       new Map(Object.entries(gitStatus?.files ?? {}).map(([path, info]) => [path, info.status])),
     [gitStatus?.files],
   );
-  const fullPath = session?.worktree_path || repository?.local_path || "";
+  const fullPath = session?.worktree_path || repository?.local_path || treeState.tree?.path || "";
   const displayPath = fullPath.replace(/^\/(?:Users|home)\/[^/]+\//, "~/");
 
   const handlers = useFileBrowserHandlers(sessionId, onOpenFile, onCreateFile, treeState);
@@ -442,7 +442,7 @@ export function FileBrowser({
           loadError={treeState.loadError}
           creatingInPath={handlers.creatingInPath}
           fileStatuses={fileStatuses}
-          expandedPaths={treeState.expandedPaths}
+          visibleRows={treeState.visibleRows}
           activeFolderPath={handlers.activeFolderPath}
           activeFilePath={activeFilePath}
           visibleLoadingPaths={treeState.visibleLoadingPaths}

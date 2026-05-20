@@ -23,7 +23,17 @@ type DraftMcpConfig = {
   error: string | null;
 };
 
-export type DraftProfile = Omit<AgentProfile, "allow_indexing"> & {
+/**
+ * Editable in-memory shape for an agent profile being created or edited
+ * in the settings UI. Mirrors the canonical (camelCase) `AgentProfile`
+ * with form-state extras. The save helpers translate this back to
+ * snake_case at the API boundary.
+ *
+ * `allow_indexing` is kept as a snake_case form key so the permissions
+ * map (which is keyed by snake_case agent metadata) flows through the
+ * draft unchanged.
+ */
+export type DraftProfile = AgentProfile & {
   allow_indexing?: boolean;
   isNew?: boolean;
   mcp_config?: DraftMcpConfig;
@@ -126,8 +136,8 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
       model: profile.model,
       mode: profile.mode,
       ...permissionsToProfilePatch(profile),
-      cli_passthrough: profile.cli_passthrough ?? false,
-      cli_flags: profile.cli_flags,
+      cli_passthrough: profile.cliPassthrough ?? false,
+      cli_flags: profile.cliFlags ?? [],
     })),
   });
 
@@ -180,8 +190,8 @@ async function saveExistingProfiles(
         model: profile.model,
         mode: profile.mode,
         ...permissionsToProfilePatch(profile),
-        cli_passthrough: profile.cli_passthrough ?? false,
-        cli_flags: profile.cli_flags,
+        cli_passthrough: profile.cliPassthrough ?? false,
+        cli_flags: profile.cliFlags ?? [],
       });
       await saveMcpForProfile({
         draftProfile: profile,
@@ -197,8 +207,8 @@ async function saveExistingProfiles(
         model: profile.model,
         mode: profile.mode,
         ...permissionsToProfilePatch(profile),
-        cli_passthrough: profile.cli_passthrough ?? false,
-        cli_flags: profile.cli_flags,
+        cli_passthrough: profile.cliPassthrough ?? false,
+        cli_flags: profile.cliFlags ?? [],
       });
       nextProfiles.push(updatedProfile);
       continue;
@@ -258,12 +268,14 @@ export async function saveExistingAgent(
 
 export function isProfileDirty(draft: DraftProfile, saved?: AgentProfile): boolean {
   if (!saved) return true;
+  const draftAllow = draft.allow_indexing ?? draft.allowIndexing ?? false;
+  const savedAllow = saved.allowIndexing ?? false;
   return (
     draft.name !== saved.name ||
     draft.model !== saved.model ||
     (draft.mode ?? "") !== (saved.mode ?? "") ||
-    arePermissionsDirty(draft, saved) ||
-    draft.cli_passthrough !== saved.cli_passthrough ||
-    !areCLIFlagsEqual(draft.cli_flags, saved.cli_flags)
+    arePermissionsDirty({ allow_indexing: draftAllow }, { allow_indexing: savedAllow }) ||
+    draft.cliPassthrough !== saved.cliPassthrough ||
+    !areCLIFlagsEqual(draft.cliFlags ?? [], saved.cliFlags ?? [])
   );
 }

@@ -5,6 +5,11 @@ import { useShallow } from "zustand/react/shallow";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { startConfigChat } from "@/lib/api/domains/workspace-api";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
+import {
+  agentProfileId as toAgentProfileId,
+  sessionId as toSessionId,
+  taskId as toTaskId,
+} from "@/lib/types/ids";
 
 function useConfigChatStore() {
   return useAppStore(
@@ -71,12 +76,12 @@ export function useConfigChat(workspaceId: string) {
         // Seed the task session in the main store so QuickChatContent can find it
         // immediately. The WS event will merge on top when it arrives.
         storeApi.getState().setTaskSession({
-          id: response.session_id,
-          task_id: response.task_id,
+          id: toSessionId(response.session_id),
+          task_id: toTaskId(response.task_id),
           state: "CREATED",
           started_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          agent_profile_id: agentProfileId,
+          agent_profile_id: toAgentProfileId(agentProfileId),
         });
 
         // Store the prompt so QuickChatContent can send it via WS.

@@ -21,9 +21,13 @@ import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
-import type { ExecutorProfile, Repository } from "@/lib/types/http";
+import type { ExecutorProfile, ExecutorType, Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
-import { useSubtaskFormState } from "./new-subtask-form-state";
+import {
+  defaultSubtaskWorkspaceMode,
+  type SubtaskWorkspaceMode,
+  useSubtaskFormState,
+} from "./new-subtask-form-state";
 import { PromptZone, SubtaskFormBody } from "./new-subtask-form-parts";
 import { useSubtaskPromptZone, useSubtaskSubmit } from "./use-subtask-submit";
 
@@ -95,7 +99,7 @@ function useSessionOptions(taskId: string) {
 }
 
 function useExecutorProfiles(
-  executors: Array<{ id: string; type: string; name: string; profiles?: ExecutorProfile[] }>,
+  executors: Array<{ id: string; type: ExecutorType; name: string; profiles?: ExecutorProfile[] }>,
 ) {
   return useMemo<ExecutorProfile[]>(() => {
     return executors.flatMap((executor) =>
@@ -200,7 +204,7 @@ type SubtaskFormProps = {
   worktreeBranch: string | null;
   initialPrompt: string | null;
   agentProfiles: AgentProfileOption[];
-  executors: Array<{ id: string; type: string; name: string; profiles?: ExecutorProfile[] }>;
+  executors: Array<{ id: string; type: ExecutorType; name: string; profiles?: ExecutorProfile[] }>;
   workspaceId: string | null;
   workflowId: string | null;
   /** The parent task's repository — used as the default for the subtask. */
@@ -236,15 +240,15 @@ function NewSubtaskForm({
   const [title, setTitle] = useState(defaultTitle);
   const [hasPrompt, setHasPrompt] = useState(false);
   const [contextValue, setContextValue] = useState("blank");
-  // Shim DialogFormState shared with the create-task dialog so RepoChipsRow,
-  // useDialogHandlers, and the GitHub URL branches effect work unchanged.
+  const [workspaceMode, setWorkspaceMode] = useState<SubtaskWorkspaceMode>(() =>
+    defaultSubtaskWorkspaceMode(worktreeBranch),
+  );
+  // Shim DialogFormState shared with the create-task dialog.
   const fs = useSubtaskFormState();
   useSeedParentRepository(fs, parentRepositoryId, baseBranch);
   useSeedAgentProfileId(fs, defaultProfileId);
   const handlers = useDialogHandlers(fs, availableRepositories);
   useGitHubUrlBranchesEffect(fs, isOpen);
-  // Fetch on-disk repos so the chip dropdown shows "on disk" entries
-  // (matches the create-task dialog's RepoChipsRow behavior).
   useDiscoverReposEffect(fs, isOpen, workspaceId, false, toast);
   const profileOptions = useAgentProfileOptions(agentProfiles);
   const sessionOptions = useSessionOptions(parentTaskId);
@@ -277,41 +281,49 @@ function NewSubtaskForm({
     title,
     setIsCreating,
     onClose,
+    workspaceMode,
   });
-  return (
-    <SubtaskFormBody
-      fs={fs}
-      handlers={handlers}
-      title={title}
-      setTitle={setTitle}
-      workspaceId={workspaceId}
-      availableRepositories={availableRepositories}
-      parentRepositoryId={parentRepositoryId}
-      worktreeBranch={worktreeBranch}
-      profileOptions={profileOptions}
-      executorProfileOptions={executorProfileOptions}
-      agentProfileId={fs.agentProfileId || defaultProfileId}
-      contextValue={contextValue}
-      onContextChange={handleContextChange}
-      hasInitialPrompt={!!initialPrompt}
-      sessionOptions={isUtilityConfigured ? sessionOptions : []}
-      promptZone={
-        <PromptZone
-          {...promptZone}
-          isCreating={isCreating}
-          isSummarizing={isSummarizing}
-          isUtilityConfigured={isUtilityConfigured}
-          setHasPrompt={setHasPrompt}
-          onSubmitShortcut={handleSubmit}
-        />
-      }
-      isCreating={isCreating}
-      isSummarizing={isSummarizing}
-      hasPrompt={hasPrompt}
-      onClose={onClose}
-      onSubmit={handleSubmit}
-    />
-  );
+  return renderSubtaskFormBody({
+    fs,
+    handlers,
+    title,
+    setTitle,
+    workspaceId,
+    availableRepositories,
+    parentRepositoryId,
+    worktreeBranch,
+    profileOptions,
+    executorProfileOptions,
+    agentProfileId: fs.agentProfileId || defaultProfileId,
+    workspaceMode,
+    onWorkspaceModeChange: setWorkspaceMode,
+    contextValue,
+    onContextChange: handleContextChange,
+    hasInitialPrompt: !!initialPrompt,
+    sessionOptions: isUtilityConfigured ? sessionOptions : [],
+    promptZoneProps: {
+      ...promptZone,
+      isCreating,
+      isSummarizing,
+      isUtilityConfigured,
+      setHasPrompt,
+      onSubmitShortcut: handleSubmit,
+    },
+    isCreating,
+    isSummarizing,
+    hasPrompt,
+    onClose,
+    onSubmit: handleSubmit,
+  });
+}
+
+type RenderArgs = Omit<React.ComponentProps<typeof SubtaskFormBody>, "promptZone"> & {
+  promptZoneProps: React.ComponentProps<typeof PromptZone>;
+};
+
+function renderSubtaskFormBody(args: RenderArgs) {
+  const { promptZoneProps, ...rest } = args;
+  return <SubtaskFormBody {...rest} promptZone={<PromptZone {...promptZoneProps} />} />;
 }
 
 export function NewSubtaskDialog({

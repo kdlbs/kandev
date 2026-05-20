@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
 	"github.com/kandev/kandev/internal/common/logger"

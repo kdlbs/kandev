@@ -27,6 +27,7 @@ func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, er
 	}
 	result := toAgentDTO(agent, profiles)
 	c.applyCapabilityStatus(&result, agent.Name)
+	c.applyBillingType(&result, agent.Name)
 	return &result, nil
 }
 
@@ -43,6 +44,7 @@ func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, e
 		}
 		entry := toAgentDTO(agent, profiles)
 		c.applyCapabilityStatus(&entry, agent.Name)
+		c.applyBillingType(&entry, agent.Name)
 		payload = append(payload, entry)
 	}
 	return &dto.ListAgentsResponse{Agents: payload, Total: len(payload)}, nil
@@ -122,6 +124,20 @@ func (c *Controller) applyCapabilityStatus(d *dto.AgentDTO, agentName string) {
 	}
 	d.CapabilityStatus = string(caps.Status)
 	d.CapabilityError = caps.Error
+}
+
+// applyBillingType populates BillingType on each profile in the DTO.
+// It calls BillingType() on the registered agent implementation at read time
+// so credential detection runs once per request and is not stored in the DB.
+func (c *Controller) applyBillingType(d *dto.AgentDTO, agentName string) {
+	ag, ok := c.agentRegistry.Get(agentName)
+	if !ok {
+		return
+	}
+	bt := string(ag.BillingType())
+	for i := range d.Profiles {
+		d.Profiles[i].BillingType = bt
+	}
 }
 
 func (c *Controller) findMatchedAvailability(name string, results []discovery.Availability) (*discovery.Availability, error) {

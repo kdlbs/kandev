@@ -18,6 +18,7 @@ export function useWorkflows(workspaceId: string | null, enabled = true) {
           sortOrder: workflow.sort_order ?? 0,
           agent_profile_id: workflow.agent_profile_id,
           hidden: workflow.hidden,
+          style: workflow.style,
         }));
         setWorkflows(mapped);
       })

@@ -86,6 +86,17 @@ func serializeSnapshotJSON(snapshot *models.GitSnapshot) (string, string, error)
 	return filesJSON, metadataJSON, nil
 }
 
+// DeleteLiveMonitorSnapshots removes all live_monitor-triggered snapshots for a
+// session. Called after creating an agent_completed snapshot to prevent stale
+// live_monitor data from superseding the authoritative completion snapshot.
+func (r *Repository) DeleteLiveMonitorSnapshots(ctx context.Context, sessionID string) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM task_session_git_snapshots
+		WHERE session_id = ? AND triggered_by = ?
+	`), sessionID, TriggeredByLiveMonitor)
+	return err
+}
+
 // CreateGitSnapshot inserts a new git snapshot into the database.
 func (r *Repository) CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error {
 	if snapshot.ID == "" {
@@ -150,10 +161,51 @@ func (r *Repository) getGitSnapshotByOrder(ctx context.Context, sessionID, order
 	return snapshot, nil
 }
 
-// GetLatestGitSnapshot retrieves the most recent git snapshot for a session.
+// GetLatestGitSnapshot retrieves the best git snapshot for a session.
+// Prefers agent_completed snapshots (captured at exact completion time) over
+// live_monitor snapshots (periodic polls that may contain stale data if the
+// poll raced with agent completion). Falls back to most-recent-by-time when
+// no agent_completed snapshot exists.
 // Returns sql.ErrNoRows if no snapshot is found.
 func (r *Repository) GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
-	return r.getGitSnapshotByOrder(ctx, sessionID, "DESC")
+	snapshot := &models.GitSnapshot{}
+	var snapshotType string
+	var filesJSON string
+	var metadataJSON string
+
+	query := `
+		SELECT id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
+		       ahead, behind, files, triggered_by, metadata, created_at
+		FROM task_session_git_snapshots
+		WHERE session_id = ?
+		ORDER BY
+			CASE WHEN triggered_by = 'agent_completed' THEN 0 ELSE 1 END,
+			created_at DESC
+		LIMIT 1
+	`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID).Scan(
+		&snapshot.ID, &snapshot.SessionID, &snapshotType, &snapshot.Branch,
+		&snapshot.RemoteBranch, &snapshot.HeadCommit, &snapshot.BaseCommit,
+		&snapshot.Ahead, &snapshot.Behind, &filesJSON, &snapshot.TriggeredBy,
+		&metadataJSON, &snapshot.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	snapshot.SnapshotType = models.SnapshotType(snapshotType)
+	if filesJSON != "" && filesJSON != "{}" {
+		if err := json.Unmarshal([]byte(filesJSON), &snapshot.Files); err != nil {
+			return nil, fmt.Errorf("failed to deserialize git snapshot files: %w", err)
+		}
+	}
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &snapshot.Metadata); err != nil {
+			return nil, fmt.Errorf("failed to deserialize git snapshot metadata: %w", err)
+		}
+	}
+
+	return snapshot, nil
 }
 
 // GetFirstGitSnapshot retrieves the oldest git snapshot for a session (first one created).

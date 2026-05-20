@@ -1,17 +1,13 @@
-import type {
-  LocalRepository,
-  Repository,
-  Workspace,
-  Executor,
-  Branch,
-  Task,
-} from "@/lib/types/http";
-import type { AgentProfileOption } from "@/lib/state/slices";
+import type React from "react";
+import type { LocalRepository, Repository, Executor, Branch, Task } from "@/lib/types/http";
+import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import type {
   KanbanMultiState,
   WorkflowSnapshotData,
   WorkflowsState,
 } from "@/lib/state/slices/kanban/types";
+
+type Workspace = WorkspaceState["items"][number];
 import type {
   useRepositoryOptions,
   useBranchOptions,
@@ -133,6 +129,13 @@ export type TaskCreateEffectsArgs = {
    * worktree run that would trigger a destructive `git checkout` on submit.
    */
   isLocalExecutor: boolean;
+  /**
+   * Branch the caller wants preserved across the local-switch reset (e.g. the
+   * PR head branch when launching from a GitHub PR). The reset effect skips
+   * rows whose branch matches this value so the explicit caller choice isn't
+   * clobbered by the executor's async settle on mount.
+   */
+  preserveBranch?: string;
 };
 
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
@@ -163,7 +166,7 @@ export type DialogFormState = {
    * order is the position the backend sees. There is no "primary" concept.
    */
   repositories: TaskRepoRow[];
-  setRepositories: (v: TaskRepoRow[]) => void;
+  setRepositories: React.Dispatch<React.SetStateAction<TaskRepoRow[]>>;
   addRepository: () => void;
   removeRepository: (key: string) => void;
   updateRepository: (key: string, patch: Partial<TaskRepoRow>) => void;
@@ -270,7 +273,7 @@ export type SubmitHandlersDeps = {
   setHasTitle: (v: boolean) => void;
   setHasDescription: (v: boolean) => void;
   setTaskName: (v: string) => void;
-  setRepositories: (v: TaskRepoRow[]) => void;
+  setRepositories: React.Dispatch<React.SetStateAction<TaskRepoRow[]>>;
   setGitHubBranch: (v: string) => void;
   setAgentProfileId: (v: string) => void;
   setExecutorId: (v: string) => void;

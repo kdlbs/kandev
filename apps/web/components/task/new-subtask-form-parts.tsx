@@ -15,7 +15,7 @@ import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
 import type { useDialogHandlers } from "@/components/task-create-dialog-handlers";
 import type { Repository } from "@/lib/types/http";
-import type { useSubtaskFormState } from "./new-subtask-form-state";
+import type { SubtaskWorkspaceMode, useSubtaskFormState } from "./new-subtask-form-state";
 import {
   AttachButton,
   ContextSelect,
@@ -176,6 +176,51 @@ export function PromptZone({
   );
 }
 
+type WorkspaceSectionProps = {
+  inheritParent: boolean;
+  fs: ReturnType<typeof useSubtaskFormState>;
+  handlers: ReturnType<typeof useDialogHandlers>;
+  availableRepositories: Repository[];
+  workspaceId: string | null;
+  worktreeBranch: string | null;
+  showWorktreeBadge: boolean;
+};
+
+/**
+ * Renders the workspace section under the workspace-mode toggle. When
+ * inherit_parent is selected the repo pickers are hidden (the backend
+ * inherits parent's repos); when new_workspace is selected we show the
+ * existing chip row + branch badge so the user can override.
+ */
+function WorkspaceSection({
+  inheritParent,
+  fs,
+  handlers,
+  availableRepositories,
+  workspaceId,
+  worktreeBranch,
+  showWorktreeBadge,
+}: WorkspaceSectionProps) {
+  if (inheritParent) {
+    return <WorktreeBadge show={!!worktreeBranch} branch={worktreeBranch} />;
+  }
+  return (
+    <>
+      <RepoChipsRow
+        fs={fs}
+        repositories={availableRepositories}
+        isTaskStarted={false}
+        workspaceId={workspaceId}
+        onRowRepositoryChange={handlers.handleRowRepositoryChange}
+        onRowBranchChange={handlers.handleRowBranchChange}
+        onToggleGitHubUrl={handlers.handleToggleGitHubUrl}
+        onGitHubUrlChange={handlers.handleGitHubUrlChange}
+      />
+      <WorktreeBadge show={showWorktreeBadge} branch={worktreeBranch} />
+    </>
+  );
+}
+
 type SubtaskFormBodyProps = {
   fs: ReturnType<typeof useSubtaskFormState>;
   handlers: ReturnType<typeof useDialogHandlers>;
@@ -188,6 +233,9 @@ type SubtaskFormBodyProps = {
   profileOptions: ReturnType<typeof useAgentProfileOptions>;
   executorProfileOptions: ReturnType<typeof useExecutorProfileOptions>;
   agentProfileId: string;
+  /** Office task-handoffs phase 5 — workspace mode toggle. */
+  workspaceMode: SubtaskWorkspaceMode;
+  onWorkspaceModeChange: (m: SubtaskWorkspaceMode) => void;
   contextValue: string;
   onContextChange: (value: string) => void | Promise<void>;
   hasInitialPrompt: boolean;
@@ -199,6 +247,102 @@ type SubtaskFormBodyProps = {
   onClose: () => void;
   onSubmit: (e: React.FormEvent) => void;
 };
+
+type WorkspaceModeToggleProps = {
+  value: SubtaskWorkspaceMode;
+  onChange: (m: SubtaskWorkspaceMode) => void;
+  disabled: boolean;
+  worktreeBranch: string | null;
+};
+
+/**
+ * Two-option toggle: inherit the parent task's materialized workspace,
+ * or create a new workspace from selected repositories. Office task-
+ * handoffs phase 5 — the backend records group membership when
+ * inherit_parent is selected so launch reuses the parent's environment.
+ */
+export function WorkspaceModeToggle({
+  value,
+  onChange,
+  disabled,
+  worktreeBranch,
+}: WorkspaceModeToggleProps) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-xs font-medium text-muted-foreground">Workspace</label>
+      <div
+        role="radiogroup"
+        aria-label="Workspace mode"
+        className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+      >
+        <WorkspaceModeOption
+          value="inherit_parent"
+          label="Inherit parent workspace"
+          description={
+            worktreeBranch
+              ? `Run in the parent's worktree (${worktreeBranch})`
+              : "Run in the parent's materialized workspace"
+          }
+          checked={value === "inherit_parent"}
+          disabled={disabled}
+          onSelect={() => onChange("inherit_parent")}
+          dataTestId="subtask-workspace-mode-inherit"
+        />
+        <WorkspaceModeOption
+          value="new_workspace"
+          label="Create new workspace"
+          description="Pick a different repo, local folder, or remote URL"
+          checked={value === "new_workspace"}
+          disabled={disabled}
+          onSelect={() => onChange("new_workspace")}
+          dataTestId="subtask-workspace-mode-new"
+        />
+      </div>
+    </div>
+  );
+}
+
+type WorkspaceModeOptionProps = {
+  value: SubtaskWorkspaceMode;
+  label: string;
+  description: string;
+  checked: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+  dataTestId: string;
+};
+
+function WorkspaceModeOption({
+  value,
+  label,
+  description,
+  checked,
+  disabled,
+  onSelect,
+  dataTestId,
+}: WorkspaceModeOptionProps) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={checked}
+      data-testid={dataTestId}
+      data-value={value}
+      disabled={disabled}
+      onClick={onSelect}
+      className={
+        "cursor-pointer rounded-md border px-3 py-2 text-left text-xs transition-colors " +
+        (checked
+          ? "border-primary bg-primary/5 text-foreground"
+          : "border-border hover:border-primary/60 text-muted-foreground hover:text-foreground") +
+        (disabled ? " cursor-not-allowed opacity-60" : "")
+      }
+    >
+      <div className="font-medium">{label}</div>
+      <div className="mt-0.5 text-[11px] text-muted-foreground">{description}</div>
+    </button>
+  );
+}
 
 /**
  * Renders the entire subtask form body (title input, repo chips, selectors,
@@ -217,6 +361,8 @@ export function SubtaskFormBody({
   profileOptions,
   executorProfileOptions,
   agentProfileId,
+  workspaceMode,
+  onWorkspaceModeChange,
   contextValue,
   onContextChange,
   hasInitialPrompt,
@@ -235,6 +381,7 @@ export function SubtaskFormBody({
     fs.repositories.length === 1 &&
     fs.repositories[0]?.repositoryId === parentRepositoryId &&
     !fs.useGitHubUrl;
+  const inheritParent = workspaceMode === "inherit_parent";
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="space-y-1.5">
@@ -251,17 +398,21 @@ export function SubtaskFormBody({
           disabled={isCreating}
         />
       </div>
-      <RepoChipsRow
-        fs={fs}
-        repositories={availableRepositories}
-        isTaskStarted={false}
-        workspaceId={workspaceId}
-        onRowRepositoryChange={handlers.handleRowRepositoryChange}
-        onRowBranchChange={handlers.handleRowBranchChange}
-        onToggleGitHubUrl={handlers.handleToggleGitHubUrl}
-        onGitHubUrlChange={handlers.handleGitHubUrlChange}
+      <WorkspaceModeToggle
+        value={workspaceMode}
+        onChange={onWorkspaceModeChange}
+        disabled={isCreating}
+        worktreeBranch={worktreeBranch}
       />
-      <WorktreeBadge show={showWorktreeBadge} branch={worktreeBranch} />
+      <WorkspaceSection
+        inheritParent={inheritParent}
+        fs={fs}
+        handlers={handlers}
+        availableRepositories={availableRepositories}
+        workspaceId={workspaceId}
+        worktreeBranch={worktreeBranch}
+        showWorktreeBadge={showWorktreeBadge}
+      />
       <SelectorsRow
         profileOptions={profileOptions}
         executorProfileOptions={executorProfileOptions}

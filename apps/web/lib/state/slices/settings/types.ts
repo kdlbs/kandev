@@ -54,14 +54,14 @@ export type AgentProfileOption = {
 /** Single source of truth for mapping an API Agent+Profile to a store AgentProfileOption. */
 export function toAgentProfileOption(
   agent: Pick<Agent, "id" | "name" | "capability_status" | "capability_error">,
-  profile: Pick<AgentProfile, "id" | "agent_display_name" | "name"> & { cli_passthrough?: boolean },
+  profile: Pick<AgentProfile, "id" | "agentDisplayName" | "name"> & { cliPassthrough?: boolean },
 ): AgentProfileOption {
   return {
     id: profile.id,
-    label: `${profile.agent_display_name} • ${profile.name}`,
+    label: `${profile.agentDisplayName ?? ""} • ${profile.name}`,
     agent_id: agent.id,
     agent_name: agent.name,
-    cli_passthrough: profile.cli_passthrough ?? false,
+    cli_passthrough: profile.cliPassthrough ?? false,
     capability_status: agent.capability_status,
     capability_error: agent.capability_error,
   };

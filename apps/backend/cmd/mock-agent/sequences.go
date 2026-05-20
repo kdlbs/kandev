@@ -215,6 +215,122 @@ func emitMermaidSequence(e *emitter, model string) {
 		"- Database connections use a **connection pool** (max 50)\n")
 }
 
+// emitMarkdownShowcase emits a rich multi-message demonstration of every
+// rendered text/markdown type: headings, paragraphs (short and long), inline
+// code, fenced code blocks, lists, tables, blockquotes, bold/italic, and hr.
+func emitMarkdownShowcase(e *emitter, model string) {
+	randomDelay(model)
+	e.text(markdownHeadingsMsg())
+	randomDelay(model)
+	e.text(markdownLongParaMsg())
+	randomDelay(model)
+	e.text(markdownCodeBlocksMsg())
+	randomDelay(model)
+	e.text(markdownListsMsg())
+	randomDelay(model)
+	e.text(markdownTableBlockquoteMsg())
+}
+
+func markdownHeadingsMsg() string {
+	return "# Heading 1\n\n" +
+		"## Heading 2\n\n" +
+		"### Heading 3\n\n" +
+		"Short paragraph. Inline code looks like `const x = 42` in the middle of a sentence.\n\n" +
+		"Another short one: call `os.Exit(1)` to terminate, or use `fmt.Errorf(\"wrap: %w\", err)` for wrapping errors."
+}
+
+func markdownLongParaMsg() string {
+	return "## Long Paragraph\n\n" +
+		"This is a deliberately long paragraph to test line wrapping and reading comfort at various chat panel widths. " +
+		"When a user writes a prompt that requires careful reasoning, the agent first decomposes the request into sub-problems, " +
+		"then resolves each one in dependency order before synthesising a final answer. " +
+		"The approach mirrors how a senior engineer would tackle an unfamiliar codebase: read the entry points, " +
+		"trace the data flow, identify the invariants that must hold, and only then start making changes. " +
+		"Getting this sequence right matters because changes made without understanding the invariants tend to " +
+		"introduce subtle regressions that only surface under production load — exactly the kind of bug that is " +
+		"hardest to diagnose after the fact.\n\n" +
+		"A second long paragraph follows immediately to check spacing between blocks. " +
+		"The spacing should feel consistent with single-paragraph messages, neither too tight nor too loose. " +
+		"Inter-paragraph spacing is controlled by `margin-top` on `.markdown-body p + p`, " +
+		"which currently sits at `0.5em` — enough breathing room without pushing content off-screen on short viewports."
+}
+
+func markdownCodeBlocksMsg() string {
+	return "## Code Blocks\n\n" +
+		"TypeScript:\n\n" +
+		"```typescript\n" +
+		"interface Session {\n" +
+		"  id: string;\n" +
+		"  createdAt: Date;\n" +
+		"  messages: Message[];\n" +
+		"}\n\n" +
+		"async function fetchSession(id: string): Promise<Session> {\n" +
+		"  const res = await fetch(`/api/sessions/${id}`);\n" +
+		"  if (!res.ok) throw new Error(`HTTP ${res.status}`);\n" +
+		"  return res.json();\n" +
+		"}\n" +
+		"```\n\n" +
+		"Go:\n\n" +
+		"```go\n" +
+		"func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest) (*Task, error) {\n" +
+		"\tif req.Title == \"\" {\n" +
+		"\t\treturn nil, fmt.Errorf(\"title is required\")\n" +
+		"\t}\n" +
+		"\ttask := &Task{\n" +
+		"\t\tID:        uuid.New().String(),\n" +
+		"\t\tTitle:     req.Title,\n" +
+		"\t\tCreatedAt: time.Now(),\n" +
+		"\t}\n" +
+		"\treturn s.repo.Save(ctx, task)\n" +
+		"}\n" +
+		"```\n\n" +
+		"Shell:\n\n" +
+		"```bash\n" +
+		"# Build and run tests\n" +
+		"make -C apps/backend build && \\\n" +
+		"  go test ./... -race -count=1 | tee /tmp/test.log\n" +
+		"```"
+}
+
+func markdownListsMsg() string {
+	return "## Lists\n\n" +
+		"Unordered:\n\n" +
+		"- First item with `inline code` in it\n" +
+		"- Second item — **bold text** and *italic text* inline\n" +
+		"- Third item with a longer description: this tests wrapping inside list items at narrow panel widths, " +
+		"which is a common layout scenario in split-pane editors\n" +
+		"  - Nested item A\n" +
+		"  - Nested item B\n\n" +
+		"Ordered:\n\n" +
+		"1. Read the spec\n" +
+		"2. Write a failing test\n" +
+		"3. Implement the feature\n" +
+		"4. Refactor until the code is clean\n" +
+		"5. Open a PR and request review"
+}
+
+func markdownTableBlockquoteMsg() string {
+	return "## Table\n\n" +
+		"| Command | Description | Example |\n" +
+		"|---------|-------------|----------|\n" +
+		"| `/slow` | Slow response | `/slow 10s` |\n" +
+		"| `/thinking` | Reasoning blocks | `/thinking` |\n" +
+		"| `/mermaid` | Mermaid diagram | `/mermaid` |\n" +
+		"| `/markdown` | This showcase | `/markdown` |\n\n" +
+		"---\n\n" +
+		"## Blockquote\n\n" +
+		"> Programs must be written for people to read, and only incidentally for machines to execute.\n" +
+		"> — Harold Abelson\n\n" +
+		"> A second blockquote paragraph to verify spacing between consecutive quote blocks " +
+		"and to ensure the left-border styling extends for the full height of wrapped lines.\n\n" +
+		"---\n\n" +
+		"## Inline Styles\n\n" +
+		"**Bold**, *italic*, ~~strikethrough~~, and `inline code` all in one sentence. " +
+		"A path like `apps/web/app/globals.css` mid-sentence, then more prose after it. " +
+		"And a longer inline snippet: `color-mix(in oklch, var(--foreground) 10%, var(--muted))` " +
+		"should wrap cleanly without breaking the surrounding text flow."
+}
+
 // emitWebFetch emits a WebFetch tool call.
 func emitWebFetch(e *emitter, model string) {
 	toolID := nextToolID()

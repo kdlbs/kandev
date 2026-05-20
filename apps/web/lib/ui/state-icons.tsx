@@ -42,6 +42,9 @@ const SESSION_STATE_ICONS: Record<TaskSessionState, IconConfig> = {
   CREATED: { Icon: IconAlertCircle, className: STYLE_MUTED },
   STARTING: { Icon: IconLoader2, className: STYLE_LOADING },
   RUNNING: { Icon: IconCircleFilled, className: "text-emerald-500" },
+  // Office sessions: agent process torn down, conversation paused. Use the
+  // pause icon — visually distinct from RUNNING and from terminal states.
+  IDLE: { Icon: IconPlayerPause, className: STYLE_MUTED },
   WAITING_FOR_INPUT: { Icon: IconClock, className: STYLE_MUTED },
   COMPLETED: { Icon: IconCircleCheck, className: "text-green-500" },
   FAILED: { Icon: IconAlertTriangle, className: STYLE_ERROR },
