@@ -449,10 +449,11 @@ func (c *PATClient) GetRepoMergeMethods(ctx context.Context, owner, repo string)
 	if err := c.get(ctx, fmt.Sprintf("/repos/%s/%s", owner, repo), &raw); err != nil {
 		return RepoMergeMethods{}, fmt.Errorf("get repo merge methods: %w", err)
 	}
-	// GitHub omits the allow_* fields when the token can't admin the repo, so
-	// a missing field means "assume allowed" — matches what GitHub's own UI
-	// offers a non-admin viewer.
-	allowed := func(p *bool) bool { return p == nil || *p }
+	// Conservative read: missing field → false. A permission-gated response
+	// that omits allow_* would otherwise let us pick a disallowed method
+	// (e.g. "merge" on a rebase-only repo), reproducing the 405 this fix is
+	// designed to prevent.
+	allowed := func(p *bool) bool { return p != nil && *p }
 	return RepoMergeMethods{
 		Merge:  allowed(raw.AllowMergeCommit),
 		Squash: allowed(raw.AllowSquashMerge),

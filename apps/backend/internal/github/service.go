@@ -446,9 +446,13 @@ func (s *Service) MergePR(ctx context.Context, owner, repo string, number int, m
 		// Resolve to an allowed method up-front so we don't rely on GitHub's
 		// "default to merge" behavior, which 405s on repos that disallow
 		// merge commits (squash-only / rebase-only). Best-effort: if the
-		// lookup fails, fall back to GitHub's default and surface its error.
+		// lookup fails (or — degenerate config — reports no method allowed),
+		// fall back to GitHub's default and surface its error rather than
+		// blocking the merge attempt.
 		if methods, err := s.GetRepoMergeMethods(ctx, owner, repo); err == nil {
-			mergeMethod = pickDefaultMergeMethod(methods)
+			if pick := pickDefaultMergeMethod(methods); pick != "" {
+				mergeMethod = pick
+			}
 		}
 	}
 	return s.client.MergePR(ctx, owner, repo, number, mergeMethod)

@@ -10,15 +10,16 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { useToast } from "@/components/toast-provider";
-import { getRepoMergeMethods, mergePR } from "@/lib/api/domains/github-api";
-import type { MergeMethod, RepoMergeMethods, TaskPR } from "@/lib/types/github";
+import { useRepoMergeMethods } from "@/hooks/domains/github/use-repo-merge-methods";
+import { mergePR } from "@/lib/api/domains/github-api";
+import type { MergeMethod, TaskPR } from "@/lib/types/github";
 import { isPRReadyToMerge } from "./pr-task-icon";
 
 // Renders nothing unless the PR is fully green (CI success + mergeable +
-// approval or no-review-needed). Shared by the PR detail panel header and
-// the topbar hover popover so a "ready" PR can be merged from either
-// surface. `compact` switches to the smaller pill variant used inside the
-// dense popover.
+// approval or no-review-needed) AND the repo's allowed merge methods have
+// loaded. Shared by the PR detail panel header and the topbar hover popover
+// so a "ready" PR can be merged from either surface. `compact` switches to
+// the smaller pill variant used inside the dense popover.
 export function PRMergeButton({
   taskPR,
   onMerged,
@@ -34,7 +35,7 @@ export function PRMergeButton({
   // state="merged" — otherwise the button briefly re-enables during the async
   // refresh window and a double-click would hit the GitHub API again.
   const [merged, setMerged] = useState(false);
-  const [methods, setMethods] = useState<RepoMergeMethods | null>(null);
+  const methods = useRepoMergeMethods(taskPR.owner, taskPR.repo);
 
   // If the same component instance ever renders a different PR (e.g. the user
   // switches the active task while the panel/popover stays mounted), the
@@ -45,23 +46,12 @@ export function PRMergeButton({
     setMerged(false);
   }, [taskPR.id]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setMethods(null);
-    getRepoMergeMethods(taskPR.owner, taskPR.repo)
-      .then((m) => {
-        if (!cancelled) setMethods(m);
-      })
-      .catch(() => {
-        // Lookup failures are non-fatal — the backend will fall back to
-        // GitHub's default behavior if the user clicks merge.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [taskPR.owner, taskPR.repo]);
-
   if (merged || !isPRReadyToMerge(taskPR)) return null;
+  // Wait until we know the repo's allowed methods so we don't flicker the
+  // primary label from "Merge PR" → "Squash and merge" after the lookup
+  // resolves, and so we never click through with an empty method that races
+  // the backend's own lookup.
+  if (!methods) return null;
 
   const allowed = allowedMethods(methods);
   const primary = pickPrimaryMethod(allowed);
@@ -167,13 +157,7 @@ function MergeButtonShell({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-auto">
           {extraMethods.map((m) => (
-            <DropdownMenuItem
-              key={m}
-              onSelect={(e) => {
-                e.preventDefault();
-                onPickMethod(m);
-              }}
-            >
+            <DropdownMenuItem key={m} onSelect={() => onPickMethod(m)}>
               {mergeLabel(m)}
             </DropdownMenuItem>
           ))}
@@ -198,10 +182,11 @@ function mergeLabel(method?: MergeMethod): string {
 
 // Returns the methods the repo allows, in the order we prefer to surface
 // them (squash → merge → rebase, matching GitHub's own button defaults).
-// When the lookup hasn't returned yet, returns an empty array so only the
-// primary action is rendered.
-function allowedMethods(methods: RepoMergeMethods | null): MergeMethod[] {
-  if (!methods) return [];
+function allowedMethods(methods: {
+  merge: boolean;
+  squash: boolean;
+  rebase: boolean;
+}): MergeMethod[] {
   const order: MergeMethod[] = ["squash", "merge", "rebase"];
   return order.filter((m) => methods[m]);
 }

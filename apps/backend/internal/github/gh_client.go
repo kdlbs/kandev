@@ -659,10 +659,12 @@ func (c *GHClient) GetRepoMergeMethods(ctx context.Context, owner, repo string) 
 	if err := json.Unmarshal([]byte(out), &raw); err != nil {
 		return RepoMergeMethods{}, fmt.Errorf("parse repo: %w", err)
 	}
-	// GitHub omits the allow_* fields for public repos the caller can't admin,
-	// so a missing field means "assume allowed" — matches the merge UI you see
-	// as a non-admin viewer.
-	allowed := func(p *bool) bool { return p == nil || *p }
+	// Conservative read: missing field → false. A permission-gated response
+	// that omits allow_* would otherwise let us pick a disallowed method
+	// (e.g. "merge" on a rebase-only repo), reproducing the 405 this fix is
+	// designed to prevent. Callers that fall back to GitHub's default on an
+	// empty pick get a meaningful error instead of a wrong-method 405.
+	allowed := func(p *bool) bool { return p != nil && *p }
 	return RepoMergeMethods{
 		Merge:  allowed(raw.AllowMergeCommit),
 		Squash: allowed(raw.AllowSquashMerge),
