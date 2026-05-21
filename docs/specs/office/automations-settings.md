@@ -15,6 +15,7 @@ The Automations feature, originating in PR #406, gives kandev a standalone trigg
 ## What
 
 - Every automation has an `execution_mode` field — `task` (default) or `run`. The choice is per-automation, editable in the editor.
+- Every automation has an optional `repository_id` field. When set, scheduled and webhook firings pin the task to that repository on its default branch. When empty, falls back to the workspace's first repository (legacy behavior). `github_pr` triggers always use the PR's own repository and ignore `repository_id`.
 - `execution_mode = task`: trigger fires → a normal kanban task is created (current PR #406 behavior). Task is visible on the kanban, commentable, reviewable, and has full lifecycle.
 - `execution_mode = run`: trigger fires → an ephemeral task is created (`is_ephemeral = true`, `origin = "automation_run"`) so the existing session pipeline still launches an agent. The kanban hides ephemeral tasks. The AutomationRun row is the surfaced artifact; the linked task is plumbing only.
 - Run-mode automations **auto-start** their agent regardless of the workflow step's `auto_start_agent` setting — the user never opens the task to drag it, so the trigger MUST be the start signal.
@@ -27,13 +28,12 @@ The Automations feature, originating in PR #406, gives kandev a standalone trigg
 
 ## Data model
 
-Builds on PR #406's `internal/automation/` schema. Only one column added:
+Builds on PR #406's `internal/automation/` schema. Two columns added (folded into the canonical `CREATE TABLE` since PR #406 itself introduces the `automations` table — no in-branch migrations are needed):
 
 ```
 automations.execution_mode TEXT NOT NULL DEFAULT 'task'   -- 'task' | 'run'
+automations.repository_id  TEXT NOT NULL DEFAULT ''       -- optional FK-by-id to repositories
 ```
-
-Idempotent migration in `internal/automation/store.go::migrateExecutionModeSQL` — `ALTER TABLE automations ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'task'`. SQLite swallows duplicate-column errors on re-run.
 
 The `tasks.is_ephemeral` and `tasks.origin` columns already exist (used by quick-chat). Run-mode automations set both at task-create time. New task origin constant `TaskOriginAutomationRun = "automation_run"` lives in `internal/task/models/models.go`.
 
@@ -41,7 +41,7 @@ The `tasks.is_ephemeral` and `tasks.origin` columns already exist (used by quick
 
 ## API surface
 
-PR #406's WS-based API gets one new field — `execution_mode` — on:
+PR #406's WS-based API gets two new fields — `execution_mode` and `repository_id` — on:
 
 - `automation.create` payload (input)
 - `automation.update` payload (input)
@@ -89,6 +89,9 @@ Inherits PR #406's model (no per-action authorization gates). The flat `/setting
 - **GIVEN** a user opens `/settings/automations` in a fresh install with zero workspaces, **WHEN** the page loads, **THEN** an empty-state card explains "create a workspace first" with a CTA.
 - **GIVEN** a user toggles an existing task-mode automation to run mode in the editor, **WHEN** the next trigger fires, **THEN** the resulting task is hidden from the kanban; previously-created tasks (from task-mode firings) remain visible.
 - **GIVEN** a run-mode automation triggered by a GitHub PR event, **WHEN** the trigger fires, **THEN** the PR is associated with the ephemeral task via `AssociatePRWithTask` exactly as in task mode.
+- **GIVEN** a scheduled automation with `repository_id` set to a specific repo, **WHEN** the cron fires, **THEN** the resulting task is pinned to that repo's default branch — regardless of whether the workspace has other repositories.
+- **GIVEN** a scheduled automation with `repository_id = ""` in a multi-repo workspace, **WHEN** the cron fires, **THEN** the task uses the workspace's first repository (legacy fallback) and a warning is logged.
+- **GIVEN** an automation with `repository_id` set and a `github_pr` trigger, **WHEN** a PR event fires, **THEN** the task uses the PR's own repository, not the configured `repository_id` — the editor disables the picker for PR triggers with a hint.
 - **GIVEN** an upgrade from a pre-execution_mode kandev version, **WHEN** the user opens the editor for an existing automation, **THEN** the execution-mode selector defaults to "Task" (preserving previous behavior).
 
 ## Out of scope

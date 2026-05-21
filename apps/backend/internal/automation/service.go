@@ -68,6 +68,7 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 		WorkflowStepID:    req.WorkflowStepID,
 		AgentProfileID:    req.AgentProfileID,
 		ExecutorProfileID: req.ExecutorProfileID,
+		RepositoryID:      req.RepositoryID,
 		Prompt:            req.Prompt,
 		TaskTitleTemplate: req.TaskTitleTemplate,
 		ExecutionMode:     mode,

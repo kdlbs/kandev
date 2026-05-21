@@ -54,14 +54,19 @@ func (m ExecutionMode) Valid() bool {
 
 // Automation is a named rule with triggers, a prompt template, and agent/executor config.
 type Automation struct {
-	ID                string        `json:"id" db:"id"`
-	WorkspaceID       string        `json:"workspace_id" db:"workspace_id"`
-	Name              string        `json:"name" db:"name"`
-	Description       string        `json:"description" db:"description"`
-	WorkflowID        string        `json:"workflow_id" db:"workflow_id"`
-	WorkflowStepID    string        `json:"workflow_step_id" db:"workflow_step_id"`
-	AgentProfileID    string        `json:"agent_profile_id" db:"agent_profile_id"`
-	ExecutorProfileID string        `json:"executor_profile_id" db:"executor_profile_id"`
+	ID                string `json:"id" db:"id"`
+	WorkspaceID       string `json:"workspace_id" db:"workspace_id"`
+	Name              string `json:"name" db:"name"`
+	Description       string `json:"description" db:"description"`
+	WorkflowID        string `json:"workflow_id" db:"workflow_id"`
+	WorkflowStepID    string `json:"workflow_step_id" db:"workflow_step_id"`
+	AgentProfileID    string `json:"agent_profile_id" db:"agent_profile_id"`
+	ExecutorProfileID string `json:"executor_profile_id" db:"executor_profile_id"`
+	// RepositoryID is the explicit repository to use for trigger firings.
+	// Empty falls back to the workspace's first repository (for scheduled /
+	// webhook triggers) or the PR's repository (for github_pr triggers, which
+	// always override this field — see resolveAutomationRepository).
+	RepositoryID      string        `json:"repository_id" db:"repository_id"`
 	Prompt            string        `json:"prompt" db:"prompt"`
 	TaskTitleTemplate string        `json:"task_title_template" db:"task_title_template"`
 	ExecutionMode     ExecutionMode `json:"execution_mode" db:"execution_mode"`
@@ -151,6 +156,7 @@ type CreateAutomationRequest struct {
 	WorkflowStepID    string              `json:"workflow_step_id"`
 	AgentProfileID    string              `json:"agent_profile_id"`
 	ExecutorProfileID string              `json:"executor_profile_id"`
+	RepositoryID      string              `json:"repository_id"`
 	Prompt            string              `json:"prompt"`
 	TaskTitleTemplate string              `json:"task_title_template"`
 	ExecutionMode     ExecutionMode       `json:"execution_mode"`
@@ -173,6 +179,7 @@ type UpdateAutomationRequest struct {
 	WorkflowStepID    *string        `json:"workflow_step_id,omitempty"`
 	AgentProfileID    *string        `json:"agent_profile_id,omitempty"`
 	ExecutorProfileID *string        `json:"executor_profile_id,omitempty"`
+	RepositoryID      *string        `json:"repository_id,omitempty"`
 	Prompt            *string        `json:"prompt,omitempty"`
 	TaskTitleTemplate *string        `json:"task_title_template,omitempty"`
 	ExecutionMode     *ExecutionMode `json:"execution_mode,omitempty"`

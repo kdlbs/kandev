@@ -39,7 +39,10 @@ const createTablesSQL = `
 		workflow_step_id TEXT NOT NULL,
 		agent_profile_id TEXT NOT NULL,
 		executor_profile_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL DEFAULT '',
 		prompt TEXT DEFAULT '',
+		task_title_template TEXT DEFAULT '',
+		execution_mode TEXT NOT NULL DEFAULT 'task',
 		enabled BOOLEAN DEFAULT 1,
 		max_concurrent_runs INTEGER DEFAULT 1,
 		webhook_secret TEXT DEFAULT '',
@@ -78,23 +81,9 @@ const createTablesSQL = `
 	CREATE INDEX IF NOT EXISTS idx_automation_runs_dedup ON automation_runs(automation_id, dedup_key);
 `
 
-const migrateTaskTitleSQL = `
-	ALTER TABLE automations ADD COLUMN task_title_template TEXT DEFAULT '';
-`
-
-const migrateExecutionModeSQL = `
-	ALTER TABLE automations ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'task';
-`
-
 func (s *Store) initSchema() error {
-	if _, err := s.db.Exec(createTablesSQL); err != nil {
-		return err
-	}
-	// Idempotent migrations: each ALTER adds a column if missing; SQLite
-	// returns a duplicate-column error otherwise, which we swallow.
-	s.db.Exec(migrateTaskTitleSQL)     //nolint:errcheck // column may already exist
-	s.db.Exec(migrateExecutionModeSQL) //nolint:errcheck // column may already exist
-	return nil
+	_, err := s.db.Exec(createTablesSQL)
+	return err
 }
 
 // --- Automation CRUD ---
@@ -115,12 +104,14 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO automations (id, workspace_id, name, description, workflow_id, workflow_step_id,
-			agent_profile_id, executor_profile_id, prompt, task_title_template, execution_mode,
+			agent_profile_id, executor_profile_id, repository_id,
+			prompt, task_title_template, execution_mode,
 			enabled, max_concurrent_runs,
 			webhook_secret, last_triggered_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.WorkspaceID, a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
-		a.AgentProfileID, a.ExecutorProfileID, a.Prompt, a.TaskTitleTemplate, string(a.ExecutionMode),
+		a.AgentProfileID, a.ExecutorProfileID, a.RepositoryID,
+		a.Prompt, a.TaskTitleTemplate, string(a.ExecutionMode),
 		a.Enabled, a.MaxConcurrentRuns,
 		a.WebhookSecret, a.LastTriggeredAt, a.CreatedAt, a.UpdatedAt)
 	return err
@@ -222,6 +213,9 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 	if req.ExecutorProfileID != nil {
 		a.ExecutorProfileID = *req.ExecutorProfileID
 	}
+	if req.RepositoryID != nil {
+		a.RepositoryID = *req.RepositoryID
+	}
 	if req.Prompt != nil {
 		a.Prompt = *req.Prompt
 	}
@@ -243,11 +237,13 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 	a.UpdatedAt = time.Now().UTC()
 	_, err = s.db.ExecContext(ctx, `
 		UPDATE automations SET name = ?, description = ?, workflow_id = ?, workflow_step_id = ?,
-			agent_profile_id = ?, executor_profile_id = ?, prompt = ?, task_title_template = ?,
+			agent_profile_id = ?, executor_profile_id = ?, repository_id = ?,
+			prompt = ?, task_title_template = ?,
 			execution_mode = ?, enabled = ?, max_concurrent_runs = ?, updated_at = ?
 		WHERE id = ?`,
 		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
-		a.AgentProfileID, a.ExecutorProfileID, a.Prompt, a.TaskTitleTemplate,
+		a.AgentProfileID, a.ExecutorProfileID, a.RepositoryID,
+		a.Prompt, a.TaskTitleTemplate,
 		string(a.ExecutionMode), a.Enabled, a.MaxConcurrentRuns, a.UpdatedAt, id)
 	return err
 }

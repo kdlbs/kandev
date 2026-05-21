@@ -165,15 +165,49 @@ func (s *Service) autoStartAutomationTask(ctx context.Context, a *automation.Aut
 }
 
 // resolveAutomationRepository determines the repository for an automation-triggered task.
-// For github_pr triggers, it extracts repo info from the trigger data.
-// For other triggers (scheduled, webhook), it uses the automation's configured repository_id.
+// For github_pr triggers, it always extracts repo info from the trigger data —
+// the PR's own repo is the only sensible choice when responding to a PR event,
+// so an explicit RepositoryID on the automation is ignored.
+// For other triggers (scheduled, webhook), it prefers the automation's explicit
+// RepositoryID; falls back to the workspace's first repository if unset.
 func (s *Service) resolveAutomationRepository(
 	ctx context.Context, a *automation.Automation, evt *automation.AutomationTriggeredEvent,
 ) []ReviewTaskRepository {
 	if evt.TriggerType == automation.TriggerTypeGitHubPR {
 		return s.resolveGitHubPRTriggerRepository(ctx, a.WorkspaceID, evt.TriggerData)
 	}
+	if a.RepositoryID != "" {
+		return s.resolveExplicitRepository(ctx, a.RepositoryID)
+	}
 	return s.resolveWorkspaceRepository(ctx, a.WorkspaceID)
+}
+
+// resolveExplicitRepository loads the repository named by the automation's
+// RepositoryID field and produces a single ReviewTaskRepository entry. The
+// task gets pinned to the repo's default branch; the automation has no way
+// to specify a checkout branch yet.
+func (s *Service) resolveExplicitRepository(
+	ctx context.Context, repositoryID string,
+) []ReviewTaskRepository {
+	store, ok := s.repo.(repoStore)
+	if !ok {
+		return nil
+	}
+	repo, err := store.GetRepository(ctx, repositoryID)
+	if err != nil || repo == nil {
+		s.logger.Warn("failed to load explicit automation repository",
+			zap.String("repository_id", repositoryID), zap.Error(err))
+		return nil
+	}
+	baseBranch := repo.DefaultBranch
+	if baseBranch == "" {
+		baseBranch = "main"
+	}
+	return []ReviewTaskRepository{{
+		RepositoryID:   repo.ID,
+		BaseBranch:     baseBranch,
+		CheckoutBranch: baseBranch,
+	}}
 }
 
 // resolveGitHubPRTriggerRepository extracts repo owner/name from PR trigger data

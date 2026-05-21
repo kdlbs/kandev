@@ -41,6 +41,7 @@ type FormState = {
   workflowStepId: string;
   agentProfileId: string;
   executorProfileId: string;
+  repositoryId: string;
   prompt: string;
   taskTitleTemplate: string;
   executionMode: ExecutionMode;
@@ -64,6 +65,7 @@ const defaultForm: FormState = {
   workflowStepId: "",
   agentProfileId: "",
   executorProfileId: "",
+  repositoryId: "",
   prompt: DEFAULT_PROMPT,
   taskTitleTemplate: "",
   executionMode: "task",
@@ -79,6 +81,7 @@ function formFromAutomation(a: Automation): FormState {
     workflowStepId: a.workflow_step_id,
     agentProfileId: a.agent_profile_id,
     executorProfileId: a.executor_profile_id,
+    repositoryId: a.repository_id ?? "",
     prompt: a.prompt || DEFAULT_PROMPT,
     taskTitleTemplate: a.task_title_template ?? "",
     executionMode: a.execution_mode ?? "task",
@@ -188,6 +191,7 @@ function buildCreatePayload(workspaceId: string, form: FormState, pending: Pendi
     workflow_step_id: form.workflowStepId,
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
+    repository_id: form.repositoryId,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
     execution_mode: form.executionMode,
@@ -204,6 +208,7 @@ function buildUpdatePayload(form: FormState) {
     workflow_step_id: form.workflowStepId,
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
+    repository_id: form.repositoryId,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
     execution_mode: form.executionMode,
@@ -331,6 +336,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         workspaceId={workspaceId}
         placeholders={placeholders}
         defaultTaskTitle={defaultTaskTitle}
+        conditionType={conditionType}
         updateField={updateField}
       />
       <Separator />
@@ -385,12 +391,14 @@ function ThenSection({
   workspaceId,
   placeholders,
   defaultTaskTitle,
+  conditionType,
   updateField,
 }: {
   form: FormState;
   workspaceId: string;
   placeholders: PlaceholderInfo[];
   defaultTaskTitle: string;
+  conditionType: TriggerType | null;
   updateField: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 }) {
   return (
@@ -425,7 +433,9 @@ function ThenSection({
           workflowStepId={form.workflowStepId}
           agentProfileId={form.agentProfileId}
           executorProfileId={form.executorProfileId}
+          repositoryId={form.repositoryId}
           executionMode={form.executionMode}
+          conditionType={conditionType}
           onWorkflowChange={(v) => {
             updateField("workflowId", v);
             updateField("workflowStepId", "");
@@ -433,6 +443,7 @@ function ThenSection({
           onStepChange={(v) => updateField("workflowStepId", v)}
           onAgentProfileChange={(v) => updateField("agentProfileId", v)}
           onExecutorProfileChange={(v) => updateField("executorProfileId", v)}
+          onRepositoryChange={(v) => updateField("repositoryId", v)}
           onExecutionModeChange={(v) => updateField("executionMode", v)}
         />
       </div>
