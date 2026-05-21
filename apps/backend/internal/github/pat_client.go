@@ -453,6 +453,19 @@ func (c *PATClient) SubmitReview(ctx context.Context, owner, repo string, number
 	return c.post(ctx, endpoint, jsonBody)
 }
 
+func (c *PATClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, number)
+	payload := map[string]string{}
+	if mergeMethod != "" {
+		payload["merge_method"] = mergeMethod
+	}
+	jsonBody, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal merge payload: %w", err)
+	}
+	return c.put(ctx, endpoint, jsonBody)
+}
+
 func (c *PATClient) post(ctx context.Context, endpoint string, body []byte) error {
 	u := githubAPIBase + endpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
@@ -473,6 +486,30 @@ func (c *PATClient) post(ctx context.Context, endpoint string, body []byte) erro
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
 		return fmt.Errorf("GitHub API POST %s returned %d: %s", endpoint, resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+func (c *PATClient) put(ctx context.Context, endpoint string, body []byte) error {
+	u := githubAPIBase + endpoint
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	c.setGitHubHeaders(req)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request PUT %s: %w", endpoint, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	c.recordRateHeaders(resp, endpoint)
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
+		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(respBody)}
 	}
 	return nil
 }

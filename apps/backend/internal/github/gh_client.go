@@ -600,6 +600,21 @@ func (c *GHClient) SubmitReview(ctx context.Context, owner, repo string, number 
 	return nil
 }
 
+func (c *GHClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
+	args := []string{"api",
+		fmt.Sprintf("repos/%s/%s/pulls/%d/merge", owner, repo, number),
+		"-X", "PUT",
+	}
+	if mergeMethod != "" {
+		args = append(args, "-f", "merge_method="+mergeMethod)
+	}
+	_, err := c.run(ctx, args...)
+	if err != nil {
+		return fmt.Errorf("merge PR #%d: %w", number, err)
+	}
+	return nil
+}
+
 func (c *GHClient) ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
 	out, err := c.run(ctx, "api",
 		fmt.Sprintf("repos/%s/%s/branches", owner, repo),

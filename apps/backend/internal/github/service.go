@@ -392,6 +392,17 @@ func (s *Service) SubmitReview(ctx context.Context, owner, repo string, number i
 	return s.client.SubmitReview(ctx, owner, repo, number, event, body)
 }
 
+// MergePR merges a pull request. mergeMethod is one of "merge", "squash",
+// "rebase"; an empty string lets GitHub apply the repo's default. The caller
+// is expected to refresh PR feedback after a successful merge — the background
+// poller will catch the merged state on its next pass.
+func (s *Service) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
+	if s.client == nil {
+		return fmt.Errorf("github client not configured")
+	}
+	return s.client.MergePR(ctx, owner, repo, number, mergeMethod)
+}
+
 // --- PR Watch operations ---
 
 // CreatePRWatch creates a new PR watch for a (session, repository) pair.

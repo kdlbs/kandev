@@ -1,6 +1,7 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 // stubClient implements Client with no-op defaults; override fields as needed.
 type stubClient struct {
 	getPRFunc func(ctx context.Context, owner, repo string, number int) (*PR, error)
+	mergePRFn func(ctx context.Context, owner, repo string, number int, mergeMethod string) error
 }
 
 func (s *stubClient) IsAuthenticated(context.Context) (bool, error) { return true, nil }
@@ -67,6 +69,12 @@ func (s *stubClient) ListPRCommits(context.Context, string, string, int) ([]PRCo
 	return nil, nil
 }
 func (s *stubClient) SubmitReview(context.Context, string, string, int, string, string) error {
+	return nil
+}
+func (s *stubClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
+	if s.mergePRFn != nil {
+		return s.mergePRFn(ctx, owner, repo, number, mergeMethod)
+	}
 	return nil
 }
 func (s *stubClient) ListRepoBranches(context.Context, string, string) ([]RepoBranch, error) {
@@ -160,5 +168,92 @@ func TestHttpGetPRInfo_ServiceError(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", w.Code)
+	}
+}
+
+func TestHttpMergePR_Success(t *testing.T) {
+	var called struct {
+		owner       string
+		repo        string
+		number      int
+		mergeMethod string
+	}
+	sc := &stubClient{
+		mergePRFn: func(_ context.Context, owner, repo string, number int, mergeMethod string) error {
+			called.owner = owner
+			called.repo = repo
+			called.number = number
+			called.mergeMethod = mergeMethod
+			return nil
+		},
+	}
+	router, _ := setupControllerTest(sc)
+
+	body := bytes.NewBufferString(`{"merge_method":"squash"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/github/prs/acme/widget/42/merge", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if called.owner != "acme" || called.repo != "widget" || called.number != 42 || called.mergeMethod != "squash" {
+		t.Errorf("unexpected MergePR args: %+v", called)
+	}
+}
+
+func TestHttpMergePR_InvalidMethod(t *testing.T) {
+	router, _ := setupControllerTest(&stubClient{})
+
+	body := bytes.NewBufferString(`{"merge_method":"bogus"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/github/prs/acme/widget/42/merge", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHttpMergePR_EmptyBody_UsesDefaultMethod(t *testing.T) {
+	var gotMethod string
+	sc := &stubClient{
+		mergePRFn: func(_ context.Context, _, _ string, _ int, mergeMethod string) error {
+			gotMethod = mergeMethod
+			return nil
+		},
+	}
+	router, _ := setupControllerTest(sc)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/github/prs/acme/widget/42/merge", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if gotMethod != "" {
+		t.Errorf("expected empty merge_method, got %q", gotMethod)
+	}
+}
+
+func TestHttpMergePR_Conflict(t *testing.T) {
+	sc := &stubClient{
+		mergePRFn: func(context.Context, string, string, int, string) error {
+			return &GitHubAPIError{StatusCode: http.StatusMethodNotAllowed, Endpoint: "/merge", Body: "not mergeable"}
+		},
+	}
+	router, _ := setupControllerTest(sc)
+
+	body := bytes.NewBufferString(`{"merge_method":"merge"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/github/prs/acme/widget/42/merge", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
 	}
 }

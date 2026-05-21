@@ -134,6 +134,21 @@ export async function submitPRReview(
   );
 }
 
+// Merge a pull request. Omit mergeMethod to use the repo's default.
+export async function mergePR(
+  owner: string,
+  repo: string,
+  number: number,
+  mergeMethod?: "merge" | "squash" | "rebase",
+) {
+  return fetchJson<{ merged: boolean }>(`/api/v1/github/prs/${owner}/${repo}/${number}/merge`, {
+    init: {
+      method: "PUT",
+      body: JSON.stringify({ merge_method: mergeMethod ?? "" }),
+    },
+  });
+}
+
 // PR watches
 export async function listPRWatches(options?: ApiRequestOptions) {
   return fetchJson<PRWatchesResponse>("/api/v1/github/watches/pr", options);
