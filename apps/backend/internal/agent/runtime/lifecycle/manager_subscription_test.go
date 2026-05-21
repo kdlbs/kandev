@@ -362,10 +362,35 @@ func TestAggregator_PushAsync_LastWriteWinsUnderRace(t *testing.T) {
 	mgr.pollAggregator.HandleSessionMode("s1", WorkspacePollModeSlow)
 	mgr.pollAggregator.HandleSessionMode("s1", WorkspacePollModeFast)
 
-	// Wait long enough for both pushes (including the artificial slowDelay)
-	// to settle. Otherwise the test could observe "fast" before the racing
-	// "slow" arrives and overwrites it — and pass even when the bug is present.
-	time.Sleep(slowDelay + 300*time.Millisecond)
+	// Wait for both pushes to land — the server records each call, so we
+	// can poll the recorded length instead of sleeping a fixed amount. The
+	// old fire-and-forget impl sent both slow and fast (2 calls); the fix
+	// may collapse slow before dispatch (1 call). Either way we wait until
+	// the pusher goroutine has drained, plus a brief settle window for any
+	// in-flight slow request to complete.
+	deadline := time.NewTimer(slowDelay + 2*time.Second)
+	defer deadline.Stop()
+waitLoop:
+	for {
+		mu.Lock()
+		n := len(calls)
+		seen := serverSeen
+		mu.Unlock()
+		// 1 call is enough only when it's already "fast" — in the buggy
+		// path a late-arriving slow can still overwrite, so wait for the
+		// drain window or until both arrived.
+		if n >= 2 || (n >= 1 && seen == "fast") {
+			break
+		}
+		select {
+		case <-deadline.C:
+			break waitLoop
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	// Add a brief settle so any racing slow push has time to overwrite if
+	// the bug is present.
+	time.Sleep(slowDelay + 100*time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()

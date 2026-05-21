@@ -232,22 +232,24 @@ func (m *Manager) GetWorkspaceTracker() *WorkspaceTracker {
 	return m.workspaceTracker
 }
 
-// StartAllWorkspaceTrackers starts the root tracker plus every per-repo tracker.
-// Idempotent: WorkspaceTracker.Start is a no-op when already started.
-//
-// For single-repo workspaces this is equivalent to
-// GetWorkspaceTracker().Start(ctx) — repoTrackers is empty. For multi-repo
-// task roots the root tracker is bare (no git index, exits immediately) and
-// only the per-repo trackers actually poll for changes — they must be started
-// here so file-change notifications fire without an agent process. Without
-// this, CLI passthrough mode (which bypasses startAgent/startOneShot) leaves
-// every per-repo tracker idle and the Files panel never receives updates.
+// StartAllWorkspaceTrackers starts root + per-repo trackers (idempotent) so file-change events fire in passthrough mode.
 func (m *Manager) StartAllWorkspaceTrackers(ctx context.Context) {
 	if m.workspaceTracker != nil {
 		m.workspaceTracker.Start(ctx)
 	}
 	for _, t := range m.repoTrackers {
 		t.Start(ctx)
+	}
+}
+
+// stopWorkspaceTrackers stops the root tracker and every per-repo tracker.
+// Idempotent: WorkspaceTracker.Stop uses sync.Once internally.
+func (m *Manager) stopWorkspaceTrackers() {
+	if m.workspaceTracker != nil {
+		m.workspaceTracker.Stop()
+	}
+	for _, t := range m.repoTrackers {
+		t.Stop()
 	}
 }
 
@@ -953,6 +955,12 @@ func (m *Manager) Stop(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Stop workspace trackers unconditionally — CreateInstance starts them
+	// before any agent process, so in passthrough mode (where Start() is
+	// never called and status stays Stopped) the early return below would
+	// otherwise skip stopShellAndProcesses and leak the tracker goroutines.
+	m.stopWorkspaceTrackers()
+
 	status := m.Status()
 	if status == StatusStopped || status == StatusStopping {
 		m.logger.Info("Stop called but already stopped/stopping", zap.String("status", string(status)))
@@ -1004,12 +1012,7 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) {
 	m.logger.Debug("workspace processes stopped")
 
 	m.logger.Debug("stopping workspace tracker")
-	if m.workspaceTracker != nil {
-		m.workspaceTracker.Stop()
-	}
-	for _, t := range m.repoTrackers {
-		t.Stop()
-	}
+	m.stopWorkspaceTrackers()
 	m.logger.Debug("workspace tracker stopped")
 }
 
