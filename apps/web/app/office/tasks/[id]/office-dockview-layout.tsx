@@ -11,7 +11,6 @@ import {
   CENTER_GROUP,
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
-  LAYOUT_RIGHT_MAX_PX,
   panel,
 } from "@/lib/state/layout-manager/constants";
 import type { LayoutState } from "@/lib/state/layout-manager/types";
@@ -46,7 +45,6 @@ function officeLayout(): LayoutState {
         id: "right",
         pinned: true,
         width: 350,
-        maxWidth: LAYOUT_RIGHT_MAX_PX,
         groups: [
           { id: RIGHT_TOP_GROUP, panels: [panel("files"), panel("changes")] },
           { id: RIGHT_BOTTOM_GROUP, panels: [panel("terminal-default")] },

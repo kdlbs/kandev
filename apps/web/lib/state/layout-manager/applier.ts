@@ -8,8 +8,8 @@ import {
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
   TERMINAL_DEFAULT_ID,
-  LAYOUT_SIDEBAR_MAX_PX,
 } from "./constants";
+import { computePinnedMaxPx, LAYOUT_PINNED_MIN_PX } from "./caps";
 
 export type LayoutGroupIds = {
   centerGroupId: string;
@@ -71,23 +71,34 @@ export function applyLayout(
 
   api.fromJSON(serialized);
 
-  // Lock sidebar group and enforce max-width constraint.
+  // Lock sidebar group and enforce max/min-width constraints.
   // Constraints are not serialized with layouts, so we must reapply after fromJSON.
+  const runtimeCap = computePinnedMaxPx();
   const sb = api.getPanel("sidebar");
   if (sb) {
     sb.group.locked = SIDEBAR_LOCK;
     sb.group.header.hidden = false;
-    sb.group.api.setConstraints({ maximumWidth: LAYOUT_SIDEBAR_MAX_PX });
+    sb.group.api.setConstraints({
+      maximumWidth: runtimeCap,
+      minimumWidth: LAYOUT_PINNED_MIN_PX,
+    });
   }
 
-  // Enforce max-width on other pinned columns (e.g. right panel group).
+  // Enforce constraints on other pinned columns (e.g. right panel group).
+  // Column.maxWidth (when set) wins over the runtime cap so presets like
+  // compact can pin the sidebar tight; otherwise we inherit the viewport-
+  // proportional cap so wide screens get a roomy right panel.
   for (const col of state.columns) {
-    if (col.id === "sidebar" || !col.pinned || !col.maxWidth) continue;
+    if (col.id === "sidebar" || !col.pinned) continue;
+    const cap = col.maxWidth ?? runtimeCap;
     for (const group of col.groups) {
       for (const p of group.panels) {
         const pnl = api.getPanel(p.id);
         if (pnl) {
-          pnl.group.api.setConstraints({ maximumWidth: col.maxWidth });
+          pnl.group.api.setConstraints({
+            maximumWidth: cap,
+            minimumWidth: LAYOUT_PINNED_MIN_PX,
+          });
           break;
         }
       }

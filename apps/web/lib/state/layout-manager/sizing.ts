@@ -1,23 +1,25 @@
 import type { LayoutColumn, LayoutGroup } from "./types";
 import { LAYOUT_SIDEBAR_RATIO } from "./constants";
+import { computePinnedMaxPx, LAYOUT_PINNED_MIN_PX } from "./caps";
 
 /**
  * Get the effective pinned width for a column,
  * considering user overrides, maxWidth cap, and ratio-based default.
+ *
+ * The default cap is viewport-proportional (see ./caps.ts) — column.maxWidth
+ * still wins when explicitly set (e.g. compact preset narrowing the sidebar).
  */
 export function getPinnedWidth(
   column: LayoutColumn,
   totalWidth: number,
   override?: number,
 ): number {
+  const max = column.maxWidth ?? computePinnedMaxPx();
+  const min = column.minWidth ?? LAYOUT_PINNED_MIN_PX;
   if (override !== undefined) {
-    const max = column.maxWidth ?? Infinity;
-    const min = column.minWidth ?? 50;
     return Math.max(min, Math.min(override, max));
   }
   const ratioWidth = Math.round(totalWidth * LAYOUT_SIDEBAR_RATIO);
-  const max = column.maxWidth ?? Infinity;
-  const min = column.minWidth ?? 50;
   return Math.max(min, Math.min(ratioWidth, max));
 }
 

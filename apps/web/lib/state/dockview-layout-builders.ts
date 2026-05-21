@@ -3,10 +3,10 @@ import {
   SIDEBAR_LOCK,
   SIDEBAR_GROUP,
   CENTER_GROUP,
-  LAYOUT_SIDEBAR_MAX_PX,
-  LAYOUT_RIGHT_MAX_PX,
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
+  computePinnedMaxPx,
+  LAYOUT_PINNED_MIN_PX,
   resolveGroupIds,
 } from "./layout-manager";
 import type { LayoutGroupIds } from "./layout-manager";
@@ -16,11 +16,12 @@ export { getRootSplitview } from "./layout-manager";
 
 /** After fromJSON() restores a session layout, apply fixups and return group IDs. */
 export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
+  const cap = computePinnedMaxPx();
   const sb = api.getPanel("sidebar");
   if (sb) {
     sb.group.locked = SIDEBAR_LOCK;
     sb.group.header.hidden = false;
-    sb.group.api.setConstraints({ maximumWidth: LAYOUT_SIDEBAR_MAX_PX });
+    sb.group.api.setConstraints({ maximumWidth: cap, minimumWidth: LAYOUT_PINNED_MIN_PX });
   }
 
   const oldChanges = api.getPanel("diff-files");
@@ -34,7 +35,7 @@ export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
   for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
     const group = api.groups.find((g) => g.id === gid);
     if (group) {
-      group.api.setConstraints({ maximumWidth: LAYOUT_RIGHT_MAX_PX });
+      group.api.setConstraints({ maximumWidth: cap, minimumWidth: LAYOUT_PINNED_MIN_PX });
     }
   }
 

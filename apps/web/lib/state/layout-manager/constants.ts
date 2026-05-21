@@ -1,10 +1,9 @@
 import type { LayoutPanel } from "./types";
 
-// Layout sizing constants (single source of truth)
+// Layout sizing constants (single source of truth).
+// Pinned column max width is computed at runtime — see ./caps.ts.
 export const LAYOUT_SIDEBAR_RATIO = 2.5 / 10;
 export const LAYOUT_RIGHT_RATIO = 2.5 / 10;
-export const LAYOUT_SIDEBAR_MAX_PX = 350;
-export const LAYOUT_RIGHT_MAX_PX = 450;
 
 // Well-known group/panel IDs
 export const SIDEBAR_GROUP = "group-sidebar";
