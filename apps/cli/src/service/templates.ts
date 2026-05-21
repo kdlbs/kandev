@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 
 import type { LauncherInfo } from "./paths";
@@ -18,9 +19,13 @@ export type UnitInputs = {
   mode: "user" | "system";
 };
 
-const SYSTEMD_PATH =
+// User-mode PATH includes ~/.local/bin so user-installed agent CLIs (npm user
+// prefix, pipx, fnm, etc.) are discoverable.
+const SYSTEMD_SYSTEM_PATH =
   "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin";
-const LAUNCHD_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
+const SYSTEMD_USER_PATH = `%h/.local/bin:${SYSTEMD_SYSTEM_PATH}`;
+const LAUNCHD_SYSTEM_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
+const launchdUserPath = (): string => `${os.homedir()}/.local/bin:${LAUNCHD_SYSTEM_PATH}`;
 
 // Prepend the launcher node's bin dir so `npm`/`npx` resolve under per-user
 // node managers (fnm, nvm, asdf, volta, mise), where node lives in a versioned
@@ -64,10 +69,11 @@ export function looksLikeManagedUnit(content: string): boolean {
  * `npm i -g` installs don't get spurious env vars.
  */
 export function renderSystemdUnit(input: UnitInputs): string {
+  const basePath = input.mode === "system" ? SYSTEMD_SYSTEM_PATH : SYSTEMD_USER_PATH;
   const env: string[] = [
     envLine("KANDEV_HOME_DIR", input.homeDir),
     envLine("KANDEV_LOG_LEVEL", "info"),
-    envLine("PATH", pathWithNodeBinDir(SYSTEMD_PATH, input.launcher.nodePath)),
+    envLine("PATH", pathWithNodeBinDir(basePath, input.launcher.nodePath)),
   ];
   if (input.port !== undefined) {
     env.push(envLine("KANDEV_SERVER_PORT", String(input.port)));
@@ -113,10 +119,11 @@ WantedBy=${wantedBy}
  * get a LaunchDaemon that runs at boot regardless of login.
  */
 export function renderLaunchdPlist(input: UnitInputs): string {
+  const basePath = input.mode === "system" ? LAUNCHD_SYSTEM_PATH : launchdUserPath();
   const envEntries: Array<[string, string]> = [
     ["KANDEV_HOME_DIR", input.homeDir],
     ["KANDEV_LOG_LEVEL", "info"],
-    ["PATH", pathWithNodeBinDir(LAUNCHD_PATH, input.launcher.nodePath)],
+    ["PATH", pathWithNodeBinDir(basePath, input.launcher.nodePath)],
   ];
   if (input.port !== undefined) {
     envEntries.push(["KANDEV_SERVER_PORT", String(input.port)]);
