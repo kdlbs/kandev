@@ -1915,13 +1915,16 @@ func (s *Service) cleanupReviewPRTaskBatch(ctx context.Context, prTasks []*Revie
 		// and there is no task to delete. Clean up the dedup row once the PR
 		// reaches a terminal state, same gating as the normal path.
 		if rpt.TaskID == "" {
+			// Orphan reservation row — no task was ever created (process
+			// crashed between Reserve and Assign). Clean it up but DON'T
+			// increment `deleted`: the count is reported back to the
+			// settings-page toast as "Deleted N tasks", and these rows
+			// never had an associated task.
 			if should, _ := s.shouldDeleteReviewTask(ctx, rpt, policy); should {
 				if err := s.store.DeleteReviewPRTask(ctx, rpt.ID); err != nil {
-					s.logger.Warn("failed to delete orphan dedup row",
+					s.logger.Warn("failed to delete orphan reservation row",
 						zap.String("dedup_id", rpt.ID), zap.Error(err))
-					continue
 				}
-				deleted++
 			}
 			continue
 		}
@@ -2544,13 +2547,13 @@ func (s *Service) cleanupIssueTaskBatch(ctx context.Context, issueTasks []*Issue
 	for _, it := range issueTasks {
 		policy := resolvePolicy(it)
 		if it.TaskID == "" {
+			// Orphan reservation row — no task was created. Clean it up
+			// but don't count it as a deleted task.
 			if should, _ := s.shouldDeleteIssueTask(ctx, it, policy); should {
 				if err := s.store.DeleteIssueWatchTask(ctx, it.ID); err != nil {
-					s.logger.Warn("failed to delete orphan dedup row",
+					s.logger.Warn("failed to delete orphan reservation row",
 						zap.String("dedup_id", it.ID), zap.Error(err))
-					continue
 				}
-				deleted++
 			}
 			continue
 		}

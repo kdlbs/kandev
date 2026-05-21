@@ -547,6 +547,29 @@ func TestPostLaunchCreated_WithMessage_DoesNotChangeSessionState(t *testing.T) {
 	}
 }
 
+func TestPostLaunchCreated_AutoStart_SetsMetadata(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+
+	// autoStart=true should land an `auto_start: true` tag on the
+	// recorded user message so HasUserAuthoredMessage skips it. This
+	// asserts the metadata wiring in recordInitialMessage directly —
+	// the broader behavior is tested in cmd/kandev TestHasUserAuthoredMessage.
+	svc.postLaunchCreated(ctx, "task1", "session1", "auto-started by workflow", false, false, true, nil)
+
+	if len(mc.userMessages) != 1 {
+		t.Fatalf("expected 1 user message, got %d", len(mc.userMessages))
+	}
+	if mc.userMessages[0].metadata["auto_start"] != true {
+		t.Fatalf("expected auto_start=true in metadata, got %v", mc.userMessages[0].metadata)
+	}
+}
+
 func TestPostLaunchCreated_PlanMode_SetsMetadata(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
