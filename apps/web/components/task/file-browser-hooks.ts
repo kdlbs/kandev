@@ -118,25 +118,39 @@ export function useFileBrowserSearch(sessionId: string) {
 }
 
 /** Apply incoming file changes to the tree by refreshing affected folders. */
-function applyFileChanges(ctx: {
+export function applyFileChanges(ctx: {
   client: ReturnType<typeof getWebSocketClient>;
   sessionId: string;
   expandedPaths: ReadonlySet<string>;
-  changes: Array<{ path: string }>;
+  changes: Array<{ path: string; operation?: string; repository_name?: string }>;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   setLoadState: React.Dispatch<React.SetStateAction<LoadState>>;
 }) {
   const { client, sessionId, expandedPaths, changes, setTree, setLoadState } = ctx;
-  const candidates = new Set<string>();
+  const foldersToRefresh = new Set<string>();
   for (const change of changes) {
+    // Polling-detected workspace changes arrive as `refresh` events with an
+    // empty path (the tracker knows "something changed" but not which file).
+    // Refresh root plus every currently-expanded folder under the affected
+    // repo so files added inside an expanded subtree show up — without this
+    // the merge preserves the stale children and the user has to manually
+    // re-expand to see new files. repository_name is set for multi-repo
+    // task roots; scope to that repo's branch when present.
+    if (change.operation === "refresh") {
+      foldersToRefresh.add("");
+      const repo = change.repository_name;
+      for (const exp of expandedPaths) {
+        if (!repo || exp === repo || exp.startsWith(repo + "/")) {
+          foldersToRefresh.add(exp);
+        }
+      }
+      continue;
+    }
     const p = change.path;
     const lastSlash = p.lastIndexOf("/");
-    candidates.add(lastSlash === -1 ? "" : p.substring(0, lastSlash));
-    candidates.add(p);
-  }
-  const foldersToRefresh = new Set<string>();
-  for (const c of candidates) {
-    if (c === "" || expandedPaths.has(c)) foldersToRefresh.add(c);
+    const parent = lastSlash === -1 ? "" : p.substring(0, lastSlash);
+    if (parent === "" || expandedPaths.has(parent)) foldersToRefresh.add(parent);
+    if (p === "" || expandedPaths.has(p)) foldersToRefresh.add(p);
   }
   if (foldersToRefresh.size === 0) return;
 
