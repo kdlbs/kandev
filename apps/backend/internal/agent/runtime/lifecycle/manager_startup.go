@@ -15,6 +15,30 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// startPassthroughExecution dispatches a passthrough-routed execution to the
+// resume or fresh launch path. profileInfo may be nil — see routePassthrough's
+// contract. Extracted so StartAgentProcess stays under the nestif budget.
+func (m *Manager) startPassthroughExecution(ctx context.Context, execution *AgentExecution, profileInfo *AgentProfileInfo) error {
+	if execution.isResumedSession {
+		// Resume reuses the launched session id; ResumePassthroughSession does
+		// its own profile lookup for command building.
+		return m.ResumePassthroughSession(ctx, execution.SessionID)
+	}
+	if profileInfo == nil {
+		// Snapshot-driven routing leaves profileInfo nil so we resolve fresh
+		// here for command building.
+		if execution.AgentProfileID == "" || m.profileResolver == nil {
+			return fmt.Errorf("execution %q is passthrough but has no resolvable profile", execution.ID)
+		}
+		resolved, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
+		if err != nil {
+			return fmt.Errorf("resolve profile for passthrough execution %q: %w", execution.ID, err)
+		}
+		profileInfo = resolved
+	}
+	return m.startPassthroughSession(ctx, execution, profileInfo)
+}
+
 // routePassthrough decides whether an execution should launch on the passthrough
 // PTY path or the ACP path. The session-creation snapshot
 // (execution.IsPassthrough) is authoritative for session-backed launches.
@@ -68,27 +92,8 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	// transient resolve error must not silently route a passthrough session
 	// to ACP — the resume branch routes on the snapshot alone, and the fresh
 	// branch surfaces the resolve error explicitly.
-	isPassthrough, profileInfo := m.routePassthrough(ctx, execution)
-	if isPassthrough {
-		if execution.isResumedSession {
-			// Resume reuses the launched session id; ResumePassthroughSession
-			// does its own profile lookup for command building.
-			return m.ResumePassthroughSession(ctx, execution.SessionID)
-		}
-		// profileInfo is only pre-populated when routing already resolved it
-		// (sessionless fallback). Snapshot-driven routing leaves it nil so we
-		// resolve fresh here for command building.
-		if profileInfo == nil {
-			if execution.AgentProfileID == "" || m.profileResolver == nil {
-				return fmt.Errorf("execution %q is passthrough but has no resolvable profile", executionID)
-			}
-			resolved, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
-			if err != nil {
-				return fmt.Errorf("resolve profile for passthrough execution %q: %w", executionID, err)
-			}
-			profileInfo = resolved
-		}
-		return m.startPassthroughSession(ctx, execution, profileInfo)
+	if isPassthrough, profileInfo := m.routePassthrough(ctx, execution); isPassthrough {
+		return m.startPassthroughExecution(ctx, execution, profileInfo)
 	}
 
 	if execution.agentctl == nil {
