@@ -232,6 +232,25 @@ func (m *Manager) GetWorkspaceTracker() *WorkspaceTracker {
 	return m.workspaceTracker
 }
 
+// StartAllWorkspaceTrackers starts the root tracker plus every per-repo tracker.
+// Idempotent: WorkspaceTracker.Start is a no-op when already started.
+//
+// For single-repo workspaces this is equivalent to
+// GetWorkspaceTracker().Start(ctx) — repoTrackers is empty. For multi-repo
+// task roots the root tracker is bare (no git index, exits immediately) and
+// only the per-repo trackers actually poll for changes — they must be started
+// here so file-change notifications fire without an agent process. Without
+// this, CLI passthrough mode (which bypasses startAgent/startOneShot) leaves
+// every per-repo tracker idle and the Files panel never receives updates.
+func (m *Manager) StartAllWorkspaceTrackers(ctx context.Context) {
+	if m.workspaceTracker != nil {
+		m.workspaceTracker.Start(ctx)
+	}
+	for _, t := range m.repoTrackers {
+		t.Start(ctx)
+	}
+}
+
 // SubscribeWorkspaceStream creates a single workspace stream subscriber and
 // fans it out across the root tracker plus every per-repo tracker, so the
 // caller receives events from all repositories on one channel. Use

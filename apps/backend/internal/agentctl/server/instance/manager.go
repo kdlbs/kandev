@@ -108,9 +108,13 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	// Create process manager
 	procMgr := process.NewManager(instanceCfg, m.logger)
 
-	// Start workspace tracker immediately so process output can be streamed
-	// even without an agent running (for dev server, etc.)
-	procMgr.GetWorkspaceTracker().Start(context.Background())
+	// Start workspace trackers (root + every per-repo tracker for multi-repo
+	// roots) immediately so file-change notifications fire even without an
+	// agent running. CLI passthrough mode never goes through startAgent /
+	// startOneShot, so per-repo trackers would otherwise stay idle and the
+	// Files panel would not refresh when the user-driven agent CLI modifies
+	// files.
+	procMgr.StartAllWorkspaceTrackers(context.Background())
 
 	handler := m.buildHTTPHandler(instanceCfg, procMgr)
 	httpServer := m.startHTTPServer(port, listener, handler, id)
