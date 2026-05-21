@@ -156,7 +156,13 @@ function FilterFields({
 
   return (
     <>
-      <TeamAndAssigneeRow form={form} setForm={setForm} teams={teams} />
+      <TeamRow form={form} setForm={setForm} teams={teams} />
+      <AssigneeAndCreatorRow
+        form={form}
+        setForm={setForm}
+        users={users}
+        loadingUsers={loadingUsers}
+      />
       <div className="space-y-1.5">
         <Label>Priority</Label>
         <p className="text-xs text-muted-foreground">
@@ -164,7 +170,6 @@ function FilterFields({
         </p>
         <PriorityMultiSelect selected={form.priorities} onToggle={togglePriority} />
       </div>
-      <CreatorRow form={form} setForm={setForm} users={users} loadingUsers={loadingUsers} />
       <div className="space-y-1.5">
         <Label>States</Label>
         <p className="text-xs text-muted-foreground">
@@ -203,7 +208,7 @@ function FilterFields({
 
 type FormSetter = React.Dispatch<React.SetStateAction<FormState>>;
 
-function TeamAndAssigneeRow({
+function TeamRow({
   form,
   setForm,
   teams,
@@ -213,17 +218,32 @@ function TeamAndAssigneeRow({
   teams: LinearTeam[];
 }) {
   return (
+    <SelectField
+      label="Team"
+      description="Restrict matches to one team."
+      value={form.teamKey}
+      onChange={(v) =>
+        setForm((p) => ({ ...p, teamKey: v, stateIds: [], labelIds: [], creatorId: "" }))
+      }
+      placeholder="(any team)"
+      items={teams.map((t) => ({ id: t.key, label: `${t.name} (${t.key})` }))}
+    />
+  );
+}
+
+function AssigneeAndCreatorRow({
+  form,
+  setForm,
+  users,
+  loadingUsers,
+}: {
+  form: FormState;
+  setForm: FormSetter;
+  users: LinearUser[];
+  loadingUsers: boolean;
+}) {
+  return (
     <div className="grid grid-cols-2 gap-4">
-      <SelectField
-        label="Team"
-        description="Restrict matches to one team."
-        value={form.teamKey}
-        onChange={(v) =>
-          setForm((p) => ({ ...p, teamKey: v, stateIds: [], labelIds: [], creatorId: "" }))
-        }
-        placeholder="(any team)"
-        items={teams.map((t) => ({ id: t.key, label: `${t.name} (${t.key})` }))}
-      />
       <SelectField
         label="Assignee"
         description="Filter by who an issue is assigned to."
@@ -236,34 +256,19 @@ function TeamAndAssigneeRow({
           { id: "unassigned", label: "Unassigned" },
         ]}
       />
+      <SelectField
+        label="Creator"
+        description="Match issues created by one user."
+        value={form.creatorId || CREATOR_ANY}
+        onChange={(v) => setForm((p) => ({ ...p, creatorId: v === CREATOR_ANY ? "" : v }))}
+        placeholder={creatorPlaceholder(form.teamKey, loadingUsers)}
+        items={[
+          { id: CREATOR_ANY, label: "(any)" },
+          ...users.map((u) => ({ id: u.id, label: userOptionLabel(u) })),
+        ]}
+        disabled={!form.teamKey || loadingUsers}
+      />
     </div>
-  );
-}
-
-function CreatorRow({
-  form,
-  setForm,
-  users,
-  loadingUsers,
-}: {
-  form: FormState;
-  setForm: FormSetter;
-  users: LinearUser[];
-  loadingUsers: boolean;
-}) {
-  return (
-    <SelectField
-      label="Creator"
-      description="Match issues created by one user."
-      value={form.creatorId || CREATOR_ANY}
-      onChange={(v) => setForm((p) => ({ ...p, creatorId: v === CREATOR_ANY ? "" : v }))}
-      placeholder={creatorPlaceholder(form.teamKey, loadingUsers)}
-      items={[
-        { id: CREATOR_ANY, label: "(any)" },
-        ...users.map((u) => ({ id: u.id, label: userOptionLabel(u) })),
-      ]}
-      disabled={!form.teamKey || loadingUsers}
-    />
   );
 }
 
@@ -553,12 +558,20 @@ export function LinearIssueWatchDialog({
             }
             disabled={workspaceLocked}
           />
+          {/* Hairlines separate the four conceptual blocks (Destination /
+              Filter / Automation / Prompt / Settings). Each block answers a
+              different question, so a consistent rhythm helps users navigate
+              the form visually instead of reading it as one long stack. */}
+          <div className="border-t border-border/60" />
           <FilterFields form={form} setForm={setForm} />
+          <div className="border-t border-border/60" />
           <AutomationFields form={form} setForm={setForm} />
+          <div className="border-t border-border/60" />
           <PromptField
             value={form.prompt}
             onChange={(v) => setForm((p) => ({ ...p, prompt: v }))}
           />
+          <div className="border-t border-border/60" />
           <SettingsFields form={form} setForm={setForm} />
         </div>
         <DialogFooter>
