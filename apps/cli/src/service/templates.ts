@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import type { LauncherInfo } from "./paths";
 
 export type UnitInputs = {
@@ -19,6 +21,18 @@ export type UnitInputs = {
 const SYSTEMD_PATH =
   "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin";
 const LAUNCHD_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
+
+// Prepend the launcher node's bin dir so `npm`/`npx` resolve under per-user
+// node managers (fnm, nvm, asdf, volta, mise), where node lives in a versioned
+// subdirectory not covered by the system PATH. ExecStart already points at this
+// node, so its parent dir is exactly where the matching npm/npx live — without
+// this, npx-based ACP agents (claude, codex, opencode) fail to spawn.
+function pathWithNodeBinDir(basePath: string, nodePath: string): string {
+  const nodeBinDir = path.dirname(nodePath);
+  const parts = basePath.split(":");
+  if (parts.includes(nodeBinDir)) return basePath;
+  return `${nodeBinDir}:${basePath}`;
+}
 
 /**
  * Marker substring baked into every unit/plist kandev writes. Used to safely
@@ -45,7 +59,7 @@ export function renderSystemdUnit(input: UnitInputs): string {
   const env: string[] = [
     envLine("KANDEV_HOME_DIR", input.homeDir),
     envLine("KANDEV_LOG_LEVEL", "info"),
-    envLine("PATH", SYSTEMD_PATH),
+    envLine("PATH", pathWithNodeBinDir(SYSTEMD_PATH, input.launcher.nodePath)),
   ];
   if (input.port !== undefined) {
     env.push(envLine("KANDEV_SERVER_PORT", String(input.port)));
@@ -94,7 +108,7 @@ export function renderLaunchdPlist(input: UnitInputs): string {
   const envEntries: Array<[string, string]> = [
     ["KANDEV_HOME_DIR", input.homeDir],
     ["KANDEV_LOG_LEVEL", "info"],
-    ["PATH", LAUNCHD_PATH],
+    ["PATH", pathWithNodeBinDir(LAUNCHD_PATH, input.launcher.nodePath)],
   ];
   if (input.port !== undefined) {
     envEntries.push(["KANDEV_SERVER_PORT", String(input.port)]);

@@ -17,6 +17,14 @@ const BREW_LAUNCHER: LauncherInfo = {
   version: "0.49.0",
 };
 
+// Versioned bin dir typical of per-user node managers (fnm/nvm/asdf/volta/mise).
+const FNM_LAUNCHER: LauncherInfo = {
+  nodePath: "/home/alice/.local/share/fnm/node-versions/v24.14.0/installation/bin/node",
+  cliEntry:
+    "/home/alice/.local/share/fnm/node-versions/v24.14.0/installation/lib/node_modules/kandev/bin/cli.js",
+  kind: "npm",
+};
+
 describe("renderSystemdUnit", () => {
   it("renders a user unit with absolute paths and --headless", () => {
     const unit = renderSystemdUnit({
@@ -69,6 +77,45 @@ describe("renderSystemdUnit", () => {
     expect(unit).toContain("Environment=KANDEV_SERVER_PORT=9000");
   });
 
+  it("prepends launcher node bin dir to PATH so npx-based agents resolve under fnm/nvm/asdf/volta/mise", () => {
+    const unit = renderSystemdUnit({
+      launcher: FNM_LAUNCHER,
+      homeDir: "/home/alice/.kandev",
+      logDir: "/home/alice/.kandev/logs",
+      mode: "user",
+    });
+    expect(unit).toContain(
+      "Environment=PATH=/home/alice/.local/share/fnm/node-versions/v24.14.0/installation/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+    );
+  });
+
+  it("does not duplicate node bin dir when it is already on the system PATH", () => {
+    const unit = renderSystemdUnit({
+      launcher: NPM_LAUNCHER,
+      homeDir: "/home/alice/.kandev",
+      logDir: "/home/alice/.kandev/logs",
+      mode: "user",
+    });
+    // /usr/local/bin already in SYSTEMD_PATH — dirname(nodePath) must not double it.
+    expect(unit).toContain(
+      "Environment=PATH=/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+    );
+    expect(unit).not.toContain("/usr/local/bin:/usr/local/bin");
+  });
+
+  it("prepends node bin dir for system-mode units too", () => {
+    const unit = renderSystemdUnit({
+      launcher: FNM_LAUNCHER,
+      homeDir: "/var/lib/kandev",
+      logDir: "/var/lib/kandev/logs",
+      mode: "system",
+      systemUser: "alice",
+    });
+    expect(unit).toContain(
+      "Environment=PATH=/home/alice/.local/share/fnm/node-versions/v24.14.0/installation/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+    );
+  });
+
   it("quotes ExecStart paths that contain spaces", () => {
     const unit = renderSystemdUnit({
       launcher: {
@@ -102,6 +149,35 @@ describe("renderLaunchdPlist", () => {
     expect(plist).toContain("<string>/Users/alice/.kandev/logs/service.err</string>");
     expect(plist).toContain("KANDEV_HOME_DIR");
     expect(plist).not.toContain("KANDEV_BUNDLE_DIR");
+  });
+
+  it("prepends launcher node bin dir to PATH for plists too (fnm/nvm/asdf/volta/mise)", () => {
+    const plist = renderLaunchdPlist({
+      launcher: {
+        nodePath: "/Users/alice/.volta/tools/image/node/24.14.0/bin/node",
+        cliEntry: "/Users/alice/.volta/tools/image/packages/kandev/bin/cli.js",
+        kind: "npm",
+      },
+      homeDir: "/Users/alice/.kandev",
+      logDir: "/Users/alice/.kandev/logs",
+      mode: "user",
+    });
+    expect(plist).toContain(
+      "<key>PATH</key>\n      <string>/Users/alice/.volta/tools/image/node/24.14.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>",
+    );
+  });
+
+  it("does not duplicate node bin dir in plist PATH when already present", () => {
+    const plist = renderLaunchdPlist({
+      launcher: BREW_LAUNCHER,
+      homeDir: "/Users/alice/.kandev",
+      logDir: "/Users/alice/.kandev/logs",
+      mode: "user",
+    });
+    // /opt/homebrew/bin already first in LAUNCHD_PATH — must not be doubled.
+    expect(plist).toContain(
+      "<key>PATH</key>\n      <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>",
+    );
   });
 
   it("escapes XML special characters in paths", () => {
