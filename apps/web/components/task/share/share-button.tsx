@@ -58,7 +58,7 @@ export function ShareButton({ taskId, sessionId, iconOnly = false }: Props) {
     <>
       <Tooltip>
         <TooltipTrigger asChild>{button}</TooltipTrigger>
-        <TooltipContent>Share this completed task with a public link</TooltipContent>
+        <TooltipContent>Share this task conversation as a public link</TooltipContent>
       </Tooltip>
       <ShareDialog open={open} onOpenChange={setOpen} taskId={taskId} sessionId={sessionId} />
     </>
