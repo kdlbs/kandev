@@ -189,39 +189,51 @@ func (c *Controller) httpSearchIssues(ctx *gin.Context) {
 // is rejected rather than silently dropped so callers don't accidentally widen
 // the search by typoing a number.
 func parseSearchNumericFilters(ctx *gin.Context, filter *SearchFilter) error {
-	if p := ctx.Query("priorities"); p != "" {
-		parts := splitCSV(p)
-		priorities := make([]int, 0, len(parts))
-		for _, raw := range parts {
-			v, err := strconv.Atoi(raw)
-			if err != nil || v < 0 || v > 4 {
-				return fmt.Errorf("priorities must be integers between 0 and 4")
-			}
-			priorities = append(priorities, v)
-		}
-		filter.Priorities = priorities
+	priorities, err := parseSearchPriorities(ctx.Query("priorities"))
+	if err != nil {
+		return err
 	}
-	if v := ctx.Query("estimate_min"); v != "" {
-		f, err := strconv.ParseFloat(v, 64)
-		// strconv.ParseFloat accepts "NaN", "Inf", "-Inf" without error, but
-		// json.Marshal rejects them later (turning a 400 into a 500). Filter
-		// them out here so the response stays a clean 400.
-		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {
-			return fmt.Errorf("estimate_min must be a non-negative number")
-		}
-		filter.EstimateMin = &f
+	filter.Priorities = priorities
+	if filter.EstimateMin, err = parseEstimateBound(ctx.Query("estimate_min"), "estimate_min"); err != nil {
+		return err
 	}
-	if v := ctx.Query("estimate_max"); v != "" {
-		f, err := strconv.ParseFloat(v, 64)
-		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {
-			return fmt.Errorf("estimate_max must be a non-negative number")
-		}
-		filter.EstimateMax = &f
+	if filter.EstimateMax, err = parseEstimateBound(ctx.Query("estimate_max"), "estimate_max"); err != nil {
+		return err
 	}
 	if filter.EstimateMin != nil && filter.EstimateMax != nil && *filter.EstimateMin > *filter.EstimateMax {
 		return fmt.Errorf("estimate_min cannot be greater than estimate_max")
 	}
 	return nil
+}
+
+func parseSearchPriorities(raw string) ([]int, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	parts := splitCSV(raw)
+	priorities := make([]int, 0, len(parts))
+	for _, p := range parts {
+		v, err := strconv.Atoi(p)
+		if err != nil || v < 0 || v > 4 {
+			return nil, fmt.Errorf("priorities must be integers between 0 and 4")
+		}
+		priorities = append(priorities, v)
+	}
+	return priorities, nil
+}
+
+// parseEstimateBound parses a non-negative float query param. strconv.ParseFloat
+// accepts "NaN", "Inf", "-Inf" without error, but json.Marshal rejects them
+// later (turning a 400 into a 500), so we filter them out here.
+func parseEstimateBound(raw, name string) (*float64, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	f, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {
+		return nil, fmt.Errorf("%s must be a non-negative number", name)
+	}
+	return &f, nil
 }
 
 func (c *Controller) httpGetIssue(ctx *gin.Context) {
