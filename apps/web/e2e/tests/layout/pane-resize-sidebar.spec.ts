@@ -71,7 +71,7 @@ test.describe("Sidebar resize — viewport-proportional cap", () => {
     const sashIdx = await getColumnSashIndex(testPage, "sidebar");
     await dragHorizontalSash(testPage, sashIdx, +2000);
     const width = await getDockviewGroupWidth(testPage, "sidebar");
-    expect(width).toBeLessThanOrEqual(Math.max(800, Math.round(1200 * 0.7)) + 10);
+    expect(width).toBeLessThanOrEqual(Math.max(350, Math.round(1200 * 0.3)) + 10);
   });
 
   test("user width survives reload", async ({ testPage, apiClient, seedData }) => {

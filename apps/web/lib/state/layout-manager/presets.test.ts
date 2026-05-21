@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compactLayout, defaultLayout, getPresetSidebarColumn } from "./presets";
-import { computePinnedMaxPx } from "./caps";
+import { computeSidebarMaxPx } from "./caps";
 
 describe("layout presets", () => {
   it("keeps the compact workbench on Dockview while prioritizing the center panel", () => {
@@ -10,7 +10,7 @@ describe("layout presets", () => {
     // compact pins itself tighter.
     const defaultSidebarCap =
       defaultLayout().columns.find((column) => column.id === "sidebar")?.maxWidth ??
-      computePinnedMaxPx();
+      computeSidebarMaxPx();
 
     expect(compact.columns.map((column) => column.id)).toEqual(["sidebar", "center"]);
     const compactSidebarWidth = compactSidebar?.width ?? Number.POSITIVE_INFINITY;

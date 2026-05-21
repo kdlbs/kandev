@@ -1,26 +1,37 @@
 import type { LayoutColumn, LayoutGroup } from "./types";
 import { LAYOUT_SIDEBAR_RATIO } from "./constants";
-import { computePinnedMaxPx, LAYOUT_PINNED_MIN_PX } from "./caps";
+import { computePinnedMaxPxFor, LAYOUT_PINNED_MIN_PX } from "./caps";
+
+// Legacy hard caps used to clamp the *initial* default width. Users can still
+// drag past these via setConstraints (which uses the larger runtime cap),
+// but a fresh task env opens at the same width it always did.
+const LEGACY_SIDEBAR_INITIAL_CAP = 350;
+const LEGACY_RIGHT_INITIAL_CAP = 450;
 
 /**
- * Get the effective pinned width for a column,
- * considering user overrides, maxWidth cap, and ratio-based default.
+ * Get the effective pinned width for a column.
  *
- * The default cap is viewport-proportional (see ./caps.ts) — column.maxWidth
- * still wins when explicitly set (e.g. compact preset narrowing the sidebar).
+ * - User overrides (from a prior resize, including widths seeded from
+ *   pinned-defaults sessionStorage) are clamped to the runtime cap.
+ * - The initial default (no override) preserves legacy behavior: ratio-based
+ *   width clamped to the old hard cap. New environments open exactly as
+ *   they did before this PR.
  */
 export function getPinnedWidth(
   column: LayoutColumn,
   totalWidth: number,
   override?: number,
 ): number {
-  const max = column.maxWidth ?? computePinnedMaxPx();
+  const runtimeMax = column.maxWidth ?? computePinnedMaxPxFor(column.id);
   const min = column.minWidth ?? LAYOUT_PINNED_MIN_PX;
   if (override !== undefined) {
-    return Math.max(min, Math.min(override, max));
+    return Math.max(min, Math.min(override, runtimeMax));
   }
   const ratioWidth = Math.round(totalWidth * LAYOUT_SIDEBAR_RATIO);
-  return Math.max(min, Math.min(ratioWidth, max));
+  const initialCap =
+    column.maxWidth ??
+    (column.id === "sidebar" ? LEGACY_SIDEBAR_INITIAL_CAP : LEGACY_RIGHT_INITIAL_CAP);
+  return Math.max(min, Math.min(ratioWidth, initialCap));
 }
 
 type ColumnBucket = {

@@ -4,7 +4,8 @@ import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { getRootSplitview } from "@/lib/state/dockview-layout-builders";
 import {
-  computePinnedMaxPx,
+  computeSidebarMaxPx,
+  computeRightMaxPx,
   LAYOUT_PINNED_MIN_PX,
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
@@ -22,13 +23,20 @@ const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
 function applyDynamicConstraints(api: DockviewReadyEvent["api"]): void {
   if (useDockviewStore.getState().isRestoringLayout) return;
   if (useDockviewStore.getState().preMaximizeLayout !== null) return;
-  const cap = computePinnedMaxPx();
-  const constraints = { maximumWidth: cap, minimumWidth: LAYOUT_PINNED_MIN_PX };
   const sb = api.getPanel("sidebar");
-  if (sb) sb.group.api.setConstraints(constraints);
+  if (sb) {
+    sb.group.api.setConstraints({
+      maximumWidth: computeSidebarMaxPx(),
+      minimumWidth: LAYOUT_PINNED_MIN_PX,
+    });
+  }
+  const rightConstraints = {
+    maximumWidth: computeRightMaxPx(),
+    minimumWidth: LAYOUT_PINNED_MIN_PX,
+  };
   for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
     const group = api.groups.find((g) => g.id === gid);
-    if (group) group.api.setConstraints(constraints);
+    if (group) group.api.setConstraints(rightConstraints);
   }
 }
 

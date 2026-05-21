@@ -55,7 +55,8 @@ export type { BuiltInPreset } from "./layout-manager";
 export {
   LAYOUT_SIDEBAR_RATIO,
   LAYOUT_RIGHT_RATIO,
-  computePinnedMaxPx,
+  computeSidebarMaxPx,
+  computeRightMaxPx,
   LAYOUT_PINNED_MIN_PX,
 } from "./layout-manager";
 export { applyLayoutFixups } from "./dockview-layout-builders";

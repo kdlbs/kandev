@@ -27,7 +27,12 @@ export {
 } from "./constants";
 
 // Runtime caps for pinned columns
-export { computePinnedMaxPx, LAYOUT_PINNED_MIN_PX } from "./caps";
+export {
+  computeSidebarMaxPx,
+  computeRightMaxPx,
+  computePinnedMaxPxFor,
+  LAYOUT_PINNED_MIN_PX,
+} from "./caps";
 
 // Presets
 export {
