@@ -71,18 +71,28 @@ func (c *PATClient) setHeaders(req *http.Request) {
 	req.Header.Set("Accept", "application/json")
 }
 
-// IsAuthenticated probes /user. A 401/403 means the token is bad and is
-// surfaced as (false, nil) so callers can render "not connected". Any other
-// error (network, 5xx, parse failure) is returned so it isn't silently
-// reported as a bad token.
+// IsAuthenticated probes /user *uncached* — calling GetAuthenticatedUser
+// would return the previously-cached username even after the token was
+// revoked upstream, leaving the integration showing "connected" forever.
+// A 401/403 means the token is bad and is surfaced as (false, nil) so
+// callers can render "not connected". Any other error (network, 5xx,
+// parse failure) is returned so it isn't silently reported as a bad token.
 func (c *PATClient) IsAuthenticated(ctx context.Context) (bool, error) {
-	if _, err := c.GetAuthenticatedUser(ctx); err != nil {
+	var user struct {
+		Username string `json:"username"`
+	}
+	if err := c.get(ctx, "/user", &user); err != nil {
 		var apiErr *APIError
 		if errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden) {
 			return false, nil
 		}
 		return false, err
 	}
+	// Opportunistically refresh the cache so the next GetAuthenticatedUser
+	// caller doesn't have to re-fetch.
+	c.usernameMu.Lock()
+	c.username = user.Username
+	c.usernameMu.Unlock()
 	return true, nil
 }
 

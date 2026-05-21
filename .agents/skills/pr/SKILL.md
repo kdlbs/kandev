@@ -98,13 +98,17 @@ EOF
 If `glab` is unavailable but `$GITLAB_TOKEN` is set, fall back to the REST API. Derive the host from the git remote — `$CI_SERVER_URL` is only set inside GitLab runners and silently falling back to `gitlab.com` from a developer's machine would target the wrong instance. Construct the JSON body with `jq` so multi-line descriptions and embedded quotes can't break the payload.
 
 ```bash
-REMOTE_URL="$(git remote get-url origin)"          # e.g. git@gitlab.acme.corp:team/repo.git
-HOST_PATH="${REMOTE_URL#*@}"                       # gitlab.acme.corp:team/repo.git
-HOST_PATH="${HOST_PATH#*://}"                      # strip scheme if https
-HOST_ONLY="${HOST_PATH%%[:/]*}"                    # gitlab.acme.corp
+REMOTE_URL="$(git remote get-url origin)"          # e.g. git@gitlab.acme.corp:team/repo.git or ssh://git@gitlab.acme.corp:2222/team/repo.git
+REMOTE_URL="${REMOTE_URL#ssh://}"                  # drop ssh:// scheme so the rules below work for both forms
+REMOTE_URL="${REMOTE_URL#*@}"                      # strip user@ (handles git@host and bare host)
+REMOTE_URL="${REMOTE_URL#*://}"                    # strip https:// scheme if present
+HOST_ONLY="${REMOTE_URL%%[:/]*}"                   # gitlab.acme.corp
 HOST="https://${HOST_ONLY}"
-PROJECT="${HOST_PATH#*[:/]}"
-PROJECT="${PROJECT%.git}"                          # team/repo
+PROJECT_PATH="${REMOTE_URL#*[:/]}"                 # may be "2222/team/repo.git" for ssh://...:2222/team/repo.git
+if [[ "$PROJECT_PATH" =~ ^[0-9]+/ ]]; then         # leading port digits — drop them
+  PROJECT_PATH="${PROJECT_PATH#*/}"
+fi
+PROJECT="${PROJECT_PATH%.git}"                     # team/repo
 SOURCE_BRANCH="$(git branch --show-current)"
 PROJECT_ENC="$(printf '%s' "$PROJECT" | jq -sRr @uri)"
 # Default branch via the GitLab API itself, not glab (avoids version drift
@@ -129,4 +133,4 @@ curl --fail -X POST \
   "$HOST/api/v4/projects/$PROJECT_ENC/merge_requests"
 ```
 
-To address review comments on a GitLab MR, use the **discussions** API rather than individual review comments — discussions are GitLab's threading primitive. List with `GET /projects/:id/merge_requests/:iid/discussions`, reply with `POST /projects/:id/merge_requests/:iid/discussions/:discussion_id/notes`, and resolve a thread with `PUT /projects/:id/merge_requests/:iid/discussions/:discussion_id?resolved=true`. The `glab` equivalent is `glab mr note` for replies.
+To address review comments on a GitLab MR, use the **discussions** API rather than individual review comments — discussions are GitLab's threading primitive. List with `GET /projects/:id/merge_requests/:iid/discussions`, reply with `POST /projects/:id/merge_requests/:iid/discussions/:discussion_id/notes`, and resolve a thread with `PUT /projects/:id/merge_requests/:iid/discussions/:discussion_id?resolved=true`. The `glab` equivalent for replies is `glab mr note create --reply <discussion_id>` — bare `glab mr note` opens a new thread instead of replying to an existing one.

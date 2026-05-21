@@ -231,12 +231,13 @@ func (c *MockClient) GetMRFeedback(ctx context.Context, projectPath string, iid 
 		return nil, err
 	}
 	d, _ := c.ListMRDiscussions(ctx, projectPath, iid, nil)
+	pipelines, _ := c.ListPipelines(ctx, projectPath, mr.HeadBranch)
 	return &MRFeedback{
 		MR:          mr,
 		Approvals:   []MRApproval{},
 		Discussions: d,
-		Pipelines:   []Pipeline{},
-		HasIssues:   hasOpenDiscussions(d),
+		Pipelines:   pipelines,
+		HasIssues:   hasOpenDiscussions(d) || pipelineFailing(pipelines),
 	}, nil
 }
 

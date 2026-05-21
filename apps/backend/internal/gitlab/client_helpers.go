@@ -407,14 +407,17 @@ func buildIssueSearchQuery(filter, customQuery string) string {
 }
 
 // appendFilter parses a `key=value&key2=value2` filter and merges it into
-// values. Unparseable filters are ignored — callers that need stricter
-// validation should use customQuery instead.
+// values. User-supplied keys override defaults set by the caller (so passing
+// "state=closed" actually swaps the default "opened" rather than appending
+// a second value). Unparseable filters are ignored — callers that need
+// stricter validation should use customQuery instead.
 func appendFilter(values url.Values, filter string) {
 	parsed, err := url.ParseQuery(filter)
 	if err != nil {
 		return
 	}
 	for k, vs := range parsed {
+		values.Del(k)
 		for _, v := range vs {
 			values.Add(k, v)
 		}

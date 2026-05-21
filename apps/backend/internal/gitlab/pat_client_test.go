@@ -327,6 +327,36 @@ func TestPATClient_IsAuthenticated_401IsClean(t *testing.T) {
 	}
 }
 
+// Regression: if a token gets revoked upstream, IsAuthenticated must surface
+// the failure even though the username was previously cached. The previous
+// implementation called GetAuthenticatedUser, which short-circuited on the
+// cache and made revoked tokens appear connected forever.
+func TestPATClient_IsAuthenticated_DoesNotTrustStaleCache(t *testing.T) {
+	calls := 0
+	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls == 1 {
+			_, _ = w.Write([]byte(`{"username":"alice"}`))
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer stop()
+
+	c := NewPATClient(host, "tok")
+	// Warm the cache.
+	if _, err := c.GetAuthenticatedUser(context.Background()); err != nil {
+		t.Fatalf("warmup err = %v", err)
+	}
+	ok, err := c.IsAuthenticated(context.Background())
+	if err != nil {
+		t.Errorf("err = %v, want nil for 401", err)
+	}
+	if ok {
+		t.Error("authenticated = true after upstream revoked token, want false (cache must not mask revocation)")
+	}
+}
+
 func TestNormalizeMRState(t *testing.T) {
 	cases := map[string]string{
 		"opened": "open",
