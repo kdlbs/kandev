@@ -83,7 +83,8 @@ apps/backend/
 │   │   ├── handlers/     # Task event handlers
 │   │   ├── models/       # Task, Session, Executor, Message models
 │   │   ├── repository/   # Database access (SQLite)
-│   │   └── service/      # Task business logic
+│   │   ├── service/      # Task business logic
+│   │   └── share/        # Public share links: snapshot builder, gist backend, service, redaction
 │   ├── office/           # Autonomous agent management (Office feature)
 │   │   ├── agents/       # Agent instance CRUD + auth guards
 │   │   ├── approvals/    # Approval requests and decisions
