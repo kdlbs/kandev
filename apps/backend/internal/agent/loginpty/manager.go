@@ -168,11 +168,17 @@ loop:
 			// TestStart_RunsCommandAndExits on CI). Windows ConPTY does NOT
 			// deliver EOF on child exit, so if readLoop is still blocked after
 			// the grace window we close to unblock it.
+			drain := time.NewTimer(500 * time.Millisecond)
 			select {
 			case <-sess.readDone:
-			case <-time.After(500 * time.Millisecond):
-				sess.stop()
+				drain.Stop()
+			case <-drain.C:
 			}
+			// Always close the PTY (idempotent). On the natural-exit
+			// happy path readLoop has already returned by here, so
+			// this only releases the master fd; on the timeout path
+			// it also unblocks a stuck Windows ConPTY Read.
+			sess.stop()
 			break loop
 		case <-idle.C:
 			sess.log.Info("login session idle timeout — terminating")
