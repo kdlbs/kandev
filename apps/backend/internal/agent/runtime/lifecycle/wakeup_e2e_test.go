@@ -229,12 +229,6 @@ func TestWakeupE2EFullPipeline_BridgeToEventBus(t *testing.T) {
 				adapterEventsMu.Lock()
 				adapterEvents = append(adapterEvents, ev)
 				adapterEventsMu.Unlock()
-				// Stamp the execution session ID into the event if not set
-				// (the adapter only knows its own session id after NewSession,
-				// but events emitted before that don't carry it).
-				if ev.SessionID != "" && agentExec.SessionID == "" {
-					agentExec.SessionID = ev.SessionID
-				}
 				fmt.Fprintf(os.Stderr, "[adapter→mgr] event type=%s sessionID=%s text=%q\n",
 					ev.Type, ev.SessionID, truncateE2E(ev.Text, 80))
 				mgr.handleAgentEvent(agentExec, ev)
