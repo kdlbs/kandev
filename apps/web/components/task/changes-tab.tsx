@@ -10,7 +10,7 @@ import {
 } from "@kandev/ui/context-menu";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
+import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { cn } from "@kandev/ui/lib/utils";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
@@ -40,9 +40,7 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
 
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
-  const { commits } = useSessionCommits(activeSessionId ?? null);
-  const fileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
-  const totalCount = fileCount + commits.length;
+  const totalCount = useSessionChangesCount(activeSessionId ?? null);
 
   // gitStatus is undefined until the first WS git-status event arrives,
   // which marks the end of the initial data load for this session.
