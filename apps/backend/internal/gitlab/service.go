@@ -94,7 +94,10 @@ func (s *Service) GetStatus(ctx context.Context) (*Status, error) {
 	authMethod := s.authMethod
 	s.mu.RUnlock()
 
-	tokenConfigured, tokenSecretID := s.findTokenSecret(ctx)
+	tokenConfigured, tokenSecretID, err := s.findTokenSecret(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("look up token secret: %w", err)
+	}
 
 	if client == nil {
 		return &Status{
@@ -142,11 +145,14 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 	s.mu.RUnlock()
 
 	probe := NewPATClient(host, token)
-	if _, err := probe.GetAuthenticatedUser(ctx); err != nil {
-		return fmt.Errorf("invalid token: %w", err)
+	if _, probeErr := probe.GetAuthenticatedUser(ctx); probeErr != nil {
+		return fmt.Errorf("invalid token: %w", probeErr)
 	}
 
-	configured, secretID := s.findTokenSecret(ctx)
+	configured, secretID, err := s.findTokenSecret(ctx)
+	if err != nil {
+		return fmt.Errorf("look up token secret: %w", err)
+	}
 	switch {
 	case configured && secretID != "":
 		if err := s.secretManager.Update(ctx, secretID, token); err != nil {
@@ -171,7 +177,10 @@ func (s *Service) ClearToken(ctx context.Context) error {
 	if s.secretManager == nil {
 		return errors.New("secret manager not configured")
 	}
-	configured, secretID := s.findTokenSecret(ctx)
+	configured, secretID, err := s.findTokenSecret(ctx)
+	if err != nil {
+		return fmt.Errorf("look up token secret: %w", err)
+	}
 	if !configured || secretID == "" {
 		return nil
 	}
@@ -206,10 +215,9 @@ func (s *Service) ConfigureHost(ctx context.Context, host string) error {
 		return fmt.Errorf("host unreachable: %w", err)
 	}
 
-	s.mu.Lock()
-	s.host = host
-	s.mu.Unlock()
-
+	// Persist before mutating the in-memory state so a failed write
+	// doesn't leave the running service pointing at a host that wasn't
+	// committed to disk.
 	if s.hostStore != nil {
 		if err := s.hostStore.SetHost(ctx, host); err != nil {
 			return fmt.Errorf("persist host: %w", err)
@@ -218,6 +226,7 @@ func (s *Service) ConfigureHost(ctx context.Context, host string) error {
 
 	client, authMethod, _ := NewClient(ctx, host, s.secrets, s.logger)
 	s.mu.Lock()
+	s.host = host
 	s.client = client
 	s.authMethod = authMethod
 	s.mu.Unlock()
@@ -240,22 +249,25 @@ func (s *Service) ResolveMRDiscussion(ctx context.Context, projectPath string, i
 }
 
 // findTokenSecret reports whether a GitLab token is stored in the secret
-// store. Returns (configured, secretID).
-func (s *Service) findTokenSecret(ctx context.Context) (bool, string) {
+// store. Returns (configured, secretID, error). A nil secrets provider is
+// treated as "not configured" without error; a List failure is returned so
+// callers don't mistake a backend outage for "token absent" (which would
+// hide a still-present secret from ClearToken / GetStatus).
+func (s *Service) findTokenSecret(ctx context.Context) (bool, string, error) {
 	if s.secrets == nil {
-		return false, ""
+		return false, "", nil
 	}
 	items, err := s.secrets.List(ctx)
 	if err != nil {
-		return false, ""
+		return false, "", fmt.Errorf("list secrets: %w", err)
 	}
 	for _, item := range items {
 		if !item.HasValue {
 			continue
 		}
 		if item.Name == secretNameToken || item.Name == "gitlab_token" {
-			return true, item.ID
+			return true, item.ID, nil
 		}
 	}
-	return false, ""
+	return false, "", nil
 }

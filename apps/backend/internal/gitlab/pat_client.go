@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -39,6 +41,10 @@ type PATClient struct {
 	host       string
 	token      string
 	httpClient *http.Client
+	// username caches the authenticated user's login after the first
+	// /user lookup. Service.GetStatus can race other status callers,
+	// so the cache field is guarded by usernameMu.
+	usernameMu sync.RWMutex
 	username   string
 }
 
@@ -65,14 +71,27 @@ func (c *PATClient) setHeaders(req *http.Request) {
 	req.Header.Set("Accept", "application/json")
 }
 
+// IsAuthenticated probes /user. A 401/403 means the token is bad and is
+// surfaced as (false, nil) so callers can render "not connected". Any other
+// error (network, 5xx, parse failure) is returned so it isn't silently
+// reported as a bad token.
 func (c *PATClient) IsAuthenticated(ctx context.Context) (bool, error) {
-	_, err := c.GetAuthenticatedUser(ctx)
-	return err == nil, nil
+	if _, err := c.GetAuthenticatedUser(ctx); err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func (c *PATClient) GetAuthenticatedUser(ctx context.Context) (string, error) {
-	if c.username != "" {
-		return c.username, nil
+	c.usernameMu.RLock()
+	cached := c.username
+	c.usernameMu.RUnlock()
+	if cached != "" {
+		return cached, nil
 	}
 	var user struct {
 		Username string `json:"username"`
@@ -80,8 +99,10 @@ func (c *PATClient) GetAuthenticatedUser(ctx context.Context) (string, error) {
 	if err := c.get(ctx, "/user", &user); err != nil {
 		return "", err
 	}
+	c.usernameMu.Lock()
 	c.username = user.Username
-	return c.username, nil
+	c.usernameMu.Unlock()
+	return user.Username, nil
 }
 
 // projectRef returns the URL-encoded project path used as :id in API URLs.
@@ -375,9 +396,12 @@ func (c *PATClient) GetMRStatus(ctx context.Context, projectPath string, iid int
 	if err != nil {
 		return nil, err
 	}
-	pipelines, err := c.ListPipelines(ctx, projectPath, mr.HeadBranch)
-	if err != nil {
-		return nil, err
+	var pipelines []Pipeline
+	if mr.HeadSHA != "" || mr.HeadBranch != "" {
+		pipelines, err = c.ListPipelines(ctx, projectPath, mr.HeadBranch)
+		if err != nil {
+			return nil, err
+		}
 	}
 	pipelineState, jobsTotal, jobsPassing := summarizePipelines(pipelines)
 	approvalState := summarizeApprovals(len(approvals), required)
@@ -614,8 +638,12 @@ func (c *PATClient) doWrite(ctx context.Context, method, endpoint string, body [
 	return json.NewDecoder(resp.Body).Decode(result)
 }
 
-// parseNextLink extracts the "next" URL path+query from a GitLab Link header.
-// Strips the API base prefix so the caller can pass the result back to get().
+// parseNextLink extracts the "next" URL path+query from a GitLab Link header
+// and strips the API base prefix so the caller can pass the result back to
+// get() (which re-prepends host + apiPathPrefix). Returns "" if the link
+// targets a different host or doesn't share the apiBase prefix — passing a
+// bare absolute URL back to get() would double-prefix it and break
+// pagination, so it's safer to stop than to silently misroute the next page.
 func parseNextLink(header, apiBase string) string {
 	if header == "" {
 		return ""
@@ -634,7 +662,7 @@ func parseNextLink(header, apiBase string) string {
 		if strings.HasPrefix(link, apiBase) {
 			return link[len(apiBase):]
 		}
-		return link
+		return ""
 	}
 	return ""
 }

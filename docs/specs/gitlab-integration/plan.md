@@ -67,7 +67,7 @@ to create:
     `/projects/:id/merge_requests/:iid/approvals`,
     `/projects/:id/merge_requests/:iid/changes`,
     `/projects/:id/merge_requests/:iid/commits`.
-  - Pipelines: `/projects/:id/pipelines`, `/projects/:id/pipelines/:id/jobs`.
+  - Pipelines: `/projects/:id/pipelines`, `/projects/:id/pipelines/:pipeline_id/jobs`.
   - Issues: `/issues` (search), `/projects/:id/issues/:iid`.
   - User: `/user` (auth check + login).
 - `pat_client_test.go` — table-driven tests with `httptest.Server` per

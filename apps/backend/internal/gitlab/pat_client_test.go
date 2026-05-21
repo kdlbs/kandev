@@ -270,19 +270,60 @@ func TestPATClient_SearchMRsPaged_HonoursTotalHeader(t *testing.T) {
 func TestParseNextLink(t *testing.T) {
 	apiBase := "https://gitlab.example.com/api/v4"
 	cases := []struct {
+		name   string
 		header string
 		want   string
 	}{
-		{"", ""},
-		{`<https://gitlab.example.com/api/v4/issues?page=2>; rel="next"`, "/issues?page=2"},
-		{`<https://gitlab.example.com/api/v4/issues?page=2>; rel="prev"`, ""},
-		{`<https://gitlab.example.com/api/v4/issues?page=3>; rel="next", <https://gitlab.example.com/api/v4/issues?page=10>; rel="last"`, "/issues?page=3"},
+		{"empty", "", ""},
+		{"next", `<https://gitlab.example.com/api/v4/issues?page=2>; rel="next"`, "/issues?page=2"},
+		{"prev-only", `<https://gitlab.example.com/api/v4/issues?page=2>; rel="prev"`, ""},
+		{"next-then-last", `<https://gitlab.example.com/api/v4/issues?page=3>; rel="next", <https://gitlab.example.com/api/v4/issues?page=10>; rel="last"`, "/issues?page=3"},
+		// Cross-host or wrong-base URLs are dropped rather than returned
+		// raw — passing a bare absolute URL back to get() would double-
+		// prefix it with host + apiPathPrefix.
+		{"foreign-host-dropped", `<https://other.example.com/api/v4/issues?page=2>; rel="next"`, ""},
+		{"no-apibase-dropped", `</issues?page=2>; rel="next"`, ""},
 	}
 	for _, tc := range cases {
-		got := parseNextLink(tc.header, apiBase)
-		if got != tc.want {
-			t.Errorf("parseNextLink(%q) = %q, want %q", tc.header, got, tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseNextLink(tc.header, apiBase)
+			if got != tc.want {
+				t.Errorf("parseNextLink(%q) = %q, want %q", tc.header, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPATClient_IsAuthenticated_PropagatesNonAuthErrors(t *testing.T) {
+	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"boom"}`))
+	}))
+	defer stop()
+
+	c := NewPATClient(host, "tok")
+	ok, err := c.IsAuthenticated(context.Background())
+	if err == nil {
+		t.Fatal("expected error for 500 response (transport failure must not be reported as 'not authenticated')")
+	}
+	if ok {
+		t.Error("authenticated = true on 500, want false")
+	}
+}
+
+func TestPATClient_IsAuthenticated_401IsClean(t *testing.T) {
+	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer stop()
+
+	c := NewPATClient(host, "bad")
+	ok, err := c.IsAuthenticated(context.Background())
+	if err != nil {
+		t.Errorf("err = %v, want nil for 401 (it's a clean 'not authenticated' signal)", err)
+	}
+	if ok {
+		t.Error("authenticated = true on 401, want false")
 	}
 }
 

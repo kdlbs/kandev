@@ -82,6 +82,8 @@ When `git remote get-url origin` points at a GitLab host, the steps are the same
 
 Prefer the `glab` CLI when it is on the agent's `PATH`:
 
+Don't hardcode `--target-branch`: many projects ship from `master`, `develop`, or a custom default. Omit the flag so `glab` resolves the project's default branch via the API, or pass an explicit value only if the user / spec already specified one.
+
 ```bash
 glab mr create [--draft] \
   --title "type: description" \
@@ -89,33 +91,39 @@ glab mr create [--draft] \
 <filled template>
 EOF
 )" \
-  --target-branch main \
   --remove-source-branch \
   --yes
 ```
 
-If `glab` is unavailable but `$GITLAB_TOKEN` is set, fall back to the REST API. Use `$CI_SERVER_URL` if defined (set by GitLab runners), otherwise default to `https://gitlab.com`. The project path is `<namespace>/<repo>` — read it from the remote URL.
+If `glab` is unavailable but `$GITLAB_TOKEN` is set, fall back to the REST API. Derive the host from the git remote — `$CI_SERVER_URL` is only set inside GitLab runners and silently falling back to `gitlab.com` from a developer's machine would target the wrong instance. Construct the JSON body with `jq` so multi-line descriptions and embedded quotes can't break the payload.
 
 ```bash
-PROJECT="namespace/repo"   # adjust from `git remote get-url origin`
-HOST="${CI_SERVER_URL:-https://gitlab.com}"
+REMOTE_URL="$(git remote get-url origin)"          # e.g. git@gitlab.acme.corp:team/repo.git
+HOST_PATH="${REMOTE_URL#*@}"                       # gitlab.acme.corp:team/repo.git
+HOST_PATH="${HOST_PATH#*://}"                      # strip scheme if https
+HOST_ONLY="${HOST_PATH%%[:/]*}"                    # gitlab.acme.corp
+HOST="https://${HOST_ONLY}"
+PROJECT="${HOST_PATH#*[:/]}"
+PROJECT="${PROJECT%.git}"                          # team/repo
 SOURCE_BRANCH="$(git branch --show-current)"
-TARGET_BRANCH="main"
+TARGET_BRANCH="$(glab repo view --json defaultBranch -F text 2>/dev/null || echo main)"
 PROJECT_ENC="$(printf '%s' "$PROJECT" | jq -sRr @uri)"
+
+PAYLOAD="$(jq -n \
+  --arg source "$SOURCE_BRANCH" \
+  --arg target "$TARGET_BRANCH" \
+  --arg title "type: description" \
+  --arg description "$(cat <<'EOF'
+<filled template>
+EOF
+)" \
+  '{source_branch: $source, target_branch: $target, title: $title, description: $description, remove_source_branch: true}')"
 
 curl --fail -X POST \
   -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
   -H "Content-Type: application/json" \
-  --data @- \
-  "$HOST/api/v4/projects/$PROJECT_ENC/merge_requests" <<EOF
-{
-  "source_branch": "$SOURCE_BRANCH",
-  "target_branch": "$TARGET_BRANCH",
-  "title": "type: description",
-  "description": "<filled template>",
-  "remove_source_branch": true
-}
-EOF
+  --data "$PAYLOAD" \
+  "$HOST/api/v4/projects/$PROJECT_ENC/merge_requests"
 ```
 
 To address review comments on a GitLab MR, use the **discussions** API rather than individual review comments — discussions are GitLab's threading primitive. List with `GET /projects/:id/merge_requests/:iid/discussions`, reply with `POST /projects/:id/merge_requests/:iid/discussions/:discussion_id/notes`, and resolve a thread with `PUT /projects/:id/merge_requests/:iid/discussions/:discussion_id?resolved=true`. The `glab` equivalent is `glab mr note` for replies.

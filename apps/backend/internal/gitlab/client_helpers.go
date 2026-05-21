@@ -193,8 +193,13 @@ func convertRawIssue(raw *rawIssue) *Issue {
 
 func convertRawProject(raw *rawProject) Project {
 	namespace := raw.Namespace.FullPath
-	if namespace == "" && strings.Contains(raw.PathWithNamespace, "/") {
-		namespace = strings.SplitN(raw.PathWithNamespace, "/", 2)[0]
+	if namespace == "" {
+		// GitLab subgroups can be arbitrarily nested (acme/team/squad/repo),
+		// so the namespace is everything up to the final "/" — not just the
+		// first segment.
+		if idx := strings.LastIndex(raw.PathWithNamespace, "/"); idx > 0 {
+			namespace = raw.PathWithNamespace[:idx]
+		}
 	}
 	return Project{
 		ID:                raw.ID,

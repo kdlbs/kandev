@@ -93,6 +93,13 @@ func TestCloneURLWithHost(t *testing.T) {
 			"gitlab", "http://gitlab.local", "team", "service", ProtocolHTTPS,
 			"https://gitlab.local/team/service.git",
 		},
+		{
+			// scp-style "git@host:path" can't carry a port; ssh:// URL
+			// form is the only correct shape when one is present.
+			"self-managed SSH with port falls back to ssh:// URL",
+			"gitlab", "https://gitlab.acme.corp:2222", "team", "service", ProtocolSSH,
+			"ssh://git@gitlab.acme.corp:2222/team/service.git",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

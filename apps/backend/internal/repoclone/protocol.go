@@ -52,6 +52,12 @@ func CloneURLWithHost(provider, host, owner, name, protocol string) (string, err
 		}
 	}
 	if protocol == ProtocolSSH {
+		// scp-style "git@host:path" can't carry a port — when the host has
+		// one (gitlab.acme.corp:2222) fall back to the ssh:// URL form,
+		// which git understands and accepts a port natively.
+		if strings.Contains(resolvedHost, ":") {
+			return fmt.Sprintf("ssh://git@%s/%s/%s.git", resolvedHost, owner, name), nil
+		}
 		return fmt.Sprintf("git@%s:%s/%s.git", resolvedHost, owner, name), nil
 	}
 	return fmt.Sprintf("https://%s/%s/%s.git", resolvedHost, owner, name), nil
