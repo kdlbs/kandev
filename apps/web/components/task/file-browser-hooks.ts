@@ -530,14 +530,8 @@ export type ToggleFolderExpandDeps = {
   loadChildren?: typeof loadNodeChildren;
 };
 
-/**
- * Toggle a folder's expansion state with optimistic UI: the expanded set
- * flips synchronously so the chevron rotates immediately, then children are
- * fetched in the background. Without the optimistic flip, the first click on
- * a folder waits for the WebSocket round-trip in loadNodeChildren and the UI
- * appears unresponsive — users perceive the click as a no-op and only the
- * second click looks like it "did something".
- */
+// Flip expanded synchronously *then* fetch children — otherwise the first
+// click on a folder blocks on the loadNodeChildren round-trip and looks dead.
 export async function toggleFolderExpand({
   node,
   sessionId,
