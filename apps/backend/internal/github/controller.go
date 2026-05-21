@@ -2,6 +2,7 @@ package github
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -316,14 +317,26 @@ func (c *Controller) httpMergePR(ctx *gin.Context) {
 	var req struct {
 		MergeMethod string `json:"merge_method"`
 	}
-	// Body is optional — empty body means "use the repo default merge method".
-	_ = ctx.ShouldBindJSON(&req)
+	// Body is optional — an empty body (io.EOF) means "use the repo default
+	// merge method". A non-empty but malformed body is a client bug, not a
+	// silent "use default", so reject it with 400.
+	if bindErr := ctx.ShouldBindJSON(&req); bindErr != nil && !errors.Is(bindErr, io.EOF) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
 	validMethods := map[string]bool{"": true, "merge": true, "squash": true, "rebase": true}
 	if !validMethods[req.MergeMethod] {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "merge_method must be merge, squash, or rebase"})
 		return
 	}
 	if err := c.service.MergePR(ctx.Request.Context(), owner, repo, number, req.MergeMethod); err != nil {
+		if errors.Is(err, ErrNoClient) {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "GitHub is not configured. Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",
+				"code":  "github_not_configured",
+			})
+			return
+		}
 		status := http.StatusInternalServerError
 		var apiErr *GitHubAPIError
 		if errors.As(err, &apiErr) {

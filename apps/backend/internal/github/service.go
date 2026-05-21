@@ -398,7 +398,7 @@ func (s *Service) SubmitReview(ctx context.Context, owner, repo string, number i
 // poller will catch the merged state on its next pass.
 func (s *Service) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
 	if s.client == nil {
-		return fmt.Errorf("github client not configured")
+		return ErrNoClient
 	}
 	return s.client.MergePR(ctx, owner, repo, number, mergeMethod)
 }

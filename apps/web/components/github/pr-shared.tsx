@@ -270,14 +270,19 @@ export function PRMergeButton({
 }) {
   const { toast } = useToast();
   const [merging, setMerging] = useState(false);
+  // After a successful merge we stay hidden until the store catches up to
+  // state="merged" — otherwise the button briefly re-enables during the async
+  // refresh window and a double-click would hit the GitHub API again.
+  const [merged, setMerged] = useState(false);
 
-  if (!isPRReadyToMerge(taskPR)) return null;
+  if (merged || !isPRReadyToMerge(taskPR)) return null;
 
   const handleMerge = async (e: React.MouseEvent) => {
     e.stopPropagation();
     setMerging(true);
     try {
       await mergePR(taskPR.owner, taskPR.repo, taskPR.pr_number);
+      setMerged(true);
       toast({ description: "PR merged", variant: "success" });
       onMerged?.();
     } catch (err) {
