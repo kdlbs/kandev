@@ -174,6 +174,7 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 		BaseBranch:           req.BaseBranch,
 		FallbackBaseBranch:   req.DefaultBranch,
 		CheckoutBranch:       req.CheckoutBranch,
+		PRNumber:             req.PRNumber,
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
 		PullBeforeWorktree:   req.PullBeforeWorktree,
 		WorktreeID:           req.WorktreeID,
@@ -380,6 +381,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.BaseBranch = spec.BaseBranch
 	subReq.DefaultBranch = spec.DefaultBranch
 	subReq.CheckoutBranch = spec.CheckoutBranch
+	subReq.PRNumber = spec.PRNumber
 	subReq.WorktreeID = spec.WorktreeID
 	subReq.WorktreeBranchPrefix = spec.WorktreeBranchPrefix
 	subReq.PullBeforeWorktree = spec.PullBeforeWorktree

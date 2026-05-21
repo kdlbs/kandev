@@ -245,6 +245,7 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 			RepositoryID:   r.RepositoryID,
 			BaseBranch:     r.BaseBranch,
 			CheckoutBranch: r.CheckoutBranch,
+			PRNumber:       r.PRNumber,
 		})
 	}
 	return a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{

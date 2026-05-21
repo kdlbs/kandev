@@ -52,6 +52,7 @@ export function useSubtaskFormState(): DialogFormState {
   const [githubBranchesLoading, setGitHubBranchesLoading] = useState(false);
   const [githubUrlError, setGitHubUrlError] = useState<string | null>(null);
   const [githubPrHeadBranch, setGitHubPrHeadBranch] = useState<string | null>(null);
+  const [githubPrBaseBranch, setGitHubPrBaseBranch] = useState<string | null>(null);
   // Discovered (on-disk) repos — populated by useDiscoverReposEffect when the
   // dialog opens, same as the create-task flow. This lets users target
   // not-yet-imported on-machine git folders for the subtask.
@@ -106,6 +107,8 @@ export function useSubtaskFormState(): DialogFormState {
       setGitHubUrlError,
       githubPrHeadBranch,
       setGitHubPrHeadBranch,
+      githubPrBaseBranch,
+      setGitHubPrBaseBranch,
       workflowAgentProfileId: "",
       setWorkflowAgentProfileId: NOOP,
       clearDraft: NOOP,
@@ -126,6 +129,7 @@ export function useSubtaskFormState(): DialogFormState {
       githubBranchesLoading,
       githubUrlError,
       githubPrHeadBranch,
+      githubPrBaseBranch,
       discoveredRepositories,
       discoverReposLoading,
       discoverReposLoaded,

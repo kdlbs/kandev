@@ -330,6 +330,7 @@ function useSubmitHandlersWiring({
     useGitHubUrl: fs.useGitHubUrl,
     githubUrl: fs.githubUrl,
     githubPrHeadBranch: fs.githubPrHeadBranch,
+    githubPrBaseBranch: fs.githubPrBaseBranch,
     githubBranch: fs.githubBranch,
     agentProfileId: computed.effectiveAgentProfileId,
     executorId: fs.executorId,

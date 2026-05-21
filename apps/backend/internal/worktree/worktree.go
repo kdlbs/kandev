@@ -119,6 +119,15 @@ type CreateRequest struct {
 	// fallback branch is created using the original name with a random suffix.
 	CheckoutBranch string
 
+	// PRNumber, when > 0, identifies the GitHub PR whose head ref should be
+	// fetched into the local CheckoutBranch via the refs/pull/<N>/head refspec.
+	// Required for fork PRs, whose branches only exist on the contributor's
+	// fork — git fetch origin <branch> fails because origin (the base repo)
+	// has no such ref. GitHub mirrors every PR head under refs/pull/<N>/head
+	// on the base repo, so the refspec form works for same-repo and fork PRs
+	// uniformly without needing to add the fork as a remote.
+	PRNumber int
+
 	// WorktreeBranchPrefix is the prefix to use for the worktree branch name.
 	// If empty, the default prefix is used.
 	WorktreeBranchPrefix string

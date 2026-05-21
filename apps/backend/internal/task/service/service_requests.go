@@ -13,6 +13,7 @@ type TaskRepositoryInput struct {
 	RepositoryID   string `json:"repository_id"`
 	BaseBranch     string `json:"base_branch"`
 	CheckoutBranch string `json:"checkout_branch,omitempty"`
+	PRNumber       int    `json:"pr_number,omitempty"` // GitHub PR number when CheckoutBranch is a PR head; persisted into task_repositories.metadata["pr_number"].
 	LocalPath      string `json:"local_path,omitempty"`
 	Name           string `json:"name,omitempty"`
 	DefaultBranch  string `json:"default_branch,omitempty"`

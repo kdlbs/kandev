@@ -834,7 +834,7 @@ esac
 	}
 
 	repoPath := t.TempDir()
-	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
+	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch", 0)
 	if err != nil {
 		t.Fatalf("fetchBranchToLocal() unexpected error: %v", err)
 	}
@@ -873,7 +873,7 @@ esac
 	}
 
 	repoPath := t.TempDir()
-	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
+	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch", 0)
 	if err != nil {
 		t.Fatalf("fetchBranchToLocal() should fall back to local branch, got error: %v", err)
 	}
@@ -918,7 +918,7 @@ esac
 	}
 
 	repoPath := t.TempDir()
-	_, err = mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
+	_, err = mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch", 0)
 	if err == nil {
 		t.Fatal("fetchBranchToLocal() should fail when branch not found anywhere")
 	}
@@ -957,7 +957,7 @@ esac
 	}
 
 	repoPath := t.TempDir()
-	_, err = mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
+	_, err = mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch", 0)
 	if err == nil {
 		t.Fatal("fetchBranchToLocal() should fail when remote ref is missing and no local branch")
 	}

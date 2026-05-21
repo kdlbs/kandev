@@ -98,6 +98,7 @@ type ReviewTaskRepository struct {
 	RepositoryID   string
 	BaseBranch     string
 	CheckoutBranch string
+	PRNumber       int // GitHub PR number; carried so worktree creation can use refs/pull/<N>/head for fork PRs.
 }
 
 // SetGitHubService sets the GitHub service for PR auto-detection.
@@ -367,7 +368,7 @@ func (s *Service) resolveReviewRepository(ctx context.Context, workspaceID strin
 		zap.String("base_branch", baseBranch))
 	// BaseBranch = repo default branch (e.g. "main") for worktree creation.
 	// CheckoutBranch = PR head branch to fetch and checkout after worktree is created.
-	return []ReviewTaskRepository{{RepositoryID: repoID, BaseBranch: baseBranch, CheckoutBranch: pr.HeadBranch}}
+	return []ReviewTaskRepository{{RepositoryID: repoID, BaseBranch: baseBranch, CheckoutBranch: pr.HeadBranch, PRNumber: pr.Number}}
 }
 
 // detectPushAndAssociatePR checks if a push happened and looks for a PR on

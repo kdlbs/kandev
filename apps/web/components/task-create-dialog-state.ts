@@ -98,6 +98,7 @@ type FormResetters = {
   setGitHubBranches: (v: Branch[]) => void;
   setGitHubUrlError: (v: string | null) => void;
   setGitHubPrHeadBranch: (v: string | null) => void;
+  setGitHubPrBaseBranch: (v: string | null) => void;
   setFreshBranchEnabled: (v: boolean) => void;
   setCurrentLocalBranch: (v: string) => void;
 };
@@ -216,6 +217,7 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   resetters.setGitHubBranches([]);
   resetters.setGitHubUrlError(null);
   resetters.setGitHubPrHeadBranch(iv?.checkoutBranch ?? null);
+  resetters.setGitHubPrBaseBranch(null);
   resetters.setFreshBranchEnabled(false);
   resetters.setCurrentLocalBranch("");
   // Source-mode toggle resets — without these, opening the dialog in "None"
@@ -293,6 +295,7 @@ function useGitHubUrlState() {
   const [githubBranchesLoading, setGitHubBranchesLoading] = useState(false);
   const [githubUrlError, setGitHubUrlError] = useState<string | null>(null);
   const [githubPrHeadBranch, setGitHubPrHeadBranch] = useState<string | null>(null);
+  const [githubPrBaseBranch, setGitHubPrBaseBranch] = useState<string | null>(null);
   return {
     useGitHubUrl,
     setUseGitHubUrl,
@@ -306,6 +309,8 @@ function useGitHubUrlState() {
     setGitHubUrlError,
     githubPrHeadBranch,
     setGitHubPrHeadBranch,
+    githubPrBaseBranch,
+    setGitHubPrBaseBranch,
   };
 }
 
@@ -446,6 +451,7 @@ export function useDialogFormState(
       setGitHubBranches: ghUrl.setGitHubBranches,
       setGitHubUrlError: ghUrl.setGitHubUrlError,
       setGitHubPrHeadBranch: ghUrl.setGitHubPrHeadBranch,
+      setGitHubPrBaseBranch: ghUrl.setGitHubPrBaseBranch,
       setFreshBranchEnabled: freshBranch.setFreshBranchEnabled,
       setCurrentLocalBranch: freshBranch.setCurrentLocalBranch,
       setNoRepository: form.setNoRepository,

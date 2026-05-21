@@ -140,6 +140,7 @@ func convertToServiceRepos(repos []dto.TaskRepositoryInput) []service.TaskReposi
 			RepositoryID:   r.RepositoryID,
 			BaseBranch:     r.BaseBranch,
 			CheckoutBranch: r.CheckoutBranch,
+			PRNumber:       r.PRNumber,
 			LocalPath:      r.LocalPath,
 			Name:           r.Name,
 			DefaultBranch:  r.DefaultBranch,

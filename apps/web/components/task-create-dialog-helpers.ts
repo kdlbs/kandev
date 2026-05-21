@@ -173,6 +173,13 @@ export function buildRepositoriesPayload(opts: {
   githubUrl: string;
   githubBranch: string;
   githubPrHeadBranch: string | null;
+  /**
+   * PR's target branch from the GitHub API. When set and the displayed branch
+   * still matches the auto-selected PR head, this is sent as `base_branch`
+   * (so origin can resolve it for fork PRs). Optional to keep existing test
+   * fixtures and non-PR call sites compiling without a sentinel.
+   */
+  githubPrBaseBranch?: string | null;
   repositories: TaskRepoRow[];
   /** Used to look up `default_branch` for `localPath` rows. */
   discoveredRepositories: LocalRepository[];
@@ -195,10 +202,21 @@ export function buildRepositoriesPayload(opts: {
   freshBranch?: { confirmDiscard: boolean; consentedDirtyFiles: string[] };
 }): NonNullable<CreateTaskParams["repositories"]> {
   if (opts.useGitHubUrl && opts.githubUrl) {
+    // For PR URLs we display the PR head branch in the pill (so the user sees
+    // the branch they pasted). The displayed branch is NOT a valid base on
+    // origin for fork PRs — it only exists on the contributor's fork — so we
+    // anchor `base_branch` to the PR's actual target branch from the GitHub
+    // API and let `checkout_branch` carry the head ref. The backend materializes
+    // the head via the refs/pull/<N>/head refspec.
+    const isPrAutoSelection =
+      !!opts.githubPrHeadBranch && opts.githubBranch === opts.githubPrHeadBranch;
+    const baseBranch = isPrAutoSelection
+      ? opts.githubPrBaseBranch || undefined
+      : opts.githubBranch || undefined;
     return [
       {
         repository_id: "",
-        base_branch: opts.githubBranch || undefined,
+        base_branch: baseBranch,
         checkout_branch: opts.githubPrHeadBranch || undefined,
         github_url: opts.githubUrl.trim(),
       },

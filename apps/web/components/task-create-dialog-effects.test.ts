@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
-import { useWorkflowAgentProfileEffect } from "./task-create-dialog-effects";
+import {
+  useBranchAutoSelectEffect,
+  useWorkflowAgentProfileEffect,
+} from "./task-create-dialog-effects";
 import type { DialogFormState } from "@/components/task-create-dialog-types";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
@@ -104,5 +107,83 @@ describe("useWorkflowAgentProfileEffect", () => {
     // Empty string lets useDefaultSelectionsEffect take over the fallback
     // chain (workspace default → first profile).
     expect(fs.setAgentProfileId).toHaveBeenCalledWith("");
+  });
+});
+
+type BranchFake = Pick<
+  DialogFormState,
+  "githubBranch" | "githubBranches" | "useGitHubUrl" | "setGitHubBranch" | "githubPrHeadBranch"
+>;
+function makeBranchFs(overrides: Partial<BranchFake> = {}): DialogFormState {
+  return {
+    githubBranch: "",
+    githubBranches: [],
+    useGitHubUrl: true,
+    setGitHubBranch: vi.fn(),
+    githubPrHeadBranch: null,
+    ...overrides,
+  } as unknown as DialogFormState;
+}
+
+describe("useBranchAutoSelectEffect", () => {
+  it("selects the PR head branch when it is present in the base repo's branch list", () => {
+    const fs = makeBranchFs({
+      githubBranches: [
+        { name: "main", type: "remote" },
+        { name: "feature/x", type: "remote" },
+      ],
+      githubPrHeadBranch: "feature/x",
+    });
+    renderHook(() => useBranchAutoSelectEffect(fs));
+    expect(fs.setGitHubBranch).toHaveBeenCalledWith("feature/x");
+  });
+
+  it("still surfaces the PR head branch for fork PRs whose head is NOT in the base repo's branch list", () => {
+    // Regression guard for the fork-PR display bug: previously the effect
+    // fell through to "main" when the PR head was missing from the base
+    // repo's branches, visually contradicting the URL the user just pasted.
+    const fs = makeBranchFs({
+      githubBranches: [
+        { name: "main", type: "remote" },
+        { name: "develop", type: "remote" },
+      ],
+      githubPrHeadBranch: "jira-hosted-path-auth",
+    });
+    renderHook(() => useBranchAutoSelectEffect(fs));
+    expect(fs.setGitHubBranch).toHaveBeenCalledWith("jira-hosted-path-auth");
+  });
+
+  it("falls back to main when there is no PR head branch", () => {
+    const fs = makeBranchFs({
+      githubBranches: [
+        { name: "feature/y", type: "remote" },
+        { name: "main", type: "remote" },
+      ],
+    });
+    renderHook(() => useBranchAutoSelectEffect(fs));
+    expect(fs.setGitHubBranch).toHaveBeenCalledWith("main");
+  });
+
+  it("does nothing when useGitHubUrl is false", () => {
+    const fs = makeBranchFs({
+      useGitHubUrl: false,
+      githubBranches: [{ name: "main", type: "remote" }],
+      githubPrHeadBranch: "feature/x",
+    });
+    renderHook(() => useBranchAutoSelectEffect(fs));
+    expect(fs.setGitHubBranch).not.toHaveBeenCalled();
+  });
+
+  it("does nothing once a branch has already been selected (manual override)", () => {
+    const fs = makeBranchFs({
+      githubBranch: "develop",
+      githubBranches: [
+        { name: "main", type: "remote" },
+        { name: "develop", type: "remote" },
+      ],
+      githubPrHeadBranch: "feature/x",
+    });
+    renderHook(() => useBranchAutoSelectEffect(fs));
+    expect(fs.setGitHubBranch).not.toHaveBeenCalled();
   });
 });

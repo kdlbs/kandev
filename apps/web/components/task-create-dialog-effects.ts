@@ -367,14 +367,18 @@ export function useDefaultSelectionsEffect(
 export function useBranchAutoSelectEffect(fs: DialogFormState) {
   const { githubBranch, githubBranches, useGitHubUrl, setGitHubBranch, githubPrHeadBranch } = fs;
   useEffect(() => {
-    if (!useGitHubUrl || githubBranches.length === 0 || githubBranch) return;
+    if (!useGitHubUrl || githubBranch) return;
+    // PR head wins regardless of whether it appears in the base repo's branch
+    // list. Fork PRs (head lives only on the contributor's fork) won't match
+    // anything in githubBranches, but we still want the pill to surface the
+    // PR's branch name — the worktree will materialize it from the PR refspec
+    // on the backend, and falling through to "main" would visually contradict
+    // the URL the user just pasted.
     if (githubPrHeadBranch) {
-      const prBranch = githubBranches.find((b) => b.name === githubPrHeadBranch);
-      if (prBranch) {
-        setGitHubBranch(prBranch.name);
-        return;
-      }
+      setGitHubBranch(githubPrHeadBranch);
+      return;
     }
+    if (githubBranches.length === 0) return;
     // GitHub URL branches are referenced by name only (no remote prefix);
     // selectPreferredBranch expects origin-prefixed remotes, so pick directly.
     const preferred =
@@ -412,6 +416,7 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
     setGitHubBranchesLoading,
     setGitHubUrlError,
     setGitHubPrHeadBranch,
+    setGitHubPrBaseBranch,
   } = fs;
   useEffect(() => {
     if (!open || !useGitHubUrl) {
@@ -429,6 +434,7 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
     if (!parsed) {
       setGitHubBranches([]);
       setGitHubPrHeadBranch(null);
+      setGitHubPrBaseBranch(null);
       setGitHubBranchesLoading(false);
       setGitHubUrlError("Invalid GitHub URL — expected github.com/owner/repo or .../pull/123");
       return;
@@ -437,6 +443,7 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
     setGitHubUrlError(null);
     setGitHubBranchesLoading(true);
     setGitHubPrHeadBranch(null);
+    setGitHubPrBaseBranch(null);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15_000);
@@ -456,6 +463,7 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
         setGitHubUrlError(null);
         if (prInfo) {
           setGitHubPrHeadBranch(prInfo.head_branch);
+          setGitHubPrBaseBranch(prInfo.base_branch);
         }
       })
       .catch((err) => {
@@ -488,6 +496,7 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
     setGitHubBranchesLoading,
     setGitHubUrlError,
     setGitHubPrHeadBranch,
+    setGitHubPrBaseBranch,
   ]);
 }
 
