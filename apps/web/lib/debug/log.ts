@@ -1,10 +1,16 @@
 /**
  * Namespaced debug logger for development.
  *
- * Active when `NODE_ENV !== "production"` (i.e. `make dev`) **or** when
- * `NEXT_PUBLIC_KANDEV_DEBUG=true` is set at build time (i.e. `make
- * start-debug`). In a plain production build both conditions are false and
- * Next.js dead-code-eliminates everything.
+ * Active when any of the following is true:
+ *   - `NODE_ENV !== "production"` (i.e. `make dev`)
+ *   - `NEXT_PUBLIC_KANDEV_DEBUG=true` at build time (inlined into the bundle)
+ *   - `window.__KANDEV_DEBUG === true` at runtime (set by `layout.tsx` when
+ *     the server-side env var is present, e.g. `make start-debug`)
+ *
+ * The runtime `window` check exists because `make start-debug` re-uses the
+ * already-built production web bundle and only flips the env var on the
+ * server process. Without the runtime fallback, the inlined `process.env`
+ * value stays `false` in the client bundle and no logs surface.
  *
  * The `debug()` call itself is free, but JavaScript evaluates its arguments
  * before the call — so callers that compute expensive values (O(n) maps,
@@ -12,16 +18,46 @@
  *
  *   if (IS_DEBUG) { debug(...); }
  *
- * Next.js inlines both `process.env` checks at build time and Terser folds
- * `IS_DEBUG` to a boolean literal, dead-code-eliminating the block in regular
- * production builds. Simple scalar reads are cheap enough to leave unguarded.
+ * In a production build with no flag set, both `process.env` checks fold to
+ * `false` and the `window` check short-circuits at runtime, so the guarded
+ * block is effectively a no-op.
  *
  * Output format is logfmt-ish so logs are flat and grep/copy-friendly:
  *
  *   [namespace] message key1=value key2="value with space" key3={"nested":1}
  *
+ * ## Namespace convention
+ *
+ * Names use `<domain>:<aspect>` so a devtools console filter can narrow on
+ * either part. Known namespaces in this codebase (keep this list current
+ * when adding new loggers — it's the cheat-sheet for triage):
+ *
+ *   Git / Changes panel pipeline (bug: stale until refresh)
+ *     [git-status:subscribe]  useSessionGitStatus subscribe/unsubscribe cycle
+ *     [ws:dispatch]           every WS message — inbound notifications and
+ *                             outbound sends (`message="send"`). Streaming
+ *                             chunk traffic is denylisted.
+ *     [git-status:ws]         git event handler — status_update / commit_created / ...
+ *     [git-status:store]      setGitStatus — overwrite decision + prev/next counts
+ *     [git-status:derive]     useSessionGit file aggregation across repos
+ *
+ *   Files panel pipeline (bug: stuck loading skeleton)
+ *     [agentctl:status]       per-session agentctl status transitions
+ *     [file-browser:load]     tree loader — init / ready-flip / start / retry / gave-up
+ *     [file-browser:changes]  session.workspace.file.changes events + folder refresh
+ *
+ *   Other
+ *     [ws:connection]         WS hook mount + status transitions
+ *     [dockview:*]            layout restore / save / env-switch / session-tabs
+ *     [messages:*]            message fetch / process / lazyload
+ *     [session:env-mapping]   session → environment ID mapping
+ *
+ * Tip: in Chrome devtools the console filter input takes substrings and regex.
+ * Use `[git-status:` for the whole git pipeline, `[ws:dispatch] action=session.git`
+ * to scope WS dispatch to git, etc.
+ *
  * Usage:
- *   const debug = createDebugLogger("git-status");
+ *   const debug = createDebugLogger("git-status:ws");
  *   debug("status_update received", { sessionId, fileCount });
  *
  * Logs go through `console.debug`, which the log interceptor mirrors into the
@@ -32,7 +68,9 @@
 export type DebugLogger = (...args: unknown[]) => void;
 
 export const IS_DEBUG =
-  process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_KANDEV_DEBUG === "true";
+  process.env.NODE_ENV !== "production" ||
+  process.env.NEXT_PUBLIC_KANDEV_DEBUG === "true" ||
+  (typeof window !== "undefined" && window.__KANDEV_DEBUG === true);
 
 const NOOP: DebugLogger = () => {};
 

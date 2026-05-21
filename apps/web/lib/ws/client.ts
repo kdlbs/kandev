@@ -1,6 +1,19 @@
 import type { BackendMessageMap, BackendMessageType } from "@/lib/types/backend";
 import type { ConnectionStatus } from "@/lib/types/connection";
 import { generateUUID } from "@/lib/utils";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+
+const debugDispatch = createDebugLogger("ws:dispatch");
+
+// High-frequency notification types we skip in the dispatch log to avoid
+// drowning the console during agent streams. Filter [ws:dispatch] to see
+// everything else; if you need the streaming traffic, comment this out.
+const DISPATCH_LOG_DENYLIST = new Set<string>([
+  "session.message.added",
+  "session.message.updated",
+  "session.shell.output",
+  "session.process.output",
+]);
 
 type MessageHandler<T extends BackendMessageType> = (message: BackendMessageMap[T]) => void;
 
@@ -115,6 +128,24 @@ export class WebSocketClient {
 
   send(payload: unknown) {
     const data = JSON.stringify(payload);
+    if (IS_DEBUG) {
+      const p = payload as { action?: string; id?: string; type?: string } | null;
+      const action = p?.action ?? "?";
+      if (!DISPATCH_LOG_DENYLIST.has(action)) {
+        const sessionId = (
+          (p as { payload?: { session_id?: string } } | null)?.payload as
+            | { session_id?: string }
+            | undefined
+        )?.session_id;
+        debugDispatch("send", {
+          action,
+          id: p?.id ?? null,
+          type: p?.type ?? null,
+          sessionId: sessionId ?? null,
+          queued: this.status !== "connected" || !this.socket,
+        });
+      }
+    }
     if (this.status !== "connected" || !this.socket) {
       this.pendingQueue.push(data);
       return;
@@ -324,14 +355,26 @@ export class WebSocketClient {
     }
   }
 
+  private debugNotification(action: BackendMessageType, payload: unknown, handlerCount: number) {
+    if (!IS_DEBUG || DISPATCH_LOG_DENYLIST.has(action)) return;
+    const payloadSessionId = (payload as { session_id?: string } | undefined)?.session_id;
+    debugDispatch("notification", {
+      action,
+      sessionId: payloadSessionId ?? null,
+      handlers: handlerCount,
+    });
+  }
+
   private handleParsedMessage(message: BackendMessageMap[BackendMessageType]) {
     const msgWithId = message as { id?: string; type: string };
 
     if (msgWithId.type === "response" && msgWithId.id) {
+      if (IS_DEBUG) debugDispatch("response", { id: msgWithId.id });
       this.resolvePendingRequest(msgWithId.id, message.payload);
       return;
     }
     if (msgWithId.type === "error" && msgWithId.id) {
+      if (IS_DEBUG) debugDispatch("error-response", { id: msgWithId.id });
       this.rejectPendingRequest(msgWithId.id, message.payload);
       return;
     }
@@ -340,6 +383,7 @@ export class WebSocketClient {
     const action = (message as { action?: string })?.action as BackendMessageType | undefined;
     if (!action) return;
     const handlers = this.handlers.get(action);
+    this.debugNotification(action, message.payload, handlers?.size ?? 0);
     if (handlers) {
       handlers.forEach((handler) => handler(message));
     }
