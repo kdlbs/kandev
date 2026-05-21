@@ -89,7 +89,8 @@ export function parseEstimate(raw: string): number | undefined {
   const t = raw.trim();
   if (t === "") return undefined;
   const n = Number(t);
-  return Number.isFinite(n) ? n : undefined;
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return n;
 }
 
 export function filterIsEmpty(form: FormState): boolean {

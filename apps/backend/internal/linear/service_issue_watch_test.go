@@ -3,6 +3,7 @@ package linear
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 )
 
@@ -120,6 +121,28 @@ func TestService_UpdateIssueWatch_PartialPatch(t *testing.T) {
 	empty := SearchFilter{}
 	if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{Filter: &empty}); !errors.Is(err, ErrInvalidConfig) {
 		t.Errorf("expected ErrInvalidConfig for empty filter patch, got %v", err)
+	}
+}
+
+func TestValidateFilterBounds_RejectsNonFiniteAndNegativeEstimates(t *testing.T) {
+	nan := math.NaN()
+	posInf := math.Inf(1)
+	negInf := math.Inf(-1)
+	neg := -1.0
+	cases := map[string]SearchFilter{
+		"estimateMin NaN":  {EstimateMin: &nan},
+		"estimateMax NaN":  {EstimateMax: &nan},
+		"estimateMin +Inf": {EstimateMin: &posInf},
+		"estimateMax -Inf": {EstimateMax: &negInf},
+		"estimateMin < 0":  {EstimateMin: &neg},
+		"estimateMax < 0":  {EstimateMax: &neg},
+	}
+	for name, f := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := validateFilterBounds(f); !errors.Is(err, ErrInvalidConfig) {
+				t.Errorf("expected ErrInvalidConfig, got %v", err)
+			}
+		})
 	}
 }
 

@@ -236,7 +236,7 @@ func TestHTTPSearchIssues_RejectsBadNumericParams(t *testing.T) {
 		t.Fatalf("set secret: %v", err)
 	}
 	cases := map[string]string{
-		"priorities out of range":       "priorities=99",
+		"priorities out of range":        "priorities=99",
 		"priorities mixed valid/invalid": "priorities=1,99",
 		"priorities not a number":        "priorities=abc",
 		"estimate_min not a number":      "estimate_min=abc",
