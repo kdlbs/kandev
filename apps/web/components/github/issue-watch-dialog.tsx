@@ -81,7 +81,7 @@ const CLEANUP_POLICY_OPTIONS: Array<{ id: CleanupPolicy; label: string; descript
   {
     id: "never",
     label: "Never auto-delete",
-    description: "Keep all tasks. Use the manual cleanup button to drain piles.",
+    description: "Keep all tasks. Delete them manually from the task list.",
   },
 ];
 

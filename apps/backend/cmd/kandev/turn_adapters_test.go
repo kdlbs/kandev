@@ -67,6 +67,21 @@ func TestHasUserAuthoredMessage(t *testing.T) {
 			want: false,
 		},
 		{
+			// Legacy message from before the cleanup_policy work:
+			// recordAutoStartMessage only tagged workflow_auto_start. The
+			// filter must recognize that tag too so installs with piled-up
+			// pre-upgrade tasks can drain them via the manual button.
+			name: "legacy workflow auto-start (only workflow_auto_start=true) → false",
+			messages: []*models.Message{
+				{
+					AuthorType: models.MessageAuthorUser,
+					Content:    "legacy auto-start prompt",
+					Metadata:   map[string]interface{}{"workflow_auto_start": true},
+				},
+			},
+			want: false,
+		},
+		{
 			name: "real user message (no auto_start tag) → true",
 			messages: []*models.Message{
 				{

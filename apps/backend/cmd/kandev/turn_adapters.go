@@ -60,11 +60,23 @@ func (a *taskSessionCheckerAdapter) HasUserAuthoredMessage(ctx context.Context, 
 			if m.AuthorType != models.MessageAuthorUser {
 				continue
 			}
-			if autoStart, ok := m.Metadata["auto_start"].(bool); ok && autoStart {
+			// New code paths tag both auto_start and workflow_auto_start.
+			// Legacy rows (pre-cleanup-policy upgrade) carry only the
+			// workflow_auto_start tag from the old recordAutoStartMessage
+			// implementation — recognize it too so the install-wide
+			// cleanup button actually drains piled-up tasks after upgrade.
+			if metaFlag(m.Metadata, "auto_start") || metaFlag(m.Metadata, "workflow_auto_start") {
 				continue
 			}
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// metaFlag returns true when meta[key] is a bool with value true. Returns
+// false for missing keys, nil maps, non-bool values, and false values.
+func metaFlag(meta map[string]interface{}, key string) bool {
+	v, ok := meta[key].(bool)
+	return ok && v
 }
