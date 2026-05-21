@@ -10,7 +10,7 @@ import {
   SummaryDot,
   pluralCount,
 } from "./shared";
-import { pickArray, pickString } from "./parse";
+import { pickArray, pickString, shortId } from "./parse";
 import type { KandevRenderer } from "./types";
 
 type QuestionOption = { label?: string; description?: string };
@@ -128,7 +128,7 @@ export const AskUserQuestionRenderer: KandevRenderer = ({ args, result, status }
         )}
         {pendingId && status === "running" && (
           <div className="text-[10px] italic text-muted-foreground/70">
-            Awaiting user response (pending_id={pendingId.slice(0, 8)}…)
+            Awaiting user response (pending_id={shortId(pendingId)})
           </div>
         )}
       </KandevBody>

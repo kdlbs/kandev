@@ -71,9 +71,9 @@ export const ListWorkspacesRenderer: KandevRenderer = ({ result, status }) => {
         {items.length === 0 ? (
           <EmptyListNote noun="workspaces" />
         ) : (
-          items.map((w) => (
+          items.map((w, i) => (
             <NamedListRow
-              key={w.id ?? w.name}
+              key={w.id ?? w.name ?? `workspace-${i}`}
               name={w.name}
               description={w.description}
               id={w.id}
@@ -120,9 +120,9 @@ export const ListWorkflowsRenderer: KandevRenderer = ({ args, result, status }) 
         {items.length === 0 ? (
           <EmptyListNote noun="workflows" />
         ) : (
-          items.map((w) => (
+          items.map((w, i) => (
             <NamedListRow
-              key={w.id ?? w.name}
+              key={w.id ?? w.name ?? `workflow-${i}`}
               name={w.name}
               description={w.description}
               id={w.id}
@@ -181,8 +181,11 @@ export const ListWorkflowStepsRenderer: KandevRenderer = ({ args, result, status
         {items.length === 0 ? (
           <EmptyListNote noun="steps" />
         ) : (
-          sorted.map((step) => (
-            <div key={step.id ?? `${step.position}`} className="flex items-center gap-2 text-xs">
+          sorted.map((step, i) => (
+            <div
+              key={step.id ?? step.name ?? `step-${i}`}
+              className="flex items-center gap-2 text-xs"
+            >
               <StepColorDot color={step.color} />
               <span>{step.name ?? "(unnamed)"}</span>
               {step.is_start_step && (
@@ -236,8 +239,8 @@ export const ListTasksRenderer: KandevRenderer = ({ args, result, status }) => {
         {items.length === 0 ? (
           <EmptyListNote noun="tasks" />
         ) : (
-          items.map((t) => (
-            <div key={t.id ?? t.title} className="flex items-baseline gap-2 text-xs">
+          items.map((t, i) => (
+            <div key={t.id ?? t.title ?? `task-${i}`} className="flex items-baseline gap-2 text-xs">
               <TaskStateBadge state={t.state} />
               <span>{t.title ?? "(untitled)"}</span>
               <IdChip id={t.id} />
@@ -271,8 +274,11 @@ function RelatedGroup({ label, items }: { label: string; items: RelatedTaskItem[
   return (
     <div className="space-y-1">
       <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60">{label}</div>
-      {items.map((t) => (
-        <div key={t.id ?? t.title} className="flex items-baseline gap-2 text-xs pl-2">
+      {items.map((t, i) => (
+        <div
+          key={t.id ?? t.title ?? `related-${i}`}
+          className="flex items-baseline gap-2 text-xs pl-2"
+        >
           <TaskStateBadge state={t.state} />
           <span>{t.title ?? "(untitled)"}</span>
           <IdChip id={t.id} />
@@ -343,8 +349,8 @@ export const ListAgentsRenderer: KandevRenderer = ({ result, status }) => {
         {items.length === 0 ? (
           <EmptyListNote noun="agents" />
         ) : (
-          items.map((a) => (
-            <ListItemRow key={a.id ?? a.name}>
+          items.map((a, i) => (
+            <ListItemRow key={a.id ?? a.name ?? `agent-${i}`}>
               <div className="font-medium">{a.name ?? a.id ?? "(unnamed)"}</div>
               {a.profiles && a.profiles.length > 0 && (
                 <div className="text-[11px] text-muted-foreground/70">
@@ -397,8 +403,11 @@ export const ListExecutorProfilesRenderer: KandevRenderer = ({ args, result, sta
         {items.length === 0 ? (
           <EmptyListNote noun="profiles" />
         ) : (
-          items.map((p) => (
-            <div key={p.id ?? p.name} className="flex items-baseline gap-2 text-xs">
+          items.map((p, i) => (
+            <div
+              key={p.id ?? p.name ?? `profile-${i}`}
+              className="flex items-baseline gap-2 text-xs"
+            >
               <span>{p.name ?? "(unnamed)"}</span>
               {p.mcp_policy && (
                 <span className="text-[10px] text-muted-foreground/60">mcp: {p.mcp_policy}</span>
@@ -448,8 +457,8 @@ export const ListTaskDocumentsRenderer: KandevRenderer = ({ args, result, status
         {items.length === 0 ? (
           <EmptyListNote noun="documents" />
         ) : (
-          items.map((d) => (
-            <div key={d.key ?? d.title} className="flex items-baseline gap-2 text-xs">
+          items.map((d, i) => (
+            <div key={d.key ?? d.title ?? `doc-${i}`} className="flex items-baseline gap-2 text-xs">
               <span>{d.title ?? d.key ?? "(untitled)"}</span>
               {d.key && d.title && (
                 <span className="font-mono text-[10px] text-muted-foreground/50">{d.key}</span>

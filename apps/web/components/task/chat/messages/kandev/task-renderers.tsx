@@ -167,7 +167,7 @@ export const MoveTaskRenderer: KandevRenderer = ({ args, result, status }) => {
         </span>
       }
       status={status}
-      hasExpandableContent={!!task || !!prompt}
+      hasExpandableContent={!!task || !!prompt || !!workflowId || !!stepId}
     >
       <KandevBody>
         {workflowId && (
