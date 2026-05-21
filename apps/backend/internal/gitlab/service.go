@@ -100,11 +100,16 @@ func (s *Service) GetStatus(ctx context.Context) (*Status, error) {
 	}
 
 	if client == nil {
+		// Defensive — every Provide/NewClient path returns at least a
+		// NoopClient, so in practice this branch is unreachable. Keep
+		// RequiredScopes as an empty slice so the JSON contract matches
+		// the always-an-array shape declared on the TypeScript side.
 		return &Status{
 			AuthMethod:      AuthMethodNone,
 			Host:            host,
 			TokenConfigured: tokenConfigured,
 			TokenSecretID:   tokenSecretID,
+			RequiredScopes:  []string{},
 		}, nil
 	}
 
@@ -172,8 +177,14 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 		}
 	}
 
+	// Build the installed client inside the write lock using the *current*
+	// s.host — if ConfigureHost ran between our snapshot above and now we'd
+	// otherwise install a client pointing at the previous host, leaving
+	// s.host and s.client desynced until the next reconfigure. The token
+	// was validated against `probe`; here we just construct a fresh client
+	// at the up-to-date host.
 	s.mu.Lock()
-	s.client = probe
+	s.client = NewPATClient(s.host, token)
 	s.authMethod = AuthMethodPAT
 	s.mu.Unlock()
 	s.logger.Info("GitLab token configured", zap.String("host", host))

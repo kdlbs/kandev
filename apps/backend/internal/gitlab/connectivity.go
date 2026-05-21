@@ -31,8 +31,8 @@ func validateHost(host string) (*url.URL, error) {
 	if parsed.Host == "" {
 		return nil, errors.New("host is missing a hostname")
 	}
-	if parsed.Opaque != "" || parsed.User != nil {
-		return nil, errors.New("host must not contain userinfo or be an opaque URL")
+	if parsed.User != nil {
+		return nil, errors.New("host must not contain userinfo (user:password@host is not allowed)")
 	}
 	return &url.URL{
 		Scheme: parsed.Scheme,
