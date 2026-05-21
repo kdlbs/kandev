@@ -14,7 +14,11 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 
 type CachedEntry = { value: RepoMergeMethods; expiresAt: number };
 const completed = new Map<string, CachedEntry>();
-const pending = new Map<string, Promise<RepoMergeMethods>>();
+// The pending promise is only used to coalesce concurrent fetches — consumers
+// re-read from `completed` after it settles, so the resolved value is irrelevant.
+// Typing it as `void` lets the chain swallow rejections cleanly (no rethrow,
+// no unhandled-rejection warnings in the browser console).
+const pending = new Map<string, Promise<void>>();
 
 function repoKey(owner: string, repo: string) {
   return `${owner}/${repo}`;
@@ -52,11 +56,7 @@ export function useRepoMergeMethods(
     if (readFresh(key)) return;
     const existing = pending.get(key);
     if (existing) {
-      // Attach both fulfilled and rejected handlers so a second consumer
-      // co-waiting on the same in-flight fetch always re-renders, even if
-      // the request fails — and so the rejection is observed (no unhandled
-      // promise rejection warnings).
-      void existing.then(rerender, rerender);
+      void existing.then(rerender);
       return;
     }
     const promise = getRepoMergeMethods(owner, repo)
@@ -64,15 +64,15 @@ export function useRepoMergeMethods(
         completed.set(key, { value: result, expiresAt: Date.now() + CACHE_TTL_MS });
         pending.delete(key);
         rerender();
-        return result;
       })
-      .catch((err: unknown) => {
-        // Don't poison the cache on transient failures — the next time the
-        // hook is mounted (or the user retries the merge) we'll attempt
-        // again. Re-render so any joined consumers can react.
+      .catch(() => {
+        // Don't poison the cache on transient failures — the next mount or
+        // render will retry. Swallow the rejection here so the originating
+        // consumer's promise doesn't surface as an unhandled rejection in
+        // the browser console; co-waiting consumers re-render and read
+        // null, which behaves identically to a fresh "not-loaded" state.
         pending.delete(key);
         rerender();
-        throw err;
       });
     pending.set(key, promise);
   }, [owner, repo]);
