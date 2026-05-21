@@ -231,7 +231,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
       </PanelBody>
       <ClarificationSection
-        pendingClarification={pendingClarification}
+        pendingClarification={Boolean(pendingClarification)}
         isArchived={isArchived}
         containerRef={clarificationContainerRef}
         resizeProps={clarificationResizeProps}
