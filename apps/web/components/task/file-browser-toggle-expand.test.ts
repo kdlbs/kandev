@@ -32,6 +32,7 @@ function makeTreeState(initialExpanded: Set<string> = new Set()): {
     loadTree: vi.fn(),
     showLoading: vi.fn(),
     hideLoading: vi.fn(),
+    isLoading: vi.fn(() => false),
     collapseAll: vi.fn(),
   } as unknown as TreeState;
   return { state, expanded };

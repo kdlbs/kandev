@@ -186,9 +186,11 @@ function applyFileChanges(ctx: {
 
 function useLoadingTimers() {
   const loadingTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const activeLoadsRef = useRef<Set<string>>(new Set());
   const [visibleLoadingPaths, setVisibleLoadingPaths] = useState<Set<string>>(new Set());
 
   const showLoading = useCallback((path: string) => {
+    activeLoadsRef.current.add(path);
     const timer = setTimeout(() => {
       setVisibleLoadingPaths((prev) => new Set(prev).add(path));
       loadingTimersRef.current.delete(path);
@@ -197,6 +199,7 @@ function useLoadingTimers() {
   }, []);
 
   const hideLoading = useCallback((path: string) => {
+    activeLoadsRef.current.delete(path);
     const timer = loadingTimersRef.current.get(path);
     if (timer) {
       clearTimeout(timer);
@@ -209,7 +212,9 @@ function useLoadingTimers() {
     });
   }, []);
 
-  return { visibleLoadingPaths, showLoading, hideLoading };
+  const isLoading = useCallback((path: string) => activeLoadsRef.current.has(path), []);
+
+  return { visibleLoadingPaths, showLoading, hideLoading, isLoading };
 }
 
 type TreeLoaderContext = {
@@ -358,7 +363,7 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
   const agentctlStatus = useSessionAgentctl(sessionId);
-  const { visibleLoadingPaths, showLoading, hideLoading } = useLoadingTimers();
+  const { visibleLoadingPaths, showLoading, hideLoading, isLoading } = useLoadingTimers();
 
   const clearRetryTimer = useCallback(() => {
     if (retryTimerRef.current) {
@@ -448,6 +453,7 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
     loadTree,
     showLoading,
     hideLoading,
+    isLoading,
     collapseAll,
   };
 }
@@ -505,6 +511,8 @@ export async function loadNodeChildren(
   treeState: ReturnType<typeof useFileBrowserTree>,
 ) {
   if (node.children && node.children.length > 0) return;
+  // Dedupe in-flight fetches so rapid double-clicks don't issue two WS round-trips.
+  if (treeState.isLoading(node.path)) return;
   treeState.showLoading(node.path);
   try {
     const client = getWebSocketClient();
@@ -530,8 +538,7 @@ export type ToggleFolderExpandDeps = {
   loadChildren?: typeof loadNodeChildren;
 };
 
-// Flip expanded synchronously *then* fetch children — otherwise the first
-// click on a folder blocks on the loadNodeChildren round-trip and looks dead.
+// Flip expanded synchronously *then* fetch children so the chevron rotates on the first click.
 export async function toggleFolderExpand({
   node,
   sessionId,
