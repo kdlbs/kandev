@@ -242,8 +242,7 @@ func (m *Manager) StartAllWorkspaceTrackers(ctx context.Context) {
 	}
 }
 
-// stopWorkspaceTrackers stops the root tracker and every per-repo tracker.
-// Idempotent: WorkspaceTracker.Stop uses sync.Once internally.
+// stopWorkspaceTrackers stops root + per-repo trackers (idempotent via sync.Once).
 func (m *Manager) stopWorkspaceTrackers() {
 	if m.workspaceTracker != nil {
 		m.workspaceTracker.Stop()
@@ -955,10 +954,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Stop workspace trackers unconditionally — CreateInstance starts them
-	// before any agent process, so in passthrough mode (where Start() is
-	// never called and status stays Stopped) the early return below would
-	// otherwise skip stopShellAndProcesses and leak the tracker goroutines.
+	// Stop trackers before the status guard: passthrough never calls Start() so the early return below would otherwise leak them.
 	m.stopWorkspaceTrackers()
 
 	status := m.Status()

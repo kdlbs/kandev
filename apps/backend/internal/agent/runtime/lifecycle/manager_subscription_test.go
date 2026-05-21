@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -288,29 +289,12 @@ func parseHTTPURL(t *testing.T, raw string) (host string, port int) {
 		t.Fatalf("unexpected URL shape: %q", raw)
 	}
 	host = parts[0]
-	if _, err := fmtSscanf(parts[1], &port); err != nil {
+	port, err := strconv.Atoi(parts[1])
+	if err != nil {
 		t.Fatalf("port parse: %v", err)
 	}
 	return host, port
 }
-
-// fmtSscanf is a tiny wrapper around fmt.Sscanf kept in this file so the import
-// list stays scoped to what the test needs.
-func fmtSscanf(s string, p *int) (int, error) {
-	var n int
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return 0, &numErr{s}
-		}
-		n = n*10 + int(r-'0')
-	}
-	*p = n
-	return 1, nil
-}
-
-type numErr struct{ s string }
-
-func (e *numErr) Error() string { return "not a number: " + e.s }
 
 // TestAggregator_PushAsync_LastWriteWinsUnderRace is a regression test for the
 // race that caused multi-repo passthrough sessions to get stuck in slow mode
@@ -396,6 +380,12 @@ waitLoop:
 	defer mu.Unlock()
 	if serverSeen != "fast" {
 		t.Errorf("agentctl tracker final mode = %q, want fast (calls: %+v)", serverSeen, calls)
+	}
+	// The fix collapses back-to-back slow→fast in the pending queue when the
+	// pusher hasn't dispatched yet, so we expect at most one slow push. More
+	// than one would mean the queue stopped collapsing (a regression).
+	if n := slowCalls.Load(); n > 1 {
+		t.Errorf("slow push count = %d, want <= 1 (queue should collapse duplicates)", n)
 	}
 }
 

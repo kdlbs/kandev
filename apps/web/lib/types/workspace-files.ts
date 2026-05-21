@@ -35,8 +35,7 @@ export type FileChangeEvent = {
   session_id: string;
   task_id: string;
   agent_id: string;
-  // Repo-scoped events (multi-repo task roots) include the subdir name so the
-  // frontend can scope the refresh to that repo's branch of the tree.
+  // Set for multi-repo task roots so the frontend can scope refreshes to the right repo branch.
   repository_name?: string;
 };
 

@@ -129,13 +129,7 @@ export function applyFileChanges(ctx: {
   const { client, sessionId, expandedPaths, changes, setTree, setLoadState } = ctx;
   const foldersToRefresh = new Set<string>();
   for (const change of changes) {
-    // Polling-detected workspace changes arrive as `refresh` events with an
-    // empty path (the tracker knows "something changed" but not which file).
-    // Refresh root plus every currently-expanded folder under the affected
-    // repo so files added inside an expanded subtree show up — without this
-    // the merge preserves the stale children and the user has to manually
-    // re-expand to see new files. repository_name is set for multi-repo
-    // task roots; scope to that repo's branch when present.
+    // `refresh` events have empty path; refresh root + every expanded folder under the affected repo so new files show up.
     if (change.operation === "refresh") {
       foldersToRefresh.add("");
       const repo = change.repository_name;
