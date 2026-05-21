@@ -3,12 +3,34 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { getRootSplitview } from "@/lib/state/dockview-layout-builders";
+import {
+  computePinnedMaxPx,
+  LAYOUT_PINNED_MIN_PX,
+  RIGHT_TOP_GROUP,
+  RIGHT_BOTTOM_GROUP,
+} from "@/lib/state/layout-manager";
 import { setEnvLayout } from "@/lib/local-storage";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
 import { stopUserShell } from "@/lib/api/domains/user-shell-api";
 
 const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
+
+/** Re-apply the runtime cap to all pinned groups. Called when the viewport
+ *  resizes so a panel pinned to the old cap on a narrower screen can grow
+ *  with the window (and vice versa: shrinking the window re-clamps it). */
+function applyDynamicConstraints(api: DockviewReadyEvent["api"]): void {
+  if (useDockviewStore.getState().isRestoringLayout) return;
+  if (useDockviewStore.getState().preMaximizeLayout !== null) return;
+  const cap = computePinnedMaxPx();
+  const constraints = { maximumWidth: cap, minimumWidth: LAYOUT_PINNED_MIN_PX };
+  const sb = api.getPanel("sidebar");
+  if (sb) sb.group.api.setConstraints(constraints);
+  for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
+    const group = api.groups.find((g) => g.id === gid);
+    if (group) group.api.setConstraints(constraints);
+  }
+}
 
 function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
   if (useDockviewStore.getState().isRestoringLayout) return;
@@ -59,6 +81,10 @@ export function setupContainerResizeSync(api: DockviewReadyEvent["api"]): () => 
     const w = parent.clientWidth;
     const h = parent.clientHeight;
     if (w <= 0 || h <= 0) return;
+    // Reapply the runtime cap on every tick — the viewport may have changed
+    // even when api.width is already correct (e.g. devtools toggle that nets
+    // to the same width).
+    applyDynamicConstraints(api);
     if (w === api.width && h === api.height) return;
     api.layout(w, h);
   });
@@ -83,8 +109,23 @@ export function setupLayoutPersistence(
   api: DockviewReadyEvent["api"],
   saveTimerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>,
   envIdRef: React.MutableRefObject<string | null>,
-): void {
-  api.onDidLayoutChange(() => {
+): () => void {
+  const persistNow = (): void => {
+    const live = useDockviewStore.getState();
+    if (live.preMaximizeLayout !== null || live.isRestoringLayout) return;
+    try {
+      const json = api.toJSON();
+      const envId = envIdRef.current;
+      localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
+      if (envId) {
+        setEnvLayout(envId, json);
+      }
+    } catch {
+      // Ignore serialization errors
+    }
+  };
+
+  const sub = api.onDidLayoutChange(() => {
     if (useDockviewStore.getState().isRestoringLayout) return;
     // While maximized, the live layout is the 2-column overlay. Persisting it
     // as the env's regular layout would mean: if we ever fall back to that
@@ -99,23 +140,30 @@ export function setupLayoutPersistence(
       // started after this timer was scheduled. Persisting api.toJSON() now
       // would write the maximize overlay as the env's regular layout — the
       // bug this guard is meant to prevent.
-      const live = useDockviewStore.getState();
-      if (live.preMaximizeLayout !== null || live.isRestoringLayout) {
-        saveTimerRef.current = null;
-        return;
-      }
-      try {
-        const json = api.toJSON();
-        const envId = envIdRef.current;
-        localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
-        if (envId) {
-          setEnvLayout(envId, json);
-        }
-      } catch {
-        // Ignore serialization errors
-      }
+      saveTimerRef.current = null;
+      persistNow();
     }, 300);
   });
+
+  // Flush a pending debounced save on tab close / reload — otherwise a
+  // resize completed less than 300ms before unload is lost.
+  const onBeforeUnload = (): void => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      persistNow();
+    }
+  };
+  if (typeof window !== "undefined") {
+    window.addEventListener("beforeunload", onBeforeUnload);
+  }
+
+  return () => {
+    sub.dispose();
+    if (typeof window !== "undefined") {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    }
+  };
 }
 
 export function setupPortalCleanup(

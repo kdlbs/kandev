@@ -6,6 +6,8 @@ import {
   getEnvMaximizeState,
   setEnvMaximizeState,
   removeEnvMaximizeState,
+  getPinnedDefaults,
+  setPinnedDefaults,
 } from "@/lib/local-storage";
 import { applyLayoutFixups, focusOrAddPanel } from "./dockview-layout-builders";
 import {
@@ -667,7 +669,14 @@ function performBuildDefault(
 ): void {
   const { userDefaultLayout } = get();
   const intent = intentName ? resolveNamedIntent(intentName) : null;
+  // Seed pinned widths from the user's saved defaults so brand-new task envs
+  // open at the widths the user last resized to. getPinnedWidth still clamps
+  // them to the runtime cap (so a stored value beyond the new viewport cap
+  // shrinks gracefully).
+  const defaults = getPinnedDefaults();
   const freshPinned = new Map<string, number>();
+  if (defaults.sidebar !== undefined) freshPinned.set("sidebar", defaults.sidebar);
+  if (defaults.right !== undefined) freshPinned.set("right", defaults.right);
   // Capture dimensions before layout change — api.width can become stale
   // after fromJSON inside applyLayout
   const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
@@ -773,6 +782,13 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
       m.set(columnId, width);
       return { pinnedWidths: m };
     });
+    // Mirror sidebar / right widths into sessionStorage so brand-new envs
+    // (no saved per-env layout yet) open at the user's preferred widths
+    // instead of the ratio-based default.
+    if (columnId === "sidebar" || columnId === "right") {
+      const current = getPinnedDefaults();
+      setPinnedDefaults({ ...current, [columnId]: width });
+    }
   },
   userDefaultLayout: null,
   setUserDefaultLayout: (layout) => set({ userDefaultLayout: layout }),

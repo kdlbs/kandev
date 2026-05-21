@@ -524,7 +524,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       readyDisposersRef.current.push(setupGroupTracking(api));
       setupSessionTabSync(api, appStore);
       setupChatPanelSafetyNet(api, appStore);
-      setupLayoutPersistence(api, saveTimerRef, envIdRef);
+      readyDisposersRef.current.push(setupLayoutPersistence(api, saveTimerRef, envIdRef));
       setupPortalCleanup(api, appStore);
       readyDisposersRef.current.push(setupContainerResizeSync(api));
     },
