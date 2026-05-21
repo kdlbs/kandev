@@ -359,28 +359,34 @@ func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest)
 			return nil, "", errors.New("no token stored — paste one to test")
 		}
 	}
-	// Merge with persisted config so a partial request still produces a usable
-	// triple. Applies to both the inline-secret and stored-secret paths: a
-	// pre-save TestConnection call may carry only the field the user just
-	// changed, and a post-save re-test sends an empty body. A real DB error
-	// here must not be swallowed — otherwise the user would see an opaque
-	// "missing field" validation message instead of the actual storage issue.
-	stored, err := s.store.GetConfig(ctx)
-	if err != nil {
-		return nil, "", fmt.Errorf("read jira config: %w", err)
-	}
-	if stored != nil {
-		if cfg.SiteURL == "" {
-			cfg.SiteURL = stored.SiteURL
+	// Merge with persisted config only when the caller didn't pass enough on
+	// its own. A fully-specified pre-save TestConnection request needs no DB
+	// read — keeping the call gated avoids a transient DB error blocking auth
+	// testing for a request that doesn't depend on persisted state. When a
+	// read does happen, surface its error so a real DB failure isn't masked
+	// as an opaque "missing field" validation message later on.
+	needsStoredConfig := cfg.SiteURL == "" ||
+		cfg.AuthMethod == "" ||
+		cfg.InstanceType == "" ||
+		(cfg.AuthMethod == AuthMethodAPIToken && cfg.Email == "")
+	if needsStoredConfig {
+		stored, err := s.store.GetConfig(ctx)
+		if err != nil {
+			return nil, "", fmt.Errorf("read jira config: %w", err)
 		}
-		if cfg.Email == "" {
-			cfg.Email = stored.Email
-		}
-		if cfg.AuthMethod == "" {
-			cfg.AuthMethod = stored.AuthMethod
-		}
-		if cfg.InstanceType == "" {
-			cfg.InstanceType = stored.InstanceType
+		if stored != nil {
+			if cfg.SiteURL == "" {
+				cfg.SiteURL = stored.SiteURL
+			}
+			if cfg.Email == "" {
+				cfg.Email = stored.Email
+			}
+			if cfg.AuthMethod == "" {
+				cfg.AuthMethod = stored.AuthMethod
+			}
+			if cfg.InstanceType == "" {
+				cfg.InstanceType = stored.InstanceType
+			}
 		}
 	}
 	if cfg.InstanceType == "" {

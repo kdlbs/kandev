@@ -599,10 +599,18 @@ export function JiraConnectionSection() {
   // instance type, same Jira host, and — for Cloud api_token where the basic
   // pair is email:token — the same email. Otherwise the user could change the
   // site URL or Cloud account and silently submit the previous token to a
-  // different host/account.
+  // different host/account. The host comparison mirrors the backend's
+  // normalizeSiteURL (strip trailing slash, prepend https:// if no scheme) so
+  // that "acme.atlassian.net" and "https://acme.atlassian.net" don't read as
+  // different hosts.
+  const normalizeComparableSiteUrl = (value: string) => {
+    const trimmed = value.trim().replace(/\/+$/, "");
+    if (!trimmed) return "";
+    return trimmed.includes("://") ? trimmed : `https://${trimmed}`;
+  };
   const savedInstance = s.config?.instanceType || "cloud";
-  const savedSiteUrl = (s.config?.siteUrl ?? "").replace(/\/+$/, "");
-  const currentSiteUrl = s.form.siteUrl.replace(/\/+$/, "");
+  const savedSiteUrl = normalizeComparableSiteUrl(s.config?.siteUrl ?? "");
+  const currentSiteUrl = normalizeComparableSiteUrl(s.form.siteUrl);
   const savedSecretMatchesMode =
     !!s.config?.hasSecret &&
     s.config?.authMethod === s.form.authMethod &&
