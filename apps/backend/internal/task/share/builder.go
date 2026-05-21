@@ -56,7 +56,7 @@ func BuildSnapshot(ctx context.Context, repo TaskReader, taskSessionID, kandevVe
 		return nil, fmt.Errorf("load messages: %w", err)
 	}
 
-	red := NewRedactor(workspaceRootFor(session))
+	red := NewRedactor(workspaceRootsFor(session)...)
 	snap := &Snapshot{
 		Version:       SnapshotVersion,
 		KandevVersion: kandevVersion,
@@ -99,16 +99,21 @@ func sessionMeta(s *models.TaskSession) SessionMeta {
 	}
 }
 
-// workspaceRootFor picks the most-specific filesystem root we can use to
-// rewrite absolute paths into repo-relative form. Prefers the active
-// worktree path, falls back to the session's workspace path.
-func workspaceRootFor(s *models.TaskSession) string {
+// workspaceRootsFor returns every filesystem root the redactor should rewrite
+// to repo-relative form. Multi-repo sessions carry multiple worktrees, so we
+// emit each WorktreePath plus the session's WorkspacePath fallback — the
+// redactor sorts them longest-first internally to handle nested roots.
+func workspaceRootsFor(s *models.TaskSession) []string {
+	roots := make([]string, 0, len(s.Worktrees)+1)
 	for _, w := range s.Worktrees {
 		if w != nil && w.WorktreePath != "" {
-			return w.WorktreePath
+			roots = append(roots, w.WorktreePath)
 		}
 	}
-	return s.WorkspacePath
+	if s.WorkspacePath != "" {
+		roots = append(roots, s.WorkspacePath)
+	}
+	return roots
 }
 
 // snapshotString extracts a string field from one of the *Snapshot map

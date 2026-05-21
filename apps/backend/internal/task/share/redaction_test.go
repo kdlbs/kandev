@@ -113,6 +113,32 @@ func TestRedactor_AbsPath_EmptyRootSkipsRule(t *testing.T) {
 	}
 }
 
+func TestRedactor_AbsPath_MultipleRootsRewriteIndependently(t *testing.T) {
+	t.Parallel()
+	r := NewRedactor("/Users/foo/repo-a", "/Users/foo/repo-b")
+	in := "touched /Users/foo/repo-a/src/x.ts and /Users/foo/repo-b/lib/y.go"
+	want := "touched src/x.ts and lib/y.go"
+	got := r.String(in)
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	assertRulesEqual(t, r.Applied(), []string{RuleAbsPath})
+}
+
+func TestRedactor_AbsPath_NestedRootsPreferLongest(t *testing.T) {
+	t.Parallel()
+	// If the longer root is processed first the inner path stays clean;
+	// if the shorter root won, "/workspace" would strip down to "repo1/src/x.ts"
+	// while a sibling "/workspace-other" must still not match.
+	r := NewRedactor("/workspace", "/workspace/repo1")
+	got := r.String("a:/workspace/repo1/src/x.ts b:/workspace/other.md")
+	want := "a:src/x.ts b:other.md"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	assertRulesEqual(t, r.Applied(), []string{RuleAbsPath})
+}
+
 func TestRedactor_JSON_DropsTopLevelEnvField(t *testing.T) {
 	t.Parallel()
 	r := NewRedactor("")

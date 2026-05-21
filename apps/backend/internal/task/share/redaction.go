@@ -49,17 +49,31 @@ var envFileRe = regexp.MustCompile(`(^|/)\.env(\..+)?$`)
 // Construct with NewRedactor; reuse across one snapshot build (it accumulates
 // the applied-rule set).
 type Redactor struct {
-	workspaceRoot string
-	applied       map[string]struct{}
+	// workspaceRoots are sorted longest-first so a root that is a prefix of
+	// another (e.g. "/workspace" vs "/workspace/repo1") gets matched after the
+	// more specific one.
+	workspaceRoots []string
+	applied        map[string]struct{}
 }
 
-// NewRedactor returns a Redactor that rewrites absolute paths under
-// workspaceRoot to repo-relative paths. workspaceRoot may be empty, in
-// which case the abs-path rule is skipped.
-func NewRedactor(workspaceRoot string) *Redactor {
+// NewRedactor returns a Redactor that rewrites absolute paths under any of
+// workspaceRoots to repo-relative paths. Passing no roots (or only empty
+// strings) skips the abs-path rule. Multiple roots are supported so multi-repo
+// sessions don't leak paths from secondary worktrees.
+func NewRedactor(workspaceRoots ...string) *Redactor {
+	roots := make([]string, 0, len(workspaceRoots))
+	for _, root := range workspaceRoots {
+		trimmed := strings.TrimRight(root, "/")
+		if trimmed != "" {
+			roots = append(roots, trimmed)
+		}
+	}
+	sort.Slice(roots, func(i, j int) bool {
+		return len(roots[i]) > len(roots[j])
+	})
 	return &Redactor{
-		workspaceRoot: strings.TrimRight(workspaceRoot, "/"),
-		applied:       make(map[string]struct{}),
+		workspaceRoots: roots,
+		applied:        make(map[string]struct{}),
 	}
 }
 
@@ -76,26 +90,23 @@ func (r *Redactor) String(s string) string {
 			r.record(rule.name)
 		}
 	}
-	if r.workspaceRoot != "" {
+	for _, root := range r.workspaceRoots {
 		// Split on the workspace root WITH a trailing slash so a sibling
 		// directory sharing the root as a bare prefix doesn't match. e.g.
 		// workspaceRoot="/home/user/proj" must not match "/home/user/proj2/x.ts".
 		// The separator already carries the slash, so rejoining is a plain concat.
-		root := r.workspaceRoot + "/"
-		if strings.Contains(out, root) {
-			parts := strings.Split(out, root)
-			var b strings.Builder
-			b.WriteString(parts[0])
-			changed := false
-			for _, part := range parts[1:] {
-				changed = true
-				b.WriteString(part)
-			}
-			if changed {
-				out = b.String()
-				r.record(RuleAbsPath)
-			}
+		sep := root + "/"
+		if !strings.Contains(out, sep) {
+			continue
 		}
+		parts := strings.Split(out, sep)
+		var b strings.Builder
+		b.WriteString(parts[0])
+		for _, part := range parts[1:] {
+			b.WriteString(part)
+		}
+		out = b.String()
+		r.record(RuleAbsPath)
 	}
 	return out
 }
