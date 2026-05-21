@@ -106,8 +106,11 @@ HOST="https://${HOST_ONLY}"
 PROJECT="${HOST_PATH#*[:/]}"
 PROJECT="${PROJECT%.git}"                          # team/repo
 SOURCE_BRANCH="$(git branch --show-current)"
-TARGET_BRANCH="$(glab repo view --json defaultBranch -F text 2>/dev/null || echo main)"
 PROJECT_ENC="$(printf '%s' "$PROJECT" | jq -sRr @uri)"
+# Default branch via the GitLab API itself, not glab (avoids version drift
+# on glab's flag surface). Fall back to "main" only if the lookup fails.
+TARGET_BRANCH="$(curl --fail -s -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+  "$HOST/api/v4/projects/$PROJECT_ENC" | jq -r '.default_branch // "main"')"
 
 PAYLOAD="$(jq -n \
   --arg source "$SOURCE_BRANCH" \
