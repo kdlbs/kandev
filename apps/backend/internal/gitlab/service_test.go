@@ -268,6 +268,64 @@ func TestService_GetStatus_ReportsAuthenticatedAfterConfigure(t *testing.T) {
 	if !status.TokenConfigured {
 		t.Error("status.TokenConfigured = false, want true")
 	}
+	if status.ConnectionError != "" {
+		t.Errorf("status.ConnectionError = %q, want empty on healthy probe", status.ConnectionError)
+	}
+}
+
+// Regression: a 5xx (or any non-401/403 error) from the IsAuthenticated probe
+// must surface as ConnectionError so the UI can render "unreachable" instead
+// of "not connected" — the prior code dropped the error and made transient
+// outages look like a bad token.
+func TestService_GetStatus_PopulatesConnectionErrorOn5xx(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/user", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	svc, _, _ := newServiceFixture(t, mux)
+	// Force the service to actually call the upstream by swapping in a
+	// PATClient pointed at our fake-failing server.
+	svc.mu.Lock()
+	svc.client = NewPATClient(svc.host, "tok")
+	svc.authMethod = AuthMethodPAT
+	svc.mu.Unlock()
+
+	status, err := svc.GetStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetStatus err = %v", err)
+	}
+	if status.Authenticated {
+		t.Error("Authenticated = true on 5xx, want false")
+	}
+	if status.ConnectionError == "" {
+		t.Error("ConnectionError empty on 5xx, want populated (a transport failure must distinguish itself from 'not connected')")
+	}
+}
+
+// Counterpart: a 401 is a clean "bad token" signal — IsAuthenticated returns
+// (false, nil) — and must leave ConnectionError empty so the UI doesn't
+// render an "unreachable" warning over a legitimately-rejected token.
+func TestService_GetStatus_ClearsConnectionErrorOn401(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/user", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	})
+	svc, _, _ := newServiceFixture(t, mux)
+	svc.mu.Lock()
+	svc.client = NewPATClient(svc.host, "bad")
+	svc.authMethod = AuthMethodPAT
+	svc.mu.Unlock()
+
+	status, err := svc.GetStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetStatus err = %v", err)
+	}
+	if status.Authenticated {
+		t.Error("Authenticated = true on 401, want false")
+	}
+	if status.ConnectionError != "" {
+		t.Errorf("ConnectionError = %q on 401, want empty (401 is a clean not-authenticated signal, not a transport failure)", status.ConnectionError)
+	}
 }
 
 // Sanity: the package-level errors used by the tests are real values, not

@@ -13,6 +13,15 @@ export type GitLabStatus = {
   glab_outdated?: boolean;
   required_scopes: string[];
   diagnostics?: GitLabAuthDiagnostics;
+  /**
+   * Transport-layer error from the most recent `IsAuthenticated` probe
+   * (network down, 5xx, parse failure). Distinct from `authenticated:
+   * false` with no `connection_error`, which means a 401/403 / no token
+   * configured. Present so the UI can render "GitLab unreachable" instead
+   * of "not connected" during an outage and stop users from rotating an
+   * actually-valid token.
+   */
+  connection_error?: string;
 };
 
 export type GitLabAuthDiagnostics = {

@@ -21,10 +21,15 @@ type MockClient struct {
 	username    string
 	mrs         map[mockMRKey]*MR
 	discussions map[mockMRKey][]MRDiscussion
-	pipelines   map[mockMRKey][]Pipeline
-	issues      map[mockIssueKey]*Issue
-	branches    map[string][]RepoBranch
-	nextMRIID   int
+	// pipelines is keyed by project — ListPipelines below returns the
+	// project's seeded set regardless of branch or iid, matching the
+	// real PATClient.ListPipelines flow (one MR head ref → all
+	// pipelines for that project). Keying by mockMRKey here would
+	// make iteration order matter when multiple MRs share a project.
+	pipelines map[string][]Pipeline
+	issues    map[mockIssueKey]*Issue
+	branches  map[string][]RepoBranch
+	nextMRIID int
 }
 
 type mockMRKey struct {
@@ -47,7 +52,7 @@ func NewMockClient(host string) *MockClient {
 		username:    "kandev-tester",
 		mrs:         make(map[mockMRKey]*MR),
 		discussions: make(map[mockMRKey][]MRDiscussion),
-		pipelines:   make(map[mockMRKey][]Pipeline),
+		pipelines:   make(map[string][]Pipeline),
 		issues:      make(map[mockIssueKey]*Issue),
 		branches:    make(map[string][]RepoBranch),
 		nextMRIID:   100,
@@ -100,13 +105,16 @@ func (c *MockClient) SeedBranches(projectPath string, branches []RepoBranch) {
 	c.branches[projectPath] = branches
 }
 
-// SeedPipelines registers the pipelines returned for (projectPath, iid).
-// ListPipelines is project-keyed in the mock — the iid is stored for parity
-// with the other Seed* methods but the lookup ignores it.
-func (c *MockClient) SeedPipelines(projectPath string, iid int, pipelines []Pipeline) {
+// SeedPipelines registers the pipelines returned for projectPath.
+// The mock's ListPipelines returns every pipeline seeded under the project
+// regardless of branch, mirroring how the real PATClient surfaces a single
+// project-level pipeline list. Keyed by project (not MR iid) so two MRs in
+// the same project share one canonical list — calling SeedPipelines twice
+// overwrites rather than racing on map iteration order.
+func (c *MockClient) SeedPipelines(projectPath string, pipelines []Pipeline) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.pipelines[mockMRKey{Project: projectPath, IID: iid}] = pipelines
+	c.pipelines[projectPath] = pipelines
 }
 
 func (c *MockClient) Host() string { return c.host }
@@ -226,10 +234,8 @@ func (c *MockClient) ResolveMRDiscussion(_ context.Context, projectPath string, 
 func (c *MockClient) ListPipelines(_ context.Context, projectPath, _ string) ([]Pipeline, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for key, p := range c.pipelines {
-		if key.Project == projectPath {
-			return p, nil
-		}
+	if p, ok := c.pipelines[projectPath]; ok {
+		return p, nil
 	}
 	return []Pipeline{}, nil
 }

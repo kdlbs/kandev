@@ -382,7 +382,7 @@ func (c *PATClient) GetMRFeedback(ctx context.Context, projectPath string, iid i
 		return nil, err
 	}
 	var pipelines []Pipeline
-	if mr.HeadSHA != "" {
+	if mr.HeadSHA != "" || mr.HeadBranch != "" {
 		pipelines, err = c.ListPipelines(ctx, projectPath, mr.HeadBranch)
 		if err != nil {
 			return nil, err

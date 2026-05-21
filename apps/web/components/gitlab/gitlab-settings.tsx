@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  IconAlertTriangle,
   IconBrandGitlab,
   IconCheck,
   IconEye,
@@ -12,6 +13,7 @@ import {
   IconWorld,
   IconX,
 } from "@tabler/icons-react";
+import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -39,10 +41,43 @@ function StatusBadge({ status }: { status: GitLabStatus | null }) {
       </Badge>
     );
   }
+  // A non-empty connection_error means the probe failed for transport reasons
+  // (network / 5xx / parse) — distinct from "no token configured", which has
+  // an empty connection_error and authenticated=false.
+  if (status.connection_error) {
+    return (
+      <Badge
+        variant="outline"
+        className="gap-1 border-amber-500/60 text-amber-700 dark:text-amber-300"
+      >
+        <IconAlertTriangle className="h-3 w-3" /> Unreachable
+      </Badge>
+    );
+  }
   return (
     <Badge variant="outline" className="gap-1">
       <IconX className="h-3 w-3" /> Not connected
     </Badge>
+  );
+}
+
+// ConnectionErrorAlert renders the per-host transport failure separately from
+// the "bad token" path so users see "GitLab is currently unreachable" instead
+// of "your token is broken" during an outage. Hidden when the probe succeeded
+// or when no token is configured (nothing to probe).
+function ConnectionErrorAlert({ status }: { status: GitLabStatus | null }) {
+  if (!status?.connection_error) return null;
+  return (
+    <Alert variant="destructive">
+      <IconAlertTriangle className="h-4 w-4" />
+      <AlertDescription className="text-sm">
+        Couldn&apos;t reach <code className="font-mono text-xs">{status.host}</code>:{" "}
+        {status.connection_error}
+        <span className="block text-xs opacity-80 mt-1">
+          Your token may still be valid — this looks like a network or upstream issue.
+        </span>
+      </AlertDescription>
+    </Alert>
   );
 }
 
@@ -232,6 +267,7 @@ export function GitLabIntegrationPage() {
     >
       <Card>
         <CardContent className="space-y-4 py-4">
+          <ConnectionErrorAlert status={status} />
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <StatusBadge status={status} />

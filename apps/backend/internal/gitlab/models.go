@@ -177,6 +177,14 @@ type Status struct {
 	GLabOutdated    bool             `json:"glab_outdated,omitempty"`
 	RequiredScopes  []string         `json:"required_scopes"`
 	Diagnostics     *AuthDiagnostics `json:"diagnostics,omitempty"`
+	// ConnectionError carries a transport-layer failure from the most
+	// recent IsAuthenticated probe (network down, 5xx, parse failure).
+	// 401/403 is NOT a connection error — that just means Authenticated
+	// is false. Empty when the probe succeeded or the host is unconfigured.
+	// Lets the frontend distinguish "not connected" from "GitLab is
+	// temporarily unreachable" so users don't delete a valid token during
+	// a transient outage.
+	ConnectionError string `json:"connection_error,omitempty"`
 }
 
 // ConfigureTokenRequest is the request body for configuring a GitLab token.

@@ -17,7 +17,7 @@ func TestMockClient_GetMRFeedback_SkipsPipelinesWhenHeadEmpty(t *testing.T) {
 
 	// Seed a failing pipeline for the project — any MR without a head ref
 	// must NOT inherit it.
-	mock.pipelines[mockMRKey{Project: project, IID: 1}] = []Pipeline{{Status: "failed"}}
+	mock.SeedPipelines(project, []Pipeline{{Status: "failed"}})
 	mock.SeedMR(project, &MR{IID: 7, State: "open"}) // no HeadSHA, no HeadBranch
 
 	fb, err := mock.GetMRFeedback(context.Background(), project, 7)
@@ -32,10 +32,29 @@ func TestMockClient_GetMRFeedback_SkipsPipelinesWhenHeadEmpty(t *testing.T) {
 	}
 }
 
+// SeedPipelines is keyed by project so successive calls for the same project
+// overwrite rather than living side-by-side in the map. Previously the seed
+// API took (project, iid), which let two seeds for the same project coexist
+// and made ListPipelines's iteration-order pick non-deterministic.
+func TestMockClient_SeedPipelines_OverwritesByProject(t *testing.T) {
+	mock := NewMockClient("")
+	const project = "team/repo"
+	mock.SeedPipelines(project, []Pipeline{{Status: "failed"}})
+	mock.SeedPipelines(project, []Pipeline{{Status: "success"}})
+
+	got, err := mock.ListPipelines(context.Background(), project, "feat/x")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(got) != 1 || got[0].Status != "success" {
+		t.Errorf("pipelines = %#v, want [{Status: success}] (second seed must overwrite)", got)
+	}
+}
+
 func TestMockClient_GetMRFeedback_ReportsPipelinesWhenHeadPresent(t *testing.T) {
 	mock := NewMockClient("")
 	const project = "team/repo"
-	mock.pipelines[mockMRKey{Project: project, IID: 1}] = []Pipeline{{Status: "failed"}}
+	mock.SeedPipelines(project, []Pipeline{{Status: "failed"}})
 	mock.SeedMR(project, &MR{IID: 7, State: "open", HeadBranch: "feat/x", HeadSHA: "abc"})
 
 	fb, err := mock.GetMRFeedback(context.Background(), project, 7)

@@ -108,7 +108,7 @@ func (s *Service) GetStatus(ctx context.Context) (*Status, error) {
 		}, nil
 	}
 
-	authenticated, _ := client.IsAuthenticated(ctx)
+	authenticated, authErr := client.IsAuthenticated(ctx)
 	username := ""
 	if authenticated {
 		username, _ = client.GetAuthenticatedUser(ctx)
@@ -122,6 +122,14 @@ func (s *Service) GetStatus(ctx context.Context) (*Status, error) {
 		TokenConfigured: tokenConfigured,
 		TokenSecretID:   tokenSecretID,
 		RequiredScopes:  []string{"api", "read_user"},
+	}
+	if authErr != nil {
+		// IsAuthenticated returns (false, nil) for 401/403 — that's a
+		// known "bad token" signal. Anything reaching here is a transport
+		// failure (network, 5xx, parse error) the user needs to see as
+		// "GitLab unreachable" rather than "not connected", so they don't
+		// delete a valid token during a transient outage.
+		status.ConnectionError = authErr.Error()
 	}
 	if g, ok := client.(*GLabClient); ok {
 		status.GLabVersion = g.Version()
