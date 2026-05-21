@@ -216,7 +216,12 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 // and the user now wants to start the agent with a prompt (e.g., from the plan panel or chat).
 // When skipMessageRecord is true, only the session state is updated (the caller already stored the user message).
 // When planMode is true, plan mode instructions are injected into the prompt and session metadata is set.
-func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error) {
+// autoStart marks the launch as having been triggered by an automated path
+// (only consumed when skipMessageRecord is false — callers that store their
+// own message control its metadata directly).
+//
+//nolint:cyclop,funlen // existing complexity inherited from main's session-lifecycle handling; signature touched here only to thread autoStart
+func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error) {
 	s.logger.Debug("starting created session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -365,7 +370,7 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	// Record the initial user message and set plan mode metadata after launch.
 	// Note: we do NOT set session state here — the executor sets it to STARTING,
 	// and event handlers (handleAgentReady) transition it to WAITING_FOR_INPUT.
-	s.postLaunchCreated(ctx, taskID, sessionID, effectivePrompt, skipMessageRecord, planModeActive, attachments)
+	s.postLaunchCreated(ctx, taskID, sessionID, effectivePrompt, skipMessageRecord, planModeActive, autoStart, attachments)
 
 	// Ensure a PR watch exists so the poller can detect PRs created by the agent.
 	// PrepareTaskSession may have already created one, but if that goroutine failed
@@ -379,9 +384,13 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 // records the initial user message (unless skipped) and sets plan mode metadata.
 // It does NOT modify session state — the executor sets STARTING, and event handlers
 // (handleAgentReady) handle the transition to WAITING_FOR_INPUT.
-func (s *Service) postLaunchCreated(ctx context.Context, taskID, sessionID, prompt string, skipMessage, planModeActive bool, attachments []v1.MessageAttachment) {
+// autoStart marks the message as having been created by an automated trigger
+// (preserved through to recordInitialMessage's auto_start metadata tag); the
+// flag is only consumed when skipMessage is false (callers that store their
+// own message control its metadata directly).
+func (s *Service) postLaunchCreated(ctx context.Context, taskID, sessionID, prompt string, skipMessage, planModeActive, autoStart bool, attachments []v1.MessageAttachment) {
 	if !skipMessage {
-		s.recordInitialMessage(ctx, taskID, sessionID, prompt, planModeActive, attachments)
+		s.recordInitialMessage(ctx, taskID, sessionID, prompt, planModeActive, autoStart, attachments)
 	}
 
 	if planModeActive {
@@ -398,14 +407,18 @@ func (s *Service) postLaunchCreated(ctx context.Context, taskID, sessionID, prom
 // applied if the step has plan_mode enabled.
 // If planMode is true and the workflow step doesn't already apply plan mode,
 // default plan mode instructions are injected into the prompt.
-func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error) {
-	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, attachments, nil, nil)
+// autoStart marks the launch as having been triggered by an automated path
+// (PR/issue/Jira/Linear watch, workflow auto-start) rather than direct user
+// input — the seed prompt is tagged so the github cleanup loop can tell
+// "agent ran on its own" from "user actually engaged".
+func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error) {
+	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, nil, nil)
 }
 
 // StartTaskWithEnv starts a task and carries launch-scoped environment variables
 // through to the agent runtime. Existing StartTask callers keep the old behavior.
-func (s *Service) StartTaskWithEnv(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode bool, attachments []v1.MessageAttachment, env map[string]string) (*executor.TaskExecution, error) {
-	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, attachments, env, nil)
+func (s *Service) StartTaskWithEnv(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, env map[string]string) (*executor.TaskExecution, error) {
+	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, env, nil)
 }
 
 // StartTaskWithRoute launches a task with a fully resolved provider
@@ -425,6 +438,9 @@ func (s *Service) StartTaskWithEnv(ctx context.Context, taskID string, agentProf
 // KANDEV_*); route.Env carries provider-scoped overrides. The route
 // env wins on key collisions because per-provider env is the more
 // specific authority.
+//
+// Office-routed launches use autoStart=false: the user kicked off the
+// task; the office layer only chose the provider.
 func (s *Service) StartTaskWithRoute(
 	ctx context.Context, taskID, agentProfileID string,
 	launch executor.LaunchContext, route executor.RouteOverride,
@@ -432,7 +448,7 @@ func (s *Service) StartTaskWithRoute(
 	merged := mergeRouteEnv(launch.Env, route.Env)
 	_, err := s.startTask(ctx, taskID, agentProfileID,
 		launch.ExecutorID, launch.ExecutorProfileID, launch.Priority,
-		launch.Prompt, launch.WorkflowStepID, launch.PlanMode,
+		launch.Prompt, launch.WorkflowStepID, launch.PlanMode, false,
 		launch.Attachments, merged, &route)
 	return err
 }
@@ -457,7 +473,8 @@ func mergeRouteEnv(launchEnv, routeEnv map[string]string) map[string]string {
 	return out
 }
 
-func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode bool, attachments []v1.MessageAttachment, env map[string]string, route *executor.RouteOverride) (*executor.TaskExecution, error) {
+//nolint:cyclop,funlen // launch path threads many orthogonal concerns (workflow-step / agent-profile / office-task / config-mode / route / system-prompt wrapping); splitting it would require shared mutable state across helpers
+func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, env map[string]string, route *executor.RouteOverride) (*executor.TaskExecution, error) {
 	s.logger.Debug("manually starting task",
 		zap.String("task_id", taskID),
 		zap.String("agent_profile_id", agentProfileID),
@@ -466,6 +483,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		zap.Int("prompt_length", len(prompt)),
 		zap.String("workflow_step_id", workflowStepID),
 		zap.Bool("plan_mode", planMode),
+		zap.Bool("auto_start", autoStart),
 		zap.Int("attachments", len(attachments)))
 
 	// Office tasks do NOT transition through SCHEDULING / IN_PROGRESS on
@@ -577,7 +595,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		return nil, err
 	}
 
-	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, attachments)
+	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, autoStart, attachments)
 
 	// Note: Task stays in SCHEDULING state until the agent is fully initialized.
 	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
@@ -713,9 +731,9 @@ func (s *Service) resolveEffectiveAgentProfile(ctx context.Context, taskID, work
 }
 
 // postLaunchStart records the initial message and sets plan mode after a successful launch.
-func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution *executor.TaskExecution, prompt string, recordPlanMode, setPlanMode bool, attachments []v1.MessageAttachment) {
+func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution *executor.TaskExecution, prompt string, recordPlanMode, setPlanMode, autoStart bool, attachments []v1.MessageAttachment) {
 	if execution.SessionID != "" {
-		s.recordInitialMessage(ctx, taskID, execution.SessionID, prompt, recordPlanMode, attachments)
+		s.recordInitialMessage(ctx, taskID, execution.SessionID, prompt, recordPlanMode, autoStart, attachments)
 
 		if setPlanMode {
 			session, err := s.repo.GetTaskSession(ctx, execution.SessionID)
@@ -769,9 +787,12 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 }
 
 // recordInitialMessage creates the initial user message and updates session state after launch.
-func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, prompt string, planModeActive bool, attachments []v1.MessageAttachment) {
+// autoStart marks the message as having been created by an automated trigger
+// (workflow auto-start, PR/issue watch, Jira/Linear integration) so cleanup
+// logic can distinguish "agent ran on its own" from "user actually engaged".
+func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, prompt string, planModeActive, autoStart bool, attachments []v1.MessageAttachment) {
 	if s.messageCreator != nil && (prompt != "" || len(attachments) > 0) {
-		meta := NewUserMessageMeta().WithPlanMode(planModeActive).WithAttachments(attachments)
+		meta := NewUserMessageMeta().WithPlanMode(planModeActive).WithAutoStart(autoStart).WithAttachments(attachments)
 		if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, s.getActiveTurnID(sessionID), meta.ToMap()); err != nil {
 			s.logger.Error("failed to create initial user message",
 				zap.String("task_id", taskID),

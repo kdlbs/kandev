@@ -24,6 +24,10 @@ import { ToolSubagentMessage } from "@/components/task/chat/messages/tool-subage
 import { MonitorMessage } from "@/components/task/chat/messages/monitor-message";
 import { AgentPlanMessage } from "@/components/task/chat/messages/agent-plan-message";
 import { ActionMessage } from "@/components/task/chat/messages/action-message";
+import {
+  KandevToolMessage,
+  hasKandevRenderer,
+} from "@/components/task/chat/messages/kandev-tool-message";
 
 type AdapterContext = {
   isTaskDescription: boolean;
@@ -180,6 +184,14 @@ const adapters: MessageAdapter[] = [
         />
       );
     },
+  },
+  {
+    // Kandev MCP tools — `mcp__kandev__list_tasks_kandev` etc. — get
+    // per-tool structured rendering. Must run BEFORE the generic tool_call
+    // adapter so the unwrapped + structured view wins. Unrecognised Kandev
+    // tools (no matching renderer) fall through to the generic adapter.
+    matches: (comment) => hasKandevRenderer(comment),
+    render: (comment) => <KandevToolMessage comment={comment} />,
   },
   {
     matches: (comment) => comment.type === "tool_call",

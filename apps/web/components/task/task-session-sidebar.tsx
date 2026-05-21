@@ -11,7 +11,7 @@ import type {
 import type { TaskPR } from "@/lib/types/github";
 import type { KanbanState } from "@/lib/state/slices";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
-import { TaskSwitcher } from "./task-switcher";
+import { TaskSwitcher, type TaskSwitcherItem } from "./task-switcher";
 import { applyView } from "@/lib/sidebar/apply-view";
 import { SidebarFilterBar } from "./sidebar-filter/sidebar-filter-bar";
 import { MOCK_ITEMS, MOCK_SIDEBAR } from "./sidebar-mock-data";
@@ -575,6 +575,22 @@ function useBulkGitStatusSubscription(primarySessionIds: string[]) {
   }, [primarySessionIds, connectionStatus, activeSessionId]);
 }
 
+function useGroupedSidebarView(displayTasks: TaskSwitcherItem[]) {
+  const prefs = useSidebarTaskPrefs();
+  const effectiveView = useEffectiveSidebarView();
+  const { pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId } = prefs;
+  const grouped = useMemo(
+    () =>
+      applyView(displayTasks, effectiveView, {
+        pinnedTaskIds,
+        orderedTaskIds,
+        subtaskOrderByParentId,
+      }),
+    [displayTasks, effectiveView, pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId],
+  );
+  return { grouped, effectiveView, prefs };
+}
+
 export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   workspaceId,
 }: TaskSessionSidebarProps) {
@@ -618,13 +634,8 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   const toggleSidebarGroupCollapsed = useAppStore((state) => state.toggleSidebarGroupCollapsed);
   const collapsedSubtaskParents = useAppStore((state) => state.collapsedSubtaskParents);
   const toggleSubtaskCollapsed = useAppStore((state) => state.toggleSubtaskCollapsed);
-  const { pinnedTaskIds, orderedTaskIds, togglePinnedTask, handleReorderGroup } =
-    useSidebarTaskPrefs();
-  const effectiveView = useEffectiveSidebarView();
-  const grouped = useMemo(
-    () => applyView(displayTasks, effectiveView, { pinnedTaskIds, orderedTaskIds }),
-    [displayTasks, effectiveView, pinnedTaskIds, orderedTaskIds],
-  );
+  const { grouped, effectiveView, prefs } = useGroupedSidebarView(displayTasks);
+  const { pinnedTaskIds, togglePinnedTask, handleReorderGroup, handleReorderSubtasks } = prefs;
   return (
     <PanelRoot data-testid="task-sidebar">
       <SidebarFilterBar />
@@ -646,6 +657,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
           onMoveToStep={handleMoveToStep}
           onTogglePin={togglePinnedTask}
           onReorderGroup={handleReorderGroup}
+          onReorderSubtasks={handleReorderSubtasks}
           pinnedTaskIds={pinnedTaskIds}
           deletingTaskId={deletingTaskId}
           isLoading={isLoadingWorkflow}

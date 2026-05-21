@@ -62,6 +62,9 @@ type Client interface {
 	// event is one of "APPROVE", "COMMENT", "REQUEST_CHANGES".
 	SubmitReview(ctx context.Context, owner, repo string, number int, event, body string) error
 
+	// MergePR merges a pull request. mergeMethod is one of "merge", "squash", "rebase".
+	MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error
+
 	// ListRepoBranches lists branches for a repository.
 	ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error)
 

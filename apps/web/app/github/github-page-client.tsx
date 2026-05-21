@@ -6,8 +6,9 @@ import { IconBrandGithub } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { PageTopbar } from "@/components/page-topbar";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
+import { usePRKeyToTasks } from "@/hooks/domains/github/use-pr-key-to-tasks";
 import type { Repository, Workflow, WorkflowStep } from "@/lib/types/http";
-import type { GitHubIssue, GitHubPR } from "@/lib/types/github";
+import type { GitHubIssue, GitHubPR, TaskPR } from "@/lib/types/github";
 import { PRList } from "@/components/github/my-github/pr-list";
 import { IssueList } from "@/components/github/my-github/issue-list";
 import {
@@ -40,6 +41,7 @@ import {
   resolveIssuePresets,
 } from "@/components/github/my-github/action-presets";
 import { useGitHubActionPresets } from "@/hooks/domains/github/use-github-action-presets";
+import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 
 type GitHubPageClientProps = {
   workspaceId?: string;
@@ -109,6 +111,7 @@ function ResultsList({
   prPresets,
   issuePresets,
   onStartTask,
+  prKeyToTasks,
 }: {
   selection: SidebarSelection;
   items: Array<GitHubPR | GitHubIssue>;
@@ -117,6 +120,7 @@ function ResultsList({
   prPresets: TaskPreset[];
   issuePresets: TaskPreset[];
   onStartTask: (payload: LaunchPayload) => void;
+  prKeyToTasks: Map<string, TaskPR[]>;
 }) {
   if (selection.kind === "pr") {
     return (
@@ -126,6 +130,7 @@ function ResultsList({
         error={error}
         presets={prPresets}
         onStartTask={onStartTask}
+        prKeyToTasks={prKeyToTasks}
       />
     );
   }
@@ -286,6 +291,8 @@ function AuthenticatedLayout({
   onStartTask: (payload: LaunchPayload) => void;
 }) {
   const { selection, search, repoOptions, title } = state;
+  const prKeyToTasks = usePRKeyToTasks(workspaceId ?? null);
+  useAllWorkflowSnapshots(workspaceId ?? null);
   return (
     <div className="flex-1 flex min-h-0">
       <aside className="w-60 border-r overflow-y-auto shrink-0">
@@ -325,6 +332,7 @@ function AuthenticatedLayout({
             prPresets={prPresets}
             issuePresets={issuePresets}
             onStartTask={onStartTask}
+            prKeyToTasks={prKeyToTasks}
           />
         </div>
         <ResultsPagination

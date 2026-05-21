@@ -4,7 +4,13 @@ import { createElement, useCallback, useRef, useState } from "react";
 import { mergeAttributes, Node } from "@tiptap/core";
 import { ReactNodeViewRenderer, NodeViewWrapper, type ReactNodeViewProps } from "@tiptap/react";
 import { Suggestion, type SuggestionOptions } from "@tiptap/suggestion";
-import { IconFile, IconFolder, IconAt, IconListCheck } from "@tabler/icons-react";
+import {
+  IconFile,
+  IconFolder,
+  IconAt,
+  IconListCheck,
+  IconClipboardList,
+} from "@tabler/icons-react";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@kandev/ui/hover-card";
 import { isDirectory } from "@/lib/utils/file-path";
 import { usePanelActions } from "@/hooks/use-panel-actions";
@@ -13,7 +19,7 @@ import { LazyFilePreview } from "./context-items/lazy-file-preview";
 import { LazyPlanPreview } from "./context-items/lazy-plan-preview";
 import { PromptPreviewFromStore } from "./context-items/prompt-preview";
 
-export type MentionKind = "file" | "prompt" | "plan";
+export type MentionKind = "file" | "prompt" | "plan" | "task";
 
 export type ContextMentionOptions = {
   /** Suggestion configs — one per trigger character (e.g. @ and /) */
@@ -44,6 +50,10 @@ export const ContextMention = Node.create<ContextMentionOptions>({
       label: { default: null },
       kind: { default: "file" as MentionKind },
       path: { default: null },
+      taskId: { default: null },
+      workflowId: { default: null },
+      workflowStepId: { default: null },
+      taskState: { default: null },
     };
   },
 
@@ -171,6 +181,7 @@ function useMentionPreview(
 function getMentionIcon(kind: MentionKind, path?: string) {
   if (kind === "prompt") return IconAt;
   if (kind === "plan") return IconListCheck;
+  if (kind === "task") return IconClipboardList;
   if (path && isDirectory(path)) return IconFolder;
   return IconFile;
 }

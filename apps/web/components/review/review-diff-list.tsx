@@ -3,7 +3,7 @@
 import { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { IconAlertTriangle, IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Checkbox } from "@kandev/ui/checkbox";
-import { FileDiffViewer } from "@/components/diff";
+import { FileDiffViewer, DiffErrorBoundary } from "@/components/diff";
 import type { RevertBlockInfo } from "@/components/diff";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent, updateFileContent } from "@/lib/ws/workspace-files";
@@ -375,26 +375,35 @@ function renderDiffContent(opts: {
     // both PR and local changes, the wrong content gets paired with the PR
     // patch and @pierre/diffs 1.1.x renders nothing/errors. Disable expansion
     // for PR-sourced rows; uncommitted/committed rows still get it.
-    const enableExpansion = file.source !== "pr";
+    //
+    // Also disable expansion for untracked files: the backend synthesizes a
+    // single all-additions hunk against /dev/null, so there is no real
+    // context to expand. Re-parsing with the live working-tree content
+    // races with concurrent edits — if the file shrinks after the snapshot,
+    // the cached hunk header advertises more lines than the fetched content
+    // has and @pierre/diffs' DiffHunksRenderer throws.
+    const enableExpansion = file.source !== "pr" && file.status !== "untracked";
     return (
       <>
-        <FileDiffViewer
-          filePath={file.path}
-          diff={file.diff}
-          status={file.status}
-          enableComments
-          enableAcceptReject
-          onRevertBlock={onRevertBlock}
-          onCommentRun={onCommentRun}
-          sessionId={sessionId}
-          wordWrap={wordWrap}
-          enableExpansion={enableExpansion}
-          baseRef="HEAD"
-          hideHeader
-          expandUnchanged={expandUnchanged}
-          onToggleExpandUnchanged={onToggleExpandUnchanged}
-          repo={file.repository_name}
-        />
+        <DiffErrorBoundary filePath={file.path}>
+          <FileDiffViewer
+            filePath={file.path}
+            diff={file.diff}
+            status={file.status}
+            enableComments
+            enableAcceptReject
+            onRevertBlock={onRevertBlock}
+            onCommentRun={onCommentRun}
+            sessionId={sessionId}
+            wordWrap={wordWrap}
+            enableExpansion={enableExpansion}
+            baseRef="HEAD"
+            hideHeader
+            expandUnchanged={expandUnchanged}
+            onToggleExpandUnchanged={onToggleExpandUnchanged}
+            repo={file.repository_name}
+          />
+        </DiffErrorBoundary>
         {file.diff_skip_reason === "truncated" && (
           <div className="py-1 text-center text-xs text-muted-foreground border-t">
             Diff truncated — showing first 256 KB

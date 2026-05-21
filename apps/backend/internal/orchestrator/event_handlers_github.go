@@ -323,6 +323,7 @@ func (s *Service) autoStartReviewTask(
 		task.Description,
 		evt.WorkflowStepID,
 		false,
+		true,
 		nil,
 	)
 	if err != nil {
@@ -1132,6 +1133,7 @@ func (s *Service) autoStartIssueTask(
 		task.Description,
 		evt.WorkflowStepID,
 		false,
+		true,
 		nil,
 	)
 	if err != nil {

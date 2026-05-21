@@ -33,6 +33,7 @@ import type {
   ReviewWatch,
   CreateReviewWatchRequest,
   UpdateReviewWatchRequest,
+  CleanupPolicy,
 } from "@/lib/types/github";
 
 type ReviewWatchDialogProps = {
@@ -63,6 +64,7 @@ type FormState = {
   customQuery: string;
   enabled: boolean;
   pollInterval: number;
+  cleanupPolicy: CleanupPolicy;
 };
 
 function makeDefaultForm(workspaceId: string): FormState {
@@ -78,6 +80,7 @@ function makeDefaultForm(workspaceId: string): FormState {
     customQuery: QUERY_TEMPLATES.meAndTeams,
     enabled: true,
     pollInterval: 300,
+    cleanupPolicy: "auto",
   };
 }
 
@@ -95,8 +98,27 @@ function formStateFromWatch(watch: ReviewWatch): FormState {
     customQuery: watch.custom_query || QUERY_TEMPLATES.meAndTeams,
     enabled: watch.enabled,
     pollInterval: watch.poll_interval_seconds,
+    cleanupPolicy: watch.cleanup_policy ?? "auto",
   };
 }
+
+const CLEANUP_POLICY_OPTIONS: Array<{ id: CleanupPolicy; label: string; description: string }> = [
+  {
+    id: "auto",
+    label: "Auto (recommended)",
+    description: "Delete merged/closed PR tasks unless you typed a message in them.",
+  },
+  {
+    id: "always",
+    label: "Always delete",
+    description: "Delete on merge/close even if you engaged with the task.",
+  },
+  {
+    id: "never",
+    label: "Never auto-delete",
+    description: "Keep all tasks. Delete them manually from the task list.",
+  },
+];
 
 // --- Generic select field with description ---
 
@@ -482,6 +504,16 @@ function SettingsFields({
           className="cursor-pointer"
         />
       </div>
+      <SelectField
+        label="Cleanup behavior"
+        description={
+          CLEANUP_POLICY_OPTIONS.find((p) => p.id === form.cleanupPolicy)?.description ?? ""
+        }
+        value={form.cleanupPolicy}
+        onChange={(v) => setForm((prev) => ({ ...prev, cleanupPolicy: v as CleanupPolicy }))}
+        placeholder="Auto"
+        items={CLEANUP_POLICY_OPTIONS.map((p) => ({ id: p.id, label: p.label }))}
+      />
     </>
   );
 }
@@ -539,6 +571,7 @@ export function ReviewWatchDialog({
         custom_query: form.customQuery,
         enabled: form.enabled,
         poll_interval_seconds: form.pollInterval,
+        cleanup_policy: form.cleanupPolicy,
       };
       if (watch) {
         await onUpdate(watch.id, payload);

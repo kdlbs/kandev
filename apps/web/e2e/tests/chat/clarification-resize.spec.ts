@@ -121,7 +121,10 @@ test.describe("Clarification overlay resizable layout", () => {
       };
     });
 
-    expect(initial.overflowY).toBe("auto");
+    // overflow-y: scroll reserves a permanent scrollbar gutter so users
+    // discover scrollable content (and the in-overlay Submit) without having
+    // to wait for macOS auto-hide scrollbars to fade in on hover.
+    expect(initial.overflowY).toBe("scroll");
     // Default state: no inline height → container sizes to its content.
     expect(initial.inlineHeight).toBe("");
     // Sanity check: content-sized overlay is at least tall enough for the

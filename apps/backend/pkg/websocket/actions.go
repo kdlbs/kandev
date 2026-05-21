@@ -398,6 +398,11 @@ const (
 	ActionGitHubActionPresetsList   = "github.action_presets.list"
 	ActionGitHubActionPresetsUpdate = "github.action_presets.update"
 	ActionGitHubActionPresetsReset  = "github.action_presets.reset"
+
+	// Manual cleanup sweeps over all dedup rows (review/issue). Used by the
+	// settings-page button so users can drain piled-up tasks on demand.
+	ActionGitHubCleanupReviewTasks = "github.cleanup.review_tasks"
+	ActionGitHubCleanupIssueTasks  = "github.cleanup.issue_tasks"
 )
 
 // Jira integration actions

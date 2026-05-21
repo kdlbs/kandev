@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { IconBrandGithub, IconPlus } from "@tabler/icons-react";
+import { IconBrandGithub, IconPlus, IconTrashX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
@@ -19,7 +19,51 @@ import { PRStatsPanel } from "./pr-stats";
 import { useReviewWatches } from "@/hooks/domains/github/use-review-watches";
 import { useIssueWatches } from "@/hooks/domains/github/use-issue-watches";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
+import { cleanupMergedReviewTasks, cleanupClosedIssueTasks } from "@/lib/api/domains/github-api";
 import type { ReviewWatch, IssueWatch } from "@/lib/types/github";
+
+// CleanupNowButton runs a manual global sweep over the dedup tables. Useful
+// for users who upgraded with a pile of legacy merged-PR / closed-issue
+// review tasks that pre-date the cleanup_policy work — clicking once drains
+// them according to each watch's policy.
+function CleanupNowButton({
+  label,
+  run,
+}: {
+  label: string;
+  run: () => Promise<{ deleted: number }>;
+}) {
+  const { toast } = useToast();
+  const [busy, setBusy] = useState(false);
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          const { deleted } = await run();
+          toast({
+            description:
+              deleted === 0
+                ? "No tasks to clean up"
+                : `Deleted ${deleted} task${deleted === 1 ? "" : "s"}`,
+            variant: "success",
+          });
+        } catch {
+          toast({ description: "Cleanup failed", variant: "error" });
+        } finally {
+          setBusy(false);
+        }
+      }}
+      className="cursor-pointer"
+    >
+      <IconTrashX className="h-4 w-4 mr-1" />
+      {busy ? "Cleaning…" : label}
+    </Button>
+  );
+}
 
 function useWatchActions(workspaceId?: string | null) {
   const { items: watches, create, update, remove, trigger } = useReviewWatches(workspaceId);
@@ -205,17 +249,20 @@ function ReviewWatchSection() {
         title="Review Watches"
         description="Automatically create tasks for PRs that need your review."
         action={
-          <Button
-            size="sm"
-            onClick={() => {
-              setEditingWatch(null);
-              setDialogOpen(true);
-            }}
-            className="cursor-pointer"
-          >
-            <IconPlus className="h-4 w-4 mr-1" />
-            Add Watch
-          </Button>
+          <div className="flex items-center gap-2">
+            <CleanupNowButton label="Clean up merged" run={cleanupMergedReviewTasks} />
+            <Button
+              size="sm"
+              onClick={() => {
+                setEditingWatch(null);
+                setDialogOpen(true);
+              }}
+              className="cursor-pointer"
+            >
+              <IconPlus className="h-4 w-4 mr-1" />
+              Add Watch
+            </Button>
+          </div>
         }
       >
         <Card>
@@ -266,17 +313,20 @@ function IssueWatchSection() {
         title="Issue Watches"
         description="Automatically create tasks for GitHub issues matching your criteria."
         action={
-          <Button
-            size="sm"
-            onClick={() => {
-              setEditingIssueWatch(null);
-              setDialogOpen(true);
-            }}
-            className="cursor-pointer"
-          >
-            <IconPlus className="h-4 w-4 mr-1" />
-            Add Watch
-          </Button>
+          <div className="flex items-center gap-2">
+            <CleanupNowButton label="Clean up closed" run={cleanupClosedIssueTasks} />
+            <Button
+              size="sm"
+              onClick={() => {
+                setEditingIssueWatch(null);
+                setDialogOpen(true);
+              }}
+              className="cursor-pointer"
+            >
+              <IconPlus className="h-4 w-4 mr-1" />
+              Add Watch
+            </Button>
+          </div>
         }
       >
         <Card>

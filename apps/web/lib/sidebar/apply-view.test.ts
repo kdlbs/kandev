@@ -455,17 +455,16 @@ describe("applyView — custom sort", () => {
       task({ id: "c1", title: "C1", parentTaskId: "p1", createdAt: "2026-02-01" }),
       task({ id: "c2", title: "C2", parentTaskId: "p1", createdAt: "2026-02-02" }),
     ];
-    // Simulates a drag of P3 to the front: handleReorderGroup writes only
-    // root IDs into orderedTaskIds.
+    // Simulates a drag of P3 to the front. orderedTaskIds contains only root
+    // IDs here; subtasks fall back to "newest createdAt first".
     const out = applyView(tasks, customView, {
       pinnedTaskIds: [],
       orderedTaskIds: ["p3", "p1", "p2"],
     });
     // Root order matches the drag.
     expect(out.groups[0].tasks.map((t) => t.id)).toEqual(["p3", "p1", "p2"]);
-    // Subtasks stay attached to p1 — they're never in orderedTaskIds and they
-    // never appear in group.tasks, so dragging the parent doesn't separate
-    // them or reorder them relative to each other.
+    // Subtasks stay attached to p1 and use the createdAt fallback (newest
+    // first) since neither is in orderedTaskIds.
     expect(out.subTasksByParentId.get("p1")?.map((t) => t.id)).toEqual(["c2", "c1"]);
     expect(out.subTasksByParentId.get("p2")).toBeUndefined();
     expect(out.subTasksByParentId.get("p3")).toBeUndefined();
@@ -483,6 +482,74 @@ describe("applyView — custom sort", () => {
       orderedTaskIds: ["c", "b", "a"],
     });
     expect(out.groups[0].tasks.map((t) => t.id)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("applyView — subtaskOrderByParentId", () => {
+  // Subtask ordering is independent of the view's sort: the global sort still
+  // determines root order, and per-parent overrides reorder *only* that parent's
+  // subtask list.
+  const titleAscView: SidebarView = {
+    id: "v",
+    name: "v",
+    filters: [],
+    sort: { key: "title", direction: "asc" },
+    group: "none",
+    collapsedGroups: [],
+  };
+  const parentId = "p1";
+  const sub = (id: string, parent: string) => task({ id, title: id, parentTaskId: parent });
+
+  it("reorders one parent's subtasks without flipping the root sort", () => {
+    const tasks = [
+      task({ id: "p1", title: "P1" }),
+      task({ id: "p2", title: "P2" }),
+      sub("c1", parentId),
+      sub("c2", parentId),
+      sub("c3", parentId),
+    ];
+    const out = applyView(tasks, titleAscView, {
+      pinnedTaskIds: [],
+      orderedTaskIds: [],
+      subtaskOrderByParentId: { [parentId]: ["c1", "c3", "c2"] },
+    });
+    // Root order still follows title asc — untouched by the subtask reorder.
+    expect(out.groups[0].tasks.map((t) => t.id)).toEqual(["p1", "p2"]);
+    expect(out.subTasksByParentId.get(parentId)?.map((t) => t.id)).toEqual(["c1", "c3", "c2"]);
+  });
+
+  it("subtasks not in the override keep the active sort's order, after the listed ones", () => {
+    const tasks = [
+      task({ id: "p1", title: "P1" }),
+      sub("c1", parentId),
+      sub("c2", parentId),
+      sub("c3", parentId),
+    ];
+    // Title-asc fallback over the unordered subtasks: c1, c2 follow after c3.
+    const out = applyView(tasks, titleAscView, {
+      pinnedTaskIds: [],
+      orderedTaskIds: [],
+      subtaskOrderByParentId: { [parentId]: ["c3"] },
+    });
+    expect(out.subTasksByParentId.get(parentId)?.map((t) => t.id)).toEqual(["c3", "c1", "c2"]);
+  });
+
+  it("override for parent A does not affect parent B's subtasks", () => {
+    const tasks = [
+      task({ id: "p1", title: "P1" }),
+      task({ id: "p2", title: "P2" }),
+      sub("a1", "p1"),
+      sub("a2", "p1"),
+      sub("b1", "p2"),
+      sub("b2", "p2"),
+    ];
+    const out = applyView(tasks, titleAscView, {
+      pinnedTaskIds: [],
+      orderedTaskIds: [],
+      subtaskOrderByParentId: { p1: ["a2", "a1"] },
+    });
+    expect(out.subTasksByParentId.get("p1")?.map((t) => t.id)).toEqual(["a2", "a1"]);
+    expect(out.subTasksByParentId.get("p2")?.map((t) => t.id)).toEqual(["b1", "b2"]);
   });
 });
 

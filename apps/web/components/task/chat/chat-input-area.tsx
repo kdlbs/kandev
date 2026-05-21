@@ -8,10 +8,11 @@ import { TodoIndicator } from "./todo-indicator";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
-import { useMessageHandler } from "@/hooks/use-message-handler";
-import { useAppStore } from "@/components/state-provider";
+import { useMessageHandler, buildTaskMentionsContext } from "@/hooks/use-message-handler";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { type ContextFile } from "@/lib/state/context-files-store";
+import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import {
   ChatInputContainer,
   type ChatInputContainerHandle,
@@ -96,6 +97,7 @@ export function useSubmitHandler(
   onSend?: (message: string) => void,
 ) {
   const [isSending, setIsSending] = useState(false);
+  const storeApi = useAppStoreApi();
   const {
     resolvedSessionId,
     sessionModel,
@@ -132,6 +134,7 @@ export function useSubmitHandler(
       reviewComments?: DiffComment[],
       attachments?: MessageAttachment[],
       inlineMentions?: ContextFile[],
+      inlineTaskMentions?: TaskMentionData[],
     ) => {
       if (isSending) return;
       setIsSending(true);
@@ -144,9 +147,21 @@ export function useSubmitHandler(
         );
         const hasReviewComments = !!(reviewComments && reviewComments.length > 0);
         if (onSend) {
-          await onSend(finalMessage);
+          // The onSend path bypasses useMessageHandler.buildFinalMessage, so
+          // expand task mentions here — otherwise the task chips show in the
+          // editor but the agent never receives the <kandev-system> block.
+          const taskCtx = inlineTaskMentions?.length
+            ? buildTaskMentionsContext(inlineTaskMentions, storeApi.getState())
+            : "";
+          await onSend(finalMessage + taskCtx);
         } else {
-          await handleSendMessage(finalMessage, attachments, hasReviewComments, inlineMentions);
+          await handleSendMessage(
+            finalMessage,
+            attachments,
+            hasReviewComments,
+            inlineMentions,
+            inlineTaskMentions,
+          );
         }
         if (reviewComments && reviewComments.length > 0)
           markCommentsSent(reviewComments.map((c) => c.id));
@@ -166,6 +181,7 @@ export function useSubmitHandler(
     [
       isSending,
       onSend,
+      storeApi,
       handleSendMessage,
       markCommentsSent,
       planComments,
@@ -338,6 +354,7 @@ type ChatInputAreaProps = {
     reviewComments?: DiffComment[],
     attachments?: MessageAttachment[],
     inlineMentions?: ContextFile[],
+    inlineTaskMentions?: TaskMentionData[],
   ) => Promise<void>;
   handleCancelTurn: () => Promise<void>;
   showRequestChangesTooltip: boolean;

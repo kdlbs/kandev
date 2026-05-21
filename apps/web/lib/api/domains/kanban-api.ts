@@ -74,7 +74,8 @@ export async function createTask(
     attachments?: Array<{ type: string; data: string; mime_type: string; name?: string }>;
     parent_id?: string;
     workspace_path?: string;
-    priority?: number;
+    priority?: string;
+    project_id?: string;
     metadata?: Record<string, unknown>;
     /** Office task-handoffs phase 4/5 — workspace policy. */
     workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";

@@ -19,6 +19,58 @@ import (
 	"github.com/kandev/kandev/internal/task/service"
 )
 
+type captureCreateTaskRepo struct {
+	mockRepository
+	captured *models.Task
+}
+
+func (m *captureCreateTaskRepo) GetWorkspaceTaskPrefix(_ context.Context, _ string) (string, string, error) {
+	return "KAN", "wf-office", nil
+}
+
+func (m *captureCreateTaskRepo) CreateTask(_ context.Context, task *models.Task) error {
+	m.captured = task
+	return nil
+}
+
+// TestHTTPCreateTask_ProjectIDReachesOfficePath guards the wiring that broke
+// the office "New Task" dialog: when the request body sets project_id (and
+// omits workflow_id), the handler must forward it to the service so
+// isOfficeRequest() returns true and the workflow is auto-resolved. Without
+// this, requests fall through to the kanban validator with
+// "workflow_id is required for non-ephemeral tasks".
+func TestHTTPCreateTask_ProjectIDReachesOfficePath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &TaskHandlers{service: svc, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id": "ws-1",
+		"title": "Analyse integrations",
+		"project_id": "proj-1",
+		"priority": "medium"
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.NotNil(t, repo.captured, "service.CreateTask was not called")
+	assert.Equal(t, "proj-1", repo.captured.ProjectID)
+	assert.Equal(t, "wf-office", repo.captured.WorkflowID, "office workflow should be auto-resolved")
+}
+
 func newTestLogger(t *testing.T) *logger.Logger {
 	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{

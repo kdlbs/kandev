@@ -874,7 +874,7 @@ func (a *schedulerTaskStarterAdapter) StartTask(
 ) error {
 	_, err := a.orch.StartTask(ctx, taskID, agentProfileID,
 		executorID, executorProfileID, priority, prompt,
-		workflowStepID, planMode, nil)
+		workflowStepID, planMode, false, nil)
 	return err
 }
 
@@ -1271,7 +1271,7 @@ func newOfficeTaskStarter(orchestratorSvc *orchestrator.Service) officeservice.T
 			planMode bool, attachments []v1.MessageAttachment, env map[string]string) error {
 			_, err := orchestratorSvc.StartTaskWithEnv(ctx, taskID, agentProfileID,
 				executorID, executorProfileID, priority, prompt,
-				workflowStepID, planMode, attachments, env)
+				workflowStepID, planMode, false, attachments, env)
 			return err
 		},
 	)

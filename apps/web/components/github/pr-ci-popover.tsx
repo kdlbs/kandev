@@ -26,6 +26,7 @@ import {
   type WorkflowGroup,
 } from "@/lib/github/check-buckets";
 import type { CheckRun, TaskPR } from "@/lib/types/github";
+import { PRMergeButton } from "./pr-merge-button";
 
 type CountsView = {
   passed: number;
@@ -489,7 +490,7 @@ export function PRCIPopover({
   const authLost = ghStatus !== null && !ghStatus.authenticated;
   // Trigger an initial status load from the same hook the rest of the app uses.
   useGitHubStatus();
-  const { feedback, isFetching, lastUpdatedAt } = usePRCIPopover(pr, enabled && !authLost);
+  const { feedback, isFetching, lastUpdatedAt, refetch } = usePRCIPopover(pr, enabled && !authLost);
   const onAddAsContext = useAddCheckToContext(pr);
 
   return (
@@ -513,6 +514,7 @@ export function PRCIPopover({
             <PRReviewRow pr={pr} />
             <PRCommentsRow pr={pr} />
           </div>
+          <PRMergeButton taskPR={pr} onMerged={refetch} compact />
         </>
       )}
       {onOpenDetailPanel && (

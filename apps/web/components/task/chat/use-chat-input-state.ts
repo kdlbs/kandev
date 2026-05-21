@@ -19,6 +19,7 @@ import type { ContextFile } from "@/lib/state/context-files-store";
 import type { DiffComment } from "@/lib/diff/types";
 import type { MessageAttachment } from "./chat-input-container";
 import type { TipTapInputHandle } from "./tiptap-input";
+import type { TaskMentionData } from "@/hooks/use-inline-mention";
 
 type UseChatInputStateProps = {
   sessionId: string | null;
@@ -34,6 +35,7 @@ type UseChatInputStateProps = {
     reviewComments?: DiffComment[],
     attachments?: MessageAttachment[],
     inlineMentions?: ContextFile[],
+    inlineTaskMentions?: TaskMentionData[],
   ) => void;
 };
 
@@ -195,11 +197,13 @@ export function useChatInputState({
       if (!hasContent) return;
       const messageAttachments = toMessageAttachments(currentAttachments);
       const inlineMentions = inputRef.current?.getMentions() ?? [];
+      const inlineTaskMentions = inputRef.current?.getTaskMentions() ?? [];
       onSubmit(
         trimmed,
         allComments.length > 0 ? allComments : undefined,
         messageAttachments.length > 0 ? messageAttachments : undefined,
         inlineMentions.length > 0 ? inlineMentions : undefined,
+        inlineTaskMentions.length > 0 ? inlineTaskMentions : undefined,
       );
       inputRef.current?.clear();
       setValue("");

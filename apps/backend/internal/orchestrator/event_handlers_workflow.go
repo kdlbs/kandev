@@ -349,7 +349,7 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 	// Async: event bus delivers synchronously; blocking here → HTTP timeout (see handleTaskMovedWithSession doc).
 	go func() {
 		asyncCtx := context.WithoutCancel(ctx)
-		_, err := s.StartTask(asyncCtx, task.ID, agentProfileID, "", executorProfileID, "", task.Description, data.ToStepID, planMode, nil)
+		_, err := s.StartTask(asyncCtx, task.ID, agentProfileID, "", executorProfileID, "", task.Description, data.ToStepID, planMode, true, nil)
 		if err != nil {
 			s.logger.Error("task.moved: failed to auto-start task",
 				zap.String("task_id", data.TaskID),
@@ -1151,7 +1151,7 @@ func (s *Service) autoStartStepPrompt(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName))
-		_, err := s.StartCreatedSession(ctx, taskID, sessionID, session.AgentProfileID, recordedPrompt, true, planMode, attachments)
+		_, err := s.StartCreatedSession(ctx, taskID, sessionID, session.AgentProfileID, recordedPrompt, true, planMode, true, attachments)
 		if err != nil {
 			requeueTaken()
 		}
@@ -1265,7 +1265,7 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 		return err
 	}
 
-	if _, err := s.StartCreatedSession(ctx, taskID, sessionID, fresh.AgentProfileID, prompt, true, planMode, attachments); err != nil {
+	if _, err := s.StartCreatedSession(ctx, taskID, sessionID, fresh.AgentProfileID, prompt, true, planMode, true, attachments); err != nil {
 		s.logger.Error("auto-start fallback: fresh launch failed",
 			zap.String("session_id", sessionID), zap.Error(err))
 		requeue()
@@ -1319,7 +1319,14 @@ func (s *Service) recordAutoStartMessage(ctx context.Context, taskID, sessionID,
 		s.startTurnForSession(ctx, sessionID)
 		turnID = s.getActiveTurnID(sessionID)
 	}
-	meta := NewUserMessageMeta().WithPlanMode(planMode)
+	// auto_start tags this seed prompt as automation-originated so the
+	// github cleanup filter (HasUserAuthoredMessage) skips it — without
+	// this tag, a workflow auto-start fired on a PR-watch task makes the
+	// task look user-authored and the cleanup loop preserves it on merge,
+	// re-creating the exact pileup the cleanup_policy work fixes.
+	// workflow_auto_start is the original tag this function set; preserved
+	// for any consumer reading it directly.
+	meta := NewUserMessageMeta().WithPlanMode(planMode).WithAutoStart(true)
 	metaMap := meta.ToMap()
 	if metaMap == nil {
 		metaMap = make(map[string]interface{})

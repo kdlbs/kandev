@@ -233,14 +233,17 @@ func TestCleanupMergedReviewTasks_OrphanReservation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CleanupMergedReviewTasks: %v", err)
 	}
-	if deleted != 1 {
-		t.Errorf("expected 1 deleted, got %d", deleted)
+	// Returned count tracks deleted tasks specifically — orphan reservation
+	// rows have no associated task, so cleaning them shouldn't bump the
+	// count (the settings-page toast reports "Deleted N tasks").
+	if deleted != 0 {
+		t.Errorf("expected deleted=0 (orphan reservation has no task), got %d", deleted)
 	}
 	if len(rec.calls) != 0 {
 		t.Errorf("expected DeleteTask NOT to be called for orphan reservation, got calls=%v", rec.calls)
 	}
 
-	// The orphan dedup row must be gone.
+	// The orphan dedup row must still be gone.
 	remaining, err := store.ListReviewPRTasksByWatch(ctx, watch.ID)
 	if err != nil {
 		t.Fatalf("ListReviewPRTasksByWatch: %v", err)

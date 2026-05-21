@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os/exec"
 	"strings"
@@ -598,6 +599,51 @@ func (c *GHClient) SubmitReview(ctx context.Context, owner, repo string, number 
 		return fmt.Errorf("submit review on PR #%d: %w", number, err)
 	}
 	return nil
+}
+
+func (c *GHClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
+	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/merge", owner, repo, number)
+	args := []string{"api", endpoint, "-X", "PUT"}
+	if mergeMethod != "" {
+		args = append(args, "-f", "merge_method="+mergeMethod)
+	}
+	_, err := c.run(ctx, args...)
+	if err != nil {
+		// Surface status-based errors as GitHubAPIError so httpMergePR can
+		// translate 405 (not mergeable) / 409 (conflict) to HTTP 409 for
+		// gh CLI users too, matching the PAT path.
+		if code, ok := ghMergeStatusCode(err); ok {
+			return &GitHubAPIError{StatusCode: code, Endpoint: endpoint, Body: err.Error()}
+		}
+		return fmt.Errorf("merge PR #%d: %w", number, err)
+	}
+	return nil
+}
+
+// ghMergeStatusCode extracts the HTTP status code from a gh CLI merge error.
+// Returns the code and true when the stderr matches one of GitHub's
+// merge-API failure shapes (404/403/405/409); false otherwise so the caller
+// falls back to a generic wrap.
+func ghMergeStatusCode(err error) (int, bool) {
+	if err == nil {
+		return 0, false
+	}
+	if isNotFoundErr(err) {
+		return http.StatusNotFound, true
+	}
+	if isForbiddenErr(err) {
+		return http.StatusForbidden, true
+	}
+	s := err.Error()
+	if strings.Contains(s, "HTTP 405") || strings.Contains(s, "status: 405") ||
+		strings.Contains(s, "405 Method Not Allowed") {
+		return http.StatusMethodNotAllowed, true
+	}
+	if strings.Contains(s, "HTTP 409") || strings.Contains(s, "status: 409") ||
+		strings.Contains(s, "409 Conflict") {
+		return http.StatusConflict, true
+	}
+	return 0, false
 }
 
 func (c *GHClient) ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error) {

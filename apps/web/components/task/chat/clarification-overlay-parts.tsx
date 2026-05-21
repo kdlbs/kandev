@@ -226,18 +226,17 @@ type CarouselNavProps = {
   isSubmitting: boolean;
   onPrev: () => void;
   onNext: () => void;
-  onSubmit: () => void;
-  canSubmit: boolean;
 };
 
+// Back/Next carousel nav. The final-submit affordance lives in the overlay
+// header so it stays visible even when the question card scrolls past the
+// fold; this nav only handles per-question navigation.
 export function ClarificationCarouselNav({
   activeIndex,
   total,
   isSubmitting,
   onPrev,
   onNext,
-  onSubmit,
-  canSubmit,
 }: CarouselNavProps) {
   const isFirst = activeIndex === 0;
   const isLast = activeIndex === total - 1;
@@ -258,34 +257,21 @@ export function ClarificationCarouselNav({
         <IconArrowLeft className="h-3 w-3" />
         Back
       </button>
-      {isLast ? (
-        <button
-          type="button"
-          onClick={onSubmit}
-          disabled={!canSubmit || isSubmitting}
-          data-testid="clarification-submit"
-          className={cn(
-            "inline-flex items-center gap-1 text-xs px-3 py-1 rounded font-medium",
-            canSubmit && !isSubmitting
-              ? "bg-blue-500 text-white hover:bg-blue-500/90 cursor-pointer"
-              : "bg-muted text-muted-foreground cursor-not-allowed",
-          )}
-        >
-          {isSubmitting ? "Submitting…" : "Submit answers"}
-          <IconCheck className="h-3 w-3" />
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={onNext}
-          disabled={isSubmitting}
-          data-testid="clarification-next"
-          className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-border text-foreground/80 hover:bg-muted/50 cursor-pointer"
-        >
-          Next
-          <IconArrowRight className="h-3 w-3" />
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={onNext}
+        disabled={isLast || isSubmitting}
+        data-testid="clarification-next"
+        className={cn(
+          "inline-flex items-center gap-1 text-xs px-2 py-1 rounded border",
+          isLast
+            ? "border-transparent text-muted-foreground/40 cursor-not-allowed"
+            : "border-border text-foreground/80 hover:bg-muted/50 cursor-pointer",
+        )}
+      >
+        Next
+        <IconArrowRight className="h-3 w-3" />
+      </button>
     </div>
   );
 }

@@ -335,3 +335,7 @@ type BulkMoveTasksResponse struct {
 type TaskCountResponse struct {
 	TaskCount int `json:"task_count"`
 }
+
+type RepositoryActiveSessionCountResponse struct {
+	ActiveSessionCount int `json:"active_session_count"`
+}

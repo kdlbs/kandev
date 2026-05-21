@@ -14,6 +14,7 @@ import (
 const (
 	errMsgInvalidPayload = "invalid payload"
 	errMsgIDRequired     = "id required"
+	respKeyDeleted       = "deleted"
 )
 
 // RegisterRoutes registers HTTP and WebSocket routes for GitHub integration.
@@ -65,6 +66,34 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionGitHubActionPresetsList, wsListActionPresets(svc))
 	dispatcher.RegisterFunc(ws.ActionGitHubActionPresetsUpdate, wsUpdateActionPresets(svc))
 	dispatcher.RegisterFunc(ws.ActionGitHubActionPresetsReset, wsResetActionPresets(svc))
+
+	// Manual cleanup sweeps
+	dispatcher.RegisterFunc(ws.ActionGitHubCleanupReviewTasks, wsCleanupReviewTasks(svc))
+	dispatcher.RegisterFunc(ws.ActionGitHubCleanupIssueTasks, wsCleanupIssueTasks(svc))
+}
+
+// wsCleanupReviewTasks runs the manual full sweep and returns the count
+// deleted. Manual users want everything drained now, so this skips the
+// poller's "orphans only" optimization.
+func wsCleanupReviewTasks(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		deleted, err := svc.CleanupAllReviewTasks(ctx)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]int{respKeyDeleted: deleted})
+	}
+}
+
+// wsCleanupIssueTasks mirrors wsCleanupReviewTasks for issue watches.
+func wsCleanupIssueTasks(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		deleted, err := svc.CleanupAllIssueTasks(ctx)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]int{respKeyDeleted: deleted})
+	}
 }
 
 // parseMap parses the WS message payload into a map for simple field lookups.
@@ -113,7 +142,7 @@ func wsDeleteByID(deleteFn func(ctx context.Context, id string) error) func(ctx 
 		if err := deleteFn(ctx, id); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"deleted": true})
+		return ws.NewResponse(msg.ID, msg.Action, map[string]bool{respKeyDeleted: true})
 	}
 }
 
