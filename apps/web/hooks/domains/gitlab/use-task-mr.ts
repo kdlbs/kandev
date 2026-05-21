@@ -37,9 +37,16 @@ export function useWorkspaceMRs(workspaceId: string | null) {
   }, [workspaceId, setTaskMRs]);
 }
 
+// Stable empty array so the zustand selector output stays referentially
+// equal across renders when a task has no MRs. Returning a fresh [] each
+// call triggers an infinite re-render loop.
+const EMPTY_MRS: TaskMR[] = [];
+
 /** Return MRs linked to a task. Reads directly from the store. */
 export function useTaskMRs(taskId: string | null): TaskMR[] {
-  return useAppStore((state) => (taskId ? (state.taskMRs.byTaskId[taskId] ?? []) : []));
+  return useAppStore((state) =>
+    taskId ? (state.taskMRs.byTaskId[taskId] ?? EMPTY_MRS) : EMPTY_MRS,
+  );
 }
 
 /**
