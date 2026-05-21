@@ -72,6 +72,32 @@ export function shouldUseQuestionTaskIcon(
   return isWaitingForInputState(state) || hasPendingClarification;
 }
 
+const TERMINAL_SESSION_STATES: ReadonlySet<string> = new Set<TaskSessionState>([
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+]);
+
+export function isTerminalSessionState(state?: string | null): boolean {
+  return Boolean(state) && TERMINAL_SESSION_STATES.has(state as string);
+}
+
+/**
+ * Returns true when the kanban card should show the spinning loader for an
+ * in-progress task. The task state can stay in IN_PROGRESS after the agent's
+ * session has reached a terminal state (the workflow leaves the card in its
+ * current column until the user — or a transition action — moves it). In
+ * that case the spinner is misleading, so suppress it whenever the primary
+ * session is in a terminal state.
+ */
+export function shouldShowTaskRunningSpinner(
+  taskState?: TaskState,
+  primarySessionState?: string | null,
+): boolean {
+  if (taskState !== "IN_PROGRESS" && taskState !== "SCHEDULING") return false;
+  return !isTerminalSessionState(primarySessionState);
+}
+
 export function shouldUsePermissionTaskIcon(hasPendingPermission = false): boolean {
   return hasPendingPermission;
 }

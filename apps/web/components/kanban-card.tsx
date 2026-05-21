@@ -27,6 +27,12 @@ export interface Task {
   repositories?: Array<{ id: string; repository_id: string; position: number }>;
   sessionCount?: number | null;
   primarySessionId?: string | null;
+  /**
+   * Primary session's runtime state. Decoupled from `state` (the workflow
+   * column). Used to suppress the running-spinner when the agent has already
+   * finished — the workflow may leave the task in IN_PROGRESS for review.
+   */
+  primarySessionState?: string | null;
   reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primaryExecutorId?: string | null;
   primaryExecutorType?: string | null;
