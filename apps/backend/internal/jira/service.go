@@ -362,8 +362,14 @@ func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest)
 	// Merge with persisted config so a partial request still produces a usable
 	// triple. Applies to both the inline-secret and stored-secret paths: a
 	// pre-save TestConnection call may carry only the field the user just
-	// changed, and a post-save re-test sends an empty body.
-	if stored, _ := s.store.GetConfig(ctx); stored != nil {
+	// changed, and a post-save re-test sends an empty body. A real DB error
+	// here must not be swallowed — otherwise the user would see an opaque
+	// "missing field" validation message instead of the actual storage issue.
+	stored, err := s.store.GetConfig(ctx)
+	if err != nil {
+		return nil, "", fmt.Errorf("read jira config: %w", err)
+	}
+	if stored != nil {
 		if cfg.SiteURL == "" {
 			cfg.SiteURL = stored.SiteURL
 		}

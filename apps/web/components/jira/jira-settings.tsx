@@ -594,15 +594,21 @@ function EnabledPill() {
 // task presets live elsewhere because they scope per workspace.
 export function JiraConnectionSection() {
   const s = useJiraSettings();
-  // The stored secret is only safe to reuse when both auth method and
-  // (normalized) instance type still match what was saved. Switching, say,
-  // Cloud + api_token → Server + pat would otherwise silently keep the old
-  // token under the new auth mode and submit it to the wrong endpoint.
+  // The stored secret is only safe to reuse when every identity component of
+  // the saved credential still matches: same auth method, same (normalized)
+  // instance type, same Jira host, and — for Cloud api_token where the basic
+  // pair is email:token — the same email. Otherwise the user could change the
+  // site URL or Cloud account and silently submit the previous token to a
+  // different host/account.
   const savedInstance = s.config?.instanceType || "cloud";
+  const savedSiteUrl = (s.config?.siteUrl ?? "").replace(/\/+$/, "");
+  const currentSiteUrl = s.form.siteUrl.replace(/\/+$/, "");
   const savedSecretMatchesMode =
     !!s.config?.hasSecret &&
     s.config?.authMethod === s.form.authMethod &&
-    savedInstance === s.form.instanceType;
+    savedInstance === s.form.instanceType &&
+    savedSiteUrl === currentSiteUrl &&
+    (s.form.authMethod !== "api_token" || s.config?.email === s.form.email);
   const missingSecret = !savedSecretMatchesMode && !s.form.secret;
   // Email is only required for the Cloud + api_token combination. Server PAT
   // and session cookies authenticate the user out of the token itself.
