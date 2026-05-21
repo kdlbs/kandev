@@ -41,6 +41,8 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   };
 }
 
+const SKY_400 = "text-sky-400";
+
 describe("isPRReadyToMerge", () => {
   it("is true when open + approved + success + clean", () => {
     expect(
@@ -223,7 +225,22 @@ describe("getPRStatusColor", () => {
       mergeable_state: "blocked",
       pending_review_count: 1,
     });
-    expect(getPRStatusColor(pr)).toBe("text-sky-400");
+    expect(getPRStatusColor(pr)).toBe(SKY_400);
+  });
+
+  it("returns sky-400 when required_reviews is unmet but mergeable_state is clean (bug repro)", () => {
+    // The stale-snapshot bug: GitHub still reports mergeable_state="clean" while
+    // branch protection has recorded one fewer approval than required. The icon
+    // must downgrade to "awaiting review" instead of the emerald "ready to merge".
+    const pr = makePR({
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "clean",
+      required_reviews: 2,
+      review_count: 1,
+    });
+    expect(getPRStatusColor(pr)).toBe(SKY_400);
   });
 
   it("returns plain green when mergeable_state is empty (backfilled row)", () => {
@@ -244,7 +261,7 @@ describe("getPRStatusColor", () => {
       mergeable_state: "clean",
       pending_review_count: 2,
     });
-    expect(getPRStatusColor(pr)).toBe("text-sky-400");
+    expect(getPRStatusColor(pr)).toBe(SKY_400);
   });
 
   it("returns sky-400 when CI passed and reviewers are requested but no review state set", () => {
@@ -255,7 +272,7 @@ describe("getPRStatusColor", () => {
       mergeable_state: "blocked",
       pending_review_count: 1,
     });
-    expect(getPRStatusColor(pr)).toBe("text-sky-400");
+    expect(getPRStatusColor(pr)).toBe(SKY_400);
   });
 
   it("returns emerald when CI passed and no reviewers are required", () => {

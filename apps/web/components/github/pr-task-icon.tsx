@@ -24,12 +24,8 @@ export function isPRReadyToMerge(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
   if (pr.checks_state !== "success") return false;
   if (pr.mergeable_state !== "clean") return false;
-  // Branch protection's required_approving_review_count: when the recorded
-  // approval count hasn't met the required minimum, refuse to show the merge
-  // button even if GitHub's mergeable_state momentarily reports "clean" (a
-  // stale snapshot from before an approval was dismissed, or a missing
-  // refetch after a new commit invalidated approvals). The popover renders
-  // the same "K / M" pair in PRReviewRow, so the two surfaces now agree.
+  // Guard against stale mergeable_state: enforce required_reviews directly so
+  // this matches the popover's "K / M required" display.
   if (pr.required_reviews != null && pr.review_count < pr.required_reviews) {
     return false;
   }
@@ -48,9 +44,7 @@ export function isPRReadyToMerge(pr: TaskPR): boolean {
 export function isPRAwaitingReview(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
   if (pr.checks_state !== "success") return false;
-  // Required-reviewer shortfall is "awaiting review" even when no one is
-  // currently requested (e.g. the second reviewer was un-requested but
-  // protection still demands 2 approvals). Matches the popover's "1 / 2".
+  // Shortfall is "awaiting review" even when no reviewer is currently requested.
   if (pr.required_reviews != null && pr.review_count < pr.required_reviews) {
     return true;
   }
