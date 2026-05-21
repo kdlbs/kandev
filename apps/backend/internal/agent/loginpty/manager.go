@@ -159,12 +159,25 @@ loop:
 	for {
 		select {
 		case info = <-exited:
-			// Natural child exit. On Windows ConPTY, the underlying handle does
-			// NOT return EOF when the child process terminates, so the readLoop
-			// would block on Read until something closes the PTY. Closing here
-			// unblocks it so the readDone wait below resolves promptly. On Unix
-			// the master already saw EOF from the slave close — this is just an
-			// extra (idempotent) Close that the windowsPTY sync.Once also guards.
+			// Natural child exit. Give readLoop a chance to drain the child's
+			// final output before closing the PTY out from under it. On Unix
+			// the master returns EIO/EOF on next Read once the slave is closed
+			// by child exit — but closing eagerly races with the in-flight
+			// Read, which then returns "file already closed" before delivering
+			// the child's last bytes (this is what flaked
+			// TestStart_RunsCommandAndExits on CI). Windows ConPTY does NOT
+			// deliver EOF on child exit, so if readLoop is still blocked after
+			// the grace window we close to unblock it.
+			drain := time.NewTimer(500 * time.Millisecond)
+			select {
+			case <-sess.readDone:
+				drain.Stop()
+			case <-drain.C:
+			}
+			// Always close the PTY (idempotent). On the natural-exit
+			// happy path readLoop has already returned by here, so
+			// this only releases the master fd; on the timeout path
+			// it also unblocks a stuck Windows ConPTY Read.
 			sess.stop()
 			break loop
 		case <-idle.C:
