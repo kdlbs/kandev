@@ -231,7 +231,15 @@ func (c *MockClient) GetMRFeedback(ctx context.Context, projectPath string, iid 
 		return nil, err
 	}
 	d, _ := c.ListMRDiscussions(ctx, projectPath, iid, nil)
-	pipelines, _ := c.ListPipelines(ctx, projectPath, mr.HeadBranch)
+	// Mirror PATClient.GetMRFeedback: only consider pipelines when the MR
+	// actually has a head ref. MockClient.ListPipelines ignores its branch
+	// argument and returns every pipeline seeded under the project, so
+	// without this guard a fresh MR with no head would still inherit a
+	// failing pipeline from a sibling MR in the same project.
+	var pipelines []Pipeline
+	if mr.HeadSHA != "" || mr.HeadBranch != "" {
+		pipelines, _ = c.ListPipelines(ctx, projectPath, mr.HeadBranch)
+	}
 	return &MRFeedback{
 		MR:          mr,
 		Approvals:   []MRApproval{},

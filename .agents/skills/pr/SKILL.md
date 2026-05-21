@@ -98,16 +98,35 @@ EOF
 If `glab` is unavailable but `$GITLAB_TOKEN` is set, fall back to the REST API. Derive the host from the git remote — `$CI_SERVER_URL` is only set inside GitLab runners and silently falling back to `gitlab.com` from a developer's machine would target the wrong instance. Construct the JSON body with `jq` so multi-line descriptions and embedded quotes can't break the payload.
 
 ```bash
-REMOTE_URL="$(git remote get-url origin)"          # e.g. git@gitlab.acme.corp:team/repo.git or ssh://git@gitlab.acme.corp:2222/team/repo.git
-REMOTE_URL="${REMOTE_URL#ssh://}"                  # drop ssh:// scheme so the rules below work for both forms
-REMOTE_URL="${REMOTE_URL#*@}"                      # strip user@ (handles git@host and bare host)
-REMOTE_URL="${REMOTE_URL#*://}"                    # strip https:// scheme if present
-HOST_ONLY="${REMOTE_URL%%[:/]*}"                   # gitlab.acme.corp
-HOST="https://${HOST_ONLY}"
-PROJECT_PATH="${REMOTE_URL#*[:/]}"                 # may be "2222/team/repo.git" for ssh://...:2222/team/repo.git
-if [[ "$PROJECT_PATH" =~ ^[0-9]+/ ]]; then         # leading port digits — drop them
-  PROJECT_PATH="${PROJECT_PATH#*/}"
-fi
+REMOTE_URL="$(git remote get-url origin)"          # any of: git@host:path.git | ssh://git@host[:port]/path.git | https://host[:port]/path.git
+# Classify by scheme so we can keep an https:// port (real API endpoint)
+# while dropping any ssh:// port (irrelevant to the HTTPS API).
+case "$REMOTE_URL" in
+  ssh://*)        URL="${REMOTE_URL#ssh://}";   FORM=ssh ;;
+  http://*|https://*) URL="${REMOTE_URL#*://}"; FORM=http ;;
+  *)              URL="$REMOTE_URL";            FORM=scp ;;
+esac
+URL="${URL#*@}"                                    # strip optional user@
+case "$FORM" in
+  scp)
+    # scp-style "git@host:path" — no port possible.
+    HOST_ONLY="${URL%%:*}"
+    HOST="https://${HOST_ONLY}"
+    PROJECT_PATH="${URL#*:}"
+    ;;
+  ssh)
+    # ssh:// — port (if any) is the SSH port, not the HTTPS API port.
+    HOST_PORT="${URL%%/*}"
+    HOST="https://${HOST_PORT%%:*}"
+    PROJECT_PATH="${URL#*/}"
+    ;;
+  http)
+    # https://host[:port]/path — preserve the port; it IS the API endpoint.
+    HOST_PORT="${URL%%/*}"
+    HOST="https://${HOST_PORT}"
+    PROJECT_PATH="${URL#*/}"
+    ;;
+esac
 PROJECT="${PROJECT_PATH%.git}"                     # team/repo
 SOURCE_BRANCH="$(git branch --show-current)"
 PROJECT_ENC="$(printf '%s' "$PROJECT" | jq -sRr @uri)"
