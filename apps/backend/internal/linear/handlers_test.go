@@ -150,6 +150,38 @@ func TestHTTPListStates_RoutesThroughService(t *testing.T) {
 	}
 }
 
+func TestHTTPSearchIssues_RejectsBadNumericParams(t *testing.T) {
+	ctrl, router, _ := newTestController(t)
+	ctx := context.Background()
+	if err := ctrl.service.store.UpsertConfig(ctx, &LinearConfig{
+		AuthMethod: AuthMethodAPIKey,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := ctrl.service.secrets.Set(ctx, SecretKey, "linear", "tok"); err != nil {
+		t.Fatalf("set secret: %v", err)
+	}
+	cases := map[string]string{
+		"priority out of range":    "priority=99",
+		"estimate_min not a number": "estimate_min=abc",
+		"estimate_min NaN":          "estimate_min=NaN",
+		"estimate_min +Inf":         "estimate_min=%2BInf",
+		"estimate_max -Inf":         "estimate_max=-Inf",
+		"estimate_min negative":     "estimate_min=-1",
+		"estimate_min > max":        "estimate_min=5&estimate_max=1",
+	}
+	for name, query := range cases {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/issues?"+query, nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestRegisterRoutes_RegistersWSHandlers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -115,9 +116,9 @@ func (c *Controller) httpListTeams(ctx *gin.Context) {
 }
 
 func (c *Controller) httpListStates(ctx *gin.Context) {
-	teamKey := ctx.Query("team_key")
+	teamKey := ctx.Query(teamKeyParam)
 	if teamKey == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "team_key required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": teamKeyRequired})
 		return
 	}
 	states, err := c.service.ListStates(ctx.Request.Context(), teamKey)
@@ -129,9 +130,9 @@ func (c *Controller) httpListStates(ctx *gin.Context) {
 }
 
 func (c *Controller) httpListLabels(ctx *gin.Context) {
-	teamKey := ctx.Query("team_key")
+	teamKey := ctx.Query(teamKeyParam)
 	if teamKey == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "team_key required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": teamKeyRequired})
 		return
 	}
 	labels, err := c.service.ListLabels(ctx.Request.Context(), teamKey)
@@ -143,9 +144,9 @@ func (c *Controller) httpListLabels(ctx *gin.Context) {
 }
 
 func (c *Controller) httpListUsers(ctx *gin.Context) {
-	teamKey := ctx.Query("team_key")
+	teamKey := ctx.Query(teamKeyParam)
 	if teamKey == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "team_key required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": teamKeyRequired})
 		return
 	}
 	users, err := c.service.ListUsers(ctx.Request.Context(), teamKey)
@@ -159,7 +160,7 @@ func (c *Controller) httpListUsers(ctx *gin.Context) {
 func (c *Controller) httpSearchIssues(ctx *gin.Context) {
 	filter := SearchFilter{
 		Query:     ctx.Query("query"),
-		TeamKey:   ctx.Query("team_key"),
+		TeamKey:   ctx.Query(teamKeyParam),
 		Assigned:  ctx.Query("assigned"),
 		CreatorID: ctx.Query("creator_id"),
 	}
@@ -197,14 +198,17 @@ func parseSearchNumericFilters(ctx *gin.Context, filter *SearchFilter) error {
 	}
 	if v := ctx.Query("estimate_min"); v != "" {
 		f, err := strconv.ParseFloat(v, 64)
-		if err != nil || f < 0 {
+		// strconv.ParseFloat accepts "NaN", "Inf", "-Inf" without error, but
+		// json.Marshal rejects them later (turning a 400 into a 500). Filter
+		// them out here so the response stays a clean 400.
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {
 			return fmt.Errorf("estimate_min must be a non-negative number")
 		}
 		filter.EstimateMin = &f
 	}
 	if v := ctx.Query("estimate_max"); v != "" {
 		f, err := strconv.ParseFloat(v, 64)
-		if err != nil || f < 0 {
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {
 			return fmt.Errorf("estimate_max must be a non-negative number")
 		}
 		filter.EstimateMax = &f
@@ -244,6 +248,13 @@ func (c *Controller) httpSetIssueState(ctx *gin.Context) {
 // errCodeLinearNotConfigured is the wire-level code surfaced to the UI when
 // Linear has no saved credentials.
 const errCodeLinearNotConfigured = "LINEAR_NOT_CONFIGURED"
+
+// Wire-format constants for the team_key query parameter that scopes
+// per-team endpoints (states / labels / users / search).
+const (
+	teamKeyParam    = "team_key"
+	teamKeyRequired = "team_key required"
+)
 
 // writeClientError maps service-level errors to HTTP responses.
 func (c *Controller) writeClientError(ctx *gin.Context, err error) {

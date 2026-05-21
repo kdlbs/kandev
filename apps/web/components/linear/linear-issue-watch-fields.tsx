@@ -48,6 +48,7 @@ export function useTeamsAndStates(teamKey: string) {
     fetched.add(teamKey);
     let cancelled = false;
     let anyFailed = false;
+    let loaded = false;
     const markFailed = () => {
       anyFailed = true;
     };
@@ -77,6 +78,9 @@ export function useTeamsAndStates(teamKey: string) {
           if (!cancelled) setUsersByTeam((prev) => ({ ...prev, [teamKey]: [] }));
         }),
     ]).finally(() => {
+      // Track full success so cleanup can keep the cache marker — otherwise
+      // every cleanup wipes it and the next visit refetches.
+      loaded = !cancelled && !anyFailed;
       // If a fetch failed (and we didn't cancel), drop the marker so the
       // next visit to this team can retry. Success-path marker stays so
       // cached data is reused.
@@ -84,11 +88,10 @@ export function useTeamsAndStates(teamKey: string) {
     });
     return () => {
       cancelled = true;
-      // Drop the marker on cleanup so rapid team switches (A → B → A)
-      // re-fetch on return. The fetch promise's late-arriving `if
-      // (!cancelled)` guard already prevents stale writes; without this
-      // delete the team could otherwise be stranded mid-load.
-      fetched.delete(teamKey);
+      // Drop the marker on cleanup ONLY when the fetch hadn't completed
+      // successfully — that handles the rapid-switch (A→B→A) case without
+      // also evicting a healthy cache after a normal team change.
+      if (!loaded) fetched.delete(teamKey);
     };
   }, [teamKey]);
 
