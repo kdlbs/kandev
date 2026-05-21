@@ -340,6 +340,58 @@ func TestHttpGetRepoMergeMethods_OK(t *testing.T) {
 	}
 }
 
+func TestHttpGetRepoMergeMethods_NoClient_Returns503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newControllerTestLogger()
+	// nil client triggers ErrNoClient via Service.GetRepoMergeMethods.
+	svc := NewService(nil, "none", nil, nil, nil, log)
+	ctrl := NewController(svc, log)
+	router := gin.New()
+	ctrl.RegisterHTTPRoutes(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos/acme/widget/merge-methods", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHttpGetRepoMergeMethods_NotFound_Returns404(t *testing.T) {
+	sc := &stubClient{
+		getRepoMergeMethodsFn: func() (RepoMergeMethods, error) {
+			return RepoMergeMethods{}, &GitHubAPIError{StatusCode: http.StatusNotFound, Endpoint: "/repos/acme/widget"}
+		},
+	}
+	router, _ := setupControllerTest(sc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos/acme/widget/merge-methods", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHttpGetRepoMergeMethods_OtherError_Returns500(t *testing.T) {
+	sc := &stubClient{
+		getRepoMergeMethodsFn: func() (RepoMergeMethods, error) {
+			return RepoMergeMethods{}, fmt.Errorf("unexpected upstream failure")
+		},
+	}
+	router, _ := setupControllerTest(sc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos/acme/widget/merge-methods", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestHttpMergePR_MalformedJSON(t *testing.T) {
 	router, _ := setupControllerTest(&stubClient{})
 
