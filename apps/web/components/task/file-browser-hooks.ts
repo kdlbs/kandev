@@ -414,6 +414,9 @@ function useTreeLoadEffects(ctx: TreeLoadEffectsContext) {
   // Fire the initial load on the waiting → ready transition. `loadState` is
   // read via a ref so a failed load (which sets state back to "waiting") does
   // not re-fire this effect and cancel the retry timer via `resetRetry: true`.
+  // The `treeRef.current` check alongside "loaded" is load-bearing:
+  // `applyFileChanges` can flip state to "loaded" while the tree is still
+  // null, and without the tree check this effect would skip the real load.
   useEffect(() => {
     let reason: string | null = null;
     if (!agentctlIsReady) reason = "agentctl-not-ready";
