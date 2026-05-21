@@ -32,6 +32,10 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/mrs/feedback", c.httpGetMRFeedback)
 	api.POST("/mrs/discussions/notes", c.httpCreateDiscussionNote)
 	api.POST("/mrs/discussions/resolve", c.httpResolveDiscussion)
+
+	api.GET("/workspaces/:workspaceID/task-mrs", c.httpListWorkspaceTaskMRs)
+	api.GET("/tasks/:taskID/mrs", c.httpListTaskMRs)
+	api.POST("/tasks/:taskID/mrs/sync", c.httpSyncTaskMR)
 }
 
 // RegisterRoutes is the package-level entrypoint mirroring github.RegisterRoutes.
@@ -155,4 +159,60 @@ func parseProjectAndIID(ctx *gin.Context) (string, int, error) {
 		return "", 0, errors.New("iid must be a positive integer")
 	}
 	return project, iid, nil
+}
+
+// SyncTaskMRRequest is the JSON body for POST /tasks/:taskID/mrs/sync.
+// project_path is "namespace/path"; iid is the MR's per-project sequential id;
+// repository_id is the kandev repository UUID (empty for single-repo tasks).
+type SyncTaskMRRequest struct {
+	ProjectPath  string `json:"project_path" binding:"required"`
+	IID          int    `json:"iid" binding:"required"`
+	RepositoryID string `json:"repository_id"`
+}
+
+func (c *Controller) httpListWorkspaceTaskMRs(ctx *gin.Context) {
+	wsID := ctx.Param("workspaceID")
+	if wsID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspaceID required"})
+		return
+	}
+	taskMRs, err := c.service.ListTaskMRsByWorkspace(ctx.Request.Context(), wsID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, TaskMRsResponse{TaskMRs: taskMRs})
+}
+
+func (c *Controller) httpListTaskMRs(ctx *gin.Context) {
+	taskID := ctx.Param("taskID")
+	if taskID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "taskID required"})
+		return
+	}
+	mrs, err := c.service.ListTaskMRsByTask(ctx.Request.Context(), taskID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"task_mrs": mrs})
+}
+
+func (c *Controller) httpSyncTaskMR(ctx *gin.Context) {
+	taskID := ctx.Param("taskID")
+	if taskID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "taskID required"})
+		return
+	}
+	var req SyncTaskMRRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload: project_path and iid required"})
+		return
+	}
+	row, err := c.service.SyncTaskMR(ctx.Request.Context(), taskID, req.RepositoryID, req.ProjectPath, req.IID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, row)
 }

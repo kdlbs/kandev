@@ -250,3 +250,54 @@ type Issue struct {
 	UpdatedAt        time.Time  `json:"updated_at"`
 	ClosedAt         *time.Time `json:"closed_at,omitempty"`
 }
+
+// TaskMR associates a kandev task with a GitLab merge request, parallel to
+// github.TaskPR. RepositoryID may be empty for single-repo tasks; multi-repo
+// task launches set it so each repo's MR is distinguishable on the same
+// (task, iid) key. ProjectPath holds the GitLab path-with-namespace
+// ("group/project") used as the API :id.
+//
+// GitLab-shaped fields differ from GitHub:
+//   - State is "open" | "closed" | "merged" | "locked" (normalised from
+//     GitLab's "opened" wording).
+//   - ApprovalState is "" | "approved" | "pending" — derived from approvals
+//     received vs RequiredApprovals.
+//   - PipelineState mirrors GitHub's ChecksState ("success", "failure",
+//     "pending", "") — GitLab pipelines are the analogue of GitHub checks.
+//   - MergeStatus carries GitLab's own merge_status string verbatim
+//     (can_be_merged, cannot_be_merged, unchecked, …) for debugging.
+type TaskMR struct {
+	ID                string     `json:"id" db:"id"`
+	TaskID            string     `json:"task_id" db:"task_id"`
+	RepositoryID      string     `json:"repository_id,omitempty" db:"repository_id"`
+	Host              string     `json:"host" db:"host"`                 // gitlab base URL the MR lives on
+	ProjectPath       string     `json:"project_path" db:"project_path"` // namespace/path
+	MRIID             int        `json:"mr_iid" db:"mr_iid"`             // GitLab per-project sequential id
+	MRURL             string     `json:"mr_url" db:"mr_url"`
+	MRTitle           string     `json:"mr_title" db:"mr_title"`
+	HeadBranch        string     `json:"head_branch" db:"head_branch"`
+	BaseBranch        string     `json:"base_branch" db:"base_branch"`
+	AuthorUsername    string     `json:"author_username" db:"author_username"`
+	State             string     `json:"state" db:"state"`                   // open, closed, merged, locked
+	ApprovalState     string     `json:"approval_state" db:"approval_state"` // approved, pending, ""
+	PipelineState     string     `json:"pipeline_state" db:"pipeline_state"` // success, failure, pending, ""
+	MergeStatus       string     `json:"merge_status" db:"merge_status"`
+	Draft             bool       `json:"draft" db:"draft"`
+	ApprovalCount     int        `json:"approval_count" db:"approval_count"`
+	RequiredApprovals int        `json:"required_approvals" db:"required_approvals"`
+	UnresolvedThreads int        `json:"unresolved_threads" db:"unresolved_threads"`
+	DiscussionCount   int        `json:"discussion_count" db:"discussion_count"`
+	PipelineJobsTotal int        `json:"pipeline_jobs_total" db:"pipeline_jobs_total"`
+	PipelineJobsPass  int        `json:"pipeline_jobs_pass" db:"pipeline_jobs_pass"`
+	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
+	MergedAt          *time.Time `json:"merged_at,omitempty" db:"merged_at"`
+	ClosedAt          *time.Time `json:"closed_at,omitempty" db:"closed_at"`
+	LastSyncedAt      *time.Time `json:"last_synced_at,omitempty" db:"last_synced_at"`
+	UpdatedAt         time.Time  `json:"updated_at" db:"updated_at"`
+}
+
+// TaskMRsResponse is the shape returned by GET /workspaces/:id/task-mrs.
+// Keyed by task ID; each task may have one entry per linked repository.
+type TaskMRsResponse struct {
+	TaskMRs map[string][]*TaskMR `json:"task_mrs"`
+}

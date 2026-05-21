@@ -30,6 +30,46 @@ export type GitLabAuthDiagnostics = {
   exit_code: number;
 };
 
+/**
+ * Task ↔ MR association — parallel to github's TaskPR. Surfaces what the MR
+ * topbar button needs to render (state + counts + a click target). Backend
+ * row in `gitlab_task_mrs`.
+ */
+export type TaskMR = {
+  id: string;
+  task_id: string;
+  repository_id?: string;
+  host: string;
+  project_path: string;
+  mr_iid: number;
+  mr_url: string;
+  mr_title: string;
+  head_branch: string;
+  base_branch: string;
+  author_username: string;
+  state: "open" | "closed" | "merged" | "locked" | string;
+  approval_state: "" | "approved" | "pending" | string;
+  pipeline_state: "" | "success" | "failure" | "pending" | string;
+  merge_status: string;
+  draft: boolean;
+  approval_count: number;
+  required_approvals: number;
+  unresolved_threads: number;
+  discussion_count: number;
+  pipeline_jobs_total: number;
+  pipeline_jobs_pass: number;
+  created_at: string;
+  merged_at?: string;
+  closed_at?: string;
+  last_synced_at?: string;
+  updated_at: string;
+};
+
+/** Response shape for `GET /api/v1/gitlab/workspaces/:id/task-mrs`. */
+export type TaskMRsResponse = {
+  task_mrs: Record<string, TaskMR[]>;
+};
+
 export type GitLabConfigureTokenResponse = { configured: boolean };
 export type GitLabClearTokenResponse = { cleared: boolean };
 export type GitLabConfigureHostResponse = { configured: boolean; host: string };

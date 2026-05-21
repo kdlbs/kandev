@@ -32,6 +32,7 @@ import {
   createSessionRuntimeSlice,
   createUISlice,
   createGitHubSlice,
+  createGitLabSlice,
   createJiraSlice,
   createLinearSlice,
   createOfficeSlice,
@@ -44,6 +45,7 @@ import {
   defaultSessionRuntimeState,
   defaultUIState,
   defaultGitHubState,
+  defaultGitLabState,
   defaultJiraState,
   defaultLinearState,
   defaultOfficeState,
@@ -88,6 +90,7 @@ import type {
 // Re-export all types from slices for backwards compatibility (split out
 // to keep this file under the max-lines limit).
 export type * from "./store-reexports";
+import type { TaskMR } from "@/lib/types/gitlab";
 import type { JiraIssueWatch } from "@/lib/types/jira";
 import type { LinearIssueWatch } from "@/lib/types/linear";
 import type {
@@ -186,6 +189,9 @@ export type AppState = {
   actionPresets: (typeof defaultGitHubState)["actionPresets"];
   prFeedbackCache: (typeof defaultGitHubState)["prFeedbackCache"];
 
+  // GitLab slice
+  taskMRs: (typeof defaultGitLabState)["taskMRs"];
+
   // JIRA slice
   jiraIssueWatches: (typeof defaultJiraState)["jiraIssueWatches"];
 
@@ -245,6 +251,11 @@ export type AppState = {
   applyGitHubRateLimitUpdate: (update: GitHubRateLimitUpdate) => void;
   setPRFeedbackCacheEntry: (key: string, feedback: PRFeedback) => void;
   removePRFeedbackCacheEntry: (key: string) => void;
+
+  // GitLab actions
+  setTaskMRs: (mrs: Record<string, TaskMR[]>) => void;
+  setTaskMR: (taskId: string, mr: TaskMR) => void;
+  resetTaskMRs: () => void;
 
   // JIRA actions
   setJiraIssueWatches: (watches: JiraIssueWatch[]) => void;
@@ -561,6 +572,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createGitHubSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createGitLabSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createJiraSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createLinearSlice(set as any, get as any, api as any),
@@ -622,6 +635,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       reviewWatches: merged.reviewWatches,
       issueWatches: merged.issueWatches,
       actionPresets: merged.actionPresets,
+      taskMRs: merged.taskMRs,
       jiraIssueWatches: merged.jiraIssueWatches,
       linearIssueWatches: merged.linearIssueWatches,
       office: merged.office,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -47,7 +48,16 @@ type Service struct {
 	secrets       SecretProvider
 	secretManager SecretManager
 	hostStore     HostStore
+	store         *Store
 	logger        *logger.Logger
+}
+
+// SetStore wires the task↔MR persistence layer. Optional — when nil the
+// task-mr endpoints return empty results and SyncTaskMR is a no-op.
+func (s *Service) SetStore(store *Store) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.store = store
 }
 
 // NewService builds a Service from an already-resolved client. Callers
@@ -312,4 +322,88 @@ func (s *Service) findTokenSecret(ctx context.Context) (bool, string, error) {
 		}
 	}
 	return false, "", nil
+}
+
+// --- Task ↔ MR association ---
+
+// SyncTaskMR fetches the MR's current state from GitLab and upserts the
+// task↔MR row. Called from the orchestrator when an agent creates an MR via
+// the `pr` skill, and from the topbar's manual refresh. Returns the upserted
+// row so the caller can broadcast it on the WS bus.
+//
+// repositoryID is the task's repository UUID (empty for single-repo tasks).
+// projectPath is the GitLab namespace/path. iid is the MR's per-project id.
+func (s *Service) SyncTaskMR(ctx context.Context, taskID, repositoryID, projectPath string, iid int) (*TaskMR, error) {
+	s.mu.RLock()
+	client := s.client
+	store := s.store
+	host := s.host
+	s.mu.RUnlock()
+	if store == nil {
+		return nil, errors.New("gitlab store not configured")
+	}
+	if client == nil {
+		return nil, ErrNoClient
+	}
+	status, err := client.GetMRStatus(ctx, projectPath, iid)
+	if err != nil {
+		return nil, fmt.Errorf("fetch MR status: %w", err)
+	}
+	if status == nil || status.MR == nil {
+		return nil, fmt.Errorf("MR !%d not found in %s", iid, projectPath)
+	}
+	now := time.Now().UTC()
+	mr := status.MR
+	row := &TaskMR{
+		TaskID:            taskID,
+		RepositoryID:      repositoryID,
+		Host:              host,
+		ProjectPath:       projectPath,
+		MRIID:             mr.IID,
+		MRURL:             mr.WebURL,
+		MRTitle:           mr.Title,
+		HeadBranch:        mr.HeadBranch,
+		BaseBranch:        mr.BaseBranch,
+		AuthorUsername:    mr.AuthorUsername,
+		State:             mr.State,
+		ApprovalState:     status.ApprovalState,
+		PipelineState:     status.PipelineState,
+		MergeStatus:       status.MergeStatus,
+		Draft:             mr.Draft,
+		ApprovalCount:     status.ApprovalCount,
+		RequiredApprovals: status.RequiredApprovals,
+		PipelineJobsTotal: status.PipelineJobsTotal,
+		PipelineJobsPass:  status.PipelineJobsPassing,
+		CreatedAt:         mr.CreatedAt,
+		MergedAt:          mr.MergedAt,
+		ClosedAt:          mr.ClosedAt,
+		LastSyncedAt:      &now,
+	}
+	if err := store.UpsertTaskMR(ctx, row); err != nil {
+		return nil, fmt.Errorf("upsert task MR: %w", err)
+	}
+	return row, nil
+}
+
+// ListTaskMRsByWorkspace surfaces all MR associations under a workspace,
+// grouped by task ID. Returns an empty map when no store is configured.
+func (s *Service) ListTaskMRsByWorkspace(ctx context.Context, workspaceID string) (map[string][]*TaskMR, error) {
+	s.mu.RLock()
+	store := s.store
+	s.mu.RUnlock()
+	if store == nil {
+		return map[string][]*TaskMR{}, nil
+	}
+	return store.ListTaskMRsByWorkspaceID(ctx, workspaceID)
+}
+
+// ListTaskMRsByTask returns the MR(s) linked to a single task.
+func (s *Service) ListTaskMRsByTask(ctx context.Context, taskID string) ([]*TaskMR, error) {
+	s.mu.RLock()
+	store := s.store
+	s.mu.RUnlock()
+	if store == nil {
+		return nil, nil
+	}
+	return store.ListTaskMRsByTask(ctx, taskID)
 }
