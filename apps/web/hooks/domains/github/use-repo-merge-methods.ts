@@ -7,21 +7,38 @@ import type { RepoMergeMethods } from "@/lib/types/github";
 // Module-level cache: merge settings are repo-scoped and rarely change, and
 // the backend already TTL-caches them. Coalescing concurrent fetches here
 // keeps multiple merge buttons on the same page from triggering duplicate
-// round-trips before the backend cache warms.
-const completed = new Map<string, RepoMergeMethods>();
+// round-trips before the backend cache warms. Match the backend's 5-minute
+// window so an admin flipping a merge strategy mid-session is reflected
+// without a full page reload.
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+type CachedEntry = { value: RepoMergeMethods; expiresAt: number };
+const completed = new Map<string, CachedEntry>();
 const pending = new Map<string, Promise<RepoMergeMethods>>();
 
 function repoKey(owner: string, repo: string) {
   return `${owner}/${repo}`;
 }
 
+function readFresh(key: string): RepoMergeMethods | null {
+  const entry = completed.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    completed.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
 /**
- * Fetches the merge methods a repository allows so callers can hide
- * disallowed options and avoid the 405 GitHub returns when an empty
- * merge_method falls through to the default "merge" on squash-only repos.
+ * Fetches the merge methods a repository allows so callers can populate the
+ * merge-method dropdown without sending a request to GitHub that 405s on
+ * squash-only / rebase-only repos.
  *
- * Returns `null` while the fetch is in flight (or owner/repo are missing)
- * so consumers can defer rendering until the answer is known.
+ * Returns `null` while the fetch is in flight, on failure, or when
+ * owner/repo are missing. Callers should treat `null` as "use the backend
+ * resolver" — never as "hide the merge UI", because a transient lookup
+ * failure would otherwise lock the user out of merging.
  */
 export function useRepoMergeMethods(
   owner: string | null,
@@ -32,27 +49,34 @@ export function useRepoMergeMethods(
   useEffect(() => {
     if (!owner || !repo) return;
     const key = repoKey(owner, repo);
-    if (completed.has(key)) return;
+    if (readFresh(key)) return;
     const existing = pending.get(key);
     if (existing) {
-      void existing.then(rerender);
+      // Attach both fulfilled and rejected handlers so a second consumer
+      // co-waiting on the same in-flight fetch always re-renders, even if
+      // the request fails — and so the rejection is observed (no unhandled
+      // promise rejection warnings).
+      void existing.then(rerender, rerender);
       return;
     }
     const promise = getRepoMergeMethods(owner, repo)
       .then((result) => {
-        completed.set(key, result);
+        completed.set(key, { value: result, expiresAt: Date.now() + CACHE_TTL_MS });
         pending.delete(key);
         rerender();
         return result;
       })
-      .catch((err) => {
-        // Don't poison the cache on transient failures — let the next mount retry.
+      .catch((err: unknown) => {
+        // Don't poison the cache on transient failures — the next time the
+        // hook is mounted (or the user retries the merge) we'll attempt
+        // again. Re-render so any joined consumers can react.
         pending.delete(key);
+        rerender();
         throw err;
       });
     pending.set(key, promise);
   }, [owner, repo]);
 
   if (!owner || !repo) return null;
-  return completed.get(repoKey(owner, repo)) ?? null;
+  return readFresh(repoKey(owner, repo));
 }

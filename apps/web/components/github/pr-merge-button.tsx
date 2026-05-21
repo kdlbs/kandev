@@ -16,10 +16,12 @@ import type { MergeMethod, TaskPR } from "@/lib/types/github";
 import { isPRReadyToMerge } from "./pr-task-icon";
 
 // Renders nothing unless the PR is fully green (CI success + mergeable +
-// approval or no-review-needed) AND the repo's allowed merge methods have
-// loaded. Shared by the PR detail panel header and the topbar hover popover
-// so a "ready" PR can be merged from either surface. `compact` switches to
-// the smaller pill variant used inside the dense popover.
+// approval or no-review-needed). When `useRepoMergeMethods` hasn't yet
+// returned the repo's allowed methods (loading, failure, or expired cache)
+// the button still renders — clicks fall through to the backend resolver.
+// Shared by the PR detail panel header and the topbar hover popover so a
+// "ready" PR can be merged from either surface. `compact` switches to the
+// smaller pill variant used inside the dense popover.
 export function PRMergeButton({
   taskPR,
   onMerged,
@@ -47,12 +49,12 @@ export function PRMergeButton({
   }, [taskPR.id]);
 
   if (merged || !isPRReadyToMerge(taskPR)) return null;
-  // Wait until we know the repo's allowed methods so we don't flicker the
-  // primary label from "Merge PR" → "Squash and merge" after the lookup
-  // resolves, and so we never click through with an empty method that races
-  // the backend's own lookup.
-  if (!methods) return null;
-
+  // `methods` may be null on first render, on lookup failure, or after the
+  // 5-minute cache window. We still render the button — clicking with no
+  // method routes through the backend's GetRepoMergeMethods resolver, so
+  // the merge succeeds either way. The trade-off is a brief label flicker
+  // from "Merge PR" → "Squash and merge" on first load; locking the user
+  // out of merging on a transient fetch failure is the worse alternative.
   const allowed = allowedMethods(methods);
   const primary = pickPrimaryMethod(allowed);
 
@@ -182,11 +184,13 @@ function mergeLabel(method?: MergeMethod): string {
 
 // Returns the methods the repo allows, in the order we prefer to surface
 // them (squash → merge → rebase, matching GitHub's own button defaults).
-function allowedMethods(methods: {
-  merge: boolean;
-  squash: boolean;
-  rebase: boolean;
-}): MergeMethod[] {
+// When the lookup hasn't resolved (or failed), returns an empty array so
+// the button still renders without a dropdown and the backend's resolver
+// picks the method at merge time.
+function allowedMethods(
+  methods: { merge: boolean; squash: boolean; rebase: boolean } | null,
+): MergeMethod[] {
+  if (!methods) return [];
   const order: MergeMethod[] = ["squash", "merge", "rebase"];
   return order.filter((m) => methods[m]);
 }
