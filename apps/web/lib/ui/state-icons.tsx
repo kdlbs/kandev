@@ -72,30 +72,34 @@ export function shouldUseQuestionTaskIcon(
   return isWaitingForInputState(state) || hasPendingClarification;
 }
 
-const TERMINAL_SESSION_STATES: ReadonlySet<string> = new Set<TaskSessionState>([
-  "COMPLETED",
-  "FAILED",
-  "CANCELLED",
+// Session states where the agent is actively running work. Anything outside
+// this set (WAITING_FOR_INPUT, IDLE, COMPLETED, FAILED, CANCELLED) is paused
+// or terminal and must not drive the spinner — even when the task is still
+// in the IN_PROGRESS workflow column.
+const ACTIVE_SESSION_STATES: ReadonlySet<string> = new Set<TaskSessionState>([
+  "CREATED",
+  "STARTING",
+  "RUNNING",
 ]);
-
-export function isTerminalSessionState(state?: string | null): boolean {
-  return Boolean(state) && TERMINAL_SESSION_STATES.has(state as string);
-}
 
 /**
  * Returns true when the kanban card should show the spinning loader for an
- * in-progress task. The task state can stay in IN_PROGRESS after the agent's
- * session has reached a terminal state (the workflow leaves the card in its
- * current column until the user — or a transition action — moves it). In
- * that case the spinner is misleading, so suppress it whenever the primary
- * session is in a terminal state.
+ * in-progress task. The task workflow state and the primary session's runtime
+ * state are decoupled — the workflow can keep a task in `IN_PROGRESS` after
+ * the agent has finished, errored, or paused waiting for input — so we gate
+ * the spinner on the primary session being actively running.
+ *
+ * When no primary session is attached yet (task just created / scheduling),
+ * we still show the spinner so users see the imminent work; otherwise we
+ * require an active session state.
  */
 export function shouldShowTaskRunningSpinner(
   taskState?: TaskState,
   primarySessionState?: string | null,
 ): boolean {
   if (taskState !== "IN_PROGRESS" && taskState !== "SCHEDULING") return false;
-  return !isTerminalSessionState(primarySessionState);
+  if (!primarySessionState) return true;
+  return ACTIVE_SESSION_STATES.has(primarySessionState);
 }
 
 export function shouldUsePermissionTaskIcon(hasPendingPermission = false): boolean {

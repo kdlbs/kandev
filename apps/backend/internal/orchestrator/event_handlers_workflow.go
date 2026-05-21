@@ -1828,9 +1828,20 @@ func (s *Service) applyEngineTransition(
 	// Flip to WAITING_FOR_INPUT so that autoStartStepPrompt in processOnEnter sends
 	// the prompt directly instead of queueing it — the queue would never be drained
 	// because handleAgentReady already returned.
+	//
+	// Mirror setSessionWaitingForInput's task-state side effect: write
+	// tasks.state = REVIEW so the kanban card drops out of IN_PROGRESS. Without
+	// this, an engine-driven on_turn_complete transition would persist the
+	// new workflow step + flip the session but leave tasks.state stale at
+	// IN_PROGRESS, leaving the spinner spinning in the new column even though
+	// the agent has paused. If the target step's on_enter starts another agent,
+	// setSessionRunning will flip tasks.state back to IN_PROGRESS — the
+	// REVIEW write is a safe intermediate that any active-running follow-up
+	// will overwrite.
 	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
 		s.updateTaskSessionState(ctx, taskID, session.ID, models.TaskSessionStateWaitingForInput, "", false, session)
 		session.State = models.TaskSessionStateWaitingForInput
+		s.writeTaskReviewState(ctx, taskID)
 	}
 
 	// Launch processOnEnter asynchronously to avoid blocking the stream reader goroutine.

@@ -23,12 +23,13 @@ describe("getTaskStateIcon", () => {
 });
 
 describe("shouldShowTaskRunningSpinner", () => {
-  it("returns false for terminal task states", () => {
+  it("returns false for non-loading task states regardless of session state", () => {
     expect(shouldShowTaskRunningSpinner("COMPLETED")).toBe(false);
     expect(shouldShowTaskRunningSpinner("FAILED")).toBe(false);
     expect(shouldShowTaskRunningSpinner("CANCELLED")).toBe(false);
     expect(shouldShowTaskRunningSpinner("REVIEW")).toBe(false);
     expect(shouldShowTaskRunningSpinner("TODO")).toBe(false);
+    expect(shouldShowTaskRunningSpinner("REVIEW", "RUNNING")).toBe(false);
   });
 
   it("returns true for SCHEDULING with no primary session yet", () => {
@@ -37,21 +38,31 @@ describe("shouldShowTaskRunningSpinner", () => {
     expect(shouldShowTaskRunningSpinner("SCHEDULING", undefined)).toBe(true);
   });
 
-  it("returns true for IN_PROGRESS with a non-terminal primary session", () => {
+  it("returns true for IN_PROGRESS when the primary session is actively running", () => {
     expect(shouldShowTaskRunningSpinner("IN_PROGRESS", "RUNNING")).toBe(true);
     expect(shouldShowTaskRunningSpinner("IN_PROGRESS", "STARTING")).toBe(true);
     expect(shouldShowTaskRunningSpinner("IN_PROGRESS", "CREATED")).toBe(true);
+  });
+
+  it("returns true for IN_PROGRESS when no primary session is attached yet", () => {
     expect(shouldShowTaskRunningSpinner("IN_PROGRESS", undefined)).toBe(true);
     expect(shouldShowTaskRunningSpinner("IN_PROGRESS", null)).toBe(true);
   });
 
-  it("suppresses the spinner when the primary session has reached a terminal state", () => {
-    // The repro from issue #985: agent finishes (session → COMPLETED) but the
+  it("suppresses the spinner when the primary session is terminal", () => {
+    // Repro from issue #985: agent finishes (session → COMPLETED) but the
     // workflow leaves the task in IN_PROGRESS for review/manual move. The
     // spinner must not keep spinning forever.
     expect(shouldShowTaskRunningSpinner("IN_PROGRESS", "COMPLETED")).toBe(false);
     expect(shouldShowTaskRunningSpinner("IN_PROGRESS", "FAILED")).toBe(false);
     expect(shouldShowTaskRunningSpinner("IN_PROGRESS", "CANCELLED")).toBe(false);
     expect(shouldShowTaskRunningSpinner("SCHEDULING", "COMPLETED")).toBe(false);
+  });
+
+  it("suppresses the spinner when the primary session is paused (waiting/idle)", () => {
+    // Same desync class, paused branch: agent stopped to wait for input or
+    // was torn down (office IDLE). The spinner is misleading.
+    expect(shouldShowTaskRunningSpinner("IN_PROGRESS", "WAITING_FOR_INPUT")).toBe(false);
+    expect(shouldShowTaskRunningSpinner("IN_PROGRESS", "IDLE")).toBe(false);
   });
 });
