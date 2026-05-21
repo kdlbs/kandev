@@ -8,22 +8,27 @@ import (
 	"go.uber.org/zap"
 )
 
-// runScheduler holds at most one pending ScheduleRun-driven prompt for
-// the adapter. The Claude Agent SDK exposes `ScheduleRun` as a tool inside
+// wakeupScheduler holds at most one pending ScheduleWakeup-driven prompt for
+// the adapter. The Claude Agent SDK exposes `ScheduleWakeup` as a tool inside
 // its harness; when its timer fires, the SDK queues a new turn on its
 // async-iterator (`session.query`). The upstream
 // @agentclientprotocol/claude-agent-acp bridge only iterates that channel
-// inside its `prompt()` handler, so a run that fires while no
+// inside its `prompt()` handler, so a wakeup that fires while no
 // `session/prompt` is in flight produces no ACP output at all — the buffered
 // turn only drains on the next user message.
 //
-// This scheduler closes the gap: when we observe a `ScheduleRun` tool
+// This scheduler closes the gap: when we observe a `ScheduleWakeup` tool
 // completion, we record `scheduledFor` and the prompt text, and at fire time
 // issue a synthetic `session/prompt` to the bridge. That triggers the bridge
-// to drain the buffered output and produce visible ACP frames for the run
-// turn — matching what standalone Claude Code does, where the run prompt
+// to drain the buffered output and produce visible ACP frames for the wakeup
+// turn — matching what standalone Claude Code does, where the wakeup prompt
 // is injected as a synthesized user turn.
-type runScheduler struct {
+//
+// The wire-level tool name "ScheduleWakeup" is hardcoded in the Claude Code
+// SDK binary (see `extractScheduleWakeup`) and MUST NOT be renamed when
+// refactoring; PR #914 globally renamed Wakeup→Run including this string,
+// which silently broke every Claude wakeup until it was reverted here.
+type wakeupScheduler struct {
 	logger *logger.Logger
 	fire   func(sessionID, prompt string)
 
@@ -37,38 +42,38 @@ type runScheduler struct {
 	// goroutine for the old timer (timer.Stop() returns false) and the new
 	// schedule() then writes new state before the stale fireOnce acquires the
 	// lock. Without gen, the stale fireOnce would consume the new state and
-	// fire the new run immediately while clobbering w.timer.
+	// fire the new wakeup immediately while clobbering w.timer.
 	gen uint64
 }
 
-// pendingRun accumulates partial state for an in-flight ScheduleRun tool
-// call. The bridge emits the run metadata across multiple notifications:
-// the initial tool_call carries `_meta.claudeCode.toolName="ScheduleRun"`
+// pendingWakeup accumulates partial state for an in-flight ScheduleWakeup tool
+// call. The bridge emits the wakeup metadata across multiple notifications:
+// the initial tool_call carries `_meta.claudeCode.toolName="ScheduleWakeup"`
 // (no rawInput yet); subsequent tool_call_updates fill in `rawInput.prompt`
 // and `_meta.claudeCode.toolResponse.scheduledFor`. We only have enough to
 // schedule once both the prompt and scheduledFor timestamp are present.
-type pendingRun struct {
+type pendingWakeup struct {
 	prompt         string
 	scheduledForMs int64
 }
 
-func newRunScheduler(log *logger.Logger, fire func(sessionID, prompt string)) *runScheduler {
-	return &runScheduler{
-		logger: log.WithFields(zap.String("component", "run-scheduler")),
+func newWakeupScheduler(log *logger.Logger, fire func(sessionID, prompt string)) *wakeupScheduler {
+	return &wakeupScheduler{
+		logger: log.WithFields(zap.String("component", "wakeup-scheduler")),
 		fire:   fire,
 	}
 }
 
-// schedule registers a run for the given session, replacing any prior
-// pending run. unixMs is the Unix-epoch millisecond timestamp at which the
-// run should fire (matches the `_meta.claudeCode.toolResponse.scheduledFor`
+// schedule registers a wakeup for the given session, replacing any prior
+// pending wakeup. unixMs is the Unix-epoch millisecond timestamp at which the
+// wakeup should fire (matches the `_meta.claudeCode.toolResponse.scheduledFor`
 // field reported by the bridge). If the timestamp is in the past or zero, the
-// run is dropped without firing — that matches the ACP semantics of "the
+// wakeup is dropped without firing — that matches the ACP semantics of "the
 // turn already happened" and avoids unbounded immediate-fire loops on stale
 // timestamps.
-func (w *runScheduler) schedule(sessionID, prompt string, unixMs int64) {
+func (w *wakeupScheduler) schedule(sessionID, prompt string, unixMs int64) {
 	if sessionID == "" || prompt == "" || unixMs <= 0 {
-		w.logger.Warn("ignoring run with missing fields",
+		w.logger.Warn("ignoring wakeup with missing fields",
 			zap.String("session_id", sessionID),
 			zap.Int("prompt_len", len(prompt)),
 			zap.Int64("unix_ms", unixMs))
@@ -77,10 +82,10 @@ func (w *runScheduler) schedule(sessionID, prompt string, unixMs int64) {
 
 	delay := time.Until(time.UnixMilli(unixMs))
 	if delay <= 0 {
-		// Warn rather than Debug: a stale run typically signals system
+		// Warn rather than Debug: a stale wakeup typically signals system
 		// suspension, container pause, or significant clock skew — those are
 		// production-relevant and shouldn't be hidden at default log levels.
-		w.logger.Warn("dropping stale run",
+		w.logger.Warn("dropping stale wakeup",
 			zap.String("session_id", sessionID),
 			zap.Duration("past_by", -delay))
 		return
@@ -97,7 +102,7 @@ func (w *runScheduler) schedule(sessionID, prompt string, unixMs int64) {
 	w.timer = time.AfterFunc(delay, func() { w.fireOnce(myGen) })
 	w.mu.Unlock()
 
-	w.logger.Info("scheduled run",
+	w.logger.Info("scheduled wakeup",
 		zap.String("session_id", sessionID),
 		zap.Time("fires_at", time.UnixMilli(unixMs)),
 		zap.Duration("delay", delay))
@@ -107,11 +112,11 @@ func (w *runScheduler) schedule(sessionID, prompt string, unixMs int64) {
 // myGen identifies the schedule call that armed this timer; if a later
 // schedule or cancel has bumped w.gen, this fire is stale and is dropped.
 // It clears the pending state before calling the callback so a re-entry from
-// inside the callback (e.g. the synthetic prompt schedules another run)
+// inside the callback (e.g. the synthetic prompt schedules another wakeup)
 // can overwrite cleanly. The gen check guarantees sessionID is non-empty
 // here — schedule() rejects empty sessionID before bumping gen, and any
 // cancel would have bumped gen too — so we don't re-check it.
-func (w *runScheduler) fireOnce(myGen uint64) {
+func (w *wakeupScheduler) fireOnce(myGen uint64) {
 	w.mu.Lock()
 	if myGen != w.gen {
 		w.mu.Unlock()
@@ -125,18 +130,18 @@ func (w *runScheduler) fireOnce(myGen uint64) {
 	w.gen++
 	w.mu.Unlock()
 
-	w.logger.Info("firing run",
+	w.logger.Info("firing wakeup",
 		zap.String("session_id", sessionID))
 	w.fire(sessionID, prompt)
 }
 
-// cancel stops any pending run. Safe to call multiple times. Bumping gen
+// cancel stops any pending wakeup. Safe to call multiple times. Bumping gen
 // invalidates any in-flight fireOnce that has already been launched but is
 // blocked on the lock — without that, a stale fireOnce after Stop()=false
 // would still observe the cleared state and no-op cleanly, but cancel races
 // with concurrent schedule could otherwise let a stale fire consume newly
 // scheduled state.
-func (w *runScheduler) cancel() {
+func (w *wakeupScheduler) cancel() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.timer != nil {
@@ -148,13 +153,17 @@ func (w *runScheduler) cancel() {
 	w.gen++
 }
 
-// extractScheduleRun inspects an ACP tool-call meta map and returns
-// (scheduledForUnixMs, isScheduleRun). It expects the bridge's
+// extractScheduleWakeup inspects an ACP tool-call meta map and returns
+// (scheduledForUnixMs, isScheduleWakeup). It expects the bridge's
 // `_meta.claudeCode.toolName` and `_meta.claudeCode.toolResponse.scheduledFor`
 // shape that @agentclientprotocol/claude-agent-acp emits; missing/malformed
-// entries are reported as not-a-run rather than as errors so unrelated
+// entries are reported as not-a-wakeup rather than as errors so unrelated
 // tools pass through unaffected.
-func extractScheduleRun(meta any) (scheduledForMs int64, isRun bool) {
+//
+// The literal "ScheduleWakeup" string is the Claude Code SDK's hardcoded tool
+// name (verified in the upstream binary). Do not rename: that would make this
+// match nothing and every wakeup turn silently never fire.
+func extractScheduleWakeup(meta any) (scheduledForMs int64, isWakeup bool) {
 	m, ok := meta.(map[string]any)
 	if !ok {
 		return 0, false
@@ -163,12 +172,12 @@ func extractScheduleRun(meta any) (scheduledForMs int64, isRun bool) {
 	if !ok {
 		return 0, false
 	}
-	if name, _ := cc["toolName"].(string); name != "ScheduleRun" {
+	if name, _ := cc["toolName"].(string); name != "ScheduleWakeup" {
 		return 0, false
 	}
 	resp, ok := cc["toolResponse"].(map[string]any)
 	if !ok {
-		return 0, true // ScheduleRun tool, but response not yet present
+		return 0, true // ScheduleWakeup tool, but response not yet present
 	}
 	switch v := resp["scheduledFor"].(type) {
 	case float64:
@@ -181,10 +190,10 @@ func extractScheduleRun(meta any) (scheduledForMs int64, isRun bool) {
 	return 0, true
 }
 
-// extractRunPrompt pulls the prompt string out of a ScheduleRun
+// extractWakeupPrompt pulls the prompt string out of a ScheduleWakeup
 // tool-call rawInput. Returns ("", false) when the field is absent or the
 // wrong type.
-func extractRunPrompt(rawInput any) (string, bool) {
+func extractWakeupPrompt(rawInput any) (string, bool) {
 	m, ok := rawInput.(map[string]any)
 	if !ok {
 		return "", false

@@ -10,7 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-func newTestRunLogger(t *testing.T) *logger.Logger {
+func newTestWakeupLogger(t *testing.T) *logger.Logger {
 	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{
 		Level:      "error",
@@ -23,7 +23,7 @@ func newTestRunLogger(t *testing.T) *logger.Logger {
 	return log
 }
 
-func TestExtractScheduleRun_NotARun(t *testing.T) {
+func TestExtractScheduleWakeup_NotAWakeup(t *testing.T) {
 	cases := []struct {
 		name string
 		meta any
@@ -36,33 +36,41 @@ func TestExtractScheduleRun_NotARun(t *testing.T) {
 		{"different tool", map[string]any{
 			"claudeCode": map[string]any{"toolName": "Bash"},
 		}},
+		// Regression for PR #914: a global Wakeup→Run rename flipped the wire
+		// string check to "ScheduleRun", which matched nothing the Claude SDK
+		// emits and silently broke every wakeup. Lock in that "ScheduleRun"
+		// is NOT recognised as a wakeup so a future rename can't repeat that
+		// mistake without flipping this assertion too.
+		{"ScheduleRun is not a wakeup", map[string]any{
+			"claudeCode": map[string]any{"toolName": "ScheduleRun"},
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			ms, ok := extractScheduleRun(c.meta)
+			ms, ok := extractScheduleWakeup(c.meta)
 			if ok {
-				t.Errorf("expected isRun=false for %s, got true (ms=%d)", c.name, ms)
+				t.Errorf("expected isWakeup=false for %s, got true (ms=%d)", c.name, ms)
 			}
 		})
 	}
 }
 
-func TestExtractScheduleRun_NoResponseYet(t *testing.T) {
+func TestExtractScheduleWakeup_NoResponseYet(t *testing.T) {
 	meta := map[string]any{
 		"claudeCode": map[string]any{
-			"toolName": "ScheduleRun",
+			"toolName": "ScheduleWakeup",
 		},
 	}
-	ms, ok := extractScheduleRun(meta)
+	ms, ok := extractScheduleWakeup(meta)
 	if !ok {
-		t.Fatal("expected isRun=true")
+		t.Fatal("expected isWakeup=true")
 	}
 	if ms != 0 {
 		t.Errorf("expected ms=0 when toolResponse missing, got %d", ms)
 	}
 }
 
-func TestExtractScheduleRun_WithResponse(t *testing.T) {
+func TestExtractScheduleWakeup_WithResponse(t *testing.T) {
 	cases := []struct {
 		name string
 		val  any
@@ -77,15 +85,15 @@ func TestExtractScheduleRun_WithResponse(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			meta := map[string]any{
 				"claudeCode": map[string]any{
-					"toolName": "ScheduleRun",
+					"toolName": "ScheduleWakeup",
 					"toolResponse": map[string]any{
 						"scheduledFor": c.val,
 					},
 				},
 			}
-			ms, ok := extractScheduleRun(meta)
+			ms, ok := extractScheduleWakeup(meta)
 			if !ok {
-				t.Fatal("expected isRun=true")
+				t.Fatal("expected isWakeup=true")
 			}
 			if ms != c.want {
 				t.Errorf("ms=%d, want %d", ms, c.want)
@@ -94,7 +102,7 @@ func TestExtractScheduleRun_WithResponse(t *testing.T) {
 	}
 }
 
-func TestExtractRunPrompt(t *testing.T) {
+func TestExtractWakeupPrompt(t *testing.T) {
 	cases := []struct {
 		name     string
 		input    any
@@ -110,7 +118,7 @@ func TestExtractRunPrompt(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, ok := extractRunPrompt(c.input)
+			got, ok := extractWakeupPrompt(c.input)
 			if ok != c.wantOK || got != c.wantText {
 				t.Errorf("got (%q, %v), want (%q, %v)", got, ok, c.wantText, c.wantOK)
 			}
@@ -118,18 +126,18 @@ func TestExtractRunPrompt(t *testing.T) {
 	}
 }
 
-type runCapture struct {
+type wakeupCapture struct {
 	mu        sync.Mutex
 	calls     int32
 	lastSess  string
 	lastPrmpt string
 }
 
-func newRunCapture() *runCapture {
-	return &runCapture{}
+func newWakeupCapture() *wakeupCapture {
+	return &wakeupCapture{}
 }
 
-func (c *runCapture) fire(sessionID, prompt string) {
+func (c *wakeupCapture) fire(sessionID, prompt string) {
 	c.mu.Lock()
 	c.lastSess = sessionID
 	c.lastPrmpt = prompt
@@ -144,11 +152,11 @@ func (c *runCapture) fire(sessionID, prompt string) {
 // synctest.Wait() afterwards ensures any goroutine the timer spawned has
 // finished its work before the assertion.
 
-func TestRunScheduler_FiresAfterDelay(t *testing.T) {
+func TestWakeupScheduler_FiresAfterDelay(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		log := newTestRunLogger(t)
-		cap := newRunCapture()
-		sched := newRunScheduler(log, cap.fire)
+		log := newTestWakeupLogger(t)
+		cap := newWakeupCapture()
+		sched := newWakeupScheduler(log, cap.fire)
 
 		at := time.Now().Add(40 * time.Millisecond).UnixMilli()
 		sched.schedule("sess-1", "wake-prompt", at)
@@ -167,11 +175,11 @@ func TestRunScheduler_FiresAfterDelay(t *testing.T) {
 	})
 }
 
-func TestRunScheduler_CancelPreventsFire(t *testing.T) {
+func TestWakeupScheduler_CancelPreventsFire(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		log := newTestRunLogger(t)
-		cap := newRunCapture()
-		sched := newRunScheduler(log, cap.fire)
+		log := newTestWakeupLogger(t)
+		cap := newWakeupCapture()
+		sched := newWakeupScheduler(log, cap.fire)
 
 		at := time.Now().Add(50 * time.Millisecond).UnixMilli()
 		sched.schedule("sess-1", "p", at)
@@ -187,11 +195,11 @@ func TestRunScheduler_CancelPreventsFire(t *testing.T) {
 	})
 }
 
-func TestRunScheduler_StaleTimestampDropped(t *testing.T) {
+func TestWakeupScheduler_StaleTimestampDropped(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		log := newTestRunLogger(t)
-		cap := newRunCapture()
-		sched := newRunScheduler(log, cap.fire)
+		log := newTestWakeupLogger(t)
+		cap := newWakeupCapture()
+		sched := newWakeupScheduler(log, cap.fire)
 
 		// Past timestamp: should not arm a timer at all.
 		sched.schedule("sess-1", "p", time.Now().Add(-time.Hour).UnixMilli())
@@ -205,11 +213,11 @@ func TestRunScheduler_StaleTimestampDropped(t *testing.T) {
 	})
 }
 
-func TestRunScheduler_RescheduleReplacesPrior(t *testing.T) {
+func TestWakeupScheduler_RescheduleReplacesPrior(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		log := newTestRunLogger(t)
-		cap := newRunCapture()
-		sched := newRunScheduler(log, cap.fire)
+		log := newTestWakeupLogger(t)
+		cap := newWakeupCapture()
+		sched := newWakeupScheduler(log, cap.fire)
 
 		// First schedule far in the future, then reschedule soon — only the
 		// second should fire, and only once.
@@ -230,15 +238,15 @@ func TestRunScheduler_RescheduleReplacesPrior(t *testing.T) {
 	})
 }
 
-// TestRunScheduler_StaleFireOnceDoesNotConsumeNewState reproduces the race
+// TestWakeupScheduler_StaleFireOnceDoesNotConsumeNewState reproduces the race
 // where time.AfterFunc has already launched a fireOnce goroutine for the old
 // timer before schedule() runs. The stale fireOnce must observe the gen
-// mismatch and bail out, not consume the newly scheduled run.
-func TestRunScheduler_StaleFireOnceDoesNotConsumeNewState(t *testing.T) {
+// mismatch and bail out, not consume the newly scheduled wakeup.
+func TestWakeupScheduler_StaleFireOnceDoesNotConsumeNewState(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		log := newTestRunLogger(t)
-		cap := newRunCapture()
-		sched := newRunScheduler(log, cap.fire)
+		log := newTestWakeupLogger(t)
+		cap := newWakeupCapture()
+		sched := newWakeupScheduler(log, cap.fire)
 
 		// Manually drive the race: arm a timer, capture its gen, then simulate
 		// a stale fire by calling fireOnce with the captured gen *after* a
@@ -278,10 +286,10 @@ func TestRunScheduler_StaleFireOnceDoesNotConsumeNewState(t *testing.T) {
 	})
 }
 
-func TestRunScheduler_IgnoresMissingFields(t *testing.T) {
-	log := newTestRunLogger(t)
-	cap := newRunCapture()
-	sched := newRunScheduler(log, cap.fire)
+func TestWakeupScheduler_IgnoresMissingFields(t *testing.T) {
+	log := newTestWakeupLogger(t)
+	cap := newWakeupCapture()
+	sched := newWakeupScheduler(log, cap.fire)
 
 	// Missing each required field in turn — none should arm a timer.
 	sched.schedule("", "p", time.Now().Add(time.Minute).UnixMilli())
@@ -293,24 +301,24 @@ func TestRunScheduler_IgnoresMissingFields(t *testing.T) {
 	}
 }
 
-func TestHandleRunEvent_SchedulesOnceBothFieldsArrive(t *testing.T) {
+func TestHandleWakeupEvent_SchedulesOnceBothFieldsArrive(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		a := newTestAdapter()
 		t.Cleanup(func() { _ = a.Close() })
 
-		cap := newRunCapture()
-		a.run = newRunScheduler(a.logger, cap.fire)
+		cap := newWakeupCapture()
+		a.wakeup = newWakeupScheduler(a.logger, cap.fire)
 
 		at := time.Now().Add(40 * time.Millisecond).UnixMilli()
 
 		// Initial tool_call: only the toolName is known.
 		metaInitial := map[string]any{
-			"claudeCode": map[string]any{"toolName": "ScheduleRun"},
+			"claudeCode": map[string]any{"toolName": "ScheduleWakeup"},
 		}
-		a.handleRunEvent("sess-1", "tc-1", metaInitial, nil, false)
+		a.handleWakeupEvent("sess-1", "tc-1", metaInitial, nil, false)
 
 		// Mid-update: rawInput arrives with the prompt.
-		a.handleRunEvent("sess-1", "tc-1", metaInitial, map[string]any{
+		a.handleWakeupEvent("sess-1", "tc-1", metaInitial, map[string]any{
 			"prompt":       "wake-now",
 			"delaySeconds": 60,
 		}, false)
@@ -323,11 +331,11 @@ func TestHandleRunEvent_SchedulesOnceBothFieldsArrive(t *testing.T) {
 		// Final update: scheduledFor arrives in meta.
 		metaWithResp := map[string]any{
 			"claudeCode": map[string]any{
-				"toolName":     "ScheduleRun",
+				"toolName":     "ScheduleWakeup",
 				"toolResponse": map[string]any{"scheduledFor": float64(at)},
 			},
 		}
-		a.handleRunEvent("sess-1", "tc-1", metaWithResp, nil, false)
+		a.handleWakeupEvent("sess-1", "tc-1", metaWithResp, nil, false)
 
 		time.Sleep(100 * time.Millisecond)
 		synctest.Wait()
@@ -343,12 +351,12 @@ func TestHandleRunEvent_SchedulesOnceBothFieldsArrive(t *testing.T) {
 	})
 }
 
-func TestHandleRunEvent_NonRunIgnored(t *testing.T) {
+func TestHandleWakeupEvent_NonWakeupIgnored(t *testing.T) {
 	a := newTestAdapter()
 	t.Cleanup(func() { _ = a.Close() })
 
-	cap := newRunCapture()
-	a.run = newRunScheduler(a.logger, cap.fire)
+	cap := newWakeupCapture()
+	a.wakeup = newWakeupScheduler(a.logger, cap.fire)
 
 	// Bash tool — should be ignored entirely.
 	meta := map[string]any{
@@ -357,11 +365,11 @@ func TestHandleRunEvent_NonRunIgnored(t *testing.T) {
 			"toolResponse": map[string]any{"scheduledFor": float64(time.Now().Add(time.Hour).UnixMilli())},
 		},
 	}
-	a.handleRunEvent("sess-1", "tc-1", meta, map[string]any{"prompt": "x"}, false)
+	a.handleWakeupEvent("sess-1", "tc-1", meta, map[string]any{"prompt": "x"}, false)
 
 	a.mu.Lock()
-	if _, present := a.pendingRuns["tc-1"]; present {
-		t.Error("non-run tool should not be tracked")
+	if _, present := a.pendingWakeups["tc-1"]; present {
+		t.Error("non-wakeup tool should not be tracked")
 	}
 	a.mu.Unlock()
 
@@ -370,59 +378,55 @@ func TestHandleRunEvent_NonRunIgnored(t *testing.T) {
 	}
 }
 
-func TestHandleRunEvent_TerminalCleansUpPending(t *testing.T) {
+func TestHandleWakeupEvent_TerminalCleansUpPending(t *testing.T) {
 	a := newTestAdapter()
 	t.Cleanup(func() { _ = a.Close() })
 
-	cap := newRunCapture()
-	a.run = newRunScheduler(a.logger, cap.fire)
+	cap := newWakeupCapture()
+	a.wakeup = newWakeupScheduler(a.logger, cap.fire)
 
 	meta := map[string]any{
-		"claudeCode": map[string]any{"toolName": "ScheduleRun"},
+		"claudeCode": map[string]any{"toolName": "ScheduleWakeup"},
 	}
-	a.handleRunEvent("sess-1", "tc-1", meta, nil, false)
+	a.handleWakeupEvent("sess-1", "tc-1", meta, nil, false)
 
 	a.mu.Lock()
-	_, present := a.pendingRuns["tc-1"]
+	_, present := a.pendingWakeups["tc-1"]
 	a.mu.Unlock()
 	if !present {
-		t.Fatal("expected pending run before terminal")
+		t.Fatal("expected pending wakeup before terminal")
 	}
 
 	// Terminal arrives without prompt or scheduledFor — should clean up.
-	a.handleRunEvent("sess-1", "tc-1", meta, nil, true)
+	a.handleWakeupEvent("sess-1", "tc-1", meta, nil, true)
 
 	a.mu.Lock()
-	_, present = a.pendingRuns["tc-1"]
+	_, present = a.pendingWakeups["tc-1"]
 	a.mu.Unlock()
 	if present {
-		t.Error("expected pending run cleared on terminal")
+		t.Error("expected pending wakeup cleared on terminal")
 	}
 	if got := atomic.LoadInt32(&cap.calls); got != 0 {
 		t.Errorf("terminal-without-data should not fire, got %d calls", got)
 	}
 }
 
-// TestFireRun_SkipsOnSessionChange exercises fireRun's session-guard
+// TestFireWakeup_SkipsOnSessionChange exercises fireWakeup's session-guard
 // branch — when the adapter's current session has rotated away from the one
-// the run was scheduled for, the run must drop instead of trying to
-// drive an unrelated session.
-// TestFireRun_SkipsOnSessionChange exercises fireRun's session-guard
-// branch — when the adapter's current session has rotated away from the one
-// the run was scheduled for, the run must drop instead of trying to
+// the wakeup was scheduled for, the wakeup must drop instead of trying to
 // drive an unrelated session.
 //
 // We can't observe Prompt directly (it returns early on nil acpConn without
 // any side effect on the updates channel) so we use a.pendingContext as a
 // canary: Prompt's first action under a.mu is to read-and-clear it. If the
-// guard works, fireRun never spawns the goroutine that calls Prompt and
+// guard works, fireWakeup never spawns the goroutine that calls Prompt and
 // the canary survives. If the guard regresses, Prompt runs and clears it.
-func TestFireRun_SkipsOnSessionChange(t *testing.T) {
+func TestFireWakeup_SkipsOnSessionChange(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		a := newTestAdapter()
 		t.Cleanup(func() { _ = a.Close() })
 
-		// Adapter currently tracks a different session than the one the run
+		// Adapter currently tracks a different session than the one the wakeup
 		// was scheduled against, and pendingContext holds a canary string.
 		const canary = "guard-canary"
 		a.mu.Lock()
@@ -430,7 +434,7 @@ func TestFireRun_SkipsOnSessionChange(t *testing.T) {
 		a.pendingContext = canary
 		a.mu.Unlock()
 
-		a.fireRun("old-sess", "should-not-fire")
+		a.fireWakeup("old-sess", "should-not-fire")
 
 		// Let any spawned goroutine run to completion. Inside synctest, after
 		// Wait() returns the bubble has settled and we can inspect state.

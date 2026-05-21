@@ -46,11 +46,11 @@ const (
 	configOptionIDModel = "model"
 )
 
-// runPromptTimeout bounds how long a synthetic run prompt can run.
-// Run turns can perform real work (the model often runs a few tool calls
+// wakeupPromptTimeout bounds how long a synthetic wakeup prompt can run.
+// Wakeup turns can perform real work (the model often runs a few tool calls
 // before stopping) so we mirror what a normal user-initiated prompt would
 // allow rather than a tight RPC deadline.
-const runPromptTimeout = 30 * time.Minute
+const wakeupPromptTimeout = 30 * time.Minute
 
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
@@ -116,15 +116,16 @@ type Adapter struct {
 	// and rebuilt during session/load replay.
 	activeMonitors map[string]map[string]string
 
-	// ScheduleRun tracking. The Claude Agent SDK's ScheduleRun tool fires
-	// its timer inside the SDK's async-iterator, but the upstream
+	// ScheduleWakeup tracking. The Claude Agent SDK's ScheduleWakeup tool
+	// fires its timer inside the SDK's async-iterator, but the upstream
 	// @agentclientprotocol/claude-agent-acp bridge only drains that iterator
-	// inside its prompt() handler — so a run that fires while no prompt is
-	// in flight produces no output. run re-injects the run as a synthetic
-	// session/prompt at fire time. pendingRuns tracks per-tool-call info
-	// (prompt + scheduledFor) since these arrive in separate notifications.
-	run         *runScheduler
-	pendingRuns map[string]*pendingRun
+	// inside its prompt() handler — so a wakeup that fires while no prompt
+	// is in flight produces no output. wakeup re-injects the wakeup as a
+	// synthetic session/prompt at fire time. pendingWakeups tracks per-tool-
+	// call info (prompt + scheduledFor) since these arrive in separate
+	// notifications.
+	wakeup         *wakeupScheduler
+	pendingWakeups map[string]*pendingWakeup
 
 	// OTel tracing: active prompt span context.
 	// Notification spans become children of the prompt span for visual grouping.
@@ -169,7 +170,7 @@ type Adapter struct {
 	closed bool
 
 	// lifetimeCtx is cancelled by Close. Background work that may outlive
-	// the call site (e.g. the synthetic run prompt goroutine) derives its
+	// the call site (e.g. the synthetic wakeup prompt goroutine) derives its
 	// context from this one so it aborts when the adapter shuts down rather
 	// than continuing to drive a dead subprocess.
 	lifetimeCtx    context.Context
@@ -190,13 +191,13 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		updatesCh:       make(chan AgentEvent, 100),
 		activeToolCalls: make(map[string]*streams.NormalizedPayload),
 		activeMonitors:  make(map[string]map[string]string),
-		pendingRuns:     make(map[string]*pendingRun),
+		pendingWakeups:  make(map[string]*pendingWakeup),
 		usageBySession:  make(map[string]*usageTracker),
 		attachMgr:       shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
 		lifetimeCtx:     ctx,
 		lifetimeCancel:  cancel,
 	}
-	a.run = newRunScheduler(l, a.fireRun)
+	a.wakeup = newWakeupScheduler(l, a.fireWakeup)
 	return a
 }
 
@@ -315,13 +316,13 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 		return "", fmt.Errorf("adapter not initialized")
 	}
 
-	// A fresh session invalidates any pending run keyed to the prior
-	// session. Reset pendingRuns and cancel the scheduler under one
-	// a.mu critical section so a concurrent handleRunEvent can't slip
+	// A fresh session invalidates any pending wakeup keyed to the prior
+	// session. Reset pendingWakeups and cancel the scheduler under one
+	// a.mu critical section so a concurrent handleWakeupEvent can't slip
 	// a stale entry between the two operations.
 	a.mu.Lock()
-	a.pendingRuns = make(map[string]*pendingRun)
-	a.run.cancel()
+	a.pendingWakeups = make(map[string]*pendingWakeup)
+	a.wakeup.cancel()
 	a.mu.Unlock()
 
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.new")
@@ -498,13 +499,13 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
 	}
 
-	// Loading a different session invalidates any pending run keyed to the
+	// Loading a different session invalidates any pending wakeup keyed to the
 	// prior session — same reset block as NewSession to avoid leaving an armed
 	// timer for a session id that's about to change and accumulating stale
-	// pendingRuns entries across reloads.
+	// pendingWakeups entries across reloads.
 	a.mu.Lock()
-	a.pendingRuns = make(map[string]*pendingRun)
-	a.run.cancel()
+	a.pendingWakeups = make(map[string]*pendingWakeup)
+	a.wakeup.cancel()
 	a.mu.Unlock()
 
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.load")
@@ -761,9 +762,9 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 	return nil
 }
 
-// fireRun is invoked by runScheduler when a ScheduleRun timer
+// fireWakeup is invoked by wakeupScheduler when a ScheduleWakeup timer
 // elapses. It issues a synthetic session/prompt so the upstream
-// @agentclientprotocol/claude-agent-acp bridge drains the SDK's queued run
+// @agentclientprotocol/claude-agent-acp bridge drains the SDK's queued wakeup
 // turn and emits visible ACP frames. The session must still match (the user
 // hasn't started a fresh session) and the adapter must not be closed.
 //
@@ -774,80 +775,80 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 // JSON-RPC pairs each response back to its originating request via id —
 // but it does mean two prompts can be in flight against the bridge at
 // once. The bridge serialises them in the order it receives them, which
-// is exactly what we want for a run that races a user message.
-func (a *Adapter) fireRun(sessionID, prompt string) {
+// is exactly what we want for a wakeup that races a user message.
+func (a *Adapter) fireWakeup(sessionID, prompt string) {
 	a.mu.RLock()
 	closed := a.closed
 	currentSession := a.sessionID
 	a.mu.RUnlock()
 
 	if closed {
-		a.logger.Debug("skipping run fire: adapter closed",
+		a.logger.Debug("skipping wakeup fire: adapter closed",
 			zap.String("session_id", sessionID))
 		return
 	}
 	if currentSession != sessionID {
-		a.logger.Info("skipping run fire: session changed",
+		a.logger.Info("skipping wakeup fire: session changed",
 			zap.String("scheduled_for", sessionID),
 			zap.String("current", currentSession))
 		return
 	}
 
-	a.logger.Info("injecting synthetic run prompt",
+	a.logger.Info("injecting synthetic wakeup prompt",
 		zap.String("session_id", sessionID),
 		zap.Int("prompt_len", len(prompt)))
 
 	go func() {
 		// Derive from lifetimeCtx so a concurrent Close aborts the in-flight
 		// prompt instead of letting it run against a dead subprocess.
-		ctx, cancel := context.WithTimeout(a.lifetimeCtx, runPromptTimeout)
+		ctx, cancel := context.WithTimeout(a.lifetimeCtx, wakeupPromptTimeout)
 		defer cancel()
 		if err := a.Prompt(ctx, prompt, nil); err != nil {
-			a.logger.Error("synthetic run prompt failed",
+			a.logger.Error("synthetic wakeup prompt failed",
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 		}
 	}()
 }
 
-// handleRunEvent inspects a tool-call meta + rawInput pair, accumulates
-// pending state per toolCallID, and schedules a run once both the prompt
+// handleWakeupEvent inspects a tool-call meta + rawInput pair, accumulates
+// pending state per toolCallID, and schedules a wakeup once both the prompt
 // and scheduledFor timestamp are known. terminal=true means the tool call has
 // reached a terminal state, so any pending entry should be cleaned up.
-func (a *Adapter) handleRunEvent(sessionID, toolCallID string, meta any, rawInput any, terminal bool) {
+func (a *Adapter) handleWakeupEvent(sessionID, toolCallID string, meta any, rawInput any, terminal bool) {
 	if toolCallID == "" {
 		return
 	}
 
-	scheduledForMs, isRun := extractScheduleRun(meta)
+	scheduledForMs, isWakeup := extractScheduleWakeup(meta)
 
 	a.mu.Lock()
-	pw, tracked := a.pendingRuns[toolCallID]
+	pw, tracked := a.pendingWakeups[toolCallID]
 	if !tracked {
-		if !isRun {
+		if !isWakeup {
 			a.mu.Unlock()
 			return
 		}
-		pw = &pendingRun{}
-		a.pendingRuns[toolCallID] = pw
+		pw = &pendingWakeup{}
+		a.pendingWakeups[toolCallID] = pw
 	}
 
 	if scheduledForMs > 0 {
 		pw.scheduledForMs = scheduledForMs
 	}
-	if prompt, ok := extractRunPrompt(rawInput); ok {
+	if prompt, ok := extractWakeupPrompt(rawInput); ok {
 		pw.prompt = prompt
 	}
 
 	prompt := pw.prompt
 	stamp := pw.scheduledForMs
 	if (prompt != "" && stamp > 0) || terminal {
-		delete(a.pendingRuns, toolCallID)
+		delete(a.pendingWakeups, toolCallID)
 	}
 	a.mu.Unlock()
 
 	if prompt != "" && stamp > 0 {
-		a.run.schedule(sessionID, prompt, stamp)
+		a.wakeup.schedule(sessionID, prompt, stamp)
 	}
 }
 
@@ -983,10 +984,10 @@ func (a *Adapter) Close() error {
 
 	a.logger.Info("closing ACP adapter")
 
-	// Stop any pending ScheduleRun timer so it doesn't fire after close,
-	// and cancel the lifetime context so any in-flight run prompt aborts.
-	if a.run != nil {
-		a.run.cancel()
+	// Stop any pending ScheduleWakeup timer so it doesn't fire after close,
+	// and cancel the lifetime context so any in-flight wakeup prompt aborts.
+	if a.wakeup != nil {
+		a.wakeup.cancel()
 	}
 	if a.lifetimeCancel != nil {
 		a.lifetimeCancel()
@@ -1824,10 +1825,10 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 	a.activeToolCalls[toolCallID] = normalizedPayload
 	a.mu.Unlock()
 
-	// ScheduleRun tracking: meta carries `_meta.claudeCode.toolName`
+	// ScheduleWakeup tracking: meta carries `_meta.claudeCode.toolName`
 	// on the initial tool_call; rawInput is usually empty here but record
 	// the prompt eagerly when it does arrive in the same notification.
-	a.handleRunEvent(sessionID, toolCallID, tc.Meta, tc.RawInput, false)
+	a.handleWakeupEvent(sessionID, toolCallID, tc.Meta, tc.RawInput, false)
 
 	// Detect tool type for logging
 	toolType := DetectToolOperationType(toolKind, args)
@@ -1954,10 +1955,10 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	}
 	a.mu.Unlock()
 
-	// ScheduleRun tracking: tool_call_update is where rawInput.prompt and
+	// ScheduleWakeup tracking: tool_call_update is where rawInput.prompt and
 	// `_meta.claudeCode.toolResponse.scheduledFor` typically arrive. Once both
 	// are known, schedule the synthetic prompt; on terminal status, clean up.
-	a.handleRunEvent(sessionID, toolCallID, tcu.Meta, tcu.RawInput, isTerminal)
+	a.handleWakeupEvent(sessionID, toolCallID, tcu.Meta, tcu.RawInput, isTerminal)
 
 	// When a switch_mode tool carries a plan (e.g. ExitPlanMode), emit it
 	// as an agent_plan event so the orchestrator creates a visible plan message.
