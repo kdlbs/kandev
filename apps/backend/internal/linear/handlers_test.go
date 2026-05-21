@@ -150,6 +150,80 @@ func TestHTTPListStates_RoutesThroughService(t *testing.T) {
 	}
 }
 
+func TestHTTPListLabels_RequiresTeamKey(t *testing.T) {
+	_, router, _ := newTestController(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/labels", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHTTPListLabels_RoutesThroughService(t *testing.T) {
+	ctrl, router, client := newTestController(t)
+	ctx := context.Background()
+	if err := ctrl.service.store.UpsertConfig(ctx, &LinearConfig{
+		AuthMethod: AuthMethodAPIKey,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := ctrl.service.secrets.Set(ctx, SecretKey, "linear", "tok"); err != nil {
+		t.Fatalf("set secret: %v", err)
+	}
+	var seenTeam string
+	client.listLabelsFn = func(teamKey string) ([]LinearLabel, error) {
+		seenTeam = teamKey
+		return []LinearLabel{{ID: "l1", Name: "bug"}}, nil
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/labels?team_key=ENG", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if seenTeam != "ENG" {
+		t.Errorf("team key forwarded to client = %q, want ENG", seenTeam)
+	}
+}
+
+func TestHTTPListUsers_RequiresTeamKey(t *testing.T) {
+	_, router, _ := newTestController(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/users", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHTTPListUsers_RoutesThroughService(t *testing.T) {
+	ctrl, router, client := newTestController(t)
+	ctx := context.Background()
+	if err := ctrl.service.store.UpsertConfig(ctx, &LinearConfig{
+		AuthMethod: AuthMethodAPIKey,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := ctrl.service.secrets.Set(ctx, SecretKey, "linear", "tok"); err != nil {
+		t.Fatalf("set secret: %v", err)
+	}
+	var seenTeam string
+	client.listUsersFn = func(teamKey string) ([]LinearUser, error) {
+		seenTeam = teamKey
+		return []LinearUser{{ID: "u1", Name: "Alice"}}, nil
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/users?team_key=ENG", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if seenTeam != "ENG" {
+		t.Errorf("team key forwarded to client = %q, want ENG", seenTeam)
+	}
+}
+
 func TestHTTPSearchIssues_RejectsBadNumericParams(t *testing.T) {
 	ctrl, router, _ := newTestController(t)
 	ctx := context.Background()
