@@ -15,6 +15,13 @@ import (
 // secretNameToken is the canonical secret-store name for the GitLab PAT.
 const secretNameToken = "GITLAB_TOKEN"
 
+// ErrInvalidToken is returned by ConfigureToken when the supplied token is
+// empty or fails the /user probe. The controller layer uses errors.Is to
+// route this to HTTP 400 instead of 500 — a sentinel is more durable than
+// string-matching against the error message, which would silently break
+// the status mapping if the message wording changes.
+var ErrInvalidToken = errors.New("invalid token")
+
 // SecretManager handles secret create/update/delete for the token.
 type SecretManager interface {
 	Create(ctx context.Context, name, value string) (id string, err error)
@@ -147,7 +154,7 @@ func (s *Service) GetStatus(ctx context.Context) (*Status, error) {
 func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return errors.New("invalid token: empty")
+		return fmt.Errorf("%w: empty", ErrInvalidToken)
 	}
 	if s.secretManager == nil {
 		return errors.New("secret manager not configured")
@@ -159,7 +166,7 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 
 	probe := NewPATClient(host, token)
 	if _, probeErr := probe.GetAuthenticatedUser(ctx); probeErr != nil {
-		return fmt.Errorf("invalid token: %w", probeErr)
+		return fmt.Errorf("%w: %w", ErrInvalidToken, probeErr)
 	}
 
 	configured, secretID, err := s.findTokenSecret(ctx)
@@ -211,12 +218,12 @@ func (s *Service) ClearToken(ctx context.Context) error {
 		return fmt.Errorf("delete token: %w", err)
 	}
 
-	s.mu.RLock()
-	host := s.host
-	s.mu.RUnlock()
-
-	client, authMethod, _ := NewClient(ctx, host, s.secrets, s.logger)
+	// Rebuild the fallback client under the write lock against the
+	// current s.host. Snapshotting outside the lock would race a
+	// concurrent ConfigureHost the same way ConfigureToken used to —
+	// s.host would advertise H2 while s.client still pointed at H1.
 	s.mu.Lock()
+	client, authMethod, _ := NewClient(ctx, s.host, s.secrets, s.logger)
 	s.client = client
 	s.authMethod = authMethod
 	s.mu.Unlock()

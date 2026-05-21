@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -56,7 +55,9 @@ func (c *Controller) httpConfigureToken(ctx *gin.Context) {
 		return
 	}
 	if err := c.service.ConfigureToken(ctx.Request.Context(), req.Token); err != nil {
-		if strings.Contains(err.Error(), "invalid token") {
+		// errors.Is against the package-level sentinel — durable across
+		// future rewording / wrapping of the ConfigureToken error message.
+		if errors.Is(err, ErrInvalidToken) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}

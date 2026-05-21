@@ -123,6 +123,15 @@ func projectRef(projectPath string) string {
 	return strings.ReplaceAll(url.PathEscape(projectPath), "/", "%2F")
 }
 
+// groupRef returns the URL-encoded group path used as :id in /groups/:id/...
+// API URLs. Same %2F treatment as projectRef — required for subgroup paths
+// like "acme/team" where the slash separates the parent group from the
+// child group and a bare PathEscape leaves it as "/", which GitLab routes
+// to the parent only and returns 404 for the subgroup.
+func groupRef(groupPath string) string {
+	return strings.ReplaceAll(url.PathEscape(groupPath), "/", "%2F")
+}
+
 func (c *PATClient) GetMR(ctx context.Context, projectPath string, iid int) (*MR, error) {
 	var raw rawMR
 	endpoint := fmt.Sprintf("/projects/%s/merge_requests/%d", projectRef(projectPath), iid)
@@ -261,7 +270,7 @@ func (c *PATClient) SearchGroupProjects(ctx context.Context, group, query string
 		limit = 20
 	}
 	endpoint := fmt.Sprintf("/groups/%s/projects?per_page=%d&simple=true&include_subgroups=true",
-		url.PathEscape(group), limit)
+		groupRef(group), limit)
 	if query != "" {
 		endpoint += "&search=" + url.QueryEscape(query)
 	}

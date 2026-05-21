@@ -27,9 +27,16 @@ type MockClient struct {
 	// pipelines for that project). Keying by mockMRKey here would
 	// make iteration order matter when multiple MRs share a project.
 	pipelines map[string][]Pipeline
-	issues    map[mockIssueKey]*Issue
-	branches  map[string][]RepoBranch
-	nextMRIID int
+	// approvals tracks who has approved each MR. requiredApprovals tracks
+	// the project-level required-count GitLab returns alongside the
+	// approved_by list. Both are seeded separately because the GitLab
+	// /approvals endpoint conflates them on one payload — the mock keeps
+	// them split so tests can express e.g. "2 approvals required, 1 given".
+	approvals         map[mockMRKey][]MRApproval
+	requiredApprovals map[mockMRKey]int
+	issues            map[mockIssueKey]*Issue
+	branches          map[string][]RepoBranch
+	nextMRIID         int
 }
 
 type mockMRKey struct {
@@ -48,14 +55,16 @@ func NewMockClient(host string) *MockClient {
 		host = DefaultHost
 	}
 	c := &MockClient{
-		host:        host,
-		username:    "kandev-tester",
-		mrs:         make(map[mockMRKey]*MR),
-		discussions: make(map[mockMRKey][]MRDiscussion),
-		pipelines:   make(map[string][]Pipeline),
-		issues:      make(map[mockIssueKey]*Issue),
-		branches:    make(map[string][]RepoBranch),
-		nextMRIID:   100,
+		host:              host,
+		username:          "kandev-tester",
+		mrs:               make(map[mockMRKey]*MR),
+		discussions:       make(map[mockMRKey][]MRDiscussion),
+		pipelines:         make(map[string][]Pipeline),
+		approvals:         make(map[mockMRKey][]MRApproval),
+		requiredApprovals: make(map[mockMRKey]int),
+		issues:            make(map[mockIssueKey]*Issue),
+		branches:          make(map[string][]RepoBranch),
+		nextMRIID:         100,
 	}
 	return c
 }
@@ -115,6 +124,18 @@ func (c *MockClient) SeedPipelines(projectPath string, pipelines []Pipeline) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.pipelines[projectPath] = pipelines
+}
+
+// SeedApprovals registers the approval state for (projectPath, iid):
+// the list of who has approved + the required-count for "approved" to
+// flip on. Tests can express "1 of 2 approvals" by passing one approver
+// and required=2.
+func (c *MockClient) SeedApprovals(projectPath string, iid int, approvals []MRApproval, required int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := mockMRKey{Project: projectPath, IID: iid}
+	c.approvals[key] = approvals
+	c.requiredApprovals[key] = required
 }
 
 func (c *MockClient) Host() string { return c.host }
@@ -186,7 +207,12 @@ func (c *MockClient) SearchGroupProjects(context.Context, string, string, int) (
 	return []Project{}, nil
 }
 
-func (c *MockClient) ListMRApprovals(context.Context, string, int) ([]MRApproval, error) {
+func (c *MockClient) ListMRApprovals(_ context.Context, projectPath string, iid int) ([]MRApproval, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a, ok := c.approvals[mockMRKey{Project: projectPath, IID: iid}]; ok {
+		return a, nil
+	}
 	return []MRApproval{}, nil
 }
 
@@ -246,6 +272,7 @@ func (c *MockClient) GetMRFeedback(ctx context.Context, projectPath string, iid 
 		return nil, err
 	}
 	d, _ := c.ListMRDiscussions(ctx, projectPath, iid, nil)
+	approvals, _ := c.ListMRApprovals(ctx, projectPath, iid)
 	// Mirror PATClient.GetMRFeedback: only consider pipelines when the MR
 	// actually has a head ref. MockClient.ListPipelines ignores its branch
 	// argument and returns every pipeline seeded under the project, so
@@ -257,7 +284,7 @@ func (c *MockClient) GetMRFeedback(ctx context.Context, projectPath string, iid 
 	}
 	return &MRFeedback{
 		MR:          mr,
-		Approvals:   []MRApproval{},
+		Approvals:   approvals,
 		Discussions: d,
 		Pipelines:   pipelines,
 		HasIssues:   hasOpenDiscussions(d) || pipelineFailing(pipelines),
@@ -273,11 +300,19 @@ func (c *MockClient) GetMRStatus(ctx context.Context, projectPath string, iid in
 	if mr.HeadSHA != "" || mr.HeadBranch != "" {
 		pipelines, _ = c.ListPipelines(ctx, projectPath, mr.HeadBranch)
 	}
+	approvals, _ := c.ListMRApprovals(ctx, projectPath, iid)
+	c.mu.Lock()
+	required := c.requiredApprovals[mockMRKey{Project: projectPath, IID: iid}]
+	c.mu.Unlock()
 	pipelineState, jobsTotal, jobsPassing := summarizePipelines(pipelines)
+	approvalState := summarizeApprovals(len(approvals), required)
 	return &MRStatus{
 		MR:                  mr,
-		MergeStatus:         mr.MergeStatus,
+		ApprovalState:       approvalState,
 		PipelineState:       pipelineState,
+		MergeStatus:         mr.MergeStatus,
+		ApprovalCount:       len(approvals),
+		RequiredApprovals:   required,
 		PipelineJobsTotal:   jobsTotal,
 		PipelineJobsPassing: jobsPassing,
 	}, nil

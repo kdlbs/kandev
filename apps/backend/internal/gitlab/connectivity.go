@@ -3,6 +3,7 @@ package gitlab
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -68,6 +69,11 @@ func CheckHost(ctx context.Context, host string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	// Drain so http.DefaultClient's transport can reuse the connection on
+	// the next probe — same pattern as PATClient.getWithTotal / doWrite.
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 	return nil
 }

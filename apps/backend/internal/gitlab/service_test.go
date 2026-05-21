@@ -328,7 +328,30 @@ func TestService_GetStatus_ClearsConnectionErrorOn401(t *testing.T) {
 	}
 }
 
+// ConfigureToken must wrap ErrInvalidToken so the controller can route the
+// failure to HTTP 400 via errors.Is, instead of string-matching on the
+// error message. Covers both the empty-token path and the failed-probe path.
+func TestService_ConfigureToken_WrapsErrInvalidToken(t *testing.T) {
+	t.Run("empty token", func(t *testing.T) {
+		log := newTestLogger(t)
+		svc := NewService("", NewNoopClient(""), AuthMethodNone, nil, log)
+		svc.SetSecretManager(newFakeSecretManager())
+		err := svc.ConfigureToken(context.Background(), "   ")
+		if !errors.Is(err, ErrInvalidToken) {
+			t.Errorf("err = %v, want errors.Is ErrInvalidToken", err)
+		}
+	})
+	t.Run("rejected by probe", func(t *testing.T) {
+		svc, _, _ := newServiceFixture(t, userHandler(func(string) bool { return false }))
+		err := svc.ConfigureToken(context.Background(), "bad-token")
+		if !errors.Is(err, ErrInvalidToken) {
+			t.Errorf("err = %v, want errors.Is ErrInvalidToken", err)
+		}
+	})
+}
+
 // Sanity: the package-level errors used by the tests are real values, not
 // just docstrings — guards against accidental rename.
 var _ error = ErrNoClient
+var _ error = ErrInvalidToken
 var _ = errors.New

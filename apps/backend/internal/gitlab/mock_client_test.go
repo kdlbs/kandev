@@ -51,6 +51,30 @@ func TestMockClient_SeedPipelines_OverwritesByProject(t *testing.T) {
 	}
 }
 
+// MockClient.GetMRStatus must derive approval state from SeedApprovals so
+// the same approval-gating logic the real client uses (summarizeApprovals
+// against approved-vs-required) can be exercised end-to-end in tests.
+func TestMockClient_GetMRStatus_UsesSeededApprovals(t *testing.T) {
+	mock := NewMockClient("")
+	const project = "team/repo"
+	mock.SeedMR(project, &MR{IID: 7, State: "open", HeadBranch: "feat/x", HeadSHA: "abc"})
+	mock.SeedApprovals(project, 7, []MRApproval{{Username: "alice"}}, 2)
+
+	st, err := mock.GetMRStatus(context.Background(), project, 7)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if st.ApprovalCount != 1 {
+		t.Errorf("ApprovalCount = %d, want 1", st.ApprovalCount)
+	}
+	if st.RequiredApprovals != 2 {
+		t.Errorf("RequiredApprovals = %d, want 2", st.RequiredApprovals)
+	}
+	if st.ApprovalState != "pending" {
+		t.Errorf("ApprovalState = %q, want pending (1/2 approved)", st.ApprovalState)
+	}
+}
+
 func TestMockClient_GetMRFeedback_ReportsPipelinesWhenHeadPresent(t *testing.T) {
 	mock := NewMockClient("")
 	const project = "team/repo"
