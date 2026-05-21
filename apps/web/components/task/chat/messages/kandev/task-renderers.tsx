@@ -162,7 +162,7 @@ export const MoveTaskRenderer: KandevRenderer = ({ args, result, status }) => {
       summary={
         <span className="inline-flex items-center gap-1.5">
           <IdChip id={taskId} />
-          <SummaryDot />
+          {taskId && stepId && <SummaryDot />}
           <IdChip id={stepId} />
         </span>
       }
