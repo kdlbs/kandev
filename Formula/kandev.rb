@@ -48,9 +48,12 @@ class Kandev < Formula
     system "./scripts/release/package-bundle.sh"
 
     # The Next.js standalone tracer pulls platform-tagged native modules
-    # into the bundle, including musl-libc variants of sharp/@swc/lightningcss
-    # that brew linkage --test flags on glibc-only Linuxbrew. Strip them.
-    Pathname.glob("#{bundle}/web/**/*musl*").each { |p| rm_r(p) if p.directory? }
+    # into the bundle, including musl-libc variants of sharp, @swc/core,
+    # and lightningcss that brew linkage --test flags on glibc-only
+    # Linuxbrew. Strip them — rm_r handles both directory trees (the
+    # current shape) and bare .node files (in case a future bundler
+    # version inlines them).
+    bundle.glob("web/**/*musl*").each { |p| rm_r(p) }
 
     libexec.install Dir[bundle/"*"]
 
@@ -71,6 +74,6 @@ class Kandev < Formula
     # without requiring HTTP listeners, port binds, or subprocesses —
     # which can be problematic in sandboxed build environments.
     output = shell_output("#{libexec}/bin/agentctl kandev 2>&1", 1)
-    assert_match(/Usage:\s+agentctl kandev/i, output)
+    assert_match "Usage: agentctl kandev", output
   end
 end
