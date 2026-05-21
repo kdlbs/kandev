@@ -296,6 +296,85 @@ describe("useClarificationGroup — optimistic store update on resolve", () => {
   });
 });
 
+describe("useClarificationGroup — optimistic store update edge cases", () => {
+  beforeEach(setupFetchMock);
+
+  // Race guard (cubic P1): if the parent re-renders the hook with a different
+  // bundle after the POST is in flight (e.g. the next clarification has
+  // already streamed in), the optimistic update must still target the bundle
+  // that was *submitted* — not whatever the live messages prop points at when
+  // the await resolves. We capture a snapshot at submit time.
+  it("submitCollected applies the optimistic update to the submit-time bundle, not the latest one", async () => {
+    let resolveFetch: ((res: Response) => void) | null = null;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+
+    const initial = [
+      clarMessage({ id: "m-old", pendingId: "p-old", questionId: "q-old", index: 0, total: 1 }),
+    ];
+    const next = [
+      clarMessage({ id: "m-new", pendingId: "p-new", questionId: "q-new", index: 0, total: 1 }),
+    ];
+
+    const { result, rerender } = renderHook(({ msgs }) => useClarificationGroup(msgs), {
+      initialProps: { msgs: initial },
+    });
+
+    await act(async () => {
+      // Submit kicks off the POST; rerender swaps the bundle while in flight;
+      // resolveFetch unblocks the POST and the optimistic update runs.
+      const pending = result.current.submitCollected({
+        "q-old": { question_id: "q-old", selected_options: ["o1"] },
+      });
+      rerender({ msgs: next });
+      resolveFetch?.(new Response(null, { status: 200 }));
+      await pending;
+    });
+
+    expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
+    expect(mockUpdateMessage.mock.calls[0][0].id).toBe("m-old");
+    expect(mockUpdateMessage.mock.calls[0][0].metadata.pending_id).toBe("p-old");
+  });
+
+  // Failure-isolation guard (greptile P1): the optimistic store update is a
+  // best-effort UI nicety — if it blows up (e.g. the store action is missing,
+  // immer throws on a frozen object), the HTTP submit still succeeded and the
+  // user must see submitState === "ok", not "error".
+  it("submitCollected stays 'ok' when the optimistic store update throws", async () => {
+    mockUpdateMessage.mockImplementationOnce(() => {
+      throw new Error("store update boom");
+    });
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    await act(async () => {
+      await result.current.submitCollected({
+        q1: { question_id: "q1", selected_options: ["o1"] },
+      });
+    });
+
+    expect(result.current.submitState).toBe("ok");
+  });
+
+  it("skipAll stays 'ok' when the optimistic store update throws", async () => {
+    mockUpdateMessage.mockImplementationOnce(() => {
+      throw new Error("store update boom");
+    });
+    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
+    const { result } = renderHook(() => useClarificationGroup(msgs));
+
+    await act(async () => {
+      await result.current.skipAll();
+    });
+
+    expect(result.current.submitState).toBe("ok");
+  });
+});
+
 describe("useClarificationGroup — inflight guard", () => {
   beforeEach(setupFetchMock);
 
