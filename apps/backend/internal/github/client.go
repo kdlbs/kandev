@@ -90,4 +90,12 @@ type Client interface {
 
 	// GetIssueState returns the state of a single issue ("open" or "closed").
 	GetIssueState(ctx context.Context, owner, repo string, number int) (string, error)
+
+	// CreateGist creates a new gist on the authenticated user's account.
+	// Set Public=false to create a secret (unlisted) gist.
+	CreateGist(ctx context.Context, in CreateGistInput) (*GistResponse, error)
+
+	// DeleteGist deletes a gist by ID. A 404 is wrapped in *GitHubAPIError
+	// so callers can distinguish "already gone" from transport failures.
+	DeleteGist(ctx context.Context, gistID string) error
 }

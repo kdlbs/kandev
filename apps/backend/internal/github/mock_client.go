@@ -74,6 +74,19 @@ type MockClient struct {
 	submittedReviews []submittedReview
 	mergedPRs        []mergedPR
 	mergeMethods     map[repoKey]RepoMergeMethods
+	gists            map[string]mockGist
+	deletedGists     []string
+	nextGistID       int
+}
+
+// mockGist captures a gist that was created via the mock client so tests
+// can inspect what would have been uploaded.
+type mockGist struct {
+	ID          string
+	Description string
+	Public      bool
+	Files       map[string]GistFile
+	HTMLURL     string
 }
 
 // NewMockClient creates a new MockClient with default values.
@@ -91,6 +104,7 @@ func NewMockClient() *MockClient {
 		files:         make(map[prKey][]PRFile),
 		commits:       make(map[prKey][]PRCommitInfo),
 		mergeMethods:  make(map[repoKey]RepoMergeMethods),
+		gists:         make(map[string]mockGist),
 	}
 }
 
@@ -311,6 +325,65 @@ func (m *MockClient) MergePR(_ context.Context, owner, repo string, number int, 
 	return nil
 }
 
+func (m *MockClient) CreateGist(_ context.Context, in CreateGistInput) (*GistResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.nextGistID++
+	id := fmt.Sprintf("mock-gist-%d", m.nextGistID)
+	htmlURL := "https://gist.github.com/" + m.user + "/" + id
+	files := make(map[string]GistFile, len(in.Files))
+	for k, v := range in.Files {
+		files[k] = v
+	}
+	m.gists[id] = mockGist{
+		ID:          id,
+		Description: in.Description,
+		Public:      in.Public,
+		Files:       files,
+		HTMLURL:     htmlURL,
+	}
+	return &GistResponse{
+		ID:        id,
+		HTMLURL:   htmlURL,
+		CreatedAt: time.Now().UTC(),
+	}, nil
+}
+
+func (m *MockClient) DeleteGist(_ context.Context, gistID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.gists[gistID]; !ok {
+		return &GitHubAPIError{
+			StatusCode: 404,
+			Endpoint:   "/gists/" + gistID,
+			Body:       "gist not found",
+		}
+	}
+	delete(m.gists, gistID)
+	m.deletedGists = append(m.deletedGists, gistID)
+	return nil
+}
+
+// Gists returns all currently-stored gists for test inspection.
+func (m *MockClient) Gists() map[string]mockGist {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make(map[string]mockGist, len(m.gists))
+	for k, v := range m.gists {
+		out[k] = v
+	}
+	return out
+}
+
+// DeletedGists returns the IDs of gists that were deleted, in call order.
+func (m *MockClient) DeletedGists() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]string, len(m.deletedGists))
+	copy(out, m.deletedGists)
+	return out
+}
+
 // --- Setter methods for HTTP control endpoints ---
 
 // SetUser sets the authenticated username.
@@ -451,6 +524,9 @@ func (m *MockClient) Reset() {
 	m.submittedReviews = nil
 	m.mergedPRs = nil
 	m.mergeMethods = make(map[repoKey]RepoMergeMethods)
+	m.gists = make(map[string]mockGist)
+	m.deletedGists = nil
+	m.nextGistID = 0
 }
 
 // SubmittedReviews returns all recorded SubmitReview calls.

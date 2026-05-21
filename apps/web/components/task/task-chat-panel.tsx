@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
-import { PanelRoot, PanelBody } from "./panel-primitives";
+import { useCallback, useEffect, useMemo, useRef, useState, memo, type RefObject } from "react";
+import { PanelRoot, PanelBody, PanelHeaderBarSplit } from "./panel-primitives";
+import { ShareButton } from "@/components/task/share/share-button";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
 import { MessageList } from "@/components/task/chat/message-list";
@@ -17,6 +18,7 @@ import { usePanelSearch } from "@/hooks/use-panel-search";
 import { useSessionSearch } from "@/hooks/domains/session/use-session-search";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import { useAppStore } from "@/components/state-provider";
+import type { Message } from "@/lib/types/http";
 
 function useClarificationKey(agentMessageCount: number) {
   const lastCountRef = useRef(agentMessageCount);
@@ -185,20 +187,16 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   // plan/terminal panels), so clicking a message leaves focus on <body>. Make
   // the panel root itself focusable and route non-interactive clicks to it so
   // Ctrl+F can detect focus within the session panel.
-  const handlePanelMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const target = e.target as HTMLElement | null;
-    if (!target) return;
-    // Exclude `tabindex="-1"` so we don't match PanelRoot itself (which is
-    // marked focus-receivable but shouldn't short-circuit this handler).
-    if (
-      target.closest(
-        "input, textarea, select, button, a, [contenteditable], [tabindex]:not([tabindex='-1'])",
-      )
-    ) {
-      return;
-    }
-    panelRef.current?.focus({ preventScroll: true });
-  }, []);
+  const handlePanelMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => routePanelMouseDown(e, panelRef),
+    [],
+  );
+
+  const sessionState = session?.state ?? null;
+  const shareIds =
+    taskId && resolvedSessionId && shareableSessionStateClient(sessionState)
+      ? { taskId, sessionId: resolvedSessionId }
+      : null;
 
   return (
     <PanelRoot
@@ -209,6 +207,11 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       onMouseDown={handlePanelMouseDown}
       className="outline-none"
     >
+      {shareIds && (
+        <PanelHeaderBarSplit
+          right={<ShareButton taskId={shareIds.taskId} sessionId={shareIds.sessionId} iconOnly />}
+        />
+      )}
       <PanelBody padding={false} className="relative">
         <MessageList
           items={groupedItems}
@@ -227,40 +230,143 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         />
         <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
       </PanelBody>
-      {pendingClarification && !isArchived && (
-        <div className="relative flex-shrink-0 border-t border-sky-400/30 bg-card">
-          <ResizeHandle {...clarificationResizeProps} />
-          <div
-            ref={clarificationContainerRef}
-            data-testid="clarification-overlay-container"
-            className="px-1 overflow-y-scroll overscroll-contain max-h-[50vh]"
-            style={clarificationHeight === null ? undefined : { height: clarificationHeight }}
-          >
-            <ClarificationInputOverlay
-              messages={pendingClarificationGroup}
-              onResolved={handleClarificationResolved}
-            />
-          </div>
-        </div>
-      )}
-      {isArchived ? (
-        <div className="bg-muted/50 flex-shrink-0 px-4 py-3 text-center text-sm text-muted-foreground border-t">
-          This task is archived and read-only.
-        </div>
-      ) : (
-        <ChatInputArea
-          chatInputRef={chatInputRef}
-          clarificationKey={clarificationKey}
-          onClarificationResolved={handleClarificationResolved}
-          handleSubmit={handleSubmit}
-          handleCancelTurn={handleCancelTurn}
-          showRequestChangesTooltip={showRequestChangesTooltip}
-          onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
-          panelState={panelState}
-          isSending={isSending}
-          hideSessionsDropdown={hideSessionsDropdown}
-        />
-      )}
+      <ClarificationSection
+        pendingClarification={pendingClarification}
+        isArchived={isArchived}
+        containerRef={clarificationContainerRef}
+        resizeProps={clarificationResizeProps}
+        height={clarificationHeight}
+        messages={pendingClarificationGroup}
+        onResolved={handleClarificationResolved}
+      />
+      <ChatFooter
+        isArchived={isArchived}
+        chatInputRef={chatInputRef}
+        clarificationKey={clarificationKey}
+        onClarificationResolved={handleClarificationResolved}
+        handleSubmit={handleSubmit}
+        handleCancelTurn={handleCancelTurn}
+        showRequestChangesTooltip={showRequestChangesTooltip}
+        onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
+        panelState={panelState}
+        isSending={isSending}
+        hideSessionsDropdown={hideSessionsDropdown}
+      />
     </PanelRoot>
   );
 });
+
+type ClarificationSectionProps = {
+  pendingClarification: boolean;
+  isArchived: boolean;
+  containerRef: RefObject<HTMLDivElement | null>;
+  resizeProps: { onMouseDown: (e: React.MouseEvent) => void; onDoubleClick: () => void };
+  height: number | null;
+  messages: readonly Message[] | null | undefined;
+  onResolved: () => void;
+};
+
+function ClarificationSection({
+  pendingClarification,
+  isArchived,
+  containerRef,
+  resizeProps,
+  height,
+  messages,
+  onResolved,
+}: ClarificationSectionProps) {
+  if (!pendingClarification || isArchived) return null;
+  return (
+    <div className="relative flex-shrink-0 border-t border-sky-400/30 bg-card">
+      <ResizeHandle {...resizeProps} />
+      <div
+        ref={containerRef}
+        data-testid="clarification-overlay-container"
+        className="px-1 overflow-y-scroll overscroll-contain max-h-[50vh]"
+        style={height === null ? undefined : { height }}
+      >
+        <ClarificationInputOverlay messages={messages} onResolved={onResolved} />
+      </div>
+    </div>
+  );
+}
+
+type ChatFooterProps = {
+  isArchived: boolean;
+  chatInputRef: RefObject<
+    import("@/components/task/chat/chat-input-container").ChatInputContainerHandle | null
+  >;
+  clarificationKey: number;
+  onClarificationResolved: () => void;
+  handleSubmit: ReturnType<typeof useSubmitHandler>["handleSubmit"];
+  handleCancelTurn: () => Promise<void>;
+  showRequestChangesTooltip: boolean;
+  onRequestChangesTooltipDismiss?: () => void;
+  panelState: ReturnType<typeof useChatPanelState>;
+  isSending: boolean;
+  hideSessionsDropdown?: boolean;
+};
+
+function ChatFooter({
+  isArchived,
+  chatInputRef,
+  clarificationKey,
+  onClarificationResolved,
+  handleSubmit,
+  handleCancelTurn,
+  showRequestChangesTooltip,
+  onRequestChangesTooltipDismiss,
+  panelState,
+  isSending,
+  hideSessionsDropdown,
+}: ChatFooterProps) {
+  if (isArchived) {
+    return (
+      <div className="bg-muted/50 flex-shrink-0 px-4 py-3 text-center text-sm text-muted-foreground border-t">
+        This task is archived and read-only.
+      </div>
+    );
+  }
+  return (
+    <ChatInputArea
+      chatInputRef={chatInputRef}
+      clarificationKey={clarificationKey}
+      onClarificationResolved={onClarificationResolved}
+      handleSubmit={handleSubmit}
+      handleCancelTurn={handleCancelTurn}
+      showRequestChangesTooltip={showRequestChangesTooltip}
+      onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
+      panelState={panelState}
+      isSending={isSending}
+      hideSessionsDropdown={hideSessionsDropdown}
+    />
+  );
+}
+
+// routePanelMouseDown routes non-interactive clicks to the panel root so that
+// Ctrl+F can detect focus within the session panel. Extracted to keep
+// TaskChatPanel's cyclomatic complexity within limits.
+const interactiveSelector =
+  "input, textarea, select, button, a, [contenteditable], [tabindex]:not([tabindex='-1'])";
+
+function routePanelMouseDown(
+  e: React.MouseEvent<HTMLDivElement>,
+  ref: React.RefObject<HTMLDivElement | null>,
+): void {
+  const target = e.target as HTMLElement | null;
+  if (!target) return;
+  // Exclude `tabindex="-1"` so we don't match PanelRoot itself (which is
+  // marked focus-receivable but shouldn't short-circuit this handler).
+  if (target.closest(interactiveSelector)) return;
+  ref.current?.focus({ preventScroll: true });
+}
+
+// shareableSessionStateClient gates the Share entry point. Sessions that
+// haven't produced any conversation yet (CREATED / STARTING) have nothing
+// worth publishing; everything else — RUNNING, IDLE, WAITING_FOR_INPUT,
+// COMPLETED, FAILED, CANCELLED — gets the button. Backend enforces the
+// same rule (see internal/task/share/builder.go).
+function shareableSessionStateClient(state?: string | null): boolean {
+  if (!state) return false;
+  return state !== "CREATED" && state !== "STARTING";
+}

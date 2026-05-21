@@ -25,13 +25,14 @@ import (
 	"github.com/kandev/kandev/internal/slack"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/task/share"
 	userservice "github.com/kandev/kandev/internal/user/service"
 	utilityservice "github.com/kandev/kandev/internal/utility/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
 
-func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, dbPool *db.Pool, eventBus bus.EventBus, agentRegistry *registry.Registry) (*Services, *agentsettingscontroller.Controller, error) {
+func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, dbPool *db.Pool, eventBus bus.EventBus, agentRegistry *registry.Registry, version string) (*Services, *agentsettingscontroller.Controller, error) {
 	// Load custom TUI agents from DB into registry before discovery
 	loadCustomTUIAgents(context.Background(), repos, agentRegistry, log)
 
@@ -92,6 +93,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
 	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
 	slackSvc := initSlackService(dbPool, repos.Secrets, log)
+	shareHTTP := initShareHandlers(dbPool, repos.Task, githubSvc, log, version)
 
 	// Plumb GitHub branch listing into the task service so provider-backed
 	// ("Remote") repos serve branches from the GitHub API rather than relying
@@ -112,6 +114,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Jira:     jiraSvc,
 		Linear:   linearSvc,
 		Slack:    slackSvc,
+		Share:    shareHTTP,
 		// Office is constructed later in initOfficeServices once all
 		// of its dependencies (config loader, task integrations, etc.) are available.
 		Office: nil,
@@ -261,6 +264,32 @@ func initLinearService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secr
 		log.Warn("Linear service initialization failed (non-fatal)", zap.Error(err))
 	}
 	return svc
+}
+
+// initShareHandlers wires up the public-share-links HTTP surface. Failures
+// are non-fatal: the rest of the backend boots without the share endpoints.
+// The github.Client may be nil; CreateShare will fail at the IsAuthenticated
+// probe with a 412 in that case.
+func initShareHandlers(
+	dbPool *db.Pool,
+	taskRepo share.TaskReader,
+	githubSvc *github.Service,
+	log *logger.Logger,
+	version string,
+) *share.HTTPHandlers {
+	var ghClient github.Client
+	if githubSvc != nil {
+		ghClient = githubSvc.Client()
+	}
+	if ghClient == nil {
+		ghClient = &github.NoopClient{}
+	}
+	h, _, err := share.Provide(dbPool.Writer(), dbPool.Reader(), taskRepo, ghClient, log, share.Config{KandevVersion: version})
+	if err != nil {
+		log.Warn("Share handlers initialization failed (non-fatal)", zap.Error(err))
+		return nil
+	}
+	return h
 }
 
 // initSlackService wires up the Slack integration. Failures are non-fatal.

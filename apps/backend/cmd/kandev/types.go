@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/slack"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/task/share"
 	userservice "github.com/kandev/kandev/internal/user/service"
 	userstore "github.com/kandev/kandev/internal/user/store"
 	utilityservice "github.com/kandev/kandev/internal/utility/service"
@@ -54,6 +55,7 @@ type Services struct {
 	Jira         *jira.Service
 	Linear       *linear.Service
 	Slack        *slack.Service
+	Share        *share.HTTPHandlers
 	Office       *officeservice.Service
 	OfficeSvcs   *office.Services
 	// OrchScheduler is the office SchedulerIntegration constructed by

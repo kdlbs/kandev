@@ -487,6 +487,42 @@ func (c *PATClient) MergePR(ctx context.Context, owner, repo string, number int,
 	return c.put(ctx, endpoint, jsonBody)
 }
 
+func (c *PATClient) CreateGist(ctx context.Context, in CreateGistInput) (*GistResponse, error) {
+	payload := struct {
+		Description string                 `json:"description,omitempty"`
+		Public      bool                   `json:"public"`
+		Files       map[string]gistFileDTO `json:"files"`
+	}{
+		Description: in.Description,
+		Public:      in.Public,
+		Files:       make(map[string]gistFileDTO, len(in.Files)),
+	}
+	for name, f := range in.Files {
+		payload.Files[name] = gistFileDTO(f)
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal gist payload: %w", err)
+	}
+	var resp GistResponse
+	if err := c.postJSON(ctx, "/gists", body, &resp); err != nil {
+		return nil, fmt.Errorf("create gist: %w", err)
+	}
+	return &resp, nil
+}
+
+func (c *PATClient) DeleteGist(ctx context.Context, gistID string) error {
+	if gistID == "" {
+		return fmt.Errorf("delete gist: empty id")
+	}
+	return c.delete(ctx, "/gists/"+gistID)
+}
+
+// gistFileDTO mirrors the GitHub API's per-file body shape.
+type gistFileDTO struct {
+	Content string `json:"content"`
+}
+
 // post makes an authenticated HTTP POST to the GitHub API.
 // Errors on non-2xx are returned as plain `fmt.Errorf` (not `*GitHubAPIError`),
 // so callers cannot recover the HTTP status via `errors.As`. Use `put` (or
@@ -512,6 +548,60 @@ func (c *PATClient) post(ctx context.Context, endpoint string, body []byte) erro
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
 		return fmt.Errorf("GitHub API POST %s returned %d: %s", endpoint, resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+// postJSON sends a POST and decodes the response body into result.
+// 2xx with no body returns nil; 4xx/5xx returns a *GitHubAPIError.
+func (c *PATClient) postJSON(ctx context.Context, endpoint string, body []byte, result interface{}) error {
+	u := githubAPIBase + endpoint
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	c.setGitHubHeaders(req)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request POST %s: %w", endpoint, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	c.recordRateHeaders(resp, endpoint)
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
+		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(respBody)}
+	}
+	if result == nil {
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(result)
+}
+
+// delete sends a DELETE request. 2xx and 404 both return nil-or-typed-error per caller intent.
+// Here we return a typed error on any non-2xx so callers can inspect for 404.
+func (c *PATClient) delete(ctx context.Context, endpoint string) error {
+	u := githubAPIBase + endpoint
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
+	if err != nil {
+		return err
+	}
+	c.setGitHubHeaders(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request DELETE %s: %w", endpoint, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	c.recordRateHeaders(resp, endpoint)
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
+		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(respBody)}
 	}
 	return nil
 }

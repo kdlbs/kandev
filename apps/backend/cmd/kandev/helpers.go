@@ -643,6 +643,10 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
 	analyticshandlers.RegisterStatsRoutes(p.router, p.analyticsRepo, p.log)
 	agenthandlers.RegisterShellRoutes(p.router, p.lifecycleMgr, p.log)
+	if p.services.Share != nil {
+		p.services.Share.RegisterRoutes(p.router)
+		p.log.Debug("Registered Public Share Links handlers (HTTP)")
+	}
 	p.log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
 }
 

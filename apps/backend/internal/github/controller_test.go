@@ -99,6 +99,10 @@ func (s *stubClient) GetIssueState(context.Context, string, string, int) (string
 func (s *stubClient) GetPRStatus(context.Context, string, string, int) (*PRStatus, error) {
 	return nil, nil
 }
+func (s *stubClient) CreateGist(context.Context, CreateGistInput) (*GistResponse, error) {
+	return nil, nil
+}
+func (s *stubClient) DeleteGist(context.Context, string) error { return nil }
 
 func newControllerTestLogger() *logger.Logger {
 	log, _ := logger.NewLogger(logger.LoggingConfig{
