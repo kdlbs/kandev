@@ -63,14 +63,7 @@ type workspacePollAggregator struct {
 	// known to belong to that workspace. Lets recordAndCompute iterate only
 	// sessions in the affected workspace instead of scanning all sessionModes.
 	workspaceSessions map[string]map[string]bool
-	// pendingPush holds the latest mode that still needs to be pushed for a
-	// workspace, scoped to the in-flight pusher goroutine for that workspace.
-	// Map presence + pushInFlight together implement a last-write-wins queue
-	// so concurrent transitions can't race on the wire (a subscribe→focus pair
-	// would otherwise spawn two goroutines whose HTTP order is undefined; if
-	// the slow push lands after the fast push the tracker ends up in slow mode
-	// while lastPushed claims fast — and the suppress-duplicate guard then
-	// prevents any future event from ever reconciling the divergence).
+	// Last-write-wins queue: pendingPush + pushInFlight serialize per-workspace HTTP pushes so order matches enqueue.
 	pendingPush  map[string]workspacePushTarget
 	pushInFlight map[string]bool
 }
