@@ -132,11 +132,7 @@ export class WebSocketClient {
       const p = payload as { action?: string; id?: string; type?: string } | null;
       const action = p?.action ?? "?";
       if (!DISPATCH_LOG_DENYLIST.has(action)) {
-        const sessionId = (
-          (p as { payload?: { session_id?: string } } | null)?.payload as
-            | { session_id?: string }
-            | undefined
-        )?.session_id;
+        const sessionId = (p as { payload?: { session_id?: string } } | null)?.payload?.session_id;
         debugDispatch("send", {
           action,
           id: p?.id ?? null,
