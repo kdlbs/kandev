@@ -24,8 +24,7 @@ export function isPRReadyToMerge(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
   if (pr.checks_state !== "success") return false;
   if (pr.mergeable_state !== "clean") return false;
-  // Guard against stale mergeable_state: enforce required_reviews directly so
-  // this matches the popover's "K / M required" display.
+  // Guard against stale mergeable_state: enforce required_reviews to match GitHub's gate.
   if (pr.required_reviews != null && pr.review_count < pr.required_reviews) {
     return false;
   }
