@@ -364,6 +364,32 @@ func TestPATClient_IsAuthenticated_DoesNotTrustStaleCache(t *testing.T) {
 	}
 }
 
+// SearchGroupProjects must %2F-encode slashes in subgroup paths so the
+// resulting URL is /groups/acme%2Fteam/projects, not /groups/acme/team/projects
+// (which GitLab routes to the parent only and returns 404 for). Without this
+// regression test a future refactor that switched groupRef back to a bare
+// url.PathEscape would silently break subgroup lookups.
+func TestPATClient_SearchGroupProjects_EncodesSubgroupSlash(t *testing.T) {
+	var receivedPath string
+	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// EscapedPath() preserves %2F; r.URL.Path is the decoded form.
+		receivedPath = r.URL.EscapedPath()
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer stop()
+
+	c := NewPATClient(host, "tok")
+	if _, err := c.SearchGroupProjects(context.Background(), "acme/team", "", 5); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	// newTestServer mounts handlers under /api/v4/* via StripPrefix, so the
+	// handler sees the path without the /api/v4 prefix.
+	want := "/groups/acme%2Fteam/projects"
+	if receivedPath != want {
+		t.Errorf("escaped path = %q, want %q (subgroup slash must be %%2F-encoded)", receivedPath, want)
+	}
+}
+
 func TestNormalizeMRState(t *testing.T) {
 	cases := map[string]string{
 		"opened": "open",
@@ -380,14 +406,17 @@ func TestNormalizeMRState(t *testing.T) {
 }
 
 func TestSplitFullReference(t *testing.T) {
+	// projectPath is the full namespace-qualified path so callers can pass
+	// it straight to projectRef. namespace is everything before the final
+	// "/" — same shape as Project.Namespace.
 	cases := []struct {
 		in            string
 		wantNamespace string
 		wantPath      string
 	}{
-		{"group/project!42", "group", "project"},
-		{"group/sub/project!7", "group/sub", "project"},
-		{"group/project#10", "group", "project"},
+		{"group/project!42", "group", "group/project"},
+		{"group/sub/project!7", "group/sub", "group/sub/project"},
+		{"group/project#10", "group", "group/project"},
 		{"noslash", "", ""},
 		{"", "", ""},
 	}

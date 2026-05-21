@@ -218,12 +218,19 @@ func (s *Service) ClearToken(ctx context.Context) error {
 		return fmt.Errorf("delete token: %w", err)
 	}
 
-	// Rebuild the fallback client under the write lock against the
-	// current s.host. Snapshotting outside the lock would race a
-	// concurrent ConfigureHost the same way ConfigureToken used to —
-	// s.host would advertise H2 while s.client still pointed at H1.
+	// Build the fallback client outside the write lock — NewClient may
+	// shell out to `glab auth status` (up to glabAuthTimeout = 10s), and
+	// holding the write lock for that long would freeze every concurrent
+	// GetStatus / GetMRFeedback / Client() call. Pre-build against a
+	// snapshot of s.host, then swap inside a short critical section. If a
+	// concurrent ConfigureHost flipped the host underneath us the new
+	// client targets the previous host until the next reconfigure — a
+	// much narrower correctness window than 10s of blocked readers.
+	s.mu.RLock()
+	hostSnap := s.host
+	s.mu.RUnlock()
+	client, authMethod, _ := NewClient(ctx, hostSnap, s.secrets, s.logger)
 	s.mu.Lock()
-	client, authMethod, _ := NewClient(ctx, s.host, s.secrets, s.logger)
 	s.client = client
 	s.authMethod = authMethod
 	s.mu.Unlock()

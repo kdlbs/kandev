@@ -284,26 +284,24 @@ func normalizeMRState(state string) string {
 // splitFullReference parses GitLab's "namespace/path!iid" or
 // "namespace/path#iid" form into (namespace, projectPath). It is best-effort:
 // when the reference does not match it returns ("", "").
-func splitFullReference(full string) (string, string) {
+// splitFullReference parses GitLab's full-reference strings (e.g.
+// "group/sub/project!42" for an MR or "group/project#10" for an issue) into
+// (namespace, projectPath). projectPath is the *full* path-with-namespace
+// — "group/sub/project" — so callers can round-trip it back into API URLs
+// via projectRef without having to recombine namespace + name themselves.
+// namespace is everything before the final "/".
+func splitFullReference(full string) (namespace, projectPath string) {
 	for _, sep := range []string{"!", "#"} {
 		if idx := strings.Index(full, sep); idx > 0 {
 			full = full[:idx]
 			break
 		}
 	}
-	if !strings.Contains(full, "/") {
+	last := strings.LastIndex(full, "/")
+	if last <= 0 {
 		return "", ""
 	}
-	parts := strings.SplitN(full, "/", 2)
-	if len(parts) != 2 {
-		return "", ""
-	}
-	rest := parts[1]
-	last := strings.LastIndex(rest, "/")
-	if last < 0 {
-		return parts[0], rest
-	}
-	return parts[0] + "/" + rest[:last], rest[last+1:]
+	return full[:last], full
 }
 
 func hasOpenDiscussions(discussions []MRDiscussion) bool {
