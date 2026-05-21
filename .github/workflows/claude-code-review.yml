@@ -66,6 +66,30 @@ jobs:
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
             --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git rebase:*),Bash(git reset:*),Bash(gh pr edit:*),Bash(curl:*),Bash(wget:*)"
 
+  # Strip safe-to-review label on new pushes to fork PRs.
+  # Prevents a once-approved fork from running the review against updated
+  # (potentially malicious) code on subsequent pushes without a fresh
+  # maintainer re-approval. Mirrors strip-safe-to-test in preview-env.yml.
+  strip-safe-to-review:
+    if: >
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'synchronize' &&
+      github.event.pull_request.head.repo.full_name != github.repository &&
+      contains(github.event.pull_request.labels.*.name, 'safe-to-review')
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              name: 'safe-to-review',
+            });
+
   claude-review-fork:
     # Fork PRs only, via pull_request_target so secrets are available.
     # Gated by allowlist: OWNER/MEMBER/COLLABORATOR author, `safe-to-review`
