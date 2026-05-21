@@ -22,6 +22,7 @@ import type {
   AutomationTrigger,
   TriggerTypeInfo,
   PlaceholderInfo,
+  ExecutionMode,
 } from "@/lib/types/automation";
 import { TriggersSection } from "./triggers-section";
 import { PromptSection } from "./prompt-section";
@@ -42,6 +43,7 @@ type FormState = {
   executorProfileId: string;
   prompt: string;
   taskTitleTemplate: string;
+  executionMode: ExecutionMode;
   enabled: boolean;
   maxConcurrentRuns: number;
 };
@@ -64,6 +66,7 @@ const defaultForm: FormState = {
   executorProfileId: "",
   prompt: DEFAULT_PROMPT,
   taskTitleTemplate: "",
+  executionMode: "task",
   enabled: true,
   maxConcurrentRuns: 1,
 };
@@ -78,6 +81,7 @@ function formFromAutomation(a: Automation): FormState {
     executorProfileId: a.executor_profile_id,
     prompt: a.prompt || DEFAULT_PROMPT,
     taskTitleTemplate: a.task_title_template ?? "",
+    executionMode: a.execution_mode ?? "task",
     enabled: a.enabled,
     maxConcurrentRuns: a.max_concurrent_runs,
   };
@@ -186,6 +190,7 @@ function buildCreatePayload(workspaceId: string, form: FormState, pending: Pendi
     executor_profile_id: form.executorProfileId,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
+    execution_mode: form.executionMode,
     max_concurrent_runs: form.maxConcurrentRuns,
     triggers: pending.map((t) => ({ type: t.type, config: t.config, enabled: t.enabled })),
   };
@@ -201,6 +206,7 @@ function buildUpdatePayload(form: FormState) {
     executor_profile_id: form.executorProfileId,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
+    execution_mode: form.executionMode,
     enabled: form.enabled,
     max_concurrent_runs: form.maxConcurrentRuns,
   };
@@ -419,6 +425,7 @@ function ThenSection({
           workflowStepId={form.workflowStepId}
           agentProfileId={form.agentProfileId}
           executorProfileId={form.executorProfileId}
+          executionMode={form.executionMode}
           onWorkflowChange={(v) => {
             updateField("workflowId", v);
             updateField("workflowStepId", "");
@@ -426,6 +433,7 @@ function ThenSection({
           onStepChange={(v) => updateField("workflowStepId", v)}
           onAgentProfileChange={(v) => updateField("agentProfileId", v)}
           onExecutorProfileChange={(v) => updateField("executorProfileId", v)}
+          onExecutionModeChange={(v) => updateField("executionMode", v)}
         />
       </div>
     </div>

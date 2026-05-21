@@ -87,6 +87,10 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 		return
 	}
 
+	// Run-mode automations create an ephemeral task hidden from the kanban —
+	// the user surfaces them through the AutomationRun row instead. The
+	// existing session/launch pipeline still runs against the task.
+	isRunMode := a.ExecutionMode == automation.ExecutionModeRun
 	task, taskErr := s.reviewTaskCreator.CreateReviewTask(ctx, &ReviewTaskRequest{
 		WorkspaceID:    a.WorkspaceID,
 		WorkflowID:     a.WorkflowID,
@@ -101,7 +105,10 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 			"trigger_type":        string(evt.TriggerType),
 			"agent_profile_id":    a.AgentProfileID,
 			"executor_profile_id": a.ExecutorProfileID,
+			"execution_mode":      string(a.ExecutionMode),
 		},
+		IsEphemeral: isRunMode,
+		Origin:      models.TaskOriginAutomationRun,
 	})
 	if taskErr != nil {
 		s.logger.Error("failed to create automation task",
@@ -121,10 +128,13 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 	s.logger.Info("created automation task",
 		zap.String("task_id", task.ID),
 		zap.String("automation_id", a.ID),
+		zap.String("execution_mode", string(a.ExecutionMode)),
 		zap.String("trigger_type", string(evt.TriggerType)))
 
-	// Auto-start if the target step has auto_start_agent on_enter.
-	if !s.shouldAutoStartStep(ctx, a.WorkflowStepID) {
+	// Auto-start: always for run-mode (the user never sees the task, so no
+	// kanban drag triggers it); otherwise honour the workflow step's
+	// auto_start_agent on_enter setting.
+	if !isRunMode && !s.shouldAutoStartStep(ctx, a.WorkflowStepID) {
 		return
 	}
 	s.autoStartAutomationTask(ctx, a, task)

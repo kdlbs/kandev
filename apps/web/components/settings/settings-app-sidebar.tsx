@@ -113,7 +113,6 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
             const workspacePath = `/settings/workspace/${workspace.id}`;
             const workflowsPath = `${workspacePath}/workflows`;
             const repositoriesPath = `${workspacePath}/repositories`;
-            const automationsPath = `${workspacePath}/automations`;
 
             return (
               <SidebarMenuSubItem key={workspace.id}>
@@ -140,18 +139,6 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
                       <Link href={workflowsPath}>
                         <IconArrowsShuffle className="h-3.5 w-3.5" />
                         <span>Workflows</span>
-                      </Link>
-                    </SidebarMenuSubButton>
-                  </SidebarMenuSubItem>
-                  <SidebarMenuSubItem>
-                    <SidebarMenuSubButton
-                      asChild
-                      size="sm"
-                      isActive={pathname.startsWith(automationsPath)}
-                    >
-                      <Link href={automationsPath}>
-                        <IconBolt className="h-3.5 w-3.5" />
-                        <span>Automations</span>
                       </Link>
                     </SidebarMenuSubButton>
                   </SidebarMenuSubItem>
@@ -359,6 +346,23 @@ export function SettingsAppSidebar() {
                 </SidebarMenuItem>
 
                 <ExecutorsSidebarSection pathname={pathname} executors={executors} />
+
+                {/* Automations */}
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={
+                      pathname.startsWith("/settings/automations") ||
+                      pathname.includes("/automations")
+                    }
+                  >
+                    <Link href="/settings/automations">
+                      <IconBolt className="h-4 w-4" />
+                      <span>Automations</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
                 <SecretsSidebarSection pathname={pathname} />
 
                 {/* External MCP */}

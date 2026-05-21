@@ -7,6 +7,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
+import type { ExecutionMode } from "@/lib/types/automation";
 
 type ConfigSectionProps = {
   workspaceId: string;
@@ -14,10 +15,12 @@ type ConfigSectionProps = {
   workflowStepId: string;
   agentProfileId: string;
   executorProfileId: string;
+  executionMode: ExecutionMode;
   onWorkflowChange: (id: string) => void;
   onStepChange: (id: string) => void;
   onAgentProfileChange: (id: string) => void;
   onExecutorProfileChange: (id: string) => void;
+  onExecutionModeChange: (mode: ExecutionMode) => void;
 };
 
 type StepOption = { id: string; name: string };
@@ -51,10 +54,12 @@ export function ConfigSection({
   workflowStepId,
   agentProfileId,
   executorProfileId,
+  executionMode,
   onWorkflowChange,
   onStepChange,
   onAgentProfileChange,
   onExecutorProfileChange,
+  onExecutionModeChange,
 }: ConfigSectionProps) {
   useSettingsData(true);
   useWorkflows(workspaceId, true);
@@ -111,6 +116,17 @@ export function ConfigSection({
           onChange={onExecutorProfileChange}
           placeholder="Select executor"
           items={allExecutorProfiles.map((p) => ({ id: p.id, label: p.name }))}
+        />
+        <SelectField
+          testId="execution-mode-selector"
+          label="Execution Mode"
+          value={executionMode}
+          onChange={(v) => onExecutionModeChange(v as ExecutionMode)}
+          placeholder="Select mode"
+          items={[
+            { id: "task", label: "Task — creates a tracked kanban task" },
+            { id: "run", label: "Run — fire-and-forget, hidden from kanban" },
+          ]}
         />
       </div>
     </div>

@@ -4,6 +4,11 @@ export type TriggerType = "scheduled" | "github_pr" | "github_push" | "github_ci
 
 export type RunStatus = "triggered" | "task_created" | "failed" | "skipped";
 
+// ExecutionMode controls whether an automation firing creates a visible
+// kanban task ("task", the default) or an ephemeral run hidden from the
+// kanban whose output is surfaced via the automation's run history ("run").
+export type ExecutionMode = "task" | "run";
+
 export type Automation = {
   id: string;
   workspace_id: string;
@@ -15,6 +20,7 @@ export type Automation = {
   executor_profile_id: string;
   prompt: string;
   task_title_template: string;
+  execution_mode: ExecutionMode;
   enabled: boolean;
   max_concurrent_runs: number;
   last_triggered_at: string | null;
@@ -110,6 +116,7 @@ export type CreateAutomationRequest = {
   executor_profile_id: string;
   prompt?: string;
   task_title_template?: string;
+  execution_mode?: ExecutionMode;
   max_concurrent_runs?: number;
   triggers?: Array<{
     type: TriggerType;
@@ -127,6 +134,7 @@ export type UpdateAutomationRequest = {
   executor_profile_id?: string;
   prompt?: string;
   task_title_template?: string;
+  execution_mode?: ExecutionMode;
   enabled?: boolean;
   max_concurrent_runs?: number;
 };

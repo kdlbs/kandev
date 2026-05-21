@@ -82,12 +82,18 @@ const migrateTaskTitleSQL = `
 	ALTER TABLE automations ADD COLUMN task_title_template TEXT DEFAULT '';
 `
 
+const migrateExecutionModeSQL = `
+	ALTER TABLE automations ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'task';
+`
+
 func (s *Store) initSchema() error {
 	if _, err := s.db.Exec(createTablesSQL); err != nil {
 		return err
 	}
-	// Idempotent migration: add task_title_template column if missing.
-	s.db.Exec(migrateTaskTitleSQL) //nolint:errcheck // column may already exist
+	// Idempotent migrations: each ALTER adds a column if missing; SQLite
+	// returns a duplicate-column error otherwise, which we swallow.
+	s.db.Exec(migrateTaskTitleSQL)     //nolint:errcheck // column may already exist
+	s.db.Exec(migrateExecutionModeSQL) //nolint:errcheck // column may already exist
 	return nil
 }
 
@@ -104,13 +110,18 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	now := time.Now().UTC()
 	a.CreatedAt = now
 	a.UpdatedAt = now
+	if a.ExecutionMode == "" {
+		a.ExecutionMode = ExecutionModeTask
+	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO automations (id, workspace_id, name, description, workflow_id, workflow_step_id,
-			agent_profile_id, executor_profile_id, prompt, task_title_template, enabled, max_concurrent_runs,
+			agent_profile_id, executor_profile_id, prompt, task_title_template, execution_mode,
+			enabled, max_concurrent_runs,
 			webhook_secret, last_triggered_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.WorkspaceID, a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
-		a.AgentProfileID, a.ExecutorProfileID, a.Prompt, a.TaskTitleTemplate, a.Enabled, a.MaxConcurrentRuns,
+		a.AgentProfileID, a.ExecutorProfileID, a.Prompt, a.TaskTitleTemplate, string(a.ExecutionMode),
+		a.Enabled, a.MaxConcurrentRuns,
 		a.WebhookSecret, a.LastTriggeredAt, a.CreatedAt, a.UpdatedAt)
 	return err
 }
@@ -223,15 +234,21 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 	if req.TaskTitleTemplate != nil {
 		a.TaskTitleTemplate = *req.TaskTitleTemplate
 	}
+	if req.ExecutionMode != nil {
+		a.ExecutionMode = *req.ExecutionMode
+	}
+	if !a.ExecutionMode.Valid() {
+		a.ExecutionMode = ExecutionModeTask
+	}
 	a.UpdatedAt = time.Now().UTC()
 	_, err = s.db.ExecContext(ctx, `
 		UPDATE automations SET name = ?, description = ?, workflow_id = ?, workflow_step_id = ?,
 			agent_profile_id = ?, executor_profile_id = ?, prompt = ?, task_title_template = ?,
-			enabled = ?, max_concurrent_runs = ?, updated_at = ?
+			execution_mode = ?, enabled = ?, max_concurrent_runs = ?, updated_at = ?
 		WHERE id = ?`,
 		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID, a.Prompt, a.TaskTitleTemplate,
-		a.Enabled, a.MaxConcurrentRuns, a.UpdatedAt, id)
+		string(a.ExecutionMode), a.Enabled, a.MaxConcurrentRuns, a.UpdatedAt, id)
 	return err
 }
 

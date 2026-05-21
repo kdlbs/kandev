@@ -106,6 +106,7 @@ export function AutomationsTable({
         <TableHeader>
           <TableRow>
             <TableHead>Name</TableHead>
+            <TableHead>Mode</TableHead>
             <TableHead>Triggers</TableHead>
             <TableHead>Enabled</TableHead>
             <TableHead>Last Triggered</TableHead>
@@ -116,7 +117,7 @@ export function AutomationsTable({
           {automations.length === 0 ? (
             <TableRow>
               <TableCell
-                colSpan={5}
+                colSpan={6}
                 className="text-center text-muted-foreground py-8"
                 data-testid="automations-empty"
               >
@@ -134,6 +135,11 @@ export function AutomationsTable({
                 }
               >
                 <TableCell className="font-medium">{a.name}</TableCell>
+                <TableCell>
+                  <Badge variant="outline" className="text-[10px]">
+                    {a.execution_mode === "run" ? "Run" : "Task"}
+                  </Badge>
+                </TableCell>
                 <TableCell>
                   <TriggerBadges triggers={a.triggers} />
                 </TableCell>

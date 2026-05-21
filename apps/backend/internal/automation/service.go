@@ -56,6 +56,10 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 		maxRuns = 1
 	}
 
+	mode := req.ExecutionMode
+	if !mode.Valid() {
+		mode = ExecutionModeTask
+	}
 	a := &Automation{
 		WorkspaceID:       req.WorkspaceID,
 		Name:              req.Name,
@@ -66,6 +70,7 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 		ExecutorProfileID: req.ExecutorProfileID,
 		Prompt:            req.Prompt,
 		TaskTitleTemplate: req.TaskTitleTemplate,
+		ExecutionMode:     mode,
 		Enabled:           true,
 		MaxConcurrentRuns: maxRuns,
 	}

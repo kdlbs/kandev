@@ -31,24 +31,46 @@ const (
 	RunStatusSkipped     RunStatus = "skipped"
 )
 
+// ExecutionMode controls whether an automation firing creates a visible
+// kanban task or a fire-and-forget ephemeral run.
+type ExecutionMode string
+
+const (
+	// ExecutionModeTask is the default: a trigger fires, a normal kanban
+	// task is created, the user can see/track/comment on it.
+	ExecutionModeTask ExecutionMode = "task"
+	// ExecutionModeRun is the lightweight path: a trigger fires, an
+	// ephemeral task is created so the session pipeline still works, but
+	// the task is hidden from the kanban. Only the AutomationRun row is
+	// surfaced to the user. Intended for "scheduled prompt that produces
+	// output the user just reads" use cases.
+	ExecutionModeRun ExecutionMode = "run"
+)
+
+// Valid reports whether the execution mode is a recognised value.
+func (m ExecutionMode) Valid() bool {
+	return m == ExecutionModeTask || m == ExecutionModeRun
+}
+
 // Automation is a named rule with triggers, a prompt template, and agent/executor config.
 type Automation struct {
-	ID                string     `json:"id" db:"id"`
-	WorkspaceID       string     `json:"workspace_id" db:"workspace_id"`
-	Name              string     `json:"name" db:"name"`
-	Description       string     `json:"description" db:"description"`
-	WorkflowID        string     `json:"workflow_id" db:"workflow_id"`
-	WorkflowStepID    string     `json:"workflow_step_id" db:"workflow_step_id"`
-	AgentProfileID    string     `json:"agent_profile_id" db:"agent_profile_id"`
-	ExecutorProfileID string     `json:"executor_profile_id" db:"executor_profile_id"`
-	Prompt            string     `json:"prompt" db:"prompt"`
-	TaskTitleTemplate string     `json:"task_title_template" db:"task_title_template"`
-	Enabled           bool       `json:"enabled" db:"enabled"`
-	MaxConcurrentRuns int        `json:"max_concurrent_runs" db:"max_concurrent_runs"`
-	WebhookSecret     string     `json:"-" db:"webhook_secret"`
-	LastTriggeredAt   *time.Time `json:"last_triggered_at,omitempty" db:"last_triggered_at"`
-	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at" db:"updated_at"`
+	ID                string        `json:"id" db:"id"`
+	WorkspaceID       string        `json:"workspace_id" db:"workspace_id"`
+	Name              string        `json:"name" db:"name"`
+	Description       string        `json:"description" db:"description"`
+	WorkflowID        string        `json:"workflow_id" db:"workflow_id"`
+	WorkflowStepID    string        `json:"workflow_step_id" db:"workflow_step_id"`
+	AgentProfileID    string        `json:"agent_profile_id" db:"agent_profile_id"`
+	ExecutorProfileID string        `json:"executor_profile_id" db:"executor_profile_id"`
+	Prompt            string        `json:"prompt" db:"prompt"`
+	TaskTitleTemplate string        `json:"task_title_template" db:"task_title_template"`
+	ExecutionMode     ExecutionMode `json:"execution_mode" db:"execution_mode"`
+	Enabled           bool          `json:"enabled" db:"enabled"`
+	MaxConcurrentRuns int           `json:"max_concurrent_runs" db:"max_concurrent_runs"`
+	WebhookSecret     string        `json:"-" db:"webhook_secret"`
+	LastTriggeredAt   *time.Time    `json:"last_triggered_at,omitempty" db:"last_triggered_at"`
+	CreatedAt         time.Time     `json:"created_at" db:"created_at"`
+	UpdatedAt         time.Time     `json:"updated_at" db:"updated_at"`
 
 	// Hydrated separately, not stored in the automations table.
 	Triggers []AutomationTrigger `json:"triggers" db:"-"`
@@ -131,6 +153,7 @@ type CreateAutomationRequest struct {
 	ExecutorProfileID string              `json:"executor_profile_id"`
 	Prompt            string              `json:"prompt"`
 	TaskTitleTemplate string              `json:"task_title_template"`
+	ExecutionMode     ExecutionMode       `json:"execution_mode"`
 	MaxConcurrentRuns int                 `json:"max_concurrent_runs"`
 	Triggers          []CreateTriggerSpec `json:"triggers"`
 }
@@ -144,16 +167,17 @@ type CreateTriggerSpec struct {
 
 // UpdateAutomationRequest is the payload for updating an automation.
 type UpdateAutomationRequest struct {
-	Name              *string `json:"name,omitempty"`
-	Description       *string `json:"description,omitempty"`
-	WorkflowID        *string `json:"workflow_id,omitempty"`
-	WorkflowStepID    *string `json:"workflow_step_id,omitempty"`
-	AgentProfileID    *string `json:"agent_profile_id,omitempty"`
-	ExecutorProfileID *string `json:"executor_profile_id,omitempty"`
-	Prompt            *string `json:"prompt,omitempty"`
-	TaskTitleTemplate *string `json:"task_title_template,omitempty"`
-	Enabled           *bool   `json:"enabled,omitempty"`
-	MaxConcurrentRuns *int    `json:"max_concurrent_runs,omitempty"`
+	Name              *string        `json:"name,omitempty"`
+	Description       *string        `json:"description,omitempty"`
+	WorkflowID        *string        `json:"workflow_id,omitempty"`
+	WorkflowStepID    *string        `json:"workflow_step_id,omitempty"`
+	AgentProfileID    *string        `json:"agent_profile_id,omitempty"`
+	ExecutorProfileID *string        `json:"executor_profile_id,omitempty"`
+	Prompt            *string        `json:"prompt,omitempty"`
+	TaskTitleTemplate *string        `json:"task_title_template,omitempty"`
+	ExecutionMode     *ExecutionMode `json:"execution_mode,omitempty"`
+	Enabled           *bool          `json:"enabled,omitempty"`
+	MaxConcurrentRuns *int           `json:"max_concurrent_runs,omitempty"`
 }
 
 // AddTriggerRequest adds a trigger to an existing automation.

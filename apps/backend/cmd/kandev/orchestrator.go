@@ -256,6 +256,8 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		Description:    req.Description,
 		Metadata:       req.Metadata,
 		Repositories:   repos,
+		IsEphemeral:    req.IsEphemeral,
+		Origin:         req.Origin,
 	})
 }
 
