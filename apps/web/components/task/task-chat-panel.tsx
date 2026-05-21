@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, memo, type RefObject } from "react";
-import { PanelRoot, PanelBody, PanelHeaderBarSplit } from "./panel-primitives";
-import { ShareButton } from "@/components/task/share/share-button";
+import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
 import { MessageList } from "@/components/task/chat/message-list";
@@ -192,12 +191,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     [],
   );
 
-  const sessionState = session?.state ?? null;
-  const shareIds =
-    taskId && resolvedSessionId && shareableSessionStateClient(sessionState)
-      ? { taskId, sessionId: resolvedSessionId }
-      : null;
-
   return (
     <PanelRoot
       ref={panelRef}
@@ -207,11 +200,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       onMouseDown={handlePanelMouseDown}
       className="outline-none"
     >
-      {shareIds && (
-        <PanelHeaderBarSplit
-          right={<ShareButton taskId={shareIds.taskId} sessionId={shareIds.sessionId} iconOnly />}
-        />
-      )}
       <PanelBody padding={false} className="relative">
         <MessageList
           items={groupedItems}
@@ -359,14 +347,4 @@ function routePanelMouseDown(
   // marked focus-receivable but shouldn't short-circuit this handler).
   if (target.closest(interactiveSelector)) return;
   ref.current?.focus({ preventScroll: true });
-}
-
-// shareableSessionStateClient gates the Share entry point. Sessions that
-// haven't produced any conversation yet (CREATED / STARTING) have nothing
-// worth publishing; everything else — RUNNING, IDLE, WAITING_FOR_INPUT,
-// COMPLETED, FAILED, CANCELLED — gets the button. Backend enforces the
-// same rule (see internal/task/share/builder.go).
-function shareableSessionStateClient(state?: string | null): boolean {
-  if (!state) return false;
-  return state !== "CREATED" && state !== "STARTING";
 }

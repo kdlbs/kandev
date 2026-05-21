@@ -6,6 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { TodoIndicator } from "./todo-indicator";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
+import { ShareButton, shareableSessionStateClient } from "@/components/task/share/share-button";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useMessageHandler, buildTaskMentionsContext } from "@/hooks/use-message-handler";
@@ -299,6 +300,8 @@ type TodoDisplayItem = {
 function ChatStatusBar({
   todoItems,
   taskId,
+  sessionId,
+  sessionState,
   nextStepName,
   onProceed,
   isAgentBusy,
@@ -306,6 +309,8 @@ function ChatStatusBar({
 }: {
   todoItems: TodoDisplayItem[];
   taskId: string | null;
+  sessionId: string | null;
+  sessionState: string | null;
   nextStepName: string | null;
   onProceed: () => void;
   isAgentBusy: boolean;
@@ -313,6 +318,7 @@ function ChatStatusBar({
 }) {
   const showTodos = todoItems.length > 0;
   const showProceed = !!nextStepName && !isAgentBusy;
+  const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
   // PRMergedBanner returns null internally when not applicable
   return (
     <div
@@ -322,6 +328,11 @@ function ChatStatusBar({
       {showTodos && <TodoIndicator todos={todoItems} />}
       <PRStatusChip taskId={taskId} />
       {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
+      {canShare && taskId && sessionId && (
+        <div className="ml-auto">
+          <ShareButton taskId={taskId} sessionId={sessionId} iconOnly />
+        </div>
+      )}
       {showProceed && (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -329,7 +340,7 @@ function ChatStatusBar({
               type="button"
               variant="outline"
               size="sm"
-              className="ml-auto h-6 gap-1 px-2.5 text-xs cursor-pointer text-primary"
+              className={`${canShare ? "" : "ml-auto "}h-6 gap-1 px-2.5 text-xs cursor-pointer text-primary`}
               onClick={onProceed}
               disabled={isMoving}
               data-testid="proceed-next-step"
@@ -432,6 +443,8 @@ export function ChatInputArea({
       <ChatStatusBar
         todoItems={todoItems}
         taskId={taskId}
+        sessionId={resolvedSessionId}
+        sessionState={panelState.session?.state ?? null}
         nextStepName={proceedStepName}
         onProceed={proceed}
         isAgentBusy={isAgentBusy}
