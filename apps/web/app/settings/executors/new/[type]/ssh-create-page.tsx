@@ -81,7 +81,7 @@ function SSHCreateHeader() {
             </Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Connect to a remote host over SSH and run agentctl there. linux/amd64 only in v1.
+            Connect to a remote host over SSH and run agentctl there. linux/amd64 hosts only.
           </p>
         </div>
         <Button

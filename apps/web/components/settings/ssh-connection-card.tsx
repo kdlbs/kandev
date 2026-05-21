@@ -229,7 +229,7 @@ export function SSHConnectionCard(props: SSHConnectionCardProps) {
               Connection
             </CardTitle>
             <CardDescription>
-              Run an agent on any Linux box you can reach over SSH. linux/amd64 only in v1.
+              Run an agent on any Linux box you can reach over SSH. linux/amd64 hosts only.
             </CardDescription>
           </div>
           <ConnectionBadge fingerprint={c.form.host_fingerprint} />
@@ -340,7 +340,7 @@ function SSHConnectionForm({
         id="ssh-proxy-jump"
         testId="ssh-input-proxy-jump"
         label="ProxyJump (optional)"
-        hint="Single bastion hop. Chained jumps unsupported in v1."
+        hint="Single bastion hop. Chained jumps are not supported."
         placeholder="bastion.example.com"
         value={form.proxy_jump ?? ""}
         onChange={(v) => onChange("proxy_jump", v)}
