@@ -44,7 +44,7 @@ function TaskDTOBody({ task }: { task: Record<string, unknown> | undefined }) {
       <div className="flex items-center gap-2 flex-wrap">
         <TaskStateBadge state={state} />
         {title && <span className="text-sm font-medium">{title}</span>}
-        <IdChip id={id} label="id" />
+        <IdChip id={id} />
       </div>
       {description && (
         <div className="text-xs text-muted-foreground whitespace-pre-wrap line-clamp-4">
@@ -52,8 +52,8 @@ function TaskDTOBody({ task }: { task: Record<string, unknown> | undefined }) {
         </div>
       )}
       <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground/70">
-        {workflowId && <IdChip id={workflowId} label="workflow" />}
-        {stepId && <IdChip id={stepId} label="step" />}
+        {workflowId && <IdChip id={workflowId} />}
+        {stepId && <IdChip id={stepId} />}
       </div>
       <RepoChips repos={repos} />
     </>
@@ -116,7 +116,7 @@ export const UpdateTaskRenderer: KandevRenderer = ({ args, result, status }) => 
       title="Kandev: Update Task"
       summary={
         <span className="inline-flex items-center gap-1.5">
-          <IdChip id={taskId} label="task" />
+          <IdChip id={taskId} />
           {changes.length > 0 && (
             <>
               <SummaryDot />
@@ -161,9 +161,9 @@ export const MoveTaskRenderer: KandevRenderer = ({ args, result, status }) => {
       title="Kandev: Move Task"
       summary={
         <span className="inline-flex items-center gap-1.5">
-          <IdChip id={taskId} label="task" />
+          <IdChip id={taskId} />
           <SummaryDot />
-          <IdChip id={stepId} label="step" />
+          <IdChip id={stepId} />
         </span>
       }
       status={status}
@@ -209,7 +209,7 @@ export const MessageTaskRenderer: KandevRenderer = ({ args, result, status }) =>
       title="Kandev: Message Task"
       summary={
         <span className="inline-flex items-center gap-1.5 min-w-0">
-          <IdChip id={taskId} label="task" />
+          <IdChip id={taskId} />
           {promptShort && (
             <>
               <SummaryDot />

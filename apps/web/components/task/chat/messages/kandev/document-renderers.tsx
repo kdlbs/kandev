@@ -70,7 +70,7 @@ export const GetTaskPlanRenderer: KandevRenderer = ({ args, result, status }) =>
       title="Kandev: Get Task Plan"
       summary={
         <span className="inline-flex items-center gap-1.5">
-          <IdChip id={taskId} label="task" />
+          <IdChip id={taskId} />
           <SummaryDot />
           <span>{hasPlan ? summarizeContent(content) : "no plan"}</span>
         </span>
@@ -110,11 +110,11 @@ export const CreateTaskPlanRenderer: KandevRenderer = ({ args, result, status })
       title="Kandev: Create Task Plan"
       summary={
         <span className="inline-flex items-center gap-1.5">
-          <IdChip id={taskId} label="task" />
+          <IdChip id={taskId} />
           {resultId && (
             <>
               <SummaryDot />
-              <IdChip id={resultId} label="plan" />
+              <IdChip id={resultId} />
             </>
           )}
         </span>
@@ -147,7 +147,7 @@ export const UpdateTaskPlanRenderer: KandevRenderer = ({ args, result, status })
       title="Kandev: Update Task Plan"
       summary={
         <span className="inline-flex items-center gap-1.5">
-          <IdChip id={taskId} label="task" />
+          <IdChip id={taskId} />
           <SummaryDot />
           <span>{summarizeContent(displayContent)}</span>
         </span>
@@ -175,7 +175,7 @@ export const DeleteTaskPlanRenderer: KandevRenderer = ({ args, status }) => {
     <KandevRow
       Icon={IconTrash}
       title="Kandev: Delete Task Plan"
-      summary={<IdChip id={taskId} label="task" />}
+      summary={<IdChip id={taskId} />}
       status={status}
       hasExpandableContent={false}
     />
@@ -197,7 +197,7 @@ export const GetTaskDocumentRenderer: KandevRenderer = ({ args, result, status }
       title="Kandev: Get Task Document"
       summary={
         <span className="inline-flex items-center gap-1.5">
-          <IdChip id={taskId} label="task" />
+          <IdChip id={taskId} />
           {docKey && (
             <>
               <SummaryDot />
@@ -244,7 +244,7 @@ export const WriteTaskDocumentRenderer: KandevRenderer = ({ args, result, status
       title="Kandev: Write Task Document"
       summary={
         <span className="inline-flex items-center gap-1.5">
-          <IdChip id={taskId} label="task" />
+          <IdChip id={taskId} />
           {docKey && (
             <>
               <SummaryDot />
@@ -313,23 +313,28 @@ export const GetTaskConversationRenderer: KandevRenderer = ({ args, result, stat
   const taskId = pickString(args, "task_id");
   const sessionId = pickString(args, "session_id") ?? pickString(result, "session_id");
   const messages = pickArray<ConversationMessage>(result, "messages") ?? [];
+  // The backend paginates: `total` is the absolute count, `messages.length`
+  // is just the current page. The "more not shown" footer must account for
+  // both the inline-cap *and* any server-side pagination, otherwise a
+  // capped page (total=200, messages=50) reads as if everything was visible.
   const total = pickNumber(result, "total") ?? messages.length;
   const visible = messages.slice(0, MAX_INLINE_MESSAGES);
-  const truncated = messages.length > MAX_INLINE_MESSAGES;
+  const hiddenCount = Math.max(0, total - visible.length);
+  const truncated = hiddenCount > 0;
   return (
     <KandevRow
       Icon={IconMessageCircle}
       title="Kandev: Get Task Conversation"
       summary={
         <span className="inline-flex items-center gap-1.5">
-          <IdChip id={taskId} label="task" />
+          {taskId && <IdChip id={taskId} />}
           {sessionId && (
             <>
-              <SummaryDot />
-              <IdChip id={sessionId} label="session" />
+              {taskId && <SummaryDot />}
+              <IdChip id={sessionId} />
             </>
           )}
-          <SummaryDot />
+          {(taskId || sessionId) && <SummaryDot />}
           {pluralCount(total, "message")}
         </span>
       }
@@ -346,7 +351,7 @@ export const GetTaskConversationRenderer: KandevRenderer = ({ args, result, stat
             ))}
             {truncated && (
               <div className="text-[10px] italic text-muted-foreground/70">
-                + {messages.length - MAX_INLINE_MESSAGES} more not shown
+                + {hiddenCount} more not shown
               </div>
             )}
           </div>

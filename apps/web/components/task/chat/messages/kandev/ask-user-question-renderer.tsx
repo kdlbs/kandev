@@ -10,7 +10,7 @@ import {
   SummaryDot,
   pluralCount,
 } from "./shared";
-import { pickArray, pickObject, pickString } from "./parse";
+import { pickArray, pickString } from "./parse";
 import type { KandevRenderer } from "./types";
 
 type QuestionOption = { label?: string; description?: string };
@@ -55,25 +55,33 @@ function QuestionBlock({ q, answer }: { q: Question; answer: AnswerEntry | undef
   );
 }
 
+// matchAnswerForQuestion accepts both response shapes the backend may emit:
+// keyed by question id (`{ q1: {...} }`) or as a positional list. The raw
+// `responses` value is read directly rather than via `pickObject`, because
+// the latter discards arrays and would silently lose list-shaped payloads.
 function matchAnswerForQuestion(
-  responses: Record<string, unknown> | undefined,
+  responses: unknown,
   question: Question,
   index: number,
 ): AnswerEntry | undefined {
-  if (!responses) return undefined;
-  // Responses may come back keyed by question id OR as a flat list — handle
-  // both shapes defensively so a backend tweak doesn't blank the UI.
-  if (question.id && responses[question.id]) {
-    return responses[question.id] as AnswerEntry;
+  if (!responses || typeof responses !== "object") return undefined;
+  if (Array.isArray(responses)) return responses[index] as AnswerEntry | undefined;
+  if (question.id) {
+    const entry = (responses as Record<string, unknown>)[question.id];
+    if (entry) return entry as AnswerEntry;
   }
-  const arr = Array.isArray(responses) ? responses : undefined;
-  return arr?.[index];
+  return undefined;
+}
+
+function readResponses(result: unknown): unknown {
+  if (!result || typeof result !== "object") return undefined;
+  return (result as Record<string, unknown>).responses;
 }
 
 export const AskUserQuestionRenderer: KandevRenderer = ({ args, result, status }) => {
   const questions = pickArray<Question>(args, "questions") ?? [];
   const context = pickString(args, "context");
-  const responses = pickObject(result, "responses");
+  const responses = readResponses(result);
   const pendingId = pickString(result, "pending_id");
 
   // Build a short header summary: count of questions, plus the first prompt

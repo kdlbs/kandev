@@ -82,10 +82,10 @@ export function SummaryDot() {
 }
 
 // IdChip displays a UUID-style id in a very subtle inline form, with the
-// full id on hover. No `label=` prefix — the surrounding context (column
-// position, neighbouring text) carries the meaning, and the prefix was
-// making rows visually noisy.
-export function IdChip({ id }: { id: string | undefined; label?: string }) {
+// full id available on hover. No `label=` prefix — surrounding context
+// (column position, neighbouring text) carries the meaning, and the prefix
+// was making rows visually noisy.
+export function IdChip({ id }: { id: string | undefined }) {
   if (!id) return null;
   return (
     <span className="font-mono text-[10px] text-muted-foreground/50" title={id}>
