@@ -15,7 +15,15 @@ on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
   pull_request_target:
-    types: [opened, synchronize, ready_for_review, reopened]
+    # `labeled` is needed so a maintainer applying `safe-to-review` to a fork
+    # PR triggers a review against the current head SHA. Subsequent fork pushes
+    # (synchronize) do NOT re-trigger the label path — see claude-review-fork's
+    # if-gate and strip-safe-to-review below.
+    types: [opened, synchronize, ready_for_review, reopened, labeled]
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   claude-review-same-repo:
@@ -67,9 +75,11 @@ jobs:
             --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git rebase:*),Bash(git reset:*),Bash(gh pr edit:*),Bash(curl:*),Bash(wget:*)"
 
   # Strip safe-to-review label on new pushes to fork PRs.
-  # Prevents a once-approved fork from running the review against updated
-  # (potentially malicious) code on subsequent pushes without a fresh
-  # maintainer re-approval. Mirrors strip-safe-to-test in preview-env.yml.
+  # Together with the `github.event.action != 'synchronize'` guard on the
+  # label path in claude-review-fork's if-gate, this gives true per-commit
+  # opt-in: the maintainer must re-apply `safe-to-review` after each push for
+  # the review job to run again. A new push on its own never re-triggers the
+  # review on the label path.
   strip-safe-to-review:
     if: >
       github.event_name == 'pull_request_target' &&
@@ -83,25 +93,35 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            await github.rest.issues.removeLabel({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.pull_request.number,
-              name: 'safe-to-review',
-            });
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                name: 'safe-to-review',
+              });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              core.info('safe-to-review label already absent; nothing to remove.');
+            }
 
   claude-review-fork:
     # Fork PRs only, via pull_request_target so secrets are available.
-    # Gated by allowlist: OWNER/MEMBER/COLLABORATOR author, `safe-to-review`
-    # label (maintainer opt-in), or CLAUDE_REVIEW_ALLOWLIST repo variable
-    # (JSON array string, e.g. ["alice","bob"], in Settings -> Secrets and
-    # variables -> Actions -> Variables).
+    # Three approval paths:
+    #   - OWNER/MEMBER/COLLABORATOR author_association (trusted user, all events)
+    #   - CLAUDE_REVIEW_ALLOWLIST repo variable (trusted login list, all events;
+    #     JSON array, e.g. ["alice","bob"], in Settings -> Secrets and variables
+    #     -> Actions -> Variables)
+    #   - `safe-to-review` label (maintainer opt-in, per-commit). Explicitly
+    #     blocked on `synchronize` so a contributor's push cannot re-use a
+    #     stale label — the maintainer must re-apply it after each push for
+    #     the `labeled` event to trigger a fresh review against the new SHA.
     if: >
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.head.repo.full_name != github.repository &&
       (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) ||
-       contains(github.event.pull_request.labels.*.name, 'safe-to-review') ||
-       (vars.CLAUDE_REVIEW_ALLOWLIST != '' && contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)))
+       (vars.CLAUDE_REVIEW_ALLOWLIST != '' && contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)) ||
+       (github.event.action != 'synchronize' && contains(github.event.pull_request.labels.*.name, 'safe-to-review')))
     runs-on: ubuntu-latest
     permissions:
       contents: read
