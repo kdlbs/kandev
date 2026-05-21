@@ -116,12 +116,15 @@ jobs:
     #     blocked on `synchronize` so a contributor's push cannot re-use a
     #     stale label — the maintainer must re-apply it after each push for
     #     the `labeled` event to trigger a fresh review against the new SHA.
+    # Branch order matters: keep cheap/safe checks before `fromJSON(vars.*)`,
+    # which throws (and skips the whole job) if the repo variable is
+    # non-empty but unparseable JSON.
     if: >
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.head.repo.full_name != github.repository &&
       (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) ||
-       (vars.CLAUDE_REVIEW_ALLOWLIST != '' && contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)) ||
-       (github.event.action != 'synchronize' && contains(github.event.pull_request.labels.*.name, 'safe-to-review')))
+       (github.event.action != 'synchronize' && contains(github.event.pull_request.labels.*.name, 'safe-to-review')) ||
+       (vars.CLAUDE_REVIEW_ALLOWLIST != '' && contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)))
     runs-on: ubuntu-latest
     permissions:
       contents: read
