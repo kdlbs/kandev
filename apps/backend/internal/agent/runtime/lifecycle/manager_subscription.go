@@ -75,10 +75,7 @@ type workspacePollAggregator struct {
 	pushInFlight map[string]bool
 }
 
-// workspacePushTarget bundles the mode and client for a queued push. The
-// client is captured at enqueue time rather than re-looked-up in the pusher
-// goroutine so the request always targets the agentctl instance that was
-// current when the gateway transition fired.
+// workspacePushTarget bundles the queued mode and the agentctl client captured at enqueue time.
 type workspacePushTarget struct {
 	mode   WorkspacePollMode
 	client *agentctl.Client
@@ -205,12 +202,7 @@ func (a *workspacePollAggregator) recordAndCompute(sessionID string, mode Worksp
 	return workspacePath, effective, true
 }
 
-// pushAsync queues the latest mode for a workspace and ensures exactly one
-// in-flight pusher goroutine per workspace processes the queue. Concurrent
-// callers (e.g. subscribe→focus arriving back-to-back from the gateway) all
-// converge on the same goroutine, which drains pendingPush in order until
-// empty — guaranteeing the FINAL queued mode reaches agentctl last on the
-// wire, regardless of how Go's http.Transport schedules connections.
+// pushAsync queues the latest mode and ensures exactly one pusher goroutine per workspace drains it (last-write-wins).
 func (a *workspacePollAggregator) pushAsync(execution *AgentExecution, workspacePath string, mode WorkspacePollMode) {
 	client := execution.GetAgentCtlClient()
 	if client == nil {
@@ -227,11 +219,7 @@ func (a *workspacePollAggregator) pushAsync(execution *AgentExecution, workspace
 	go a.pushLoop(workspacePath)
 }
 
-// pushLoop drains pendingPush for a single workspace, holding the in-flight
-// slot for its workspace until the queue is empty. Drops the slot under lock
-// so a concurrent pushAsync sees the released state and starts a fresh
-// goroutine if needed — no goroutine is ever simultaneously executing for
-// the same workspace, so HTTP order matches enqueue order.
+// pushLoop drains pendingPush for a workspace sequentially so HTTP order matches enqueue order.
 func (a *workspacePollAggregator) pushLoop(workspacePath string) {
 	for {
 		a.mu.Lock()

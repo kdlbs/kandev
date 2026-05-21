@@ -976,7 +976,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 	return nil
 }
 
-// stopShellAndProcesses stops the shell session, VS Code, workspace processes, and workspace tracker.
+// stopShellAndProcesses stops the shell session, VS Code, and workspace processes.
 func (m *Manager) stopShellAndProcesses(ctx context.Context) {
 	// Stop VS Code server if running
 	m.logger.Debug("stopping vscode server")
@@ -1006,10 +1006,6 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) {
 		}
 	}
 	m.logger.Debug("workspace processes stopped")
-
-	m.logger.Debug("stopping workspace tracker")
-	m.stopWorkspaceTrackers()
-	m.logger.Debug("workspace tracker stopped")
 }
 
 // closeAdapterAndStdin closes the protocol adapter, the stop channel, and stdin.
