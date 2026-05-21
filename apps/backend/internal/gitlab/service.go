@@ -222,17 +222,22 @@ func (s *Service) ClearToken(ctx context.Context) error {
 	// shell out to `glab auth status` (up to glabAuthTimeout = 10s), and
 	// holding the write lock for that long would freeze every concurrent
 	// GetStatus / GetMRFeedback / Client() call. Pre-build against a
-	// snapshot of s.host, then swap inside a short critical section. If a
-	// concurrent ConfigureHost flipped the host underneath us the new
-	// client targets the previous host until the next reconfigure — a
-	// much narrower correctness window than 10s of blocked readers.
+	// snapshot of s.host, then swap inside a short critical section.
+	// Guard the swap with a host-equality check so a concurrent
+	// ConfigureHost that already installed a newer client for a new
+	// host doesn't get clobbered by our stale-host build.
 	s.mu.RLock()
 	hostSnap := s.host
 	s.mu.RUnlock()
 	client, authMethod, _ := NewClient(ctx, hostSnap, s.secrets, s.logger)
 	s.mu.Lock()
-	s.client = client
-	s.authMethod = authMethod
+	if s.host == hostSnap {
+		s.client = client
+		s.authMethod = authMethod
+	}
+	// else: ConfigureHost moved s.host while we were probing — leave
+	// its (newer, correctly-targeted) client in place. The next
+	// reconfigure or auth-health poller will converge if needed.
 	s.mu.Unlock()
 	return nil
 }
