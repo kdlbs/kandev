@@ -236,13 +236,15 @@ func TestHTTPSearchIssues_RejectsBadNumericParams(t *testing.T) {
 		t.Fatalf("set secret: %v", err)
 	}
 	cases := map[string]string{
-		"priority out of range":    "priority=99",
-		"estimate_min not a number": "estimate_min=abc",
-		"estimate_min NaN":          "estimate_min=NaN",
-		"estimate_min +Inf":         "estimate_min=%2BInf",
-		"estimate_max -Inf":         "estimate_max=-Inf",
-		"estimate_min negative":     "estimate_min=-1",
-		"estimate_min > max":        "estimate_min=5&estimate_max=1",
+		"priorities out of range":       "priorities=99",
+		"priorities mixed valid/invalid": "priorities=1,99",
+		"priorities not a number":        "priorities=abc",
+		"estimate_min not a number":      "estimate_min=abc",
+		"estimate_min NaN":               "estimate_min=NaN",
+		"estimate_min +Inf":              "estimate_min=%2BInf",
+		"estimate_max -Inf":              "estimate_max=-Inf",
+		"estimate_min negative":          "estimate_min=-1",
+		"estimate_min > max":             "estimate_min=5&estimate_max=1",
 	}
 	for name, query := range cases {
 		t.Run(name, func(t *testing.T) {

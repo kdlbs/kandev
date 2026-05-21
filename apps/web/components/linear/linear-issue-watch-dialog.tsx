@@ -24,20 +24,23 @@ import {
   ScriptEditor,
   computeEditorHeight,
 } from "@/components/settings/profile-edit/script-editor";
-import { LabelMultiSelect, StateMultiSelect, useTeamsAndStates } from "./linear-issue-watch-fields";
+import {
+  LabelMultiSelect,
+  PriorityMultiSelect,
+  StateMultiSelect,
+  useTeamsAndStates,
+} from "./linear-issue-watch-fields";
 import { LINEAR_ISSUE_WATCH_PLACEHOLDERS } from "./linear-issue-watch-placeholders";
 import {
   ASSIGNED_ANY,
   CREATOR_ANY,
-  PRIORITY_ANY,
-  PRIORITY_OPTIONS,
   type FormState,
+  type LinearPriority,
   buildFilterPayload,
   creatorPlaceholder,
   filterIsEmpty,
   formStateFromWatch,
   makeEmptyForm,
-  parsePriority,
   userOptionLabel,
 } from "./linear-issue-watch-form";
 import type {
@@ -140,16 +143,28 @@ function FilterFields({
       })),
     [setForm],
   );
+  const togglePriority = useCallback(
+    (priority: LinearPriority) =>
+      setForm((p) => ({
+        ...p,
+        priorities: p.priorities.includes(priority)
+          ? p.priorities.filter((x) => x !== priority)
+          : [...p.priorities, priority],
+      })),
+    [setForm],
+  );
 
   return (
     <>
       <TeamAndAssigneeRow form={form} setForm={setForm} teams={teams} />
-      <PriorityAndCreatorRow
-        form={form}
-        setForm={setForm}
-        users={users}
-        loadingUsers={loadingUsers}
-      />
+      <div className="space-y-1.5">
+        <Label>Priority</Label>
+        <p className="text-xs text-muted-foreground">
+          Click to toggle. Matches issues at ANY of the selected priorities.
+        </p>
+        <PriorityMultiSelect selected={form.priorities} onToggle={togglePriority} />
+      </div>
+      <CreatorRow form={form} setForm={setForm} users={users} loadingUsers={loadingUsers} />
       <div className="space-y-1.5">
         <Label>States</Label>
         <p className="text-xs text-muted-foreground">
@@ -225,7 +240,7 @@ function TeamAndAssigneeRow({
   );
 }
 
-function PriorityAndCreatorRow({
+function CreatorRow({
   form,
   setForm,
   users,
@@ -237,28 +252,18 @@ function PriorityAndCreatorRow({
   loadingUsers: boolean;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-4">
-      <SelectField
-        label="Priority"
-        description="Match issues at one priority level."
-        value={form.priority === null ? PRIORITY_ANY : String(form.priority)}
-        onChange={(v) => setForm((p) => ({ ...p, priority: parsePriority(v) }))}
-        placeholder="(any)"
-        items={PRIORITY_OPTIONS}
-      />
-      <SelectField
-        label="Creator"
-        description="Match issues created by one user."
-        value={form.creatorId || CREATOR_ANY}
-        onChange={(v) => setForm((p) => ({ ...p, creatorId: v === CREATOR_ANY ? "" : v }))}
-        placeholder={creatorPlaceholder(form.teamKey, loadingUsers)}
-        items={[
-          { id: CREATOR_ANY, label: "(any)" },
-          ...users.map((u) => ({ id: u.id, label: userOptionLabel(u) })),
-        ]}
-        disabled={!form.teamKey || loadingUsers}
-      />
-    </div>
+    <SelectField
+      label="Creator"
+      description="Match issues created by one user."
+      value={form.creatorId || CREATOR_ANY}
+      onChange={(v) => setForm((p) => ({ ...p, creatorId: v === CREATOR_ANY ? "" : v }))}
+      placeholder={creatorPlaceholder(form.teamKey, loadingUsers)}
+      items={[
+        { id: CREATOR_ANY, label: "(any)" },
+        ...users.map((u) => ({ id: u.id, label: userOptionLabel(u) })),
+      ]}
+      disabled={!form.teamKey || loadingUsers}
+    />
   );
 }
 

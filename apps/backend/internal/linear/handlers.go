@@ -189,12 +189,17 @@ func (c *Controller) httpSearchIssues(ctx *gin.Context) {
 // is rejected rather than silently dropped so callers don't accidentally widen
 // the search by typoing a number.
 func parseSearchNumericFilters(ctx *gin.Context, filter *SearchFilter) error {
-	if p := ctx.Query("priority"); p != "" {
-		v, err := strconv.Atoi(p)
-		if err != nil || v < 0 || v > 4 {
-			return fmt.Errorf("priority must be an integer between 0 and 4")
+	if p := ctx.Query("priorities"); p != "" {
+		parts := splitCSV(p)
+		priorities := make([]int, 0, len(parts))
+		for _, raw := range parts {
+			v, err := strconv.Atoi(raw)
+			if err != nil || v < 0 || v > 4 {
+				return fmt.Errorf("priorities must be integers between 0 and 4")
+			}
+			priorities = append(priorities, v)
 		}
-		filter.Priority = &v
+		filter.Priorities = priorities
 	}
 	if v := ctx.Query("estimate_min"); v != "" {
 		f, err := strconv.ParseFloat(v, 64)

@@ -2,21 +2,19 @@ import type { LinearIssueWatch, LinearSearchFilter, LinearUser } from "@/lib/typ
 import { DEFAULT_LINEAR_ISSUE_WATCH_PROMPT } from "./linear-issue-watch-placeholders";
 
 export const ASSIGNED_ANY = "__any__";
-export const PRIORITY_ANY = "__any__";
 export const CREATOR_ANY = "__any__";
 
-// Linear priorities: 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low. Encoded as
-// strings for use as Select values; converted back at the form boundary.
-export const PRIORITY_OPTIONS: { id: string; label: string }[] = [
-  { id: PRIORITY_ANY, label: "(any)" },
-  { id: "0", label: "No priority" },
-  { id: "1", label: "Urgent" },
-  { id: "2", label: "High" },
-  { id: "3", label: "Medium" },
-  { id: "4", label: "Low" },
-];
-
 export type LinearPriority = 0 | 1 | 2 | 3 | 4;
+
+// Linear priorities: 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low. Rendered as
+// toggle chips, mirroring the States and Labels multi-selects.
+export const PRIORITY_OPTIONS: { value: LinearPriority; label: string }[] = [
+  { value: 1, label: "Urgent" },
+  { value: 2, label: "High" },
+  { value: 3, label: "Medium" },
+  { value: 4, label: "Low" },
+  { value: 0, label: "No priority" },
+];
 
 export interface FormState {
   workspaceId: string;
@@ -24,7 +22,7 @@ export interface FormState {
   teamKey: string;
   stateIds: string[];
   assigned: string;
-  priority: LinearPriority | null;
+  priorities: LinearPriority[];
   labelIds: string[];
   creatorId: string;
   estimateMin: string;
@@ -45,7 +43,7 @@ export function makeEmptyForm(workspaceId: string): FormState {
     teamKey: "",
     stateIds: [],
     assigned: "",
-    priority: null,
+    priorities: [],
     labelIds: [],
     creatorId: "",
     estimateMin: "",
@@ -72,7 +70,7 @@ export function formStateFromWatch(w: LinearIssueWatch): FormState {
     teamKey: f.teamKey ?? "",
     stateIds: f.stateIds ?? [],
     assigned: f.assigned ?? "",
-    priority: f.priority ?? null,
+    priorities: f.priorities ?? [],
     labelIds: f.labelIds ?? [],
     creatorId: f.creatorId ?? "",
     estimateMin: estimateString(f.estimateMin),
@@ -85,13 +83,6 @@ export function formStateFromWatch(w: LinearIssueWatch): FormState {
     enabled: w.enabled,
     pollInterval: w.pollIntervalSeconds,
   };
-}
-
-export function parsePriority(raw: string): LinearPriority | null {
-  if (raw === PRIORITY_ANY) return null;
-  const n = Number(raw);
-  if (n === 0 || n === 1 || n === 2 || n === 3 || n === 4) return n;
-  return null;
 }
 
 export function parseEstimate(raw: string): number | undefined {
@@ -107,7 +98,7 @@ export function filterIsEmpty(form: FormState): boolean {
     form.teamKey.trim() === "" &&
     form.assigned.trim() === "" &&
     form.stateIds.length === 0 &&
-    form.priority === null &&
+    form.priorities.length === 0 &&
     form.labelIds.length === 0 &&
     form.creatorId.trim() === "" &&
     parseEstimate(form.estimateMin) === undefined &&
@@ -121,7 +112,7 @@ export function buildFilterPayload(form: FormState): LinearSearchFilter {
     teamKey: form.teamKey.trim() || undefined,
     stateIds: form.stateIds.length > 0 ? form.stateIds : undefined,
     assigned: form.assigned.trim() || undefined,
-    priority: form.priority ?? undefined,
+    priorities: form.priorities.length > 0 ? form.priorities : undefined,
     labelIds: form.labelIds.length > 0 ? form.labelIds : undefined,
     creatorId: form.creatorId.trim() || undefined,
     estimateMin: parseEstimate(form.estimateMin),

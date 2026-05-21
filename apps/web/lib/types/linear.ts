@@ -95,8 +95,8 @@ export interface LinearSearchFilter {
   stateIds?: string[];
   /** "me" | "unassigned" | "" (any) */
   assigned?: string;
-  /** 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low. Omit for no priority filter. */
-  priority?: 0 | 1 | 2 | 3 | 4;
+  /** Priorities to include (OR). 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low. */
+  priorities?: (0 | 1 | 2 | 3 | 4)[];
   /** Issue labels (OR semantics — match any). */
   labelIds?: string[];
   /** Filter by issue creator UUID. */

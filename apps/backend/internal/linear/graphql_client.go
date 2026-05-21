@@ -528,8 +528,8 @@ func buildIssueFilter(f SearchFilter) map[string]interface{} {
 	case "unassigned":
 		out["assignee"] = map[string]interface{}{"null": true}
 	}
-	if f.Priority != nil {
-		out["priority"] = map[string]interface{}{"eq": *f.Priority}
+	if len(f.Priorities) > 0 {
+		out["priority"] = map[string]interface{}{"in": f.Priorities}
 	}
 	if len(f.LabelIDs) > 0 {
 		// `labels.some` matches issues having at least one label whose id is

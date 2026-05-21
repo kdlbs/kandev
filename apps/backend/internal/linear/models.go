@@ -134,10 +134,10 @@ type SearchFilter struct {
 	TeamKey  string   `json:"teamKey,omitempty"`  // restrict to one team
 	StateIDs []string `json:"stateIds,omitempty"` // restrict to specific workflow states
 	Assigned string   `json:"assigned,omitempty"` // "me" | "unassigned" | "" (any)
-	// Priority: pointer so callers can distinguish "unset" (no filter) from
-	// the literal "None" priority (0). Linear uses 0=None, 1=Urgent, 2=High,
-	// 3=Medium, 4=Low.
-	Priority *int `json:"priority,omitempty"`
+	// Priorities filters issues whose priority is in this set. Linear uses
+	// 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low. Empty slice means no
+	// priority filter; a slice with 0 in it includes "No priority" issues.
+	Priorities []int `json:"priorities,omitempty"`
 	// LabelIDs filters issues that have ANY of the given label UUIDs (Linear's
 	// labels filter is OR by default).
 	LabelIDs []string `json:"labelIds,omitempty"`

@@ -9,10 +9,9 @@ import (
 func TestService_CreateIssueWatch_AcceptsRichFilters(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-	prio := 1
 	min := 1.0
 	cases := map[string]SearchFilter{
-		"priority":    {Priority: &prio},
+		"priority":    {Priorities: []int{1}},
 		"labels":      {LabelIDs: []string{"l1"}},
 		"creator":     {CreatorID: "u1"},
 		"estimateMin": {EstimateMin: &min},

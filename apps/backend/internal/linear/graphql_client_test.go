@@ -256,19 +256,22 @@ func TestBuildIssueFilter_DropsEmpty(t *testing.T) {
 }
 
 func TestBuildIssueFilter_RichFilters(t *testing.T) {
-	prio := 2
 	min := 1.0
 	max := 5.0
 	got := buildIssueFilter(SearchFilter{
-		Priority:    &prio,
+		Priorities:  []int{1, 2},
 		LabelIDs:    []string{"l1", "l2"},
 		CreatorID:   "u1",
 		EstimateMin: &min,
 		EstimateMax: &max,
 	})
 	prioBlock, ok := got["priority"].(map[string]interface{})
-	if !ok || prioBlock["eq"] != 2 {
-		t.Errorf("priority filter mismatch: %+v", got["priority"])
+	if !ok {
+		t.Fatalf("missing priority filter: %+v", got)
+	}
+	prioIn, _ := prioBlock["in"].([]int)
+	if len(prioIn) != 2 || prioIn[0] != 1 || prioIn[1] != 2 {
+		t.Errorf("priority filter mismatch: %+v", prioBlock)
 	}
 	labelBlock, ok := got["labels"].(map[string]interface{})
 	if !ok {
@@ -292,10 +295,10 @@ func TestBuildIssueFilter_RichFilters(t *testing.T) {
 }
 
 func TestBuildIssueFilter_PriorityZero(t *testing.T) {
-	zero := 0
-	got := buildIssueFilter(SearchFilter{Priority: &zero})
+	got := buildIssueFilter(SearchFilter{Priorities: []int{0}})
 	prio, _ := got["priority"].(map[string]interface{})
-	if prio["eq"] != 0 {
-		t.Errorf("priority=0 should map to eq:0, got %+v", prio)
+	in, _ := prio["in"].([]int)
+	if len(in) != 1 || in[0] != 0 {
+		t.Errorf("priorities=[0] should map to in:[0] (No priority), got %+v", prio)
 	}
 }

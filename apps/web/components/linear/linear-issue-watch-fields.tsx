@@ -8,6 +8,7 @@ import {
   listLinearTeams,
   listLinearUsers,
 } from "@/lib/api/domains/linear-api";
+import { PRIORITY_OPTIONS, type LinearPriority } from "./linear-issue-watch-form";
 import type { LinearLabel, LinearTeam, LinearUser, LinearWorkflowState } from "@/lib/types/linear";
 
 // useTeamsAndStates loads the team list once Linear is configured, plus the
@@ -141,6 +142,33 @@ export function StateMultiSelect({
             className="cursor-pointer"
           >
             <Badge variant={active ? "default" : "outline"}>{s.name}</Badge>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function PriorityMultiSelect({
+  selected,
+  onToggle,
+}: {
+  selected: LinearPriority[];
+  onToggle: (p: LinearPriority) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {PRIORITY_OPTIONS.map((opt) => {
+        const active = selected.includes(opt.value);
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onToggle(opt.value)}
+            aria-pressed={active}
+            className="cursor-pointer"
+          >
+            <Badge variant={active ? "default" : "outline"}>{opt.label}</Badge>
           </button>
         );
       })}
