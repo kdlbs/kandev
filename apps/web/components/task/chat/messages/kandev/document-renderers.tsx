@@ -70,8 +70,12 @@ export const GetTaskPlanRenderer: KandevRenderer = ({ args, result, status }) =>
       title="Kandev: Get Task Plan"
       summary={
         <span className="inline-flex items-center gap-1.5">
-          <IdChip id={taskId} />
-          <SummaryDot />
+          {taskId && (
+            <>
+              <IdChip id={taskId} />
+              <SummaryDot />
+            </>
+          )}
           <span>{hasPlan ? summarizeContent(content) : "no plan"}</span>
         </span>
       }
@@ -147,8 +151,12 @@ export const UpdateTaskPlanRenderer: KandevRenderer = ({ args, result, status })
       title="Kandev: Update Task Plan"
       summary={
         <span className="inline-flex items-center gap-1.5">
-          <IdChip id={taskId} />
-          <SummaryDot />
+          {taskId && (
+            <>
+              <IdChip id={taskId} />
+              <SummaryDot />
+            </>
+          )}
           <span>{summarizeContent(displayContent)}</span>
         </span>
       }

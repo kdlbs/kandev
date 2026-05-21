@@ -424,6 +424,7 @@ type DocumentItem = {
 
 export const ListTaskDocumentsRenderer: KandevRenderer = ({ args, result, status }) => {
   const items = pickArray<DocumentItem>(result, "documents") ?? [];
+  const total = pickNumber(result, "total") ?? items.length;
   const taskId = pickString(args, "task_id") ?? pickString(result, "task_id");
   return (
     <KandevRow
@@ -437,7 +438,7 @@ export const ListTaskDocumentsRenderer: KandevRenderer = ({ args, result, status
               <SummaryDot />
             </>
           )}
-          {pluralCount(items.length, "document")}
+          {pluralCount(total, "document")}
         </span>
       }
       status={status}

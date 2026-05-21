@@ -241,6 +241,29 @@ describe("KandevToolMessage document & question renderers", () => {
     expect(html).toContain("SQLite");
   });
 
+  // Regression guard for the array-shape response branch in
+  // matchAnswerForQuestion. Positional arrays come from older backends or
+  // single-question calls; the renderer must match the answer by index.
+  it("renders ask_user_question with positional array responses", () => {
+    const html = renderToStaticMarkup(
+      <KandevToolMessage
+        comment={kandevToolCall({
+          status: "running",
+          toolName: "mcp__kandev__ask_user_question_kandev",
+          input: {
+            questions: [
+              { id: "q1", prompt: "Pick one", options: [{ label: "A" }, { label: "B" }] },
+            ],
+          },
+          resultJson: { responses: [{ question_id: "q1", selected: "A" }] },
+        })}
+      />,
+    );
+    expect(html).toContain("Pick one");
+    // Selected option gets the "default" Badge variant; unselected stays "outline".
+    expect(html).toMatch(/data-variant="default"[^>]*>A<\/span>/);
+  });
+
   it("does not render anything when the renderer is missing", () => {
     const html = renderToStaticMarkup(
       <KandevToolMessage
