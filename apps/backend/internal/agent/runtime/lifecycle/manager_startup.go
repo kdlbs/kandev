@@ -24,16 +24,29 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 		return fmt.Errorf("execution %q not found", executionID)
 	}
 
-	// Check if this execution should use passthrough mode
+	// Decide passthrough vs ACP. The session-creation snapshot
+	// (execution.IsPassthrough, sourced from TaskSession.IsPassthrough) is
+	// the source of truth: a profile that toggles CLIPassthrough after the
+	// session was created must not strand existing sessions in the wrong
+	// launch path (issue #981). Non-session launches (e.g. the low-level
+	// controller.LaunchAgent path) leave IsPassthrough false and fall back to
+	// live profile resolution so first-time launches still pick the current
+	// mode.
 	if execution.AgentProfileID != "" && m.profileResolver != nil {
 		profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
-		if err == nil && profileInfo.CLIPassthrough {
-			// On resume (e.g., after backend restart), use the resume command path
-			// so the agent receives resume flags (-c / --resume).
-			if execution.isResumedSession {
-				return m.ResumePassthroughSession(ctx, execution.SessionID)
+		if err == nil {
+			isPassthrough := execution.IsPassthrough
+			if !isPassthrough && execution.SessionID == "" {
+				isPassthrough = profileInfo.CLIPassthrough
 			}
-			return m.startPassthroughSession(ctx, execution, profileInfo)
+			if isPassthrough {
+				// On resume (e.g., after backend restart), use the resume command path
+				// so the agent receives resume flags (-c / --resume).
+				if execution.isResumedSession {
+					return m.ResumePassthroughSession(ctx, execution.SessionID)
+				}
+				return m.startPassthroughSession(ctx, execution, profileInfo)
+			}
 		}
 	}
 

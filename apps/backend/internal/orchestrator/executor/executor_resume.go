@@ -500,6 +500,7 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 		TaskDescription:   task.Description,
 		Priority:          task.Priority,
 		IsEphemeral:       task.IsEphemeral,
+		IsPassthrough:     session.IsPassthrough,
 		TaskEnvironmentID: session.TaskEnvironmentID,
 	}
 

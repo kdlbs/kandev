@@ -725,6 +725,7 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		if req.PreviousExecutionID != "" {
 			execution.isResumedSession = true
 		}
+		execution.IsPassthrough = req.IsPassthrough
 		m.logger.Info("promoted workspace-only execution to agent execution",
 			zap.String("execution_id", execution.ID),
 			zap.String("session_id", req.SessionID),
@@ -853,6 +854,7 @@ func (m *Manager) buildExecutionFromInstance(
 	if req.PreviousExecutionID != "" {
 		execution.isResumedSession = true
 	}
+	execution.IsPassthrough = req.IsPassthrough
 	cmds := m.buildAgentCommand(req, profileInfo, agentConfig)
 	execution.AgentCommand = cmds.initial
 	execution.ContinueCommand = cmds.continue_

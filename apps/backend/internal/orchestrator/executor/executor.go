@@ -261,6 +261,15 @@ type LaunchAgentRequest struct {
 	IsEphemeral         bool              // Ephemeral task (quick chat) — enables fallback workspace creation
 	WorkspacePath       string            // Optional host folder for repo-less tasks (overrides scratch fallback)
 
+	// IsPassthrough is the session's mode snapshot (TaskSession.IsPassthrough)
+	// at session-creation time. Forwarded to the lifecycle manager so
+	// StartAgentProcess routes to the passthrough vs ACP path based on the
+	// session's original mode, not on live profile state — preventing
+	// existing sessions from getting stranded when a profile's
+	// CLIPassthrough flag is toggled after the session was created
+	// (issue #981).
+	IsPassthrough bool
+
 	// Setup script from executor profile (runs in execution environment before agent starts)
 	SetupScript string
 

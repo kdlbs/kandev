@@ -295,6 +295,7 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		ExecutorType:      execConfig.ExecutorType,
 		Metadata:          execConfig.Metadata,
 		IsEphemeral:       task.IsEphemeral,
+		IsPassthrough:     session.IsPassthrough,
 		TaskEnvironmentID: session.TaskEnvironmentID,
 	}
 

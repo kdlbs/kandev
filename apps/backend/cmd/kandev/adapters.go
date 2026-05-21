@@ -93,6 +93,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		PreviousExecutionID: req.PreviousExecutionID,
 		McpMode:             req.McpMode,
 		IsEphemeral:         req.IsEphemeral,
+		IsPassthrough:       req.IsPassthrough,
 		SetupScript:         req.SetupScript,
 		// Worktree configuration for concurrent agent execution
 		UseWorktree:          req.UseWorktree,

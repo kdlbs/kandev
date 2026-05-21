@@ -59,6 +59,13 @@ type AgentExecution struct {
 	standaloneInstanceID string // Instance ID in standalone agentctl
 	standalonePort       int    // Port of the standalone execution
 
+	// IsPassthrough captures the session's mode as decided at session-creation
+	// time (TaskSession.IsPassthrough snapshot). StartAgentProcess uses this
+	// instead of re-resolving the live profile so a profile that toggles
+	// CLIPassthrough after the session was created cannot strand existing
+	// sessions in the wrong launch path. See issue #981.
+	IsPassthrough bool
+
 	// Passthrough mode info (CLI passthrough without ACP)
 	PassthroughProcessID string    // Process ID in the interactive runner (empty if not in passthrough mode)
 	PassthroughStartedAt time.Time // When the current passthrough process was launched; used to detect fast-fail exits and skip auto-restart loops
@@ -334,6 +341,15 @@ type LaunchRequest struct {
 	// Ephemeral tasks (quick chat) get fallback workspace directories when no repo is configured.
 	// Non-ephemeral tasks without a workspace path will not receive a fallback directory.
 	IsEphemeral bool
+
+	// IsPassthrough is the session's mode snapshot taken when the session was
+	// created (TaskSession.IsPassthrough). When the launch request originates
+	// from an existing session, this is the source of truth for the launch
+	// path so a profile that toggles CLIPassthrough after the session was
+	// created does not strand the session in the wrong mode. Non-session
+	// launches (e.g. the low-level controller.LaunchAgent path) leave this
+	// false and fall back to live profile resolution. See issue #981.
+	IsPassthrough bool
 
 	// Executor configuration - determines which runtime to use
 	ExecutorType        string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime

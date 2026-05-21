@@ -613,6 +613,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		SessionID:         sessionID,
 		TaskEnvironmentID: session.TaskEnvironmentID,
 		IsEphemeral:       task.IsEphemeral,
+		IsPassthrough:     session.IsPassthrough,
 		WorkspacePath:     session.WorkspacePath,
 	}
 
