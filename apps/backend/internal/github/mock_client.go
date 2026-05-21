@@ -73,6 +73,7 @@ type MockClient struct {
 	commits          map[prKey][]PRCommitInfo
 	submittedReviews []submittedReview
 	mergedPRs        []mergedPR
+	mergeMethods     map[repoKey]RepoMergeMethods
 }
 
 // NewMockClient creates a new MockClient with default values.
@@ -89,6 +90,7 @@ func NewMockClient() *MockClient {
 		checks:        make(map[checkKey][]CheckRun),
 		files:         make(map[prKey][]PRFile),
 		commits:       make(map[prKey][]PRCommitInfo),
+		mergeMethods:  make(map[repoKey]RepoMergeMethods),
 	}
 }
 
@@ -275,6 +277,25 @@ func (m *MockClient) SubmitReview(_ context.Context, owner, repo string, number 
 	return nil
 }
 
+func (m *MockClient) GetRepoMergeMethods(_ context.Context, owner, repo string) (RepoMergeMethods, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if methods, ok := m.mergeMethods[repoKey{owner, repo}]; ok {
+		return methods, nil
+	}
+	// Default to all three allowed so existing e2e fixtures don't have to
+	// seed merge settings just to exercise the merge button.
+	return RepoMergeMethods{Merge: true, Squash: true, Rebase: true}, nil
+}
+
+// SetRepoMergeMethods overrides the allowed merge methods for a repo.
+// Used by e2e fixtures to exercise the squash-only / rebase-only paths.
+func (m *MockClient) SetRepoMergeMethods(owner, repo string, methods RepoMergeMethods) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mergeMethods[repoKey{owner, repo}] = methods
+}
+
 func (m *MockClient) MergePR(_ context.Context, owner, repo string, number int, mergeMethod string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -429,6 +450,7 @@ func (m *MockClient) Reset() {
 	m.commits = make(map[prKey][]PRCommitInfo)
 	m.submittedReviews = nil
 	m.mergedPRs = nil
+	m.mergeMethods = make(map[repoKey]RepoMergeMethods)
 }
 
 // SubmittedReviews returns all recorded SubmitReview calls.

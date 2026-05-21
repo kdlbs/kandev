@@ -123,6 +123,14 @@ export type GitHubPRStatus = {
   checks_passing: number;
 };
 
+export type MergeMethod = "merge" | "squash" | "rebase";
+
+export type RepoMergeMethods = {
+  merge: boolean;
+  squash: boolean;
+  rebase: boolean;
+};
+
 export type MergeableState =
   | "clean"
   | "blocked"

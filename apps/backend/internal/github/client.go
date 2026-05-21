@@ -68,6 +68,9 @@ type Client interface {
 	// ListRepoBranches lists branches for a repository.
 	ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error)
 
+	// GetRepoMergeMethods reports which merge methods a repository allows.
+	GetRepoMergeMethods(ctx context.Context, owner, repo string) (RepoMergeMethods, error)
+
 	// ListIssues searches for open issues (not PRs) matching the given query.
 	// filter is an optional additional search qualifier (e.g. "repo:owner/name" or "label:bug").
 	// customQuery, when non-empty, replaces the entire generated query.

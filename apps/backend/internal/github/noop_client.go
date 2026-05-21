@@ -77,6 +77,10 @@ func (c *NoopClient) ListRepoBranches(context.Context, string, string) ([]RepoBr
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) GetRepoMergeMethods(context.Context, string, string) (RepoMergeMethods, error) {
+	return RepoMergeMethods{}, ErrNoClient
+}
+
 func (c *NoopClient) SubmitReview(context.Context, string, string, int, string, string) error {
 	return ErrNoClient
 }

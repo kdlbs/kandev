@@ -108,6 +108,7 @@ type Service struct {
 	taskEventSubs      []bus.Subscription
 	searchCache        *ttlCache
 	prStatusCache      *ttlCache
+	mergeMethodsCache  *ttlCache
 	protectionCache    *branchProtectionCache
 	rateTracker        *RateTracker
 
@@ -129,6 +130,7 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		logger:               log,
 		searchCache:          newTTLCache(),
 		prStatusCache:        newTTLCache(),
+		mergeMethodsCache:    newMergeMethodsCache(),
 		protectionCache:      newBranchProtectionCache(),
 		rateTracker:          NewRateTracker(eventBus, log),
 		cleanupFailureCounts: make(map[string]int),
@@ -432,14 +434,64 @@ func (s *Service) SubmitReview(ctx context.Context, owner, repo string, number i
 }
 
 // MergePR merges a pull request. mergeMethod is one of "merge", "squash",
-// "rebase"; an empty string lets GitHub apply the repo's default. The caller
-// is expected to refresh PR feedback after a successful merge — the background
-// poller will catch the merged state on its next pass.
+// "rebase"; an empty string asks the service to pick the first method the
+// repo allows. The caller is expected to refresh PR feedback after a
+// successful merge — the background poller will catch the merged state on
+// its next pass.
 func (s *Service) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
 	if s.client == nil {
 		return ErrNoClient
 	}
+	if mergeMethod == "" {
+		// Resolve to an allowed method up-front so we don't rely on GitHub's
+		// "default to merge" behavior, which 405s on repos that disallow
+		// merge commits (squash-only / rebase-only). Best-effort: if the
+		// lookup fails, fall back to GitHub's default and surface its error.
+		if methods, err := s.GetRepoMergeMethods(ctx, owner, repo); err == nil {
+			mergeMethod = pickDefaultMergeMethod(methods)
+		}
+	}
 	return s.client.MergePR(ctx, owner, repo, number, mergeMethod)
+}
+
+// GetRepoMergeMethods returns the merge methods a repo allows, cached for
+// a few minutes since repo settings rarely change.
+func (s *Service) GetRepoMergeMethods(ctx context.Context, owner, repo string) (RepoMergeMethods, error) {
+	if s.client == nil {
+		return RepoMergeMethods{}, ErrNoClient
+	}
+	key := owner + "/" + repo
+	v, err := s.mergeMethodsCache.doOrFetch(key, func() (any, error) {
+		return s.client.GetRepoMergeMethods(ctx, owner, repo)
+	})
+	if err != nil {
+		return RepoMergeMethods{}, err
+	}
+	return v.(RepoMergeMethods), nil
+}
+
+// Merge method identifiers accepted by GitHub's pulls/{number}/merge endpoint
+// and used throughout the merge resolution paths.
+const (
+	mergeMethodMerge  = "merge"
+	mergeMethodSquash = "squash"
+	mergeMethodRebase = "rebase"
+)
+
+// pickDefaultMergeMethod picks the merge method to use when the caller
+// didn't pin one. Prefers squash (matches the convention most repos in
+// this codebase follow) and falls back to merge, then rebase.
+func pickDefaultMergeMethod(m RepoMergeMethods) string {
+	switch {
+	case m.Squash:
+		return mergeMethodSquash
+	case m.Merge:
+		return mergeMethodMerge
+	case m.Rebase:
+		return mergeMethodRebase
+	default:
+		return ""
+	}
 }
 
 // --- PR Watch operations ---

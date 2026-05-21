@@ -1,11 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { IconGitMerge } from "@tabler/icons-react";
+import { IconChevronDown, IconGitMerge } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
 import { useToast } from "@/components/toast-provider";
-import { mergePR } from "@/lib/api/domains/github-api";
-import type { TaskPR } from "@/lib/types/github";
+import { getRepoMergeMethods, mergePR } from "@/lib/api/domains/github-api";
+import type { MergeMethod, RepoMergeMethods, TaskPR } from "@/lib/types/github";
 import { isPRReadyToMerge } from "./pr-task-icon";
 
 // Renders nothing unless the PR is fully green (CI success + mergeable +
@@ -28,6 +34,7 @@ export function PRMergeButton({
   // state="merged" — otherwise the button briefly re-enables during the async
   // refresh window and a double-click would hit the GitHub API again.
   const [merged, setMerged] = useState(false);
+  const [methods, setMethods] = useState<RepoMergeMethods | null>(null);
 
   // If the same component instance ever renders a different PR (e.g. the user
   // switches the active task while the panel/popover stays mounted), the
@@ -38,13 +45,31 @@ export function PRMergeButton({
     setMerged(false);
   }, [taskPR.id]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setMethods(null);
+    getRepoMergeMethods(taskPR.owner, taskPR.repo)
+      .then((m) => {
+        if (!cancelled) setMethods(m);
+      })
+      .catch(() => {
+        // Lookup failures are non-fatal — the backend will fall back to
+        // GitHub's default behavior if the user clicks merge.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [taskPR.owner, taskPR.repo]);
+
   if (merged || !isPRReadyToMerge(taskPR)) return null;
 
-  const handleMerge = async (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const allowed = allowedMethods(methods);
+  const primary = pickPrimaryMethod(allowed);
+
+  const runMerge = async (method?: MergeMethod) => {
     setMerging(true);
     try {
-      await mergePR(taskPR.owner, taskPR.repo, taskPR.pr_number);
+      await mergePR(taskPR.owner, taskPR.repo, taskPR.pr_number, method);
       setMerged(true);
       toast({ description: "PR merged", variant: "success" });
       onMerged?.();
@@ -59,31 +84,128 @@ export function PRMergeButton({
     }
   };
 
-  if (compact) {
-    return (
-      <button
-        type="button"
-        data-testid="pr-merge-button"
-        onClick={handleMerge}
-        disabled={merging}
-        className="self-end inline-flex items-center gap-1 rounded-full bg-green-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 disabled:opacity-60 cursor-pointer"
-      >
-        <IconGitMerge className="h-3 w-3" />
-        {merging ? "Merging..." : "Merge"}
-      </button>
-    );
-  }
+  const handlePrimary = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    void runMerge(primary);
+  };
 
   return (
+    <MergeButtonShell
+      compact={compact}
+      label={merging ? "Merging..." : mergeLabel(primary)}
+      disabled={merging}
+      onPrimaryClick={handlePrimary}
+      extraMethods={allowed.filter((m) => m !== primary)}
+      onPickMethod={(m) => void runMerge(m)}
+    />
+  );
+}
+
+function MergeButtonShell({
+  compact,
+  label,
+  disabled,
+  onPrimaryClick,
+  extraMethods,
+  onPickMethod,
+}: {
+  compact: boolean;
+  label: string;
+  disabled: boolean;
+  onPrimaryClick: (e: React.MouseEvent) => void;
+  extraMethods: MergeMethod[];
+  onPickMethod: (m: MergeMethod) => void;
+}) {
+  const showDropdown = extraMethods.length > 0;
+  const primaryBtn = compact ? (
+    <button
+      type="button"
+      data-testid="pr-merge-button"
+      onClick={onPrimaryClick}
+      disabled={disabled}
+      className={`inline-flex items-center gap-1 bg-green-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 disabled:opacity-60 cursor-pointer ${showDropdown ? "rounded-l-full" : "rounded-full"}`}
+    >
+      <IconGitMerge className="h-3 w-3" />
+      {label}
+    </button>
+  ) : (
     <Button
       data-testid="pr-merge-button"
       size="sm"
-      className="cursor-pointer gap-1.5 border-0 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500"
-      onClick={handleMerge}
-      disabled={merging}
+      className={`cursor-pointer gap-1.5 border-0 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 ${showDropdown ? "rounded-r-none" : ""}`}
+      onClick={onPrimaryClick}
+      disabled={disabled}
     >
       <IconGitMerge className="h-3.5 w-3.5" />
-      {merging ? "Merging..." : "Merge PR"}
+      {label}
     </Button>
   );
+
+  if (!showDropdown) {
+    return compact ? primaryBtn : <span className="self-end">{primaryBtn}</span>;
+  }
+
+  return (
+    <span className={compact ? "inline-flex" : "self-end inline-flex"}>
+      {primaryBtn}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            data-testid="pr-merge-button-more"
+            aria-label="Choose merge method"
+            disabled={disabled}
+            onClick={(e) => e.stopPropagation()}
+            className={
+              compact
+                ? "inline-flex items-center rounded-r-full border-l border-green-700/40 bg-green-600 px-1.5 py-0.5 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 disabled:opacity-60 cursor-pointer"
+                : "inline-flex items-center rounded-r-md border-l border-green-700/40 bg-green-600 px-2 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 disabled:opacity-60 cursor-pointer"
+            }
+          >
+            <IconChevronDown className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-auto">
+          {extraMethods.map((m) => (
+            <DropdownMenuItem
+              key={m}
+              onSelect={(e) => {
+                e.preventDefault();
+                onPickMethod(m);
+              }}
+            >
+              {mergeLabel(m)}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </span>
+  );
+}
+
+function mergeLabel(method?: MergeMethod): string {
+  switch (method) {
+    case "squash":
+      return "Squash and merge";
+    case "rebase":
+      return "Rebase and merge";
+    case "merge":
+      return "Create a merge commit";
+    default:
+      return "Merge PR";
+  }
+}
+
+// Returns the methods the repo allows, in the order we prefer to surface
+// them (squash → merge → rebase, matching GitHub's own button defaults).
+// When the lookup hasn't returned yet, returns an empty array so only the
+// primary action is rendered.
+function allowedMethods(methods: RepoMergeMethods | null): MergeMethod[] {
+  if (!methods) return [];
+  const order: MergeMethod[] = ["squash", "merge", "rebase"];
+  return order.filter((m) => methods[m]);
+}
+
+function pickPrimaryMethod(allowed: MergeMethod[]): MergeMethod | undefined {
+  return allowed[0];
 }

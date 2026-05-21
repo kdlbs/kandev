@@ -66,6 +66,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/orgs", c.httpListUserOrgs)
 	api.GET("/repos/search", c.httpSearchRepos)
 	api.GET("/repos/:owner/:repo/branches", c.httpListRepoBranches)
+	api.GET("/repos/:owner/:repo/merge-methods", c.httpGetRepoMergeMethods)
 
 	api.GET("/user/prs", c.httpSearchUserPRs)
 	api.GET("/user/issues", c.httpSearchUserIssues)
@@ -523,6 +524,36 @@ func (c *Controller) httpListRepoBranches(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"branches": branches})
+}
+
+func (c *Controller) httpGetRepoMergeMethods(ctx *gin.Context) {
+	owner := ctx.Param("owner")
+	repo := ctx.Param("repo")
+	methods, err := c.service.GetRepoMergeMethods(ctx.Request.Context(), owner, repo)
+	if err != nil {
+		if errors.Is(err, ErrNoClient) {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "GitHub is not configured. Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",
+				"code":  "github_not_configured",
+			})
+			return
+		}
+		status := http.StatusInternalServerError
+		var apiErr *GitHubAPIError
+		if errors.As(err, &apiErr) {
+			switch apiErr.StatusCode {
+			case http.StatusNotFound:
+				status = http.StatusNotFound
+			case http.StatusUnauthorized:
+				status = http.StatusUnauthorized
+			case http.StatusForbidden:
+				status = http.StatusForbidden
+			}
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, methods)
 }
 
 // httpSearchUserPRs searches for pull requests. Accepts:

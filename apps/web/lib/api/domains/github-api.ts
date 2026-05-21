@@ -25,6 +25,8 @@ import type {
   GitHubActionPresets,
   UpdateGitHubActionPresetsRequest,
   CleanupTasksResponse,
+  MergeMethod,
+  RepoMergeMethods,
 } from "@/lib/types/github";
 
 // Status
@@ -135,12 +137,14 @@ export async function submitPRReview(
   );
 }
 
-// Merge a pull request. Omit mergeMethod to use the repo's default.
+// Merge a pull request. Omit mergeMethod to let the backend pick the first
+// method the repo allows (avoids GitHub's "default to merge commit" 405 on
+// squash-only / rebase-only repos).
 export async function mergePR(
   owner: string,
   repo: string,
   number: number,
-  mergeMethod?: "merge" | "squash" | "rebase",
+  mergeMethod?: MergeMethod,
 ) {
   return fetchJson<{ merged: boolean }>(`/api/v1/github/prs/${owner}/${repo}/${number}/merge`, {
     init: {
@@ -148,6 +152,20 @@ export async function mergePR(
       body: JSON.stringify({ merge_method: mergeMethod ?? "" }),
     },
   });
+}
+
+// Fetch the merge methods a repository allows (allow_merge_commit /
+// allow_squash_merge / allow_rebase_merge). Used by the merge button to
+// hide disallowed options and avoid 405s.
+export async function getRepoMergeMethods(
+  owner: string,
+  repo: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<RepoMergeMethods>(
+    `/api/v1/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/merge-methods`,
+    options,
+  );
 }
 
 // PR watches

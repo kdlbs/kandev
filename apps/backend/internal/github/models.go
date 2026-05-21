@@ -296,6 +296,14 @@ type RepoBranch struct {
 	Name string `json:"name"`
 }
 
+// RepoMergeMethods reports which merge methods a repository allows. Mirrors
+// the allow_*_merge booleans from GET /repos/{owner}/{repo}.
+type RepoMergeMethods struct {
+	Merge  bool `json:"merge"`
+	Squash bool `json:"squash"`
+	Rebase bool `json:"rebase"`
+}
+
 // GitHubStatus represents GitHub connection status.
 type GitHubStatus struct {
 	Authenticated   bool                 `json:"authenticated"`

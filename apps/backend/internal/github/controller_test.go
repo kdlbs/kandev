@@ -17,8 +17,9 @@ import (
 
 // stubClient implements Client with no-op defaults; override fields as needed.
 type stubClient struct {
-	getPRFunc func(ctx context.Context, owner, repo string, number int) (*PR, error)
-	mergePRFn func(ctx context.Context, owner, repo string, number int, mergeMethod string) error
+	getPRFunc             func(ctx context.Context, owner, repo string, number int) (*PR, error)
+	mergePRFn             func(ctx context.Context, owner, repo string, number int, mergeMethod string) error
+	getRepoMergeMethodsFn func() (RepoMergeMethods, error)
 }
 
 func (s *stubClient) IsAuthenticated(context.Context) (bool, error) { return true, nil }
@@ -79,6 +80,12 @@ func (s *stubClient) MergePR(ctx context.Context, owner, repo string, number int
 }
 func (s *stubClient) ListRepoBranches(context.Context, string, string) ([]RepoBranch, error) {
 	return nil, nil
+}
+func (s *stubClient) GetRepoMergeMethods(context.Context, string, string) (RepoMergeMethods, error) {
+	if s.getRepoMergeMethodsFn != nil {
+		return s.getRepoMergeMethodsFn()
+	}
+	return RepoMergeMethods{Merge: true, Squash: true, Rebase: true}, nil
 }
 func (s *stubClient) ListIssues(context.Context, string, string) ([]*Issue, error) {
 	return nil, nil
@@ -217,12 +224,81 @@ func TestHttpMergePR_InvalidMethod(t *testing.T) {
 	}
 }
 
-func TestHttpMergePR_EmptyBody_UsesDefaultMethod(t *testing.T) {
+func TestHttpMergePR_EmptyBody_ResolvesToAllowedMethod(t *testing.T) {
+	// Empty merge_method must NOT propagate to GitHub — that would let
+	// GitHub default to "merge" and 405 on squash-only repos. The service
+	// should resolve to the first allowed method instead.
 	var gotMethod string
 	sc := &stubClient{
 		mergePRFn: func(_ context.Context, _, _ string, _ int, mergeMethod string) error {
 			gotMethod = mergeMethod
 			return nil
+		},
+		getRepoMergeMethodsFn: func() (RepoMergeMethods, error) {
+			// Squash-only repo (the case that surfaced this bug).
+			return RepoMergeMethods{Squash: true}, nil
+		},
+	}
+	router, _ := setupControllerTest(sc)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/github/prs/acme/widget/42/merge", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if gotMethod != "squash" {
+		t.Errorf("expected merge_method=squash, got %q", gotMethod)
+	}
+}
+
+func TestHttpMergePR_ExplicitMethod_Passthrough(t *testing.T) {
+	// When the user picks a method from the dropdown, the service must
+	// NOT second-guess it via the repo lookup.
+	var gotMethod string
+	var lookupCalls int
+	sc := &stubClient{
+		mergePRFn: func(_ context.Context, _, _ string, _ int, mergeMethod string) error {
+			gotMethod = mergeMethod
+			return nil
+		},
+		getRepoMergeMethodsFn: func() (RepoMergeMethods, error) {
+			lookupCalls++
+			return RepoMergeMethods{Merge: true}, nil
+		},
+	}
+	router, _ := setupControllerTest(sc)
+
+	body := bytes.NewBufferString(`{"merge_method":"rebase"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/github/prs/acme/widget/42/merge", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if gotMethod != "rebase" {
+		t.Errorf("expected merge_method=rebase, got %q", gotMethod)
+	}
+	if lookupCalls != 0 {
+		t.Errorf("expected no merge-methods lookup for explicit pin, got %d", lookupCalls)
+	}
+}
+
+func TestHttpMergePR_EmptyBody_LookupFails_FallsBackToGitHubDefault(t *testing.T) {
+	// If the repo lookup itself errors, we still attempt the merge with an
+	// empty method and let GitHub surface whatever error it surfaces — better
+	// than refusing to merge because of an unrelated lookup failure.
+	var gotMethod string
+	sc := &stubClient{
+		mergePRFn: func(_ context.Context, _, _ string, _ int, mergeMethod string) error {
+			gotMethod = mergeMethod
+			return nil
+		},
+		getRepoMergeMethodsFn: func() (RepoMergeMethods, error) {
+			return RepoMergeMethods{}, fmt.Errorf("rate limited")
 		},
 	}
 	router, _ := setupControllerTest(sc)
@@ -235,7 +311,32 @@ func TestHttpMergePR_EmptyBody_UsesDefaultMethod(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	if gotMethod != "" {
-		t.Errorf("expected empty merge_method, got %q", gotMethod)
+		t.Errorf("expected empty merge_method (fall back to GitHub default), got %q", gotMethod)
+	}
+}
+
+func TestHttpGetRepoMergeMethods_OK(t *testing.T) {
+	sc := &stubClient{
+		getRepoMergeMethodsFn: func() (RepoMergeMethods, error) {
+			return RepoMergeMethods{Squash: true, Rebase: true}, nil
+		},
+	}
+	router, _ := setupControllerTest(sc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos/acme/widget/merge-methods", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var got RepoMergeMethods
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := RepoMergeMethods{Squash: true, Rebase: true}
+	if got != want {
+		t.Errorf("got %+v, want %+v", got, want)
 	}
 }
 

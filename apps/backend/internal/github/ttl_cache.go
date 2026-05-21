@@ -42,6 +42,15 @@ func newTTLCache() *ttlCache {
 	}
 }
 
+// newMergeMethodsCache uses a longer TTL than the default search/status
+// caches: repo merge settings rarely change, so a 5-minute window cuts the
+// per-PR-view API calls without making "I just toggled squash" feel stuck.
+func newMergeMethodsCache() *ttlCache {
+	c := newTTLCache()
+	c.ttl = 5 * time.Minute
+	return c
+}
+
 func (c *ttlCache) get(key string) (any, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

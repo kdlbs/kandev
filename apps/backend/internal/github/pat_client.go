@@ -440,6 +440,26 @@ func (c *PATClient) ListRepoBranches(ctx context.Context, owner, repo string) ([
 	return branches, nil
 }
 
+func (c *PATClient) GetRepoMergeMethods(ctx context.Context, owner, repo string) (RepoMergeMethods, error) {
+	var raw struct {
+		AllowMergeCommit *bool `json:"allow_merge_commit"`
+		AllowSquashMerge *bool `json:"allow_squash_merge"`
+		AllowRebaseMerge *bool `json:"allow_rebase_merge"`
+	}
+	if err := c.get(ctx, fmt.Sprintf("/repos/%s/%s", owner, repo), &raw); err != nil {
+		return RepoMergeMethods{}, fmt.Errorf("get repo merge methods: %w", err)
+	}
+	// GitHub omits the allow_* fields when the token can't admin the repo, so
+	// a missing field means "assume allowed" — matches what GitHub's own UI
+	// offers a non-admin viewer.
+	allowed := func(p *bool) bool { return p == nil || *p }
+	return RepoMergeMethods{
+		Merge:  allowed(raw.AllowMergeCommit),
+		Squash: allowed(raw.AllowSquashMerge),
+		Rebase: allowed(raw.AllowRebaseMerge),
+	}, nil
+}
+
 func (c *PATClient) SubmitReview(ctx context.Context, owner, repo string, number int, event, body string) error {
 	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, number)
 	payload := map[string]string{"event": event}

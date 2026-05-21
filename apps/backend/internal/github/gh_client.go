@@ -646,6 +646,30 @@ func ghMergeStatusCode(err error) (int, bool) {
 	return 0, false
 }
 
+func (c *GHClient) GetRepoMergeMethods(ctx context.Context, owner, repo string) (RepoMergeMethods, error) {
+	out, err := c.run(ctx, "api", fmt.Sprintf("repos/%s/%s", owner, repo))
+	if err != nil {
+		return RepoMergeMethods{}, fmt.Errorf("get repo merge methods: %w", err)
+	}
+	var raw struct {
+		AllowMergeCommit *bool `json:"allow_merge_commit"`
+		AllowSquashMerge *bool `json:"allow_squash_merge"`
+		AllowRebaseMerge *bool `json:"allow_rebase_merge"`
+	}
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return RepoMergeMethods{}, fmt.Errorf("parse repo: %w", err)
+	}
+	// GitHub omits the allow_* fields for public repos the caller can't admin,
+	// so a missing field means "assume allowed" — matches the merge UI you see
+	// as a non-admin viewer.
+	allowed := func(p *bool) bool { return p == nil || *p }
+	return RepoMergeMethods{
+		Merge:  allowed(raw.AllowMergeCommit),
+		Squash: allowed(raw.AllowSquashMerge),
+		Rebase: allowed(raw.AllowRebaseMerge),
+	}, nil
+}
+
 func (c *GHClient) ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
 	out, err := c.run(ctx, "api",
 		fmt.Sprintf("repos/%s/%s/branches", owner, repo),
