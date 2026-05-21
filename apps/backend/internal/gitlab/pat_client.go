@@ -572,6 +572,9 @@ func (c *PATClient) getWithTotal(ctx context.Context, endpoint string, result an
 		}
 	}
 	if result == nil {
+		// Drain so the underlying connection can be reused for keep-alive;
+		// HTTP/1.1 transports only pool when the body is fully consumed.
+		_, _ = io.Copy(io.Discard, resp.Body)
 		return total, nil
 	}
 	return total, json.NewDecoder(resp.Body).Decode(result)
@@ -643,6 +646,8 @@ func (c *PATClient) doWrite(ctx context.Context, method, endpoint string, body [
 		return &APIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(respBody)}
 	}
 	if result == nil {
+		// Drain to allow HTTP/1.1 connection reuse on the next call.
+		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(result)

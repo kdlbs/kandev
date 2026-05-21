@@ -100,6 +100,15 @@ func (c *MockClient) SeedBranches(projectPath string, branches []RepoBranch) {
 	c.branches[projectPath] = branches
 }
 
+// SeedPipelines registers the pipelines returned for (projectPath, iid).
+// ListPipelines is project-keyed in the mock — the iid is stored for parity
+// with the other Seed* methods but the lookup ignores it.
+func (c *MockClient) SeedPipelines(projectPath string, iid int, pipelines []Pipeline) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pipelines[mockMRKey{Project: projectPath, IID: iid}] = pipelines
+}
+
 func (c *MockClient) Host() string { return c.host }
 
 func (c *MockClient) IsAuthenticated(context.Context) (bool, error) {
@@ -254,7 +263,18 @@ func (c *MockClient) GetMRStatus(ctx context.Context, projectPath string, iid in
 	if err != nil {
 		return nil, err
 	}
-	return &MRStatus{MR: mr, MergeStatus: mr.MergeStatus}, nil
+	var pipelines []Pipeline
+	if mr.HeadSHA != "" || mr.HeadBranch != "" {
+		pipelines, _ = c.ListPipelines(ctx, projectPath, mr.HeadBranch)
+	}
+	pipelineState, jobsTotal, jobsPassing := summarizePipelines(pipelines)
+	return &MRStatus{
+		MR:                  mr,
+		MergeStatus:         mr.MergeStatus,
+		PipelineState:       pipelineState,
+		PipelineJobsTotal:   jobsTotal,
+		PipelineJobsPassing: jobsPassing,
+	}, nil
 }
 
 func (c *MockClient) ListMRFiles(context.Context, string, int) ([]MRFile, error) {

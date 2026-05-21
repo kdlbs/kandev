@@ -22,7 +22,9 @@ func newTestServer(t *testing.T, handler http.Handler) (host string, teardown fu
 }
 
 func TestPATClient_GetAuthenticatedUser(t *testing.T) {
+	calls := 0
 	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
 		if r.URL.Path != "/user" {
 			t.Errorf("path = %q, want /user", r.URL.Path)
 		}
@@ -41,9 +43,14 @@ func TestPATClient_GetAuthenticatedUser(t *testing.T) {
 	if user != "alice" {
 		t.Fatalf("user = %q, want alice", user)
 	}
-	// Cached on second call.
+	// Cached on second call — the server must not be hit again. A non-
+	// caching implementation would still pass an err-only assertion, so
+	// the request counter is what actually proves the cache.
 	if _, err := c.GetAuthenticatedUser(context.Background()); err != nil {
 		t.Fatalf("cached call err = %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("server called %d times, want 1 (second call must hit cache)", calls)
 	}
 }
 
