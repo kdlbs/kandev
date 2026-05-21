@@ -296,18 +296,7 @@ func parseHTTPURL(t *testing.T, raw string) (host string, port int) {
 	return host, port
 }
 
-// TestAggregator_PushAsync_LastWriteWinsUnderRace is a regression test for the
-// race that caused multi-repo passthrough sessions to get stuck in slow mode
-// (#982 follow-up): subscribe + focus arriving back-to-back used to spawn two
-// independent goroutines whose HTTP order was undefined; with a slow request
-// landing AFTER the fast request the tracker ended up in slow mode while the
-// aggregator's lastPushed claimed fast — and the suppress-duplicate guard
-// then blocked any future event from reconciling the divergence.
-//
-// We simulate the race by making the agentctl "slow" handler block briefly,
-// firing slow then fast in quick succession, and asserting the FINAL mode
-// the server saw is "fast" (which a parallel-goroutine implementation would
-// fail because the slow push would land last and overwrite fast).
+// Regression for #982: slow-then-fast mode events must not leave the tracker stuck in slow.
 func TestAggregator_PushAsync_LastWriteWinsUnderRace(t *testing.T) {
 	type call struct {
 		Mode string
