@@ -15,6 +15,27 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// routePassthrough decides whether an execution should launch on the passthrough
+// PTY path or the ACP path. The session-creation snapshot
+// (execution.IsPassthrough) is authoritative for session-backed launches.
+// Sessionless launches (legacy controller.LaunchAgent) fall back to live profile
+// state so first-time launches reflect the current mode. A profile resolve
+// failure on the fallback path is treated as "not passthrough" — callers that
+// need profile info for command building handle the resolve error themselves.
+func (m *Manager) routePassthrough(ctx context.Context, execution *AgentExecution) bool {
+	if execution.IsPassthrough {
+		return true
+	}
+	if execution.SessionID != "" || execution.AgentProfileID == "" || m.profileResolver == nil {
+		return false
+	}
+	profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
+	if err != nil || profileInfo == nil {
+		return false
+	}
+	return profileInfo.CLIPassthrough
+}
+
 // StartAgentProcess configures and starts the agent subprocess for an execution.
 // This must be called after Launch() to actually start the agent (e.g., auggie, codex).
 // The command is built internally based on the execution's agent profile.
@@ -28,26 +49,31 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	// (execution.IsPassthrough, sourced from TaskSession.IsPassthrough) is
 	// the source of truth: a profile that toggles CLIPassthrough after the
 	// session was created must not strand existing sessions in the wrong
-	// launch path (issue #981). Non-session launches (e.g. the low-level
+	// launch path. Non-session launches (e.g. the low-level
 	// controller.LaunchAgent path) leave IsPassthrough false and fall back to
 	// live profile resolution so first-time launches still pick the current
 	// mode.
-	if execution.AgentProfileID != "" && m.profileResolver != nil {
-		profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
-		if err == nil {
-			isPassthrough := execution.IsPassthrough
-			if !isPassthrough && execution.SessionID == "" {
-				isPassthrough = profileInfo.CLIPassthrough
-			}
-			if isPassthrough {
-				// On resume (e.g., after backend restart), use the resume command path
-				// so the agent receives resume flags (-c / --resume).
-				if execution.isResumedSession {
-					return m.ResumePassthroughSession(ctx, execution.SessionID)
-				}
-				return m.startPassthroughSession(ctx, execution, profileInfo)
-			}
+	//
+	// Profile resolution is needed only for *command building* in the
+	// non-resume passthrough path; it is not part of the routing decision. A
+	// transient resolve error must not silently route a passthrough session
+	// to ACP — the resume branch routes on the snapshot alone, and the fresh
+	// branch surfaces the resolve error explicitly.
+	isPassthrough := m.routePassthrough(ctx, execution)
+	if isPassthrough {
+		if execution.isResumedSession {
+			// Resume reuses the launched session id; ResumePassthroughSession
+			// does its own profile lookup for command building.
+			return m.ResumePassthroughSession(ctx, execution.SessionID)
 		}
+		if execution.AgentProfileID == "" || m.profileResolver == nil {
+			return fmt.Errorf("execution %q is passthrough but has no resolvable profile", executionID)
+		}
+		profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
+		if err != nil {
+			return fmt.Errorf("resolve profile for passthrough execution %q: %w", executionID, err)
+		}
+		return m.startPassthroughSession(ctx, execution, profileInfo)
 	}
 
 	if execution.agentctl == nil {

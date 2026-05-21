@@ -266,8 +266,7 @@ type LaunchAgentRequest struct {
 	// StartAgentProcess routes to the passthrough vs ACP path based on the
 	// session's original mode, not on live profile state — preventing
 	// existing sessions from getting stranded when a profile's
-	// CLIPassthrough flag is toggled after the session was created
-	// (issue #981).
+	// CLIPassthrough flag is toggled after the session was created.
 	IsPassthrough bool
 
 	// Setup script from executor profile (runs in execution environment before agent starts)

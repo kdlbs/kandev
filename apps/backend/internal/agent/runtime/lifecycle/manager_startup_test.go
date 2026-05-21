@@ -2,16 +2,23 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
 
 // mockAgentProfileResolver returns a profile pointing to the mock-agent.
+// When err is non-nil, ResolveProfile returns that error and a nil profile —
+// simulating transient DB hiccups, network failures, or deleted profiles.
 type mockAgentProfileResolver struct {
 	cliPassthrough bool
+	err            error
 }
 
 func (m *mockAgentProfileResolver) ResolveProfile(_ context.Context, profileID string) (*AgentProfileInfo, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
 	return &AgentProfileInfo{
 		ProfileID:      profileID,
 		ProfileName:    "Test Profile",
@@ -111,8 +118,8 @@ func TestStartAgentProcess_Passthrough_Resumed(t *testing.T) {
 	}
 }
 
-// Issue #981: a session created in agent (ACP) mode must keep using the ACP
-// launch path even after its profile has been toggled to CLIPassthrough — the
+// A session created in agent (ACP) mode must keep using the ACP launch path
+// even after its profile has been toggled to CLIPassthrough — the
 // session-snapshot wins so existing sessions don't get stranded.
 func TestStartAgentProcess_AgentSession_IgnoresProfileToggleToPassthrough(t *testing.T) {
 	mgr := newTestManager()
@@ -167,6 +174,66 @@ func TestStartAgentProcess_PassthroughSession_IgnoresProfileToggleToAgent(t *tes
 	}
 	if !strings.Contains(err.Error(), "interactive runner not available") {
 		t.Errorf("expected passthrough path to fail on missing interactive runner, got: %v", err)
+	}
+}
+
+// When ResolveProfile errors on a passthrough resume, the routing decision
+// must still honor the snapshot and stay on the passthrough branch. The
+// downstream command builder may then surface the resolve error explicitly —
+// what matters is that we do NOT silently fall through to the ACP path (the
+// bug that would otherwise strand the session in the wrong launch mode).
+func TestStartAgentProcess_PassthroughResume_SurvivesProfileResolveError(t *testing.T) {
+	mgr := newTestManager()
+	mgr.profileResolver = &mockAgentProfileResolver{err: errors.New("transient DB error")}
+
+	execution := &AgentExecution{
+		ID:               "exec-1",
+		SessionID:        "sess-1",
+		AgentProfileID:   "profile-1",
+		IsPassthrough:    true,
+		isResumedSession: true,
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("seed execution: %v", err)
+	}
+
+	err := mgr.StartAgentProcess(context.Background(), "exec-1")
+	if err == nil {
+		t.Fatal("expected error from the passthrough branch")
+	}
+	// ACP-path "no agentctl client" error would mean the snapshot was
+	// ignored and routing silently picked the wrong branch.
+	if strings.Contains(err.Error(), "no agentctl client") {
+		t.Errorf("snapshot must keep us on the passthrough branch, got ACP error: %v", err)
+	}
+}
+
+// A fresh passthrough launch (not a resume) needs the profile for command
+// building, so a profile-resolve error must surface as an explicit error
+// rather than silently falling through to ACP.
+func TestStartAgentProcess_FreshPassthrough_SurfacesProfileResolveError(t *testing.T) {
+	mgr := newTestManager()
+	mgr.profileResolver = &mockAgentProfileResolver{err: errors.New("transient DB error")}
+
+	execution := &AgentExecution{
+		ID:             "exec-1",
+		SessionID:      "sess-1",
+		AgentProfileID: "profile-1",
+		IsPassthrough:  true,
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("seed execution: %v", err)
+	}
+
+	err := mgr.StartAgentProcess(context.Background(), "exec-1")
+	if err == nil {
+		t.Fatal("expected profile-resolve error to surface")
+	}
+	if !strings.Contains(err.Error(), "resolve profile") {
+		t.Errorf("expected resolve-profile error, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "agentctl client") {
+		t.Errorf("snapshot must keep us on the passthrough branch, got ACP error: %v", err)
 	}
 }
 

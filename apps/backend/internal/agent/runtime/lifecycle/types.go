@@ -63,7 +63,7 @@ type AgentExecution struct {
 	// time (TaskSession.IsPassthrough snapshot). StartAgentProcess uses this
 	// instead of re-resolving the live profile so a profile that toggles
 	// CLIPassthrough after the session was created cannot strand existing
-	// sessions in the wrong launch path. See issue #981.
+	// sessions in the wrong launch path.
 	IsPassthrough bool
 
 	// Passthrough mode info (CLI passthrough without ACP)
@@ -348,7 +348,7 @@ type LaunchRequest struct {
 	// path so a profile that toggles CLIPassthrough after the session was
 	// created does not strand the session in the wrong mode. Non-session
 	// launches (e.g. the low-level controller.LaunchAgent path) leave this
-	// false and fall back to live profile resolution. See issue #981.
+	// false and fall back to live profile resolution.
 	IsPassthrough bool
 
 	// Executor configuration - determines which runtime to use

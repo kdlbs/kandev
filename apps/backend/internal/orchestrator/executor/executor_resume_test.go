@@ -229,14 +229,10 @@ func TestResumeSession_CancelledStateForceCleansUpStaleState(t *testing.T) {
 	}
 }
 
-// TestResumeSession_PropagatesIsPassthrough is a regression test for issue
-// #981: when a user toggles a profile's CLIPassthrough flag and restarts the
-// server, sessions created in the original mode used to silently re-resolve
-// the live profile and pick the new (wrong) launch path, leaving them stuck
-// in "starting". The fix snapshots the session's IsPassthrough at session-
-// creation time and propagates it through the resume request so the lifecycle
-// manager honors the session's original mode regardless of post-create profile
-// toggles.
+// TestResumeSession_PropagatesIsPassthrough verifies the session's IsPassthrough
+// snapshot taken at session-creation time is carried through the resume request
+// to the lifecycle manager, so a profile that toggles CLIPassthrough after the
+// session was created cannot strand existing sessions in the wrong launch path.
 func TestResumeSession_PropagatesIsPassthrough(t *testing.T) {
 	cases := []struct {
 		name             string
