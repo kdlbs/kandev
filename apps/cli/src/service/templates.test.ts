@@ -116,6 +116,26 @@ describe("renderSystemdUnit", () => {
     );
   });
 
+  it("does not prepend '.' when nodePath has no POSIX separator (Windows-style or bare filename)", () => {
+    // path.dirname('C:\\...\\node.exe') === '.' on POSIX. Without the
+    // isAbsolute guard, this would put CWD first in the daemon's PATH —
+    // a privilege-escalation footgun the systemd unit must not introduce.
+    const unit = renderSystemdUnit({
+      launcher: {
+        nodePath: 'C:\\Program Files\\node "Node"\\node.exe',
+        cliEntry: "/home/alice/cli.js",
+        kind: "unknown",
+      },
+      homeDir: "/home/alice/.kandev",
+      logDir: "/home/alice/.kandev/logs",
+      mode: "user",
+    });
+    expect(unit).not.toMatch(/^Environment=PATH=\.:/m);
+    expect(unit).toContain(
+      "Environment=PATH=/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+    );
+  });
+
   it("quotes ExecStart paths that contain spaces", () => {
     const unit = renderSystemdUnit({
       launcher: {
@@ -175,6 +195,40 @@ describe("renderLaunchdPlist", () => {
       mode: "user",
     });
     // /opt/homebrew/bin already first in LAUNCHD_PATH — must not be doubled.
+    expect(plist).toContain(
+      "<key>PATH</key>\n      <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>",
+    );
+  });
+
+  it("prepends node bin dir for system-mode LaunchDaemons too", () => {
+    const plist = renderLaunchdPlist({
+      launcher: {
+        nodePath: "/Users/alice/.volta/tools/image/node/24.14.0/bin/node",
+        cliEntry: "/Users/alice/.volta/tools/image/packages/kandev/bin/cli.js",
+        kind: "npm",
+      },
+      homeDir: "/Library/Application Support/kandev",
+      logDir: "/Library/Logs/kandev",
+      mode: "system",
+      systemUser: "_kandev",
+    });
+    expect(plist).toContain(
+      "<key>PATH</key>\n      <string>/Users/alice/.volta/tools/image/node/24.14.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>",
+    );
+  });
+
+  it("does not prepend '.' to plist PATH when nodePath has no POSIX separator", () => {
+    const plist = renderLaunchdPlist({
+      launcher: {
+        nodePath: "C:\\Program Files\\node\\node.exe",
+        cliEntry: "/home/alice/cli.js",
+        kind: "unknown",
+      },
+      homeDir: "/Users/alice/.kandev",
+      logDir: "/Users/alice/.kandev/logs",
+      mode: "user",
+    });
+    expect(plist).not.toMatch(/<key>PATH<\/key>\s*<string>\.:/);
     expect(plist).toContain(
       "<key>PATH</key>\n      <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>",
     );

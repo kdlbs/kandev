@@ -27,8 +27,16 @@ const LAUNCHD_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
 // subdirectory not covered by the system PATH. ExecStart already points at this
 // node, so its parent dir is exactly where the matching npm/npx live — without
 // this, npx-based ACP agents (claude, codex, opencode) fail to spawn.
+//
+// The isAbsolute guard exists because `path.dirname` on POSIX returns `'.'`
+// for a path with no `/` separator (e.g. a Windows-style `C:\…\node.exe`
+// passed through). Prepending `.` would put CWD ahead of system dirs in the
+// daemon's PATH — a privilege-escalation footgun. Production callers always
+// pass `process.execPath` (absolute on Linux/macOS), so the guard only kicks
+// in for non-POSIX or relative inputs from future callers / tests.
 function pathWithNodeBinDir(basePath: string, nodePath: string): string {
   const nodeBinDir = path.dirname(nodePath);
+  if (!path.isAbsolute(nodeBinDir)) return basePath;
   const parts = basePath.split(":");
   if (parts.includes(nodeBinDir)) return basePath;
   return `${nodeBinDir}:${basePath}`;
