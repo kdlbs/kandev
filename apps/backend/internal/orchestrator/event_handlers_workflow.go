@@ -1319,7 +1319,14 @@ func (s *Service) recordAutoStartMessage(ctx context.Context, taskID, sessionID,
 		s.startTurnForSession(ctx, sessionID)
 		turnID = s.getActiveTurnID(sessionID)
 	}
-	meta := NewUserMessageMeta().WithPlanMode(planMode)
+	// auto_start tags this seed prompt as automation-originated so the
+	// github cleanup filter (HasUserAuthoredMessage) skips it — without
+	// this tag, a workflow auto-start fired on a PR-watch task makes the
+	// task look user-authored and the cleanup loop preserves it on merge,
+	// re-creating the exact pileup the cleanup_policy work fixes.
+	// workflow_auto_start is the original tag this function set; preserved
+	// for any consumer reading it directly.
+	meta := NewUserMessageMeta().WithPlanMode(planMode).WithAutoStart(true)
 	metaMap := meta.ToMap()
 	if metaMap == nil {
 		metaMap = make(map[string]interface{})
