@@ -216,14 +216,19 @@ type MRFile struct {
 }
 
 // MRCommitInfo represents a commit in a merge request.
+//
+// AuthorName is the commit's `author_name` (display name like "Jane Smith"),
+// not a GitLab login handle — GitLab's MR-commits endpoint doesn't expose a
+// login. Per-commit Additions/Deletions/FilesChanged are also not on the
+// MR-commits endpoint; getting them would require a per-commit fetch
+// against /projects/:id/repository/commits/:sha?stats=true, which is N+1
+// and out of scope for v1. The fields were filled with 0 in earlier
+// revisions and removed here to stop callers consuming bogus data.
 type MRCommitInfo struct {
-	SHA            string `json:"sha"`
-	Message        string `json:"message"`
-	AuthorUsername string `json:"author_username"`
-	AuthorDate     string `json:"author_date"`
-	Additions      int    `json:"additions"`
-	Deletions      int    `json:"deletions"`
-	FilesChanged   int    `json:"files_changed"`
+	SHA        string `json:"sha"`
+	Message    string `json:"message"`
+	AuthorName string `json:"author_name"`
+	AuthorDate string `json:"author_date"`
 }
 
 // Issue represents a GitLab Issue.

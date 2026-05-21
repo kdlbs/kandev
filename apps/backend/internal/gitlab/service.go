@@ -186,8 +186,12 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 	s.mu.Lock()
 	s.client = NewPATClient(s.host, token)
 	s.authMethod = AuthMethodPAT
+	installedHost := s.host
 	s.mu.Unlock()
-	s.logger.Info("GitLab token configured", zap.String("host", host))
+	// Log the host the installed client actually targets, not the
+	// pre-validation snapshot — a concurrent ConfigureHost between the
+	// two would otherwise leave the log entry referring to a stale value.
+	s.logger.Info("GitLab token configured", zap.String("host", installedHost))
 	return nil
 }
 

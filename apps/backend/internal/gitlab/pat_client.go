@@ -459,16 +459,14 @@ func (c *PATClient) ListMRFiles(ctx context.Context, projectPath string, iid int
 }
 
 func (c *PATClient) ListMRCommits(ctx context.Context, projectPath string, iid int) ([]MRCommitInfo, error) {
+	// The MR-commits endpoint doesn't return per-commit stats — only the
+	// per-repo /repository/commits/:sha?stats=true does. We deliberately
+	// don't fetch stats here; see the MRCommitInfo doc-comment.
 	var raw []struct {
 		ID           string `json:"id"`
 		Message      string `json:"message"`
 		AuthorName   string `json:"author_name"`
 		AuthoredDate string `json:"authored_date"`
-		Stats        struct {
-			Additions int `json:"additions"`
-			Deletions int `json:"deletions"`
-			Total     int `json:"total"`
-		} `json:"stats"`
 	}
 	endpoint := fmt.Sprintf("/projects/%s/merge_requests/%d/commits?per_page=100",
 		projectRef(projectPath), iid)
@@ -478,12 +476,10 @@ func (c *PATClient) ListMRCommits(ctx context.Context, projectPath string, iid i
 	commits := make([]MRCommitInfo, len(raw))
 	for i, r := range raw {
 		commits[i] = MRCommitInfo{
-			SHA:            r.ID,
-			Message:        r.Message,
-			AuthorUsername: r.AuthorName,
-			AuthorDate:     r.AuthoredDate,
-			Additions:      r.Stats.Additions,
-			Deletions:      r.Stats.Deletions,
+			SHA:        r.ID,
+			Message:    r.Message,
+			AuthorName: r.AuthorName,
+			AuthorDate: r.AuthoredDate,
 		}
 	}
 	return commits, nil
