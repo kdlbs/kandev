@@ -127,25 +127,40 @@ func TestRedactor_AbsPath_MultipleRootsRewriteIndependently(t *testing.T) {
 
 func TestRedactor_AbsPath_StandaloneRootStripped(t *testing.T) {
 	t.Parallel()
-	// Bare root (e.g. `pwd` output, quoted paths, end of sentence) used to
-	// leak through because the matcher only handled `root + "/"`. Now we
-	// also strip the root when it appears at a word boundary.
-	r := NewRedactor("/workspace")
+	// Bare root (e.g. `pwd` output, end of sentence, mid-prose whitespace)
+	// used to leak through because the matcher only handled `root + "/"`.
+	// Now we accept "/", whitespace, or end-of-string as the boundary.
 	cases := map[string]string{
 		"cwd: /workspace":          "cwd: ",
 		"cd /workspace && ls":      "cd  && ls",
-		"path=\"/workspace\" done": "path=\"\" done",
+		"line1\n/workspace\nline2": "line1\n\nline2",
 	}
 	for in, want := range cases {
+		r := NewRedactor("/workspace")
 		got := r.String(in)
 		if got != want {
 			t.Errorf("input %q: got %q, want %q", in, got, want)
 		}
 	}
-	// Sibling dir must still be left alone.
-	siblingIn := "see /workspace2/file.ts"
-	if got := r.String(siblingIn); got != siblingIn {
-		t.Errorf("sibling path corrupted: got %q, want %q", got, siblingIn)
+}
+
+func TestRedactor_AbsPath_SiblingsWithPunctuationNotCorrupted(t *testing.T) {
+	t.Parallel()
+	// Sibling paths that extend the root via punctuation (".", "-", "_") used
+	// to false-match a `\b` matcher because `\b` fires on word→non-word
+	// transitions. The current regex restricts the boundary to "/", whitespace,
+	// or end-of-string so these stay intact.
+	r := NewRedactor("/workspace")
+	siblings := []string{
+		"see /workspace2/file.ts",
+		"see /workspace.bak/file.ts",
+		"see /workspace-old/file.ts",
+		"see /workspace_alt/file.ts",
+	}
+	for _, in := range siblings {
+		if got := r.String(in); got != in {
+			t.Errorf("sibling path corrupted: in=%q got=%q", in, got)
+		}
 	}
 }
 

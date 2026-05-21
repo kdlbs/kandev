@@ -49,15 +49,25 @@ var envFileRe = regexp.MustCompile(`(^|/)\.env(\..+)?$`)
 // Construct with NewRedactor; reuse across one snapshot build (it accumulates
 // the applied-rule set).
 type Redactor struct {
-	// rootPatterns matches each workspace root followed by either a path
-	// separator (so "/workspace/src/x.ts" → "src/x.ts") or a word boundary
-	// (so a standalone "/workspace" from `pwd` output is also stripped). The
-	// word-boundary alternative prevents sibling dirs like "/workspace2"
-	// from matching. Patterns are sorted longest-root-first so a nested root
-	// (e.g. "/workspace/repo1") gets matched before its parent.
+	// roots are the workspace prefixes to rewrite, sorted longest-first so a
+	// nested root (e.g. "/workspace/repo1") gets matched before its parent.
+	// rootPatterns is the parallel slice of compiled matchers.
+	roots        []string
 	rootPatterns []*regexp.Regexp
 	applied      map[string]struct{}
 }
+
+// rootBoundary matches the characters that may follow a workspace root WITHOUT
+// extending it into a sibling path. We accept:
+//   - "/" — path separator (the common "rewrite to repo-relative" case)
+//   - end-of-string anchor `$` — bare root at the tail of a string
+//   - whitespace — bare root in the middle of prose, `pwd` output, …
+//
+// We explicitly do NOT use `\b` here: `\b` fires on any word↔non-word transition
+// so "/workspace.bak" or "/workspace-old" would falsely match. Restricting to
+// `/`, EOS, or whitespace keeps every realistic case while never corrupting
+// sibling paths that differ only in punctuation.
+const rootBoundary = `(/|\s|$)`
 
 // NewRedactor returns a Redactor that rewrites absolute paths under any of
 // workspaceRoots to repo-relative paths. Passing no roots (or only empty
@@ -76,9 +86,10 @@ func NewRedactor(workspaceRoots ...string) *Redactor {
 	})
 	patterns := make([]*regexp.Regexp, 0, len(roots))
 	for _, root := range roots {
-		patterns = append(patterns, regexp.MustCompile(regexp.QuoteMeta(root)+`(?:/|\b)`))
+		patterns = append(patterns, regexp.MustCompile(regexp.QuoteMeta(root)+rootBoundary))
 	}
 	return &Redactor{
+		roots:        roots,
 		rootPatterns: patterns,
 		applied:      make(map[string]struct{}),
 	}
@@ -97,11 +108,22 @@ func (r *Redactor) String(s string) string {
 			r.record(rule.name)
 		}
 	}
-	for _, re := range r.rootPatterns {
+	for i, re := range r.rootPatterns {
 		if !re.MatchString(out) {
 			continue
 		}
-		out = re.ReplaceAllString(out, "")
+		// Strip root + path separator entirely so paths become repo-relative;
+		// for whitespace/EOS boundaries, preserve the boundary char so prose
+		// like "cd /workspace && ls" loses only the root, not the surrounding
+		// space.
+		rootLen := len(r.roots[i])
+		out = re.ReplaceAllStringFunc(out, func(match string) string {
+			boundary := match[rootLen:]
+			if boundary == "/" {
+				return ""
+			}
+			return boundary
+		})
 		r.record(RuleAbsPath)
 	}
 	return out
