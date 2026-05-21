@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@kandev/ui/button";
+import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
@@ -558,20 +559,20 @@ export function LinearIssueWatchDialog({
             }
             disabled={workspaceLocked}
           />
-          {/* Hairlines separate the four conceptual blocks (Destination /
+          {/* Hairlines separate the five conceptual blocks (Destination /
               Filter / Automation / Prompt / Settings). Each block answers a
               different question, so a consistent rhythm helps users navigate
               the form visually instead of reading it as one long stack. */}
-          <div className="border-t border-border/60" />
+          <Separator />
           <FilterFields form={form} setForm={setForm} />
-          <div className="border-t border-border/60" />
+          <Separator />
           <AutomationFields form={form} setForm={setForm} />
-          <div className="border-t border-border/60" />
+          <Separator />
           <PromptField
             value={form.prompt}
             onChange={(v) => setForm((p) => ({ ...p, prompt: v }))}
           />
-          <div className="border-t border-border/60" />
+          <Separator />
           <SettingsFields form={form} setForm={setForm} />
         </div>
         <DialogFooter>
