@@ -26,7 +26,7 @@ import {
   type WorkflowGroup,
 } from "@/lib/github/check-buckets";
 import type { CheckRun, TaskPR } from "@/lib/types/github";
-import { PRMergeButton } from "./pr-shared";
+import { PRMergeButton } from "./pr-merge-button";
 
 type CountsView = {
   passed: number;

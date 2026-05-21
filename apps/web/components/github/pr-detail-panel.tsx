@@ -31,8 +31,8 @@ import {
   getTimeAgoColor,
   CollapsibleSection,
   PRMarkdownBody,
-  PRMergeButton,
 } from "./pr-shared";
+import { PRMergeButton } from "./pr-merge-button";
 import { ReviewStateBadge } from "./pr-reviews-section";
 import { ChecksSection } from "./pr-checks-section";
 import { ReviewsSection } from "./pr-reviews-section";

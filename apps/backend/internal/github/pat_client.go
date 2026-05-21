@@ -466,6 +466,11 @@ func (c *PATClient) MergePR(ctx context.Context, owner, repo string, number int,
 	return c.put(ctx, endpoint, jsonBody)
 }
 
+// post makes an authenticated HTTP POST to the GitHub API.
+// Errors on non-2xx are returned as plain `fmt.Errorf` (not `*GitHubAPIError`),
+// so callers cannot recover the HTTP status via `errors.As`. Use `put` (or
+// switch to wrapping in `GitHubAPIError`) if the caller needs per-status
+// mapping like the merge endpoint does.
 func (c *PATClient) post(ctx context.Context, endpoint string, body []byte) error {
 	u := githubAPIBase + endpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))

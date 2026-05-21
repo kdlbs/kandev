@@ -239,6 +239,41 @@ func TestHttpMergePR_EmptyBody_UsesDefaultMethod(t *testing.T) {
 	}
 }
 
+func TestHttpMergePR_MalformedJSON(t *testing.T) {
+	router, _ := setupControllerTest(&stubClient{})
+
+	// Truncated JSON: parser fails with a non-EOF error, which must now
+	// surface as 400 rather than silently falling through to the default
+	// merge method.
+	body := bytes.NewBufferString(`{"merge_method":"squash"`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/github/prs/acme/widget/42/merge", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHttpMergePR_NoClient_Returns503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newControllerTestLogger()
+	// nil client triggers ErrNoClient via Service.MergePR.
+	svc := NewService(nil, "none", nil, nil, nil, log)
+	ctrl := NewController(svc, log)
+	router := gin.New()
+	ctrl.RegisterHTTPRoutes(router)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/github/prs/acme/widget/42/merge", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestHttpMergePR_Conflict(t *testing.T) {
 	sc := &stubClient{
 		mergePRFn: func(context.Context, string, string, int, string) error {

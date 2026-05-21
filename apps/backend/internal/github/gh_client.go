@@ -635,10 +635,12 @@ func ghMergeStatusCode(err error) (int, bool) {
 		return http.StatusForbidden, true
 	}
 	s := err.Error()
-	if strings.Contains(s, "HTTP 405") || strings.Contains(s, "status: 405") {
+	if strings.Contains(s, "HTTP 405") || strings.Contains(s, "status: 405") ||
+		strings.Contains(s, "405 Method Not Allowed") {
 		return http.StatusMethodNotAllowed, true
 	}
-	if strings.Contains(s, "HTTP 409") || strings.Contains(s, "status: 409") {
+	if strings.Contains(s, "HTTP 409") || strings.Contains(s, "status: 409") ||
+		strings.Contains(s, "409 Conflict") {
 		return http.StatusConflict, true
 	}
 	return 0, false
