@@ -343,10 +343,9 @@ func TestWakeupE2EFullPipeline_BridgeToEventBus(t *testing.T) {
 		}
 	}
 	if len(wakeupTexts) == 0 {
-		t.Logf("WARNING: adapter did not surface 'WAKEUP' text. Cannot assert on bus publishing.")
-	} else {
-		t.Logf("✓ adapter surfaced wakeup text chunks: %v", wakeupTexts)
+		t.Fatalf("adapter did not surface 'WAKEUP' text — wakeup turn did not fire, bus-publishing assertions would be inconclusive")
 	}
+	t.Logf("✓ adapter surfaced wakeup text chunks: %v", wakeupTexts)
 
 	// ---- Detailed accounting per turn ----
 	//

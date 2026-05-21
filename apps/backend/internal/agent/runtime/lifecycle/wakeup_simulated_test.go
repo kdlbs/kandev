@@ -101,9 +101,9 @@ func TestWakeup_SecondTurnAgentReadyIsSuppressed(t *testing.T) {
 
 	// The bug: agent.ready is suppressed on the second turn because the
 	// execution status is already Ready when MarkReady runs.
-	if readyCount < 2 {
+	if readyCount != 2 {
 		t.Errorf(
-			"BUG CONFIRMED: only %d agent.ready event(s) published, expected 2. "+
+			"expected exactly 2 agent.ready events, got %d. "+
 				"MarkReady at manager_interaction.go:896 suppresses the wakeup turn's "+
 				"AgentReady because fireWakeup bypasses SessionManager.SendPrompt and "+
 				"never flips the execution back to Running. The orchestrator therefore "+
