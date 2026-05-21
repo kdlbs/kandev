@@ -40,6 +40,14 @@ type submittedReview struct {
 	Body   string `json:"body"`
 }
 
+// mergedPR records a MergePR call for test assertions.
+type mergedPR struct {
+	Owner       string `json:"owner"`
+	Repo        string `json:"repo"`
+	Number      int    `json:"number"`
+	MergeMethod string `json:"merge_method"`
+}
+
 // repoKey is a composite key for per-repo lookups by owner/repo.
 type repoKey struct {
 	Owner string
@@ -64,6 +72,7 @@ type MockClient struct {
 	files            map[prKey][]PRFile
 	commits          map[prKey][]PRCommitInfo
 	submittedReviews []submittedReview
+	mergedPRs        []mergedPR
 }
 
 // NewMockClient creates a new MockClient with default values.
@@ -266,6 +275,21 @@ func (m *MockClient) SubmitReview(_ context.Context, owner, repo string, number 
 	return nil
 }
 
+func (m *MockClient) MergePR(_ context.Context, owner, repo string, number int, mergeMethod string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mergedPRs = append(m.mergedPRs, mergedPR{
+		Owner: owner, Repo: repo, Number: number, MergeMethod: mergeMethod,
+	})
+	now := time.Now().UTC()
+	if pr, ok := m.prs[prKey{owner, repo, number}]; ok {
+		pr.State = "merged"
+		pr.MergedAt = &now
+		pr.Mergeable = false
+	}
+	return nil
+}
+
 // --- Setter methods for HTTP control endpoints ---
 
 // SetUser sets the authenticated username.
@@ -404,6 +428,7 @@ func (m *MockClient) Reset() {
 	m.files = make(map[prKey][]PRFile)
 	m.commits = make(map[prKey][]PRCommitInfo)
 	m.submittedReviews = nil
+	m.mergedPRs = nil
 }
 
 // SubmittedReviews returns all recorded SubmitReview calls.
@@ -412,5 +437,14 @@ func (m *MockClient) SubmittedReviews() []submittedReview {
 	defer m.mu.RUnlock()
 	result := make([]submittedReview, len(m.submittedReviews))
 	copy(result, m.submittedReviews)
+	return result
+}
+
+// MergedPRs returns all recorded MergePR calls.
+func (m *MockClient) MergedPRs() []mergedPR {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make([]mergedPR, len(m.mergedPRs))
+	copy(result, m.mergedPRs)
 	return result
 }

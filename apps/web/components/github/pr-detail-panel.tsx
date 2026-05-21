@@ -32,6 +32,7 @@ import {
   CollapsibleSection,
   PRMarkdownBody,
 } from "./pr-shared";
+import { PRMergeButton } from "./pr-merge-button";
 import { ReviewStateBadge } from "./pr-reviews-section";
 import { ChecksSection } from "./pr-checks-section";
 import { ReviewsSection } from "./pr-reviews-section";
@@ -475,6 +476,7 @@ function PRHeader({
           <HeaderTitleRow taskPR={taskPR} loading={loading} onRefresh={onRefresh} />
         </div>
         <ApproveButton taskPR={taskPR} feedback={feedback} onRefresh={onRefresh} />
+        <PRMergeButton taskPR={taskPR} onMerged={onRefresh} />
       </div>
       <div className="flex items-center gap-1.5 flex-wrap">
         <StateBadge state={isDraft && liveState === "open" ? "draft" : liveState} />

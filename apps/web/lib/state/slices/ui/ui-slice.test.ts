@@ -143,6 +143,76 @@ describe("sidebar task prefs (pin + manual order)", () => {
   });
 });
 
+describe("setSubtaskOrder", () => {
+  const SUB_KEY = "kandev.sidebar.subtaskOrderByParentId";
+  const PARENT_A = "parent-a";
+  const PARENT_B = "parent-b";
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("hydrates subtaskOrderByParentId from localStorage", () => {
+    window.localStorage.setItem(SUB_KEY, JSON.stringify({ [PARENT_A]: ["c1", "c2"] }));
+    const store = makeStore();
+    expect(store.getState().sidebarTaskPrefs.subtaskOrderByParentId).toEqual({
+      [PARENT_A]: ["c1", "c2"],
+    });
+  });
+
+  it("setSubtaskOrder writes per-parent order and persists", () => {
+    const store = makeStore();
+    store.getState().setSubtaskOrder(PARENT_A, ["c2", "c1"]);
+    expect(store.getState().sidebarTaskPrefs.subtaskOrderByParentId).toEqual({
+      [PARENT_A]: ["c2", "c1"],
+    });
+    expect(JSON.parse(window.localStorage.getItem(SUB_KEY) ?? "null")).toEqual({
+      [PARENT_A]: ["c2", "c1"],
+    });
+
+    store.getState().setSubtaskOrder(PARENT_B, ["d1"]);
+    expect(store.getState().sidebarTaskPrefs.subtaskOrderByParentId).toEqual({
+      [PARENT_A]: ["c2", "c1"],
+      [PARENT_B]: ["d1"],
+    });
+  });
+
+  it("setSubtaskOrder with empty array clears the parent entry", () => {
+    const store = makeStore();
+    store.getState().setSubtaskOrder(PARENT_A, ["c1"]);
+    store.getState().setSubtaskOrder(PARENT_A, []);
+    expect(store.getState().sidebarTaskPrefs.subtaskOrderByParentId).toEqual({});
+    expect(JSON.parse(window.localStorage.getItem(SUB_KEY) ?? "null")).toEqual({});
+  });
+
+  it("removeTaskFromSidebarPrefs drops the task as a parent key and from sibling lists", () => {
+    const store = makeStore();
+    store.getState().setSubtaskOrder(PARENT_A, ["c1", "c2"]);
+    store.getState().setSubtaskOrder(PARENT_B, ["c1", "d1"]);
+
+    // Removing c1 — it's both a subtask under p1 and p2.
+    store.getState().removeTaskFromSidebarPrefs("c1");
+    expect(store.getState().sidebarTaskPrefs.subtaskOrderByParentId).toEqual({
+      [PARENT_A]: ["c2"],
+      [PARENT_B]: ["d1"],
+    });
+
+    // Removing the parent itself wipes its entry.
+    store.getState().removeTaskFromSidebarPrefs(PARENT_A);
+    expect(store.getState().sidebarTaskPrefs.subtaskOrderByParentId).toEqual({
+      [PARENT_B]: ["d1"],
+    });
+  });
+
+  it("removeTaskFromSidebarPrefs drops the parent key if removing its last subtask", () => {
+    const store = makeStore();
+    store.getState().setSubtaskOrder(PARENT_A, ["c1"]);
+    store.getState().removeTaskFromSidebarPrefs("c1");
+    expect(store.getState().sidebarTaskPrefs.subtaskOrderByParentId).toEqual({});
+    expect(JSON.parse(window.localStorage.getItem(SUB_KEY) ?? "null")).toEqual({});
+  });
+});
+
 describe("reorderSidebarViews", () => {
   beforeEach(() => {
     window.localStorage.clear();

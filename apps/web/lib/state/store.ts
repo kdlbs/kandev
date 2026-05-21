@@ -478,6 +478,7 @@ export type AppState = {
   setKanbanPreviewedTaskId: UIA["setKanbanPreviewedTaskId"];
   togglePinnedTask: UIA["togglePinnedTask"];
   setSidebarTaskOrder: UIA["setSidebarTaskOrder"];
+  setSubtaskOrder: UIA["setSubtaskOrder"];
   removeTaskFromSidebarPrefs: UIA["removeTaskFromSidebarPrefs"];
   // Office actions
   setOfficeAgentProfiles: (agents: AgentProfile[]) => void;

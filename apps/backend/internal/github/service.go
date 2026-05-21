@@ -28,6 +28,11 @@ const (
 	AuthMethodPAT  = "pat"
 )
 
+// ErrInvalidPRURL signals that a caller-supplied PR URL could not be parsed.
+// Used by AssociateExistingPRByURL so HTTP callers can translate the failure
+// into a 400 instead of a generic 500.
+var ErrInvalidPRURL = errors.New("invalid PR URL")
+
 // defaultBranchMain and defaultBranchMaster are the conventional default branch
 // names sorted to the top of branch pickers.
 const (
@@ -387,6 +392,17 @@ func (s *Service) SubmitReview(ctx context.Context, owner, repo string, number i
 	return s.client.SubmitReview(ctx, owner, repo, number, event, body)
 }
 
+// MergePR merges a pull request. mergeMethod is one of "merge", "squash",
+// "rebase"; an empty string lets GitHub apply the repo's default. The caller
+// is expected to refresh PR feedback after a successful merge — the background
+// poller will catch the merged state on its next pass.
+func (s *Service) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
+	if s.client == nil {
+		return ErrNoClient
+	}
+	return s.client.MergePR(ctx, owner, repo, number, mergeMethod)
+}
+
 // --- PR Watch operations ---
 
 // CreatePRWatch creates a new PR watch for a (session, repository) pair.
@@ -593,6 +609,35 @@ func (s *Service) AssociatePRWithTask(ctx context.Context, taskID, repositoryID 
 		zap.String("task_id", taskID),
 		zap.String("repository_id", repositoryID),
 		zap.Int("pr_number", pr.Number))
+	return tp, nil
+}
+
+// AssociateExistingPRByURL parses a GitHub PR URL, fetches the PR data, and
+// associates it with the given task. No PR watch is created — this is used
+// when the caller already knows the PR (e.g. user clicked "+ Task" on a PR
+// in the GitHub page), so branch-based discovery is unnecessary. The watch
+// for ongoing status sync is still created later when the agent session
+// starts (see ensureSessionPRWatch).
+//
+// Returns the persisted TaskPR row so callers can confirm the association
+// and react to errors synchronously, in contrast to AssociatePRByURL's
+// fire-and-forget logging.
+func (s *Service) AssociateExistingPRByURL(ctx context.Context, taskID, repositoryID, prURL string) (*TaskPR, error) {
+	if s.client == nil {
+		return nil, fmt.Errorf("github client not available")
+	}
+	owner, repo, prNumber, err := parsePRURL(prURL)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidPRURL, err)
+	}
+	pr, err := s.client.GetPR(ctx, owner, repo, prNumber)
+	if err != nil {
+		return nil, fmt.Errorf("fetch PR: %w", err)
+	}
+	tp, err := s.AssociatePRWithTask(ctx, taskID, repositoryID, pr)
+	if err != nil {
+		return nil, fmt.Errorf("associate PR with task: %w", err)
+	}
 	return tp, nil
 }
 

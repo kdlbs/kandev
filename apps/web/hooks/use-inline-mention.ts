@@ -7,11 +7,21 @@ import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { getFileName } from "@/lib/utils/file-path";
 import type { RichTextInputHandle } from "@/components/task/chat/rich-text-input";
 
+export type TaskMentionData = {
+  taskId: string;
+  title: string;
+  workflowId: string;
+  workflowStepId: string;
+  state?: string | null;
+};
+
 export type MentionItem = {
   id: string;
-  kind: "prompt" | "file" | "plan";
+  kind: "prompt" | "file" | "plan" | "task";
   label: string;
   description?: string;
+  /** Task-only payload carried for chip serialisation and prompt expansion. */
+  task?: TaskMentionData;
   /** What happens on selection. Each kind provides its own. */
   onSelect: (
     input: RichTextInputHandle,

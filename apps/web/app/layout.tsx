@@ -5,6 +5,7 @@ import { StateProvider } from "@/components/state-provider";
 import { WebSocketConnector } from "@/components/ws-connector";
 import { ToastProvider } from "@/components/toast-provider";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { Toaster as SonnerToaster } from "@kandev/ui/sonner";
 import { CommandRegistryProvider } from "@/lib/commands/command-registry";
 import { CommandPanel } from "@/components/command-panel";
 import { GlobalCommands } from "@/components/global-commands";
@@ -70,6 +71,7 @@ export default async function RootLayout({
             <DiffWorkerPoolProvider>
               <TooltipProvider>
                 <ToastProvider>
+                  <SonnerToaster richColors position="top-right" />
                   <SessionFailureToastBridge />
                   <SidebarViewsSyncBridge />
                   <LogBufferBridge />
