@@ -76,21 +76,25 @@ func (r *Redactor) String(s string) string {
 			r.record(rule.name)
 		}
 	}
-	if r.workspaceRoot != "" && strings.Contains(out, r.workspaceRoot) {
-		// Replace every occurrence of the workspace root with a relative form.
-		// We split on the root and rejoin so each suffix has its leading slash
-		// trimmed independently.
-		parts := strings.Split(out, r.workspaceRoot)
-		var b strings.Builder
-		b.WriteString(parts[0])
-		changed := false
-		for _, part := range parts[1:] {
-			changed = true
-			b.WriteString(strings.TrimPrefix(part, "/"))
-		}
-		if changed {
-			out = b.String()
-			r.record(RuleAbsPath)
+	if r.workspaceRoot != "" {
+		// Split on the workspace root WITH a trailing slash so a sibling
+		// directory sharing the root as a bare prefix doesn't match. e.g.
+		// workspaceRoot="/home/user/proj" must not match "/home/user/proj2/x.ts".
+		// The separator already carries the slash, so rejoining is a plain concat.
+		root := r.workspaceRoot + "/"
+		if strings.Contains(out, root) {
+			parts := strings.Split(out, root)
+			var b strings.Builder
+			b.WriteString(parts[0])
+			changed := false
+			for _, part := range parts[1:] {
+				changed = true
+				b.WriteString(part)
+			}
+			if changed {
+				out = b.String()
+				r.record(RuleAbsPath)
+			}
 		}
 	}
 	return out

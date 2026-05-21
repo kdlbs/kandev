@@ -46,7 +46,9 @@ func (s *Service) CreateShare(ctx context.Context, taskSessionID string) (*Share
 	if err != nil {
 		return nil, err
 	}
-	body, err := json.Marshal(snap)
+	// Use the same indented marshal as the gist backend so the size we
+	// surface to the UI matches the bytes actually uploaded to GitHub.
+	body, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal snapshot: %w", err)
 	}

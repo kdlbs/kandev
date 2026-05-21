@@ -58,7 +58,9 @@ func TestBuildGistREADME_FullConversation(t *testing.T) {
 	assertContains(t, md, "> why is X flaky?")
 	assertContains(t, md, "🤖 Assistant")
 	assertContains(t, md, "🔧 <strong>shell</strong>")
-	assertContains(t, md, "```json")
+	// Tool args and output render via HTML <pre><code> rather than a
+	// triple-backtick fence so payloads containing ``` can't break out.
+	assertContains(t, md, `<pre><code class="language-json">`)
 	assertContains(t, md, `"cmd": "go test ./..."`)
 	assertContains(t, md, "📤 Tool output")
 	assertContains(t, md, "FAIL pkg/foo TestX")

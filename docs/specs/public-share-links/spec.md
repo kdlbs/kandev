@@ -23,9 +23,13 @@ blob can be re-posted to the hosted service without code changes.
 
 ## What
 
-- A "Share" button appears in the task header **only when the session has
-  completed**. For an in-progress, queued, or failed session the button is
-  hidden.
+- A "Share" button appears in the chat panel header for any session past
+  the pre-history states (`CREATED` / `STARTING`). The button is hidden
+  while the session is still warming up — there is nothing worth
+  publishing yet — and visible for every other state (`RUNNING`, `IDLE`,
+  `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, `CANCELLED`). Users can
+  share an in-progress conversation if they want to; the backend mirrors
+  this rule (see Failure modes).
 - Clicking Share opens a dialog with a **mandatory preview-and-confirm step**:
   the dialog renders the redacted snapshot in a read-only viewer that reuses
   the existing session message components, plus a visible warning that anyone
@@ -65,7 +69,7 @@ published. The frozen snapshot itself lives on the gist, not in the
 kandev DB; the table only records the metadata needed to manage and
 revoke shares.
 
-```
+```text
 task_shares
   id                  TEXT       PRIMARY KEY (uuid)
   task_session_id     TEXT       NOT NULL  -- soft reference; no FK constraint
@@ -97,7 +101,7 @@ URL is opened), and `README.md` (fallback for users who land on the gist
 directly). The JSON schema is the durable contract; the HTML and README
 are derived from it.
 
-```
+```text
 Snapshot
   version          int       -- 1
   kandev_version   string    -- version that produced the snapshot
@@ -136,7 +140,7 @@ HTTP surface. kandev's HTTP layer has no per-request user middleware
 today — authorisation is "this kandev instance can reach this task in its
 local store", same as every other task endpoint.
 
-```
+```http
 POST   /api/v1/tasks/:taskId/sessions/:sessionId/shares
        -> 201 { id, url, created_at, snapshot_size_bytes, revoked_at? }
        Builds and uploads a snapshot. Idempotency is not provided in v0;
@@ -158,7 +162,7 @@ GET    /api/v1/tasks/:taskId/sessions/:sessionId/shares
 DELETE /api/v1/shares/:shareId
        -> 204
        Revokes a share: deletes the gist and marks the row revoked.
-```
+```go
 
 Internal Go surface:
 
@@ -179,7 +183,7 @@ type Backend interface {
     Upload(ctx context.Context, snap *Snapshot) (externalID, externalURL string, err error)
     Delete(ctx context.Context, externalID string) error
 }
-```
+```text
 
 ### Share URL format
 
@@ -205,7 +209,7 @@ gistpreview-with-share.html form on every response.
 
 A share row has two states:
 
-```
+```text
 created --[user clicks Revoke OR DELETE /api/shares/:id]--> revoked
 ```
 
@@ -355,5 +359,3 @@ There is no "draft" or "scheduled" state; publish is synchronous.
   with no kandev row).
 - Embedding rich workspace context (file tree, repo HEAD SHA, agent
   config). v0 captures only what is needed to render the conversation.
-- Backporting to in-progress sessions. Only completed sessions can be
-  shared in v0.

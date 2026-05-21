@@ -170,7 +170,7 @@ func writeText(b *strings.Builder, text, role string) bool {
 }
 
 func writeToolCall(b *strings.Builder, block Block) bool {
-	name := nonEmpty(block.ToolName, "tool")
+	name := escapeHTML(nonEmpty(block.ToolName, "tool"))
 	summary := strings.TrimSpace(block.Text)
 	if summary != "" {
 		fmt.Fprintf(b, "<details>\n<summary>🔧 <strong>%s</strong> — %s</summary>\n\n", name, escapeHTML(summary))
@@ -178,7 +178,11 @@ func writeToolCall(b *strings.Builder, block Block) bool {
 		fmt.Fprintf(b, "<details>\n<summary>🔧 <strong>%s</strong></summary>\n\n", name)
 	}
 	if len(block.Args) > 0 {
-		fmt.Fprintf(b, "```json\n%s\n```\n", prettyJSON(block.Args))
+		// Render via an HTML <pre> rather than a triple-backtick fence so a
+		// JSON arg containing literal ``` sequences (commands, code snippets)
+		// can't break out of the code block and corrupt downstream rendering.
+		fmt.Fprintf(b, "<pre><code class=\"language-json\">%s</code></pre>\n",
+			escapeHTML(prettyJSON(block.Args)))
 	}
 	b.WriteString("\n</details>\n\n")
 	return true
@@ -192,8 +196,10 @@ func writeToolResult(b *strings.Builder, block Block) bool {
 	if block.Truncated {
 		label += " <em>(truncated)</em>"
 	}
-	fmt.Fprintf(b, "<details>\n<summary>%s</summary>\n\n```\n%s\n```\n\n</details>\n\n",
-		label, strings.TrimRight(block.Output, "\n"))
+	// HTML <pre> avoids the triple-backtick collision when the tool output
+	// itself contains a code fence.
+	fmt.Fprintf(b, "<details>\n<summary>%s</summary>\n\n<pre><code>%s</code></pre>\n\n</details>\n\n",
+		label, escapeHTML(strings.TrimRight(block.Output, "\n")))
 	return true
 }
 

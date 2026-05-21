@@ -2,12 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 
 import { listShares, type Share } from "@/lib/api/domains/share-api";
 
-export type UseSharesResult = {
+export interface UseSharesResult {
   shares: Share[];
   isLoading: boolean;
   error: Error | null;
   refresh: () => Promise<void>;
-};
+}
 
 /**
  * Loads the list of share rows for a (taskId, sessionId) pair and exposes a
@@ -22,7 +22,11 @@ export function useShares(taskId: string | null, sessionId: string | null): UseS
 
   const refresh = useCallback(async () => {
     if (!taskId || !sessionId) {
+      // Reset everything when no session is selected so a stale error from
+      // a previous session doesn't keep showing in the UI.
       setShares([]);
+      setError(null);
+      setIsLoading(false);
       return;
     }
     setIsLoading(true);

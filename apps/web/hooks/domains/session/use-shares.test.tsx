@@ -27,8 +27,10 @@ describe("useShares", () => {
     });
     const { result } = renderHook(() => useShares("t-1", "sess-1"));
 
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(result.current.shares).toHaveLength(1);
+    // Wait on the actual async outcome (shares populated) rather than
+    // isLoading flipping false, which can be true on the initial render
+    // before the effect resolves.
+    await waitFor(() => expect(result.current.shares).toHaveLength(1));
     expect(result.current.shares[0]?.id).toBe("s-1");
     expect(listSharesMock).toHaveBeenCalledWith("t-1", "sess-1");
   });
@@ -59,7 +61,7 @@ describe("useShares", () => {
       ],
     });
     const { result } = renderHook(() => useShares("t-1", "sess-1"));
-    await waitFor(() => expect(result.current.shares).toEqual([]));
+    await waitFor(() => expect(listSharesMock).toHaveBeenCalledTimes(1));
 
     await act(async () => {
       await result.current.refresh();

@@ -77,6 +77,19 @@ func TestRedactor_AbsPath_RewritesToRelative(t *testing.T) {
 	assertRulesEqual(t, r.Applied(), []string{RuleAbsPath})
 }
 
+func TestRedactor_AbsPath_SiblingDirNotCorrupted(t *testing.T) {
+	t.Parallel()
+	r := NewRedactor("/Users/foo/proj")
+	in := "opened /Users/foo/proj2/src/x.ts"
+	got := r.String(in)
+	if got != in {
+		t.Fatalf("sibling path should be unchanged, got %q", got)
+	}
+	if len(r.Applied()) != 0 {
+		t.Fatalf("abs-path rule should not fire for sibling dir, got %v", r.Applied())
+	}
+}
+
 func TestRedactor_AbsPath_NoMatchLeavesUnchanged(t *testing.T) {
 	t.Parallel()
 	r := NewRedactor("/Users/foo/proj")
