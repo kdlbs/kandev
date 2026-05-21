@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClarificationAnswer, ClarificationRequestMetadata, Message } from "@/lib/types/http";
 import { getBackendConfig } from "@/lib/config";
+import { useAppStoreApi } from "@/components/state-provider";
 
 type SubmitState = "idle" | "submitting" | "ok" | "error";
 
@@ -57,6 +58,52 @@ async function postClarificationBatch(
   return "error";
 }
 
+// Mark each bundle message as resolved so the overlay closes regardless of
+// whether the backend's WS confirmation event arrives. A long-idle tab can
+// leave the WebSocket half-dead (NAT/throttle); the HTTP POST still succeeds
+// but the session.message.updated broadcast never lands, which would otherwise
+// strand the carousel on "pending" until the user refreshes.
+function applyResolvedStatusToBundle(
+  bundle: readonly Message[],
+  status: "answered" | "rejected",
+  answersByQuestionId: Record<string, ClarificationAnswer>,
+  update: (message: Message) => void,
+) {
+  for (const msg of bundle) {
+    const meta = (msg.metadata ?? {}) as ClarificationRequestMetadata;
+    const questionId = meta.question_id ?? meta.question?.id ?? "";
+    const nextMeta: ClarificationRequestMetadata = { ...meta, status };
+    const matched = questionId ? answersByQuestionId[questionId] : undefined;
+    if (matched) nextMeta.response = matched;
+    update({ ...msg, metadata: nextMeta });
+  }
+}
+
+// Returns a stable callback that flips every message in the current bundle to
+// `status` and (for answers) stamps the matching response. Hold a live ref to
+// the bundle so the callback always observes the latest messages without
+// having to be re-created when the array reference changes.
+function useApplyResolvedStatus(messages: readonly Message[] | null | undefined) {
+  const storeApi = useAppStoreApi();
+  const messagesRef = useRef<readonly Message[] | null | undefined>(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+  return useCallback(
+    (status: "answered" | "rejected", answersByQuestionId: Record<string, ClarificationAnswer>) => {
+      const bundle = messagesRef.current;
+      if (!bundle || bundle.length === 0) return;
+      applyResolvedStatusToBundle(
+        bundle,
+        status,
+        answersByQuestionId,
+        storeApi.getState().updateMessage,
+      );
+    },
+    [storeApi],
+  );
+}
+
 async function postClarificationSkip(pendingId: string, reason: string): Promise<SubmitState> {
   const { apiBaseUrl } = getBackendConfig();
   const res = await fetch(`${apiBaseUrl}/api/v1/clarification/${pendingId}/respond`, {
@@ -94,6 +141,7 @@ export function useClarificationGroup(
   // a double-click on the Submit button can also race). The hook owns the
   // guarantee that only one POST is in flight at a time.
   const inflightRef = useRef(false);
+  const applyResolvedStatus = useApplyResolvedStatus(messages);
 
   const pendingId = useMemo(() => {
     if (!messages || messages.length === 0) return null;
@@ -134,7 +182,9 @@ export function useClarificationGroup(
         .map((id) => current[id])
         .filter((a): a is ClarificationAnswer => Boolean(a));
       try {
-        setSubmitState(await postClarificationBatch(pendingId, ordered));
+        const next = await postClarificationBatch(pendingId, ordered);
+        if (next === "ok") applyResolvedStatus("answered", current);
+        setSubmitState(next);
       } catch (err) {
         console.error("Clarification submit threw:", err);
         setSubmitState("error");
@@ -142,7 +192,7 @@ export function useClarificationGroup(
         inflightRef.current = false;
       }
     },
-    [pendingId, questionIds],
+    [pendingId, questionIds, applyResolvedStatus],
   );
 
   const skipAll = useCallback(
@@ -152,7 +202,9 @@ export function useClarificationGroup(
       inflightRef.current = true;
       setSubmitState("submitting");
       try {
-        setSubmitState(await postClarificationSkip(pendingId, reason ?? "User skipped"));
+        const next = await postClarificationSkip(pendingId, reason ?? "User skipped");
+        if (next === "ok") applyResolvedStatus("rejected", {});
+        setSubmitState(next);
       } catch (err) {
         console.error("Clarification skip threw:", err);
         setSubmitState("error");
@@ -160,7 +212,7 @@ export function useClarificationGroup(
         inflightRef.current = false;
       }
     },
-    [pendingId],
+    [pendingId, applyResolvedStatus],
   );
 
   return {
