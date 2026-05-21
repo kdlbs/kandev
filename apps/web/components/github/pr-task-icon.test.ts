@@ -140,6 +140,57 @@ describe("isPRReadyToMerge", () => {
   );
 });
 
+describe("isPRReadyToMerge — required_reviews gate", () => {
+  it("is false when required_reviews is unmet even if mergeable_state is clean", () => {
+    // GitHub's stored mergeable_state can lag branch-protection state (e.g.
+    // after a dismissed approval); the required_reviews gate guarantees the
+    // button matches GitHub's merge box.
+    expect(
+      isPRReadyToMerge(
+        makePR({
+          state: "open",
+          review_state: "approved",
+          checks_state: "success",
+          mergeable_state: "clean",
+          required_reviews: 2,
+          review_count: 1,
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("is true when required_reviews equals review_count and everything else is clean", () => {
+    expect(
+      isPRReadyToMerge(
+        makePR({
+          state: "open",
+          review_state: "approved",
+          checks_state: "success",
+          mergeable_state: "clean",
+          required_reviews: 2,
+          review_count: 2,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("is true when required_reviews is zero (protected branch with no approval requirement)", () => {
+    expect(
+      isPRReadyToMerge(
+        makePR({
+          state: "open",
+          review_state: "",
+          checks_state: "success",
+          mergeable_state: "clean",
+          required_reviews: 0,
+          review_count: 0,
+          pending_review_count: 0,
+        }),
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("getPRStatusColor", () => {
   it("returns ready-to-merge color when all conditions are met", () => {
     const pr = makePR({
@@ -298,6 +349,23 @@ describe("isPRAwaitingReview", () => {
         }),
       ),
     ).toBe(false);
+  });
+
+  it("is true when required_reviews is unmet even with no pending reviewers", () => {
+    // 1 of 2 approvals; the second reviewer is no longer requested but branch
+    // protection still demands two approvals — surface as awaiting review.
+    expect(
+      isPRAwaitingReview(
+        makePR({
+          state: "open",
+          review_state: "approved",
+          checks_state: "success",
+          pending_review_count: 0,
+          required_reviews: 2,
+          review_count: 1,
+        }),
+      ),
+    ).toBe(true);
   });
 });
 
