@@ -17,7 +17,7 @@ import (
 
 // startPassthroughExecution dispatches a passthrough-routed execution to the
 // resume or fresh launch path. profileInfo may be nil — see routePassthrough's
-// contract. Extracted so StartAgentProcess stays under the nestif budget.
+// contract.
 func (m *Manager) startPassthroughExecution(ctx context.Context, execution *AgentExecution, profileInfo *AgentProfileInfo) error {
 	if execution.isResumedSession {
 		// Resume reuses the launched session id; ResumePassthroughSession does
