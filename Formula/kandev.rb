@@ -52,8 +52,11 @@ class Kandev < Formula
     # and lightningcss that brew linkage --test flags on glibc-only
     # Linuxbrew. Strip them — rm_r handles both directory trees (the
     # current shape) and bare .node files (in case a future bundler
-    # version inlines them).
-    bundle.glob("web/**/*musl*").each { |p| rm_r(p) }
+    # version inlines them). The exist? guard handles the glob
+    # returning a parent dir and its musl-named children together —
+    # removing the parent makes the child paths vanish before we get
+    # to them.
+    bundle.glob("web/**/*musl*").each { |p| rm_r(p) if p.exist? }
 
     libexec.install Dir[bundle/"*"]
 
