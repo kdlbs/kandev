@@ -447,11 +447,10 @@ func TestProcessOnTurnCompleteViaEngine_WritesTaskStateReview(t *testing.T) {
 		t.Fatalf("expected a transition from New Step → Done, got none")
 	}
 
-	// processOnEnter launches asynchronously; the task-state write happens
-	// synchronously inside applyEngineTransition so it's already visible,
-	// but give the engine path a tick to settle in case anything else races.
-	time.Sleep(100 * time.Millisecond)
-
+	// writeTaskReviewState and ApplyTransition both run synchronously inside
+	// applyEngineTransition (before processOnEnter's goroutine), so the
+	// task-state and step assertions need no async wait. assertSessionState
+	// has its own polling loop for the WAITING_FOR_INPUT flip.
 	assertStepByName(t, ctx, repo, "s1", "Done", nameToID)
 	assertSessionState(t, ctx, repo, "s1", models.TaskSessionStateWaitingForInput)
 
