@@ -1,10 +1,16 @@
 package lifecycle
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -251,6 +257,120 @@ func TestAggregator_FlushSessionMode_QueriesHubWhenWired(t *testing.T) {
 	}
 	if cachedMode != WorkspacePollModeFast {
 		t.Errorf("FlushSessionMode should update sessionModes to hub-queried mode; got %q, want fast", cachedMode)
+	}
+}
+
+// addExecutionWithClient is like addExecution but wires a real agentctl.Client
+// pointing at the supplied URL. Needed for tests that observe the HTTP RPC.
+func addExecutionWithClient(t *testing.T, mgr *Manager, sessionID, workspacePath, agentctlURL string) {
+	t.Helper()
+	host, port := parseHTTPURL(t, agentctlURL)
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	c := agentctl.NewClient(host, port, log)
+	if err := mgr.executionStore.Add(&AgentExecution{
+		ID:            "exec-" + sessionID,
+		SessionID:     sessionID,
+		WorkspacePath: workspacePath,
+		agentctl:      c,
+	}); err != nil {
+		t.Fatalf("executionStore.Add: %v", err)
+	}
+}
+
+func parseHTTPURL(t *testing.T, raw string) (host string, port int) {
+	t.Helper()
+	stripped := strings.TrimPrefix(raw, "http://")
+	parts := strings.Split(stripped, ":")
+	if len(parts) != 2 {
+		t.Fatalf("unexpected URL shape: %q", raw)
+	}
+	host = parts[0]
+	if _, err := fmtSscanf(parts[1], &port); err != nil {
+		t.Fatalf("port parse: %v", err)
+	}
+	return host, port
+}
+
+// fmtSscanf is a tiny wrapper around fmt.Sscanf kept in this file so the import
+// list stays scoped to what the test needs.
+func fmtSscanf(s string, p *int) (int, error) {
+	var n int
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0, &numErr{s}
+		}
+		n = n*10 + int(r-'0')
+	}
+	*p = n
+	return 1, nil
+}
+
+type numErr struct{ s string }
+
+func (e *numErr) Error() string { return "not a number: " + e.s }
+
+// TestAggregator_PushAsync_LastWriteWinsUnderRace is a regression test for the
+// race that caused multi-repo passthrough sessions to get stuck in slow mode
+// (#982 follow-up): subscribe + focus arriving back-to-back used to spawn two
+// independent goroutines whose HTTP order was undefined; with a slow request
+// landing AFTER the fast request the tracker ended up in slow mode while the
+// aggregator's lastPushed claimed fast — and the suppress-duplicate guard
+// then blocked any future event from reconciling the divergence.
+//
+// We simulate the race by making the agentctl "slow" handler block briefly,
+// firing slow then fast in quick succession, and asserting the FINAL mode
+// the server saw is "fast" (which a parallel-goroutine implementation would
+// fail because the slow push would land last and overwrite fast).
+func TestAggregator_PushAsync_LastWriteWinsUnderRace(t *testing.T) {
+	type call struct {
+		Mode string
+		At   time.Time
+	}
+	var (
+		mu         sync.Mutex
+		calls      []call
+		slowCalls  atomic.Int32
+		slowDelay  = 80 * time.Millisecond
+		serverSeen string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Mode string `json:"mode"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Mode == "slow" {
+			slowCalls.Add(1)
+			time.Sleep(slowDelay)
+		}
+		mu.Lock()
+		calls = append(calls, call{Mode: body.Mode, At: time.Now()})
+		serverSeen = body.Mode
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	mgr := newTestManagerForAggregator(t)
+	addExecutionWithClient(t, mgr, "s1", "/tmp/ws1", srv.URL)
+
+	// Fire subscribe (slow) then focus (fast) microseconds apart, matching
+	// what the gateway does when a page loads.
+	mgr.pollAggregator.HandleSessionMode("s1", WorkspacePollModeSlow)
+	mgr.pollAggregator.HandleSessionMode("s1", WorkspacePollModeFast)
+
+	// Wait long enough for both pushes (including the artificial slowDelay)
+	// to settle. Otherwise the test could observe "fast" before the racing
+	// "slow" arrives and overwrites it — and pass even when the bug is present.
+	time.Sleep(slowDelay + 300*time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if serverSeen != "fast" {
+		t.Errorf("agentctl tracker final mode = %q, want fast (calls: %+v)", serverSeen, calls)
 	}
 }
 
