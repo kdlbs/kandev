@@ -36,6 +36,9 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/workspaces/:workspaceID/task-mrs", c.httpListWorkspaceTaskMRs)
 	api.GET("/tasks/:taskID/mrs", c.httpListTaskMRs)
 	api.POST("/tasks/:taskID/mrs/sync", c.httpSyncTaskMR)
+
+	api.GET("/user/mrs", c.httpSearchUserMRs)
+	api.GET("/user/issues", c.httpSearchUserIssues)
 }
 
 // RegisterRoutes is the package-level entrypoint mirroring github.RegisterRoutes.
@@ -215,4 +218,52 @@ func (c *Controller) httpSyncTaskMR(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, row)
+}
+
+// httpSearchUserMRs surfaces the configured user's MR queue. filter is one of
+// "assigned", "authored", "review_requested" (matching the GitLab "scope"
+// query param); custom_query passes through verbatim for power users.
+func (c *Controller) httpSearchUserMRs(ctx *gin.Context) {
+	page, perPage := paginationFromQuery(ctx)
+	result, err := c.service.Client().SearchMRsPaged(
+		ctx.Request.Context(),
+		ctx.Query("filter"),
+		ctx.Query("custom_query"),
+		page, perPage,
+	)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, result)
+}
+
+// httpSearchUserIssues surfaces the configured user's issue queue.
+func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
+	page, perPage := paginationFromQuery(ctx)
+	result, err := c.service.Client().ListIssuesPaged(
+		ctx.Request.Context(),
+		ctx.Query("filter"),
+		ctx.Query("custom_query"),
+		page, perPage,
+	)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, result)
+}
+
+// paginationFromQuery reads ?page=&per_page= with the same clamps SearchMRsPaged
+// applies internally — surfaced here so 400s on bad input are uniform.
+func paginationFromQuery(ctx *gin.Context) (int, int) {
+	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	perPage, _ := strconv.Atoi(ctx.DefaultQuery("per_page", "50"))
+	if perPage <= 0 {
+		perPage = 50
+	}
+	return page, perPage
 }

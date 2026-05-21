@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { listWorkspaceTaskMRs } from "@/lib/api/domains/gitlab-api";
+import { useEffect, useRef, useState } from "react";
+import { fetchGitLabStatus, listWorkspaceTaskMRs } from "@/lib/api/domains/gitlab-api";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskMR } from "@/lib/types/gitlab";
 
@@ -40,4 +40,33 @@ export function useWorkspaceMRs(workspaceId: string | null) {
 /** Return MRs linked to a task. Reads directly from the store. */
 export function useTaskMRs(taskId: string | null): TaskMR[] {
   return useAppStore((state) => (taskId ? (state.taskMRs.byTaskId[taskId] ?? []) : []));
+}
+
+/**
+ * Returns whether GitLab is configured enough to surface in the integrations
+ * menu. Token-configured or authenticated counts as "available" — same bar
+ * as useGitHubStatus's `ready` flag. Probes /status on mount + after window
+ * regains focus so settings changes propagate without a hard reload.
+ */
+export function useGitLabAvailable(): boolean {
+  const [available, setAvailable] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const probe = () => {
+      fetchGitLabStatus({ init: { cache: "no-store" } })
+        .then((s) => {
+          if (!cancelled) setAvailable(Boolean(s?.authenticated || s?.token_configured));
+        })
+        .catch(() => {
+          if (!cancelled) setAvailable(false);
+        });
+    };
+    probe();
+    window.addEventListener("focus", probe);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", probe);
+    };
+  }, []);
+  return available;
 }

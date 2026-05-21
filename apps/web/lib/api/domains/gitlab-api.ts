@@ -6,6 +6,10 @@ import type {
   GitLabConfigureHostResponse,
   TaskMR,
   TaskMRsResponse,
+  MR,
+  Issue,
+  MRSearchPage,
+  IssueSearchPage,
 } from "@/lib/types/gitlab";
 
 export async function fetchGitLabStatus(options?: ApiRequestOptions) {
@@ -58,3 +62,40 @@ export async function syncTaskMR(
     init: { method: "POST", body: JSON.stringify(body) },
   });
 }
+
+/** Search the current user's MRs. filter is one of "assigned", "authored",
+ * "review_requested" (matches GitLab's `scope` query param). */
+export async function searchUserMRs(params: {
+  filter?: string;
+  customQuery?: string;
+  page?: number;
+  perPage?: number;
+}) {
+  const qs = new URLSearchParams();
+  if (params.filter) qs.set("filter", params.filter);
+  if (params.customQuery) qs.set("custom_query", params.customQuery);
+  if (params.page) qs.set("page", String(params.page));
+  if (params.perPage) qs.set("per_page", String(params.perPage));
+  return fetchJson<MRSearchPage>(`/api/v1/gitlab/user/mrs?${qs.toString()}`, {
+    init: { cache: "no-store" },
+  });
+}
+
+/** Search the current user's issues. */
+export async function searchUserIssues(params: {
+  filter?: string;
+  customQuery?: string;
+  page?: number;
+  perPage?: number;
+}) {
+  const qs = new URLSearchParams();
+  if (params.filter) qs.set("filter", params.filter);
+  if (params.customQuery) qs.set("custom_query", params.customQuery);
+  if (params.page) qs.set("page", String(params.page));
+  if (params.perPage) qs.set("per_page", String(params.perPage));
+  return fetchJson<IssueSearchPage>(`/api/v1/gitlab/user/issues?${qs.toString()}`, {
+    init: { cache: "no-store" },
+  });
+}
+
+export type { MR, Issue, MRSearchPage, IssueSearchPage };

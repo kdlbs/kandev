@@ -70,6 +70,69 @@ export type TaskMRsResponse = {
   task_mrs: Record<string, TaskMR[]>;
 };
 
+/** Merge request returned by /api/v1/gitlab/user/mrs (matches backend MR). */
+export type MR = {
+  id: number;
+  iid: number;
+  project_id: number;
+  title: string;
+  url: string;
+  web_url: string;
+  state: "open" | "closed" | "merged" | "locked" | "opened" | string;
+  head_branch: string;
+  head_sha: string;
+  base_branch: string;
+  author_username: string;
+  project_namespace: string;
+  project_path: string;
+  body: string;
+  draft: boolean;
+  merge_status: string;
+  has_conflicts: boolean;
+  additions: number;
+  deletions: number;
+  reviewers: { username: string; name: string; type: string }[];
+  assignees: { username: string; name: string; type: string }[];
+  created_at: string;
+  updated_at: string;
+  merged_at?: string;
+  closed_at?: string;
+};
+
+/** Issue returned by /api/v1/gitlab/user/issues. */
+export type Issue = {
+  id: number;
+  iid: number;
+  project_id: number;
+  title: string;
+  body: string;
+  url: string;
+  web_url: string;
+  state: "opened" | "closed" | string;
+  author_username: string;
+  project_namespace: string;
+  project_path: string;
+  labels: string[];
+  assignees: string[];
+  created_at: string;
+  updated_at: string;
+  closed_at?: string;
+};
+
+export type MRSearchPage = {
+  mrs: MR[];
+  total_count: number;
+  page: number;
+  per_page: number;
+};
+
+export type IssueSearchPage = {
+  issues: Issue[];
+  total_count: number;
+  page: number;
+  per_page: number;
+};
+
 export type GitLabConfigureTokenResponse = { configured: boolean };
 export type GitLabClearTokenResponse = { cleared: boolean };
 export type GitLabConfigureHostResponse = { configured: boolean; host: string };
