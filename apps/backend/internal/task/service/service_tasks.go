@@ -413,12 +413,12 @@ func resolvePRNumber(input TaskRepositoryInput) int {
 	if input.PRNumber > 0 {
 		return input.PRNumber
 	}
-	url := strings.TrimSpace(input.GitHubURL)
-	idx := strings.Index(url, "/pull/")
+	rawURL := strings.TrimSpace(input.GitHubURL)
+	idx := strings.Index(rawURL, "/pull/")
 	if idx < 0 {
 		return 0
 	}
-	numStr := url[idx+len("/pull/"):]
+	numStr := rawURL[idx+len("/pull/"):]
 	if i := strings.IndexAny(numStr, "/?#"); i >= 0 {
 		numStr = numStr[:i]
 	}

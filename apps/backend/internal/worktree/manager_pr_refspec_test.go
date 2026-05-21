@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -107,6 +108,63 @@ func TestCreateWorktree_PRNumberCreatesWorktreeFromForkRef(t *testing.T) {
 	}
 }
 
+// TestCreateWorktree_PRNumberSecondWorktreeForSameForkPR exercises the
+// retry-path regression flagged in PR #990 review: when a fork PR's head
+// branch is already checked out in another worktree, the refspec fetch is
+// refused and the manager retries with a bare `pull/<N>/head` fetch. That
+// retry updates FETCH_HEAD but does NOT create `origin/<branch>` because
+// the branch doesn't exist on origin — so returning `StartPoint:
+// "origin/<branch>"` would make the downstream `git worktree add` fail
+// with an invalid ref. Empty StartPoint must be returned so the caller
+// falls back to the local branch (already at the PR head from task 1).
+func TestCreateWorktree_PRNumberSecondWorktreeForSameForkPR(t *testing.T) {
+	repoPath, prHeadSHA := initGitRepoWithPullRef(t, 974, "feature/fork-pr")
+
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	wt1, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID: "task-1", SessionID: "session-1", TaskTitle: "Fork PR review 1",
+		RepositoryID: "repo-1", RepositoryPath: repoPath,
+		BaseBranch: "main", CheckoutBranch: "feature/fork-pr", PRNumber: 974,
+		TaskDirName: "task-1", RepoName: "repo-1",
+	})
+	if err != nil {
+		t.Fatalf("Create() first fork-PR worktree failed: %v", err)
+	}
+	if wt1.Branch != "feature/fork-pr" {
+		t.Fatalf("first worktree: expected direct branch, got %q", wt1.Branch)
+	}
+
+	wt2, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID: "task-2", SessionID: "session-2", TaskTitle: "Fork PR review 2",
+		RepositoryID: "repo-1", RepositoryPath: repoPath,
+		BaseBranch: "main", CheckoutBranch: "feature/fork-pr", PRNumber: 974,
+		TaskDirName: "task-2", RepoName: "repo-1",
+	})
+	if err != nil {
+		t.Fatalf("Create() second fork-PR worktree failed (regression in retry path): %v", err)
+	}
+	if wt2.Branch == "feature/fork-pr" {
+		t.Fatal("second worktree must NOT reuse the branch already checked out")
+	}
+	if !strings.HasPrefix(wt2.Branch, "feature/fork-pr-") {
+		t.Fatalf("expected suffixed branch like %q, got %q", "feature/fork-pr-xxx", wt2.Branch)
+	}
+
+	sha1 := strings.TrimSpace(runGit(t, wt1.Path, "rev-parse", "HEAD"))
+	sha2 := strings.TrimSpace(runGit(t, wt2.Path, "rev-parse", "HEAD"))
+	if sha1 != prHeadSHA || sha2 != prHeadSHA {
+		t.Fatalf("worktree SHAs must equal PR head: sha1=%q, sha2=%q, want=%q",
+			sha1, sha2, prHeadSHA)
+	}
+}
+
 // initGitRepoWithPullRef simulates a fork PR scenario: a bare origin repo
 // containing main + an arbitrary commit registered under refs/pull/<N>/head
 // (but NOT under any branch). Returns the clone path and the PR head SHA.
@@ -169,18 +227,5 @@ func initGitRepoWithPullRef(t *testing.T, prNumber int, headBranchName string) (
 }
 
 func pullHeadRef(prNumber int) string {
-	return "refs/pull/" + itoa(prNumber) + "/head"
-}
-
-// itoa avoids pulling strconv into the test file just for one PR number.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var digits []byte
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	return string(digits)
+	return fmt.Sprintf("refs/pull/%d/head", prNumber)
 }

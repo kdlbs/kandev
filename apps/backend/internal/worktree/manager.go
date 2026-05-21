@@ -508,6 +508,14 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 			if _, retryErr := retryCmd.CombinedOutput(); retryErr == nil {
 				m.logger.Info("fetched via remote-tracking ref (branch checked out elsewhere)",
 					zap.String("branch", branch))
+				if prNumber > 0 {
+					// Fork PRs have no origin/<branch> ref — the bare
+					// pull/<N>/head retry only updates FETCH_HEAD, so the local
+					// `branch` (already populated by the prior worktree) is the
+					// only valid start point. Empty StartPoint signals the
+					// caller to fall back to req.CheckoutBranch.
+					return &FetchBranchResult{}, nil
+				}
 				return &FetchBranchResult{StartPoint: "origin/" + branch}, nil
 			}
 		}
