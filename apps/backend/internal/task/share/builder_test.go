@@ -190,6 +190,62 @@ func TestBuildSnapshot_RedactsToolCallEnvAndPaths(t *testing.T) {
 	}
 }
 
+// TestBuildSnapshot_ToolCall_ProductionMetadataShape exercises the metadata
+// shape that real sessions produce: no "tool_name" key, args under
+// metadata["normalized"] as the NormalizedPayload JSON, message Type set to
+// "tool_<kind>". The earlier shape ("tool_name"/"args" keys) only exists in
+// the debug fixture loader.
+func TestBuildSnapshot_ToolCall_ProductionMetadataShape(t *testing.T) {
+	t.Parallel()
+	completed := time.Now().UTC()
+	r := &stubReader{
+		task: &models.Task{ID: "t-1", Title: "Real session"},
+		session: &models.TaskSession{
+			ID: "s-1", TaskID: "t-1", State: models.TaskSessionStateCompleted,
+			StartedAt: completed, CompletedAt: &completed,
+			WorkspacePath: "/workspace/proj",
+		},
+		messages: []*models.Message{
+			{
+				ID: "m-1", TaskSessionID: "s-1", AuthorType: models.MessageAuthorAgent,
+				Type:    models.MessageTypeToolRead,
+				Content: "read /workspace/proj/src/main.go",
+				Metadata: map[string]interface{}{
+					"normalized": map[string]interface{}{
+						"kind": "read_file",
+						"read_file": map[string]interface{}{
+							"path": "/workspace/proj/src/main.go",
+						},
+					},
+				},
+				CreatedAt: completed,
+			},
+		},
+	}
+	snap, err := BuildSnapshot(context.Background(), r, "s-1", "v")
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	b := snap.Messages[0].Blocks[0]
+	if b.Kind != blockKindToolCall {
+		t.Fatalf("expected tool_call block, got %q", b.Kind)
+	}
+	// "tool_" prefix stripped from m.Type to produce a useful label.
+	if b.ToolName != "read" {
+		t.Fatalf("expected ToolName=read, got %q", b.ToolName)
+	}
+	// Args populated from metadata["normalized"] and redacted.
+	if len(b.Args) == 0 {
+		t.Fatalf("expected Args populated from normalized payload, got empty")
+	}
+	if strings.Contains(string(b.Args), "/workspace/proj") {
+		t.Fatalf("expected abs-path redacted in args, got %s", string(b.Args))
+	}
+	if strings.Contains(b.Text, "/workspace/proj") {
+		t.Fatalf("expected abs-path redacted in text, got %q", b.Text)
+	}
+}
+
 func TestBuildSnapshot_FiltersNoiseTypes(t *testing.T) {
 	t.Parallel()
 	completed := time.Now().UTC()

@@ -125,6 +125,30 @@ func TestRedactor_AbsPath_MultipleRootsRewriteIndependently(t *testing.T) {
 	assertRulesEqual(t, r.Applied(), []string{RuleAbsPath})
 }
 
+func TestRedactor_AbsPath_StandaloneRootStripped(t *testing.T) {
+	t.Parallel()
+	// Bare root (e.g. `pwd` output, quoted paths, end of sentence) used to
+	// leak through because the matcher only handled `root + "/"`. Now we
+	// also strip the root when it appears at a word boundary.
+	r := NewRedactor("/workspace")
+	cases := map[string]string{
+		"cwd: /workspace":          "cwd: ",
+		"cd /workspace && ls":      "cd  && ls",
+		"path=\"/workspace\" done": "path=\"\" done",
+	}
+	for in, want := range cases {
+		got := r.String(in)
+		if got != want {
+			t.Errorf("input %q: got %q, want %q", in, got, want)
+		}
+	}
+	// Sibling dir must still be left alone.
+	siblingIn := "see /workspace2/file.ts"
+	if got := r.String(siblingIn); got != siblingIn {
+		t.Errorf("sibling path corrupted: got %q, want %q", got, siblingIn)
+	}
+}
+
 func TestRedactor_AbsPath_NestedRootsPreferLongest(t *testing.T) {
 	t.Parallel()
 	// If the longer root is processed first the inner path stays clean;

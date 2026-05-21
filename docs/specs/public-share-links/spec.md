@@ -162,7 +162,7 @@ GET    /api/v1/tasks/:taskId/sessions/:sessionId/shares
 DELETE /api/v1/shares/:shareId
        -> 204
        Revokes a share: deletes the gist and marks the row revoked.
-```go
+```
 
 Internal Go surface:
 
@@ -183,7 +183,7 @@ type Backend interface {
     Upload(ctx context.Context, snap *Snapshot) (externalID, externalURL string, err error)
     Delete(ctx context.Context, externalID string) error
 }
-```text
+```
 
 ### Share URL format
 

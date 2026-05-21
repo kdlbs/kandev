@@ -217,12 +217,37 @@ func toolCallBlock(m *models.Message, red *Redactor) Block {
 	b := Block{
 		Kind:     blockKindToolCall,
 		Text:     red.String(strings.TrimSpace(m.Content)),
-		ToolName: metaString(m.Metadata, "tool_name"),
+		ToolName: toolNameFor(m),
 	}
-	if raw, ok := metaJSON(m.Metadata, "args"); ok {
+	if raw, ok := toolArgsFor(m); ok {
 		b.Args = red.JSON(raw)
 	}
 	return b
+}
+
+// toolNameFor picks the tool label. Production messages don't carry a
+// "tool_name" metadata key — service_messages.go writes the normalized
+// *streams.NormalizedPayload under metadata["normalized"] and the tool kind
+// ends up on Message.Type ("tool_read", "tool_execute", …). Strip the
+// "tool_" prefix from Type to get a useful label ("read", "execute", "edit").
+// The debug-fixture replay path *does* set metadata["tool_name"], so prefer
+// that when present for backward compatibility.
+func toolNameFor(m *models.Message) string {
+	if name := metaString(m.Metadata, "tool_name"); name != "" {
+		return name
+	}
+	return strings.TrimPrefix(string(m.Type), "tool_")
+}
+
+// toolArgsFor picks the args JSON payload. Production stores the typed tool
+// payload under metadata["normalized"]; the debug-fixture replay path stores
+// it under metadata["args"]. Prefer "args" so existing fixtures keep their
+// shape, fall back to "normalized" so real shares have something to redact.
+func toolArgsFor(m *models.Message) (json.RawMessage, bool) {
+	if raw, ok := metaJSON(m.Metadata, "args"); ok {
+		return raw, true
+	}
+	return metaJSON(m.Metadata, "normalized")
 }
 
 func metaString(m map[string]interface{}, key string) string {

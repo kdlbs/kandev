@@ -736,8 +736,10 @@ func (c *GHClient) DeleteGist(ctx context.Context, gistID string) error {
 		// so share.IsAlreadyGone matches consistently — PATClient.delete()
 		// already returns a typed error for the same case, and the share
 		// service uses errors.As to detect "gist already revoked upstream"
-		// and treat it as a soft success rather than a 502.
-		if strings.Contains(err.Error(), "HTTP 404") {
+		// and treat it as a soft success rather than a 502. Use isNotFoundErr
+		// so every gh-CLI 404 format ("HTTP 404", "404 Not Found", "status: 404")
+		// is recognised, not just the most common one.
+		if isNotFoundErr(err) {
 			return &GitHubAPIError{
 				StatusCode: http.StatusNotFound,
 				Endpoint:   "/gists/" + gistID,

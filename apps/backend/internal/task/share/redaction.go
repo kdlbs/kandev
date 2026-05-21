@@ -49,11 +49,14 @@ var envFileRe = regexp.MustCompile(`(^|/)\.env(\..+)?$`)
 // Construct with NewRedactor; reuse across one snapshot build (it accumulates
 // the applied-rule set).
 type Redactor struct {
-	// workspaceRoots are sorted longest-first so a root that is a prefix of
-	// another (e.g. "/workspace" vs "/workspace/repo1") gets matched after the
-	// more specific one.
-	workspaceRoots []string
-	applied        map[string]struct{}
+	// rootPatterns matches each workspace root followed by either a path
+	// separator (so "/workspace/src/x.ts" → "src/x.ts") or a word boundary
+	// (so a standalone "/workspace" from `pwd` output is also stripped). The
+	// word-boundary alternative prevents sibling dirs like "/workspace2"
+	// from matching. Patterns are sorted longest-root-first so a nested root
+	// (e.g. "/workspace/repo1") gets matched before its parent.
+	rootPatterns []*regexp.Regexp
+	applied      map[string]struct{}
 }
 
 // NewRedactor returns a Redactor that rewrites absolute paths under any of
@@ -71,9 +74,13 @@ func NewRedactor(workspaceRoots ...string) *Redactor {
 	sort.Slice(roots, func(i, j int) bool {
 		return len(roots[i]) > len(roots[j])
 	})
+	patterns := make([]*regexp.Regexp, 0, len(roots))
+	for _, root := range roots {
+		patterns = append(patterns, regexp.MustCompile(regexp.QuoteMeta(root)+`(?:/|\b)`))
+	}
 	return &Redactor{
-		workspaceRoots: roots,
-		applied:        make(map[string]struct{}),
+		rootPatterns: patterns,
+		applied:      make(map[string]struct{}),
 	}
 }
 
@@ -90,22 +97,11 @@ func (r *Redactor) String(s string) string {
 			r.record(rule.name)
 		}
 	}
-	for _, root := range r.workspaceRoots {
-		// Split on the workspace root WITH a trailing slash so a sibling
-		// directory sharing the root as a bare prefix doesn't match. e.g.
-		// workspaceRoot="/home/user/proj" must not match "/home/user/proj2/x.ts".
-		// The separator already carries the slash, so rejoining is a plain concat.
-		sep := root + "/"
-		if !strings.Contains(out, sep) {
+	for _, re := range r.rootPatterns {
+		if !re.MatchString(out) {
 			continue
 		}
-		parts := strings.Split(out, sep)
-		var b strings.Builder
-		b.WriteString(parts[0])
-		for _, part := range parts[1:] {
-			b.WriteString(part)
-		}
-		out = b.String()
+		out = re.ReplaceAllString(out, "")
 		r.record(RuleAbsPath)
 	}
 	return out
