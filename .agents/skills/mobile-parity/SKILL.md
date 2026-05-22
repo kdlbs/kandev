@@ -1,6 +1,10 @@
 ---
 name: mobile-parity
 description: Ensures UI feature work ships with desktop and mobile parity, responsive behavior, and mobile Playwright E2E coverage. Use when implementing, planning, reviewing, or testing any new feature, page, component, workflow, form, dialog, sidebar, navigation, dashboard, or visual UI change; if work touches frontend or user-facing UI, this skill must run even when user mentions only desktop or says "new feature".
+kandev:
+  system: true
+  version: "0.51.0"
+  default_for_roles: []
 ---
 
 # Mobile Parity
@@ -37,6 +41,7 @@ If task has no UI surface, say why this skill does not apply and continue.
 4. Add E2E coverage.
    - Add or update Playwright tests for the feature's happy path on desktop if missing.
    - Add mobile Playwright coverage for the same user value, using existing mobile projects/devices when configured.
+   - In this repo, name mobile test files `mobile-*.spec.ts` so the `mobile-chrome` Playwright project picks them up automatically.
    - If no mobile project exists, configure the test or project with a realistic mobile viewport plus touch/mobile settings.
    - Cover mobile-specific controls such as drawers, overflow menus, stacked actions, responsive tables, or bottom controls.
 
@@ -51,7 +56,7 @@ Every UI feature should end with one of these:
 
 - mobile Playwright test added or updated
 - existing mobile Playwright test explicitly identified as covering the changed behavior
-- written justification for no mobile test, limited to non-UI work or impossible-to-test infrastructure gaps
+- written justification for no mobile test, limited to impossible-to-test infrastructure gaps
 
 Good mobile tests assert real user outcomes, not only visibility. Prefer:
 
@@ -63,22 +68,20 @@ Good mobile tests assert real user outcomes, not only visibility. Prefer:
 
 ## Playwright Pattern
 
-Use repo conventions first. When no convention exists, adapt this shape:
+Use repo conventions first. In this repo, create `mobile-*.spec.ts` files and let the `mobile-chrome` project apply the mobile device; do not add per-test device overrides. Follow `/e2e` conventions for fixture imports, page objects, selectors, and local reproduction.
 
 ```ts
-import { test, expect, devices } from '@playwright/test';
+import { test, expect } from '../../fixtures/test-base';
 
 test.describe('feature on mobile', () => {
-  test.use({ ...devices['iPhone 13'] });
+  test('completes primary workflow', async ({ testPage }) => {
+    await testPage.goto('/feature');
+    await testPage.getByRole('button', { name: /menu|open/i }).click();
+    await testPage.getByRole('link', { name: /feature/i }).click();
 
-  test('completes primary workflow', async ({ page }) => {
-    await page.goto('/feature');
-    await page.getByRole('button', { name: /menu|open/i }).click();
-    await page.getByRole('link', { name: /feature/i }).click();
-
-    await expect(page.getByRole('heading', { name: /feature/i })).toBeVisible();
-    await page.getByRole('button', { name: /primary action/i }).click();
-    await expect(page.getByText(/success|saved|created/i)).toBeVisible();
+    await expect(testPage.getByRole('heading', { name: /feature/i })).toBeVisible();
+    await testPage.getByRole('button', { name: /primary action/i }).click();
+    await expect(testPage.getByText(/success|saved|created/i)).toBeVisible();
   });
 });
 ```
