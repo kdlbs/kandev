@@ -7,7 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { IconTerminal2 } from "@tabler/icons-react";
 import { useAppStoreApi } from "@/components/state-provider";
-import { createExecutor } from "@/lib/api/domains/settings-api";
+import { createExecutor, createExecutorProfile } from "@/lib/api/domains/settings-api";
 import { SSHConnectionCard } from "@/components/settings/ssh-connection-card";
 import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
 import { getExecutorLabel } from "@/lib/executor-icons";
@@ -19,10 +19,10 @@ const EXECUTORS_ROUTE = "/settings/executors";
 /**
  * SSH-specific "new executor" flow. Renders just the SSHConnectionCard;
  * Save POSTs to /api/v1/executors with type=ssh and the freshly-pinned
- * fingerprint, then routes to the existing-executor SSH page.
- *
- * Profiles for the SSH executor are still managed via the standard profile
- * flow once the executor itself exists.
+ * fingerprint, then immediately creates a default profile under it (the
+ * /settings/executors index lists profiles, so an executor with no
+ * profile would otherwise be invisible). Routes to the existing-executor
+ * SSH page after both writes succeed.
  */
 export function SSHCreatePage() {
   const router = useRouter();
@@ -35,6 +35,14 @@ export function SSHCreatePage() {
         type: "ssh",
         config: buildSSHExecutorConfig(cfg),
       });
+      // Auto-create a default profile so the executor shows up in the
+      // /settings/executors list (which flattens by profile). The profile
+      // carries the same name as the executor and inherits the connection
+      // config; users can add more profiles later if they want different
+      // workdir roots / prepare scripts / env vars on the same host.
+      const profile = await createExecutorProfile(created.id, {
+        name: cfg.name,
+      });
       const next: Executor = {
         id: created.id,
         name: created.name,
@@ -42,7 +50,7 @@ export function SSHCreatePage() {
         status: "active",
         is_system: false,
         config: created.config,
-        profiles: [],
+        profiles: [profile],
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
