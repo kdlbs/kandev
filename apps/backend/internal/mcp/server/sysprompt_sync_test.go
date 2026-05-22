@@ -247,25 +247,33 @@ func extractAskUserQuestionFacts(t *testing.T, s *Server) askUserQuestionSchemaF
 	props, ok := parsed["properties"].(map[string]any)
 	require.True(t, ok, "schema must expose 'properties'")
 
-	// The top-level array param is whichever property has type "array". Looking
-	// it up by structure instead of by name guards against silent renames.
-	var arrayParam string
-	var arraySpec map[string]any
+	// Collect all top-level array params and assert exactly one exists.
+	// Using a collect-then-assert pattern (rather than break-on-first) makes
+	// the selection deterministic even if Go's map iteration visits properties
+	// in a different order between runs or Go versions.
+	var arrayParams []string
+	paramSpecs := make(map[string]map[string]any)
 	for name, spec := range props {
 		m, ok := spec.(map[string]any)
 		if !ok {
 			continue
 		}
 		if m["type"] == "array" {
-			arrayParam = name
-			arraySpec = m
-			break
+			arrayParams = append(arrayParams, name)
+			paramSpecs[name] = m
 		}
 	}
-	require.NotEmpty(t, arrayParam, "ask_user_question schema must have an array parameter")
+	sort.Strings(arrayParams)
+	require.Len(t, arrayParams, 1,
+		"ask_user_question schema must have exactly one top-level array parameter; got %v", arrayParams)
+
+	arrayParam := arrayParams[0]
+	arraySpec := paramSpecs[arrayParam]
 
 	minF, _ := arraySpec["minItems"].(float64)
 	maxF, _ := arraySpec["maxItems"].(float64)
+	require.NotZero(t, maxF,
+		"ask_user_question schema must declare maxItems on the %q array — if absent, bounds would silently become \"0-0\" and mask schema drift", arrayParam)
 
 	items, _ := arraySpec["items"].(map[string]any)
 	requiredRaw, _ := items["required"].([]any)
