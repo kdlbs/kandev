@@ -15,7 +15,9 @@ import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
 import { stopUserShell } from "@/lib/api/domains/user-shell-api";
 
-const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
+// v2: bumped alongside DOCKVIEW_ENV_LAYOUT_PREFIX so the no-env fallback
+// also invalidates layouts saved under the previous caps.
+const LAYOUT_STORAGE_KEY = "dockview-layout-v2";
 
 /** Re-apply the runtime cap to all pinned groups. Called when the viewport
  *  resizes so a panel pinned to the old cap on a narrower screen can grow

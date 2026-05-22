@@ -11,7 +11,8 @@ import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
 const debug = createDebugLogger("dockview:restore");
 
-const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
+// Mirrors LAYOUT_STORAGE_KEY in dockview-layout-setup.ts. Bump in lockstep.
+const LAYOUT_STORAGE_KEY = "dockview-layout-v2";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function describeSanitizeMode(options: {
