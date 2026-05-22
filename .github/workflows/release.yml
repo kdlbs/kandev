@@ -380,6 +380,9 @@ jobs:
           COMMIT=$(git rev-parse --short HEAD)
           BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
           LDFLAGS="-s -w -X main.Version=${KANDEV_VERSION} -X main.Commit=${COMMIT} -X main.BuildTime=${BUILD_TIME}"
+          # Export to subsequent steps so the cross-compiled agentctl helper
+          # below gets the same version metadata (matches Makefile parity).
+          echo "LDFLAGS=${LDFLAGS}" >> "${GITHUB_ENV}"
           go build -tags fts5 -ldflags "${LDFLAGS}" -o bin/kandev${EXT} ./cmd/kandev
           go build -ldflags "${LDFLAGS}" -o bin/agentctl${EXT} ./cmd/agentctl
 
@@ -392,7 +395,7 @@ jobs:
       - name: Build linux/amd64 agentctl helper
         run: |
           cd apps/backend
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 CC= go build -o bin/agentctl-linux-amd64 ./cmd/agentctl
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-linux-amd64 ./cmd/agentctl
 
       - name: Package bundle
         run: |
