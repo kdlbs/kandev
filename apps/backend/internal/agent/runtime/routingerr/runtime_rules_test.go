@@ -48,6 +48,17 @@ func TestMatchRuntimeEnvironmentRules_NoMatch(t *testing.T) {
 	}
 }
 
+func TestExtractNpxCachePath_AllowsSpacesInHomePath(t *testing.T) {
+	// macOS user dirs commonly contain spaces; the regex must not stop
+	// at whitespace or the rule silently degrades on those machines.
+	text := "npm error path /Users/John Doe/.npm/_npx/abc123def4/node_modules/foo"
+	got := extractNpxCachePath(text)
+	want := "/Users/John Doe/.npm/_npx/abc123def4"
+	if got != want {
+		t.Errorf("extractNpxCachePath = %q, want %q", got, want)
+	}
+}
+
 func TestClassify_NpxCacheCorrupted_WiredThroughClassify(t *testing.T) {
 	resetInjection()
 	exit := 190

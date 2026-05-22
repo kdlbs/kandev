@@ -38,8 +38,11 @@ type runtimeRule struct {
 // npxCachePathRe captures the cache root, e.g.
 // `/Users/cfl/.npm/_npx/d820eb7d96bc2600` from any npm error line that
 // references a file beneath it. The hash segment is hex (npm uses an
-// 8-byte hex of the package spec).
-var npxCachePathRe = regexp.MustCompile(`(/[^[:space:]]*?/\.npm/_npx/[0-9a-f]+)`)
+// 8-byte hex of the package spec). `[^\n]*?` lets the home prefix
+// contain spaces (e.g. `/Users/John Doe/...`); RemediateNpxCache's
+// `EvalSymlinks` + `$HOME/.npm/_npx/` prefix guard validates the path
+// before any deletion, so we don't need the regex to do that work too.
+var npxCachePathRe = regexp.MustCompile(`(/[^\n]*?/\.npm/_npx/[0-9a-f]+)`)
 
 func extractNpxCachePath(text string) string {
 	m := npxCachePathRe.FindStringSubmatch(text)
