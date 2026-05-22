@@ -17,7 +17,7 @@ body = """
 ### {{ group | striptags | trim | upper_first }}
 {% for commit in commits %}
 - {{ commit.message }}\
-{% if commit.github.username and commit.github.username not in maintainers %} by @{{ commit.github.username }}{% endif %}\
+{% if commit.remote.username and commit.remote.username | lower not in maintainers %} by @{{ commit.remote.username }}{% endif %}\
 {% endfor %}
 {% endfor %}\n
 """
