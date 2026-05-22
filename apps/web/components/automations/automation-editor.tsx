@@ -26,8 +26,9 @@ import type {
 } from "@/lib/types/automation";
 import { TriggersSection } from "./triggers-section";
 import { PromptSection } from "./prompt-section";
-import { ConfigSection } from "./config-section";
+import { ConfigSection, type RepositorySelection } from "./config-section";
 import { RunsSection } from "./runs-section";
+import { createRepositoryAction } from "@/app/actions/workspaces";
 
 type AutomationEditorProps = {
   workspaceId: string;
@@ -41,7 +42,10 @@ type FormState = {
   workflowStepId: string;
   agentProfileId: string;
   executorProfileId: string;
-  repositoryId: string;
+  // repositorySelection captures either a registered workspace repo (id),
+  // a discovered local repo (path — registered at save time to obtain an
+  // id), or "auto" for workspace-first fallback.
+  repositorySelection: RepositorySelection;
   prompt: string;
   taskTitleTemplate: string;
   executionMode: ExecutionMode;
@@ -65,7 +69,7 @@ const defaultForm: FormState = {
   workflowStepId: "",
   agentProfileId: "",
   executorProfileId: "",
-  repositoryId: "",
+  repositorySelection: { kind: "auto" },
   prompt: DEFAULT_PROMPT,
   taskTitleTemplate: "",
   executionMode: "task",
@@ -81,7 +85,9 @@ function formFromAutomation(a: Automation): FormState {
     workflowStepId: a.workflow_step_id,
     agentProfileId: a.agent_profile_id,
     executorProfileId: a.executor_profile_id,
-    repositoryId: a.repository_id ?? "",
+    repositorySelection: a.repository_id
+      ? { kind: "registered", id: a.repository_id }
+      : { kind: "auto" },
     prompt: a.prompt || DEFAULT_PROMPT,
     taskTitleTemplate: a.task_title_template ?? "",
     executionMode: a.execution_mode ?? "task",
@@ -182,7 +188,40 @@ function isDefaultPrompt(prompt: string, triggerTypes: TriggerTypeInfo[]): boole
   return triggerTypes.some((t) => t.default_prompt === prompt);
 }
 
-function buildCreatePayload(workspaceId: string, form: FormState, pending: PendingTrigger[]) {
+// resolveRepositoryId turns a RepositorySelection into a concrete
+// repository_id, registering a discovered local repo with the workspace
+// first when needed. Empty string for "auto" (workspace-first fallback).
+async function resolveRepositoryId(
+  workspaceId: string,
+  selection: RepositorySelection,
+): Promise<string> {
+  if (selection.kind === "auto") return "";
+  if (selection.kind === "registered") return selection.id;
+  const created = await createRepositoryAction({
+    workspace_id: workspaceId,
+    name: selection.name,
+    source_type: "local",
+    local_path: selection.path,
+    provider: "",
+    provider_repo_id: "",
+    provider_owner: "",
+    provider_name: "",
+    default_branch: selection.defaultBranch,
+    worktree_branch_prefix: "feature/",
+    pull_before_worktree: true,
+    setup_script: "",
+    cleanup_script: "",
+    dev_script: "",
+  });
+  return created.id;
+}
+
+function buildCreatePayload(
+  workspaceId: string,
+  form: FormState,
+  repositoryId: string,
+  pending: PendingTrigger[],
+) {
   return {
     workspace_id: workspaceId,
     name: form.name || "New Automation",
@@ -191,7 +230,7 @@ function buildCreatePayload(workspaceId: string, form: FormState, pending: Pendi
     workflow_step_id: form.workflowStepId,
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
-    repository_id: form.repositoryId,
+    repository_id: repositoryId,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
     execution_mode: form.executionMode,
@@ -200,7 +239,59 @@ function buildCreatePayload(workspaceId: string, form: FormState, pending: Pendi
   };
 }
 
-function buildUpdatePayload(form: FormState) {
+type SaveHandlerOpts = {
+  isNew: boolean;
+  workspaceId: string;
+  form: FormState;
+  currentId: string | null;
+  create: (payload: ReturnType<typeof buildCreatePayload>) => Promise<Automation>;
+  update: (id: string, payload: ReturnType<typeof buildUpdatePayload>) => Promise<unknown>;
+  setSaving: React.Dispatch<React.SetStateAction<boolean>>;
+  setCurrentId: React.Dispatch<React.SetStateAction<string | null>>;
+  setForm: React.Dispatch<React.SetStateAction<FormState>>;
+  triggerActions: ReturnType<typeof useTriggerActions>;
+  router: ReturnType<typeof useRouter>;
+};
+
+// useSaveHandler returns the save callback for the automation editor.
+// Pulled out of AutomationEditor to keep that component under the
+// function-length lint cap; the save flow has gotten chunky now that it
+// registers discovered repos before persisting the automation.
+function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
+  const { isNew, workspaceId, form, currentId, create, update } = opts;
+  const { setSaving, setCurrentId, setForm, triggerActions, router } = opts;
+  return async () => {
+    setSaving(true);
+    try {
+      const repositoryId = await resolveRepositoryId(workspaceId, form.repositorySelection);
+      const promoteSelection = () => {
+        if (form.repositorySelection.kind === "discovered" && repositoryId) {
+          setForm((prev) => ({
+            ...prev,
+            repositorySelection: { kind: "registered", id: repositoryId },
+          }));
+        }
+      };
+      if (isNew) {
+        const a = await create(
+          buildCreatePayload(workspaceId, form, repositoryId, triggerActions.pending),
+        );
+        setCurrentId(a.id);
+        triggerActions.setTriggers(a.triggers ?? []);
+        triggerActions.clearPending();
+        promoteSelection();
+        router.replace(`/settings/workspace/${workspaceId}/automations/${a.id}`);
+      } else if (currentId) {
+        await update(currentId, buildUpdatePayload(form, repositoryId));
+        promoteSelection();
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+}
+
+function buildUpdatePayload(form: FormState, repositoryId: string) {
   return {
     name: form.name,
     description: form.description,
@@ -208,7 +299,7 @@ function buildUpdatePayload(form: FormState) {
     workflow_step_id: form.workflowStepId,
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
-    repository_id: form.repositoryId,
+    repository_id: repositoryId,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
     execution_mode: form.executionMode,
@@ -286,22 +377,19 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     setForm((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      if (isNew) {
-        const a = await create(buildCreatePayload(workspaceId, form, triggerActions.pending));
-        setCurrentId(a.id);
-        triggerActions.setTriggers(a.triggers ?? []);
-        triggerActions.clearPending();
-        router.replace(`/settings/workspace/${workspaceId}/automations/${a.id}`);
-      } else {
-        await update(currentId, buildUpdatePayload(form));
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
+  const handleSave = useSaveHandler({
+    isNew,
+    workspaceId,
+    form,
+    currentId,
+    create,
+    update,
+    setSaving,
+    setCurrentId,
+    setForm,
+    triggerActions,
+    router,
+  });
 
   const handleRemove = async () => {
     if (!currentId) return;
@@ -433,7 +521,7 @@ function ThenSection({
           workflowStepId={form.workflowStepId}
           agentProfileId={form.agentProfileId}
           executorProfileId={form.executorProfileId}
-          repositoryId={form.repositoryId}
+          repositorySelection={form.repositorySelection}
           executionMode={form.executionMode}
           conditionType={conditionType}
           onWorkflowChange={(v) => {
@@ -443,7 +531,7 @@ function ThenSection({
           onStepChange={(v) => updateField("workflowStepId", v)}
           onAgentProfileChange={(v) => updateField("agentProfileId", v)}
           onExecutorProfileChange={(v) => updateField("executorProfileId", v)}
-          onRepositoryChange={(v) => updateField("repositoryId", v)}
+          onRepositoryChange={(v) => updateField("repositorySelection", v)}
           onExecutionModeChange={(v) => updateField("executionMode", v)}
         />
       </div>

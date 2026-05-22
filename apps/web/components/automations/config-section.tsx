@@ -7,8 +7,20 @@ import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
+import { discoverRepositoriesAction } from "@/app/actions/workspaces";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
+import type { LocalRepository, Repository } from "@/lib/types/http";
 import type { ExecutionMode, TriggerType } from "@/lib/types/automation";
+
+// RepositorySelection mirrors the task-create dialog's two-tier model: a
+// registered workspace repository (keyed by id) OR a filesystem-discovered
+// repo not yet registered (keyed by local path). The form holds whichever
+// the user picked; save-time logic registers the discovered repo first to
+// land an id on the automation row.
+export type RepositorySelection =
+  | { kind: "auto" }
+  | { kind: "registered"; id: string }
+  | { kind: "discovered"; path: string; name: string; defaultBranch: string };
 
 type ConfigSectionProps = {
   workspaceId: string;
@@ -16,35 +28,93 @@ type ConfigSectionProps = {
   workflowStepId: string;
   agentProfileId: string;
   executorProfileId: string;
-  repositoryId: string;
+  repositorySelection: RepositorySelection;
   executionMode: ExecutionMode;
   conditionType: TriggerType | null;
   onWorkflowChange: (id: string) => void;
   onStepChange: (id: string) => void;
   onAgentProfileChange: (id: string) => void;
   onExecutorProfileChange: (id: string) => void;
-  onRepositoryChange: (id: string) => void;
+  onRepositoryChange: (selection: RepositorySelection) => void;
   onExecutionModeChange: (mode: ExecutionMode) => void;
 };
 
 const REPO_AUTO_OPTION_ID = "__auto__";
+const DISCOVERED_PREFIX = "path:";
 
-type RepoLike = { id: string; name: string; provider_owner: string; provider_name: string };
+function selectionToOptionId(sel: RepositorySelection): string {
+  if (sel.kind === "registered") return sel.id;
+  if (sel.kind === "discovered") return DISCOVERED_PREFIX + sel.path;
+  return REPO_AUTO_OPTION_ID;
+}
 
-function buildRepositoryItems(repositories: RepoLike[]): Array<{ id: string; label: string }> {
+function buildRepositoryItems(
+  workspaceRepos: Repository[],
+  discoveredRepos: LocalRepository[],
+): Array<{ id: string; label: string }> {
+  const registeredPaths = new Set(
+    workspaceRepos
+      .map((r) => r.local_path)
+      .filter(Boolean)
+      .map((p) => p.replace(/\/+$/, "")),
+  );
   const items: Array<{ id: string; label: string }> = [
     { id: REPO_AUTO_OPTION_ID, label: "Auto — first workspace repo" },
   ];
-  for (const r of repositories) {
+  for (const r of workspaceRepos) {
     items.push({ id: r.id, label: r.name || `${r.provider_owner}/${r.provider_name}` });
   }
+  for (const r of discoveredRepos) {
+    if (registeredPaths.has(r.path.replace(/\/+$/, ""))) continue;
+    items.push({ id: DISCOVERED_PREFIX + r.path, label: `${r.name} — ${r.path}` });
+  }
   return items;
+}
+
+function pickSelectionFromOptionId(
+  optionId: string,
+  workspaceRepos: Repository[],
+  discoveredRepos: LocalRepository[],
+): RepositorySelection {
+  if (optionId === REPO_AUTO_OPTION_ID) return { kind: "auto" };
+  if (optionId.startsWith(DISCOVERED_PREFIX)) {
+    const path = optionId.slice(DISCOVERED_PREFIX.length);
+    const match = discoveredRepos.find((r) => r.path === path);
+    return {
+      kind: "discovered",
+      path,
+      name: match?.name ?? path.split("/").pop() ?? "New Repository",
+      defaultBranch: match?.default_branch ?? "",
+    };
+  }
+  const reg = workspaceRepos.find((r) => r.id === optionId);
+  return reg ? { kind: "registered", id: reg.id } : { kind: "auto" };
 }
 
 const EXECUTION_MODE_ITEMS = [
   { id: "task", label: "Task — creates a tracked kanban task" },
   { id: "run", label: "Run — fire-and-forget, hidden from kanban" },
 ];
+
+function useDiscoveredRepositories(workspaceId: string) {
+  const [items, setItems] = useState<LocalRepository[]>([]);
+  useEffect(() => {
+    if (!workspaceId) return;
+    let cancelled = false;
+    discoverRepositoriesAction(workspaceId)
+      .then((res) => {
+        if (cancelled) return;
+        setItems(res.repositories ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+  return items;
+}
 
 type StepOption = { id: string; name: string };
 
@@ -77,7 +147,7 @@ export function ConfigSection({
   workflowStepId,
   agentProfileId,
   executorProfileId,
-  repositoryId,
+  repositorySelection,
   executionMode,
   conditionType,
   onWorkflowChange,
@@ -90,6 +160,7 @@ export function ConfigSection({
   useSettingsData(true);
   useWorkflows(workspaceId, true);
   const { repositories } = useRepositories(workspaceId, true);
+  const discoveredRepos = useDiscoveredRepositories(workspaceId);
 
   const workflows = useAppStore((state) => state.workflows.items);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
@@ -105,7 +176,10 @@ export function ConfigSection({
     [executors],
   );
   const isPRTrigger = conditionType === "github_pr";
-  const repositoryItems = useMemo(() => buildRepositoryItems(repositories), [repositories]);
+  const repositoryItems = useMemo(
+    () => buildRepositoryItems(repositories, discoveredRepos),
+    [repositories, discoveredRepos],
+  );
 
   return (
     <div className="space-y-3">
@@ -149,8 +223,10 @@ export function ConfigSection({
         <SelectField
           testId="repository-selector"
           label="Repository"
-          value={repositoryId || REPO_AUTO_OPTION_ID}
-          onChange={(v) => onRepositoryChange(v === REPO_AUTO_OPTION_ID ? "" : v)}
+          value={selectionToOptionId(repositorySelection)}
+          onChange={(v) =>
+            onRepositoryChange(pickSelectionFromOptionId(v, repositories, discoveredRepos))
+          }
           placeholder="Auto"
           items={repositoryItems}
           disabled={isPRTrigger}
