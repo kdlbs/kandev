@@ -73,25 +73,28 @@ export function useUserShells(
   });
   const connectionStatus = useAppStore((state) => state.connection.status);
 
-  // Guard ref to prevent duplicate fetches per env
-  const lastFetchedEnvIdRef = useRef<string | null>(null);
+  // Cache the fetch scope as env+task. An earlier load without a task
+  // id (e.g. before the active task hydrated) must not block the
+  // task-scoped refetch — that would pin the store on the legacy
+  // shells while the DB-backed ordinary rows never reach the panel.
+  const fetchScope = environmentId ? `${environmentId}:${taskId ?? ""}` : null;
+  const lastFetchedScopeRef = useRef<string | null>(null);
 
-  // Reset ref when environmentId clears
+  // Reset ref when scope clears (no env, or env+task changed)
   useEffect(() => {
-    if (!environmentId) {
-      lastFetchedEnvIdRef.current = null;
+    if (!fetchScope) {
+      lastFetchedScopeRef.current = null;
     }
-  }, [environmentId]);
+  }, [fetchScope]);
 
   // Fetch user shells from backend
   useEffect(() => {
-    if (!environmentId) return;
+    if (!environmentId || !fetchScope) return;
     if (connectionStatus !== "connected") return;
-    if (isLoaded) {
-      lastFetchedEnvIdRef.current = environmentId;
-      return;
-    }
-    if (lastFetchedEnvIdRef.current === environmentId) return;
+    // Skip when this exact scope has already been fetched. A different
+    // env+task pair re-runs the effect because the ref no longer matches.
+    if (lastFetchedScopeRef.current === fetchScope) return;
+    void isLoaded; // dependency only — invalidation is by scope, not env.
 
     const fetchShells = async () => {
       const client = getWebSocketClient();
@@ -119,16 +122,19 @@ export function useUserShells(
 
         const mapped: UserShellInfo[] = (response.shells ?? []).map((s) => mapListItemToShell(s));
         store.getState().setUserShells(environmentId, mapped);
-        lastFetchedEnvIdRef.current = environmentId;
+        lastFetchedScopeRef.current = fetchScope;
       } catch (error) {
         console.error("Failed to fetch user shells:", error);
         store.getState().setUserShells(environmentId, []);
-        lastFetchedEnvIdRef.current = environmentId;
+        lastFetchedScopeRef.current = fetchScope;
       }
     };
 
     fetchShells();
-  }, [environmentId, taskId, connectionStatus, isLoaded, store]);
+    // `taskId` is captured inside `payload` via the fetchShells closure;
+    // including it in the deps array is the React-hooks-lint preference
+    // even though `fetchScope` already encodes the same information.
+  }, [environmentId, fetchScope, taskId, connectionStatus, isLoaded, store]);
 
   const addShell = (shell: UserShellInfo) => {
     if (environmentId) {

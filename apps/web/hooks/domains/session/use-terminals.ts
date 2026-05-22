@@ -161,8 +161,10 @@ function useAddTerminal({
       // (terminal_id, label, closable) without `kind` or `seq`. Defaulting
       // to "ordinary" in that case marks the tab as managed and routes
       // close → park, which fails on the old backend with unknown-action.
-      // Only treat the row as ordinary when `seq` is also present.
-      const ordinary = result.kind === "ordinary" || result.seq !== undefined;
+      // `seq` is the only field a backend that supports the DB-backed
+      // path always populates, so gate on its presence alone — a
+      // bare-bones `kind: "ordinary"` without `seq` is treated as legacy.
+      const ordinary = result.seq !== undefined;
       const newTerm: Terminal = {
         id: result.terminalId,
         type: "shell",
@@ -182,20 +184,28 @@ function useAddTerminal({
 }
 
 type RemoveTerminalOpts = {
-  activeTab: string | undefined;
+  /**
+   * Source-of-truth getter for the currently active tab. The handler reads
+   * this at call-time rather than capturing the value in the closure so an
+   * async close (`parkUserShell(...).then(removeTerminal)`) that resolves
+   * after the user switches tabs doesn't clobber the new selection with a
+   * stale fallback shift.
+   */
+  getActiveTab: () => string | undefined;
   sessionId: string | null;
   setTerminals: Dispatch<SetStateAction<Terminal[]>>;
   setRightPanelActiveTab: (sessionId: string, tabId: string) => void;
 };
 
 function useRemoveTerminal({
-  activeTab,
+  getActiveTab,
   sessionId,
   setTerminals,
   setRightPanelActiveTab,
 }: RemoveTerminalOpts) {
   return useCallback(
     (id: string) => {
+      const activeTab = getActiveTab();
       setTerminals((prev) => {
         const indexToRemove = prev.findIndex((t) => t.id === id);
         if (indexToRemove === -1) return prev;
@@ -207,7 +217,7 @@ function useRemoveTerminal({
         return prev.filter((t) => t.id !== id);
       });
     },
-    [activeTab, sessionId, setRightPanelActiveTab, setTerminals],
+    [getActiveTab, sessionId, setRightPanelActiveTab, setTerminals],
   );
 }
 
@@ -408,6 +418,16 @@ function useTerminalActions({
 
   const taskID = useAppStore((state) => state.tasks?.activeTaskId ?? null);
 
+  // Track the latest activeTab in a ref so async close handlers read the
+  // current selection instead of the value captured when handleCloseTab
+  // first ran. Without this, tab switches that happen mid-park/destroy
+  // can be silently undone by the .then() fallback-shift logic.
+  const activeTabRef = useRef(activeTab);
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+  const getActiveTab = useCallback(() => activeTabRef.current, []);
+
   const addTerminal = useAddTerminal({
     environmentId,
     taskID,
@@ -416,7 +436,7 @@ function useTerminalActions({
     setRightPanelActiveTab,
   });
   const removeTerminal = useRemoveTerminal({
-    activeTab,
+    getActiveTab,
     sessionId,
     setTerminals,
     setRightPanelActiveTab,
