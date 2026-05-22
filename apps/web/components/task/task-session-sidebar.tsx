@@ -23,11 +23,8 @@ import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-s
 import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
-import {
-  buildSwitchToSession,
-  findTaskInSnapshots,
-  selectTaskWithLayout,
-} from "./task-select-helpers";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { buildSwitchToSession, selectTaskWithLayout } from "./task-select-helpers";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useArchivedTaskState } from "./task-archived-context";
@@ -367,7 +364,7 @@ function useArchiveActions(store: StoreApi) {
 
   const handleArchiveTask = useCallback(
     (taskId: string) => {
-      const task = findTaskInSnapshots(store.getState().kanbanMulti.snapshots, taskId);
+      const task = findTaskInSnapshots(taskId, store.getState().kanbanMulti.snapshots);
       setArchivingTask({ id: taskId, title: task?.title ?? "this task" });
     },
     [store],
@@ -399,7 +396,7 @@ function useDeleteActions(
 
   const handleDeleteTask = useCallback(
     (taskId: string) => {
-      const task = findTaskInSnapshots(store.getState().kanbanMulti.snapshots, taskId);
+      const task = findTaskInSnapshots(taskId, store.getState().kanbanMulti.snapshots);
       setDeletingTask({ id: taskId, title: task?.title ?? "this task" });
     },
     [store],
@@ -451,10 +448,10 @@ function useSidebarActions(store: StoreApi) {
 
   const handleSelectTask = useCallback(
     (taskId: string) => {
-      const task = findTaskInSnapshots(store.getState().kanbanMulti.snapshots, taskId);
+      const task = findTaskInSnapshots(taskId, store.getState().kanbanMulti.snapshots);
       selectTaskWithLayout({
         taskId,
-        task,
+        task: task ?? undefined,
         store,
         switchToSession,
         loadTaskSessionsForTask,

@@ -7,7 +7,6 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSession } from "@/lib/types/http";
-import type { KanbanState } from "@/lib/state/slices";
 import {
   performLayoutSwitch,
   releaseLayoutToDefault,
@@ -26,25 +25,6 @@ export type SwitchToSessionFn = (
   sessionId: string,
   oldSessionId: string | null | undefined,
 ) => void;
-
-/**
- * Find a task across every loaded workflow snapshot, with an optional
- * fallback to the active `kanban.tasks` slice. The desktop sidebar uses the
- * snapshot-only path (snapshots are guaranteed loaded); the mobile sheet
- * passes `kanban.tasks` so it can still locate tasks that arrived via WS
- * before the snapshot fetch resolved.
- */
-export function findTaskInSnapshots(
-  snapshots: Record<string, { tasks: KanbanState["tasks"] }>,
-  taskId: string,
-  fallbackTasks?: KanbanState["tasks"],
-): KanbanState["tasks"][number] | undefined {
-  for (const snapshot of Object.values(snapshots)) {
-    const found = snapshot.tasks.find((t) => t.id === taskId);
-    if (found) return found;
-  }
-  return fallbackTasks?.find((t) => t.id === taskId);
-}
 
 export function resolveLoadedSessionId(
   sessions: TaskSession[],

@@ -23,7 +23,8 @@ import {
   type WorkflowSnapshot,
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
-import { findTaskInSnapshots, resolvePreferredSessionId } from "../task-select-helpers";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { resolvePreferredSessionId } from "../task-select-helpers";
 
 // Map workflow snapshot to kanban state on workspace switch.
 function mapSnapshotToKanban(snapshot: WorkflowSnapshot, newWorkflowId: string) {
@@ -199,7 +200,6 @@ export function useSheetData(workspaceId: string | null) {
   return {
     activeTaskId,
     selectedTaskId,
-    steps,
     workspaces,
     workflows,
     stepsByWorkflowId,
@@ -444,7 +444,7 @@ function useSheetDeleteActions(
   const handleDeleteTask = useCallback(
     (taskId: string) => {
       const state = store.getState();
-      const task = findTaskInSnapshots(state.kanbanMulti.snapshots, taskId, state.kanban.tasks);
+      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
       setDeletingTask({ id: taskId, title: task?.title ?? "this task" });
     },
     [store],
@@ -492,7 +492,7 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
   const handleSelectTask = useCallback(
     (taskId: string) => {
       const state = store.getState();
-      const task = findTaskInSnapshots(state.kanbanMulti.snapshots, taskId, state.kanban.tasks);
+      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
       if (task?.primarySessionId) {
         const targetSessionId = resolvePreferredSessionId(
           taskId,
@@ -522,7 +522,7 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
   const handleArchiveTask = useCallback(
     (taskId: string) => {
       const state = store.getState();
-      const task = findTaskInSnapshots(state.kanbanMulti.snapshots, taskId, state.kanban.tasks);
+      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
       setArchivingTask({ id: taskId, title: task?.title ?? "this task" });
     },
     [store],
