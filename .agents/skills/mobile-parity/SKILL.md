@@ -71,16 +71,18 @@ Good mobile tests assert real user outcomes, not only visibility. Prefer:
 Use repo conventions first. In this repo, create `mobile-*.spec.ts` files and let the `mobile-chrome` project apply the mobile device; do not add per-test device overrides. Follow `/e2e` conventions for fixture imports, page objects, selectors, and local reproduction. Adjust the fixture import path to the spec location: top-level `tests/mobile-*.spec.ts` files use `../fixtures/test-base`, while nested files use paths such as `../../fixtures/test-base`.
 
 ```ts
-import { test, expect } from '../../fixtures/test-base';
+import { test, expect } from "../../fixtures/test-base";
 
-test.describe('feature on mobile', () => {
-  test('completes primary workflow', async ({ testPage }) => {
-    await testPage.goto('/feature');
-    await testPage.getByRole('button', { name: /menu|open/i }).click();
-    await testPage.getByRole('link', { name: /feature/i }).click();
+test.describe("feature on mobile", () => {
+  test("completes primary workflow", async ({ testPage }) => {
+    await testPage.goto("/feature");
+    await testPage.getByRole("button", { name: /menu|open/i }).click();
+    await testPage.getByRole("link", { name: /feature/i }).click();
 
-    await expect(testPage.getByRole('heading', { name: /feature/i })).toBeVisible();
-    await testPage.getByRole('button', { name: /primary action/i }).click();
+    await expect(
+      testPage.getByRole("heading", { name: /feature/i }),
+    ).toBeVisible();
+    await testPage.getByRole("button", { name: /primary action/i }).click();
     await expect(testPage.getByText(/success|saved|created/i)).toBeVisible();
   });
 });
