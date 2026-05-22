@@ -197,8 +197,8 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
   return (
     <div
       className={cn(
-        "shrink-0 self-center font-mono text-[11px] transition-opacity duration-100",
-        menuOpen ? "opacity-0" : "group-hover:opacity-0",
+        "shrink-0 self-center font-mono text-[11px]",
+        menuOpen ? "hidden" : "group-hover:hidden",
       )}
     >
       <span className="text-emerald-500">+{diffStats.additions}</span>{" "}
@@ -242,7 +242,6 @@ function TaskItemContent({
   updatedAt,
   prInfo,
   issueInfo,
-  reserveMenuSpace,
 }: {
   title: string;
   taskId?: string;
@@ -256,12 +255,9 @@ function TaskItemContent({
   updatedAt?: string;
   prInfo?: { number: number; state: string };
   issueInfo?: { url: string; number: number };
-  reserveMenuSpace: boolean;
 }) {
   return (
-    <div
-      className={cn("flex min-w-0 flex-1 flex-col gap-0.5", reserveMenuSpace && "group-hover:pr-5")}
-    >
+    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
         <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
         {isPinned && (
@@ -370,8 +366,9 @@ export const TaskItem = memo(function TaskItem({
         updatedAt={updatedAt}
         prInfo={prInfo}
         issueInfo={issueInfo}
-        reserveMenuSpace={!hasDiffStats}
       />
+      {hasDiffStats && <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />}
+      <TaskMenuButton visible={effectiveMenuOpen} />
       {showSubtaskToggle && (
         <SubtaskToggle
           taskId={taskId}
@@ -380,8 +377,6 @@ export const TaskItem = memo(function TaskItem({
           onToggle={onToggleSubtasks!}
         />
       )}
-      {hasDiffStats && <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />}
-      <TaskMenuButton visible={effectiveMenuOpen} shiftLeft={showSubtaskToggle} />
     </div>
   );
 });
@@ -439,15 +434,12 @@ function SubtaskToggle({
   );
 }
 
-function TaskMenuButton({ visible, shiftLeft }: { visible: boolean; shiftLeft?: boolean }) {
+function TaskMenuButton({ visible }: { visible: boolean }) {
   return (
     <div
       className={cn(
-        "absolute inset-y-0 flex items-center gap-0.5 transition-opacity duration-100",
-        // When a subtask toggle is present on the right, push the menu button
-        // left of it so the two controls don't overlap on hover.
-        shiftLeft ? "right-10" : "right-1",
-        visible ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+        "self-center shrink-0 flex items-center",
+        visible ? "flex" : "hidden group-hover:flex",
       )}
     >
       <button
