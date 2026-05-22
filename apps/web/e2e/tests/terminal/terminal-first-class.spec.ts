@@ -80,29 +80,47 @@ async function createOrdinaryTerminal(
 
 async function renameTerminal(
   apiClient: ApiClient,
+  taskID: string,
   terminalID: string,
   name: string | null,
 ): Promise<void> {
   await apiClient.wsRequest("user_shell.rename", {
+    task_id: taskID,
     terminal_id: terminalID,
     custom_name: name,
   });
 }
 
-async function parkTerminal(apiClient: ApiClient, terminalID: string): Promise<void> {
-  await apiClient.wsRequest("user_shell.park", { terminal_id: terminalID });
+async function parkTerminal(
+  apiClient: ApiClient,
+  taskID: string,
+  terminalID: string,
+): Promise<void> {
+  await apiClient.wsRequest("user_shell.park", {
+    task_id: taskID,
+    terminal_id: terminalID,
+  });
 }
 
-async function resumeTerminal(apiClient: ApiClient, terminalID: string): Promise<void> {
-  await apiClient.wsRequest("user_shell.resume", { terminal_id: terminalID });
+async function resumeTerminal(
+  apiClient: ApiClient,
+  taskID: string,
+  terminalID: string,
+): Promise<void> {
+  await apiClient.wsRequest("user_shell.resume", {
+    task_id: taskID,
+    terminal_id: terminalID,
+  });
 }
 
 async function destroyTerminal(
   apiClient: ApiClient,
+  taskID: string,
   terminalID: string,
   envID: string,
 ): Promise<void> {
   await apiClient.wsRequest("user_shell.destroy", {
+    task_id: taskID,
     task_environment_id: envID,
     terminal_id: terminalID,
   });
@@ -143,8 +161,8 @@ test.describe("Terminals — first-class persistent entities", () => {
     const b = await createOrdinaryTerminal(apiClient, task.id, envID);
     const c = await createOrdinaryTerminal(apiClient, task.id, envID);
 
-    await renameTerminal(apiClient, b.terminal_id, "build watcher");
-    await parkTerminal(apiClient, c.terminal_id);
+    await renameTerminal(apiClient, task.id, b.terminal_id, "build watcher");
+    await parkTerminal(apiClient, task.id, c.terminal_id);
 
     // Reload — DB-backed metadata must survive.
     await testPage.reload();
@@ -179,7 +197,7 @@ test.describe("Terminals — first-class persistent entities", () => {
     const c = await createOrdinaryTerminal(apiClient, task.id, envID);
     expect([a.seq, b.seq, c.seq]).toEqual([1, 2, 3]);
 
-    await destroyTerminal(apiClient, b.terminal_id, envID);
+    await destroyTerminal(apiClient, task.id, b.terminal_id, envID);
 
     const d = await createOrdinaryTerminal(apiClient, task.id, envID);
     expect(d.seq, "deleted #2 should leave a gap — next create should be #4").toBe(4);
@@ -199,14 +217,14 @@ test.describe("Terminals — first-class persistent entities", () => {
 
     const t = await createOrdinaryTerminal(apiClient, task.id, envID);
 
-    await parkTerminal(apiClient, t.terminal_id);
+    await parkTerminal(apiClient, task.id, t.terminal_id);
     const openOnly = await listTerminals(apiClient, task.id, envID, false);
     expect(openOnly.find((it) => it.id === t.terminal_id)).toBeUndefined();
 
     const all = await listTerminals(apiClient, task.id, envID, true);
     expect(all.find((it) => it.id === t.terminal_id)?.state).toBe("parked");
 
-    await resumeTerminal(apiClient, t.terminal_id);
+    await resumeTerminal(apiClient, task.id, t.terminal_id);
     const afterResume = await listTerminals(apiClient, task.id, envID, false);
     expect(afterResume.find((it) => it.id === t.terminal_id)?.state).toBe("open");
   });
@@ -217,10 +235,41 @@ test.describe("Terminals — first-class persistent entities", () => {
     await getEnvID(apiClient, task.id);
 
     await expect(
-      renameTerminal(apiClient, "bottom-panel", "should fail"),
+      renameTerminal(apiClient, task.id, "bottom-panel", "should fail"),
       "rename guard",
     ).rejects.toThrow();
-    await expect(parkTerminal(apiClient, "bottom-panel"), "park guard").rejects.toThrow();
-    await expect(parkTerminal(apiClient, "script-fake"), "script guard").rejects.toThrow();
+    await expect(parkTerminal(apiClient, task.id, "bottom-panel"), "park guard").rejects.toThrow();
+    await expect(parkTerminal(apiClient, task.id, "script-fake"), "script guard").rejects.toThrow();
+  });
+
+  test("cross-task mutating ops are rejected", async ({ apiClient, seedData }) => {
+    test.setTimeout(90_000);
+    const taskA = await createTaskAndWaitForDone(apiClient, seedData, "Owner Task A");
+    const taskB = await createTaskAndWaitForDone(apiClient, seedData, "Attacker Task B");
+    const envA = await getEnvID(apiClient, taskA.id);
+
+    // Create a terminal owned by task A.
+    const owned = await createOrdinaryTerminal(apiClient, taskA.id, envA);
+
+    // Task B tries to rename/park/destroy task A's terminal by raw id.
+    await expect(
+      renameTerminal(apiClient, taskB.id, owned.terminal_id, "stolen"),
+      "cross-task rename should reject",
+    ).rejects.toThrow();
+    await expect(
+      parkTerminal(apiClient, taskB.id, owned.terminal_id),
+      "cross-task park should reject",
+    ).rejects.toThrow();
+    await expect(
+      destroyTerminal(apiClient, taskB.id, owned.terminal_id, envA),
+      "cross-task destroy should reject",
+    ).rejects.toThrow();
+
+    // Terminal is still owned by task A, unchanged.
+    const list = await listTerminals(apiClient, taskA.id, envA, true);
+    const found = list.find((it) => it.id === owned.terminal_id);
+    expect(found, "terminal should still exist under task A").toBeDefined();
+    expect(found?.custom_name ?? null).toBeNull();
+    expect(found?.state).toBe("open");
   });
 });

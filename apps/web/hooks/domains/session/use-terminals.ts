@@ -368,6 +368,7 @@ function useCloseDevTab({
 
 type ManagedTerminalActionsOpts = {
   environmentId: string | null;
+  taskID: string | null;
   updateUserShell: (
     environmentId: string,
     terminalId: string,
@@ -378,6 +379,7 @@ type ManagedTerminalActionsOpts = {
 
 function useManagedTerminalActions({
   environmentId,
+  taskID,
   updateUserShell,
   removeUserShellStore,
 }: ManagedTerminalActionsOpts) {
@@ -387,39 +389,39 @@ function useManagedTerminalActions({
       const trimmed = name === null ? null : name.trim();
       const normalized = trimmed === "" ? null : trimmed;
       try {
-        await renameUserShell(id, normalized);
+        await renameUserShell(id, normalized, taskID ?? undefined);
         updateUserShell(environmentId, id, { customName: normalized });
       } catch (error) {
         console.error("Failed to rename terminal:", error);
       }
     },
-    [environmentId, updateUserShell],
+    [environmentId, taskID, updateUserShell],
   );
 
   const resumeTerminal = useCallback(
     async (id: string) => {
       if (!environmentId) return;
       try {
-        await resumeUserShell(id);
+        await resumeUserShell(id, taskID ?? undefined);
         updateUserShell(environmentId, id, { state: "open" });
       } catch (error) {
         console.error("Failed to resume terminal:", error);
       }
     },
-    [environmentId, updateUserShell],
+    [environmentId, taskID, updateUserShell],
   );
 
   const destroyTerminal = useCallback(
     async (id: string) => {
       if (!environmentId) return;
       try {
-        await destroyUserShell(environmentId, id);
+        await destroyUserShell(environmentId, id, taskID ?? undefined);
         removeUserShellStore(environmentId, id);
       } catch (error) {
         console.error("Failed to destroy terminal:", error);
       }
     },
-    [environmentId, removeUserShellStore],
+    [environmentId, taskID, removeUserShellStore],
   );
 
   return { renameTerminal, resumeTerminal, destroyTerminal };
@@ -517,14 +519,14 @@ function useTerminalActions({
       const term = terminals.find((t) => t.id === terminalId);
       const isOrdinaryTab = term?.kind === "ordinary";
       if (isOrdinaryTab) {
-        parkUserShell(terminalId)
+        parkUserShell(terminalId, taskID ?? undefined)
           .then(() => {
             updateUserShell(environmentId, terminalId, { state: "parked" });
             removeTerminal(terminalId);
           })
           .catch((error) => console.error("Failed to park terminal:", error));
       } else {
-        destroyUserShell(environmentId, terminalId)
+        destroyUserShell(environmentId, terminalId, taskID ?? undefined)
           .then(() => {
             removeUserShellStore(environmentId, terminalId);
             removeTerminal(terminalId);
@@ -532,11 +534,12 @@ function useTerminalActions({
           .catch((error) => console.error("Failed to destroy terminal:", error));
       }
     },
-    [environmentId, terminals, removeTerminal, removeUserShellStore, updateUserShell],
+    [environmentId, taskID, terminals, removeTerminal, removeUserShellStore, updateUserShell],
   );
 
   const { renameTerminal, resumeTerminal, destroyTerminal } = useManagedTerminalActions({
     environmentId,
+    taskID,
     updateUserShell,
     removeUserShellStore,
   });

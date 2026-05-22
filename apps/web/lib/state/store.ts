@@ -464,7 +464,7 @@ export type AppState = {
   updateUserShell: (
     environmentId: string,
     terminalId: string,
-    patch: Partial<UserShellInfo>,
+    patch: Partial<Omit<UserShellInfo, "terminalId">>,
   ) => void;
   setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
   /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"];

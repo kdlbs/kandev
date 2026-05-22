@@ -157,18 +157,28 @@ export async function createUserShell(
  * Destroy (hard-kill PTY + delete row) an ordinary terminal. Also serves
  * the legacy `user_shell.stop` action for non-ordinary terminals — backend
  * accepts either name.
+ *
+ * Rejects (rather than silently resolving) on a missing WS client so the
+ * caller's `.then()` doesn't fire and remove the tab from the strip
+ * without a frame ever being sent. Mirrors rename/park/resume's contract.
+ *
+ * `taskId` is sent so the backend can verify ownership and reject
+ * cross-task destroys. Optional for non-managed ids (bottom-panel,
+ * script-*) where the service guard short-circuits.
  */
-export async function destroyUserShell(environmentId: string, terminalId: string): Promise<void> {
+export async function destroyUserShell(
+  environmentId: string,
+  terminalId: string,
+  taskId?: string,
+): Promise<void> {
   const client = getWebSocketClient();
-  if (!client) return;
-  try {
-    await client.request("user_shell.destroy", {
-      task_environment_id: environmentId,
-      terminal_id: terminalId,
-    });
-  } catch (error) {
-    console.warn("Failed to destroy user shell:", error);
-  }
+  if (!client) throw new Error(WS_UNAVAILABLE);
+  const payload: Record<string, string> = {
+    task_environment_id: environmentId,
+    terminal_id: terminalId,
+  };
+  if (taskId) payload.task_id = taskId;
+  await client.request("user_shell.destroy", payload);
 }
 
 /** Legacy name retained for the bottom-panel + script paths. */
@@ -177,31 +187,43 @@ export const stopUserShell = destroyUserShell;
 /**
  * Rename an ordinary terminal. Pass `null` to clear the custom name and
  * revert to the derived "Terminal {seq}" label.
+ *
+ * `taskId` lets the backend verify the terminal belongs to the supplied
+ * task; a mismatch rejects the rename instead of silently mutating
+ * another task's row.
  */
 export async function renameUserShell(
   terminalId: string,
   customName: string | null,
+  taskId?: string,
 ): Promise<void> {
   const client = getWebSocketClient();
   if (!client) throw new Error(WS_UNAVAILABLE);
-  await client.request("user_shell.rename", {
+  const payload: Record<string, unknown> = {
     terminal_id: terminalId,
     custom_name: customName,
-  });
+  };
+  if (taskId) payload.task_id = taskId;
+  await client.request("user_shell.rename", payload);
 }
 
 /**
  * Park an ordinary terminal — hides the tab from the panel strip but
- * leaves the PTY running so the user can resume later.
+ * leaves the PTY running so the user can resume later. `taskId` enforces
+ * ownership server-side.
  */
-export async function parkUserShell(terminalId: string): Promise<void> {
+export async function parkUserShell(terminalId: string, taskId?: string): Promise<void> {
   const client = getWebSocketClient();
   if (!client) throw new Error(WS_UNAVAILABLE);
-  await client.request("user_shell.park", { terminal_id: terminalId });
+  const payload: Record<string, string> = { terminal_id: terminalId };
+  if (taskId) payload.task_id = taskId;
+  await client.request("user_shell.park", payload);
 }
 
-export async function resumeUserShell(terminalId: string): Promise<void> {
+export async function resumeUserShell(terminalId: string, taskId?: string): Promise<void> {
   const client = getWebSocketClient();
   if (!client) throw new Error(WS_UNAVAILABLE);
-  await client.request("user_shell.resume", { terminal_id: terminalId });
+  const payload: Record<string, string> = { terminal_id: terminalId };
+  if (taskId) payload.task_id = taskId;
+  await client.request("user_shell.resume", payload);
 }

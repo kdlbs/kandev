@@ -44,6 +44,11 @@ const (
 // misuse loudly.
 var ErrNotManaged = errors.New("terminal id is not managed by the terminal service")
 
+// ErrTaskMismatch is returned by mutating ops when the supplied task_id
+// does not own the supplied terminal_id. Defends against cross-task
+// rename/park/destroy by raw terminal id.
+var ErrTaskMismatch = errors.New("terminal does not belong to the supplied task")
+
 // PTYBackend is the slice of agentctl's interactive runner that the service
 // needs. Register pre-creates the agentctl-side entry so the next WS stream
 // connection can lazily start the PTY; Stop tears down the PTY; IsAlive is
@@ -135,28 +140,48 @@ func (s *Service) List(ctx context.Context, taskID string, includeParked bool) (
 	return items, nil
 }
 
-// Rename sets or clears the custom_name on an ordinary terminal. Pass nil
-// to clear (revert to the derived "Terminal N" label).
-func (s *Service) Rename(ctx context.Context, id string, name *string) error {
+// requireOwnership loads the terminal and verifies it belongs to taskID.
+// Empty taskID skips the ownership check (used by call sites that don't
+// yet have the task scope, e.g. event-bus cleanup that already iterates
+// task-scoped rows). Returns ErrTaskMismatch on a cross-task attempt and
+// ErrNotManaged when the id falls outside the managed-id set.
+func (s *Service) requireOwnership(ctx context.Context, taskID, id string) (*models.Terminal, error) {
 	if !IsManaged(id) {
-		return ErrNotManaged
+		return nil, ErrNotManaged
+	}
+	term, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if taskID != "" && term.TaskID != taskID {
+		return nil, ErrTaskMismatch
+	}
+	return term, nil
+}
+
+// Rename sets or clears the custom_name on an ordinary terminal. Pass nil
+// to clear (revert to the derived "Terminal N" label). taskID is checked
+// against the terminal's task_id; cross-task rename returns ErrTaskMismatch.
+func (s *Service) Rename(ctx context.Context, taskID, id string, name *string) error {
+	if _, err := s.requireOwnership(ctx, taskID, id); err != nil {
+		return err
 	}
 	return s.repo.Rename(ctx, id, name)
 }
 
 // Park hides a terminal tab; the PTY is intentionally left running.
-func (s *Service) Park(ctx context.Context, id string) error {
-	if !IsManaged(id) {
-		return ErrNotManaged
+func (s *Service) Park(ctx context.Context, taskID, id string) error {
+	if _, err := s.requireOwnership(ctx, taskID, id); err != nil {
+		return err
 	}
 	return s.repo.SetState(ctx, id, models.StateParked)
 }
 
 // Resume returns a parked terminal to the visible state. PTY status is
 // returned by a subsequent List call.
-func (s *Service) Resume(ctx context.Context, id string) error {
-	if !IsManaged(id) {
-		return ErrNotManaged
+func (s *Service) Resume(ctx context.Context, taskID, id string) error {
+	if _, err := s.requireOwnership(ctx, taskID, id); err != nil {
+		return err
 	}
 	return s.repo.SetState(ctx, id, models.StateOpen)
 }
@@ -168,14 +193,12 @@ func (s *Service) Resume(ctx context.Context, id string) error {
 // reason to leave the DB row behind. The error is logged at Warn so
 // operators can spot "terminal row gone, PTY still running" situations
 // without it becoming an opaque 500 to the caller.
-func (s *Service) Destroy(ctx context.Context, id string) error {
-	if !IsManaged(id) {
-		return ErrNotManaged
-	}
-	term, err := s.repo.Get(ctx, id)
+func (s *Service) Destroy(ctx context.Context, taskID, id string) error {
+	term, err := s.requireOwnership(ctx, taskID, id)
 	if err != nil {
-		// Already gone — return clean. PTY teardown isn't possible
-		// without the env id; agentctl will GC the entry on restart.
+		// Already-deleted rows are not a destroy failure — the caller
+		// got what they asked for. Cross-task and not-managed errors
+		// still surface.
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil
 		}

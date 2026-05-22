@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -44,10 +45,13 @@ func (f *fakeBackend) IsAlive(_, terminalID string) bool {
 
 func setupService(t *testing.T) (*Service, *fakeBackend) {
 	t.Helper()
-	rawDB, err := sql.Open("sqlite3", ":memory:?_foreign_keys=on")
+	// shared-cache + MaxOpenConns(1) mirror the repository test setup so
+	// every connection in the sqlx pool talks to the same in-memory DB.
+	rawDB, err := sql.Open("sqlite3", "file::memory:?cache=shared&_foreign_keys=on")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	rawDB.SetMaxOpenConns(1)
 	sqlxDB := sqlx.NewDb(rawDB, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
 	repo, err := repository.NewWithDB(sqlxDB, sqlxDB, nil)
@@ -103,7 +107,7 @@ func TestList_FilterParked(t *testing.T) {
 
 	_, _ = svc.Create(ctx, "task-1", "env-1", "")
 	t2, _ := svc.Create(ctx, "task-1", "env-1", "")
-	_ = svc.Park(ctx, t2.ID)
+	_ = svc.Park(ctx, "task-1", t2.ID)
 
 	open, _ := svc.List(ctx, "task-1", false)
 	if len(open) != 1 {
@@ -121,7 +125,7 @@ func TestRename_UpdatesDisplayName(t *testing.T) {
 
 	term, _ := svc.Create(ctx, "task-1", "env-1", "")
 	name := "build watcher"
-	if err := svc.Rename(ctx, term.ID, &name); err != nil {
+	if err := svc.Rename(ctx, "task-1", term.ID, &name); err != nil {
 		t.Fatalf("rename: %v", err)
 	}
 
@@ -136,7 +140,7 @@ func TestPark_DoesNotStopPTY(t *testing.T) {
 	ctx := context.Background()
 
 	term, _ := svc.Create(ctx, "task-1", "env-1", "")
-	if err := svc.Park(ctx, term.ID); err != nil {
+	if err := svc.Park(ctx, "task-1", term.ID); err != nil {
 		t.Fatalf("park: %v", err)
 	}
 	if be.stopped[term.ID] {
@@ -152,8 +156,8 @@ func TestResume_SetsStateOpen(t *testing.T) {
 	ctx := context.Background()
 
 	term, _ := svc.Create(ctx, "task-1", "env-1", "")
-	_ = svc.Park(ctx, term.ID)
-	if err := svc.Resume(ctx, term.ID); err != nil {
+	_ = svc.Park(ctx, "task-1", term.ID)
+	if err := svc.Resume(ctx, "task-1", term.ID); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 
@@ -168,7 +172,7 @@ func TestDestroy_StopsAndDeletes(t *testing.T) {
 	ctx := context.Background()
 
 	term, _ := svc.Create(ctx, "task-1", "env-1", "")
-	if err := svc.Destroy(ctx, term.ID); err != nil {
+	if err := svc.Destroy(ctx, "task-1", term.ID); err != nil {
 		t.Fatalf("destroy: %v", err)
 	}
 	if !be.stopped[term.ID] {
@@ -208,14 +212,73 @@ func TestGuard_RejectsBottomPanel(t *testing.T) {
 	ctx := context.Background()
 
 	name := "x"
-	if err := svc.Rename(ctx, "bottom-panel", &name); err == nil {
+	if err := svc.Rename(ctx, "task-1", "bottom-panel", &name); err == nil {
 		t.Error("expected guard error for bottom-panel rename")
 	}
-	if err := svc.Park(ctx, "bottom-panel"); err == nil {
+	if err := svc.Park(ctx, "task-1", "bottom-panel"); err == nil {
 		t.Error("expected guard error for bottom-panel park")
 	}
-	if err := svc.Destroy(ctx, "bottom-panel"); err == nil {
+	if err := svc.Destroy(ctx, "task-1", "bottom-panel"); err == nil {
 		t.Error("expected guard error for bottom-panel destroy")
+	}
+}
+
+// TestRename_RejectsCrossTask ensures a caller supplying the wrong task_id
+// cannot rename a terminal owned by another task. Same shape applies to
+// park/resume/destroy via the shared requireOwnership helper.
+func TestRename_RejectsCrossTask(t *testing.T) {
+	svc, _ := setupService(t)
+	ctx := context.Background()
+
+	owned, _ := svc.Create(ctx, "task-a", "env-a", "")
+	name := "stolen"
+	err := svc.Rename(ctx, "task-b", owned.ID, &name)
+	if err == nil {
+		t.Fatal("expected cross-task rename to be rejected")
+	}
+	if !errors.Is(err, ErrTaskMismatch) {
+		t.Errorf("expected ErrTaskMismatch, got %v", err)
+	}
+}
+
+// TestPark_RejectsCrossTask same defense for park.
+func TestPark_RejectsCrossTask(t *testing.T) {
+	svc, _ := setupService(t)
+	ctx := context.Background()
+
+	owned, _ := svc.Create(ctx, "task-a", "env-a", "")
+	err := svc.Park(ctx, "task-b", owned.ID)
+	if !errors.Is(err, ErrTaskMismatch) {
+		t.Errorf("expected ErrTaskMismatch, got %v", err)
+	}
+}
+
+// TestDestroy_RejectsCrossTask same defense for destroy.
+func TestDestroy_RejectsCrossTask(t *testing.T) {
+	svc, be := setupService(t)
+	ctx := context.Background()
+
+	owned, _ := svc.Create(ctx, "task-a", "env-a", "")
+	err := svc.Destroy(ctx, "task-b", owned.ID)
+	if !errors.Is(err, ErrTaskMismatch) {
+		t.Errorf("expected ErrTaskMismatch, got %v", err)
+	}
+	if be.stopped[owned.ID] {
+		t.Error("destroy should not have torn down the PTY across tasks")
+	}
+}
+
+// TestRename_EmptyTaskIDSkipsOwnership confirms the helper allows an empty
+// taskID for internal callers (e.g. CleanupTask which already scopes by
+// task elsewhere).
+func TestRename_EmptyTaskIDSkipsOwnership(t *testing.T) {
+	svc, _ := setupService(t)
+	ctx := context.Background()
+
+	owned, _ := svc.Create(ctx, "task-a", "env-a", "")
+	name := "internal-rename"
+	if err := svc.Rename(ctx, "", owned.ID, &name); err != nil {
+		t.Errorf("empty taskID should skip ownership check, got %v", err)
 	}
 }
 
@@ -224,7 +287,7 @@ func TestGuard_RejectsScriptPrefix(t *testing.T) {
 	ctx := context.Background()
 
 	name := "x"
-	if err := svc.Rename(ctx, "script-abc", &name); err == nil {
+	if err := svc.Rename(ctx, "task-1", "script-abc", &name); err == nil {
 		t.Error("expected guard error for script- rename")
 	}
 }

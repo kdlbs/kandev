@@ -337,7 +337,12 @@ func (h *ShellHandlers) wsUserShellList(ctx context.Context, msg *ws.Message) (*
 	// Non-managed terminals — passthrough straight from agentctl. Filters
 	// out anything an ordinary row already covers so a managed id never
 	// appears twice.
-	items = appendUnmanagedShells(items, h.lifecycleMgr.GetInteractiveRunner(), req.TaskEnvironmentID)
+	// When the terminal service is wired and a task scope was supplied,
+	// managed-shaped orphans are dropped (no DB row → not user-visible).
+	// Without those preconditions we're on the legacy passthrough path,
+	// so any agentctl-side shell stays visible regardless of id shape.
+	managedCovered := h.terminalSvc != nil && req.TaskID != ""
+	items = appendUnmanagedShells(items, h.lifecycleMgr.GetInteractiveRunner(), req.TaskEnvironmentID, managedCovered)
 
 	h.logger.Debug("listing user shells",
 		zap.String("task_id", req.TaskID),
@@ -351,12 +356,22 @@ func (h *ShellHandlers) wsUserShellList(ctx context.Context, msg *ws.Message) (*
 
 // appendUnmanagedShells merges agentctl's view of unmanaged terminals
 // (bottom-panel + scripts + orphans) into the items list. Skips ids the
-// terminal service already returned (`seen` set) and filters out orphan
-// ordinary shells lacking a DB row.
+// terminal service already returned (`seen` set).
+//
+// managedCovered=true means the caller already loaded ordinary terminals
+// from the service for this task — so any managed-shaped id we see here
+// without a matching DB row is an orphan and should be silently dropped
+// (plan §7).
+//
+// managedCovered=false means we're on the legacy passthrough path
+// (terminal service disabled or task_id missing). In that case every
+// agentctl-side shell stays visible regardless of id shape — otherwise
+// older clients lose their previously created shells.
 func appendUnmanagedShells(
 	items []userShellListItem,
 	runner *process.InteractiveRunner,
 	scopeID string,
+	managedCovered bool,
 ) []userShellListItem {
 	if runner == nil || scopeID == "" {
 		return items
@@ -369,7 +384,7 @@ func appendUnmanagedShells(
 		if _, dup := seen[s.TerminalID]; dup {
 			continue
 		}
-		if terminalservice.IsManaged(s.TerminalID) {
+		if managedCovered && terminalservice.IsManaged(s.TerminalID) {
 			// Orphan ordinary shell (no DB row) — drop silently per
 			// plan §7; it'll be GC'd next agentctl restart.
 			continue
@@ -523,6 +538,7 @@ func (h *ShellHandlers) resolveShellScript(
 // UserShellStopRequest for user_shell.stop action.
 // User shells are env-scoped — TaskEnvironmentID is required.
 type UserShellStopRequest struct {
+	TaskID            string `json:"task_id"`
 	TaskEnvironmentID string `json:"task_environment_id"`
 	TerminalID        string `json:"terminal_id"`
 }
@@ -549,7 +565,7 @@ func (h *ShellHandlers) wsUserShellStop(ctx context.Context, msg *ws.Message) (*
 	// the frontend doesn't optimistically remove a row that the backend
 	// failed to delete.
 	if h.terminalSvc != nil && terminalservice.IsManaged(req.TerminalID) {
-		if err := h.terminalSvc.Destroy(ctx, req.TerminalID); err != nil {
+		if err := h.terminalSvc.Destroy(ctx, req.TaskID, req.TerminalID); err != nil {
 			h.logger.Warn("destroy ordinary terminal",
 				zap.String("terminal_id", req.TerminalID), zap.Error(err))
 			return nil, fmt.Errorf("destroy terminal: %w", err)
@@ -572,7 +588,10 @@ func (h *ShellHandlers) wsUserShellStop(ctx context.Context, msg *ws.Message) (*
 }
 
 // UserShellRenameRequest for user_shell.rename. CustomName==nil clears.
+// TaskID is verified against the terminal's owning task on the service
+// side; cross-task renames return ErrTaskMismatch.
 type UserShellRenameRequest struct {
+	TaskID     string  `json:"task_id"`
 	TerminalID string  `json:"terminal_id"`
 	CustomName *string `json:"custom_name"`
 }
@@ -588,14 +607,17 @@ func (h *ShellHandlers) wsUserShellRename(ctx context.Context, msg *ws.Message) 
 	if h.terminalSvc == nil {
 		return nil, fmt.Errorf("terminal service not available")
 	}
-	if err := h.terminalSvc.Rename(ctx, req.TerminalID, req.CustomName); err != nil {
+	if err := h.terminalSvc.Rename(ctx, req.TaskID, req.TerminalID, req.CustomName); err != nil {
 		return nil, err
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]any{"success": true})
 }
 
-// UserShellParkRequest / UserShellResumeRequest share a shape.
+// UserShellStateRequest shares its shape between park and resume.
+// TaskID is verified against the terminal's owning task on the service
+// side; cross-task mutations return ErrTaskMismatch.
 type UserShellStateRequest struct {
+	TaskID     string `json:"task_id"`
 	TerminalID string `json:"terminal_id"`
 }
 
@@ -610,7 +632,7 @@ func (h *ShellHandlers) wsUserShellPark(ctx context.Context, msg *ws.Message) (*
 	if h.terminalSvc == nil {
 		return nil, fmt.Errorf("terminal service not available")
 	}
-	if err := h.terminalSvc.Park(ctx, req.TerminalID); err != nil {
+	if err := h.terminalSvc.Park(ctx, req.TaskID, req.TerminalID); err != nil {
 		return nil, err
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]any{"success": true})
@@ -627,7 +649,7 @@ func (h *ShellHandlers) wsUserShellResume(ctx context.Context, msg *ws.Message) 
 	if h.terminalSvc == nil {
 		return nil, fmt.Errorf("terminal service not available")
 	}
-	if err := h.terminalSvc.Resume(ctx, req.TerminalID); err != nil {
+	if err := h.terminalSvc.Resume(ctx, req.TaskID, req.TerminalID); err != nil {
 		return nil, err
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]any{"success": true})
@@ -716,7 +738,7 @@ func (h *ShellHandlers) httpListTaskTerminals(c *gin.Context) {
 			})
 		}
 	}
-	items = appendUnmanagedShells(items, h.lifecycleMgr.GetInteractiveRunner(), envID)
+	items = appendUnmanagedShells(items, h.lifecycleMgr.GetInteractiveRunner(), envID, h.terminalSvc != nil)
 
 	c.JSON(http.StatusOK, gin.H{"terminals": items})
 }

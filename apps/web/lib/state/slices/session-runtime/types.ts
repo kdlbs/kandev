@@ -391,7 +391,10 @@ export type SessionRuntimeSliceActions = {
   updateUserShell: (
     environmentId: string,
     terminalId: string,
-    patch: Partial<UserShellInfo>,
+    // `terminalId` is the row key — patching it would silently break
+    // future lookups while leaving the array index pointing at the old
+    // entry. `Omit` removes it from the patch surface.
+    patch: Partial<Omit<UserShellInfo, "terminalId">>,
   ) => void;
   setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
 };
