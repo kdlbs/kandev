@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -332,6 +333,36 @@ func TestParseResumeFromArgs(t *testing.T) {
 			got := parseResumeFromArgs(tt.args)
 			if got != tt.want {
 				t.Errorf("parseResumeFromArgs(%v) = %q, want %q", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseSubtaskTitle(t *testing.T) {
+	tests := []struct {
+		name   string
+		cmd    string
+		want   string
+		isAuto bool
+	}{
+		{name: "lowercase no title", cmd: "/subtask", isAuto: true},
+		{name: "lowercase with title", cmd: "/subtask My task", want: "My task"},
+		{name: "uppercase route, mixed-case title", cmd: "/SUBTASK My Task", want: "My Task"},
+		{name: "mixed-case route preserves title casing", cmd: "/SubTask Hello World", want: "Hello World"},
+		{name: "extra whitespace trimmed", cmd: "/subtask   trimmed   ", want: "trimmed"},
+		{name: "empty mixed-case route", cmd: "/SubTask", isAuto: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseSubtaskTitle(tt.cmd)
+			if tt.isAuto {
+				if !strings.HasPrefix(got, "Mock subtask ") {
+					t.Errorf("parseSubtaskTitle(%q) = %q, want auto-generated %q-prefixed title", tt.cmd, got, "Mock subtask ")
+				}
+				return
+			}
+			if got != tt.want {
+				t.Errorf("parseSubtaskTitle(%q) = %q, want %q", tt.cmd, got, tt.want)
 			}
 		})
 	}

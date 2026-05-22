@@ -275,13 +275,7 @@ func emitSubagentSequence(e *emitter, model string) {
 // manually exercising sidebar subtask UI in dev with KANDEV_MOCK_AGENT=true.
 // Usage: `/subtask` or `/subtask My subtask title`.
 func emitCreateSubtask(e *emitter, cmd, model string) {
-	// Dispatch matches "/subtask" case-insensitively, so trim by length —
-	// strings.TrimPrefix would no-op on "/SubTask foo" and leak the prefix
-	// into the title.
-	title := strings.TrimSpace(cmd[len("/subtask"):])
-	if title == "" {
-		title = fmt.Sprintf("Mock subtask %d", time.Now().Unix()%10000)
-	}
+	title := parseSubtaskTitle(cmd)
 
 	args := map[string]any{
 		"title":       title,
@@ -301,4 +295,20 @@ func emitCreateSubtask(e *emitter, cmd, model string) {
 	}
 	e.completeTool(toolID, map[string]any{"result": result})
 	e.text(fmt.Sprintf("Created subtask %q under the current task.", title))
+}
+
+// parseSubtaskTitle extracts the title from a /subtask command. The dispatch
+// matches case-insensitively, so we slice by prefix length rather than using
+// strings.TrimPrefix (which would no-op on "/SubTask foo" and leak the prefix
+// into the title). Returns an auto-generated title when no title is supplied.
+func parseSubtaskTitle(cmd string) string {
+	const prefix = "/subtask"
+	title := ""
+	if len(cmd) >= len(prefix) {
+		title = strings.TrimSpace(cmd[len(prefix):])
+	}
+	if title == "" {
+		title = fmt.Sprintf("Mock subtask %d", time.Now().Unix()%10000)
+	}
+	return title
 }
