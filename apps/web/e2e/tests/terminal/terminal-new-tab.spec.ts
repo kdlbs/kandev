@@ -107,7 +107,9 @@ test.describe("Terminal new tab — env-keyed user shell RPCs", () => {
     // Open the dockview "+" menu (every group has one — the chat/center
     // group's is reliably present and not behind any conditional).
     await session.addPanelButton().click();
-    const terminalItem = testPage.getByRole("menuitem", { name: "Terminal" });
+    // Use exact match to disambiguate from the new "Terminals" submenu
+    // label and any "Resume Terminal …" reopen items.
+    const terminalItem = testPage.getByRole("menuitem", { name: "New Terminal", exact: true });
     await expect(terminalItem).toBeVisible({ timeout: 5_000 });
     await terminalItem.click();
 

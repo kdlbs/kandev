@@ -489,6 +489,10 @@ export function buildExtraPanelActions(get: StoreGet) {
       addSimplePanel(api, groupId ?? rightBottomGroupId, {
         id,
         component: "terminal",
+        // terminalTab is a custom dockview tab that adds the `#N` badge
+        // when there's more than one ordinary terminal in the task and
+        // exposes a context menu for rename / park / destroy.
+        tabComponent: "terminalTab",
         title: title ?? "Terminal",
         params: { terminalId: id, environmentId, taskID },
       });

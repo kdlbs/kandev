@@ -18,6 +18,7 @@ import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 import { RepositoryScriptsMenuItems } from "./repository-scripts-menu";
 import { SessionReopenMenuItems } from "./session-reopen-menu";
+import { TerminalReopenMenuItems } from "./terminal-reopen-menu";
 
 type AddPanelMenuState = {
   taskId: string | null;
@@ -74,8 +75,9 @@ export function AddPanelMenuItems({
       )}
       <DropdownMenuItem onClick={onAddTerminal} className={MENU_ITEM_CLASS}>
         <IconTerminal2 className={MENU_ICON_CLASS} />
-        Terminal
+        New Terminal
       </DropdownMenuItem>
+      <TerminalReopenMenuItems groupId={groupId} />
       <DropdownMenuItem
         onClick={() => addBrowserPanel(undefined, groupId)}
         className={MENU_ITEM_CLASS}

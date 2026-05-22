@@ -46,6 +46,7 @@ import { ChangesTab } from "./changes-tab";
 import { PlanTab } from "./plan-tab";
 import { PreviewFileTab, PreviewDiffTab, PreviewCommitTab, PinnedDefaultTab } from "./preview-tab";
 import { SessionTab } from "./session-tab";
+import { TerminalTab } from "./terminal-tab";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import {
   setupSessionTabSync,
@@ -190,6 +191,7 @@ const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeader
   changesTab: ChangesTab,
   planTab: PlanTab,
   sessionTab: SessionTab,
+  terminalTab: TerminalTab,
   previewFileTab: PreviewFileTab,
   previewDiffTab: PreviewDiffTab,
   previewCommitTab: PreviewCommitTab,
