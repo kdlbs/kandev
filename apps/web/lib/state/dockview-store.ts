@@ -132,7 +132,13 @@ type DockviewStore = {
    *  activeSessionId anchors the new panel to the session's current group so it lands as a tab
    *  next to the session, not as a split. Falls back to centerGroupId when omitted. */
   addPRPanel: (prKey?: string, activeSessionId?: string | null) => void;
-  addTerminalPanel: (terminalId?: string, groupId?: string, environmentId?: string) => void;
+  addTerminalPanel: (
+    terminalId?: string,
+    groupId?: string,
+    environmentId?: string,
+    taskID?: string,
+    title?: string,
+  ) => void;
   selectedDiff: { path: string; content?: string } | null;
   setSelectedDiff: (diff: { path: string; content?: string } | null) => void;
   activeGroupId: string | null;

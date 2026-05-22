@@ -564,7 +564,15 @@ func (h *ShellHandlers) wsUserShellStop(ctx context.Context, msg *ws.Message) (*
 	// deleted alongside the PTY tear-down. Destroy errors propagate so
 	// the frontend doesn't optimistically remove a row that the backend
 	// failed to delete.
-	if h.terminalSvc != nil && terminalservice.IsManaged(req.TerminalID) {
+	//
+	// task_id is required for ordinary terminals. Older clients (and
+	// legacy dockview panels persisted before task_id was stamped) may
+	// still send empty task_id and a `shell-…` id that matches IsManaged.
+	// For those, fall through to the passthrough stop so legacy callers
+	// keep working — the service rejects with ErrTaskMismatch on empty
+	// task_id, which we treat as "this isn't a DB-backed terminal,
+	// behave like the old code did".
+	if h.terminalSvc != nil && req.TaskID != "" && terminalservice.IsManaged(req.TerminalID) {
 		if err := h.terminalSvc.Destroy(ctx, req.TaskID, req.TerminalID); err != nil {
 			h.logger.Warn("destroy ordinary terminal",
 				zap.String("terminal_id", req.TerminalID), zap.Error(err))
@@ -573,7 +581,8 @@ func (h *ShellHandlers) wsUserShellStop(ctx context.Context, msg *ws.Message) (*
 		return ws.NewResponse(msg.ID, msg.Action, map[string]any{"success": true})
 	}
 
-	// Non-managed or no service wired — best-effort PTY tear-down.
+	// Non-managed, no service wired, or legacy caller without task_id —
+	// best-effort PTY tear-down via the runner.
 	interactiveRunner := h.lifecycleMgr.GetInteractiveRunner()
 	if interactiveRunner == nil {
 		return nil, fmt.Errorf("interactive runner not available")

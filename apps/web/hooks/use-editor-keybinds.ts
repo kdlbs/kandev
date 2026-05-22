@@ -31,6 +31,7 @@ function handleTerminalToggle(
   api: DockviewApi,
   previousPanelIdRef: React.MutableRefObject<string | null>,
   getEnvironmentId: () => string | null,
+  getTaskID: () => string | null,
 ) {
   e.preventDefault();
   e.stopPropagation();
@@ -58,10 +59,14 @@ function handleTerminalToggle(
 
   const environmentId = getEnvironmentId();
   if (!environmentId) return;
+  const taskID = getTaskID();
 
-  createUserShell(environmentId)
+  createUserShell(environmentId, { taskId: taskID ?? undefined })
     .then((result) => {
-      useDockviewStore.getState().addTerminalPanel(result.terminalId, undefined, environmentId);
+      const title = result.displayName ?? result.label ?? "Terminal";
+      useDockviewStore
+        .getState()
+        .addTerminalPanel(result.terminalId, undefined, environmentId, taskID ?? undefined, title);
     })
     .catch((err) => {
       console.warn("Failed to create terminal shell:", err);
@@ -168,11 +173,17 @@ export function useEditorKeybinds() {
       const isTerminalToggle = e.ctrlKey && !e.metaKey && !e.shiftKey && e.code === "Backquote";
 
       if (isTerminalToggle) {
-        handleTerminalToggle(e, api, previousPanelIdRef, () => {
-          const state = appStore.getState();
-          const sid = state.tasks.activeSessionId;
-          return sid ? (state.environmentIdBySessionId[sid] ?? null) : null;
-        });
+        handleTerminalToggle(
+          e,
+          api,
+          previousPanelIdRef,
+          () => {
+            const state = appStore.getState();
+            const sid = state.tasks.activeSessionId;
+            return sid ? (state.environmentIdBySessionId[sid] ?? null) : null;
+          },
+          () => appStore.getState().tasks?.activeTaskId ?? null,
+        );
         return;
       }
 

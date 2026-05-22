@@ -165,11 +165,16 @@ export function setupPortalCleanup(
       // back to the active session's env for legacy panels created before
       // the param was added (e.g. layouts persisted from older releases).
       const stampedEnv = entry.params.environmentId as string | undefined;
+      const stampedTaskID = entry.params.taskID as string | undefined;
       const state = appStore.getState();
       const active = state.tasks.activeSessionId;
       const fallbackEnv = active ? (state.environmentIdBySessionId[active] ?? null) : null;
       const envForTerminal = stampedEnv || fallbackEnv;
-      if (terminalId && envForTerminal) stopUserShell(envForTerminal, terminalId);
+      // Pass the task_id along so the backend's ownership check passes
+      // for DB-backed ordinary terminals. Legacy panels created before
+      // taskID was stamped fall through to the old passthrough path
+      // (handler routes to agentctl stop when terminalSvc rejects).
+      if (terminalId && envForTerminal) stopUserShell(envForTerminal, terminalId, stampedTaskID);
     }
     panelPortalManager.release(panel.id);
   });

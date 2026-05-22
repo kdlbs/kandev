@@ -88,6 +88,7 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   const { group, containerApi } = props;
   const state = useLeftHeaderState(group.id, containerApi);
   const environmentId = useEnvironmentId();
+  const taskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
   const devScript = useActiveSessionDevScript();
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
@@ -95,19 +96,25 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   const handleAddTerminal = useCallback(async () => {
     if (!environmentId) return;
     try {
-      const result = await createUserShell(environmentId);
-      addTerminalPanel(result.terminalId, group.id, environmentId);
+      // Pass taskId so the backend creates a DB-backed ordinary terminal
+      // (with seq/kind) instead of a legacy passthrough shell. Also stamp
+      // taskID into the dockview panel params so the destroy cleanup
+      // passes ownership verification.
+      const result = await createUserShell(environmentId, { taskId: taskID ?? undefined });
+      const title = result.displayName ?? result.label ?? "Terminal";
+      addTerminalPanel(result.terminalId, group.id, environmentId, taskID ?? undefined, title);
     } catch (error) {
       console.error("Failed to create terminal:", error);
     }
-  }, [environmentId, addTerminalPanel, group.id]);
+  }, [environmentId, taskID, addTerminalPanel, group.id]);
 
   const handleRunScript = useCallback(
     async (scriptId: string) => {
       if (!environmentId) return;
       try {
         const result = await createUserShell(environmentId, { scriptId });
-        addTerminalPanel(result.terminalId, group.id, environmentId);
+        const title = result.label ?? "Script";
+        addTerminalPanel(result.terminalId, group.id, environmentId, undefined, title);
       } catch (error) {
         console.error("Failed to run script:", error);
       }
@@ -122,7 +129,7 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
         command: devScript,
         label: "Dev Server",
       });
-      addTerminalPanel(result.terminalId, group.id, environmentId);
+      addTerminalPanel(result.terminalId, group.id, environmentId, undefined, "Dev Server");
     } catch (error) {
       console.error("Failed to start dev script:", error);
     }
@@ -427,7 +434,13 @@ function TerminalScriptsDropdown({
       if (!environmentId) return;
       try {
         const result = await createUserShell(environmentId, { scriptId });
-        addTerminalPanel(result.terminalId, rightBottomGroupId ?? undefined, environmentId);
+        addTerminalPanel(
+          result.terminalId,
+          rightBottomGroupId ?? undefined,
+          environmentId,
+          undefined,
+          result.label ?? "Script",
+        );
       } catch (error) {
         console.error("Failed to run script:", error);
       }
@@ -488,6 +501,7 @@ function TerminalDevPreviewButton({
   visible,
 }: TerminalDevPreviewButtonProps) {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const taskID = useAppStore((state) => state.tasks?.activeTaskId ?? null);
   const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
   const upsertProcessStatus = useAppStore((state) => state.upsertProcessStatus);
@@ -506,14 +520,22 @@ function TerminalDevPreviewButton({
       // Process may already be running
     }
     try {
-      const shell = await createUserShell(environmentId);
-      addTerminalPanel(shell.terminalId, rightBottomGroupId ?? undefined, environmentId);
+      const shell = await createUserShell(environmentId, { taskId: taskID ?? undefined });
+      const title = shell.displayName ?? shell.label ?? "Terminal";
+      addTerminalPanel(
+        shell.terminalId,
+        rightBottomGroupId ?? undefined,
+        environmentId,
+        taskID ?? undefined,
+        title,
+      );
     } catch {
       // Terminal creation is best-effort
     }
   }, [
     activeSessionId,
     environmentId,
+    taskID,
     addBrowserPanel,
     upsertProcessStatus,
     setActiveProcess,

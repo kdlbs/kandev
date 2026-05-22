@@ -471,18 +471,26 @@ export function buildExtraPanelActions(get: StoreGet) {
         params: prKey ? { prKey } : undefined,
       });
     },
-    addTerminalPanel: (terminalId?: string, groupId?: string, environmentId?: string) => {
+    addTerminalPanel: (
+      terminalId?: string,
+      groupId?: string,
+      environmentId?: string,
+      taskID?: string,
+      title?: string,
+    ) => {
       const { api, rightBottomGroupId } = get();
       if (!api) return;
       const id = terminalId ?? `terminal-${Date.now()}`;
-      // Stamp the env id into the panel's params so cleanup
-      // (dockview-layout-setup.onDidRemovePanel) can call stopUserShell with
-      // the correct env even when the user has switched tasks since open.
+      // Stamp env id + task id into the panel's params so cleanup
+      // (dockview-layout-setup.onDidRemovePanel) can call destroyUserShell
+      // with the correct task scope even after the user switches tasks.
+      // task_id is what the backend uses to verify ownership now — without
+      // it `requireOwnership` rejects with ErrTaskMismatch.
       addSimplePanel(api, groupId ?? rightBottomGroupId, {
         id,
         component: "terminal",
-        title: "Terminal",
-        params: { terminalId: id, environmentId },
+        title: title ?? "Terminal",
+        params: { terminalId: id, environmentId, taskID },
       });
     },
   };
