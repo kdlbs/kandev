@@ -5,6 +5,7 @@ import type { QueuedMessage } from "@/lib/state/slices/session/types";
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 vi.mock("@kandev/ui/tooltip", () => ({
@@ -18,6 +19,8 @@ const PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 
 const ATTACHMENT_1_ALT = "Attachment 1";
+const OPEN_ATTACHMENT_1_LABEL = "Open Attachment 1";
+const FULL_SIZE_ATTACHMENT_1_ALT = "Full size Attachment 1";
 
 function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   return {
@@ -46,7 +49,9 @@ describe("QueuedGhostMessage attachment thumbnails", () => {
     );
     const img = screen.getByAltText(ATTACHMENT_1_ALT) as HTMLImageElement;
     expect(img.src).toBe(`data:image/png;base64,${PNG_BASE64}`);
-    expect(img.className).toContain("cursor-pointer");
+    expect(screen.getByRole("button", { name: OPEN_ATTACHMENT_1_LABEL }).className).toContain(
+      "cursor-pointer",
+    );
   });
 
   it("renders a file chip for non-image (resource) attachments", () => {
@@ -64,7 +69,23 @@ describe("QueuedGhostMessage attachment thumbnails", () => {
     expect(screen.getByText("Attachment")).toBeTruthy();
   });
 
-  it("opens the image via keyboard (Enter) when focused in display mode", () => {
+  it("renders image thumbnails as accessible dialog triggers in display mode", () => {
+    render(
+      <QueuedGhostMessage
+        entry={entry({
+          attachments: [{ type: "image", data: PNG_BASE64, mime_type: "image/png" }],
+        })}
+        canEdit
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: OPEN_ATTACHMENT_1_LABEL });
+    expect(trigger.getAttribute("type")).toBe("button");
+    expect(screen.getByAltText(ATTACHMENT_1_ALT)).toBeTruthy();
+  });
+
+  it("opens the image in a preview dialog when clicked in display mode", () => {
     const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
     render(
       <QueuedGhostMessage
@@ -76,32 +97,15 @@ describe("QueuedGhostMessage attachment thumbnails", () => {
         onRemove={() => {}}
       />,
     );
-    const img = screen.getByAltText(ATTACHMENT_1_ALT) as HTMLImageElement;
-    expect(img.getAttribute("role")).toBe("button");
-    expect(img.getAttribute("tabindex")).toBe("0");
-    fireEvent.keyDown(img, { key: "Enter" });
-    expect(openSpy).toHaveBeenCalledOnce();
-    openSpy.mockRestore();
-  });
-
-  it("opens the image in a new window when clicked in display mode", () => {
-    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
-    render(
-      <QueuedGhostMessage
-        entry={entry({
-          attachments: [{ type: "image", data: PNG_BASE64, mime_type: "image/png" }],
-        })}
-        canEdit
-        onSave={async () => {}}
-        onRemove={() => {}}
-      />,
+    fireEvent.click(screen.getByRole("button", { name: OPEN_ATTACHMENT_1_LABEL }));
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByAltText(FULL_SIZE_ATTACHMENT_1_ALT).getAttribute("src")).toBe(
+      `data:image/png;base64,${PNG_BASE64}`,
     );
-    fireEvent.click(screen.getByAltText(ATTACHMENT_1_ALT));
-    expect(openSpy).toHaveBeenCalledOnce();
-    openSpy.mockRestore();
   });
 
-  it("renders thumbnails read-only in edit mode (no click handler, no cursor-pointer)", () => {
+  it("renders thumbnails read-only in edit mode (no dialog trigger, no cursor-pointer)", () => {
     const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
     render(
       <QueuedGhostMessage
@@ -116,9 +120,9 @@ describe("QueuedGhostMessage attachment thumbnails", () => {
     fireEvent.click(screen.getByTitle("Edit queued message"));
     const img = screen.getByAltText(ATTACHMENT_1_ALT) as HTMLImageElement;
     expect(img.className).not.toContain("cursor-pointer");
+    expect(screen.queryByRole("button", { name: OPEN_ATTACHMENT_1_LABEL })).toBeNull();
     fireEvent.click(img);
     expect(openSpy).not.toHaveBeenCalled();
-    openSpy.mockRestore();
   });
 
   it("renders no thumbnail row when there are no attachments", () => {

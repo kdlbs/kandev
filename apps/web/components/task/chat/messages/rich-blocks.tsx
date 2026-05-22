@@ -5,6 +5,7 @@ import type { Message } from "@/lib/types/http";
 import type { ContentBlock, RichMetadata } from "@/components/task/chat/types";
 import { DiffViewBlock } from "@/components/task/chat/messages/diff-view-block";
 import { TodoMessage } from "@/components/task/chat/messages/todo-message";
+import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import { normalizeDiffString } from "@/lib/diff";
 import type { FileDiffData } from "@/lib/diff/types";
 
@@ -120,16 +121,18 @@ function ContentBlockView({ block }: { block: ContentBlock }) {
             <span>Image</span>
           </div>
           {block.data && (
-            // eslint-disable-next-line @next/next/no-img-element -- base64 data URIs are not optimizable by next/image
-            <img
+            <ImagePreviewDialog
               src={block.uri || `data:${block.mime_type || "image/png"};base64,${block.data}`}
               alt="Agent image"
-              className="max-w-full max-h-96 rounded"
+              thumbnailClassName="max-h-96 max-w-full rounded transition-opacity hover:opacity-90"
             />
           )}
           {block.uri && !block.data && (
-            // eslint-disable-next-line @next/next/no-img-element -- external agent image URIs
-            <img src={block.uri} alt="Agent image" className="max-w-full max-h-96 rounded" />
+            <ImagePreviewDialog
+              src={block.uri}
+              alt="Agent image"
+              thumbnailClassName="max-h-96 max-w-full rounded transition-opacity hover:opacity-90"
+            />
           )}
         </div>
       );

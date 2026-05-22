@@ -1,8 +1,12 @@
 "use client";
 
 import { memo, useState, useCallback } from "react";
-import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
+import { Dialog, DialogContent } from "@kandev/ui/dialog";
 import type { ImageContextItem } from "@/lib/types/context";
+import {
+  IMAGE_PREVIEW_DIALOG_CONTENT_CLASSNAME,
+  ImagePreviewContent,
+} from "@/components/task/chat/image-preview-dialog";
 import { ContextChip } from "./context-chip";
 
 export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextItem }) {
@@ -34,14 +38,11 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
         onRemove={item.onRemove}
       />
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-3xl p-2">
-          <DialogTitle className="sr-only">Image preview</DialogTitle>
-          {/* eslint-disable-next-line @next/next/no-img-element -- base64 preview */}
-          <img
-            src={item.attachment.preview}
-            alt="Full size preview"
-            className="max-w-full max-h-[80vh] rounded object-contain mx-auto"
-          />
+        <DialogContent
+          aria-describedby={undefined}
+          className={IMAGE_PREVIEW_DIALOG_CONTENT_CLASSNAME}
+        >
+          <ImagePreviewContent src={item.attachment.preview} alt="Full size preview" />
         </DialogContent>
       </Dialog>
     </>

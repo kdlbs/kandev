@@ -14,7 +14,7 @@ import {
   normalizeMarkdown,
   remarkPlugins,
 } from "@/components/shared/markdown-components";
-import { openImageInWindow } from "@/components/task/chat/file-attachment";
+import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 
 type ChatMessageProps = {
   comment: Message;
@@ -211,13 +211,11 @@ function UserMessageContent({
           {hasAttachments && (
             <div className={cn("flex flex-wrap gap-2", hasContent && "mb-2")}>
               {imageAttachments.map((att, index) => (
-                /* eslint-disable-next-line @next/next/no-img-element -- base64 data URLs are not compatible with next/image */
-                <img
+                <ImagePreviewDialog
                   key={index}
                   src={`data:${att.mime_type};base64,${att.data}`}
                   alt={`Attachment ${index + 1}`}
-                  className="max-h-48 max-w-full rounded-lg object-contain cursor-pointer hover:opacity-90 transition-opacity"
-                  onClick={() => openImageInWindow(att.mime_type, att.data)}
+                  thumbnailClassName="max-h-48 max-w-full rounded-lg object-contain transition-opacity hover:opacity-90"
                 />
               ))}
               {fileAttachments.map((att, index) => (

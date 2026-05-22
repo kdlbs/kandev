@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { openImageInWindow, processFile } from "./file-attachment";
+import { processFile } from "./file-attachment";
 
 const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -57,27 +57,5 @@ describe("processFile in insecure context (HTTP, no crypto.randomUUID)", () => {
     expect(attachment!.id).toMatch(UUID_V4_REGEX);
     expect(attachment!.isImage).toBe(true);
     expect(attachment!.preview).toMatch(/^data:image\/png;base64,/);
-  });
-});
-
-describe("openImageInWindow", () => {
-  it("falls back to image/png when the MIME type is not in the safe allowlist", () => {
-    let written = "";
-    const fakeWin = { document: { write: (s: string) => (written = s) } };
-    const openSpy = vi.spyOn(window, "open").mockReturnValue(fakeWin as unknown as Window);
-    openImageInWindow('image/png" onerror="alert(1)', "AAAA");
-    expect(openSpy).toHaveBeenCalledWith("", "_blank", "noopener,noreferrer");
-    expect(written).toContain("data:image/png;base64,AAAA");
-    expect(written).not.toContain("onerror");
-    openSpy.mockRestore();
-  });
-
-  it("passes through a safe MIME type unchanged", () => {
-    let written = "";
-    const fakeWin = { document: { write: (s: string) => (written = s) } };
-    const openSpy = vi.spyOn(window, "open").mockReturnValue(fakeWin as unknown as Window);
-    openImageInWindow("image/jpeg", "ZZZ");
-    expect(written).toContain("data:image/jpeg;base64,ZZZ");
-    openSpy.mockRestore();
   });
 });

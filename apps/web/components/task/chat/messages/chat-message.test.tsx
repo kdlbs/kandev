@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import { ChatMessage } from "./chat-message";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
@@ -8,6 +8,14 @@ import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/li
 const SENDER_TASK_ID = "task-sender";
 const SENDER_TITLE = "Fix login bug";
 const SENDER_BADGE_SELECTOR = "[data-testid='sender-task-badge']";
+const PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+const OPEN_ATTACHMENT_1_LABEL = "Open Attachment 1";
+const FULL_SIZE_ATTACHMENT_1_ALT = "Full size Attachment 1";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function userMessage(overrides: Partial<Message>): Message {
   return {
@@ -129,5 +137,25 @@ describe("ChatMessage sender badge", () => {
     const { container } = renderWithSender([], { plan_mode: true });
 
     expect(container.querySelector(SENDER_BADGE_SELECTOR)).toBeNull();
+  });
+});
+
+describe("ChatMessage image attachments", () => {
+  it("opens image attachments in an in-app preview dialog", () => {
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    renderWithSender([], {
+      attachments: [{ type: "image", data: PNG_BASE64, mime_type: "image/png" }],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: OPEN_ATTACHMENT_1_LABEL }));
+
+    expect(openSpy).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog");
+    const preview = screen.getByAltText(FULL_SIZE_ATTACHMENT_1_ALT);
+    expect(dialog.className).toContain("w-fit");
+    expect(dialog.className).toContain("max-w-[calc(100vw-1rem)]");
+    expect(preview.className).toContain("w-[min(92vw,1100px)]");
+    expect(preview.className).toContain("max-h-[calc(100dvh-5rem)]");
+    expect(preview.getAttribute("src")).toBe(`data:image/png;base64,${PNG_BASE64}`);
   });
 });

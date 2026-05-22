@@ -19,7 +19,7 @@ import { Textarea } from "@kandev/ui/textarea";
 import { cn } from "@/lib/utils";
 import { QueueEntryNotFoundError } from "@/lib/api/domains/queue-api";
 import { stripSystemTags } from "@/lib/utils/system-tags";
-import { openImageInWindow } from "@/components/task/chat/file-attachment";
+import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import {
   SenderTaskBadge,
   type SenderTaskInfo,
@@ -44,29 +44,18 @@ function AttachmentRow({ attachments, interactive }: AttachmentRowProps) {
   if (attachments.length === 0) return null;
   const images = attachments.filter((a) => a.type === "image");
   const files = attachments.filter((a) => a.type !== "image");
-  const onImageKeyDown = (att: QueuedAttachment) => (e: React.KeyboardEvent<HTMLImageElement>) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      openImageInWindow(att.mime_type, att.data);
-    }
-  };
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {images.map((att, i) => (
-        /* eslint-disable-next-line @next/next/no-img-element -- base64 data URLs are not compatible with next/image */
-        <img
+        <ImagePreviewDialog
           key={`img-${i}`}
           src={`data:${att.mime_type};base64,${att.data}`}
           alt={`Attachment ${i + 1}`}
-          role={interactive ? "button" : undefined}
-          tabIndex={interactive ? 0 : undefined}
-          className={cn(
+          interactive={interactive}
+          thumbnailClassName={cn(
             "h-10 w-10 rounded-md border border-border object-cover",
-            interactive &&
-              "cursor-pointer hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-primary",
+            interactive && "transition-opacity hover:opacity-90",
           )}
-          onClick={interactive ? () => openImageInWindow(att.mime_type, att.data) : undefined}
-          onKeyDown={interactive ? onImageKeyDown(att) : undefined}
         />
       ))}
       {files.map((_, i) => (
