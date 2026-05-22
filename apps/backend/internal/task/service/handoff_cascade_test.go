@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -746,6 +747,41 @@ func TestArchiveTaskTree_NoCascade_LeavesChildrenActive(t *testing.T) {
 			t.Errorf("%s should remain active, got archived_at=%v", id, child.ArchivedAt)
 		}
 	}
+}
+
+// TestDeleteTaskTree_NoCascade_ReparentFailureAborts pins the safety
+// invariant: when the no-cascade reparent step fails we MUST refuse to
+// delete the parent. Continuing past a reparent error would leave
+// children pointing at a row we're about to remove — exactly the
+// dangling pointer the no-cascade path is designed to prevent.
+func TestDeleteTaskTree_NoCascade_ReparentFailureAborts(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("c1", "root", "ws-1")
+	groups := newCascadeWSGroupRepo()
+	tr := &fakeReparentErrRepo{fakeDeleteRepo: &fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}}
+	svc := NewHandoffService(tr, nil, nil, nil, groups, nil)
+
+	_, err := svc.DeleteTaskTree(context.Background(), "root", false)
+	if err == nil {
+		t.Fatal("expected error from failed reparent, got nil")
+	}
+	if _, exists := tasks.tasks["root"]; !exists {
+		t.Error("root should NOT be deleted when reparent fails")
+	}
+	if _, exists := tasks.tasks["c1"]; !exists {
+		t.Error("c1 should still exist")
+	}
+}
+
+// fakeReparentErrRepo overrides ReparentDirectChildren to simulate a DB
+// failure so the no-cascade abort path can be exercised in tests.
+type fakeReparentErrRepo struct {
+	*fakeDeleteRepo
+}
+
+func (r *fakeReparentErrRepo) ReparentDirectChildren(_ context.Context, _, _ string) error {
+	return errors.New("simulated DB failure")
 }
 
 // TestDeleteTaskTree_NoCascade_ReparentsDirectChildren verifies the

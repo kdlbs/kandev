@@ -269,12 +269,13 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 		all = descendants
 	} else {
 		// Reparent direct children (archived or not) to root so the
-		// soon-deleted parent_id pointer doesn't dangle. Best-effort:
-		// log and continue so the user's delete intent still goes
-		// through if the reparent fails.
+		// soon-deleted parent_id pointer doesn't dangle. This MUST
+		// succeed before we touch the parent row — continuing past a
+		// reparent error would leave children pointing at a row we're
+		// about to delete, exactly the dangling-pointer state the
+		// no-cascade path is designed to avoid.
 		if err := s.tasks.ReparentDirectChildren(ctx, rootID, ""); err != nil {
-			s.logf().Warn("reparent direct children before delete",
-				zap.String("task_id", rootID), zap.Error(err))
+			return nil, fmt.Errorf("reparent direct children of %s: %w", rootID, err)
 		}
 		all = []string{rootID}
 	}

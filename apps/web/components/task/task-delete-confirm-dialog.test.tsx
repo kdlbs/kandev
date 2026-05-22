@@ -3,7 +3,7 @@ import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/re
 
 const mockGetSubtaskCount = vi.fn();
 
-vi.mock("@/lib/api/domains/kanban-api", () => ({
+vi.mock("@/lib/api", () => ({
   getSubtaskCount: (...args: unknown[]) => mockGetSubtaskCount(...args),
 }));
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { IconLoader } from "@tabler/icons-react";
 import {
   AlertDialog,
@@ -13,7 +13,7 @@ import {
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
 import { Checkbox } from "@kandev/ui/checkbox";
-import { getSubtaskCount } from "@/lib/api";
+import { useSubtaskCount } from "@/hooks/use-subtask-count";
 
 type TaskDeleteConfirmDialogProps = {
   open: boolean;
@@ -97,26 +97,4 @@ export function TaskDeleteConfirmDialog({
       </AlertDialogContent>
     </AlertDialog>
   );
-}
-
-function useSubtaskCount(open: boolean, taskId?: string, taskIds?: string[]): number {
-  const [total, setTotal] = useState(0);
-  useEffect(() => {
-    if (!open) return;
-    const ids = taskIds ?? (taskId ? [taskId] : []);
-    if (ids.length === 0) return;
-    let cancelled = false;
-    Promise.all(ids.map((id) => getSubtaskCount(id).catch(() => ({ count: 0 }))))
-      .then((results) => {
-        if (cancelled) return;
-        setTotal(results.reduce((sum, r) => sum + r.count, 0));
-      })
-      .catch(() => {
-        // swallow — leaves total at its prior value (0 on first run)
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, taskId, taskIds]);
-  return open ? total : 0;
 }
