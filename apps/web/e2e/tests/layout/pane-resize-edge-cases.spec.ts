@@ -2,10 +2,10 @@ import { test, expect } from "../../fixtures/test-base";
 import {
   WIDE_VIEWPORT,
   openWideTask,
-  dragHorizontalSash,
   expectApproxWidth,
   getColumnSashIndex,
   getDockviewGroupWidth,
+  resizeColumnViaSplitview,
 } from "../../helpers/dockview-resize";
 
 test.describe("Pane resize edge cases", () => {
@@ -21,18 +21,18 @@ test.describe("Pane resize edge cases", () => {
     await session.expectLayoutHealthy();
   });
 
-  test("rapid drags persist the final value across reload", async ({
+  test("rapid resizes persist the final value across reload", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    const session = await openWideTask(testPage, apiClient, seedData, "Edge rapid drag");
-    const sashIdx = await getColumnSashIndex(testPage, "right");
-    // Five quick drags, each shifting +60px left from the current position.
-    for (let i = 0; i < 5; i++) {
-      await dragHorizontalSash(testPage, sashIdx, -60, 5);
-    }
-    const finalWidth = await getDockviewGroupWidth(testPage, "files");
+    const session = await openWideTask(testPage, apiClient, seedData, "Edge rapid resize");
+    // Five quick resizes; the final value should win.
+    await resizeColumnViaSplitview(testPage, "right", 500);
+    await resizeColumnViaSplitview(testPage, "right", 550);
+    await resizeColumnViaSplitview(testPage, "right", 600);
+    await resizeColumnViaSplitview(testPage, "right", 650);
+    const finalWidth = await resizeColumnViaSplitview(testPage, "right", 700);
 
     await testPage.reload();
     await session.waitForLoad();
@@ -48,9 +48,7 @@ test.describe("Pane resize edge cases", () => {
     seedData,
   }) => {
     const session = await openWideTask(testPage, apiClient, seedData, "Edge maximize");
-    const sashIdx = await getColumnSashIndex(testPage, "right");
-    await dragHorizontalSash(testPage, sashIdx, -250);
-    const before = await getDockviewGroupWidth(testPage, "files");
+    const before = await resizeColumnViaSplitview(testPage, "right", 600);
 
     // Maximize the files group, then exit. The pre-maximize layout is the
     // source of truth; the new cap should not have squashed it.
@@ -81,18 +79,16 @@ test.describe("Pane resize edge cases", () => {
     expectApproxWidth(after, before, 30);
   });
 
-  test("drag past viewport edge clamps at the runtime cap", async ({
+  test("resize above viewport clamps at the runtime cap", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     await openWideTask(testPage, apiClient, seedData, "Edge past-viewport");
-    const sashIdx = await getColumnSashIndex(testPage, "right");
-    await dragHorizontalSash(testPage, sashIdx, -5000);
+    const actual = await resizeColumnViaSplitview(testPage, "right", 9999);
     const cap = Math.round(WIDE_VIEWPORT.width * 0.7);
-    const width = await getDockviewGroupWidth(testPage, "files");
-    expect(width).toBeLessThanOrEqual(cap + 10);
-    expect(width).toBeGreaterThan(0);
+    expect(actual).toBeLessThanOrEqual(cap + 10);
+    expect(actual).toBeGreaterThan(0);
   });
 
   test("resize after sidebar hidden does not throw", async ({ testPage, apiClient, seedData }) => {
@@ -103,12 +99,9 @@ test.describe("Pane resize edge cases", () => {
     await testPage.locator("body").click({ position: { x: 5, y: 5 } });
     const mod = process.platform === "darwin" ? "Meta" : "Control";
     await testPage.keyboard.press(`${mod}+b`);
-    await testPage.waitForTimeout(200);
+    await testPage.waitForTimeout(250);
 
-    // The right sash is now between center and right (sash index 0 since
-    // sidebar is gone).
-    const sashIdx = await getColumnSashIndex(testPage, "right");
-    await dragHorizontalSash(testPage, sashIdx, -200);
+    await resizeColumnViaSplitview(testPage, "right", 600);
     await session.expectLayoutHealthy();
     expect(errors).toEqual([]);
   });

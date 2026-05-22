@@ -77,9 +77,10 @@ async function sashBoxAt(page: Page, index: number): Promise<Box> {
 
 /**
  * Drag a horizontal-direction sash (between two columns) by deltaX pixels.
- * sashIndex is the dockview sash order (0 = left-most). Uses many small mouse
- * moves so dockview's drag listener fires throughout the drag, mirroring real
- * user motion.
+ * sashIndex is the dockview sash order (0 = left-most). Reserved for tests
+ * that exercise real pointer motion (double-click smoke tests, etc.); most
+ * resize tests should prefer {@link resizeColumnViaSplitview} for stability
+ * in headless CI.
  */
 export async function dragHorizontalSash(
   page: Page,
@@ -97,6 +98,46 @@ export async function dragHorizontalSash(
   // Give the debounced layout-save 350ms to fire so subsequent reload assertions
   // see the new width.
   await page.waitForTimeout(400);
+}
+
+/**
+ * Programmatically resize a column via dockview's internal splitview API.
+ *
+ * `targetWidth` is the desired width in pixels; dockview clamps it against
+ * the constraints applied by `setConstraints`, so the returned actual width
+ * reflects what was permitted (cap-enforcement is what we want to verify).
+ *
+ * Avoids the flakiness of real pointer motion in headless CI — `page.mouse`
+ * drags are sensitive to viewport-overlap and pointer-events targeting,
+ * which produce intermittent failures across sharded browser instances.
+ */
+export async function resizeColumnViaSplitview(
+  page: Page,
+  column: "sidebar" | "right",
+  targetWidth: number,
+): Promise<number> {
+  const result = await page.evaluate(
+    ({ col, target }) => {
+      type Splitview = {
+        length: number;
+        getViewSize: (i: number) => number;
+        resizeView: (i: number, size: number) => void;
+      };
+      type Component = { gridview?: { root?: { splitview?: Splitview } } };
+      type Api = { component?: Component };
+      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+      const sv = api?.component?.gridview?.root?.splitview;
+      if (!sv) throw new Error("dockview splitview not exposed");
+      if (sv.length < 2) throw new Error("dockview has fewer than 2 columns");
+      const idx = col === "sidebar" ? 0 : sv.length - 1;
+      sv.resizeView(idx, target);
+      return sv.getViewSize(idx);
+    },
+    { col: column, target: targetWidth },
+  );
+  // Allow the debounced persistence + pinned-defaults mirror to fire.
+  await page.waitForTimeout(400);
+  return result;
 }
 
 /**

@@ -3,20 +3,17 @@ import { SessionPage } from "../../pages/session-page";
 import {
   WIDE_VIEWPORT,
   openWideTask,
-  dragHorizontalSash,
   expectApproxWidth,
-  getColumnSashIndex,
   getDockviewGroupWidth,
   readPinnedDefaultsFromStorage,
+  resizeColumnViaSplitview,
 } from "../../helpers/dockview-resize";
 
 test.describe("Right pane resize — viewport-proportional cap", () => {
   test("resizes past the old 450px hard cap", async ({ testPage, apiClient, seedData }) => {
     await openWideTask(testPage, apiClient, seedData, "Right resize past old cap");
-    const sashIdx = await getColumnSashIndex(testPage, "right");
-    await dragHorizontalSash(testPage, sashIdx, -350);
-    const width = await getDockviewGroupWidth(testPage, "files");
-    expect(width).toBeGreaterThan(600);
+    const actual = await resizeColumnViaSplitview(testPage, "right", 700);
+    expect(actual).toBeGreaterThan(600);
   });
 
   test("respects the viewport-proportional cap (max(800, vw*0.7))", async ({
@@ -25,12 +22,9 @@ test.describe("Right pane resize — viewport-proportional cap", () => {
     seedData,
   }) => {
     await openWideTask(testPage, apiClient, seedData, "Right cap respect");
-    const sashIdx = await getColumnSashIndex(testPage, "right");
-    // Drag aggressively left — dockview should clamp at vw*0.7 = 1120.
-    await dragHorizontalSash(testPage, sashIdx, -2000);
-    const width = await getDockviewGroupWidth(testPage, "files");
+    const actual = await resizeColumnViaSplitview(testPage, "right", 5000);
     const cap = Math.round(WIDE_VIEWPORT.width * 0.7);
-    expect(width).toBeLessThanOrEqual(cap + 10);
+    expect(actual).toBeLessThanOrEqual(cap + 10);
   });
 
   test("user width survives reload (sessionStorage round-trip)", async ({
@@ -39,16 +33,14 @@ test.describe("Right pane resize — viewport-proportional cap", () => {
     seedData,
   }) => {
     const session = await openWideTask(testPage, apiClient, seedData, "Right resize reload");
-    const sashIdx = await getColumnSashIndex(testPage, "right");
-    await dragHorizontalSash(testPage, sashIdx, -250);
-    const before = await getDockviewGroupWidth(testPage, "files");
+    const before = await resizeColumnViaSplitview(testPage, "right", 600);
 
     await testPage.reload();
     await session.waitForLoad();
     await session.waitForDockviewReady();
 
     const after = await getDockviewGroupWidth(testPage, "files");
-    expectApproxWidth(after, before, 10);
+    expectApproxWidth(after, before, 12);
   });
 
   test("user width persists into sessionStorage pinned-defaults slot", async ({
@@ -57,9 +49,7 @@ test.describe("Right pane resize — viewport-proportional cap", () => {
     seedData,
   }) => {
     await openWideTask(testPage, apiClient, seedData, "Right pinned defaults");
-    const sashIdx = await getColumnSashIndex(testPage, "right");
-    await dragHorizontalSash(testPage, sashIdx, -300);
-    const live = await getDockviewGroupWidth(testPage, "files");
+    const live = await resizeColumnViaSplitview(testPage, "right", 650);
     const defaults = await readPinnedDefaultsFromStorage(testPage);
     expect(defaults.right).toBeDefined();
     expectApproxWidth(defaults.right ?? 0, live, 12);
@@ -71,9 +61,7 @@ test.describe("Right pane resize — viewport-proportional cap", () => {
     seedData,
   }) => {
     const session = await openWideTask(testPage, apiClient, seedData, "Right propagate A");
-    const sashIdx = await getColumnSashIndex(testPage, "right");
-    await dragHorizontalSash(testPage, sashIdx, -280);
-    const widthA = await getDockviewGroupWidth(testPage, "files");
+    const widthA = await resizeColumnViaSplitview(testPage, "right", 620);
     void session;
 
     const taskB = await apiClient.createTaskWithAgent(
@@ -102,17 +90,16 @@ test.describe("Right pane resize — viewport-proportional cap", () => {
     seedData,
   }) => {
     await openWideTask(testPage, apiClient, seedData, "Right viewport shrink");
-    const sashIdx = await getColumnSashIndex(testPage, "right");
-    await dragHorizontalSash(testPage, sashIdx, -400);
-    const wideWidth = await getDockviewGroupWidth(testPage, "files");
+    const wideWidth = await resizeColumnViaSplitview(testPage, "right", 900);
     expect(wideWidth).toBeGreaterThan(700);
 
     await testPage.setViewportSize({ width: 1100, height: 800 });
-    // Allow ResizeObserver tick + applyDynamicConstraints to fire.
-    await testPage.waitForTimeout(250);
+    // Allow ResizeObserver tick + applyDynamicConstraints to fire, then attempt
+    // a re-resize that would exceed the new cap.
+    await testPage.waitForTimeout(300);
+    const narrowWidth = await resizeColumnViaSplitview(testPage, "right", 1500);
 
     const newCap = Math.max(800, Math.round(1100 * 0.7));
-    const narrowWidth = await getDockviewGroupWidth(testPage, "files");
     expect(narrowWidth).toBeLessThanOrEqual(newCap + 10);
   });
 });

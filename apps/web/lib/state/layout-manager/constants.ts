@@ -2,6 +2,11 @@ import type { LayoutPanel } from "./types";
 
 // Layout sizing constants (single source of truth).
 // Pinned column max width is computed at runtime — see ./caps.ts.
+//
+// Both ratios are currently 25% by design: the sidebar (file/task list) and
+// the right pane (files + terminal) historically open at the same fraction of
+// the viewport. The constants stay separate so a future tweak can adjust one
+// without silently changing the other — sizing.ts dispatches by column id.
 export const LAYOUT_SIDEBAR_RATIO = 2.5 / 10;
 export const LAYOUT_RIGHT_RATIO = 2.5 / 10;
 

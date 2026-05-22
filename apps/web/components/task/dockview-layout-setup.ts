@@ -60,12 +60,9 @@ function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
       }
     }
     // Right column is the last grid index when present. Skip when there is
-    // no right column (compact preset, sv.length < 2 after sidebar check,
-    // or rightPanelsVisible=false).
+    // no right column (compact preset, rightPanelsVisible=false).
     if (store.rightPanelsVisible) {
       const rightIdx = sv.length - 1;
-      // Same index as sidebar when sv.length == 1 (degenerate) — bail.
-      if (rightIdx === 0 && store.sidebarVisible) return;
       const rightW = sv.getViewSize(rightIdx);
       if (rightW > 50) {
         const current = store.pinnedWidths.get("right");
@@ -181,6 +178,12 @@ export function setupLayoutPersistence(
     sub.dispose();
     if (typeof window !== "undefined") {
       window.removeEventListener("beforeunload", onBeforeUnload);
+    }
+    // Cancel any in-flight debounce so a pending fire can't race with
+    // teardown and write a stale layout to storage.
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
     }
   };
 }
