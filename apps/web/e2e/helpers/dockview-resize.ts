@@ -1,8 +1,40 @@
 import { expect, type Page } from "@playwright/test";
+import type { SeedData } from "../fixtures/test-base";
+import type { ApiClient } from "../helpers/api-client";
+import { SessionPage } from "../pages/session-page";
 
 /** Bounding-box info Playwright returns. Re-declared to avoid pulling the
  *  full Locator type just for one shape. */
 type Box = { x: number; y: number; width: number; height: number };
+
+export const WIDE_VIEWPORT = { width: 1600, height: 900 };
+
+/** Open a fresh task at the wide viewport and wait for the desktop dockview
+ *  layout to settle. Shared by every pane-resize spec. */
+export async function openWideTask(
+  page: Page,
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+): Promise<SessionPage> {
+  await page.setViewportSize(WIDE_VIEWPORT);
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    title,
+    seedData.agentProfileId,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+  await page.goto(`/t/${task.id}`);
+  const session = new SessionPage(page);
+  await session.waitForLoad();
+  await session.waitForDockviewReady();
+  return session;
+}
 
 /** Read the live pixel width of a dockview group containing a given panel. */
 export async function getDockviewGroupWidth(page: Page, panelId: string): Promise<number> {
@@ -46,7 +78,7 @@ async function sashBoxAt(page: Page, index: number): Promise<Box> {
 /**
  * Drag a horizontal-direction sash (between two columns) by deltaX pixels.
  * sashIndex is the dockview sash order (0 = left-most). Uses many small mouse
- * moves so dockview's drag listener fires through-out the drag, mirroring real
+ * moves so dockview's drag listener fires throughout the drag, mirroring real
  * user motion.
  */
 export async function dragHorizontalSash(
@@ -75,7 +107,9 @@ export async function dragHorizontalSash(
 export async function getColumnSashIndex(page: Page, column: "sidebar" | "right"): Promise<number> {
   if (column === "sidebar") return 0;
   return page.evaluate(() => {
-    return document.querySelectorAll(".dv-sash").length - 1;
+    const count = document.querySelectorAll(".dv-sash").length;
+    if (count === 0) throw new Error("no .dv-sash elements found");
+    return count - 1;
   });
 }
 

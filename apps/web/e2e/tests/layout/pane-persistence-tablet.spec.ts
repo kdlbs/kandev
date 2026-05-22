@@ -1,10 +1,13 @@
-import { type Page } from "@playwright/test";
+import { type Page, expect as pwExpect } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 
-const TABLET_VIEWPORT = { width: 1024, height: 800 };
+// The responsive breakpoint logic treats width < 768 with fine pointer as
+// "tablet"; width >= 768 with fine pointer is compactDesktop. Headless
+// Chromium reports fine pointer, so a true tablet layout needs width < 768.
+const TABLET_VIEWPORT = { width: 700, height: 900 };
 
 async function openTabletTask(
   page: Page,
@@ -31,15 +34,22 @@ async function openTabletTask(
   return session;
 }
 
-async function readStoredLayout(page: Page, id: string): Promise<unknown | null> {
+async function readStoredLayout(page: Page, id: string): Promise<Record<string, number> | null> {
   return page.evaluate((key) => {
     const raw = window.localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : null;
+    return raw ? (JSON.parse(raw) as Record<string, number>) : null;
   }, id);
 }
 
+async function readPanelWidth(page: Page, panelId: string): Promise<number> {
+  return page.evaluate((id) => {
+    const el = document.querySelector(`[data-panel-id="${id}"]`);
+    return el ? Math.round(el.getBoundingClientRect().width) : 0;
+  }, panelId);
+}
+
 test.describe("Tablet pane persistence", () => {
-  test("tablet left/right split persists to localStorage", async ({
+  test("tablet left/right split persists across reload", async ({
     testPage,
     apiClient,
     seedData,
@@ -49,39 +59,55 @@ test.describe("Tablet pane persistence", () => {
     // Drive the resize-panels library directly by overwriting the stored
     // layout — the underlying drag handle is a complex pointer-events target
     // that's flaky to grab in headless. The stored layout drives the next
-    // render; this test verifies the round-trip persistence contract.
+    // render; this test verifies the round-trip persistence contract AND
+    // that the rendered panels match the stored proportions.
     await testPage.evaluate(() => {
-      window.localStorage.setItem("task-layout-tablet-v1", JSON.stringify({ left: 70, right: 30 }));
+      window.localStorage.setItem("task-layout-tablet-v1", JSON.stringify({ left: 65, right: 35 }));
     });
     await testPage.reload();
     await session.waitForLoad();
+    await expect(testPage.getByTestId("tablet-task-layout")).toBeVisible({ timeout: 10_000 });
 
-    const stored = (await readStoredLayout(testPage, "task-layout-tablet-v1")) as Record<
-      string,
-      number
-    >;
-    expect(stored.left).toBe(70);
-    expect(stored.right).toBe(30);
+    // localStorage round-trip: react-resizable-panels writes its own
+    // normalized version on layout, so allow a small tolerance.
+    const stored = await readStoredLayout(testPage, "task-layout-tablet-v1");
+    pwExpect(stored).not.toBeNull();
+    pwExpect(Math.abs((stored?.left ?? 0) - 65)).toBeLessThanOrEqual(2);
+    pwExpect(Math.abs((stored?.right ?? 0) - 35)).toBeLessThanOrEqual(2);
+
+    // Rendered widths should match the stored proportions (verifies the
+    // app actually applied the stored layout, not just echoed localStorage).
+    const leftWidth = await readPanelWidth(testPage, "left");
+    const rightWidth = await readPanelWidth(testPage, "right");
+    const totalWidth = leftWidth + rightWidth;
+    pwExpect(totalWidth).toBeGreaterThan(0);
+    const leftPct = (leftWidth / totalWidth) * 100;
+    pwExpect(Math.abs(leftPct - 65)).toBeLessThanOrEqual(4);
   });
 
-  test("invalid stored layout falls back to default", async ({ testPage, apiClient, seedData }) => {
+  test("invalid stored layout is replaced with a valid default", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     await testPage.setViewportSize(TABLET_VIEWPORT);
     await testPage.goto("/");
     await testPage.evaluate(() => {
       window.localStorage.setItem("task-layout-tablet-v1", '{"left":2}');
     });
     const session = await openTabletTask(testPage, apiClient, seedData, "Tablet fallback");
-    await expect(testPage.getByTestId("tablet-task-layout")).toBeVisible();
-
-    // Default layout still renders both panels — the broken stored layout
-    // is rejected by `isLayoutValid` (panel "right" is missing) and the
-    // base layout takes over.
-    const tabletLayout = testPage.getByTestId("tablet-task-layout");
-    await expect(tabletLayout).toBeVisible();
     void session;
+
+    // After load, onLayoutChanged replaces the invalid stub with the
+    // rendered (valid) layout. Verify the persisted value is now valid:
+    // both panel IDs present and >= MIN_PANEL_PERCENT (5).
+    const stored = await readStoredLayout(testPage, "task-layout-tablet-v1");
+    pwExpect(stored).not.toBeNull();
+    pwExpect(stored?.left).toBeGreaterThanOrEqual(5);
+    pwExpect(stored?.right).toBeGreaterThanOrEqual(5);
   });
 
-  test("tablet right-panel top/bottom shrinks below the old 30% floor", async ({
+  test("tablet right-panel inner split accepts values below the old 30% floor", async ({
     testPage,
     apiClient,
     seedData,
@@ -89,19 +115,17 @@ test.describe("Tablet pane persistence", () => {
     await openTabletTask(testPage, apiClient, seedData, "Tablet top shrink");
 
     // The right-panel internal split now allows minSize=15. Round-trip via
-    // localStorage: write a 20/80 layout (below the old 30% floor), reload,
-    // assert the layout was accepted (would have been rejected before).
+    // localStorage: write a 20/80 layout (below the old 30% floor) and
+    // verify it survives the reload — would have been rejected before.
     await testPage.evaluate(() => {
       window.localStorage.setItem("task-layout-right-v2", JSON.stringify({ top: 20, bottom: 80 }));
     });
     await testPage.reload();
     await expect(testPage.getByTestId("tablet-task-layout")).toBeVisible({ timeout: 10_000 });
 
-    const stored = (await readStoredLayout(testPage, "task-layout-right-v2")) as Record<
-      string,
-      number
-    >;
-    expect(stored.top).toBe(20);
-    expect(stored.bottom).toBe(80);
+    const stored = await readStoredLayout(testPage, "task-layout-right-v2");
+    pwExpect(stored).not.toBeNull();
+    pwExpect(Math.abs((stored?.top ?? 0) - 20)).toBeLessThanOrEqual(2);
+    pwExpect(Math.abs((stored?.bottom ?? 0) - 80)).toBeLessThanOrEqual(2);
   });
 });

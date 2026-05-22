@@ -18,18 +18,35 @@ const SIDEBAR_FLOOR_PX = 350;
 const RIGHT_RATIO = 0.7;
 const RIGHT_FLOOR_PX = 800;
 
+/** Pixels reserved for the center column + opposite pinned column so the cap
+ *  never grows past `viewport - VIEWPORT_RESERVE_PX`. Without this, an 800px
+ *  right-cap floor on a 900px viewport would collapse the center to 0. */
+const VIEWPORT_RESERVE_PX = 300;
+
+/** Minimum pixel width for any pinned column. Below this the panel becomes
+ *  unusable (icons clipped, scrollbars stacked). */
+export const LAYOUT_PINNED_MIN_PX = 180;
+
 function getViewport(viewportWidth?: number): number {
   return viewportWidth ?? (typeof window !== "undefined" ? window.innerWidth : FALLBACK_VIEWPORT);
 }
 
-/** Sidebar max width: max(350, viewportWidth * 0.3). */
-export function computeSidebarMaxPx(viewportWidth?: number): number {
-  return Math.max(SIDEBAR_FLOOR_PX, Math.round(getViewport(viewportWidth) * SIDEBAR_RATIO));
+function viewportBound(value: number, viewportWidth: number): number {
+  // Always leave at least `VIEWPORT_RESERVE_PX` for the rest of the layout,
+  // and never go below the per-column min — even on absurdly narrow viewports.
+  return Math.max(LAYOUT_PINNED_MIN_PX, Math.min(value, viewportWidth - VIEWPORT_RESERVE_PX));
 }
 
-/** Right pane max width: max(800, viewportWidth * 0.7). */
+/** Sidebar max width: max(350, viewportWidth * 0.3), bounded by viewport. */
+export function computeSidebarMaxPx(viewportWidth?: number): number {
+  const vw = getViewport(viewportWidth);
+  return viewportBound(Math.max(SIDEBAR_FLOOR_PX, Math.round(vw * SIDEBAR_RATIO)), vw);
+}
+
+/** Right pane max width: max(800, viewportWidth * 0.7), bounded by viewport. */
 export function computeRightMaxPx(viewportWidth?: number): number {
-  return Math.max(RIGHT_FLOOR_PX, Math.round(getViewport(viewportWidth) * RIGHT_RATIO));
+  const vw = getViewport(viewportWidth);
+  return viewportBound(Math.max(RIGHT_FLOOR_PX, Math.round(vw * RIGHT_RATIO)), vw);
 }
 
 /** Pick the runtime cap appropriate for a given column ID. Non-sidebar
@@ -39,7 +56,3 @@ export function computePinnedMaxPxFor(columnId: string, viewportWidth?: number):
     ? computeSidebarMaxPx(viewportWidth)
     : computeRightMaxPx(viewportWidth);
 }
-
-/** Minimum pixel width for any pinned column. Below this the panel becomes
- *  unusable (icons clipped, scrollbars stacked). */
-export const LAYOUT_PINNED_MIN_PX = 180;

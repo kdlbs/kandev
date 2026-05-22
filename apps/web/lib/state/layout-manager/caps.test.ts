@@ -11,9 +11,9 @@ describe("computeSidebarMaxPx", () => {
     vi.unstubAllGlobals();
   });
 
-  it("floors at 350px on narrow viewports", () => {
-    expect(computeSidebarMaxPx(800)).toBe(350);
-    expect(computeSidebarMaxPx(100)).toBe(350);
+  it("hits the 350px floor on roomy viewports", () => {
+    // vw=1000 → 30%=300 < floor 350; viewport reserve = 700 (plenty).
+    expect(computeSidebarMaxPx(1000)).toBe(350);
   });
 
   it("scales to viewport * 0.3 above the floor", () => {
@@ -21,9 +21,17 @@ describe("computeSidebarMaxPx", () => {
     expect(computeSidebarMaxPx(3000)).toBe(900);
   });
 
+  it("never exceeds viewport - reserve so the center column survives", () => {
+    // vw=500 → 30%=150 < floor 350; viewport reserve = 200. So 350 clamps to 200.
+    // floor below LAYOUT_PINNED_MIN_PX is also enforced.
+    expect(computeSidebarMaxPx(500)).toBeLessThanOrEqual(500 - 300);
+    expect(computeSidebarMaxPx(500)).toBeGreaterThanOrEqual(LAYOUT_PINNED_MIN_PX);
+  });
+
   it("uses 1440 fallback when window is undefined", () => {
     vi.stubGlobal("window", undefined);
-    expect(computeSidebarMaxPx()).toBe(Math.round(1440 * 0.3));
+    // vw=1440 → 30%=432 > floor 350.
+    expect(computeSidebarMaxPx()).toBe(432);
   });
 });
 
@@ -32,14 +40,20 @@ describe("computeRightMaxPx", () => {
     vi.unstubAllGlobals();
   });
 
-  it("floors at 800px on narrow viewports", () => {
-    expect(computeRightMaxPx(1024)).toBe(800);
-    expect(computeRightMaxPx(100)).toBe(800);
+  it("hits the 800px floor on mid viewports", () => {
+    // vw=1024 → 70%=716 < floor 800; viewport reserve = 724. Clamp 800 → 724.
+    // (The viewport reserve protects narrow screens from over-allocation.)
+    expect(computeRightMaxPx(1024)).toBeLessThan(800);
   });
 
-  it("scales to viewport * 0.7 above the floor", () => {
+  it("scales to viewport * 0.7 above the floor on roomy viewports", () => {
     expect(computeRightMaxPx(2000)).toBe(1400);
     expect(computeRightMaxPx(3000)).toBe(2100);
+  });
+
+  it("never collapses the center column on narrow viewports", () => {
+    // vw=900 → 70%=630 < floor 800; reserve 300 → viewport bound 600.
+    expect(computeRightMaxPx(900)).toBe(600);
   });
 
   it("reads window.innerWidth when no argument passed", () => {

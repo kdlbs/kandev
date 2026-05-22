@@ -1,41 +1,12 @@
-import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-import type { SeedData } from "../../fixtures/test-base";
-import type { ApiClient } from "../../helpers/api-client";
-import { SessionPage } from "../../pages/session-page";
 import {
+  WIDE_VIEWPORT,
+  openWideTask,
   dragHorizontalSash,
   expectApproxWidth,
   getColumnSashIndex,
   getDockviewGroupWidth,
 } from "../../helpers/dockview-resize";
-
-const WIDE_VIEWPORT = { width: 1600, height: 900 };
-
-async function openWideTask(
-  page: Page,
-  apiClient: ApiClient,
-  seedData: SeedData,
-  title: string,
-): Promise<SessionPage> {
-  await page.setViewportSize(WIDE_VIEWPORT);
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-  await page.goto(`/t/${task.id}`);
-  const session = new SessionPage(page);
-  await session.waitForLoad();
-  await session.waitForDockviewReady();
-  return session;
-}
 
 test.describe("Pane resize edge cases", () => {
   test("double-click on sidebar sash does not crash dockview", async ({
@@ -84,23 +55,14 @@ test.describe("Pane resize edge cases", () => {
     // Maximize the files group, then exit. The pre-maximize layout is the
     // source of truth; the new cap should not have squashed it.
     await testPage.evaluate(() => {
-      type Group = { id: string; panels: { id: string }[] };
-      type Api = { groups: Group[] };
-      const fileWindow = window as unknown as {
-        __dockviewApi__?: Api;
-        __testMaximize__?: (gid: string) => void;
-      };
-      const api = fileWindow.__dockviewApi__;
-      if (!api) return;
-      const group = api.groups.find((g) => g.panels.some((p) => p.id === "files"));
-      if (!group) return;
-      // Use the store action via the keyboard shortcut path is brittle; just
-      // call the API's own maximize for the smoke check.
       type GroupApi = { maximize: () => void };
-      type ApiWithMax = { groups: (Group & { api: GroupApi })[] };
-      const apiMax = fileWindow.__dockviewApi__ as unknown as ApiWithMax;
-      const matching = apiMax.groups.find((g) => g.panels.some((p) => p.id === "files"));
-      matching?.api.maximize();
+      type Group = { id: string; panels: { id: string }[]; api: GroupApi };
+      type Api = { groups: Group[] };
+      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+      if (!api) throw new Error("dockview api not exposed");
+      const matching = api.groups.find((g) => g.panels.some((p) => p.id === "files"));
+      if (!matching) throw new Error("files group not found");
+      matching.api.maximize();
     });
     await testPage.waitForTimeout(150);
     await testPage.evaluate(() => {
@@ -108,8 +70,10 @@ test.describe("Pane resize edge cases", () => {
       type Group = { id: string; panels: { id: string }[]; api: GroupApi };
       type Api = { groups: Group[] };
       const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
-      const matching = api?.groups.find((g) => g.panels.some((p) => p.id === "files"));
-      matching?.api.exitMaximized();
+      if (!api) throw new Error("dockview api not exposed");
+      const matching = api.groups.find((g) => g.panels.some((p) => p.id === "files"));
+      if (!matching) throw new Error("files group not found");
+      matching.api.exitMaximized();
     });
     await session.waitForDockviewReady();
 

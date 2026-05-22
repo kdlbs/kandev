@@ -786,10 +786,17 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
     // Mirror sidebar / right widths into sessionStorage so brand-new envs
     // (no saved per-env layout yet) open at the user's preferred widths
     // instead of the ratio-based default.
-    if (columnId === "sidebar" || columnId === "right") {
-      const current = getPinnedDefaults();
-      setPinnedDefaults({ ...current, [columnId]: width });
-    }
+    //
+    // Skip when the column is hidden — auto-sync infers the sidebar slot
+    // from grid index 0, which is the *center* column when the sidebar is
+    // hidden. Without this guard, a center-column resize would overwrite
+    // the user's stored sidebar width.
+    if (columnId !== "sidebar" && columnId !== "right") return;
+    const live = get();
+    const visible = columnId === "sidebar" ? live.sidebarVisible : live.rightPanelsVisible;
+    if (!visible) return;
+    const current = getPinnedDefaults();
+    setPinnedDefaults({ ...current, [columnId]: width });
   },
   userDefaultLayout: null,
   setUserDefaultLayout: (layout) => set({ userDefaultLayout: layout }),

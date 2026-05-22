@@ -1,42 +1,14 @@
-import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-import type { SeedData } from "../../fixtures/test-base";
-import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import {
+  WIDE_VIEWPORT,
+  openWideTask,
   dragHorizontalSash,
   expectApproxWidth,
   getColumnSashIndex,
   getDockviewGroupWidth,
   readPinnedDefaultsFromStorage,
 } from "../../helpers/dockview-resize";
-
-const WIDE_VIEWPORT = { width: 1600, height: 900 };
-
-async function openWideTask(
-  page: Page,
-  apiClient: ApiClient,
-  seedData: SeedData,
-  title: string,
-): Promise<SessionPage> {
-  await page.setViewportSize(WIDE_VIEWPORT);
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-  await page.goto(`/t/${task.id}`);
-  const session = new SessionPage(page);
-  await session.waitForLoad();
-  await session.waitForDockviewReady();
-  return session;
-}
 
 test.describe("Right pane resize — viewport-proportional cap", () => {
   test("resizes past the old 450px hard cap", async ({ testPage, apiClient, seedData }) => {

@@ -73,12 +73,16 @@ export function applyLayout(
 
   // Lock sidebar group and enforce max/min-width constraints.
   // Constraints are not serialized with layouts, so we must reapply after fromJSON.
+  // column.maxWidth wins so presets like `compact` (maxWidth=260) keep their
+  // tight cap; otherwise inherit the runtime sidebar cap.
+  const sidebarCol = state.columns.find((c) => c.id === "sidebar");
+  const sidebarCap = sidebarCol?.maxWidth ?? computePinnedMaxPxFor("sidebar");
   const sb = api.getPanel("sidebar");
   if (sb) {
     sb.group.locked = SIDEBAR_LOCK;
     sb.group.header.hidden = false;
     sb.group.api.setConstraints({
-      maximumWidth: computePinnedMaxPxFor("sidebar"),
+      maximumWidth: sidebarCap,
       minimumWidth: LAYOUT_PINNED_MIN_PX,
     });
   }

@@ -1,5 +1,5 @@
 import type { LayoutColumn, LayoutGroup } from "./types";
-import { LAYOUT_SIDEBAR_RATIO } from "./constants";
+import { LAYOUT_SIDEBAR_RATIO, LAYOUT_RIGHT_RATIO } from "./constants";
 import { computePinnedMaxPxFor, LAYOUT_PINNED_MIN_PX } from "./caps";
 
 // Legacy hard caps used to clamp the *initial* default width. Users can still
@@ -27,7 +27,8 @@ export function getPinnedWidth(
   if (override !== undefined) {
     return Math.max(min, Math.min(override, runtimeMax));
   }
-  const ratioWidth = Math.round(totalWidth * LAYOUT_SIDEBAR_RATIO);
+  const ratio = column.id === "sidebar" ? LAYOUT_SIDEBAR_RATIO : LAYOUT_RIGHT_RATIO;
+  const ratioWidth = Math.round(totalWidth * ratio);
   const initialCap =
     column.maxWidth ??
     (column.id === "sidebar" ? LEGACY_SIDEBAR_INITIAL_CAP : LEGACY_RIGHT_INITIAL_CAP);

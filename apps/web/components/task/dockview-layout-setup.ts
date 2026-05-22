@@ -41,25 +41,36 @@ function applyDynamicConstraints(api: DockviewReadyEvent["api"]): void {
 }
 
 function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
-  if (useDockviewStore.getState().isRestoringLayout) return;
-  if (api.hasMaximizedGroup() || useDockviewStore.getState().preMaximizeLayout !== null) return;
+  const store = useDockviewStore.getState();
+  if (store.isRestoringLayout) return;
+  if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
   try {
-    const sidebarW = sv.getViewSize(0);
-    if (sidebarW > 50) {
-      const current = useDockviewStore.getState().pinnedWidths.get("sidebar");
-      if (current !== sidebarW) {
-        useDockviewStore.getState().setPinnedWidth("sidebar", sidebarW);
+    // Sidebar is grid index 0 *only when sidebar is visible*. Without the
+    // visibility guard, hiding the sidebar makes index 0 the center column,
+    // and we'd persist the center width as the sidebar's preferred width.
+    if (store.sidebarVisible) {
+      const sidebarW = sv.getViewSize(0);
+      if (sidebarW > 50) {
+        const current = store.pinnedWidths.get("sidebar");
+        if (current !== sidebarW) {
+          store.setPinnedWidth("sidebar", sidebarW);
+        }
       }
     }
-    if (sv.length >= 3) {
+    // Right column is the last grid index when present. Skip when there is
+    // no right column (compact preset, sv.length < 2 after sidebar check,
+    // or rightPanelsVisible=false).
+    if (store.rightPanelsVisible) {
       const rightIdx = sv.length - 1;
+      // Same index as sidebar when sv.length == 1 (degenerate) — bail.
+      if (rightIdx === 0 && store.sidebarVisible) return;
       const rightW = sv.getViewSize(rightIdx);
       if (rightW > 50) {
-        const current = useDockviewStore.getState().pinnedWidths.get("right");
+        const current = store.pinnedWidths.get("right");
         if (current !== rightW) {
-          useDockviewStore.getState().setPinnedWidth("right", rightW);
+          store.setPinnedWidth("right", rightW);
         }
       }
     }
