@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -176,7 +177,16 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 
 	probe := NewPATClient(host, token)
 	if _, probeErr := probe.GetAuthenticatedUser(ctx); probeErr != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidToken, probeErr)
+		// Only 401 / 403 mean "the token is bad". Network failures, 5xx,
+		// DNS errors etc. propagate without the ErrInvalidToken wrap so the
+		// controller surfaces them as "GitLab unreachable" instead of
+		// "invalid token" — otherwise during a GitLab outage a user might
+		// delete their (valid) token assuming it had been rejected.
+		var apiErr *APIError
+		if errors.As(probeErr, &apiErr) && (apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden) {
+			return fmt.Errorf("%w: %w", ErrInvalidToken, probeErr)
+		}
+		return fmt.Errorf("probe token: %w", probeErr)
 	}
 
 	configured, secretID, err := s.findTokenSecret(ctx)

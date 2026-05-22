@@ -351,6 +351,25 @@ func TestService_ConfigureToken_WrapsErrInvalidToken(t *testing.T) {
 	})
 }
 
+// Regression: a 5xx (or any non-401/403) error from the probe must NOT be
+// wrapped as ErrInvalidToken — that would surface as HTTP 400 "invalid token"
+// to a user during a GitLab outage and risk them deleting a valid token.
+func TestService_ConfigureToken_DoesNotWrapTransportErrorAsErrInvalidToken(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/user", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	svc, _, _ := newServiceFixture(t, mux)
+
+	err := svc.ConfigureToken(context.Background(), "valid-but-server-is-down")
+	if err == nil {
+		t.Fatal("expected error when probe hits 5xx")
+	}
+	if errors.Is(err, ErrInvalidToken) {
+		t.Errorf("err = %v, must NOT be ErrInvalidToken on 5xx (would mislead user during an outage)", err)
+	}
+}
+
 // --- Task ↔ MR association ---
 
 // withTaskMRStore wires a temporary GitLab Store onto the service so the
