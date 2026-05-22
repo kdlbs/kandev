@@ -3,7 +3,10 @@ import {
   ActivitySkeleton,
   ChartsSkeleton,
   OverviewCardsSkeleton,
+  RepoLeadersSkeleton,
   RepositoriesSkeleton,
+  TopRepositoriesSkeleton,
+  WorkloadSkeleton,
 } from "./stats-skeletons";
 
 export default function StatsLoading() {
@@ -29,6 +32,9 @@ export default function StatsLoading() {
             <ChartsSkeleton />
             <ActivitySkeleton />
             <RepositoriesSkeleton />
+            <TopRepositoriesSkeleton />
+            <RepoLeadersSkeleton />
+            <WorkloadSkeleton />
           </div>
         </div>
       </div>

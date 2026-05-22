@@ -1,8 +1,9 @@
+import type { StatsRange } from "@/lib/api/domains/stats-api";
 import type { StatsResponse } from "@/lib/types/http";
 
-export type RangeKey = "week" | "month" | "all";
+export type RangeKey = StatsRange;
 
-export const RANGE_KEYS = ["week", "month", "all"] as const;
+export const RANGE_KEYS = ["week", "month", "all"] as const satisfies readonly RangeKey[];
 export const DEFAULT_RANGE: RangeKey = "month";
 
 export function isRangeKey(value: string | null | undefined): value is RangeKey {
@@ -17,8 +18,6 @@ export function getRangeLabel(range: RangeKey): string {
       return "Last Month";
     case "all":
       return "All Time";
-    default:
-      return "Last Month";
   }
 }
 
