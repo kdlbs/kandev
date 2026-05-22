@@ -18,6 +18,8 @@ vi.mock("./layout-manager", () => ({
   fromDockviewApi: vi.fn(() => ({ columns: [] })),
   savedLayoutMatchesLive: vi.fn(() => false),
   layoutStructuresMatch: vi.fn(() => false),
+  getRootSplitview: vi.fn(() => null),
+  getPinnedWidth: vi.fn(() => 350),
 }));
 
 import { getEnvLayout } from "@/lib/local-storage";
