@@ -275,12 +275,14 @@ func extractAskUserQuestionFacts(t *testing.T, s *Server) askUserQuestionSchemaF
 	require.NotZero(t, maxF,
 		"ask_user_question schema must declare maxItems on the %q array — if absent, bounds would silently become \"0-0\" and mask schema drift", arrayParam)
 
-	items, _ := arraySpec["items"].(map[string]any)
-	requiredRaw, _ := items["required"].([]any)
+	items, ok := arraySpec["items"].(map[string]any)
+	require.True(t, ok, "ask_user_question schema must declare an items schema on the %q array", arrayParam)
+	requiredRaw, ok := items["required"].([]any)
+	require.True(t, ok, "ask_user_question schema items must declare a required field list")
 	required := make([]string, 0, len(requiredRaw))
 	for _, r := range requiredRaw {
-		if s, ok := r.(string); ok {
-			required = append(required, s)
+		if field, ok := r.(string); ok {
+			required = append(required, field)
 		}
 	}
 	sort.Strings(required)
