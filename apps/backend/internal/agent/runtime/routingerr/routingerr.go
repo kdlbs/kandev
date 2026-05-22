@@ -29,6 +29,7 @@ const (
 	CodeTask                   Code = "task_error"
 	CodeRepo                   Code = "repo_error"
 	CodePermissionDeniedByUser Code = "permission_denied_by_user"
+	CodeNpxCacheCorrupted      Code = "npx_cache_corrupted"
 )
 
 // Confidence reflects how strongly the classifier trusts the matched signal.
@@ -66,6 +67,7 @@ type Error struct {
 	ExitCode        *int
 	ResetHint       *time.Time
 	RawExcerpt      string
+	RemediationPath string // path to clean before retry; only set for codes that have a known remediation
 }
 
 func (e *Error) Error() string {
@@ -95,6 +97,12 @@ func Classify(in Input) *Error {
 		return applyInvariants(e)
 	}
 	if e, ok := matchProviderRules(in.ProviderID, in.Stderr+"\n"+in.Stdout); ok {
+		e.Phase = in.Phase
+		e.ExitCode = in.ExitCode
+		e.RawExcerpt = excerpt
+		return applyInvariants(e)
+	}
+	if e, ok := matchRuntimeEnvironmentRules(in.Stderr + "\n" + in.Stdout); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
 		e.RawExcerpt = excerpt
@@ -199,6 +207,9 @@ func applyInvariants(e *Error) *Error {
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
 	case CodeProviderUnavailable, CodeUnknownProvider:
+		e.AutoRetryable = true
+		e.FallbackAllowed = true
+	case CodeNpxCacheCorrupted:
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
 	case CodePermissionDeniedByUser, CodeTask, CodeRepo, CodeAgentRuntime:
