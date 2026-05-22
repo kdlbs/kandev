@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
@@ -28,8 +28,16 @@ export function GitHubPRConfig({ config, onUpdate }: GitHubPRConfigProps) {
   const events = (config.events as string[]) ?? [];
   const repos = (config.repos as RepoFilter[]) ?? [];
   const allRepos = (config.all_repos as boolean) ?? true;
-  const [branches, setBranches] = useState(((config.branches as string[]) ?? []).join(", "));
-  const [authors, setAuthors] = useState(((config.authors as string[]) ?? []).join(", "));
+  const configBranches = ((config.branches as string[]) ?? []).join(", ");
+  const configAuthors = ((config.authors as string[]) ?? []).join(", ");
+  const [branches, setBranches] = useState(configBranches);
+  const [authors, setAuthors] = useState(configAuthors);
+  useEffect(() => {
+    setBranches(configBranches);
+  }, [configBranches]);
+  useEffect(() => {
+    setAuthors(configAuthors);
+  }, [configAuthors]);
   const excludeDraft = (config.exclude_draft as boolean) ?? false;
 
   const toggleEvent = (event: string) => {

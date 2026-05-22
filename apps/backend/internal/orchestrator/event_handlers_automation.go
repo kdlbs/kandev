@@ -13,17 +13,27 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 // AutomationService is the interface the orchestrator uses for automation operations.
 type AutomationService interface {
 	GetAutomation(ctx context.Context, id string) (*automation.Automation, error)
 	RecordRun(ctx context.Context, run *automation.AutomationRun) error
+	MarkRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error
+	MarkRunSucceededByTaskID(ctx context.Context, taskID string) error
 }
 
 // SetAutomationService sets the automation service for handling automation triggers.
 func (s *Service) SetAutomationService(svc AutomationService) {
 	s.automationService = svc
+}
+
+// SetWorktreeManager sets the worktree manager. Used to clean up ephemeral
+// worktrees for run-mode automation tasks on completion. Nil-safe — handlers
+// skip worktree cleanup when not set.
+func (s *Service) SetWorktreeManager(mgr *worktree.Manager) {
+	s.worktreeMgr = mgr
 }
 
 // subscribeAutomationEvents subscribes to automation-related events on the event bus.
@@ -89,12 +99,20 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 
 	// Run-mode automations create an ephemeral task hidden from the kanban —
 	// the user surfaces them through the AutomationRun row instead. The
-	// existing session/launch pipeline still runs against the task.
+	// existing session/launch pipeline still runs against the task. Ephemeral
+	// tasks reject a non-empty workflow_id, so we strip workflow fields in
+	// run-mode even if the automation row still carries them.
 	isRunMode := a.ExecutionMode == automation.ExecutionModeRun
+	workflowID := a.WorkflowID
+	workflowStepID := a.WorkflowStepID
+	if isRunMode {
+		workflowID = ""
+		workflowStepID = ""
+	}
 	task, taskErr := s.reviewTaskCreator.CreateReviewTask(ctx, &ReviewTaskRequest{
 		WorkspaceID:    a.WorkspaceID,
-		WorkflowID:     a.WorkflowID,
-		WorkflowStepID: a.WorkflowStepID,
+		WorkflowID:     workflowID,
+		WorkflowStepID: workflowStepID,
 		Title:          title,
 		Description:    prompt,
 		Repositories:   repositories,
@@ -137,10 +155,10 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 	if !isRunMode && !s.shouldAutoStartStep(ctx, a.WorkflowStepID) {
 		return
 	}
-	s.autoStartAutomationTask(ctx, a, task)
+	s.autoStartAutomationTask(ctx, a, task, workflowStepID)
 }
 
-func (s *Service) autoStartAutomationTask(ctx context.Context, a *automation.Automation, task *models.Task) {
+func (s *Service) autoStartAutomationTask(ctx context.Context, a *automation.Automation, task *models.Task, workflowStepID string) {
 	_, err := s.StartTask(
 		ctx,
 		task.ID,
@@ -149,7 +167,7 @@ func (s *Service) autoStartAutomationTask(ctx context.Context, a *automation.Aut
 		a.ExecutorProfileID,
 		"",
 		task.Description,
-		a.WorkflowStepID,
+		workflowStepID,
 		false,
 		true,
 		nil,
@@ -374,4 +392,60 @@ func (s *Service) recordSuccessRun(ctx context.Context, evt *automation.Automati
 	if recordErr := s.automationService.RecordRun(ctx, run); recordErr != nil {
 		s.logger.Error("failed to record automation run", zap.Error(recordErr))
 	}
+}
+
+// finalizeAutomationRunIfEphemeral closes out a run-mode automation run when
+// its agent terminates. For ephemeral automation tasks it (a) flips the
+// AutomationRun row from task_created → succeeded|failed, and (b) reaps the
+// per-run worktree immediately. Regular tasks are untouched.
+func (s *Service) finalizeAutomationRunIfEphemeral(ctx context.Context, taskID, sessionID string, success bool, errMsg string) {
+	if taskID == "" {
+		return
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return
+	}
+	if !task.IsEphemeral || task.Origin != models.TaskOriginAutomationRun {
+		return
+	}
+
+	if s.automationService != nil {
+		var markErr error
+		if success {
+			markErr = s.automationService.MarkRunSucceededByTaskID(ctx, taskID)
+		} else {
+			markErr = s.automationService.MarkRunFailedByTaskID(ctx, taskID, errMsg)
+		}
+		if markErr != nil {
+			s.logger.Warn("failed to update automation run terminal status",
+				zap.String("task_id", taskID),
+				zap.Bool("success", success),
+				zap.Error(markErr))
+		}
+	}
+
+	s.reapAutomationWorktree(ctx, taskID, sessionID)
+}
+
+// reapAutomationWorktree removes the ephemeral worktree (and its branch)
+// associated with a finished run-mode automation session.
+func (s *Service) reapAutomationWorktree(ctx context.Context, taskID, sessionID string) {
+	if s.worktreeMgr == nil || sessionID == "" {
+		return
+	}
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil || running == nil || running.WorktreeID == "" {
+		return
+	}
+	if err := s.worktreeMgr.RemoveByID(ctx, running.WorktreeID, true); err != nil {
+		s.logger.Warn("failed to reap automation worktree",
+			zap.String("task_id", taskID),
+			zap.String("worktree_id", running.WorktreeID),
+			zap.Error(err))
+		return
+	}
+	s.logger.Info("reaped ephemeral automation worktree",
+		zap.String("task_id", taskID),
+		zap.String("worktree_id", running.WorktreeID))
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 
@@ -10,7 +10,11 @@ type GitHubPushConfigProps = {
 };
 
 export function GitHubPushConfig({ config, onUpdate }: GitHubPushConfigProps) {
-  const [branches, setBranches] = useState(((config.branches as string[]) ?? []).join(", "));
+  const configBranches = ((config.branches as string[]) ?? []).join(", ");
+  const [branches, setBranches] = useState(configBranches);
+  useEffect(() => {
+    setBranches(configBranches);
+  }, [configBranches]);
 
   const handleBlur = () => {
     const parsed = branches

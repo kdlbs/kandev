@@ -451,6 +451,10 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 
 	// Clean up the agent execution (stop agentctl, release port)
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+
+	// Finalize run-mode automation runs: mark status=succeeded and reap
+	// the ephemeral worktree right away (the 24h Office GC is too late).
+	s.finalizeAutomationRunIfEphemeral(ctx, data.TaskID, data.SessionID, true, "")
 }
 
 // handleAgentFailed handles agent failure events
@@ -489,6 +493,12 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 	}
 
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+
+	errMsg := data.ErrorMessage
+	if errMsg == "" {
+		errMsg = "agent failed"
+	}
+	s.finalizeAutomationRunIfEphemeral(ctx, data.TaskID, data.SessionID, false, errMsg)
 }
 
 // wasResumeAttempt checks whether the session's last execution used a resume token.

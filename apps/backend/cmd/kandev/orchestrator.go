@@ -80,6 +80,7 @@ func provideOrchestrator(
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
 	taskSvc.SetExecutionStopper(orchestratorSvc)
 	taskSvc.SetGitArchiveCapture(orchestratorSvc)
+	orchestratorSvc.SetWorktreeManager(lifecycleMgr.WorktreeManager())
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)

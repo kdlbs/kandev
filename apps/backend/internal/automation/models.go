@@ -27,6 +27,7 @@ type RunStatus string
 const (
 	RunStatusTriggered   RunStatus = "triggered"
 	RunStatusTaskCreated RunStatus = "task_created"
+	RunStatusSucceeded   RunStatus = "succeeded"
 	RunStatusFailed      RunStatus = "failed"
 	RunStatusSkipped     RunStatus = "skipped"
 )

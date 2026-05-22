@@ -44,12 +44,6 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 	if req.WorkspaceID == "" {
 		return nil, fmt.Errorf("workspace_id is required")
 	}
-	if req.WorkflowID == "" {
-		return nil, fmt.Errorf("workflow_id is required")
-	}
-	if req.WorkflowStepID == "" {
-		return nil, fmt.Errorf("workflow_step_id is required")
-	}
 
 	maxRuns := req.MaxConcurrentRuns
 	if maxRuns <= 0 {
@@ -59,6 +53,17 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 	mode := req.ExecutionMode
 	if !mode.Valid() {
 		mode = ExecutionModeTask
+	}
+	// Workflow + step are required for task-mode automations (the run is
+	// surfaced on the kanban and needs a starting column). Run-mode is
+	// ephemeral and bypasses the workflow entirely.
+	if mode == ExecutionModeTask {
+		if req.WorkflowID == "" {
+			return nil, fmt.Errorf("workflow_id is required")
+		}
+		if req.WorkflowStepID == "" {
+			return nil, fmt.Errorf("workflow_step_id is required")
+		}
 	}
 	a := &Automation{
 		WorkspaceID:       req.WorkspaceID,
@@ -221,6 +226,19 @@ func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID strin
 // RecordRun records a trigger run outcome.
 func (s *Service) RecordRun(ctx context.Context, run *AutomationRun) error {
 	return s.store.CreateRun(ctx, run)
+}
+
+// MarkRunFailedByTaskID transitions a still-pending run (task_created) into
+// the failed state. Used when something downstream of task creation aborts
+// the run, e.g. a permission prompt for a run-mode automation.
+func (s *Service) MarkRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error {
+	return s.store.MarkRunFailedByTaskID(ctx, taskID, errMsg)
+}
+
+// MarkRunSucceededByTaskID transitions a still-pending run (task_created)
+// into the succeeded state when the launched agent finishes cleanly.
+func (s *Service) MarkRunSucceededByTaskID(ctx context.Context, taskID string) error {
+	return s.store.MarkRunSucceededByTaskID(ctx, taskID)
 }
 
 // GetWebhookSecret returns the webhook secret for an automation.

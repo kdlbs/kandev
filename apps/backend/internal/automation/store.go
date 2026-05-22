@@ -400,6 +400,37 @@ func (s *Store) CreateRun(ctx context.Context, r *AutomationRun) error {
 	return err
 }
 
+// MarkRunFailedByTaskID flips the most recent task_created run for a task
+// into the failed state. Used when a downstream condition (e.g. a permission
+// prompt that a run-mode automation can't answer) makes the run effectively
+// dead. No-op if no matching run is found.
+func (s *Store) MarkRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error {
+	return s.updateRunTerminalStatus(ctx, taskID, RunStatusFailed, errMsg)
+}
+
+// MarkRunSucceededByTaskID flips the most recent task_created run for a task
+// into the succeeded state. Used when an automation-launched agent completes
+// without error.
+func (s *Store) MarkRunSucceededByTaskID(ctx context.Context, taskID string) error {
+	return s.updateRunTerminalStatus(ctx, taskID, RunStatusSucceeded, "")
+}
+
+// updateRunTerminalStatus is the shared implementation behind MarkRun{Failed,Succeeded}ByTaskID.
+func (s *Store) updateRunTerminalStatus(ctx context.Context, taskID string, status RunStatus, errMsg string) error {
+	if taskID == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE automation_runs SET status = ?, error_message = ?
+		WHERE id = (
+			SELECT id FROM automation_runs
+			WHERE task_id = ? AND status = ?
+			ORDER BY created_at DESC LIMIT 1
+		)`,
+		string(status), errMsg, taskID, string(RunStatusTaskCreated))
+	return err
+}
+
 // ListRuns returns recent runs for an automation.
 func (s *Store) ListRuns(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
 	if limit <= 0 {

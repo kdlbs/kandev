@@ -1,17 +1,19 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Label } from "@kandev/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { IconChevronDown, IconChevronUp, IconRefresh } from "@tabler/icons-react";
 import { useAutomationRuns } from "@/hooks/domains/settings/use-automation-runs";
-import type { RunStatus } from "@/lib/types/automation";
+import type { ExecutionMode, RunStatus } from "@/lib/types/automation";
 import { formatRelativeTime } from "./format-utils";
 
 type RunsSectionProps = {
   automationId: string | null;
+  executionMode: ExecutionMode;
 };
 
 const STATUS_BADGE: Record<
@@ -19,14 +21,17 @@ const STATUS_BADGE: Record<
   { variant: "default" | "destructive" | "secondary" | "outline"; label: string }
 > = {
   triggered: { variant: "secondary", label: "Triggered" },
-  task_created: { variant: "default", label: "Task Created" },
+  task_created: { variant: "secondary", label: "Running" },
+  succeeded: { variant: "default", label: "Succeeded" },
   failed: { variant: "destructive", label: "Failed" },
   skipped: { variant: "outline", label: "Skipped" },
 };
 
-export function RunsSection({ automationId }: RunsSectionProps) {
+export function RunsSection({ automationId, executionMode }: RunsSectionProps) {
   const [expanded, setExpanded] = useState(false);
   const { runs, loading, refresh } = useAutomationRuns(automationId);
+  const router = useRouter();
+  const taskClickable = executionMode !== "run";
 
   if (!automationId) return null;
 
@@ -62,7 +67,7 @@ export function RunsSection({ automationId }: RunsSectionProps) {
         <div className="rounded-md border">
           <Table>
             <TableHeader>
-              <TableRow>
+              <TableRow className="hover:bg-transparent focus-within:bg-transparent">
                 <TableHead>Trigger</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Task</TableHead>
@@ -80,8 +85,19 @@ export function RunsSection({ automationId }: RunsSectionProps) {
               ) : (
                 runs.map((run) => {
                   const badge = STATUS_BADGE[run.status] ?? STATUS_BADGE.triggered;
+                  const rowClickable = taskClickable && !!run.task_id;
                   return (
-                    <TableRow key={run.id}>
+                    <TableRow
+                      key={run.id}
+                      className={
+                        rowClickable
+                          ? "cursor-pointer hover:bg-muted/50"
+                          : "hover:bg-transparent focus-within:bg-transparent"
+                      }
+                      onClick={
+                        rowClickable ? () => router.push(`/tasks/${run.task_id}`) : undefined
+                      }
+                    >
                       <TableCell className="text-sm">{run.trigger_type}</TableCell>
                       <TableCell>
                         <Badge variant={badge.variant}>{badge.label}</Badge>

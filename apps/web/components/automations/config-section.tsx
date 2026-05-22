@@ -176,6 +176,7 @@ export function ConfigSection({
     [executors],
   );
   const isPRTrigger = conditionType === "github_pr";
+  const isRunMode = executionMode === "run";
   const repositoryItems = useMemo(
     () => buildRepositoryItems(repositories, discoveredRepos),
     [repositories, discoveredRepos],
@@ -188,21 +189,23 @@ export function ConfigSection({
       </Label>
       <div className="grid grid-cols-2 gap-4">
         <SelectField
-          testId="workflow-selector"
-          label="Workflow"
-          value={workflowId}
-          onChange={onWorkflowChange}
-          placeholder="Select workflow"
-          items={workflows.map((w) => ({ id: w.id, label: w.name }))}
+          testId="execution-mode-selector"
+          label="Execution Mode"
+          value={executionMode}
+          onChange={(v) => onExecutionModeChange(v as ExecutionMode)}
+          placeholder="Select mode"
+          items={EXECUTION_MODE_ITEMS}
         />
-        <SelectField
-          testId="workflow-step-selector"
-          label="Workflow Step"
-          value={workflowStepId}
-          onChange={onStepChange}
-          placeholder="Select step"
-          items={steps.map((s) => ({ id: s.id, label: s.name }))}
-        />
+        {!isRunMode && (
+          <WorkflowFields
+            workflowId={workflowId}
+            workflowStepId={workflowStepId}
+            workflows={workflows}
+            steps={steps}
+            onWorkflowChange={onWorkflowChange}
+            onStepChange={onStepChange}
+          />
+        )}
         <SelectField
           label="Agent Profile"
           value={agentProfileId}
@@ -232,16 +235,45 @@ export function ConfigSection({
           disabled={isPRTrigger}
           helpText={isPRTrigger ? "PR triggers always use the PR's own repository." : undefined}
         />
-        <SelectField
-          testId="execution-mode-selector"
-          label="Execution Mode"
-          value={executionMode}
-          onChange={(v) => onExecutionModeChange(v as ExecutionMode)}
-          placeholder="Select mode"
-          items={EXECUTION_MODE_ITEMS}
-        />
       </div>
     </div>
+  );
+}
+
+function WorkflowFields({
+  workflowId,
+  workflowStepId,
+  workflows,
+  steps,
+  onWorkflowChange,
+  onStepChange,
+}: {
+  workflowId: string;
+  workflowStepId: string;
+  workflows: Array<{ id: string; name: string }>;
+  steps: StepOption[];
+  onWorkflowChange: (id: string) => void;
+  onStepChange: (id: string) => void;
+}) {
+  return (
+    <>
+      <SelectField
+        testId="workflow-selector"
+        label="Workflow"
+        value={workflowId}
+        onChange={onWorkflowChange}
+        placeholder="Select workflow"
+        items={workflows.map((w) => ({ id: w.id, label: w.name }))}
+      />
+      <SelectField
+        testId="workflow-step-selector"
+        label="Workflow Step"
+        value={workflowStepId}
+        onChange={onStepChange}
+        placeholder="Select step"
+        items={steps.map((s) => ({ id: s.id, label: s.name }))}
+      />
+    </>
   );
 }
 

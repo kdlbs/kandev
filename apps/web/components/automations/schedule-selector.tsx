@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -39,6 +39,14 @@ export function ScheduleSelector({ config, onChange }: ScheduleSelectorProps) {
   const configExpr = (config?.cron_expression as string) ?? "";
   const [customInput, setCustomInput] = useState(configExpr);
   const [error, setError] = useState<string | null>(null);
+
+  // Re-sync the input when the saved config arrives or changes from elsewhere
+  // (e.g. async automation fetch on page reload). useState's initial value
+  // only fires at mount, so without this the input would stay empty after
+  // a deferred load.
+  useEffect(() => {
+    setCustomInput(configExpr);
+  }, [configExpr]);
 
   const handlePreset = (expression: string) => {
     setCustomInput(expression);

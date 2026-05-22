@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -286,6 +287,9 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
         await update(currentId, buildUpdatePayload(form, repositoryId));
         promoteSelection();
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Failed to save automation: ${msg}`);
     } finally {
       setSaving(false);
     }
@@ -398,7 +402,9 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     router.push(`/settings/workspace/${workspaceId}/automations`);
   };
 
-  const canSave = form.name.trim().length > 0 && !!form.workflowId && !!form.workflowStepId;
+  const isRunMode = form.executionMode === "run";
+  const canSave =
+    form.name.trim().length > 0 && (isRunMode || (!!form.workflowId && !!form.workflowStepId));
 
   return (
     <div className="max-w-3xl space-y-6" data-testid="automation-editor">
@@ -431,7 +437,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
       <Separator />
       <SettingsSection form={form} updateField={updateField} />
       <Separator />
-      <RunsSection automationId={currentId} />
+      <RunsSection automationId={currentId} executionMode={form.executionMode} />
       <EditorFooter
         canSave={canSave}
         saving={saving}

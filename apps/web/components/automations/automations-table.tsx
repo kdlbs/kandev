@@ -104,7 +104,7 @@ export function AutomationsTable({
     <div className="rounded-md border" data-testid="automations-table">
       <Table>
         <TableHeader>
-          <TableRow>
+          <TableRow className="hover:bg-transparent focus-within:bg-transparent">
             <TableHead>Name</TableHead>
             <TableHead>Mode</TableHead>
             <TableHead>Triggers</TableHead>

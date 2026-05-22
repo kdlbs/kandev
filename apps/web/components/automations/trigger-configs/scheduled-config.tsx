@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -17,7 +17,11 @@ const PRESETS = [
 ] as const;
 
 export function ScheduledConfig({ config, onUpdate }: ScheduledConfigProps) {
-  const [cronExpression, setCronExpression] = useState((config.cron_expression as string) ?? "");
+  const configExpr = (config.cron_expression as string) ?? "";
+  const [cronExpression, setCronExpression] = useState(configExpr);
+  useEffect(() => {
+    setCronExpression(configExpr);
+  }, [configExpr]);
 
   const handlePreset = (expression: string) => {
     setCronExpression(expression);
