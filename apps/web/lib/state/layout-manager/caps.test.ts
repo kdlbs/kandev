@@ -11,7 +11,7 @@ describe("computeSidebarMaxPx", () => {
     vi.unstubAllGlobals();
   });
 
-  it("hits the 350px floor on roomy viewports", () => {
+  it("hits the 350px floor when vw * 0.3 falls below the minimum", () => {
     // vw=1000 → 30%=300 < floor 350; viewport reserve = 700 (plenty).
     expect(computeSidebarMaxPx(1000)).toBe(350);
   });

@@ -25,7 +25,7 @@ test.describe("Right pane resize — viewport-proportional cap", () => {
     expect(actual).toBeLessThanOrEqual(cap + 10);
   });
 
-  test("user width survives reload (per-env sessionStorage round-trip)", async ({
+  test("user width survives reload (localStorage dockview-layout-v2 round-trip)", async ({
     testPage,
     apiClient,
     seedData,

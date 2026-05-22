@@ -5,9 +5,8 @@ import {
   CENTER_GROUP,
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
-  computeSidebarMaxPx,
-  computeRightMaxPx,
   LAYOUT_PINNED_MIN_PX,
+  getRootSplitview as getRootSplitviewImpl,
   resolveGroupIds,
 } from "./layout-manager";
 import type { LayoutGroupIds } from "./layout-manager";
@@ -15,14 +14,21 @@ import type { LayoutGroupIds } from "./layout-manager";
 // Re-export for consumers that import from this module
 export { getRootSplitview } from "./layout-manager";
 
-/** After fromJSON() restores a session layout, apply fixups and return group IDs. */
+/** After fromJSON() restores a session layout, apply fixups and return group IDs.
+ *
+ *  Pinned column max widths are locked at their just-restored sizes so
+ *  dockview's proportional rebalance can't grow them past the saved value.
+ *  The sash-drag handler widens the cap on user mousedown and snaps it back
+ *  on mouseup — see `setupSashDragCapToggle`. */
 export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
+  const sv = getRootSplitviewImpl(api);
   const sb = api.getPanel("sidebar");
   if (sb) {
     sb.group.locked = SIDEBAR_LOCK;
     sb.group.header.hidden = false;
+    const currentW = sv?.getViewSize?.(0) ?? sb.group.width;
     sb.group.api.setConstraints({
-      maximumWidth: computeSidebarMaxPx(),
+      maximumWidth: Math.max(currentW, LAYOUT_PINNED_MIN_PX),
       minimumWidth: LAYOUT_PINNED_MIN_PX,
     });
   }
@@ -35,11 +41,15 @@ export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
   // Constrain right column groups by their well-known IDs.
   // Groups created from presets carry stable IDs (e.g. "group-right-top"),
   // so this works regardless of which panels are in them.
-  const rightCap = computeRightMaxPx();
+  const rightIdx = sv ? sv.length - 1 : -1;
+  const rightW = sv && rightIdx >= 0 ? sv.getViewSize(rightIdx) : LAYOUT_PINNED_MIN_PX;
   for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
     const group = api.groups.find((g) => g.id === gid);
     if (group) {
-      group.api.setConstraints({ maximumWidth: rightCap, minimumWidth: LAYOUT_PINNED_MIN_PX });
+      group.api.setConstraints({
+        maximumWidth: Math.max(rightW, LAYOUT_PINNED_MIN_PX),
+        minimumWidth: LAYOUT_PINNED_MIN_PX,
+      });
     }
   }
 

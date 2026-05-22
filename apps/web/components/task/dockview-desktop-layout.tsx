@@ -16,6 +16,7 @@ import {
   setupGroupTracking,
   setupLayoutPersistence,
   setupPortalCleanup,
+  setupSashDragCapToggle,
 } from "./dockview-layout-setup";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useFileEditors } from "@/hooks/use-file-editors";
@@ -527,6 +528,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       readyDisposersRef.current.push(setupLayoutPersistence(api, saveTimerRef, envIdRef));
       setupPortalCleanup(api, appStore);
       readyDisposersRef.current.push(setupContainerResizeSync(api));
+      readyDisposersRef.current.push(setupSashDragCapToggle(api));
     },
     [setApi, buildDefaultLayout, initialLayout, compact, appStore],
   );

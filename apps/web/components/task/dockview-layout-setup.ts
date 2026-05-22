@@ -19,27 +19,67 @@ import { stopUserShell } from "@/lib/api/domains/user-shell-api";
 // also invalidates layouts saved under the previous caps.
 const LAYOUT_STORAGE_KEY = "dockview-layout-v2";
 
-/** Re-apply the runtime cap to all pinned groups. Called when the viewport
- *  resizes so a panel pinned to the old cap on a narrower screen can grow
- *  with the window (and vice versa: shrinking the window re-clamps it). */
-function applyDynamicConstraints(api: DockviewReadyEvent["api"]): void {
-  if (useDockviewStore.getState().isRestoringLayout) return;
-  if (useDockviewStore.getState().preMaximizeLayout !== null) return;
+/**
+ * Lock or release pinned-column max widths.
+ *
+ * Dockview's splitview rebalances proportionally on any `api.layout` call.
+ * Without a tight upper bound, sidebar/right grow past their defaults every
+ * time the container resizes. We solve this by pinning `maximumWidth` to the
+ * column's current width whenever the user is NOT actively dragging — so
+ * rebalance has no room to grow the column.
+ *
+ * During a sash drag (`allowGrowth=true`), we widen the cap to the
+ * viewport-proportional runtime cap so the user can drag past the initial
+ * default. On mouseup we snap the cap back down to the new current width.
+ */
+function applyPinnedCap(api: DockviewReadyEvent["api"], allowGrowth: boolean): void {
+  const store = useDockviewStore.getState();
+  if (store.isRestoringLayout) return;
+  if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
+  const sv = getRootSplitview(api);
+  if (!sv) return;
+
   const sb = api.getPanel("sidebar");
-  if (sb) {
-    sb.group.api.setConstraints({
-      maximumWidth: computeSidebarMaxPx(),
-      minimumWidth: LAYOUT_PINNED_MIN_PX,
-    });
+  if (sb && store.sidebarVisible) {
+    const currentW = sv.getViewSize(0);
+    const cap = allowGrowth ? computeSidebarMaxPx() : Math.max(currentW, LAYOUT_PINNED_MIN_PX);
+    sb.group.api.setConstraints({ maximumWidth: cap, minimumWidth: LAYOUT_PINNED_MIN_PX });
   }
-  const rightConstraints = {
-    maximumWidth: computeRightMaxPx(),
-    minimumWidth: LAYOUT_PINNED_MIN_PX,
+
+  if (store.rightPanelsVisible) {
+    const rightIdx = sv.length - 1;
+    const rightW = sv.getViewSize(rightIdx);
+    const cap = allowGrowth ? computeRightMaxPx() : Math.max(rightW, LAYOUT_PINNED_MIN_PX);
+    for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
+      const group = api.groups.find((g) => g.id === gid);
+      if (group) {
+        group.api.setConstraints({ maximumWidth: cap, minimumWidth: LAYOUT_PINNED_MIN_PX });
+      }
+    }
+  }
+}
+
+/** Listen for sash drag start/end and toggle the pinned cap accordingly. */
+export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => void {
+  if (typeof document === "undefined") return () => {};
+  const onMouseDown = (e: MouseEvent): void => {
+    const target = e.target as HTMLElement | null;
+    if (target?.closest(".dv-sash")) {
+      applyPinnedCap(api, true);
+    }
   };
-  for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
-    const group = api.groups.find((g) => g.id === gid);
-    if (group) group.api.setConstraints(rightConstraints);
-  }
+  const onMouseUp = (e: MouseEvent): void => {
+    if (e.button !== 0) return;
+    // Defer to the next frame so dockview's drag-end handler runs first;
+    // otherwise we'd read the pre-release width.
+    requestAnimationFrame(() => applyPinnedCap(api, false));
+  };
+  document.addEventListener("mousedown", onMouseDown, true);
+  document.addEventListener("mouseup", onMouseUp, true);
+  return () => {
+    document.removeEventListener("mousedown", onMouseDown, true);
+    document.removeEventListener("mouseup", onMouseUp, true);
+  };
 }
 
 function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
@@ -99,12 +139,14 @@ export function setupContainerResizeSync(api: DockviewReadyEvent["api"]): () => 
     const w = parent.clientWidth;
     const h = parent.clientHeight;
     if (w <= 0 || h <= 0) return;
-    // Reapply the runtime cap on every tick — the viewport may have changed
-    // even when api.width is already correct (e.g. devtools toggle that nets
-    // to the same width).
-    applyDynamicConstraints(api);
+    // Pin pinned-column caps to current widths so the impending api.layout
+    // doesn't grow them proportionally past their defaults.
+    applyPinnedCap(api, false);
     if (w === api.width && h === api.height) return;
     api.layout(w, h);
+    // After api.layout, currentWidth may have shifted (constraint kicked in).
+    // Re-pin so a future call has a fresh cap matching the new state.
+    applyPinnedCap(api, false);
   });
   ro.observe(parent);
   return () => ro.disconnect();

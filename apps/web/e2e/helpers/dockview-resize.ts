@@ -130,13 +130,23 @@ export async function resizeColumnViaSplitview(
       const sv = api?.component?.gridview?.root?.splitview;
       if (!sv) throw new Error("dockview splitview not exposed");
       if (sv.length < 2) throw new Error("dockview has fewer than 2 columns");
+      // Sidebar is at index 0 only when visible. When hidden, dockview drops
+      // it from the root splitview and index 0 becomes the center column —
+      // refuse the call rather than silently resizing the wrong column.
+      if (col === "sidebar") {
+        type SbApi = { getPanel: (id: string) => unknown };
+        const sbApi = (window as unknown as { __dockviewApi__?: SbApi }).__dockviewApi__;
+        if (!sbApi?.getPanel("sidebar")) {
+          throw new Error("cannot resize sidebar when hidden (index 0 is center column)");
+        }
+      }
       const idx = col === "sidebar" ? 0 : sv.length - 1;
       sv.resizeView(idx, target);
       return sv.getViewSize(idx);
     },
     { col: column, target: targetWidth },
   );
-  // Allow the debounced persistence + pinned-defaults mirror to fire.
+  // Allow the debounced layout persistence to fire.
   await page.waitForTimeout(400);
   return result;
 }
