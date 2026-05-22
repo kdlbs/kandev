@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -18,7 +18,11 @@ const CI_CONCLUSIONS = [
 
 export function GitHubCIConfig({ config, onUpdate }: GitHubCIConfigProps) {
   const conclusions = (config.conclusions as string[]) ?? [];
-  const [checkNames, setCheckNames] = useState(((config.check_names as string[]) ?? []).join(", "));
+  const configCheckNames = ((config.check_names as string[]) ?? []).join(", ");
+  const [checkNames, setCheckNames] = useState(configCheckNames);
+  useEffect(() => {
+    setCheckNames(configCheckNames);
+  }, [configCheckNames]);
 
   const toggleConclusion = (conclusion: string) => {
     const next = conclusions.includes(conclusion)

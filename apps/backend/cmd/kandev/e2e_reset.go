@@ -129,7 +129,12 @@ func handleE2EReset(
 			return
 		}
 
-		deletedAutomations := deleteAutomationsForReset(ctx, automationSvc, workspaceID, log)
+		deletedAutomations, autoErr := deleteAutomationsForReset(ctx, automationSvc, workspaceID)
+		if autoErr != nil {
+			log.Error("e2e reset: failed to delete automations", zap.Error(autoErr))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": autoErr.Error()})
+			return
+		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"deleted_tasks":       deletedTasks,
@@ -143,17 +148,11 @@ func deleteAutomationsForReset(
 	ctx context.Context,
 	automationSvc *automation.Service,
 	workspaceID string,
-	log *logger.Logger,
-) int {
+) (int, error) {
 	if automationSvc == nil {
-		return 0
+		return 0, nil
 	}
-	n, err := automationSvc.Store().DeleteAutomationsByWorkspace(ctx, workspaceID)
-	if err != nil {
-		log.Error("e2e reset: failed to delete automations", zap.Error(err))
-		return 0
-	}
-	return n
+	return automationSvc.Store().DeleteAutomationsByWorkspace(ctx, workspaceID)
 }
 
 type e2eHiddenWorkflowRequest struct {

@@ -55,13 +55,20 @@ export function ScheduleSelector({ config, onChange }: ScheduleSelectorProps) {
   };
 
   const handleCustomBlur = () => {
-    if (!customInput) return;
-    if (!isValidExpression(customInput)) {
+    const trimmed = customInput.trim();
+    // An empty input means "clear the schedule" — propagate so the saved
+    // config doesn't retain a stale cron expression.
+    if (trimmed === "") {
+      setError(null);
+      if (configExpr !== "") onChange({ cron_expression: "" });
+      return;
+    }
+    if (!isValidExpression(trimmed)) {
       setError("Invalid expression. Use @every with a duration, a shorthand, or a 5-field cron.");
       return;
     }
     setError(null);
-    onChange({ cron_expression: customInput });
+    onChange({ cron_expression: trimmed });
   };
 
   return (

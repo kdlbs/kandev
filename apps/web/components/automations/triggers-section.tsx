@@ -45,6 +45,11 @@ export function TriggersSection({
   };
 
   const handleAddWebhook = () => {
+    // Switching to webhook mode is exclusive: any pre-existing scheduled /
+    // condition triggers must be deleted, otherwise they keep firing in the
+    // background while the UI only shows the webhook trigger.
+    if (scheduleTrigger) onDeleteTrigger(scheduleTrigger.id);
+    if (conditionTrigger) onDeleteTrigger(conditionTrigger.id);
     onAddTrigger("webhook", {});
   };
 

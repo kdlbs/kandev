@@ -465,6 +465,16 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 		zap.String("agent_execution_id", data.AgentExecutionID),
 		zap.String("error_message", data.ErrorMessage))
 
+	// Finalize run-mode automation runs first — every other branch below
+	// returns early (resume failure, session-backed recoverable failure,
+	// no-session retry), and run-mode automations need their AutomationRun
+	// flipped + worktree reaped on *every* failure path.
+	errMsg := data.ErrorMessage
+	if errMsg == "" {
+		errMsg = "agent failed"
+	}
+	s.finalizeAutomationRunIfEphemeral(ctx, data.TaskID, data.SessionID, false, errMsg)
+
 	// Check if the agent was started with a resume token AND session init hadn't completed.
 	// If init completed, this is a normal prompt failure (e.g. agent internal timeout),
 	// not a resume failure — skip the resume cleanup path.
@@ -493,12 +503,6 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 	}
 
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
-
-	errMsg := data.ErrorMessage
-	if errMsg == "" {
-		errMsg = "agent failed"
-	}
-	s.finalizeAutomationRunIfEphemeral(ctx, data.TaskID, data.SessionID, false, errMsg)
 }
 
 // wasResumeAttempt checks whether the session's last execution used a resume token.

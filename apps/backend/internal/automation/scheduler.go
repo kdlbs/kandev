@@ -188,7 +188,7 @@ func parseCronFields(expr string) (time.Duration, error) {
 	if hourInterval > 0 && hourInterval < 24 {
 		return time.Duration(hourInterval) * time.Hour, nil
 	}
-	return time.Hour, nil
+	return 0, fmt.Errorf("unsupported cron expression (no step interval found): %s", expr)
 }
 
 func splitFields(expr string) []string {

@@ -68,7 +68,7 @@ export const createAutomationsSlice: StateCreator<
   [["zustand/immer", never]],
   [],
   AutomationsSlice
-> = (set) => ({
+> = (set, _get, _api) => ({
   ...defaultAutomationsState,
   ...createAutomationsActions(set),
   ...createRunsActions(set),

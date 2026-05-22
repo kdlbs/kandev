@@ -193,6 +193,17 @@ func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID strin
 		}
 	}
 
+	// Enforce max_concurrent_runs: a run is "active" while still in
+	// task_created (succeeded/failed/skipped don't count). If at the cap,
+	// record a skipped run so the user can see the cap kicked in.
+	skipped, capErr := s.maybeSkipForConcurrencyCap(ctx, automationID, triggerID, triggerType, triggerData, dedupKey)
+	if capErr != nil {
+		return capErr
+	}
+	if skipped {
+		return nil
+	}
+
 	evt := &AutomationTriggeredEvent{
 		AutomationID: automationID,
 		TriggerID:    triggerID,
@@ -226,6 +237,43 @@ func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID strin
 // RecordRun records a trigger run outcome.
 func (s *Service) RecordRun(ctx context.Context, run *AutomationRun) error {
 	return s.store.CreateRun(ctx, run)
+}
+
+// maybeSkipForConcurrencyCap enforces max_concurrent_runs. Returns (skipped,
+// err). When skipped, a "skipped" run row is persisted so the user can see
+// the cap kicked in.
+func (s *Service) maybeSkipForConcurrencyCap(ctx context.Context, automationID, triggerID string, triggerType TriggerType, triggerData json.RawMessage, dedupKey string) (bool, error) {
+	a, err := s.store.GetAutomation(ctx, automationID)
+	if err != nil || a == nil {
+		return false, nil // not our problem here; FireTrigger will hit it again downstream
+	}
+	if a.MaxConcurrentRuns <= 0 {
+		return false, nil
+	}
+	active, err := s.store.CountActiveRuns(ctx, automationID)
+	if err != nil {
+		return false, fmt.Errorf("count active runs: %w", err)
+	}
+	if active < a.MaxConcurrentRuns {
+		return false, nil
+	}
+	skipRun := &AutomationRun{
+		AutomationID: automationID,
+		TriggerID:    triggerID,
+		TriggerType:  triggerType,
+		Status:       RunStatusSkipped,
+		DedupKey:     dedupKey,
+		TriggerData:  triggerData,
+		ErrorMessage: fmt.Sprintf("max_concurrent_runs=%d reached", a.MaxConcurrentRuns),
+	}
+	if recErr := s.store.CreateRun(ctx, skipRun); recErr != nil {
+		s.logger.Warn("failed to record skipped run", zap.Error(recErr))
+	}
+	s.logger.Info("automation trigger skipped: concurrency cap reached",
+		zap.String("automation_id", automationID),
+		zap.Int("active", active),
+		zap.Int("max", a.MaxConcurrentRuns))
+	return true, nil
 }
 
 // MarkRunFailedByTaskID transitions a still-pending run (task_created) into
