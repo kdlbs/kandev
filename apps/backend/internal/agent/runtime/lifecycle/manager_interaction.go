@@ -970,17 +970,23 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 	eventType := events.AgentCompleted
 	if execution.Status == v1.AgentStatusFailed {
 		eventType = events.AgentFailed
-		m.logRoutingClassification(execution, exitCode, errorMessage)
+		m.classifyAndMaybeRemediate(execution, exitCode, errorMessage)
 	}
 	m.eventPublisher.PublishAgentEvent(context.Background(), eventType, execution)
 
 	return nil
 }
 
-// logRoutingClassification runs routingerr.Classify at the failure boundary
-// and logs the structured result. Acting on the result is wired by Phase 4
-// of office-provider-routing.
-func (m *Manager) logRoutingClassification(execution *AgentExecution, exitCode int, errorMessage string) {
+// classifyAndMaybeRemediate runs routingerr.Classify at the failure
+// boundary, logs the structured result, and - for codes that carry a
+// safe remediation (currently CodeNpxCacheCorrupted) - fires a
+// best-effort cleanup goroutine so the next launch attempt (Office
+// scheduler retry or Kanban "Resume") finds a clean environment.
+//
+// The remediation hook is injectable via Manager.remediateNpxCache;
+// production wiring points it at routingerr.RemediateNpxCache. Tests
+// stub it to avoid touching the real filesystem.
+func (m *Manager) classifyAndMaybeRemediate(execution *AgentExecution, exitCode int, errorMessage string) {
 	phase := routingerr.PhaseSessionInit
 	if execution.sessionInitialized {
 		phase = routingerr.PhasePromptSend
@@ -1010,7 +1016,27 @@ func (m *Manager) logRoutingClassification(execution *AgentExecution, exitCode i
 		zap.String("classifier_rule", e.ClassifierRule),
 		zap.Bool("fallback_allowed", e.FallbackAllowed),
 		zap.Bool("auto_retryable", e.AutoRetryable),
-		zap.Bool("user_action", e.UserAction))
+		zap.Bool("user_action", e.UserAction),
+		zap.String("remediation_path", e.RemediationPath))
+
+	if e.Code != routingerr.CodeNpxCacheCorrupted || e.RemediationPath == "" {
+		return
+	}
+	remediate := m.remediateNpxCache
+	path := e.RemediationPath
+	execID := execution.ID
+	zapLog := m.logger.Zap().With(
+		zap.String("execution_id", execID),
+		zap.String("path", path),
+	)
+	go func() {
+		if err := remediate(path, zapLog); err != nil {
+			m.logger.Warn("npx cache remediation failed",
+				zap.String("execution_id", execID),
+				zap.String("path", path),
+				zap.Error(err))
+		}
+	}()
 }
 
 // RespondToPermission sends a response to an agent's permission request.

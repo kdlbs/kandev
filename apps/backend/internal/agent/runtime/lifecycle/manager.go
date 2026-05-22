@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/secrets"
@@ -116,6 +117,11 @@ type Manager struct {
 	// the agent process starts. Defaults to a no-op deployer; office wires
 	// its concrete implementation via SetSkillDeployer.
 	skillDeployer SkillDeployer
+
+	// remediateNpxCache is the hook fired when the routing classifier
+	// returns CodeNpxCacheCorrupted. NewManager wires routingerr.RemediateNpxCache;
+	// tests override it to avoid touching the real filesystem.
+	remediateNpxCache func(path string, log *zap.Logger) error
 }
 
 // NewManager creates a new lifecycle manager.
@@ -174,6 +180,7 @@ func NewManager(
 		remoteStatusBySession:    make(map[string]*RemoteStatus),
 		stopCh:                   stopCh,
 		skillDeployer:            NoopSkillDeployer(),
+		remediateNpxCache:        routingerr.RemediateNpxCache,
 	}
 
 	// Initialize stream manager with callbacks that delegate to manager methods
