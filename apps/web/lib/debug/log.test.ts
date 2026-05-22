@@ -79,41 +79,36 @@ describe("IS_DEBUG", () => {
   // Module re-imports are required because IS_DEBUG is a module-level constant
   // evaluated at import time. resetModules forces re-evaluation with the
   // current env / globals each time.
-  const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
-  const ORIGINAL_PUBLIC = process.env.NEXT_PUBLIC_KANDEV_DEBUG;
 
   beforeEach(() => {
     vi.resetModules();
   });
 
   afterEach(() => {
-    if (ORIGINAL_NODE_ENV === undefined) delete process.env.NODE_ENV;
-    else process.env.NODE_ENV = ORIGINAL_NODE_ENV;
-    if (ORIGINAL_PUBLIC === undefined) delete process.env.NEXT_PUBLIC_KANDEV_DEBUG;
-    else process.env.NEXT_PUBLIC_KANDEV_DEBUG = ORIGINAL_PUBLIC;
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
 
   it("is true in a production build when window.__KANDEV_DEBUG is set", async () => {
     // Simulates `make start-debug`: production bundle, runtime window flag.
-    process.env.NODE_ENV = "production";
-    delete process.env.NEXT_PUBLIC_KANDEV_DEBUG;
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NEXT_PUBLIC_KANDEV_DEBUG", "");
     vi.stubGlobal("window", { __KANDEV_DEBUG: true });
     const { IS_DEBUG } = await import("./log");
     expect(IS_DEBUG).toBe(true);
   });
 
   it("is false in a production build with no flag set", async () => {
-    process.env.NODE_ENV = "production";
-    delete process.env.NEXT_PUBLIC_KANDEV_DEBUG;
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NEXT_PUBLIC_KANDEV_DEBUG", "");
     vi.stubGlobal("window", {});
     const { IS_DEBUG } = await import("./log");
     expect(IS_DEBUG).toBe(false);
   });
 
   it("is true when NEXT_PUBLIC_KANDEV_DEBUG=true at build time", async () => {
-    process.env.NODE_ENV = "production";
-    process.env.NEXT_PUBLIC_KANDEV_DEBUG = "true";
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NEXT_PUBLIC_KANDEV_DEBUG", "true");
     vi.stubGlobal("window", {});
     const { IS_DEBUG } = await import("./log");
     expect(IS_DEBUG).toBe(true);

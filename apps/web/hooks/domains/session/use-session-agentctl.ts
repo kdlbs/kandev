@@ -25,7 +25,7 @@ export function useSessionAgentctl(sessionId: string | null) {
   // Log status transitions only — re-rendering should not spam.
   const lastLoggedRef = useRef<string | null>(null);
   const statusValue = status?.status ?? "missing";
-  const snapshot = `${statusValue}|${status?.errorMessage ?? ""}|${status?.agentExecutionId ?? ""}`;
+  const snapshot = `${sessionId ?? "none"}|${statusValue}|${status?.errorMessage ?? ""}|${status?.agentExecutionId ?? ""}`;
   useEffect(() => {
     if (!sessionId) return;
     if (lastLoggedRef.current === snapshot) return;
