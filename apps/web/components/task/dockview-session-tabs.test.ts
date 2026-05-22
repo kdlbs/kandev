@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import type { DockviewApi } from "dockview-react";
-import { reconcileRemovedSessionPanels } from "./dockview-session-tabs";
+import {
+  findSessionAnchorGroupId,
+  reconcileRemovedSessionPanels,
+} from "./dockview-session-tabs";
 
 type FakePanel = {
   id: string;
@@ -148,5 +151,31 @@ describe("reconcileRemovedSessionPanels", () => {
 
     expect(createdSet.has("already-removed")).toBe(false);
     expect(createdSet.has(KEEP)).toBe(true);
+  });
+});
+
+describe("findSessionAnchorGroupId", () => {
+  function makeApiWithPanel(panelId: string, groupId: string): DockviewApi {
+    return {
+      getPanel: (id: string) => (id === panelId ? { id, group: { id: groupId } } : null),
+    } as unknown as DockviewApi;
+  }
+
+  it("returns the group id of a pr-detail anchor panel", () => {
+    // Regression: when a saved layout's session was sanitized away (page load)
+    // or replaced (env switch) but pr-detail remained, the new session would
+    // be added as a right-of-sidebar split instead of joining pr-detail's
+    // group — pulling pr-detail out of the user's grouping with the agent.
+    const api = makeApiWithPanel("pr-detail", "saved-center-group");
+
+    expect(findSessionAnchorGroupId(api)).toBe("saved-center-group");
+  });
+
+  it("returns null when no anchor panel exists", () => {
+    const api = {
+      getPanel: () => null,
+    } as unknown as DockviewApi;
+
+    expect(findSessionAnchorGroupId(api)).toBeNull();
   });
 });

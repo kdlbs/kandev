@@ -212,7 +212,7 @@ describe("performEnvSwitch slow-path stale session strip", () => {
   it("closes stale session chat panels after the slow-path fromJSON", () => {
     // Regression: a saved env layout could carry a `session:*` panel from a
     // previously-deleted task (phantom). On the slow-path restore, that
-    // panel would land in the live api as a stray tab. removeStaleSessionPanels
+    // panel would land in the live api as a stray tab. replaceStaleSessionPanels
     // must close any session:* panel whose id != the incoming active session.
     vi.mocked(getEnvLayout)
       .mockReturnValueOnce(makeHealthyLayoutWith({}))
@@ -226,13 +226,16 @@ describe("performEnvSwitch slow-path stale session strip", () => {
     const api = {
       ...makeMockApi(),
       // api.fromJSON is a no-op mock; populate `panels` with what would exist
-      // post-restore so removeStaleSessionPanels' filter has something to act on.
+      // post-restore so replaceStaleSessionPanels' filter has something to act on.
       panels: [
         { id: "session:old-session", api: { component: "chat", close: closeStale } },
         { id: NEW_SESSION_PANEL_ID, api: { component: "chat", close: closeKeep } },
         // file editors are NOT session panels — they must NOT be closed.
         { id: "preview:file-editor", api: { component: "file-editor", close: closeFileEditor } },
       ],
+      getPanel: vi.fn((id: string) =>
+        id === NEW_SESSION_PANEL_ID ? { id: NEW_SESSION_PANEL_ID } : null,
+      ),
     } as unknown as EnvSwitchParams["api"];
     const params = makeParams({ api });
 
@@ -242,6 +245,80 @@ describe("performEnvSwitch slow-path stale session strip", () => {
     expect(closeKeep).not.toHaveBeenCalled();
     expect(closeFileEditor).not.toHaveBeenCalled();
     expect(params.api.fromJSON).toHaveBeenCalledOnce();
+    // Keep panel already existed, so no addPanel.
+    expect(params.api.addPanel).not.toHaveBeenCalled();
+  });
+
+  it("anchors the new session to the stale session's group and tab index", () => {
+    // Regression: when the saved layout had a phantom session co-tabbed with
+    // pr-detail (or other siblings the user dragged into the chat group),
+    // simply closing the phantom orphaned the siblings. The new active session
+    // would then land as a fresh split next to the sidebar — pulling pr-detail
+    // out of the user's grouping. The replacement must land in the phantom's
+    // exact (group, index) so siblings stay tabbed with the agent.
+    vi.mocked(getEnvLayout)
+      .mockReturnValueOnce(makeHealthyLayoutWith({}))
+      .mockReturnValueOnce(makeHealthyLayoutWith({}));
+    vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(false);
+
+    const closeStale = vi.fn();
+    const stalePanelId = "session:phantom-from-other-env";
+    const groupId = "saved-center-group";
+    const groupPanels = [
+      { id: stalePanelId, api: { component: "chat", close: closeStale } },
+      { id: "pr-detail", api: { component: "pr-detail", close: vi.fn() } },
+    ];
+    const stale = {
+      ...groupPanels[0],
+      group: { id: groupId, panels: groupPanels },
+    };
+    const api = {
+      ...makeMockApi(),
+      panels: [
+        stale,
+        { id: "pr-detail", api: { component: "pr-detail" }, group: { id: groupId } },
+      ],
+      groups: [{ id: groupId }],
+      // The active session panel does NOT exist yet — that's the whole point;
+      // the fromJSON restore only brought back the phantom.
+      getPanel: vi.fn(() => null),
+    } as unknown as EnvSwitchParams["api"];
+    const params = makeParams({ api });
+
+    performEnvSwitch(params);
+
+    expect(api.addPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: NEW_SESSION_PANEL_ID,
+        component: "chat",
+        position: { referenceGroup: groupId, index: 0 },
+      }),
+    );
+    expect(closeStale).toHaveBeenCalledOnce();
+  });
+
+  it("skips addPanel when there is no active session (sessionless task)", () => {
+    vi.mocked(getEnvLayout)
+      .mockReturnValueOnce(makeHealthyLayoutWith({}))
+      .mockReturnValueOnce(makeHealthyLayoutWith({}));
+    vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(false);
+
+    const closeStale = vi.fn();
+    const groupId = "g1";
+    const groupPanels = [
+      { id: "session:phantom", api: { component: "chat", close: closeStale } },
+    ];
+    const stale = { ...groupPanels[0], group: { id: groupId, panels: groupPanels } };
+    const api = {
+      ...makeMockApi(),
+      panels: [stale],
+      groups: [{ id: groupId }],
+    } as unknown as EnvSwitchParams["api"];
+
+    performEnvSwitch(makeParams({ api, activeSessionId: null }));
+
+    expect(closeStale).toHaveBeenCalledOnce();
+    expect(api.addPanel).not.toHaveBeenCalled();
   });
 });
 

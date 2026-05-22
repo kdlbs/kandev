@@ -172,28 +172,54 @@ function removeEphemeralPanels(api: DockviewApi, keepSessionId: string | null): 
 }
 
 /**
- * Close stale session chat panels — any `session:*` panel whose id isn't
- * `session:${keepSessionId}`. Used after `fromJSON` in the slow path to
- * strip phantom sessions carried in from a saved layout, WITHOUT touching
- * file-editors/diffs/browser/etc. that legitimately belong to this env.
+ * Replace stale session chat panels with the incoming active session.
+ *
+ * A "stale" session is any `session:*` panel whose id isn't
+ * `session:${keepSessionId}` — typically a phantom carried in from a saved
+ * layout whose session belongs to a different env (or has been deleted).
+ *
+ * Before closing the first stale panel, add the active session at the same
+ * (group, tab-index). This preserves the user's grouping when the stale was
+ * co-tabbed with non-session siblings (pr-detail, dragged file-editors,
+ * etc.) — without it, the siblings would be orphaned in a group with no
+ * session, and `useAutoSessionTab` would later add the active session as a
+ * fresh split next to the sidebar.
+ *
+ * File-editors/diffs/browser/etc. are NEVER touched here — they
+ * legitimately belong to this env's saved state.
  */
-function removeStaleSessionPanels(api: DockviewApi, keepSessionId: string | null): void {
+function replaceStaleSessionPanels(api: DockviewApi, keepSessionId: string | null): void {
   const keepId = keepSessionId ? `session:${keepSessionId}` : null;
   // keepId=null (sessionless task) → strips all session panels, unlike the
   // fast path's shouldRemoveDuringSwitch which keeps them. In practice
   // sessionless tasks should have no session panels; useAutoSessionTab
   // re-adds the panel when a session arrives.
-  const toRemove = api.panels.filter(
+  const stale = api.panels.filter(
     (p) => p.api.component === "chat" && p.id.startsWith("session:") && p.id !== keepId,
   );
+
+  // Anchor the active session to the first stale's (group, index) so co-tabbed
+  // siblings (pr-detail etc.) stay grouped with the agent tab. Skipped when:
+  //   - no keepSessionId (sessionless task)
+  //   - the active session panel already exists in the layout
+  //   - the stale's group is missing from the live api (defensive)
+  if (keepSessionId && keepId && !api.getPanel(keepId) && stale.length > 0) {
+    const first = stale[0];
+    const groupId = first.group.id;
+    if (api.groups.some((g) => g.id === groupId)) {
+      const idx = first.group.panels.findIndex((p) => p.id === first.id);
+      addIncomingSessionPanel(api, keepSessionId, groupId, idx);
+    }
+  }
+
   if (IS_DEBUG) {
-    debug("removeStaleSessionPanels", {
+    debug("replaceStaleSessionPanels", {
       keepSessionId,
       livePanelIds: api.panels.map((p) => p.id),
-      removingIds: toRemove.map((p) => p.id),
+      removingIds: stale.map((p) => p.id),
     });
   }
-  for (const p of toRemove) {
+  for (const p of stale) {
     try {
       p.api.close();
     } catch {
@@ -371,11 +397,13 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
       }
       api.fromJSON(saved as SerializedDockview);
       // Saved layout may carry a stale session panel from a previously-deleted
-      // task (phantom). Strip session panels that don't belong to the incoming
-      // active session — file editors/diffs/etc. were legitimately part of
-      // this env's saved state and must NOT be touched.
-      // useAutoSessionTab will add the current session's panel if missing.
-      removeStaleSessionPanels(api, activeSessionId);
+      // task (phantom). Replace stale session panels with the incoming active
+      // session in the same (group, tab-index), then close the stale ones —
+      // preserves grouping with co-tabbed siblings (pr-detail, dragged file
+      // editors, etc.). File editors/diffs/etc. on their own are legitimately
+      // part of this env's saved state and must NOT be touched.
+      // useAutoSessionTab will still no-op if the panel was just added here.
+      replaceStaleSessionPanels(api, activeSessionId);
       api.layout(safeWidth, safeHeight);
       if (IS_DEBUG) {
         debug("performEnvSwitch: completed via slow path (fromJSON)", {

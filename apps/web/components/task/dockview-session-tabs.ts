@@ -227,10 +227,30 @@ export function useAutoPRPanel() {
   }, [taskId, hasPR, hasApi, sessionId]);
 }
 
+/**
+ * Panels that are added co-tabbed with a session panel (see `useAutoPRPanel`).
+ * When a saved layout's session was stripped (phantom-session sanitize on
+ * page load, or stale removal during env switch), these siblings end up alone
+ * in a group with no session. Prefer joining that group when adding the new
+ * active session — without this fallback we'd add the session as a fresh
+ * split next to the sidebar, breaking the user's grouping.
+ */
+const SESSION_ANCHOR_PANEL_IDS = ["pr-detail"];
+
+export function findSessionAnchorGroupId(api: DockviewApi): string | null {
+  for (const id of SESSION_ANCHOR_PANEL_IDS) {
+    const panel = api.getPanel(id);
+    if (panel) return panel.group.id;
+  }
+  return null;
+}
+
 function resolveInitialPosition(api: DockviewApi): AddPanelOptions["position"] {
   const { centerGroupId } = useDockviewStore.getState();
   const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
   if (centerGroupExists) return { referenceGroup: centerGroupId };
+  const anchorGroupId = findSessionAnchorGroupId(api);
+  if (anchorGroupId) return { referenceGroup: anchorGroupId, index: 0 };
   const sb = api.getPanel("sidebar");
   if (sb) return { direction: "right" as const, referencePanel: "sidebar" };
   return undefined;
