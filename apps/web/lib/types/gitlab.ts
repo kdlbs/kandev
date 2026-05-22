@@ -54,8 +54,6 @@ export type TaskMR = {
   draft: boolean;
   approval_count: number;
   required_approvals: number;
-  unresolved_threads: number;
-  discussion_count: number;
   pipeline_jobs_total: number;
   pipeline_jobs_pass: number;
   created_at: string;

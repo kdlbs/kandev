@@ -274,6 +274,44 @@ func TestPATClient_SearchMRsPaged_HonoursTotalHeader(t *testing.T) {
 	}
 }
 
+func TestPATClient_ListIssuesPaged_HonoursTotalHeader(t *testing.T) {
+	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// X-Total drives pagination; the body returns a small slice so the
+		// test verifies header + body wire up independently.
+		w.Header().Set("X-Total", "87")
+		if r.URL.Path != "/issues" {
+			// newTestServer strips the /api/v4 prefix before dispatch.
+			t.Errorf("path = %q, want /issues", r.URL.Path)
+		}
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		perPage := r.URL.Query().Get("per_page")
+		if perPage != "20" {
+			t.Errorf("per_page = %q, want 20 — paging args must reach the server", perPage)
+		}
+		if page == 2 {
+			_, _ = w.Write([]byte(`[{"iid":42,"state":"opened","author":{"username":"alice"},"references":{"full":"g/p#42"}}]`))
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer stop()
+
+	c := NewPATClient(host, "tok")
+	page, err := c.ListIssuesPaged(context.Background(), "", "", 2, 20)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if page.TotalCount != 87 {
+		t.Errorf("total = %d, want 87 (X-Total header)", page.TotalCount)
+	}
+	if page.Page != 2 || page.PerPage != 20 {
+		t.Errorf("page/perPage = %d/%d, want 2/20 (echoed back)", page.Page, page.PerPage)
+	}
+	if len(page.Issues) != 1 || page.Issues[0].IID != 42 {
+		t.Errorf("issues = %+v, want one issue with IID 42", page.Issues)
+	}
+}
+
 func TestParseNextLink(t *testing.T) {
 	apiBase := "https://gitlab.example.com/api/v4"
 	cases := []struct {

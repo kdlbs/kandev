@@ -74,7 +74,7 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
 
 ## GitLab flow (Merge Requests)
 
-When `git remote get-url origin` points at a GitLab host, the steps are the same up through **Push** (1–3). For step 4, create a Merge Request instead of a PR:
+When `git remote get-url origin` points at a GitLab host, the steps are the same up through **Push** (1–3). For step 4, create a Merge Request instead of a PR. **Skip steps 5 and 6** — `/pr-fixup` is wired to GitHub CI / CodeRabbit and `gh pr edit` only works against GitHub. The GitLab equivalent is to manage the MR directly via `glab` or the REST API (see "review comments" note at the bottom). After creating the MR, return the MR URL and stop.
 
 **MR title** still follows Conventional Commits — the squash-merge commit message is built from it the same way.
 

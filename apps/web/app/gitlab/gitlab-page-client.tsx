@@ -18,7 +18,8 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Spinner } from "@kandev/ui/spinner";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@kandev/ui/tabs";
-import { fetchGitLabStatus, searchUserIssues, searchUserMRs } from "@/lib/api/domains/gitlab-api";
+import { fetchGitLabStatus } from "@/lib/api/domains/gitlab-api";
+import { useGitLabUserIssues, useGitLabUserMRs } from "@/hooks/domains/gitlab/use-user-search";
 import type { GitLabStatus, Issue, MR } from "@/lib/types/gitlab";
 
 // Filter values map to GitLab's "scope" query param semantics.
@@ -96,30 +97,7 @@ function NotConnectedNotice() {
 }
 
 function MRList({ filter, query }: { filter: string; query: string }) {
-  const [mrs, setMRs] = useState<MR[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    /* eslint-disable react-hooks/set-state-in-effect -- reset to loading on filter/query change */
-    setLoading(true);
-    setError(null);
-    /* eslint-enable react-hooks/set-state-in-effect */
-    searchUserMRs({ filter, customQuery: query, perPage: 50 })
-      .then((res) => {
-        if (!cancelled) setMRs(res?.mrs ?? []);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load MRs");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [filter, query]);
+  const { items: mrs, loading, error } = useGitLabUserMRs(filter, query);
 
   if (loading) {
     return (
@@ -166,30 +144,7 @@ function MRList({ filter, query }: { filter: string; query: string }) {
 }
 
 function IssueList({ filter, query }: { filter: string; query: string }) {
-  const [issues, setIssues] = useState<Issue[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    /* eslint-disable react-hooks/set-state-in-effect -- reset to loading on filter/query change */
-    setLoading(true);
-    setError(null);
-    /* eslint-enable react-hooks/set-state-in-effect */
-    searchUserIssues({ filter, customQuery: query, perPage: 50 })
-      .then((res) => {
-        if (!cancelled) setIssues(res?.issues ?? []);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load issues");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [filter, query]);
+  const { items: issues, loading, error } = useGitLabUserIssues(filter, query);
 
   if (loading) {
     return (
@@ -249,7 +204,7 @@ export function GitLabPageClient({ workspaceId: _workspaceId }: { workspaceId?: 
 
   const reloadStatus = useCallback(() => {
     setStatusLoading(true);
-    fetchGitLabStatus({ init: { cache: "no-store" } })
+    fetchGitLabStatus({ cache: "no-store" })
       .then(setStatus)
       .catch(() => setStatus(null))
       .finally(() => setStatusLoading(false));
@@ -257,7 +212,7 @@ export function GitLabPageClient({ workspaceId: _workspaceId }: { workspaceId?: 
 
   useEffect(() => {
     let cancelled = false;
-    fetchGitLabStatus({ init: { cache: "no-store" } })
+    fetchGitLabStatus({ cache: "no-store" })
       .then((s) => {
         if (!cancelled) setStatus(s);
       })

@@ -77,7 +77,7 @@ export async function searchUserMRs(params: {
   if (params.page) qs.set("page", String(params.page));
   if (params.perPage) qs.set("per_page", String(params.perPage));
   return fetchJson<MRSearchPage>(`/api/v1/gitlab/user/mrs?${qs.toString()}`, {
-    init: { cache: "no-store" },
+    cache: "no-store",
   });
 }
 
@@ -94,7 +94,7 @@ export async function searchUserIssues(params: {
   if (params.page) qs.set("page", String(params.page));
   if (params.perPage) qs.set("per_page", String(params.perPage));
   return fetchJson<IssueSearchPage>(`/api/v1/gitlab/user/issues?${qs.toString()}`, {
-    init: { cache: "no-store" },
+    cache: "no-store",
   });
 }
 

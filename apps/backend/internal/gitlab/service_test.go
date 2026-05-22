@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeSecretManager is an in-memory SecretManager + SecretProvider used to
@@ -348,6 +349,179 @@ func TestService_ConfigureToken_WrapsErrInvalidToken(t *testing.T) {
 			t.Errorf("err = %v, want errors.Is ErrInvalidToken", err)
 		}
 	})
+}
+
+// --- Task ↔ MR association ---
+
+// withTaskMRStore wires a temporary GitLab Store onto the service so the
+// task-MR methods exercise real SQLite. Returns the store for direct
+// inspection.
+func withTaskMRStore(t *testing.T, svc *Service) *Store {
+	t.Helper()
+	store := newTestStore(t)
+	svc.SetStore(store)
+	return store
+}
+
+// swapToMock replaces the service's client with an in-memory MockClient that
+// tests can pre-seed with MRs. Returns the mock for further seeding.
+func swapToMock(t *testing.T, svc *Service) *MockClient {
+	t.Helper()
+	mock := NewMockClient(svc.Host())
+	svc.mu.Lock()
+	svc.client = mock
+	svc.mu.Unlock()
+	return mock
+}
+
+func TestService_SyncTaskMR_UpsertsFromMockClient(t *testing.T) {
+	svc, _, _ := newServiceFixture(t, userHandler(func(string) bool { return true }))
+	store := withTaskMRStore(t, svc)
+	mock := swapToMock(t, svc)
+	seedTask(t, store, "task-1", "ws-1")
+
+	mock.SeedMR("acme/api", &MR{
+		IID:        42,
+		Title:      "feat: thing",
+		HeadBranch: "feat/x",
+		BaseBranch: "main",
+		State:      mrStateOpen,
+		WebURL:     "https://gitlab.example/acme/api/-/merge_requests/42",
+		HeadSHA:    "abc123",
+		CreatedAt:  time.Now().UTC(),
+	})
+
+	row, err := svc.SyncTaskMR(context.Background(), "task-1", "", "acme/api", 42)
+	if err != nil {
+		t.Fatalf("SyncTaskMR err = %v", err)
+	}
+	if row.MRTitle != "feat: thing" || row.HeadBranch != "feat/x" || row.BaseBranch != "main" {
+		t.Errorf("unexpected upserted row: %+v", row)
+	}
+	if row.LastSyncedAt == nil {
+		t.Error("LastSyncedAt not stamped")
+	}
+
+	// Round-trip through the store: the row must be readable by ID.
+	stored, _ := store.ListTaskMRsByTask(context.Background(), "task-1")
+	if len(stored) != 1 || stored[0].MRTitle != "feat: thing" {
+		t.Fatalf("store roundtrip failed: %+v", stored)
+	}
+}
+
+func TestService_SyncTaskMR_PreservesPipelineJobsMapping(t *testing.T) {
+	svc, _, _ := newServiceFixture(t, userHandler(func(string) bool { return true }))
+	withTaskMRStore(t, svc)
+	mock := swapToMock(t, svc)
+
+	mock.SeedMR("acme/api", &MR{IID: 7, HeadSHA: "deadbeef", HeadBranch: "f", State: mrStateOpen})
+	// Two finished pipelines: one all-pass, one with a failure.
+	finished := time.Now().UTC()
+	mock.SeedPipelines("acme/api", []Pipeline{
+		{ID: 1, Status: "success", SHA: "deadbeef", JobsTotal: 3, JobsPassing: 3, FinishedAt: &finished},
+	})
+
+	row, err := svc.SyncTaskMR(context.Background(), "task-1", "", "acme/api", 7)
+	if err != nil {
+		t.Fatalf("sync err = %v", err)
+	}
+	if row.PipelineJobsTotal != 3 || row.PipelineJobsPass != 3 {
+		t.Errorf("pipeline jobs mapping wrong: total=%d pass=%d (want 3/3) — field-name regression",
+			row.PipelineJobsTotal, row.PipelineJobsPass)
+	}
+}
+
+func TestService_SyncTaskMR_ReturnsErrWhenMRNotFound(t *testing.T) {
+	svc, _, _ := newServiceFixture(t, userHandler(func(string) bool { return true }))
+	withTaskMRStore(t, svc)
+	swapToMock(t, svc)
+
+	_, err := svc.SyncTaskMR(context.Background(), "task-1", "", "acme/api", 999)
+	if err == nil {
+		t.Fatal("expected error for unseeded MR")
+	}
+}
+
+func TestService_SyncTaskMR_ErrorWhenStoreUnset(t *testing.T) {
+	svc, _, _ := newServiceFixture(t, userHandler(func(string) bool { return true }))
+	swapToMock(t, svc) // no SetStore — store remains nil
+	_, err := svc.SyncTaskMR(context.Background(), "task", "", "p", 1)
+	if err == nil {
+		t.Fatal("expected error when store is nil")
+	}
+	if !strings.Contains(err.Error(), "store") {
+		t.Errorf("err = %v, want mention of store", err)
+	}
+}
+
+func TestService_ListTaskMRsByWorkspace_EmptyWhenStoreUnset(t *testing.T) {
+	svc, _, _ := newServiceFixture(t, userHandler(func(string) bool { return true }))
+	got, err := svc.ListTaskMRsByWorkspace(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %d rows, want 0 when store is nil", len(got))
+	}
+}
+
+func TestService_ListTaskMRsByWorkspace_ScopesByWorkspaceJoin(t *testing.T) {
+	svc, _, _ := newServiceFixture(t, userHandler(func(string) bool { return true }))
+	store := withTaskMRStore(t, svc)
+	mock := swapToMock(t, svc)
+	seedTask(t, store, "task-a", "ws-1")
+	seedTask(t, store, "task-b", "ws-2")
+
+	mock.SeedMR("p1", &MR{IID: 1, HeadBranch: "x", BaseBranch: "main", State: mrStateOpen, CreatedAt: time.Now().UTC()})
+	mock.SeedMR("p2", &MR{IID: 2, HeadBranch: "y", BaseBranch: "main", State: mrStateOpen, CreatedAt: time.Now().UTC()})
+	if _, err := svc.SyncTaskMR(context.Background(), "task-a", "", "p1", 1); err != nil {
+		t.Fatalf("sync a: %v", err)
+	}
+	if _, err := svc.SyncTaskMR(context.Background(), "task-b", "", "p2", 2); err != nil {
+		t.Fatalf("sync b: %v", err)
+	}
+
+	got, err := svc.ListTaskMRsByWorkspace(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(got) != 1 || len(got["task-a"]) != 1 {
+		t.Fatalf("ws-1 result = %+v, want task-a with one MR", got)
+	}
+	if _, leaked := got["task-b"]; leaked {
+		t.Error("ws-2's MR leaked into ws-1 result — workspace JOIN broken")
+	}
+}
+
+func TestService_ListTaskMRsByTask_DelegatesToStore(t *testing.T) {
+	svc, _, _ := newServiceFixture(t, userHandler(func(string) bool { return true }))
+	store := withTaskMRStore(t, svc)
+	mock := swapToMock(t, svc)
+	seedTask(t, store, "task-1", "ws-1")
+
+	mock.SeedMR("acme/api", &MR{IID: 1, HeadBranch: "x", BaseBranch: "main", State: mrStateOpen, CreatedAt: time.Now().UTC()})
+	if _, err := svc.SyncTaskMR(context.Background(), "task-1", "", "acme/api", 1); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	got, err := svc.ListTaskMRsByTask(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(got) != 1 || got[0].ProjectPath != "acme/api" {
+		t.Errorf("got = %+v, want acme/api", got)
+	}
+}
+
+func TestService_ListTaskMRsByTask_NilWhenStoreUnset(t *testing.T) {
+	svc, _, _ := newServiceFixture(t, userHandler(func(string) bool { return true }))
+	got, err := svc.ListTaskMRsByTask(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got != nil {
+		t.Errorf("got %v, want nil when store unset", got)
+	}
 }
 
 // Sanity: the package-level errors used by the tests are real values, not

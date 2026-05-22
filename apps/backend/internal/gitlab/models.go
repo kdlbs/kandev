@@ -285,8 +285,6 @@ type TaskMR struct {
 	Draft             bool       `json:"draft" db:"draft"`
 	ApprovalCount     int        `json:"approval_count" db:"approval_count"`
 	RequiredApprovals int        `json:"required_approvals" db:"required_approvals"`
-	UnresolvedThreads int        `json:"unresolved_threads" db:"unresolved_threads"`
-	DiscussionCount   int        `json:"discussion_count" db:"discussion_count"`
 	PipelineJobsTotal int        `json:"pipeline_jobs_total" db:"pipeline_jobs_total"`
 	PipelineJobsPass  int        `json:"pipeline_jobs_pass" db:"pipeline_jobs_pass"`
 	CreatedAt         time.Time  `json:"created_at" db:"created_at"`

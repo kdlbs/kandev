@@ -54,8 +54,6 @@ const createTablesSQL = `
 		draft INTEGER NOT NULL DEFAULT 0,
 		approval_count INTEGER DEFAULT 0,
 		required_approvals INTEGER DEFAULT 0,
-		unresolved_threads INTEGER DEFAULT 0,
-		discussion_count INTEGER DEFAULT 0,
 		pipeline_jobs_total INTEGER DEFAULT 0,
 		pipeline_jobs_pass INTEGER DEFAULT 0,
 		created_at DATETIME NOT NULL,
@@ -72,6 +70,26 @@ func (s *Store) createTables() error {
 	_, err := s.db.Exec(createTablesSQL)
 	return err
 }
+
+// taskMRSelectCols is the projection used by every SELECT so dev DBs that
+// still have dropped columns (older revisions defined `unresolved_threads`
+// and `discussion_count` here) don't break sqlx struct binding.
+const taskMRSelectCols = `id, task_id, repository_id, host, project_path, mr_iid,
+	mr_url, mr_title, head_branch, base_branch, author_username, state,
+	approval_state, pipeline_state, merge_status, draft, approval_count,
+	required_approvals, pipeline_jobs_total, pipeline_jobs_pass,
+	created_at, merged_at, closed_at, last_synced_at, updated_at`
+
+// taskMRSelectColsQualified is the same projection prefixed with `gtm.`,
+// for the workspace JOIN where `tasks` shares column names (id, created_at,
+// updated_at).
+const taskMRSelectColsQualified = `gtm.id, gtm.task_id, gtm.repository_id,
+	gtm.host, gtm.project_path, gtm.mr_iid, gtm.mr_url, gtm.mr_title,
+	gtm.head_branch, gtm.base_branch, gtm.author_username, gtm.state,
+	gtm.approval_state, gtm.pipeline_state, gtm.merge_status, gtm.draft,
+	gtm.approval_count, gtm.required_approvals, gtm.pipeline_jobs_total,
+	gtm.pipeline_jobs_pass, gtm.created_at, gtm.merged_at, gtm.closed_at,
+	gtm.last_synced_at, gtm.updated_at`
 
 // UpsertTaskMR creates or updates a task↔MR association keyed by
 // (task_id, repository_id, project_path, mr_iid). Generates an ID on first
@@ -98,14 +116,14 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 		INSERT INTO gitlab_task_mrs (
 			id, task_id, repository_id, host, project_path, mr_iid, mr_url, mr_title,
 			head_branch, base_branch, author_username, state, approval_state, pipeline_state,
-			merge_status, draft, approval_count, required_approvals, unresolved_threads,
-			discussion_count, pipeline_jobs_total, pipeline_jobs_pass,
+			merge_status, draft, approval_count, required_approvals,
+			pipeline_jobs_total, pipeline_jobs_pass,
 			created_at, merged_at, closed_at, last_synced_at, updated_at
 		) VALUES (
 			:id, :task_id, :repository_id, :host, :project_path, :mr_iid, :mr_url, :mr_title,
 			:head_branch, :base_branch, :author_username, :state, :approval_state, :pipeline_state,
-			:merge_status, :draft, :approval_count, :required_approvals, :unresolved_threads,
-			:discussion_count, :pipeline_jobs_total, :pipeline_jobs_pass,
+			:merge_status, :draft, :approval_count, :required_approvals,
+			:pipeline_jobs_total, :pipeline_jobs_pass,
 			:created_at, :merged_at, :closed_at, :last_synced_at, :updated_at
 		)`, tm)
 	return err
@@ -120,7 +138,6 @@ func (s *Store) updateTaskMR(ctx context.Context, tm *TaskMR) error {
 			approval_state = :approval_state, pipeline_state = :pipeline_state,
 			merge_status = :merge_status, draft = :draft,
 			approval_count = :approval_count, required_approvals = :required_approvals,
-			unresolved_threads = :unresolved_threads, discussion_count = :discussion_count,
 			pipeline_jobs_total = :pipeline_jobs_total, pipeline_jobs_pass = :pipeline_jobs_pass,
 			merged_at = :merged_at, closed_at = :closed_at,
 			last_synced_at = :last_synced_at, updated_at = :updated_at
@@ -131,7 +148,7 @@ func (s *Store) updateTaskMR(ctx context.Context, tm *TaskMR) error {
 func (s *Store) findTaskMR(ctx context.Context, taskID, repositoryID, projectPath string, iid int) (*TaskMR, error) {
 	var tm TaskMR
 	err := s.ro.GetContext(ctx, &tm,
-		`SELECT * FROM gitlab_task_mrs
+		`SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs
 		 WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?
 		 LIMIT 1`, taskID, repositoryID, projectPath, iid)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -147,7 +164,8 @@ func (s *Store) findTaskMR(ctx context.Context, taskID, repositoryID, projectPat
 func (s *Store) ListTaskMRsByTask(ctx context.Context, taskID string) ([]*TaskMR, error) {
 	var mrs []TaskMR
 	if err := s.ro.SelectContext(ctx, &mrs,
-		`SELECT * FROM gitlab_task_mrs WHERE task_id = ? ORDER BY created_at ASC`, taskID); err != nil {
+		`SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs
+		 WHERE task_id = ? ORDER BY created_at ASC`, taskID); err != nil {
 		return nil, err
 	}
 	out := make([]*TaskMR, 0, len(mrs))
@@ -163,7 +181,7 @@ func (s *Store) ListTaskMRsByTask(ctx context.Context, taskID string) ([]*TaskMR
 func (s *Store) ListTaskMRsByWorkspaceID(ctx context.Context, workspaceID string) (map[string][]*TaskMR, error) {
 	var mrs []TaskMR
 	if err := s.ro.SelectContext(ctx, &mrs,
-		`SELECT gtm.* FROM gitlab_task_mrs gtm
+		`SELECT `+taskMRSelectColsQualified+` FROM gitlab_task_mrs gtm
 		 INNER JOIN tasks t ON gtm.task_id = t.id
 		 WHERE t.workspace_id = ?
 		 ORDER BY gtm.created_at ASC`, workspaceID); err != nil {

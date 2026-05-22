@@ -13,12 +13,18 @@ import type { TaskMR } from "@/lib/types/gitlab";
  */
 export function useWorkspaceMRs(workspaceId: string | null) {
   const setTaskMRs = useAppStore((state) => state.setTaskMRs);
+  const resetTaskMRs = useAppStore((state) => state.resetTaskMRs);
   const fetchedRef = useRef<string | null>(null);
   const requestRef = useRef(0);
 
   useEffect(() => {
     if (!workspaceId) {
+      // Invalidate any in-flight request and clear the cached MRs so a
+      // workspace switch / sign-out doesn't leave the previous workspace's
+      // MRs visible until the next fetch.
+      requestRef.current += 1;
       fetchedRef.current = null;
+      resetTaskMRs();
       return;
     }
     if (fetchedRef.current === workspaceId) return;
@@ -34,7 +40,7 @@ export function useWorkspaceMRs(workspaceId: string | null) {
           fetchedRef.current = null; // allow retry on failure
         }
       });
-  }, [workspaceId, setTaskMRs]);
+  }, [workspaceId, setTaskMRs, resetTaskMRs]);
 }
 
 // Stable empty array so the zustand selector output stays referentially
@@ -60,7 +66,9 @@ export function useGitLabAvailable(): boolean {
   useEffect(() => {
     let cancelled = false;
     const probe = () => {
-      fetchGitLabStatus({ init: { cache: "no-store" } })
+      // `cache` MUST be top-level — fetchJson reads options.cache directly
+      // and overwrites init.cache with undefined. See lib/api/client.ts.
+      fetchGitLabStatus({ cache: "no-store" })
         .then((s) => {
           if (!cancelled) setAvailable(Boolean(s?.authenticated || s?.token_configured));
         })
