@@ -7,6 +7,7 @@ header = """# Changelog
 All notable changes to Kandev.\n
 """
 body = """
+{# Update when team changes — must match GitHub login (lowercased). Check repo admins at https://github.com/orgs/kdlbs/people #}\
 {% set maintainers = ["carlosflorencio", "jcfs", "zeval", "nnobre"] %}\
 {% if version %}\
 ## {{ version | trim_start_matches(pat="v") }} - {{ timestamp | date(format="%Y-%m-%d") }}
