@@ -48,7 +48,7 @@
  *
  *   Other
  *     [ws:connection]         WS hook mount + status transitions
- *     [dockview:*]            layout restore / save / env-switch / session-tabs
+ *     [dockview:*]            layout restore / save / env-switch / session-tabs / task-select
  *     [messages:*]            message fetch / process / lazyload
  *     [session:env-mapping]   session → environment ID mapping
  *

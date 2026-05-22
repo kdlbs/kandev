@@ -82,7 +82,7 @@ export function setupChatPanelSafetyNet(
         // If all sessions were deleted, leave the layout empty — the user
         // can create a new session via the "+" menu.
         if (!activeSessionId) {
-          debug("setupChatPanelSafetyNet: skip recreate (no active session)");
+          if (IS_DEBUG) debug("setupChatPanelSafetyNet: skip recreate (no active session)");
           return;
         }
         // Don't recreate a panel for a session that no longer exists in the
@@ -461,7 +461,8 @@ function shouldSkipPanelEnsure(
     return true;
   }
   if (!prepareLayoutForSessionPanels(api)) {
-    debug("useAutoSessionTab: skip body (maximized - panels suppressed)", { effectiveSessionId });
+    if (IS_DEBUG)
+      debug("useAutoSessionTab: skip body (maximized - panels suppressed)", { effectiveSessionId });
     createdSet.add(effectiveSessionId);
     return true;
   }
@@ -502,7 +503,7 @@ function runAutoSessionTabEffect(
   );
 
   if (!effectiveSessionId) {
-    debug("useAutoSessionTab: no effectiveSessionId, returning");
+    if (IS_DEBUG) debug("useAutoSessionTab: no effectiveSessionId, returning");
     return;
   }
 
