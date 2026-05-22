@@ -76,3 +76,32 @@ func TestGetAgent_ExcludesWorkspaceScopedProfiles(t *testing.T) {
 		t.Errorf("expected p-global, got %q", got.Profiles[0].ID)
 	}
 }
+
+func TestUpdateAgent_ExcludesWorkspaceScopedProfiles(t *testing.T) {
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "claude-acp"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	st.profiles[agent.ID] = []*models.AgentProfile{
+		{ID: "p-global", AgentID: agent.ID, Name: "Sonnet", WorkspaceID: ""},
+		{ID: "p-office", AgentID: agent.ID, Name: "CEO", WorkspaceID: "ws-1"},
+	}
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	ctrl := &Controller{
+		repo:          st,
+		agentRegistry: registry.NewRegistry(log),
+		logger:        log,
+	}
+
+	got, err := ctrl.UpdateAgent(context.Background(), UpdateAgentRequest{ID: "agent-1"})
+	if err != nil {
+		t.Fatalf("UpdateAgent: %v", err)
+	}
+	if len(got.Profiles) != 1 {
+		t.Fatalf("expected 1 profile after filtering office row, got %d", len(got.Profiles))
+	}
+	if got.Profiles[0].ID != "p-global" {
+		t.Errorf("expected p-global, got %q", got.Profiles[0].ID)
+	}
+}

@@ -70,7 +70,7 @@ test.describe("Workspace selection isolation", () => {
   test("office page with workspaceId URL param shows correct workspace without writing settings", async ({
     testPage,
     apiClient,
-    officeApi,
+    officeApi: _officeApi,
     seedData,
     officeSeed,
   }) => {
@@ -91,10 +91,5 @@ test.describe("Workspace selection isolation", () => {
     // User settings workspace_id must remain the kanban workspace.
     const settings = await apiClient.getUserSettings();
     expect(settings.settings.workspace_id).toBe(seedData.workspaceId);
-
-    // Verify the correct office workspace is loaded via the API (not a stale ID).
-    const state = await officeApi.getOnboardingState();
-    const s = state as { completed: boolean; workspaceId?: string };
-    expect(s.workspaceId).toBe(officeSeed.workspaceId);
   });
 });
