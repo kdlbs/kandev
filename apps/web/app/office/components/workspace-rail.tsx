@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useCallback } from "react";
 import { IconPlus, IconArrowLeft } from "@tabler/icons-react";
 import Link from "next/link";
 import { Button } from "@kandev/ui/button";
@@ -56,10 +57,14 @@ export function WorkspaceRail({
   const items = storeWorkspaces.items.length > 0 ? storeWorkspaces.items : ssrWorkspaces;
   const activeId = storeWorkspaces.activeId ?? ssrActiveId;
 
-  const handleSelect = (id: string) => {
-    setActiveWorkspace(id);
-    router.push(`/office?workspaceId=${id}`);
-  };
+  const handleSelect = useCallback(
+    (id: string) => {
+      document.cookie = `office-active-workspace=${id}; path=/; max-age=86400; samesite=strict; secure`;
+      setActiveWorkspace(id);
+      router.push(`/office?workspaceId=${id}`);
+    },
+    [setActiveWorkspace, router],
+  );
 
   return (
     <div className="w-[60px] h-full border-r border-border bg-background flex flex-col items-center py-3 shrink-0">
