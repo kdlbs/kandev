@@ -74,6 +74,7 @@ import {
   type PreviewViewMode,
   type PreviewDevicePreset,
   type ConnectionState,
+  type SystemSliceActions,
 } from "./slices";
 import type {
   AvailableCommand,
@@ -205,23 +206,8 @@ export type AppState = {
   automations: (typeof defaultAutomationsState)["automations"];
   automationRuns: (typeof defaultAutomationsState)["automationRuns"];
 
-  // System slice
+  // System slice (actions merged via SystemSliceActions intersection on AppState)
   system: (typeof defaultSystemState)["system"];
-  setSystemInfo: (info: NonNullable<(typeof defaultSystemState)["system"]["info"]>) => void;
-  setSystemDiskUsage: (
-    usage: NonNullable<(typeof defaultSystemState)["system"]["diskUsage"]>,
-  ) => void;
-  setSystemDatabase: (
-    stats: NonNullable<(typeof defaultSystemState)["system"]["database"]>,
-  ) => void;
-  setSystemBackups: (items: (typeof defaultSystemState)["system"]["backups"]["items"]) => void;
-  setSystemLogs: (files: (typeof defaultSystemState)["system"]["logs"]["files"]) => void;
-  setSystemLogTail: (lines: string[]) => void;
-  setSystemUpdates: (
-    updates: NonNullable<(typeof defaultSystemState)["system"]["updates"]>,
-  ) => void;
-  upsertSystemJob: (job: (typeof defaultSystemState)["system"]["jobs"][string]) => void;
-  clearSystemJob: (jobId: string) => void;
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
@@ -559,7 +545,7 @@ export type AppState = {
   setRunAttempts: (runId: string, attempts: RouteAttempt[]) => void;
   appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
-};
+} & SystemSliceActions;
 
 export function createAppStore(initialState?: Partial<AppState>) {
   const merged = mergeInitialState(initialState);
