@@ -203,6 +203,12 @@ function replaceStaleSessionPanels(api: DockviewApi, keepSessionId: string | nul
   //   - no keepSessionId (sessionless task)
   //   - the active session panel already exists in the layout
   //   - the stale's group is missing from the live api (defensive)
+  //
+  // Limitation: if the saved layout had stale sessions in multiple groups
+  // (rare — requires multi-session contamination across env boundaries),
+  // only the first stale's group keeps its siblings. Sessions in other
+  // groups still close, orphaning anything co-tabbed with them. One active
+  // session can only re-anchor one group.
   if (keepSessionId && keepId && !api.getPanel(keepId) && stale.length > 0) {
     const first = stale[0];
     const groupId = first.group.id;

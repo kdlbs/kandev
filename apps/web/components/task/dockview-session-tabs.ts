@@ -250,6 +250,12 @@ function resolveInitialPosition(api: DockviewApi): AddPanelOptions["position"] {
   const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
   if (centerGroupExists) return { referenceGroup: centerGroupId };
   const anchorGroupId = findSessionAnchorGroupId(api);
+  // index:0 matches the project's session-on-the-left convention (agent tab
+  // first, pr-detail/etc. to the right). Worth noting: if a user had
+  // rearranged a previous layout to put pr-detail first, that ordering is
+  // lost here — but the alternative (appending) would put the agent tab
+  // to the right of pr-detail, which contradicts the default placement
+  // every other code path produces. Pick the consistent default.
   if (anchorGroupId) return { referenceGroup: anchorGroupId, index: 0 };
   const sb = api.getPanel("sidebar");
   if (sb) return { direction: "right" as const, referencePanel: "sidebar" };
