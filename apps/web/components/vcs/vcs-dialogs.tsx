@@ -61,15 +61,15 @@ type FileSummary = { count: number; additions: number; deletions: number };
 
 /**
  * Counts files for the commit dialog summary.
- * - When `stageAll=true` (the default), include every file (staged + unstaged)
- *   because the commit op stages them all before committing.
- * - When `stageAll=false`, count only staged files — those are the only files
- *   the commit will actually include. Counting all here would over-state what
- *   the commit produces and surprise the user post-commit.
+ * - When `stageAll=true`, include every file (staged + unstaged) because the
+ *   commit op stages them all before committing.
+ * - When `stageAll=false` (the default), count only staged files — those are
+ *   the only files the commit will actually include. Counting all here would
+ *   over-state what the commit produces and surprise the user post-commit.
  */
 function computeFileSummary(
   files: Record<string, FileInfo> | undefined,
-  stageAll: boolean = true,
+  stageAll: boolean = false,
 ): FileSummary {
   if (!files) return { count: 0, additions: 0, deletions: 0 };
   const considered = (Object.values(files) as FileInfo[]).filter((f) => stageAll || f.staged);
@@ -337,12 +337,12 @@ function useCommitDialogState(): UseCommitDialogReturn {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [body, setBody] = useState("");
-  const [stageAll, setStageAll] = useState(true);
+  const [stageAll, setStageAll] = useState(false);
   const [repo, setRepo] = useState("");
   const openDialog = useCallback((nextRepo?: string) => {
     setMessage("");
     setBody("");
-    setStageAll(true);
+    setStageAll(false);
     // Defensive: callers binding `openDialog` directly to onClick can leak the
     // React MouseEvent into nextRepo. Only accept actual repo strings.
     setRepo(typeof nextRepo === "string" ? nextRepo : "");

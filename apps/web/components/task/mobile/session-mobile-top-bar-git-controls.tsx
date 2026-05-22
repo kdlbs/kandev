@@ -98,13 +98,13 @@ function useCommitDialogForm(
 ) {
   const [commitMessage, setCommitMessage] = useState("");
   const [commitBody, setCommitBody] = useState("");
-  const [stageAll, setStageAll] = useState(true);
+  const [stageAll, setStageAll] = useState(false);
 
   const handleOpen = (isOpen: boolean) => {
     if (isOpen) {
       setCommitMessage("");
       setCommitBody("");
-      setStageAll(true);
+      setStageAll(false);
     }
     onOpenChange(isOpen);
   };
