@@ -423,7 +423,7 @@ function ensureSiblingPanels(
   const created: string[] = [];
   for (const sid of currentSessionIds) {
     if (sid === effectiveSessionId) continue;
-    if (!api.getPanel(`session:${sid}`)) created.push(sid);
+    if (IS_DEBUG && !api.getPanel(`session:${sid}`)) created.push(sid);
     ensureSessionPanel(api, sid, siblingAnchor, true, createdSet);
   }
   return created;
