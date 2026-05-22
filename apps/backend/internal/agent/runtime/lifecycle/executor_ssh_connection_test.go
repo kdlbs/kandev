@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/agent/agents"
 )
 
 func TestResolveSSHTarget_ExplicitFields(t *testing.T) {
@@ -225,6 +227,56 @@ func TestParseProxyJumpHostPort(t *testing.T) {
 					c.in, host, port, ok, c.wantHost, c.wantPort, c.wantOK)
 			}
 		})
+	}
+}
+
+// noInstallScriptAgent is a minimal agentIdentity stub for cases where we
+// want to assert behavior with InstallScript() returning empty / Name()
+// returning empty. The real agents.Agent interface is large; this satisfies
+// only the slice formatMissingAgentBinaryError reads.
+type noInstallScriptAgent struct {
+	id   string
+	name string
+}
+
+func (a *noInstallScriptAgent) ID() string            { return a.id }
+func (a *noInstallScriptAgent) Name() string          { return a.name }
+func (a *noInstallScriptAgent) InstallScript() string { return "" }
+
+func TestFormatMissingAgentBinaryError_WithInstallScript(t *testing.T) {
+	// MockAgent advertises a deterministic InstallScript so e2e + this test
+	// can both pin the "install hint" branch without depending on real CLIs.
+	ag := agents.NewMockAgent()
+	got := formatMissingAgentBinaryError(ag, "npx")
+	for _, want := range []string{
+		"Mock Agent", // ag.Name() — must surface so users see which agent is missing
+		`"npx"`,      // the binary we probed
+		"$PATH",      // tells them where we looked
+		"Install hint",
+		ag.InstallScript(), // the actual command they should run
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("formatMissingAgentBinaryError(...): missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestFormatMissingAgentBinaryError_NoInstallScriptOmitsHintBlock(t *testing.T) {
+	ag := &noInstallScriptAgent{name: "PhantomAgent"}
+	got := formatMissingAgentBinaryError(ag, "phantom")
+	if strings.Contains(got, "Install hint") {
+		t.Errorf("expected no Install hint block when InstallScript() is empty, got %q", got)
+	}
+	if !strings.Contains(got, "PhantomAgent") || !strings.Contains(got, `"phantom"`) {
+		t.Errorf("expected agent name + binary in message, got %q", got)
+	}
+}
+
+func TestFormatMissingAgentBinaryError_FallsBackToIDWhenNameEmpty(t *testing.T) {
+	ag := &noInstallScriptAgent{id: "fallback-id"}
+	got := formatMissingAgentBinaryError(ag, "fallback-bin")
+	if !strings.Contains(got, "fallback-id") {
+		t.Errorf("expected ID fallback in message when Name() is empty, got %q", got)
 	}
 }
 

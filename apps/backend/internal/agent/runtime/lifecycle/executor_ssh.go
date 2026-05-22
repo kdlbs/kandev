@@ -5,15 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 )
@@ -185,6 +188,10 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 
 	agentctlBin, err := r.prepareRemoteHost(ctx, client, req)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := r.preflightAgentBinary(ctx, client, req); err != nil {
 		return nil, err
 	}
 
@@ -541,6 +548,68 @@ func (r *SSHExecutor) maybeUploadCredentials(_ context.Context, _ *ssh.Client, r
 		zap.String("task_id", req.TaskID),
 		zap.String("session_id", req.SessionID),
 	)
+}
+
+// preflightAgentBinary probes the remote for the agent's required binary
+// before we provision the per-session agentctl. Without this, a remote that
+// lacks (say) `npx` surfaces the failure deep inside agentctl as an opaque
+// `exec: "npx": executable file not found in $PATH` once the agent process
+// actually tries to spawn — long after a successful "Starting agent
+// controller" step, which reads as "everything is fine".
+//
+// We extract the binary by calling BuildCommand with Runtime=ssh — that
+// returns the exact command the lifecycle will eventually ship to agentctl.
+// The first token is the binary; we shell out to POSIX `command -v` on the
+// remote and treat empty stdout as "missing". On miss we surface the
+// agent's name + InstallScript() so the error is actionable in the UI.
+func (r *SSHExecutor) preflightAgentBinary(ctx context.Context, client *ssh.Client, req *ExecutorCreateRequest) error {
+	if req.AgentConfig == nil {
+		return nil
+	}
+	cmd := req.AgentConfig.BuildCommand(agents.CommandOptions{Runtime: agentruntime.RuntimeSSH})
+	args := cmd.Args()
+	if len(args) == 0 {
+		return nil
+	}
+	binary := args[0]
+	stepName := "Verifying agent binary"
+	probe := "command -v " + shellQuote(binary) + " 2>/dev/null || true"
+	out, _, err := runSSHCommand(ctx, client, probe)
+	if err != nil {
+		r.report(req.OnProgress, stepName, PrepareStepFailed, err.Error())
+		return fmt.Errorf("ssh: probe %s on remote: %w", binary, err)
+	}
+	if strings.TrimSpace(out) == "" {
+		msg := formatMissingAgentBinaryError(req.AgentConfig, binary)
+		r.report(req.OnProgress, stepName, PrepareStepFailed, msg)
+		return errors.New(msg)
+	}
+	r.report(req.OnProgress, stepName, PrepareStepCompleted, strings.TrimSpace(out))
+	return nil
+}
+
+// agentIdentity is the slice of agents.Agent that formatMissingAgentBinaryError
+// reads. Narrowing the parameter keeps the helper trivially testable without a
+// dependency on the full Agent interface or a stub for every method on it.
+type agentIdentity interface {
+	ID() string
+	Name() string
+	InstallScript() string
+}
+
+// formatMissingAgentBinaryError builds the user-facing message we surface
+// when the agent's first command-line token isn't on the remote's $PATH.
+// Pulled out so unit tests can pin the contract without a real SSH client.
+func formatMissingAgentBinaryError(ag agentIdentity, binary string) string {
+	name := ag.Name()
+	if name == "" {
+		name = ag.ID()
+	}
+	msg := fmt.Sprintf("%s requires %q on the remote host, but it was not found in $PATH", name, binary)
+	if install := strings.TrimSpace(ag.InstallScript()); install != "" {
+		msg += "\n\nInstall hint (run on the remote):\n  " + install
+	}
+	return msg
 }
 
 // sshTaskDirName builds a stable per-task remote directory name. Prefers an
