@@ -89,7 +89,7 @@ function SessionTabItem({
         onContextMenu={tab.onContextMenu}
         onDoubleClick={tab.onDoubleClick}
         className={
-          tab.className +
+          (tab.className ?? "") +
           " group relative py-1 cursor-pointer rounded-sm " +
           (tab.truncate === false ? "max-w-[200px]" : "max-w-[120px]")
         }

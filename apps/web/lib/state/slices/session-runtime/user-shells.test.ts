@@ -3,21 +3,9 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSessionRuntimeSlice } from "./session-runtime-slice";
 import type { SessionRuntimeSlice, UserShellInfo } from "./types";
-import type { StateCreator } from "zustand";
-
-type SliceCreator = StateCreator<
-  SessionRuntimeSlice,
-  [["zustand/immer", never]],
-  [],
-  SessionRuntimeSlice
->;
 
 function makeStore() {
-  return create<SessionRuntimeSlice>()(
-    immer<SessionRuntimeSlice>((set, get, store) =>
-      (createSessionRuntimeSlice as unknown as SliceCreator)(set, get, store),
-    ),
-  );
+  return create<SessionRuntimeSlice>()(immer<SessionRuntimeSlice>(createSessionRuntimeSlice));
 }
 
 const ENV = "env-1";

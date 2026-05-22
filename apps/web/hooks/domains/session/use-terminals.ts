@@ -503,21 +503,32 @@ function useTerminalActions({
    * X-button close. For ordinary terminals this PARKS the tab (PTY keeps
    * running, user can resume from the "Parked terminals" submenu). For
    * scripts and any non-ordinary terminal it falls back to destroy.
+   *
+   * The local tab is removed only AFTER the backend call resolves — that
+   * way a transient failure (network, backend 500) leaves the tab on the
+   * strip rather than disappearing into thin air. The next `user_shell.list`
+   * poll then reflects whatever state the backend actually settled on.
    */
   const handleCloseTab = useCallback(
     (event: MouseEvent, terminalId: string) => {
       event.preventDefault();
       event.stopPropagation();
+      if (!environmentId) return;
       const term = terminals.find((t) => t.id === terminalId);
       const isOrdinaryTab = term?.kind === "ordinary";
-      removeTerminal(terminalId);
-      if (isOrdinaryTab && environmentId) {
+      if (isOrdinaryTab) {
         parkUserShell(terminalId)
-          .then(() => updateUserShell(environmentId, terminalId, { state: "parked" }))
+          .then(() => {
+            updateUserShell(environmentId, terminalId, { state: "parked" });
+            removeTerminal(terminalId);
+          })
           .catch((error) => console.error("Failed to park terminal:", error));
-      } else if (environmentId) {
+      } else {
         destroyUserShell(environmentId, terminalId)
-          .then(() => removeUserShellStore(environmentId, terminalId))
+          .then(() => {
+            removeUserShellStore(environmentId, terminalId);
+            removeTerminal(terminalId);
+          })
           .catch((error) => console.error("Failed to destroy terminal:", error));
       }
     },
