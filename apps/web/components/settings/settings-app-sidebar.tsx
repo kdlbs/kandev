@@ -21,6 +21,7 @@ import {
   IconArrowsShuffle,
   IconTicket,
   IconPlugConnected,
+  IconBolt,
 } from "@tabler/icons-react";
 import {
   Sidebar,
@@ -345,6 +346,23 @@ export function SettingsAppSidebar() {
                 </SidebarMenuItem>
 
                 <ExecutorsSidebarSection pathname={pathname} executors={executors} />
+
+                {/* Automations */}
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={
+                      pathname.startsWith("/settings/automations") ||
+                      pathname.includes("/automations")
+                    }
+                  >
+                    <Link href="/settings/automations">
+                      <IconBolt className="h-4 w-4" />
+                      <span>Automations</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
                 <SecretsSidebarSection pathname={pathname} />
 
                 {/* External MCP */}

@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -103,18 +104,25 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		taskSvc.SetRemoteBranchLister(githubBranchListerAdapter{svc: githubSvc})
 	}
 
+	// Initialize Automation service
+	automationComponents, automationErr := automation.Provide(dbPool.Writer(), dbPool.Reader(), eventBus, githubSvc, log)
+	if automationErr != nil {
+		log.Warn("Automation service initialization failed (non-fatal)", zap.Error(automationErr))
+	}
+
 	return &Services{
-		Task:     taskSvc,
-		User:     userSvc,
-		Editor:   editorSvc,
-		Prompts:  promptSvc,
-		Utility:  utilitySvc,
-		Workflow: workflowSvc,
-		GitHub:   githubSvc,
-		Jira:     jiraSvc,
-		Linear:   linearSvc,
-		Slack:    slackSvc,
-		Share:    shareHTTP,
+		Task:       taskSvc,
+		User:       userSvc,
+		Editor:     editorSvc,
+		Prompts:    promptSvc,
+		Utility:    utilitySvc,
+		Workflow:   workflowSvc,
+		GitHub:     githubSvc,
+		Jira:       jiraSvc,
+		Linear:     linearSvc,
+		Slack:      slackSvc,
+		Share:      shareHTTP,
+		Automation: automationComponents,
 		// Office is constructed later in initOfficeServices once all
 		// of its dependencies (config loader, task integrations, etc.) are available.
 		Office: nil,

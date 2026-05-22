@@ -22,6 +22,7 @@ import type {
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
 import type * as UISliceTypes from "./slices/ui/types";
+import type { Automation, AutomationRun } from "@/lib/types/automation";
 import { mergeInitialState } from "./default-state";
 import {
   createKanbanSlice,
@@ -35,6 +36,7 @@ import {
   createLinearSlice,
   createOfficeSlice,
   createFeaturesSlice,
+  createAutomationsSlice,
   defaultKanbanState,
   defaultWorkspaceState,
   defaultSettingsState,
@@ -46,6 +48,7 @@ import {
   defaultLinearState,
   defaultOfficeState,
   defaultFeaturesState,
+  defaultAutomationsState,
   type WorkspaceState,
   type WorkflowsState,
   type ExecutorsState,
@@ -196,6 +199,10 @@ export type AppState = {
   features: (typeof defaultFeaturesState)["features"];
   setFeatures: (features: (typeof defaultFeaturesState)["features"]) => void;
 
+  // Automations slice
+  automations: (typeof defaultAutomationsState)["automations"];
+  automationRuns: (typeof defaultAutomationsState)["automationRuns"];
+
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
   rightPanel: (typeof defaultUIState)["rightPanel"];
@@ -254,6 +261,15 @@ export type AppState = {
   updateLinearIssueWatch: (watch: LinearIssueWatch) => void;
   removeLinearIssueWatch: (id: string) => void;
   resetLinearIssueWatches: () => void;
+
+  // Automations actions
+  setAutomations: (items: Automation[]) => void;
+  setAutomationsLoading: (loading: boolean) => void;
+  addAutomation: (automation: Automation) => void;
+  updateAutomation: (automation: Automation) => void;
+  removeAutomation: (id: string) => void;
+  setAutomationRuns: (automationId: string, runs: AutomationRun[]) => void;
+  setAutomationRunsLoading: (automationId: string, loading: boolean) => void;
 
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
@@ -525,8 +541,6 @@ export type AppState = {
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
 };
 
-export type AppStore = ReturnType<typeof createAppStore>;
-
 export function createAppStore(initialState?: Partial<AppState>) {
   const merged = mergeInitialState(initialState);
 
@@ -556,6 +570,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       ...createFeaturesSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createUISlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createAutomationsSlice(set as any, get as any, api as any),
       // Override state with merged initial state
       kanban: merged.kanban,
       kanbanMulti: merged.kanbanMulti,
@@ -610,6 +626,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       linearIssueWatches: merged.linearIssueWatches,
       office: merged.office,
       features: merged.features,
+      automations: merged.automations,
+      automationRuns: merged.automationRuns,
       previewPanel: merged.previewPanel,
       rightPanel: merged.rightPanel,
       diffs: merged.diffs,

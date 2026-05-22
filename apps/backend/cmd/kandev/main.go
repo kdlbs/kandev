@@ -467,6 +467,17 @@ func startAgentInfrastructure(
 		addCleanup(func() error { slackTrigger.Stop(); return nil })
 	}
 
+	// Wire automation service into orchestrator for trigger-based task creation.
+	// The Automation subsystem is independent of the Office feature flag — it
+	// has its own cron scheduler, GitHub poller, and webhook handler, and
+	// creates tasks via the task service directly.
+	if services.Automation != nil {
+		orchestratorSvc.SetAutomationService(services.Automation.Service)
+		services.Automation.Start(ctx)
+		addCleanup(func() error { services.Automation.Stop(); return nil })
+		log.Info("Automation scheduler and evaluator started")
+	}
+
 	return startGatewayAndServe(ctx, cfg, log, eventBus, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath, addCleanup, runCleanups)
 }

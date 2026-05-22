@@ -30,6 +30,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	analyticshandlers "github.com/kandev/kandev/internal/analytics/handlers"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -731,6 +732,11 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered Slack handlers (HTTP + WebSocket)")
 	}
 
+	if p.services.Automation != nil {
+		automation.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Automation.Service, p.log)
+		p.log.Debug("Registered Automation handlers (HTTP + WebSocket)")
+	}
+
 	docker.RegisterDockerRoutes(p.router, p.lifecycleMgr.DockerClientProvider(), dockerTaskTitleProvider(p.taskRepo, p.log), p.log)
 	p.log.Debug("Registered Docker management handlers (HTTP)")
 
@@ -747,7 +753,11 @@ func registerSecondaryRoutes(
 
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService, handoffSvc)
 
-	registerE2EResetRoutes(p.router, p.taskRepo, p.taskSvc, p.log)
+	var automationSvc *automation.Service
+	if p.services.Automation != nil {
+		automationSvc = p.services.Automation.Service
+	}
+	registerE2EResetRoutes(p.router, p.taskRepo, p.taskSvc, automationSvc, p.log)
 
 	if officetestharness.Enabled() {
 		var officeAgentSvc *officeagents.AgentService

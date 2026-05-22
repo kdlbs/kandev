@@ -3,6 +3,7 @@ package main
 import (
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
+	"github.com/kandev/kandev/internal/automation"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
 	"github.com/kandev/kandev/internal/github"
@@ -65,4 +66,8 @@ type Services struct {
 	// WorktreeMgr is the worktree manager. Exposed so the office GC can
 	// consult it as the authoritative inventory of live worktrees.
 	WorktreeMgr *worktree.Manager
+	// Automation is the trigger-based automation subsystem (cron, GitHub PR
+	// events, webhooks). Independent of Office — has its own scheduler and
+	// creates tasks via the task service.
+	Automation *automation.Components
 }
