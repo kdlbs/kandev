@@ -24,7 +24,17 @@ import { useUserShells } from "@/hooks/domains/session/use-user-shells";
  *   (sets state=open) and opens a new dockview panel for the PTY.
  * - Hidden when there are no managed terminals for the env.
  */
-export function TerminalReopenMenuItems({ groupId }: { groupId: string }) {
+export function TerminalReopenMenuItems({
+  groupId,
+  onNewTerminal,
+}: {
+  groupId: string;
+  /**
+   * Click handler for the leading "New Terminal" item rendered as the
+   * first row under the section label. Omit to hide the row.
+   */
+  onNewTerminal?: () => void;
+}) {
   const environmentId = useEnvironmentId();
   const taskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
   // useUserShells fetches the list into the Zustand store the first time
@@ -70,11 +80,25 @@ export function TerminalReopenMenuItems({ groupId }: { groupId: string }) {
     [api, addTerminalPanel, environmentId, taskID, updateUserShell, groupId],
   );
 
-  if (ordinary.length === 0) return null;
+  // Show the section header + the New Terminal row whenever onNewTerminal
+  // is supplied, even if no ordinary terminals exist yet. This puts the
+  // create action under the section label (matching the Agents pattern).
+  if (ordinary.length === 0 && !onNewTerminal) return null;
 
   return (
     <>
       <DropdownMenuLabel className="text-xs text-muted-foreground">Terminals</DropdownMenuLabel>
+      {onNewTerminal && (
+        <DropdownMenuItem
+          onClick={onNewTerminal}
+          className="cursor-pointer text-xs gap-1.5"
+          data-testid="new-terminal-button"
+        >
+          <span className="w-5 shrink-0" aria-hidden="true" />
+          <IconTerminal2 className="h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1 truncate">New Terminal</span>
+        </DropdownMenuItem>
+      )}
       {ordinary
         .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
         .map((shell) => {

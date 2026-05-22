@@ -7,10 +7,8 @@ import {
   IconFolder,
   IconGitBranch,
   IconGitPullRequest,
-  IconMessagePlus,
-  IconTerminal2,
 } from "@tabler/icons-react";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@kandev/ui/dropdown-menu";
+import { DropdownMenuItem } from "@kandev/ui/dropdown-menu";
 import { prPanelLabel } from "@/components/github/pr-utils";
 import { prTaskKey } from "@/components/github/pr-detail-panel";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -60,24 +58,13 @@ export function AddPanelMenuItems({
   return (
     <>
       {state.taskId && (
-        <>
-          <DropdownMenuItem
-            onClick={onNewSession}
-            className={MENU_ITEM_CLASS}
-            data-testid="new-session-button"
-          >
-            <IconMessagePlus className={MENU_ICON_CLASS} />
-            New Agent
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <SessionReopenMenuItems taskId={state.taskId} groupId={groupId} />
-        </>
+        <SessionReopenMenuItems
+          taskId={state.taskId}
+          groupId={groupId}
+          onNewSession={onNewSession}
+        />
       )}
-      <DropdownMenuItem onClick={onAddTerminal} className={MENU_ITEM_CLASS}>
-        <IconTerminal2 className={MENU_ICON_CLASS} />
-        New Terminal
-      </DropdownMenuItem>
-      <TerminalReopenMenuItems groupId={groupId} />
+      <TerminalReopenMenuItems groupId={groupId} onNewTerminal={onAddTerminal} />
       <DropdownMenuItem
         onClick={() => addBrowserPanel(undefined, groupId)}
         className={MENU_ITEM_CLASS}
