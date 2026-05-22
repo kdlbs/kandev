@@ -187,23 +187,35 @@ type Backend interface {
 
 ### Share URL format
 
-The user-facing share URL routes through **gistpreview.github.io** — a
-static GitHub-Pages renderer that fetches the gist via the GitHub API and
-injects the HTML client-side. We use it instead of raw.githack.com because
-raw.githack shows a "One more step" anti-phishing interstitial on HTML
-files served from gists.
+The user-facing share URL routes through **gist.githack.com** — a
+Cloudflare-backed CDN that proxies the gist's raw file content directly.
 
-Format: `https://gistpreview.github.io/?<gist_id>/share.html`
+We initially shipped via `gistpreview.github.io` (a static GitHub-Pages
+renderer that fetches gists through the public GitHub API), but the gists
+API returns `content: ""` for any file past GitHub's per-response content
+budget (~1 MB combined across files). For non-trivial sessions, the
+generated `share.html` lands past that budget, and gistpreview renders a
+blank page. githack proxies the raw HTML directly, so even multi-megabyte
+share.html renders correctly.
 
-The `/share.html` suffix is required: gistpreview's file picker defaults
-to the first iterated file (alphabetically `README.md` in our gists), so
-without an explicit filename the page renders raw markdown instead of the
-styled HTML.
+The trade-off is that githack shows a one-time anti-phishing interstitial
+the first time a user visits any githack URL on a given device — accepted
+as the price of fidelity for big tasks.
 
-`displayURL` on the API layer normalises every legacy URL format
-(`gist.github.com/<owner>/<id>`, `gist.githack.com/<owner>/<id>/raw/share.html`,
-or a gistpreview URL missing the filename) to the canonical
-gistpreview-with-share.html form on every response.
+Format: `https://gist.githack.com/<owner>/<id>/raw/share.html`
+
+The `/raw/share.html` suffix is required: githack can't pick a default
+file without an explicit path.
+
+`displayURL` on the API layer normalises stored URL formats to the
+canonical githack-with-share.html form on every response:
+
+- `gist.github.com/<owner>/<id>` → githack
+- `gist.githack.com/<owner>/<id>` (no filename) → re-pinned to `/raw/share.html`
+- Legacy `gistpreview.github.io/?<id>/share.html` → passed through
+  unchanged. The owner is not recoverable from a gistpreview URL, so we
+  cannot auto-upgrade. Users can revoke + re-share to get a githack URL
+  for those rows.
 
 ## State machine
 

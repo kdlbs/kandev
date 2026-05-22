@@ -45,7 +45,7 @@ func TestBuildGistREADME_FullConversation(t *testing.T) {
 		Redaction: RedactionLog{AppliedRules: []string{RuleAbsPath}},
 	}
 
-	md := BuildGistREADME(snap, "https://gistpreview.github.io/?mock-gist-1/share.html")
+	md := BuildGistREADME(snap, "https://gist.githack.com/jane/mock-gist-1/raw/share.html")
 	assertContains(t, md, "# Investigate flaky test")
 	assertContains(t, md, "<kbd>claude-acp</kbd>")
 	assertContains(t, md, "<kbd>claude-opus-4-7</kbd>")
@@ -76,7 +76,7 @@ func TestBuildGistREADME_NilAndEmpty(t *testing.T) {
 		t.Fatal("nil snapshot should still produce a non-empty README")
 	}
 	empty := &Snapshot{Task: TaskMeta{Title: "Untitled"}}
-	got := BuildGistREADME(empty, "https://gistpreview.github.io/?g1/share.html")
+	got := BuildGistREADME(empty, "https://gist.githack.com/jane/g1/raw/share.html")
 	if !strings.Contains(got, "_(No messages.)_") {
 		t.Fatalf("expected empty-messages placeholder, got: %s", got)
 	}
