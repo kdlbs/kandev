@@ -364,7 +364,8 @@ function useArchiveActions(store: StoreApi) {
 
   const handleArchiveTask = useCallback(
     (taskId: string) => {
-      const task = findTaskInSnapshots(taskId, store.getState().kanbanMulti.snapshots);
+      const state = store.getState();
+      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
       setArchivingTask({ id: taskId, title: task?.title ?? "this task" });
     },
     [store],
@@ -396,7 +397,8 @@ function useDeleteActions(
 
   const handleDeleteTask = useCallback(
     (taskId: string) => {
-      const task = findTaskInSnapshots(taskId, store.getState().kanbanMulti.snapshots);
+      const state = store.getState();
+      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
       setDeletingTask({ id: taskId, title: task?.title ?? "this task" });
     },
     [store],
@@ -448,7 +450,8 @@ function useSidebarActions(store: StoreApi) {
 
   const handleSelectTask = useCallback(
     (taskId: string) => {
-      const task = findTaskInSnapshots(taskId, store.getState().kanbanMulti.snapshots);
+      const state = store.getState();
+      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
       selectTaskWithLayout({
         taskId,
         task: task ?? undefined,
