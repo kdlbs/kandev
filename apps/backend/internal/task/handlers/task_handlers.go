@@ -21,6 +21,10 @@ type handlerRepo interface {
 	DeleteSessionFileReviews(ctx context.Context, sessionID string) error
 	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
 	CountToolCallMessagesBySession(ctx context.Context, sessionIDs []string) (map[string]int, error)
+	// ListChildren returns the direct, non-archived, non-ephemeral
+	// subtasks of parentID. Used by httpTaskSubtaskCount to drive the
+	// "Also archive/delete subtasks" checkbox in the frontend dialog.
+	ListChildren(ctx context.Context, parentID string) ([]*models.Task, error)
 }
 
 type TaskHandlers struct {
@@ -91,6 +95,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.DELETE("/tasks/:id", h.httpDeleteTask)
 	api.POST("/tasks/:id/archive", h.httpArchiveTask)
 	api.POST("/tasks/:id/unarchive", h.httpUnarchiveTask)
+	api.GET("/tasks/:id/subtask-count", h.httpTaskSubtaskCount)
 
 	api.POST("/tasks/bulk-move", h.httpBulkMoveTasks)
 	api.GET("/workflows/:id/task-count", h.httpGetWorkflowTaskCount)

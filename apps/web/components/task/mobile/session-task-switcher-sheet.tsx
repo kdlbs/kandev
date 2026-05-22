@@ -148,8 +148,9 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
           if (!open) actions.setArchivingTask(null);
         }}
         taskTitle={actions.archivingTask?.title ?? ""}
+        taskId={actions.archivingTask?.id}
         isArchiving={actions.isArchiving}
-        onConfirm={actions.handleArchiveConfirm}
+        onConfirm={({ cascade }) => actions.handleArchiveConfirm({ cascade })}
       />
       <TaskDeleteConfirmDialog
         open={actions.deletingTask !== null}
@@ -157,8 +158,9 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
           if (!open) actions.setDeletingTask(null);
         }}
         taskTitle={actions.deletingTask?.title ?? ""}
+        taskId={actions.deletingTask?.id}
         isDeleting={actions.isDeleting}
-        onConfirm={actions.handleDeleteConfirm}
+        onConfirm={({ cascade }) => actions.handleDeleteConfirm({ cascade })}
       />
     </Sheet>
   );

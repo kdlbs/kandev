@@ -940,11 +940,12 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	deleteCtx, cancel := context.WithTimeout(context.Background(), constants.TaskDeleteTimeout)
 	defer cancel()
 	taskID := c.Param("id")
+	cascade := cascadeQueryParam(c)
 	// Office task-handoffs phase 6: route through HandoffService.DeleteTaskTree
 	// when wired so descendant runs are cancelled, group memberships are
 	// released with reason=deleted, and the cleanup state machine fires.
 	if h.handoffSvc != nil {
-		if _, err := h.handoffSvc.DeleteTaskTree(deleteCtx, taskID); err != nil {
+		if _, err := h.handoffSvc.DeleteTaskTree(deleteCtx, taskID, cascade); err != nil {
 			handleNotFound(c, h.logger, err, "task not deleted")
 			return
 		}
@@ -960,13 +961,14 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 
 func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
 	taskID := c.Param("id")
+	cascade := cascadeQueryParam(c)
 	// Office task-handoffs phase 6: when a HandoffService is wired,
 	// archive the whole subtree under a single cascade ID so
 	// descendants get tagged for scoped unarchive AND workspace-group
 	// memberships are released. When HandoffService is unconfigured
 	// (legacy / tests) fall back to the single-task path.
 	if h.handoffSvc != nil {
-		if _, err := h.handoffSvc.ArchiveTaskTree(c.Request.Context(), taskID); err != nil {
+		if _, err := h.handoffSvc.ArchiveTaskTree(c.Request.Context(), taskID, cascade); err != nil {
 			handleNotFound(c, h.logger, err, "task not archived")
 			return
 		}
@@ -978,6 +980,26 @@ func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
+}
+
+// cascadeQueryParam returns whether the archive/delete request asked to
+// cascade into subtasks. Default is false — subtasks are preserved
+// unless the client explicitly opts in via ?cascade=true.
+func cascadeQueryParam(c *gin.Context) bool {
+	return strings.EqualFold(c.Query("cascade"), "true")
+}
+
+// httpTaskSubtaskCount returns the count of direct, non-archived,
+// non-ephemeral subtasks for a task. Used by the frontend's archive /
+// delete confirmation dialogs to decide whether to render the
+// "Also archive/delete subtasks" checkbox.
+func (h *TaskHandlers) httpTaskSubtaskCount(c *gin.Context) {
+	children, err := h.repo.ListChildren(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"count": len(children)})
 }
 
 // httpUnarchiveTask routes through HandoffService.UnarchiveTaskTree so

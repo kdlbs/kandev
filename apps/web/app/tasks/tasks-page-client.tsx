@@ -87,9 +87,9 @@ function useTaskOperations({
   ]);
 
   const handleArchive = useCallback(
-    async (taskId: string) => {
+    async (taskId: string, opts?: { cascade?: boolean }) => {
       try {
-        await archiveTask(taskId);
+        await archiveTask(taskId, opts);
         toast({ title: "Task archived", description: "The task has been archived successfully." });
         fetchTasks();
       } catch (err) {
@@ -104,10 +104,10 @@ function useTaskOperations({
   );
 
   const handleDelete = useCallback(
-    async (taskId: string) => {
+    async (taskId: string, opts?: { cascade?: boolean }) => {
       setDeletingTaskId(taskId);
       try {
-        await deleteTask(taskId);
+        await deleteTask(taskId, opts);
         fetchTasks();
       } catch (err) {
         toast({

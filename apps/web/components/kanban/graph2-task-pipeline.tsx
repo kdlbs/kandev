@@ -43,8 +43,8 @@ export type Graph2TaskPipelineProps = {
   onMoveTask: (task: Task, targetStepId: string) => void;
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
-  onDeleteTask: (task: Task) => void;
-  onArchiveTask?: (task: Task) => void;
+  onDeleteTask: (task: Task, opts?: { cascade?: boolean }) => void;
+  onArchiveTask?: (task: Task, opts?: { cascade?: boolean }) => void;
   isMoving?: boolean;
   isDeleting?: boolean;
   isArchiving?: boolean;
@@ -164,15 +164,17 @@ function TaskActions({
         open={showDeleteConfirm}
         onOpenChange={setShowDeleteConfirm}
         taskTitle={task.title}
+        taskId={task.id}
         isDeleting={isDeleting}
-        onConfirm={() => onDeleteTask(task)}
+        onConfirm={({ cascade }) => onDeleteTask(task, { cascade })}
       />
       <TaskArchiveConfirmDialog
         open={showArchiveConfirm}
         onOpenChange={setShowArchiveConfirm}
         taskTitle={task.title}
+        taskId={task.id}
         isArchiving={isArchiving}
-        onConfirm={() => onArchiveTask?.(task)}
+        onConfirm={({ cascade }) => onArchiveTask?.(task, { cascade })}
       />
     </>
   );

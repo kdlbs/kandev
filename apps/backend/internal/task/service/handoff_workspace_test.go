@@ -237,6 +237,26 @@ func (f *fakeTaskRepo) ListChildren(_ context.Context, parentID string) ([]*mode
 	return out, nil
 }
 
+// ReparentDirectChildren mirrors the sqlite impl: every child of
+// oldParentID is updated to point at newParentID. Used by the
+// no-cascade delete tests to verify children are orphaned to root
+// rather than left dangling.
+func (f *fakeTaskRepo) ReparentDirectChildren(_ context.Context, oldParentID, newParentID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ids := f.children[oldParentID]
+	delete(f.children, oldParentID)
+	for _, id := range ids {
+		if t, ok := f.tasks[id]; ok {
+			t.ParentID = newParentID
+		}
+		if newParentID != "" {
+			f.children[newParentID] = append(f.children[newParentID], id)
+		}
+	}
+	return nil
+}
+
 func (f *fakeTaskRepo) ListChildrenIncludingArchived(_ context.Context, parentID string) ([]*models.Task, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -276,6 +296,9 @@ func (r *phase4TaskRepo) ListChildren(ctx context.Context, parentID string) ([]*
 }
 func (r *phase4TaskRepo) ListChildrenIncludingArchived(ctx context.Context, parentID string) ([]*models.Task, error) {
 	return r.base.ListChildrenIncludingArchived(ctx, parentID)
+}
+func (r *phase4TaskRepo) ReparentDirectChildren(ctx context.Context, oldParentID, newParentID string) error {
+	return r.base.ReparentDirectChildren(ctx, oldParentID, newParentID)
 }
 
 // All other TaskRepository methods panic — the AttachWorkspacePolicy

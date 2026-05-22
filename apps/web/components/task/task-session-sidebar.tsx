@@ -430,18 +430,21 @@ function useArchiveActions(store: StoreApi) {
     [store],
   );
 
-  const handleArchiveConfirm = useCallback(async () => {
-    if (!archivingTask) return;
-    setIsArchiving(true);
-    try {
-      await archiveAndSwitch(archivingTask.id);
-    } catch (error) {
-      console.error("Failed to archive task:", error);
-    } finally {
-      setIsArchiving(false);
-      setArchivingTask(null);
-    }
-  }, [archivingTask, archiveAndSwitch]);
+  const handleArchiveConfirm = useCallback(
+    async (opts: { cascade: boolean }) => {
+      if (!archivingTask) return;
+      setIsArchiving(true);
+      try {
+        await archiveAndSwitch(archivingTask.id, opts);
+      } catch (error) {
+        console.error("Failed to archive task:", error);
+      } finally {
+        setIsArchiving(false);
+        setArchivingTask(null);
+      }
+    },
+    [archivingTask, archiveAndSwitch],
+  );
 
   return { archivingTask, setArchivingTask, isArchiving, handleArchiveTask, handleArchiveConfirm };
 }
@@ -462,22 +465,25 @@ function useDeleteActions(
     [store],
   );
 
-  const handleDeleteConfirm = useCallback(async () => {
-    if (!deletingTask || isDeleting) return;
-    const taskId = deletingTask.id;
-    setIsDeleting(true);
-    const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
-      store.getState().tasks;
-    try {
-      await deleteTaskById(taskId);
-      await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
-    } catch (error) {
-      console.error("Failed to delete task:", error);
-    } finally {
-      setIsDeleting(false);
-      setDeletingTask(null);
-    }
-  }, [deletingTask, isDeleting, deleteTaskById, removeTaskFromBoard, store]);
+  const handleDeleteConfirm = useCallback(
+    async (opts: { cascade: boolean }) => {
+      if (!deletingTask || isDeleting) return;
+      const taskId = deletingTask.id;
+      setIsDeleting(true);
+      const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
+        store.getState().tasks;
+      try {
+        await deleteTaskById(taskId, opts);
+        await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
+      } catch (error) {
+        console.error("Failed to delete task:", error);
+      } finally {
+        setIsDeleting(false);
+        setDeletingTask(null);
+      }
+    },
+    [deletingTask, isDeleting, deleteTaskById, removeTaskFromBoard, store],
+  );
 
   const deletingTaskId = isDeleting ? (deletingTask?.id ?? null) : null;
 
