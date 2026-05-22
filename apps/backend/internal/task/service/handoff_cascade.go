@@ -257,40 +257,9 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 	cascadeID := uuid.New().String()
 	out := &CascadeOutcome{CascadeID: cascadeID}
 
-	var all []string
-	if cascade {
-		// Delete must walk archived descendants too: a parent with
-		// already-archived children must remove every row, not just the
-		// non-archived ones (post-review #4).
-		descendants, err := s.collectTaskTreeIncludingArchived(ctx, rootID)
-		if err != nil {
-			return nil, err
-		}
-		all = descendants
-	} else {
-		// Reparent direct children (archived or not) to root so the
-		// soon-deleted parent_id pointer doesn't dangle. This MUST
-		// succeed before we touch the parent row — continuing past a
-		// reparent error would leave children pointing at a row we're
-		// about to delete, exactly the dangling-pointer state the
-		// no-cascade path is designed to avoid.
-		//
-		// Capture the affected children BEFORE the update so we can
-		// publish task.updated for each one after the row change — WS
-		// clients (kanban, sidebar) cache parent_id and would otherwise
-		// keep displaying the children nested under the deleted parent
-		// until a full reload.
-		children, err := s.tasks.ListChildrenIncludingArchived(ctx, rootID)
-		if err != nil {
-			return nil, fmt.Errorf("list direct children of %s: %w", rootID, err)
-		}
-		if err := s.tasks.ReparentDirectChildren(ctx, rootID, ""); err != nil {
-			return nil, fmt.Errorf("reparent direct children of %s: %w", rootID, err)
-		}
-		for _, c := range children {
-			s.publishUpdatedTask(ctx, c.ID)
-		}
-		all = []string{rootID}
+	all, err := s.resolveDeleteSet(ctx, rootID, cascade)
+	if err != nil {
+		return nil, err
 	}
 
 	s.cancelActiveRuns(ctx, all, "task tree deleted")
@@ -423,6 +392,42 @@ func (s *HandoffService) UnarchiveTaskTree(ctx context.Context, rootID string) (
 		s.restoreCleanedGroups(ctx, ids)
 	}
 	return out, nil
+}
+
+// resolveDeleteSet returns the set of task IDs DeleteTaskTree should
+// remove. When cascade is true that's the full descendant tree
+// (including archived rows). When cascade is false it's just rootID,
+// and the helper first reparents direct children to root so the
+// soon-deleted parent_id pointer doesn't dangle, then publishes a
+// task.updated event for each reparented child so WS-driven clients
+// refresh their cached parent_id.
+func (s *HandoffService) resolveDeleteSet(ctx context.Context, rootID string, cascade bool) ([]string, error) {
+	if cascade {
+		// Delete must walk archived descendants too: a parent with
+		// already-archived children must remove every row, not just
+		// the non-archived ones (post-review #4).
+		return s.collectTaskTreeIncludingArchived(ctx, rootID)
+	}
+	// Capture the affected children BEFORE the update so we can
+	// publish task.updated for each one after the row change —
+	// clients (kanban, sidebar) cache parent_id and would otherwise
+	// keep displaying the children nested under the deleted parent
+	// until a full reload.
+	children, err := s.tasks.ListChildrenIncludingArchived(ctx, rootID)
+	if err != nil {
+		return nil, fmt.Errorf("list direct children of %s: %w", rootID, err)
+	}
+	// Reparent MUST succeed before we touch the parent row —
+	// continuing past a reparent error would leave children pointing
+	// at a row we're about to delete, exactly the dangling-pointer
+	// state the no-cascade path is designed to avoid.
+	if err := s.tasks.ReparentDirectChildren(ctx, rootID, ""); err != nil {
+		return nil, fmt.Errorf("reparent direct children of %s: %w", rootID, err)
+	}
+	for _, c := range children {
+		s.publishUpdatedTask(ctx, c.ID)
+	}
+	return []string{rootID}, nil
 }
 
 // collectTaskTree returns rootID followed by every NON-ARCHIVED

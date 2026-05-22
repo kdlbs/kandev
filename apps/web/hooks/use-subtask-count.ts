@@ -31,15 +31,14 @@ export function useSubtaskCount(open: boolean, taskId?: string, taskIds?: string
     if (!idsKey) return;
     const ids = taskIds ?? (taskId ? [taskId] : []);
     let cancelled = false;
-    Promise.all(ids.map((id) => getSubtaskCount(id).catch(() => ({ count: 0 }))))
-      .then((results) => {
+    // Per-id .catch already maps every failure to { count: 0 }, so
+    // Promise.all never rejects — no outer .catch needed.
+    Promise.all(ids.map((id) => getSubtaskCount(id).catch(() => ({ count: 0 })))).then(
+      (results) => {
         if (cancelled) return;
         setResult({ key: idsKey, total: results.reduce((sum, r) => sum + r.count, 0) });
-      })
-      .catch(() => {
-        // swallow — leaves prior result untouched; the key gate below
-        // still suppresses any leftover total.
-      });
+      },
+    );
     return () => {
       cancelled = true;
     };
