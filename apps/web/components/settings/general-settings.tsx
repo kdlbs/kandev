@@ -8,6 +8,7 @@ import {
   IconServer,
   IconKeyboard,
   IconTerminal2,
+  IconGitBranch,
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -109,6 +110,61 @@ function ChatSubmitKeyCard() {
             {userSettings.chatSubmitKey === "cmd_enter"
               ? "Press Cmd/Ctrl+Enter to send messages. Press Enter for newlines."
               : "Press Enter to send messages. Press Shift+Enter for newlines."}
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ChangesPanelLayoutCard() {
+  const userSettings = useAppStore((state) => state.userSettings);
+  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const storeApi = useAppStoreApi();
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleChange = async (value: "flat" | "tree") => {
+    if (isSaving) return;
+    setIsSaving(true);
+    const current = storeApi.getState().userSettings;
+    const previous = current.changesPanelLayout;
+    try {
+      setUserSettings({ ...current, changesPanelLayout: value });
+      await updateUserSettings({
+        workspace_id: current.workspaceId || "",
+        repository_ids: current.repositoryIds || [],
+        changes_panel_layout: value,
+      });
+    } catch {
+      setUserSettings({ ...storeApi.getState().userSettings, changesPanelLayout: previous });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Changes Panel Layout</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          <Label htmlFor="changes-panel-layout">File list view</Label>
+          <Select
+            value={userSettings.changesPanelLayout}
+            onValueChange={(v) => handleChange(v as "flat" | "tree")}
+            disabled={isSaving}
+          >
+            <SelectTrigger id="changes-panel-layout" data-testid="changes-panel-layout-select">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="flat">Flat list</SelectItem>
+              <SelectItem value="tree">Tree</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Display changed files as a flat list with full paths, or as a folder tree.
           </p>
         </div>
       </CardContent>
@@ -446,6 +502,16 @@ export function GeneralSettings() {
         description="Configure chat input behavior"
       >
         <ChatSubmitKeyCard />
+      </SettingsSection>
+
+      <Separator />
+
+      <SettingsSection
+        icon={<IconGitBranch className="h-5 w-5" />}
+        title="Changes Panel"
+        description="Customize how changed files are displayed"
+      >
+        <ChangesPanelLayoutCard />
       </SettingsSection>
 
       <Separator />

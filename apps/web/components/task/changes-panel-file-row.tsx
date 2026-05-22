@@ -52,6 +52,10 @@ type FileRowProps = {
   onUnstage: (path: string, repo?: string) => void;
   onDiscard: (path: string, repo?: string) => void;
   onEditFile: (path: string) => void;
+  /** Tree mode: skip the folder prefix in the label (depth is implied by indent). */
+  hideFolderPrefix?: boolean;
+  /** Tree mode: left padding in pixels driven by depth. */
+  indentPx?: number;
 };
 
 export function FileRow({
@@ -65,8 +69,11 @@ export function FileRow({
   onUnstage,
   onDiscard,
   onEditFile,
+  hideFolderPrefix,
+  indentPx,
 }: FileRowProps) {
   const { folder, file: name } = splitPath(file.path);
+  const showFolder = !hideFolderPrefix && folder;
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.button === 2) return;
@@ -94,7 +101,10 @@ export function FileRow({
       )}
       onClick={handleClick}
     >
-      <div className="flex items-center gap-2 min-w-0">
+      <div
+        className="flex items-center gap-2 min-w-0"
+        style={indentPx ? { paddingLeft: indentPx } : undefined}
+      >
         <StageButton
           isPending={isPending}
           staged={file.staged}
@@ -105,7 +115,7 @@ export function FileRow({
         />
         <button type="button" className="min-w-0 text-left cursor-pointer" title={file.path}>
           <p className="flex text-foreground text-xs min-w-0">
-            {folder && (
+            {showFolder && (
               <span className="text-foreground/60 truncate min-w-0 [flex-shrink:9999]">
                 {folder}/
               </span>

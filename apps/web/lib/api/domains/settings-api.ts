@@ -51,6 +51,7 @@ export async function updateUserSettings(
     terminal_link_behavior?: "new_tab" | "browser_panel";
     terminal_font_family?: string;
     terminal_font_size?: number;
+    changes_panel_layout?: "flat" | "tree";
   },
   options?: ApiRequestOptions,
 ) {

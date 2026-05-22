@@ -161,6 +161,7 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		"terminal_link_behavior":          settings.TerminalLinkBehavior,
 		"terminal_font_family":            settings.TerminalFontFamily,
 		"terminal_font_size":              settings.TerminalFontSize,
+		"changes_panel_layout":            settings.ChangesPanelLayout,
 	})
 	if err != nil {
 		return err
@@ -205,6 +206,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ChatSubmitKey = "cmd_enter"
 		settings.KeyboardShortcuts = map[string]interface{}{}
 		settings.TerminalLinkBehavior = "new_tab"
+		settings.ChangesPanelLayout = "flat"
 		settings.SidebarViews = []models.SidebarView{}
 		return settings, nil
 	}
@@ -232,6 +234,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		TerminalLinkBehavior        string                            `json:"terminal_link_behavior"`
 		TerminalFontFamily          string                            `json:"terminal_font_family"`
 		TerminalFontSize            int                               `json:"terminal_font_size"`
+		ChangesPanelLayout          string                            `json:"changes_panel_layout"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -291,5 +294,10 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	settings.TerminalFontFamily = payload.TerminalFontFamily
 	settings.TerminalFontSize = payload.TerminalFontSize
+	if payload.ChangesPanelLayout != "" {
+		settings.ChangesPanelLayout = payload.ChangesPanelLayout
+	} else {
+		settings.ChangesPanelLayout = "flat"
+	}
 	return settings, nil
 }

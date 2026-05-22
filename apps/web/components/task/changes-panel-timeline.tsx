@@ -7,7 +7,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { FileInfo } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useAppStore } from "@/components/state-provider";
 import { FileRow, BulkActionBar } from "./changes-panel-file-row";
+import { ChangesTree, RepoTreeGroup } from "./changes-panel-tree";
 import { type CommitItem } from "./commit-row";
 import { groupByRepositoryName, isSingleRepoGroup } from "@/lib/group-by-repo";
 import {
@@ -279,6 +281,7 @@ function FileListBody(props: FileListBodyProps) {
   // in two repos will light up both rows. Matches existing routing limit noted
   // in FileRowProps comments.
   const activeFilePath = useDockviewStore((s) => s.activeFilePath);
+  const layout = useAppStore((s) => s.userSettings.changesPanelLayout);
   const groups = useMemo(() => groupByRepositoryName(files, (f) => f.repositoryName), [files]);
   // Per-repo collapsed state: keyed by repositoryName. Default expanded;
   // setting an entry to true collapses that group. Persists across re-renders
@@ -312,6 +315,47 @@ function FileListBody(props: FileListBodyProps) {
   // Single-repo: drop the per-repo sub-header. The action buttons (Stage all
   // / Commit / Unstage all) move up to the section header — see FileListSection.
   const isSingleRepo = isSingleRepoGroup(groups);
+
+  if (layout === "tree") {
+    return (
+      <div tabIndex={-1} onKeyDown={props.onKeyDown}>
+        {isSingleRepo ? (
+          <ChangesTree
+            files={groups[0].items}
+            pendingStageFiles={pendingStageFiles}
+            onOpenDiff={props.onOpenDiff}
+            onEditFile={props.onEditFile}
+            onStage={props.onStage}
+            onUnstage={props.onUnstage}
+            onDiscard={props.onDiscard}
+            variant={variant}
+          />
+        ) : (
+          groups.map((group) => (
+            <RepoTreeGroup
+              key={group.repositoryName || "__no_repo__"}
+              variant={variant}
+              repositoryName={group.repositoryName}
+              displayName={props.repoDisplayName?.(group.repositoryName)}
+              files={group.items}
+              pendingStageFiles={pendingStageFiles}
+              collapsed={collapsedRepos.has(group.repositoryName)}
+              onToggle={() => toggleRepo(group.repositoryName)}
+              onOpenDiff={props.onOpenDiff}
+              onEditFile={props.onEditFile}
+              onStage={props.onStage}
+              onUnstage={props.onUnstage}
+              onDiscard={props.onDiscard}
+              primaryLabel={props.primaryLabel}
+              secondaryLabel={props.secondaryLabel}
+              onRepoAction={props.onRepoAction}
+              onRepoSecondaryAction={props.onRepoSecondaryAction}
+            />
+          ))
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>

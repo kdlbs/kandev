@@ -381,6 +381,7 @@ export type UserSettingsUpdatedPayload = {
   default_utility_agent_id?: string;
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminal_link_behavior?: string;
+  changes_panel_layout?: "flat" | "tree";
   updated_at?: string;
 };
 
