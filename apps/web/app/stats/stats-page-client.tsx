@@ -5,10 +5,11 @@ import { Button } from "@kandev/ui/button";
 import { PageTopbar } from "@/components/page-topbar";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import type { StatsResponse } from "@/lib/types/http";
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useReducer } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { IconChartBar } from "@tabler/icons-react";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { fetchStats } from "@/lib/api/domains/stats-api";
 import {
   OverviewCards,
   WorkloadSection,
@@ -22,37 +23,22 @@ import {
   CompletedTasksChart,
   MostProductiveSummary,
 } from "./stats-charts";
+import {
+  ActivitySkeleton,
+  ChartsSkeleton,
+  OverviewCardsSkeleton,
+  RepoLeadersSkeleton,
+  RepositoriesSkeleton,
+  TopRepositoriesSkeleton,
+  WorkloadSkeleton,
+} from "./stats-skeletons";
 import { PRStatsPanel } from "@/components/github/pr-stats";
 
 interface StatsPageClientProps {
-  stats: StatsResponse | null;
-  error: string | null;
   workspaceId?: string;
   activeRange?: RangeKey;
+  initialError?: string | null;
 }
-
-const EMPTY_STATS: StatsResponse = {
-  global: {
-    total_tasks: 0,
-    completed_tasks: 0,
-    in_progress_tasks: 0,
-    total_sessions: 0,
-    total_turns: 0,
-    total_messages: 0,
-    total_user_messages: 0,
-    total_tool_calls: 0,
-    total_duration_ms: 0,
-    avg_turns_per_task: 0,
-    avg_messages_per_task: 0,
-    avg_duration_ms_per_task: 0,
-  },
-  task_stats: [],
-  daily_activity: [],
-  completed_activity: [],
-  agent_usage: [],
-  repository_stats: [],
-  git_stats: { total_commits: 0, total_files_changed: 0, total_insertions: 0, total_deletions: 0 },
-};
 
 function formatDuration(ms: number): string {
   if (ms === 0) return "—";
@@ -91,19 +77,30 @@ function StatsEmptyState({ message }: { message: string }) {
 }
 
 type StatsHeaderProps = {
-  global: StatsResponse["global"];
+  global: StatsResponse["global"] | null;
   range: RangeKey;
   copied: boolean;
+  copyDisabled: boolean;
   onRangeChange: (r: RangeKey) => void;
   onCopy: () => void;
 };
 
-function StatsHeader({ global, range, copied, onRangeChange, onCopy }: StatsHeaderProps) {
+function StatsHeader({
+  global,
+  range,
+  copied,
+  copyDisabled,
+  onRangeChange,
+  onCopy,
+}: StatsHeaderProps) {
+  const subtitle = global
+    ? `${global.total_tasks} tasks · ${global.total_sessions} sessions · ${formatDuration(global.total_duration_ms)}`
+    : "Loading stats…";
   return (
     <PageTopbar
       title="Statistics"
       icon={<IconChartBar className="h-4 w-4" />}
-      subtitle={`${global.total_tasks} tasks · ${global.total_sessions} sessions · ${formatDuration(global.total_duration_ms)}`}
+      subtitle={subtitle}
       actions={
         <>
           <ToggleGroup
@@ -131,6 +128,7 @@ function StatsHeader({ global, range, copied, onRangeChange, onCopy }: StatsHead
             size="sm"
             className="h-7 px-2 text-xs cursor-pointer"
             onClick={onCopy}
+            disabled={copyDisabled}
           >
             {copied ? "Copied" : "Copy Stats"}
           </Button>
@@ -139,8 +137,6 @@ function StatsHeader({ global, range, copied, onRangeChange, onCopy }: StatsHead
     />
   );
 }
-
-type StatsContentProps = { resolvedStats: StatsResponse; rangeLabel: string; workspaceId?: string };
 
 function SectionDivider({ id, label }: { id: string; label: string }) {
   return (
@@ -151,17 +147,24 @@ function SectionDivider({ id, label }: { id: string; label: string }) {
   );
 }
 
-function TelemetrySection({
-  completedActivity,
-  dailyActivity,
-  agentUsage,
-  rangeLabel,
-}: {
-  completedActivity: StatsResponse["completed_activity"];
-  dailyActivity: StatsResponse["daily_activity"];
-  agentUsage: StatsResponse["agent_usage"];
+type TelemetrySectionProps = {
+  stats: StatsResponse | null;
   rangeLabel: string;
-}) {
+};
+
+function TelemetrySection({ stats, rangeLabel }: TelemetrySectionProps) {
+  if (!stats) {
+    return (
+      <>
+        <div id="completed" className="scroll-mt-24">
+          <ChartsSkeleton />
+        </div>
+        <div id="activity" className="scroll-mt-24">
+          <ActivitySkeleton />
+        </div>
+      </>
+    );
+  }
   return (
     <>
       <div id="completed" className="scroll-mt-24">
@@ -173,7 +176,7 @@ function TelemetrySection({
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <CompletedTasksChart completedActivity={completedActivity} />
+              <CompletedTasksChart completedActivity={stats.completed_activity} />
             </CardContent>
           </Card>
           <Card className="rounded-sm">
@@ -183,7 +186,7 @@ function TelemetrySection({
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <MostProductiveSummary completedActivity={completedActivity} />
+              <MostProductiveSummary completedActivity={stats.completed_activity} />
             </CardContent>
           </Card>
         </div>
@@ -196,7 +199,7 @@ function TelemetrySection({
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ActivityHeatmap dailyActivity={dailyActivity} />
+            <ActivityHeatmap dailyActivity={stats.daily_activity} />
           </CardContent>
         </Card>
         <Card className="rounded-sm">
@@ -204,7 +207,7 @@ function TelemetrySection({
             <CardTitle className="text-sm font-medium text-muted-foreground">Top Agents</CardTitle>
           </CardHeader>
           <CardContent>
-            <AgentUsageList agentUsage={agentUsage} />
+            <AgentUsageList agentUsage={stats.agent_usage} />
           </CardContent>
         </Card>
       </div>
@@ -212,62 +215,78 @@ function TelemetrySection({
   );
 }
 
-function StatsContent({ resolvedStats, rangeLabel, workspaceId }: StatsContentProps) {
-  const {
-    global,
-    task_stats,
-    completed_activity,
-    daily_activity,
-    agent_usage,
-    repository_stats,
-    git_stats,
-  } = resolvedStats;
+type StatsContentProps = {
+  stats: StatsResponse | null;
+  rangeLabel: string;
+  workspaceId?: string;
+  fetchError: string | null;
+};
+
+function StatsContent({ stats, rangeLabel, workspaceId, fetchError }: StatsContentProps) {
   return (
     <div className="flex-1 overflow-auto">
       <div className="max-w-7xl mx-auto p-6">
         <div className="space-y-5">
-          <OverviewCards global={global} git_stats={git_stats} />
+          {fetchError && (
+            <Card className="rounded-sm border-destructive/60">
+              <CardContent className="py-3 text-sm text-destructive">
+                Error loading stats: {fetchError}
+              </CardContent>
+            </Card>
+          )}
+          {stats ? (
+            <OverviewCards global={stats.global} git_stats={stats.git_stats} />
+          ) : (
+            <OverviewCardsSkeleton />
+          )}
           <SectionDivider id="telemetry" label="Telemetry" />
-          <TelemetrySection
-            completedActivity={completed_activity}
-            dailyActivity={daily_activity}
-            agentUsage={agent_usage}
-            rangeLabel={rangeLabel}
-          />
-          <Card id="repositories" className="rounded-sm scroll-mt-24">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Repository Activity
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <RepositoryStatsGrid repositoryStats={repository_stats} />
-            </CardContent>
-          </Card>
-          <Card className="rounded-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Top Repositories
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <TopRepositories repositoryStats={repository_stats} />
-            </CardContent>
-          </Card>
-          <Card className="rounded-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Repo Leaders
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <RepoLeaders repositoryStats={repository_stats} />
-            </CardContent>
-          </Card>
+          <TelemetrySection stats={stats} rangeLabel={rangeLabel} />
+          {stats ? (
+            <Card id="repositories" className="rounded-sm scroll-mt-24">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Repository Activity
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <RepositoryStatsGrid repositoryStats={stats.repository_stats} />
+              </CardContent>
+            </Card>
+          ) : (
+            <RepositoriesSkeleton />
+          )}
+          {stats ? (
+            <Card className="rounded-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Top Repositories
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <TopRepositories repositoryStats={stats.repository_stats} />
+              </CardContent>
+            </Card>
+          ) : (
+            <TopRepositoriesSkeleton />
+          )}
+          {stats ? (
+            <Card className="rounded-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Repo Leaders
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <RepoLeaders repositoryStats={stats.repository_stats} />
+              </CardContent>
+            </Card>
+          ) : (
+            <RepoLeadersSkeleton />
+          )}
           <SectionDivider id="github" label="GitHub" />
           <PRStatsPanel workspaceId={workspaceId ?? null} />
           <SectionDivider id="workload" label="Workload" />
-          <WorkloadSection task_stats={task_stats} />
+          {stats ? <WorkloadSection task_stats={stats.task_stats} /> : <WorkloadSkeleton />}
         </div>
       </div>
     </div>
@@ -303,59 +322,113 @@ function buildStatsSummary(
   ].join("\n");
 }
 
-export function StatsPageClient({ stats, error, workspaceId, activeRange }: StatsPageClientProps) {
+type StatsState = {
+  stats: StatsResponse | null;
+  loading: boolean;
+  error: string | null;
+};
+
+type StatsAction =
+  | { type: "fetch" }
+  | { type: "success"; stats: StatsResponse }
+  | { type: "failure"; error: string };
+
+function statsReducer(state: StatsState, action: StatsAction): StatsState {
+  switch (action.type) {
+    case "fetch":
+      return { stats: null, loading: true, error: null };
+    case "success":
+      return { stats: action.stats, loading: false, error: null };
+    case "failure":
+      return { stats: null, loading: false, error: action.error };
+  }
+}
+
+function useStatsData(workspaceId: string | undefined, range: RangeKey) {
+  const [state, dispatch] = useReducer(statsReducer, {
+    stats: null,
+    loading: Boolean(workspaceId),
+    error: null,
+  });
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    let cancelled = false;
+    dispatch({ type: "fetch" });
+    fetchStats(workspaceId, { cache: "no-store" }, range)
+      .then((data) => {
+        if (!cancelled) dispatch({ type: "success", stats: data });
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        const message = e instanceof Error ? e.message : "Failed to fetch stats";
+        dispatch({ type: "failure", error: message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, range]);
+
+  return state;
+}
+
+export function StatsPageClient({ workspaceId, activeRange, initialError }: StatsPageClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { copied, copy } = useCopyToClipboard();
   const range = (activeRange ?? "month") as RangeKey;
   const rangeLabel = getRangeLabel(range);
-  const resolvedStats = stats ?? EMPTY_STATS;
+
+  const { stats, error: fetchError } = useStatsData(workspaceId, range);
 
   const completedInRange = useMemo(
-    () =>
-      (resolvedStats.completed_activity ?? []).reduce((sum, item) => sum + item.completed_tasks, 0),
-    [resolvedStats.completed_activity],
+    () => (stats?.completed_activity ?? []).reduce((sum, item) => sum + item.completed_tasks, 0),
+    [stats?.completed_activity],
   );
   const statsSummary = useMemo(
-    () => buildStatsSummary(resolvedStats, rangeLabel, completedInRange),
-    [resolvedStats, rangeLabel, completedInRange],
+    () => (stats ? buildStatsSummary(stats, rangeLabel, completedInRange) : ""),
+    [stats, rangeLabel, completedInRange],
   );
 
-  if (!workspaceId) return <StatsEmptyState message="Select a workspace to view statistics." />;
-  if (error)
+  const handleCopyStats = useCallback(() => {
+    if (statsSummary) void copy(statsSummary);
+  }, [copy, statsSummary]);
+
+  const handleRangeChange = useCallback(
+    (nextRange: RangeKey) => {
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      params.set("range", nextRange);
+      router.push(`/stats?${params.toString()}`);
+    },
+    [router, searchParams],
+  );
+
+  if (initialError)
     return (
       <div className="h-screen w-full flex flex-col bg-background">
         <PageTopbar title="Statistics" icon={<IconChartBar className="h-4 w-4" />} />
         <div className="flex-1 flex items-center justify-center">
-          <p className="text-destructive">Error loading stats: {error}</p>
+          <p className="text-destructive">Error loading stats: {initialError}</p>
         </div>
       </div>
     );
-  if (!stats) return <StatsEmptyState message="No stats available." />;
-
-  const handleCopyStats = () => {
-    void copy(statsSummary);
-  };
-
-  const handleRangeChange = (nextRange: RangeKey) => {
-    const params = new URLSearchParams(searchParams?.toString() ?? "");
-    params.set("range", nextRange);
-    router.push(`/stats?${params.toString()}`);
-  };
+  if (!workspaceId) return <StatsEmptyState message="Select a workspace to view statistics." />;
 
   return (
     <div className="h-screen w-full flex flex-col bg-background">
       <StatsHeader
-        global={resolvedStats.global}
+        global={stats?.global ?? null}
         range={range}
         copied={copied}
+        copyDisabled={!stats}
         onRangeChange={handleRangeChange}
         onCopy={handleCopyStats}
       />
       <StatsContent
-        resolvedStats={resolvedStats}
+        stats={stats}
         rangeLabel={rangeLabel}
         workspaceId={workspaceId}
+        fetchError={fetchError}
       />
     </div>
   );
