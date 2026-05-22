@@ -26,14 +26,14 @@ func BuildShareHTML(snap *Snapshot) string {
 	b.WriteString("<!doctype html>\n<html lang=\"en\">\n")
 	writeHTMLHead(&b, snap)
 	b.WriteString("<body>\n")
-	// Inline the stylesheet at the top of <body> rather than in <head> so it
-	// survives renderers (notably gistpreview.github.io) that copy only the
-	// body content into their own page — dropping <head> and any <style> tags
-	// in it. <style> in <body> is non-conforming HTML but every browser
-	// applies it without complaint, and it's the standard workaround for
-	// gist-rendering services. We ALSO keep a <style> in head so direct
-	// raw-HTML viewers still get the styles via the normal path; the
-	// duplicate is harmless (CSS rules are idempotent).
+	// Duplicate the stylesheet at the top of <body> as defense-in-depth: some
+	// gist-rendering proxies copy only the body content into their own page,
+	// dropping <head> and any <style> tags it contains. gist.githack.com
+	// serves the raw file unchanged so <head> styles work, but we keep the
+	// inline copy in case we ever route through a body-only renderer (or one
+	// is added by a downstream embedder). <style> in <body> is non-conforming
+	// HTML but every browser applies it without complaint, and CSS rules are
+	// idempotent so the duplicate is harmless.
 	b.WriteString("<style>")
 	b.WriteString(shareCSS)
 	b.WriteString("</style>\n")

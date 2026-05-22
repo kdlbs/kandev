@@ -182,8 +182,10 @@ func TestRenderedURLForGist(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"authenticated_gist", "https://gist.github.com/jane/abc123", "https://gistpreview.github.io/?abc123/share.html"},
-		{"anonymous_gist", "https://gist.github.com/abc123", "https://gistpreview.github.io/?abc123/share.html"},
+		{"authenticated_gist", "https://gist.github.com/jane/abc123", "https://gist.githack.com/jane/abc123/raw/share.html"},
+		// Anonymous gists lack the owner segment githack needs to address the
+		// file; we return "" so callers fall back to whatever was stored.
+		{"anonymous_gist", "https://gist.github.com/abc123", ""},
 		{"wrong_host", "https://example.com/jane/abc123", ""},
 		{"empty", "", ""},
 	}
@@ -197,23 +199,25 @@ func TestRenderedURLForGist(t *testing.T) {
 	}
 }
 
-func TestGistIDFromGithackURL(t *testing.T) {
+func TestOwnerAndIDFromGithackURL(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name  string
-		input string
-		want  string
+		name      string
+		input     string
+		wantOwner string
+		wantID    string
 	}{
-		{"valid_legacy_url", "https://gist.githack.com/jane/abc123/raw/share.html", "abc123"},
-		{"wrong_host", "https://example.com/jane/abc123/raw/share.html", ""},
-		{"too_short", "https://gist.githack.com/jane", ""},
-		{"empty", "", ""},
+		{"valid_url", "https://gist.githack.com/jane/abc123/raw/share.html", "jane", "abc123"},
+		{"wrong_host", "https://example.com/jane/abc123/raw/share.html", "", ""},
+		{"too_short", "https://gist.githack.com/jane", "", ""},
+		{"empty", "", "", ""},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			if got := gistIDFromGithackURL(tc.input); got != tc.want {
-				t.Fatalf("got %q, want %q", got, tc.want)
+			owner, id := ownerAndIDFromGithackURL(tc.input)
+			if owner != tc.wantOwner || id != tc.wantID {
+				t.Fatalf("got (%q,%q), want (%q,%q)", owner, id, tc.wantOwner, tc.wantID)
 			}
 		})
 	}

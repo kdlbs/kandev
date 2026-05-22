@@ -52,9 +52,9 @@ func newGinRouter(h *HTTPHandlers) *gin.Engine {
 func TestHTTP_Create_HappyPath(t *testing.T) {
 	t.Parallel()
 	reader := completedSession()
-	// Real GistBackend returns the gistpreview.github.io rendered URL —
-	// match that shape so the test mirrors production.
-	backend := &mockBackend{nextID: "gist-x", nextURL: "https://gistpreview.github.io/?gist-x/share.html"}
+	// Real GistBackend returns the gist.githack.com rendered URL — match
+	// that shape so the test mirrors production.
+	backend := &mockBackend{nextID: "gist-x", nextURL: "https://gist.githack.com/jane/gist-x/raw/share.html"}
 	handlers, _ := newHandlersForTest(t, reader, backend, true)
 	router := newGinRouter(handlers)
 
@@ -69,7 +69,7 @@ func TestHTTP_Create_HappyPath(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body.URL != "https://gistpreview.github.io/?gist-x/share.html" {
+	if body.URL != "https://gist.githack.com/jane/gist-x/raw/share.html" {
 		t.Fatalf("unexpected url: %s", body.URL)
 	}
 }
@@ -201,22 +201,35 @@ func TestDisplayURL_NormalizesAllFormats(t *testing.T) {
 		want  string
 	}{
 		{
-			"bare_gist_url_old_share",
+			"bare_gist_url_converted_to_githack",
 			"https://gist.github.com/jane/abc123",
-			"https://gistpreview.github.io/?abc123/share.html",
-		},
-		{
-			"legacy_githack_url_gets_rewritten",
 			"https://gist.githack.com/jane/abc123/raw/share.html",
+		},
+		{
+			"githack_url_passthrough",
+			"https://gist.githack.com/jane/abc123/raw/share.html",
+			"https://gist.githack.com/jane/abc123/raw/share.html",
+		},
+		{
+			"githack_without_filename_repinned",
+			"https://gist.githack.com/jane/abc123",
+			"https://gist.githack.com/jane/abc123/raw/share.html",
+		},
+		{
+			// Legacy gistpreview rows (written before the githack switch)
+			// lack the owner segment we need to build a githack URL, so
+			// they pass through. Users on those rows still get a working
+			// link for small tasks; revoking + re-sharing surfaces the
+			// githack URL going forward.
+			"legacy_gistpreview_with_share_html_passthrough",
+			"https://gistpreview.github.io/?abc123/share.html",
 			"https://gistpreview.github.io/?abc123/share.html",
 		},
 		{
-			"already_gistpreview_with_share_html_passthrough",
-			"https://gistpreview.github.io/?abc123/share.html",
-			"https://gistpreview.github.io/?abc123/share.html",
-		},
-		{
-			"older_gistpreview_without_filename_repinned",
+			// Older gistpreview rows stored without /share.html still get
+			// re-pinned so gistpreview doesn't silently fall back to
+			// rendering README.md.
+			"legacy_gistpreview_without_filename_repinned",
 			"https://gistpreview.github.io/?abc123",
 			"https://gistpreview.github.io/?abc123/share.html",
 		},
@@ -248,13 +261,14 @@ func TestHTTP_List_NormalizesLegacyURLsOnDisplay(t *testing.T) {
 	handlers, svc := newHandlersForTest(t, reader, backend, true)
 	router := newGinRouter(handlers)
 
-	// Seed two legacy rows from earlier URL formats — the API should
-	// surface both as gistpreview URLs.
+	// Seed two legacy rows from earlier URL formats — bare gist and a
+	// githack URL with no filename pinned. Both should surface as the
+	// canonical /raw/share.html githack form.
 	for _, row := range []*Share{
 		{ID: "old-1", TaskSessionID: "s-1", Backend: BackendGitHubGist, ExternalID: "abc123",
 			ExternalURL: "https://gist.github.com/jane/abc123"},
 		{ID: "old-2", TaskSessionID: "s-1", Backend: BackendGitHubGist, ExternalID: "def456",
-			ExternalURL: "https://gist.githack.com/jane/def456/raw/share.html"},
+			ExternalURL: "https://gist.githack.com/jane/def456"},
 	} {
 		if err := svc.repo.Create(context.Background(), row); err != nil {
 			t.Fatalf("seed %s: %v", row.ID, err)
@@ -275,8 +289,9 @@ func TestHTTP_List_NormalizesLegacyURLsOnDisplay(t *testing.T) {
 		t.Fatalf("expected 2 shares, got %d", len(body.Shares))
 	}
 	for _, s := range body.Shares {
-		if !strings.HasPrefix(s.URL, "https://gistpreview.github.io/?") {
-			t.Fatalf("expected gistpreview URL, got %q", s.URL)
+		if !strings.HasSuffix(s.URL, "/raw/share.html") ||
+			!strings.HasPrefix(s.URL, "https://gist.githack.com/") {
+			t.Fatalf("expected gist.githack.com /raw/share.html URL, got %q", s.URL)
 		}
 	}
 }
