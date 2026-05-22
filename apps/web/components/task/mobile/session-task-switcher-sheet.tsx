@@ -6,6 +6,8 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Button } from "@kandev/ui/button";
 import { TaskSwitcher } from "../task-switcher";
 import type { TaskSwitcherItem } from "../task-switcher";
+import type { StepDef } from "../task-switcher-context-menu";
+import type { TaskMoveWorkflow } from "../task-move-context-menu";
 import { applyView } from "@/lib/sidebar/apply-view";
 import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-sidebar-view";
 import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
@@ -24,6 +26,8 @@ type SessionTaskSwitcherSheetProps = {
 
 function MobileTaskList({
   tasks,
+  workflows,
+  stepsByWorkflowId,
   activeTaskId,
   selectedTaskId,
   onSelectTask,
@@ -33,6 +37,8 @@ function MobileTaskList({
   isLoading,
 }: {
   tasks: TaskSwitcherItem[];
+  workflows: TaskMoveWorkflow[];
+  stepsByWorkflowId: Record<string, StepDef[]>;
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
@@ -62,6 +68,8 @@ function MobileTaskList({
   return (
     <TaskSwitcher
       grouped={grouped}
+      workflows={workflows}
+      stepsByWorkflowId={stepsByWorkflowId}
       activeTaskId={activeTaskId}
       selectedTaskId={selectedTaskId}
       onSelectTask={onSelectTask}
@@ -85,7 +93,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   workflowId,
 }: SessionTaskSwitcherSheetProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
-  const data = useSheetData(workspaceId, workflowId);
+  const data = useSheetData(workspaceId);
   const actions = useSheetActions(workspaceId, onOpenChange);
 
   return (
@@ -120,6 +128,8 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         <div className="flex-1 min-h-0 overflow-y-auto p-2">
           <MobileTaskList
             tasks={data.tasksWithRepositories}
+            workflows={data.workflows}
+            stepsByWorkflowId={data.stepsByWorkflowId}
             activeTaskId={data.activeTaskId}
             selectedTaskId={data.selectedTaskId}
             onSelectTask={actions.handleSelectTask}

@@ -18,11 +18,12 @@ import { MOCK_ITEMS, MOCK_SIDEBAR } from "./sidebar-mock-data";
 import { SidebarDialogs } from "./task-session-sidebar-dialogs";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
 import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-sidebar-view";
 import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { buildSwitchToSession, selectTaskWithLayout } from "./task-select-helpers";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -33,7 +34,6 @@ import {
   hasPendingClarificationForSession,
   hasPendingPermissionForSession,
 } from "@/lib/utils/pending-clarification";
-import { aggregateSidebarTasks } from "./task-session-sidebar-aggregate";
 
 /**
  * Stabilize a derived array of primary session IDs so the reference only
@@ -53,18 +53,6 @@ function useStablePrimarySessionIds(
     [allTasks],
   );
   return useMemo(() => (key ? key.split("\0") : []), [key]);
-}
-
-/** Find a task across all workflow snapshots */
-function findTaskInSnapshots(
-  snapshots: Record<string, { tasks: KanbanState["tasks"] }>,
-  taskId: string,
-): KanbanState["tasks"][number] | undefined {
-  for (const snapshot of Object.values(snapshots)) {
-    const task = snapshot.tasks.find((t: KanbanState["tasks"][number]) => t.id === taskId);
-    if (task) return task;
-  }
-  return undefined;
 }
 
 /** Look up git status directly via primarySessionId, bypassing the session list. */
@@ -223,51 +211,6 @@ function buildArchivedItem(s: ReturnType<typeof useArchivedTaskState>): SidebarI
   };
 }
 
-// Restrict snapshots and the active-kanban fallback to the current workspace.
-// Snapshots can briefly persist from a previously-active workspace (SSR
-// hydration on first sidebar mount, in-flight task.created WS events that
-// raced the workspace switch, etc.), and those would otherwise leak into
-// the sidebar after switching workspaces.
-function useScopedAggregation(workspaceId: string | null) {
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const workflows = useAppStore((state) => state.workflows.items);
-  const activeKanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
-  const activeKanbanTasks = useAppStore((state) => state.kanban.tasks);
-  const activeKanbanSteps = useAppStore((state) => state.kanban.steps);
-
-  const workspaceWorkflowIds = useMemo(
-    () =>
-      new Set(
-        workflows.filter((w) => !workspaceId || w.workspaceId === workspaceId).map((w) => w.id),
-      ),
-    [workflows, workspaceId],
-  );
-  const scopedSnapshots = useMemo(() => {
-    const result: typeof snapshots = {};
-    for (const [wfId, snap] of Object.entries(snapshots)) {
-      if (workspaceWorkflowIds.has(wfId)) result[wfId] = snap;
-    }
-    return result;
-  }, [snapshots, workspaceWorkflowIds]);
-  const fallbackWorkflowId =
-    activeKanbanWorkflowId && workspaceWorkflowIds.has(activeKanbanWorkflowId)
-      ? activeKanbanWorkflowId
-      : null;
-
-  const aggregated = useMemo(
-    () =>
-      aggregateSidebarTasks(
-        scopedSnapshots,
-        fallbackWorkflowId,
-        activeKanbanTasks,
-        activeKanbanSteps,
-      ),
-    [scopedSnapshots, fallbackWorkflowId, activeKanbanTasks, activeKanbanSteps],
-  );
-
-  return { aggregated, scopedSnapshots, snapshots };
-}
-
 function useSidebarData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
@@ -275,8 +218,6 @@ function useSidebarData(workspaceId: string | null) {
   const sessionsByTaskId = useAppStore((state) => state.taskSessionsByTask.itemsByTaskId);
   const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
   const envIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
-  const workflows = useAppStore((state) => state.workflows.items);
-  const isMultiLoading = useAppStore((state) => state.kanbanMulti.isLoading);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const taskPRsByTaskId = useAppStore((state) => state.taskPRs.byTaskId);
   const messagesBySession = useAppStore((state) => state.messages.bySession);
@@ -287,10 +228,13 @@ function useSidebarData(workspaceId: string | null) {
     return activeTaskId;
   }, [activeSessionId, activeTaskId, sessionsById]);
 
-  const { aggregated, scopedSnapshots, snapshots } = useScopedAggregation(workspaceId);
-  const { allTasks, allSteps, stepsByWorkflowId } = aggregated;
-
-  const isLoadingWorkflow = isMultiLoading && Object.keys(snapshots).length === 0;
+  const {
+    allTasks,
+    allSteps,
+    stepsByWorkflowId,
+    workflows,
+    isLoading: isLoadingWorkflow,
+  } = useWorkspaceSidebarTasks(workspaceId);
 
   const tasksWithRepositories = useMemo(() => {
     const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
@@ -303,9 +247,7 @@ function useSidebarData(workspaceId: string | null) {
       ]),
     );
     const titleById = new Map(allTasks.map((t) => [t.id, t.title]));
-    const workflowNameById = new Map(
-      Object.entries(scopedSnapshots).map(([wfId, snap]) => [wfId, snap.workflowName]),
-    );
+    const workflowNameById = new Map(workflows.map((w) => [w.id, w.name]));
     const stepTitleById = new Map(allSteps.map((s) => [s.id, s.title]));
     const mapCtx = {
       sessionsByTaskId,
@@ -331,7 +273,7 @@ function useSidebarData(workspaceId: string | null) {
     repositoriesByWorkspace,
     allTasks,
     allSteps,
-    scopedSnapshots,
+    workflows,
     workspaceId,
     sessionsByTaskId,
     gitStatusByEnvId,
@@ -353,9 +295,7 @@ function useSidebarData(workspaceId: string | null) {
     isLoadingWorkflow,
     tasksWithRepositories,
     primarySessionIds,
-    workflows: workflows
-      .filter((workflow) => !workspaceId || workflow.workspaceId === workspaceId)
-      .map((workflow) => ({ id: workflow.id, name: workflow.name, hidden: workflow.hidden })),
+    workflows,
   };
 }
 
@@ -424,7 +364,8 @@ function useArchiveActions(store: StoreApi) {
 
   const handleArchiveTask = useCallback(
     (taskId: string) => {
-      const task = findTaskInSnapshots(store.getState().kanbanMulti.snapshots, taskId);
+      const state = store.getState();
+      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
       setArchivingTask({ id: taskId, title: task?.title ?? "this task" });
     },
     [store],
@@ -459,7 +400,8 @@ function useDeleteActions(
 
   const handleDeleteTask = useCallback(
     (taskId: string) => {
-      const task = findTaskInSnapshots(store.getState().kanbanMulti.snapshots, taskId);
+      const state = store.getState();
+      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
       setDeletingTask({ id: taskId, title: task?.title ?? "this task" });
     },
     [store],
@@ -514,10 +456,11 @@ function useSidebarActions(store: StoreApi) {
 
   const handleSelectTask = useCallback(
     (taskId: string) => {
-      const task = findTaskInSnapshots(store.getState().kanbanMulti.snapshots, taskId);
+      const state = store.getState();
+      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
       selectTaskWithLayout({
         taskId,
-        task,
+        task: task ?? undefined,
         store,
         switchToSession,
         loadTaskSessionsForTask,
@@ -601,7 +544,6 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   workspaceId,
 }: TaskSessionSidebarProps) {
   const store = useAppStoreApi();
-  useAllWorkflowSnapshots(workspaceId);
   useRepositories(workspaceId);
   useWorkspacePRs(workspaceId);
 
