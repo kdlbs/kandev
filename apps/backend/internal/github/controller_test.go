@@ -431,6 +431,40 @@ func TestHttpMergePR_NoClient_Returns503(t *testing.T) {
 	}
 }
 
+// TestHttpSubmitReview_SelfApproveReturns422 exercises the full controller →
+// service guard → HTTP mapping for the ErrSelfApprove path. Guards against a
+// future refactor accidentally reclassifying the typed error as 500, which
+// would mask "you can't approve your own PR" as an opaque upstream failure.
+func TestHttpSubmitReview_SelfApproveReturns422(t *testing.T) {
+	sc := &stubClient{
+		// stubClient.GetAuthenticatedUser returns "test-user"; matching
+		// AuthorLogin triggers the self-approve guard inside SubmitReview.
+		getPRFunc: func(_ context.Context, _, _ string, _ int) (*PR, error) {
+			return &PR{Number: 42, AuthorLogin: "test-user", State: "open"}, nil
+		},
+	}
+	router, _ := setupControllerTest(sc)
+
+	body := bytes.NewBufferString(`{"event":"APPROVE"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/prs/acme/widget/42/reviews", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if resp.Error != ErrSelfApprove.Error() {
+		t.Errorf("expected error %q, got %q", ErrSelfApprove.Error(), resp.Error)
+	}
+}
+
 func TestHttpMergePR_Conflict(t *testing.T) {
 	sc := &stubClient{
 		mergePRFn: func(context.Context, string, string, int, string) error {
