@@ -74,10 +74,7 @@ func TestClassifyAndMaybeRemediate_NoCallOnUnrelatedFailure(t *testing.T) {
 	exec := &AgentExecution{ID: "exec-2", AgentID: "claude-acp"}
 	m.classifyAndMaybeRemediate(exec, 1, "some unrelated stderr")
 
-	select {
-	case <-called:
+	if len(called) != 0 {
 		t.Fatal("remediation hook should not have been called")
-	case <-time.After(50 * time.Millisecond):
-		// expected - no call
 	}
 }
