@@ -197,8 +197,8 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
   return (
     <div
       className={cn(
-        "shrink-0 self-center font-mono text-[11px]",
-        menuOpen ? "hidden" : "group-hover:hidden",
+        "shrink-0 self-center font-mono text-[11px] transition-opacity duration-100",
+        menuOpen ? "opacity-0" : "group-hover:opacity-0 group-focus-within:opacity-0",
       )}
     >
       <span className="text-emerald-500">+{diffStats.additions}</span>{" "}
@@ -438,8 +438,10 @@ function TaskMenuButton({ visible }: { visible: boolean }) {
   return (
     <div
       className={cn(
-        "self-center shrink-0 flex items-center",
-        visible ? "flex" : "hidden group-hover:flex",
+        "self-center shrink-0 flex items-center transition-opacity duration-100",
+        visible
+          ? "opacity-100"
+          : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
       )}
     >
       <button

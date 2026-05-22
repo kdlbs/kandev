@@ -275,7 +275,10 @@ func emitSubagentSequence(e *emitter, model string) {
 // manually exercising sidebar subtask UI in dev with KANDEV_MOCK_AGENT=true.
 // Usage: `/subtask` or `/subtask My subtask title`.
 func emitCreateSubtask(e *emitter, cmd, model string) {
-	title := strings.TrimSpace(strings.TrimPrefix(cmd, "/subtask"))
+	// Dispatch matches "/subtask" case-insensitively, so trim by length —
+	// strings.TrimPrefix would no-op on "/SubTask foo" and leak the prefix
+	// into the title.
+	title := strings.TrimSpace(cmd[len("/subtask"):])
 	if title == "" {
 		title = fmt.Sprintf("Mock subtask %d", time.Now().Unix()%10000)
 	}
