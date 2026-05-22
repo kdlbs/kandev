@@ -461,6 +461,11 @@ export type AppState = {
   setUserShellsLoading: (sessionId: string, loading: boolean) => void;
   addUserShell: (sessionId: string, shell: UserShellInfo) => void;
   removeUserShell: (sessionId: string, terminalId: string) => void;
+  updateUserShell: (
+    environmentId: string,
+    terminalId: string,
+    patch: Partial<UserShellInfo>,
+  ) => void;
   setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
   /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"];
   updateSidebarDraft: UIA["updateSidebarDraft"];

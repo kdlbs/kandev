@@ -239,6 +239,19 @@ function buildUserShellActions(set: ImmerSet) {
           (s) => s.terminalId !== terminalId,
         );
       }),
+    updateUserShell: (
+      environmentId: string,
+      terminalId: string,
+      patch: Parameters<SessionRuntimeSlice["updateUserShell"]>[2],
+    ) =>
+      set((draft) => {
+        if (!environmentId) return;
+        const existing = draft.userShells.byEnvironmentId[environmentId];
+        if (!existing) return;
+        draft.userShells.byEnvironmentId[environmentId] = existing.map((s) =>
+          s.terminalId === terminalId ? { ...s, ...patch } : s,
+        );
+      }),
     setSessionPollMode: (sessionId: string, mode: SessionPollMode) =>
       set((draft) => {
         draft.sessionPollMode.bySessionId[sessionId] = mode;

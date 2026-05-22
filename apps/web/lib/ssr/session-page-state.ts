@@ -308,6 +308,62 @@ async function fetchTaskDataOnly(
   return { task, sessionId: null, initialState, initialTerminals: [] };
 }
 
+type TerminalApiResponse = Awaited<ReturnType<typeof fetchTerminals>>[number];
+
+function shouldHydrateTerminal(t: TerminalApiResponse): boolean {
+  const id = t.id ?? t.terminal_id ?? "";
+  if (!id || id === "bottom-panel") return false;
+  if (t.state === "parked") return false;
+  return true;
+}
+
+function classifyTerminal(
+  t: TerminalApiResponse,
+  id: string,
+): { isScript: boolean; isOrdinary: boolean } {
+  const isScript = t.kind === "script" || id.startsWith("script-");
+  const isOrdinary = t.kind === "ordinary" || (!isScript && t.seq !== undefined);
+  return { isScript, isOrdinary };
+}
+
+function deriveHydratedLabel(
+  t: TerminalApiResponse,
+  isScript: boolean,
+  isOrdinary: boolean,
+): string {
+  if (t.display_name) return t.display_name;
+  if (t.custom_name && t.custom_name !== "") return t.custom_name;
+  if (t.label) return t.label;
+  if (isOrdinary && t.seq) return `Terminal ${t.seq}`;
+  return isScript ? "Script" : "Terminal";
+}
+
+function pickTerminalKind(
+  isOrdinary: boolean,
+  isScript: boolean,
+): "ordinary" | "script" | undefined {
+  if (isOrdinary) return "ordinary";
+  if (isScript) return "script";
+  return undefined;
+}
+
+function hydrateTerminal(t: TerminalApiResponse): Terminal {
+  const id = (t.id ?? t.terminal_id ?? "") as string;
+  const { isScript, isOrdinary } = classifyTerminal(t, id);
+  const kind = pickTerminalKind(isOrdinary, isScript);
+  return {
+    id,
+    type: isScript ? ("script" as const) : ("shell" as const),
+    label: deriveHydratedLabel(t, isScript, isOrdinary),
+    closable: t.closable ?? true,
+    kind,
+    seq: t.seq,
+    customName: t.custom_name ?? undefined,
+    state: t.state,
+    ptyStatus: t.pty_status,
+  };
+}
+
 async function fetchSessionDataFromTask(
   task: Task,
   sessionId: string,
@@ -342,7 +398,7 @@ async function fetchSessionDataFromTask(
     })),
     listSessionTurns(sessionId, { cache: "no-store" }).catch(() => ({ turns: [], total: 0 })),
     fetchUserSettings({ cache: "no-store" }).catch(() => null),
-    sessionEnvId ? fetchTerminals(sessionEnvId).catch(() => []) : Promise.resolve([]),
+    sessionEnvId ? fetchTerminals(task.id, sessionEnvId).catch(() => []) : Promise.resolve([]),
     listTaskSessionMessages(sessionId, { limit: 50, sort: "desc" }, { cache: "no-store" }).catch(
       () => null as ListMessagesResponse | null,
     ),
@@ -354,12 +410,9 @@ async function fetchSessionDataFromTask(
   const workflows = workflowsResponse.workflows ?? [];
   const turns = turnsResponse.turns ?? [];
 
-  const initialTerminals: Terminal[] = terminalsResponse.map((t) => ({
-    id: t.terminal_id,
-    type: t.initial_command ? ("script" as const) : ("shell" as const),
-    label: t.label,
-    closable: t.closable,
-  }));
+  const initialTerminals: Terminal[] = terminalsResponse
+    .filter(shouldHydrateTerminal)
+    .map(hydrateTerminal);
 
   const initialState = buildSessionPageState({
     task,
