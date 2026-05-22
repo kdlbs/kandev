@@ -11,9 +11,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { resumeUserShell } from "@/lib/api/domains/user-shell-api";
 import { useEnvironmentId } from "@/hooks/use-environment-session-id";
-import type { UserShellInfo } from "@/lib/state/slices/session-runtime/types";
-
-const EMPTY_SHELLS: UserShellInfo[] = [];
+import { useUserShells } from "@/hooks/domains/session/use-user-shells";
 
 /**
  * Lists ordinary user terminals (both open and parked) inside the dockview
@@ -29,13 +27,13 @@ const EMPTY_SHELLS: UserShellInfo[] = [];
 export function TerminalReopenMenuItems({ groupId }: { groupId: string }) {
   const environmentId = useEnvironmentId();
   const taskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
-  const shells = useAppStore((s) => {
-    if (!environmentId) return EMPTY_SHELLS;
-    // Return the stored array directly so Zustand's referential equality
-    // check short-circuits — returning `?? []` on every call would create
-    // a new array reference per render and cause an infinite-render loop.
-    return s.userShells.byEnvironmentId[environmentId] ?? EMPTY_SHELLS;
-  });
+  // useUserShells fetches the list into the Zustand store the first time
+  // the menu mounts. On desktop dockview, no other code path triggers
+  // this — the mobile/tablet right-panel hook would, but it never runs
+  // here — so without this call the section stays empty until the user
+  // creates a terminal manually. The fetch is idempotent per env+task
+  // (see use-user-shells.ts), so it doesn't refetch on every render.
+  const { shells } = useUserShells(environmentId, taskID);
   const updateUserShell = useAppStore((s) => s.updateUserShell);
   const api = useDockviewStore((s) => s.api);
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);

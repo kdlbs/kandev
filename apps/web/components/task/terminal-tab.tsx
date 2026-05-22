@@ -38,12 +38,22 @@ function extractParams(props: IDockviewPanelHeaderProps): StampedParams {
   };
 }
 
+/**
+ * Tab title text — intentionally drops the backend's "Terminal {seq}"
+ * suffix so the title reads "Terminal" and the seq lives only in the
+ * sibling badge (mirroring session-tab's pattern where the agent name is
+ * the title and the seq is a separate pill before it).
+ *
+ * Custom names override the default; legacy passthrough shells keep
+ * their server-supplied label (e.g. "Script", "Dev Server").
+ */
 function pickDisplayName(
-  shell: { customName?: string | null; displayName?: string } | null,
+  shell: { kind?: string; customName?: string | null; label?: string } | null,
   fallback: string,
 ): string {
   if (shell?.customName && shell.customName !== "") return shell.customName;
-  if (shell?.displayName) return shell.displayName;
+  if (shell?.kind === "ordinary") return "Terminal";
+  if (shell?.label) return shell.label;
   return fallback;
 }
 

@@ -28,6 +28,7 @@ import { replaceTaskUrl } from "@/lib/links";
 import type { Task, ProcessInfo } from "@/lib/types/http";
 import type { ProcessStatusEntry } from "@/lib/state/slices";
 import { AddPanelMenuItems, MENU_ITEM_CLASS } from "./dockview-add-panel-items";
+import { useUserShells } from "@/hooks/domains/session/use-user-shells";
 import { NewSessionDialog } from "./new-session-dialog";
 import { NewTaskDropdown } from "./new-task-dropdown";
 import { useActiveSessionDevScript } from "./repository-scripts-menu";
@@ -92,6 +93,12 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
   const devScript = useActiveSessionDevScript();
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
+  // Eagerly populate the user-shell store for this env+task so the
+  // dockview "+" menu's Terminals submenu and the per-tab badge logic
+  // both have the data ready on first open. Without this call, the
+  // store stays empty on desktop (the mobile right-panel hook is the
+  // only other call site) and the menu would render an empty section.
+  useUserShells(environmentId, taskID);
 
   const handleAddTerminal = useCallback(async () => {
     if (!environmentId) return;
