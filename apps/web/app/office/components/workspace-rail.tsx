@@ -59,7 +59,7 @@ export function WorkspaceRail({
 
   const handleSelect = useCallback(
     (id: string) => {
-      document.cookie = `office-active-workspace=${id}; path=/; max-age=86400; samesite=strict`;
+      document.cookie = `office-active-workspace=${id}; path=/; max-age=86400; samesite=strict; secure`;
       setActiveWorkspace(id);
       router.push(`/office?workspaceId=${id}`);
     },

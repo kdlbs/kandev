@@ -174,7 +174,7 @@ export function SetupWizard({
     try {
       const result = await submitOnboarding(data);
       toast.success("Workspace created successfully");
-      document.cookie = `office-active-workspace=${result.workspaceId}; path=/; max-age=86400; samesite=strict`;
+      document.cookie = `office-active-workspace=${result.workspaceId}; path=/; max-age=86400; samesite=strict; secure`;
       router.push(`/office?workspaceId=${result.workspaceId}`);
       router.refresh();
     } catch (err) {

@@ -29,8 +29,7 @@ test.describe("Workspace selection isolation", () => {
     ).toBeVisible({ timeout: 10_000 });
 
     // Step 1: fill in workspace name.
-    const suffix = Date.now().toString(36);
-    await testPage.getByLabel("Workspace name").fill(`Isolation Test ${suffix}`);
+    await testPage.getByLabel("Workspace name").fill("Isolation Test Workspace");
     await testPage.getByRole("button", { name: /next/i }).click();
 
     // Step 2: agent config - advance without changing profile selection.
@@ -49,7 +48,7 @@ test.describe("Workspace selection isolation", () => {
     await expect(testPage.getByRole("heading", { name: "Review and launch" })).toBeVisible({
       timeout: 10_000,
     });
-    await expect(testPage.getByText(`Isolation Test ${suffix}`)).toBeVisible();
+    await expect(testPage.getByText("Isolation Test Workspace")).toBeVisible();
 
     const responsePromise = testPage.waitForResponse(
       (resp) => resp.url().includes("/onboarding/complete") && resp.status() === 201,
