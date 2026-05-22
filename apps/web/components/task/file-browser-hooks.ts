@@ -183,10 +183,7 @@ export function applyFileChanges(ctx: {
           }
           return node.children ? { ...node, children: node.children.map(patchNode) } : node;
         };
-        // Recurse over the root's already-merged children — re-running patchNode
-        // on the root itself would re-match folderUpdates.has("") and replace
-        // the merged children with the raw depth-1 server response, discarding
-        // every preserved subtree from the merge block above.
+        // Skip root: already merged above; re-matching folderUpdates.has("") here would overwrite preserved subtrees.
         return { ...updated, children: updated.children?.map(patchNode) };
       });
       setLoadState("loaded");

@@ -140,10 +140,7 @@ describe("applyFileChanges — refresh operation expands to all expanded folders
   });
 });
 
-// Regression: a `refresh` event scoped to one repo must NOT wipe out the
-// loaded children of unaffected sibling repos. Previously patchNode ran on
-// the root and re-matched folderUpdates.has(""), replacing the merged
-// children with the raw depth-1 server response.
+// Regression (#982): refresh scoped to one repo must not wipe sibling repos' loaded subtrees.
 describe("applyFileChanges — cross-repo subtree preservation", () => {
   it("preserves kandev's loaded children when refresh is scoped to thm", async () => {
     requestFileTreeMock.mockImplementation((_c: unknown, _s: string, folder: string) => {
@@ -209,9 +206,7 @@ function thmChildrenAfter(): FileTreeNode {
 }
 
 function rootChildrenAfter(): FileTreeNode {
-  // depth=1 backend responses serialize directory children as `undefined`
-  // (Children []*FileTreeNode `json:"children,omitempty"`), not as empty
-  // arrays — mergeTreeNodes relies on this to preserve nested children.
+  // depth=1 backend responses omit `children` (omitempty) — mergeTreeNodes uses absence to preserve loaded subtrees.
   return {
     name: "",
     path: "",
