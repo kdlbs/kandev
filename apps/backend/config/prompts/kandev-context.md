@@ -6,7 +6,7 @@ Kandev Session ID: {session_id}
 Use these IDs when calling tools that require task_id or session_id.
 
 Available tools:
-- ask_user_question_kandev: Ask the user a clarifying question with multiple-choice options. Use this whenever you need user input before proceeding. Required params: prompt (string), options (array of {label, description}).
+- ask_user_question_kandev: Ask the user one or more clarifying questions in a single tool call. Use this whenever you need user input before proceeding. Required params: questions (array of 1-4 question objects; each object has prompt (string) and options (array of 2-6 {label, description})). Optional: context (string).
 - create_task_plan_kandev: Save an implementation plan for the current task. Required params: task_id, content (markdown). Optional: title.
 - get_task_plan_kandev: Retrieve the current plan for a task (includes any user edits). Required params: task_id.
 - update_task_plan_kandev: Update an existing plan. Required params: task_id, content (markdown). Optional: title.

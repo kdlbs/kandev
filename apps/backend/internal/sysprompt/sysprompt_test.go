@@ -253,6 +253,25 @@ func TestInterpolatePlaceholders_MultiplePlaceholders(t *testing.T) {
 	assert.Equal(t, "task-123 and task-123", result)
 }
 
+// --- ask_user_question schema documentation ---
+
+func TestContexts_DocumentCurrentAskUserQuestionSchema(t *testing.T) {
+	// Regression: the embedded prompt context used to document a legacy
+	// top-level `prompt` / `options` schema for ask_user_question_kandev.
+	// The real MCP tool requires a `questions` array of 1-4 question objects.
+	// Stale docs caused agents to send malformed payloads that landed in the
+	// approval layer as "0 questions" and were ultimately cancelled.
+	for name, ctx := range map[string]string{
+		"ConfigContext": ConfigContext(),
+		"KandevContext": KandevContext(),
+	} {
+		assert.Contains(t, ctx, "questions", "%s should mention the questions array param", name)
+		assert.Contains(t, ctx, "1-4 question objects", "%s should document the 1-4 question limit", name)
+		assert.NotContains(t, ctx, "Required params: prompt (string), options", "%s leaks the legacy ask_user_question schema", name)
+		assert.NotContains(t, ctx, "Required: prompt, options", "%s leaks the legacy ask_user_question schema", name)
+	}
+}
+
 // --- ConfigContext vs KandevContext distinction ---
 
 func TestConfigContext_DoesNotContainPlanTools(t *testing.T) {
