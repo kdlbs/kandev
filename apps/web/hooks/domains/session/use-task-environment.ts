@@ -5,6 +5,7 @@ import {
   fetchTaskEnvironmentLive,
   resetTaskEnvironment,
   type ContainerLiveStatus,
+  type SSHLiveStatus,
   type TaskEnvironment,
 } from "@/lib/api/domains/task-environment-api";
 import { ApiError } from "@/lib/api/client";
@@ -26,6 +27,7 @@ const BACKGROUND_POLL_INTERVAL_MS = 7000;
 export function useTaskEnvironment(taskId: string | null | undefined, active: boolean) {
   const [env, setEnv] = useState<TaskEnvironment | null>(null);
   const [container, setContainer] = useState<ContainerLiveStatus | null>(null);
+  const [ssh, setSsh] = useState<SSHLiveStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const inFlight = useRef(false);
@@ -43,16 +45,22 @@ export function useTaskEnvironment(taskId: string | null | undefined, active: bo
     lastStatusRef.current = null;
     setEnv(null);
     setContainer(null);
+    setSsh(null);
     setLoading(false);
   }, [taskId]);
 
   const updateState = useCallback(
-    (nextEnv: TaskEnvironment | null, nextContainer: ContainerLiveStatus | null) => {
+    (
+      nextEnv: TaskEnvironment | null,
+      nextContainer: ContainerLiveStatus | null,
+      nextSsh: SSHLiveStatus | null,
+    ) => {
       const nextStatus = getEnvironmentStatusSnapshot(nextEnv, nextContainer);
       maybeNotifyEnvironmentStatus(lastStatusRef.current, nextStatus);
       lastStatusRef.current = nextStatus;
       setEnv(nextEnv);
       setContainer(nextContainer);
+      setSsh(nextSsh);
     },
     [],
   );
@@ -64,14 +72,14 @@ export function useTaskEnvironment(taskId: string | null | undefined, active: bo
     try {
       const data = await fetchTaskEnvironmentLive(taskId);
       hasLoadedRef.current = true;
-      updateState(data.environment, data.container ?? null);
+      updateState(data.environment, data.container ?? null, data.ssh ?? null);
     } catch (err) {
       // Only treat 404 as "no environment yet" — a transient 500 / auth /
       // network error should leave the last-known view in place rather than
       // erase a valid environment and disable the Reset action.
       if (err instanceof ApiError && err.status === 404) {
         hasLoadedRef.current = true;
-        updateState(null, null);
+        updateState(null, null, null);
       }
     } finally {
       inFlight.current = false;
@@ -97,6 +105,7 @@ export function useTaskEnvironment(taskId: string | null | undefined, active: bo
         lastStatusRef.current = getEnvironmentStatusSnapshot(null, null);
         setEnv(null);
         setContainer(null);
+        setSsh(null);
         return true;
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error";
@@ -114,7 +123,7 @@ export function useTaskEnvironment(taskId: string | null | undefined, active: bo
     [env, container],
   );
 
-  return { env, container, loading, isResetting, reset, status };
+  return { env, container, ssh, loading, isResetting, reset, status };
 }
 
 function maybeNotifyEnvironmentStatus(

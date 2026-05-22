@@ -453,6 +453,7 @@ function shouldShowExecutorEnvironmentControls(executorType?: string | null): bo
     case "local_docker":
     case "remote_docker":
     case "sprites":
+    case "ssh":
       return true;
     default:
       return false;

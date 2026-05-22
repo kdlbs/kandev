@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import {
   type ContainerLiveStatus,
+  type SSHLiveStatus,
   type TaskEnvironment,
 } from "@/lib/api/domains/task-environment-api";
 import { resolveExecutorEnvironmentStatus, type StatusTone } from "./executor-environment-status";
@@ -22,10 +23,12 @@ const TONE_CLASSES: Record<StatusTone, string> = {
 export function EnvironmentInfo({
   env,
   container,
+  ssh,
   loading,
 }: {
   env: TaskEnvironment | null;
   container: ContainerLiveStatus | null;
+  ssh?: SSHLiveStatus | null;
   loading: boolean;
 }) {
   if (loading && !env) {
@@ -53,7 +56,7 @@ export function EnvironmentInfo({
         <span className="font-medium text-foreground">{formatExecutorType(env.executor_type)}</span>
         <StatusBadge env={env} container={container} />
       </div>
-      <EnvironmentFields env={env} container={container} />
+      <EnvironmentFields env={env} container={container} ssh={ssh ?? null} />
     </div>
   );
 }
@@ -79,11 +82,13 @@ function StatusBadge({
 function EnvironmentFields({
   env,
   container,
+  ssh,
 }: {
   env: TaskEnvironment;
   container: ContainerLiveStatus | null;
+  ssh: SSHLiveStatus | null;
 }) {
-  const fields = useMemo(() => buildFields(env, container), [env, container]);
+  const fields = useMemo(() => buildFields(env, container, ssh), [env, container, ssh]);
   if (fields.length === 0) {
     return <p className="text-xs text-muted-foreground">No resource details available.</p>;
   }
@@ -123,7 +128,11 @@ function Field({ label, value, copy }: { label: string; value: string; copy?: bo
 
 type FieldRow = { label: string; value: string; copy?: boolean };
 
-function buildFields(env: TaskEnvironment, container: ContainerLiveStatus | null): FieldRow[] {
+function buildFields(
+  env: TaskEnvironment,
+  container: ContainerLiveStatus | null,
+  ssh: SSHLiveStatus | null,
+): FieldRow[] {
   const rows: FieldRow[] = [];
 
   if (env.worktree_path) {
@@ -153,7 +162,64 @@ function buildFields(env: TaskEnvironment, container: ContainerLiveStatus | null
     rows.push({ label: "Sprite", value: env.sandbox_id, copy: true });
   }
 
+  if (env.executor_type === "ssh" && ssh) {
+    addSshRows(rows, ssh);
+  }
+
   return rows;
+}
+
+function addSshRows(rows: FieldRow[], ssh: SSHLiveStatus) {
+  // user@host[:port] — matches what a user would paste into an SSH client.
+  // Suppress :22 since the canonical port reads as noise.
+  if (ssh.host) {
+    rows.push({ label: "Host", value: formatHostTarget(ssh), copy: true });
+  }
+  if (ssh.remote_task_dir) {
+    rows.push({ label: "Workdir", value: ssh.remote_task_dir, copy: true });
+  }
+  const agentctl = formatAgentctlSummary(ssh);
+  if (agentctl) {
+    rows.push({ label: "Agentctl", value: agentctl });
+  }
+  if (ssh.fingerprint) {
+    rows.push({ label: "Fingerprint", value: formatFingerprint(ssh.fingerprint), copy: true });
+  }
+  // Shell affordance: paste-ready ssh command that mirrors how kandev
+  // connects. Helpful when the user wants to inspect the remote dir by hand.
+  if (ssh.host) {
+    rows.push({ label: "Shell", value: formatShellCommand(ssh), copy: true });
+  }
+}
+
+function formatHostTarget(ssh: SSHLiveStatus): string {
+  const userPart = ssh.user ? `${ssh.user}@` : "";
+  const portPart = ssh.port && ssh.port !== 22 ? `:${ssh.port}` : "";
+  return `${userPart}${ssh.host ?? ""}${portPart}`;
+}
+
+function formatShellCommand(ssh: SSHLiveStatus): string {
+  const userPart = ssh.user ? `${ssh.user}@` : "";
+  const portPart = ssh.port && ssh.port !== 22 ? ` -p ${ssh.port}` : "";
+  return `ssh${portPart} ${userPart}${ssh.host ?? ""}`;
+}
+
+// Compact one-liner for the agentctl process: pid → remote:port → local:port.
+// Each is optional (e.g. a recovered session may have lost the local
+// forward port mid-restore), so the helper omits gracefully. Returns ""
+// when nothing is set so callers can skip the row entirely.
+function formatAgentctlSummary(ssh: SSHLiveStatus): string {
+  const parts: string[] = [];
+  if (ssh.remote_agentctl_pid) parts.push(`pid ${ssh.remote_agentctl_pid}`);
+  if (ssh.remote_agentctl_port) parts.push(`remote :${ssh.remote_agentctl_port}`);
+  if (ssh.local_forward_port) parts.push(`local :${ssh.local_forward_port}`);
+  return parts.join(" → ");
+}
+
+// Show the suffix only — full fingerprint is verbose, and the trust gate
+// already pinned it on save. The copy button hands back the full string.
+function formatFingerprint(fingerprint: string): string {
+  return fingerprint.startsWith("SHA256:") ? `…${fingerprint.slice(-12)}` : fingerprint;
 }
 
 function formatUptime(startedAt: string): string {
@@ -178,6 +244,8 @@ function formatExecutorType(type: string): string {
       return "Sprites sandbox";
     case "remote_docker":
       return "Remote Docker";
+    case "ssh":
+      return "SSH";
     default:
       return type || "Unknown executor";
   }

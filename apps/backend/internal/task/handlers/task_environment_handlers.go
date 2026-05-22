@@ -52,6 +52,17 @@ func (h *TaskHandlers) httpGetTaskEnvironmentLive(c *gin.Context) {
 	if live != nil {
 		resp["container"] = live
 	}
+	// SSH-backed environments get a parallel `ssh` block with the runtime
+	// fields (host/user/workdir/forward ports) the popover surfaces. Service
+	// returns nil on non-SSH environments, so this is a no-op for the other
+	// executor types.
+	if ssh, err := h.service.GetSSHLiveStatus(c.Request.Context(), taskID); err != nil {
+		h.logger.Warn("failed to fetch live ssh status",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	} else if ssh != nil {
+		resp["ssh"] = ssh
+	}
 	c.JSON(http.StatusOK, resp)
 }
 

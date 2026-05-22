@@ -37,9 +37,21 @@ export type ContainerLiveStatus = {
   missing?: boolean;
 };
 
+export type SSHLiveStatus = {
+  host?: string;
+  port?: number;
+  user?: string;
+  remote_task_dir?: string;
+  remote_agentctl_pid?: number;
+  remote_agentctl_port?: number;
+  local_forward_port?: number;
+  fingerprint?: string;
+};
+
 export type TaskEnvironmentLiveResponse = {
   environment: TaskEnvironment;
   container?: ContainerLiveStatus;
+  ssh?: SSHLiveStatus;
 };
 
 export async function fetchTaskEnvironment(taskId: string, options?: ApiRequestOptions) {

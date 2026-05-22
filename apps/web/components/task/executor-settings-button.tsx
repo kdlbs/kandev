@@ -31,7 +31,7 @@ export function ExecutorSettingsButton({
   const isPreparing = isPreparingPhase(prepare.phase);
   // Promote the foreground polling cadence while preparing so the icon flips
   // to "ready" without the user hovering over the trigger.
-  const { env, container, loading, isResetting, reset, status } = useTaskEnvironment(
+  const { env, container, ssh, loading, isResetting, reset, status } = useTaskEnvironment(
     taskId,
     open || isPreparing,
   );
@@ -80,7 +80,7 @@ export function ExecutorSettingsButton({
           data-testid="executor-settings-popover"
         >
           <PrepareStatusSection summary={prepare} />
-          <EnvironmentInfo env={env} container={container} loading={loading} />
+          <EnvironmentInfo env={env} container={container} ssh={ssh} loading={loading} />
           <div className="border-t border-border px-2 py-1.5 flex items-center justify-end">
             <Button
               variant="destructive"
