@@ -10,15 +10,6 @@ vi.mock("./changes-panel-file-row", () => ({
   ),
 }));
 
-vi.mock("@/hooks/use-multi-select", () => ({
-  useMultiSelect: () => ({
-    selectedPaths: new Set<string>(),
-    isSelected: () => false,
-    handleClick: vi.fn(),
-    clearSelection: vi.fn(),
-  }),
-}));
-
 vi.mock("@/lib/state/dockview-store", () => ({
   useDockviewStore: () => null,
 }));
@@ -29,6 +20,15 @@ afterEach(cleanup);
 
 type Props = ComponentProps<typeof ChangesTree>;
 
+const stubMultiSelect: Props["multiSelect"] = {
+  selectedPaths: new Set<string>(),
+  isSelected: () => false,
+  handleClick: vi.fn(() => false),
+  clearSelection: vi.fn(),
+  selectAll: vi.fn(),
+  setSelectedPaths: vi.fn(),
+};
+
 const baseProps: Omit<Props, "files" | "variant"> = {
   pendingStageFiles: new Set(),
   onOpenDiff: vi.fn(),
@@ -36,6 +36,7 @@ const baseProps: Omit<Props, "files" | "variant"> = {
   onStage: vi.fn(),
   onUnstage: vi.fn(),
   onDiscard: vi.fn(),
+  multiSelect: stubMultiSelect,
 };
 
 function file(path: string): Props["files"][number] {
@@ -49,19 +50,23 @@ function file(path: string): Props["files"][number] {
   };
 }
 
+const APPS_WEB_DIR = "tree-dir-apps-web";
+const FOO_TS = "apps/web/foo.ts";
+const BAR_TS = "apps/web/bar.ts";
+
 describe("ChangesTree", () => {
   it("renders folders as dir rows and files as file rows", () => {
     render(
       <ChangesTree
         {...baseProps}
         variant="unstaged"
-        files={[file("apps/web/foo.ts"), file("apps/web/bar.ts"), file("README.md")]}
+        files={[file(FOO_TS), file(BAR_TS), file("README.md")]}
       />,
     );
     // Two file rows under apps/web plus README at root.
     expect(screen.getAllByTestId("file-row")).toHaveLength(3);
     // A directory row exists for "apps/web" (chain-collapsed).
-    const dir = screen.getByTestId("tree-dir-apps-web");
+    const dir = screen.getByTestId(APPS_WEB_DIR);
     expect(dir.textContent).toContain("apps/web");
   });
 
@@ -73,15 +78,30 @@ describe("ChangesTree", () => {
   });
 
   it("hides children when a folder is collapsed", () => {
+    render(<ChangesTree {...baseProps} variant="unstaged" files={[file(FOO_TS), file(BAR_TS)]} />);
+    expect(screen.getAllByTestId("file-row")).toHaveLength(2);
+    fireEvent.click(screen.getByTestId(APPS_WEB_DIR));
+    expect(screen.queryAllByTestId("file-row")).toHaveLength(0);
+  });
+
+  it("uses the parent multiSelect (not an internal one) so bulk actions stay wired", () => {
+    // Regression: tree mode used to instantiate its own useMultiSelect, which
+    // left the section-level BulkActionBar blind to tree selections. Verify
+    // the prop is consulted by checking that isSelected/handleClick come from
+    // the supplied object.
+    const isSelected = vi.fn(() => true);
+    const handleClick = vi.fn(() => false);
     render(
       <ChangesTree
         {...baseProps}
+        multiSelect={{ ...stubMultiSelect, isSelected, handleClick }}
         variant="unstaged"
-        files={[file("apps/web/foo.ts"), file("apps/web/bar.ts")]}
+        files={[file(FOO_TS)]}
       />,
     );
-    expect(screen.getAllByTestId("file-row")).toHaveLength(2);
-    fireEvent.click(screen.getByTestId("tree-dir-apps-web"));
-    expect(screen.queryAllByTestId("file-row")).toHaveLength(0);
+    // Our FileRow mock surfaces isSelected via a data attribute when wired.
+    // Even without the attribute, the spy proves the parent's hook ran for
+    // this file's path during render.
+    expect(isSelected).toHaveBeenCalledWith(FOO_TS);
   });
 });

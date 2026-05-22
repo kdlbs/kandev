@@ -3,10 +3,9 @@
 import { useMemo } from "react";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { cn } from "@/lib/utils";
 import { useTree, type VisibleRow } from "@/hooks/use-tree";
 import { useDockviewStore } from "@/lib/state/dockview-store";
-import { useMultiSelect } from "@/hooks/use-multi-select";
+import type { useMultiSelect } from "@/hooks/use-multi-select";
 import { FileRow } from "./changes-panel-file-row";
 import type { FileInfo } from "@/lib/state/store";
 import type { OpenDiffOptions } from "./changes-diff-target";
@@ -80,6 +79,9 @@ type ChangesTreeProps = {
   onUnstage: (path: string, repo?: string) => void;
   onDiscard: (path: string, repo?: string) => void;
   variant: "unstaged" | "staged";
+  /** Shared with the parent FileListSection so the BulkActionBar reflects
+   *  selections made in tree mode. */
+  multiSelect: ReturnType<typeof useMultiSelect>;
 };
 
 export function ChangesTree({
@@ -91,6 +93,7 @@ export function ChangesTree({
   onUnstage,
   onDiscard,
   variant,
+  multiSelect,
 }: ChangesTreeProps) {
   const tree = useMemo(() => buildChangesTree(files), [files]);
   const { visibleRows, toggle } = useTree<TreeNode>({
@@ -102,8 +105,6 @@ export function ChangesTree({
     chainCollapse: true,
   });
 
-  const filePaths = useMemo(() => files.map((f) => f.path), [files]);
-  const multiSelect = useMultiSelect({ items: filePaths });
   const activeFilePath = useDockviewStore((s) => s.activeFilePath);
 
   return (
@@ -150,6 +151,7 @@ type RepoTreeGroupProps = {
   secondaryLabel?: string;
   onRepoAction?: (repo: string) => void;
   onRepoSecondaryAction?: (repo: string) => void;
+  multiSelect: ReturnType<typeof useMultiSelect>;
 };
 
 export function RepoTreeGroup(props: RepoTreeGroupProps) {
@@ -225,6 +227,7 @@ export function RepoTreeGroup(props: RepoTreeGroupProps) {
           onUnstage={props.onUnstage}
           onDiscard={props.onDiscard}
           variant={variant}
+          multiSelect={props.multiSelect}
         />
       )}
     </div>
@@ -236,9 +239,7 @@ function TreeDirRow({ row, onToggle }: { row: VisibleRow<TreeNode>; onToggle: ()
     <li>
       <button
         type="button"
-        className={cn(
-          "flex items-center w-full gap-1 px-1 py-0.5 -mx-1 rounded-md hover:bg-muted/60 cursor-pointer text-xs text-foreground/70",
-        )}
+        className="flex items-center w-full gap-1 px-1 py-0.5 -mx-1 rounded-md hover:bg-muted/60 cursor-pointer text-xs text-foreground/70"
         style={{ paddingLeft: row.depth * 12 + 4 }}
         onClick={onToggle}
         data-testid={`tree-dir-${row.path.replace(/[/\\]/g, "-")}`}

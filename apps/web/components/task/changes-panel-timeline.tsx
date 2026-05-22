@@ -329,6 +329,7 @@ function FileListBody(props: FileListBodyProps) {
             onUnstage={props.onUnstage}
             onDiscard={props.onDiscard}
             variant={variant}
+            multiSelect={multiSelect}
           />
         ) : (
           groups.map((group) => (
@@ -350,6 +351,7 @@ function FileListBody(props: FileListBodyProps) {
               secondaryLabel={props.secondaryLabel}
               onRepoAction={props.onRepoAction}
               onRepoSecondaryAction={props.onRepoSecondaryAction}
+              multiSelect={multiSelect}
             />
           ))
         )}
