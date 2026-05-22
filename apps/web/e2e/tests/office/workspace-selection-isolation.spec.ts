@@ -59,7 +59,7 @@ test.describe("Workspace selection isolation", () => {
     await responsePromise;
 
     // Wizard redirects to /office (or /office?workspaceId=...) after completion.
-    await expect(testPage).toHaveURL(/\/office/, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/office(\?|$)/, { timeout: 15_000 });
 
     // The critical assertion: user settings workspace_id must still point to
     // the kanban workspace - not the newly created office workspace.
@@ -84,7 +84,7 @@ test.describe("Workspace selection isolation", () => {
 
     // Navigate to /office with an explicit workspaceId param.
     await testPage.goto(`/office?workspaceId=${officeSeed.workspaceId}`);
-    await expect(testPage).toHaveURL(/\/office/, { timeout: 10_000 });
+    await expect(testPage).toHaveURL(/\/office(\?|$)/, { timeout: 10_000 });
     await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
 
     // User settings workspace_id must remain the kanban workspace.
