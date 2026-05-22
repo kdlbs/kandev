@@ -189,6 +189,8 @@ describe("useBranchAutoSelectEffect", () => {
   });
 });
 
+const PR_1_TITLE = "PR #1: first";
+
 type AutoFillFake = Pick<DialogFormState, "taskName" | "setTaskName" | "setHasTitle">;
 function makeAutoFillFs(overrides: Partial<AutoFillFake> = {}): DialogFormState {
   return {
@@ -244,7 +246,7 @@ describe("useAutoFillTaskNameFromPR", () => {
       return useAutoFillTaskNameFromPR(fs);
     });
     result.current(1, "first");
-    expect(currentName).toBe("PR #1: first");
+    expect(currentName).toBe(PR_1_TITLE);
 
     rerender();
     result.current(2, "second");
@@ -265,7 +267,7 @@ describe("useAutoFillTaskNameFromPR", () => {
       return useAutoFillTaskNameFromPR(fs);
     });
     result.current(1, "first");
-    expect(currentName).toBe("PR #1: first");
+    expect(currentName).toBe(PR_1_TITLE);
 
     // User edits the title manually.
     currentName = "my edits";
@@ -276,5 +278,42 @@ describe("useAutoFillTaskNameFromPR", () => {
     // edit is preserved.
     expect(fs.setTaskName).toHaveBeenCalledTimes(1);
     expect(currentName).toBe("my edits");
+  });
+
+  it("clears the sentinel when taskName resets to empty, preventing a re-typed auto-fill from being overwritten", () => {
+    // Regression guard for the mounted-across-open/close edge case:
+    // after a dialog reset clears taskName, the user manually types the same
+    // text that was previously auto-filled. A second PR paste must NOT
+    // overwrite it because the sentinel was cleared on the empty transition.
+    let currentName = "";
+    const fs = makeAutoFillFs({
+      taskName: currentName,
+      setTaskName: vi.fn((v: string) => {
+        currentName = v;
+      }),
+    });
+    const { result, rerender } = renderHook(() => {
+      fs.taskName = currentName;
+      return useAutoFillTaskNameFromPR(fs);
+    });
+    result.current(1, "first");
+    expect(currentName).toBe(PR_1_TITLE);
+
+    // Simulate React flushing the setTaskName state update back into the hook
+    // so the ref-mirror effect sees taskName = PR_1_TITLE.
+    rerender();
+
+    // Dialog resets taskName to empty (sentinel should clear).
+    currentName = "";
+    rerender();
+
+    // User re-types the exact previously auto-filled value.
+    currentName = PR_1_TITLE;
+    rerender();
+
+    // A second paste with a different PR should NOT overwrite.
+    result.current(2, "second");
+    expect(fs.setTaskName).toHaveBeenCalledTimes(1); // only the first auto-fill
+    expect(currentName).toBe(PR_1_TITLE);
   });
 });
