@@ -84,6 +84,74 @@ func newTestLogger(t *testing.T) *logger.Logger {
 	return log
 }
 
+// subtaskCountRepo lets the subtask-count handler test drive
+// ListChildren to specific values / errors without standing up a real
+// SQLite repo.
+type subtaskCountRepo struct {
+	mockRepository
+	children []*models.Task
+	err      error
+}
+
+func (r *subtaskCountRepo) ListChildren(_ context.Context, _ string) ([]*models.Task, error) {
+	return r.children, r.err
+}
+
+func (r *subtaskCountRepo) CountToolCallMessagesBySession(
+	_ context.Context, _ []string,
+) (map[string]int, error) {
+	return nil, nil
+}
+
+func TestHTTPTaskSubtaskCount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+
+	t.Run("returns count for task with subtasks", func(t *testing.T) {
+		repo := &subtaskCountRepo{children: []*models.Task{{ID: "c1"}, {ID: "c2"}, {ID: "c3"}}}
+		h := &TaskHandlers{repo: repo, logger: log}
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodGet, "/tasks/root/subtask-count", nil)
+		c.Params = gin.Params{{Key: "id", Value: "root"}}
+
+		h.httpTaskSubtaskCount(c)
+
+		require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+		assert.JSONEq(t, `{"count":3}`, rec.Body.String())
+	})
+
+	t.Run("returns zero for task with no subtasks", func(t *testing.T) {
+		repo := &subtaskCountRepo{children: nil}
+		h := &TaskHandlers{repo: repo, logger: log}
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodGet, "/tasks/root/subtask-count", nil)
+		c.Params = gin.Params{{Key: "id", Value: "root"}}
+
+		h.httpTaskSubtaskCount(c)
+
+		require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+		assert.JSONEq(t, `{"count":0}`, rec.Body.String())
+	})
+
+	t.Run("returns 500 with a generic error on repo failure", func(t *testing.T) {
+		repo := &subtaskCountRepo{err: errors.New("sql: connection refused: postgres://user@host/db")}
+		h := &TaskHandlers{repo: repo, logger: log}
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodGet, "/tasks/root/subtask-count", nil)
+		c.Params = gin.Params{{Key: "id", Value: "root"}}
+
+		h.httpTaskSubtaskCount(c)
+
+		require.Equal(t, http.StatusInternalServerError, rec.Code)
+		// Must NOT leak the raw error (would expose DSN / driver details).
+		assert.NotContains(t, rec.Body.String(), "postgres://")
+		assert.Contains(t, rec.Body.String(), "failed to count subtasks")
+	})
+}
+
 func TestHandleSelectedMoveError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	log := newTestLogger(t)

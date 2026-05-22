@@ -274,8 +274,21 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 		// reparent error would leave children pointing at a row we're
 		// about to delete, exactly the dangling-pointer state the
 		// no-cascade path is designed to avoid.
+		//
+		// Capture the affected children BEFORE the update so we can
+		// publish task.updated for each one after the row change — WS
+		// clients (kanban, sidebar) cache parent_id and would otherwise
+		// keep displaying the children nested under the deleted parent
+		// until a full reload.
+		children, err := s.tasks.ListChildrenIncludingArchived(ctx, rootID)
+		if err != nil {
+			return nil, fmt.Errorf("list direct children of %s: %w", rootID, err)
+		}
 		if err := s.tasks.ReparentDirectChildren(ctx, rootID, ""); err != nil {
 			return nil, fmt.Errorf("reparent direct children of %s: %w", rootID, err)
+		}
+		for _, c := range children {
+			s.publishUpdatedTask(ctx, c.ID)
 		}
 		all = []string{rootID}
 	}

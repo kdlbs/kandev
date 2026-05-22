@@ -994,9 +994,15 @@ func cascadeQueryParam(c *gin.Context) bool {
 // delete confirmation dialogs to decide whether to render the
 // "Also archive/delete subtasks" checkbox.
 func (h *TaskHandlers) httpTaskSubtaskCount(c *gin.Context) {
-	children, err := h.repo.ListChildren(c.Request.Context(), c.Param("id"))
+	taskID := c.Param("id")
+	children, err := h.repo.ListChildren(c.Request.Context(), taskID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// Don't surface the raw repo error to the client — it can leak
+		// driver / SQL details. Log the full reason server-side, return
+		// a generic 500 to the caller.
+		h.logger.Error("failed to list direct subtasks",
+			zap.String("task_id", taskID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count subtasks"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"count": len(children)})

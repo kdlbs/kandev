@@ -7,22 +7,28 @@ import { getSubtaskCount } from "@/lib/api";
 // supplied) — in all of those cases the dialog's cascade checkbox
 // stays hidden.
 //
-// The hook keys the stored count by a stable string of the requested
-// ids. When the caller passes a different task (e.g. the dialog is
-// closed and reopened for another row) the stale count is no longer
-// returned, preventing the "Also archive 3 subtasks" label from
-// flashing for a task that actually has 0. This also lets us depend on
-// the joined string instead of the taskIds array — unstable array
-// references (the multi-select toolbar spreads `selectedIds` on every
-// render) no longer fan out a new Promise.all on every render.
+// The stored count is keyed by a stable string of the requested ids
+// AND only returned while the dialog reports `open=true`. Closing the
+// dialog clears the cache, so reopening — even for the same task —
+// shows 0 until the fresh fetch lands. This avoids a stale count from
+// a previous opening flashing before the new request resolves and
+// stops the bulk toolbar's per-render `[...selectedIds]` from fanning
+// out a new Promise.all on every render.
 export function useSubtaskCount(open: boolean, taskId?: string, taskIds?: string[]): number {
   const idsKey = taskIds?.join(",") ?? taskId ?? "";
-  const [{ key, total }, setResult] = useState<{ key: string; total: number }>({
+  const [result, setResult] = useState<{ key: string; total: number }>({
     key: "",
     total: 0,
   });
   useEffect(() => {
-    if (!open || !idsKey) return;
+    if (!open) {
+      // Clear so the next open starts from a known-empty state —
+      // this is what gates stale counts from leaking across separate
+      // dialog openings for the same id.
+      setResult({ key: "", total: 0 });
+      return;
+    }
+    if (!idsKey) return;
     const ids = taskIds ?? (taskId ? [taskId] : []);
     let cancelled = false;
     Promise.all(ids.map((id) => getSubtaskCount(id).catch(() => ({ count: 0 }))))
@@ -31,8 +37,8 @@ export function useSubtaskCount(open: boolean, taskId?: string, taskIds?: string
         setResult({ key: idsKey, total: results.reduce((sum, r) => sum + r.count, 0) });
       })
       .catch(() => {
-        // swallow — leaves prior result untouched; the stale-key gate
-        // below still suppresses any leftover total.
+        // swallow — leaves prior result untouched; the key gate below
+        // still suppresses any leftover total.
       });
     return () => {
       cancelled = true;
@@ -40,5 +46,5 @@ export function useSubtaskCount(open: boolean, taskId?: string, taskIds?: string
     // taskId / taskIds intentionally excluded — idsKey is their stable summary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, idsKey]);
-  return open && key === idsKey ? total : 0;
+  return open && result.key === idsKey ? result.total : 0;
 }

@@ -749,6 +749,43 @@ func TestArchiveTaskTree_NoCascade_LeavesChildrenActive(t *testing.T) {
 	}
 }
 
+// TestDeleteTaskTree_NoCascade_PublishesUpdatedForReparentedChildren
+// pins the WS-event contract for the reparent step: after children are
+// reparented to root, the bus must carry one task.updated per child so
+// WS-driven clients refresh their cached parent_id pointers. Without
+// the publish, the kanban / sidebar would keep displaying the children
+// nested under the (now-deleted) parent until a manual reload.
+func TestDeleteTaskTree_NoCascade_PublishesUpdatedForReparentedChildren(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("c1", "root", "ws-1")
+	tasks.addTask("c2", "root", "ws-1")
+	groups := newCascadeWSGroupRepo()
+	tr := &fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}
+	svc := NewHandoffService(tr, nil, nil, nil, groups, nil)
+	pub := &fakeEventPublisher{}
+	svc.SetTaskEventPublisher(pub)
+
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", false); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	pub.mu.Lock()
+	defer pub.mu.Unlock()
+	// We expect one update per direct child (c1, c2). The deleted root
+	// goes via PublishTaskDeleted, not PublishTaskUpdated.
+	want := map[string]bool{"c1": true, "c2": true}
+	for _, id := range pub.updated {
+		delete(want, id)
+	}
+	if len(want) > 0 {
+		t.Errorf("missing PublishTaskUpdated for reparented children: %v", want)
+	}
+	if len(pub.deleted) != 1 || pub.deleted[0] != "root" {
+		t.Errorf("expected exactly one task.deleted for root, got %v", pub.deleted)
+	}
+}
+
 // TestDeleteTaskTree_NoCascade_ReparentFailureAborts pins the safety
 // invariant: when the no-cascade reparent step fails we MUST refuse to
 // delete the parent. Continuing past a reparent error would leave
