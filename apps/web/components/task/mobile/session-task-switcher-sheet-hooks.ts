@@ -23,7 +23,7 @@ import {
   type WorkflowSnapshot,
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
-import { resolvePreferredSessionId } from "../task-select-helpers";
+import { findTaskInSnapshots, resolvePreferredSessionId } from "../task-select-helpers";
 
 // Map workflow snapshot to kanban state on workspace switch.
 function mapSnapshotToKanban(snapshot: WorkflowSnapshot, newWorkflowId: string) {
@@ -74,21 +74,6 @@ function mapSnapshotToKanban(snapshot: WorkflowSnapshot, newWorkflowId: string) 
       updatedAt: task.updated_at,
     })),
   };
-}
-
-// Lookup a task across all loaded workflow snapshots, falling back to the
-// active kanban slice. The mobile sheet now lists tasks from every workspace
-// workflow, so action callbacks (select / archive / delete) can no longer
-// assume the target lives in `state.kanban.tasks`.
-function findTaskAcrossWorkflows(
-  state: ReturnType<ReturnType<typeof useAppStoreApi>["getState"]>,
-  taskId: string,
-): KanbanState["tasks"][number] | undefined {
-  for (const snapshot of Object.values(state.kanbanMulti.snapshots)) {
-    const found = snapshot.tasks.find((t) => t.id === taskId);
-    if (found) return found;
-  }
-  return state.kanban.tasks.find((t) => t.id === taskId);
 }
 
 function sortByUpdatedAtDesc<T extends { updated_at?: string | null }>(items: T[]): T[] {
@@ -158,7 +143,6 @@ export function useSheetData(workspaceId: string | null) {
   const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
   const envIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
   const messagesBySession = useAppStore((state) => state.messages.bySession);
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const {
     allTasks,
     allSteps,
@@ -181,9 +165,7 @@ export function useSheetData(workspaceId: string | null) {
       repositoryPathsById: new Map(
         repositories.map((repo: Repository) => [repo.id, repo.local_path]),
       ),
-      workflowNameById: new Map(
-        Object.entries(snapshots).map(([wfId, snap]) => [wfId, snap.workflowName]),
-      ),
+      workflowNameById: new Map(workflows.map((w) => [w.id, w.name])),
       stepTitleById: new Map(allSteps.map((s) => [s.id, s.title])),
       sessionsByTaskId,
       gitStatusByEnvId,
@@ -195,7 +177,7 @@ export function useSheetData(workspaceId: string | null) {
     repositoriesByWorkspace,
     allTasks,
     allSteps,
-    snapshots,
+    workflows,
     workspaceId,
     sessionsByTaskId,
     gitStatusByEnvId,
@@ -461,7 +443,8 @@ function useSheetDeleteActions(
 
   const handleDeleteTask = useCallback(
     (taskId: string) => {
-      const task = findTaskAcrossWorkflows(store.getState(), taskId);
+      const state = store.getState();
+      const task = findTaskInSnapshots(state.kanbanMulti.snapshots, taskId, state.kanban.tasks);
       setDeletingTask({ id: taskId, title: task?.title ?? "this task" });
     },
     [store],
@@ -509,7 +492,7 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
   const handleSelectTask = useCallback(
     (taskId: string) => {
       const state = store.getState();
-      const task = findTaskAcrossWorkflows(state, taskId);
+      const task = findTaskInSnapshots(state.kanbanMulti.snapshots, taskId, state.kanban.tasks);
       if (task?.primarySessionId) {
         const targetSessionId = resolvePreferredSessionId(
           taskId,
@@ -538,7 +521,8 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
 
   const handleArchiveTask = useCallback(
     (taskId: string) => {
-      const task = findTaskAcrossWorkflows(store.getState(), taskId);
+      const state = store.getState();
+      const task = findTaskInSnapshots(state.kanbanMulti.snapshots, taskId, state.kanban.tasks);
       setArchivingTask({ id: taskId, title: task?.title ?? "this task" });
     },
     [store],

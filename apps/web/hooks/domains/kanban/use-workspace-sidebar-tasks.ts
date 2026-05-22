@@ -31,12 +31,13 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
   const activeKanbanTasks = useAppStore((state) => state.kanban.tasks);
   const activeKanbanSteps = useAppStore((state) => state.kanban.steps);
 
-  const workspaceWorkflowIds = useMemo(
-    () =>
-      new Set(
-        workflows.filter((w) => !workspaceId || w.workspaceId === workspaceId).map((w) => w.id),
-      ),
+  const filteredWorkflows = useMemo(
+    () => (!workspaceId ? workflows : workflows.filter((w) => w.workspaceId === workspaceId)),
     [workflows, workspaceId],
+  );
+  const workspaceWorkflowIds = useMemo(
+    () => new Set(filteredWorkflows.map((w) => w.id)),
+    [filteredWorkflows],
   );
 
   const scopedSnapshots = useMemo(() => {
@@ -64,11 +65,8 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
   );
 
   const workspaceWorkflows = useMemo<TaskMoveWorkflow[]>(
-    () =>
-      workflows
-        .filter((w) => !workspaceId || w.workspaceId === workspaceId)
-        .map((w) => ({ id: w.id, name: w.name, hidden: w.hidden })),
-    [workflows, workspaceId],
+    () => filteredWorkflows.map((w) => ({ id: w.id, name: w.name, hidden: w.hidden })),
+    [filteredWorkflows],
   );
 
   // Only flash a skeleton on the very first fetch (no snapshots yet); refreshes

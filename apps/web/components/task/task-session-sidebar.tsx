@@ -23,7 +23,11 @@ import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-s
 import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
-import { buildSwitchToSession, selectTaskWithLayout } from "./task-select-helpers";
+import {
+  buildSwitchToSession,
+  findTaskInSnapshots,
+  selectTaskWithLayout,
+} from "./task-select-helpers";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useArchivedTaskState } from "./task-archived-context";
@@ -52,18 +56,6 @@ function useStablePrimarySessionIds(
     [allTasks],
   );
   return useMemo(() => (key ? key.split("\0") : []), [key]);
-}
-
-/** Find a task across all workflow snapshots */
-function findTaskInSnapshots(
-  snapshots: Record<string, { tasks: KanbanState["tasks"] }>,
-  taskId: string,
-): KanbanState["tasks"][number] | undefined {
-  for (const snapshot of Object.values(snapshots)) {
-    const task = snapshot.tasks.find((t: KanbanState["tasks"][number]) => t.id === taskId);
-    if (task) return task;
-  }
-  return undefined;
 }
 
 /** Look up git status directly via primarySessionId, bypassing the session list. */
@@ -229,7 +221,6 @@ function useSidebarData(workspaceId: string | null) {
   const sessionsByTaskId = useAppStore((state) => state.taskSessionsByTask.itemsByTaskId);
   const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
   const envIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const taskPRsByTaskId = useAppStore((state) => state.taskPRs.byTaskId);
   const messagesBySession = useAppStore((state) => state.messages.bySession);
@@ -259,9 +250,7 @@ function useSidebarData(workspaceId: string | null) {
       ]),
     );
     const titleById = new Map(allTasks.map((t) => [t.id, t.title]));
-    const workflowNameById = new Map(
-      Object.entries(snapshots).map(([wfId, snap]) => [wfId, snap.workflowName]),
-    );
+    const workflowNameById = new Map(workflows.map((w) => [w.id, w.name]));
     const stepTitleById = new Map(allSteps.map((s) => [s.id, s.title]));
     const mapCtx = {
       sessionsByTaskId,
@@ -287,7 +276,7 @@ function useSidebarData(workspaceId: string | null) {
     repositoriesByWorkspace,
     allTasks,
     allSteps,
-    snapshots,
+    workflows,
     workspaceId,
     sessionsByTaskId,
     gitStatusByEnvId,
