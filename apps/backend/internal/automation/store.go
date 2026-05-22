@@ -81,9 +81,24 @@ const createTablesSQL = `
 	CREATE INDEX IF NOT EXISTS idx_automation_runs_dedup ON automation_runs(automation_id, dedup_key);
 `
 
+// In-branch column additions. The canonical CREATE TABLE covers fresh
+// installs; these ALTERs cover DBs already initialised from an earlier
+// commit on this branch (the original PR #406 schema). SQLite returns a
+// duplicate-column error when the column already exists, which we swallow.
+const (
+	migrateTaskTitleSQL     = `ALTER TABLE automations ADD COLUMN task_title_template TEXT DEFAULT ''`
+	migrateExecutionModeSQL = `ALTER TABLE automations ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'task'`
+	migrateRepositoryIDSQL  = `ALTER TABLE automations ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`
+)
+
 func (s *Store) initSchema() error {
-	_, err := s.db.Exec(createTablesSQL)
-	return err
+	if _, err := s.db.Exec(createTablesSQL); err != nil {
+		return err
+	}
+	s.db.Exec(migrateTaskTitleSQL)     //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(migrateExecutionModeSQL) //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(migrateRepositoryIDSQL)  //nolint:errcheck // duplicate-column on existing DBs
+	return nil
 }
 
 // --- Automation CRUD ---
