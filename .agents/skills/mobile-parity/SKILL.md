@@ -68,7 +68,7 @@ Good mobile tests assert real user outcomes, not only visibility. Prefer:
 
 ## Playwright Pattern
 
-Use repo conventions first. In this repo, create `mobile-*.spec.ts` files and let the `mobile-chrome` project apply the mobile device; do not add per-test device overrides. Follow `/e2e` conventions for fixture imports, page objects, selectors, and local reproduction.
+Use repo conventions first. In this repo, create `mobile-*.spec.ts` files and let the `mobile-chrome` project apply the mobile device; do not add per-test device overrides. Follow `/e2e` conventions for fixture imports, page objects, selectors, and local reproduction. Adjust the fixture import path to the spec location: top-level `tests/mobile-*.spec.ts` files use `../fixtures/test-base`, while nested files use paths such as `../../fixtures/test-base`.
 
 ```ts
 import { test, expect } from '../../fixtures/test-base';
