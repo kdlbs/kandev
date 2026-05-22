@@ -568,19 +568,15 @@ export function useTerminals({
     return userShells.filter((s) => s.state === "parked").map(shellToTerminal);
   }, [userShells, userShellsLoaded]);
 
-  // Reading sessionStorage is synchronous; useMemo here adds no real
-  // value and inlining drops the file under the 600-line cap.
   const savedTabFromStorage = sessionId
     ? getSessionStorage<string | null>(`rightPanel-tab-${sessionId}`, null)
     : null;
-  const savedTabExists = savedTabFromStorage && terminals.some((t) => t.id === savedTabFromStorage);
-
   const terminalTabValue = computeTerminalTabValue(
     activeTab,
     sessionJustChanged,
     savedTabFromStorage,
     terminals,
-    !!savedTabExists,
+    !!(savedTabFromStorage && terminals.some((t) => t.id === savedTabFromStorage)),
   );
 
   return {
