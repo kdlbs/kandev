@@ -408,6 +408,31 @@ function parseGitHubUrl(url: string): { owner: string; repo: string; prNumber?: 
   return { owner: match[1], repo: match[2] };
 }
 
+/**
+ * Returns a callback that auto-fills the task name with `PR #N: <title>` when
+ * a PR URL is pasted, leaving anything the user typed themselves alone. The
+ * callback is stable across renders and reads the latest taskName via a ref,
+ * so the fetch effect doesn't need to list taskName as a dep (which would
+ * re-fire the branches/PR fetch on every keystroke in the title input).
+ */
+export function useAutoFillTaskNameFromPR(fs: DialogFormState) {
+  const { taskName, setTaskName, setHasTitle } = fs;
+  const lastAutoFilledTitleRef = useRef("");
+  const taskNameRef = useRef(taskName);
+  useEffect(() => {
+    taskNameRef.current = taskName;
+  }, [taskName]);
+  return (prNumber: number, prTitle: string) => {
+    const next = `PR #${prNumber}: ${prTitle}`;
+    const current = taskNameRef.current;
+    if (!current.trim() || current === lastAutoFilledTitleRef.current) {
+      lastAutoFilledTitleRef.current = next;
+      setTaskName(next);
+      setHasTitle(true);
+    }
+  };
+}
+
 export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
   const {
     useGitHubUrl,
@@ -418,6 +443,7 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
     setGitHubPrHeadBranch,
     setGitHubPrBaseBranch,
   } = fs;
+  const autoFillTitle = useAutoFillTaskNameFromPR(fs);
   useEffect(() => {
     if (!open || !useGitHubUrl) {
       setGitHubBranchesLoading(false);
@@ -464,6 +490,7 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
         if (prInfo) {
           setGitHubPrHeadBranch(prInfo.head_branch);
           setGitHubPrBaseBranch(prInfo.base_branch);
+          autoFillTitle(prInfo.number, prInfo.title);
         }
       })
       .catch((err) => {
@@ -488,6 +515,10 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
       clearTimeout(timeoutId);
       controller.abort();
     };
+    // autoFillTitle is intentionally omitted: it's a fresh closure each render
+    // but reads the latest taskName via ref, so excluding it keeps the fetch
+    // from re-firing on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     open,
     useGitHubUrl,

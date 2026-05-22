@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import {
+  useAutoFillTaskNameFromPR,
   useBranchAutoSelectEffect,
   useWorkflowAgentProfileEffect,
 } from "./task-create-dialog-effects";
@@ -185,5 +186,95 @@ describe("useBranchAutoSelectEffect", () => {
     });
     renderHook(() => useBranchAutoSelectEffect(fs));
     expect(fs.setGitHubBranch).not.toHaveBeenCalled();
+  });
+});
+
+type AutoFillFake = Pick<DialogFormState, "taskName" | "setTaskName" | "setHasTitle">;
+function makeAutoFillFs(overrides: Partial<AutoFillFake> = {}): DialogFormState {
+  return {
+    taskName: "",
+    setTaskName: vi.fn(),
+    setHasTitle: vi.fn(),
+    ...overrides,
+  } as unknown as DialogFormState;
+}
+
+describe("useAutoFillTaskNameFromPR", () => {
+  it("fills the task name with 'PR #N: <title>' when the title is empty", () => {
+    const fs = makeAutoFillFs({ taskName: "" });
+    const { result } = renderHook(() => useAutoFillTaskNameFromPR(fs));
+    result.current(971, "feat/omp-acp-agent");
+    expect(fs.setTaskName).toHaveBeenCalledWith("PR #971: feat/omp-acp-agent");
+    expect(fs.setHasTitle).toHaveBeenCalledWith(true);
+  });
+
+  it("fills when the title contains only whitespace", () => {
+    // Regression guard: hasTitle treats whitespace-only as empty, so the
+    // auto-fill check must too — otherwise pasting a PR URL after typing a
+    // stray space would silently keep the spaces.
+    const fs = makeAutoFillFs({ taskName: "   " });
+    const { result } = renderHook(() => useAutoFillTaskNameFromPR(fs));
+    result.current(7, "fix");
+    expect(fs.setTaskName).toHaveBeenCalledWith("PR #7: fix");
+  });
+
+  it("does NOT overwrite a title the user typed themselves", () => {
+    const fs = makeAutoFillFs({ taskName: "my custom title" });
+    const { result } = renderHook(() => useAutoFillTaskNameFromPR(fs));
+    result.current(42, "something");
+    expect(fs.setTaskName).not.toHaveBeenCalled();
+    expect(fs.setHasTitle).not.toHaveBeenCalled();
+  });
+
+  it("replaces a previously auto-filled title when a different PR URL is pasted", () => {
+    // Re-paste flow: the user pastes PR #1 (autofills "PR #1: foo"), then
+    // realizes wrong URL and pastes PR #2. Without the lastAutoFilled-ref
+    // tracking, the second paste would see a non-empty title and bail.
+    let currentName = "";
+    const fs = makeAutoFillFs({
+      taskName: currentName,
+      setTaskName: vi.fn((v: string) => {
+        currentName = v;
+      }),
+    });
+    const { result, rerender } = renderHook(() => {
+      // Re-read taskName from the closure on every render so the ref-mirror
+      // effect sees the latest value.
+      fs.taskName = currentName;
+      return useAutoFillTaskNameFromPR(fs);
+    });
+    result.current(1, "first");
+    expect(currentName).toBe("PR #1: first");
+
+    rerender();
+    result.current(2, "second");
+    expect(currentName).toBe("PR #2: second");
+    expect(fs.setTaskName).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT replace once the user edits the auto-filled title", () => {
+    let currentName = "";
+    const fs = makeAutoFillFs({
+      taskName: currentName,
+      setTaskName: vi.fn((v: string) => {
+        currentName = v;
+      }),
+    });
+    const { result, rerender } = renderHook(() => {
+      fs.taskName = currentName;
+      return useAutoFillTaskNameFromPR(fs);
+    });
+    result.current(1, "first");
+    expect(currentName).toBe("PR #1: first");
+
+    // User edits the title manually.
+    currentName = "my edits";
+    rerender();
+
+    result.current(2, "second");
+    // Setter is still only called once (the initial auto-fill); the manual
+    // edit is preserved.
+    expect(fs.setTaskName).toHaveBeenCalledTimes(1);
+    expect(currentName).toBe("my edits");
   });
 });
