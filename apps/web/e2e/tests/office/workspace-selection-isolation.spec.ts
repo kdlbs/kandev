@@ -70,7 +70,6 @@ test.describe("Workspace selection isolation", () => {
   test("office page with workspaceId URL param shows correct workspace without writing settings", async ({
     testPage,
     apiClient,
-    officeApi: _officeApi,
     seedData,
     officeSeed,
   }) => {

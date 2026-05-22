@@ -154,7 +154,7 @@ test.describe("Onboarding", () => {
     const agentId = (completed as { agentId?: string }).agentId;
     expect(agentId).toBeTruthy();
 
-    await expect(testPage).toHaveURL(/\/office/, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/office(\?|$)/, { timeout: 15_000 });
     await testPage.goto(`/office/agents/${agentId}/configuration`);
     await expect(testPage.getByTestId("cli-config-card")).toBeVisible();
     await expect(testPage.getByTestId("cli-config-card").getByText("Unassigned")).toHaveCount(0);
@@ -213,7 +213,7 @@ test.describe("Onboarding", () => {
     await responsePromise;
 
     // Redirect to dashboard with new workspace selected
-    await expect(testPage).toHaveURL(/\/office/, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/office(\?|$)/, { timeout: 15_000 });
     await expect(testPage.getByRole("heading", { name: /Dashboard/i }).first()).toBeVisible({
       timeout: 10_000,
     });
