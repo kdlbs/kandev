@@ -545,11 +545,14 @@ func (h *ShellHandlers) wsUserShellStop(ctx context.Context, msg *ws.Message) (*
 	}
 
 	// Managed terminal — route through the service so the DB row is
-	// deleted alongside the PTY tear-down.
+	// deleted alongside the PTY tear-down. Destroy errors propagate so
+	// the frontend doesn't optimistically remove a row that the backend
+	// failed to delete.
 	if h.terminalSvc != nil && terminalservice.IsManaged(req.TerminalID) {
 		if err := h.terminalSvc.Destroy(ctx, req.TerminalID); err != nil {
 			h.logger.Warn("destroy ordinary terminal",
 				zap.String("terminal_id", req.TerminalID), zap.Error(err))
+			return nil, fmt.Errorf("destroy terminal: %w", err)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, map[string]any{"success": true})
 	}

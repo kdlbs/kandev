@@ -3,8 +3,11 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"sync"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
@@ -13,10 +16,15 @@ import (
 
 func setupTestRepo(t *testing.T) *Repository {
 	t.Helper()
-	rawDB, err := sql.Open("sqlite3", ":memory:?_foreign_keys=on")
+	// shared-cache + MaxOpenConns(1) mirrors the production writer pool
+	// (see internal/task/repository/sqlite/base.go) so all goroutines see
+	// the same in-memory database — without this, each connection gets
+	// its own DB and the concurrency test would see "no such table".
+	rawDB, err := sql.Open("sqlite3", "file::memory:?cache=shared&_foreign_keys=on")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	rawDB.SetMaxOpenConns(1)
 	sqlxDB := sqlx.NewDb(rawDB, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
 	repo, err := NewWithDB(sqlxDB, sqlxDB, nil)
@@ -182,13 +190,55 @@ func TestSetState_Park(t *testing.T) {
 	}
 }
 
-func TestGet_NotFoundReturnsErr(t *testing.T) {
+func TestGet_NotFoundReturnsErrNotFound(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
 
 	_, err := repo.Get(ctx, "missing-id")
-	if err == nil {
-		t.Error("expected error for missing id")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// TestCreate_ConcurrentSeqAllocation pounds Create with N goroutines and
+// verifies every seq is unique (no UNIQUE constraint collisions). Locks in
+// the atomic INSERT … SELECT contract.
+func TestCreate_ConcurrentSeqAllocation(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	const N = 25
+	var wg sync.WaitGroup
+	errs := make(chan error, N)
+	seqs := make(chan int, N)
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			term, err := repo.Create(ctx, "task-1", "env-1", "t-"+uuid.New().String(), "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			seqs <- term.Seq
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	close(seqs)
+
+	for err := range errs {
+		t.Errorf("concurrent create: %v", err)
+	}
+	seen := make(map[int]struct{}, N)
+	for s := range seqs {
+		if _, dup := seen[s]; dup {
+			t.Errorf("duplicate seq %d allocated", s)
+		}
+		seen[s] = struct{}{}
+	}
+	if len(seen) != N {
+		t.Errorf("seen %d unique seqs, want %d", len(seen), N)
 	}
 }
 

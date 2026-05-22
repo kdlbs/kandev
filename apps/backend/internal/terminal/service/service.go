@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/terminal/models"
@@ -161,26 +162,40 @@ func (s *Service) Resume(ctx context.Context, id string) error {
 }
 
 // Destroy stops the PTY and deletes the DB row. Irreversible.
+//
+// PTY stop errors are not fatal — agentctl may have already torn the
+// process down (e.g. after a container restart), so a missing PTY isn't
+// reason to leave the DB row behind. The error is logged at Warn so
+// operators can spot "terminal row gone, PTY still running" situations
+// without it becoming an opaque 500 to the caller.
 func (s *Service) Destroy(ctx context.Context, id string) error {
 	if !IsManaged(id) {
 		return ErrNotManaged
 	}
 	term, err := s.repo.Get(ctx, id)
 	if err != nil {
-		// Already gone — call Stop best-effort and return clean.
+		// Already gone — return clean. PTY teardown isn't possible
+		// without the env id; agentctl will GC the entry on restart.
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil
 		}
 		return err
 	}
 	if s.pty != nil {
-		_ = s.pty.Stop(ctx, term.EnvironmentID, id)
+		if stopErr := s.pty.Stop(ctx, term.EnvironmentID, id); stopErr != nil {
+			s.logWarn("pty stop on destroy (best-effort)",
+				zap.String("terminal_id", id),
+				zap.String("environment_id", term.EnvironmentID),
+				zap.Error(stopErr))
+		}
 	}
 	return s.repo.Delete(ctx, id)
 }
 
 // CleanupTask is called by the task.deleted/archived event subscriber. It
-// stops every ordinary PTY for the task and deletes the rows.
+// stops every ordinary PTY for the task and deletes the rows. Stop
+// failures are logged but don't block deletion — the DB row is the source
+// of truth for "the user expects this terminal gone".
 func (s *Service) CleanupTask(ctx context.Context, taskID string) (int, error) {
 	rows, err := s.repo.ListByTask(ctx, taskID, true)
 	if err != nil {
@@ -188,8 +203,22 @@ func (s *Service) CleanupTask(ctx context.Context, taskID string) (int, error) {
 	}
 	if s.pty != nil {
 		for _, r := range rows {
-			_ = s.pty.Stop(ctx, r.EnvironmentID, r.ID)
+			if stopErr := s.pty.Stop(ctx, r.EnvironmentID, r.ID); stopErr != nil {
+				s.logWarn("pty stop on cleanup (best-effort)",
+					zap.String("task_id", taskID),
+					zap.String("terminal_id", r.ID),
+					zap.Error(stopErr))
+			}
 		}
 	}
 	return s.repo.DeleteByTask(ctx, taskID)
+}
+
+// logWarn is a nil-safe wrapper around s.log.Warn; service unit tests
+// construct the service with a nil logger.
+func (s *Service) logWarn(msg string, fields ...zap.Field) {
+	if s.log == nil {
+		return
+	}
+	s.log.Warn(msg, fields...)
 }

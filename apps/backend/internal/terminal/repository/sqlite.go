@@ -64,27 +64,24 @@ func (r *Repository) initSchema() error {
 	return nil
 }
 
-// Create inserts a new terminal row. The seq is computed as MAX(seq)+1 for the
-// task — never reused, so deletes leave gaps.
+// Create inserts a new terminal row. The seq is computed as MAX(seq)+1 for
+// the task — never reused, so deletes leave gaps.
 //
-// The caller supplies the id (must be a UUID that's also used as the agentctl
-// PTY id). initialCommand is "" for plain shells.
+// Seq computation and insertion are folded into a single INSERT … SELECT
+// statement so the MAX read and the new row write happen atomically inside
+// SQLite's per-statement transaction. Two concurrent creates for the same
+// task can no longer pick the same seq — the second statement reads the
+// first's already-inserted row.
+//
+// The caller supplies the id (must be a UUID that's also used as the
+// agentctl PTY id). initialCommand is "" for plain shells.
 func (r *Repository) Create(ctx context.Context, taskID, envID, id, initialCommand string) (*models.Terminal, error) {
-	var seq int
-	err := r.db.QueryRowxContext(ctx,
-		`SELECT COALESCE(MAX(seq), 0) + 1 FROM user_terminals WHERE task_id = ?`,
-		taskID,
-	).Scan(&seq)
-	if err != nil {
-		return nil, fmt.Errorf("compute seq: %w", err)
-	}
-
-	_, err = r.db.ExecContext(ctx,
+	if _, err := r.db.ExecContext(ctx,
 		`INSERT INTO user_terminals (id, task_id, environment_id, seq, custom_name, state, initial_command)
-		 VALUES (?, ?, ?, ?, NULL, 'open', ?)`,
-		id, taskID, envID, seq, initialCommand,
-	)
-	if err != nil {
+		 SELECT ?, ?, ?, COALESCE(MAX(seq), 0) + 1, NULL, 'open', ?
+		 FROM user_terminals WHERE task_id = ?`,
+		id, taskID, envID, initialCommand, taskID,
+	); err != nil {
 		return nil, fmt.Errorf("insert terminal: %w", err)
 	}
 

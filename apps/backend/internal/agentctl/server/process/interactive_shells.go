@@ -264,17 +264,24 @@ func (r *InteractiveRunner) StopUserShell(ctx context.Context, scopeID, terminal
 // currently running. Returns false when the entry doesn't exist, the entry
 // has no process id (lazy-start hasn't happened yet), or the process has
 // since exited.
+//
+// ProcessID is read under the read lock so the subsequent r.Get call
+// doesn't race with a concurrent shell-start path that mutates the entry
+// pointer in place.
 func (r *InteractiveRunner) IsUserShellAlive(scopeID, terminalID string) bool {
 	key := scopeID + ":" + terminalID
 
 	r.userShellsMu.RLock()
-	entry, exists := r.userShells[key]
+	var processID string
+	if entry, exists := r.userShells[key]; exists {
+		processID = entry.ProcessID
+	}
 	r.userShellsMu.RUnlock()
 
-	if !exists || entry.ProcessID == "" {
+	if processID == "" {
 		return false
 	}
-	_, running := r.Get(entry.ProcessID, false)
+	_, running := r.Get(processID, false)
 	return running
 }
 
