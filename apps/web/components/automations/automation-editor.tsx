@@ -29,6 +29,7 @@ import { PromptSection } from "./prompt-section";
 import { ConfigSection, type RepositorySelection } from "./config-section";
 import { RunsSection } from "./runs-section";
 import { createRepositoryAction } from "@/app/actions/workspaces";
+import { generateUUID } from "@/lib/utils";
 
 type AutomationEditorProps = {
   workspaceId: string;
@@ -115,7 +116,7 @@ function useTriggerActions(currentId: string | null) {
 
   const handleAdd = async (type: TriggerType, config: Record<string, unknown>) => {
     if (!currentId) {
-      setPending((prev) => [...prev, { tempId: crypto.randomUUID(), type, config, enabled: true }]);
+      setPending((prev) => [...prev, { tempId: generateUUID(), type, config, enabled: true }]);
       return;
     }
     const trigger = await addTrigger({ automation_id: currentId, type, config, enabled: true });
