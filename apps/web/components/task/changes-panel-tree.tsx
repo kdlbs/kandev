@@ -125,7 +125,7 @@ export function ChangesTree({
             onUnstage={onUnstage}
             onDiscard={onDiscard}
             onEditFile={onEditFile}
-            hideFolderPrefix
+            treeMode
             indentPx={row.depth * 12}
           />
         ),
