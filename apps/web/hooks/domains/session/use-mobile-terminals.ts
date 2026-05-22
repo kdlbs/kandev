@@ -40,11 +40,15 @@ export function useMobileTerminals(sessionId: string | null) {
   const environmentId = useAppStore((s) =>
     sessionId ? (s.environmentIdBySessionId[sessionId] ?? null) : null,
   );
+  const taskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
   const result = useTerminals({ sessionId, environmentId });
   // Read user-shell loaded flag directly so the auto-create trigger has
   // primitive dependencies — depending on `result` would re-run on every
   // render and would also race against React's effect ordering.
-  const { isLoaded: shellsLoaded, shells } = useUserShells(environmentId);
+  // taskID flows in so the backend's DB-backed ordinary-shell path
+  // returns parked + open ordinary rows (the orphan filter drops them
+  // otherwise).
+  const { isLoaded: shellsLoaded, shells } = useUserShells(environmentId, taskID);
   const addTerminalRef = useRef(result.addTerminal);
   useEffect(() => {
     addTerminalRef.current = result.addTerminal;

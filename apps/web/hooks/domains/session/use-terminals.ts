@@ -579,7 +579,14 @@ export function useTerminals({
     setPreviewStage,
   } = useTerminalStore(sessionId, devProcessId);
 
-  const { shells: userShells, isLoaded: userShellsLoaded } = useUserShells(environmentId);
+  // Pass taskID so the backend's DB-backed ordinary-shell path fires; without
+  // it `user_shell.list` only returns legacy passthrough shells and the
+  // parked-terminals submenu stays empty.
+  const activeTaskId = useAppStore((state) => state.tasks?.activeTaskId ?? null);
+  const { shells: userShells, isLoaded: userShellsLoaded } = useUserShells(
+    environmentId,
+    activeTaskId,
+  );
 
   const tabRestoredRef = useTerminalSync({
     environmentId,

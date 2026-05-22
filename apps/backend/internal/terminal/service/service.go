@@ -141,19 +141,26 @@ func (s *Service) List(ctx context.Context, taskID string, includeParked bool) (
 }
 
 // requireOwnership loads the terminal and verifies it belongs to taskID.
-// Empty taskID skips the ownership check (used by call sites that don't
-// yet have the task scope, e.g. event-bus cleanup that already iterates
-// task-scoped rows). Returns ErrTaskMismatch on a cross-task attempt and
-// ErrNotManaged when the id falls outside the managed-id set.
+// Returns ErrTaskMismatch on a cross-task attempt and ErrNotManaged when
+// the id falls outside the managed-id set.
+//
+// taskID is required; the previous "empty taskID skips" carve-out was
+// dropped because the WS handlers pass user-controlled task_id directly
+// to this helper, making the bypass an unauthenticated escape hatch.
+// Internal task-scoped cleanup paths (CleanupTask) walk the repo
+// directly and never call this method.
 func (s *Service) requireOwnership(ctx context.Context, taskID, id string) (*models.Terminal, error) {
 	if !IsManaged(id) {
 		return nil, ErrNotManaged
+	}
+	if taskID == "" {
+		return nil, ErrTaskMismatch
 	}
 	term, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if taskID != "" && term.TaskID != taskID {
+	if term.TaskID != taskID {
 		return nil, ErrTaskMismatch
 	}
 	return term, nil

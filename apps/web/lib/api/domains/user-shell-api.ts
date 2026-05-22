@@ -165,6 +165,10 @@ export async function createUserShell(
  * `taskId` is sent so the backend can verify ownership and reject
  * cross-task destroys. Optional for non-managed ids (bottom-panel,
  * script-*) where the service guard short-circuits.
+ *
+ * Falls back to `user_shell.stop` if the server rejects `user_shell.destroy`
+ * as an unknown action — preserves compatibility during the rollout
+ * window where older backends only register the legacy action name.
  */
 export async function destroyUserShell(
   environmentId: string,
@@ -178,7 +182,27 @@ export async function destroyUserShell(
     terminal_id: terminalId,
   };
   if (taskId) payload.task_id = taskId;
-  await client.request("user_shell.destroy", payload);
+  try {
+    await client.request("user_shell.destroy", payload);
+  } catch (error) {
+    if (isUnknownActionError(error)) {
+      await client.request("user_shell.stop", payload);
+      return;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Heuristic check for "server doesn't know this action" responses. The
+ * WS dispatcher returns an error whose message contains "unknown action"
+ * or "no handler" depending on backend version; both forms are matched
+ * by case-insensitive substring search.
+ */
+function isUnknownActionError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  const lower = msg.toLowerCase();
+  return lower.includes("unknown action") || lower.includes("no handler");
 }
 
 /** Legacy name retained for the bottom-panel + script paths. */

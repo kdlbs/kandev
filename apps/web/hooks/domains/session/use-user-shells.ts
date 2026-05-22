@@ -1,7 +1,12 @@
 import { useEffect, useRef } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import type { UserShellInfo } from "@/lib/state/slices";
+import type {
+  UserShellInfo,
+  UserShellKind,
+  UserShellState,
+  UserShellPTYStatus,
+} from "@/lib/state/slices";
 
 interface UseUserShellsReturn {
   shells: UserShellInfo[];
@@ -14,17 +19,44 @@ interface UseUserShellsReturn {
 const EMPTY_SHELLS: UserShellInfo[] = [];
 
 /**
+ * Wire shape of an item in the `user_shell.list` response. Backend returns
+ * a discriminated union — `kind: "ordinary"` carries DB metadata, `fixed`
+ * and `script` only carry the id + pty_status + label.
+ */
+type ListResponseItem = {
+  id?: string;
+  terminal_id?: string; // legacy / passthrough
+  kind?: UserShellKind;
+  seq?: number;
+  display_name?: string;
+  custom_name?: string | null;
+  state?: UserShellState;
+  pty_status?: UserShellPTYStatus;
+  label?: string;
+  closable?: boolean;
+  initial_command?: string;
+  process_id?: string;
+  running?: boolean;
+};
+
+/**
  * Hook to fetch and manage user shell terminals for a task environment.
  *
- * User shells are env-scoped — sessions in the same task share one shell list.
- * Pass the environment id directly; do not pass a session id.
+ * `taskId` is required for the backend's DB-backed ordinary-terminal path
+ * to fire. Without it, only the legacy passthrough shells (bottom-panel,
+ * scripts) come back — first-class persistent terminals would never reach
+ * the panel strip, and the parked-terminals submenu would always be
+ * empty.
  *
  * Follows the data fetching pattern:
  * 1. Read from store first
  * 2. Fetch from backend if not loaded
  * 3. Track loading/loaded state
  */
-export function useUserShells(environmentId: string | null): UseUserShellsReturn {
+export function useUserShells(
+  environmentId: string | null,
+  taskId?: string | null,
+): UseUserShellsReturn {
   const store = useAppStoreApi();
 
   const shells = useAppStore((state) => {
@@ -68,27 +100,16 @@ export function useUserShells(environmentId: string | null): UseUserShellsReturn
       store.getState().setUserShellsLoading(environmentId, true);
 
       try {
-        const response = await client.request<{
-          shells?: Array<{
-            terminal_id: string;
-            process_id: string;
-            running: boolean;
-            label: string;
-            closable: boolean;
-            initial_command?: string;
-          }>;
-        }>("user_shell.list", { task_environment_id: environmentId }, 10000);
+        const payload: Record<string, unknown> = { task_environment_id: environmentId };
+        if (taskId) payload.task_id = taskId;
+        const response = await client.request<{ shells?: ListResponseItem[] }>(
+          "user_shell.list",
+          payload,
+          10000,
+        );
 
-        const shells: UserShellInfo[] = (response.shells ?? []).map((s) => ({
-          terminalId: s.terminal_id,
-          processId: s.process_id,
-          running: s.running,
-          label: s.label || "Terminal",
-          closable: s.closable,
-          initialCommand: s.initial_command,
-        }));
-
-        store.getState().setUserShells(environmentId, shells);
+        const mapped: UserShellInfo[] = (response.shells ?? []).map((s) => mapListItemToShell(s));
+        store.getState().setUserShells(environmentId, mapped);
         lastFetchedEnvIdRef.current = environmentId;
       } catch (error) {
         console.error("Failed to fetch user shells:", error);
@@ -98,7 +119,7 @@ export function useUserShells(environmentId: string | null): UseUserShellsReturn
     };
 
     fetchShells();
-  }, [environmentId, connectionStatus, isLoaded, store]);
+  }, [environmentId, taskId, connectionStatus, isLoaded, store]);
 
   const addShell = (shell: UserShellInfo) => {
     if (environmentId) {
@@ -118,5 +139,31 @@ export function useUserShells(environmentId: string | null): UseUserShellsReturn
     isLoaded,
     addShell,
     removeShell,
+  };
+}
+
+/**
+ * Maps the wire shape onto the in-store `UserShellInfo`. The new handler
+ * returns `id` (typed `kind: "ordinary" | "fixed" | "script"`), the
+ * legacy passthrough returns `terminal_id`. Both populate the legacy
+ * `processId/running/label/closable` fields when present so older
+ * consumers (e.g. the `useTerminals` build path for non-ordinary tabs)
+ * keep rendering correctly.
+ */
+function mapListItemToShell(s: ListResponseItem): UserShellInfo {
+  const id = (s.id ?? s.terminal_id ?? "") as string;
+  return {
+    terminalId: id,
+    kind: s.kind,
+    seq: s.seq,
+    customName: s.custom_name ?? null,
+    displayName: s.display_name,
+    state: s.state,
+    ptyStatus: s.pty_status,
+    processId: s.process_id,
+    running: s.running ?? s.pty_status === "running",
+    label: s.label || s.display_name || "Terminal",
+    closable: s.closable ?? true,
+    initialCommand: s.initial_command,
   };
 }

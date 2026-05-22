@@ -268,17 +268,18 @@ func TestDestroy_RejectsCrossTask(t *testing.T) {
 	}
 }
 
-// TestRename_EmptyTaskIDSkipsOwnership confirms the helper allows an empty
-// taskID for internal callers (e.g. CleanupTask which already scopes by
-// task elsewhere).
-func TestRename_EmptyTaskIDSkipsOwnership(t *testing.T) {
+// TestRename_EmptyTaskIDRejected ensures the previous "empty taskID
+// skips" carve-out is gone — an unauthenticated client cannot mutate any
+// terminal by raw id just by omitting task_id.
+func TestRename_EmptyTaskIDRejected(t *testing.T) {
 	svc, _ := setupService(t)
 	ctx := context.Background()
 
 	owned, _ := svc.Create(ctx, "task-a", "env-a", "")
-	name := "internal-rename"
-	if err := svc.Rename(ctx, "", owned.ID, &name); err != nil {
-		t.Errorf("empty taskID should skip ownership check, got %v", err)
+	name := "stolen"
+	err := svc.Rename(ctx, "", owned.ID, &name)
+	if !errors.Is(err, ErrTaskMismatch) {
+		t.Errorf("empty taskID should reject with ErrTaskMismatch, got %v", err)
 	}
 }
 
