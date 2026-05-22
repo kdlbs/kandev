@@ -237,9 +237,13 @@ const (
 	ActionSessionShellOutput = "session.shell.output" // Shell output notification (also used for exit with type: "exit")
 
 	// User shell actions (independent terminal tabs)
-	ActionUserShellList   = "user_shell.list"   // List running user shells for a session
-	ActionUserShellCreate = "user_shell.create" // Create a new user shell terminal (assigns ID and label)
-	ActionUserShellStop   = "user_shell.stop"   // Stop a user shell terminal
+	ActionUserShellList    = "user_shell.list"    // List user shells for a task (DB rows + agentctl probes)
+	ActionUserShellCreate  = "user_shell.create"  // Create a new user shell terminal (assigns ID + seq)
+	ActionUserShellStop    = "user_shell.stop"    // Legacy alias of destroy; kept for one release
+	ActionUserShellRename  = "user_shell.rename"  // Rename an ordinary user shell (set/clear custom_name)
+	ActionUserShellPark    = "user_shell.park"    // Hide tab; PTY continues running
+	ActionUserShellResume  = "user_shell.resume"  // Unhide a parked tab
+	ActionUserShellDestroy = "user_shell.destroy" // Stop the PTY and delete the row
 
 	// Session file review actions
 	ActionSessionFileReviewGet    = "session.file_review.get"    // Get all file reviews for a session

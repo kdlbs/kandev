@@ -24,6 +24,8 @@ import (
 	orchestratorhandlers "github.com/kandev/kandev/internal/orchestrator/handlers"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	terminalrepo "github.com/kandev/kandev/internal/terminal/repository"
+	terminalservice "github.com/kandev/kandev/internal/terminal/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -105,12 +107,24 @@ func provideGateway(
 	agentRegistry *registry.Registry,
 	notificationRepo notificationstore.Repository,
 	taskRepo *sqliterepo.Repository,
+	terminalRepo *terminalrepo.Repository,
 	githubSvc *github.Service,
 	dataDir string,
-) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, error) {
+) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, *terminalservice.Service, error) {
 	gateway, err := gateways.Provide(log)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
+	}
+
+	// Terminal service — DB-backed first-class user terminals. Backend is
+	// nil-safe when no interactive runner is wired (remote-executor mode).
+	var terminalSvc *terminalservice.Service
+	if terminalRepo != nil {
+		var ptyBackend terminalservice.PTYBackend
+		if lifecycleMgr != nil {
+			ptyBackend = terminalservice.NewInteractiveRunnerBackend(lifecycleMgr.GetInteractiveRunner())
+		}
+		terminalSvc = terminalservice.New(terminalRepo, ptyBackend, log)
 	}
 
 	// Enable dedicated terminal WebSocket for passthrough mode
@@ -139,6 +153,9 @@ func provideGateway(
 		workspaceFileHandlers.RegisterHandlers(gateway.Dispatcher)
 
 		shellHandlers := agenthandlers.NewShellHandlers(lifecycleMgr, scriptSvc, log)
+		if terminalSvc != nil {
+			shellHandlers.SetTerminalService(terminalSvc)
+		}
 		shellHandlers.RegisterHandlers(gateway.Dispatcher)
 
 		gitHandlers := agenthandlers.NewGitHandlers(lifecycleMgr, &sessionReaderAdapter{repo: taskRepo, logger: log}, log)
@@ -263,5 +280,50 @@ func provideGateway(
 		}
 	}
 
-	return gateway, notificationSvc, notificationCtrl, nil
+	// Wire the task-lifecycle cascade: terminals are PTYs and DB rows;
+	// destroying the task should destroy them too. Mirrors the GitHub PR
+	// watch / handoff cascade pattern (see CLAUDE.md "Task lifecycle
+	// events").
+	if terminalSvc != nil && eventBus != nil {
+		subscribeTerminalCleanup(ctx, eventBus, terminalSvc, log)
+	}
+
+	return gateway, notificationSvc, notificationCtrl, terminalSvc, nil
+}
+
+// subscribeTerminalCleanup wires the terminal service to task.deleted /
+// task.archived (where archived_at is set). It cleans up PTYs and DB rows
+// for the task.
+func subscribeTerminalCleanup(ctx context.Context, eventBus bus.EventBus, svc *terminalservice.Service, log *logger.Logger) {
+	handler := func(eventCtx context.Context, event *bus.Event) error {
+		if event == nil {
+			return nil
+		}
+		data, ok := event.Data.(map[string]interface{})
+		if !ok {
+			return nil
+		}
+		taskID, _ := data["task_id"].(string)
+		if taskID == "" {
+			return nil
+		}
+		archivedAt, _ := data["archived_at"].(string)
+		if event.Type == events.TaskUpdated && archivedAt == "" {
+			// Plain update — only react on archive transitions.
+			return nil
+		}
+		if _, err := svc.CleanupTask(eventCtx, taskID); err != nil {
+			log.Warn("terminal cleanup on task event",
+				zap.String("task_id", taskID),
+				zap.String("event", event.Type),
+				zap.Error(err))
+		}
+		return nil
+	}
+	if _, err := eventBus.Subscribe(events.TaskDeleted, handler); err != nil {
+		log.Error("subscribe terminal cleanup (deleted)", zap.Error(err))
+	}
+	if _, err := eventBus.Subscribe(events.TaskUpdated, handler); err != nil {
+		log.Error("subscribe terminal cleanup (updated/archived)", zap.Error(err))
+	}
 }

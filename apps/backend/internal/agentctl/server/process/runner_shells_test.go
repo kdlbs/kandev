@@ -206,25 +206,18 @@ func TestInteractiveRunner_RegisterScriptShell(t *testing.T) {
 
 	runner.RegisterScriptShell("session-1", "script-abc", "npm start", "npm run start")
 
-	// Should appear in list
+	// Auto-create-first-shell was removed; the script registration is the
+	// only entry the runner now knows about for this scope.
 	shells := runner.ListUserShells("session-1")
-
-	// Should have 2: auto-created "Terminal" + registered script
-	if len(shells) != 2 {
-		t.Fatalf("ListUserShells() returned %d shells, want 2", len(shells))
+	if len(shells) != 1 {
+		t.Fatalf("ListUserShells() returned %d shells, want 1", len(shells))
 	}
 
-	// Find the script shell
-	var scriptShell *UserShellInfo
-	for i := range shells {
-		if shells[i].TerminalID == "script-abc" {
-			scriptShell = &shells[i]
-			break
-		}
+	scriptShell := &shells[0]
+	if scriptShell.TerminalID != "script-abc" {
+		t.Fatalf("script shell terminalID = %q, want script-abc", scriptShell.TerminalID)
 	}
-	if scriptShell == nil {
-		t.Fatal("script shell not found in list")
-	} else {
+	{
 		if scriptShell.Label != "npm start" {
 			t.Errorf("script shell Label = %q, want 'npm start'", scriptShell.Label)
 		}
@@ -257,44 +250,15 @@ func TestInteractiveRunner_RegisterScriptShell_DoesNotAffectShellCount(t *testin
 	}
 }
 
-func TestInteractiveRunner_ListUserShells_AutoCreatesFirst(t *testing.T) {
+func TestInteractiveRunner_ListUserShells_EmptyByDefault(t *testing.T) {
 	log := newTestLogger(t)
 	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
 
-	// First call should auto-create "Terminal"
+	// Auto-create-first-shell was removed; an untouched scope returns nothing.
+	// Backend's terminal service owns the auto-create policy now.
 	shells := runner.ListUserShells("session-1")
-
-	if len(shells) != 1 {
-		t.Fatalf("ListUserShells() returned %d shells, want 1", len(shells))
-	}
-	if shells[0].Label != "Terminal" {
-		t.Errorf("auto-created shell Label = %q, want 'Terminal'", shells[0].Label)
-	}
-	if shells[0].Closable {
-		t.Error("auto-created first shell should not be closable")
-	}
-	if shells[0].Running {
-		t.Error("auto-created shell should not be running (no process)")
-	}
-	if !strings.HasPrefix(shells[0].TerminalID, "shell-") {
-		t.Errorf("auto-created shell TerminalID = %q, want prefix 'shell-'", shells[0].TerminalID)
-	}
-}
-
-func TestInteractiveRunner_ListUserShells_StableAfterAutoCreate(t *testing.T) {
-	log := newTestLogger(t)
-	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
-
-	// First call auto-creates
-	shells1 := runner.ListUserShells("session-1")
-	// Second call should return the same list (not create another)
-	shells2 := runner.ListUserShells("session-1")
-
-	if len(shells1) != 1 || len(shells2) != 1 {
-		t.Fatalf("ListUserShells() should return 1 shell each time, got %d and %d", len(shells1), len(shells2))
-	}
-	if shells1[0].TerminalID != shells2[0].TerminalID {
-		t.Error("ListUserShells() should return the same terminal ID across calls")
+	if len(shells) != 0 {
+		t.Fatalf("ListUserShells() returned %d shells, want 0", len(shells))
 	}
 }
 

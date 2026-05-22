@@ -494,12 +494,15 @@ func startGatewayAndServe(
 	// WEBSOCKET GATEWAY
 	// ============================================
 	log.Info("Initializing WebSocket Gateway...")
-	gateway, _, notificationCtrl, err := provideGateway(
+	gateway, _, notificationCtrl, terminalSvc, err := provideGateway(
 		ctx, log, eventBus, services.Task, services.User,
 		orchestratorSvc, lifecycleMgr, agentRegistry,
-		repos.Notification, repos.Task, services.GitHub,
+		repos.Notification, repos.Task, repos.Terminal, services.GitHub,
 		cfg.ResolvedHomeDir(),
 	)
+	if terminalSvc != nil {
+		services.Terminal = terminalSvc
+	}
 	if err != nil {
 		log.Error("Failed to initialize WebSocket gateway", zap.Error(err))
 		return false
