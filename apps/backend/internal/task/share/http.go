@@ -72,16 +72,18 @@ func toShareResponse(s *Share) shareResponse {
 // displayURL returns the URL we want clients to use when opening a share.
 // We always prefer the gist.githack.com rendered view (it proxies the raw
 // gist file directly, avoiding the GitHub gists-API content budget that
-// makes gistpreview.github.io render blank for big snapshots). Three
-// stored formats are normalised on the way out:
+// makes gistpreview.github.io render blank for big snapshots). Stored
+// formats are normalised on the way out:
 //
 //   - bare gist URL (https://gist.github.com/<owner>/<id>) — older rows
 //     written before share.html landed in the gist
-//   - already a githack URL — re-pinned to /raw/share.html so legacy
-//     rows that targeted a different file land on the styled view
-//   - legacy gistpreview URL — passed through unchanged. The owner is
-//     not recoverable from a gistpreview URL, so we can't auto-upgrade;
-//     users can revoke + re-share to get the githack URL.
+//   - already a githack URL — re-pinned to /raw/share.html so rows that
+//     targeted a different file (or no file) land on the styled view
+//   - legacy gistpreview URL — passed through (owner is not recoverable
+//     from gistpreview shape, so we can't upgrade to githack), but
+//     re-pinned with /share.html when stored without a filename so
+//     pre-existing rows still hit the styled HTML rather than the
+//     alphabetically-first README.md
 //
 // Anything we don't recognise is returned unchanged.
 func displayURL(stored string) string {
@@ -95,6 +97,17 @@ func displayURL(stored string) string {
 	// Bare gist URL → convert to githack.
 	if rendered := renderedURLForGist(stored); rendered != "" {
 		return rendered
+	}
+	// Legacy gistpreview URL — pass through, but re-pin /share.html for
+	// rows stored without a filename so they don't silently fall back to
+	// rendering README.md.
+	const previewPrefix = "https://gistpreview.github.io/?"
+	if strings.HasPrefix(stored, previewPrefix) {
+		id := strings.TrimPrefix(stored, previewPrefix)
+		if i := strings.Index(id, "/"); i >= 0 {
+			id = id[:i]
+		}
+		return previewPrefix + id + "/share.html"
 	}
 	return stored
 }

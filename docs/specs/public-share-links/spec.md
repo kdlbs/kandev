@@ -155,9 +155,10 @@ POST   /api/v1/tasks/:taskId/sessions/:sessionId/shares?dry_run=true
 GET    /api/v1/tasks/:taskId/sessions/:sessionId/shares
        -> 200 { shares: [{ id, url, created_at, revoked_at, snapshot_size_bytes }] }
        Lists every share row (including revoked) for the session. The
-       `url` field is always normalised to the current rendering URL
-       (gistpreview.github.io/?<id>/share.html) regardless of what's
-       stored.
+       `url` field is always normalised to the canonical githack rendering
+       URL (gist.githack.com/<owner>/<id>/raw/share.html) regardless of
+       what's stored; legacy gistpreview.github.io rows are passed
+       through (re-pinned to /share.html when the filename is missing).
 
 DELETE /api/v1/shares/:shareId
        -> 204
@@ -307,7 +308,8 @@ There is no "draft" or "scheduled" state; publish is synchronous.
 - **GIVEN** the preview dialog is open, **WHEN** the user clicks "Publish
   to GitHub Gist", **THEN** kandev uploads a secret gist containing
   `snapshot.json`, `share.html`, and `README.md`, inserts a `task_shares`
-  row, and the dialog displays the gistpreview URL with a copy button.
+  row, and the dialog displays the gist.githack.com URL with a copy
+  button.
 
 - **GIVEN** an active share row, **WHEN** the user clicks Revoke, **THEN**
   the gist is deleted from GitHub, the row is updated with `revoked_at`,

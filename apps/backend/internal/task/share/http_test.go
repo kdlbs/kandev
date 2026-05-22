@@ -218,11 +218,19 @@ func TestDisplayURL_NormalizesAllFormats(t *testing.T) {
 		{
 			// Legacy gistpreview rows (written before the githack switch)
 			// lack the owner segment we need to build a githack URL, so
-			// they pass through unchanged. Users on those rows still get a
-			// working link for small tasks; revoking + re-sharing surfaces
-			// the githack URL going forward.
-			"legacy_gistpreview_passthrough",
+			// they pass through. Users on those rows still get a working
+			// link for small tasks; revoking + re-sharing surfaces the
+			// githack URL going forward.
+			"legacy_gistpreview_with_share_html_passthrough",
 			"https://gistpreview.github.io/?abc123/share.html",
+			"https://gistpreview.github.io/?abc123/share.html",
+		},
+		{
+			// Older gistpreview rows stored without /share.html still get
+			// re-pinned so gistpreview doesn't silently fall back to
+			// rendering README.md.
+			"legacy_gistpreview_without_filename_repinned",
+			"https://gistpreview.github.io/?abc123",
 			"https://gistpreview.github.io/?abc123/share.html",
 		},
 		{
