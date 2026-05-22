@@ -40,7 +40,17 @@ export function shellToTerminal(shell: UserShellInfo): Terminal {
   };
 }
 
-/** Compute the effective active tab value, preferring store, then sessionStorage, then fallback. */
+/**
+ * Compute the effective active tab value, preferring store, then
+ * sessionStorage, then fallback.
+ *
+ * `activeTab` is only honoured when it points at a tab that is still
+ * selectable — i.e. present in `terminals` or the synthetic "commands"
+ * tab. A stale id (e.g. left over from a terminal that was parked or
+ * destroyed in another tab) would otherwise stay active and block the
+ * fallback shift to a real shell. The "commands" id is always accepted
+ * because it has no corresponding entry in `terminals`.
+ */
 export function computeTerminalTabValue(
   activeTab: string | undefined,
   sessionJustChanged: boolean,
@@ -48,8 +58,10 @@ export function computeTerminalTabValue(
   terminals: Terminal[],
   savedTabExists: boolean,
 ): string {
+  const activeTabSelectable =
+    !!activeTab && (activeTab === "commands" || terminals.some((t) => t.id === activeTab));
   const effectiveActiveTab =
-    !sessionJustChanged && activeTab && activeTab !== "" ? activeTab : null;
+    !sessionJustChanged && activeTab && activeTab !== "" && activeTabSelectable ? activeTab : null;
   return (
     effectiveActiveTab ??
     (savedTabFromStorage && (terminals.length === 0 || savedTabExists)

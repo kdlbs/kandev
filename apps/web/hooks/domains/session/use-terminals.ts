@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo } from "react";
 import { getSessionStorage } from "@/lib/local-storage";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { stopProcess } from "@/lib/api";
 import {
   destroyUserShell,
@@ -392,7 +392,6 @@ function useManagedTerminalActions({
 type TerminalActionsOptions = {
   sessionId: string | null;
   environmentId: string | null;
-  activeTab: string | undefined;
   terminals: Terminal[];
   devProcessId: string | undefined;
   setTerminals: Dispatch<SetStateAction<Terminal[]>>;
@@ -404,7 +403,6 @@ type TerminalActionsOptions = {
 function useTerminalActions({
   sessionId,
   environmentId,
-  activeTab,
   terminals,
   devProcessId,
   setTerminals,
@@ -418,15 +416,16 @@ function useTerminalActions({
 
   const taskID = useAppStore((state) => state.tasks?.activeTaskId ?? null);
 
-  // Track the latest activeTab in a ref so async close handlers read the
-  // current selection instead of the value captured when handleCloseTab
-  // first ran. Without this, tab switches that happen mid-park/destroy
-  // can be silently undone by the .then() fallback-shift logic.
-  const activeTabRef = useRef(activeTab);
-  useEffect(() => {
-    activeTabRef.current = activeTab;
-  }, [activeTab]);
-  const getActiveTab = useCallback(() => activeTabRef.current, []);
+  // getActiveTab reads the live store at call-time rather than capturing
+  // `activeTab` in the useCallback closure. Async close handlers that
+  // resolve after a user tab-switch see the new selection immediately
+  // — no useEffect/useLayoutEffect race window because the store is the
+  // single source of truth and `getState()` is synchronous.
+  const storeApi = useAppStoreApi();
+  const getActiveTab = useCallback(
+    () => (sessionId ? storeApi.getState().rightPanel.activeTabBySessionId[sessionId] : undefined),
+    [storeApi, sessionId],
+  );
 
   const addTerminal = useAddTerminal({
     environmentId,
@@ -556,7 +555,6 @@ export function useTerminals({
   } = useTerminalActions({
     sessionId,
     environmentId,
-    activeTab,
     terminals,
     devProcessId,
     setTerminals,
