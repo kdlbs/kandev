@@ -18,8 +18,9 @@ func (s *Server) registerRelatedTasksTool() {
 		mcp.NewTool("list_related_tasks_kandev",
 			mcp.WithDescription(
 				`List parent, children, siblings, blockers, and blocked tasks for the current task.
-Use this to discover task IDs you can read documents from. Document keys are included so you can pick
-the document to fetch with get_task_document_kandev. Pass task_id to inspect a different task in the same workspace.`,
+Use this to discover task IDs you can reach via message_task_kandev. In office mode, document keys are
+also included so you can fetch documents with get_task_document_kandev.
+Pass task_id to inspect a different task in the same workspace.`,
 			),
 			mcp.WithString("task_id", mcp.Description("Defaults to the current task.")),
 		),
