@@ -100,7 +100,16 @@ export function useUserShells(
       store.getState().setUserShellsLoading(environmentId, true);
 
       try {
-        const payload: Record<string, unknown> = { task_environment_id: environmentId };
+        // include_parked=true is required for the "Parked terminals"
+        // submenu to populate after a page reload — without it the
+        // backend returns only state=open rows and parked PTYs become
+        // invisible until the user parks something in the same session.
+        // `buildTerminalsFromShells` already filters parked entries out
+        // of the main strip so this doesn't change visible-tab behaviour.
+        const payload: Record<string, unknown> = {
+          task_environment_id: environmentId,
+          include_parked: true,
+        };
         if (taskId) payload.task_id = taskId;
         const response = await client.request<{ shells?: ListResponseItem[] }>(
           "user_shell.list",
