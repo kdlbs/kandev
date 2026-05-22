@@ -411,9 +411,14 @@ function parseGitHubUrl(url: string): { owner: string; repo: string; prNumber?: 
 /**
  * Returns a callback that auto-fills the task name with `PR #N: <title>` when
  * a PR URL is pasted, leaving anything the user typed themselves alone. The
- * callback is stable across renders and reads the latest taskName via a ref,
- * so the fetch effect doesn't need to list taskName as a dep (which would
- * re-fire the branches/PR fetch on every keystroke in the title input).
+ * callback reads the latest taskName via a ref so the fetch effect doesn't
+ * need to list taskName as a dep (which would re-fire the branches/PR fetch on
+ * every keystroke in the title input).
+ *
+ * NOTE: Callers must omit the returned callback from `useEffect` dependency
+ * arrays — including it causes the fetch to re-fire on every keystroke,
+ * defeating the purpose of the ref. The call site uses
+ * `eslint-disable react-hooks/exhaustive-deps` intentionally.
  */
 export function useAutoFillTaskNameFromPR(fs: DialogFormState) {
   const { taskName, setTaskName, setHasTitle } = fs;
@@ -421,6 +426,9 @@ export function useAutoFillTaskNameFromPR(fs: DialogFormState) {
   const taskNameRef = useRef(taskName);
   useEffect(() => {
     taskNameRef.current = taskName;
+    if (!taskName.trim()) {
+      lastAutoFilledTitleRef.current = "";
+    }
   }, [taskName]);
   return (prNumber: number, prTitle: string) => {
     const next = `PR #${prNumber}: ${prTitle}`;
