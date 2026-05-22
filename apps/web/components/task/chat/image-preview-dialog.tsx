@@ -18,7 +18,7 @@ export const IMAGE_PREVIEW_IMAGE_CLASSNAME =
   "block h-auto max-h-[calc(100dvh-5rem)] w-[min(92vw,1100px)] max-w-full rounded object-contain";
 
 type ImagePreviewContentProps = {
-  src?: string;
+  src: string;
   alt: string;
 };
 

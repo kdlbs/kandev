@@ -11,40 +11,39 @@ import { ContextChip } from "./context-chip";
 
 export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextItem }) {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const previewSrc = item.attachment.preview;
 
   const handleClick = useCallback(() => {
     setDialogOpen(true);
   }, []);
 
-  const preview = (
+  const preview = previewSrc ? (
     <div className="space-y-1.5">
       {/* eslint-disable-next-line @next/next/no-img-element -- base64 preview */}
-      <img
-        src={item.attachment.preview}
-        alt="Preview"
-        className="max-w-full max-h-48 rounded object-contain"
-      />
+      <img src={previewSrc} alt="Preview" className="max-w-full max-h-48 rounded object-contain" />
     </div>
-  );
+  ) : undefined;
 
   return (
     <>
       <ContextChip
         kind="image"
         label={item.label}
-        thumbnail={item.attachment.preview}
+        thumbnail={previewSrc}
         preview={preview}
-        onClick={handleClick}
+        onClick={previewSrc ? handleClick : undefined}
         onRemove={item.onRemove}
       />
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent
-          aria-describedby={undefined}
-          className={IMAGE_PREVIEW_DIALOG_CONTENT_CLASSNAME}
-        >
-          <ImagePreviewContent src={item.attachment.preview} alt="Full size preview" />
-        </DialogContent>
-      </Dialog>
+      {previewSrc && (
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogContent
+            aria-describedby={undefined}
+            className={IMAGE_PREVIEW_DIALOG_CONTENT_CLASSNAME}
+          >
+            <ImagePreviewContent src={previewSrc} alt="Full size preview" />
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 });

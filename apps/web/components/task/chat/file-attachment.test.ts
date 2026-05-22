@@ -58,4 +58,22 @@ describe("processFile in insecure context (HTTP, no crypto.randomUUID)", () => {
     expect(attachment!.isImage).toBe(true);
     expect(attachment!.preview).toMatch(/^data:image\/png;base64,/);
   });
+
+  it("treats non-previewable image MIME types as regular file attachments", async () => {
+    const ImageSpy = vi.fn();
+    vi.stubGlobal("crypto", {});
+    vi.stubGlobal("FileReader", FakeFileReader);
+    vi.stubGlobal("Image", ImageSpy);
+
+    const file = new File(["svg"], "icon.svg", { type: "image/svg+xml" });
+    Object.defineProperty(file, "size", { value: 3 });
+
+    const attachment = await processFile(file);
+    expect(attachment).not.toBeNull();
+    expect(attachment!.id).toMatch(UUID_V4_REGEX);
+    expect(attachment!.isImage).toBe(false);
+    expect(attachment!.mimeType).toBe("image/svg+xml");
+    expect(attachment!.preview).toBeUndefined();
+    expect(ImageSpy).not.toHaveBeenCalled();
+  });
 });
