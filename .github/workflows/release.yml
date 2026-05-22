@@ -360,15 +360,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-mingw-w64-x86-64
 
+      # The `fts5` build tag is REQUIRED on the kandev binary. The office
+      # task search migrations create a `tasks_fts` virtual table using
+      # `USING fts5(...)`; without the tag, mattn/go-sqlite3 lacks the
+      # module and any subsequent boot against a DB that already has the
+      # virtual table fails with "no such module: fts5" during schema init.
+      # See issue #1006 for the regression this prevents.
+      #
+      # Version ldflags mirror apps/backend/Makefile so `kandev --version`
+      # reports the released tag instead of the build-time default "dev".
       - name: Build backend binaries
         env:
           CC: ${{ matrix.cc || '' }}
+          KANDEV_VERSION: ${{ needs.prepare.outputs.tag }}
         run: |
           cd apps/backend
           mkdir -p bin
           EXT=${{ matrix.goos == 'windows' && '.exe' || '' }}
-          go build -o bin/kandev${EXT} ./cmd/kandev
-          go build -o bin/agentctl${EXT} ./cmd/agentctl
+          COMMIT=$(git rev-parse --short HEAD)
+          BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          LDFLAGS="-s -w -X main.Version=${KANDEV_VERSION} -X main.Commit=${COMMIT} -X main.BuildTime=${BUILD_TIME}"
+          go build -tags fts5 -ldflags "${LDFLAGS}" -o bin/kandev${EXT} ./cmd/kandev
+          go build -ldflags "${LDFLAGS}" -o bin/agentctl${EXT} ./cmd/agentctl
 
       # Cross-compile a linux/amd64 agentctl regardless of the host platform.
       # Remote executors (local Docker, remote Docker, Sprites) bind-mount this
