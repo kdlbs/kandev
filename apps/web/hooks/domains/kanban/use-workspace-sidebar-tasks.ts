@@ -31,8 +31,11 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
   const activeKanbanTasks = useAppStore((state) => state.kanban.tasks);
   const activeKanbanSteps = useAppStore((state) => state.kanban.steps);
 
+  // While `workspaceId` is unresolved (initial SSR / pre-hydration), return an
+  // empty scope rather than every workflow in the store — otherwise snapshots
+  // from previously-active workspaces would briefly bleed into the sidebar.
   const filteredWorkflows = useMemo(
-    () => (!workspaceId ? workflows : workflows.filter((w) => w.workspaceId === workspaceId)),
+    () => (workspaceId ? workflows.filter((w) => w.workspaceId === workspaceId) : []),
     [workflows, workspaceId],
   );
   const workspaceWorkflowIds = useMemo(

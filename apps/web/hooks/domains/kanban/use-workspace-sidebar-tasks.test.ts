@@ -104,6 +104,28 @@ describe("useWorkspaceSidebarTasks", () => {
     expect(result.current.workflows.map((w) => w.id)).toEqual(["wf-A", "wf-B"]);
   });
 
+  it("returns an empty scope when workspaceId is null (no cross-workspace leak)", () => {
+    setMockState({
+      workflows: {
+        items: [
+          { id: "wf-A", workspaceId: "ws-1", name: "Alpha" },
+          { id: "wf-B", workspaceId: "ws-2", name: "Beta" },
+        ],
+      },
+      kanbanMulti: {
+        snapshots: {
+          "wf-A": makeSnapshot("wf-A", "Alpha", ["t-a1"]),
+          "wf-B": makeSnapshot("wf-B", "Beta", ["t-b1"]),
+        },
+        isLoading: false,
+      },
+    });
+
+    const { result } = renderHook(() => useWorkspaceSidebarTasks(null));
+    expect(result.current.allTasks).toEqual([]);
+    expect(result.current.workflows).toEqual([]);
+  });
+
   it("filters out snapshots from other workspaces (stale hydration)", () => {
     setMockState({
       workflows: {
@@ -142,6 +164,17 @@ describe("useWorkspaceSidebarTasks", () => {
     const { result } = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
     expect(result.current.allTasks.map((t) => t.id)).toEqual(["t-a1"]);
     expect(result.current.allTasks[0]._workflowId).toBe("wf-A");
+  });
+});
+
+describe("useWorkspaceSidebarTasks — loading", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockState = {
+      kanbanMulti: { snapshots: {}, isLoading: false },
+      workflows: { items: [] },
+      kanban: { workflowId: null, tasks: [], steps: [] },
+    };
   });
 
   it("reports loading only on the first fetch, not on refreshes", () => {
