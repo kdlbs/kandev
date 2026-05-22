@@ -47,11 +47,10 @@ describe("QueuedGhostMessage attachment thumbnails", () => {
         onRemove={() => {}}
       />,
     );
-    const img = screen.getByAltText(ATTACHMENT_1_ALT) as HTMLImageElement;
+    const trigger = screen.getByRole("button", { name: OPEN_ATTACHMENT_1_LABEL });
+    const img = trigger.querySelector("img") as HTMLImageElement;
     expect(img.src).toBe(`data:image/png;base64,${PNG_BASE64}`);
-    expect(screen.getByRole("button", { name: OPEN_ATTACHMENT_1_LABEL }).className).toContain(
-      "cursor-pointer",
-    );
+    expect(trigger.className).toContain("cursor-pointer");
   });
 
   it("renders a file chip for non-image (resource) attachments", () => {
@@ -82,7 +81,7 @@ describe("QueuedGhostMessage attachment thumbnails", () => {
     );
     const trigger = screen.getByRole("button", { name: OPEN_ATTACHMENT_1_LABEL });
     expect(trigger.getAttribute("type")).toBe("button");
-    expect(screen.getByAltText(ATTACHMENT_1_ALT)).toBeTruthy();
+    expect(trigger.querySelector("img")).toBeTruthy();
   });
 
   it("opens the image in a preview dialog when clicked in display mode", () => {
