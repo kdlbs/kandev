@@ -251,7 +251,11 @@ function applyLayoutAndSet(
   pinnedWidths: Map<string, number>,
   set: StoreSet,
 ): LayoutGroupIds {
-  const ids = applyLayout(api, state, pinnedWidths);
+  // Pass measured container dims so fromJSON's grid.width matches the live
+  // container — avoids the proportional rescale that would otherwise grow
+  // pinned columns past their legacy initial caps on the next api.layout.
+  const measured = measureDockviewContainer(api);
+  const ids = applyLayout(api, state, pinnedWidths, measured.width, measured.height);
   set(ids);
   return ids;
 }
@@ -382,7 +386,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       for (const key of cleanedWidths.keys()) {
         if (!targetColumnIds.has(key)) cleanedWidths.delete(key);
       }
-      const ids = applyLayout(api, state, cleanedWidths);
+      const ids = applyLayout(api, state, cleanedWidths, safeWidth, safeHeight);
       set({
         ...ids,
         sidebarVisible: true,
@@ -411,7 +415,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
           console.warn("applyCustomLayout: old-format restore failed:", e);
         }
       } else {
-        const ids = applyLayout(api, state, liveWidths);
+        const ids = applyLayout(api, state, liveWidths, safeWidth, safeHeight);
         set(ids);
       }
       const hasSidebar = !!api.getPanel("sidebar");
@@ -686,7 +690,7 @@ function performBuildDefault(
     state = applyActivePanelOverrides(state, intent.activePanels);
   }
 
-  const ids = applyLayout(api, state, freshPinned);
+  const ids = applyLayout(api, state, freshPinned, safeWidth, safeHeight);
   const hasSidebar = state.columns.some((c) => c.id === "sidebar");
   const hasRight = state.columns.length > (hasSidebar ? 2 : 1);
   set({ ...ids, sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });

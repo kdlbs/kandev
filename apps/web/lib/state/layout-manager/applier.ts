@@ -61,13 +61,23 @@ export function resolveGroupIds(api: DockviewApi): LayoutGroupIds {
 /**
  * Apply a LayoutState to DockviewApi via fromJSON.
  * Computes sizes, serializes, applies, and returns group IDs.
+ *
+ * `totalWidth` / `totalHeight` default to `api.width` / `api.height`, but
+ * callers should pass measured container dimensions when available — relying
+ * on `api.width` causes a proportional rescale on the next `api.layout` call
+ * (the pinned-column max widths no longer enforce the legacy hard caps, so
+ * the rescale grows sidebar/right past their intended defaults).
  */
 export function applyLayout(
   api: DockviewApi,
   state: LayoutState,
   pinnedWidths: Map<string, number>,
+  totalWidth?: number,
+  totalHeight?: number,
 ): LayoutGroupIds {
-  const serialized = toSerializedDockview(state, api.width, api.height, pinnedWidths);
+  const w = totalWidth ?? api.width;
+  const h = totalHeight ?? api.height;
+  const serialized = toSerializedDockview(state, w, h, pinnedWidths);
 
   api.fromJSON(serialized);
 
