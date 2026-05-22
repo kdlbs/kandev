@@ -332,44 +332,6 @@ export function removeEnvMaximizeState(envId: string): void {
   }
 }
 
-// --- Dockview pinned-column user defaults (sessionStorage) ---
-// Stores the user's preferred sidebar / right widths so brand-new task envs
-// adopt them instead of falling back to the ratio-based default. Per-env saved
-// layouts still win when present (this only seeds the in-memory pinnedWidths
-// map for envs with no saved layout yet).
-const DOCKVIEW_PINNED_DEFAULTS_KEY = "kandev.dockview.pinned-defaults";
-
-export type PinnedDefaults = { sidebar?: number; right?: number };
-
-function isPinnedDefaults(value: unknown): value is PinnedDefaults {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  const okSidebar = v.sidebar === undefined || typeof v.sidebar === "number";
-  const okRight = v.right === undefined || typeof v.right === "number";
-  return okSidebar && okRight;
-}
-
-export function getPinnedDefaults(): PinnedDefaults {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.sessionStorage.getItem(DOCKVIEW_PINNED_DEFAULTS_KEY);
-    if (!raw) return {};
-    const parsed: unknown = JSON.parse(raw);
-    return isPinnedDefaults(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-export function setPinnedDefaults(defaults: PinnedDefaults): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.setItem(DOCKVIEW_PINNED_DEFAULTS_KEY, JSON.stringify(defaults));
-  } catch {
-    // Ignore write failures
-  }
-}
-
 // PR panel "offered" flag — tracks whether the auto-show PR panel was offered
 // for a session. If offered and then closed by the user, we respect the dismissal.
 const PR_PANEL_OFFERED_PREFIX = "kandev.pr-panel-offered.";

@@ -1,11 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
-import { SessionPage } from "../../pages/session-page";
 import {
   WIDE_VIEWPORT,
   openWideTask,
   expectApproxWidth,
   getDockviewGroupWidth,
-  readPinnedDefaultsFromStorage,
   resizeColumnViaSplitview,
 } from "../../helpers/dockview-resize";
 
@@ -27,7 +25,7 @@ test.describe("Right pane resize — viewport-proportional cap", () => {
     expect(actual).toBeLessThanOrEqual(cap + 10);
   });
 
-  test("user width survives reload (sessionStorage round-trip)", async ({
+  test("user width survives reload (per-env sessionStorage round-trip)", async ({
     testPage,
     apiClient,
     seedData,
@@ -41,47 +39,6 @@ test.describe("Right pane resize — viewport-proportional cap", () => {
 
     const after = await getDockviewGroupWidth(testPage, "files");
     expectApproxWidth(after, before, 12);
-  });
-
-  test("user width persists into sessionStorage pinned-defaults slot", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    await openWideTask(testPage, apiClient, seedData, "Right pinned defaults");
-    const live = await resizeColumnViaSplitview(testPage, "right", 650);
-    const defaults = await readPinnedDefaultsFromStorage(testPage);
-    expect(defaults.right).toBeDefined();
-    expectApproxWidth(defaults.right ?? 0, live, 12);
-  });
-
-  test("new task adopts user's preferred right width", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await openWideTask(testPage, apiClient, seedData, "Right propagate A");
-    const widthA = await resizeColumnViaSplitview(testPage, "right", 620);
-    void session;
-
-    const taskB = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Right propagate B",
-      seedData.agentProfileId,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-    await testPage.goto(`/t/${taskB.id}`);
-    const sessionB = new SessionPage(testPage);
-    await sessionB.waitForLoad();
-    await sessionB.waitForDockviewReady();
-
-    const widthB = await getDockviewGroupWidth(testPage, "files");
-    expectApproxWidth(widthB, widthA, 20);
   });
 
   test("viewport shrink re-clamps an over-cap pinned width", async ({

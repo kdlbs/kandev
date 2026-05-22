@@ -9,15 +9,16 @@ type Box = { x: number; y: number; width: number; height: number };
 
 export const WIDE_VIEWPORT = { width: 1600, height: 900 };
 
-/** Open a fresh task at the wide viewport and wait for the desktop dockview
- *  layout to settle. Shared by every pane-resize spec. */
+/** Open a fresh task at the given (or wide-default) viewport and wait for
+ *  the desktop dockview layout to settle. Shared by every pane-resize spec. */
 export async function openWideTask(
   page: Page,
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
+  viewport: { width: number; height: number } = WIDE_VIEWPORT,
 ): Promise<SessionPage> {
-  await page.setViewportSize(WIDE_VIEWPORT);
+  await page.setViewportSize(viewport);
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
@@ -151,27 +152,6 @@ export async function getColumnSashIndex(page: Page, column: "sidebar" | "right"
     const count = document.querySelectorAll(".dv-sash").length;
     if (count === 0) throw new Error("no .dv-sash elements found");
     return count - 1;
-  });
-}
-
-/** Pre-populate the pinned-defaults sessionStorage slot before navigation so
- *  the dockview store seeds with the desired widths on first build. */
-export async function setPinnedDefaultsViaStorage(
-  page: Page,
-  defaults: { sidebar?: number; right?: number },
-): Promise<void> {
-  await page.evaluate((d) => {
-    window.sessionStorage.setItem("kandev.dockview.pinned-defaults", JSON.stringify(d));
-  }, defaults);
-}
-
-/** Read the pinned-defaults sessionStorage slot. */
-export async function readPinnedDefaultsFromStorage(
-  page: Page,
-): Promise<{ sidebar?: number; right?: number }> {
-  return page.evaluate(() => {
-    const raw = window.sessionStorage.getItem("kandev.dockview.pinned-defaults");
-    return raw ? (JSON.parse(raw) as { sidebar?: number; right?: number }) : {};
   });
 }
 

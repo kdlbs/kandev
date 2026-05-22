@@ -21,27 +21,6 @@ test.describe("Pane resize edge cases", () => {
     await session.expectLayoutHealthy();
   });
 
-  test("rapid resizes persist the final value across reload", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await openWideTask(testPage, apiClient, seedData, "Edge rapid resize");
-    // Five quick resizes; the final value should win.
-    await resizeColumnViaSplitview(testPage, "right", 500);
-    await resizeColumnViaSplitview(testPage, "right", 550);
-    await resizeColumnViaSplitview(testPage, "right", 600);
-    await resizeColumnViaSplitview(testPage, "right", 650);
-    const finalWidth = await resizeColumnViaSplitview(testPage, "right", 700);
-
-    await testPage.reload();
-    await session.waitForLoad();
-    await session.waitForDockviewReady();
-
-    const afterReload = await getDockviewGroupWidth(testPage, "files");
-    expectApproxWidth(afterReload, finalWidth, 15);
-  });
-
   test("resize during maximize does not corrupt the pre-maximize width", async ({
     testPage,
     apiClient,
