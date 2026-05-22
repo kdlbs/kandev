@@ -58,9 +58,7 @@ function client() {
   return {} as ReturnType<typeof import("@/lib/ws/connection").getWebSocketClient>;
 }
 
-// Polling-detected refresh events carry empty path + operation: "refresh".
-// Before the fix, applyFileChanges only refreshed root, so files added under
-// an expanded subdir never appeared in the tree (regression for #982).
+// Regression for #982: refresh events must expand all affected-repo folders, not just root.
 describe("applyFileChanges — refresh operation expands to all expanded folders", () => {
   it("refreshes every expanded folder under the affected repo on a refresh event", async () => {
     mockEmptyTree();
@@ -110,8 +108,7 @@ describe("applyFileChanges — refresh operation expands to all expanded folders
       setLoadState: vi.fn(),
     });
     await new Promise<void>((r) => setTimeout(r, 0));
-    // create event for THM_NEW — parent is "thm" (expanded), the path
-    // itself isn't expanded. Only "thm" should be refreshed.
+    // create event: parent "thm" is expanded, path itself is not — only "thm" refreshed.
     expect(requestFileTreeMock.mock.calls.map((c) => c[2]).sort()).toEqual(["thm"]);
   });
 
@@ -184,8 +181,7 @@ describe("applyFileChanges — cross-repo subtree preservation", () => {
     const reducer = setTree.mock.calls[0][0] as (prev: FileTreeNode) => FileTreeNode;
     const next = reducer(prevTree);
     const kandevNode = next.children?.find((c) => c.path === "kandev");
-    // kandev wasn't part of the refresh scope (different repo), so its
-    // existing README.md child must still be present.
+    // kandev's existing child must survive a refresh scoped to a different repo.
     expect(kandevNode?.children?.map((c) => c.path)).toEqual(["kandev/README.md"]);
     const thmNode = next.children?.find((c) => c.path === "thm");
     expect(thmNode?.children?.map((c) => c.path).sort()).toEqual([THM_NEW, THM_OLD]);

@@ -108,12 +108,7 @@ func TestManager_RepoSubpaths(t *testing.T) {
 	}
 }
 
-// Regression test for kdlbs/kandev#982: in CLI passthrough mode the agent
-// runs via the PTY-based InteractiveRunner and never goes through
-// startAgent/startOneShot, so the per-repo trackers used to stay idle and
-// file changes by the agent never produced workspace-stream notifications.
-// StartAllWorkspaceTrackers is what instance.Manager.CreateInstance now
-// calls so polling fires even without an agent subprocess.
+// Regression for #982: passthrough mode must start per-repo trackers so file-change events reach the Files panel.
 func TestManager_StartAllWorkspaceTrackers_StartsRootAndRepoTrackers(t *testing.T) {
 	taskRoot := t.TempDir()
 	for _, name := range []string{"frontend", "backend"} {
@@ -137,10 +132,7 @@ func TestManager_StartAllWorkspaceTrackers_StartsRootAndRepoTrackers(t *testing.
 		}
 	})
 
-	// Every tracker must report started. Waiting on initialScanDone proves
-	// the monitor goroutine actually ran (it closes the channel on either
-	// the first scan completing or the no-git-index early-exit), which is
-	// what makes the workspace stream subscriber receive change events.
+	// initialScanDone closes once the monitor goroutine ran — confirms Start() actually fired.
 	for i, tr := range append([]*WorkspaceTracker{mgr.workspaceTracker}, mgr.repoTrackers...) {
 		select {
 		case <-tr.initialScanDone:
