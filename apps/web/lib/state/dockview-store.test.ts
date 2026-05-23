@@ -91,3 +91,52 @@ describe("dockview-store resolveFilePath (via onDidActivePanelChange)", () => {
     expect(useDockviewStore.getState().activeFilePath).toBeNull();
   });
 });
+
+describe("dockview-store minimize state", () => {
+  beforeEach(() => {
+    useDockviewStore.setState({ minimizedGroupIds: new Set<string>() });
+  });
+
+  it("toggleGroupMinimized adds then removes a group ID", () => {
+    const { toggleGroupMinimized } = useDockviewStore.getState();
+    toggleGroupMinimized("g1");
+    expect(useDockviewStore.getState().minimizedGroupIds.has("g1")).toBe(true);
+    toggleGroupMinimized("g1");
+    expect(useDockviewStore.getState().minimizedGroupIds.has("g1")).toBe(false);
+  });
+
+  it("toggleGroupMinimized swaps the Set instance so selectors re-fire", () => {
+    const before = useDockviewStore.getState().minimizedGroupIds;
+    useDockviewStore.getState().toggleGroupMinimized("g1");
+    const after = useDockviewStore.getState().minimizedGroupIds;
+    expect(after).not.toBe(before);
+  });
+
+  it("toggleGroupMinimized treats distinct IDs independently", () => {
+    const { toggleGroupMinimized } = useDockviewStore.getState();
+    toggleGroupMinimized("g1");
+    toggleGroupMinimized("g2");
+    const ids = useDockviewStore.getState().minimizedGroupIds;
+    expect(ids.has("g1")).toBe(true);
+    expect(ids.has("g2")).toBe(true);
+    toggleGroupMinimized("g1");
+    const ids2 = useDockviewStore.getState().minimizedGroupIds;
+    expect(ids2.has("g1")).toBe(false);
+    expect(ids2.has("g2")).toBe(true);
+  });
+
+  it("clearMinimizedGroups empties the Set", () => {
+    useDockviewStore.getState().toggleGroupMinimized("g1");
+    useDockviewStore.getState().toggleGroupMinimized("g2");
+    expect(useDockviewStore.getState().minimizedGroupIds.size).toBe(2);
+    useDockviewStore.getState().clearMinimizedGroups();
+    expect(useDockviewStore.getState().minimizedGroupIds.size).toBe(0);
+  });
+
+  it("clearMinimizedGroups is a no-op when already empty (preserves identity)", () => {
+    const before = useDockviewStore.getState().minimizedGroupIds;
+    useDockviewStore.getState().clearMinimizedGroups();
+    const after = useDockviewStore.getState().minimizedGroupIds;
+    expect(after).toBe(before);
+  });
+});

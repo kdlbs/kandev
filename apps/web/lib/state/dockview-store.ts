@@ -178,6 +178,10 @@ type DockviewStore = {
   maximizedGroupId: string | null;
   maximizeGroup: (groupId: string) => void;
   exitMaximizedLayout: () => void;
+  /** Per-group minimized state — content hidden, tab strip visible. Not persisted. */
+  minimizedGroupIds: Set<string>;
+  toggleGroupMinimized: (groupId: string) => void;
+  clearMinimizedGroups: () => void;
 };
 
 type StoreGet = () => DockviewStore;
@@ -387,6 +391,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
         sidebarVisible: true,
         rightPanelsVisible: preset === "default",
         pinnedWidths: cleanedWidths,
+        minimizedGroupIds: new Set<string>(),
       });
       requestAnimationFrame(() => {
         api.layout(safeWidth, safeHeight);
@@ -417,7 +422,11 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       const colCount = state?.columns?.length ?? api.groups.length;
       const sidebarCols = hasSidebar ? 1 : 0;
       const hasRight = colCount > sidebarCols + 1;
-      set({ sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
+      set({
+        sidebarVisible: hasSidebar,
+        rightPanelsVisible: hasRight,
+        minimizedGroupIds: new Set<string>(),
+      });
       requestAnimationFrame(() => {
         api.layout(safeWidth, safeHeight);
         syncPinnedWidthsFromApi(api, set);
@@ -565,7 +574,11 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
     // outgoing env rather than silently skipping it.
     const effectiveOld = oldEnvId ?? currentLayoutEnvId;
     saveOutgoingEnv(api, effectiveOld, preMaximizeLayout, get().pinnedWidths);
-    set({ preMaximizeLayout: null, maximizedGroupId: null });
+    set({
+      preMaximizeLayout: null,
+      maximizedGroupId: null,
+      minimizedGroupIds: new Set<string>(),
+    });
     set({ isRestoringLayout: true, currentLayoutEnvId: newEnvId });
     try {
       if (restoreMaximizeFromStorage(api, newEnvId, set)) return;
@@ -586,6 +599,26 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
     } catch {
       set({ isRestoringLayout: false });
     }
+  };
+}
+
+function buildMinimizeActions(set: StoreSet, get: StoreGet) {
+  return {
+    toggleGroupMinimized: (groupId: string) => {
+      set((prev) => {
+        const next = new Set(prev.minimizedGroupIds);
+        if (next.has(groupId)) {
+          next.delete(groupId);
+        } else {
+          next.add(groupId);
+        }
+        return { minimizedGroupIds: next };
+      });
+    },
+    clearMinimizedGroups: () => {
+      if (get().minimizedGroupIds.size === 0) return;
+      set({ minimizedGroupIds: new Set<string>() });
+    },
   };
 }
 
@@ -623,7 +656,12 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
         groups: [{ panels: targetGroup.panels, activePanel: targetGroup.activePanel }],
       });
       const maximizedLayout: LayoutState = { columns };
-      set({ isRestoringLayout: true, preMaximizeLayout: current, maximizedGroupId: groupId });
+      set({
+        isRestoringLayout: true,
+        preMaximizeLayout: current,
+        maximizedGroupId: groupId,
+        minimizedGroupIds: new Set<string>(),
+      });
       const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
       applyLayoutAndSet(api, maximizedLayout, liveWidths, set);
       requestAnimationFrame(() => {
@@ -645,7 +683,12 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
       const safeWidth = measured.width;
       const safeHeight = measured.height;
       const liveWidths = get().pinnedWidths;
-      set({ isRestoringLayout: true, preMaximizeLayout: null, maximizedGroupId: null });
+      set({
+        isRestoringLayout: true,
+        preMaximizeLayout: null,
+        maximizedGroupId: null,
+        minimizedGroupIds: new Set<string>(),
+      });
       if (currentLayoutEnvId) {
         removeEnvMaximizeState(currentLayoutEnvId);
       }
@@ -688,7 +731,12 @@ function performBuildDefault(
   const ids = applyLayout(api, state, freshPinned);
   const hasSidebar = state.columns.some((c) => c.id === "sidebar");
   const hasRight = state.columns.length > (hasSidebar ? 2 : 1);
-  set({ ...ids, sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
+  set({
+    ...ids,
+    sidebarVisible: hasSidebar,
+    rightPanelsVisible: hasRight,
+    minimizedGroupIds: new Set<string>(),
+  });
 
   const pending = get().deferredPanelActions;
   if (pending.length > 0) {
@@ -797,6 +845,8 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   setPendingChatScrollTop: (value) => set({ pendingChatScrollTop: value }),
   preMaximizeLayout: null,
   maximizedGroupId: null,
+  minimizedGroupIds: new Set<string>(),
+  ...buildMinimizeActions(set, get),
   ...buildMaximizeActions(set, get),
   ...buildPanelActions(set, get),
   ...buildExtraPanelActions(get),
@@ -834,6 +884,7 @@ export function releaseLayoutToDefault(oldEnvId: string | null): void {
     preMaximizeLayout: null,
     maximizedGroupId: null,
     currentLayoutEnvId: null,
+    minimizedGroupIds: new Set<string>(),
   });
   buildDefaultLayout(api);
 }
