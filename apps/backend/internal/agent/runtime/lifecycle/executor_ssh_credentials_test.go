@@ -5,6 +5,48 @@ import (
 	"testing"
 )
 
+func TestWrapLoginShell(t *testing.T) {
+	t.Run("empty shell defaults to bash", func(t *testing.T) {
+		got := WrapLoginShell("", "echo hi")
+		if !strings.HasPrefix(got, "bash -lc ") {
+			t.Errorf("WrapLoginShell with empty shell = %q, want bash -lc prefix", got)
+		}
+	})
+
+	t.Run("custom shell is used verbatim", func(t *testing.T) {
+		got := WrapLoginShell("zsh", "echo hi")
+		if !strings.HasPrefix(got, "zsh -lc ") {
+			t.Errorf("WrapLoginShell with zsh = %q, want zsh -lc prefix", got)
+		}
+	})
+
+	t.Run("inner command is single-quoted", func(t *testing.T) {
+		got := WrapLoginShell("bash", "echo hi")
+		if !strings.Contains(got, "'echo hi'") {
+			t.Errorf("WrapLoginShell did not single-quote inner cmd: %q", got)
+		}
+	})
+
+	t.Run("embedded single quote escaped POSIX-safe", func(t *testing.T) {
+		// shellQuote's contract is to replace ' with '\'' so a payload
+		// like `echo "it's"` becomes 'echo "it'\''s"' — preserving the
+		// single quote literally inside the bash -lc argument.
+		got := WrapLoginShell("bash", `echo "it's"`)
+		if !strings.Contains(got, `'echo "it'\''s"'`) {
+			t.Errorf("WrapLoginShell did not escape single quote correctly: %q", got)
+		}
+	})
+
+	t.Run("multiline scripts survive intact", func(t *testing.T) {
+		script := "set -e\nmkdir -p /tmp/x\ncat <<EOF > /tmp/x/f\nhello\nEOF"
+		got := WrapLoginShell("bash", script)
+		// Newlines inside single-quoted args are valid POSIX shell input.
+		if !strings.Contains(got, "set -e\nmkdir -p /tmp/x") {
+			t.Errorf("WrapLoginShell mangled multiline script: %q", got)
+		}
+	})
+}
+
 func TestParentDir(t *testing.T) {
 	cases := []struct {
 		in   string

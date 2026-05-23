@@ -101,6 +101,8 @@ func (h *Handler) registerHTTP(router *gin.Engine) {
 	api.POST("/test", h.httpTest)
 	api.GET("/executors/:id/sessions", h.httpListSessions)
 	api.POST("/executors/:id/probe-agents", h.httpProbeAgents)
+	api.POST("/executors/:id/probe-shells", h.httpProbeShells)
+	api.POST("/executors/:id/install-agent", h.httpInstallAgent)
 }
 
 func (h *Handler) registerWS(dispatcher *ws.Dispatcher) {
@@ -202,15 +204,29 @@ type AgentReadinessRow struct {
 }
 
 // AgentReadinessResponse is the body of POST /api/v1/ssh/executors/:id/probe-agents.
+// Shell echoes back which login shell the probe ran under so the UI can
+// label results that depend on shell-init PATH (nvm/asdf etc.).
 type AgentReadinessResponse struct {
 	Host       string              `json:"host"`
+	Shell      string              `json:"shell,omitempty"`
 	DurationMs int64               `json:"duration_ms"`
 	Rows       []AgentReadinessRow `json:"rows"`
 }
 
+// ProbeAgentsRequest is the optional body of POST /api/v1/ssh/executors/:id/probe-agents.
+// Shell, when set, names the login shell the probe runs under (e.g. "bash",
+// "zsh"). Empty falls back to bash — see lifecycle.WrapLoginShell.
+type ProbeAgentsRequest struct {
+	Shell string `json:"shell,omitempty"`
+}
+
 // httpProbeAgents SSHs to the given executor's host and runs `command -v`
 // for each enabled agent's first command-line token. Drives the "Available
-// agents on this host" card on /settings/executors/ssh/:id.
+// agents on this host" card on the executor's profile-edit page.
+//
+// Reads an optional `{shell}` body so the UI can re-probe under whichever
+// shell the user picked in the shell selector (PATH depends on shell init
+// files, so the same host shows different agents under bash vs sh).
 func (h *Handler) httpProbeAgents(c *gin.Context) {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
@@ -221,7 +237,11 @@ func (h *Handler) httpProbeAgents(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{errorJSONKey: "agent readiness not wired"})
 		return
 	}
-	resp, status, err := h.probeAgents(c.Request.Context(), id)
+	var body ProbeAgentsRequest
+	// Body is optional — empty POST is fine and falls back to the default
+	// shell. Don't fail loudly on a malformed body; just ignore the shell.
+	_ = c.ShouldBindJSON(&body)
+	resp, status, err := h.probeAgents(c.Request.Context(), id, body.Shell)
 	if err != nil {
 		c.JSON(status, gin.H{errorJSONKey: err.Error()})
 		return
@@ -230,18 +250,11 @@ func (h *Handler) httpProbeAgents(c *gin.Context) {
 }
 
 // probeAgents is the testable core of httpProbeAgents.
-func (h *Handler) probeAgents(ctx context.Context, executorID string) (*AgentReadinessResponse, int, error) {
+func (h *Handler) probeAgents(ctx context.Context, executorID, shell string) (*AgentReadinessResponse, int, error) {
 	started := time.Now()
-	executor, err := h.executorFetcher.GetExecutor(ctx, executorID)
+	target, status, err := h.resolveSSHTarget(ctx, executorID)
 	if err != nil {
-		return nil, http.StatusNotFound, fmt.Errorf("executor %q not found: %w", executorID, err)
-	}
-	if executor == nil || executor.Type != models.ExecutorTypeSSH {
-		return nil, http.StatusBadRequest, fmt.Errorf("executor %q is not an SSH executor", executorID)
-	}
-	target, err := sshTargetFromExecutorConfig(executor.Config)
-	if err != nil {
-		return nil, http.StatusBadRequest, err
+		return nil, status, err
 	}
 	client, err := lifecycle.DialSSH(ctx, target)
 	if err != nil {
@@ -249,9 +262,10 @@ func (h *Handler) probeAgents(ctx context.Context, executorID string) (*AgentRea
 	}
 	defer func() { _ = client.Close() }()
 
-	rows := h.probeAgentsOnClient(ctx, client)
+	rows := h.probeAgentsOnClient(ctx, client, shell)
 	return &AgentReadinessResponse{
 		Host:       target.Host,
+		Shell:      shell,
 		DurationMs: time.Since(started).Milliseconds(),
 		Rows:       rows,
 	}, http.StatusOK, nil
@@ -259,16 +273,16 @@ func (h *Handler) probeAgents(ctx context.Context, executorID string) (*AgentRea
 
 // probeAgentsOnClient walks every enabled agent and runs command -v over
 // the existing client. Public seam for a unit test that fakes the SSH side.
-func (h *Handler) probeAgentsOnClient(ctx context.Context, client *ssh.Client) []AgentReadinessRow {
+func (h *Handler) probeAgentsOnClient(ctx context.Context, client *ssh.Client, shell string) []AgentReadinessRow {
 	enabled := h.agents.ListEnabled()
 	rows := make([]AgentReadinessRow, 0, len(enabled))
 	for _, ag := range enabled {
-		rows = append(rows, probeOneAgent(ctx, client, ag))
+		rows = append(rows, probeOneAgent(ctx, client, shell, ag))
 	}
 	return rows
 }
 
-func probeOneAgent(ctx context.Context, client *ssh.Client, ag agents.Agent) AgentReadinessRow {
+func probeOneAgent(ctx context.Context, client *ssh.Client, shell string, ag agents.Agent) AgentReadinessRow {
 	row := AgentReadinessRow{
 		AgentID:     ag.ID(),
 		AgentName:   ag.Name(),
@@ -281,7 +295,7 @@ func probeOneAgent(ctx context.Context, client *ssh.Client, ag agents.Agent) Age
 		return row
 	}
 	row.Binary = args[0]
-	resolved, err := lifecycle.ProbeRemoteBinary(ctx, client, row.Binary)
+	resolved, err := lifecycle.ProbeRemoteBinary(ctx, client, shell, row.Binary)
 	if err != nil {
 		row.Error = err.Error()
 		return row
@@ -292,6 +306,245 @@ func probeOneAgent(ctx context.Context, client *ssh.Client, ag agents.Agent) Age
 	row.Available = true
 	row.ResolvedAt = resolved
 	return row
+}
+
+// candidateShells is the closed set the probe walks. Common Linux shells
+// plus dash; expanding this is cheap (one extra `command -v` per entry).
+var candidateShells = []string{"bash", "zsh", "sh", "fish", "dash"}
+
+// ProbeShellsResponse is the body of POST /api/v1/ssh/executors/:id/probe-shells.
+type ProbeShellsResponse struct {
+	Host       string   `json:"host"`
+	DurationMs int64    `json:"duration_ms"`
+	Available  []string `json:"available"`
+}
+
+// httpProbeShells SSHs to the host and reports which of a small set of
+// canonical login shells resolves on the remote's $PATH. Drives the shell
+// selector on the SSH profile-edit page so users pick a shell that actually
+// exists. The shell choice then governs every subsequent SSH command —
+// including the agent-readiness probe and the actual agentctl launch.
+func (h *Handler) httpProbeShells(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: "executor id required"})
+		return
+	}
+	if h.executorFetcher == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{errorJSONKey: "executor lookup not wired"})
+		return
+	}
+	resp, status, err := h.probeShells(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(status, gin.H{errorJSONKey: err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handler) probeShells(ctx context.Context, executorID string) (*ProbeShellsResponse, int, error) {
+	started := time.Now()
+	target, status, err := h.resolveSSHTarget(ctx, executorID)
+	if err != nil {
+		return nil, status, err
+	}
+	client, err := lifecycle.DialSSH(ctx, target)
+	if err != nil {
+		return nil, http.StatusBadGateway, fmt.Errorf("ssh: dial %s: %w", target.Host, err)
+	}
+	defer func() { _ = client.Close() }()
+
+	available := make([]string, 0, len(candidateShells))
+	for _, shell := range candidateShells {
+		// Probe without login-shell wrapping — we're checking whether the
+		// shell binary itself exists in PATH, which is independent of the
+		// shell-init files we'd source. /bin/sh -c 'command -v bash' is
+		// fine.
+		resolved, probeErr := lifecycle.ProbeRemoteBinary(ctx, client, "sh", shell)
+		if probeErr != nil {
+			h.logger.Warn("probe-shells: SSH probe failed",
+				zap.String("shell", shell), zap.Error(probeErr))
+			continue
+		}
+		if resolved != "" {
+			available = append(available, shell)
+		}
+	}
+	return &ProbeShellsResponse{
+		Host:       target.Host,
+		DurationMs: time.Since(started).Milliseconds(),
+		Available:  available,
+	}, http.StatusOK, nil
+}
+
+// InstallAgentRequest is the body of POST /api/v1/ssh/executors/:id/install-agent.
+// AgentID names the agent to install; the handler resolves it through the
+// registry to get a deterministic InstallScript. Shell, when set, names the
+// login shell to run the script under (defaults to bash).
+type InstallAgentRequest struct {
+	AgentID string `json:"agent_id"`
+	Shell   string `json:"shell,omitempty"`
+}
+
+// InstallAgentResponse is the body returned by the install endpoint. Output
+// is the combined stdout+stderr captured during the install (capped at a
+// few KB so the UI can render it inline without crushing the browser).
+type InstallAgentResponse struct {
+	AgentID    string `json:"agent_id"`
+	Success    bool   `json:"success"`
+	DurationMs int64  `json:"duration_ms"`
+	Output     string `json:"output,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
+const installOutputCapBytes = 8 * 1024
+
+// httpInstallAgent runs the agent's InstallScript on the remote under the
+// configured login shell. Backs the "Install" button on the readiness card.
+// Always returns 200 — the response body carries success/failure so the UI
+// can show a deterministic spinner-then-result cycle without per-status
+// branching.
+func (h *Handler) httpInstallAgent(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: "executor id required"})
+		return
+	}
+	var body InstallAgentRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: "invalid request body: " + err.Error()})
+		return
+	}
+	if h.executorFetcher == nil || h.agents == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{errorJSONKey: "agent install not wired"})
+		return
+	}
+	resp, status, err := h.installAgent(c.Request.Context(), id, body)
+	if err != nil {
+		c.JSON(status, gin.H{errorJSONKey: err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handler) installAgent(ctx context.Context, executorID string, req InstallAgentRequest) (*InstallAgentResponse, int, error) {
+	started := time.Now()
+	agentID := strings.TrimSpace(req.AgentID)
+	if agentID == "" {
+		return nil, http.StatusBadRequest, fmt.Errorf("agent_id required")
+	}
+	target, status, err := h.resolveSSHTarget(ctx, executorID)
+	if err != nil {
+		return nil, status, err
+	}
+	ag := findAgentByID(h.agents.ListEnabled(), agentID)
+	if ag == nil {
+		return nil, http.StatusNotFound, fmt.Errorf("agent %q not found or not enabled", agentID)
+	}
+	script := strings.TrimSpace(ag.InstallScript())
+	if script == "" {
+		return nil, http.StatusBadRequest, fmt.Errorf("agent %q has no InstallScript", agentID)
+	}
+
+	client, err := lifecycle.DialSSH(ctx, target)
+	if err != nil {
+		return nil, http.StatusBadGateway, fmt.Errorf("ssh: dial %s: %w", target.Host, err)
+	}
+	defer func() { _ = client.Close() }()
+
+	resp := &InstallAgentResponse{AgentID: agentID}
+	wrapped := lifecycle.WrapLoginShell(req.Shell, script)
+	stdout, stderr, runErr := h.runInstallScript(ctx, client, wrapped)
+	combined := joinOutputs(stdout, stderr)
+	resp.Output = capBytes(combined, installOutputCapBytes)
+	resp.DurationMs = time.Since(started).Milliseconds()
+	if runErr != nil {
+		resp.Success = false
+		resp.Error = runErr.Error()
+		return resp, http.StatusOK, nil
+	}
+	resp.Success = true
+	return resp, http.StatusOK, nil
+}
+
+// runInstallScript is a thin seam for tests. Real impl just shells out via
+// runSSHCommand — but unit tests can fake it without dialing SSH.
+func (h *Handler) runInstallScript(ctx context.Context, client *ssh.Client, cmd string) (string, string, error) {
+	return runSSHCommandShim(ctx, client, cmd)
+}
+
+// runSSHCommandShim is a package-local alias for lifecycle's private
+// runSSHCommand. Lives here so the ssh package doesn't depend on
+// lifecycle's internals — instead we use lifecycle.WrapLoginShell to
+// produce the right command string, then run it over a stock ssh.Session.
+func runSSHCommandShim(ctx context.Context, client *ssh.Client, cmd string) (string, string, error) {
+	session, err := client.NewSession()
+	if err != nil {
+		return "", "", fmt.Errorf("ssh: new session: %w", err)
+	}
+	defer func() { _ = session.Close() }()
+
+	var outBuf, errBuf strings.Builder
+	session.Stdout = &outBuf
+	session.Stderr = &errBuf
+
+	done := make(chan error, 1)
+	go func() { done <- session.Run(cmd) }()
+	select {
+	case <-ctx.Done():
+		_ = session.Signal(ssh.SIGTERM)
+		return outBuf.String(), errBuf.String(), ctx.Err()
+	case err := <-done:
+		return outBuf.String(), errBuf.String(), err
+	}
+}
+
+func findAgentByID(list []agents.Agent, id string) agents.Agent {
+	for _, ag := range list {
+		if ag.ID() == id {
+			return ag
+		}
+	}
+	return nil
+}
+
+func joinOutputs(stdout, stderr string) string {
+	stdout = strings.TrimSpace(stdout)
+	stderr = strings.TrimSpace(stderr)
+	if stdout == "" {
+		return stderr
+	}
+	if stderr == "" {
+		return stdout
+	}
+	return stdout + "\n---\n" + stderr
+}
+
+// capBytes returns the last n bytes of s when len(s) > n. Tail-truncation
+// (vs head) keeps the most recent / informative output — install scripts
+// emit progress noise upfront and the actionable error at the end.
+func capBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return "…(truncated)…\n" + s[len(s)-n:]
+}
+
+// resolveSSHTarget looks up the executor by id and projects its config
+// into an SSHTarget. Shared between probe + install entry points.
+func (h *Handler) resolveSSHTarget(ctx context.Context, executorID string) (*lifecycle.SSHTarget, int, error) {
+	executor, err := h.executorFetcher.GetExecutor(ctx, executorID)
+	if err != nil {
+		return nil, http.StatusNotFound, fmt.Errorf("executor %q not found: %w", executorID, err)
+	}
+	if executor == nil || executor.Type != models.ExecutorTypeSSH {
+		return nil, http.StatusBadRequest, fmt.Errorf("executor %q is not an SSH executor", executorID)
+	}
+	target, err := sshTargetFromExecutorConfig(executor.Config)
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+	return target, http.StatusOK, nil
 }
 
 // sshTargetFromExecutorConfig projects an executor.Config into the

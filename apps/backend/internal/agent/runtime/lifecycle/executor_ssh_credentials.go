@@ -82,9 +82,10 @@ func (r *SSHExecutor) runAuthSetupScripts(
 }
 
 // runOneAuthSetupScript executes a single env-credential setup script over
-// SSH. Sets the agent's env vars via the inline `KEY=value KEY=value sh -c
-// '...'` form so the script can read them without us having to plumb a full
-// shell-builder. Best-effort: failures log a warning and return.
+// SSH. Sets the agent's env vars via the inline `KEY=value KEY=value <shell>
+// -lc '...'` form so the script can read them and so `$HOME`/PATH are set up
+// the same way an interactive login would. Best-effort: failures log a
+// warning and return.
 func (r *SSHExecutor) runOneAuthSetupScript(
 	ctx context.Context,
 	client *ssh.Client,
@@ -93,7 +94,8 @@ func (r *SSHExecutor) runOneAuthSetupScript(
 	method remoteauth.Method,
 ) {
 	envPrefix := buildSSHEnvPrefix(req.Env)
-	wrapped := envPrefix + "sh -c " + shellQuote(method.SetupScript)
+	shell := sshShellFromMetadata(req.Metadata)
+	wrapped := envPrefix + WrapLoginShell(shell, method.SetupScript)
 	out, stderr, err := runSSHCommand(ctx, client, wrapped)
 	if err != nil {
 		r.logger.Warn("auth setup script failed",
@@ -192,7 +194,8 @@ func (r *SSHExecutor) resolveRemoteAuthHomeDir(
 		r.logger.Debug("using remote auth home override", zap.String("home_dir", override))
 		return override, nil
 	}
-	out, _, err := runSSHCommand(ctx, client, `sh -lc 'printf %s "$HOME"'`)
+	shell := sshShellFromMetadata(req.Metadata)
+	out, _, err := runSSHCommand(ctx, client, WrapLoginShell(shell, `printf %s "$HOME"`))
 	if err != nil {
 		return "", fmt.Errorf("ssh: resolve remote $HOME for credentials: %w", err)
 	}

@@ -276,17 +276,46 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// defaultLoginShell is the shell used when the profile didn't pick one
+// explicitly. bash is on virtually every Linux distro (including the
+// e2e Alpine image, which symlinks /bin/sh → bash via the bash package)
+// and is what nvm/asdf/brew assume — so it's the right default for the
+// "agent isn't on PATH" diagnosis.
+const defaultLoginShell = "bash"
+
+// WrapLoginShell wraps cmd in `${shell} -lc '<cmd>'` so commands run under
+// a login shell that has sourced the user's profile (~/.profile,
+// ~/.bash_profile, etc.). This is the canonical fix for "I have nvm
+// installed but kandev can't find npx" — sshd's default exec channel
+// runs a non-interactive non-login shell which doesn't pick up shell-init
+// PATH additions.
+//
+// Empty shell falls back to defaultLoginShell. The inner cmd is
+// single-quote-escaped so embedded quotes don't break the wrapper.
+func WrapLoginShell(shell, cmd string) string {
+	if shell == "" {
+		shell = defaultLoginShell
+	}
+	return shell + " -lc " + shellQuote(cmd)
+}
+
 // ProbeRemoteBinary runs `command -v <binary>` over the existing SSH client
 // and reports whether the binary resolves on the remote's $PATH. Returns
 // the resolved absolute path on success (the `command -v` stdout), or an
 // empty string when missing. err is non-nil only when the SSH call itself
 // fails — a missing binary is not an error.
 //
+// shell is the login shell to run the probe under (e.g. "bash", "zsh");
+// empty defaults to bash. Running through a login shell is what makes the
+// probe pick up nvm/asdf/brew PATH setup — without it, every node-based
+// agent would show as "missing" on dev machines.
+//
 // Exported for the SSH agent-readiness probe in package ssh; callers
 // outside lifecycle would otherwise have to copy the shellQuote + run
 // dance and risk drifting from the launch-time pre-flight semantics.
-func ProbeRemoteBinary(ctx context.Context, client *ssh.Client, binary string) (string, error) {
-	out, _, err := runSSHCommand(ctx, client, "command -v "+shellQuote(binary)+" 2>/dev/null || true")
+func ProbeRemoteBinary(ctx context.Context, client *ssh.Client, shell, binary string) (string, error) {
+	probe := "command -v " + shellQuote(binary) + " 2>/dev/null || true"
+	out, _, err := runSSHCommand(ctx, client, WrapLoginShell(shell, probe))
 	if err != nil {
 		return "", err
 	}
@@ -341,28 +370,33 @@ func ensureRemoteSessionDir(ctx context.Context, client *ssh.Client, taskDir, se
 func startRemoteAgentctl(
 	ctx context.Context,
 	client *ssh.Client,
-	agentctlBin, workspacePath, sessionDir string,
+	shell, agentctlBin, workspacePath, sessionDir string,
 	log *logger.Logger,
 ) (port int, pid int, err error) {
 	port = pickRemoteAgentctlPort()
 
-	cmd := fmt.Sprintf(
+	// Wrap the agentctl exec in a login shell so the spawned process
+	// inherits the user's $PATH (nvm/asdf/brew etc.). Without this, even
+	// if `npx` is installed via nvm, agentctl's child processes won't
+	// find it because the SSH-exec channel runs a non-interactive non-
+	// login shell and `nohup` inherits whatever that shell's PATH was.
+	innerScript := fmt.Sprintf(
 		`set -e
-		mkdir -p %[1]s
-		: > %[1]s/agentctl.log
-		AGENTCTL_PORT=%[4]d nohup %[2]s --workdir %[3]s \
-		  >> %[1]s/agentctl.log 2>&1 < /dev/null &
-		AGENTCTL_PID=$!
-		disown "$AGENTCTL_PID" 2>/dev/null || true
-		echo "$AGENTCTL_PID" > %[1]s/agentctl.pid
-		echo "$AGENTCTL_PID"
-		`,
+mkdir -p %[1]s
+: > %[1]s/agentctl.log
+AGENTCTL_PORT=%[4]d nohup %[2]s --workdir %[3]s \
+  >> %[1]s/agentctl.log 2>&1 < /dev/null &
+AGENTCTL_PID=$!
+disown "$AGENTCTL_PID" 2>/dev/null || true
+echo "$AGENTCTL_PID" > %[1]s/agentctl.pid
+echo "$AGENTCTL_PID"
+`,
 		shellQuote(sessionDir),
 		shellQuote(agentctlBin),
 		shellQuote(workspacePath),
 		port,
 	)
-	out, stderr, err := runSSHCommand(ctx, client, cmd)
+	out, stderr, err := runSSHCommand(ctx, client, WrapLoginShell(shell, innerScript))
 	if err != nil {
 		return 0, 0, fmt.Errorf("ssh: launch agentctl: %w (stderr: %s)", err, strings.TrimSpace(stderr))
 	}

@@ -276,7 +276,8 @@ func (r *SSHExecutor) prepareRemoteDirs(ctx context.Context, client *ssh.Client,
 func (r *SSHExecutor) startAndForwardAgentctl(
 	ctx context.Context, client *ssh.Client, agentctlBin, taskDir, sessionDir string, req *ExecutorCreateRequest,
 ) (int, int, *SSHPortForwarder, error) {
-	controlPort, pid, err := startRemoteAgentctl(ctx, client, agentctlBin, taskDir, sessionDir, r.logger)
+	shell := sshShellFromMetadata(req.Metadata)
+	controlPort, pid, err := startRemoteAgentctl(ctx, client, shell, agentctlBin, taskDir, sessionDir, r.logger)
 	if err != nil {
 		r.report(req.OnProgress, "Starting agent controller", PrepareStepFailed, err.Error())
 		return 0, 0, nil, err
@@ -572,19 +573,27 @@ func (r *SSHExecutor) preflightAgentBinary(ctx context.Context, client *ssh.Clie
 	}
 	binary := args[0]
 	stepName := "Verifying agent binary"
-	probe := "command -v " + shellQuote(binary) + " 2>/dev/null || true"
-	out, _, err := runSSHCommand(ctx, client, probe)
+	shell := sshShellFromMetadata(req.Metadata)
+	out, err := ProbeRemoteBinary(ctx, client, shell, binary)
 	if err != nil {
 		r.report(req.OnProgress, stepName, PrepareStepFailed, err.Error())
 		return fmt.Errorf("ssh: probe %s on remote: %w", binary, err)
 	}
-	if strings.TrimSpace(out) == "" {
+	if out == "" {
 		msg := formatMissingAgentBinaryError(req.AgentConfig, binary)
 		r.report(req.OnProgress, stepName, PrepareStepFailed, msg)
 		return errors.New(msg)
 	}
-	r.report(req.OnProgress, stepName, PrepareStepCompleted, strings.TrimSpace(out))
+	r.report(req.OnProgress, stepName, PrepareStepCompleted, out)
 	return nil
+}
+
+// sshShellFromMetadata reads the user-selected login shell from the
+// per-profile metadata. Empty / unset returns "" so callers can fall
+// back to WrapLoginShell's defaultLoginShell — keeping the default in
+// one place.
+func sshShellFromMetadata(md map[string]interface{}) string {
+	return strings.TrimSpace(getMetadataString(md, MetadataKeySSHShell))
 }
 
 // agentIdentity is the slice of agents.Agent that formatMissingAgentBinaryError

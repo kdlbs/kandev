@@ -99,6 +99,13 @@ const (
 	MetadataKeySSHProxyJump          = "ssh_proxy_jump"
 	MetadataKeySSHIdentitySource     = "ssh_identity_source"
 	MetadataKeySSHIdentityFile       = "ssh_identity_file"
+	// MetadataKeySSHShell names the login shell used when running commands
+	// over SSH on the remote (probe, agentctl launch, install, setup
+	// scripts). Empty / unset falls back to "bash" at runtime — see
+	// WrapLoginShell. Stored per-profile so different profiles on the same
+	// host can use different shells; flows into req.Metadata via the
+	// standard executor-config merge in buildLaunchMetadata.
+	MetadataKeySSHShell = "ssh_shell"
 )
 
 // persistentMetadataKeys lists metadata keys carried forward from a previous
@@ -127,6 +134,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHProxyJump:          true,
 	MetadataKeySSHIdentitySource:     true,
 	MetadataKeySSHIdentityFile:       true,
+	MetadataKeySSHShell:              true,
 
 	// Executor type marker
 	MetadataKeyIsRemote: true,
