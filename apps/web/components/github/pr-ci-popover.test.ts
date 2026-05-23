@@ -56,6 +56,18 @@ describe("deriveAggregateCounts", () => {
     });
   });
 
+  it("clamps over-counted passing checks before reserving failed segment", () => {
+    expect(
+      deriveAggregateCounts(
+        makePR({
+          checks_state: "failure",
+          checks_total: 5,
+          checks_passing: 8,
+        }),
+      ),
+    ).toEqual({ passed: 4, failed: 1, inProgress: 0 });
+  });
+
   it("reserves in-progress segment when pending state has stale all-passing counts", () => {
     expect(
       deriveAggregateCounts(
@@ -74,6 +86,29 @@ describe("deriveAggregateCounts", () => {
       failed: 0,
       inProgress: 1,
     });
+  });
+
+  it("uses total checks for success state", () => {
+    expect(
+      deriveAggregateCounts(
+        makePR({
+          checks_state: "success",
+          checks_total: 7,
+          checks_passing: 3,
+        }),
+      ),
+    ).toEqual({ passed: 7, failed: 0, inProgress: 0 });
+  });
+
+  it("falls back to aggregate passing and remaining counts for unknown state", () => {
+    expect(
+      deriveAggregateCounts(
+        makePR({
+          checks_total: 5,
+          checks_passing: 3,
+        }),
+      ),
+    ).toEqual({ passed: 3, failed: 0, inProgress: 2 });
   });
 });
 
