@@ -93,7 +93,6 @@ export function SessionReopenMenuItems({
           className="cursor-pointer text-xs gap-1.5"
           data-testid="new-session-button"
         >
-          <span className="w-5 shrink-0" aria-hidden="true" />
           <IconMessagePlus className="h-3.5 w-3.5 shrink-0" />
           <span className="flex-1 truncate">New Agent</span>
         </DropdownMenuItem>
@@ -109,7 +108,12 @@ export function SessionReopenMenuItems({
             className={`cursor-pointer text-xs gap-1.5 ${isOpen ? "opacity-50" : ""}`}
             data-testid={`reopen-session-${session.id}`}
           >
-            <span className="w-5 shrink-0 text-muted-foreground text-right">#{index + 1}</span>
+            <span
+              data-testid={`reopen-session-seq-${index + 1}`}
+              className="shrink-0 text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5"
+            >
+              {index + 1}
+            </span>
             {info.agentName && (
               <AgentLogo agentName={info.agentName} size={14} className="shrink-0" />
             )}

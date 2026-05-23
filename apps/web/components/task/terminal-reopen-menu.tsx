@@ -55,14 +55,18 @@ export function TerminalReopenMenuItems({
       if (!environmentId) return;
       const label = seq != null ? `terminal #${seq}` : "this terminal";
       if (!window.confirm(`Terminate ${label}? This kills the running PTY.`)) return;
+      // Optimistically close + drop the row so the onDidRemovePanel
+      // cleanup sees no shell and skips trying to park the terminal we
+      // just asked to hard-destroy.
+      removeUserShellStore(environmentId, terminalId);
+      if (api) findExistingTerminalPanel(api, terminalId)?.api.close();
       try {
         await destroyUserShell(environmentId, terminalId, taskID ?? undefined);
-        removeUserShellStore(environmentId, terminalId);
       } catch (error) {
         console.error("terminate terminal from reopen menu:", error);
       }
     },
-    [environmentId, taskID, removeUserShellStore],
+    [api, environmentId, taskID, removeUserShellStore],
   );
 
   const ordinary = shells.filter((s) => s.kind === "ordinary");
@@ -115,7 +119,6 @@ export function TerminalReopenMenuItems({
           className="cursor-pointer text-xs gap-1.5"
           data-testid="new-terminal-button"
         >
-          <span className="w-5 shrink-0" aria-hidden="true" />
           <IconTerminal2 className="h-3.5 w-3.5 shrink-0" />
           <span className="flex-1 truncate">New Terminal</span>
         </DropdownMenuItem>
@@ -173,10 +176,10 @@ function TerminalReopenRow({
   onClick: (terminalId: string, state: string | undefined, label: string) => void;
   onDestroy: (event: React.MouseEvent, terminalId: string, seq: number | undefined) => void;
 }) {
-  const label =
-    shell.customName && shell.customName !== ""
-      ? shell.customName
-      : (shell.displayName ?? `Terminal ${shell.seq ?? ""}`);
+  // Ordinary terminals don't need the backend "Terminal {seq}" suffix
+  // in the label — the seq lives in the adjacent badge, so the row
+  // reads "[N] Terminal" (or "[N] custom name") with no duplication.
+  const label = shell.customName && shell.customName !== "" ? shell.customName : "Terminal";
   return (
     <DropdownMenuItem
       onClick={() => onClick(shell.terminalId, shell.state, label)}
@@ -184,7 +187,12 @@ function TerminalReopenRow({
       data-testid={`reopen-terminal-${shell.terminalId}`}
     >
       {shell.seq != null && (
-        <span className="w-5 shrink-0 text-muted-foreground text-right">#{shell.seq}</span>
+        <span
+          data-testid={`reopen-terminal-seq-${shell.seq}`}
+          className="shrink-0 text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5"
+        >
+          {shell.seq}
+        </span>
       )}
       <IconTerminal2 className="h-3.5 w-3.5 shrink-0" />
       <span className="flex-1 truncate">{label}</span>

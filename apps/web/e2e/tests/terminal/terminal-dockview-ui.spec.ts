@@ -184,7 +184,7 @@ test.describe("Terminals — dockview UI", () => {
     // wiped the DB row is the regression guard.
     const reopenRowsWithSeq2 = testPage
       .locator('[data-testid^="reopen-terminal-"]')
-      .filter({ hasText: "#2" });
+      .filter({ has: testPage.getByTestId("reopen-terminal-seq-2") });
     await expect
       .poll(() => reopenRowsWithSeq2.count(), {
         timeout: 10_000,
@@ -270,7 +270,9 @@ test.describe("Terminals — dockview UI", () => {
 
     // Open the "+" menu and confirm-destroy the seq=2 row.
     await session.addPanelButton().click();
-    const row = testPage.locator('[data-testid^="reopen-terminal-"]').filter({ hasText: "#2" });
+    const row = testPage
+      .locator('[data-testid^="reopen-terminal-"]')
+      .filter({ has: testPage.getByTestId("reopen-terminal-seq-2") });
     await expect(row).toHaveCount(1, { timeout: 10_000 });
 
     testPage.once("dialog", (d) => d.accept());
@@ -287,7 +289,7 @@ test.describe("Terminals — dockview UI", () => {
     await session.addPanelButton().click();
     const rowAfter = testPage
       .locator('[data-testid^="reopen-terminal-"]')
-      .filter({ hasText: "#2" });
+      .filter({ has: testPage.getByTestId("reopen-terminal-seq-2") });
     await expect(rowAfter).toHaveCount(0, { timeout: 5_000 });
   });
 
@@ -325,7 +327,9 @@ test.describe("Terminals — dockview UI", () => {
     // open as a tab, so the click should focus rather than mint a new
     // panel.
     await session.addPanelButton().click();
-    const seq2Row = testPage.locator('[data-testid^="reopen-terminal-"]').filter({ hasText: "#2" });
+    const seq2Row = testPage
+      .locator('[data-testid^="reopen-terminal-"]')
+      .filter({ has: testPage.getByTestId("reopen-terminal-seq-2") });
     await expect(seq2Row).toHaveCount(1, { timeout: 10_000 });
     await seq2Row.click();
 
@@ -337,6 +341,47 @@ test.describe("Terminals — dockview UI", () => {
       after,
       `clicking an open terminal in the reopen menu must focus, not duplicate (before=${before}, after=${after})`,
     ).toBe(before);
+  });
+
+  /**
+   * Right-click → Terminate must hard-destroy the terminal AND remove
+   * its dockview tab in the same gesture. Before the fix the WS RPC
+   * fired but the panel stayed open with a dead PTY and the row hung
+   * around in the reopen menu until the next refresh.
+   */
+  test("right-click → Terminate closes the tab and removes the row", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await createTaskAndWait(apiClient, seedData, "Tab Terminate UI");
+    const session = await openTask(testPage, "Tab Terminate UI");
+    await session.clickTab("Terminal");
+    await session.expectTerminalConnected();
+
+    // Add a second terminal so we have a non-default one to terminate
+    // (the default's id is `terminal-default` and its right-click menu
+    // routes through the same handler, but the seq=2 case is what
+    // surfaced the bug).
+    await clickNewTerminalInPlusMenu(testPage, session);
+    await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible({ timeout: 10_000 });
+
+    // Right-click the seq=2 tab and pick Terminate.
+    const seq2TabTrigger = testPage.getByTestId("terminal-tab-seq-2").locator("..").locator("..");
+    await seq2TabTrigger.click({ button: "right" });
+    await testPage.getByRole("menuitem", { name: /^Terminate/ }).click();
+
+    // The seq=2 badge must disappear — proves the panel was closed.
+    await expect(testPage.getByTestId("terminal-tab-seq-2")).toHaveCount(0, { timeout: 5_000 });
+
+    // The seq=2 row must NOT appear in the reopen menu — proves the
+    // row was hard-destroyed, not parked.
+    await session.addPanelButton().click();
+    const seq2Row = testPage
+      .locator('[data-testid^="reopen-terminal-"]')
+      .filter({ has: testPage.getByTestId("reopen-terminal-seq-2") });
+    await expect(seq2Row).toHaveCount(0, { timeout: 5_000 });
   });
 
   /**
