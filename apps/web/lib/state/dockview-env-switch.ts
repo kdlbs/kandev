@@ -209,7 +209,7 @@ function replaceStaleSessionPanels(api: DockviewApi, keepSessionId: string | nul
   // only the first stale's group keeps its siblings. Sessions in other
   // groups still close, orphaning anything co-tabbed with them. One active
   // session can only re-anchor one group.
-  if (keepSessionId && keepId && !api.getPanel(keepId) && stale.length > 0) {
+  if (keepSessionId && !api.getPanel(`session:${keepSessionId}`) && stale.length > 0) {
     const first = stale[0];
     const groupId = first.group.id;
     if (api.groups.some((g) => g.id === groupId)) {
