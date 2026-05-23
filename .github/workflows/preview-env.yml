@@ -15,7 +15,7 @@ on:
     types: [opened, synchronize, reopened, closed, labeled]
 
 concurrency:
-  group: preview-env-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: preview-env-${{ github.event.pull_request.number || github.ref }}
   # Don't cancel cleanup on close — let it finish destroying the sprite.
   cancel-in-progress: ${{ github.event.action != 'closed' }}
 

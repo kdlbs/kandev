@@ -22,7 +22,7 @@ on:
     types: [opened, synchronize, ready_for_review, reopened, labeled]
 
 concurrency:
-  group: claude-review-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: claude-review-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -142,11 +142,6 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
-
-      - name: Point origin at base repo for Claude fetch
-        run: git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run Claude Code Review (GITHUB_TOKEN fallback)
         id: claude-review
