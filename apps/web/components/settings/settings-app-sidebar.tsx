@@ -325,6 +325,23 @@ export function SettingsAppSidebar() {
                 <GeneralSidebarSection pathname={pathname} />
                 <WorkspacesSidebarSection pathname={pathname} workspaces={workspaces} />
                 <IntegrationsSidebarSection pathname={pathname} />
+
+                {/* Automations */}
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={
+                      pathname.startsWith("/settings/automations") ||
+                      pathname.includes("/automations")
+                    }
+                  >
+                    <Link href="/settings/automations">
+                      <IconBolt className="h-4 w-4" />
+                      <span>Automations</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
                 <AgentsSidebarSection pathname={pathname} agents={agents} />
 
                 {/* Prompts */}
@@ -348,22 +365,6 @@ export function SettingsAppSidebar() {
                 </SidebarMenuItem>
 
                 <ExecutorsSidebarSection pathname={pathname} executors={executors} />
-
-                {/* Automations */}
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={
-                      pathname.startsWith("/settings/automations") ||
-                      pathname.includes("/automations")
-                    }
-                  >
-                    <Link href="/settings/automations">
-                      <IconBolt className="h-4 w-4" />
-                      <span>Automations</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
 
                 <SecretsSidebarSection pathname={pathname} />
 
