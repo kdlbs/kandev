@@ -27,6 +27,10 @@ export function useTouchScroll({
     const terminal = xtermRef.current;
     if (!container || !terminal) return;
     return attachTouchScroll(container, terminal);
+    // Invariant: `useTerminalInit` creates the xterm instance once per mount
+    // and only flips `isTerminalReady` from false → true. If a future change
+    // ever recreates the terminal mid-mount, add the new identity as a dep so
+    // the listener re-attaches to the new instance.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs are stable
   }, [enabled, isTerminalReady]);
 }
