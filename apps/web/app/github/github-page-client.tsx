@@ -69,7 +69,6 @@ function PageHeader({ onOpenMobileSidebar }: { onOpenMobileSidebar?: () => void 
             aria-label="Open GitHub filters"
           >
             <IconMenu2 className="h-4 w-4" />
-            <span className="sr-only">Open GitHub filters</span>
           </Button>
         )
       }
@@ -391,17 +390,16 @@ export function GitHubPageClient({
   // Close the mobile sheet after any sidebar selection. KindToggle clicks also
   // route through onSelect — closing on every selection is acceptable UX since
   // the user always wants to see the list after picking a kind or preset.
-  const onMobileSidebarSelect = useCallback(
-    (s: Parameters<typeof state.onSelect>[0]) => {
-      state.onSelect(s);
-      setMobileSidebarOpen(false);
-    },
-    [state],
-  );
-  const onMobileSaveCurrent = useCallback(() => {
+  // No useCallback: `state` is a fresh object every render, so memoizing
+  // these handlers would be deceptive — they'd still be new refs each pass.
+  const onMobileSidebarSelect = (s: Parameters<typeof state.onSelect>[0]) => {
+    state.onSelect(s);
+    setMobileSidebarOpen(false);
+  };
+  const onMobileSaveCurrent = () => {
     setMobileSidebarOpen(false);
     state.onOpenSaveDialog();
-  }, [state]);
+  };
 
   return (
     <div className="h-screen w-full flex flex-col bg-background">

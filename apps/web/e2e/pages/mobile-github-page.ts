@@ -15,9 +15,10 @@ export class MobileGitHubPage {
 
   async goto() {
     await this.page.goto("/github");
-    // PageTopbar renders the "GitHub" breadcrumb — wait for it so the auth
-    // status fetch has resolved and the actions slot is mounted.
-    await this.page.getByText("GitHub", { exact: true }).first().waitFor({ state: "visible" });
+    // The hamburger only mounts once auth has resolved on a mobile viewport —
+    // waiting on it is deterministic and avoids the ambiguity of matching
+    // "GitHub" text (which appears in the breadcrumb AND breadcrumb link aria).
+    await this.mobileMenuButton.waitFor({ state: "visible" });
   }
 
   presetByLabel(label: string): Locator {
