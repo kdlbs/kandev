@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
-import { IconLoader2 } from "@tabler/icons-react";
+import { useCallback, useMemo, useState, type KeyboardEvent } from "react";
+import { IconLoader2, IconSend } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Textarea } from "@kandev/ui/textarea";
 import { AgentLogo } from "@/components/agent-logo";
 import { GridSpinner } from "@/components/grid-spinner";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
@@ -163,8 +164,11 @@ function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId:
 
   if (session.is_passthrough) {
     return (
-      <div className="h-full bg-card">
-        <PassthroughTerminal sessionId={session.id} mode="agent" />
+      <div className="flex h-full flex-col bg-card">
+        <div className="flex-1 min-h-0">
+          <PassthroughTerminal sessionId={session.id} mode="agent" />
+        </div>
+        <PassthroughComposer onSubmit={handleSendMessage} />
       </div>
     );
   }
@@ -172,6 +176,75 @@ function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId:
   return (
     <div className="flex h-full flex-col">
       <TaskChatPanel onSend={handleSendMessage} sessionId={session.id} hideSessionsDropdown />
+    </div>
+  );
+}
+
+/**
+ * PassthroughComposer is the kandev-controlled compose box rendered alongside
+ * the PTY in passthrough mode. Submitting forwards the typed text via the
+ * onSubmit prop (which posts `message.add` over WS); the backend's
+ * `Executor.Prompt` routes passthrough sessions to PTY stdin so the CLI agent
+ * actually receives it. Enter submits; Shift+Enter inserts a newline.
+ */
+export function PassthroughComposer({
+  onSubmit,
+}: {
+  onSubmit: (content: string) => Promise<void>;
+}) {
+  const [value, setValue] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const trimmed = value.trim();
+  const canSubmit = trimmed.length > 0 && !isSending;
+
+  const submit = useCallback(async () => {
+    if (!canSubmit) return;
+    setIsSending(true);
+    try {
+      await onSubmit(trimmed);
+      setValue("");
+    } finally {
+      setIsSending(false);
+    }
+  }, [canSubmit, onSubmit, trimmed]);
+
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        void submit();
+      }
+    },
+    [submit],
+  );
+
+  return (
+    <div
+      className="flex flex-shrink-0 items-end gap-2 border-t bg-card px-2 py-2"
+      data-testid="passthrough-composer"
+    >
+      <Textarea
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Message the CLI agent (Enter to send, Shift+Enter for newline)"
+        rows={1}
+        disabled={isSending}
+        className="min-h-9 max-h-32 flex-1 resize-none"
+        data-testid="passthrough-composer-textarea"
+      />
+      <Button
+        type="button"
+        size="sm"
+        variant="default"
+        onClick={() => void submit()}
+        disabled={!canSubmit}
+        className="cursor-pointer h-9 shrink-0"
+        data-testid="passthrough-composer-submit"
+        aria-label="Send message to CLI agent"
+      >
+        <IconSend className="h-4 w-4" />
+      </Button>
     </div>
   );
 }
