@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // seedPassthroughSession installs a task + session into the mock repo and wires
@@ -115,6 +116,33 @@ func TestExecutor_Prompt_PassthroughMarkRunningErrorIsNonFatal(t *testing.T) {
 	}
 	if got := len(agentManager.writePassthroughStdinCalls); got != 1 {
 		t.Errorf("expected the stdin write to have happened exactly once, got %d", got)
+	}
+}
+
+func TestExecutor_Prompt_PassthroughWithAttachmentsDropsAttachmentsAndSucceeds(t *testing.T) {
+	// Attachments have no place in passthrough mode (no ACP channel for binary
+	// payloads). When prompt text is present we still deliver the text; the
+	// caller (logs) records that the attachments were dropped.
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{
+		isPassthroughSessionFunc: func(_ context.Context, _ string) bool { return true },
+	}
+	seedPassthroughSession(t, repo, agentManager, "task-1", "sess-1", "exec-1")
+	exec := newTestExecutor(t, agentManager, repo)
+
+	atts := []v1.MessageAttachment{{Type: "image", MimeType: "image/png", Name: "screenshot.png"}}
+	result, err := exec.Prompt(context.Background(), "task-1", "sess-1", "look at this", atts, false)
+	if err != nil {
+		t.Fatalf("Prompt with attachments should still succeed (attachments dropped); got error: %v", err)
+	}
+	if result == nil || result.StopReason != "passthrough_dispatched" {
+		t.Fatalf("expected passthrough_dispatched result, got %+v", result)
+	}
+	if got := len(agentManager.writePassthroughStdinCalls); got != 1 {
+		t.Fatalf("expected 1 WritePassthroughStdin call, got %d", got)
+	}
+	if !strings.HasPrefix(agentManager.writePassthroughStdinCalls[0].Data, "look at this") {
+		t.Errorf("PTY write should carry the typed text, got %q", agentManager.writePassthroughStdinCalls[0].Data)
 	}
 }
 

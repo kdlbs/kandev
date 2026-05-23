@@ -159,7 +159,7 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 	// any other surface that calls message.add against a passthrough session)
 	// reaches this branch via Service.PromptTask → Executor.Prompt.
 	if e.agentManager.IsPassthroughSession(ctx, sessionID) {
-		return e.promptPassthrough(ctx, taskID, sessionID, prompt)
+		return e.promptPassthrough(ctx, taskID, sessionID, prompt, attachments)
 	}
 
 	result, err := e.agentManager.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
@@ -173,17 +173,23 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 }
 
 // promptPassthrough delivers a user prompt to a passthrough (PTY) agent session.
-// Attachments are intentionally ignored — passthrough mode has no protocol channel
-// for them; the typed text reaches the CLI agent as if the user typed it into
-// xterm and pressed Enter.
+// Passthrough mode has no protocol channel for attachments: when the caller
+// supplies any, we log a warning so an operator can see they were dropped
+// (image-only messages are rejected outright since there is nothing to write).
 //
 // A WritePassthroughStdin failure (no live PTY, runner unavailable) is returned
 // as an error so Service.handlePromptError can revert session state and surface
 // the failure to the user. A MarkPassthroughRunning failure is non-fatal — the
 // data is already in the PTY; only the AgentRunning event is missed.
-func (e *Executor) promptPassthrough(ctx context.Context, taskID, sessionID, prompt string) (*PromptResult, error) {
+func (e *Executor) promptPassthrough(ctx context.Context, taskID, sessionID, prompt string, attachments []v1.MessageAttachment) (*PromptResult, error) {
 	if prompt == "" {
 		return nil, fmt.Errorf("passthrough prompt cannot be empty (attachments are not supported in CLI passthrough mode)")
+	}
+	if len(attachments) > 0 {
+		e.logger.Warn("dropping attachments on passthrough prompt; CLI passthrough mode has no attachment channel",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Int("attachments_count", len(attachments)))
 	}
 	if err := e.agentManager.WritePassthroughStdin(ctx, sessionID, prompt+passthroughSubmitSequence); err != nil {
 		return nil, fmt.Errorf("failed to write to passthrough stdin: %w", err)
