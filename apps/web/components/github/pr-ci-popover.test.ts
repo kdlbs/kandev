@@ -67,6 +67,14 @@ describe("deriveAggregateCounts", () => {
       ),
     ).toEqual({ passed: 19, failed: 0, inProgress: 1 });
   });
+
+  it("reserves in-progress segment when pending state has no populated counts yet", () => {
+    expect(deriveAggregateCounts(makePR({ checks_state: "pending" }))).toEqual({
+      passed: 0,
+      failed: 0,
+      inProgress: 1,
+    });
+  });
 });
 
 describe("hasNoChecksAtAll", () => {
