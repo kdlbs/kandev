@@ -10,7 +10,7 @@ export class MobileGitHubPage {
     this.mobileMenuButton = page.getByTestId("github-mobile-menu-button");
     this.mobileSidebar = page.getByTestId("github-mobile-sidebar");
     this.inlineSidebar = page.getByTestId("github-presets-sidebar-inline");
-    this.toolbarTitle = page.locator("h2.text-sm.font-semibold").first();
+    this.toolbarTitle = page.getByTestId("github-list-toolbar-title");
   }
 
   async goto() {

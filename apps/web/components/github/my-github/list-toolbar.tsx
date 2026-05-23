@@ -77,7 +77,9 @@ export function ListToolbar({
     <div className="px-4 sm:px-6 py-2.5 border-b shrink-0 flex flex-col md:flex-row md:items-center md:flex-wrap gap-2 md:gap-3">
       <div className="flex items-center gap-2 min-w-0">
         <div className="flex items-baseline gap-2 min-w-0 flex-1 md:flex-initial">
-          <h2 className="text-sm font-semibold truncate">{title}</h2>
+          <h2 className="text-sm font-semibold truncate" data-testid="github-list-toolbar-title">
+            {title}
+          </h2>
           <span className="text-xs text-muted-foreground tabular-nums">
             {loading ? "…" : count}
           </span>
