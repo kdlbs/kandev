@@ -344,6 +344,63 @@ describe("RepoChipsRow", () => {
     });
   });
 
+  it("non-local-executor row autoselects the repo's default_branch", () => {
+    // When a workspace repo has default_branch="develop" and the row has no branch
+    // yet, the chip must call onBranchChange("develop") — not "main" from the
+    // hardcoded fallback. This verifies the ChipsList computes repoDefaultBranch
+    // and passes it as preferredDefaultBranch to RepoChip.
+    mockBranches.value = {
+      branches: [
+        { name: "main", type: "local" } as Branch,
+        { name: "develop", type: "local" } as Branch,
+      ],
+      isLoading: false,
+    };
+    const onRowBranchChange = vi.fn();
+    const repoWithDevelopDefault: Repository = {
+      ...makeRepo(REPO_FRONT_ID, "frontend"),
+      default_branch: "develop",
+    };
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({ repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })] })}
+        repositories={[repoWithDevelopDefault]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={onRowBranchChange}
+        isLocalExecutor={false}
+      />,
+    );
+    expect(onRowBranchChange).toHaveBeenCalledWith("r0", "develop");
+    mockBranches.value = { branches: [], isLoading: false };
+  });
+
+  it("non-local-executor row with empty default_branch falls back to main", () => {
+    mockBranches.value = {
+      branches: [{ name: "main", type: "local" } as Branch],
+      isLoading: false,
+    };
+    const onRowBranchChange = vi.fn();
+    const repoNoDefault: Repository = {
+      ...makeRepo(REPO_FRONT_ID, "frontend"),
+      default_branch: "",
+    };
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({ repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })] })}
+        repositories={[repoNoDefault]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={onRowBranchChange}
+        isLocalExecutor={false}
+      />,
+    );
+    expect(onRowBranchChange).toHaveBeenCalledWith("r0", "main");
+    mockBranches.value = { branches: [], isLoading: false };
+  });
+
   // Regression: remote branches must keep their "origin/" prefix so users
   // can distinguish a local "main" from "origin/main". A prior rewrite
   // dropped the prefix, producing two indistinguishable rows.

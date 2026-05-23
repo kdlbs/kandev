@@ -280,32 +280,38 @@ function ChipsList({
 }) {
   return (
     <>
-      {fs.repositories.map((row) => (
-        <RepoChip
-          key={row.key}
-          row={row}
-          workspaceId={workspaceId}
-          repositories={repositories}
-          discoveredRepositories={fs.discoveredRepositories}
-          excludedRepoIds={collectUsedRepoIds(fs.repositories, row.key)}
-          branchLocked={branchLocked}
-          // For local-executor rows, seed row.branch with the workspace's
-          // current branch via this prop. Non-local rows leave it undefined
-          // and fall back to the existing last-used / preferred-default
-          // autoselect path.
-          preferredDefaultBranch={isLocalExecutor ? fs.currentLocalBranch : undefined}
-          preferredDefaultBranchLoading={isLocalExecutor ? fs.currentLocalBranchLoading : false}
-          branchPrefix={computeBranchPrefix({
-            isLocalExecutor,
-            rowBranch: row.branch,
-            currentLocalBranch: fs.currentLocalBranch,
-            freshBranchEnabled: !!fs.freshBranchEnabled,
-          })}
-          onRepositoryChange={(value) => onRowRepositoryChange(row.key, value)}
-          onBranchChange={(value) => onRowBranchChange(row.key, value)}
-          onRemove={() => fs.removeRepository(row.key)}
-        />
-      ))}
+      {fs.repositories.map((row) => {
+        const repoDefaultBranch = isLocalExecutor
+          ? undefined
+          : repositories.find((r) => r.id === row.repositoryId)?.default_branch ||
+            fs.discoveredRepositories.find((d) => d.path === row.localPath)?.default_branch ||
+            undefined;
+        return (
+          <RepoChip
+            key={row.key}
+            row={row}
+            workspaceId={workspaceId}
+            repositories={repositories}
+            discoveredRepositories={fs.discoveredRepositories}
+            excludedRepoIds={collectUsedRepoIds(fs.repositories, row.key)}
+            branchLocked={branchLocked}
+            // For local-executor rows, seed row.branch with the workspace's current branch.
+            // For non-local rows, use the repo's default_branch so newly attached repos
+            // start on the correct integration branch instead of last-used or hardcoded main/master.
+            preferredDefaultBranch={isLocalExecutor ? fs.currentLocalBranch : repoDefaultBranch}
+            preferredDefaultBranchLoading={isLocalExecutor ? fs.currentLocalBranchLoading : false}
+            branchPrefix={computeBranchPrefix({
+              isLocalExecutor,
+              rowBranch: row.branch,
+              currentLocalBranch: fs.currentLocalBranch,
+              freshBranchEnabled: !!fs.freshBranchEnabled,
+            })}
+            onRepositoryChange={(value) => onRowRepositoryChange(row.key, value)}
+            onBranchChange={(value) => onRowBranchChange(row.key, value)}
+            onRemove={() => fs.removeRepository(row.key)}
+          />
+        );
+      })}
       {freshBranchToggle}
       <Tooltip>
         <TooltipTrigger asChild>

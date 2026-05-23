@@ -191,6 +191,48 @@ describe("buildRepositoriesPayload — local executor branch split (edge cases)"
   });
 });
 
+describe("buildRepositoriesPayload — non-local executor uses repo default_branch as base", () => {
+  it("workspace repo with non-main default_branch: base_branch reflects the repo default", () => {
+    // The autoselect in the chip pre-fills row.branch with default_branch (via
+    // preferredDefaultBranch). By the time submit runs, row.branch already holds
+    // the default. This test verifies the submit payload mirrors that value.
+    const payload = buildRepositoriesPayload({
+      useGitHubUrl: false,
+      githubUrl: "",
+      githubBranch: "",
+      githubPrHeadBranch: null,
+      repositories: [{ key: "r0", repositoryId: "repo-1", branch: "develop" }],
+      discoveredRepositories: [],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      workspaceRepositories: [{ id: "repo-1", default_branch: "develop" }] as any,
+      isLocalExecutor: false,
+    });
+    expect(payload).toEqual([
+      { repository_id: "repo-1", base_branch: "develop", checkout_branch: undefined },
+    ]);
+  });
+
+  it("workspace repo with empty default_branch falls back to hardcoded autoselect", () => {
+    // When default_branch is unset (legacy repos not yet probed by backend),
+    // the chip falls back to localStorage / main / master. row.branch ends up
+    // as whatever that fallback picks. Payload just mirrors row.branch.
+    const payload = buildRepositoriesPayload({
+      useGitHubUrl: false,
+      githubUrl: "",
+      githubBranch: "",
+      githubPrHeadBranch: null,
+      repositories: [{ key: "r0", repositoryId: "repo-1", branch: "main" }],
+      discoveredRepositories: [],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      workspaceRepositories: [{ id: "repo-1", default_branch: "" }] as any,
+      isLocalExecutor: false,
+    });
+    expect(payload).toEqual([
+      { repository_id: "repo-1", base_branch: "main", checkout_branch: undefined },
+    ]);
+  });
+});
+
 describe("buildRepositoriesPayload — single-row and URL mode", () => {
   it("URL mode produces a single github_url entry and ignores the rows", () => {
     const payload = buildRepositoriesPayload({
