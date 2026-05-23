@@ -4,7 +4,11 @@ import (
 	"time"
 
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
+
+// ProfileEnvVar is an environment variable entry on an agent profile.
+type ProfileEnvVar = taskmodels.ProfileEnvVar
 
 type Agent struct {
 	ID            string         `json:"id"`
@@ -68,6 +72,10 @@ type AgentProfile struct {
 	// reach the subprocess argv. Stored as a JSON-encoded TEXT column;
 	// settings repo handles the conversion via manual scan.
 	CLIFlags []CLIFlag `json:"cli_flags" db:"-"`
+
+	// EnvVars are injected into the agent subprocess when this profile runs.
+	// Stored as a JSON-encoded TEXT column; settings repo handles conversion.
+	EnvVars []ProfileEnvVar `json:"env_vars,omitempty" db:"-"`
 
 	// Deprecated legacy permission fields: retained in the DB schema so rows
 	// load cleanly, but no longer read by the launch path. ACP session modes

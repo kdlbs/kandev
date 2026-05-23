@@ -48,6 +48,7 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		DangerouslySkipPermissions: profile.DangerouslySkipPermissions,
 		AllowIndexing:              profile.AllowIndexing,
 		CLIFlags:                   profile.CLIFlags,
+		EnvVars:                    profile.EnvVars,
 		CLIPassthrough:             profile.CLIPassthrough,
 		NativeSessionResume:        nativeSessionResume,
 		SupportsMCP:                agent.SupportsMCP,

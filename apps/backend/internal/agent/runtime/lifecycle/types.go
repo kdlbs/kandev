@@ -446,6 +446,8 @@ type AgentProfileInfo struct {
 	// CLIFlags is the resolved user-configurable list of CLI flags for this
 	// profile. Passed verbatim to cliflags.Resolve at launch time.
 	CLIFlags []settingsmodels.CLIFlag
+	// EnvVars are user-configured environment variables for this profile.
+	EnvVars []settingsmodels.ProfileEnvVar
 
 	// Deprecated: legacy permission fields, no longer consulted by the launch
 	// path. Kept so existing call sites compile during the transition.

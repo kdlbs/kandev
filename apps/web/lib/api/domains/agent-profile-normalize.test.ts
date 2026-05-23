@@ -13,6 +13,7 @@ describe("normalizeAgentProfile", () => {
       mode: "acp",
       allow_indexing: true,
       cli_flags: [{ flag: "--verbose", description: "v", enabled: true }],
+      env_vars: [{ key: "ANTHROPIC_BASE_URL", value: "https://api.example" }],
       cli_passthrough: false,
       user_modified: true,
       created_at: "2026-01-01T00:00:00Z",
@@ -28,6 +29,7 @@ describe("normalizeAgentProfile", () => {
       mode: "acp",
       allowIndexing: true,
       cliFlags: [{ flag: "--verbose", description: "v", enabled: true }],
+      envVars: [{ key: "ANTHROPIC_BASE_URL", value: "https://api.example" }],
       cliPassthrough: false,
       userModified: true,
       createdAt: "2026-01-01T00:00:00Z",
@@ -38,6 +40,7 @@ describe("normalizeAgentProfile", () => {
   it("falls back to safe defaults for missing fields", () => {
     const result = normalizeAgentProfile({ id: "x", name: "y" });
     expect(result.cliFlags).toEqual([]);
+    expect(result.envVars).toEqual([]);
     expect(result.cliPassthrough).toBe(false);
     expect(result.allowIndexing).toBe(false);
     expect(result.agentDisplayName).toBe("");

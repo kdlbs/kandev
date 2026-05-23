@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { IconTrash } from "@tabler/icons-react";
@@ -18,12 +18,19 @@ import {
   AgentProfileDeleteConfirmDialog,
   AgentProfileDeleteConflictDialog,
 } from "@/components/settings/agent-profile-delete-dialog";
+import {
+  EnvVarsCard,
+  rowsToEnvVars,
+  useEnvVarRows,
+} from "@/components/settings/profile-edit/env-vars-card";
+import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import type {
   Agent,
   AgentProfile,
   ModelConfig,
   PermissionSetting,
   PassthroughConfig,
+  ProfileEnvVar,
 } from "@/lib/types/http";
 import { useAppStore } from "@/components/state-provider";
 import { AgentLogo } from "@/components/agent-logo";
@@ -159,6 +166,42 @@ function ProfileSettingsCard({
   );
 }
 
+function areEnvVarsEqual(a?: ProfileEnvVar[], b?: ProfileEnvVar[]): boolean {
+  const left = a ?? [];
+  const right = b ?? [];
+  if (left.length !== right.length) return false;
+  return left.every(
+    (ev, i) =>
+      ev.key === right[i]?.key &&
+      (ev.value ?? "") === (right[i]?.value ?? "") &&
+      (ev.secret_id ?? "") === (right[i]?.secret_id ?? ""),
+  );
+}
+
+type ProfileEnvVarsEditorProps = {
+  envVars?: ProfileEnvVar[];
+  secrets: { id: string; name: string }[];
+  onChange: (envVars: ProfileEnvVar[]) => void;
+};
+
+function ProfileEnvVarsEditor({ envVars, secrets, onChange }: ProfileEnvVarsEditorProps) {
+  const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar } = useEnvVarRows(envVars);
+
+  useEffect(() => {
+    onChange(rowsToEnvVars(envVarRows));
+  }, [envVarRows, onChange]);
+
+  return (
+    <EnvVarsCard
+      rows={envVarRows}
+      secrets={secrets}
+      onAdd={addEnvVar}
+      onUpdate={updateEnvVar}
+      onRemove={removeEnvVar}
+    />
+  );
+}
+
 function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<AgentProfile> {
   const next: Partial<AgentProfile> = {};
   if (patch.name !== undefined) next.name = patch.name;
@@ -201,7 +244,8 @@ function useProfileEditorState(profile: AgentProfile) {
       (draft.mode ?? "") !== (savedProfile.mode ?? "") ||
       draft.allowIndexing !== savedProfile.allowIndexing ||
       draft.cliPassthrough !== savedProfile.cliPassthrough ||
-      !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []),
+      !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []) ||
+      !areEnvVarsEqual(draft.envVars, savedProfile.envVars),
     [draft, savedProfile],
   );
 
@@ -255,6 +299,7 @@ function useProfileSave({
         allow_indexing: draft.allowIndexing,
         cli_passthrough: draft.cliPassthrough,
         cli_flags: draft.cliFlags,
+        env_vars: draft.envVars ?? [],
       });
       setSavedProfile(updated);
       setDraft(updated);
@@ -374,6 +419,14 @@ function ProfileEditor({
     handleForceDelete,
   } = useProfileDelete(agent, draft, settingsAgents, syncAgentsToStore, toast);
 
+  const { items: secrets } = useSecrets();
+  const handleEnvVarsChange = useCallback(
+    (envVars: ProfileEnvVar[]) => {
+      setDraft((current) => ({ ...current, envVars }));
+    },
+    [setDraft],
+  );
+
   return (
     <div className="space-y-8">
       <ProfileEditorHeader
@@ -395,6 +448,13 @@ function ProfileEditor({
         modelConfig={modelConfig}
         permissionSettings={permissionSettings}
         passthroughConfig={passthroughConfig}
+      />
+
+      <ProfileEnvVarsEditor
+        key={savedProfile.updatedAt}
+        envVars={savedProfile.envVars}
+        secrets={secrets}
+        onChange={handleEnvVarsChange}
       />
 
       <CommandPreviewCard

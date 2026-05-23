@@ -1,3 +1,4 @@
+import type { ProfileEnvVar } from "./http";
 import type { AgentProfileId, WorkspaceId } from "./ids";
 
 // Canonical AgentProfile (ADR 0005, Wave E):
@@ -68,6 +69,8 @@ export type AgentProfile = {
   allowIndexing: boolean;
   /** User-configurable CLI flags passed to the agent subprocess. */
   cliFlags: CLIFlag[];
+  /** Environment variables injected when this profile starts an agent session. */
+  envVars?: ProfileEnvVar[];
   cliPassthrough: boolean;
   userModified?: boolean;
 
@@ -135,6 +138,7 @@ export type AgentProfilePayload = {
   mode?: string;
   allow_indexing: boolean;
   cli_flags: CLIFlag[];
+  env_vars?: ProfileEnvVar[];
   cli_passthrough: boolean;
   user_modified?: boolean;
   created_at: string;

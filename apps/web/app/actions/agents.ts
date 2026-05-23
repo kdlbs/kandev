@@ -6,6 +6,7 @@ import type {
   AgentProfile,
   AgentProfileMcpConfig,
   CLIFlag,
+  ProfileEnvVar,
   McpServerDef,
   ListAgentsResponse,
   ListAgentDiscoveryResponse,
@@ -128,6 +129,7 @@ export async function updateAgentProfileAction(
     allow_indexing?: boolean;
     cli_passthrough?: boolean;
     cli_flags?: CLIFlag[];
+    env_vars?: ProfileEnvVar[];
   },
 ): Promise<AgentProfile> {
   const raw = await fetchJson<unknown>(`${apiBaseUrl}/api/v1/agent-profiles/${id}`, {

@@ -232,6 +232,8 @@ func (m *Manager) buildEnvForExecution(executionID string, req *LaunchRequest, a
 		env[k] = v
 	}
 
+	m.mergeAgentProfileEnv(context.Background(), req.AgentProfileID, env)
+
 	// Add standard variables for recovery after backend restart
 	env["KANDEV_INSTANCE_ID"] = executionID
 	env["KANDEV_TASK_ID"] = req.TaskID

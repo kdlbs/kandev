@@ -315,6 +315,7 @@ export class ApiClient {
       mode?: string;
       cli_passthrough?: boolean;
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
+      env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
     },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/agent-profiles/${profileId}`, patch);

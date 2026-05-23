@@ -396,12 +396,13 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 }
 
 type updateProfileRequest struct {
-	Name           *string           `json:"name,omitempty"`
-	Model          *string           `json:"model,omitempty"`
-	Mode           *string           `json:"mode,omitempty"`
-	AllowIndexing  *bool             `json:"allow_indexing,omitempty"`
-	CLIPassthrough *bool             `json:"cli_passthrough,omitempty"`
-	CLIFlags       *[]dto.CLIFlagDTO `json:"cli_flags,omitempty"`
+	Name           *string                 `json:"name,omitempty"`
+	Model          *string                 `json:"model,omitempty"`
+	Mode           *string                 `json:"mode,omitempty"`
+	AllowIndexing  *bool                   `json:"allow_indexing,omitempty"`
+	CLIPassthrough *bool                   `json:"cli_passthrough,omitempty"`
+	CLIFlags       *[]dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
+	EnvVars        *[]dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
 }
 
 func (h *Handlers) httpUpdateProfile(c *gin.Context) {
@@ -422,6 +423,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		AllowIndexing:  body.AllowIndexing,
 		CLIPassthrough: body.CLIPassthrough,
 		CLIFlags:       body.CLIFlags,
+		EnvVars:        body.EnvVars,
 	})
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {

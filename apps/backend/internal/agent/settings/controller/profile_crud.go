@@ -26,6 +26,7 @@ type CreateProfileRequest struct {
 	// profile opens with the agent's recommended flags (all disabled by
 	// default unless the curated entry specifies Default: true).
 	CLIFlags []dto.CLIFlagDTO
+	EnvVars  []dto.ProfileEnvVarDTO
 }
 
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -50,6 +51,9 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	} else if err := validateCLIFlagDTOs(req.CLIFlags); err != nil {
 		return nil, err
 	}
+	if err := validateProfileEnvVarDTOs(req.EnvVars); err != nil {
+		return nil, err
+	}
 	profile := &models.AgentProfile{
 		AgentID:          req.AgentID,
 		Name:             req.Name,
@@ -59,6 +63,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		AllowIndexing:    req.AllowIndexing,
 		CLIPassthrough:   req.CLIPassthrough,
 		CLIFlags:         cliFlags,
+		EnvVars:          envVarsFromDTO(req.EnvVars),
 		UserModified:     true,
 	}
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
@@ -110,6 +115,8 @@ type UpdateProfileRequest struct {
 	// CLIFlags replaces the entire list when non-nil. Nil means "leave
 	// unchanged" — the UI always sends the full desired list on save.
 	CLIFlags *[]dto.CLIFlagDTO
+	// EnvVars replaces the entire list when non-nil.
+	EnvVars *[]dto.ProfileEnvVarDTO
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -142,6 +149,12 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 			return nil, err
 		}
 		profile.CLIFlags = cliFlagsFromDTO(*req.CLIFlags)
+	}
+	if req.EnvVars != nil {
+		if err := validateProfileEnvVarDTOs(*req.EnvVars); err != nil {
+			return nil, err
+		}
+		profile.EnvVars = envVarsFromDTO(*req.EnvVars)
 	}
 	profile.UserModified = true
 	if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
@@ -277,6 +290,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		Mode:             profile.Mode,
 		AllowIndexing:    profile.AllowIndexing,
 		CLIFlags:         cliFlagsToDTO(profile.CLIFlags),
+		EnvVars:          envVarsToDTO(profile.EnvVars),
 		CLIPassthrough:   profile.CLIPassthrough,
 		UserModified:     profile.UserModified,
 		WorkspaceID:      profile.WorkspaceID,
@@ -299,6 +313,44 @@ func cliFlagsFromDTO(in []dto.CLIFlagDTO) []models.CLIFlag {
 		out[i] = models.CLIFlag{Description: f.Description, Flag: f.Flag, Enabled: f.Enabled}
 	}
 	return out
+}
+
+func envVarsToDTO(in []models.ProfileEnvVar) []dto.ProfileEnvVarDTO {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]dto.ProfileEnvVarDTO, len(in))
+	for i, ev := range in {
+		out[i] = dto.ProfileEnvVarDTO{Key: ev.Key, Value: ev.Value, SecretID: ev.SecretID}
+	}
+	return out
+}
+
+func envVarsFromDTO(in []dto.ProfileEnvVarDTO) []models.ProfileEnvVar {
+	out := make([]models.ProfileEnvVar, 0, len(in))
+	for _, ev := range in {
+		if strings.TrimSpace(ev.Key) == "" {
+			continue
+		}
+		out = append(out, models.ProfileEnvVar{
+			Key:      strings.TrimSpace(ev.Key),
+			Value:    ev.Value,
+			SecretID: ev.SecretID,
+		})
+	}
+	return out
+}
+
+func validateProfileEnvVarDTOs(in []dto.ProfileEnvVarDTO) error {
+	for i, ev := range in {
+		if strings.TrimSpace(ev.Key) == "" {
+			return fmt.Errorf("env_vars[%d].key is required", i)
+		}
+		if ev.SecretID != "" && ev.Value != "" {
+			return fmt.Errorf("env_vars[%d]: set value or secret_id, not both", i)
+		}
+	}
+	return nil
 }
 
 // resolveProfileNameForModel looks up the agent by ID, fetches its model list (using cache),

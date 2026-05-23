@@ -79,6 +79,7 @@ func (r *sqliteRepository) initSchema() error {
 		user_modified INTEGER NOT NULL DEFAULT 0,
 		plan TEXT DEFAULT '',
 		cli_flags TEXT DEFAULT NULL,
+		env_vars TEXT NOT NULL DEFAULT '[]',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		deleted_at TIMESTAMP,
@@ -133,6 +134,7 @@ func (r *sqliteRepository) initSchema() error {
 	r.migrate.Apply("agent_profiles.migrated_from", `ALTER TABLE agent_profiles ADD COLUMN migrated_from TEXT DEFAULT NULL`)
 	// Rows where cli_flags IS NULL are backfilled on first read - see scanAgentProfile.
 	r.migrate.Apply("agent_profiles.cli_flags", `ALTER TABLE agent_profiles ADD COLUMN cli_flags TEXT DEFAULT NULL`)
+	r.migrate.Apply("agent_profiles.env_vars", `ALTER TABLE agent_profiles ADD COLUMN env_vars TEXT NOT NULL DEFAULT '[]'`)
 
 	// Migration: drop CHECK(model != '') constraint from agent_profiles.
 	//
@@ -458,6 +460,10 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	if err != nil {
 		return err
 	}
+	envVarsJSON, err := envVarsToJSON(profile.EnvVars)
+	if err != nil {
+		return err
+	}
 	enrich, err := enrichmentValues(profile)
 	if err != nil {
 		return err
@@ -466,7 +472,7 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 		INSERT INTO agent_profiles (
 			id, agent_id, name, agent_display_name, model, mode, migrated_from,
 			auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough,
-			user_modified, plan, cli_flags, created_at, updated_at, deleted_at,
+			user_modified, plan, cli_flags, env_vars, created_at, updated_at, deleted_at,
 			workspace_id, role, icon, reports_to,
 			skill_ids, desired_skills, custom_prompt,
 			status, pause_reason, last_run_finished_at,
@@ -476,7 +482,7 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
-			?, '', ?, ?, ?, ?,
+			?, '', ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
 			?, ?, ?,
 			?, ?, ?,
@@ -489,7 +495,7 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
 		dialect.BoolToInt(profile.AutoApprove),
 		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing), dialect.BoolToInt(profile.CLIPassthrough),
-		dialect.BoolToInt(profile.UserModified), cliFlagsJSON, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt,
+		dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt,
 		enrich.workspaceID, enrich.role, enrich.icon, enrich.reportsTo,
 		enrich.skillIDs, enrich.desiredSkills, enrich.customPrompt,
 		enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
@@ -641,9 +647,24 @@ func cliFlagsToJSON(flags []models.CLIFlag) (string, error) {
 	return string(data), nil
 }
 
+func envVarsToJSON(envVars []models.ProfileEnvVar) (string, error) {
+	if envVars == nil {
+		envVars = []models.ProfileEnvVar{}
+	}
+	data, err := json.Marshal(envVars)
+	if err != nil {
+		return "", fmt.Errorf("marshal env_vars: %w", err)
+	}
+	return string(data), nil
+}
+
 func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {
 	profile.UpdatedAt = time.Now().UTC()
 	cliFlagsJSON, err := cliFlagsToJSON(profile.CLIFlags)
+	if err != nil {
+		return err
+	}
+	envVarsJSON, err := envVarsToJSON(profile.EnvVars)
 	if err != nil {
 		return err
 	}
@@ -655,7 +676,7 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 		UPDATE agent_profiles
 		SET name = ?, agent_display_name = ?, model = ?, mode = ?, migrated_from = ?,
 			auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?,
-			cli_passthrough = ?, user_modified = ?, cli_flags = ?, updated_at = ?,
+			cli_passthrough = ?, user_modified = ?, cli_flags = ?, env_vars = ?, updated_at = ?,
 			workspace_id = ?, role = ?, icon = ?, reports_to = ?,
 			skill_ids = ?, desired_skills = ?, custom_prompt = ?,
 			status = ?, pause_reason = ?, last_run_finished_at = ?,
@@ -668,7 +689,7 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
 		dialect.BoolToInt(profile.AutoApprove),
 		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing),
-		dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, profile.UpdatedAt,
+		dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.UpdatedAt,
 		enrich.workspaceID, enrich.role, enrich.icon, enrich.reportsTo,
 		enrich.skillIDs, enrich.desiredSkills, enrich.customPrompt,
 		enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
@@ -707,6 +728,7 @@ func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*mod
 		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from,
 			auto_approve, dangerously_skip_permissions, allow_indexing,
 			cli_passthrough, user_modified, plan, cli_flags,
+			COALESCE(env_vars, '[]'),
 			created_at, updated_at, deleted_at,
 			COALESCE(workspace_id, ''), COALESCE(role, ''), COALESCE(icon, ''),
 			COALESCE(reports_to, ''), COALESCE(skill_ids, '[]'),
@@ -732,6 +754,7 @@ func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string
 		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from,
 			auto_approve, dangerously_skip_permissions, allow_indexing,
 			cli_passthrough, user_modified, plan, cli_flags,
+			COALESCE(env_vars, '[]'),
 			created_at, updated_at, deleted_at,
 			COALESCE(workspace_id, ''), COALESCE(role, ''), COALESCE(icon, ''),
 			COALESCE(reports_to, ''), COALESCE(skill_ids, '[]'),
@@ -865,6 +888,7 @@ func scanAgentProfile(scanner interface {
 	var userModified int
 	var plan string // unused, kept for backwards compatibility
 	var cliFlagsRaw sql.NullString
+	var envVarsRaw sql.NullString
 	var role, status string
 	var skipIdleRuns int
 	var failureThreshold int
@@ -883,6 +907,7 @@ func scanAgentProfile(scanner interface {
 		&userModified,
 		&plan,
 		&cliFlagsRaw,
+		&envVarsRaw,
 		&profile.CreatedAt,
 		&profile.UpdatedAt,
 		&profile.DeletedAt,
@@ -929,6 +954,11 @@ func scanAgentProfile(scanner interface {
 	if cliFlagsRaw.Valid && cliFlagsRaw.String != "" {
 		if err := json.Unmarshal([]byte(cliFlagsRaw.String), &profile.CLIFlags); err != nil {
 			return nil, fmt.Errorf("failed to parse cli_flags for profile %s: %w", profile.ID, err)
+		}
+	}
+	if envVarsRaw.Valid && envVarsRaw.String != "" {
+		if err := json.Unmarshal([]byte(envVarsRaw.String), &profile.EnvVars); err != nil {
+			return nil, fmt.Errorf("failed to parse env_vars for profile %s: %w", profile.ID, err)
 		}
 	}
 	// When cli_flags is NULL the caller (GetAgentProfile / ListAgentProfiles)
