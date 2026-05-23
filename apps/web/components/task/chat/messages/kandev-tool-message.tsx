@@ -10,11 +10,9 @@ import { parsePermission, usePermissionResponseHandlers } from "./use-permission
 import { KandevPermissionUIProvider, type KandevPermissionUIState } from "./kandev/shared";
 import type { PermissionRequestMetadata } from "./use-permission-handlers";
 
-// derivePermissionUI maps the permission_request's stamped status into the
-// overlay state consumed by KandevRow. Approval intentionally falls through
-// to `undefined` so the underlying tool_call status keeps driving the row —
-// otherwise an approved-but-still-pending tool would render as complete and
-// any later tool_call error would be masked.
+// Approval falls through to `undefined` on purpose: the tool_call status
+// stays the source of truth so an approved-but-still-pending tool does not
+// render as complete and a later tool_call error is not masked.
 function derivePermissionUI(
   permissionStatus: PermissionRequestMetadata["status"],
   isPermissionPending: boolean,
@@ -96,11 +94,6 @@ export const KandevToolMessage = memo(function KandevToolMessage({
   const rawResult = generic?.output ?? meta?.result;
   const result = extractMcpResult(rawResult);
 
-  // Pass the *real* tool_call status to the renderer. The permission overlay
-  // (amber clock / rejected mark / hidden summary) is layered on top via the
-  // context provider below — never by mutating the status — so an approved
-  // tool that's still pending continues to read as pending, and a later
-  // tool_call error is never masked.
   const permissionUI = derivePermissionUI(permissionStatus, isPermissionPending);
 
   // Each renderer is a stable function-pointer pulled from the static

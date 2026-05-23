@@ -274,9 +274,7 @@ describe("KandevToolMessage document & question renderers", () => {
   });
 });
 
-// pendingPermissionMessage mirrors the orchestrator-emitted permission_request
-// message that arrives alongside a blocking MCP tool_call. Status is left
-// unset (which `parsePermission` treats as pending).
+// Unset status is treated as pending by parsePermission.
 function pendingPermissionMessage(toolCallId: string): Message {
   return {
     id: "perm-1",
@@ -357,13 +355,6 @@ describe("KandevToolMessage permission UI", () => {
 });
 
 describe("KandevToolMessage resolved-permission overlay", () => {
-  // After approve/reject the orchestrator stamps `status` onto the
-  // permission_request message but the tool_call's own `meta.status` stays
-  // "pending" until the backend sends the next tool_call update. The row
-  // must reflect the user's decision via a permission overlay WITHOUT
-  // overriding the tool_call status itself — otherwise an approved-but-
-  // still-running tool reads as complete and a later tool_call error is
-  // silently masked.
   function resolvedPermissionMessage(toolCallId: string, status: "approved" | "rejected"): Message {
     const msg = pendingPermissionMessage(toolCallId);
     return {
@@ -390,8 +381,6 @@ describe("KandevToolMessage resolved-permission overlay", () => {
     const html = renderToStaticMarkup(
       <KandevToolMessage
         comment={kandevToolCall({
-          // Mirrors the race window: user approved, but the agent hasn't
-          // emitted the tool_call completion yet.
           status: "pending",
           toolName: "mcp__kandev__list_workspaces_kandev",
         })}
@@ -405,8 +394,6 @@ describe("KandevToolMessage resolved-permission overlay", () => {
     const html = renderToStaticMarkup(
       <KandevToolMessage
         comment={kandevToolCall({
-          // A previous fix mapped approved -> complete and masked this icon.
-          // The real tool status must come through.
           status: "error",
           toolName: "mcp__kandev__list_workspaces_kandev",
         })}
@@ -434,7 +421,6 @@ describe("KandevToolMessage resolved-permission overlay", () => {
     const html = renderToStaticMarkup(
       <KandevToolMessage
         comment={kandevToolCall({
-          // Tool denied before it could run.
           status: "pending",
           toolName: "mcp__kandev__list_workspaces_kandev",
         })}

@@ -130,14 +130,8 @@ func scenarioMultiPermission(e *emitter) {
 	e.text("Multi-permission scenario complete.")
 }
 
-// scenarioKandevMCPPermission emits a tool_call whose title is a real Kandev
-// MCP tool name (`mcp__kandev__list_workspaces_kandev`) and blocks on a
-// permission request. Reproduces the bug where the Kandev custom renderer
-// never wired `permissionMessage` through, leaving the user with no approve
-// button. We emit the wire frames directly (same pattern as
-// scenarioMultiPermission) rather than calling the live MCP tool, because the
-// renderer is purely driven by the tool_call title and the permission_request
-// message arriving alongside it.
+// scenarioKandevMCPPermission emits a tool_call with a Kandev MCP tool title and
+// blocks on a permission request, exercising the kandev renderer's approval UI.
 func scenarioKandevMCPPermission(e *emitter) {
 	fixedDelay(50)
 	e.text("Calling a Kandev MCP tool that needs approval.")

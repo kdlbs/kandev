@@ -24,13 +24,8 @@ export function KandevStatusIcon({ status }: { status: KandevStatus }) {
   return null;
 }
 
-// KandevPermissionUIState is the *display overlay* applied to a Kandev row
-// while a permission_request message is attached. It deliberately does NOT
-// override the tool_call's own `status`: a tool can be approved but still
-// pending, or rejected before it ever ran, and the underlying tool state is
-// the source of truth for things like the green check, spinner, and red X.
-// The overlay only drives "waiting on the user" affordances (amber clock,
-// hidden summary) and the rejection mark.
+// Display overlay applied alongside the tool_call's own status. Never replaces
+// it — see derivePermissionUI in kandev-tool-message.tsx for the reasoning.
 export type KandevPermissionUIState = "pending" | "rejected" | undefined;
 
 const KandevPermissionUIContext = createContext<KandevPermissionUIState>(undefined);
@@ -49,10 +44,7 @@ type KandevRowProps = {
 // KandevRow is the consistent header row for every Kandev tool. Title is the
 // "Kandev: …" string, summary is an inline description of args / result count,
 // and children are the expanded body. Auto-expands while the tool is running,
-// matching the pattern used by ToolExecuteMessage. The permission overlay
-// (amber clock / hidden summary / red X) is layered on top of the underlying
-// tool status via `KandevPermissionUIContext` so the row never lies about the
-// real tool_call state.
+// matching the pattern used by ToolExecuteMessage.
 export function KandevRow({
   Icon,
   title,
@@ -66,12 +58,7 @@ export function KandevRow({
   const isRejected = permissionUI === "rejected";
   const autoExpanded = status === "running";
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
-  // The header chip on the right shows one of: amber clock (waiting on the
-  // user), red X (rejected, takes precedence over the tool's own state),
-  // otherwise the tool's own status icon. We suppress that chip on success
-  // because the leftmost icon already conveys "done"; rejection wins over the
-  // success short-circuit so a tool that completed before the user denied it
-  // still reads as denied.
+  // Rejection wins over success so a completed-then-denied tool still reads as denied.
   const isSuccess = status === "complete" && !isRejected;
 
   return (
