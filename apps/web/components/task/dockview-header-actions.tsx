@@ -168,13 +168,15 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   );
 }
 
-/** Faded maximize, split, and close buttons for any non-sidebar group. */
+/** Faded maximize, minimize, split, and close buttons for any non-sidebar group. */
 function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsProps) {
   const centerGroupId = useDockviewStore((s) => s.centerGroupId);
   const isChatGroup = group.id === centerGroupId;
   const isMaximized = useDockviewStore((s) => s.preMaximizeLayout !== null);
+  const isMinimized = useDockviewStore((s) => s.minimizedGroupIds.has(group.id));
   const storeMaximize = useDockviewStore((s) => s.maximizeGroup);
   const storeExitMaximize = useDockviewStore((s) => s.exitMaximizedLayout);
+  const toggleGroupMinimized = useDockviewStore((s) => s.toggleGroupMinimized);
   const width = useDockviewGroupWidth(group);
 
   const handleMaximize = useCallback(() => {
@@ -184,6 +186,15 @@ function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsP
       storeMaximize(group.id);
     }
   }, [group.id, isMaximized, storeMaximize, storeExitMaximize]);
+
+  const handleMinimize = useCallback(() => {
+    // Minimize and maximize are orthogonal — maximize is a global single-group
+    // overlay, minimize is per-group in-place collapse. Clicking Minimize while
+    // maximized would minimize the lone visible group and leave the user with a
+    // header-only screen; exit maximize first so they see the regular layout.
+    if (isMaximized) storeExitMaximize();
+    toggleGroupMinimized(group.id);
+  }, [group.id, isMaximized, storeExitMaximize, toggleGroupMinimized]);
 
   const handleSplitRight = useCallback(() => {
     containerApi.addGroup({ referenceGroup: group, direction: "right" });
@@ -218,6 +229,8 @@ function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsP
       isChatGroup={isChatGroup}
       isMaximized={isMaximized}
       onMaximize={handleMaximize}
+      isMinimized={isMinimized}
+      onMinimize={handleMinimize}
       onSplitRight={handleSplitRight}
       onSplitDown={handleSplitDown}
       onCloseGroup={handleCloseGroup}
