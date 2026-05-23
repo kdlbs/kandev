@@ -9,8 +9,6 @@ import type {
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import type {
   SSHAgentReadinessResponseBody,
-  SSHInstallAgentRequestBody,
-  SSHInstallAgentResponseBody,
   SSHProbeShellsResponseBody,
   SSHSessionBody,
   SSHTestRequestBody,
@@ -1537,13 +1535,6 @@ export class ApiClient {
   async probeSSHShells(executorId: string): Promise<SSHProbeShellsResponseBody> {
     return this.request("POST", `/api/v1/ssh/executors/${executorId}/probe-shells`);
   }
-
-  async installSSHAgent(
-    executorId: string,
-    body: SSHInstallAgentRequestBody,
-  ): Promise<SSHInstallAgentResponseBody> {
-    return this.request("POST", `/api/v1/ssh/executors/${executorId}/install-agent`, body);
-  }
 }
 
 // SSH HTTP shapes live in api-client-ssh.ts; re-exported here so existing
@@ -1557,8 +1548,6 @@ export type {
   SSHAgentReadinessRowBody,
   SSHAgentReadinessResponseBody,
   SSHProbeShellsResponseBody,
-  SSHInstallAgentRequestBody,
-  SSHInstallAgentResponseBody,
 } from "./api-client-ssh";
 
 // --- Jira / Linear mock payload types ---

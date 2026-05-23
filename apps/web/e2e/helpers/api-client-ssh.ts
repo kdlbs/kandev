@@ -72,16 +72,3 @@ export type SSHProbeShellsResponseBody = {
   duration_ms: number;
   available: string[];
 };
-
-export type SSHInstallAgentRequestBody = {
-  agent_id: string;
-  shell?: string;
-};
-
-export type SSHInstallAgentResponseBody = {
-  agent_id: string;
-  success: boolean;
-  duration_ms: number;
-  output?: string;
-  error?: string;
-};

@@ -7,15 +7,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kand
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
-import { IconCheck, IconCopy, IconDownload, IconLoader2, IconX } from "@tabler/icons-react";
+import { IconCheck, IconCopy, IconLoader2, IconX } from "@tabler/icons-react";
 import { toast } from "sonner";
-import { installSSHAgent, probeSSHAgents, probeSSHShells } from "@/lib/api/domains/ssh-api";
-import type { SSHAgentReadinessRow, SSHInstallAgentResponse } from "@/lib/types/http-ssh";
+import { probeSSHAgents, probeSSHShells } from "@/lib/api/domains/ssh-api";
+import type { SSHAgentReadinessRow } from "@/lib/types/http-ssh";
 
 export interface SSHAgentReadinessCardProps {
   executorId: string;
   /** The shell currently saved on the profile. Drives initial selection + the
-   *  shell sent to the probe/install endpoints. */
+   *  shell sent to the probe endpoint. */
   shell?: string;
   /** Persist a shell change up to the profile. Called when the user picks a
    *  different option in the dropdown so the choice survives the page reload
@@ -27,8 +27,7 @@ const DEFAULT_SHELL = "bash";
 
 // useReadinessState owns the card's fetch + selection state so the component
 // renders a thin view layer. Pulled out to keep the component body under the
-// max-lines-per-function lint budget (the card body had too many independent
-// concerns inline).
+// max-lines-per-function lint budget.
 function useReadinessState({
   executorId,
   shellProp,
@@ -108,18 +107,6 @@ function useReadinessState({
     [onShellChange],
   );
 
-  const handleInstalled = useCallback(
-    (agentID: string, resp: SSHInstallAgentResponse) => {
-      if (resp.success) {
-        toast.success(`${agentLabel(rows, agentID)}: install completed`);
-        void refresh();
-      } else {
-        toast.error(`${agentLabel(rows, agentID)}: install failed`);
-      }
-    },
-    [rows, refresh],
-  );
-
   return {
     rows,
     loading,
@@ -130,16 +117,16 @@ function useReadinessState({
     shell,
     refresh,
     handleShellChange,
-    handleInstalled,
   };
 }
 
 /**
  * Probes the remote host for each kandev-enabled agent's required binary
  * (the first token of the agent's BuildCommand) under the user-chosen login
- * shell. Surfaces availability + an Install button (one-click run of the
- * agent's InstallScript). Manual refresh only — a real SSH dial happens per
- * probe so we don't poll on a timer.
+ * shell. Surfaces availability + a copy-button for the agent's install
+ * command — installs themselves stay manual so the user keeps full control
+ * over what runs on their machine. Manual refresh only — a real SSH dial
+ * happens per probe so we don't poll on a timer.
  */
 export function SSHAgentReadinessCard({
   executorId,
@@ -157,7 +144,6 @@ export function SSHAgentReadinessCard({
     shell,
     refresh,
     handleShellChange,
-    handleInstalled,
   } = state;
 
   return (
@@ -167,8 +153,8 @@ export function SSHAgentReadinessCard({
           <div>
             <CardTitle>Available agents on this host</CardTitle>
             <CardDescription>
-              Probes the remote {"$PATH"} for each enabled agent under the chosen login shell.
-              Install missing agents in one click.
+              Probes the remote {"$PATH"} for each enabled agent under the chosen login shell. Copy
+              the install hint and run it on the remote when an agent is missing.
             </CardDescription>
           </div>
           <Button
@@ -191,14 +177,7 @@ export function SSHAgentReadinessCard({
         />
       </CardHeader>
       <CardContent>
-        <ReadinessContent
-          error={error}
-          hasProbed={hasProbed}
-          rows={rows}
-          executorId={executorId}
-          shell={shell}
-          onInstalled={handleInstalled}
-        />
+        <ReadinessContent error={error} hasProbed={hasProbed} rows={rows} />
       </CardContent>
     </Card>
   );
@@ -261,16 +240,10 @@ function ReadinessContent({
   error,
   hasProbed,
   rows,
-  executorId,
-  shell,
-  onInstalled,
 }: {
   error: string | null;
   hasProbed: boolean;
   rows: SSHAgentReadinessRow[];
-  executorId: string;
-  shell: string;
-  onInstalled: (agentID: string, resp: SSHInstallAgentResponse) => void;
 }) {
   if (error) {
     return (
@@ -289,22 +262,10 @@ function ReadinessContent({
   if (rows.length === 0) {
     return <p className="text-sm text-muted-foreground">No enabled agents to probe.</p>;
   }
-  return (
-    <ReadinessTable rows={rows} executorId={executorId} shell={shell} onInstalled={onInstalled} />
-  );
+  return <ReadinessTable rows={rows} />;
 }
 
-function ReadinessTable({
-  rows,
-  executorId,
-  shell,
-  onInstalled,
-}: {
-  rows: SSHAgentReadinessRow[];
-  executorId: string;
-  shell: string;
-  onInstalled: (agentID: string, resp: SSHInstallAgentResponse) => void;
-}) {
+function ReadinessTable({ rows }: { rows: SSHAgentReadinessRow[] }) {
   return (
     <Table data-testid="ssh-agent-readiness-table">
       <TableHeader>
@@ -312,91 +273,31 @@ function ReadinessTable({
           <TableHead>Agent</TableHead>
           <TableHead>Binary</TableHead>
           <TableHead>Status</TableHead>
-          <TableHead>Action</TableHead>
+          <TableHead>Install hint</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {rows.map((row) => (
-          <ReadinessRow
-            key={row.agent_id}
-            row={row}
-            executorId={executorId}
-            shell={shell}
-            onInstalled={onInstalled}
-          />
+          <ReadinessRow key={row.agent_id} row={row} />
         ))}
       </TableBody>
     </Table>
   );
 }
 
-function ReadinessRow({
-  row,
-  executorId,
-  shell,
-  onInstalled,
-}: {
-  row: SSHAgentReadinessRow;
-  executorId: string;
-  shell: string;
-  onInstalled: (agentID: string, resp: SSHInstallAgentResponse) => void;
-}) {
-  const [installing, setInstalling] = useState(false);
-  const [lastOutput, setLastOutput] = useState<string | null>(null);
+function ReadinessRow({ row }: { row: SSHAgentReadinessRow }) {
   const slug = row.agent_id.replace(/[^a-z0-9]+/gi, "-");
-
-  const handleInstall = useCallback(async () => {
-    if (installing) return;
-    setInstalling(true);
-    setLastOutput(null);
-    try {
-      const resp = await installSSHAgent(executorId, {
-        agent_id: row.agent_id,
-        shell: shell || undefined,
-      });
-      setLastOutput(resp.output ?? null);
-      onInstalled(row.agent_id, resp);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Install request failed";
-      setLastOutput(msg);
-      onInstalled(row.agent_id, {
-        agent_id: row.agent_id,
-        success: false,
-        duration_ms: 0,
-        error: msg,
-      });
-    } finally {
-      setInstalling(false);
-    }
-  }, [executorId, installing, onInstalled, row.agent_id, shell]);
-
   return (
-    <>
-      <TableRow data-testid={`ssh-readiness-row-${slug}`} data-available={row.available}>
-        <TableCell className="font-medium">{row.agent_name || row.agent_id}</TableCell>
-        <TableCell className="font-mono text-xs">{row.binary}</TableCell>
-        <TableCell>
-          <StatusBadge row={row} />
-        </TableCell>
-        <TableCell className="text-xs">
-          <RowActions row={row} installing={installing} onInstall={handleInstall} />
-        </TableCell>
-      </TableRow>
-      {lastOutput ? (
-        <TableRow data-testid={`ssh-readiness-row-${slug}-output`}>
-          <TableCell colSpan={4} className="bg-muted/40 py-2">
-            <details>
-              <summary className="cursor-pointer text-xs text-muted-foreground">
-                Install output
-              </summary>
-              <pre className="mt-1 max-h-48 overflow-auto text-[11px] font-mono whitespace-pre-wrap">
-                {lastOutput}
-              </pre>
-            </details>
-          </TableCell>
-        </TableRow>
-      ) : null}
-    </>
+    <TableRow data-testid={`ssh-readiness-row-${slug}`} data-available={row.available}>
+      <TableCell className="font-medium">{row.agent_name || row.agent_id}</TableCell>
+      <TableCell className="font-mono text-xs">{row.binary}</TableCell>
+      <TableCell>
+        <StatusBadge row={row} />
+      </TableCell>
+      <TableCell className="text-xs">
+        <InstallHint hint={row.install_hint} available={row.available} />
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -422,59 +323,22 @@ function StatusBadge({ row }: { row: SSHAgentReadinessRow }) {
   );
 }
 
-function RowActions({
-  row,
-  installing,
-  onInstall,
-}: {
-  row: SSHAgentReadinessRow;
-  installing: boolean;
-  onInstall: () => void;
-}) {
-  if (row.available) {
-    return <span className="text-muted-foreground">—</span>;
-  }
-  if (!row.install_hint) {
-    return <span className="text-muted-foreground">No install hint available</span>;
-  }
+function InstallHint({ hint, available }: { hint?: string; available: boolean }) {
+  if (available) return <span className="text-muted-foreground">—</span>;
+  if (!hint) return <span className="text-muted-foreground">No hint available</span>;
   return (
-    <div className="flex items-center gap-2">
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-7 cursor-pointer text-xs"
-        disabled={installing}
-        onClick={onInstall}
-        data-testid={`ssh-readiness-install-${row.agent_id.replace(/[^a-z0-9]+/gi, "-")}`}
-        aria-label={`Install ${row.agent_name || row.agent_id} on remote`}
-      >
-        {installing ? (
-          <>
-            <IconLoader2 className="mr-1 h-3 w-3 animate-spin" /> Installing
-          </>
-        ) : (
-          <>
-            <IconDownload className="mr-1 h-3 w-3" /> Install
-          </>
-        )}
-      </Button>
+    <div className="flex items-center gap-1">
+      <code className="truncate">{hint}</code>
       <button
         type="button"
         className="cursor-pointer text-muted-foreground hover:text-foreground"
         aria-label="Copy install hint"
         onClick={() => {
-          void navigator.clipboard
-            .writeText(row.install_hint ?? "")
-            .then(() => toast.success("Install hint copied"));
+          void navigator.clipboard.writeText(hint).then(() => toast.success("Install hint copied"));
         }}
       >
         <IconCopy className="h-3 w-3" />
       </button>
     </div>
   );
-}
-
-function agentLabel(rows: SSHAgentReadinessRow[], agentID: string): string {
-  const row = rows.find((r) => r.agent_id === agentID);
-  return row?.agent_name || agentID;
 }

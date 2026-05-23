@@ -1,5 +1,5 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
-import { execInContainer, remotePathExists } from "../../helpers/ssh";
+import { execInContainer } from "../../helpers/ssh";
 
 /**
  * The agent-readiness probe SSHs into the remote and runs `command -v` for
@@ -8,8 +8,8 @@ import { execInContainer, remotePathExists } from "../../helpers/ssh";
  * as installed. Move it aside and the second probe must flip to "missing"
  * AND carry the agent's InstallScript() through as an install hint.
  *
- * Drives the HTTP API, the shell-detection endpoint, the install endpoint,
- * and the UI card mounted on /settings/executors/[profileId].
+ * Drives the HTTP API, the shell-detection endpoint, and the UI card
+ * mounted on /settings/executors/[profileId].
  */
 test.describe("ssh executor — agent readiness", () => {
   test("probes the remote and reports installed agents (mock-agent baked in)", async ({
@@ -46,7 +46,7 @@ test.describe("ssh executor — agent readiness", () => {
       // MockAgent's InstallScript is a deterministic echo-only command so
       // tests can assert the hint flows through end-to-end. Real agents'
       // hints (e.g. `npm install -g …`) would never run during this test
-      // — the panel only displays them.
+      // — the panel only displays them; the user runs them on the remote.
       expect(mock!.install_hint).toMatch(/mock-install/);
     } finally {
       execInContainer(seedData.sshTarget, [
@@ -72,50 +72,18 @@ test.describe("ssh executor — agent readiness", () => {
     expect(resp.available).not.toContain("fish");
   });
 
-  test("install-agent runs the agent's InstallScript and reports success", async ({
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(60_000);
-    // MockAgent.InstallScript is `echo mock-install: step 1 && echo mock-install: step 2 && echo mock-install: done` —
-    // deterministic and side-effect-free. Asserting the output mentions the
-    // step labels proves the script actually ran via login shell, not that
-    // we stubbed the path.
-    const resp = await apiClient.installSSHAgent(seedData.sshExecutorId, {
-      agent_id: "mock-agent",
-    });
-    expect(resp.success).toBe(true);
-    expect(resp.output).toMatch(/mock-install: step 1/);
-    expect(resp.output).toMatch(/mock-install: done/);
-  });
-
-  test("install-agent rejects unknown agent_id with a clean error", async ({
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(30_000);
-    const rawResp = await apiClient.rawRequest(
-      "POST",
-      `/api/v1/ssh/executors/${seedData.sshExecutorId}/install-agent`,
-      { agent_id: "does-not-exist" },
-    );
-    expect(rawResp.status).toBe(404);
-    const body = await rawResp.json();
-    expect(body.error).toMatch(/not found/i);
-  });
-
-  test("UI card renders on profile-edit page; probe + install round-trip works", async ({
+  test("UI card renders on profile-edit page; install hints surface for missing agents", async ({
     apiClient: _apiClient,
     seedData,
     testPage,
   }) => {
-    test.setTimeout(120_000);
-    // Land on the profile-edit page (the new home for the readiness card).
+    test.setTimeout(60_000);
+    // Land on the profile-edit page (the home for the readiness card).
     await testPage.goto(`/settings/executors/${seedData.sshExecutorProfileId}`);
     const card = testPage.getByTestId("ssh-agent-readiness-card");
     await expect(card).toBeVisible({ timeout: 5_000 });
 
-    // Shell selector renders + the detected-shells probe populated it.
+    // Shell selector renders (auto-detect probe populates it).
     const shellSelector = testPage.getByTestId("ssh-readiness-shell");
     await expect(shellSelector).toBeVisible();
 
@@ -126,11 +94,9 @@ test.describe("ssh executor — agent readiness", () => {
     const mockRow = testPage.getByTestId("ssh-readiness-row-mock-agent");
     await expect(mockRow).toHaveAttribute("data-available", "true");
 
-    // Sanity: install endpoint is reachable via the UI button when an
-    // agent is missing. Move mock-agent aside, re-probe, click Install,
-    // assert the row flips back to installed (the install script is a
-    // no-op echo so the row stays missing in reality — but the install
-    // CALL itself should succeed and the toast surfaces).
+    // Move mock-agent aside, re-probe, and assert the row carries the
+    // install hint text. Install is intentionally manual — the user copies
+    // the command and runs it on the remote themselves.
     execInContainer(seedData.sshTarget, [
       "sh",
       "-c",
@@ -139,26 +105,13 @@ test.describe("ssh executor — agent readiness", () => {
     try {
       await testPage.getByTestId("ssh-agent-readiness-probe").click();
       await expect(mockRow).toHaveAttribute("data-available", "false", { timeout: 30_000 });
-      const installBtn = testPage.getByTestId("ssh-readiness-install-mock-agent");
-      await expect(installBtn).toBeVisible();
-      await installBtn.click();
-      // After the install call returns, the card auto re-probes. The
-      // mock-agent install script is echo-only so the binary is still
-      // moved aside — assertion is that the install request itself
-      // succeeded (output panel appears) and didn't hang.
-      const outputRow = testPage.getByTestId("ssh-readiness-row-mock-agent-output");
-      await expect(outputRow).toBeVisible({ timeout: 30_000 });
-      await expect(outputRow).toContainText("mock-install");
+      await expect(mockRow).toContainText("mock-install");
     } finally {
-      // Restore so other tests in the same worker see the agent as
-      // installed.
-      if (remotePathExists(seedData.sshTarget, "/usr/local/bin/mock-agent.bak")) {
-        execInContainer(seedData.sshTarget, [
-          "sh",
-          "-c",
-          "mv /usr/local/bin/mock-agent.bak /usr/local/bin/mock-agent",
-        ]);
-      }
+      execInContainer(seedData.sshTarget, [
+        "sh",
+        "-c",
+        "mv /usr/local/bin/mock-agent.bak /usr/local/bin/mock-agent",
+      ]);
     }
   });
 });
