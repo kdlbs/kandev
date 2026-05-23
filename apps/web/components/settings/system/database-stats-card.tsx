@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { Spinner } from "@kandev/ui/spinner";
 import { IconDatabase, IconBolt, IconRefresh, IconTrash } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useDatabaseStats } from "@/hooks/domains/system/use-database-stats";
 import { optimizeDatabase, vacuumDatabase } from "@/lib/api/domains/system-api";
 import { formatBytes } from "@/lib/utils/format-bytes";
@@ -59,6 +60,41 @@ function StatsTable({ database }: { database: DBStats }) {
   );
 }
 
+// Plain-language descriptions of each maintenance operation. Surfaced as a
+// short paragraph next to the button + an on-hover tooltip so users without
+// database background know what each action does and when to use it.
+const VACUUM_HELP =
+  "Reclaims unused space inside the database file. The file can grow over time as you delete tasks or sessions; vacuum compacts it back down. Safe to run anytime - it does not change any data. Use it once in a while if the database size looks large.";
+const OPTIMIZE_HELP =
+  "Asks the database to refresh its internal indexes so common queries stay fast. Run it after deleting a lot of data or if the app feels sluggish. Quick and safe - no data is changed.";
+const FACTORY_RESET_HELP =
+  "Wipes ALL Kandev data: tasks, sessions, settings, repositories, and worktrees. There is no undo. A backup is taken first, but restoring it requires using the Backups page after the reset. Only use this if you want to start over from scratch.";
+
+function OperationRow({
+  testid,
+  label,
+  description,
+  button,
+}: {
+  testid: string;
+  label: string;
+  description: string;
+  button: React.ReactNode;
+}) {
+  return (
+    <div
+      className="flex items-start justify-between gap-3 rounded-md border p-3"
+      data-testid={testid}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">{label}</p>
+        <p className="text-xs text-muted-foreground mt-1">{description}</p>
+      </div>
+      <div className="shrink-0">{button}</div>
+    </div>
+  );
+}
+
 function MaintenanceButtons({
   vacuumPending,
   optimizePending,
@@ -73,36 +109,72 @@ function MaintenanceButtons({
   onResetOpen: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={vacuumPending}
-        onClick={onVacuum}
-        className="cursor-pointer"
-        data-testid="system-vacuum-button"
-      >
-        <IconBolt className="h-3.5 w-3.5 mr-1" /> VACUUM
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={optimizePending}
-        onClick={onOptimize}
-        className="cursor-pointer"
-        data-testid="system-optimize-button"
-      >
-        <IconRefresh className="h-3.5 w-3.5 mr-1" /> Optimize
-      </Button>
-      <Button
-        variant="destructive"
-        size="sm"
-        onClick={onResetOpen}
-        className="cursor-pointer"
-        data-testid="system-factory-reset-button"
-      >
-        <IconTrash className="h-3.5 w-3.5 mr-1" /> Factory Reset
-      </Button>
+    <div className="space-y-2">
+      <OperationRow
+        testid="system-vacuum-row"
+        label="Vacuum"
+        description={VACUUM_HELP}
+        button={
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={vacuumPending}
+                onClick={onVacuum}
+                className="cursor-pointer"
+                data-testid="system-vacuum-button"
+              >
+                <IconBolt className="h-3.5 w-3.5 mr-1" /> Run vacuum
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{VACUUM_HELP}</TooltipContent>
+          </Tooltip>
+        }
+      />
+      <OperationRow
+        testid="system-optimize-row"
+        label="Optimize"
+        description={OPTIMIZE_HELP}
+        button={
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={optimizePending}
+                onClick={onOptimize}
+                className="cursor-pointer"
+                data-testid="system-optimize-button"
+              >
+                <IconRefresh className="h-3.5 w-3.5 mr-1" /> Run optimize
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{OPTIMIZE_HELP}</TooltipContent>
+          </Tooltip>
+        }
+      />
+      <OperationRow
+        testid="system-factory-reset-row"
+        label="Factory reset"
+        description={FACTORY_RESET_HELP}
+        button={
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={onResetOpen}
+                className="cursor-pointer"
+                data-testid="system-factory-reset-button"
+              >
+                <IconTrash className="h-3.5 w-3.5 mr-1" /> Factory reset
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{FACTORY_RESET_HELP}</TooltipContent>
+          </Tooltip>
+        }
+      />
     </div>
   );
 }

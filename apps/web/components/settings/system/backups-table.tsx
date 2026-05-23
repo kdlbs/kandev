@@ -179,6 +179,12 @@ export function BackupsTable() {
         </Button>
       </CardHeader>
       <CardContent className="space-y-4">
+        <p className="text-xs text-muted-foreground" data-testid="system-backups-help">
+          A backup is a full copy of Kandev&apos;s database (tasks, sessions, settings). Kandev
+          automatically creates one before every version upgrade so you can roll back if something
+          goes wrong. You can also create one manually before risky operations like factory reset.
+          Only the latest 2 backups are kept on disk.
+        </p>
         {error && (
           <p className="text-xs text-destructive" data-testid="system-backups-error">
             {error}

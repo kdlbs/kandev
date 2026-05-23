@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/logger/buffer"
 )
 
 // FileInfo describes one log file on disk.
@@ -29,20 +30,25 @@ type FileInfo struct {
 // Service enumerates and serves files from the configured log directory.
 // The active (un-rotated) file is identified by exact name match against
 // currentName (set to the lumberjack Filename's basename, e.g. "kandev.log").
+// When logDir is empty (the process is logging to stdout/stderr only), Tail
+// falls back to the in-memory ring buffer so the UI still shows recent logs.
 type Service struct {
 	logDir      string
 	currentName string
 	log         *logger.Logger
+	memBuffer   *buffer.RingBuffer
 }
 
 // NewService constructs a Service. logDir may be empty (logger is writing to
-// stdout/stderr); List then returns an empty slice and Tail returns no lines.
-// currentName is the basename of the active log file (e.g. "kandev.log").
+// stdout/stderr); List then returns an empty slice and Tail falls back to the
+// shared in-memory ring buffer. currentName is the basename of the active log
+// file (e.g. "kandev.log").
 func NewService(logDir, currentName string, log *logger.Logger) *Service {
 	return &Service{
 		logDir:      logDir,
 		currentName: currentName,
 		log:         log,
+		memBuffer:   buffer.Default(),
 	}
 }
 

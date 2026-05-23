@@ -15,7 +15,13 @@ export default async function SystemStatusPage() {
     ]);
     initialState = {
       systemHealth: health
-        ? { healthy: health.healthy, issues: health.issues, loaded: true, loading: false }
+        ? {
+            healthy: health.healthy,
+            issues: health.issues,
+            checks: health.checks ?? [],
+            loaded: true,
+            loading: false,
+          }
         : undefined,
       system: updates ? { updates } : undefined,
     };

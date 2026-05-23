@@ -1,13 +1,4 @@
 import { ReactNode } from "react";
-import Link from "next/link";
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@kandev/ui/breadcrumb";
 import { Separator } from "@kandev/ui/separator";
 
 type SystemPageShellProps = {
@@ -20,20 +11,6 @@ type SystemPageShellProps = {
 export function SystemPageShell({ title, description, actions, children }: SystemPageShellProps) {
   return (
     <div className="space-y-6" data-testid="system-page-shell">
-      <Breadcrumb data-testid="system-breadcrumb">
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink asChild>
-              <Link href="/settings/system/status">System</Link>
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage>{title}</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
-
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold" data-testid="system-page-title">

@@ -32,6 +32,13 @@ export function refreshDiskUsage(options?: ApiRequestOptions): Promise<JobAccept
   });
 }
 
+export function openDataFolder(options?: ApiRequestOptions): Promise<{ path: string }> {
+  return fetchJson<{ path: string }>(`${SYSTEM_BASE}/disk-usage/open`, {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
+}
+
 // --- Database -----------------------------------------------------------
 
 export function fetchDatabaseStats(options?: ApiRequestOptions): Promise<DatabaseStats> {

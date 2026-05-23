@@ -1,7 +1,10 @@
 package disk
 
 import (
+	"fmt"
 	"net/http"
+	"os/exec"
+	"runtime"
 
 	"github.com/gin-gonic/gin"
 )
@@ -24,5 +27,36 @@ func HandleRefresh(s *Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		jobID := s.Refresh(c.Request.Context())
 		c.JSON(http.StatusAccepted, gin.H{"job_id": jobID})
+	}
+}
+
+// HandleOpenFolder serves POST /api/v1/system/disk-usage/open and reveals the
+// configured data directory in the host OS file explorer. The path is always
+// the resolved home directory the disk walker uses — there is no user input,
+// so no shell-escaping concerns.
+func HandleOpenFolder(s *Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		path := s.HomeDir()
+		if path == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "data directory is not configured"})
+			return
+		}
+		var cmd *exec.Cmd
+		switch runtime.GOOS {
+		case "darwin":
+			cmd = exec.Command("open", path)
+		case "linux":
+			cmd = exec.Command("xdg-open", path)
+		case "windows":
+			cmd = exec.Command("explorer", path)
+		default:
+			c.JSON(http.StatusNotImplemented, gin.H{"error": fmt.Sprintf("unsupported platform: %s", runtime.GOOS)})
+			return
+		}
+		if err := cmd.Start(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"path": path})
 	}
 }

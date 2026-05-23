@@ -19,7 +19,15 @@ function formatTimestamp(iso: string): string {
   return d.toLocaleString();
 }
 
-function TailContent({ tail, loading }: { tail: string[]; loading: boolean }) {
+function TailContent({
+  tail,
+  loading,
+  inMemoryOnly,
+}: {
+  tail: string[];
+  loading: boolean;
+  inMemoryOnly: boolean;
+}) {
   if (loading && tail.length === 0) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -30,17 +38,26 @@ function TailContent({ tail, loading }: { tail: string[]; loading: boolean }) {
   if (tail.length === 0) {
     return (
       <p className="text-sm text-muted-foreground" data-testid="system-log-tail-empty">
-        The active log file is empty or not accessible from this process.
+        No recent log activity captured yet. Logs will appear as Kandev does work.
       </p>
     );
   }
   return (
-    <pre
-      className="max-h-[28rem] overflow-auto rounded-md border bg-muted/30 p-3 text-[11px] leading-relaxed font-mono whitespace-pre"
-      data-testid="system-log-tail-content"
-    >
-      {tail.join("\n")}
-    </pre>
+    <div className="space-y-2">
+      {inMemoryOnly && (
+        <p className="text-xs text-muted-foreground" data-testid="system-log-tail-source">
+          Showing the in-memory log buffer (last ~2000 entries). Kandev is currently logging to the
+          terminal, not to a file - file rotation is disabled. Set <code>logging.outputPath</code>{" "}
+          in <code>config.yaml</code> to a file path to enable downloadable log files.
+        </p>
+      )}
+      <pre
+        className="max-h-[28rem] overflow-auto rounded-md border bg-muted/30 p-3 text-[11px] leading-relaxed font-mono whitespace-pre"
+        data-testid="system-log-tail-content"
+      >
+        {tail.join("\n")}
+      </pre>
+    </div>
   );
 }
 
@@ -98,6 +115,7 @@ export function LogViewer() {
   };
 
   const current = files.find((f) => f.current);
+  const inMemoryOnly = !filesLoading && files.length === 0;
 
   return (
     <div className="space-y-6">
@@ -113,7 +131,7 @@ export function LogViewer() {
           />
         </CardHeader>
         <CardContent>
-          <TailContent tail={tail} loading={tailLoading} />
+          <TailContent tail={tail} loading={tailLoading} inMemoryOnly={inMemoryOnly} />
         </CardContent>
       </Card>
 

@@ -45,6 +45,7 @@ const DISK_USAGE: DiskUsageResponse = {
     computed_at: TS,
   },
   computing: false,
+  home_dir: "/data/kandev",
 };
 
 const DB_STATS: DatabaseStats = {
@@ -110,7 +111,7 @@ describe("system slice", () => {
     store.getState().setSystemDiskUsage(DISK_USAGE);
     expect(store.getState().system.diskUsage).toEqual(DISK_USAGE);
 
-    const computing: DiskUsageResponse = { data: null, computing: true };
+    const computing: DiskUsageResponse = { data: null, computing: true, home_dir: "/data/kandev" };
     store.getState().setSystemDiskUsage(computing);
     expect(store.getState().system.diskUsage).toEqual(computing);
   });

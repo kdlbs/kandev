@@ -41,10 +41,13 @@ type Breakdown struct {
 
 // GetResult is what Service.Get returns: the cached breakdown (or nil when
 // none has been computed yet) plus a Computing flag that signals "a
-// background walk is in flight, expect a fresh value soon".
+// background walk is in flight, expect a fresh value soon". HomeDir is the
+// absolute path the breakdown was computed against, so the UI can show
+// "where" the data lives.
 type GetResult struct {
 	Data      *Breakdown `json:"data"`
 	Computing bool       `json:"computing"`
+	HomeDir   string     `json:"home_dir"`
 }
 
 // Service owns the in-memory cache and coordinates lazy refresh through the
@@ -91,9 +94,15 @@ func (s *Service) Get(ctx context.Context) GetResult {
 	}
 
 	if value == nil {
-		return GetResult{Data: nil, Computing: true}
+		return GetResult{Data: nil, Computing: true, HomeDir: s.homeDir}
 	}
-	return GetResult{Data: value, Computing: computing || stale}
+	return GetResult{Data: value, Computing: computing || stale, HomeDir: s.homeDir}
+}
+
+// HomeDir returns the absolute path the disk-usage service walks. Exposed so
+// the "open folder" handler can reveal it in the host OS file explorer.
+func (s *Service) HomeDir() string {
+	return s.homeDir
 }
 
 // Refresh kicks off a walk and returns the job ID. If a walk is already in

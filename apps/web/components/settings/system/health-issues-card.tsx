@@ -4,16 +4,18 @@ import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import {
   IconActivity,
   IconAlertTriangle,
   IconCircleCheck,
   IconExternalLink,
   IconInfoCircle,
+  IconX,
 } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useSystemHealth } from "@/hooks/domains/settings/use-system-health";
-import type { HealthIssue, HealthSeverity } from "@/lib/types/health";
+import type { HealthCheckSummary, HealthIssue, HealthSeverity } from "@/lib/types/health";
 
 function severityIcon(severity: HealthSeverity) {
   if (severity === "error") return <IconAlertTriangle className="h-4 w-4 text-red-500" />;
@@ -61,14 +63,54 @@ function HealthIssueRow({ issue }: { issue: HealthIssue }) {
   );
 }
 
+function ChecksPopover({ checks }: { checks: HealthCheckSummary[] }) {
+  if (checks.length === 0) return null;
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="What's monitored"
+          className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+          data-testid="system-health-checks-trigger"
+        >
+          <IconInfoCircle className="h-4 w-4" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72" data-testid="system-health-checks-popover">
+        <p className="text-xs font-medium mb-2">System checks</p>
+        <ul className="space-y-1.5">
+          {checks.map((c) => (
+            <li
+              key={c.category}
+              className="flex items-center gap-2 text-xs"
+              data-testid={`system-health-check-${c.category}`}
+            >
+              {c.passing ? (
+                <IconCircleCheck className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+              ) : (
+                <IconX className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+              )}
+              <span>{c.name}</span>
+              <span className="ml-auto text-[10px] text-muted-foreground">
+                {c.passing ? "Passing" : "Issue"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export function HealthIssuesCard() {
-  const { issues, loaded } = useSystemHealth();
+  const { issues, checks, loaded } = useSystemHealth();
   const nonInfo = issues.filter((i) => i.severity !== "info");
   const hasIssues = nonInfo.length > 0;
 
   return (
     <Card data-testid="system-health-card">
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
         <CardTitle className="text-base flex items-center gap-2">
           <IconActivity className="h-4 w-4" />
           Health
@@ -78,6 +120,7 @@ export function HealthIssuesCard() {
             </Badge>
           )}
         </CardTitle>
+        {loaded && <ChecksPopover checks={checks} />}
       </CardHeader>
       <CardContent className="space-y-3">
         {!loaded && (

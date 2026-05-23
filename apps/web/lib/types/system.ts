@@ -28,6 +28,7 @@ export interface DiskBreakdown {
 export interface DiskUsageResponse {
   data: DiskBreakdown | null;
   computing: boolean;
+  home_dir: string;
 }
 
 export interface DatabaseStats {
