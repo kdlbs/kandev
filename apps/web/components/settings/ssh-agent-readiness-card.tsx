@@ -4,27 +4,47 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Label } from "@kandev/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
-import { IconCheck, IconCopy, IconLoader2, IconX } from "@tabler/icons-react";
+import { IconCheck, IconCopy, IconDownload, IconLoader2, IconX } from "@tabler/icons-react";
 import { toast } from "sonner";
-import { probeSSHAgents } from "@/lib/api/domains/ssh-api";
-import type { SSHAgentReadinessRow } from "@/lib/types/http-ssh";
+import { installSSHAgent, probeSSHAgents, probeSSHShells } from "@/lib/api/domains/ssh-api";
+import type { SSHAgentReadinessRow, SSHInstallAgentResponse } from "@/lib/types/http-ssh";
 
 export interface SSHAgentReadinessCardProps {
   executorId: string;
+  /** The shell currently saved on the profile. Drives initial selection + the
+   *  shell sent to the probe/install endpoints. */
+  shell?: string;
+  /** Persist a shell change up to the profile. Called when the user picks a
+   *  different option in the dropdown so the choice survives the page reload
+   *  and flows into the next agent launch as ssh_shell metadata. */
+  onShellChange?: (shell: string) => void | Promise<void>;
 }
 
-/**
- * Probes the remote host for each kandev-enabled agent's required binary
- * (the first token of the agent's BuildCommand). Surfaces availability + a
- * copy-button for the agent's install command. Manual refresh only — a real
- * SSH dial happens per probe so we don't poll on a timer.
- */
-export function SSHAgentReadinessCard({ executorId }: SSHAgentReadinessCardProps) {
+const DEFAULT_SHELL = "bash";
+
+// useReadinessState owns the card's fetch + selection state so the component
+// renders a thin view layer. Pulled out to keep the component body under the
+// max-lines-per-function lint budget (the card body had too many independent
+// concerns inline).
+function useReadinessState({
+  executorId,
+  shellProp,
+  onShellChange,
+}: {
+  executorId: string;
+  shellProp?: string;
+  onShellChange?: (s: string) => void | Promise<void>;
+}) {
   const [rows, setRows] = useState<SSHAgentReadinessRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasProbed, setHasProbed] = useState(false);
+  const [shells, setShells] = useState<string[] | null>(null);
+  const [shellsLoading, setShellsLoading] = useState(false);
+  const [shell, setShell] = useState(shellProp ?? DEFAULT_SHELL);
   // Drop stale responses if the user clicks Refresh again before the
   // previous request lands — same pattern as ssh-sessions-card.
   const seqRef = useRef(0);
@@ -34,7 +54,7 @@ export function SSHAgentReadinessCard({ executorId }: SSHAgentReadinessCardProps
     setLoading(true);
     setError(null);
     try {
-      const resp = await probeSSHAgents(executorId);
+      const resp = await probeSSHAgents(executorId, { shell });
       if (seq !== seqRef.current) return;
       setRows(resp.rows);
       setHasProbed(true);
@@ -44,24 +64,111 @@ export function SSHAgentReadinessCard({ executorId }: SSHAgentReadinessCardProps
     } finally {
       if (seq === seqRef.current) setLoading(false);
     }
+  }, [executorId, shell]);
+
+  // Auto-probe the shells once on mount so the dropdown has real options.
+  // Cheap (one SSH dial, ~1s) and fully out-of-band of agent probing.
+  const probeShells = useCallback(async () => {
+    setShellsLoading(true);
+    try {
+      const resp = await probeSSHShells(executorId);
+      setShells(resp.available);
+    } catch {
+      // On failure the dropdown stays empty; user can type / save the shell
+      // via the profile form. We don't toast — a transient probe error
+      // shouldn't nag.
+    } finally {
+      setShellsLoading(false);
+    }
   }, [executorId]);
 
   useEffect(() => {
     seqRef.current = 0;
+    void probeShells();
     return () => {
       seqRef.current = -1;
     };
-  }, [executorId]);
+  }, [executorId, probeShells]);
+
+  const handleShellChange = useCallback(
+    async (next: string) => {
+      setShell(next);
+      // Stale rows = stale answer (PATH depends on shell init). Clear the
+      // table so the user re-probes explicitly with the new shell.
+      setRows([]);
+      setHasProbed(false);
+      if (onShellChange) {
+        try {
+          await onShellChange(next);
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "Failed to save shell");
+        }
+      }
+    },
+    [onShellChange],
+  );
+
+  const handleInstalled = useCallback(
+    (agentID: string, resp: SSHInstallAgentResponse) => {
+      if (resp.success) {
+        toast.success(`${agentLabel(rows, agentID)}: install completed`);
+        void refresh();
+      } else {
+        toast.error(`${agentLabel(rows, agentID)}: install failed`);
+      }
+    },
+    [rows, refresh],
+  );
+
+  return {
+    rows,
+    loading,
+    error,
+    hasProbed,
+    shells,
+    shellsLoading,
+    shell,
+    refresh,
+    handleShellChange,
+    handleInstalled,
+  };
+}
+
+/**
+ * Probes the remote host for each kandev-enabled agent's required binary
+ * (the first token of the agent's BuildCommand) under the user-chosen login
+ * shell. Surfaces availability + an Install button (one-click run of the
+ * agent's InstallScript). Manual refresh only — a real SSH dial happens per
+ * probe so we don't poll on a timer.
+ */
+export function SSHAgentReadinessCard({
+  executorId,
+  shell: shellProp,
+  onShellChange,
+}: SSHAgentReadinessCardProps) {
+  const state = useReadinessState({ executorId, shellProp, onShellChange });
+  const {
+    rows,
+    loading,
+    error,
+    hasProbed,
+    shells,
+    shellsLoading,
+    shell,
+    refresh,
+    handleShellChange,
+    handleInstalled,
+  } = state;
 
   return (
     <Card data-testid="ssh-agent-readiness-card">
       <CardHeader>
-        <div className="flex items-center justify-between">
+        <div className="flex items-start justify-between gap-3">
           <div>
             <CardTitle>Available agents on this host</CardTitle>
             <CardDescription>
-              Probes the remote {"$PATH"} for each enabled agent. Use the install hint to add a
-              missing agent on the remote.
+              Probes the remote {"$PATH"} for each enabled agent under the chosen login shell.
+              Install missing agents in one click.
             </CardDescription>
           </div>
           <Button
@@ -70,28 +177,100 @@ export function SSHAgentReadinessCard({ executorId }: SSHAgentReadinessCardProps
             onClick={refresh}
             disabled={loading}
             data-testid="ssh-agent-readiness-probe"
-            className="cursor-pointer"
+            className="cursor-pointer shrink-0"
           >
             {loading ? <IconLoader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
             {hasProbed ? "Re-probe" : "Probe agents"}
           </Button>
         </div>
+        <ShellSelector
+          shell={shell}
+          shells={shells}
+          loading={shellsLoading}
+          onChange={handleShellChange}
+        />
       </CardHeader>
       <CardContent>
-        <ReadinessContent error={error} hasProbed={hasProbed} rows={rows} />
+        <ReadinessContent
+          error={error}
+          hasProbed={hasProbed}
+          rows={rows}
+          executorId={executorId}
+          shell={shell}
+          onInstalled={handleInstalled}
+        />
       </CardContent>
     </Card>
   );
+}
+
+function ShellSelector({
+  shell,
+  shells,
+  loading,
+  onChange,
+}: {
+  shell: string;
+  shells: string[] | null;
+  loading: boolean;
+  onChange: (s: string) => void | Promise<void>;
+}) {
+  // While probing, show a placeholder option so the dropdown can't surface
+  // a stale "bash" selection that we haven't confirmed exists on the host.
+  // After probing, render whatever the host has, plus the current value so
+  // a saved shell that isn't actually installed is still selectable + loud.
+  const options = uniqueShellOptions(shell, shells);
+  return (
+    <div className="flex items-center gap-2 pt-3">
+      <Label htmlFor="ssh-readiness-shell" className="text-xs text-muted-foreground">
+        Login shell
+      </Label>
+      <Select value={shell} onValueChange={(v) => void onChange(v)} disabled={loading}>
+        <SelectTrigger
+          id="ssh-readiness-shell"
+          data-testid="ssh-readiness-shell"
+          className="h-7 w-32 text-xs"
+        >
+          <SelectValue placeholder="bash" />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((s) => (
+            <SelectItem key={s} value={s} className="text-xs">
+              {s}
+              {shells && !shells.includes(s) ? (
+                <span className="text-amber-600 ml-1">(not detected)</span>
+              ) : null}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {loading ? <IconLoader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : null}
+    </div>
+  );
+}
+
+function uniqueShellOptions(currentShell: string, detected: string[] | null): string[] {
+  const set = new Set<string>();
+  if (detected) detected.forEach((s) => set.add(s));
+  set.add(currentShell || DEFAULT_SHELL);
+  if (set.size === 0) set.add(DEFAULT_SHELL);
+  return Array.from(set);
 }
 
 function ReadinessContent({
   error,
   hasProbed,
   rows,
+  executorId,
+  shell,
+  onInstalled,
 }: {
   error: string | null;
   hasProbed: boolean;
   rows: SSHAgentReadinessRow[];
+  executorId: string;
+  shell: string;
+  onInstalled: (agentID: string, resp: SSHInstallAgentResponse) => void;
 }) {
   if (error) {
     return (
@@ -110,10 +289,22 @@ function ReadinessContent({
   if (rows.length === 0) {
     return <p className="text-sm text-muted-foreground">No enabled agents to probe.</p>;
   }
-  return <ReadinessTable rows={rows} />;
+  return (
+    <ReadinessTable rows={rows} executorId={executorId} shell={shell} onInstalled={onInstalled} />
+  );
 }
 
-function ReadinessTable({ rows }: { rows: SSHAgentReadinessRow[] }) {
+function ReadinessTable({
+  rows,
+  executorId,
+  shell,
+  onInstalled,
+}: {
+  rows: SSHAgentReadinessRow[];
+  executorId: string;
+  shell: string;
+  onInstalled: (agentID: string, resp: SSHInstallAgentResponse) => void;
+}) {
   return (
     <Table data-testid="ssh-agent-readiness-table">
       <TableHeader>
@@ -121,31 +312,91 @@ function ReadinessTable({ rows }: { rows: SSHAgentReadinessRow[] }) {
           <TableHead>Agent</TableHead>
           <TableHead>Binary</TableHead>
           <TableHead>Status</TableHead>
-          <TableHead>Install hint</TableHead>
+          <TableHead>Action</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {rows.map((row) => (
-          <ReadinessRow key={row.agent_id} row={row} />
+          <ReadinessRow
+            key={row.agent_id}
+            row={row}
+            executorId={executorId}
+            shell={shell}
+            onInstalled={onInstalled}
+          />
         ))}
       </TableBody>
     </Table>
   );
 }
 
-function ReadinessRow({ row }: { row: SSHAgentReadinessRow }) {
+function ReadinessRow({
+  row,
+  executorId,
+  shell,
+  onInstalled,
+}: {
+  row: SSHAgentReadinessRow;
+  executorId: string;
+  shell: string;
+  onInstalled: (agentID: string, resp: SSHInstallAgentResponse) => void;
+}) {
+  const [installing, setInstalling] = useState(false);
+  const [lastOutput, setLastOutput] = useState<string | null>(null);
   const slug = row.agent_id.replace(/[^a-z0-9]+/gi, "-");
+
+  const handleInstall = useCallback(async () => {
+    if (installing) return;
+    setInstalling(true);
+    setLastOutput(null);
+    try {
+      const resp = await installSSHAgent(executorId, {
+        agent_id: row.agent_id,
+        shell: shell || undefined,
+      });
+      setLastOutput(resp.output ?? null);
+      onInstalled(row.agent_id, resp);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Install request failed";
+      setLastOutput(msg);
+      onInstalled(row.agent_id, {
+        agent_id: row.agent_id,
+        success: false,
+        duration_ms: 0,
+        error: msg,
+      });
+    } finally {
+      setInstalling(false);
+    }
+  }, [executorId, installing, onInstalled, row.agent_id, shell]);
+
   return (
-    <TableRow data-testid={`ssh-readiness-row-${slug}`} data-available={row.available}>
-      <TableCell className="font-medium">{row.agent_name || row.agent_id}</TableCell>
-      <TableCell className="font-mono text-xs">{row.binary}</TableCell>
-      <TableCell>
-        <StatusBadge row={row} />
-      </TableCell>
-      <TableCell className="text-xs">
-        <InstallHint hint={row.install_hint} available={row.available} />
-      </TableCell>
-    </TableRow>
+    <>
+      <TableRow data-testid={`ssh-readiness-row-${slug}`} data-available={row.available}>
+        <TableCell className="font-medium">{row.agent_name || row.agent_id}</TableCell>
+        <TableCell className="font-mono text-xs">{row.binary}</TableCell>
+        <TableCell>
+          <StatusBadge row={row} />
+        </TableCell>
+        <TableCell className="text-xs">
+          <RowActions row={row} installing={installing} onInstall={handleInstall} />
+        </TableCell>
+      </TableRow>
+      {lastOutput ? (
+        <TableRow data-testid={`ssh-readiness-row-${slug}-output`}>
+          <TableCell colSpan={4} className="bg-muted/40 py-2">
+            <details>
+              <summary className="cursor-pointer text-xs text-muted-foreground">
+                Install output
+              </summary>
+              <pre className="mt-1 max-h-48 overflow-auto text-[11px] font-mono whitespace-pre-wrap">
+                {lastOutput}
+              </pre>
+            </details>
+          </TableCell>
+        </TableRow>
+      ) : null}
+    </>
   );
 }
 
@@ -171,22 +422,59 @@ function StatusBadge({ row }: { row: SSHAgentReadinessRow }) {
   );
 }
 
-function InstallHint({ hint, available }: { hint?: string; available: boolean }) {
-  if (available) return <span className="text-muted-foreground">—</span>;
-  if (!hint) return <span className="text-muted-foreground">No hint available</span>;
+function RowActions({
+  row,
+  installing,
+  onInstall,
+}: {
+  row: SSHAgentReadinessRow;
+  installing: boolean;
+  onInstall: () => void;
+}) {
+  if (row.available) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  if (!row.install_hint) {
+    return <span className="text-muted-foreground">No install hint available</span>;
+  }
   return (
-    <div className="flex items-center gap-1">
-      <code className="truncate">{hint}</code>
+    <div className="flex items-center gap-2">
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 cursor-pointer text-xs"
+        disabled={installing}
+        onClick={onInstall}
+        data-testid={`ssh-readiness-install-${row.agent_id.replace(/[^a-z0-9]+/gi, "-")}`}
+        aria-label={`Install ${row.agent_name || row.agent_id} on remote`}
+      >
+        {installing ? (
+          <>
+            <IconLoader2 className="mr-1 h-3 w-3 animate-spin" /> Installing
+          </>
+        ) : (
+          <>
+            <IconDownload className="mr-1 h-3 w-3" /> Install
+          </>
+        )}
+      </Button>
       <button
         type="button"
         className="cursor-pointer text-muted-foreground hover:text-foreground"
         aria-label="Copy install hint"
         onClick={() => {
-          void navigator.clipboard.writeText(hint).then(() => toast.success("Install hint copied"));
+          void navigator.clipboard
+            .writeText(row.install_hint ?? "")
+            .then(() => toast.success("Install hint copied"));
         }}
       >
         <IconCopy className="h-3 w-3" />
       </button>
     </div>
   );
+}
+
+function agentLabel(rows: SSHAgentReadinessRow[], agentID: string): string {
+  const row = rows.find((r) => r.agent_id === agentID);
+  return row?.agent_name || agentID;
 }

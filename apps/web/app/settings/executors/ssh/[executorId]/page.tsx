@@ -11,7 +11,6 @@ import { useAppStoreApi } from "@/components/state-provider";
 import { fetchExecutor, listExecutors, updateExecutor } from "@/lib/api/domains/settings-api";
 import { SSHConnectionCard } from "@/components/settings/ssh-connection-card";
 import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
-import { SSHAgentReadinessCard } from "@/components/settings/ssh-agent-readiness-card";
 import { SSHSessionsCard } from "@/components/settings/ssh-sessions-card";
 import { listSSHSessions } from "@/lib/api/domains/ssh-api";
 import { getExecutorLabel } from "@/lib/executor-icons";
@@ -113,7 +112,6 @@ function SSHExecutorView({
         onSave={handleSave}
         runningSessionCount={sessionCount}
       />
-      <SSHAgentReadinessCard executorId={executor.id} />
       <SSHSessionsCard executorId={executor.id} />
     </div>
   );

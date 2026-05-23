@@ -21,8 +21,12 @@ const EXECUTORS_ROUTE = "/settings/executors";
  * Save POSTs to /api/v1/executors with type=ssh and the freshly-pinned
  * fingerprint, then immediately creates a default profile under it (the
  * /settings/executors index lists profiles, so an executor with no
- * profile would otherwise be invisible). Routes to the existing-executor
- * SSH page after both writes succeed.
+ * profile would otherwise be invisible). Routes to the profile-edit page
+ * after both writes succeed — that's where the user picks the shell,
+ * probes for installed agents, and tunes per-task config (workdir,
+ * prepare script, credentials). The host-level executor page
+ * (/settings/executors/ssh/:id) remains reachable for re-trust and
+ * sessions inspection.
  */
 export function SSHCreatePage() {
   const router = useRouter();
@@ -62,7 +66,7 @@ export function SSHCreatePage() {
       const current = store.getState().executors.items;
       const merged = current.some((e) => e.id === next.id) ? current : [...current, next];
       store.getState().setExecutors(merged);
-      router.push(`/settings/executors/ssh/${created.id}`);
+      router.push(`/settings/executors/${profile.id}`);
     },
     [router, store],
   );

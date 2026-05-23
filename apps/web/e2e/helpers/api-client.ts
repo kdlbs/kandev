@@ -9,6 +9,9 @@ import type {
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import type {
   SSHAgentReadinessResponseBody,
+  SSHInstallAgentRequestBody,
+  SSHInstallAgentResponseBody,
+  SSHProbeShellsResponseBody,
   SSHSessionBody,
   SSHTestRequestBody,
   SSHTestResultBody,
@@ -1524,8 +1527,22 @@ export class ApiClient {
     return this.request("GET", `/api/v1/ssh/executors/${executorId}/sessions`);
   }
 
-  async probeSSHAgents(executorId: string): Promise<SSHAgentReadinessResponseBody> {
-    return this.request("POST", `/api/v1/ssh/executors/${executorId}/probe-agents`);
+  async probeSSHAgents(
+    executorId: string,
+    body?: { shell?: string },
+  ): Promise<SSHAgentReadinessResponseBody> {
+    return this.request("POST", `/api/v1/ssh/executors/${executorId}/probe-agents`, body ?? {});
+  }
+
+  async probeSSHShells(executorId: string): Promise<SSHProbeShellsResponseBody> {
+    return this.request("POST", `/api/v1/ssh/executors/${executorId}/probe-shells`);
+  }
+
+  async installSSHAgent(
+    executorId: string,
+    body: SSHInstallAgentRequestBody,
+  ): Promise<SSHInstallAgentResponseBody> {
+    return this.request("POST", `/api/v1/ssh/executors/${executorId}/install-agent`, body);
   }
 }
 
@@ -1539,6 +1556,9 @@ export type {
   SSHSessionBody,
   SSHAgentReadinessRowBody,
   SSHAgentReadinessResponseBody,
+  SSHProbeShellsResponseBody,
+  SSHInstallAgentRequestBody,
+  SSHInstallAgentResponseBody,
 } from "./api-client-ssh";
 
 // --- Jira / Linear mock payload types ---

@@ -4,6 +4,9 @@ import type {
   SSHTestResult,
   SSHSession,
   SSHAgentReadinessResponse,
+  SSHProbeShellsResponse,
+  SSHInstallAgentRequest,
+  SSHInstallAgentResponse,
 } from "@/lib/types/http-ssh";
 
 export async function testSSHConnection(
@@ -37,6 +40,7 @@ export async function listSSHSessions(
 
 export async function probeSSHAgents(
   executorId: string,
+  body?: { shell?: string },
   options?: ApiRequestOptions,
 ): Promise<SSHAgentReadinessResponse> {
   return fetchJson<SSHAgentReadinessResponse>(
@@ -47,6 +51,43 @@ export async function probeSSHAgents(
         ...(options?.init ?? {}),
         method: "POST",
         headers: { "Content-Type": "application/json", ...(options?.init?.headers ?? {}) },
+        body: JSON.stringify(body ?? {}),
+      },
+    },
+  );
+}
+
+export async function probeSSHShells(
+  executorId: string,
+  options?: ApiRequestOptions,
+): Promise<SSHProbeShellsResponse> {
+  return fetchJson<SSHProbeShellsResponse>(
+    `/api/v1/ssh/executors/${encodeURIComponent(executorId)}/probe-shells`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(options?.init?.headers ?? {}) },
+      },
+    },
+  );
+}
+
+export async function installSSHAgent(
+  executorId: string,
+  body: SSHInstallAgentRequest,
+  options?: ApiRequestOptions,
+): Promise<SSHInstallAgentResponse> {
+  return fetchJson<SSHInstallAgentResponse>(
+    `/api/v1/ssh/executors/${encodeURIComponent(executorId)}/install-agent`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(options?.init?.headers ?? {}) },
+        body: JSON.stringify(body),
       },
     },
   );

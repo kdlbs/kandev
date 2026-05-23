@@ -57,6 +57,26 @@ export interface SSHAgentReadinessRow {
 
 export interface SSHAgentReadinessResponse {
   host: string;
+  shell?: string;
   duration_ms: number;
   rows: SSHAgentReadinessRow[];
+}
+
+export interface SSHProbeShellsResponse {
+  host: string;
+  duration_ms: number;
+  available: string[];
+}
+
+export interface SSHInstallAgentRequest {
+  agent_id: string;
+  shell?: string;
+}
+
+export interface SSHInstallAgentResponse {
+  agent_id: string;
+  success: boolean;
+  duration_ms: number;
+  output?: string;
+  error?: string;
 }
