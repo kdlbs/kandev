@@ -49,3 +49,19 @@ export type SSHSessionBody = {
   uptime_seconds: number;
   created_at: string;
 };
+
+export type SSHAgentReadinessRowBody = {
+  agent_id: string;
+  agent_name: string;
+  binary: string;
+  available: boolean;
+  resolved_at?: string;
+  install_hint?: string;
+  error?: string;
+};
+
+export type SSHAgentReadinessResponseBody = {
+  host: string;
+  duration_ms: number;
+  rows: SSHAgentReadinessRowBody[];
+};

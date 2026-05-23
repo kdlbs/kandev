@@ -44,3 +44,19 @@ export interface SSHSession {
   uptime_seconds: number;
   created_at: string;
 }
+
+export interface SSHAgentReadinessRow {
+  agent_id: string;
+  agent_name: string;
+  binary: string;
+  available: boolean;
+  resolved_at?: string;
+  install_hint?: string;
+  error?: string;
+}
+
+export interface SSHAgentReadinessResponse {
+  host: string;
+  duration_ms: number;
+  rows: SSHAgentReadinessRow[];
+}

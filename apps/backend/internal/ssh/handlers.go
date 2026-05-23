@@ -15,6 +15,8 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -35,25 +37,61 @@ type ExecutorRunningLister interface {
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
 }
 
+// ExecutorFetcher looks up a single executor by id. Needed by the
+// agent-readiness probe to translate executor.Config into an SSHTarget.
+type ExecutorFetcher interface {
+	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
+}
+
+// AgentLister is the narrow slice of *registry.Registry that the readiness
+// probe needs: walk every enabled agent so we can probe each one's first
+// command-line token. Defined as an interface so handler tests can pass a
+// fake set of agents without bringing the full registry in.
+type AgentLister interface {
+	ListEnabled() []agents.Agent
+}
+
 // Handler exposes /api/v1/ssh routes used by the settings UI.
 type Handler struct {
-	repo     ExecutorRunningLister
-	resolver *lifecycle.AgentctlResolver
-	logger   *logger.Logger
+	repo            ExecutorRunningLister
+	executorFetcher ExecutorFetcher
+	agents          AgentLister
+	resolver        *lifecycle.AgentctlResolver
+	logger          *logger.Logger
 }
 
 // NewHandler builds an SSH HTTP/WS handler.
-func NewHandler(repo ExecutorRunningLister, resolver *lifecycle.AgentctlResolver, log *logger.Logger) *Handler {
+func NewHandler(
+	repo ExecutorRunningLister,
+	executorFetcher ExecutorFetcher,
+	agents AgentLister,
+	resolver *lifecycle.AgentctlResolver,
+	log *logger.Logger,
+) *Handler {
 	return &Handler{
-		repo:     repo,
-		resolver: resolver,
-		logger:   log.WithFields(zap.String("component", "ssh-handler")),
+		repo:            repo,
+		executorFetcher: executorFetcher,
+		agents:          agents,
+		resolver:        resolver,
+		logger:          log.WithFields(zap.String("component", "ssh-handler")),
 	}
 }
 
 // RegisterRoutes wires the SSH routes onto the given gin engine + WS dispatcher.
-func RegisterRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, repo ExecutorRunningLister, resolver *lifecycle.AgentctlResolver, log *logger.Logger) {
-	h := NewHandler(repo, resolver, log)
+func RegisterRoutes(
+	router *gin.Engine,
+	dispatcher *ws.Dispatcher,
+	repo ExecutorRunningLister,
+	executorFetcher ExecutorFetcher,
+	registry *registry.Registry,
+	resolver *lifecycle.AgentctlResolver,
+	log *logger.Logger,
+) {
+	var agentLister AgentLister
+	if registry != nil {
+		agentLister = registry
+	}
+	h := NewHandler(repo, executorFetcher, agentLister, resolver, log)
 	h.registerHTTP(router)
 	h.registerWS(dispatcher)
 }
@@ -62,6 +100,7 @@ func (h *Handler) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1/ssh")
 	api.POST("/test", h.httpTest)
 	api.GET("/executors/:id/sessions", h.httpListSessions)
+	api.POST("/executors/:id/probe-agents", h.httpProbeAgents)
 }
 
 func (h *Handler) registerWS(dispatcher *ws.Dispatcher) {
@@ -145,6 +184,141 @@ func (h *Handler) httpListSessions(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, rows)
+}
+
+// AgentReadinessRow reports the readiness of one agent on the remote host:
+// whether the first token of agent.BuildCommand(...).Args() resolves on the
+// remote's $PATH, and the install hint sourced from agent.InstallScript() so
+// the UI can render a copy-button instead of forcing the user to look up
+// per-agent install commands.
+type AgentReadinessRow struct {
+	AgentID     string `json:"agent_id"`
+	AgentName   string `json:"agent_name"`
+	Binary      string `json:"binary"`
+	Available   bool   `json:"available"`
+	ResolvedAt  string `json:"resolved_at,omitempty"` // command -v stdout, when found
+	InstallHint string `json:"install_hint,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
+// AgentReadinessResponse is the body of POST /api/v1/ssh/executors/:id/probe-agents.
+type AgentReadinessResponse struct {
+	Host       string              `json:"host"`
+	DurationMs int64               `json:"duration_ms"`
+	Rows       []AgentReadinessRow `json:"rows"`
+}
+
+// httpProbeAgents SSHs to the given executor's host and runs `command -v`
+// for each enabled agent's first command-line token. Drives the "Available
+// agents on this host" card on /settings/executors/ssh/:id.
+func (h *Handler) httpProbeAgents(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: "executor id required"})
+		return
+	}
+	if h.executorFetcher == nil || h.agents == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{errorJSONKey: "agent readiness not wired"})
+		return
+	}
+	resp, status, err := h.probeAgents(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(status, gin.H{errorJSONKey: err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// probeAgents is the testable core of httpProbeAgents.
+func (h *Handler) probeAgents(ctx context.Context, executorID string) (*AgentReadinessResponse, int, error) {
+	started := time.Now()
+	executor, err := h.executorFetcher.GetExecutor(ctx, executorID)
+	if err != nil {
+		return nil, http.StatusNotFound, fmt.Errorf("executor %q not found: %w", executorID, err)
+	}
+	if executor == nil || executor.Type != models.ExecutorTypeSSH {
+		return nil, http.StatusBadRequest, fmt.Errorf("executor %q is not an SSH executor", executorID)
+	}
+	target, err := sshTargetFromExecutorConfig(executor.Config)
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+	client, err := lifecycle.DialSSH(ctx, target)
+	if err != nil {
+		return nil, http.StatusBadGateway, fmt.Errorf("ssh: dial %s: %w", target.Host, err)
+	}
+	defer func() { _ = client.Close() }()
+
+	rows := h.probeAgentsOnClient(ctx, client)
+	return &AgentReadinessResponse{
+		Host:       target.Host,
+		DurationMs: time.Since(started).Milliseconds(),
+		Rows:       rows,
+	}, http.StatusOK, nil
+}
+
+// probeAgentsOnClient walks every enabled agent and runs command -v over
+// the existing client. Public seam for a unit test that fakes the SSH side.
+func (h *Handler) probeAgentsOnClient(ctx context.Context, client *ssh.Client) []AgentReadinessRow {
+	enabled := h.agents.ListEnabled()
+	rows := make([]AgentReadinessRow, 0, len(enabled))
+	for _, ag := range enabled {
+		rows = append(rows, probeOneAgent(ctx, client, ag))
+	}
+	return rows
+}
+
+func probeOneAgent(ctx context.Context, client *ssh.Client, ag agents.Agent) AgentReadinessRow {
+	row := AgentReadinessRow{
+		AgentID:     ag.ID(),
+		AgentName:   ag.Name(),
+		InstallHint: strings.TrimSpace(ag.InstallScript()),
+	}
+	cmd := ag.BuildCommand(agents.CommandOptions{Runtime: agentruntime.RuntimeSSH})
+	args := cmd.Args()
+	if len(args) == 0 {
+		row.Error = "agent did not emit a command"
+		return row
+	}
+	row.Binary = args[0]
+	resolved, err := lifecycle.ProbeRemoteBinary(ctx, client, row.Binary)
+	if err != nil {
+		row.Error = err.Error()
+		return row
+	}
+	if resolved == "" {
+		return row
+	}
+	row.Available = true
+	row.ResolvedAt = resolved
+	return row
+}
+
+// sshTargetFromExecutorConfig projects an executor.Config into the
+// SSHConnConfig the dialer expects. Keeps the handler decoupled from
+// lifecycle's internal metadata-vs-config representation.
+func sshTargetFromExecutorConfig(cfg map[string]string) (*lifecycle.SSHTarget, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("ssh executor has no config")
+	}
+	port := 0
+	if p := strings.TrimSpace(cfg["ssh_port"]); p != "" {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 1 || n > 65535 {
+			return nil, fmt.Errorf("invalid ssh_port %q", p)
+		}
+		port = n
+	}
+	return lifecycle.ResolveSSHTarget(lifecycle.SSHConnConfig{
+		HostAlias:         cfg["ssh_host_alias"],
+		Host:              cfg["ssh_host"],
+		Port:              port,
+		User:              cfg["ssh_user"],
+		IdentitySource:    lifecycle.SSHIdentitySource(cfg["ssh_identity_source"]),
+		IdentityFile:      cfg["ssh_identity_file"],
+		ProxyJump:         cfg["ssh_proxy_jump"],
+		PinnedFingerprint: cfg["ssh_host_fingerprint"],
+	})
 }
 
 // --- WS handlers ---

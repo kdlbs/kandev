@@ -7,7 +7,12 @@ import type {
   TaskSessionState,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
-import type { SSHSessionBody, SSHTestRequestBody, SSHTestResultBody } from "./api-client-ssh";
+import type {
+  SSHAgentReadinessResponseBody,
+  SSHSessionBody,
+  SSHTestRequestBody,
+  SSHTestResultBody,
+} from "./api-client-ssh";
 
 // --- GitHub Mock Types ---
 
@@ -1518,6 +1523,10 @@ export class ApiClient {
   async listSSHSessions(executorId: string): Promise<SSHSessionBody[]> {
     return this.request("GET", `/api/v1/ssh/executors/${executorId}/sessions`);
   }
+
+  async probeSSHAgents(executorId: string): Promise<SSHAgentReadinessResponseBody> {
+    return this.request("POST", `/api/v1/ssh/executors/${executorId}/probe-agents`);
+  }
 }
 
 // SSH HTTP shapes live in api-client-ssh.ts; re-exported here so existing
@@ -1528,6 +1537,8 @@ export type {
   SSHTestStepBody,
   SSHTestResultBody,
   SSHSessionBody,
+  SSHAgentReadinessRowBody,
+  SSHAgentReadinessResponseBody,
 } from "./api-client-ssh";
 
 // --- Jira / Linear mock payload types ---

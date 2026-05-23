@@ -1,5 +1,10 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
-import type { SSHTestRequest, SSHTestResult, SSHSession } from "@/lib/types/http-ssh";
+import type {
+  SSHTestRequest,
+  SSHTestResult,
+  SSHSession,
+  SSHAgentReadinessResponse,
+} from "@/lib/types/http-ssh";
 
 export async function testSSHConnection(
   request: SSHTestRequest,
@@ -27,5 +32,22 @@ export async function listSSHSessions(
   return fetchJson<SSHSession[]>(
     `/api/v1/ssh/executors/${encodeURIComponent(executorId)}/sessions`,
     options,
+  );
+}
+
+export async function probeSSHAgents(
+  executorId: string,
+  options?: ApiRequestOptions,
+): Promise<SSHAgentReadinessResponse> {
+  return fetchJson<SSHAgentReadinessResponse>(
+    `/api/v1/ssh/executors/${encodeURIComponent(executorId)}/probe-agents`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(options?.init?.headers ?? {}) },
+      },
+    },
   );
 }

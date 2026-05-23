@@ -706,7 +706,15 @@ func registerSecondaryRoutes(
 	}
 
 	if p.taskRepo != nil {
-		sshhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, p.taskRepo, lifecycle.NewAgentctlResolver(p.log), p.log)
+		sshhandlers.RegisterRoutes(
+			p.router,
+			p.gateway.Dispatcher,
+			p.taskRepo,
+			p.services.Task,
+			p.agentRegistry,
+			lifecycle.NewAgentctlResolver(p.log),
+			p.log,
+		)
 		p.log.Debug("Registered SSH handlers (HTTP + WebSocket)")
 	}
 

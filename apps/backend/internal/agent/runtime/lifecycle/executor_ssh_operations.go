@@ -276,6 +276,23 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// ProbeRemoteBinary runs `command -v <binary>` over the existing SSH client
+// and reports whether the binary resolves on the remote's $PATH. Returns
+// the resolved absolute path on success (the `command -v` stdout), or an
+// empty string when missing. err is non-nil only when the SSH call itself
+// fails — a missing binary is not an error.
+//
+// Exported for the SSH agent-readiness probe in package ssh; callers
+// outside lifecycle would otherwise have to copy the shellQuote + run
+// dance and risk drifting from the launch-time pre-flight semantics.
+func ProbeRemoteBinary(ctx context.Context, client *ssh.Client, binary string) (string, error) {
+	out, _, err := runSSHCommand(ctx, client, "command -v "+shellQuote(binary)+" 2>/dev/null || true")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // ensureRemoteTaskDir creates <workdirRoot>/<taskDirName> if missing and
 // returns the absolute remote path. Repo clones happen via the prepare-script
 // path (scriptengine), not here; this is just the parent dir.
