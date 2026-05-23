@@ -242,4 +242,54 @@ test.describe("Terminals — dockview UI", () => {
       'tab title should be plain "Terminal" after reload (seq belongs in the badge)',
     ).toBe(0);
   });
+
+  /**
+   * Regression: the row × destroy affordance in the "+" → Terminals
+   * menu permanently deletes a terminal (PTY stopped, DB row removed,
+   * no return after reload). Solves the discoverability gap once the
+   * tab is closed and the right-click Destroy is no longer reachable.
+   */
+  test("destroy button on a reopen-menu row permanently removes the terminal", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await createTaskAndWait(apiClient, seedData, "Row Destroy UI");
+    const session = await openTask(testPage, "Row Destroy UI");
+    await session.clickTab("Terminal");
+    await session.expectTerminalConnected();
+
+    await clickNewTerminalInPlusMenu(testPage, session);
+    await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible({ timeout: 10_000 });
+
+    // Park the seq=2 tab by closing it (last in tab order).
+    const terminalCloseButtons = testPage
+      .locator(".dv-default-tab")
+      .filter({ hasText: /^Terminal/ })
+      .locator(".dv-default-tab-action");
+    await terminalCloseButtons.last().click();
+
+    // Open the "+" menu and confirm-destroy the seq=2 row.
+    await session.addPanelButton().click();
+    const row = testPage.locator('[data-testid^="reopen-terminal-"]').filter({ hasText: "#2" });
+    await expect(row).toHaveCount(1, { timeout: 10_000 });
+
+    testPage.once("dialog", (d) => d.accept());
+    await row.getByTestId("destroy-terminal-row").click();
+
+    // Row vanishes from the live menu.
+    await expect(row).toHaveCount(0, { timeout: 5_000 });
+
+    // Reload and confirm it does not come back.
+    // Close the open menu first by pressing Escape.
+    await testPage.keyboard.press("Escape");
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.addPanelButton().click();
+    const rowAfter = testPage
+      .locator('[data-testid^="reopen-terminal-"]')
+      .filter({ hasText: "#2" });
+    await expect(rowAfter).toHaveCount(0, { timeout: 5_000 });
+  });
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { IconTerminal2 } from "@tabler/icons-react";
+import { IconTerminal2, IconX } from "@tabler/icons-react";
 import {
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -9,7 +9,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
-import { resumeUserShell } from "@/lib/api/domains/user-shell-api";
+import { destroyUserShell, resumeUserShell } from "@/lib/api/domains/user-shell-api";
 import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 import { useUserShells } from "@/hooks/domains/session/use-user-shells";
 
@@ -45,8 +45,29 @@ export function TerminalReopenMenuItems({
   // (see use-user-shells.ts), so it doesn't refetch on every render.
   const { shells } = useUserShells(environmentId, taskID);
   const updateUserShell = useAppStore((s) => s.updateUserShell);
+  const removeUserShellStore = useAppStore((s) => s.removeUserShell);
   const api = useDockviewStore((s) => s.api);
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
+
+  const handleDestroyRow = useCallback(
+    async (event: React.MouseEvent, terminalId: string, seq: number | undefined) => {
+      // Stop the parent DropdownMenuItem from firing its "reopen" onClick
+      // and from closing the menu. preventDefault also blocks Radix's
+      // default item-select behavior.
+      event.preventDefault();
+      event.stopPropagation();
+      if (!environmentId) return;
+      const label = seq != null ? `terminal #${seq}` : "this terminal";
+      if (!window.confirm(`Permanently delete ${label}? This kills the running PTY.`)) return;
+      try {
+        await destroyUserShell(environmentId, terminalId, taskID ?? undefined);
+        removeUserShellStore(environmentId, terminalId);
+      } catch (error) {
+        console.error("destroy terminal from reopen menu:", error);
+      }
+    },
+    [environmentId, taskID, removeUserShellStore],
+  );
 
   const ordinary = shells.filter((s) => s.kind === "ordinary");
 
@@ -101,34 +122,69 @@ export function TerminalReopenMenuItems({
       )}
       {ordinary
         .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
-        .map((shell) => {
-          const isOpen = Boolean(api?.getPanel(shell.terminalId));
-          const isParked = shell.state === "parked";
-          const label =
-            shell.customName && shell.customName !== ""
-              ? shell.customName
-              : (shell.displayName ?? `Terminal ${shell.seq ?? ""}`);
-          return (
-            <DropdownMenuItem
-              key={shell.terminalId}
-              onClick={() => handleClick(shell.terminalId, shell.state, label)}
-              className={`cursor-pointer text-xs gap-1.5 ${isOpen ? "opacity-50" : ""}`}
-              data-testid={`reopen-terminal-${shell.terminalId}`}
-            >
-              {shell.seq != null && (
-                <span className="w-5 shrink-0 text-muted-foreground text-right">#{shell.seq}</span>
-              )}
-              <IconTerminal2 className="h-3.5 w-3.5 shrink-0" />
-              <span className="flex-1 truncate">{label}</span>
-              {isParked && (
-                <span className="shrink-0 text-[10px] font-mono px-1 py-0.5 rounded-sm bg-muted text-muted-foreground">
-                  parked
-                </span>
-              )}
-            </DropdownMenuItem>
-          );
-        })}
+        .map((shell) => (
+          <TerminalReopenRow
+            key={shell.terminalId}
+            shell={shell}
+            isOpen={Boolean(api?.getPanel(shell.terminalId))}
+            onClick={handleClick}
+            onDestroy={handleDestroyRow}
+          />
+        ))}
       <DropdownMenuSeparator />
     </>
+  );
+}
+
+type ShellRow = {
+  terminalId: string;
+  seq?: number;
+  customName?: string | null;
+  displayName?: string;
+  state?: string;
+};
+
+function TerminalReopenRow({
+  shell,
+  isOpen,
+  onClick,
+  onDestroy,
+}: {
+  shell: ShellRow;
+  isOpen: boolean;
+  onClick: (terminalId: string, state: string | undefined, label: string) => void;
+  onDestroy: (event: React.MouseEvent, terminalId: string, seq: number | undefined) => void;
+}) {
+  const isParked = shell.state === "parked";
+  const label =
+    shell.customName && shell.customName !== ""
+      ? shell.customName
+      : (shell.displayName ?? `Terminal ${shell.seq ?? ""}`);
+  return (
+    <DropdownMenuItem
+      onClick={() => onClick(shell.terminalId, shell.state, label)}
+      className={`cursor-pointer text-xs gap-1.5 ${isOpen ? "opacity-50" : ""}`}
+      data-testid={`reopen-terminal-${shell.terminalId}`}
+    >
+      {shell.seq != null && (
+        <span className="w-5 shrink-0 text-muted-foreground text-right">#{shell.seq}</span>
+      )}
+      <IconTerminal2 className="h-3.5 w-3.5 shrink-0" />
+      <span className="flex-1 truncate">{label}</span>
+      {isParked && (
+        <span className="shrink-0 text-[10px] font-mono px-1 py-0.5 rounded-sm bg-muted text-muted-foreground">
+          parked
+        </span>
+      )}
+      <button
+        type="button"
+        aria-label={`Permanently delete terminal #${shell.seq ?? ""}`}
+        className="shrink-0 ml-1 rounded p-0.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive cursor-pointer"
+        data-testid="destroy-terminal-row"
+        onClick={(e) => onDestroy(e, shell.terminalId, shell.seq)}
+      >
+        <IconX className="h-3 w-3" />
+      </button>
+    </DropdownMenuItem>
   );
 }
