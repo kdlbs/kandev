@@ -1,5 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { attachTouchScroll, computeScrollLines } from "./touch-scroll";
+
+afterEach(() => {
+  // Each test appends a fresh container to document.body. Without this, jsdom
+  // accumulates orphan divs across the suite and a future test that queries
+  // document.body could pick up containers from prior runs.
+  document.body.innerHTML = "";
+});
 
 describe("computeScrollLines", () => {
   it("returns negative line count for a downward drag (reveal older)", () => {
