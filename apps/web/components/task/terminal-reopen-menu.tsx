@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
+import type { DockviewApi } from "dockview-react";
 import { IconTerminal2, IconX } from "@tabler/icons-react";
 import {
   DropdownMenuItem,
@@ -14,15 +15,16 @@ import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 import { useUserShells } from "@/hooks/domains/session/use-user-shells";
 
 /**
- * Lists ordinary user terminals (both open and parked) inside the dockview
- * "+" menu so a user can jump to or re-open a terminal that isn't already
- * a panel.
+ * Lists ordinary user terminals (open and parked alike) inside the
+ * dockview "+" menu so a user can jump to, re-open, or terminate a
+ * terminal that isn't already a panel.
  *
- * - Open terminals that already have a dockview panel are dimmed and
- *   re-focus the existing panel on click.
- * - Parked terminals appear with a "parked" pill; clicking resumes them
- *   (sets state=open) and opens a new dockview panel for the PTY.
- * - Hidden when there are no managed terminals for the env.
+ * - Already-mounted terminals are dimmed; clicking re-focuses the
+ *   existing panel. Parked terminals are visually identical — the row
+ *   doesn't advertise parked state, since clicking just brings the
+ *   terminal back into view either way.
+ * - The trailing × terminates (destroys) the terminal permanently —
+ *   PTY killed, DB row deleted, no return after reload.
  */
 export function TerminalReopenMenuItems({
   groupId,
@@ -37,12 +39,6 @@ export function TerminalReopenMenuItems({
 }) {
   const environmentId = useEnvironmentId();
   const taskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
-  // useUserShells fetches the list into the Zustand store the first time
-  // the menu mounts. On desktop dockview, no other code path triggers
-  // this — the mobile/tablet right-panel hook would, but it never runs
-  // here — so without this call the section stays empty until the user
-  // creates a terminal manually. The fetch is idempotent per env+task
-  // (see use-user-shells.ts), so it doesn't refetch on every render.
   const { shells } = useUserShells(environmentId, taskID);
   const updateUserShell = useAppStore((s) => s.updateUserShell);
   const removeUserShellStore = useAppStore((s) => s.removeUserShell);
@@ -58,12 +54,12 @@ export function TerminalReopenMenuItems({
       event.stopPropagation();
       if (!environmentId) return;
       const label = seq != null ? `terminal #${seq}` : "this terminal";
-      if (!window.confirm(`Permanently delete ${label}? This kills the running PTY.`)) return;
+      if (!window.confirm(`Terminate ${label}? This kills the running PTY.`)) return;
       try {
         await destroyUserShell(environmentId, terminalId, taskID ?? undefined);
         removeUserShellStore(environmentId, terminalId);
       } catch (error) {
-        console.error("destroy terminal from reopen menu:", error);
+        console.error("terminate terminal from reopen menu:", error);
       }
     },
     [environmentId, taskID, removeUserShellStore],
@@ -74,14 +70,18 @@ export function TerminalReopenMenuItems({
   const handleClick = useCallback(
     async (terminalId: string, state: string | undefined, displayName: string | undefined) => {
       if (!api) return;
-      const existing = api.getPanel(terminalId);
+      // The default panel keeps its registry id `terminal-default` even
+      // after migration to a `shell-<uuid>` PTY, so a direct id lookup
+      // misses it. Fall back to scanning `params.terminalId` so we focus
+      // the existing tab instead of duplicating it.
+      const existing = findExistingTerminalPanel(api, terminalId);
       if (existing) {
         existing.api.setActive();
         return;
       }
-      // Parked → resume to bring the row back to "open" before adding the
-      // dockview panel. The PTY survives parking, so this just toggles the
-      // metadata flag and re-attaches the UI.
+      // Parked → resume to bring the row back to "open" before mounting
+      // the dockview panel. The PTY survives parking, so this just
+      // toggles the metadata flag and re-attaches the UI.
       if (state === "parked" && environmentId) {
         try {
           await resumeUserShell(terminalId, taskID ?? undefined);
@@ -126,13 +126,31 @@ export function TerminalReopenMenuItems({
           <TerminalReopenRow
             key={shell.terminalId}
             shell={shell}
-            isOpen={Boolean(api?.getPanel(shell.terminalId))}
+            isOpen={Boolean(api && findExistingTerminalPanel(api, shell.terminalId))}
             onClick={handleClick}
             onDestroy={handleDestroyRow}
           />
         ))}
       <DropdownMenuSeparator />
     </>
+  );
+}
+
+/**
+ * Find a dockview panel that represents the given terminalId. Falls back
+ * to matching panels whose `params.terminalId` equals the requested id,
+ * so the default-migrated `terminal-default` panel (whose id never
+ * changes but whose params.terminalId is a `shell-<uuid>`) resolves
+ * correctly.
+ */
+function findExistingTerminalPanel(api: DockviewApi, terminalId: string) {
+  const direct = api.getPanel(terminalId);
+  if (direct) return direct;
+  return (
+    api.panels.find((p) => {
+      const params = (p.params ?? null) as Record<string, unknown> | null;
+      return typeof params?.terminalId === "string" && params.terminalId === terminalId;
+    }) ?? null
   );
 }
 
@@ -155,7 +173,6 @@ function TerminalReopenRow({
   onClick: (terminalId: string, state: string | undefined, label: string) => void;
   onDestroy: (event: React.MouseEvent, terminalId: string, seq: number | undefined) => void;
 }) {
-  const isParked = shell.state === "parked";
   const label =
     shell.customName && shell.customName !== ""
       ? shell.customName
@@ -171,14 +188,10 @@ function TerminalReopenRow({
       )}
       <IconTerminal2 className="h-3.5 w-3.5 shrink-0" />
       <span className="flex-1 truncate">{label}</span>
-      {isParked && (
-        <span className="shrink-0 text-[10px] font-mono px-1 py-0.5 rounded-sm bg-muted text-muted-foreground">
-          parked
-        </span>
-      )}
       <button
         type="button"
-        aria-label={`Permanently delete terminal #${shell.seq ?? ""}`}
+        aria-label={`Terminate terminal #${shell.seq ?? ""}`}
+        title="Terminate"
         className="shrink-0 ml-1 rounded p-0.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive cursor-pointer"
         data-testid="destroy-terminal-row"
         onClick={(e) => onDestroy(e, shell.terminalId, shell.seq)}

@@ -179,7 +179,9 @@ test.describe("Terminals — dockview UI", () => {
     await expect(terminalSection).toBeVisible({ timeout: 10_000 });
 
     // The seq=2 row must be present — proves the close was a park, not
-    // a destroy.
+    // a destroy. The row no longer carries a distinct "parked" pill;
+    // its mere presence after a destroy-on-close handler would have
+    // wiped the DB row is the regression guard.
     const reopenRowsWithSeq2 = testPage
       .locator('[data-testid^="reopen-terminal-"]')
       .filter({ hasText: "#2" });
@@ -190,10 +192,6 @@ test.describe("Terminals — dockview UI", () => {
           "parked terminal #2 should appear in reopen menu — if missing, close-handler destroyed instead of parked",
       })
       .toBe(1);
-
-    // Same row must have the `parked` pill — proves state is parked,
-    // not just open-and-hidden.
-    await expect(reopenRowsWithSeq2.getByText("parked")).toBeVisible({ timeout: 5_000 });
   });
 
   /**
@@ -291,5 +289,93 @@ test.describe("Terminals — dockview UI", () => {
       .locator('[data-testid^="reopen-terminal-"]')
       .filter({ hasText: "#2" });
     await expect(rowAfter).toHaveCount(0, { timeout: 5_000 });
+  });
+
+  /**
+   * Regression: clicking an existing-open terminal row in the "+" menu
+   * must focus the existing tab — NOT add a second panel for the same
+   * PTY. Before the fix, the default-migrated panel kept its id as
+   * `terminal-default` while the reopen row carried the shell-<uuid>,
+   * so api.getPanel(uuid) missed and a duplicate tab was created.
+   */
+  test("reopen-menu row for an already-open terminal focuses, does not duplicate", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await createTaskAndWait(apiClient, seedData, "Focus Existing UI");
+    const session = await openTask(testPage, "Focus Existing UI");
+    await session.clickTab("Terminal");
+    await session.expectTerminalConnected();
+
+    // Create a second terminal so we have a non-default row to click.
+    await clickNewTerminalInPlusMenu(testPage, session);
+    await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible({ timeout: 10_000 });
+    await testPage.waitForTimeout(800);
+
+    // Count terminal tab content elements before the focus click.
+    const terminalContent = testPage.locator(".dv-default-tab-content").filter({
+      hasText: /^Terminal$/,
+    });
+    const before = await terminalContent.count();
+    expect(before, "two terminal tabs before clicking reopen").toBeGreaterThanOrEqual(2);
+
+    // Open the menu and click the seq=2 row — that terminal is already
+    // open as a tab, so the click should focus rather than mint a new
+    // panel.
+    await session.addPanelButton().click();
+    const seq2Row = testPage.locator('[data-testid^="reopen-terminal-"]').filter({ hasText: "#2" });
+    await expect(seq2Row).toHaveCount(1, { timeout: 10_000 });
+    await seq2Row.click();
+
+    // Tab count must NOT grow. The menu closes on its own; wait briefly
+    // for any spurious panel to land.
+    await testPage.waitForTimeout(500);
+    const after = await terminalContent.count();
+    expect(
+      after,
+      `clicking an open terminal in the reopen menu must focus, not duplicate (before=${before}, after=${after})`,
+    ).toBe(before);
+  });
+
+  /**
+   * Inline rename: right-clicking a terminal tab and picking Rename
+   * swaps the title in place for an editable input. Typing + Enter
+   * commits, updating the tab title (custom names override the
+   * default "Terminal").
+   */
+  test("right-click → Rename swaps the tab title for an inline input", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    await createTaskAndWait(apiClient, seedData, "Inline Rename UI");
+    const session = await openTask(testPage, "Inline Rename UI");
+    await session.clickTab("Terminal");
+    await session.expectTerminalConnected();
+
+    // The default panel's ContextMenuTrigger has a testid prefixed
+    // with `terminal-tab-shell-` once the migration to a DB-backed
+    // shell-<uuid> id completes.
+    const tabTrigger = testPage.locator('[data-testid^="terminal-tab-shell-"]').first();
+    await expect(tabTrigger).toBeVisible({ timeout: 15_000 });
+    await tabTrigger.click({ button: "right" });
+
+    // Pick the Rename menu item.
+    await testPage.getByRole("menuitem", { name: /^Rename/ }).click();
+
+    // Input replaces the title text. Type a custom name and Enter.
+    const input = testPage.getByTestId("terminal-tab-rename-input");
+    await expect(input).toBeVisible({ timeout: 5_000 });
+    await input.fill("build watcher");
+    await input.press("Enter");
+
+    // Tab title now reads "build watcher" — proves the rename committed
+    // and the displayName lookup found the customName.
+    await expect(
+      testPage.locator(".dv-default-tab-content").filter({ hasText: "build watcher" }).first(),
+    ).toBeVisible({ timeout: 5_000 });
   });
 });
