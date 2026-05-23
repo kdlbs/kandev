@@ -294,8 +294,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	settings.TerminalFontFamily = payload.TerminalFontFamily
 	settings.TerminalFontSize = payload.TerminalFontSize
-	if payload.ChangesPanelLayout != "" {
-		settings.ChangesPanelLayout = payload.ChangesPanelLayout
+	if payload.ChangesPanelLayout == "tree" {
+		settings.ChangesPanelLayout = "tree"
 	} else {
 		settings.ChangesPanelLayout = "flat"
 	}

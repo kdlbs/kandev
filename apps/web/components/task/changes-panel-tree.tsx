@@ -1,24 +1,14 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTree, type VisibleRow } from "@/hooks/use-tree";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { useMultiSelect } from "@/hooks/use-multi-select";
 import { FileRow } from "./changes-panel-file-row";
-import type { FileInfo } from "@/lib/state/store";
+import type { ChangedFile } from "./changes-panel-helpers";
 import type { OpenDiffOptions } from "./changes-diff-target";
-
-type ChangedFile = {
-  path: string;
-  status: FileInfo["status"];
-  staged: boolean;
-  plus: number | undefined;
-  minus: number | undefined;
-  oldPath: string | undefined;
-  repositoryName?: string;
-};
 
 type TreeNode = {
   name: string;
@@ -70,6 +60,20 @@ const GET_PATH = (n: TreeNode) => n.path;
 const GET_CHILDREN = (n: TreeNode) => n.children;
 const IS_DIR = (n: TreeNode) => n.isDir;
 
+function collectDirPaths(nodes: TreeNode[]): string[] {
+  const out: string[] = [];
+  const walk = (list: TreeNode[]) => {
+    for (const n of list) {
+      if (n.isDir) {
+        out.push(n.path);
+        if (n.children) walk(n.children);
+      }
+    }
+  };
+  walk(nodes);
+  return out;
+}
+
 type ChangesTreeProps = {
   files: ChangedFile[];
   pendingStageFiles: Set<string>;
@@ -96,7 +100,7 @@ export function ChangesTree({
   multiSelect,
 }: ChangesTreeProps) {
   const tree = useMemo(() => buildChangesTree(files), [files]);
-  const { visibleRows, toggle } = useTree<TreeNode>({
+  const { visibleRows, toggle, setExpanded } = useTree<TreeNode>({
     nodes: tree,
     getPath: GET_PATH,
     getChildren: GET_CHILDREN,
@@ -104,6 +108,23 @@ export function ChangesTree({
     defaultExpanded: "all",
     chainCollapse: true,
   });
+
+  // Auto-expand directories the user hasn't seen yet (e.g. new dirs that
+  // appear mid-task as the agent edits more files). Existing dirs keep
+  // whatever collapsed/expanded state the user set; only first-time dirs
+  // are forced open.
+  const seenDirPathsRef = useRef<Set<string>>(new Set(collectDirPaths(tree)));
+  useEffect(() => {
+    const current = collectDirPaths(tree);
+    const newDirs = current.filter((p) => !seenDirPathsRef.current.has(p));
+    if (newDirs.length === 0) return;
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      for (const p of newDirs) next.add(p);
+      return next;
+    });
+    for (const p of newDirs) seenDirPathsRef.current.add(p);
+  }, [tree, setExpanded]);
 
   const activeFilePath = useDockviewStore((s) => s.activeFilePath);
 

@@ -155,7 +155,11 @@ function ChangesPanelLayoutCard() {
             onValueChange={(v) => handleChange(v as "flat" | "tree")}
             disabled={isSaving}
           >
-            <SelectTrigger id="changes-panel-layout" data-testid="changes-panel-layout-select">
+            <SelectTrigger
+              id="changes-panel-layout"
+              data-testid="changes-panel-layout-select"
+              className="cursor-pointer"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

@@ -11,16 +11,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { CommitRow, type CommitItem } from "./commit-row";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
-
-type ChangedFile = {
-  path: string;
-  status: import("@/lib/state/store").FileInfo["status"];
-  staged: boolean;
-  plus: number | undefined;
-  minus: number | undefined;
-  oldPath: string | undefined;
-  repositoryName?: string;
-};
+import type { ChangedFile } from "./changes-panel-helpers";
 
 export type RepoGroup = ReturnType<typeof groupByRepositoryName<ChangedFile>>[number];
 

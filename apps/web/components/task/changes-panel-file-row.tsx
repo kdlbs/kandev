@@ -14,8 +14,8 @@ import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { LineStat } from "@/components/diff-stat";
 import { FileIcon } from "@/components/ui/file-icon";
-import type { FileInfo } from "@/lib/state/store";
 import { FileStatusIcon } from "./file-status-icon";
+import type { ChangedFile } from "./changes-panel-helpers";
 import type { OpenDiffOptions } from "./changes-diff-target";
 
 const splitPath = (path: string) => {
@@ -25,17 +25,6 @@ const splitPath = (path: string) => {
     folder: path.slice(0, lastSlash),
     file: path.slice(lastSlash + 1),
   };
-};
-
-type ChangedFile = {
-  path: string;
-  status: FileInfo["status"];
-  staged: boolean;
-  plus: number | undefined;
-  minus: number | undefined;
-  oldPath: string | undefined;
-  /** Multi-repo: name of the repo this file lives in. Empty for single-repo. */
-  repositoryName?: string;
 };
 
 type FileRowProps = {

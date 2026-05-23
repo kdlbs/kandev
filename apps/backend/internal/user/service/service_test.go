@@ -134,6 +134,60 @@ func TestApplyBasicSettings_TerminalFontFamily(t *testing.T) {
 	})
 }
 
+func TestApplyChangesPanelLayout(t *testing.T) {
+	t.Run("nil leaves settings unchanged", func(t *testing.T) {
+		settings := &models.UserSettings{ChangesPanelLayout: "tree"}
+		req := &UpdateUserSettingsRequest{}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.ChangesPanelLayout != "tree" {
+			t.Fatalf("expected ChangesPanelLayout=tree, got %s", settings.ChangesPanelLayout)
+		}
+	})
+
+	t.Run("sets tree when provided", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{ChangesPanelLayout: ptr("tree")}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.ChangesPanelLayout != "tree" {
+			t.Fatalf("expected ChangesPanelLayout=tree, got %s", settings.ChangesPanelLayout)
+		}
+	})
+
+	t.Run("sets flat when provided", func(t *testing.T) {
+		settings := &models.UserSettings{ChangesPanelLayout: "tree"}
+		req := &UpdateUserSettingsRequest{ChangesPanelLayout: ptr("flat")}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.ChangesPanelLayout != "flat" {
+			t.Fatalf("expected ChangesPanelLayout=flat, got %s", settings.ChangesPanelLayout)
+		}
+	})
+
+	t.Run("rejects invalid value", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{ChangesPanelLayout: ptr("grid")}
+		if err := applyBasicSettings(settings, req); err == nil {
+			t.Fatal("expected error for invalid layout, got nil")
+		}
+	})
+
+	t.Run("trims whitespace before validation", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{ChangesPanelLayout: ptr("  tree  ")}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.ChangesPanelLayout != "tree" {
+			t.Fatalf("expected ChangesPanelLayout=tree, got %q", settings.ChangesPanelLayout)
+		}
+	})
+}
+
 func TestApplyBasicSettings_TerminalFontSize(t *testing.T) {
 	t.Run("nil leaves settings unchanged", func(t *testing.T) {
 		settings := &models.UserSettings{TerminalFontSize: 14}
