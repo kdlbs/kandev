@@ -198,10 +198,16 @@ function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsP
     // exitMaximizedLayout rebuilds the original layout, that ID no longer
     // exists in api.groups, and toggling minimize on it would silently no-op.
     // Use the pre-maximize group ID (stored at maximize time) instead.
+    //
+    // exitMaximizedLayout schedules `api.layout(w, h)` in a requestAnimationFrame
+    // after rebuilding the layout; calling toggleGroupMinimized synchronously
+    // would race with that layout pass and the resulting setSize(0,0) could be
+    // overridden. Defer the toggle to the next frame so the maximize-exit
+    // settles first.
     if (isMaximized) {
       const target = preMaximizeGroupId ?? group.id;
       storeExitMaximize();
-      toggleGroupMinimized(target);
+      requestAnimationFrame(() => toggleGroupMinimized(target));
       return;
     }
     toggleGroupMinimized(group.id);
