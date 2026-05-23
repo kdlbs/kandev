@@ -2,7 +2,13 @@
 
 import { type ReactNode } from "react";
 import { Badge } from "@kandev/ui/badge";
-import { IconCheck, IconX, type IconProps, type Icon as TablerIcon } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconClock,
+  IconX,
+  type IconProps,
+  type Icon as TablerIcon,
+} from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { cn } from "@/lib/utils";
 import { ExpandableRow } from "../expandable-row";
@@ -15,6 +21,8 @@ export function KandevStatusIcon({ status }: { status: KandevStatus }) {
   if (status === "complete") return <IconCheck className="h-3.5 w-3.5 text-green-500" />;
   if (status === "error") return <IconX className="h-3.5 w-3.5 text-red-500" />;
   if (status === "running") return <GridSpinner className="text-muted-foreground" />;
+  if (status === "pending")
+    return <IconClock className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />;
   return null;
 }
 
@@ -49,7 +57,7 @@ export function KandevRow({
       header={
         <div className="flex items-center gap-2 text-xs min-w-0">
           <span className="font-mono text-xs text-muted-foreground shrink-0">{title}</span>
-          {summary && (
+          {summary && status !== "pending" && (
             <span className="text-xs text-muted-foreground/80 truncate min-w-0">{summary}</span>
           )}
           {!isSuccess && (

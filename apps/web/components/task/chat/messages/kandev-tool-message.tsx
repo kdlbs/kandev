@@ -5,9 +5,12 @@ import type { Message } from "@/lib/types/http";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { extractKandevStem, extractMcpResult } from "./kandev/parse";
 import { getKandevRenderer } from "./kandev/registry";
+import { PermissionActionRow } from "./permission-action-row";
+import { parsePermission, usePermissionResponseHandlers } from "./use-permission-handlers";
 
 type KandevToolMessageProps = {
   comment: Message;
+  permissionMessage?: Message;
 };
 
 // kandevStemOf scans the several fields that may carry the raw MCP tool name
@@ -54,9 +57,15 @@ export function hasKandevRenderer(comment: Message): boolean {
 // rules drift out of sync with the registry.
 export const KandevToolMessage = memo(function KandevToolMessage({
   comment,
+  permissionMessage,
 }: KandevToolMessageProps) {
   const meta = comment.metadata as ToolCallMetadata | undefined;
   const renderer = getKandevRenderer(kandevStemOf(comment));
+  const { permissionMetadata, isPermissionPending } = parsePermission(permissionMessage);
+  const { isResponding, handleApprove, handleReject } = usePermissionResponseHandlers({
+    permissionMetadata,
+    permissionMessage,
+  });
   if (!renderer) return null;
 
   // The ACP normalizer stores MCP tool args/result inside the Generic payload:
@@ -73,5 +82,20 @@ export const KandevToolMessage = memo(function KandevToolMessage({
   // Each renderer is a stable function-pointer pulled from the static
   // registry, so invoking it like a function (rather than via JSX) is safe
   // and avoids the lint rule against "components created during render".
-  return renderer({ args, result, status: meta?.status });
+  const rendered = renderer({ args, result, status: meta?.status });
+
+  if (!isPermissionPending) return rendered;
+
+  return (
+    <>
+      {rendered}
+      <div className="mt-2 ml-7">
+        <PermissionActionRow
+          onApprove={handleApprove}
+          onReject={handleReject}
+          isResponding={isResponding}
+        />
+      </div>
+    </>
+  );
 });

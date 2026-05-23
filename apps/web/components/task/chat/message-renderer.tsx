@@ -191,7 +191,13 @@ const adapters: MessageAdapter[] = [
     // adapter so the unwrapped + structured view wins. Unrecognised Kandev
     // tools (no matching renderer) fall through to the generic adapter.
     matches: (comment) => hasKandevRenderer(comment),
-    render: (comment) => <KandevToolMessage comment={comment} />,
+    render: (comment, ctx) => {
+      const toolCallId = (comment.metadata as { tool_call_id?: string } | undefined)?.tool_call_id;
+      const permissionMessage = toolCallId
+        ? ctx.permissionsByToolCallId?.get(toolCallId)
+        : undefined;
+      return <KandevToolMessage comment={comment} permissionMessage={permissionMessage} />;
+    },
   },
   {
     matches: (comment) => comment.type === "tool_call",

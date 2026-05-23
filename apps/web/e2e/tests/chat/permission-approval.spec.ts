@@ -121,4 +121,37 @@ test.describe("Permission approval persistence", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(sidebarItem.getByTestId("task-state-pending-permission")).toHaveCount(0);
   });
+
+  test("Kandev custom MCP tools render permission approval UI", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Seed a task with the specific Kandev MCP permission scenario
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Kandev MCP permission",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:kandev-mcp-permission",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    await testPage.goto(`/t/${task.id}`);
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    // The mock agent will trigger mcp__kandev__list_workspaces_kandev and block.
+    // If the custom Kandev renderer correctly wired permissions, we should see 1 button.
+    await expect(session.permissionApproveButtons()).toHaveCount(1, { timeout: 30_000 });
+    await session.permissionApproveButtons().first().click();
+
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  });
 });
