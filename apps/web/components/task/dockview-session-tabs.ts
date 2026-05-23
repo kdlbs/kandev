@@ -227,10 +227,43 @@ export function useAutoPRPanel() {
   }, [taskId, hasPR, hasApi, sessionId]);
 }
 
+/**
+ * Panels that are added co-tabbed with a session panel (see `useAutoPRPanel`).
+ * When a saved layout's session was stripped (phantom-session sanitize on
+ * page load, or stale removal during env switch), these siblings end up alone
+ * in a group with no session. Prefer joining that group when adding the new
+ * active session — without this fallback we'd add the session as a fresh
+ * split next to the sidebar, breaking the user's grouping.
+ *
+ * Each entry matches either the bare id (e.g. `pr-detail`) or a keyed
+ * variant `<id>|<key>` (multi-repo PR panels use `pr-detail|owner/repo/N`,
+ * see `addPRPanel` in dockview-panel-actions.ts).
+ */
+const SESSION_ANCHOR_PANEL_IDS = ["pr-detail"];
+
+export function findSessionAnchorGroupId(api: DockviewApi): string | null {
+  for (const id of SESSION_ANCHOR_PANEL_IDS) {
+    const exact = api.getPanel(id);
+    if (exact) return exact.group.id;
+    const keyedPrefix = `${id}|`;
+    const keyed = api.panels.find((p) => p.id.startsWith(keyedPrefix));
+    if (keyed) return keyed.group.id;
+  }
+  return null;
+}
+
 function resolveInitialPosition(api: DockviewApi): AddPanelOptions["position"] {
   const { centerGroupId } = useDockviewStore.getState();
   const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
   if (centerGroupExists) return { referenceGroup: centerGroupId };
+  const anchorGroupId = findSessionAnchorGroupId(api);
+  // index:0 matches the project's session-on-the-left convention (agent tab
+  // first, pr-detail/etc. to the right). Worth noting: if a user had
+  // rearranged a previous layout to put pr-detail first, that ordering is
+  // lost here — but the alternative (appending) would put the agent tab
+  // to the right of pr-detail, which contradicts the default placement
+  // every other code path produces. Pick the consistent default.
+  if (anchorGroupId) return { referenceGroup: anchorGroupId, index: 0 };
   const sb = api.getPanel("sidebar");
   if (sb) return { direction: "right" as const, referencePanel: "sidebar" };
   return undefined;
