@@ -119,6 +119,9 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
   }
 
   const onMouseDown = (e: MouseEvent): void => {
+    // Only track primary-button drags. A right/middle mousedown that didn't
+    // start a drag must not leave `sashDragging` permanently set (cubic P2).
+    if (e.button !== 0) return;
     const t = e.target as HTMLElement | null;
     if (t?.closest(".dv-sash")) sashDragging = true;
   };
@@ -141,6 +144,10 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
     layoutSub.dispose();
     document.removeEventListener("mousedown", onMouseDown, true);
     document.removeEventListener("mouseup", onMouseUp, true);
+    // Reset the module-scope flag so an unmount mid-drag (e.g. user navigates
+    // away while holding a sash) doesn't leave enforcement permanently paused
+    // for the next mount (claude).
+    sashDragging = false;
   };
 }
 
