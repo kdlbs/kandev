@@ -2,6 +2,7 @@ import { StateProvider } from "@/components/state-provider";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
 import { HealthIssuesCard } from "@/components/settings/system/health-issues-card";
 import { DiskUsageCard } from "@/components/settings/system/disk-usage-card";
+import { UIStateCard } from "@/components/settings/system/ui-state-card";
 import { VersionSummaryCard } from "@/components/settings/system/version-summary-card";
 import { fetchSystemHealth } from "@/lib/api/domains/health-api";
 import { fetchUpdates } from "@/lib/api/domains/system-api";
@@ -37,6 +38,7 @@ export default async function SystemStatusPage() {
           <VersionSummaryCard />
         </div>
         <DiskUsageCard />
+        <UIStateCard />
       </SystemPageShell>
     </StateProvider>
   );
