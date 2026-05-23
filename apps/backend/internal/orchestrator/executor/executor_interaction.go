@@ -117,6 +117,13 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 	return nil
 }
 
+// passthroughSubmitSequence is appended to a passthrough prompt before writing
+// to PTY stdin. "\r" submits the current line in every TUI agent CLI currently
+// supported in passthrough mode (Claude, Codex, OpenCode, Cursor, Auggie, …).
+// If a future agent needs a different sequence, lift this into a per-agent
+// PassthroughConfig field — see the plan for issue #989.
+const passthroughSubmitSequence = "\r"
+
 // Prompt sends a follow-up prompt to a running agent for a task
 // Returns PromptResult indicating if the agent needs input
 // Attachments (images) are passed to the agent if provided
@@ -147,6 +154,14 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 		zap.Int("attachments_count", len(attachments)),
 		zap.Bool("dispatch_only", dispatchOnly))
 
+	// Passthrough sessions don't speak ACP — route the prompt through PTY stdin
+	// so the CLI agent actually receives it. The Preview-screen chat input (and
+	// any other surface that calls message.add against a passthrough session)
+	// reaches this branch via Service.PromptTask → Executor.Prompt.
+	if e.agentManager.IsPassthroughSession(ctx, sessionID) {
+		return e.promptPassthrough(ctx, taskID, sessionID, prompt)
+	}
+
 	result, err := e.agentManager.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
 	if err != nil {
 		if errors.Is(err, lifecycle.ErrExecutionNotFound) {
@@ -155,6 +170,31 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 		return nil, err
 	}
 	return result, nil
+}
+
+// promptPassthrough delivers a user prompt to a passthrough (PTY) agent session.
+// Attachments are intentionally ignored — passthrough mode has no protocol channel
+// for them; the typed text reaches the CLI agent as if the user typed it into
+// xterm and pressed Enter.
+//
+// A WritePassthroughStdin failure (no live PTY, runner unavailable) is returned
+// as an error so Service.handlePromptError can revert session state and surface
+// the failure to the user. A MarkPassthroughRunning failure is non-fatal — the
+// data is already in the PTY; only the AgentRunning event is missed.
+func (e *Executor) promptPassthrough(ctx context.Context, taskID, sessionID, prompt string) (*PromptResult, error) {
+	if prompt == "" {
+		return nil, fmt.Errorf("passthrough prompt cannot be empty (attachments are not supported in CLI passthrough mode)")
+	}
+	if err := e.agentManager.WritePassthroughStdin(ctx, sessionID, prompt+passthroughSubmitSequence); err != nil {
+		return nil, fmt.Errorf("failed to write to passthrough stdin: %w", err)
+	}
+	if err := e.agentManager.MarkPassthroughRunning(sessionID); err != nil {
+		e.logger.Warn("failed to mark passthrough as running after prompt; data already in PTY",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+	return &PromptResult{StopReason: "passthrough_dispatched"}, nil
 }
 
 // SwitchModel switches the model for a running session. It first attempts an in-place switch
