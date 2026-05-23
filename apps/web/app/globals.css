@@ -194,16 +194,6 @@
   }
   body {
     @apply bg-background text-foreground;
-    /* Block mobile pull-to-refresh and rubber-band overscroll. Kandev has no
-     * "refresh feed" semantics anywhere; pull-to-refresh on a passthrough
-     * task triggers a full page reload, which transiently flips
-     * isPassthroughMode to false (no session in the store yet) and renders
-     * TaskChatPanel instead of the live PassthroughTerminal — that mismount
-     * then sticks until a layout change forces a remount (e.g. orientation
-     * switch). Disabling overscroll on the body element prevents the
-     * scroll-boundary gesture from being interpreted as a refresh in the
-     * first place. */
-    overscroll-behavior: none;
   }
 }
 

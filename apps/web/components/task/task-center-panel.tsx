@@ -52,28 +52,12 @@ function useSessionApprove(activeSessionId: string | null, activeTaskId: string 
   );
   const setTaskSession = useAppStore((state) => state.setTaskSession);
   const isAgentWorking = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
-  // Passthrough detection priority:
-  //   1. session.is_passthrough — the source of truth, set on session creation
-  //      from the agent profile's CLIPassthrough setting and persisted on the
-  //      session row. This is what `StartAgentProcess` routes on
-  //      (manager_startup.go), and what the desktop layout and other
-  //      passthrough-aware code paths already use.
-  //   2. agent_profile_snapshot.cli_passthrough — fallback for the brief
-  //      window where the snapshot is loaded but the dedicated is_passthrough
-  //      field isn't yet present on the session record. This kept legacy
-  //      behaviour working while migrations populated is_passthrough on
-  //      existing rows.
-  // Mobile previously only checked (2), which silently dropped to a chat
-  // fallback whenever the snapshot was missing from the Redux store on
-  // re-mount — even when is_passthrough was correctly populated. Desktop was
-  // immune because it checks (1) directly.
   const isPassthroughMode = useMemo(() => {
-    if (activeSession?.is_passthrough === true) return true;
     if (!activeSession?.agent_profile_snapshot) return false;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const snapshot = activeSession.agent_profile_snapshot as any;
     return snapshot?.cli_passthrough === true;
-  }, [activeSession?.is_passthrough, activeSession?.agent_profile_snapshot]);
+  }, [activeSession?.agent_profile_snapshot]);
   const showApproveButton =
     !!activeSession?.review_status && activeSession.review_status !== "approved" && !isAgentWorking;
   const handleApprove = useCallback(async () => {
