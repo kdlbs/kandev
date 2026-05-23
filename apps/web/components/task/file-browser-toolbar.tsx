@@ -12,7 +12,6 @@ import {
 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Skeleton } from "@kandev/ui/skeleton";
-import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { cn } from "@/lib/utils";
 import { PanelHeaderBarSplit } from "./panel-primitives";
 
@@ -96,9 +95,16 @@ export function FileBrowserToolbar({
             <TooltipContent>Copy workspace path</TooltipContent>
           </Tooltip>
           {displayPath ? (
-            <ScrollOnOverflow className="min-w-0 text-xs font-medium text-muted-foreground">
-              {displayPath}
-            </ScrollOnOverflow>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+                  {displayPath}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="break-all max-w-[min(420px,90vw)]">
+                {fullPath || displayPath}
+              </TooltipContent>
+            </Tooltip>
           ) : (
             <Skeleton className="h-3 w-24" />
           )}
