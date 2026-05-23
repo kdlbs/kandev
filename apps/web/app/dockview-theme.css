@@ -137,13 +137,6 @@
   box-shadow: none !important;
 }
 
-/* Per-group minimize: hide the content area while keeping the tab strip visible.
-   The splitview size is shrunk programmatically by useMinimizedGroupSync; this
-   rule ensures the body is invisible during the transition and at rest. */
-.dockview-theme-kandev .dv-groupview[data-kandev-minimized="true"] .dv-content-container {
-  display: none;
-}
-
 .dockview-theme-kandev .dv-content-container .session-panel-wrapper {
   border: none !important;
   border-radius: 0 !important;

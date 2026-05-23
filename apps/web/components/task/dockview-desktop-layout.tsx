@@ -56,7 +56,6 @@ import {
   useCompactDockviewDefault,
   useDockviewUnmountCleanup,
 } from "./dockview-desktop-layout-hooks";
-import { useMinimizedGroupSync } from "./dockview-minimize-sync";
 import { TerminalPanel } from "./terminal-panel";
 import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
@@ -499,8 +498,6 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   useEditorKeybinds();
   usePlanPanelAutoOpen();
   useCompactDockviewDefault(compact);
-  const apiForMinimize = useDockviewStore((s) => s.api);
-  useMinimizedGroupSync(apiForMinimize);
 
   useEffect(() => {
     envIdRef.current = effectiveEnvId;

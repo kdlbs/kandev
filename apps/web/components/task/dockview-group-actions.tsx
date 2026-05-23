@@ -8,8 +8,6 @@ import {
   IconDots,
   IconLayoutColumns,
   IconLayoutRows,
-  IconMinus,
-  IconWindowMaximize,
   IconX,
 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -63,40 +61,6 @@ type SplitCloseHandlers = {
   onSplitDown: () => void;
   onCloseGroup: () => void;
 };
-
-type MinimizeHandlers = {
-  isChatGroup: boolean;
-  isMinimized: boolean;
-  onMinimize: () => void;
-};
-
-function MinimizeButton({
-  isMinimized,
-  onMinimize,
-}: {
-  isMinimized: boolean;
-  onMinimize: () => void;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          className={ACTION_BTN}
-          onClick={onMinimize}
-          data-testid="dockview-minimize-btn"
-        >
-          {isMinimized ? (
-            <IconWindowMaximize className="h-3 w-3" />
-          ) : (
-            <IconMinus className="h-3 w-3" />
-          )}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent>{isMinimized ? "Restore" : "Minimize"}</TooltipContent>
-    </Tooltip>
-  );
-}
 
 function MaximizeButton({
   isMaximized,
@@ -181,12 +145,10 @@ function InlineSplitClose({
 
 function SplitCloseDropdown({
   isChatGroup,
-  isMinimized,
-  onMinimize,
   onSplitRight,
   onSplitDown,
   onCloseGroup,
-}: SplitCloseHandlers & MinimizeHandlers) {
+}: SplitCloseHandlers) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -195,20 +157,6 @@ function SplitCloseDropdown({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {!isChatGroup && (
-          <DropdownMenuItem
-            onClick={onMinimize}
-            className="cursor-pointer text-xs"
-            data-testid="dockview-minimize-menuitem"
-          >
-            {isMinimized ? (
-              <IconWindowMaximize className="h-3.5 w-3.5 mr-1.5" />
-            ) : (
-              <IconMinus className="h-3.5 w-3.5 mr-1.5" />
-            )}
-            {isMinimized ? "Restore" : "Minimize"}
-          </DropdownMenuItem>
-        )}
         <DropdownMenuItem onClick={onSplitRight} className="cursor-pointer text-xs">
           <IconLayoutColumns className="h-3.5 w-3.5 mr-1.5" />
           Split right
@@ -232,38 +180,24 @@ type GroupSplitCloseActionsViewProps = SplitCloseHandlers & {
   width: number;
   isMaximized: boolean;
   onMaximize: () => void;
-  isMinimized: boolean;
-  onMinimize: () => void;
 };
 
-/** Presentational view: maximize stays inline; split/close collapse into a dropdown when narrow.
- *  Minimize sits between Maximize and the split/close cluster in wide mode and folds into the
- *  dropdown as its first item in narrow mode. Chat group never sees Minimize (same exclusion as Close). */
+/** Presentational view: maximize stays inline; split/close collapse into a dropdown when narrow. */
 export function GroupSplitCloseActionsView({
   width,
   isChatGroup,
   isMaximized,
   onMaximize,
-  isMinimized,
-  onMinimize,
   onSplitRight,
   onSplitDown,
   onCloseGroup,
 }: GroupSplitCloseActionsViewProps) {
   const collapsed = useCollapsedWithHysteresis(width);
-  const splitCloseHandlers = { isChatGroup, onSplitRight, onSplitDown, onCloseGroup };
-  const minimizeHandlers = { isChatGroup, isMinimized, onMinimize };
+  const handlers = { isChatGroup, onSplitRight, onSplitDown, onCloseGroup };
   return (
     <>
       <MaximizeButton isMaximized={isMaximized} onMaximize={onMaximize} />
-      {!isChatGroup && !collapsed && (
-        <MinimizeButton isMinimized={isMinimized} onMinimize={onMinimize} />
-      )}
-      {collapsed ? (
-        <SplitCloseDropdown {...splitCloseHandlers} {...minimizeHandlers} />
-      ) : (
-        <InlineSplitClose {...splitCloseHandlers} />
-      )}
+      {collapsed ? <SplitCloseDropdown {...handlers} /> : <InlineSplitClose {...handlers} />}
     </>
   );
 }

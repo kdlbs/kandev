@@ -168,16 +168,13 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   );
 }
 
-/** Faded maximize, minimize, split, and close buttons for any non-sidebar group. */
+/** Faded maximize, split, and close buttons for any non-sidebar group. */
 function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsProps) {
   const centerGroupId = useDockviewStore((s) => s.centerGroupId);
   const isChatGroup = group.id === centerGroupId;
   const isMaximized = useDockviewStore((s) => s.preMaximizeLayout !== null);
-  const isMinimized = useDockviewStore((s) => s.minimizedGroupIds.has(group.id));
-  const preMaximizeGroupId = useDockviewStore((s) => s.maximizedGroupId);
   const storeMaximize = useDockviewStore((s) => s.maximizeGroup);
   const storeExitMaximize = useDockviewStore((s) => s.exitMaximizedLayout);
-  const toggleGroupMinimized = useDockviewStore((s) => s.toggleGroupMinimized);
   const width = useDockviewGroupWidth(group);
 
   const handleMaximize = useCallback(() => {
@@ -187,38 +184,6 @@ function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsP
       storeMaximize(group.id);
     }
   }, [group.id, isMaximized, storeMaximize, storeExitMaximize]);
-
-  const handleMinimize = useCallback(() => {
-    // Minimize and maximize are orthogonal — maximize is a global single-group
-    // overlay, minimize is per-group in-place collapse. Clicking Minimize while
-    // maximized would minimize the lone visible group and leave the user with a
-    // header-only screen; exit maximize first so they see the regular layout.
-    //
-    // During maximize, `group.id` is the ephemeral overlay group's ID — once
-    // exitMaximizedLayout rebuilds the original layout, that ID no longer
-    // exists in api.groups, and toggling minimize on it would silently no-op.
-    // Use the pre-maximize group ID (stored at maximize time) instead.
-    //
-    // exitMaximizedLayout schedules `api.layout(w, h)` in a requestAnimationFrame
-    // after rebuilding the layout; calling toggleGroupMinimized synchronously
-    // would race with that layout pass and the resulting setSize(0,0) could be
-    // overridden. Defer the toggle to the next frame so the maximize-exit
-    // settles first.
-    if (isMaximized) {
-      const target = preMaximizeGroupId ?? group.id;
-      storeExitMaximize();
-      requestAnimationFrame(() => {
-        // The world may have changed across the frame (env switch, another
-        // maximize, the target group removed). Only toggle if the target still
-        // exists as a real group in the current dockview api.
-        const live = useDockviewStore.getState();
-        const stillThere = live.api?.groups.some((g) => g.id === target) ?? false;
-        if (stillThere) live.toggleGroupMinimized(target);
-      });
-      return;
-    }
-    toggleGroupMinimized(group.id);
-  }, [group.id, isMaximized, preMaximizeGroupId, storeExitMaximize, toggleGroupMinimized]);
 
   const handleSplitRight = useCallback(() => {
     containerApi.addGroup({ referenceGroup: group, direction: "right" });
@@ -253,8 +218,6 @@ function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsP
       isChatGroup={isChatGroup}
       isMaximized={isMaximized}
       onMaximize={handleMaximize}
-      isMinimized={isMinimized}
-      onMinimize={handleMinimize}
       onSplitRight={handleSplitRight}
       onSplitDown={handleSplitDown}
       onCloseGroup={handleCloseGroup}
