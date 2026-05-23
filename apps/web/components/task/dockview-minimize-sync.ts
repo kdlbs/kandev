@@ -18,7 +18,10 @@ function applyGroupMinimized(
 ): void {
   const group = api.groups.find((g) => g.id === groupId);
   if (!group) return;
-  group.element.setAttribute(MINIMIZED_ATTR, minimized ? "true" : "false");
+  const next = minimized ? "true" : "false";
+  if (group.element.getAttribute(MINIMIZED_ATTR) !== next) {
+    group.element.setAttribute(MINIMIZED_ATTR, next);
+  }
   if (minimized) {
     if (!priorSizes.has(groupId)) {
       priorSizes.set(groupId, { width: group.api.width, height: group.api.height });
