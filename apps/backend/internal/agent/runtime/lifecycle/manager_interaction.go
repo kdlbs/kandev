@@ -372,10 +372,24 @@ var ErrCancelEscalated = errors.New("cancel escalated: agent did not acknowledge
 
 // CancelAgentBySessionID cancels the current agent turn for a specific session.
 // Returns ErrNoExecutionForSession (wrapped) when no execution is tracked for the session.
+//
+// Passthrough sessions don't speak ACP — Ctrl-C (0x03) written to PTY stdin is
+// the only stop signal a TUI CLI understands. A write failure is non-fatal:
+// the caller still reconciles DB state so the UI unsticks even if the PTY is
+// already gone.
 func (m *Manager) CancelAgentBySessionID(ctx context.Context, sessionID string) error {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
 		return fmt.Errorf("session %q: %w", sessionID, ErrNoExecutionForSession)
+	}
+
+	if execution.PassthroughProcessID != "" {
+		if err := m.WritePassthroughStdin(ctx, sessionID, "\x03"); err != nil {
+			m.logger.Warn("failed to write Ctrl-C to passthrough stdin",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		return nil
 	}
 
 	return m.CancelAgent(ctx, execution.ID)

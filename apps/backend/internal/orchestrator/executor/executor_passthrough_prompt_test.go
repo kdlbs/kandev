@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -51,7 +52,9 @@ func TestExecutor_Prompt_PassthroughWritesStdin(t *testing.T) {
 	if call.SessionID != "sess-1" {
 		t.Errorf("WritePassthroughStdin session = %q, want sess-1", call.SessionID)
 	}
-	wantData := "hello agent" + passthroughSubmitSequence
+	// Mock's ResolvePassthroughConfig returns SubmitSequence "\r" by default
+	// when isPassthroughSessionFunc reports the session is passthrough.
+	wantData := "hello agent\r"
 	if call.Data != wantData {
 		t.Errorf("WritePassthroughStdin data = %q, want %q", call.Data, wantData)
 	}
@@ -186,6 +189,33 @@ func TestExecutor_Prompt_PassthroughPreservesUnicodeAndMultiline(t *testing.T) {
 	want := prompt + "\r"
 	if agentManager.writePassthroughStdinCalls[0].Data != want {
 		t.Errorf("PTY payload = %q, want %q", agentManager.writePassthroughStdinCalls[0].Data, want)
+	}
+}
+
+// TestExecutor_Prompt_PassthroughHonoursDynamicSubmitSequence verifies the
+// PTY submit suffix is taken from PassthroughConfig (per-agent) rather than
+// hardcoded. A future TUI that submits on "\n" or "\x0d\x0a" plugs in via
+// PassthroughConfig.SubmitSequence with no code change here.
+func TestExecutor_Prompt_PassthroughHonoursDynamicSubmitSequence(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{
+		isPassthroughSessionFunc: func(_ context.Context, _ string) bool { return true },
+		resolvePassthroughConfigFunc: func(_ context.Context, _ string) (agents.PassthroughConfig, error) {
+			return agents.PassthroughConfig{Supported: true, SubmitSequence: "\n"}, nil
+		},
+	}
+	seedPassthroughSession(t, repo, agentManager, "task-1", "sess-1", "exec-1")
+	exec := newTestExecutor(t, agentManager, repo)
+
+	if _, err := exec.Prompt(context.Background(), "task-1", "sess-1", "hi", nil, false); err != nil {
+		t.Fatalf("Prompt returned error: %v", err)
+	}
+	if got := len(agentManager.writePassthroughStdinCalls); got != 1 {
+		t.Fatalf("expected 1 WritePassthroughStdin call, got %d", got)
+	}
+	want := "hi\n"
+	if agentManager.writePassthroughStdinCalls[0].Data != want {
+		t.Errorf("PTY payload = %q, want %q (dynamic SubmitSequence not applied)", agentManager.writePassthroughStdinCalls[0].Data, want)
 	}
 }
 

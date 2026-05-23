@@ -29,6 +29,7 @@ type mockAgentManager struct {
 	isPassthroughSessionFunc         func(ctx context.Context, sessionID string) bool
 	writePassthroughStdinFunc        func(ctx context.Context, sessionID, data string) error
 	markPassthroughRunningFunc       func(sessionID string) error
+	resolvePassthroughConfigFunc     func(ctx context.Context, sessionID string) (agents.PassthroughConfig, error)
 	launchAgentCallCount             int
 	cleanupStaleExecutionCallCount   int
 	isAgentRunningForSessionCallArgs []string
@@ -143,7 +144,15 @@ func (m *mockAgentManager) WritePassthroughStdin(ctx context.Context, sessionID 
 	}
 	return nil
 }
-func (m *mockAgentManager) ResolvePassthroughConfig(_ context.Context, _ string) (agents.PassthroughConfig, error) {
+func (m *mockAgentManager) ResolvePassthroughConfig(ctx context.Context, sessionID string) (agents.PassthroughConfig, error) {
+	if m.resolvePassthroughConfigFunc != nil {
+		return m.resolvePassthroughConfigFunc(ctx, sessionID)
+	}
+	// Default to a sensible passthrough config (SubmitSequence "\r") when the
+	// session is in passthrough mode, so most tests don't need to override.
+	if m.isPassthroughSessionFunc != nil && m.isPassthroughSessionFunc(ctx, sessionID) {
+		return agents.PassthroughConfig{Supported: true, SubmitSequence: "\r"}, nil
+	}
 	return agents.PassthroughConfig{}, nil
 }
 func (m *mockAgentManager) MarkPassthroughRunning(sessionID string) error {

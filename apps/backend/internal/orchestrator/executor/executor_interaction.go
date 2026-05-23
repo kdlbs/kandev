@@ -117,15 +117,11 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 	return nil
 }
 
-// passthroughSubmitSequence is appended to a passthrough prompt before writing
-// to PTY stdin. "\r" submits the current line in every TUI agent CLI currently
-// supported in passthrough mode (Claude, Codex, OpenCode, Cursor, Auggie, …).
-// If a future agent needs a different sequence, lift this into a per-agent
-// PassthroughConfig field — see the plan for issue #989.
-const (
-	passthroughSubmitSequence = "\r"
-	stopReasonPassthrough     = "passthrough_dispatched"
-)
+// stopReasonPassthrough is the StopReason returned by Executor.Prompt when a
+// passthrough session's prompt is dispatched to PTY stdin (no ACP turn to
+// observe). The submit sequence is resolved per-agent via ResolvePassthroughConfig
+// — see promptPassthrough below.
+const stopReasonPassthrough = "passthrough_dispatched"
 
 // Prompt sends a follow-up prompt to a running agent for a task
 // Returns PromptResult indicating if the agent needs input
@@ -182,6 +178,10 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 // supplies any, we log a warning so an operator can see they were dropped
 // (image-only messages are rejected outright since there is nothing to write).
 //
+// The submit sequence is resolved per-agent via ResolvePassthroughConfig — most
+// TUI CLIs use "\r" but the config field lets a future agent override it
+// without touching this code path.
+//
 // A WritePassthroughStdin failure (no live PTY, runner unavailable) is returned
 // as an error so Service.handlePromptError can revert session state and surface
 // the failure to the user. A MarkPassthroughRunning failure is non-fatal — the
@@ -196,7 +196,11 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID, sessionID, pro
 			zap.String("session_id", sessionID),
 			zap.Int("attachments_count", len(attachments)))
 	}
-	if err := e.agentManager.WritePassthroughStdin(ctx, sessionID, prompt+passthroughSubmitSequence); err != nil {
+	pt, err := e.agentManager.ResolvePassthroughConfig(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve passthrough config: %w", err)
+	}
+	if err := e.agentManager.WritePassthroughStdin(ctx, sessionID, prompt+pt.SubmitSequence); err != nil {
 		return nil, fmt.Errorf("failed to write to passthrough stdin: %w", err)
 	}
 	if err := e.agentManager.MarkPassthroughRunning(sessionID); err != nil {
