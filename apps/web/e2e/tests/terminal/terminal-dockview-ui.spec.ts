@@ -109,4 +109,90 @@ test.describe("Terminals — dockview UI", () => {
     await expect(testPage.getByTestId("terminal-tab-seq-1")).toBeVisible({ timeout: 5_000 });
     await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible({ timeout: 5_000 });
   });
+
+  /**
+   * Regression: closing a terminal tab via dockview's X button must
+   * PARK the terminal (preserving the PTY + DB row), not destroy it.
+   * After reload, the closed terminal must surface in the "+" → Terminals
+   * menu with a `parked` pill AND its original seq, so the user can
+   * resume it.
+   *
+   * Before the fix this fails because dockview-layout-setup.onDidRemovePanel
+   * calls stopUserShell (alias for destroyUserShell) — the DB row is
+   * gone, no "parked" row exists to find.
+   */
+  test("closing a terminal parks it and the row shows up after reload with parked pill", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await createTaskAndWait(apiClient, seedData, "Close + Reload UI");
+    const session = await openTask(testPage, "Close + Reload UI");
+    await session.clickTab("Terminal");
+    await session.expectTerminalConnected();
+
+    // Add a second terminal so we have a non-default one to close.
+    await clickNewTerminalInPlusMenu(testPage, session);
+    await expect(testPage.getByTestId("terminal-tab-seq-1")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible({ timeout: 5_000 });
+
+    // Close the seq=2 tab specifically. `.last()` is unreliable when
+    // terminals span multiple groups (default lives in the right-bottom,
+    // user-created lands in the center). Walk from the seq=2 badge up
+    // to its wrapping div and grab that subtree's close button.
+    const seq2Close = testPage
+      .getByTestId("terminal-tab-seq-2")
+      .locator("..")
+      .locator(".dv-default-tab-action");
+    await seq2Close.click();
+    await expect(testPage.getByTestId("terminal-tab-seq-2")).toHaveCount(0, { timeout: 5_000 });
+
+    // Layout-save is 300ms-debounced. Wait past the debounce so the
+    // saved JSON reflects the closed/parked terminal — otherwise the
+    // saved layout still has it and the reload re-opens it.
+    await testPage.waitForTimeout(800);
+
+    // Reload — only the open default terminal should restore as a
+    // panel; the parked one lives in the reopen menu.
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.clickTab("Terminal");
+
+    // The open default terminal should still render as a visible tab.
+    const terminalContent = testPage.locator(".dv-default-tab-content").filter({
+      hasText: /^Terminal$/,
+    });
+    await expect
+      .poll(() => terminalContent.count(), {
+        timeout: 10_000,
+        message: "default terminal tab should still be visible after reload",
+      })
+      .toBeGreaterThanOrEqual(1);
+
+    // Open "+" menu — the parked second terminal must appear under
+    // Terminals with its seq=2 marker AND the `parked` pill.
+    await session.addPanelButton().click();
+    const terminalSection = testPage
+      .locator('[role="menu"]')
+      .getByText("Terminals", { exact: true });
+    await expect(terminalSection).toBeVisible({ timeout: 10_000 });
+
+    // The seq=2 row must be present — proves the close was a park, not
+    // a destroy.
+    const reopenRowsWithSeq2 = testPage
+      .locator('[data-testid^="reopen-terminal-"]')
+      .filter({ hasText: "#2" });
+    await expect
+      .poll(() => reopenRowsWithSeq2.count(), {
+        timeout: 10_000,
+        message:
+          "parked terminal #2 should appear in reopen menu — if missing, close-handler destroyed instead of parked",
+      })
+      .toBe(1);
+
+    // Same row must have the `parked` pill — proves state is parked,
+    // not just open-and-hidden.
+    await expect(reopenRowsWithSeq2.getByText("parked")).toBeVisible({ timeout: 5_000 });
+  });
 });
