@@ -40,6 +40,10 @@ async function seedRemoteSession(
   await session.waitForLoad();
   await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
+  // Port Forwarding lives inside the Browser panel header — open it so the
+  // button is in the DOM for the assertions below.
+  await session.openBrowserPanel();
+
   // Reset workspace default executor so other tests aren't affected
   await apiClient.updateWorkspace(seedData.workspaceId, {
     default_executor_id: "",

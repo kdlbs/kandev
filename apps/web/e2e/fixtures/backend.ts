@@ -98,11 +98,19 @@ async function waitForPortFree(port: number, timeoutMs = 10_000): Promise<void> 
   while (Date.now() < deadline) {
     const free = await new Promise<boolean>((resolve) => {
       const sock = createConnection({ port, host: "127.0.0.1" });
-      sock.once("connect", () => {
+      let settled = false;
+      const finish = (isFree: boolean) => {
+        if (settled) return;
+        settled = true;
         sock.destroy();
-        resolve(false); // port still occupied
+        resolve(isFree);
+      };
+      sock.setTimeout(500);
+      sock.once("connect", () => {
+        finish(false); // port still occupied
       });
-      sock.once("error", () => resolve(true)); // ECONNREFUSED → port is free
+      sock.once("error", () => finish(true)); // ECONNREFUSED → port is free
+      sock.once("timeout", () => finish(false));
     });
     if (free) return;
     await new Promise((r) => setTimeout(r, 100));

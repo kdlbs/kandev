@@ -289,8 +289,6 @@ function buildTaskTopBarProps(params: {
     workflowId: taskProps.workflowId,
     workspaceId: taskProps.workspaceId,
     isArchived: taskProps.isArchived,
-    isRemoteExecutor: params.remote.isRemoteExecutor,
-    isAgentctlReady: params.agentctlReady,
     remoteExecutorType: params.remote.remoteExecutorType,
     officeTaskHref: params.officeTaskHref,
   };

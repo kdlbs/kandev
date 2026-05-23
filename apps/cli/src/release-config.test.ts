@@ -19,6 +19,16 @@ function extractDockerPnpmVersion(dockerfile: string): string | undefined {
   return dockerfile.match(/^ARG PNPM_VERSION=([0-9]+\.[0-9]+\.[0-9]+)$/m)?.[1];
 }
 
+function extractPackageManagerPnpmVersion(packageJSON: string): string {
+  const packageManager = (JSON.parse(packageJSON) as { packageManager?: string }).packageManager;
+  const version = packageManager?.match(/^pnpm@([0-9]+\.[0-9]+\.[0-9]+)$/)?.[1];
+  expect(version, "apps/package.json: packageManager must pin pnpm").toBeDefined();
+  if (version === undefined) {
+    throw new Error("apps/package.json: packageManager must pin pnpm");
+  }
+  return version;
+}
+
 function indentation(line: string): number {
   return line.search(/\S/);
 }
@@ -127,7 +137,7 @@ function assertWorkflowPnpmVersions(file: string, expectedVersion: string): numb
       continue;
     }
 
-    expect(version, `${file}: pnpm/action-setup version must match Dockerfile PNPM_VERSION`).toBe(
+    expect(version, `${file}: pnpm/action-setup version must match apps/package.json`).toBe(
       expectedVersion,
     );
   }
@@ -137,17 +147,19 @@ function assertWorkflowPnpmVersions(file: string, expectedVersion: string): numb
 
 describe("release package manager version", () => {
   it("pins pnpm consistently for Docker and GitHub Actions", () => {
+    const packagePnpmVersion = extractPackageManagerPnpmVersion(readRepoFile("apps/package.json"));
     const dockerfile = readRepoFile("Dockerfile");
     const dockerPnpmVersion = extractDockerPnpmVersion(dockerfile);
 
     expect(dockerfile).not.toContain("pnpm@latest");
-    expect(dockerPnpmVersion, "Dockerfile: PNPM_VERSION must be pinned").toBeDefined();
-    if (dockerPnpmVersion === undefined) {
-      throw new Error("Dockerfile: PNPM_VERSION must be pinned");
+    if (dockerPnpmVersion !== undefined) {
+      expect(dockerPnpmVersion, "Dockerfile: PNPM_VERSION must match apps/package.json").toBe(
+        packagePnpmVersion,
+      );
     }
 
     const workflowSetupCount = workflowFiles().reduce(
-      (count, file) => count + assertWorkflowPnpmVersions(file, dockerPnpmVersion),
+      (count, file) => count + assertWorkflowPnpmVersions(file, packagePnpmVersion),
       0,
     );
     expect(workflowSetupCount).toBeGreaterThan(0);

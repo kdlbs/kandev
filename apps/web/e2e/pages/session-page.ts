@@ -32,6 +32,13 @@ export class SessionPage {
   get portForwardButton() {
     return this.page.getByTestId("port-forward-button");
   }
+  /** Open a Browser panel via the dockview "+" menu. The port-forward button
+   *  lives inside the Browser panel header, so any test that interacts with
+   *  it needs the panel mounted first. */
+  async openBrowserPanel() {
+    await this.page.getByTestId("dockview-add-panel-btn").first().click();
+    await this.page.getByTestId("add-browser-panel").click();
+  }
   get portForwardDialog() {
     return this.page.getByTestId("port-forward-dialog");
   }
@@ -329,11 +336,6 @@ export class SessionPage {
     return this.clarificationQuestionCardById(questionId).getByTestId("clarification-input");
   }
 
-  /** Container around the custom text input — exposes data-active for selection state. */
-  clarificationCustomInputContainerForQuestion(questionId: string): Locator {
-    return this.clarificationQuestionCardById(questionId).getByTestId("clarification-custom-input");
-  }
-
   /** Option button (by visible label text) inside a specific question card. */
   clarificationOptionForQuestion(questionId: string, text: string): Locator {
     return this.clarificationQuestionCardById(questionId)
@@ -363,7 +365,7 @@ export class SessionPage {
     return this.clarificationOverlay().getByTestId("clarification-next");
   }
 
-  /** Sticky "Submit" button in the overlay header (multi-question only). */
+  /** Final "Submit answers" button (rendered only on the last step). */
   clarificationSubmit(): Locator {
     return this.clarificationOverlay().getByTestId("clarification-submit");
   }
@@ -405,15 +407,10 @@ export class SessionPage {
 
   /**
    * Delete a task via the sidebar context menu.
-   * Hovers to reveal the menu trigger, opens it, clicks "Delete",
-   * and confirms the delete dialog.
+   * Hovers to reveal the menu trigger, opens it, and clicks "Delete".
    */
   async deleteTaskInSidebar(title: string): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Delete");
-    const confirmButton = this.page
-      .getByRole("alertdialog")
-      .getByRole("button", { name: "Delete" });
-    await confirmButton.click();
   }
 
   /**
@@ -435,7 +432,11 @@ export class SessionPage {
    * Retries the full open-click sequence if the menu gets detached by a
    * React re-render (e.g. WS-driven sidebar update) between open and click.
    */
-  async openSidebarMenuAndClick(title: string, itemName: string, retries = 3): Promise<void> {
+  private async openSidebarMenuAndClick(
+    title: string,
+    itemName: string,
+    retries = 3,
+  ): Promise<void> {
     const taskRow = this.sidebar.locator('[role="button"]').filter({ hasText: title });
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
@@ -1027,32 +1028,6 @@ export class SessionPage {
   /** All selected file rows in the changes panel. */
   changesSelectedRows(): Locator {
     return this.changes.locator("[data-selected='true']");
-  }
-
-  /** All file rows in the changes panel currently marked as the active tab. */
-  changesActiveRows(): Locator {
-    return this.changes.locator("[data-active='true']");
-  }
-
-  /**
-   * Close every file-diff panel in dockview: the `preview:file-diff` slot AND
-   * any pinned `diff:file:<path>` panels created by promoting the preview.
-   * After this resolves, no diff tab is active so the changes-panel rows
-   * settle to `data-active="false"`.
-   */
-  async closeFileDiffPreview(): Promise<void> {
-    await this.page.evaluate(() => {
-      type PanelApi = { close: () => void };
-      type Panel = { id: string; api: PanelApi };
-      type Api = { panels: Panel[]; getPanel: (i: string) => Panel | undefined };
-      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
-      if (!api) return;
-      api.getPanel("preview:file-diff")?.api.close();
-      // Snapshot before iterating: panel.api.close() mutates api.panels in
-      // place, so iterating the live array would skip every other panel.
-      const pinned = [...api.panels].filter((p) => p.id.startsWith("diff:file:"));
-      for (const panel of pinned) panel.api.close();
-    });
   }
 
   /** Bulk action bar for a variant (unstaged/staged). */

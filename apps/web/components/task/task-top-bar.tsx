@@ -25,14 +25,12 @@ import { EditorsMenu } from "@/components/task/editors-menu";
 import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
 import { DocumentControls } from "@/components/task/document/document-controls";
 import { PRTopbarButton } from "@/components/github/pr-topbar-button";
-import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 import { JiraTicketButton, extractJiraKey } from "@/components/jira/jira-ticket-button";
 import { JiraLinkButton } from "@/components/jira/jira-link-button";
 import { LinearIssueButton, extractLinearKey } from "@/components/linear/linear-issue-button";
 import { LinearLinkButton } from "@/components/linear/linear-link-button";
 import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
-import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { ExecutorSettingsButton } from "@/components/task/executor-settings-button";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { QuickChatButton } from "@/components/task/quick-chat-button";
@@ -58,8 +56,6 @@ type TaskTopBarProps = {
   workflowId?: string | null;
   workspaceId?: string | null;
   isArchived?: boolean;
-  isRemoteExecutor?: boolean;
-  isAgentctlReady?: boolean;
   remoteExecutorType?: string | null;
   officeTaskHref?: string | null;
 };
@@ -83,8 +79,6 @@ const TaskTopBar = memo(function TaskTopBar({
   workflowId,
   workspaceId,
   isArchived,
-  isRemoteExecutor,
-  isAgentctlReady,
   remoteExecutorType,
   officeTaskHref,
 }: TaskTopBarProps) {
@@ -118,8 +112,6 @@ const TaskTopBar = memo(function TaskTopBar({
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}
         workspaceId={workspaceId}
-        isRemoteExecutor={isRemoteExecutor}
-        isAgentctlReady={isAgentctlReady}
         taskTitle={taskTitle}
         officeTaskHref={officeTaskHref}
       />
@@ -296,16 +288,12 @@ function AttentionStatusGroup({
   activeSessionId,
   isArchived,
   workspaceId,
-  isRemoteExecutor,
-  isAgentctlReady,
   taskTitle,
 }: {
   taskId?: string | null;
   activeSessionId?: string | null;
   isArchived?: boolean;
   workspaceId?: string | null;
-  isRemoteExecutor?: boolean;
-  isAgentctlReady?: boolean;
   taskTitle?: string;
 }) {
   return (
@@ -313,16 +301,7 @@ function AttentionStatusGroup({
       <DocumentControls activeSessionId={activeSessionId ?? null} />
       {!isArchived && (
         <>
-          <PortForwardButton
-            isRemoteExecutor={isRemoteExecutor}
-            sessionId={activeSessionId}
-            isAgentctlReady={isAgentctlReady}
-          />
-          {/* PR (GitHub) and MR (GitLab) buttons each render nothing when no
-              rows match, so showing both covers GitHub-only, GitLab-only, and
-              multi-repo tasks without needing an explicit provider switch. */}
           <PRTopbarButton />
-          <MRTopbarButton />
           <IssueTrackerButtons taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
         </>
       )}
@@ -371,8 +350,6 @@ function TopBarRight({
   onToggleDebugOverlay,
   isArchived,
   workspaceId,
-  isRemoteExecutor,
-  isAgentctlReady,
   taskTitle,
   officeTaskHref,
 }: {
@@ -382,8 +359,6 @@ function TopBarRight({
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
   workspaceId?: string | null;
-  isRemoteExecutor?: boolean;
-  isAgentctlReady?: boolean;
   taskTitle?: string;
   officeTaskHref?: string | null;
 }) {
@@ -427,8 +402,6 @@ function TopBarRight({
         activeSessionId={activeSessionId}
         isArchived={isArchived}
         workspaceId={workspaceId}
-        isRemoteExecutor={isRemoteExecutor}
-        isAgentctlReady={isAgentctlReady}
         taskTitle={taskTitle}
       />
     ),

@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# pr-resolve — list and resolve PR review threads in batch.
+#
+# Usage:
+#   scripts/pr-resolve list <PR>
+#       List unresolved review threads, one per line, TAB-separated:
+#         <thread_id>\t<comment_id>\t<author>\t<path>\t<body_first_120_chars>
+#
+#   scripts/pr-resolve reply <PR> <CID> <TID> <BODY>
+#       Reply to the thread starter, resolve the thread, and add a +1
+#       reaction in one call. Use this for both "fixed" replies and
+#       pushback replies — the reply body conveys whether you agreed
+#       or not.
+#
+# Owner/repo are derived from `gh repo view` in the current repo.
+#
+# Requires: gh (authenticated) and jq.
+
+set -euo pipefail
+
+usage() {
+  sed -n '2,16p' "$0" | sed 's|^# \{0,1\}||'
+  exit "${1:-1}"
+}
+
+[ $# -ge 1 ] || usage
+
+cmd=$1; shift
+
+read -r OWNER REPO < <(gh repo view --json owner,name --jq '"\(.owner.login) \(.name)"')
+
+case "$cmd" in
+  list)
+    [ $# -eq 1 ] || usage
+    PR=$1
+    gh api graphql -f query='
+      query($owner: String!, $repo: String!, $pr: Int!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $pr) {
+            reviewThreads(first: 100) {
+              nodes {
+                id
+                isResolved
+                path
+                comments(first: 1) {
+                  nodes { databaseId author { login } body }
+                }
+              }
+            }
+          }
+        }
+      }' -f owner="$OWNER" -f repo="$REPO" -F pr="$PR" \
+    | jq -r '.data.repository.pullRequest.reviewThreads.nodes
+             | map(select(.isResolved == false))
+             | .[]
+             | "\(.id)\t\(.comments.nodes[0].databaseId)\t\(.comments.nodes[0].author.login)\t\(.path)\t\(.comments.nodes[0].body | gsub("\n"; " ") | .[0:120])"'
+    ;;
+
+  reply)
+    [ $# -eq 4 ] || usage
+    PR=$1; CID=$2; TID=$3; BODY=$4
+    gh api -X POST "repos/$OWNER/$REPO/pulls/$PR/comments/$CID/replies" \
+      -f body="$BODY" --silent
+    gh api graphql -f query='mutation($t: ID!) { resolveReviewThread(input: {threadId: $t}) { thread { isResolved } } }' \
+      -f t="$TID" --silent
+    gh api -X POST "repos/$OWNER/$REPO/pulls/comments/$CID/reactions" \
+      -f content="+1" --silent
+    echo "ok $TID"
+    ;;
+
+  *)
+    usage
+    ;;
+esac
