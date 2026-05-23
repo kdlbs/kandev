@@ -234,13 +234,20 @@ export function useAutoPRPanel() {
  * in a group with no session. Prefer joining that group when adding the new
  * active session — without this fallback we'd add the session as a fresh
  * split next to the sidebar, breaking the user's grouping.
+ *
+ * Each entry matches either the bare id (e.g. `pr-detail`) or a keyed
+ * variant `<id>|<key>` (multi-repo PR panels use `pr-detail|owner/repo/N`,
+ * see `addPRPanel` in dockview-panel-actions.ts).
  */
 const SESSION_ANCHOR_PANEL_IDS = ["pr-detail"];
 
 export function findSessionAnchorGroupId(api: DockviewApi): string | null {
   for (const id of SESSION_ANCHOR_PANEL_IDS) {
-    const panel = api.getPanel(id);
-    if (panel) return panel.group.id;
+    const exact = api.getPanel(id);
+    if (exact) return exact.group.id;
+    const keyedPrefix = `${id}|`;
+    const keyed = api.panels.find((p) => p.id.startsWith(keyedPrefix));
+    if (keyed) return keyed.group.id;
   }
   return null;
 }

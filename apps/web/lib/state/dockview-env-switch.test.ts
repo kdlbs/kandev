@@ -274,10 +274,7 @@ describe("performEnvSwitch slow-path stale session strip", () => {
     };
     const api = {
       ...makeMockApi(),
-      panels: [
-        stale,
-        { id: "pr-detail", api: { component: "pr-detail" }, group: { id: groupId } },
-      ],
+      panels: [stale, { id: "pr-detail", api: { component: "pr-detail" }, group: { id: groupId } }],
       groups: [{ id: groupId }],
       // The active session panel does NOT exist yet — that's the whole point;
       // the fromJSON restore only brought back the phantom.
@@ -305,9 +302,7 @@ describe("performEnvSwitch slow-path stale session strip", () => {
 
     const closeStale = vi.fn();
     const groupId = "g1";
-    const groupPanels = [
-      { id: "session:phantom", api: { component: "chat", close: closeStale } },
-    ];
+    const groupPanels = [{ id: "session:phantom", api: { component: "chat", close: closeStale } }];
     const stale = { ...groupPanels[0], group: { id: groupId, panels: groupPanels } };
     const api = {
       ...makeMockApi(),
