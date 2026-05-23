@@ -202,16 +202,40 @@ func TestHandleSelectedMoveError(t *testing.T) {
 
 type moveTaskConflictRepo struct {
 	mockRepository
-	task     *models.Task
-	sessions []*models.TaskSession
+	task      *models.Task
+	sessions  []*models.TaskSession
+	workflows map[string]*models.Workflow
 }
 
 func (m *moveTaskConflictRepo) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	return m.task, nil
 }
 
+func (m *moveTaskConflictRepo) UpdateTask(ctx context.Context, task *models.Task) error {
+	m.task = task
+	return nil
+}
+
+func (m *moveTaskConflictRepo) GetWorkflow(ctx context.Context, id string) (*models.Workflow, error) {
+	if m.workflows != nil {
+		if workflow, ok := m.workflows[id]; ok {
+			return workflow, nil
+		}
+	}
+	return &models.Workflow{ID: id, WorkspaceID: m.task.WorkspaceID}, nil
+}
+
 func (m *moveTaskConflictRepo) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	return m.sessions, nil
+}
+
+func (m *moveTaskConflictRepo) GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
+	for _, session := range m.sessions {
+		if session.TaskID == taskID && session.IsPrimary {
+			return session, nil
+		}
+	}
+	return nil, nil
 }
 
 func TestHTTPMoveTaskMapsMoveConflict(t *testing.T) {
@@ -235,7 +259,7 @@ func TestHTTPMoveTaskMapsMoveConflict(t *testing.T) {
 			},
 		},
 		{
-			name: "active session",
+			name: "active non-primary session",
 			task: &models.Task{
 				ID:             "task-running",
 				WorkspaceID:    "workspace-1",
@@ -276,6 +300,49 @@ func TestHTTPMoveTaskMapsMoveConflict(t *testing.T) {
 			assert.Equal(t, http.StatusConflict, rec.Code)
 		})
 	}
+}
+
+func TestHTTPMoveTaskAllowsRunningPrimarySession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+	task := &models.Task{
+		ID:             "task-running-primary",
+		WorkspaceID:    "workspace-1",
+		WorkflowID:     "wf-source",
+		WorkflowStepID: "step-source",
+	}
+	repo := &moveTaskConflictRepo{
+		task: task,
+		sessions: []*models.TaskSession{{
+			ID:        "session-running-primary",
+			TaskID:    task.ID,
+			State:     models.TaskSessionStateRunning,
+			IsPrimary: true,
+		}},
+	}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &TaskHandlers{service: svc, logger: log}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Params = gin.Params{{Key: "id", Value: task.ID}}
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/move", strings.NewReader(`{
+		"workflow_id": "wf-target",
+		"workflow_step_id": "step-target",
+		"position": 0
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpMoveTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	assert.Equal(t, "wf-target", repo.task.WorkflowID)
+	assert.Equal(t, "step-target", repo.task.WorkflowStepID)
 }
 
 func TestResolveFreshBranchName(t *testing.T) {

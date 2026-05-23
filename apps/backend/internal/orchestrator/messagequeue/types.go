@@ -15,8 +15,9 @@ const DefaultMaxPerSession = 10
 // dispatch hardcodes QueuedByAgent so user clients can never overwrite an
 // agent-authored entry.
 const (
-	QueuedByUser  = "user"
-	QueuedByAgent = "agent"
+	QueuedByUser     = "user"
+	QueuedByAgent    = "agent"
+	QueuedByWorkflow = "workflow"
 )
 
 // QueueFullErrorCode is the well-known WS / MCP error code surfaced when an

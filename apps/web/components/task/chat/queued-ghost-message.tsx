@@ -24,6 +24,11 @@ import {
   SenderTaskBadge,
   type SenderTaskInfo,
 } from "@/components/task/chat/messages/sender-task-badge";
+import {
+  WorkflowStepMessageBadge,
+  workflowMessageInfoFromMetadata,
+  type WorkflowStepMessageInfo,
+} from "@/components/task/chat/messages/workflow-step-message-badge";
 import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 
@@ -76,9 +81,18 @@ export type QueuedGhostMessageHandle = {
   startEdit: () => void;
 };
 
-type SenderKind = "user" | "agent" | "system";
+type SenderKind = "user" | "agent" | "workflow" | "system";
+
+export function isWorkflowQueuedMessage(entry: QueuedMessage): boolean {
+  return (
+    entry.queued_by === "workflow" ||
+    entry.queued_by === "workflow-auto-start" ||
+    workflowMessageInfoFromMetadata(entry.metadata) !== null
+  );
+}
 
 function senderKindOf(entry: QueuedMessage): SenderKind {
+  if (isWorkflowQueuedMessage(entry)) return "workflow";
   if (!entry.queued_by) return "system";
   // Inter-task messages dispatched via dispatchTaskMessage hardcode
   // queued_by="agent"; that's the only signal needed.
@@ -92,6 +106,7 @@ function senderLabel(entry: QueuedMessage): string {
     const title = entry.metadata?.sender_task_title;
     return typeof title === "string" && title.length > 0 ? `From ${title}` : "From agent";
   }
+  if (kind === "workflow") return "Workflow";
   if (kind === "system") return "System";
   return "You";
 }
@@ -103,6 +118,9 @@ function senderIconFor(kind: SenderKind): { Icon: typeof IconUser; tone: string 
     return { Icon: IconRobot, tone: "text-amber-500 dark:text-amber-400" };
   }
   if (kind === "system") {
+    return { Icon: IconInfoCircle, tone: "text-muted-foreground" };
+  }
+  if (kind === "workflow") {
     return { Icon: IconInfoCircle, tone: "text-muted-foreground" };
   }
   return { Icon: IconUser, tone: "text-blue-500 dark:text-blue-300" };
@@ -126,6 +144,12 @@ function getSenderTaskInfo(entry: QueuedMessage): SenderTaskInfo | null {
   const id = meta?.sender_task_id;
   if (typeof id !== "string" || id.length === 0) return null;
   return { id, snapshotTitle: meta?.sender_task_title ?? "" };
+}
+
+function getWorkflowMessageInfo(entry: QueuedMessage): WorkflowStepMessageInfo | null {
+  const info = workflowMessageInfoFromMetadata(entry.metadata);
+  if (info) return info;
+  return entry.queued_by === "workflow" || entry.queued_by === "workflow-auto-start" ? {} : null;
 }
 
 type EditViewProps = {
@@ -221,6 +245,7 @@ function DisplayView({ entry, positionLabel, canEdit, onStartEdit, onRemove }: D
   const visible = stripSystemTags(entry.content);
   const attachments = (entry.attachments ?? []) as QueuedAttachment[];
   const senderTask = getSenderTaskInfo(entry);
+  const workflowMessage = getWorkflowMessageInfo(entry);
   const [expanded, setExpanded] = useState(false);
   const canExpand = shouldOfferExpand(visible);
   return (
@@ -232,9 +257,10 @@ function DisplayView({ entry, positionLabel, canEdit, onStartEdit, onRemove }: D
         >
           {positionLabel}
         </span>
-        {!senderTask && <SenderIcon entry={entry} />}
+        {!senderTask && !workflowMessage && <SenderIcon entry={entry} />}
       </span>
       <div className="flex-1 min-w-0 space-y-1">
+        {workflowMessage && <WorkflowStepMessageBadge workflow={workflowMessage} size="xs" />}
         {senderTask && <SenderTaskBadge sender={senderTask} size="xs" />}
         {visible && (
           <div

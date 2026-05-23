@@ -138,6 +138,33 @@ describe("ChatMessage sender badge", () => {
 
     expect(container.querySelector(SENDER_BADGE_SELECTOR)).toBeNull();
   });
+
+  it("renders the workflow step badge when workflow metadata is present", () => {
+    const { container } = renderWithSender([], {
+      workflow_message: true,
+      workflow_step_name: "Review",
+      workflow_step_color: "bg-emerald-500",
+    });
+
+    const badge = container.querySelector("[data-testid='workflow-message-badge']");
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toContain("Review");
+    expect(container.querySelector("[data-testid='workflow-message-dot']")?.className).toContain(
+      "bg-emerald-500",
+    );
+  });
+
+  it("falls back when workflow metadata has an unknown color class", () => {
+    const { container } = renderWithSender([], {
+      workflow_message: true,
+      workflow_step_name: "Review",
+      workflow_step_color: "unknown-step-color",
+    });
+
+    expect(container.querySelector("[data-testid='workflow-message-dot']")?.className).toContain(
+      "bg-neutral-400",
+    );
+  });
 });
 
 describe("ChatMessage image attachments", () => {

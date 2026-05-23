@@ -35,6 +35,30 @@ function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   };
 }
 
+describe("QueuedGhostMessage workflow badge", () => {
+  it("renders workflow metadata as a workflow step badge", () => {
+    render(
+      <QueuedGhostMessage
+        entry={entry({
+          queued_by: "workflow",
+          metadata: {
+            workflow_message: true,
+            workflow_step_name: "In Progress",
+            workflow_step_color: "bg-green-500",
+          },
+        })}
+        canEdit={false}
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("workflow-message-badge").textContent).toContain("In Progress");
+    expect(screen.getByTestId("workflow-message-dot").className).toContain("bg-green-500");
+    expect(screen.queryByTestId("sender-task-badge")).toBeNull();
+  });
+});
+
 describe("QueuedGhostMessage attachment thumbnails", () => {
   it("renders an image thumbnail for image attachments", () => {
     render(

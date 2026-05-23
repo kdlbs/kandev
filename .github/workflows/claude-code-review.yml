@@ -22,7 +22,7 @@ on:
     types: [opened, synchronize, ready_for_review, reopened, labeled]
 
 concurrency:
-  group: claude-review-${{ github.event.pull_request.number || github.ref }}
+  group: claude-review-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -107,8 +107,7 @@ jobs:
 
   claude-review-fork:
     # Fork PRs only, via pull_request_target so secrets are available.
-    # Three approval paths:
-    #   - OWNER/MEMBER/COLLABORATOR author_association (trusted user, all events)
+    # Two approval paths:
     #   - CLAUDE_REVIEW_ALLOWLIST repo variable (trusted login list, all events;
     #     JSON array, e.g. ["alice","bob"], in Settings -> Secrets and variables
     #     -> Actions -> Variables)
@@ -122,8 +121,7 @@ jobs:
     if: >
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.head.repo.full_name != github.repository &&
-      (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) ||
-       (github.event.action != 'synchronize' && contains(github.event.pull_request.labels.*.name, 'safe-to-review')) ||
+      ((github.event.action != 'synchronize' && contains(github.event.pull_request.labels.*.name, 'safe-to-review')) ||
        (vars.CLAUDE_REVIEW_ALLOWLIST != '' && contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)))
     runs-on: ubuntu-latest
     permissions:
@@ -136,11 +134,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           # pull_request_target defaults to the base ref; explicitly check out
-          # the PR head so the review runs against the contributor's changes.
+          # the PR head through the base repository's pull ref. Keeping origin
+          # on the base repository lets claude-code-action fetch
+          # refs/pull/<number>/head during its own PR setup.
           # Safe because the workflow never executes scripts from the PR;
           # claude-code-action only reads files and posts comments.
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: refs/pull/${{ github.event.pull_request.number }}/head
           fetch-depth: 1
 
       - name: Run Claude Code Review (GITHUB_TOKEN fallback)

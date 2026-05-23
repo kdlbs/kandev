@@ -6,6 +6,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -291,7 +292,7 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 			Events: wfmodels.StepEvents{},
 		}
 		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
-			ID: "step2", WorkflowID: "wf1", Name: "In Progress", Position: 1,
+			ID: "step2", WorkflowID: "wf1", Name: "In Progress", Position: 1, Color: "bg-emerald-500",
 			Events: wfmodels.StepEvents{
 				OnEnter: []wfmodels.OnEnterAction{
 					{Type: wfmodels.OnEnterAutoStartAgent},
@@ -316,6 +317,22 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 				if status.Entries[0].TaskID != "t1" {
 					t.Fatalf("expected queued task_id t1, got %s", status.Entries[0].TaskID)
 				}
+				if status.Entries[0].QueuedBy != messagequeue.QueuedByWorkflow {
+					t.Fatalf("expected queued_by workflow, got %s", status.Entries[0].QueuedBy)
+				}
+				meta := status.Entries[0].Metadata
+				if got := meta["workflow_message"]; got != true {
+					t.Fatalf("workflow_message = %v, want true", got)
+				}
+				if got := meta["workflow_step_id"]; got != "step2" {
+					t.Fatalf("workflow_step_id = %v, want step2", got)
+				}
+				if got := meta["workflow_step_name"]; got != "In Progress" {
+					t.Fatalf("workflow_step_name = %v, want In Progress", got)
+				}
+				if got := meta["workflow_step_color"]; got != "bg-emerald-500" {
+					t.Fatalf("workflow_step_color = %v, want bg-emerald-500", got)
+				}
 				break
 			}
 			if time.Now().After(deadline) {
@@ -335,7 +352,7 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 		_ = repo.UpdateTaskSession(ctx, session)
 
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-		queued, err := svc.queueAutoStartPromptIfRunning(ctx, "t1", session, "prompt", false)
+		queued, err := svc.queueAutoStartPromptIfRunning(ctx, "t1", session, "prompt", false, nil, workflowMessageOrigin{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

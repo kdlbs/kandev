@@ -162,6 +162,35 @@ func TestService_MoveTaskRejectsRunningSession(t *testing.T) {
 	}
 }
 
+func TestService_MoveTaskWithOptionsAllowsRunningPrimarySession(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	createMoveTask(t, ctx, repo, "task-running-primary", "wf-source", "step-source", nil)
+	createMoveSession(t, ctx, repo, "session-running-primary", "task-running-primary", models.TaskSessionStateRunning, models.ReviewStatusNone)
+	eventBus.ClearEvents()
+
+	moved, err := svc.MoveTaskWithOptions(ctx, "task-running-primary", "wf-source", "step-review-target", 0, MoveTaskOptions{
+		AllowActivePrimarySession: true,
+	})
+	if err != nil {
+		t.Fatalf("running primary session should be movable with explicit option: %v", err)
+	}
+	if moved.Task.WorkflowStepID != "step-review-target" {
+		t.Fatalf("expected step-review-target, got %s", moved.Task.WorkflowStepID)
+	}
+
+	event := findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskMoved)
+	data, ok := event.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data type = %T, want map[string]interface{}", event.Data)
+	}
+	if got := data["session_id"]; got != "session-running-primary" {
+		t.Fatalf("session_id = %v, want session-running-primary", got)
+	}
+}
+
 func TestService_MoveTaskRejectsArchivedTask(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

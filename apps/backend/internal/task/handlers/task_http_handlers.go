@@ -918,9 +918,10 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workflow_id and workflow_step_id are required"})
 		return
 	}
-	result, err := h.service.MoveTask(
+	result, err := h.service.MoveTaskWithOptions(
 		c.Request.Context(), c.Param("id"),
 		body.WorkflowID, body.WorkflowStepID, body.Position,
+		service.MoveTaskOptions{AllowActivePrimarySession: true},
 	)
 	if err != nil {
 		handleSelectedMoveError(c, h.logger, err)
