@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@kandev/ui/button";
+import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   IconDeviceFloppy,
@@ -68,10 +69,12 @@ function ToolbarLeft({
   diffStats: { additions: number; deletions: number } | null;
 }) {
   return (
-    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-      <span className="font-mono">{toRelativePath(path, worktreePath)}</span>
+    <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+      <ScrollOnOverflow className="min-w-0 font-mono">
+        {toRelativePath(path, worktreePath)}
+      </ScrollOnOverflow>
       {isDirty && diffStats && (
-        <span className="text-xs text-yellow-500">
+        <span className="shrink-0 text-xs text-yellow-500">
           {formatDiffStats(diffStats.additions, diffStats.deletions)}
         </span>
       )}

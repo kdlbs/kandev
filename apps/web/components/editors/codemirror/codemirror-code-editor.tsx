@@ -3,6 +3,7 @@
 import { useRef } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { Button } from "@kandev/ui/button";
+import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import {
   IconDeviceFloppy,
   IconLoader2,
@@ -228,10 +229,12 @@ function CodeMirrorToolbar({
   return (
     <PanelHeaderBarSplit
       left={
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-mono">{toRelativePath(path, worktreePath)}</span>
+        <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <ScrollOnOverflow className="min-w-0 font-mono">
+            {toRelativePath(path, worktreePath)}
+          </ScrollOnOverflow>
           {isDirty && diffStats && (
-            <span className="text-xs text-yellow-500">
+            <span className="shrink-0 text-xs text-yellow-500">
               {formatDiffStats(diffStats.additions, diffStats.deletions)}
             </span>
           )}
