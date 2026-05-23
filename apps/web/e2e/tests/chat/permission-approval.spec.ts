@@ -150,7 +150,7 @@ test.describe("Permission approval persistence", () => {
     // The mock agent will trigger mcp__kandev__list_workspaces_kandev and block.
     // If the custom Kandev renderer correctly wired permissions, we should see 1 button.
     await expect(session.permissionApproveButtons()).toHaveCount(1, { timeout: 30_000 });
-    await session.permissionApproveButtons().first().click();
+    await session.permissionApproveButtons().click();
 
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });

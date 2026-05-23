@@ -7,6 +7,22 @@ import { extractKandevStem, extractMcpResult } from "./kandev/parse";
 import { getKandevRenderer } from "./kandev/registry";
 import { PermissionActionRow } from "./permission-action-row";
 import { parsePermission, usePermissionResponseHandlers } from "./use-permission-handlers";
+import type { KandevStatus } from "./kandev/shared";
+import type { PermissionRequestMetadata } from "./use-permission-handlers";
+
+// resolveKandevStatus collapses the tool-call status and the permission
+// decision into the single status the renderer should display. The tool_call
+// stays "pending" until the next backend update, so without this the row
+// keeps showing the amber clock after approve/reject — the resolved decision
+// wins as soon as the permission_request is stamped.
+function resolveKandevStatus(
+  toolStatus: ToolCallMetadata["status"],
+  permissionStatus: PermissionRequestMetadata["status"],
+): KandevStatus {
+  if (permissionStatus === "approved") return "complete";
+  if (permissionStatus === "rejected") return "error";
+  return toolStatus as KandevStatus;
+}
 
 type KandevToolMessageProps = {
   comment: Message;
@@ -61,7 +77,8 @@ export const KandevToolMessage = memo(function KandevToolMessage({
 }: KandevToolMessageProps) {
   const meta = comment.metadata as ToolCallMetadata | undefined;
   const renderer = getKandevRenderer(kandevStemOf(comment));
-  const { permissionMetadata, isPermissionPending } = parsePermission(permissionMessage);
+  const { permissionMetadata, permissionStatus, isPermissionPending } =
+    parsePermission(permissionMessage);
   const { isResponding, handleApprove, handleReject } = usePermissionResponseHandlers({
     permissionMetadata,
     permissionMessage,
@@ -79,10 +96,12 @@ export const KandevToolMessage = memo(function KandevToolMessage({
   const rawResult = generic?.output ?? meta?.result;
   const result = extractMcpResult(rawResult);
 
+  const effectiveStatus = resolveKandevStatus(meta?.status, permissionStatus);
+
   // Each renderer is a stable function-pointer pulled from the static
   // registry, so invoking it like a function (rather than via JSX) is safe
   // and avoids the lint rule against "components created during render".
-  const rendered = renderer({ args, result, status: meta?.status });
+  const rendered = renderer({ args, result, status: effectiveStatus });
 
   if (!isPermissionPending) return rendered;
 

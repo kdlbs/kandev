@@ -354,4 +354,46 @@ describe("KandevToolMessage permission UI", () => {
     );
     expect(html).not.toContain("0 workspaces");
   });
+
+  // After approve/reject the orchestrator stamps `status` onto the
+  // permission_request message but the tool_call's own `meta.status` stays
+  // "pending" until the backend sends the next tool_call update. We mirror
+  // that lag by setting tool_call status="pending" and permission status
+  // ="approved" — the header must already reflect the resolved decision so
+  // the user does not see the amber clock linger after the row vanishes.
+  function resolvedPermissionMessage(toolCallId: string, status: "approved" | "rejected"): Message {
+    const msg = pendingPermissionMessage(toolCallId);
+    return {
+      ...msg,
+      metadata: { ...(msg.metadata as object), status },
+    } as Message;
+  }
+
+  it("drops the amber pending clock once the permission resolves to approved", () => {
+    const html = renderToStaticMarkup(
+      <KandevToolMessage
+        comment={kandevToolCall({
+          status: "pending",
+          toolName: "mcp__kandev__list_workspaces_kandev",
+        })}
+        permissionMessage={resolvedPermissionMessage("tc-1", "approved")}
+      />,
+    );
+    expect(html).not.toContain("tabler-icon-clock");
+    expect(html).not.toContain('data-testid="permission-action-row"');
+  });
+
+  it("shows the result summary once permission resolves even if meta.status still pending", () => {
+    const html = renderToStaticMarkup(
+      <KandevToolMessage
+        comment={kandevToolCall({
+          status: "pending",
+          toolName: "mcp__kandev__list_workspaces_kandev",
+          resultJson: { workspaces: [{ id: "w1", name: "Main" }], total: 1 },
+        })}
+        permissionMessage={resolvedPermissionMessage("tc-1", "approved")}
+      />,
+    );
+    expect(html).toContain("1 workspace");
+  });
 });
