@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  buildCoreFields,
-  mapUserSettingsResponse,
-  parseChangesPanelLayout,
-} from "./user-settings";
+import { buildCoreFields, mapUserSettingsResponse, parseChangesPanelLayout } from "./user-settings";
 
 describe("buildCoreFields", () => {
   it("maps terminal_font_family to terminalFontFamily", () => {
