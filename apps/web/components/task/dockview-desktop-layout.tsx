@@ -10,7 +10,7 @@ import {
 } from "dockview-react";
 import { themeKandev } from "@/lib/layout/dockview-theme";
 import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
-import { tryRestoreLayout } from "./dockview-layout-restore";
+import { restoreEnvLayout } from "./dockview-layout-restore";
 import {
   setupContainerResizeSync,
   setupGroupTracking,
@@ -22,8 +22,7 @@ import { useFileEditors } from "@/hooks/use-file-editors";
 import { useLspFileOpener } from "@/hooks/use-lsp-file-opener";
 import { useEditorKeybinds } from "@/hooks/use-editor-keybinds";
 import { usePlanPanelAutoOpen } from "@/hooks/use-plan-panel-auto-open";
-import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
+import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useActiveTaskHasRepos } from "@/hooks/domains/kanban/use-active-task-has-repos";
 
@@ -53,6 +52,10 @@ import {
   useAutoSessionTab,
   useAutoPRPanel,
 } from "./dockview-session-tabs";
+import {
+  useCompactDockviewDefault,
+  useDockviewUnmountCleanup,
+} from "./dockview-desktop-layout-hooks";
 import { TerminalPanel } from "./terminal-panel";
 import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
@@ -67,7 +70,7 @@ import type { Repository, RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 
 // Portal system
-import { panelPortalManager, setPanelTitle } from "@/lib/layout/panel-portal-manager";
+import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { PanelPortalHost, usePortalSlot } from "@/lib/layout/panel-portal-host";
 
 // ---------------------------------------------------------------------------
@@ -309,10 +312,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
   // Dynamic title with file count — use environment-stable sessionId so the
   // tab title doesn't re-fetch on same-environment session tab switches.
   const activeSessionId = useEnvironmentSessionId();
-  const gitStatus = useSessionGitStatus(activeSessionId);
-  const { commits } = useSessionCommits(activeSessionId);
-  const fileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
-  const totalCount = fileCount + commits.length;
+  const totalCount = useSessionChangesCount(activeSessionId);
 
   // Repo-less tasks have no git changes ever — auto-close the panel so users
   // don't see a permanently empty Changes tab. Gate on a confirmed `false`:
@@ -468,12 +468,14 @@ type DockviewDesktopLayoutProps = {
   initialScripts?: RepositoryScript[];
   initialTerminals?: Terminal[];
   initialLayout?: string | null;
+  compact?: boolean;
 };
 
 export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   sessionId,
   repository,
   initialLayout,
+  compact = false,
 }: DockviewDesktopLayoutProps) {
   const setApi = useDockviewStore((s) => s.setApi);
   const buildDefaultLayout = useDockviewStore((s) => s.buildDefaultLayout);
@@ -495,6 +497,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   useLspFileOpener();
   useEditorKeybinds();
   usePlanPanelAutoOpen();
+  useCompactDockviewDefault(compact);
 
   useEffect(() => {
     envIdRef.current = effectiveEnvId;
@@ -506,10 +509,10 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       setApi(api);
 
       const currentEnvId = envIdRef.current;
-      // If a layout intent was passed via URL, skip saved layout restoration
-      const restored = !initialLayout && tryRestoreLayout(api, currentEnvId, VALID_COMPONENTS);
+      const restored =
+        !initialLayout && restoreEnvLayout(api, currentEnvId, appStore, VALID_COMPONENTS);
       if (!restored) {
-        buildDefaultLayout(api, initialLayout ?? undefined);
+        buildDefaultLayout(api, initialLayout ?? (compact ? "compact" : undefined));
       }
 
       useDockviewStore.setState({ currentLayoutEnvId: currentEnvId });
@@ -521,7 +524,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       setupPortalCleanup(api, appStore);
       readyDisposersRef.current.push(setupContainerResizeSync(api));
     },
-    [setApi, buildDefaultLayout, initialLayout, appStore],
+    [setApi, buildDefaultLayout, initialLayout, compact, appStore],
   );
 
   // Release session-scoped portals + trigger layout switch on session change.
@@ -535,17 +538,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   // Auto-show PR detail panel when the task has an associated PR
   useAutoPRPanel();
-
-  // Clean up on unmount (e.g. navigating away from session page)
-  useEffect(() => {
-    const timerRef = saveTimerRef;
-    const disposersRef = readyDisposersRef;
-    return () => {
-      for (const dispose of disposersRef.current.splice(0)) dispose();
-      if (timerRef.current) clearTimeout(timerRef.current);
-      panelPortalManager.releaseAll();
-    };
-  }, []);
+  useDockviewUnmountCleanup(saveTimerRef, readyDisposersRef);
 
   // Visual masking: hide the dockview container during slow-path layout
   // switches (full fromJSON rebuild) to prevent the old layout from flashing.
@@ -553,6 +546,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   return (
     <div
+      data-testid="dockview-task-layout"
       className="flex-1 min-h-0 grid grid-rows-[1fr_auto]"
       aria-busy={isRestoringLayout}
       style={{
