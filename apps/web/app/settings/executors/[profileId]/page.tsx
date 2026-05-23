@@ -430,7 +430,7 @@ function ProfileEditSections({
         // selector that governs every subsequent SSH command run by kandev.
         <SSHAgentReadinessCard
           executorId={executor.id}
-          shell={profile.config?.shell}
+          shell={profile.config?.ssh_shell}
           onShellChange={onShellChange}
         />
       )}
@@ -530,10 +530,13 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
   // from the main Save button — users twiddling the dropdown shouldn't have
   // to remember to press Save afterwards. The PATCH carries the full
   // (merged) config so the backend's config-replace semantics don't wipe
-  // adjacent keys (workdir_root, prepare_script env, etc.).
+  // adjacent keys (workdir_root, prepare_script env, etc.). Key name is
+  // ssh_shell to match MetadataKeySSHShell — buildLaunchMetadata copies
+  // profile.config keys verbatim into req.Metadata, so the same string
+  // has to identify the shell on both sides.
   const handleShellChange = useCallback(
     async (next: string) => {
-      const mergedConfig = { ...(profile.config ?? {}), shell: next };
+      const mergedConfig = { ...(profile.config ?? {}), ssh_shell: next };
       await persistence.save({
         name: profile.name,
         config: mergedConfig,
