@@ -27,6 +27,7 @@ test.describe("System Database page", () => {
 
     const vacuumButton = testPage.getByTestId("system-vacuum-button");
     await expect(vacuumButton).toBeEnabled();
+    await expect(vacuumButton).toHaveAttribute("data-state", "idle");
 
     // Fire and confirm the request leaves the page.
     const requestPromise = testPage.waitForRequest(
@@ -35,6 +36,19 @@ test.describe("System Database page", () => {
     );
     await vacuumButton.click();
     await requestPromise;
+
+    // After completion the button switches to the success state (green check
+    // + "Done"). useActionFeedback holds the pending state for at least
+    // 350ms, so the success transition is observable.
+    await expect(vacuumButton).toHaveAttribute("data-state", "success", { timeout: 5_000 });
+    // ...and reverts back to idle after the auto-reset window (~1.8s).
+    await expect(vacuumButton).toHaveAttribute("data-state", "idle", { timeout: 5_000 });
+  });
+
+  test("WAL row exposes an info tooltip trigger", async ({ testPage }) => {
+    await testPage.goto("/settings/system/database");
+    await expect(testPage.getByTestId("system-database-card")).toBeVisible();
+    await expect(testPage.getByTestId("system-db-wal-info")).toBeVisible();
   });
 
   test("clicking Factory Reset opens the confirmation modal", async ({ testPage }) => {

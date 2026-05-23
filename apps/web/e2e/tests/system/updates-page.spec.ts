@@ -36,4 +36,27 @@ test.describe("System Updates page", () => {
     await expect(testPage.getByTestId("system-updates-current")).toHaveText("v1.0.0");
     await expect(testPage.getByTestId("system-updates-latest")).toHaveText("v1.0.1");
   });
+
+  test("changelog pagination is URL-driven via ?page=N", async ({ testPage }) => {
+    // The changelog renders 10 entries per page and the embedded list (built
+    // from generated/changelog.json) routinely covers >10 versions in this
+    // repo, so page 2 should exist. If a future trim drops it below 11 the
+    // pagination element would not render and the test would skip; protect
+    // against that by asserting on the page-2 link only when present.
+    await testPage.goto("/settings/system/updates");
+    await expect(testPage.getByTestId("system-page-title")).toHaveText("Updates");
+
+    const page2 = testPage.getByRole("link", { name: "2" }).first();
+    const hasPagination = (await page2.count()) > 0;
+    test.skip(!hasPagination, "Changelog has fewer than 2 pages on this build");
+
+    await page2.click();
+    // URL replace should land on ?page=2 without a full reload.
+    await testPage.waitForURL(/[?&]page=2(\b|&)/, { timeout: 5_000 });
+
+    // Going back to page 1 strips the query param (clean URL convention).
+    const page1 = testPage.getByRole("link", { name: "1" }).first();
+    await page1.click();
+    await testPage.waitForURL((url) => !url.search.includes("page="), { timeout: 5_000 });
+  });
 });

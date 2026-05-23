@@ -70,5 +70,19 @@ export function useDiskUsage() {
     }
   }, [diskWalkJob, reload]);
 
+  // Polling fallback: keep refetching while the backend reports
+  // computing=true. The primary path is the WS system.job.update event above,
+  // but if the WS connection is not yet open when the disk-walk job finishes
+  // (typical on first page load) the broadcast is dropped and the UI would
+  // otherwise sit on "Calculating..." forever. Polling stops as soon as the
+  // backend reports the cached value.
+  useEffect(() => {
+    if (!diskUsage?.computing) return;
+    const interval = setInterval(() => {
+      void reload();
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [diskUsage?.computing, reload]);
+
   return { diskUsage, isLoading, error, reload, refresh };
 }
