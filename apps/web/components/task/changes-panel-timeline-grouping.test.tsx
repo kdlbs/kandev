@@ -25,6 +25,12 @@ vi.mock("@/hooks/use-multi-select", () => ({
   }),
 }));
 
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (
+    selector: (state: { userSettings: { changesPanelLayout: "flat" | "tree" } }) => unknown,
+  ) => selector({ userSettings: { changesPanelLayout: "flat" } }),
+}));
+
 import { FileListSection, CommitsSection } from "./changes-panel-timeline";
 
 const REPO_HEADER_TID = "changes-repo-header";

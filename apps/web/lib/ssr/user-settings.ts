@@ -8,11 +8,16 @@ export function parseTerminalLinkBehavior(value: string | undefined): "new_tab" 
   return value === "browser_panel" ? "browser_panel" : "new_tab";
 }
 
+export function parseChangesPanelLayout(value: string | undefined): "flat" | "tree" {
+  return value === "tree" ? "tree" : "flat";
+}
+
 function buildTerminalFields(s: UserSettingsData) {
   return {
     terminalLinkBehavior: parseTerminalLinkBehavior(s.terminal_link_behavior),
     terminalFontFamily: s.terminal_font_family || null,
     terminalFontSize: s.terminal_font_size || null,
+    changesPanelLayout: parseChangesPanelLayout(s.changes_panel_layout),
   };
 }
 
@@ -85,6 +90,7 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       terminalLinkBehavior: "new_tab" as const,
       terminalFontFamily: null,
       terminalFontSize: null,
+      changesPanelLayout: "flat" as const,
       ...buildLspFields(undefined),
       loaded: false,
     };

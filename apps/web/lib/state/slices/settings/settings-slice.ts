@@ -43,6 +43,7 @@ export const defaultSettingsState: SettingsSliceState = {
     keyboardShortcuts: {},
     terminalFontFamily: null,
     terminalFontSize: null,
+    changesPanelLayout: "flat",
     loaded: false,
   },
 };

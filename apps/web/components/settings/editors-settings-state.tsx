@@ -244,6 +244,7 @@ function buildUserSettingsFromResponse(
     terminalLinkBehavior: parseTerminalLinkBehavior(s.terminal_link_behavior),
     terminalFontFamily: s.terminal_font_family || null,
     terminalFontSize: s.terminal_font_size || null,
+    changesPanelLayout: s.changes_panel_layout === "tree" ? ("tree" as const) : ("flat" as const),
     ...mapEditorSettingsFields(s),
   };
 }

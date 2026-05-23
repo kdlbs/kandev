@@ -430,6 +430,7 @@ export type UserSettings = {
   terminal_link_behavior?: string;
   terminal_font_family?: string;
   terminal_font_size?: number;
+  changes_panel_layout?: "flat" | "tree";
   updated_at: string;
 };
 

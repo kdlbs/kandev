@@ -155,6 +155,7 @@ export type UserSettingsState = {
   terminalLinkBehavior: "new_tab" | "browser_panel";
   terminalFontFamily: string | null;
   terminalFontSize: number | null;
+  changesPanelLayout: "flat" | "tree";
   loaded: boolean;
 };
 
