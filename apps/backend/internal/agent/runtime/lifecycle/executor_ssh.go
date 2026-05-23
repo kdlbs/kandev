@@ -531,23 +531,22 @@ func (r *SSHExecutor) IsAlwaysResumable() bool         { return true }
 // maybeUploadCredentials runs the standard remote-credentials pipeline used by
 // Sprites. Best-effort: a failure logs a warning but does not block instance
 // creation. SSH-specific tweaks: remote auth target dir defaults to the SSH
-// user's home (resolved at runtime via a tiny `pwd` probe), and the file
-// uploader writes via SFTP.
+// user's $HOME (resolved at runtime via a tiny `printf %s "$HOME"` probe),
+// and the file uploader writes via SFTP.
 //
-// v1 ships without remote-credentials upload — the field is accepted on the
-// executor profile (parity with Sprites/Docker) but the upload pipeline lives
-// in the Sprites executor and is not yet ported over. A non-empty
-// remote_credentials log is the only side effect so users notice they
-// configured a feature that isn't active yet.
-func (r *SSHExecutor) maybeUploadCredentials(_ context.Context, _ *ssh.Client, req *ExecutorCreateRequest) {
-	if getMetadataString(req.Metadata, "remote_credentials") == "" {
-		return
+// Credential upload only fires when the executor profile selected at least
+// one remote-credentials method (or remote_auth_secrets / setup-script env
+// vars). A failure here doesn't abort the launch — credentials are
+// best-effort and missing ones surface later as the agent's own auth error.
+func (r *SSHExecutor) maybeUploadCredentials(ctx context.Context, client *ssh.Client, req *ExecutorCreateRequest) {
+	if err := r.uploadCredentials(ctx, client, req); err != nil {
+		r.logger.Warn(
+			"ssh executor: credential upload failed; launch will proceed but agent may not authenticate",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.SessionID),
+			zap.Error(err),
+		)
 	}
-	r.logger.Warn(
-		"ssh executor: remote_credentials is configured but credential upload is not yet implemented for the SSH runtime; see docs/specs/ssh-executor/spec.md",
-		zap.String("task_id", req.TaskID),
-		zap.String("session_id", req.SessionID),
-	)
 }
 
 // preflightAgentBinary probes the remote for the agent's required binary

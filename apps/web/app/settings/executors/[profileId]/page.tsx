@@ -84,10 +84,15 @@ function parseRemoteCredentials(config?: Record<string, string>): string[] {
 }
 
 function useRemoteExecutorFlags(executorType: ExecutorType) {
+  // SSH joins the "remote" set because it runs the agent on a host whose
+  // filesystem doesn't share paths with the kandev backend — so the same
+  // remote-credentials + auth-secrets surface applies (the SSH executor
+  // SFTPs files into the remote user's $HOME).
   const isRemote =
     executorType === "local_docker" ||
     executorType === "remote_docker" ||
-    executorType === "sprites";
+    executorType === "sprites" ||
+    executorType === "ssh";
   return {
     isRemote,
     isDocker: executorType === "local_docker" || executorType === "remote_docker",
