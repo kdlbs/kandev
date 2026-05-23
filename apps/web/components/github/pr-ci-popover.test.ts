@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deriveAggregateCounts, hasNoChecksAtAll } from "./pr-ci-popover";
-import type { TaskPR } from "@/lib/types/github";
+import type { CheckRun, TaskPR } from "@/lib/types/github";
 
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
@@ -115,6 +115,18 @@ describe("deriveAggregateCounts", () => {
 describe("hasNoChecksAtAll", () => {
   it("does not hide failed status just because aggregate counts are zero", () => {
     expect(hasNoChecksAtAll(makePR({ checks_state: "failure" }), null, false)).toBe(false);
+  });
+
+  it("does not hide checks while feedback is fetching", () => {
+    expect(hasNoChecksAtAll(makePR(), null, true)).toBe(false);
+  });
+
+  it("does not hide checks when aggregate total is populated", () => {
+    expect(hasNoChecksAtAll(makePR({ checks_total: 3 }), null, false)).toBe(false);
+  });
+
+  it("does not hide checks when feedback has live checks", () => {
+    expect(hasNoChecksAtAll(makePR(), { checks: [{} as CheckRun] }, false)).toBe(false);
   });
 
   it("hides checks only when status and counts are empty", () => {
