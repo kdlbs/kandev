@@ -43,10 +43,7 @@ function countForBucket(counts: CountsView, kind: CheckBucket): number {
 }
 
 export function deriveAggregateCounts(pr: TaskPR): CountsView {
-  // Pre-load: if checks_total is populated, derive a coarse split using
-  // checks_state to attribute the "non-passing" remainder. This is good
-  // enough for the instant render — the lazy PRFeedback fetch refines. When
-  // counts are stale, trust the status and reserve a visible non-passing slice.
+  // Pre-load coarse split from aggregate fields; lazy PRFeedback fetch replaces it.
   const total = Math.max(0, pr.checks_total);
   const passing = Math.min(Math.max(0, pr.checks_passing), total);
   const remaining = Math.max(0, total - passing);
