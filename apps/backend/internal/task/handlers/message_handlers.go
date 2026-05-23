@@ -229,8 +229,11 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// block and bypass server-side injection of the canonical task/session/
 	// tool context. Wrap unconditionally; the orchestrator's own guard sees
 	// our wrap downstream and skips its second pass.
+	// Passthrough sessions skip the wrap: the prompt is typed straight into
+	// the agent CLI's TTY and the user sees it verbatim — they don't want a
+	// wall of MCP-tool boilerplate prepended to "hello".
 	storedContent := req.Content
-	if isCreatedSession && (req.Content != "" || len(req.Attachments) > 0) {
+	if isCreatedSession && !sessionResp.Session.IsPassthrough && (req.Content != "" || len(req.Attachments) > 0) {
 		storedContent = sysprompt.InjectKandevContext(req.TaskID, req.TaskSessionID, req.Content)
 		req.Content = storedContent
 	}

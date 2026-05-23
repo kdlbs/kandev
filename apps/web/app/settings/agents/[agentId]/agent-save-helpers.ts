@@ -16,6 +16,25 @@ import type {
 } from "@/lib/types/http";
 import { permissionsToProfilePatch, arePermissionsDirty } from "@/lib/agent-permissions";
 import { areCLIFlagsEqual } from "@/lib/cli-flags";
+import type { ProfileFormData } from "@/components/settings/profile-form-fields";
+
+/**
+ * Translates a ProfileFormData patch (snake_case form keys) into a
+ * Partial<AgentProfile> (camelCase). Profiles in client state use the
+ * canonical camelCase AgentProfile shape, so without this translation
+ * patches like { cli_passthrough: true } would land as a new snake_case
+ * key and the camelCase reader would never see them.
+ */
+export function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<AgentProfile> {
+  const next: Partial<AgentProfile> = {};
+  if (patch.name !== undefined) next.name = patch.name;
+  if (patch.model !== undefined) next.model = patch.model;
+  if (patch.mode !== undefined) next.mode = patch.mode;
+  if (patch.allow_indexing !== undefined) next.allowIndexing = patch.allow_indexing;
+  if (patch.cli_passthrough !== undefined) next.cliPassthrough = patch.cli_passthrough;
+  if (patch.cli_flags !== undefined) next.cliFlags = patch.cli_flags;
+  return next;
+}
 
 function areEnvVarsEqual(a?: ProfileEnvVar[], b?: ProfileEnvVar[]): boolean {
   const left = a ?? [];

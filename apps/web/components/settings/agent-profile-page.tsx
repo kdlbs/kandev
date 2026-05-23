@@ -12,6 +12,7 @@ import { Separator } from "@kandev/ui/separator";
 import { useToast } from "@/components/toast-provider";
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
+import { toAgentProfilePatch } from "@/app/settings/agents/[agentId]/agent-save-helpers";
 import { deleteAgentProfileAction, updateAgentProfileAction } from "@/app/actions/agents";
 import type { ActiveSessionInfo } from "@/lib/types/agent-profile-errors";
 import {
@@ -169,17 +170,6 @@ function ProfileSettingsCard({
       </CardContent>
     </Card>
   );
-}
-
-function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<AgentProfile> {
-  const next: Partial<AgentProfile> = {};
-  if (patch.name !== undefined) next.name = patch.name;
-  if (patch.model !== undefined) next.model = patch.model;
-  if (patch.mode !== undefined) next.mode = patch.mode;
-  if (patch.allow_indexing !== undefined) next.allowIndexing = patch.allow_indexing;
-  if (patch.cli_passthrough !== undefined) next.cliPassthrough = patch.cli_passthrough;
-  if (patch.cli_flags !== undefined) next.cliFlags = patch.cli_flags;
-  return next;
 }
 
 function useSyncAgentsToStore() {

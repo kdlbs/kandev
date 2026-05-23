@@ -356,7 +356,10 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	// Message.ToAPI strips for display). Idempotent — upstream call sites that
 	// record the user message themselves (wsAddMessage on CREATED sessions)
 	// wrap first, and the HasKandevContext guard prevents a second wrap here.
-	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) {
+	// Passthrough profiles skip the wrap: the prompt is typed straight into the
+	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
+	// MCP-tool boilerplate prepended to "hello".
+	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) && !s.isPassthroughProfile(ctx, effectiveProfileID) {
 		effectivePrompt = sysprompt.InjectKandevContext(taskID, sessionID, effectivePrompt)
 	}
 
@@ -568,7 +571,10 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// recordAutoStartMessage) wrap before recording the user message so the DB
 	// row carries the block; the HasKandevContext guard makes this orchestrator
 	// pass a no-op in those cases instead of double-wrapping.
-	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) {
+	// Passthrough profiles skip the wrap: the prompt is typed straight into the
+	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
+	// MCP-tool boilerplate prepended to "hello".
+	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) && !s.isPassthroughProfile(ctx, agentProfileID) {
 		effectivePrompt = sysprompt.InjectKandevContext(task.ID, sessionID, effectivePrompt)
 	}
 

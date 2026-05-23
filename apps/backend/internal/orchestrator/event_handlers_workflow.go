@@ -1167,8 +1167,10 @@ func (s *Service) autoStartStepPrompt(
 	// (HasKandevContext guard) so the pre-wrap doesn't double.
 	// The HasKandevContext check on `prompt` also guards against any future
 	// caller that ever pre-wraps before reaching here (none today).
+	// Passthrough sessions skip the wrap: the prompt is typed straight into
+	// the agent CLI's TTY and the user sees it verbatim.
 	recordedPrompt := prompt
-	if session.State == models.TaskSessionStateCreated && (prompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(prompt) {
+	if session.State == models.TaskSessionStateCreated && !session.IsPassthrough && (prompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(prompt) {
 		recordedPrompt = sysprompt.InjectKandevContext(taskID, sessionID, prompt)
 	}
 	s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin)
