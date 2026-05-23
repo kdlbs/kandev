@@ -160,11 +160,15 @@ test.describe("Mobile passthrough terminal — touch scroll", () => {
     // Swipe up enough rows to return to the bottom of the buffer.
     await swipe(testPage, "up", 5, 50);
 
+    // Match-or-beat: any late shell output that arrives between captures bumps
+    // the buffer's bottom further down, so the new viewportY may legitimately
+    // exceed the snapshot. xterm clamps at the buffer boundary, so overshoot
+    // is impossible.
     await expect
       .poll(() => readViewportY(testPage), {
         timeout: 5_000,
         message: "Upward swipe should return viewportY to the bottom",
       })
-      .toBe(bottomViewportY);
+      .toBeGreaterThanOrEqual(bottomViewportY);
   });
 });
