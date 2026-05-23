@@ -152,10 +152,17 @@ export async function resizeColumnViaSplitview(
   // the browser-side script stays simple enough to satisfy the linter.
   const viewport = page.viewportSize();
   const vw = viewport?.width ?? 1440;
-  const runtimeCap =
+  // Mirror `caps.ts` exactly: `viewportBound(value, vw)` clamps the ratio-based
+  // cap to `vw - VIEWPORT_RESERVE_PX (300)` so the center column always has
+  // room. Without this the test helper diverges from production on narrow
+  // viewports (e.g. vw=900 → sidebar cap would be 350 here but 300 in app).
+  const PINNED_MIN = 180;
+  const VIEWPORT_RESERVE = 300;
+  const rawCap =
     column === "sidebar"
       ? Math.max(350, Math.round(vw * 0.3))
       : Math.max(800, Math.round(vw * 0.7));
+  const runtimeCap = Math.max(PINNED_MIN, Math.min(rawCap, vw - VIEWPORT_RESERVE));
   await loosenPinnedConstraints(page, column, runtimeCap);
   const result = await page.evaluate(
     ({ col, target }) => {
