@@ -5,7 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { Spinner } from "@kandev/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { Badge } from "@kandev/ui/badge";
-import { IconDownload, IconFileText, IconRefresh } from "@tabler/icons-react";
+import { IconCopy, IconDownload, IconFileText, IconRefresh } from "@tabler/icons-react";
 import { useLogFiles } from "@/hooks/domains/system/use-log-files";
 import { useLogTail } from "@/hooks/domains/system/use-log-tail";
 import { buildLogDownloadUrl } from "@/lib/api/domains/system-api";
@@ -62,17 +62,87 @@ function TailContent({
   );
 }
 
+function buildTailFilename(): string {
+  // YYYY-MM-DDTHH-MM-SS to mirror lumberjack's rotation naming, minus the
+  // colons (which are invalid on Windows). The user can rename freely.
+  const stamp = new Date().toISOString().replace(/:/g, "-").replace(/\..+$/, "");
+  return `kandev-tail-${stamp}.log`;
+}
+
+function downloadTailAsFile(tail: string[]) {
+  if (typeof window === "undefined" || tail.length === 0) return;
+  const blob = new Blob([tail.join("\n") + "\n"], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = buildTailFilename();
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function TailHeader({
+  tail,
   current,
   refreshState,
+  copyState,
   onRefresh,
+  onCopy,
 }: {
+  tail: string[];
   current: ReturnType<typeof useLogFiles>["files"][number] | undefined;
   refreshState: ActionFeedbackState;
+  copyState: ActionFeedbackState;
   onRefresh: () => void;
+  onCopy: () => void;
 }) {
+  const hasTail = tail.length > 0;
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={!hasTail || copyState === "pending"}
+        onClick={onCopy}
+        className="cursor-pointer min-w-[5.5rem] justify-center"
+        data-testid="system-log-tail-copy"
+        data-state={copyState}
+      >
+        <ActionButtonContent
+          state={copyState}
+          idleIcon={<IconCopy className="h-3.5 w-3.5 mr-1" />}
+          idleLabel="Copy"
+          pendingLabel="Copying..."
+          successLabel="Copied"
+        />
+      </Button>
+      {current ? (
+        <Button
+          asChild
+          variant="outline"
+          size="sm"
+          className="cursor-pointer"
+          data-testid="system-log-current-download"
+        >
+          <a href={buildLogDownloadUrl(current.name)} download>
+            <IconDownload className="h-3.5 w-3.5 mr-1" />
+            Download file
+          </a>
+        </Button>
+      ) : (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!hasTail}
+          onClick={() => downloadTailAsFile(tail)}
+          className="cursor-pointer"
+          data-testid="system-log-tail-download"
+        >
+          <IconDownload className="h-3.5 w-3.5 mr-1" />
+          Download tail
+        </Button>
+      )}
       <Button
         variant="outline"
         size="sm"
@@ -90,20 +160,6 @@ function TailHeader({
           successLabel="Refreshed"
         />
       </Button>
-      {current && (
-        <Button
-          asChild
-          variant="outline"
-          size="sm"
-          className="cursor-pointer"
-          data-testid="system-log-current-download"
-        >
-          <a href={buildLogDownloadUrl(current.name)} download>
-            <IconDownload className="h-3.5 w-3.5 mr-1" />
-            Download current
-          </a>
-        </Button>
-      )}
     </div>
   );
 }
@@ -112,10 +168,19 @@ export function LogViewer() {
   const { files, isLoading: filesLoading } = useLogFiles();
   const { tail, isLoading: tailLoading, reload: reloadTail } = useLogTail(1000);
   const refreshFeedback = useActionFeedback();
+  const copyFeedback = useActionFeedback();
 
   const onRefresh = () =>
     void refreshFeedback.run(async () => {
       await reloadTail();
+    });
+
+  const onCopy = () =>
+    void copyFeedback.run(async () => {
+      if (typeof navigator === "undefined" || !navigator.clipboard) {
+        throw new Error("Clipboard API not available");
+      }
+      await navigator.clipboard.writeText(tail.join("\n") + "\n");
     });
 
   const current = files.find((f) => f.current);
@@ -129,9 +194,12 @@ export function LogViewer() {
             <IconFileText className="h-4 w-4" /> Recent log output
           </CardTitle>
           <TailHeader
+            tail={tail}
             current={current}
             refreshState={refreshFeedback.state}
+            copyState={copyFeedback.state}
             onRefresh={onRefresh}
+            onCopy={onCopy}
           />
         </CardHeader>
         <CardContent>
