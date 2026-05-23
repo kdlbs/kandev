@@ -37,6 +37,11 @@ const LAYOUT_STORAGE_KEY = "dockview-layout-v2";
  *  `sv.resizeView` triggers `onDidLayoutChange`. */
 let enforcing = false;
 
+/** True while the user is actively dragging a `.dv-sash`. We pause target
+ *  enforcement during the drag so the in-progress resize doesn't get
+ *  reverted to the previous target on every intermediate layout change. */
+let sashDragging = false;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function restoreColumnToTarget(sv: any, idx: number, target: number | undefined): void {
   if (target === undefined) return;
@@ -50,7 +55,7 @@ function restoreColumnToTarget(sv: any, idx: number, target: number | undefined)
 }
 
 function enforcePinnedTargets(api: DockviewReadyEvent["api"]): void {
-  if (enforcing) return;
+  if (enforcing || sashDragging) return;
   const store = useDockviewStore.getState();
   if (store.isRestoringLayout) return;
   if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
@@ -113,14 +118,13 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
     return () => layoutSub.dispose();
   }
 
-  let dragging = false;
   const onMouseDown = (e: MouseEvent): void => {
     const t = e.target as HTMLElement | null;
-    if (t?.closest(".dv-sash")) dragging = true;
+    if (t?.closest(".dv-sash")) sashDragging = true;
   };
   const onMouseUp = (e: MouseEvent): void => {
-    if (e.button !== 0 || !dragging) return;
-    dragging = false;
+    if (e.button !== 0 || !sashDragging) return;
+    sashDragging = false;
     // Capture the post-drag width as the new target.
     requestAnimationFrame(() => {
       const sv = getRootSplitview(api);
@@ -284,6 +288,8 @@ export function setupLayoutPersistence(
     sub.dispose();
     if (typeof window !== "undefined") {
       window.removeEventListener("beforeunload", onBeforeUnload);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (window as any).__persistDockviewLayout__;
     }
     // Cancel any in-flight debounce so a pending fire can't race with
     // teardown and write a stale layout to storage.

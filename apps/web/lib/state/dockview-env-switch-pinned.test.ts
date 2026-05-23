@@ -134,4 +134,53 @@ describe("performEnvSwitch — pinned column resize after fast-path", () => {
     // is at index 2 in the column list which exceeds sv.length so isn't
     // hit; this scenario covers the saved-sidebar restoration path only.
   });
+
+  it("applies saved widths to both sidebar AND right when sv.length matches", () => {
+    // Cover the 3-column saved-layout path so the right column's
+    // saved-size branch is exercised. The previous test exits the loop
+    // before reaching the right column because sv.length = 2.
+    const savedLayout = {
+      grid: {
+        root: {
+          type: "branch" as const,
+          data: [
+            { type: "leaf", data: { id: "g1", views: ["sidebar"] }, size: 420 },
+            { type: "leaf", data: { id: "g2", views: ["chat"] }, size: 760 },
+            { type: "leaf", data: { id: "g3", views: ["files"] }, size: 420 },
+          ],
+        },
+        height: 600,
+        width: 1600,
+        orientation: "HORIZONTAL" as const,
+      },
+      panels: {
+        sidebar: { contentComponent: "sidebar" },
+        chat: { contentComponent: "chat" },
+        files: { contentComponent: "files" },
+      },
+      activeGroup: "g1",
+    };
+    vi.mocked(getEnvLayout).mockReturnValue(
+      savedLayout as unknown as ReturnType<typeof getEnvLayout>,
+    );
+    vi.mocked(savedLayoutMatchesLive).mockReturnValue(true);
+
+    const resizeView = vi.fn();
+    vi.mocked(getRootSplitview).mockImplementation(
+      () =>
+        ({
+          length: 3,
+          getViewSize: () => 800,
+          resizeView,
+        }) as unknown as NonNullable<ReturnType<typeof getRootSplitview>>,
+    );
+
+    performEnvSwitch(makeParams());
+
+    // Both pinned columns get their saved size; center (index 1) is not
+    // pinned and is skipped.
+    expect(resizeView).toHaveBeenCalledWith(0, 420);
+    expect(resizeView).toHaveBeenCalledWith(2, 420);
+    expect(resizeView).not.toHaveBeenCalledWith(1, expect.anything());
+  });
 });
