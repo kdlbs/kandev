@@ -95,9 +95,16 @@ export function FileBrowserToolbar({
             <TooltipContent>Copy workspace path</TooltipContent>
           </Tooltip>
           {displayPath ? (
-            <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
-              {displayPath}
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+                  {displayPath}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="break-all max-w-[min(420px,90vw)]">
+                {fullPath || displayPath}
+              </TooltipContent>
+            </Tooltip>
           ) : (
             <Skeleton className="h-3 w-24" />
           )}
