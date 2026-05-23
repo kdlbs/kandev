@@ -34,6 +34,14 @@ export {
   LAYOUT_PINNED_MIN_PX,
 } from "./caps";
 
+// Pinned-column target widths (enforced after every layout-change)
+export {
+  setPinnedTarget,
+  getPinnedTarget,
+  clearPinnedTarget,
+  clearAllPinnedTargets,
+} from "./pinned-targets";
+
 // Presets
 export {
   defaultLayout,

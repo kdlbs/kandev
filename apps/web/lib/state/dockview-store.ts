@@ -7,6 +7,7 @@ import {
   setEnvMaximizeState,
   removeEnvMaximizeState,
 } from "@/lib/local-storage";
+import { setPinnedTarget } from "./layout-manager";
 import { applyLayoutFixups, focusOrAddPanel } from "./dockview-layout-builders";
 import {
   SIDEBAR_GROUP,
@@ -716,7 +717,15 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
     if (typeof window !== "undefined") {
       // Exposed for E2E tests to assert on panel/group placement. Harmless in
       // prod; the DockviewApi is already reachable via the store in devtools.
-      (window as unknown as { __dockviewApi__: DockviewApi | null }).__dockviewApi__ = api;
+      type TestWindow = {
+        __dockviewApi__: DockviewApi | null;
+        __setPinnedTarget__?: typeof setPinnedTarget;
+      };
+      const w = window as unknown as TestWindow;
+      w.__dockviewApi__ = api;
+      // E2E test helpers: let `resizeColumnViaSplitview` update the target
+      // width after a programmatic resize (mirroring the sash-drag mouseup).
+      w.__setPinnedTarget__ = setPinnedTarget;
     }
     if (api) {
       const resolveFilePath = (panelId: string | undefined): string | null => {

@@ -167,7 +167,8 @@ export async function resizeColumnViaSplitview(
   const result = await page.evaluate(
     ({ col, target }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const api = (window as any).__dockviewApi__;
+      const w = window as any;
+      const api = w.__dockviewApi__;
       const sv = api?.component?.gridview?.root?.splitview;
       if (!api || !sv) throw new Error("dockview splitview not exposed");
       if (sv.length < 2) throw new Error("dockview has fewer than 2 columns");
@@ -176,7 +177,21 @@ export async function resizeColumnViaSplitview(
       }
       const idx = col === "sidebar" ? 0 : sv.length - 1;
       sv.resizeView(idx, target);
-      return sv.getViewSize(idx) as number;
+      const actual = sv.getViewSize(idx) as number;
+      // Mirror the production sash-drag mouseup behavior: update the pinned
+      // target so `enforcePinnedTargets` doesn't restore the old size on the
+      // next layout-change tick.
+      if (typeof w.__setPinnedTarget__ === "function") {
+        w.__setPinnedTarget__(col, actual);
+      }
+      // `sv.resizeView` alone does not fire `onDidLayoutChange` in dockview
+      // 4.x — without that, the debounced layout-persistence handler never
+      // saves the new width. Call the exposed test helper to force-flush the
+      // current layout into storage so reload assertions see the new state.
+      if (typeof w.__persistDockviewLayout__ === "function") {
+        w.__persistDockviewLayout__();
+      }
+      return actual;
     },
     { col: column, target: targetWidth },
   );

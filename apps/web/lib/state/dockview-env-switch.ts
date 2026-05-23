@@ -17,6 +17,7 @@ import {
   layoutStructuresMatch,
   getPinnedWidth,
   getRootSplitview,
+  setPinnedTarget,
 } from "./layout-manager";
 import type { LayoutState, LayoutGroupIds } from "./layout-manager";
 import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
@@ -352,6 +353,9 @@ function applyPinnedColumnSizes(
     if (typeof target !== "number" || target <= 0) continue;
     try {
       sv.resizeView(i, target);
+      // Update the pinned-target so enforcement keeps the new env's width
+      // through subsequent rebalances.
+      setPinnedTarget(col.id, target);
     } catch {
       /* dockview rejects out-of-range sizes — ignore */
     }

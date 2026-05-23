@@ -10,6 +10,7 @@ import {
   TERMINAL_DEFAULT_ID,
 } from "./constants";
 import { computePinnedMaxPxFor, LAYOUT_PINNED_MIN_PX } from "./caps";
+import { setPinnedTarget } from "./pinned-targets";
 
 export type LayoutGroupIds = {
   centerGroupId: string;
@@ -81,48 +82,53 @@ export function applyLayout(
 
   api.fromJSON(serialized);
 
-  // Lock sidebar / right column widths at their just-computed defaults.
-  // Without a tight max, dockview's proportional rebalance on the next
-  // `api.layout` call grows pinned columns past the legacy initial cap.
-  // The sash-drag handler widens the cap on mousedown so the user can
-  // still drag past the default; on mouseup the cap snaps back to the
-  // new current width. column.maxWidth (e.g. compact's 260) overrides
-  // the lock when set so presets stay tight.
-  const readWidth = makeWidthReader(api);
-  lockSidebarPinnedCap(api, state, readWidth);
-  lockRightPinnedCaps(api, state, readWidth);
+  // Apply loose constraints (runtime cap) so the user can drag freely; the
+  // actual pinning happens via `setPinnedTarget` + `enforcePinnedTargets`
+  // (wired in `setupSashDragCapToggle`) — after every layout-change event
+  // we force the live column back to its target width via `sv.resizeView`.
+  // This avoids the "lock to current" ratchet bug where transient container
+  // shrinks would permanently pin the sidebar at the smaller size.
+  const sv = getRootSplitview(api);
+  configureSidebarPinned(api, state, sv);
+  configureRightPinned(api, state, sv);
 
   return resolveGroupIds(api);
 }
 
-type WidthReader = (index: number, columnId: string) => number;
-
-function makeWidthReader(api: DockviewApi): WidthReader {
-  const sv = getRootSplitview(api);
-  return (index, columnId) => {
-    const live = sv?.getViewSize?.(index);
-    return typeof live === "number" ? live : computePinnedMaxPxFor(columnId);
-  };
-}
-
-function lockSidebarPinnedCap(api: DockviewApi, state: LayoutState, readWidth: WidthReader): void {
+function configureSidebarPinned(
+  api: DockviewApi,
+  state: LayoutState,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sv: any,
+): void {
   const sidebarCol = state.columns.find((c) => c.id === "sidebar");
   const sb = api.getPanel("sidebar");
   if (!sb) return;
   sb.group.locked = SIDEBAR_LOCK;
   sb.group.header.hidden = false;
-  const currentW = readWidth(0, "sidebar");
-  const cap = sidebarCol?.maxWidth ?? Math.max(currentW, LAYOUT_PINNED_MIN_PX);
-  sb.group.api.setConstraints({ maximumWidth: cap, minimumWidth: LAYOUT_PINNED_MIN_PX });
+  sb.group.api.setConstraints({
+    maximumWidth: sidebarCol?.maxWidth ?? computePinnedMaxPxFor("sidebar"),
+    minimumWidth: LAYOUT_PINNED_MIN_PX,
+  });
+  if (!sidebarCol) return;
+  const live = sv?.getViewSize?.(0);
+  if (typeof live === "number" && live > 0) setPinnedTarget("sidebar", live);
 }
 
-function lockRightPinnedCaps(api: DockviewApi, state: LayoutState, readWidth: WidthReader): void {
+function configureRightPinned(
+  api: DockviewApi,
+  state: LayoutState,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sv: any,
+): void {
   for (let i = 0; i < state.columns.length; i++) {
     const col = state.columns[i];
     if (col.id === "sidebar" || !col.pinned) continue;
-    const currentW = readWidth(i, col.id);
-    const cap = col.maxWidth ?? Math.max(currentW, LAYOUT_PINNED_MIN_PX);
+    const cap = col.maxWidth ?? computePinnedMaxPxFor(col.id);
     applyConstraintsToAllPanelGroups(api, col, cap);
+    if (col.id !== "right") continue;
+    const live = sv?.getViewSize?.(i);
+    if (typeof live === "number" && live > 0) setPinnedTarget("right", live);
   }
 }
 
