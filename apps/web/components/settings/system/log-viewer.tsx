@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { Spinner } from "@kandev/ui/spinner";
@@ -11,6 +10,8 @@ import { useLogFiles } from "@/hooks/domains/system/use-log-files";
 import { useLogTail } from "@/hooks/domains/system/use-log-tail";
 import { buildLogDownloadUrl } from "@/lib/api/domains/system-api";
 import { formatBytes } from "@/lib/utils/format-bytes";
+import { useActionFeedback, type ActionFeedbackState } from "@/hooks/use-action-feedback";
+import { ActionButtonContent } from "./action-button-content";
 
 function formatTimestamp(iso: string): string {
   if (!iso) return "-";
@@ -63,11 +64,11 @@ function TailContent({
 
 function TailHeader({
   current,
-  pending,
+  refreshState,
   onRefresh,
 }: {
   current: ReturnType<typeof useLogFiles>["files"][number] | undefined;
-  pending: boolean;
+  refreshState: ActionFeedbackState;
   onRefresh: () => void;
 }) {
   return (
@@ -75,12 +76,19 @@ function TailHeader({
       <Button
         variant="outline"
         size="sm"
-        disabled={pending}
+        disabled={refreshState === "pending"}
         onClick={onRefresh}
-        className="cursor-pointer"
+        className="cursor-pointer min-w-[6.5rem] justify-center"
         data-testid="system-log-tail-refresh"
+        data-state={refreshState}
       >
-        <IconRefresh className="h-3.5 w-3.5 mr-1" /> Refresh
+        <ActionButtonContent
+          state={refreshState}
+          idleIcon={<IconRefresh className="h-3.5 w-3.5 mr-1" />}
+          idleLabel="Refresh"
+          pendingLabel="Refreshing..."
+          successLabel="Refreshed"
+        />
       </Button>
       {current && (
         <Button
@@ -103,16 +111,12 @@ function TailHeader({
 export function LogViewer() {
   const { files, isLoading: filesLoading } = useLogFiles();
   const { tail, isLoading: tailLoading, reload: reloadTail } = useLogTail(1000);
-  const [pending, setPending] = useState(false);
+  const refreshFeedback = useActionFeedback();
 
-  const onRefresh = async () => {
-    setPending(true);
-    try {
+  const onRefresh = () =>
+    void refreshFeedback.run(async () => {
       await reloadTail();
-    } finally {
-      setPending(false);
-    }
-  };
+    });
 
   const current = files.find((f) => f.current);
   const inMemoryOnly = !filesLoading && files.length === 0;
@@ -126,8 +130,8 @@ export function LogViewer() {
           </CardTitle>
           <TailHeader
             current={current}
-            pending={pending || tailLoading}
-            onRefresh={() => void onRefresh()}
+            refreshState={refreshFeedback.state}
+            onRefresh={onRefresh}
           />
         </CardHeader>
         <CardContent>

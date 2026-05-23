@@ -4,11 +4,19 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { Spinner } from "@kandev/ui/spinner";
-import { IconDatabase, IconBolt, IconRefresh, IconTrash } from "@tabler/icons-react";
+import {
+  IconDatabase,
+  IconBolt,
+  IconInfoCircle,
+  IconRefresh,
+  IconTrash,
+} from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useDatabaseStats } from "@/hooks/domains/system/use-database-stats";
 import { optimizeDatabase, vacuumDatabase } from "@/lib/api/domains/system-api";
 import { formatBytes } from "@/lib/utils/format-bytes";
+import { useActionFeedback, type ActionFeedbackState } from "@/hooks/use-action-feedback";
+import { ActionButtonContent } from "./action-button-content";
 import { JobProgressIndicator } from "./job-progress-indicator";
 import { FactoryResetDialog } from "./factory-reset-dialog";
 
@@ -19,12 +27,32 @@ function formatTimestamp(iso: string | null | undefined): string {
   return d.toLocaleString();
 }
 
-type Row = { label: string; value: string; testid: string };
+const WAL_HELP =
+  "Write-Ahead Log. SQLite writes new changes to this companion file first and merges them into the main database over time. A non-zero WAL size is normal - it temporarily grows under load and shrinks back during checkpoints. Running vacuum will reset it.";
 
-function StatRow({ label, value, testid }: Row) {
+type Row = { label: string; value: string; testid: string; info?: string };
+
+function StatRow({ label, value, testid, info }: Row) {
   return (
     <div className="flex items-baseline justify-between gap-4 py-1.5 border-b last:border-b-0">
-      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+        {label}
+        {info && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={`What is ${label}?`}
+                className="cursor-pointer text-muted-foreground/70 hover:text-foreground transition-colors"
+                data-testid={`${testid}-info`}
+              >
+                <IconInfoCircle className="h-3 w-3" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">{info}</TooltipContent>
+          </Tooltip>
+        )}
+      </span>
       <span className="text-sm font-mono break-all text-right" data-testid={testid}>
         {value}
       </span>
@@ -45,7 +73,12 @@ function StatsTable({ database }: { database: DBStats }) {
     <div className="rounded-md border px-3 py-2">
       <StatRow label="Path" value={database.path} testid="system-db-path" />
       <StatRow label="Size" value={formatBytes(database.size_bytes)} testid="system-db-size" />
-      <StatRow label="WAL" value={formatBytes(database.wal_size_bytes)} testid="system-db-wal" />
+      <StatRow
+        label="WAL"
+        value={formatBytes(database.wal_size_bytes)}
+        testid="system-db-wal"
+        info={WAL_HELP}
+      />
       <StatRow
         label="Schema version"
         value={database.schema_version || "-"}
@@ -96,14 +129,14 @@ function OperationRow({
 }
 
 function MaintenanceButtons({
-  vacuumPending,
-  optimizePending,
+  vacuumState,
+  optimizeState,
   onVacuum,
   onOptimize,
   onResetOpen,
 }: {
-  vacuumPending: boolean;
-  optimizePending: boolean;
+  vacuumState: ActionFeedbackState;
+  optimizeState: ActionFeedbackState;
   onVacuum: () => void;
   onOptimize: () => void;
   onResetOpen: () => void;
@@ -120,12 +153,17 @@ function MaintenanceButtons({
               <Button
                 variant="outline"
                 size="sm"
-                disabled={vacuumPending}
+                disabled={vacuumState === "pending"}
                 onClick={onVacuum}
-                className="cursor-pointer"
+                className="cursor-pointer min-w-[7.5rem] justify-center"
                 data-testid="system-vacuum-button"
+                data-state={vacuumState}
               >
-                <IconBolt className="h-3.5 w-3.5 mr-1" /> Run vacuum
+                <ActionButtonContent
+                  state={vacuumState}
+                  idleIcon={<IconBolt className="h-3.5 w-3.5 mr-1" />}
+                  idleLabel="Run vacuum"
+                />
               </Button>
             </TooltipTrigger>
             <TooltipContent>{VACUUM_HELP}</TooltipContent>
@@ -142,12 +180,17 @@ function MaintenanceButtons({
               <Button
                 variant="outline"
                 size="sm"
-                disabled={optimizePending}
+                disabled={optimizeState === "pending"}
                 onClick={onOptimize}
-                className="cursor-pointer"
+                className="cursor-pointer min-w-[7.5rem] justify-center"
                 data-testid="system-optimize-button"
+                data-state={optimizeState}
               >
-                <IconRefresh className="h-3.5 w-3.5 mr-1" /> Run optimize
+                <ActionButtonContent
+                  state={optimizeState}
+                  idleIcon={<IconRefresh className="h-3.5 w-3.5 mr-1" />}
+                  idleLabel="Run optimize"
+                />
               </Button>
             </TooltipTrigger>
             <TooltipContent>{OPTIMIZE_HELP}</TooltipContent>
@@ -181,28 +224,20 @@ function MaintenanceButtons({
 
 export function DatabaseStatsCard() {
   const { database, isLoading, error, reload } = useDatabaseStats();
-  const [vacuumPending, setVacuumPending] = useState(false);
-  const [optimizePending, setOptimizePending] = useState(false);
+  const vacuum = useActionFeedback();
+  const optimize = useActionFeedback();
   const [resetOpen, setResetOpen] = useState(false);
 
-  const onVacuum = async () => {
-    setVacuumPending(true);
-    try {
+  const onVacuum = () =>
+    void vacuum.run(async () => {
       await vacuumDatabase();
-      void reload();
-    } finally {
-      setVacuumPending(false);
-    }
-  };
+      await reload();
+    });
 
-  const onOptimize = async () => {
-    setOptimizePending(true);
-    try {
+  const onOptimize = () =>
+    void optimize.run(async () => {
       await optimizeDatabase();
-    } finally {
-      setOptimizePending(false);
-    }
-  };
+    });
 
   return (
     <Card data-testid="system-database-card">
@@ -224,10 +259,10 @@ export function DatabaseStatsCard() {
         )}
         {database && <StatsTable database={database} />}
         <MaintenanceButtons
-          vacuumPending={vacuumPending}
-          optimizePending={optimizePending}
-          onVacuum={() => void onVacuum()}
-          onOptimize={() => void onOptimize()}
+          vacuumState={vacuum.state}
+          optimizeState={optimize.state}
+          onVacuum={onVacuum}
+          onOptimize={onOptimize}
           onResetOpen={() => setResetOpen(true)}
         />
         <div className="flex flex-col gap-1">

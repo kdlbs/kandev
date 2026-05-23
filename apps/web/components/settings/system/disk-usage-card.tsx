@@ -9,8 +9,10 @@ import { IconDatabase, IconRefresh, IconAlertTriangle, IconFolderOpen } from "@t
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useDiskUsage } from "@/hooks/domains/system/use-disk-usage";
 import { openDataFolder } from "@/lib/api/domains/system-api";
+import { useActionFeedback } from "@/hooks/use-action-feedback";
 import type { DiskBreakdown } from "@/lib/types/system";
 import { formatBytes } from "@/lib/utils/format-bytes";
+import { ActionButtonContent } from "./action-button-content";
 import { JobProgressIndicator } from "./job-progress-indicator";
 
 const REFRESH_HELP =
@@ -112,9 +114,15 @@ function BreakdownTable({ data }: { data: DiskBreakdown }) {
 
 export function DiskUsageCard() {
   const { diskUsage, isLoading, error, refresh } = useDiskUsage();
+  const refreshFeedback = useActionFeedback();
   const data = diskUsage?.data ?? null;
   const computing = diskUsage?.computing ?? false;
   const homeDir = diskUsage?.home_dir ?? "";
+
+  const onRefresh = () =>
+    void refreshFeedback.run(async () => {
+      await refresh();
+    });
 
   return (
     <Card data-testid="system-disk-usage-card">
@@ -135,13 +143,19 @@ export function DiskUsageCard() {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={isLoading}
-                onClick={() => void refresh()}
-                className="cursor-pointer"
+                disabled={isLoading || refreshFeedback.state === "pending"}
+                onClick={onRefresh}
+                className="cursor-pointer min-w-[6rem] justify-center"
                 data-testid="system-disk-usage-refresh"
+                data-state={refreshFeedback.state}
               >
-                <IconRefresh className="h-3.5 w-3.5 mr-1" />
-                Refresh
+                <ActionButtonContent
+                  state={refreshFeedback.state}
+                  idleIcon={<IconRefresh className="h-3.5 w-3.5 mr-1" />}
+                  idleLabel="Refresh"
+                  pendingLabel="Refreshing..."
+                  successLabel="Refreshed"
+                />
               </Button>
             </TooltipTrigger>
             <TooltipContent className="max-w-xs">{REFRESH_HELP}</TooltipContent>
