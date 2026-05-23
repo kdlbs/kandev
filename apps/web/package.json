@@ -44,6 +44,8 @@
     "@monaco-editor/react": "^4.7.0",
     "@pierre/diffs": "^1.1.22",
     "@tabler/icons-react": "^3.36.1",
+    "@tanstack/react-query": "^5.100.14",
+    "@tanstack/react-query-devtools": "^5.100.14",
     "@tanstack/react-table": "^8.21.3",
     "@tiptap/core": "^3.19.0",
     "@tiptap/extension-bubble-menu": "^3.19.0",
