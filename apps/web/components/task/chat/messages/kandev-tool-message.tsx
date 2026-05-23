@@ -7,21 +7,21 @@ import { extractKandevStem, extractMcpResult } from "./kandev/parse";
 import { getKandevRenderer } from "./kandev/registry";
 import { PermissionActionRow } from "./permission-action-row";
 import { parsePermission, usePermissionResponseHandlers } from "./use-permission-handlers";
-import type { KandevStatus } from "./kandev/shared";
+import { KandevPermissionUIProvider, type KandevPermissionUIState } from "./kandev/shared";
 import type { PermissionRequestMetadata } from "./use-permission-handlers";
 
-// resolveKandevStatus collapses the tool-call status and the permission
-// decision into the single status the renderer should display. The tool_call
-// stays "pending" until the next backend update, so without this the row
-// keeps showing the amber clock after approve/reject — the resolved decision
-// wins as soon as the permission_request is stamped.
-function resolveKandevStatus(
-  toolStatus: ToolCallMetadata["status"],
+// derivePermissionUI maps the permission_request's stamped status into the
+// overlay state consumed by KandevRow. Approval intentionally falls through
+// to `undefined` so the underlying tool_call status keeps driving the row —
+// otherwise an approved-but-still-pending tool would render as complete and
+// any later tool_call error would be masked.
+function derivePermissionUI(
   permissionStatus: PermissionRequestMetadata["status"],
-): KandevStatus {
-  if (permissionStatus === "approved") return "complete";
-  if (permissionStatus === "rejected") return "error";
-  return toolStatus as KandevStatus;
+  isPermissionPending: boolean,
+): KandevPermissionUIState {
+  if (isPermissionPending) return "pending";
+  if (permissionStatus === "rejected") return "rejected";
+  return undefined;
 }
 
 type KandevToolMessageProps = {
@@ -96,12 +96,21 @@ export const KandevToolMessage = memo(function KandevToolMessage({
   const rawResult = generic?.output ?? meta?.result;
   const result = extractMcpResult(rawResult);
 
-  const effectiveStatus = resolveKandevStatus(meta?.status, permissionStatus);
+  // Pass the *real* tool_call status to the renderer. The permission overlay
+  // (amber clock / rejected mark / hidden summary) is layered on top via the
+  // context provider below — never by mutating the status — so an approved
+  // tool that's still pending continues to read as pending, and a later
+  // tool_call error is never masked.
+  const permissionUI = derivePermissionUI(permissionStatus, isPermissionPending);
 
   // Each renderer is a stable function-pointer pulled from the static
   // registry, so invoking it like a function (rather than via JSX) is safe
   // and avoids the lint rule against "components created during render".
-  const rendered = renderer({ args, result, status: effectiveStatus });
+  const rendered = (
+    <KandevPermissionUIProvider value={permissionUI}>
+      {renderer({ args, result, status: meta?.status })}
+    </KandevPermissionUIProvider>
+  );
 
   if (!isPermissionPending) return rendered;
 

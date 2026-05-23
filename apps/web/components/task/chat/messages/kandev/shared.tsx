@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import { Badge } from "@kandev/ui/badge";
 import {
   IconCheck,
@@ -21,10 +21,21 @@ export function KandevStatusIcon({ status }: { status: KandevStatus }) {
   if (status === "complete") return <IconCheck className="h-3.5 w-3.5 text-green-500" />;
   if (status === "error") return <IconX className="h-3.5 w-3.5 text-red-500" />;
   if (status === "running") return <GridSpinner className="text-muted-foreground" />;
-  if (status === "pending")
-    return <IconClock className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />;
   return null;
 }
+
+// KandevPermissionUIState is the *display overlay* applied to a Kandev row
+// while a permission_request message is attached. It deliberately does NOT
+// override the tool_call's own `status`: a tool can be approved but still
+// pending, or rejected before it ever ran, and the underlying tool state is
+// the source of truth for things like the green check, spinner, and red X.
+// The overlay only drives "waiting on the user" affordances (amber clock,
+// hidden summary) and the rejection mark.
+export type KandevPermissionUIState = "pending" | "rejected" | undefined;
+
+const KandevPermissionUIContext = createContext<KandevPermissionUIState>(undefined);
+
+export const KandevPermissionUIProvider = KandevPermissionUIContext.Provider;
 
 type KandevRowProps = {
   Icon: TablerIcon | ((p: IconProps) => ReactNode);
@@ -38,7 +49,10 @@ type KandevRowProps = {
 // KandevRow is the consistent header row for every Kandev tool. Title is the
 // "Kandev: …" string, summary is an inline description of args / result count,
 // and children are the expanded body. Auto-expands while the tool is running,
-// matching the pattern used by ToolExecuteMessage.
+// matching the pattern used by ToolExecuteMessage. The permission overlay
+// (amber clock / hidden summary / red X) is layered on top of the underlying
+// tool status via `KandevPermissionUIContext` so the row never lies about the
+// real tool_call state.
 export function KandevRow({
   Icon,
   title,
@@ -47,9 +61,18 @@ export function KandevRow({
   hasExpandableContent,
   children,
 }: KandevRowProps) {
+  const permissionUI = useContext(KandevPermissionUIContext);
+  const isAwaitingPermission = permissionUI === "pending";
+  const isRejected = permissionUI === "rejected";
   const autoExpanded = status === "running";
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
-  const isSuccess = status === "complete";
+  // The header chip on the right shows one of: amber clock (waiting on the
+  // user), red X (rejected, takes precedence over the tool's own state),
+  // otherwise the tool's own status icon. We suppress that chip on success
+  // because the leftmost icon already conveys "done"; rejection wins over the
+  // success short-circuit so a tool that completed before the user denied it
+  // still reads as denied.
+  const isSuccess = status === "complete" && !isRejected;
 
   return (
     <ExpandableRow
@@ -57,12 +80,12 @@ export function KandevRow({
       header={
         <div className="flex items-center gap-2 text-xs min-w-0">
           <span className="font-mono text-xs text-muted-foreground shrink-0">{title}</span>
-          {summary && status !== "pending" && (
+          {summary && !isAwaitingPermission && (
             <span className="text-xs text-muted-foreground/80 truncate min-w-0">{summary}</span>
           )}
           {!isSuccess && (
             <span className="shrink-0">
-              <KandevStatusIcon status={status} />
+              {renderHeaderStatusIcon({ isAwaitingPermission, isRejected, status })}
             </span>
           )}
         </div>
@@ -74,6 +97,21 @@ export function KandevRow({
       {children}
     </ExpandableRow>
   );
+}
+
+function renderHeaderStatusIcon({
+  isAwaitingPermission,
+  isRejected,
+  status,
+}: {
+  isAwaitingPermission: boolean;
+  isRejected: boolean;
+  status: KandevStatus;
+}) {
+  if (isAwaitingPermission)
+    return <IconClock className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />;
+  if (isRejected) return <IconX className="h-3.5 w-3.5 text-red-500" />;
+  return <KandevStatusIcon status={status} />;
 }
 
 // KandevBody is the bordered container used by all expanded sections so they

@@ -354,13 +354,16 @@ describe("KandevToolMessage permission UI", () => {
     );
     expect(html).not.toContain("0 workspaces");
   });
+});
 
+describe("KandevToolMessage resolved-permission overlay", () => {
   // After approve/reject the orchestrator stamps `status` onto the
   // permission_request message but the tool_call's own `meta.status` stays
-  // "pending" until the backend sends the next tool_call update. We mirror
-  // that lag by setting tool_call status="pending" and permission status
-  // ="approved" — the header must already reflect the resolved decision so
-  // the user does not see the amber clock linger after the row vanishes.
+  // "pending" until the backend sends the next tool_call update. The row
+  // must reflect the user's decision via a permission overlay WITHOUT
+  // overriding the tool_call status itself — otherwise an approved-but-
+  // still-running tool reads as complete and a later tool_call error is
+  // silently masked.
   function resolvedPermissionMessage(toolCallId: string, status: "approved" | "rejected"): Message {
     const msg = pendingPermissionMessage(toolCallId);
     return {
@@ -383,6 +386,36 @@ describe("KandevToolMessage permission UI", () => {
     expect(html).not.toContain('data-testid="permission-action-row"');
   });
 
+  it("does NOT mark the tool complete just because the permission was approved", () => {
+    const html = renderToStaticMarkup(
+      <KandevToolMessage
+        comment={kandevToolCall({
+          // Mirrors the race window: user approved, but the agent hasn't
+          // emitted the tool_call completion yet.
+          status: "pending",
+          toolName: "mcp__kandev__list_workspaces_kandev",
+        })}
+        permissionMessage={resolvedPermissionMessage("tc-1", "approved")}
+      />,
+    );
+    expect(html).not.toContain("tabler-icon-check");
+  });
+
+  it("still renders an error when the tool_call errors after an approved permission", () => {
+    const html = renderToStaticMarkup(
+      <KandevToolMessage
+        comment={kandevToolCall({
+          // A previous fix mapped approved -> complete and masked this icon.
+          // The real tool status must come through.
+          status: "error",
+          toolName: "mcp__kandev__list_workspaces_kandev",
+        })}
+        permissionMessage={resolvedPermissionMessage("tc-1", "approved")}
+      />,
+    );
+    expect(html).toContain("tabler-icon-x");
+  });
+
   it("shows the result summary once permission resolves even if meta.status still pending", () => {
     const html = renderToStaticMarkup(
       <KandevToolMessage
@@ -395,5 +428,21 @@ describe("KandevToolMessage permission UI", () => {
       />,
     );
     expect(html).toContain("1 workspace");
+  });
+
+  it("renders a red X overlay when the permission is rejected", () => {
+    const html = renderToStaticMarkup(
+      <KandevToolMessage
+        comment={kandevToolCall({
+          // Tool denied before it could run.
+          status: "pending",
+          toolName: "mcp__kandev__list_workspaces_kandev",
+        })}
+        permissionMessage={resolvedPermissionMessage("tc-1", "rejected")}
+      />,
+    );
+    expect(html).toContain("tabler-icon-x");
+    expect(html).toContain("text-red-500");
+    expect(html).not.toContain("tabler-icon-clock");
   });
 });
