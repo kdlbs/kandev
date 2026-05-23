@@ -254,7 +254,6 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 
 	// Add required credentials from agent config
 	if m.credsMgr != nil && agentConfig != nil {
-		ctx := context.Background()
 		for _, credKey := range agentConfig.Runtime().RequiredEnv {
 			if value, err := m.credsMgr.GetCredentialValue(ctx, credKey); err == nil && value != "" {
 				env[credKey] = value
