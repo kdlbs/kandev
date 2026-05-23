@@ -12,7 +12,6 @@ const TID = {
   splitDown: "dockview-split-down-btn",
   close: "dockview-close-group-btn",
   menu: "dockview-group-actions-menu",
-  minimizeMenuItem: "dockview-minimize-menuitem",
 } as const;
 
 const baseProps = {
@@ -126,14 +125,20 @@ describe("GroupSplitCloseActionsView", () => {
     expect(screen.queryByTestId(TID.minimize)).toBeNull();
     expect(screen.queryByTestId(TID.menu)).not.toBeNull();
   });
+});
 
-  it("renders Restore tooltip and icon swap when isMinimized=true", () => {
+describe("GroupSplitCloseActionsView — minimize icon swap", () => {
+  function minimizeBtnIconClass(): string | null {
+    return screen.getByTestId(TID.minimize).querySelector("svg")?.getAttribute("class") ?? null;
+  }
+
+  it("renders IconMinus when not minimized", () => {
+    renderView(600, { isMinimized: false });
+    expect(minimizeBtnIconClass()).toContain("tabler-icon-minus");
+  });
+
+  it("renders IconWindowMaximize when minimized", () => {
     renderView(600, { isMinimized: true });
-    const btn = screen.getByTestId(TID.minimize);
-    expect(btn.getAttribute("aria-describedby") !== null || btn !== null).toBe(true);
-    // Tooltip content is only rendered on hover by Radix; assert the button is present
-    // and its child icon switched (the Minimize variant renders an IconMinus; the
-    // Restore variant renders IconWindowMaximize — distinguishable by svg class).
-    expect(btn.innerHTML).toContain("svg");
+    expect(minimizeBtnIconClass()).toContain("tabler-icon-window-maximize");
   });
 });
