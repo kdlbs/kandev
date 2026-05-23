@@ -163,6 +163,32 @@ func TestExecutor_Prompt_PassthroughEmptyPromptReturnsError(t *testing.T) {
 	}
 }
 
+// TestExecutor_Prompt_PassthroughPreservesUnicodeAndMultiline verifies the PTY
+// write payload preserves UTF-8 and embedded newlines verbatim. The submit
+// suffix is appended at the END so the agent's TUI sees one logical "submit"
+// at the right moment, even when the prompt itself contains LFs (Shift+Enter
+// inserts those in the composer).
+func TestExecutor_Prompt_PassthroughPreservesUnicodeAndMultiline(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{
+		isPassthroughSessionFunc: func(_ context.Context, _ string) bool { return true },
+	}
+	seedPassthroughSession(t, repo, agentManager, "task-1", "sess-1", "exec-1")
+	exec := newTestExecutor(t, agentManager, repo)
+
+	prompt := "café ☕\nline2\n日本語"
+	if _, err := exec.Prompt(context.Background(), "task-1", "sess-1", prompt, nil, false); err != nil {
+		t.Fatalf("Prompt returned error: %v", err)
+	}
+	if got := len(agentManager.writePassthroughStdinCalls); got != 1 {
+		t.Fatalf("expected 1 WritePassthroughStdin call, got %d", got)
+	}
+	want := prompt + "\r"
+	if agentManager.writePassthroughStdinCalls[0].Data != want {
+		t.Errorf("PTY payload = %q, want %q", agentManager.writePassthroughStdinCalls[0].Data, want)
+	}
+}
+
 func TestExecutor_Prompt_ACPPathUnchanged(t *testing.T) {
 	repo := newMockRepository()
 	agentManager := &mockAgentManager{
