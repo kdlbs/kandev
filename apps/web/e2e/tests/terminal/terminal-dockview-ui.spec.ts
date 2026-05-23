@@ -195,4 +195,51 @@ test.describe("Terminals — dockview UI", () => {
     // not just open-and-hidden.
     await expect(reopenRowsWithSeq2.getByText("parked")).toBeVisible({ timeout: 5_000 });
   });
+
+  /**
+   * Regression: with two open terminals AND a page reload (no close),
+   * both terminals must re-render with their badges. Before the fix the
+   * serializer rewrites the user-created terminal's panel id to
+   * `terminal-saved-N` and drops the environmentId/taskID params, so
+   * after reload that panel has no shell entry in the store → no badge,
+   * fallback title text.
+   */
+  test("two open terminals survive a reload with their seq badges intact", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await createTaskAndWait(apiClient, seedData, "Reload Badges UI");
+    const session = await openTask(testPage, "Reload Badges UI");
+    await session.clickTab("Terminal");
+    await session.expectTerminalConnected();
+
+    await clickNewTerminalInPlusMenu(testPage, session);
+    await expect(testPage.getByTestId("terminal-tab-seq-1")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible({ timeout: 5_000 });
+
+    // Layout-save is 300ms-debounced. Wait past the debounce so the
+    // saved JSON includes the user-created terminal panel before we
+    // reload — otherwise a fast test races the save.
+    await testPage.waitForTimeout(800);
+
+    await testPage.reload();
+    await session.waitForLoad();
+
+    // After reload, both badges must reappear — proves both panels'
+    // store entries (kind=ordinary, seq) were preserved across restore.
+    await expect(testPage.getByTestId("terminal-tab-seq-1")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible({ timeout: 5_000 });
+
+    // No tab content should contain "Terminal N" text — seq belongs in
+    // the badge, not the title.
+    const numberedTitles = testPage.locator(".dv-default-tab-content").filter({
+      hasText: /^Terminal\s+\d+$/,
+    });
+    expect(
+      await numberedTitles.count(),
+      'tab title should be plain "Terminal" after reload (seq belongs in the badge)',
+    ).toBe(0);
+  });
 });
