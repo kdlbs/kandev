@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildCoreFields, mapUserSettingsResponse } from "./user-settings";
+import {
+  buildCoreFields,
+  mapUserSettingsResponse,
+  parseChangesPanelLayout,
+} from "./user-settings";
 
 describe("buildCoreFields", () => {
   it("maps terminal_font_family to terminalFontFamily", () => {
@@ -83,5 +87,23 @@ describe("mapUserSettingsResponse", () => {
   it("returns null terminalFontFamily when response is null", () => {
     const result = mapUserSettingsResponse(null);
     expect(result.terminalFontFamily).toBeNull();
+  });
+
+  it("defaults changesPanelLayout to flat when response is null", () => {
+    const result = mapUserSettingsResponse(null);
+    expect(result.changesPanelLayout).toBe("flat");
+  });
+});
+
+describe("parseChangesPanelLayout", () => {
+  it('returns "tree" for "tree"', () => {
+    expect(parseChangesPanelLayout("tree")).toBe("tree");
+  });
+
+  it('returns "flat" for "flat", undefined, or unknown values', () => {
+    expect(parseChangesPanelLayout("flat")).toBe("flat");
+    expect(parseChangesPanelLayout(undefined)).toBe("flat");
+    expect(parseChangesPanelLayout("grid")).toBe("flat");
+    expect(parseChangesPanelLayout("")).toBe("flat");
   });
 });

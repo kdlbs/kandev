@@ -336,7 +336,6 @@ type FileListBranchProps = FileListBodyProps & {
   collapsedRepos: Set<string>;
   toggleRepo: (name: string) => void;
 };
-
 function TreeFileListBody(props: FileListBranchProps) {
   const {
     variant,
