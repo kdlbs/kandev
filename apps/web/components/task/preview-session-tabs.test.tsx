@@ -62,6 +62,22 @@ describe("PassthroughComposer", () => {
     expect(submitBtn.disabled).toBe(true);
   });
 
+  it("preserves the typed text when onSubmit rejects so the user can retry", async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new Error("network down"));
+    render(<PassthroughComposer onSubmit={onSubmit} />);
+
+    const textarea = screen.getByTestId(TEXTAREA_TID) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "important request" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    // Composer must NOT clear on failure — losing typed text on a flaky WS
+    // disconnect was a real UX regression (issue #989 review feedback).
+    expect(textarea.value).toBe("important request");
+    // Composer must re-enable so the user can resubmit.
+    await waitFor(() => expect(textarea.disabled).toBe(false));
+  });
+
   it("disables the composer while a submission is in flight", async () => {
     let resolveSubmit!: () => void;
     const submitPromise = new Promise<void>((resolve) => {

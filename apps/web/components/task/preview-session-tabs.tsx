@@ -144,6 +144,10 @@ function SessionAgentLogo({ profile }: { profile: AgentProfileOption | null | un
 
 function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId: string }) {
   const { toast } = useToast();
+  // Used by the non-passthrough TaskChatPanel branch. Swallows errors after
+  // surfacing a toast because the existing chat-input-state.handleSubmit
+  // already optimistically clears the input before this resolves; rethrowing
+  // here would surface as an unhandled rejection further up the chain.
   const handleSendMessage = useCallback(
     async (content: string) => {
       const client = getWebSocketClient();
@@ -162,13 +166,37 @@ function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId:
     [taskId, session.id, toast],
   );
 
+  // Used by PassthroughComposer. Rethrows after toasting so the composer can
+  // keep the user's typed text intact on failure (Composer.submit's catch
+  // skips the setValue("") clear when onSubmit rejects). Separate from the
+  // ACP handler above to avoid leaking unhandled rejections into the chat-
+  // input-state chain that TaskChatPanel uses.
+  const handleSendPassthroughMessage = useCallback(
+    async (content: string) => {
+      const client = getWebSocketClient();
+      if (!client) throw new Error("WebSocket client not available");
+      try {
+        await client.request(
+          "message.add",
+          { task_id: taskId, session_id: session.id, content },
+          10000,
+        );
+      } catch (error) {
+        console.error("Failed to send passthrough message:", error);
+        toast({ title: "Failed to send message", variant: "error" });
+        throw error;
+      }
+    },
+    [taskId, session.id, toast],
+  );
+
   if (session.is_passthrough) {
     return (
       <div className="flex h-full flex-col bg-card">
         <div className="flex-1 min-h-0">
           <PassthroughTerminal sessionId={session.id} mode="agent" />
         </div>
-        <PassthroughComposer onSubmit={handleSendMessage} />
+        <PassthroughComposer onSubmit={handleSendPassthroughMessage} />
       </div>
     );
   }
@@ -202,7 +230,11 @@ export function PassthroughComposer({
     setIsSending(true);
     try {
       await onSubmit(trimmed);
-      setValue("");
+      setValue(""); // only clear on success — preserve text so user can retry on send failure
+    } catch {
+      // onSubmit (PreviewSessionBody.handleSendPassthroughMessage) already
+      // surfaced the error via toast; the user's typed value stays in the
+      // textarea intentionally so they can retry without retyping.
     } finally {
       setIsSending(false);
     }

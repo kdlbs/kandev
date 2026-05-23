@@ -158,6 +158,8 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 	// so the CLI agent actually receives it. The Preview-screen chat input (and
 	// any other surface that calls message.add against a passthrough session)
 	// reaches this branch via Service.PromptTask → Executor.Prompt.
+	// dispatchOnly is intentionally not forwarded: PTY writes are inherently
+	// fire-and-forget, so the flag has no analogue in passthrough mode.
 	if e.agentManager.IsPassthroughSession(ctx, sessionID) {
 		return e.promptPassthrough(ctx, taskID, sessionID, prompt, attachments)
 	}
