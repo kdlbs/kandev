@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import {
   ContextMenu,
@@ -82,6 +82,16 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
   const showBadge = isOrdinary && ordinaryCount > 1 && typeof seq === "number";
   const displayName = pickDisplayName(shell, props.api.title ?? "Terminal");
 
+  // DockviewDefaultTab reads the title directly from `api.title` and
+  // ignores any prop overrides. So a panel created with title="Terminal 2"
+  // keeps rendering "Terminal 2" even after we recompute displayName to
+  // just "Terminal". Push the corrected title onto the api so the
+  // default-tab body re-renders the right text. Mirrors session-tab's
+  // api.setTitle(agentLabel) pattern.
+  useEffect(() => {
+    if (props.api.title !== displayName) props.api.setTitle(displayName);
+  }, [props.api, displayName]);
+
   return (
     <ContextMenu>
       <ContextMenuTrigger
@@ -105,11 +115,11 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
 function TerminalTabBody({
   showBadge,
   seq,
-  displayName,
   ...props
 }: IDockviewPanelHeaderProps & {
   showBadge: boolean;
   seq: number | undefined;
+  /** Unused after the api.setTitle migration; kept so callers don't break. */
   displayName: string;
 }) {
   return (
@@ -122,7 +132,7 @@ function TerminalTabBody({
           {seq}
         </span>
       )}
-      <DockviewDefaultTab {...props} title={displayName} />
+      <DockviewDefaultTab {...props} />
     </div>
   );
 }

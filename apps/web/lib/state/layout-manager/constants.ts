@@ -52,6 +52,12 @@ export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id">> = {
   vscode: { component: "vscode", title: "VS Code" },
   [TERMINAL_DEFAULT_ID]: {
     component: "terminal",
+    // terminalTab is the custom dockview tab that adds the `#N` badge
+    // and a right-click rename/destroy menu. The hook
+    // useEnsureDefaultTerminalOrdinary migrates the legacy
+    // `shell-default` PTY into a DB-backed ordinary terminal on
+    // session-page mount so the badge logic has a seq to display.
+    tabComponent: "terminalTab",
     title: "Terminal",
     params: { terminalId: "shell-default" },
   },

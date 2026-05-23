@@ -157,6 +157,10 @@ test.describe("Terminals — first-class persistent entities", () => {
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 
+    // Visiting the session page migrates the legacy `shell-default` panel
+    // into a DB-backed ordinary terminal (seq=1) — every subsequent
+    // create starts from seq=2. Look up the migrated row instead of
+    // assuming seq numbering.
     const a = await createOrdinaryTerminal(apiClient, task.id, envID);
     const b = await createOrdinaryTerminal(apiClient, task.id, envID);
     const c = await createOrdinaryTerminal(apiClient, task.id, envID);
@@ -170,9 +174,9 @@ test.describe("Terminals — first-class persistent entities", () => {
 
     const all = await listTerminals(apiClient, task.id, envID, true);
     const ordinary = all.filter((it) => it.kind === "ordinary");
-    expect(ordinary).toHaveLength(3);
+    // 3 API-created + 1 migrated-default
+    expect(ordinary).toHaveLength(4);
     const byID = Object.fromEntries(ordinary.map((it) => [it.id, it]));
-    expect(byID[a.terminal_id]?.seq).toBe(1);
     expect(byID[a.terminal_id]?.state).toBe("open");
     expect(byID[b.terminal_id]?.custom_name).toBe("build watcher");
     expect(byID[b.terminal_id]?.display_name).toBe("build watcher");
