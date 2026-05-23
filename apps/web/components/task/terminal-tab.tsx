@@ -128,6 +128,7 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
         environmentId={stampedEnv ?? null}
         canMutate={isOrdinary}
         onStartRename={() => setIsRenaming(true)}
+        onClosePanel={() => props.api.close()}
       />
     </ContextMenu>
   );
@@ -169,13 +170,17 @@ function useRenameCommitter({
 function TerminalTabBody({
   showBadge,
   seq,
+  // `displayName` is computed in the parent but consumed via the
+  // api.setTitle effect — drop it here so it doesn't leak into the
+  // DOM via the {...props} spread below (React warning otherwise).
+  displayName: _displayName,
   ...props
 }: IDockviewPanelHeaderProps & {
   showBadge: boolean;
   seq: number | undefined;
-  /** Unused after the api.setTitle migration; kept so callers don't break. */
   displayName: string;
 }) {
+  void _displayName;
   return (
     <div className="flex h-full items-center">
       {showBadge && (
@@ -251,24 +256,31 @@ function TerminalTabMenu({
   environmentId,
   canMutate,
   onStartRename,
+  onClosePanel,
 }: {
   terminalId: string;
   taskID: string | null;
   environmentId: string | null;
   canMutate: boolean;
   onStartRename: () => void;
+  onClosePanel: () => void;
 }) {
   const removeUserShellStore = useAppStore((s) => s.removeUserShell);
 
   const handleTerminate = useCallback(async () => {
     if (!environmentId) return;
+    // Remove from store FIRST so the dockview onDidRemovePanel cleanup
+    // sees no shell record and skips the park-on-close path — we want a
+    // hard destroy, not a park. Then close the panel synchronously, then
+    // fire-and-forget the WS destroy.
+    removeUserShellStore(environmentId, terminalId);
+    onClosePanel();
     try {
       await destroyUserShell(environmentId, terminalId, taskID ?? undefined);
-      removeUserShellStore(environmentId, terminalId);
     } catch (error) {
       console.error("terminate terminal:", error);
     }
-  }, [environmentId, terminalId, taskID, removeUserShellStore]);
+  }, [environmentId, terminalId, taskID, removeUserShellStore, onClosePanel]);
 
   return (
     <ContextMenuContent>
