@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import {
   ContextMenu,
@@ -10,7 +10,7 @@ import {
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
 import { useAppStore } from "@/components/state-provider";
-import { destroyUserShell, parkUserShell, renameUserShell } from "@/lib/api/domains/user-shell-api";
+import { destroyUserShell, renameUserShell } from "@/lib/api/domains/user-shell-api";
 
 /**
  * Custom dockview tab for terminal panels.
@@ -19,9 +19,8 @@ import { destroyUserShell, parkUserShell, renameUserShell } from "@/lib/api/doma
  * there's more than one ordinary terminal in the active task — a single
  * terminal needs no disambiguation.
  *
- * The tab also exposes a context menu (right-click) for rename / park /
- * destroy on ordinary terminals, since the dockview default close button
- * is the only direct affordance dockview provides.
+ * The tab exposes a right-click context menu with Rename / Terminate;
+ * choosing Rename swaps the title in place for an editable input.
  */
 type StampedParams = {
   terminalId: string;
@@ -57,40 +56,54 @@ function pickDisplayName(
   return fallback;
 }
 
-export function TerminalTab(props: IDockviewPanelHeaderProps) {
-  const { terminalId, taskID: stampedTaskID, environmentId: stampedEnv } = extractParams(props);
-
-  const activeTaskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
-  const taskID = stampedTaskID ?? activeTaskID ?? null;
-
-  // Pull this terminal's metadata from the store (shells are env-scoped).
+function useTerminalTabState(stampedEnv: string | undefined, terminalId: string, apiTitle: string) {
   const shell = useAppStore((s) => {
     if (!stampedEnv) return null;
     const list = s.userShells.byEnvironmentId[stampedEnv] ?? [];
     return list.find((it) => it.terminalId === terminalId) ?? null;
   });
-
-  // Count ordinary terminals for the badge "only when >1" rule.
   const ordinaryCount = useAppStore((s) => {
     if (!stampedEnv) return 0;
     const list = s.userShells.byEnvironmentId[stampedEnv] ?? [];
     return list.filter((it) => it.kind === "ordinary").length;
   });
-
   const isOrdinary = shell?.kind === "ordinary";
   const seq = shell?.seq;
   const showBadge = isOrdinary && ordinaryCount > 1 && typeof seq === "number";
-  const displayName = pickDisplayName(shell, props.api.title ?? "Terminal");
+  const displayName = pickDisplayName(shell, apiTitle);
+  return { shell, isOrdinary, seq, showBadge, displayName };
+}
 
-  // DockviewDefaultTab reads the title directly from `api.title` and
-  // ignores any prop overrides. So a panel created with title="Terminal 2"
-  // keeps rendering "Terminal 2" even after we recompute displayName to
-  // just "Terminal". Push the corrected title onto the api so the
-  // default-tab body re-renders the right text. Mirrors session-tab's
-  // api.setTitle(agentLabel) pattern.
+export function TerminalTab(props: IDockviewPanelHeaderProps) {
+  const { terminalId, taskID: stampedTaskID, environmentId: stampedEnv } = extractParams(props);
+  const activeTaskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
+  const taskID = stampedTaskID ?? activeTaskID ?? null;
+  const { shell, isOrdinary, seq, showBadge, displayName } = useTerminalTabState(
+    stampedEnv,
+    terminalId,
+    props.api.title ?? "Terminal",
+  );
+
+  // DockviewDefaultTab reads the title from `api.title` directly and
+  // ignores prop overrides — push the corrected title onto the api so
+  // the default-tab body re-renders the right text.
   useEffect(() => {
     if (props.api.title !== displayName) props.api.setTitle(displayName);
   }, [props.api, displayName]);
+
+  const [isRenaming, setIsRenaming] = useState(false);
+  const handleCommitRename = useRenameCommitter({
+    isOrdinary,
+    stampedEnv,
+    terminalId,
+    taskID,
+    currentCustomName: shell?.customName ?? null,
+    onDone: () => setIsRenaming(false),
+  });
+
+  const renameInitial =
+    shell?.customName && shell.customName !== "" ? shell.customName : displayName;
+  const seqBadgeForInput = showBadge && typeof seq === "number" ? seq : null;
 
   return (
     <ContextMenu>
@@ -98,17 +111,58 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
         className="flex h-full items-center cursor-pointer select-none"
         data-testid={`terminal-tab-${terminalId}`}
       >
-        <TerminalTabBody {...props} showBadge={showBadge} seq={seq} displayName={displayName} />
+        {isRenaming ? (
+          <TerminalTabRenameInput
+            initial={renameInitial}
+            seqBadge={seqBadgeForInput}
+            onCommit={handleCommitRename}
+            onCancel={() => setIsRenaming(false)}
+          />
+        ) : (
+          <TerminalTabBody {...props} showBadge={showBadge} seq={seq} displayName={displayName} />
+        )}
       </ContextMenuTrigger>
       <TerminalTabMenu
         terminalId={terminalId}
         taskID={taskID}
         environmentId={stampedEnv ?? null}
         canMutate={isOrdinary}
-        currentName={shell?.customName ?? null}
-        defaultName={shell?.displayName ?? `Terminal ${seq ?? ""}`}
+        onStartRename={() => setIsRenaming(true)}
       />
     </ContextMenu>
+  );
+}
+
+function useRenameCommitter({
+  isOrdinary,
+  stampedEnv,
+  terminalId,
+  taskID,
+  currentCustomName,
+  onDone,
+}: {
+  isOrdinary: boolean;
+  stampedEnv: string | undefined;
+  terminalId: string;
+  taskID: string | null;
+  currentCustomName: string | null;
+  onDone: () => void;
+}) {
+  const updateUserShell = useAppStore((s) => s.updateUserShell);
+  return useCallback(
+    async (next: string) => {
+      onDone();
+      if (!isOrdinary || !stampedEnv) return;
+      const normalized = next.trim() === "" ? null : next.trim();
+      if (currentCustomName === normalized) return;
+      try {
+        await renameUserShell(terminalId, normalized, taskID ?? undefined);
+        updateUserShell(stampedEnv, terminalId, { customName: normalized });
+      } catch (error) {
+        console.error("rename terminal:", error);
+      }
+    },
+    [isOrdinary, stampedEnv, terminalId, taskID, currentCustomName, updateUserShell, onDone],
   );
 }
 
@@ -137,56 +191,82 @@ function TerminalTabBody({
   );
 }
 
+function TerminalTabRenameInput({
+  initial,
+  seqBadge,
+  onCommit,
+  onCancel,
+}: {
+  initial: string;
+  seqBadge: number | null;
+  onCommit: (next: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  return (
+    <div
+      className="flex h-full items-center gap-1 px-2"
+      // Stop the click from selecting the tab while we type.
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      {seqBadge != null && (
+        <span className="text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5">
+          {seqBadge}
+        </span>
+      )}
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            onCommit(value);
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            onCancel();
+          }
+          // Don't let dockview see typed keys as shortcuts.
+          e.stopPropagation();
+        }}
+        onBlur={() => onCommit(value)}
+        data-testid="terminal-tab-rename-input"
+        className="h-5 min-w-[6rem] max-w-[14rem] rounded border border-input bg-background px-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+      />
+    </div>
+  );
+}
+
 function TerminalTabMenu({
   terminalId,
   taskID,
   environmentId,
   canMutate,
-  currentName,
-  defaultName,
+  onStartRename,
 }: {
   terminalId: string;
   taskID: string | null;
   environmentId: string | null;
   canMutate: boolean;
-  currentName: string | null;
-  defaultName: string;
+  onStartRename: () => void;
 }) {
-  const updateUserShell = useAppStore((s) => s.updateUserShell);
   const removeUserShellStore = useAppStore((s) => s.removeUserShell);
 
-  const handleRename = useCallback(async () => {
-    if (!canMutate) return;
-    const current = currentName ?? defaultName;
-    const next = window.prompt("Rename terminal (leave empty to reset to default)", current);
-    if (next === null) return;
-    const trimmed = next.trim();
-    const normalized = trimmed === "" ? null : trimmed;
-    try {
-      await renameUserShell(terminalId, normalized, taskID ?? undefined);
-      if (environmentId) updateUserShell(environmentId, terminalId, { customName: normalized });
-    } catch (error) {
-      console.error("rename terminal:", error);
-    }
-  }, [canMutate, currentName, defaultName, terminalId, taskID, environmentId, updateUserShell]);
-
-  const handlePark = useCallback(async () => {
-    if (!canMutate) return;
-    try {
-      await parkUserShell(terminalId, taskID ?? undefined);
-      if (environmentId) updateUserShell(environmentId, terminalId, { state: "parked" });
-    } catch (error) {
-      console.error("park terminal:", error);
-    }
-  }, [canMutate, terminalId, taskID, environmentId, updateUserShell]);
-
-  const handleDestroy = useCallback(async () => {
+  const handleTerminate = useCallback(async () => {
     if (!environmentId) return;
     try {
       await destroyUserShell(environmentId, terminalId, taskID ?? undefined);
       removeUserShellStore(environmentId, terminalId);
     } catch (error) {
-      console.error("destroy terminal:", error);
+      console.error("terminate terminal:", error);
     }
   }, [environmentId, terminalId, taskID, removeUserShellStore]);
 
@@ -194,13 +274,15 @@ function TerminalTabMenu({
     <ContextMenuContent>
       {canMutate && (
         <>
-          <ContextMenuItem onClick={handleRename}>Rename…</ContextMenuItem>
-          <ContextMenuItem onClick={handlePark}>Park (hide, keep PTY)</ContextMenuItem>
+          <ContextMenuItem onClick={onStartRename}>Rename…</ContextMenuItem>
           <ContextMenuSeparator />
         </>
       )}
-      <ContextMenuItem onClick={handleDestroy} className="text-destructive focus:text-destructive">
-        Destroy
+      <ContextMenuItem
+        onClick={handleTerminate}
+        className="text-destructive focus:text-destructive"
+      >
+        Terminate
       </ContextMenuItem>
     </ContextMenuContent>
   );
