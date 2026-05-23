@@ -27,4 +27,6 @@ export function clearBufferReader(container: HTMLDivElement) {
   const c = container as TerminalContainerWithBuffer;
   c.__xtermReadBuffer = undefined;
   c.__xtermReadViewportY = undefined;
+  c.__xtermGetFontFamily = undefined;
+  c.__xtermGetFontSize = undefined;
 }
