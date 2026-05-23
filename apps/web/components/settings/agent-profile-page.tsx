@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { IconTrash } from "@tabler/icons-react";
@@ -184,12 +184,15 @@ type ProfileEnvVarsEditorProps = {
   onChange: (envVars: ProfileEnvVar[]) => void;
 };
 
-function ProfileEnvVarsEditor({ envVars, secrets, onChange }: ProfileEnvVarsEditorProps) {
+export function ProfileEnvVarsEditor({ envVars, secrets, onChange }: ProfileEnvVarsEditorProps) {
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar } = useEnvVarRows(envVars);
+  const nextEnvVars = useMemo(() => rowsToEnvVars(envVarRows), [envVarRows]);
 
   useEffect(() => {
-    onChange(rowsToEnvVars(envVarRows));
-  }, [envVarRows, onChange]);
+    if (!areEnvVarsEqual(nextEnvVars, envVars)) {
+      onChange(nextEnvVars);
+    }
+  }, [envVars, nextEnvVars, onChange]);
 
   return (
     <EnvVarsCard
@@ -209,13 +212,14 @@ type ProfileEnvVarsSectionProps = {
 
 function ProfileEnvVarsSection({ savedProfile, onChange }: ProfileEnvVarsSectionProps) {
   const { items: secrets } = useSecrets();
+  const handleChange = useCallback((envVars: ProfileEnvVar[]) => onChange({ envVars }), [onChange]);
 
   return (
     <ProfileEnvVarsEditor
       key={savedProfile.updatedAt}
       envVars={savedProfile.envVars}
       secrets={secrets}
-      onChange={(envVars) => onChange({ envVars })}
+      onChange={handleChange}
     />
   );
 }
@@ -404,6 +408,44 @@ function useProfileDelete(
   };
 }
 
+type ProfileDeleteDialogsProps = {
+  showDeleteConfirm: boolean;
+  setShowDeleteConfirm: (open: boolean) => void;
+  handleDeleteProfile: () => void;
+  conflictSessions: ActiveSessionInfo[] | null;
+  setConflictSessions: (sessions: ActiveSessionInfo[] | null) => void;
+  handleForceDelete: () => void;
+};
+
+function ProfileDeleteDialogs({
+  showDeleteConfirm,
+  setShowDeleteConfirm,
+  handleDeleteProfile,
+  conflictSessions,
+  setConflictSessions,
+  handleForceDelete,
+}: ProfileDeleteDialogsProps) {
+  return (
+    <>
+      <AgentProfileDeleteConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={(open) => {
+          if (!open) setShowDeleteConfirm(false);
+        }}
+        onConfirm={handleDeleteProfile}
+      />
+
+      <AgentProfileDeleteConflictDialog
+        activeSessions={conflictSessions}
+        onOpenChange={(open) => {
+          if (!open) setConflictSessions(null);
+        }}
+        onConfirm={handleForceDelete}
+      />
+    </>
+  );
+}
+
 function ProfileEditor({
   agent,
   profile,
@@ -417,6 +459,17 @@ function ProfileEditor({
   const syncAgentsToStore = useSyncAgentsToStore();
   const { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty } =
     useProfileEditorState(profile);
+  const updateDraft = useCallback(
+    (patch: Partial<AgentProfile>) => {
+      setDraft((current) => {
+        if (patch.envVars !== undefined && areEnvVarsEqual(patch.envVars, current.envVars)) {
+          return current;
+        }
+        return { ...current, ...patch };
+      });
+    },
+    [setDraft],
+  );
   const handleSave = useProfileSave({
     agent,
     draft,
@@ -454,16 +507,13 @@ function ProfileEditor({
       <ProfileSettingsCard
         agent={agent}
         draft={draft}
-        onDraftChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
+        onDraftChange={updateDraft}
         modelConfig={modelConfig}
         permissionSettings={permissionSettings}
         passthroughConfig={passthroughConfig}
       />
 
-      <ProfileEnvVarsSection
-        savedProfile={savedProfile}
-        onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
-      />
+      <ProfileEnvVarsSection savedProfile={savedProfile} onChange={updateDraft} />
 
       <CommandPreviewCard
         agentName={agent.name}
@@ -490,20 +540,13 @@ function ProfileEditor({
 
       <DeleteProfileCard onDelete={requestDelete} />
 
-      <AgentProfileDeleteConfirmDialog
-        open={showDeleteConfirm}
-        onOpenChange={(open) => {
-          if (!open) setShowDeleteConfirm(false);
-        }}
-        onConfirm={handleDeleteProfile}
-      />
-
-      <AgentProfileDeleteConflictDialog
-        activeSessions={conflictSessions}
-        onOpenChange={(open) => {
-          if (!open) setConflictSessions(null);
-        }}
-        onConfirm={handleForceDelete}
+      <ProfileDeleteDialogs
+        showDeleteConfirm={showDeleteConfirm}
+        setShowDeleteConfirm={setShowDeleteConfirm}
+        handleDeleteProfile={handleDeleteProfile}
+        conflictSessions={conflictSessions}
+        setConflictSessions={setConflictSessions}
+        handleForceDelete={handleForceDelete}
       />
     </div>
   );
