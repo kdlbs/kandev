@@ -174,6 +174,7 @@ function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsP
   const isChatGroup = group.id === centerGroupId;
   const isMaximized = useDockviewStore((s) => s.preMaximizeLayout !== null);
   const isMinimized = useDockviewStore((s) => s.minimizedGroupIds.has(group.id));
+  const preMaximizeGroupId = useDockviewStore((s) => s.maximizedGroupId);
   const storeMaximize = useDockviewStore((s) => s.maximizeGroup);
   const storeExitMaximize = useDockviewStore((s) => s.exitMaximizedLayout);
   const toggleGroupMinimized = useDockviewStore((s) => s.toggleGroupMinimized);
@@ -192,9 +193,19 @@ function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsP
     // overlay, minimize is per-group in-place collapse. Clicking Minimize while
     // maximized would minimize the lone visible group and leave the user with a
     // header-only screen; exit maximize first so they see the regular layout.
-    if (isMaximized) storeExitMaximize();
+    //
+    // During maximize, `group.id` is the ephemeral overlay group's ID — once
+    // exitMaximizedLayout rebuilds the original layout, that ID no longer
+    // exists in api.groups, and toggling minimize on it would silently no-op.
+    // Use the pre-maximize group ID (stored at maximize time) instead.
+    if (isMaximized) {
+      const target = preMaximizeGroupId ?? group.id;
+      storeExitMaximize();
+      toggleGroupMinimized(target);
+      return;
+    }
     toggleGroupMinimized(group.id);
-  }, [group.id, isMaximized, storeExitMaximize, toggleGroupMinimized]);
+  }, [group.id, isMaximized, preMaximizeGroupId, storeExitMaximize, toggleGroupMinimized]);
 
   const handleSplitRight = useCallback(() => {
     containerApi.addGroup({ referenceGroup: group, direction: "right" });
