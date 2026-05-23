@@ -44,6 +44,10 @@ func mergeEnvFillMissing(dst, src map[string]string) {
 	}
 }
 
+// resolveAgentProfileEnvVars resolves profile env entries. SecretID wins over
+// Value; if secret resolution fails, the entry is skipped rather than falling
+// back. Literal Value is used only when SecretID is empty, and empty keys are
+// ignored.
 func (m *Manager) resolveAgentProfileEnvVars(ctx context.Context, envVars []settingsmodels.ProfileEnvVar) map[string]string {
 	if len(envVars) == 0 {
 		return nil

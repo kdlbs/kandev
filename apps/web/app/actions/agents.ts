@@ -74,6 +74,7 @@ export async function createAgentAction(payload: {
       mode?: string;
       cli_passthrough: boolean;
       cli_flags?: CLIFlag[];
+      env_vars?: ProfileEnvVar[];
     } & ProfilePermissions
   >;
 }): Promise<Agent> {
@@ -111,6 +112,7 @@ export async function createAgentProfileAction(
     mode?: string;
     cli_passthrough: boolean;
     cli_flags?: CLIFlag[];
+    env_vars?: ProfileEnvVar[];
   } & ProfilePermissions,
 ): Promise<AgentProfile> {
   const raw = await fetchJson<unknown>(`${apiBaseUrl}/api/v1/agents/${agentId}/profiles`, {

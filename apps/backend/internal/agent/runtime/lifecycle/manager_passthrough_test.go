@@ -14,6 +14,7 @@ import (
 // mockPassthroughProfileResolver is a mock for testing passthrough verification
 type mockPassthroughProfileResolver struct {
 	cliPassthrough bool
+	envVars        []settingsmodels.ProfileEnvVar
 	err            error
 }
 
@@ -24,6 +25,7 @@ func (m *mockPassthroughProfileResolver) ResolveProfile(ctx context.Context, pro
 	return &AgentProfileInfo{
 		ProfileID:      profileID,
 		CLIPassthrough: m.cliPassthrough,
+		EnvVars:        m.envVars,
 	}, nil
 }
 
@@ -419,6 +421,29 @@ func TestManager_ProfileCLIFlagTokens(t *testing.T) {
 			t.Errorf("profileCLIFlagTokens(malformed) = %v, want nil", got)
 		}
 	})
+}
+
+func TestBuildPassthroughEnv_MergesProfileEnvVars(t *testing.T) {
+	mgr := newTestManager()
+	mgr.profileResolver = &mockPassthroughProfileResolver{
+		envVars: []settingsmodels.ProfileEnvVar{
+			{Key: "PLAIN", Value: "plain-value"},
+			{Key: "KANDEV_SESSION_ID", Value: "profile-session"},
+		},
+	}
+
+	env := mgr.buildPassthroughEnv(context.Background(), &AgentExecution{
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+	}, nil)
+
+	if env["PLAIN"] != "plain-value" {
+		t.Fatalf("profile env var missing: %+v", env)
+	}
+	if env["KANDEV_SESSION_ID"] != "session-1" {
+		t.Fatalf("profile env var must not override KANDEV_SESSION_ID: %+v", env)
+	}
 }
 
 func TestManager_VerifyPassthroughEnabled(t *testing.T) {

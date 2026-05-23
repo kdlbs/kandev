@@ -251,10 +251,11 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// The old table does not have cli_flags yet (the ADD COLUMN ran earlier in
+	// The old table does not have cli_flags/env_vars yet (the ADD COLUMN ran earlier in
 	// initSchema but on the old table, which is about to be dropped). So we
 	// include it in the copy only when it exists on the source table.
 	srcHasCLIFlags := columnExists(tx, "agent_profiles", "cli_flags")
+	srcHasEnvVars := columnExists(tx, "agent_profiles", "env_vars")
 	srcCols := `id, agent_id, name, agent_display_name, model, mode, migrated_from,
 		auto_approve, dangerously_skip_permissions, allow_indexing,
 		cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at`
@@ -262,6 +263,10 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 	if srcHasCLIFlags {
 		srcCols += ", cli_flags"
 		dstCols += ", cli_flags"
+	}
+	if srcHasEnvVars {
+		srcCols += ", env_vars"
+		dstCols += ", env_vars"
 	}
 
 	if _, err := tx.Exec(`CREATE TABLE agent_profiles_new (
@@ -279,6 +284,7 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 		user_modified INTEGER NOT NULL DEFAULT 0,
 		plan TEXT DEFAULT '',
 		cli_flags TEXT DEFAULT NULL,
+		env_vars TEXT NOT NULL DEFAULT '[]',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		deleted_at TIMESTAMP,

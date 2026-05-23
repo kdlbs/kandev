@@ -132,6 +132,37 @@ func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
 	})
 }
 
+func TestSetExecutionEnv_DoesNotSnapshotProfileEnvVars(t *testing.T) {
+	mgr := newTestManager()
+	mgr.profileResolver = &mockPassthroughProfileResolver{
+		envVars: []settingsmodels.ProfileEnvVar{{Key: "PROFILE_ONLY", Value: "new-value"}},
+	}
+	execution := &AgentExecution{
+		ID:             "exec-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+		Metadata:       map[string]interface{}{},
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("seed execution: %v", err)
+	}
+
+	if err := mgr.SetExecutionEnv(context.Background(), execution.ID, map[string]string{"EXECUTOR_ONLY": "executor"}); err != nil {
+		t.Fatalf("SetExecutionEnv: %v", err)
+	}
+
+	runtimeEnv, ok := execution.Metadata["runtime_env"].(map[string]string)
+	if !ok {
+		t.Fatalf("runtime_env missing or wrong type: %#v", execution.Metadata["runtime_env"])
+	}
+	if runtimeEnv["EXECUTOR_ONLY"] != "executor" {
+		t.Fatalf("executor env missing: %+v", runtimeEnv)
+	}
+	if _, exists := runtimeEnv["PROFILE_ONLY"]; exists {
+		t.Fatalf("profile env vars must not be snapshotted into runtime_env: %+v", runtimeEnv)
+	}
+}
+
 // trackingPreparer records whether Prepare was called.
 type trackingPreparer struct {
 	called bool

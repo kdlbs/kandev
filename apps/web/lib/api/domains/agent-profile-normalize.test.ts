@@ -66,6 +66,7 @@ describe("toAgentProfilePayload", () => {
       name: "default",
       cliPassthrough: false,
       cliFlags: [],
+      envVars: [{ key: "ANTHROPIC_BASE_URL", value: "https://api.example" }],
     });
     expect(payload).toEqual({
       id: "p1",
@@ -73,6 +74,7 @@ describe("toAgentProfilePayload", () => {
       name: "default",
       cli_passthrough: false,
       cli_flags: [],
+      env_vars: [{ key: "ANTHROPIC_BASE_URL", value: "https://api.example" }],
     });
   });
 

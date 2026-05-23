@@ -79,6 +79,7 @@ type CreateAgentProfileRequest struct {
 	// from the agent's curated PermissionSettings() catalogue (all disabled
 	// by default) so a fresh profile opens with the agent's suggestions.
 	CLIFlags []dto.CLIFlagDTO
+	EnvVars  []dto.ProfileEnvVarDTO
 }
 
 func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*dto.AgentDTO, error) {
@@ -176,6 +177,9 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 				return nil, err
 			}
 		}
+		if err := validateProfileEnvVarDTOs(profileReq.EnvVars); err != nil {
+			return nil, err
+		}
 		cliFlags := cliFlagsFromDTO(profileReq.CLIFlags)
 		if profileReq.CLIFlags == nil {
 			cliFlags = seedCLIFlags(agentConfig)
@@ -187,6 +191,7 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 			Model:            profileReq.Model,
 			Mode:             profileReq.Mode,
 			CLIFlags:         cliFlags,
+			EnvVars:          envVarsFromDTO(profileReq.EnvVars),
 		}
 		if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 			return nil, err

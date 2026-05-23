@@ -313,7 +313,6 @@ func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentPro
 		if profileInfo.AutoApprove {
 			reqWithWorktree.Env["AGENTCTL_AUTO_APPROVE_PERMISSIONS"] = "true"
 		}
-		m.mergeAgentProfileEnvFromInfo(context.Background(), profileInfo, reqWithWorktree.Env)
 	}
 	mergeRouteOverrideEnv(&reqWithWorktree)
 	return reqWithWorktree, executionID
@@ -419,7 +418,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		return nil, nil, nil, fmt.Errorf("no runtime configured: %w", err)
 	}
 
-	env := m.buildEnvForExecution(executionID, reqWithWorktree, agentConfig)
+	env := m.buildEnvForExecution(ctx, executionID, reqWithWorktree, agentConfig)
 
 	acpMcpServers, err := m.resolveMcpServersWithParams(ctx, reqWithWorktree.AgentProfileID, reqWithWorktree.Metadata, agentConfig)
 	if err != nil {
@@ -929,7 +928,7 @@ func (m *Manager) SetExecutionDescription(_ context.Context, executionID string,
 }
 
 // SetExecutionEnv stores per-run environment variables for the next agent subprocess start.
-func (m *Manager) SetExecutionEnv(ctx context.Context, executionID string, env map[string]string) error {
+func (m *Manager) SetExecutionEnv(_ context.Context, executionID string, env map[string]string) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
@@ -937,12 +936,7 @@ func (m *Manager) SetExecutionEnv(ctx context.Context, executionID string, env m
 	if execution.Metadata == nil {
 		execution.Metadata = make(map[string]interface{})
 	}
-	merged := cloneStringMap(env)
-	if merged == nil {
-		merged = make(map[string]string)
-	}
-	m.mergeAgentProfileEnv(ctx, execution.AgentProfileID, merged)
-	execution.Metadata["runtime_env"] = merged
+	execution.Metadata["runtime_env"] = cloneStringMap(env)
 	return nil
 }
 
@@ -1059,6 +1053,7 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 	if taskDescription != "" {
 		env["TASK_DESCRIPTION"] = taskDescription
 	}
+	m.mergeAgentProfileEnv(ctx, execution.AgentProfileID, env)
 
 	if err := execution.agentctl.ConfigureAgent(ctx, execution.AgentCommand, env, approvalPolicy, execution.ContinueCommand); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)

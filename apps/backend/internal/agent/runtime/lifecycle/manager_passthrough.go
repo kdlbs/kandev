@@ -137,6 +137,7 @@ func (m *Manager) buildPassthroughEnv(ctx context.Context, execution *AgentExecu
 	env["KANDEV_TASK_ID"] = execution.TaskID
 	env["KANDEV_SESSION_ID"] = execution.SessionID
 	env["KANDEV_AGENT_PROFILE_ID"] = execution.AgentProfileID
+	m.mergeAgentProfileEnv(ctx, execution.AgentProfileID, env)
 	if m.credsMgr != nil {
 		for _, credKey := range requiredEnv {
 			if value, err := m.credsMgr.GetCredentialValue(ctx, credKey); err == nil && value != "" {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { IconTrash } from "@tabler/icons-react";
@@ -198,6 +198,24 @@ function ProfileEnvVarsEditor({ envVars, secrets, onChange }: ProfileEnvVarsEdit
       onAdd={addEnvVar}
       onUpdate={updateEnvVar}
       onRemove={removeEnvVar}
+    />
+  );
+}
+
+type ProfileEnvVarsSectionProps = {
+  savedProfile: AgentProfile;
+  onChange: (patch: Partial<AgentProfile>) => void;
+};
+
+function ProfileEnvVarsSection({ savedProfile, onChange }: ProfileEnvVarsSectionProps) {
+  const { items: secrets } = useSecrets();
+
+  return (
+    <ProfileEnvVarsEditor
+      key={savedProfile.updatedAt}
+      envVars={savedProfile.envVars}
+      secrets={secrets}
+      onChange={(envVars) => onChange({ envVars })}
     />
   );
 }
@@ -419,14 +437,6 @@ function ProfileEditor({
     handleForceDelete,
   } = useProfileDelete(agent, draft, settingsAgents, syncAgentsToStore, toast);
 
-  const { items: secrets } = useSecrets();
-  const handleEnvVarsChange = useCallback(
-    (envVars: ProfileEnvVar[]) => {
-      setDraft((current) => ({ ...current, envVars }));
-    },
-    [setDraft],
-  );
-
   return (
     <div className="space-y-8">
       <ProfileEditorHeader
@@ -450,11 +460,9 @@ function ProfileEditor({
         passthroughConfig={passthroughConfig}
       />
 
-      <ProfileEnvVarsEditor
-        key={savedProfile.updatedAt}
-        envVars={savedProfile.envVars}
-        secrets={secrets}
-        onChange={handleEnvVarsChange}
+      <ProfileEnvVarsSection
+        savedProfile={savedProfile}
+        onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
       />
 
       <CommandPreviewCard

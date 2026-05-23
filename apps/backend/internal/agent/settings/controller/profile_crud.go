@@ -342,10 +342,19 @@ func envVarsFromDTO(in []dto.ProfileEnvVarDTO) []models.ProfileEnvVar {
 }
 
 func validateProfileEnvVarDTOs(in []dto.ProfileEnvVarDTO) error {
+	seen := make(map[string]int, len(in))
 	for i, ev := range in {
-		if strings.TrimSpace(ev.Key) == "" {
+		key := strings.TrimSpace(ev.Key)
+		if key == "" {
 			return fmt.Errorf("env_vars[%d].key is required", i)
 		}
+		if strings.ContainsAny(key, "=\x00") {
+			return fmt.Errorf("env_vars[%d].key must not contain '=' or null bytes", i)
+		}
+		if first, exists := seen[key]; exists {
+			return fmt.Errorf("env_vars[%d].key duplicates env_vars[%d].key", i, first)
+		}
+		seen[key] = i
 		if ev.SecretID != "" && ev.Value != "" {
 			return fmt.Errorf("env_vars[%d]: set value or secret_id, not both", i)
 		}
