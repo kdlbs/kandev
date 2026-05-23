@@ -122,25 +122,31 @@ function lockRightPinnedCaps(api: DockviewApi, state: LayoutState, readWidth: Wi
     if (col.id === "sidebar" || !col.pinned) continue;
     const currentW = readWidth(i, col.id);
     const cap = col.maxWidth ?? Math.max(currentW, LAYOUT_PINNED_MIN_PX);
-    applyConstraintsToFirstPanelGroup(api, col, cap);
+    applyConstraintsToAllPanelGroups(api, col, cap);
   }
 }
 
-function applyConstraintsToFirstPanelGroup(
+/** Constrain every dockview group in the column. The default right column
+ *  has separate top (files+changes) and bottom (terminal) groups — applying
+ *  the cap to only the first group would leave the bottom unbounded and let
+ *  the column grow on rebalance via the bottom group. */
+function applyConstraintsToAllPanelGroups(
   api: DockviewApi,
   col: LayoutState["columns"][number],
   cap: number,
 ): void {
+  const seen = new Set<string>();
   for (const group of col.groups) {
     for (const p of group.panels) {
       const pnl = api.getPanel(p.id);
-      if (pnl) {
-        pnl.group.api.setConstraints({
-          maximumWidth: cap,
-          minimumWidth: LAYOUT_PINNED_MIN_PX,
-        });
-        return;
-      }
+      if (!pnl) continue;
+      if (seen.has(pnl.group.id)) break;
+      seen.add(pnl.group.id);
+      pnl.group.api.setConstraints({
+        maximumWidth: cap,
+        minimumWidth: LAYOUT_PINNED_MIN_PX,
+      });
+      break;
     }
   }
 }

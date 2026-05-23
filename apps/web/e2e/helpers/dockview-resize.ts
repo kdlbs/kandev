@@ -112,37 +112,64 @@ export async function dragHorizontalSash(
  * drags are sensitive to viewport-overlap and pointer-events targeting,
  * which produce intermittent failures across sharded browser instances.
  */
+async function loosenPinnedConstraints(
+  page: Page,
+  column: "sidebar" | "right",
+  runtimeCap: number,
+): Promise<void> {
+  await page.evaluate(
+    ({ col, cap }) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const api = (window as any).__dockviewApi__;
+      if (!api) return;
+      const constraint = { maximumWidth: cap, minimumWidth: 50 };
+      if (col === "sidebar") {
+        api.getPanel("sidebar")?.group.api.setConstraints(constraint);
+        return;
+      }
+      const r = api.getPanel("files") ?? api.getPanel("changes");
+      r?.group.api.setConstraints(constraint);
+      for (const gid of ["group-right-top", "group-right-bottom"]) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        api.groups.find((g: any) => g.id === gid)?.api.setConstraints(constraint);
+      }
+    },
+    { col: column, cap: runtimeCap },
+  );
+}
+
 export async function resizeColumnViaSplitview(
   page: Page,
   column: "sidebar" | "right",
   targetWidth: number,
 ): Promise<number> {
+  // Production locks pinned-column maxWidth to the current width to prevent
+  // dockview's proportional rebalance from growing them. Real users bypass
+  // that lock via the sash-drag handler (mousedown widens the cap to the
+  // runtime viewport-proportional cap). Tests simulate the same widening —
+  // to the same runtime cap, NOT unlimited — so cap-enforcement assertions
+  // still work end-to-end. The bound is computed in Node and passed in so
+  // the browser-side script stays simple enough to satisfy the linter.
+  const viewport = page.viewportSize();
+  const vw = viewport?.width ?? 1440;
+  const runtimeCap =
+    column === "sidebar"
+      ? Math.max(350, Math.round(vw * 0.3))
+      : Math.max(800, Math.round(vw * 0.7));
+  await loosenPinnedConstraints(page, column, runtimeCap);
   const result = await page.evaluate(
     ({ col, target }) => {
-      type Splitview = {
-        length: number;
-        getViewSize: (i: number) => number;
-        resizeView: (i: number, size: number) => void;
-      };
-      type Component = { gridview?: { root?: { splitview?: Splitview } } };
-      type Api = { component?: Component };
-      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const api = (window as any).__dockviewApi__;
       const sv = api?.component?.gridview?.root?.splitview;
-      if (!sv) throw new Error("dockview splitview not exposed");
+      if (!api || !sv) throw new Error("dockview splitview not exposed");
       if (sv.length < 2) throw new Error("dockview has fewer than 2 columns");
-      // Sidebar is at index 0 only when visible. When hidden, dockview drops
-      // it from the root splitview and index 0 becomes the center column —
-      // refuse the call rather than silently resizing the wrong column.
-      if (col === "sidebar") {
-        type SbApi = { getPanel: (id: string) => unknown };
-        const sbApi = (window as unknown as { __dockviewApi__?: SbApi }).__dockviewApi__;
-        if (!sbApi?.getPanel("sidebar")) {
-          throw new Error("cannot resize sidebar when hidden (index 0 is center column)");
-        }
+      if (col === "sidebar" && !api.getPanel("sidebar")) {
+        throw new Error("cannot resize sidebar when hidden (index 0 is center column)");
       }
       const idx = col === "sidebar" ? 0 : sv.length - 1;
       sv.resizeView(idx, target);
-      return sv.getViewSize(idx);
+      return sv.getViewSize(idx) as number;
     },
     { col: column, target: targetWidth },
   );

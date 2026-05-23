@@ -1,5 +1,5 @@
 import type { LayoutColumn, LayoutGroup } from "./types";
-import { LAYOUT_SIDEBAR_RATIO, LAYOUT_RIGHT_RATIO } from "./constants";
+import { LAYOUT_INITIAL_RATIO } from "./constants";
 import { computePinnedMaxPxFor, LAYOUT_PINNED_MIN_PX } from "./caps";
 
 // Legacy hard caps used to clamp the *initial* default width. Users can still
@@ -11,8 +11,8 @@ const LEGACY_RIGHT_INITIAL_CAP = 450;
 /**
  * Get the effective pinned width for a column.
  *
- * - User overrides (from a prior resize, including widths seeded from
- *   pinned-defaults sessionStorage) are clamped to the runtime cap.
+ * - User overrides (from a prior resize, captured in the in-memory
+ *   pinnedWidths map) are clamped to the runtime cap.
  * - The initial default (no override) preserves legacy behavior: ratio-based
  *   width clamped to the old hard cap. New environments open exactly as
  *   they did before this PR.
@@ -27,8 +27,7 @@ export function getPinnedWidth(
   if (override !== undefined) {
     return Math.max(min, Math.min(override, runtimeMax));
   }
-  const ratio = column.id === "sidebar" ? LAYOUT_SIDEBAR_RATIO : LAYOUT_RIGHT_RATIO;
-  const ratioWidth = Math.round(totalWidth * ratio);
+  const ratioWidth = Math.round(totalWidth * LAYOUT_INITIAL_RATIO);
   const initialCap =
     column.maxWidth ??
     (column.id === "sidebar" ? LEGACY_SIDEBAR_INITIAL_CAP : LEGACY_RIGHT_INITIAL_CAP);
