@@ -23,9 +23,11 @@ function applyGroupMinimized(
     group.element.setAttribute(MINIMIZED_ATTR, next);
   }
   if (minimized) {
-    if (!priorSizes.has(groupId)) {
-      priorSizes.set(groupId, { width: group.api.width, height: group.api.height });
-    }
+    // Skip the setSize when the group is already minimized (priorSizes already
+    // has the entry). Re-firing setSize on every sync would re-emit dockview's
+    // size-change events for no benefit.
+    if (priorSizes.has(groupId)) return;
+    priorSizes.set(groupId, { width: group.api.width, height: group.api.height });
     try {
       group.api.setSize({ width: MIN_SIZE, height: MIN_SIZE });
     } catch {

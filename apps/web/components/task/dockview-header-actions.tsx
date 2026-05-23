@@ -207,7 +207,14 @@ function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsP
     if (isMaximized) {
       const target = preMaximizeGroupId ?? group.id;
       storeExitMaximize();
-      requestAnimationFrame(() => toggleGroupMinimized(target));
+      requestAnimationFrame(() => {
+        // The world may have changed across the frame (env switch, another
+        // maximize, the target group removed). Only toggle if the target still
+        // exists as a real group in the current dockview api.
+        const live = useDockviewStore.getState();
+        const stillThere = live.api?.groups.some((g) => g.id === target) ?? false;
+        if (stillThere) live.toggleGroupMinimized(target);
+      });
       return;
     }
     toggleGroupMinimized(group.id);

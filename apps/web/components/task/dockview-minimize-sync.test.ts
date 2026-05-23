@@ -118,6 +118,24 @@ describe("useMinimizedGroupSync", () => {
     expect(groupA.api.setSize).toHaveBeenCalledWith({ width: 0, height: 0 });
   });
 
+  it("skips a redundant setSize when sync re-fires while already minimized", () => {
+    const groupA = makeGroup("A");
+    const { api, fake } = makeFakeApi([groupA]);
+    renderHook(() => useMinimizedGroupSync(api));
+
+    act(() => {
+      useDockviewStore.getState().toggleGroupMinimized("A");
+    });
+    expect(groupA.api.setSize).toHaveBeenCalledTimes(1);
+
+    // A subsequent sync (triggered here by an addGroup event) should not re-fire
+    // setSize on the already-minimized group.
+    act(() => {
+      fake.emit.addGroup(makeGroup("B"));
+    });
+    expect(groupA.api.setSize).toHaveBeenCalledTimes(1);
+  });
+
   it("on restore: replays the recorded prior size and resets data-attribute", () => {
     const groupA = makeGroup("A", { width: 800, height: 600 });
     const { api } = makeFakeApi([groupA]);
