@@ -32,6 +32,7 @@ type RepoPrepareSpec struct {
 	BaseBranch           string
 	DefaultBranch        string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch       string
+	PRNumber             int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	WorktreeID           string
 	WorktreeBranch       string
 	WorktreeBranchPrefix string
@@ -55,6 +56,7 @@ type EnvPrepareRequest struct {
 	BaseBranch      string
 	DefaultBranch   string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch  string
+	PRNumber        int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	WorktreeID      string
 	WorktreeBranch  string
 
@@ -91,6 +93,7 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		BaseBranch:           r.BaseBranch,
 		DefaultBranch:        r.DefaultBranch,
 		CheckoutBranch:       r.CheckoutBranch,
+		PRNumber:             r.PRNumber,
 		WorktreeID:           r.WorktreeID,
 		WorktreeBranch:       r.WorktreeBranch,
 		WorktreeBranchPrefix: r.WorktreeBranchPrefix,

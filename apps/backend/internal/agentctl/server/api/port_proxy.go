@@ -91,6 +91,10 @@ func (s *Server) createPortProxy(port int) *httputil.ReverseProxy {
 		r.Out.URL.RawPath = ""
 		// Preserve original Host header for CORS/Origin validation in tunneled apps.
 		r.Out.Host = r.In.Host
+		// Clear Accept-Encoding so net/http.Transport handles compression
+		// transparently: it adds its own gzip and auto-decompresses before
+		// ModifyResponse runs, letting us scan plain bytes for HTML injection.
+		r.Out.Header.Del("Accept-Encoding")
 		if r.Out.Header.Get("Upgrade") != "" {
 			r.Out.Header.Set("Connection", "Upgrade")
 		}
@@ -99,6 +103,11 @@ func (s *Server) createPortProxy(port int) *httputil.ReverseProxy {
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		if resp.StatusCode == http.StatusSwitchingProtocols {
 			resp.Header.Set("Connection", "Upgrade")
+			return nil
+		}
+		ct := strings.ToLower(resp.Header.Get("Content-Type"))
+		if strings.Contains(ct, "text/html") {
+			return injectScriptsIntoResponse(resp)
 		}
 		return nil
 	}

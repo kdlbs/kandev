@@ -24,9 +24,22 @@ type mockAgentManager struct {
 	getExecutionIDForSessionFunc     func(ctx context.Context, sessionID string) (string, error)
 	isAgentRunningForSessionFunc     func(ctx context.Context, sessionID string) bool
 	cleanupStaleExecutionFunc        func(ctx context.Context, sessionID string) error
+	promptAgentFunc                  func(ctx context.Context, agentExecutionID, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error)
+	isPassthroughSessionFunc         func(ctx context.Context, sessionID string) bool
+	writePassthroughStdinFunc        func(ctx context.Context, sessionID, data string) error
+	markPassthroughRunningFunc       func(sessionID string) error
 	launchAgentCallCount             int
 	cleanupStaleExecutionCallCount   int
 	isAgentRunningForSessionCallArgs []string
+	promptAgentCallCount             int
+	writePassthroughStdinCalls       []passthroughStdinCall
+	markPassthroughRunningCalls      []string
+}
+
+// passthroughStdinCall captures one invocation of WritePassthroughStdin for assertions.
+type passthroughStdinCall struct {
+	SessionID string
+	Data      string
 }
 
 func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
@@ -74,7 +87,11 @@ func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecuti
 	return m.StopAgent(ctx, agentExecutionID, force)
 }
 
-func (m *mockAgentManager) PromptAgent(ctx context.Context, agentExecutionID string, prompt string, _ []v1.MessageAttachment, _ bool) (*PromptResult, error) {
+func (m *mockAgentManager) PromptAgent(ctx context.Context, agentExecutionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error) {
+	m.promptAgentCallCount++
+	if m.promptAgentFunc != nil {
+		return m.promptAgentFunc(ctx, agentExecutionID, prompt, attachments, dispatchOnly)
+	}
 	return nil, nil
 }
 
@@ -110,12 +127,26 @@ func (m *mockAgentManager) GetSessionAuthMethods(_ string) []streams.AuthMethodI
 	return nil
 }
 func (m *mockAgentManager) IsPassthroughSession(ctx context.Context, sessionID string) bool {
+	if m.isPassthroughSessionFunc != nil {
+		return m.isPassthroughSessionFunc(ctx, sessionID)
+	}
 	return false
 }
-func (m *mockAgentManager) WritePassthroughStdin(_ context.Context, _ string, _ string) error {
+func (m *mockAgentManager) WritePassthroughStdin(ctx context.Context, sessionID string, data string) error {
+	m.writePassthroughStdinCalls = append(m.writePassthroughStdinCalls, passthroughStdinCall{
+		SessionID: sessionID,
+		Data:      data,
+	})
+	if m.writePassthroughStdinFunc != nil {
+		return m.writePassthroughStdinFunc(ctx, sessionID, data)
+	}
 	return nil
 }
-func (m *mockAgentManager) MarkPassthroughRunning(_ string) error {
+func (m *mockAgentManager) MarkPassthroughRunning(sessionID string) error {
+	m.markPassthroughRunningCalls = append(m.markPassthroughRunningCalls, sessionID)
+	if m.markPassthroughRunningFunc != nil {
+		return m.markPassthroughRunningFunc(sessionID)
+	}
 	return nil
 }
 
@@ -516,6 +547,9 @@ func (m *mockRepository) HasActiveTaskSessionsByEnvironment(ctx context.Context,
 }
 func (m *mockRepository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
 	return false, nil
+}
+func (m *mockRepository) CountActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (int, error) {
+	return 0, nil
 }
 func (m *mockRepository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error) {
 	return 0, nil

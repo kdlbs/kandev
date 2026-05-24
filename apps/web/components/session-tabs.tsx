@@ -8,12 +8,18 @@ export type SessionTab = {
   id: string;
   label: string;
   icon?: ReactNode;
+  /** Optional badge rendered before the label — e.g. "#3" for an ordinary terminal. */
+  badge?: ReactNode;
   closable?: boolean;
   alwaysShowClose?: boolean;
   onClose?: (event: MouseEvent) => void;
+  onContextMenu?: (event: MouseEvent) => void;
+  onDoubleClick?: (event: MouseEvent) => void;
   className?: string;
   testId?: string;
   closeTestId?: string;
+  /** When true (default) keeps the existing 120px max-width; ordinary terminals with custom names benefit from `false`. */
+  truncate?: boolean;
 };
 
 type SessionTabsProps = {
@@ -80,9 +86,23 @@ function SessionTabItem({
       <TabsTrigger
         value={tab.id}
         data-testid={tab.testId}
-        className={tab.className + " group relative py-1 cursor-pointer rounded-sm max-w-[120px]"}
+        onContextMenu={tab.onContextMenu}
+        onDoubleClick={tab.onDoubleClick}
+        className={
+          (tab.className ?? "") +
+          " group relative py-1 cursor-pointer rounded-sm " +
+          (tab.truncate === false ? "max-w-[200px]" : "max-w-[120px]")
+        }
       >
         {tab.icon}
+        {tab.badge && (
+          <span
+            data-testid={`${tab.testId ?? tab.id}-seq-badge`}
+            className="mr-1 inline-flex items-center justify-center rounded-sm bg-muted text-muted-foreground text-[10px] font-mono leading-none px-1 py-0.5"
+          >
+            {tab.badge}
+          </span>
+        )}
         <span className={`truncate ${tab.icon ? "ml-1.5" : ""}`} style={{ textOverflow: "clip" }}>
           {tab.label}
         </span>

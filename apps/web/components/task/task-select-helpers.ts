@@ -16,6 +16,9 @@ import { INTENT_PR_REVIEW } from "@/lib/state/layout-manager";
 import { replaceTaskUrl } from "@/lib/links";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+
+const debug = createDebugLogger("dockview:task-select");
 
 export type SwitchToSessionFn = (
   taskId: string,
@@ -35,6 +38,28 @@ export function resolveLoadedSessionId(
   );
 }
 
+/**
+ * Pick the session to re-open when the user navigates back to a task.
+ *
+ * Prefers the user's last-selected session (tracked per task in
+ * `lastSessionByTaskId`) over `primarySessionId`, so opening a non-primary
+ * tab then bouncing through another task does not silently snap the user
+ * back to primary. Falls back to `primarySessionId` when the remembered
+ * session is unknown / missing an env mapping (e.g. it was deleted).
+ */
+export function resolvePreferredSessionId(
+  taskId: string,
+  primarySessionId: string,
+  lastSessionByTaskId: Record<string, string>,
+  environmentIdBySessionId: Record<string, string>,
+): string {
+  const last = lastSessionByTaskId[taskId];
+  if (last && environmentIdBySessionId[last]) {
+    return last;
+  }
+  return primarySessionId;
+}
+
 export function buildSwitchToSession(
   store: StoreApi<AppState>,
   setActiveSession: (taskId: string, sessionId: string) => void,
@@ -43,6 +68,16 @@ export function buildSwitchToSession(
     const state = store.getState();
     const oldEnvId = oldSessionId ? (state.environmentIdBySessionId[oldSessionId] ?? null) : null;
     const newEnvId = state.environmentIdBySessionId[sessionId] ?? null;
+    if (IS_DEBUG) {
+      debug("switchToSession: entry", {
+        taskId,
+        sessionId,
+        oldSessionId: oldSessionId ?? null,
+        oldEnvId,
+        newEnvId,
+        path: newEnvId ? "performLayoutSwitch" : "releaseToDefault",
+      });
+    }
     setActiveSession(taskId, sessionId);
     if (newEnvId) {
       performLayoutSwitch(oldEnvId, newEnvId, sessionId);
@@ -55,6 +90,9 @@ export function buildSwitchToSession(
     // layout to default so the new task starts from a clean slate; when the
     // new env id arrives, useEnvSwitchCleanup will adopt it without rebuild.
     if (oldEnvId || oldSessionId !== sessionId) {
+      if (IS_DEBUG) {
+        debug("switchToSession: releasing outgoing env (no newEnvId yet)", { oldEnvId });
+      }
       releaseLayoutToDefault(oldEnvId);
     }
   };
@@ -113,18 +151,32 @@ export function selectTaskWithLayout(params: {
   setPreparingTaskId: (id: string | null) => void;
 }): void {
   const { taskId, task, store, switchToSession, loadTaskSessionsForTask } = params;
-  const oldSessionId = store.getState().tasks.activeSessionId;
+  const state = store.getState();
+  const oldSessionId = state.tasks.activeSessionId;
+  if (IS_DEBUG) {
+    debug("selectTaskWithLayout: entry", {
+      taskId,
+      primarySessionId: task?.primarySessionId ?? null,
+      oldSessionId: oldSessionId ?? null,
+      prevActiveTaskId: state.tasks.activeTaskId ?? null,
+    });
+  }
   if (task?.primarySessionId) {
-    const primarySessionId = task.primarySessionId;
-    const hasEnvId = !!store.getState().environmentIdBySessionId[primarySessionId];
+    const targetSessionId = resolvePreferredSessionId(
+      taskId,
+      task.primarySessionId,
+      state.tasks.lastSessionByTaskId,
+      state.environmentIdBySessionId,
+    );
+    const hasEnvId = !!state.environmentIdBySessionId[targetSessionId];
     if (hasEnvId) {
-      switchToSession(taskId, primarySessionId, oldSessionId);
+      switchToSession(taskId, targetSessionId, oldSessionId);
       loadTaskSessionsForTask(taskId);
       replaceTaskUrl(taskId);
       return;
     }
     loadTaskSessionsForTask(taskId).then((sessions) => {
-      switchToSession(taskId, resolveLoadedSessionId(sessions, primarySessionId), oldSessionId);
+      switchToSession(taskId, resolveLoadedSessionId(sessions, targetSessionId), oldSessionId);
       replaceTaskUrl(taskId);
     });
     return;

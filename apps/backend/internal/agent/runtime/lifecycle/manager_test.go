@@ -219,6 +219,13 @@ func TestNewManager(t *testing.T) {
 	}
 }
 
+func TestNewManager_WiresRemediateNpxCacheDefault(t *testing.T) {
+	m := newTestManager()
+	if m.remediateNpxCache == nil {
+		t.Fatal("NewManager must wire default remediateNpxCache")
+	}
+}
+
 func TestManager_GetExecution(t *testing.T) {
 	mgr := newTestManager()
 

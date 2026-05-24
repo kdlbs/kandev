@@ -101,13 +101,13 @@ function GitHubUrlPill({
         type="text"
         value={githubUrl}
         onChange={(e) => onGitHubUrlChange?.(e.target.value)}
-        placeholder="github.com/owner/repo"
+        placeholder="github.com/owner/repo or .../pull/123"
         data-testid="github-url-input"
-        aria-label="GitHub repository URL"
+        aria-label="GitHub repository or PR URL"
         aria-invalid={!!githubUrlError}
         aria-describedby={githubUrlError ? "github-url-error" : undefined}
         className={cn(
-          "h-7 rounded-md px-2.5 text-xs bg-muted/30 border border-border/60",
+          "h-7 w-[320px] rounded-md px-2.5 text-xs bg-muted/30 border border-border/60",
           "outline-none focus:bg-muted focus:border-border placeholder:text-muted-foreground",
           githubUrlError && "border-destructive text-destructive",
         )}

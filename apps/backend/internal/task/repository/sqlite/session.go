@@ -443,6 +443,11 @@ func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.Task
 		return fmt.Errorf("failed to serialize repository snapshot: %w", err)
 	}
 
+	// metadata is NOT written here — callers wanting to change it must use
+	// UpdateSessionMetadata or SetSessionMetadataKey. A full-row write here
+	// would clobber metadata set via those side-channel paths since the
+	// caller's in-memory copy may be stale.
+
 	// agent_profile_id is stored as NULL when empty so the partial unique
 	// index over (task_id, agent_profile_id) ignores kanban / quick-chat rows.
 	var agentProfileID interface{}
@@ -735,6 +740,21 @@ func (r *Repository) HasActiveTaskSessionsByRepository(ctx context.Context, repo
 		return false, nil
 	}
 	return err == nil, err
+}
+
+func (r *Repository) CountActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (int, error) {
+	var count int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT COUNT(*)
+		FROM task_sessions s
+		INNER JOIN task_repositories tr ON tr.task_id = s.task_id
+		WHERE s.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+			AND tr.repository_id = ?
+	`), repositoryID).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 // DeleteEphemeralTasksByAgentProfile deletes all ephemeral tasks (and their sessions)

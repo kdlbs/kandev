@@ -104,14 +104,50 @@ type LinearTeam struct {
 	Name string `json:"name"`
 }
 
+// LinearLabel is an issue label belonging to a team. Labels are returned by
+// `GET /api/v1/linear/teams/:key/labels` and surfaced in the filter UI for
+// issue watches.
+type LinearLabel struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color,omitempty"`
+}
+
+// LinearUser is a workspace member returned by `GET /api/v1/linear/teams/:key/members`
+// (and the generic users list). Used as options in creator/assignee selectors.
+type LinearUser struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName,omitempty"`
+	Email       string `json:"email,omitempty"`
+	AvatarURL   string `json:"avatarUrl,omitempty"`
+}
+
 // SearchFilter is a structured search filter used by SearchIssues. Linear has
 // no JQL equivalent, so we expose a small set of structured fields that map
 // cleanly to GraphQL filter inputs.
+//
+// All fields are optional; an empty filter returns every issue the API key can
+// see. Watcher creation rejects fully-empty filters via filterIsEmpty.
 type SearchFilter struct {
 	Query    string   `json:"query,omitempty"`    // free-text title/description/identifier match
 	TeamKey  string   `json:"teamKey,omitempty"`  // restrict to one team
 	StateIDs []string `json:"stateIds,omitempty"` // restrict to specific workflow states
 	Assigned string   `json:"assigned,omitempty"` // "me" | "unassigned" | "" (any)
+	// Priorities filters issues whose priority is in this set. Linear uses
+	// 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low. Empty slice means no
+	// priority filter; a slice with 0 in it includes "No priority" issues.
+	Priorities []int `json:"priorities,omitempty"`
+	// LabelIDs filters issues that have ANY of the given label UUIDs (Linear's
+	// labels filter is OR by default).
+	LabelIDs []string `json:"labelIds,omitempty"`
+	// CreatorID restricts to issues created by a specific user UUID. Empty
+	// means any creator.
+	CreatorID string `json:"creatorId,omitempty"`
+	// EstimateMin / EstimateMax bound the issue's point estimate. nil disables
+	// that bound; the two together act as a closed range.
+	EstimateMin *float64 `json:"estimateMin,omitempty"`
+	EstimateMax *float64 `json:"estimateMax,omitempty"`
 }
 
 // SearchResult is a page of issues from a search. Linear uses cursor-based

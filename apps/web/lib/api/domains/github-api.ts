@@ -24,6 +24,9 @@ import type {
   GitHubPRStatus,
   GitHubActionPresets,
   UpdateGitHubActionPresetsRequest,
+  CleanupTasksResponse,
+  MergeMethod,
+  RepoMergeMethods,
 } from "@/lib/types/github";
 
 // Status
@@ -63,6 +66,20 @@ export async function listWorkspaceTaskPRs(workspaceId: string, options?: ApiReq
 
 export async function getTaskPR(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<TaskPR>(`/api/v1/github/task-prs/${taskId}`, options);
+}
+
+export async function createTaskPR(
+  data: { task_id: string; repository_id?: string; pr_url: string },
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<TaskPR>(`/api/v1/github/task-prs`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "POST",
+      body: JSON.stringify(data),
+    },
+  });
 }
 
 // PR feedback (live from GitHub)
@@ -117,6 +134,37 @@ export async function submitPRReview(
         body: JSON.stringify({ event, body: body ?? "" }),
       },
     },
+  );
+}
+
+// Merge a pull request. Omit mergeMethod to let the backend pick the first
+// method the repo allows (avoids GitHub's "default to merge commit" 405 on
+// squash-only / rebase-only repos).
+export async function mergePR(
+  owner: string,
+  repo: string,
+  number: number,
+  mergeMethod?: MergeMethod,
+) {
+  return fetchJson<{ merged: boolean }>(`/api/v1/github/prs/${owner}/${repo}/${number}/merge`, {
+    init: {
+      method: "PUT",
+      body: JSON.stringify({ merge_method: mergeMethod ?? "" }),
+    },
+  });
+}
+
+// Fetch the merge methods a repository allows (allow_merge_commit /
+// allow_squash_merge / allow_rebase_merge). Used by the merge button to
+// hide disallowed options and avoid 405s.
+export async function getRepoMergeMethods(
+  owner: string,
+  repo: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<RepoMergeMethods>(
+    `/api/v1/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/merge-methods`,
+    options,
   );
 }
 
@@ -288,6 +336,23 @@ export async function triggerAllIssueWatches(workspaceId: string, options?: ApiR
       init: { method: "POST", ...(options?.init ?? {}) },
     },
   );
+}
+
+// Manual cleanup sweeps. The poller runs these every 5min per watch, but a
+// user with a pile of legacy merged-PR tasks (created before the cleanup
+// policy was in place) can invoke them on demand from the settings page.
+export async function cleanupMergedReviewTasks(options?: ApiRequestOptions) {
+  return fetchJson<CleanupTasksResponse>("/api/v1/github/cleanup/review-tasks", {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
+}
+
+export async function cleanupClosedIssueTasks(options?: ApiRequestOptions) {
+  return fetchJson<CleanupTasksResponse>("/api/v1/github/cleanup/issue-tasks", {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
 }
 
 // User PR / issue search (for the /github page).

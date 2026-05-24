@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -81,7 +82,10 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	}
 	applyIssueWatchPatch(w, req)
 	if filterIsEmpty(w.Filter) {
-		return nil, fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, or assigned", ErrInvalidConfig)
+		return nil, fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, assigned, priorities, labelIds, creatorId, or estimate range", ErrInvalidConfig)
+	}
+	if err := validateFilterBounds(w.Filter); err != nil {
+		return nil, err
 	}
 	if w.WorkflowID == "" || w.WorkflowStepID == "" {
 		return nil, fmt.Errorf("%w: workflowId and workflowStepId cannot be empty", ErrInvalidConfig)
@@ -198,12 +202,49 @@ func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 		return fmt.Errorf("%w: workflowId and workflowStepId required", ErrInvalidConfig)
 	}
 	if filterIsEmpty(normalizeFilter(req.Filter)) {
-		return fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, or assigned", ErrInvalidConfig)
+		return fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, assigned, priorities, labelIds, creatorId, or estimate range", ErrInvalidConfig)
+	}
+	if err := validateFilterBounds(req.Filter); err != nil {
+		return err
 	}
 	if req.PollIntervalSeconds != 0 {
 		if err := validatePollInterval(req.PollIntervalSeconds); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validateFilterBounds rejects out-of-range values for fields where the wire
+// type permits invalid values (e.g. Priority being an unconstrained int).
+// Empty / unset fields pass without check.
+func validateFilterBounds(f SearchFilter) error {
+	for _, p := range f.Priorities {
+		if p < 0 || p > 4 {
+			return fmt.Errorf("%w: priority must be between 0 and 4", ErrInvalidConfig)
+		}
+	}
+	if err := validateEstimateBound(f.EstimateMin, "estimateMin"); err != nil {
+		return err
+	}
+	if err := validateEstimateBound(f.EstimateMax, "estimateMax"); err != nil {
+		return err
+	}
+	if f.EstimateMin != nil && f.EstimateMax != nil && *f.EstimateMin > *f.EstimateMax {
+		return fmt.Errorf("%w: estimateMin cannot be greater than estimateMax", ErrInvalidConfig)
+	}
+	return nil
+}
+
+// validateEstimateBound rejects NaN, ±Inf, and negative values. json.Marshal
+// fails on NaN/Inf, so without this check a malformed config would surface as a
+// 500 at watch-time instead of a clean validation error at create-time.
+func validateEstimateBound(v *float64, name string) error {
+	if v == nil {
+		return nil
+	}
+	if math.IsNaN(*v) || math.IsInf(*v, 0) || *v < 0 {
+		return fmt.Errorf("%w: %s must be a non-negative number", ErrInvalidConfig, name)
 	}
 	return nil
 }
@@ -221,9 +262,12 @@ func validatePollInterval(seconds int) error {
 // instead of slipping through with whitespace.
 func normalizeFilter(f SearchFilter) SearchFilter {
 	out := SearchFilter{
-		Query:    strings.TrimSpace(f.Query),
-		TeamKey:  strings.TrimSpace(f.TeamKey),
-		Assigned: strings.TrimSpace(f.Assigned),
+		Query:       strings.TrimSpace(f.Query),
+		TeamKey:     strings.TrimSpace(f.TeamKey),
+		Assigned:    strings.TrimSpace(f.Assigned),
+		CreatorID:   strings.TrimSpace(f.CreatorID),
+		EstimateMin: f.EstimateMin,
+		EstimateMax: f.EstimateMax,
 	}
 	for _, id := range f.StateIDs {
 		id = strings.TrimSpace(id)
@@ -231,11 +275,33 @@ func normalizeFilter(f SearchFilter) SearchFilter {
 			out.StateIDs = append(out.StateIDs, id)
 		}
 	}
+	for _, id := range f.LabelIDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			out.LabelIDs = append(out.LabelIDs, id)
+		}
+	}
+	seenPriority := map[int]bool{}
+	for _, p := range f.Priorities {
+		if seenPriority[p] {
+			continue
+		}
+		seenPriority[p] = true
+		out.Priorities = append(out.Priorities, p)
+	}
 	return out
 }
 
 func filterIsEmpty(f SearchFilter) bool {
-	return f.Query == "" && f.TeamKey == "" && f.Assigned == "" && len(f.StateIDs) == 0
+	return f.Query == "" &&
+		f.TeamKey == "" &&
+		f.Assigned == "" &&
+		len(f.StateIDs) == 0 &&
+		len(f.Priorities) == 0 &&
+		len(f.LabelIDs) == 0 &&
+		f.CreatorID == "" &&
+		f.EstimateMin == nil &&
+		f.EstimateMax == nil
 }
 
 func applyIssueWatchPatch(w *IssueWatch, req *UpdateIssueWatchRequest) {

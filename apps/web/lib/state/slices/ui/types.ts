@@ -106,6 +106,12 @@ export type SidebarTaskPrefsState = {
   pinnedTaskIds: string[];
   /** Manual order. Tasks not present fall back to the active sort. */
   orderedTaskIds: string[];
+  /**
+   * Per-parent subtask order. Keyed by parent task id; value is the ordered
+   * subtask ids. Subtasks not listed fall back to the active sort.
+   * Independent of the global `orderedTaskIds` and the view's sort spec.
+   */
+  subtaskOrderByParentId: Record<string, string[]>;
 };
 
 export type UISliceState = {
@@ -183,10 +189,13 @@ export type UISliceActions = {
   setKanbanPreviewedTaskId: (taskId: string | null) => void;
   togglePinnedTask: (taskId: string) => void;
   setSidebarTaskOrder: (orderedTaskIds: string[]) => void;
+  /** Replace the stored subtask order for a parent task. Empty array clears it. */
+  setSubtaskOrder: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
   /**
-   * Drop a task ID from both pinned and ordered arrays in-memory and persist.
-   * Called on task deletion so the in-memory state doesn't out-of-date the
-   * already-cleaned localStorage and silently re-write the deleted ID back.
+   * Drop a task ID from pinned, ordered, and subtask-order arrays in-memory
+   * and persist. Called on task deletion so the in-memory state doesn't
+   * out-of-date the already-cleaned localStorage and silently re-write the
+   * deleted ID back.
    */
   removeTaskFromSidebarPrefs: (taskId: string) => void;
 };

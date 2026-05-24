@@ -1,9 +1,10 @@
 "use client";
 
-import { memo, useCallback } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { SessionMobileTopBar } from "./session-mobile-top-bar";
 import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
 import { SessionTaskSwitcherSheet } from "./session-task-switcher-sheet";
+import { MobileFileViewerPanel } from "./mobile-file-viewer-panel";
 import { TaskChatPanel } from "../task-chat-panel";
 import { TaskPlanPanel } from "../task-plan-panel";
 import { MobileChangesPanel } from "./mobile-changes-panel";
@@ -17,7 +18,10 @@ import { MobileSessionsPicker } from "./mobile-sessions-section";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import { useSessionLayoutState } from "@/hooks/use-session-layout-state";
 import { useVisualViewportOffset } from "@/hooks/use-visual-viewport-offset";
+import { useToast } from "@/components/toast-provider";
+import { fetchAndOpenFile } from "../file-browser-hooks";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
+import type { OpenFileTab } from "@/lib/types/backend";
 
 const TOP_NAV_HEIGHT = "3.5rem";
 const BOTTOM_NAV_HEIGHT = "3.25rem";
@@ -67,6 +71,7 @@ function MobileChatPanelContent({
             key={effectiveSessionId}
             sessionId={effectiveSessionId}
             mode="agent"
+            enableTouchScroll
           />
         </div>
       ) : (
@@ -81,10 +86,12 @@ type MobilePanelAreaProps = {
   activeTaskId: string | null;
   isPassthroughMode: boolean;
   effectiveSessionId: string | null;
+  selectedFile: OpenFileTab | null;
   selectedDiff: { path: string; content?: string } | null;
   handleOpenFileFromChat: (path: string) => void;
   handleClearSelectedDiff: () => void;
-  handleOpenFile: (file: { path: string }) => void;
+  handleOpenFile: (file: OpenFileTab) => void;
+  handlePanelChangeAndClearSheet: (panel: MobileSessionPanel) => void;
   topNavHeight: string;
   bottomNavHeight: string;
 };
@@ -94,10 +101,12 @@ function MobilePanelArea({
   activeTaskId,
   isPassthroughMode,
   effectiveSessionId,
+  selectedFile,
   selectedDiff,
   handleOpenFileFromChat,
   handleClearSelectedDiff,
   handleOpenFile,
+  handlePanelChangeAndClearSheet,
   topNavHeight,
   bottomNavHeight,
 }: MobilePanelAreaProps) {
@@ -144,7 +153,16 @@ function MobilePanelArea({
       )}
       {currentMobilePanel === "files" && (
         <div className="flex-1 min-h-0 flex flex-col">
-          <TaskFilesPanel onOpenFile={handleOpenFile} />
+          {selectedFile ? (
+            <MobileFileViewerPanel
+              key={selectedFile.path}
+              file={selectedFile}
+              sessionId={effectiveSessionId}
+              onClose={() => handlePanelChangeAndClearSheet("files")}
+            />
+          ) : (
+            <TaskFilesPanel onOpenFile={handleOpenFile} />
+          )}
         </div>
       )}
       {currentMobilePanel === "terminal" && (
@@ -232,30 +250,71 @@ function MobileReviewDialogMount({
   );
 }
 
-function useMobilePanelHandlers({
-  handleSelectDiff,
+export function useMobilePanelHandlers({
+  effectiveSessionId,
   handlePanelChange,
 }: {
-  handleSelectDiff: (path: string, content?: string) => void;
+  effectiveSessionId: string | null;
   handlePanelChange: (panel: MobileSessionPanel) => void;
 }) {
+  const { toast } = useToast();
+  const [selectedFile, setSelectedFile] = useState<OpenFileTab | null>(null);
+  const [trackedSessionId, setTrackedSessionId] = useState<string | null>(effectiveSessionId);
+  const latestRequestIdRef = useRef(0);
+
+  // Reset viewer when switching sessions — adjust state during render per
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  if (trackedSessionId !== effectiveSessionId) {
+    setTrackedSessionId(effectiveSessionId);
+    setSelectedFile(null);
+  }
+
+  useEffect(() => {
+    latestRequestIdRef.current += 1;
+  }, [effectiveSessionId]);
+
   const handleOpenFileFromChat = useCallback(
     (path: string) => {
-      handleSelectDiff(path);
-      handlePanelChange("changes");
+      if (!effectiveSessionId) return;
+      const requestId = (latestRequestIdRef.current += 1);
+      void fetchAndOpenFile(
+        effectiveSessionId,
+        path,
+        (file) => {
+          if (requestId !== latestRequestIdRef.current) return;
+          setSelectedFile(file);
+          handlePanelChange("files");
+        },
+        toast,
+      );
     },
-    [handleSelectDiff, handlePanelChange],
+    [effectiveSessionId, handlePanelChange, toast],
   );
 
   const handleOpenFile = useCallback(
-    (file: { path: string }) => {
-      handleSelectDiff(file.path);
-      handlePanelChange("changes");
+    (file: OpenFileTab) => {
+      latestRequestIdRef.current += 1;
+      setSelectedFile(file);
+      handlePanelChange("files");
     },
-    [handleSelectDiff, handlePanelChange],
+    [handlePanelChange],
   );
 
-  return { handleOpenFileFromChat, handleOpenFile };
+  const handlePanelChangeAndClearSheet = useCallback(
+    (panel: MobileSessionPanel) => {
+      latestRequestIdRef.current += 1;
+      setSelectedFile(null);
+      handlePanelChange(panel);
+    },
+    [handlePanelChange],
+  );
+
+  return {
+    selectedFile,
+    handleOpenFileFromChat,
+    handleOpenFile,
+    handlePanelChangeAndClearSheet,
+  };
 }
 
 export const SessionMobileLayout = memo(function SessionMobileLayout({
@@ -273,13 +332,11 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
   remoteCheckedAt,
   remoteStatusError,
 }: SessionMobileLayoutProps) {
-  // Use shared layout state hook
   const {
     activeTaskId,
     effectiveSessionId,
     isPassthroughMode,
     selectedDiff,
-    handleSelectDiff,
     handleClearSelectedDiff,
     totalChangesCount,
     hasUnseenPlanUpdate,
@@ -292,10 +349,8 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
     setMobileSessionTaskSwitcherOpen,
   } = useSessionLayoutState({ sessionId });
 
-  const { handleOpenFileFromChat, handleOpenFile } = useMobilePanelHandlers({
-    handleSelectDiff,
-    handlePanelChange,
-  });
+  const { selectedFile, handleOpenFileFromChat, handleOpenFile, handlePanelChangeAndClearSheet } =
+    useMobilePanelHandlers({ effectiveSessionId, handlePanelChange });
 
   const review = useReviewDialog(effectiveSessionId);
 
@@ -320,21 +375,21 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         remoteStatusError={remoteStatusError}
       />
 
-      {/* Content Area - fixed height panels that manage their own scrolling */}
       <MobilePanelArea
         currentMobilePanel={currentMobilePanel}
         activeTaskId={activeTaskId}
         isPassthroughMode={isPassthroughMode}
         effectiveSessionId={effectiveSessionId}
+        selectedFile={selectedFile}
         selectedDiff={selectedDiff}
         handleOpenFileFromChat={handleOpenFileFromChat}
         handleClearSelectedDiff={handleClearSelectedDiff}
         handleOpenFile={handleOpenFile}
+        handlePanelChangeAndClearSheet={handlePanelChangeAndClearSheet}
         topNavHeight={TOP_NAV_HEIGHT}
         bottomNavHeight={BOTTOM_NAV_HEIGHT}
       />
 
-      {/* Terminal key-bar — docks above OS keyboard or bottom nav on the terminal panel */}
       <MobileTerminalKeybar
         sessionId={effectiveSessionId ?? null}
         visible={currentMobilePanel === "terminal"}
@@ -344,7 +399,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
       {/* Fixed Bottom Navigation */}
       <SessionMobileBottomNav
         activePanel={currentMobilePanel}
-        onPanelChange={handlePanelChange}
+        onPanelChange={handlePanelChangeAndClearSheet}
         planBadge={hasUnseenPlanUpdate}
         changesBadge={totalChangesCount}
       />

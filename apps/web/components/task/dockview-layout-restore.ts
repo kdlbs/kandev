@@ -1,20 +1,61 @@
 import type { DockviewReadyEvent, SerializedDockview } from "dockview-react";
+import type { StoreApi } from "zustand";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { applyLayoutFixups } from "@/lib/state/dockview-layout-builders";
 import { isLayoutShapeHealthy } from "@/lib/state/dockview-layout-health";
 import { measureDockviewContainer } from "@/lib/state/dockview-measure";
 import type { LayoutState } from "@/lib/state/layout-manager";
+import type { AppState } from "@/lib/state/store";
 import { getEnvLayout, getEnvMaximizeState, removeEnvMaximizeState } from "@/lib/local-storage";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
-const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
+const debug = createDebugLogger("dockview:restore");
+
+// Mirrors LAYOUT_STORAGE_KEY in dockview-layout-setup.ts. Bump in lockstep.
+const LAYOUT_STORAGE_KEY = "dockview-layout-v2";
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function describeSanitizeMode(options: {
+  stripSessionPanels?: boolean;
+  excludeSessionIds?: Set<string>;
+}): string {
+  if (options.stripSessionPanels) return "stripAllSessions";
+  if (options.excludeSessionIds) return "excludeSpecificSessions";
+  return "keepAll";
+}
+
+function logSanitizeOutcome(
+  options: { stripSessionPanels?: boolean; excludeSessionIds?: Set<string> },
+  totalPanels: Record<string, any>,
+  validPanels: Record<string, any>,
+  invalidIds: Set<string>,
+): void {
+  if (!IS_DEBUG) return;
+  debug("sanitizeLayout", {
+    mode: describeSanitizeMode(options),
+    excludeSessionCount: options.excludeSessionIds?.size ?? 0,
+    excludeSessionIds: options.excludeSessionIds
+      ? Array.from(options.excludeSessionIds)
+      : undefined,
+    totalPanels: Object.keys(totalPanels).length,
+    keptPanels: Object.keys(validPanels).length,
+    strippedPanels: Array.from(invalidIds),
+  });
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export function sanitizeLayout(
   layout: any,
   validComponents: Set<string>,
-  options: { stripSessionPanels?: boolean } = {},
+  options:
+    | { stripSessionPanels: true; excludeSessionIds?: never }
+    | { stripSessionPanels?: false | undefined; excludeSessionIds?: Set<string> } = {},
 ): any {
-  if (!isLayoutShapeHealthy(layout)) return null;
+  if (!isLayoutShapeHealthy(layout)) {
+    debug("sanitizeLayout: layout shape unhealthy, returning null");
+    return null;
+  }
 
   const invalidIds = new Set<string>();
   const validPanels: Record<string, any> = {};
@@ -29,6 +70,18 @@ export function sanitizeLayout(
     if (id.startsWith("session:")) {
       if (options.stripSessionPanels) {
         invalidIds.add(id);
+      } else if (options.excludeSessionIds) {
+        // Per-env restore: drop session panels that we know belong to a
+        // different env (a phantom from a previously-deleted task). Sessions
+        // we have no mapping for are kept — they may be a still-loading WS
+        // arrival, and useAutoSessionTab's reconcile will clean them up if
+        // they turn out to be stale.
+        const sid = id.slice("session:".length);
+        if (options.excludeSessionIds.has(sid)) {
+          invalidIds.add(id);
+        } else {
+          validPanels[id] = panel;
+        }
       } else {
         validPanels[id] = panel;
       }
@@ -38,6 +91,8 @@ export function sanitizeLayout(
       invalidIds.add(id);
     }
   }
+
+  logSanitizeOutcome(options, layout.panels, validPanels, invalidIds);
 
   if (invalidIds.size === 0) return layout;
 
@@ -57,7 +112,10 @@ export function sanitizeLayout(
   }
 
   const cleanedRoot = cleanNode(layout.grid.root);
-  if (!cleanedRoot) return null;
+  if (!cleanedRoot) {
+    debug("sanitizeLayout: cleanedRoot is null after stripping, returning null");
+    return null;
+  }
 
   return {
     ...layout,
@@ -111,21 +169,59 @@ function tryRestoreMaximizeOnly(api: DockviewReadyEvent["api"], envId: string): 
   }
 }
 
+/**
+ * Restore the per-env saved layout, after sanitizing phantom session panels.
+ * Returns true on a successful fromJSON, false when no usable saved layout
+ * exists (caller falls through to maximize-only / global / default build).
+ */
+function tryRestoreEnvLayout(
+  api: DockviewReadyEvent["api"],
+  envId: string,
+  validComponents: Set<string>,
+  phantomSessionIds: Set<string> | undefined,
+): boolean {
+  const envLayout = getEnvLayout(envId);
+  if (!envLayout) {
+    debug("tryRestoreEnvLayout: no saved layout for env", { envId });
+    return false;
+  }
+  if (IS_DEBUG) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rawPanelIds = Object.keys((envLayout as any).panels ?? {});
+    debug("tryRestoreEnvLayout: loaded saved layout", {
+      envId,
+      rawPanelCount: rawPanelIds.length,
+      rawPanelIds,
+      phantomSessionIds: phantomSessionIds ? Array.from(phantomSessionIds) : [],
+    });
+  }
+  const sanitized = sanitizeLayout(envLayout, validComponents, {
+    excludeSessionIds: phantomSessionIds,
+  });
+  if (!sanitized) {
+    debug("tryRestoreEnvLayout: sanitize returned null", { envId });
+    return false;
+  }
+  if (IS_DEBUG) {
+    debug("tryRestoreEnvLayout: calling api.fromJSON", {
+      envId,
+      sanitizedPanelIds: Object.keys(sanitized.panels),
+    });
+  }
+  api.fromJSON(sanitized as SerializedDockview);
+  applyFixupsWithMaximize(api, envId);
+  return true;
+}
+
 export function tryRestoreLayout(
   api: DockviewReadyEvent["api"],
   currentEnvId: string | null,
   validComponents: Set<string>,
+  phantomSessionIds?: Set<string>,
 ): boolean {
   if (currentEnvId) {
     try {
-      const envLayout = getEnvLayout(currentEnvId);
-      if (envLayout) {
-        const sanitized = sanitizeLayout(envLayout, validComponents);
-        if (!sanitized) return false;
-        api.fromJSON(sanitized as SerializedDockview);
-        applyFixupsWithMaximize(api, currentEnvId);
-        return true;
-      }
+      if (tryRestoreEnvLayout(api, currentEnvId, validComponents, phantomSessionIds)) return true;
     } catch {
       // fall through to maximize-only / global fallback
     }
@@ -150,4 +246,56 @@ export function tryRestoreLayout(
   }
 
   return false;
+}
+
+/**
+ * Collect session ids that DEFINITIVELY belong to a different env than `envId`.
+ * These are phantoms (typically from a previously-deleted task) that must be
+ * stripped on env-layout restore.
+ *
+ * Sessions absent from `environmentIdBySessionId` are NOT classified as
+ * phantoms — they may be a still-loading WS arrival that legitimately belongs
+ * to this env. `useAutoSessionTab`'s reconcile cleans up anything that turns
+ * out to be stale once the store catches up.
+ */
+export function collectPhantomSessionIdsForEnv(
+  state: { environmentIdBySessionId: Record<string, string> },
+  envId: string,
+): Set<string> {
+  const result = new Set<string>();
+  for (const [sessionId, mappedEnv] of Object.entries(state.environmentIdBySessionId)) {
+    if (mappedEnv && mappedEnv !== envId) result.add(sessionId);
+  }
+  return result;
+}
+
+/**
+ * Restore the env's saved layout, stripping session panels that we KNOW
+ * belong to a different env — guards against phantom panels from
+ * previously-deleted tasks resurfacing on restore.
+ */
+export function restoreEnvLayout(
+  api: DockviewReadyEvent["api"],
+  envId: string | null,
+  appStore: StoreApi<AppState>,
+  validComponents: Set<string>,
+): boolean {
+  const phantoms = envId ? collectPhantomSessionIdsForEnv(appStore.getState(), envId) : undefined;
+  if (IS_DEBUG) {
+    debug("restoreEnvLayout: entry", {
+      envId,
+      phantomCount: phantoms?.size ?? 0,
+      phantomSessionIds: phantoms ? Array.from(phantoms) : [],
+      livePanelIdsBefore: api.panels.map((p) => p.id),
+    });
+  }
+  const result = tryRestoreLayout(api, envId, validComponents, phantoms);
+  if (IS_DEBUG) {
+    debug("restoreEnvLayout: result", {
+      envId,
+      restored: result,
+      livePanelIdsAfter: api.panels.map((p) => p.id),
+    });
+  }
+  return result;
 }

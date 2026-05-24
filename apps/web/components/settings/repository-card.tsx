@@ -9,18 +9,12 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@kandev/ui/dialog";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { EditableCard } from "@/components/settings/editable-card";
+import { DeleteRepositoryDialog } from "@/components/settings/repository-delete-dialog";
+import { getRepositoryActiveSessionCountAction } from "@/app/actions/workspaces";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 
 type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
@@ -474,35 +468,6 @@ function RepositoryPreview({
   );
 }
 
-type DeleteRepositoryDialogProps = {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onDelete: () => void;
-};
-
-function DeleteRepositoryDialog({ open, onOpenChange, onDelete }: DeleteRepositoryDialogProps) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Delete repository</DialogTitle>
-          <DialogDescription>
-            This will remove the repository and its scripts. This action cannot be undone.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button type="button" variant="destructive" onClick={onDelete}>
-            Delete Repository
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 type RepositoryCardProps = {
   repository: RepositoryWithScripts;
   isRepositoryDirty: boolean;
@@ -515,6 +480,69 @@ type RepositoryCardProps = {
   onSave: (repoId: string) => Promise<void>;
   onDelete: (repoId: string) => Promise<void> | void;
 };
+
+function useRepositoryDelete(
+  repositoryId: string,
+  onDelete: (repoId: string) => Promise<void> | void,
+  onDeleted: () => void,
+) {
+  const { toast } = useToast();
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [activeSessionCount, setActiveSessionCount] = useState(0);
+  const [checkingCount, setCheckingCount] = useState(false);
+  const deleteRequest = useRequest(async () => {
+    await onDelete(repositoryId);
+  });
+
+  const handleOpenDelete = async () => {
+    // Reset count up-front so a stale value from a previous open can't flash
+    // the destructive button between dialog mount and the async fetch
+    // resolving with the fresh count.
+    setActiveSessionCount(0);
+    if (repositoryId.startsWith("temp-repo-")) {
+      setDeleteOpen(true);
+      return;
+    }
+    setCheckingCount(true);
+    try {
+      const { active_session_count } = await getRepositoryActiveSessionCountAction(repositoryId);
+      setActiveSessionCount(active_session_count);
+      setDeleteOpen(true);
+    } catch (error) {
+      toast({
+        title: "Failed to check repository sessions",
+        description: error instanceof Error ? error.message : "Request failed",
+        variant: "error",
+      });
+    } finally {
+      setCheckingCount(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    try {
+      await deleteRequest.run();
+      setDeleteOpen(false);
+      onDeleted();
+    } catch (error) {
+      toast({
+        title: "Failed to delete repository",
+        description: error instanceof Error ? error.message : "Request failed",
+        variant: "error",
+      });
+    }
+  };
+
+  return {
+    deleteOpen,
+    setDeleteOpen,
+    activeSessionCount,
+    handleOpenDelete,
+    handleDelete,
+    buttonLoading: deleteRequest.isLoading || checkingCount,
+    dialogDeleteLoading: deleteRequest.isLoading,
+  };
+}
 
 export function RepositoryCard({
   repository,
@@ -529,13 +557,10 @@ export function RepositoryCard({
   onDelete,
 }: RepositoryCardProps) {
   const { toast } = useToast();
-  const [deleteOpen, setDeleteOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(() => autoOpen);
   const saveRequest = useRequest(() => onSave(repository.id));
-  const deleteRequest = useRequest(async () => {
-    await onDelete(repository.id);
-  });
   const isDirty = isRepositoryDirty || areScriptsDirty;
+  const deleteState = useRepositoryDelete(repository.id, onDelete, () => setIsEditing(false));
 
   const handleSave = async (close: () => void) => {
     try {
@@ -544,20 +569,6 @@ export function RepositoryCard({
     } catch (error) {
       toast({
         title: "Failed to save repository",
-        description: error instanceof Error ? error.message : "Request failed",
-        variant: "error",
-      });
-    }
-  };
-
-  const handleDelete = async () => {
-    try {
-      await deleteRequest.run();
-      setDeleteOpen(false);
-      setIsEditing(false);
-    } catch (error) {
-      toast({
-        title: "Failed to delete repository",
         description: error instanceof Error ? error.message : "Request failed",
         variant: "error",
       });
@@ -582,8 +593,8 @@ export function RepositoryCard({
             onUpdateScript={onUpdateScript}
             onDeleteScript={onDeleteScript}
             onSave={handleSave}
-            onOpenDelete={() => setDeleteOpen(true)}
-            deleteLoading={deleteRequest.isLoading}
+            onOpenDelete={deleteState.handleOpenDelete}
+            deleteLoading={deleteState.buttonLoading}
             close={close}
           />
         )}
@@ -591,16 +602,18 @@ export function RepositoryCard({
           <RepositoryPreview
             repository={repository}
             isDirty={isDirty}
-            deleteLoading={deleteRequest.isLoading}
-            onOpenDelete={() => setDeleteOpen(true)}
+            deleteLoading={deleteState.buttonLoading}
+            onOpenDelete={deleteState.handleOpenDelete}
             open={open}
           />
         )}
       />
       <DeleteRepositoryDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        onDelete={handleDelete}
+        open={deleteState.deleteOpen}
+        onOpenChange={deleteState.setDeleteOpen}
+        onDelete={deleteState.handleDelete}
+        activeSessionCount={deleteState.activeSessionCount}
+        deleteLoading={deleteState.dialogDeleteLoading}
       />
     </>
   );

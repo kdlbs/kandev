@@ -229,6 +229,51 @@ func TestResumeSession_CancelledStateForceCleansUpStaleState(t *testing.T) {
 	}
 }
 
+// TestResumeSession_PropagatesIsPassthrough verifies the session's IsPassthrough
+// snapshot taken at session-creation time is carried through the resume request
+// to the lifecycle manager, so a profile that toggles CLIPassthrough after the
+// session was created cannot strand existing sessions in the wrong launch path.
+func TestResumeSession_PropagatesIsPassthrough(t *testing.T) {
+	cases := []struct {
+		name             string
+		sessionIsPasstru bool
+	}{
+		{name: "agent_session_keeps_acp", sessionIsPasstru: false},
+		{name: "passthrough_session_keeps_passthrough", sessionIsPasstru: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newMockRepository()
+			setupLiveResumeTestFixture(repo)
+			repo.sessions["sess-1"].IsPassthrough = tc.sessionIsPasstru
+
+			var capturedReq *LaunchAgentRequest
+			agentMgr := &mockAgentManager{
+				launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+					capturedReq = req
+					return &LaunchAgentResponse{
+						AgentExecutionID: "exec-new",
+						Status:           v1.AgentStatusStarting,
+					}, nil
+				},
+				isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool { return false },
+			}
+			exec := newTestExecutor(t, agentMgr, repo)
+
+			if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
+				t.Fatalf("expected resume success, got: %v", err)
+			}
+			if capturedReq == nil {
+				t.Fatal("expected LaunchAgent to be called with a request")
+			}
+			if capturedReq.IsPassthrough != tc.sessionIsPasstru {
+				t.Errorf("IsPassthrough = %v, want %v — without this the lifecycle manager would re-resolve live profile state and ignore the session's mode at creation time",
+					capturedReq.IsPassthrough, tc.sessionIsPasstru)
+			}
+		})
+	}
+}
+
 // TestResumeSession_PropagatesTaskEnvironmentID is a regression test for a
 // post-restart bug where `buildResumeRequest` did not copy
 // `session.TaskEnvironmentID` onto the LaunchAgentRequest. The lifecycle's

@@ -55,6 +55,9 @@ func TestLaunchPreparedSession_MultiRepo_PopulatesRequestRepositories(t *testing
 			captured = req
 			return &LaunchAgentResponse{
 				AgentExecutionID: "exec-1",
+				// Multi-repo: top-level WorktreePath mirrors agentctl's WorkDir
+				// (= task root), per executor_standalone.go:147 + lifecycle adapter.
+				WorktreePath: "/tasks/x",
 				Worktrees: []RepoWorktreeResult{
 					{RepositoryID: "repo-front", WorktreeID: "wt-front", WorktreeBranch: "feat/x-1", WorktreePath: "/tasks/x/frontend"},
 					{RepositoryID: "repo-back", WorktreeID: "wt-back", WorktreeBranch: "feat/x-2", WorktreePath: "/tasks/x/backend"},
@@ -108,7 +111,10 @@ func TestLaunchPreparedSession_MultiRepo_PersistsPerRepoEnvironmentAndWorktreeRo
 			return &LaunchAgentResponse{
 				AgentExecutionID: "exec-2",
 				WorktreeID:       "wt-front", // legacy mirror of Worktrees[0]
-				WorktreePath:     "/tasks/x/frontend",
+				// Multi-repo: top-level WorktreePath = task root, matching how
+				// executor_standalone.go:147 writes metadata["worktree_path"] from
+				// req.WorkspacePath (set to task root by the multi-repo preparer).
+				WorktreePath: "/tasks/x",
 				Worktrees: []RepoWorktreeResult{
 					{RepositoryID: "repo-front", WorktreeID: "wt-front", WorktreeBranch: "feat/x-1", WorktreePath: "/tasks/x/frontend"},
 					{RepositoryID: "repo-back", WorktreeID: "wt-back", WorktreeBranch: "feat/x-2", WorktreePath: "/tasks/x/backend"},

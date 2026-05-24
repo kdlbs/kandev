@@ -210,6 +210,14 @@ test.describe("PR watcher merged cleanup", () => {
       timeout: 45_000,
     });
 
+    // The auto-start prompt alone now counts as agent-only activity (its
+    // user-authored message is tagged auto_start=true). To exercise the
+    // "user engaged → preserve banner" branch, inject a real user message
+    // on the auto-started session.
+    const { sessions } = await apiClient.listTaskSessions(prTask!.id);
+    expect(sessions.length).toBeGreaterThan(0);
+    await apiClient.addUserMessage(prTask!.id, sessions[0].id, "thanks, looks good");
+
     // Simulate PR merged
     await apiClient.mockGitHubAddPRs([
       {

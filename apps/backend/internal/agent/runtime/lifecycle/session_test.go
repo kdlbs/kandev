@@ -695,3 +695,33 @@ func TestSendPrompt_DrainsStaleSignalFromPriorDispatchOnly(t *testing.T) {
 		t.Fatalf("expected deadline exceeded error, got: %v", err)
 	}
 }
+
+// TestBuildEffectivePrompt_DoesNotInjectKandevContextOnResume verifies the
+// lifecycle layer no longer wraps follow-up prompts with the Kandev system
+// block. The orchestrator wraps the first prompt only; on resume the agent
+// CLI's restored conversation already contains it.
+func TestBuildEffectivePrompt_DoesNotInjectKandevContextOnResume(t *testing.T) {
+	log := newSessionTestLogger()
+	sm := NewSessionManager(log, make(chan struct{}))
+
+	execution := &AgentExecution{
+		ID:                 "test-exec",
+		TaskID:             "test-task",
+		SessionID:          "test-session",
+		needsResumeContext: true,
+	}
+
+	got := sm.buildEffectivePrompt(execution, "follow-up message")
+	if strings.Contains(got, "<kandev-system>") {
+		t.Fatalf("expected no <kandev-system> wrap on resumed prompt, got %q", got)
+	}
+	if !execution.resumeContextInjected {
+		t.Fatal("expected resumeContextInjected to be set after first call")
+	}
+
+	// Second call must be a no-op pass-through.
+	got2 := sm.buildEffectivePrompt(execution, "another message")
+	if got2 != "another message" {
+		t.Fatalf("expected pass-through on second call, got %q", got2)
+	}
+}

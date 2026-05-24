@@ -409,6 +409,7 @@ type httpCreateTaskRequest struct {
 	ParentID          string                    `json:"parent_id,omitempty"`
 	WorkspacePath     string                    `json:"workspace_path,omitempty"`
 	BlockedBy         []string                  `json:"blocked_by,omitempty"`
+	ProjectID         string                    `json:"project_id,omitempty"`
 	// Office task-handoffs phase 5 — workspace policy. Optional; same
 	// shape as the MCP create_task_kandev fields.
 	WorkspaceMode         string `json:"workspace_mode,omitempty"`
@@ -527,6 +528,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		ParentID:       body.ParentID,
 		WorkspacePath:  body.WorkspacePath,
 		BlockedBy:      body.BlockedBy,
+		ProjectID:      body.ProjectID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
@@ -916,9 +918,10 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workflow_id and workflow_step_id are required"})
 		return
 	}
-	result, err := h.service.MoveTask(
+	result, err := h.service.MoveTaskWithOptions(
 		c.Request.Context(), c.Param("id"),
 		body.WorkflowID, body.WorkflowStepID, body.Position,
+		service.MoveTaskOptions{AllowActivePrimarySession: true},
 	)
 	if err != nil {
 		handleSelectedMoveError(c, h.logger, err)
@@ -938,11 +941,12 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	deleteCtx, cancel := context.WithTimeout(context.Background(), constants.TaskDeleteTimeout)
 	defer cancel()
 	taskID := c.Param("id")
+	cascade := cascadeQueryParam(c)
 	// Office task-handoffs phase 6: route through HandoffService.DeleteTaskTree
 	// when wired so descendant runs are cancelled, group memberships are
 	// released with reason=deleted, and the cleanup state machine fires.
 	if h.handoffSvc != nil {
-		if _, err := h.handoffSvc.DeleteTaskTree(deleteCtx, taskID); err != nil {
+		if _, err := h.handoffSvc.DeleteTaskTree(deleteCtx, taskID, cascade); err != nil {
 			handleNotFound(c, h.logger, err, "task not deleted")
 			return
 		}
@@ -958,13 +962,14 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 
 func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
 	taskID := c.Param("id")
+	cascade := cascadeQueryParam(c)
 	// Office task-handoffs phase 6: when a HandoffService is wired,
 	// archive the whole subtree under a single cascade ID so
 	// descendants get tagged for scoped unarchive AND workspace-group
 	// memberships are released. When HandoffService is unconfigured
 	// (legacy / tests) fall back to the single-task path.
 	if h.handoffSvc != nil {
-		if _, err := h.handoffSvc.ArchiveTaskTree(c.Request.Context(), taskID); err != nil {
+		if _, err := h.handoffSvc.ArchiveTaskTree(c.Request.Context(), taskID, cascade); err != nil {
 			handleNotFound(c, h.logger, err, "task not archived")
 			return
 		}
@@ -976,6 +981,32 @@ func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
+}
+
+// cascadeQueryParam returns whether the archive/delete request asked to
+// cascade into subtasks. Default is false — subtasks are preserved
+// unless the client explicitly opts in via ?cascade=true.
+func cascadeQueryParam(c *gin.Context) bool {
+	return strings.EqualFold(c.Query("cascade"), "true")
+}
+
+// httpTaskSubtaskCount returns the count of direct, non-archived,
+// non-ephemeral subtasks for a task. Used by the frontend's archive /
+// delete confirmation dialogs to decide whether to render the
+// "Also archive/delete subtasks" checkbox.
+func (h *TaskHandlers) httpTaskSubtaskCount(c *gin.Context) {
+	taskID := c.Param("id")
+	children, err := h.repo.ListChildren(c.Request.Context(), taskID)
+	if err != nil {
+		// Don't surface the raw repo error to the client — it can leak
+		// driver / SQL details. Log the full reason server-side, return
+		// a generic 500 to the caller.
+		h.logger.Error("failed to list direct subtasks",
+			zap.String("task_id", taskID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count subtasks"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"count": len(children)})
 }
 
 // httpUnarchiveTask routes through HandoffService.UnarchiveTaskTree so

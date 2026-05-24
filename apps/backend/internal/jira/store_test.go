@@ -332,3 +332,57 @@ func TestStore_MigrateLegacyPerWorkspaceTable_PreHealthColumns(t *testing.T) {
 		t.Errorf("expected LastCheckedAt=nil (default), got %v", cfg.LastCheckedAt)
 	}
 }
+
+// TestStore_AddsInstanceTypeColumn_OnExistingSingleton covers the upgrade path
+// where a singleton-shaped jira_configs already exists (no workspace_id
+// migration needed) but predates the instance_type column. The ALTER TABLE
+// must run and seed the legacy row to 'cloud'.
+func TestStore_AddsInstanceTypeColumn_OnExistingSingleton(t *testing.T) {
+	raw, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	// Pre-instance_type schema: singleton id, no instance_type column.
+	if _, err := db.Exec(`
+		CREATE TABLE jira_configs (
+			id TEXT PRIMARY KEY CHECK(id = 'singleton'),
+			site_url TEXT NOT NULL,
+			email TEXT NOT NULL DEFAULT '',
+			auth_method TEXT NOT NULL,
+			default_project_key TEXT NOT NULL DEFAULT '',
+			last_checked_at DATETIME,
+			last_ok INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`); err != nil {
+		t.Fatalf("legacy schema: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := db.Exec(`INSERT INTO jira_configs
+		(id, site_url, email, auth_method, default_project_key, created_at, updated_at)
+		VALUES ('singleton', ?, ?, ?, ?, ?, ?)`,
+		"https://acme.atlassian.net", "u@example.com", AuthMethodAPIToken, "PROJ", now, now); err != nil {
+		t.Fatalf("seed singleton row: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("NewStore on pre-instance_type schema: %v", err)
+	}
+	cfg, err := store.GetConfig(context.Background())
+	if err != nil {
+		t.Fatalf("get singleton: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected singleton row after migration")
+	}
+	if cfg.InstanceType != InstanceTypeCloud {
+		t.Errorf("expected legacy row to default to cloud, got %q", cfg.InstanceType)
+	}
+}

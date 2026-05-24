@@ -112,7 +112,7 @@ export function PanelHeaderBarSplit({ left, right, className }: PanelHeaderBarSp
     <PanelHeaderBar className={className}>
       <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">{left}</div>
       <div className="flex-1" />
-      <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">{right}</div>
+      <div className="flex items-center gap-1.5 shrink-0">{right}</div>
     </PanelHeaderBar>
   );
 }

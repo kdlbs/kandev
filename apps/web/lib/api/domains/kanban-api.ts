@@ -74,7 +74,8 @@ export async function createTask(
     attachments?: Array<{ type: string; data: string; mime_type: string; name?: string }>;
     parent_id?: string;
     workspace_path?: string;
-    priority?: number;
+    priority?: string;
+    project_id?: string;
     metadata?: Record<string, unknown>;
     /** Office task-handoffs phase 4/5 — workspace policy. */
     workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
@@ -110,8 +111,13 @@ export async function updateTask(
   });
 }
 
-export async function deleteTask(taskId: string, options?: ApiRequestOptions) {
-  return fetchJson<void>(`/api/v1/tasks/${taskId}`, {
+export async function deleteTask(
+  taskId: string,
+  params?: { cascade?: boolean },
+  options?: ApiRequestOptions,
+) {
+  const query = params?.cascade ? "?cascade=true" : "";
+  return fetchJson<void>(`/api/v1/tasks/${taskId}${query}`, {
     ...options,
     init: { method: "DELETE", ...(options?.init ?? {}) },
   });
@@ -142,11 +148,20 @@ export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, options);
 }
 
-export async function archiveTask(taskId: string, options?: ApiRequestOptions) {
-  return fetchJson<void>(`/api/v1/tasks/${taskId}/archive`, {
+export async function archiveTask(
+  taskId: string,
+  params?: { cascade?: boolean },
+  options?: ApiRequestOptions,
+) {
+  const query = params?.cascade ? "?cascade=true" : "";
+  return fetchJson<void>(`/api/v1/tasks/${taskId}/archive${query}`, {
     ...options,
     init: { method: "POST", ...(options?.init ?? {}) },
   });
+}
+
+export async function getSubtaskCount(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ count: number }>(`/api/v1/tasks/${taskId}/subtask-count`, options);
 }
 
 export async function listTasksByWorkspace(

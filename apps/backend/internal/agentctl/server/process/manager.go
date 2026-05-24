@@ -232,6 +232,26 @@ func (m *Manager) GetWorkspaceTracker() *WorkspaceTracker {
 	return m.workspaceTracker
 }
 
+// StartAllWorkspaceTrackers starts root + per-repo trackers (idempotent) so file-change events fire in passthrough mode.
+func (m *Manager) StartAllWorkspaceTrackers(ctx context.Context) {
+	if m.workspaceTracker != nil {
+		m.workspaceTracker.Start(ctx)
+	}
+	for _, t := range m.repoTrackers {
+		t.Start(ctx)
+	}
+}
+
+// stopWorkspaceTrackers stops root + per-repo trackers (idempotent via sync.Once).
+func (m *Manager) stopWorkspaceTrackers() {
+	if m.workspaceTracker != nil {
+		m.workspaceTracker.Stop()
+	}
+	for _, t := range m.repoTrackers {
+		t.Stop()
+	}
+}
+
 // SubscribeWorkspaceStream creates a single workspace stream subscriber and
 // fans it out across the root tracker plus every per-repo tracker, so the
 // caller receives events from all repositories on one channel. Use
@@ -934,6 +954,9 @@ func (m *Manager) Stop(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Stop trackers before the status guard: passthrough never calls Start() so the early return below would otherwise leak them.
+	m.stopWorkspaceTrackers()
+
 	status := m.Status()
 	if status == StatusStopped || status == StatusStopping {
 		m.logger.Info("Stop called but already stopped/stopping", zap.String("status", string(status)))
@@ -953,7 +976,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 	return nil
 }
 
-// stopShellAndProcesses stops the shell session, VS Code, workspace processes, and workspace tracker.
+// stopShellAndProcesses stops the shell session, VS Code, and workspace processes.
 func (m *Manager) stopShellAndProcesses(ctx context.Context) {
 	// Stop VS Code server if running
 	m.logger.Debug("stopping vscode server")
@@ -983,15 +1006,6 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) {
 		}
 	}
 	m.logger.Debug("workspace processes stopped")
-
-	m.logger.Debug("stopping workspace tracker")
-	if m.workspaceTracker != nil {
-		m.workspaceTracker.Stop()
-	}
-	for _, t := range m.repoTrackers {
-		t.Stop()
-	}
-	m.logger.Debug("workspace tracker stopped")
 }
 
 // closeAdapterAndStdin closes the protocol adapter, the stop channel, and stdin.

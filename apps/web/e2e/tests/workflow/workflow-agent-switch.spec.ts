@@ -710,6 +710,119 @@ test.describe("Workflow agent profile switching", () => {
     await expect(session.primaryStarInTab("Profile A")).toBeVisible({ timeout: 30_000 });
   });
 
+  /**
+   * A user manually adds a session with a different agent (the "New Agent"
+   * button), and the active step has on_turn_complete: move_to_next with the
+   * next step having no agent override. The user's explicit profileB choice
+   * must win — we must NOT silently respawn a profileA session after each
+   * completed turn.
+   */
+  test("user-added agent session is not respawned to task default on turn complete", async ({
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+    const { profileA, profileB } = await createProfiles(apiClient);
+
+    // Step1: no override, auto_start + on_turn_complete → next.
+    // Step2: no override (this is the trigger condition for the bug).
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Respawn Regression");
+    const step1 = await apiClient.createWorkflowStep(workflow.id, "Step1", 0, {
+      is_start_step: true,
+    });
+    const step2 = await apiClient.createWorkflowStep(workflow.id, "Step2", 1);
+    await apiClient.createWorkflowStep(workflow.id, "Done", 2);
+
+    // step1 has auto_start + on_turn_complete:move_to_next but NO startup
+    // prompt — a prompt would race the user's New Agent launch and could
+    // advance the task to step2 before the user-added session even exists,
+    // letting this test pass without exercising the bug path.
+    await apiClient.updateWorkflowStep(step1.id, {
+      events: {
+        on_enter: [{ type: "auto_start_agent" }],
+        on_turn_complete: [{ type: "move_to_next" }],
+      },
+    });
+    // step2 deliberately has no agent_profile_id and no on_enter.
+
+    // Task is created with profileA as the default agent.
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Respawn Regression Task",
+      profileA.id,
+      {
+        workflow_id: workflow.id,
+        workflow_step_id: step1.id,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    // Wait for the auto-started profileA session to be ready AND confirm the
+    // task is still on step1 — without a startup prompt the only way to
+    // advance is via the user-added session's turn-complete below.
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.find((s) => s.agent_profile_id === profileA.id)?.state ?? "";
+        },
+        { timeout: 30_000, message: "Waiting for profileA session to be ready" },
+      )
+      .toBe("WAITING_FOR_INPUT");
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id, {
+        timeout: 5_000,
+        message: "Task should still be on step1 before New Agent",
+      })
+      .toBe(step1.id);
+
+    // User clicks "New Agent" — launch a profileB session on the same task.
+    await apiClient.launchSession({
+      task_id: task.id,
+      agent_profile_id: profileB.id,
+      prompt: 'e2e:message("hello from B")',
+      intent: "start",
+    });
+
+    // Wait for the on_turn_complete handler to advance the task to Step2 —
+    // a deterministic signal that the handler ran (and either spawned a new
+    // session, the bug, or correctly did not).
+    await expect
+      .poll(
+        async () => {
+          const t = await apiClient.getTask(task.id);
+          return t.workflow_step_id;
+        },
+        { timeout: 30_000, message: "Waiting for task to advance to step2" },
+      )
+      .toBe(step2.id);
+
+    // The handler runs in a goroutine after the step-id write, so a buggy
+    // respawn could land a few moments after the advance is visible. Sample
+    // the session count repeatedly across a short window and fail fast if
+    // it ever exceeds 2. `expect.poll(...).toBe(2)` would return on the
+    // first matching sample and miss a delayed respawn — we need to prove
+    // the count *stays* at 2.
+    const stabilityWindowMs = 3_000;
+    const stabilityStart = Date.now();
+    while (Date.now() - stabilityStart < stabilityWindowMs) {
+      const { sessions: stableSessions } = await apiClient.listTaskSessions(task.id);
+      expect(stableSessions.length, "no extra session should spawn within stability window").toBe(
+        2,
+      );
+      await new Promise((r) => setTimeout(r, 250));
+    }
+
+    // Critical assertion: no extra profileA session was spawned after the
+    // user's profileB turn completed. The task must still have exactly two
+    // sessions (the original profileA and the user-added profileB).
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    const profileASessions = sessions.filter((s) => s.agent_profile_id === profileA.id);
+    const profileBSessions = sessions.filter((s) => s.agent_profile_id === profileB.id);
+    expect(profileBSessions.length).toBe(1);
+    expect(profileASessions.length).toBe(1);
+  });
+
   test("reset context checkbox is disabled when step has agent profile override", async ({
     testPage,
     apiClient,

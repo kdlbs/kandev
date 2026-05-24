@@ -199,66 +199,41 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, scopeID, process
 	return info, nil
 }
 
-// ListUserShells returns all user shells for a scope, sorted by creation time.
-// If no plain shell terminals exist, automatically creates the first "Terminal" entry.
+// ListUserShells returns every user shell registered for the scope, sorted
+// by creation time. The list includes script terminals, the hardcoded
+// bottom-panel entry (if it exists), and any orphan ordinary shells the
+// agent has registered.
+//
+// Auto-creating the first "Terminal" entry is no longer this function's
+// job — the terminal service (internal/terminal/service) owns that policy
+// now and inserts a DB row alongside the agentctl-side entry. This keeps
+// "what's in the panel" derivable from a single source of truth.
 func (r *InteractiveRunner) ListUserShells(scopeID string) []UserShellInfo {
-	r.userShellsMu.Lock()
-	defer r.userShellsMu.Unlock()
+	r.userShellsMu.RLock()
+	defer r.userShellsMu.RUnlock()
 
 	prefix := scopeID + ":"
 	var shells []UserShellInfo
-	hasPlainShell := false
-
 	for key, entry := range r.userShells {
-		if strings.HasPrefix(key, prefix) {
-			terminalID := key[len(prefix):]
-			// Check if process is still alive
-			_, running := r.Get(entry.ProcessID, false)
-			shells = append(shells, UserShellInfo{
-				TerminalID:     terminalID,
-				ProcessID:      entry.ProcessID,
-				Running:        running,
-				Label:          entry.Label,
-				Closable:       entry.Closable,
-				InitialCommand: entry.InitialCommand,
-				CreatedAt:      entry.CreatedAt,
-			})
-			// Check if this is a plain shell (not a script terminal)
-			if entry.InitialCommand == "" {
-				hasPlainShell = true
-			}
+		if !strings.HasPrefix(key, prefix) {
+			continue
 		}
-	}
-
-	// Auto-create the first "Terminal" if no plain shells exist
-	if !hasPlainShell {
-		terminalID := "shell-" + uuid.New().String()
-		now := time.Now().UTC()
-		entry := &userShellEntry{
-			ProcessID:      "", // No process yet - will be started when WebSocket connects
-			Label:          "Terminal",
-			InitialCommand: "",
-			Closable:       false, // First terminal is not closable
-			CreatedAt:      now,
-		}
-		r.userShells[prefix+terminalID] = entry
-
+		terminalID := key[len(prefix):]
+		_, running := r.Get(entry.ProcessID, false)
 		shells = append(shells, UserShellInfo{
 			TerminalID:     terminalID,
-			ProcessID:      "",
-			Running:        false,
-			Label:          "Terminal",
-			Closable:       false,
-			InitialCommand: "",
-			CreatedAt:      now,
+			ProcessID:      entry.ProcessID,
+			Running:        running,
+			Label:          entry.Label,
+			Closable:       entry.Closable,
+			InitialCommand: entry.InitialCommand,
+			CreatedAt:      entry.CreatedAt,
 		})
 	}
 
-	// Sort by creation time for stable ordering
 	sort.Slice(shells, func(i, j int) bool {
 		return shells[i].CreatedAt.Before(shells[j].CreatedAt)
 	})
-
 	return shells
 }
 
@@ -283,6 +258,31 @@ func (r *InteractiveRunner) StopUserShell(ctx context.Context, scopeID, terminal
 		zap.String("process_id", entry.ProcessID))
 
 	return r.Stop(ctx, entry.ProcessID)
+}
+
+// IsUserShellAlive reports whether the PTY behind (scopeID, terminalID) is
+// currently running. Returns false when the entry doesn't exist, the entry
+// has no process id (lazy-start hasn't happened yet), or the process has
+// since exited.
+//
+// ProcessID is read under the read lock so the subsequent r.Get call
+// doesn't race with a concurrent shell-start path that mutates the entry
+// pointer in place.
+func (r *InteractiveRunner) IsUserShellAlive(scopeID, terminalID string) bool {
+	key := scopeID + ":" + terminalID
+
+	r.userShellsMu.RLock()
+	var processID string
+	if entry, exists := r.userShells[key]; exists {
+		processID = entry.ProcessID
+	}
+	r.userShellsMu.RUnlock()
+
+	if processID == "" {
+		return false
+	}
+	_, running := r.Get(processID, false)
+	return running
 }
 
 // ResizeUserShell resizes the PTY for a user shell.

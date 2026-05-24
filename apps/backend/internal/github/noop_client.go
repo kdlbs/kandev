@@ -77,7 +77,15 @@ func (c *NoopClient) ListRepoBranches(context.Context, string, string) ([]RepoBr
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) GetRepoMergeMethods(context.Context, string, string) (RepoMergeMethods, error) {
+	return RepoMergeMethods{}, ErrNoClient
+}
+
 func (c *NoopClient) SubmitReview(context.Context, string, string, int, string, string) error {
+	return ErrNoClient
+}
+
+func (c *NoopClient) MergePR(context.Context, string, string, int, string) error {
 	return ErrNoClient
 }
 
@@ -99,4 +107,12 @@ func (c *NoopClient) SearchPRsPaged(context.Context, string, string, int, int) (
 
 func (c *NoopClient) GetIssueState(context.Context, string, string, int) (string, error) {
 	return "", ErrNoClient
+}
+
+func (c *NoopClient) CreateGist(context.Context, CreateGistInput) (*GistResponse, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) DeleteGist(context.Context, string) error {
+	return ErrNoClient
 }

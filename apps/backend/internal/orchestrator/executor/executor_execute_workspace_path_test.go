@@ -3,16 +3,19 @@ package executor
 import "testing"
 
 // Pinpointed tests for computeWorkspacePath. The persisted workspace_path
-// becomes agentctl's WorkDir on cold start (GetOrEnsureExecution); pointing it
-// at the wrong directory disables the per-repo tracker fan-out and silently
-// drops the Changes panel back to single-repo mode.
+// becomes agentctl's WorkDir on cold start (GetOrEnsureExecution); it must
+// mirror the agent process cwd used on hot start (= cfg.WorkDir, which is
+// metadata["worktree_path"] = req.WorkspacePath from the env preparer).
+// Otherwise ACP session/load on resume fails with -32002 because the agent's
+// jsonl was saved under a different sanitised-cwd folder.
 func TestResolveTaskEnvWorkspacePath(t *testing.T) {
 	t.Parallel()
 	t.Run("multi-repo keeps task root", func(t *testing.T) {
 		req := &LaunchAgentRequest{TaskDirName: "do-nothing_mvo"}
 		resp := &LaunchAgentResponse{
-			// Lifecycle adapter mirrors agentctl WorkDir (task root) into
-			// the legacy WorktreePath field for multi-repo launches.
+			// Multi-repo preparer sets WorkspacePath to filepath.Dir(worktrees[0].WorktreePath)
+			// = task root; executor_standalone copies that into metadata["worktree_path"],
+			// and the lifecycle adapter surfaces it back as resp.WorktreePath.
 			WorktreePath: "/tmp/tasks/do-nothing_mvo",
 			Worktrees: []RepoWorktreeResult{
 				{WorktreePath: "/tmp/tasks/do-nothing_mvo/kandev"},
@@ -24,13 +27,16 @@ func TestResolveTaskEnvWorkspacePath(t *testing.T) {
 		}
 	})
 
-	t.Run("single-repo derives task root from repo subdir", func(t *testing.T) {
+	t.Run("single-repo keeps repo subdir", func(t *testing.T) {
+		// Single-repo preparer sets WorkspacePath = wt.Path (with repo subdir);
+		// the agent process starts at that cwd. Persisting it as-is keeps create
+		// and resume cwd in sync so ACP session/load finds the saved jsonl.
 		req := &LaunchAgentRequest{TaskDirName: "fix-thing_abc"}
 		resp := &LaunchAgentResponse{
 			WorktreePath: "/tmp/tasks/fix-thing_abc/kandev",
 		}
-		if got := computeWorkspacePath(req, resp); got != "/tmp/tasks/fix-thing_abc" {
-			t.Fatalf("single-repo: want /tmp/tasks/fix-thing_abc, got %q", got)
+		if got := computeWorkspacePath(req, resp); got != "/tmp/tasks/fix-thing_abc/kandev" {
+			t.Fatalf("single-repo: want /tmp/tasks/fix-thing_abc/kandev, got %q", got)
 		}
 	})
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -389,7 +389,7 @@ function StepWorkflows({
 
   return (
     <div className="space-y-3">
-      <div className="grid gap-2 max-h-[320px] overflow-y-auto pr-1">
+      <div className="grid grid-cols-1 gap-2 max-h-[320px] overflow-y-auto">
         {defaultTemplate && <TemplateCard template={defaultTemplate} isDefault />}
         {otherTemplates.length > 0 && (
           <>
@@ -508,9 +508,9 @@ function TemplateCard({
         <p className="text-xs text-muted-foreground mt-0.5">{template.description}</p>
       )}
       {steps.length > 0 && (
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap mt-2">
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground mt-2">
           {steps.map((s, i) => (
-            <Fragment key={s.name}>
+            <span key={s.name} className="flex items-center gap-1.5">
               {i > 0 && <span className="text-muted-foreground/40">→</span>}
               <span className="flex items-center gap-1">
                 <span
@@ -519,7 +519,7 @@ function TemplateCard({
                 />
                 {s.name}
               </span>
-            </Fragment>
+            </span>
           ))}
         </div>
       )}

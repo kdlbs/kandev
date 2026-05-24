@@ -222,6 +222,65 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 	}
 }
 
+// TestLaunchPreparedSession_PropagatesIsPassthrough mirrors
+// TestResumeSession_PropagatesIsPassthrough for the initial-launch path: the
+// session's IsPassthrough snapshot must reach the LaunchAgentRequest so the
+// lifecycle manager picks the right launch path. Without this guarantee, a
+// profile that toggles CLIPassthrough after the session was prepared would
+// re-route the session to the wrong mode at start time.
+func TestLaunchPreparedSession_PropagatesIsPassthrough(t *testing.T) {
+	cases := []struct {
+		name             string
+		sessionIsPasstru bool
+	}{
+		{name: "agent_session_keeps_acp", sessionIsPasstru: false},
+		{name: "passthrough_session_keeps_passthrough", sessionIsPasstru: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newMockRepository()
+			session := &models.TaskSession{
+				ID:             "session-pt",
+				TaskID:         "task-pt",
+				AgentProfileID: "profile-pt",
+				IsPassthrough:  tc.sessionIsPasstru,
+				State:          models.TaskSessionStateCreated,
+				StartedAt:      time.Now(),
+				UpdatedAt:      time.Now(),
+			}
+			repo.sessions[session.ID] = session
+
+			var capturedReq *LaunchAgentRequest
+			agentManager := &mockAgentManager{
+				launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+					capturedReq = req
+					return &LaunchAgentResponse{
+						AgentExecutionID: "exec-pt",
+						Status:           v1.AgentStatusStarting,
+					}, nil
+				},
+			}
+			exec := newTestExecutor(t, agentManager, repo)
+
+			task := &v1.Task{ID: "task-pt", WorkspaceID: "ws-pt", Title: "passthrough test"}
+			if _, err := exec.LaunchPreparedSession(context.Background(), task, session.ID, LaunchOptions{
+				AgentProfileID: "profile-pt",
+				Prompt:         "go",
+				StartAgent:     true,
+			}); err != nil {
+				t.Fatalf("LaunchPreparedSession: %v", err)
+			}
+			if capturedReq == nil {
+				t.Fatal("expected LaunchAgent to be called")
+			}
+			if capturedReq.IsPassthrough != tc.sessionIsPasstru {
+				t.Errorf("IsPassthrough = %v, want %v — without this the lifecycle manager would re-resolve live profile state and ignore the session's mode at creation time",
+					capturedReq.IsPassthrough, tc.sessionIsPasstru)
+			}
+		})
+	}
+}
+
 func TestAssignLaunchTaskEnvironmentID(t *testing.T) {
 	t.Run("reuses existing task environment", func(t *testing.T) {
 		session := &models.TaskSession{ID: "session-1"}
@@ -1148,7 +1207,7 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 }
 
 // Regression: PrepareTaskSession launches the workspace in a background
-// goroutine while StartTaskWithSession runs a foreground launch when the
+// goroutine while StartCreatedSession runs a foreground launch when the
 // agent is started. Both call LaunchPreparedSession on the same session.
 // Without per-session serialisation the two launches both reach
 // agentManager.LaunchAgent and the second one errors with

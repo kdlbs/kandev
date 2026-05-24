@@ -40,6 +40,14 @@ type submittedReview struct {
 	Body   string `json:"body"`
 }
 
+// mergedPR records a MergePR call for test assertions.
+type mergedPR struct {
+	Owner       string `json:"owner"`
+	Repo        string `json:"repo"`
+	Number      int    `json:"number"`
+	MergeMethod string `json:"merge_method"`
+}
+
 // repoKey is a composite key for per-repo lookups by owner/repo.
 type repoKey struct {
 	Owner string
@@ -64,6 +72,21 @@ type MockClient struct {
 	files            map[prKey][]PRFile
 	commits          map[prKey][]PRCommitInfo
 	submittedReviews []submittedReview
+	mergedPRs        []mergedPR
+	mergeMethods     map[repoKey]RepoMergeMethods
+	gists            map[string]mockGist
+	deletedGists     []string
+	nextGistID       int
+}
+
+// mockGist captures a gist that was created via the mock client so tests
+// can inspect what would have been uploaded.
+type mockGist struct {
+	ID          string
+	Description string
+	Public      bool
+	Files       map[string]GistFile
+	HTMLURL     string
 }
 
 // NewMockClient creates a new MockClient with default values.
@@ -80,6 +103,8 @@ func NewMockClient() *MockClient {
 		checks:        make(map[checkKey][]CheckRun),
 		files:         make(map[prKey][]PRFile),
 		commits:       make(map[prKey][]PRCommitInfo),
+		mergeMethods:  make(map[repoKey]RepoMergeMethods),
+		gists:         make(map[string]mockGist),
 	}
 }
 
@@ -266,6 +291,99 @@ func (m *MockClient) SubmitReview(_ context.Context, owner, repo string, number 
 	return nil
 }
 
+func (m *MockClient) GetRepoMergeMethods(_ context.Context, owner, repo string) (RepoMergeMethods, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if methods, ok := m.mergeMethods[repoKey{owner, repo}]; ok {
+		return methods, nil
+	}
+	// Default to all three allowed so existing e2e fixtures don't have to
+	// seed merge settings just to exercise the merge button.
+	return RepoMergeMethods{Merge: true, Squash: true, Rebase: true}, nil
+}
+
+// SetRepoMergeMethods overrides the allowed merge methods for a repo.
+// Used by e2e fixtures to exercise the squash-only / rebase-only paths.
+func (m *MockClient) SetRepoMergeMethods(owner, repo string, methods RepoMergeMethods) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mergeMethods[repoKey{owner, repo}] = methods
+}
+
+func (m *MockClient) MergePR(_ context.Context, owner, repo string, number int, mergeMethod string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mergedPRs = append(m.mergedPRs, mergedPR{
+		Owner: owner, Repo: repo, Number: number, MergeMethod: mergeMethod,
+	})
+	now := time.Now().UTC()
+	if pr, ok := m.prs[prKey{owner, repo, number}]; ok {
+		pr.State = "merged"
+		pr.MergedAt = &now
+		pr.Mergeable = false
+	}
+	return nil
+}
+
+func (m *MockClient) CreateGist(_ context.Context, in CreateGistInput) (*GistResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.nextGistID++
+	id := fmt.Sprintf("mock-gist-%d", m.nextGistID)
+	htmlURL := "https://gist.github.com/" + m.user + "/" + id
+	files := make(map[string]GistFile, len(in.Files))
+	for k, v := range in.Files {
+		files[k] = v
+	}
+	m.gists[id] = mockGist{
+		ID:          id,
+		Description: in.Description,
+		Public:      in.Public,
+		Files:       files,
+		HTMLURL:     htmlURL,
+	}
+	return &GistResponse{
+		ID:        id,
+		HTMLURL:   htmlURL,
+		CreatedAt: time.Now().UTC(),
+	}, nil
+}
+
+func (m *MockClient) DeleteGist(_ context.Context, gistID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.gists[gistID]; !ok {
+		return &GitHubAPIError{
+			StatusCode: 404,
+			Endpoint:   "/gists/" + gistID,
+			Body:       "gist not found",
+		}
+	}
+	delete(m.gists, gistID)
+	m.deletedGists = append(m.deletedGists, gistID)
+	return nil
+}
+
+// Gists returns all currently-stored gists for test inspection.
+func (m *MockClient) Gists() map[string]mockGist {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make(map[string]mockGist, len(m.gists))
+	for k, v := range m.gists {
+		out[k] = v
+	}
+	return out
+}
+
+// DeletedGists returns the IDs of gists that were deleted, in call order.
+func (m *MockClient) DeletedGists() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]string, len(m.deletedGists))
+	copy(out, m.deletedGists)
+	return out
+}
+
 // --- Setter methods for HTTP control endpoints ---
 
 // SetUser sets the authenticated username.
@@ -404,6 +522,11 @@ func (m *MockClient) Reset() {
 	m.files = make(map[prKey][]PRFile)
 	m.commits = make(map[prKey][]PRCommitInfo)
 	m.submittedReviews = nil
+	m.mergedPRs = nil
+	m.mergeMethods = make(map[repoKey]RepoMergeMethods)
+	m.gists = make(map[string]mockGist)
+	m.deletedGists = nil
+	m.nextGistID = 0
 }
 
 // SubmittedReviews returns all recorded SubmitReview calls.
@@ -412,5 +535,14 @@ func (m *MockClient) SubmittedReviews() []submittedReview {
 	defer m.mu.RUnlock()
 	result := make([]submittedReview, len(m.submittedReviews))
 	copy(result, m.submittedReviews)
+	return result
+}
+
+// MergedPRs returns all recorded MergePR calls.
+func (m *MockClient) MergedPRs() []mergedPR {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make([]mergedPR, len(m.mergedPRs))
+	copy(result, m.mergedPRs)
 	return result
 }

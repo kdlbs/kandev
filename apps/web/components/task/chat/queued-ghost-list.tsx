@@ -1,32 +1,92 @@
 "use client";
 
-import { useCallback } from "react";
-import { IconLayoutList, IconTrash } from "@tabler/icons-react";
+import { useCallback, useEffect, useState } from "react";
+import type { ReactNode } from "react";
+import { IconLayoutList, IconTrash, IconX } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { Button } from "@kandev/ui";
+import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { stripSystemTags } from "@/lib/utils/system-tags";
 import { useQueue } from "@/hooks/domains/session/use-queue";
-import { QueuedGhostMessage } from "./queued-ghost-message";
+import { isWorkflowQueuedMessage, QueuedGhostMessage } from "./queued-ghost-message";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 
-type QueuedGhostListProps = {
-  sessionId: string | null;
-  isArchived: boolean;
-};
+const HEAD_PREVIEW_MAX = 80;
 
-/** Inter-task messages flow through dispatchTaskMessage with queued_by="agent".
- *  We disable edit on those so a user can't rewrite another task's prompt mid-flight. */
+/** Inter-task entries are dispatched with queued_by="agent" and stay read-only. */
 function canUserEditEntry(entry: QueuedMessage): boolean {
-  return entry.queued_by !== "agent";
+  return entry.queued_by !== "agent" && !isWorkflowQueuedMessage(entry);
 }
 
+function headPreviewText(entries: QueuedMessage[]): string {
+  const first = entries[0];
+  if (!first) return "";
+  const clean = stripSystemTags(first.content);
+  if (clean.length <= HEAD_PREVIEW_MAX) return clean;
+  return clean.slice(0, HEAD_PREVIEW_MAX).trimEnd() + "…";
+}
+
+function isEditableTarget(el: EventTarget | null): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  // contentEditable covers the TipTap chat editor and any rich-text surface.
+  // `el.isContentEditable` walks up the contenteditable inheritance chain.
+  return el.isContentEditable;
+}
+
+function useEscToClose(open: boolean, onClose: () => void): void {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // Don't hijack Esc while the user is editing inside any input control on
+      // the page (queue textarea, TipTap chat editor, native input/select, or
+      // the clarification overlay).
+      if (isEditableTarget(e.target)) return;
+      e.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+}
+
+type QueueAffordanceProps = {
+  sessionId: string | null;
+  children: ReactNode;
+};
+
 /**
- * Renders the per-session FIFO queue as a stack of ghost messages plus a small
- * "n/max queued · clear all" pill above the chat input. Drained entries
- * disappear automatically when message.queue.status_changed lands.
+ * Wraps the chat input with the per-session queue affordance:
+ * - When there are no queued entries, just renders `children` (the input).
+ * - Otherwise a small floating "n queued" chip sits over the input frame and
+ *   clicking it expands a panel above the input. Drained or session-switched
+ *   queues auto-collapse.
  */
-export function QueuedGhostList({ sessionId, isArchived }: QueuedGhostListProps) {
+export function QueueAffordance({ sessionId, children }: QueueAffordanceProps) {
   const { entries, count, max, isFull, clearAll, editEntry, removeEntry } = useQueue(sessionId);
+  const [isOpen, setIsOpen] = useState(false);
+
+  // Reset disclosure on session switch or full drain using render-phase state
+  // adjustment (React docs: "Adjusting some state when a prop changes"). This
+  // avoids the cascading-render anti-pattern of doing it inside useEffect.
+  const entryCount = entries.length;
+  const [lastSession, setLastSession] = useState(sessionId);
+  const [lastEntryCount, setLastEntryCount] = useState(entryCount);
+  if (sessionId !== lastSession) {
+    setLastSession(sessionId);
+    setIsOpen(false);
+  }
+  if (entryCount !== lastEntryCount) {
+    setLastEntryCount(entryCount);
+    if (entryCount === 0) setIsOpen(false);
+  }
+
+  const close = useCallback(() => setIsOpen(false), []);
+  useEscToClose(isOpen, close);
 
   const handleSave = useCallback(
     async (entryId: string, content: string) => {
@@ -47,21 +107,148 @@ export function QueuedGhostList({ sessionId, isArchived }: QueuedGhostListProps)
     [removeEntry],
   );
 
-  if (isArchived || !sessionId || entries.length === 0) {
-    return null;
-  }
+  const handleClear = useCallback(() => {
+    clearAll().catch((err) => {
+      console.error("Failed to clear queued messages:", err);
+      toast.error("Failed to clear queued messages.");
+    });
+  }, [clearAll]);
+
+  if (!sessionId || entryCount === 0) return <>{children}</>;
 
   return (
-    <div className="flex-shrink-0 space-y-1.5 bg-card px-3 pt-1.5 pb-1">
-      <QueueCountPill count={count} max={max} isFull={isFull} onClear={clearAll} />
-      <div className="space-y-1.5" data-testid="queued-ghost-list">
-        {entries.map((entry) => (
+    <>
+      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+        <CollapsibleContent
+          className={cn(
+            "overflow-hidden",
+            "data-[state=open]:animate-queue-open data-[state=closed]:animate-queue-close",
+          )}
+        >
+          <QueuePanel
+            entries={entries}
+            count={count}
+            max={max}
+            isFull={isFull}
+            onClose={close}
+            onClear={handleClear}
+            onSave={handleSave}
+            onRemove={handleRemove}
+          />
+        </CollapsibleContent>
+      </Collapsible>
+      {!isOpen && (
+        <div className="flex items-center px-1 pb-1 animate-in fade-in-0 slide-in-from-bottom-1 duration-150 motion-reduce:animate-none">
+          <QueueChip
+            count={count}
+            isFull={isFull}
+            previewText={headPreviewText(entries)}
+            onToggle={() => setIsOpen((v) => !v)}
+          />
+        </div>
+      )}
+      {children}
+    </>
+  );
+}
+
+type QueueChipProps = {
+  count: number;
+  isFull: boolean;
+  previewText: string;
+  onToggle: () => void;
+};
+
+function chipPalette(isFull: boolean): string {
+  if (isFull) {
+    return "text-amber-600 dark:text-amber-400 border-amber-500/40 hover:bg-amber-500/10";
+  }
+  return "text-muted-foreground border-border hover:text-foreground hover:border-border/80";
+}
+
+function QueueChip({ count, isFull, previewText, onToggle }: QueueChipProps) {
+  // aria-expanded/aria-controls are intentionally omitted: the chip and the
+  // expanded panel are mutually exclusive in the DOM (clicking the chip swaps
+  // it for the panel header, which carries its own collapse controls). Pointing
+  // aria-controls at an element that isn't currently mounted would be a worse
+  // a11y signal than the descriptive aria-label below.
+  const button = (
+    <button
+      type="button"
+      data-testid="queue-chip"
+      data-full={isFull ? "true" : "false"}
+      aria-label={`${count} queued message${count === 1 ? "" : "s"}, click to expand`}
+      onClick={onToggle}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5",
+        "text-[11px] font-medium cursor-pointer transition-colors",
+        chipPalette(isFull),
+      )}
+    >
+      <IconLayoutList className="h-3 w-3" />
+      <span>{count} queued</span>
+      {isFull && <span className="opacity-80">· full</span>}
+    </button>
+  );
+  if (!previewText) return button;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side="top" align="start" className="max-w-[280px]">
+        <span className="line-clamp-2">{previewText}</span>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+type QueuePanelProps = {
+  entries: QueuedMessage[];
+  count: number;
+  max: number;
+  isFull: boolean;
+  onClose: () => void;
+  onClear: () => void;
+  onSave: (entryId: string, content: string) => Promise<void>;
+  onRemove: (entryId: string) => Promise<void>;
+};
+
+function QueuePanel({
+  entries,
+  count,
+  max,
+  isFull,
+  onClose,
+  onClear,
+  onSave,
+  onRemove,
+}: QueuePanelProps) {
+  return (
+    <div
+      id="queue-panel"
+      role="region"
+      aria-label="Queued messages"
+      data-testid="queued-ghost-list"
+      className={cn(
+        "flex-shrink-0 px-3 pt-1.5 pb-1 border-t border-border/40",
+        "animate-in slide-in-from-bottom-2 fade-in-0 duration-200",
+      )}
+    >
+      <QueuePanelHeader
+        count={count}
+        max={max}
+        isFull={isFull}
+        onClear={onClear}
+        onClose={onClose}
+      />
+      <div className="space-y-1.5">
+        {entries.map((entry, index) => (
           <QueuedGhostMessage
             key={entry.id}
             entry={entry}
+            index={index}
             canEdit={canUserEditEntry(entry)}
-            onSave={(content) => handleSave(entry.id, content)}
-            onRemove={() => handleRemove(entry.id)}
+            onSave={(content) => onSave(entry.id, content)}
+            onRemove={() => onRemove(entry.id)}
           />
         ))}
       </div>
@@ -69,42 +256,48 @@ export function QueuedGhostList({ sessionId, isArchived }: QueuedGhostListProps)
   );
 }
 
-type QueueCountPillProps = {
+type QueuePanelHeaderProps = {
   count: number;
   max: number;
   isFull: boolean;
-  onClear: () => Promise<void>;
+  onClear: () => void;
+  onClose: () => void;
 };
 
-function QueueCountPill({ count, max, isFull, onClear }: QueueCountPillProps) {
-  const handleClear = useCallback(() => {
-    onClear().catch((err) => {
-      console.error("Failed to clear queued messages:", err);
-      toast.error("Failed to clear queued messages.");
-    });
-  }, [onClear]);
+function QueuePanelHeader({ count, max, isFull, onClear, onClose }: QueuePanelHeaderProps) {
+  const capacityText = max > 0 ? `${count} of ${max}` : `${count}`;
   return (
-    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-      <span
-        className={cn(
-          "inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5",
-          isFull && "text-amber-600 dark:text-amber-400",
-        )}
-      >
-        <IconLayoutList className="h-3 w-3" />
-        {max > 0 ? `${count}/${max} queued` : `${count} queued`}
-        {isFull ? " · full" : ""}
-      </span>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-6 cursor-pointer px-2 text-xs text-muted-foreground hover:text-foreground"
-        onClick={handleClear}
-        title="Clear all queued messages"
-      >
-        <IconTrash className="mr-1 h-3 w-3" />
-        Clear all
-      </Button>
+    <div className="flex items-center justify-between gap-3 py-1">
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <IconLayoutList className="h-3.5 w-3.5" />
+        <span className="uppercase tracking-wide">Queued</span>
+        <span className={cn(isFull && "text-amber-600 dark:text-amber-400")}>
+          {capacityText}
+          {isFull ? " · full" : ""}
+        </span>
+      </div>
+      <div className="flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+          onClick={onClear}
+          title="Clear all queued messages"
+          data-testid="queue-clear-all"
+        >
+          <IconTrash className="mr-1 h-3 w-3" />
+          Clear all
+        </Button>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Collapse queued messages"
+          data-testid="queue-close"
+          className="text-muted-foreground hover:text-foreground cursor-pointer rounded p-1"
+        >
+          <IconX className="h-3.5 w-3.5" />
+        </button>
+      </div>
     </div>
   );
 }

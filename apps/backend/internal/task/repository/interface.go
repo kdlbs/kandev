@@ -49,6 +49,12 @@ type TaskRepository interface {
 	// including archived ones. Used by the office task-handoffs unarchive
 	// cascade (phase 6) to walk a previously-archived descendant tree.
 	ListChildrenIncludingArchived(ctx context.Context, parentID string) ([]*models.Task, error)
+	// ReparentDirectChildren updates every row whose parent_id matches
+	// oldParentID, replacing it with newParentID. Used by no-cascade
+	// delete so direct children of a deleted task become roots
+	// (newParentID="") instead of dangling pointers. Affects archived
+	// and active rows alike.
+	ReparentDirectChildren(ctx context.Context, oldParentID, newParentID string) error
 	// ListSiblings returns non-archived, non-ephemeral sibling tasks for taskID.
 	// A task is a sibling of taskID when it shares a non-empty parent_id and
 	// the same workspace_id, and is not taskID itself. Root tasks (empty
@@ -126,6 +132,7 @@ type SessionRepository interface {
 	HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error)
 	HasActiveTaskSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error)
 	HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error)
+	CountActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (int, error)
 	DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error)
 	DeleteTaskSession(ctx context.Context, id string) error
 	GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)

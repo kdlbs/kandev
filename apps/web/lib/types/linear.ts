@@ -75,12 +75,36 @@ export interface LinearTeam {
   name: string;
 }
 
+export interface LinearLabel {
+  id: string;
+  name: string;
+  color?: string;
+}
+
+export interface LinearUser {
+  id: string;
+  name: string;
+  displayName?: string;
+  email?: string;
+  avatarUrl?: string;
+}
+
 export interface LinearSearchFilter {
   query?: string;
   teamKey?: string;
   stateIds?: string[];
   /** "me" | "unassigned" | "" (any) */
   assigned?: string;
+  /** Priorities to include (OR). 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low. */
+  priorities?: (0 | 1 | 2 | 3 | 4)[];
+  /** Issue labels (OR semantics — match any). */
+  labelIds?: string[];
+  /** Filter by issue creator UUID. */
+  creatorId?: string;
+  /** Inclusive lower bound on point estimate. */
+  estimateMin?: number;
+  /** Inclusive upper bound on point estimate. */
+  estimateMax?: number;
 }
 
 export interface LinearSearchResult {

@@ -34,6 +34,10 @@ vi.mock("@/components/github/pr-topbar-button", () => ({
   PRTopbarButton: () => null,
 }));
 
+vi.mock("@/components/gitlab/mr-topbar-button", () => ({
+  MRTopbarButton: () => null,
+}));
+
 vi.mock("@/components/jira/jira-ticket-button", () => ({
   JiraTicketButton: () => null,
   extractJiraKey: () => null,

@@ -210,3 +210,102 @@ func TestToolEventsWakeSessionAndTaskTogether(t *testing.T) {
 		})
 	}
 }
+
+// TestSetSessionRunning_NoRedundantTaskWrites locks in the dedup: when the
+// session is already RUNNING, setSessionRunning must not re-write tasks.state.
+// Without the guard, every tool_call / tool_update fired UpdateTaskState
+// (2,000+ redundant writes observed on long-running turns).
+func TestSetSessionRunning_NoRedundantTaskWrites(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateRunning
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	for i := 0; i < 5; i++ {
+		svc.setSessionRunning(ctx, "t1", "s1")
+	}
+
+	require.Equal(t, 0, taskRepo.stateWrites["t1"],
+		"setSessionRunning must not write tasks.state when session is already RUNNING")
+}
+
+// TestSetSessionWaitingForInput_NoRedundantTaskWrites locks in the dedup for
+// the WAITING_FOR_INPUT path. Without the guard, both the workflow
+// on_turn_complete transition and handleCompleteStreamEvent were writing
+// tasks.state=REVIEW back-to-back on every turn.
+func TestSetSessionWaitingForInput_NoRedundantTaskWrites(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	for i := 0; i < 5; i++ {
+		svc.setSessionWaitingForInput(ctx, "t1", "s1")
+	}
+
+	require.Equal(t, 0, taskRepo.stateWrites["t1"],
+		"setSessionWaitingForInput must not write tasks.state when session is already WAITING_FOR_INPUT")
+}
+
+// TestSetSessionRunning_WritesOnTransition guards against an over-eager dedup
+// regression: when the session was NOT already RUNNING, the task state write
+// MUST still happen.
+func TestSetSessionRunning_WritesOnTransition(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.setSessionRunning(ctx, "t1", "s1")
+
+	require.Equal(t, 1, taskRepo.stateWrites["t1"],
+		"setSessionRunning must write tasks.state on actual transition")
+	require.Equal(t, v1.TaskStateInProgress, taskRepo.updatedStates["t1"])
+}
+
+// TestSetSessionWaitingForInput_WritesOnTransition is the symmetric counterpart
+// to TestSetSessionRunning_WritesOnTransition: when the session is NOT already
+// WAITING_FOR_INPUT, setSessionWaitingForInput MUST still fire the task write.
+// Without this guard an accidental inversion of wasAlreadyWaiting would silently
+// stop tasks from ever reaching REVIEW.
+func TestSetSessionWaitingForInput_WritesOnTransition(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	// Seed session in RUNNING state (the normal pre-condition for a turn completing).
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateRunning
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.setSessionWaitingForInput(ctx, "t1", "s1")
+
+	require.Equal(t, 1, taskRepo.stateWrites["t1"],
+		"setSessionWaitingForInput must write tasks.state on actual transition")
+	require.Equal(t, v1.TaskStateReview, taskRepo.updatedStates["t1"])
+}

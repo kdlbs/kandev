@@ -204,6 +204,12 @@ const (
 	SessionPromptUsageUpdated = "session_prompt_usage.updated" // Prompt token usage updated
 )
 
+// Event types for automations
+const (
+	AutomationTriggered  = "automation.triggered"   // A trigger fired
+	AutomationRunCreated = "automation.run.created" // Run outcome recorded
+)
+
 // Event types for GitHub integration
 const (
 	GitHubPRFeedback       = "github.pr_feedback"        // PR has new feedback (UI notification only)

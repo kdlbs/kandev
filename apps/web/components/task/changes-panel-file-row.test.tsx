@@ -108,3 +108,57 @@ describe("FileRow truncation (regression: path overlaps diff stats in narrow pan
     });
   });
 });
+
+describe("FileRow active-tab highlight", () => {
+  it("renders data-active='true' and bg-accent/60 when isActive", () => {
+    const { container } = render(
+      <TooltipProvider>
+        <ul>
+          <FileRow
+            file={{ ...baseFile, path: "active.ts" }}
+            isPending={false}
+            isActive
+            onSelect={noopSelect}
+            onOpenDiff={noop}
+            onStage={noop}
+            onUnstage={noop}
+            onDiscard={noop}
+            onEditFile={noop}
+          />
+        </ul>
+      </TooltipProvider>,
+    );
+
+    const row = container.querySelector("[data-changes-file='active.ts']") as HTMLElement | null;
+    expect(row).not.toBeNull();
+    expect(row!.getAttribute("data-active")).toBe("true");
+    expect(row!.className).toContain("bg-accent/60");
+  });
+
+  it("keeps highlight when isActive and isSelected are both true", () => {
+    const { container } = render(
+      <TooltipProvider>
+        <ul>
+          <FileRow
+            file={{ ...baseFile, path: "both.ts" }}
+            isPending={false}
+            isActive
+            isSelected
+            onSelect={noopSelect}
+            onOpenDiff={noop}
+            onStage={noop}
+            onUnstage={noop}
+            onDiscard={noop}
+            onEditFile={noop}
+          />
+        </ul>
+      </TooltipProvider>,
+    );
+
+    const row = container.querySelector("[data-changes-file='both.ts']") as HTMLElement | null;
+    expect(row).not.toBeNull();
+    expect(row!.getAttribute("data-active")).toBe("true");
+    expect(row!.getAttribute("data-selected")).toBe("true");
+    expect(row!.className).toContain("bg-accent/60");
+  });
+});

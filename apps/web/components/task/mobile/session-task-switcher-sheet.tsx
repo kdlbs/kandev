@@ -6,12 +6,15 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Button } from "@kandev/ui/button";
 import { TaskSwitcher } from "../task-switcher";
 import type { TaskSwitcherItem } from "../task-switcher";
+import type { StepDef } from "../task-switcher-context-menu";
+import type { TaskMoveWorkflow } from "../task-move-context-menu";
 import { applyView } from "@/lib/sidebar/apply-view";
 import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-sidebar-view";
 import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
 import { WorkspaceSwitcher } from "../workspace-switcher";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { TaskArchiveConfirmDialog } from "../task-archive-confirm-dialog";
+import { TaskDeleteConfirmDialog } from "../task-delete-confirm-dialog";
 import { useSheetData, useSheetActions } from "./session-task-switcher-sheet-hooks";
 
 type SessionTaskSwitcherSheetProps = {
@@ -23,6 +26,8 @@ type SessionTaskSwitcherSheetProps = {
 
 function MobileTaskList({
   tasks,
+  workflows,
+  stepsByWorkflowId,
   activeTaskId,
   selectedTaskId,
   onSelectTask,
@@ -32,6 +37,8 @@ function MobileTaskList({
   isLoading,
 }: {
   tasks: TaskSwitcherItem[];
+  workflows: TaskMoveWorkflow[];
+  stepsByWorkflowId: Record<string, StepDef[]>;
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
@@ -41,15 +48,28 @@ function MobileTaskList({
   isLoading?: boolean;
 }) {
   const view = useEffectiveSidebarView();
-  const { pinnedTaskIds, orderedTaskIds, togglePinnedTask, handleReorderGroup } =
-    useSidebarTaskPrefs();
+  const {
+    pinnedTaskIds,
+    orderedTaskIds,
+    subtaskOrderByParentId,
+    togglePinnedTask,
+    handleReorderGroup,
+    handleReorderSubtasks,
+  } = useSidebarTaskPrefs();
   const grouped = useMemo(
-    () => applyView(tasks, view, { pinnedTaskIds, orderedTaskIds }),
-    [tasks, view, pinnedTaskIds, orderedTaskIds],
+    () =>
+      applyView(tasks, view, {
+        pinnedTaskIds,
+        orderedTaskIds,
+        subtaskOrderByParentId,
+      }),
+    [tasks, view, pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId],
   );
   return (
     <TaskSwitcher
       grouped={grouped}
+      workflows={workflows}
+      stepsByWorkflowId={stepsByWorkflowId}
       activeTaskId={activeTaskId}
       selectedTaskId={selectedTaskId}
       onSelectTask={onSelectTask}
@@ -57,6 +77,7 @@ function MobileTaskList({
       onDeleteTask={onDeleteTask}
       onTogglePin={togglePinnedTask}
       onReorderGroup={handleReorderGroup}
+      onReorderSubtasks={handleReorderSubtasks}
       pinnedTaskIds={pinnedTaskIds}
       deletingTaskId={deletingTaskId}
       isLoading={isLoading}
@@ -72,7 +93,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   workflowId,
 }: SessionTaskSwitcherSheetProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
-  const data = useSheetData(workspaceId, workflowId);
+  const data = useSheetData(workspaceId);
   const actions = useSheetActions(workspaceId, onOpenChange);
 
   return (
@@ -107,6 +128,8 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         <div className="flex-1 min-h-0 overflow-y-auto p-2">
           <MobileTaskList
             tasks={data.tasksWithRepositories}
+            workflows={data.workflows}
+            stepsByWorkflowId={data.stepsByWorkflowId}
             activeTaskId={data.activeTaskId}
             selectedTaskId={data.selectedTaskId}
             onSelectTask={actions.handleSelectTask}
@@ -135,8 +158,19 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
           if (!open) actions.setArchivingTask(null);
         }}
         taskTitle={actions.archivingTask?.title ?? ""}
+        taskId={actions.archivingTask?.id}
         isArchiving={actions.isArchiving}
-        onConfirm={actions.handleArchiveConfirm}
+        onConfirm={({ cascade }) => actions.handleArchiveConfirm({ cascade })}
+      />
+      <TaskDeleteConfirmDialog
+        open={actions.deletingTask !== null}
+        onOpenChange={(open) => {
+          if (!open) actions.setDeletingTask(null);
+        }}
+        taskTitle={actions.deletingTask?.title ?? ""}
+        taskId={actions.deletingTask?.id}
+        isDeleting={actions.isDeleting}
+        onConfirm={({ cascade }) => actions.handleDeleteConfirm({ cascade })}
       />
     </Sheet>
   );

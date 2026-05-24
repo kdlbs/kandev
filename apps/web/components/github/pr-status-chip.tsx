@@ -1,18 +1,29 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import {
   IconCircleCheckFilled,
   IconCircleXFilled,
   IconChecklist,
   IconLoader2,
   IconPointFilled,
+  IconX,
 } from "@tabler/icons-react";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+} from "@kandev/ui/drawer";
+import { Button } from "@kandev/ui/button";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
 import { PRCIPopover } from "@/components/github/pr-ci-popover";
 import { isPRAwaitingReview, isPRReadyToMerge } from "@/components/github/pr-task-icon";
+import { useIsMobile } from "@/hooks/use-mobile";
 import type { TaskPR } from "@/lib/types/github";
 
 const HOVER_OPEN_DELAY_MS = 150;
@@ -46,8 +57,11 @@ function chipStatus(pr: TaskPR): ChipStatus {
  *   merged  → purple dot
  *   neutral → muted dot
  *
- * Hovering opens the full PRCIPopover anchored to the top edge so the card
- * expands upward (the chip sits just above the chat input).
+ * Desktop: hovering opens the full PRCIPopover anchored to the top edge so the
+ * card expands upward (the chip sits just above the chat input).
+ *
+ * Mobile: tapping opens the same popover content inside a bottom-sheet Drawer
+ * — hover is unreachable on touch devices.
  *
  * Returns null when the task has no PR yet.
  */
@@ -60,23 +74,41 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
   return <PRStatusChipInner pr={pr} />;
 }
 
+type ChipButtonAttrs = {
+  "data-testid": "pr-status-chip";
+  "data-pr-number": number;
+  "data-pr-state": string;
+  "data-status": ChipStatus;
+  "data-pr-ready-to-merge": "true" | "false";
+  "aria-label": string;
+  className: string;
+};
+
+function chipButtonAttrs(pr: TaskPR, status: ChipStatus): ChipButtonAttrs {
+  return {
+    "data-testid": "pr-status-chip",
+    "data-pr-number": pr.pr_number,
+    "data-pr-state": pr.state,
+    "data-status": status,
+    "data-pr-ready-to-merge": isPRReadyToMerge(pr) ? "true" : "false",
+    "aria-label": `Pull request #${pr.pr_number} CI status`,
+    className: "cursor-pointer inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs",
+  };
+}
+
 function PRStatusChipInner({ pr }: { pr: TaskPR }) {
+  const isMobile = useIsMobile();
+  if (isMobile) return <PRStatusChipDrawer pr={pr} />;
+  return <PRStatusChipHoverCard pr={pr} />;
+}
+
+function PRStatusChipHoverCard({ pr }: { pr: TaskPR }) {
   const status = chipStatus(pr);
   const triggerRef = useRef<HTMLButtonElement>(null);
   return (
     <HoverCard openDelay={HOVER_OPEN_DELAY_MS} closeDelay={HOVER_CLOSE_DELAY_MS}>
       <HoverCardTrigger asChild>
-        <button
-          ref={triggerRef}
-          type="button"
-          data-testid="pr-status-chip"
-          data-pr-number={pr.pr_number}
-          data-pr-state={pr.state}
-          data-status={status}
-          data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
-          aria-label={`Pull request #${pr.pr_number} CI status`}
-          className="cursor-pointer inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs"
-        >
+        <button ref={triggerRef} type="button" {...chipButtonAttrs(pr, status)}>
           <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
           <ChipStatusGlyph status={status} />
         </button>
@@ -99,6 +131,47 @@ function PRStatusChipInner({ pr }: { pr: TaskPR }) {
         <PRCIPopover pr={pr} enabled={true} />
       </HoverCardContent>
     </HoverCard>
+  );
+}
+
+function PRStatusChipDrawer({ pr }: { pr: TaskPR }) {
+  const status = chipStatus(pr);
+  const [open, setOpen] = useState(false);
+  return (
+    <Drawer open={open} onOpenChange={setOpen}>
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen(true)}
+        {...chipButtonAttrs(pr, status)}
+      >
+        <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+        <ChipStatusGlyph status={status} />
+      </button>
+      <DrawerContent data-testid="pr-status-chip-drawer" className="max-h-[80vh] flex flex-col">
+        <DrawerHeader className="flex flex-row items-center justify-between border-b py-2">
+          <DrawerTitle className="text-sm">PR #{pr.pr_number}</DrawerTitle>
+          <DrawerDescription className="sr-only">
+            Pull request CI status, reviews, and checks summary.
+          </DrawerDescription>
+          <DrawerClose asChild>
+            <Button
+              data-testid="pr-status-chip-drawer-close"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Close PR status"
+              className="cursor-pointer"
+            >
+              <IconX className="h-4 w-4" />
+            </Button>
+          </DrawerClose>
+        </DrawerHeader>
+        <div className="flex-1 min-h-0 overflow-y-auto p-3" data-vaul-no-drag>
+          <PRCIPopover pr={pr} enabled={open} />
+        </div>
+      </DrawerContent>
+    </Drawer>
   );
 }
 

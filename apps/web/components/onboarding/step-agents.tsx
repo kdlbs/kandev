@@ -46,7 +46,7 @@ function CopyButton({ text }: { text: string }) {
     <button
       type="button"
       onClick={handleCopy}
-      className="p-0.5 cursor-pointer hover:text-foreground text-muted-foreground transition-colors"
+      className="p-0.5 cursor-pointer hover:text-foreground text-muted-foreground transition-colors shrink-0"
     >
       {copied ? (
         <IconCheck className="h-3 w-3 text-green-500" />
@@ -138,9 +138,9 @@ function InstalledAgentRow({
           type="button"
           className="flex w-full items-center gap-3 rounded-lg border p-2 text-left cursor-pointer hover:bg-muted/50 transition-colors group"
         >
-          <AgentLogo agentName={agent.name} size={28} />
+          <AgentLogo agentName={agent.name} size={28} className="shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium">{agent.display_name}</p>
+            <p className="text-sm font-medium truncate">{agent.display_name}</p>
           </div>
           {showModelPill && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium truncate max-w-[120px]">
@@ -190,19 +190,21 @@ function NotInstalledItems({
           key={agent.name}
           className="flex w-full items-center gap-3 rounded-lg border border-dashed p-2"
         >
-          <AgentLogo agentName={agent.name} size={28} className="opacity-60" />
+          <AgentLogo agentName={agent.name} size={28} className="opacity-60 shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-muted-foreground">{agent.display_name}</p>
+            <p className="text-sm font-medium text-muted-foreground truncate">
+              {agent.display_name}
+            </p>
             {agent.install_script && (
-              <div className="flex items-center gap-1 mt-0.5">
-                <code className="text-[10px] text-muted-foreground font-mono truncate">
+              <div className="flex items-center gap-1 mt-0.5 min-w-0">
+                <code className="text-[10px] text-muted-foreground font-mono truncate min-w-0">
                   {agent.install_script}
                 </code>
                 <CopyButton text={agent.install_script} />
               </div>
             )}
           </div>
-          <IconDownload className="h-3.5 w-3.5 text-muted-foreground" />
+          <IconDownload className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
         </div>
       ))}
       {tools.map((tool) => (
@@ -212,11 +214,13 @@ function NotInstalledItems({
         >
           <IconDownload className="h-7 w-7 p-1 text-muted-foreground opacity-60 shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-muted-foreground">{tool.display_name}</p>
-            <p className="text-[10px] text-muted-foreground">{tool.description}</p>
+            <p className="text-sm font-medium text-muted-foreground truncate">
+              {tool.display_name}
+            </p>
+            <p className="text-[10px] text-muted-foreground break-words">{tool.description}</p>
             {tool.install_script && (
-              <div className="flex items-center gap-1 mt-0.5">
-                <code className="text-[10px] text-muted-foreground font-mono truncate">
+              <div className="flex items-center gap-1 mt-0.5 min-w-0">
+                <code className="text-[10px] text-muted-foreground font-mono truncate min-w-0">
                   {tool.install_script}
                 </code>
                 <CopyButton text={tool.install_script} />
@@ -228,7 +232,7 @@ function NotInstalledItems({
               href={tool.info_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-muted-foreground hover:text-foreground"
+              className="text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
             >
               <IconExternalLink className="h-3.5 w-3.5" />
             </a>
@@ -269,7 +273,7 @@ export function StepAgents({
 
   return (
     <div className="space-y-3">
-      <div className="grid gap-2 max-h-[320px] overflow-y-auto pr-1">
+      <div className="grid grid-cols-1 gap-2 max-h-[320px] overflow-y-auto">
         {installedAgents.map((agent) => (
           <InstalledAgentRow
             key={agent.name}

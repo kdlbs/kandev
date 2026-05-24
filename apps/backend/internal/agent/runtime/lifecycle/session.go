@@ -16,7 +16,6 @@ import (
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/sysprompt"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -189,12 +188,6 @@ func (sm *SessionManager) getResumeContextPrompt(agentConfig agents.Agent, taskS
 	}
 
 	return resumePrompt
-}
-
-// injectKandevContext prepends the Kandev system prompt and session context to the user's prompt.
-// This provides consistent guidance to the agent about using Kandev tools and the current session IDs.
-func (sm *SessionManager) injectKandevContext(taskID, sessionID, prompt string) string {
-	return sysprompt.InjectKandevContext(taskID, sessionID, prompt)
 }
 
 // loadSession loads an existing session via ACP session/load
@@ -398,8 +391,9 @@ func convertAttachments(attachments []MessageAttachment) []v1.MessageAttachment 
 func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, markReady func(executionID string) error) {
 	switch {
 	case taskDescription != "" || len(attachments) > 0:
-		promptWithContext := sm.injectKandevContext(execution.TaskID, execution.SessionID, taskDescription)
-		effectivePrompt := sm.getResumeContextPrompt(agentConfig, execution.SessionID, promptWithContext)
+		// The orchestrator wrapped the prompt with the Kandev system block
+		// before handing it to the runtime; do not re-wrap here.
+		effectivePrompt := sm.getResumeContextPrompt(agentConfig, execution.SessionID, taskDescription)
 		if effectivePrompt != taskDescription {
 			sm.logger.Info("injecting resume context into initial prompt",
 				zap.String("execution_id", execution.ID),
@@ -440,21 +434,22 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 }
 
 // buildEffectivePrompt applies resume context injection if needed, returning the effective prompt to send.
+// The Kandev MCP system block is intentionally NOT re-injected here — it is
+// only attached to the very first prompt of a task at the orchestrator layer.
+// On resume, the agent CLI's restored conversation already contains it.
 func (sm *SessionManager) buildEffectivePrompt(execution *AgentExecution, prompt string) string {
 	if !execution.needsResumeContext || execution.resumeContextInjected {
 		return prompt
 	}
-	// Inject Kandev context for resumed sessions (first prompt in this execution)
-	promptWithContext := sm.injectKandevContext(execution.TaskID, execution.SessionID, prompt)
-	effectivePrompt := promptWithContext
+	effectivePrompt := prompt
 	if sm.historyManager != nil {
-		resumePrompt, err := sm.historyManager.GenerateResumeContext(execution.SessionID, promptWithContext)
+		resumePrompt, err := sm.historyManager.GenerateResumeContext(execution.SessionID, prompt)
 		switch {
 		case err != nil:
 			sm.logger.Warn("failed to generate resume context for follow-up prompt",
 				zap.String("execution_id", execution.ID),
 				zap.Error(err))
-		case resumePrompt != promptWithContext:
+		case resumePrompt != prompt:
 			effectivePrompt = resumePrompt
 			sm.logger.Info("injecting resume context into follow-up prompt",
 				zap.String("execution_id", execution.ID),

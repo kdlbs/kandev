@@ -93,6 +93,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		PreviousExecutionID: req.PreviousExecutionID,
 		McpMode:             req.McpMode,
 		IsEphemeral:         req.IsEphemeral,
+		IsPassthrough:       req.IsPassthrough,
 		SetupScript:         req.SetupScript,
 		// Worktree configuration for concurrent agent execution
 		UseWorktree:          req.UseWorktree,
@@ -102,6 +103,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		BaseBranch:           req.BaseBranch,
 		DefaultBranch:        req.DefaultBranch,
 		CheckoutBranch:       req.CheckoutBranch,
+		PRNumber:             req.PRNumber,
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
 		PullBeforeWorktree:   req.PullBeforeWorktree,
 		// Task directory mode
@@ -132,6 +134,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 				BaseBranch:           r.BaseBranch,
 				DefaultBranch:        r.DefaultBranch,
 				CheckoutBranch:       r.CheckoutBranch,
+				PRNumber:             r.PRNumber,
 				WorktreeID:           r.WorktreeID,
 				WorktreeBranchPrefix: r.WorktreeBranchPrefix,
 				PullBeforeWorktree:   r.PullBeforeWorktree,
@@ -500,8 +503,8 @@ func (w *orchestratorWrapper) ResumeTaskSession(ctx context.Context, taskID, tas
 }
 
 // StartCreatedSession forwards to the orchestrator service, discarding the TaskExecution result.
-func (w *orchestratorWrapper) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool, attachments []v1.MessageAttachment) error {
-	_, err := w.svc.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, prompt, skipMessageRecord, planMode, attachments)
+func (w *orchestratorWrapper) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment) error {
+	_, err := w.svc.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments)
 	return err
 }
 

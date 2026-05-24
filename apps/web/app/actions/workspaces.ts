@@ -36,13 +36,22 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
       ...(options?.headers ?? {}),
     },
   });
+  const text = response.status === 204 ? "" : await response.text();
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status} ${response.statusText}`);
+    let message = `Request failed: ${response.status} ${response.statusText}`;
+    if (text) {
+      try {
+        const body = JSON.parse(text) as { error?: string; message?: string };
+        const detail = body.error ?? body.message;
+        if (detail) {
+          message = detail;
+        }
+      } catch {
+        // body was not JSON, fall back to status text
+      }
+    }
+    throw new Error(message);
   }
-  if (response.status === 204) {
-    return undefined as T;
-  }
-  const text = await response.text();
   if (!text) {
     return undefined as T;
   }
@@ -497,6 +506,14 @@ export async function approveSessionAction(sessionId: string): Promise<ApproveSe
 export async function getWorkflowTaskCount(workflowId: string): Promise<{ task_count: number }> {
   return fetchJson<{ task_count: number }>(
     `${apiBaseUrl}/api/v1/workflows/${workflowId}/task-count`,
+  );
+}
+
+export async function getRepositoryActiveSessionCountAction(
+  repositoryId: string,
+): Promise<{ active_session_count: number }> {
+  return fetchJson<{ active_session_count: number }>(
+    `${apiBaseUrl}/api/v1/repositories/${repositoryId}/active-session-count`,
   );
 }
 

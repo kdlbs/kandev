@@ -102,6 +102,7 @@ const createTablesSQL = `
 		custom_query TEXT NOT NULL DEFAULT '',
 		enabled BOOLEAN DEFAULT 1,
 		poll_interval_seconds INTEGER DEFAULT 300,
+		cleanup_policy TEXT NOT NULL DEFAULT 'auto',
 		last_polled_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
@@ -132,6 +133,7 @@ const createTablesSQL = `
 		custom_query TEXT NOT NULL DEFAULT '',
 		enabled BOOLEAN DEFAULT 1,
 		poll_interval_seconds INTEGER DEFAULT 300,
+		cleanup_policy TEXT NOT NULL DEFAULT 'auto',
 		last_polled_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
@@ -174,6 +176,12 @@ func (s *Store) initSchema() error {
 	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN unresolved_review_threads INTEGER DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN checks_total INTEGER DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN checks_passing INTEGER DEFAULT 0`)
+	// Per-watch cleanup policy for review/issue watches: controls whether the
+	// poller deletes auto-created tasks when the underlying PR/issue reaches
+	// a terminal state. Values: 'auto' (default — preserve only when user
+	// engaged), 'always' (delete on terminal state), 'never' (manual only).
+	_, _ = s.db.Exec(`ALTER TABLE github_review_watches ADD COLUMN cleanup_policy TEXT NOT NULL DEFAULT 'auto'`)
+	_, _ = s.db.Exec(`ALTER TABLE github_issue_watches ADD COLUMN cleanup_policy TEXT NOT NULL DEFAULT 'auto'`)
 	if err := s.migratePRTablesForMultiRepo(); err != nil {
 		return fmt.Errorf("migrate PR tables for multi-repo: %w", err)
 	}
@@ -771,6 +779,7 @@ func (s *Store) CreateReviewWatch(ctx context.Context, rw *ReviewWatch) error {
 	now := time.Now().UTC()
 	rw.CreatedAt = now
 	rw.UpdatedAt = now
+	rw.CleanupPolicy = NormalizeCleanupPolicy(rw.CleanupPolicy)
 	reposJSON, err := json.Marshal(rw.Repos)
 	if err != nil {
 		return fmt.Errorf("marshal repos: %w", err)
@@ -779,15 +788,17 @@ func (s *Store) CreateReviewWatch(ctx context.Context, rw *ReviewWatch) error {
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO github_review_watches (id, workspace_id, workflow_id, workflow_step_id, repos,
 			agent_profile_id, executor_profile_id, prompt, review_scope, custom_query,
-			enabled, poll_interval_seconds, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			enabled, poll_interval_seconds, cleanup_policy, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rw.ID, rw.WorkspaceID, rw.WorkflowID, rw.WorkflowStepID, rw.ReposJSON,
 		rw.AgentProfileID, rw.ExecutorProfileID, rw.Prompt, rw.ReviewScope, rw.CustomQuery,
-		rw.Enabled, rw.PollIntervalSeconds, rw.CreatedAt, rw.UpdatedAt)
+		rw.Enabled, rw.PollIntervalSeconds, rw.CleanupPolicy, rw.CreatedAt, rw.UpdatedAt)
 	return err
 }
 
-// hydrateReviewWatchRepos unmarshals the ReposJSON field into the Repos slice.
+// hydrateReviewWatchRepos unmarshals the ReposJSON field into the Repos slice
+// and normalizes the cleanup policy so legacy rows (or zero values) surface
+// as the documented default.
 func hydrateReviewWatchRepos(rw *ReviewWatch) {
 	if rw.ReposJSON != "" {
 		if err := json.Unmarshal([]byte(rw.ReposJSON), &rw.Repos); err != nil {
@@ -798,6 +809,7 @@ func hydrateReviewWatchRepos(rw *ReviewWatch) {
 	if rw.Repos == nil {
 		rw.Repos = []RepoFilter{}
 	}
+	rw.CleanupPolicy = NormalizeCleanupPolicy(rw.CleanupPolicy)
 }
 
 // GetReviewWatch returns a review watch by ID.
@@ -860,6 +872,7 @@ func (s *Store) ListEnabledReviewWatches(ctx context.Context) ([]*ReviewWatch, e
 // UpdateReviewWatch updates a review watch.
 func (s *Store) UpdateReviewWatch(ctx context.Context, rw *ReviewWatch) error {
 	rw.UpdatedAt = time.Now().UTC()
+	rw.CleanupPolicy = NormalizeCleanupPolicy(rw.CleanupPolicy)
 	reposJSON, err := json.Marshal(rw.Repos)
 	if err != nil {
 		return fmt.Errorf("marshal repos: %w", err)
@@ -869,19 +882,33 @@ func (s *Store) UpdateReviewWatch(ctx context.Context, rw *ReviewWatch) error {
 		UPDATE github_review_watches SET workflow_id = ?, workflow_step_id = ?, repos = ?,
 			agent_profile_id = ?, executor_profile_id = ?,
 			prompt = ?, review_scope = ?, custom_query = ?,
-			enabled = ?, poll_interval_seconds = ?, last_polled_at = ?, updated_at = ?
+			enabled = ?, poll_interval_seconds = ?, cleanup_policy = ?, last_polled_at = ?, updated_at = ?
 		WHERE id = ?`,
 		rw.WorkflowID, rw.WorkflowStepID, rw.ReposJSON,
 		rw.AgentProfileID, rw.ExecutorProfileID,
 		rw.Prompt, rw.ReviewScope, rw.CustomQuery,
-		rw.Enabled, rw.PollIntervalSeconds, rw.LastPolledAt, rw.UpdatedAt, rw.ID)
+		rw.Enabled, rw.PollIntervalSeconds, rw.CleanupPolicy, rw.LastPolledAt, rw.UpdatedAt, rw.ID)
 	return err
 }
 
-// DeleteReviewWatch deletes a review watch.
+// DeleteReviewWatch deletes a review watch and all its associated dedup rows
+// in one transaction. Dedup rows have no foreign key (SQLite never enforced
+// one for this table), so the explicit cascade is required — otherwise the
+// rows survive after the watch is gone, become invisible to the per-watch
+// poller, and the tasks they reference leak forever.
 func (s *Store) DeleteReviewWatch(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM github_review_watches WHERE id = ?`, id)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM github_review_pr_tasks WHERE review_watch_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM github_review_watches WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // --- Review PR Task deduplication ---
@@ -969,6 +996,17 @@ func (s *Store) ListReviewPRTasksByWatch(ctx context.Context, watchID string) ([
 	err := s.ro.SelectContext(ctx, &tasks,
 		`SELECT id, review_watch_id, repo_owner, repo_name, pr_number, pr_url, task_id, created_at
 		 FROM github_review_pr_tasks WHERE review_watch_id = ?`, watchID)
+	return tasks, err
+}
+
+// ListAllReviewPRTasks lists every dedup record across all watches. Used by
+// the global cleanup sweep so orphaned rows (whose watch was deleted or
+// disabled) still get evaluated for terminal-state cleanup.
+func (s *Store) ListAllReviewPRTasks(ctx context.Context) ([]*ReviewPRTask, error) {
+	var tasks []*ReviewPRTask
+	err := s.ro.SelectContext(ctx, &tasks,
+		`SELECT id, review_watch_id, repo_owner, repo_name, pr_number, pr_url, task_id, created_at
+		 FROM github_review_pr_tasks`)
 	return tasks, err
 }
 
@@ -1090,7 +1128,9 @@ func (s *Store) fetchApprovalRate(ctx context.Context, q *prStatsQuery, stats *P
 
 // --- Issue Watch operations ---
 
-// hydrateIssueWatch unmarshals JSON fields into their Go slices.
+// hydrateIssueWatch unmarshals JSON fields into their Go slices and
+// normalizes the cleanup policy so legacy rows (or zero values) surface as
+// the documented default.
 func hydrateIssueWatch(iw *IssueWatch) {
 	if iw.ReposJSON != "" {
 		if err := json.Unmarshal([]byte(iw.ReposJSON), &iw.Repos); err != nil {
@@ -1108,6 +1148,7 @@ func hydrateIssueWatch(iw *IssueWatch) {
 	if iw.Labels == nil {
 		iw.Labels = []string{}
 	}
+	iw.CleanupPolicy = NormalizeCleanupPolicy(iw.CleanupPolicy)
 }
 
 // CreateIssueWatch creates a new issue watch configuration.
@@ -1118,6 +1159,7 @@ func (s *Store) CreateIssueWatch(ctx context.Context, iw *IssueWatch) error {
 	now := time.Now().UTC()
 	iw.CreatedAt = now
 	iw.UpdatedAt = now
+	iw.CleanupPolicy = NormalizeCleanupPolicy(iw.CleanupPolicy)
 	reposJSON, err := json.Marshal(iw.Repos)
 	if err != nil {
 		return fmt.Errorf("marshal repos: %w", err)
@@ -1131,11 +1173,11 @@ func (s *Store) CreateIssueWatch(ctx context.Context, iw *IssueWatch) error {
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO github_issue_watches (id, workspace_id, workflow_id, workflow_step_id, repos,
 			agent_profile_id, executor_profile_id, prompt, labels, custom_query,
-			enabled, poll_interval_seconds, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			enabled, poll_interval_seconds, cleanup_policy, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		iw.ID, iw.WorkspaceID, iw.WorkflowID, iw.WorkflowStepID, iw.ReposJSON,
 		iw.AgentProfileID, iw.ExecutorProfileID, iw.Prompt, iw.LabelsJSON, iw.CustomQuery,
-		iw.Enabled, iw.PollIntervalSeconds, iw.CreatedAt, iw.UpdatedAt)
+		iw.Enabled, iw.PollIntervalSeconds, iw.CleanupPolicy, iw.CreatedAt, iw.UpdatedAt)
 	return err
 }
 
@@ -1198,6 +1240,7 @@ func (s *Store) ListEnabledIssueWatches(ctx context.Context) ([]*IssueWatch, err
 // UpdateIssueWatch updates an issue watch.
 func (s *Store) UpdateIssueWatch(ctx context.Context, iw *IssueWatch) error {
 	iw.UpdatedAt = time.Now().UTC()
+	iw.CleanupPolicy = NormalizeCleanupPolicy(iw.CleanupPolicy)
 	reposJSON, err := json.Marshal(iw.Repos)
 	if err != nil {
 		return fmt.Errorf("marshal repos: %w", err)
@@ -1212,12 +1255,12 @@ func (s *Store) UpdateIssueWatch(ctx context.Context, iw *IssueWatch) error {
 		UPDATE github_issue_watches SET workflow_id = ?, workflow_step_id = ?, repos = ?,
 			agent_profile_id = ?, executor_profile_id = ?,
 			prompt = ?, labels = ?, custom_query = ?,
-			enabled = ?, poll_interval_seconds = ?, last_polled_at = ?, updated_at = ?
+			enabled = ?, poll_interval_seconds = ?, cleanup_policy = ?, last_polled_at = ?, updated_at = ?
 		WHERE id = ?`,
 		iw.WorkflowID, iw.WorkflowStepID, iw.ReposJSON,
 		iw.AgentProfileID, iw.ExecutorProfileID,
 		iw.Prompt, iw.LabelsJSON, iw.CustomQuery,
-		iw.Enabled, iw.PollIntervalSeconds, iw.LastPolledAt, iw.UpdatedAt, iw.ID)
+		iw.Enabled, iw.PollIntervalSeconds, iw.CleanupPolicy, iw.LastPolledAt, iw.UpdatedAt, iw.ID)
 	return err
 }
 
@@ -1299,6 +1342,16 @@ func (s *Store) ListIssueWatchTasksByWatch(ctx context.Context, watchID string) 
 	err := s.ro.SelectContext(ctx, &tasks,
 		`SELECT id, issue_watch_id, repo_owner, repo_name, issue_number, issue_url, task_id, created_at
 		 FROM github_issue_watch_tasks WHERE issue_watch_id = ?`, watchID)
+	return tasks, err
+}
+
+// ListAllIssueWatchTasks lists every dedup record across all watches. Used by
+// the global cleanup sweep so orphaned rows still get evaluated.
+func (s *Store) ListAllIssueWatchTasks(ctx context.Context) ([]*IssueWatchTask, error) {
+	var tasks []*IssueWatchTask
+	err := s.ro.SelectContext(ctx, &tasks,
+		`SELECT id, issue_watch_id, repo_owner, repo_name, issue_number, issue_url, task_id, created_at
+		 FROM github_issue_watch_tasks`)
 	return tasks, err
 }
 

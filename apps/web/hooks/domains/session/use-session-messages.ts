@@ -2,6 +2,47 @@ import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "rea
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { TaskSessionState, Message } from "@/lib/types/http";
+import { listTaskSessionMessages } from "@/lib/api";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+
+const INITIAL_FETCH_LIMIT = 100;
+const BACKFILL_PAGE_LIMIT = 100;
+const MAX_BACKFILL_ROUNDS = 3;
+
+export function hasUserOrAgentMessage(messages: Message[]): boolean {
+  return messages.some(
+    (m) => m.type === "message" && (m.author_type === "user" || m.author_type === "agent"),
+  );
+}
+
+const debug = createDebugLogger("messages:fetch");
+
+function summarizeMessages(messages: Message[]): {
+  count: number;
+  byType: Record<string, number>;
+  userMessageCount: number;
+  agentMessageCount: number;
+  oldestCreatedAt: string | null;
+  newestCreatedAt: string | null;
+} {
+  const byType: Record<string, number> = {};
+  let userMessageCount = 0;
+  let agentMessageCount = 0;
+  for (const m of messages) {
+    const t = m.type ?? "unknown";
+    byType[t] = (byType[t] ?? 0) + 1;
+    if (m.type === "message" && m.author_type === "user") userMessageCount++;
+    if (m.type === "message" && m.author_type === "agent") agentMessageCount++;
+  }
+  return {
+    count: messages.length,
+    byType,
+    userMessageCount,
+    agentMessageCount,
+    oldestCreatedAt: messages[0]?.created_at ?? null,
+    newestCreatedAt: messages[messages.length - 1]?.created_at ?? null,
+  };
+}
 
 interface UseSessionMessagesReturn {
   isLoading: boolean;
@@ -25,12 +66,32 @@ async function fetchAndStoreMessages(
     return [];
   }
 
-  const response = await client.request<MessageListResponse>(
-    "message.list",
-    { session_id: sessionId, limit: 50, sort: "desc" },
-    10000,
-  );
+  const requestParams = {
+    session_id: sessionId,
+    limit: INITIAL_FETCH_LIMIT,
+    sort: "desc" as const,
+  };
+  debug("message.list request", requestParams);
+  const response = await client.request<MessageListResponse>("message.list", requestParams, 10000);
   const fetched = [...(response.messages ?? [])].reverse();
+  if (IS_DEBUG) {
+    const summary = summarizeMessages(fetched);
+    debug("message.list response", {
+      sessionId,
+      hasMore: response.has_more ?? false,
+      cursor: response.cursor ?? null,
+      ...summary,
+    });
+    if (fetched.length > 0 && summary.userMessageCount === 0 && summary.agentMessageCount === 0) {
+      debug("WARNING: fetched window contains no user/agent message rows", {
+        sessionId,
+        limit: requestParams.limit,
+        hasMore: response.has_more ?? false,
+        byType: summary.byType,
+        hint: "The fetch limit may be too small for this session's last turn — user prompt and agent replies live further back. Paginate or raise the limit to see them.",
+      });
+    }
+  }
   // Merge: keep WS-delivered messages that aren't in the fetch response.
   // This prevents a slow fetch (sent before messages existed) from wiping
   // messages that arrived via real-time notifications while the fetch was
@@ -50,6 +111,81 @@ async function fetchAndStoreMessages(
     oldestCursor: merged[0]?.id ?? null,
   });
   return merged;
+}
+
+/**
+ * When the initial fetch window contains no user/agent message rows (common
+ * when the latest turn produced hundreds of tool calls), the chat would render
+ * as an opaque collapsed activity group with nothing meaningful to scroll
+ * past — the lazy-load sentinel at the top of the list never fires because
+ * the user has no anchor to scroll from. Paginate backward via the same HTTP
+ * endpoint `useLazyLoadMessages` uses until we span at least one user/agent
+ * message or hit the round cap.
+ */
+export type BackfillStep = "continue" | "stop";
+
+async function fetchAndPrependOlder(
+  sessionId: string,
+  store: ReturnType<typeof useAppStoreApi>,
+  oldestCursor: string,
+): Promise<number> {
+  const response = await listTaskSessionMessages(sessionId, {
+    limit: BACKFILL_PAGE_LIMIT,
+    before: oldestCursor,
+    sort: "desc",
+  });
+  const ordered = [...(response.messages ?? [])].reverse();
+  const newOldestCursor = ordered[0]?.id ?? oldestCursor;
+  store.getState().prependMessages(sessionId, ordered, {
+    hasMore: response.has_more ?? false,
+    oldestCursor: newOldestCursor,
+  });
+  return ordered.length;
+}
+
+export async function runBackfillRound(
+  sessionId: string,
+  store: ReturnType<typeof useAppStoreApi>,
+  round: number,
+): Promise<BackfillStep> {
+  const meta = store.getState().messages.metaBySession[sessionId];
+  const messages = store.getState().messages.bySession[sessionId] ?? [];
+  if (hasUserOrAgentMessage(messages)) return "stop";
+  if (!meta?.hasMore || !meta.oldestCursor) {
+    debug("autoBackfill: stopping (no more older messages)", {
+      sessionId,
+      round,
+      hasMore: meta?.hasMore ?? false,
+    });
+    return "stop";
+  }
+  debug("autoBackfill: window has no user/agent message, fetching older", {
+    sessionId,
+    round,
+    currentCount: messages.length,
+    oldestCursor: meta.oldestCursor,
+  });
+  try {
+    const added = await fetchAndPrependOlder(sessionId, store, meta.oldestCursor);
+    return added === 0 ? "stop" : "continue";
+  } catch (err) {
+    debug("autoBackfill: fetch failed, stopping", { sessionId, round, err });
+    return "stop";
+  }
+}
+
+export async function autoBackfillUntilUserMessage(
+  sessionId: string,
+  store: ReturnType<typeof useAppStoreApi>,
+): Promise<void> {
+  for (let round = 0; round < MAX_BACKFILL_ROUNDS; round++) {
+    const step = await runBackfillRound(sessionId, store, round);
+    if (step === "stop") return;
+  }
+  debug("autoBackfill: hit round cap without finding user/agent message", {
+    sessionId,
+    cap: MAX_BACKFILL_ROUNDS,
+  });
 }
 
 type FetchMessagesParams = {
@@ -81,6 +217,9 @@ async function doFetchMessages({
     const fetched = await fetchAndStoreMessages(taskSessionId, store);
     lastFetchedSessionIdRef.current = taskSessionId;
     if (fetched.length > 0) setIsWaitingForInitialMessages(false);
+    if (fetched.length > 0 && !hasUserOrAgentMessage(fetched)) {
+      await autoBackfillUntilUserMessage(taskSessionId, store);
+    }
   } catch (error) {
     if (onError) onError(error);
     else console.error("Failed to fetch messages:", error);
@@ -135,14 +274,46 @@ export function useVisibilityBackfill(
   store: ReturnType<typeof useAppStoreApi>,
 ) {
   useEffect(() => {
-    if (!taskSessionId) return;
+    if (!taskSessionId) {
+      debug("visibilityBackfill: skipped attaching (no sessionId)");
+      return;
+    }
+    debug("visibilityBackfill: attached", { sessionId: taskSessionId });
     const onVisible = () => {
-      if (document.visibilityState === "visible") {
-        fetchAndStoreMessages(taskSessionId, store).catch(() => {});
-      }
+      const visibilityState = document.visibilityState;
+      const state = store.getState();
+      const existingCount = state.messages.bySession[taskSessionId]?.length ?? 0;
+      const newestBefore =
+        state.messages.bySession[taskSessionId]?.slice(-1)[0]?.created_at ?? null;
+      debug("visibilityBackfill: visibilitychange fired", {
+        sessionId: taskSessionId,
+        visibilityState,
+        connectionStatus: state.connection?.status ?? "unknown",
+        existingCount,
+        newestBefore,
+      });
+      if (visibilityState !== "visible") return;
+      fetchAndStoreMessages(taskSessionId, store)
+        .then(() => {
+          const afterCount = store.getState().messages.bySession[taskSessionId]?.length ?? 0;
+          const newestAfter =
+            store.getState().messages.bySession[taskSessionId]?.slice(-1)[0]?.created_at ?? null;
+          debug("visibilityBackfill: refetch complete", {
+            sessionId: taskSessionId,
+            delta: afterCount - existingCount,
+            newestBefore,
+            newestAfter,
+          });
+        })
+        .catch((err) => {
+          debug("visibilityBackfill: refetch failed", { sessionId: taskSessionId, err });
+        });
     };
     document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      debug("visibilityBackfill: detached", { sessionId: taskSessionId });
+    };
   }, [taskSessionId, store]);
 }
 
@@ -153,13 +324,24 @@ function useSessionSubscription(
   store: ReturnType<typeof useAppStoreApi>,
 ) {
   useEffect(() => {
+    debug("subscription: effect ran", {
+      sessionId: taskSessionId,
+      connectionStatus,
+      isSessionStartingOrUnknown,
+    });
     if (!taskSessionId || connectionStatus !== "connected") {
+      debug("subscription: skipped (no session or not connected)", {
+        sessionId: taskSessionId,
+        connectionStatus,
+      });
       return;
     }
     const client = getWebSocketClient();
     if (!client) {
+      debug("subscription: skipped (no ws client)", { sessionId: taskSessionId });
       return;
     }
+    debug("subscription: subscribing", { sessionId: taskSessionId });
     const unsubscribe = client.subscribeSession(taskSessionId);
 
     // Re-fetch messages after subscribing to close the gap between SSR
@@ -167,6 +349,7 @@ function useSessionSubscription(
     fetchAndStoreMessages(taskSessionId, store).catch(() => {});
 
     return () => {
+      debug("subscription: unsubscribing", { sessionId: taskSessionId });
       unsubscribe();
     };
   }, [taskSessionId, connectionStatus, store, isSessionStartingOrUnknown]);

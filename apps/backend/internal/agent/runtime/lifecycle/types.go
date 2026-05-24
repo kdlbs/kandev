@@ -59,6 +59,13 @@ type AgentExecution struct {
 	standaloneInstanceID string // Instance ID in standalone agentctl
 	standalonePort       int    // Port of the standalone execution
 
+	// IsPassthrough captures the session's mode as decided at session-creation
+	// time (TaskSession.IsPassthrough snapshot). StartAgentProcess uses this
+	// instead of re-resolving the live profile so a profile that toggles
+	// CLIPassthrough after the session was created cannot strand existing
+	// sessions in the wrong launch path.
+	IsPassthrough bool
+
 	// Passthrough mode info (CLI passthrough without ACP)
 	PassthroughProcessID string    // Process ID in the interactive runner (empty if not in passthrough mode)
 	PassthroughStartedAt time.Time // When the current passthrough process was launched; used to detect fast-fail exits and skip auto-restart loops
@@ -294,6 +301,7 @@ type RepoLaunchSpec struct {
 	BaseBranch           string
 	DefaultBranch        string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch       string
+	PRNumber             int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	WorktreeID           string // Existing worktree ID to reuse (skip creation if set)
 	WorktreeBranchPrefix string
 	PullBeforeWorktree   bool
@@ -335,6 +343,15 @@ type LaunchRequest struct {
 	// Non-ephemeral tasks without a workspace path will not receive a fallback directory.
 	IsEphemeral bool
 
+	// IsPassthrough is the session's mode snapshot taken when the session was
+	// created (TaskSession.IsPassthrough). When the launch request originates
+	// from an existing session, this is the source of truth for the launch
+	// path so a profile that toggles CLIPassthrough after the session was
+	// created does not strand the session in the wrong mode. Non-session
+	// launches (e.g. the low-level controller.LaunchAgent path) leave this
+	// false and fall back to live profile resolution.
+	IsPassthrough bool
+
 	// Executor configuration - determines which runtime to use
 	ExecutorType        string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
 	ExecutorConfig      map[string]string // Executor config (docker_host, git_token, etc.)
@@ -352,6 +369,7 @@ type LaunchRequest struct {
 	BaseBranch           string // Base branch for the worktree (e.g., "main")
 	DefaultBranch        string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch       string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
+	PRNumber             int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	WorktreeBranchPrefix string // Branch prefix for worktree branches
 	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
 
@@ -384,6 +402,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		BaseBranch:           r.BaseBranch,
 		DefaultBranch:        r.DefaultBranch,
 		CheckoutBranch:       r.CheckoutBranch,
+		PRNumber:             r.PRNumber,
 		WorktreeID:           r.WorktreeID,
 		WorktreeBranchPrefix: r.WorktreeBranchPrefix,
 		PullBeforeWorktree:   r.PullBeforeWorktree,

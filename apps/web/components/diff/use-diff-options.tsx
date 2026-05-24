@@ -9,9 +9,7 @@ import type { AnnotationMetadata } from "./use-diff-annotation-renderer";
 
 /** CSS overrides for the Pierre diff viewer, injected via unsafeCSS. */
 const DIFF_UNSAFE_CSS = `
-  [data-diffs],
-  pre[data-diffs] {
-    background-color: var(--background) !important;
+  :host {
     --diffs-bg: var(--background) !important;
     --diffs-bg-context: var(--background) !important;
     --diffs-bg-buffer: var(--card) !important;
@@ -53,6 +51,13 @@ const DIFF_UNSAFE_CSS = `
   [data-diffs-header] {
     padding-inline: 12px !important;
     background: var(--card) !important;
+  }
+  /* Vertically center the "Add comment" hover button in the line gutter.
+     Pierre 1.1.22 declares the slot wrapper as display:flex with top:0/bottom:0
+     but no align-items, so our fixed-size button pins to the top of the line
+     cell instead of centering on the line number. */
+  [data-gutter-utility-slot] {
+    align-items: center !important;
   }
 `;
 
@@ -134,6 +139,12 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
     if (!enableComments) return null;
     return (
       <div
+        // Negative margin mirrors pierre's default [data-utility-button] trick:
+        // the slot wrapper is right:0 of the line-number cell, so without this
+        // the button sits inside the cell and overlaps the number. Pulling
+        // right by (1ch - 1lh) extrudes the button past the gutter's right
+        // edge into the code area, same as pierre's built-in button does.
+        style={{ marginRight: "calc(1ch - 1lh)" }}
         className="flex h-5 w-5 cursor-pointer items-center justify-center rounded border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
         title="Add comment"
       >

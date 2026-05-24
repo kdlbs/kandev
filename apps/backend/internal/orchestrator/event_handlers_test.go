@@ -85,13 +85,15 @@ type mockTaskRepo struct {
 	mu            sync.Mutex
 	tasks         map[string]*v1.Task
 	updatedStates map[string]v1.TaskState
-	getTaskErr    error // if set, GetTask returns this error
+	stateWrites   map[string]int // per-task UpdateTaskState call count for dedup tests
+	getTaskErr    error          // if set, GetTask returns this error
 }
 
 func newMockTaskRepo() *mockTaskRepo {
 	return &mockTaskRepo{
 		tasks:         make(map[string]*v1.Task),
 		updatedStates: make(map[string]v1.TaskState),
+		stateWrites:   make(map[string]int),
 	}
 }
 
@@ -111,6 +113,7 @@ func (m *mockTaskRepo) UpdateTaskState(_ context.Context, taskID string, state v
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.updatedStates[taskID] = state
+	m.stateWrites[taskID]++
 	return nil
 }
 

@@ -13,6 +13,7 @@ import {
   IconKey,
   IconMessageCircle,
   IconBrandGithub,
+  IconBrandGitlab,
   IconBrandSlack,
   IconHexagon,
   IconSparkles,
@@ -21,6 +22,7 @@ import {
   IconArrowsShuffle,
   IconTicket,
   IconPlugConnected,
+  IconBolt,
 } from "@tabler/icons-react";
 import {
   Sidebar,
@@ -154,6 +156,7 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
 function IntegrationsSidebarSection({ pathname }: { pathname: string }) {
   const items: Array<{ href: string; label: string; Icon: typeof IconBrandGithub }> = [
     { href: "/settings/integrations/github", label: "GitHub", Icon: IconBrandGithub },
+    { href: "/settings/integrations/gitlab", label: "GitLab", Icon: IconBrandGitlab },
     { href: "/settings/integrations/jira", label: "Jira", Icon: IconTicket },
     { href: "/settings/integrations/linear", label: "Linear", Icon: IconHexagon },
     { href: "/settings/integrations/slack", label: "Slack", Icon: IconBrandSlack },
@@ -322,6 +325,23 @@ export function SettingsAppSidebar() {
                 <GeneralSidebarSection pathname={pathname} />
                 <WorkspacesSidebarSection pathname={pathname} workspaces={workspaces} />
                 <IntegrationsSidebarSection pathname={pathname} />
+
+                {/* Automations */}
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={
+                      pathname.startsWith("/settings/automations") ||
+                      pathname.includes("/automations")
+                    }
+                  >
+                    <Link href="/settings/automations">
+                      <IconBolt className="h-4 w-4" />
+                      <span>Automations</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
                 <AgentsSidebarSection pathname={pathname} agents={agents} />
 
                 {/* Prompts */}
@@ -345,6 +365,7 @@ export function SettingsAppSidebar() {
                 </SidebarMenuItem>
 
                 <ExecutorsSidebarSection pathname={pathname} executors={executors} />
+
                 <SecretsSidebarSection pathname={pathname} />
 
                 {/* External MCP */}

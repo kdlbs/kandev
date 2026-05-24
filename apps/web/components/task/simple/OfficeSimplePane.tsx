@@ -9,7 +9,7 @@ import {
   IconPlus,
   IconRestore,
   IconTrash,
-  IconUpload,
+  IconPaperclip,
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -355,7 +355,7 @@ function TaskActionRow({
           className="cursor-pointer"
           onClick={() => attachInputRef.current?.click()}
         >
-          <IconUpload className="h-3.5 w-3.5 mr-1" /> Upload attachment
+          <IconPaperclip className="h-3.5 w-3.5 mr-1" /> Attach files
         </Button>
         <input
           ref={attachInputRef}

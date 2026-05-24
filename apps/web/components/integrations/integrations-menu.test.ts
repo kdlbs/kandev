@@ -11,11 +11,16 @@ import type { GitHubStatus } from "@/lib/types/github";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
 const useGitHubStatusMock = vi.hoisted(() => vi.fn());
+const useGitLabAvailableMock = vi.hoisted(() => vi.fn());
 const useJiraAvailableMock = vi.hoisted(() => vi.fn());
 const useLinearAvailableMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/hooks/domains/github/use-github-status", () => ({
   useGitHubStatus: useGitHubStatusMock,
+}));
+
+vi.mock("@/hooks/domains/gitlab/use-task-mr", () => ({
+  useGitLabAvailable: useGitLabAvailableMock,
 }));
 
 vi.mock("@/hooks/domains/jira/use-jira-availability", () => ({
@@ -39,10 +44,12 @@ function status(overrides: Partial<GitHubStatus>): GitHubStatus {
 
 function mockAvailability({
   githubReady,
+  gitlabReady = false,
   jiraAvailable,
   linearAvailable,
 }: {
   githubReady: boolean;
+  gitlabReady?: boolean;
   jiraAvailable: boolean;
   linearAvailable: boolean;
 }) {
@@ -50,6 +57,7 @@ function mockAvailability({
     status: githubReady ? status({ token_configured: true }) : status({}),
     loading: false,
   });
+  useGitLabAvailableMock.mockReturnValue(gitlabReady);
   useJiraAvailableMock.mockReturnValue(jiraAvailable);
   useLinearAvailableMock.mockReturnValue(linearAvailable);
 }
@@ -94,6 +102,7 @@ describe("getAvailableIntegrationLinks", () => {
     expect(
       getAvailableIntegrationLinks({
         githubReady: true,
+        gitlabReady: false,
         jiraAvailable: false,
         linearAvailable: true,
       }),
@@ -107,6 +116,7 @@ describe("getAvailableIntegrationLinks", () => {
     expect(
       getAvailableIntegrationLinks({
         githubReady: false,
+        gitlabReady: false,
         jiraAvailable: false,
         linearAvailable: false,
       }),

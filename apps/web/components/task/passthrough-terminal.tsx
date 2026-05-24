@@ -22,6 +22,7 @@ import {
   useSendInput,
   useFitAndResize,
 } from "./use-passthrough-terminal";
+import { useTouchScroll } from "./use-touch-scroll";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useTerminalSearch } from "./use-terminal-search";
 import { TerminalSearchBar } from "./terminal-search-bar";
@@ -48,6 +49,10 @@ type BaseProps = {
    * Mobile uses this to register a key-bar sender that writes raw bytes
    * directly to this terminal's socket. */
   onWsReady?: (ws: WebSocket) => void;
+  /** Translate single-finger touch swipes on the terminal area into xterm
+   * scrollback navigation. Mobile callers set this so the xterm canvas no
+   * longer silently absorbs touch gestures. */
+  enableTouchScroll?: boolean;
 };
 type AgentTerminalProps = BaseProps & { mode: "agent"; sessionId?: string | null; label?: string };
 type ShellTerminalProps = BaseProps & {
@@ -146,6 +151,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     disableWebgl,
     manualInputRouting,
     onWsReady,
+    enableTouchScroll,
   } = props;
   const terminalId = mode === "shell" ? props.terminalId : undefined;
   const environmentId = mode === "shell" ? props.environmentId : undefined;
@@ -225,6 +231,13 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     sendInput,
     keyboardShortcutsRef,
     onFindInPanelRef,
+  });
+
+  useTouchScroll({
+    terminalRef: refs.terminalRef,
+    xtermRef: refs.xtermRef,
+    enabled: !!enableTouchScroll,
+    isTerminalReady,
   });
 
   useWebSocketConnection({

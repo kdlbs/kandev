@@ -47,6 +47,7 @@ const createTablesSQL = `
 		site_url TEXT NOT NULL,
 		email TEXT NOT NULL DEFAULT '',
 		auth_method TEXT NOT NULL,
+		instance_type TEXT NOT NULL DEFAULT 'cloud',
 		default_project_key TEXT NOT NULL DEFAULT '',
 		last_checked_at DATETIME,
 		last_ok INTEGER NOT NULL DEFAULT 0,
@@ -96,6 +97,28 @@ func (s *Store) initSchema() error {
 	}
 	if _, err := s.db.Exec(createTablesSQL); err != nil {
 		return err
+	}
+	if err := s.addInstanceTypeColumn(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// addInstanceTypeColumn brings older databases up to the current schema by
+// adding the instance_type column to jira_configs when missing. Existing rows
+// were all written when the code only spoke Cloud, so 'cloud' is the safe
+// default. A fresh install hits the column-already-present branch since
+// createTablesSQL above declares the column with the same default.
+func (s *Store) addInstanceTypeColumn() error {
+	cols, err := s.tableColumns("jira_configs")
+	if err != nil {
+		return err
+	}
+	if _, ok := cols["instance_type"]; ok {
+		return nil
+	}
+	if _, err := s.db.Exec(`ALTER TABLE jira_configs ADD COLUMN instance_type TEXT NOT NULL DEFAULT 'cloud'`); err != nil {
+		return fmt.Errorf("add instance_type column: %w", err)
 	}
 	return nil
 }
@@ -162,6 +185,7 @@ func (s *Store) migrateLegacyPerWorkspaceTable() error {
 			site_url TEXT NOT NULL,
 			email TEXT NOT NULL DEFAULT '',
 			auth_method TEXT NOT NULL,
+			instance_type TEXT NOT NULL DEFAULT 'cloud',
 			default_project_key TEXT NOT NULL DEFAULT '',
 			last_checked_at DATETIME,
 			last_ok INTEGER NOT NULL DEFAULT 0,
@@ -171,6 +195,9 @@ func (s *Store) migrateLegacyPerWorkspaceTable() error {
 		)`); err != nil {
 		return err
 	}
+	// instance_type column is intentionally omitted from the INSERT: the column
+	// default ('cloud') is the correct value for every legacy row, since prior
+	// releases only supported Atlassian Cloud.
 	if _, err := tx.Exec(`
 		INSERT INTO jira_configs (id, site_url, email, auth_method, default_project_key,
 			last_checked_at, last_ok, last_error, created_at, updated_at)
@@ -231,7 +258,7 @@ func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
 	return cols, rows.Err()
 }
 
-const selectConfigColumns = `site_url, email, auth_method, default_project_key,
+const selectConfigColumns = `site_url, email, auth_method, instance_type, default_project_key,
 		last_checked_at, last_ok, last_error, created_at, updated_at`
 
 // GetConfig returns the singleton Jira config, or nil when no row exists.
@@ -258,16 +285,23 @@ func (s *Store) UpsertConfig(ctx context.Context, cfg *JiraConfig) error {
 		cfg.CreatedAt = now
 	}
 	cfg.UpdatedAt = now
+	// Defensive: callers that bypass the service layer (tests, future
+	// migrations) may leave InstanceType empty. Coerce to 'cloud' so reads
+	// never surface a value the client doesn't understand.
+	if cfg.InstanceType == "" {
+		cfg.InstanceType = InstanceTypeCloud
+	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO jira_configs (id, site_url, email, auth_method, default_project_key, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO jira_configs (id, site_url, email, auth_method, instance_type, default_project_key, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			site_url = excluded.site_url,
 			email = excluded.email,
 			auth_method = excluded.auth_method,
+			instance_type = excluded.instance_type,
 			default_project_key = excluded.default_project_key,
 			updated_at = excluded.updated_at`,
-		singletonID, cfg.SiteURL, cfg.Email, cfg.AuthMethod, cfg.DefaultProjectKey, cfg.CreatedAt, cfg.UpdatedAt)
+		singletonID, cfg.SiteURL, cfg.Email, cfg.AuthMethod, cfg.InstanceType, cfg.DefaultProjectKey, cfg.CreatedAt, cfg.UpdatedAt)
 	return err
 }
 

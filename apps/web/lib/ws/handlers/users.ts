@@ -30,6 +30,7 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
             message.payload.terminal_link_behavior === "browser_panel"
               ? "browser_panel"
               : "new_tab",
+          changesPanelLayout: message.payload.changes_panel_layout === "tree" ? "tree" : "flat",
           loaded: true,
         },
       }));

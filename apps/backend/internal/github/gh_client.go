@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os/exec"
 	"strings"
@@ -600,6 +601,77 @@ func (c *GHClient) SubmitReview(ctx context.Context, owner, repo string, number 
 	return nil
 }
 
+func (c *GHClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
+	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/merge", owner, repo, number)
+	args := []string{"api", endpoint, "-X", "PUT"}
+	if mergeMethod != "" {
+		args = append(args, "-f", "merge_method="+mergeMethod)
+	}
+	_, err := c.run(ctx, args...)
+	if err != nil {
+		// Surface status-based errors as GitHubAPIError so httpMergePR can
+		// translate 405 (not mergeable) / 409 (conflict) to HTTP 409 for
+		// gh CLI users too, matching the PAT path.
+		if code, ok := ghMergeStatusCode(err); ok {
+			return &GitHubAPIError{StatusCode: code, Endpoint: endpoint, Body: err.Error()}
+		}
+		return fmt.Errorf("merge PR #%d: %w", number, err)
+	}
+	return nil
+}
+
+// ghMergeStatusCode extracts the HTTP status code from a gh CLI merge error.
+// Returns the code and true when the stderr matches one of GitHub's
+// merge-API failure shapes (404/403/405/409); false otherwise so the caller
+// falls back to a generic wrap.
+func ghMergeStatusCode(err error) (int, bool) {
+	if err == nil {
+		return 0, false
+	}
+	if isNotFoundErr(err) {
+		return http.StatusNotFound, true
+	}
+	if isForbiddenErr(err) {
+		return http.StatusForbidden, true
+	}
+	s := err.Error()
+	if strings.Contains(s, "HTTP 405") || strings.Contains(s, "status: 405") ||
+		strings.Contains(s, "405 Method Not Allowed") {
+		return http.StatusMethodNotAllowed, true
+	}
+	if strings.Contains(s, "HTTP 409") || strings.Contains(s, "status: 409") ||
+		strings.Contains(s, "409 Conflict") {
+		return http.StatusConflict, true
+	}
+	return 0, false
+}
+
+func (c *GHClient) GetRepoMergeMethods(ctx context.Context, owner, repo string) (RepoMergeMethods, error) {
+	out, err := c.run(ctx, "api", fmt.Sprintf("repos/%s/%s", owner, repo))
+	if err != nil {
+		return RepoMergeMethods{}, fmt.Errorf("get repo merge methods: %w", err)
+	}
+	var raw struct {
+		AllowMergeCommit *bool `json:"allow_merge_commit"`
+		AllowSquashMerge *bool `json:"allow_squash_merge"`
+		AllowRebaseMerge *bool `json:"allow_rebase_merge"`
+	}
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return RepoMergeMethods{}, fmt.Errorf("parse repo: %w", err)
+	}
+	// Conservative read: missing field → false. A permission-gated response
+	// that omits allow_* would otherwise let us pick a disallowed method
+	// (e.g. "merge" on a rebase-only repo), reproducing the 405 this fix is
+	// designed to prevent. Callers that fall back to GitHub's default on an
+	// empty pick get a meaningful error instead of a wrong-method 405.
+	allowed := func(p *bool) bool { return p != nil && *p }
+	return RepoMergeMethods{
+		Merge:  allowed(raw.AllowMergeCommit),
+		Squash: allowed(raw.AllowSquashMerge),
+		Rebase: allowed(raw.AllowRebaseMerge),
+	}, nil
+}
+
 func (c *GHClient) ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
 	out, err := c.run(ctx, "api",
 		fmt.Sprintf("repos/%s/%s/branches", owner, repo),
@@ -620,6 +692,65 @@ func (c *GHClient) ListRepoBranches(ctx context.Context, owner, repo string) ([]
 	return branches, nil
 }
 
+func (c *GHClient) CreateGist(ctx context.Context, in CreateGistInput) (*GistResponse, error) {
+	payload := struct {
+		Description string                 `json:"description,omitempty"`
+		Public      bool                   `json:"public"`
+		Files       map[string]gistFileDTO `json:"files"`
+	}{
+		Description: in.Description,
+		Public:      in.Public,
+		Files:       make(map[string]gistFileDTO, len(in.Files)),
+	}
+	for name, f := range in.Files {
+		payload.Files[name] = gistFileDTO(f)
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal gist payload: %w", err)
+	}
+	args := []string{"api", "gists",
+		"-X", "POST",
+		"-H", "Accept: " + githubAccept,
+		"--input", "-",
+	}
+	out, err := c.runWithStdin(ctx, body, args...)
+	if err != nil {
+		return nil, fmt.Errorf("create gist: %w", err)
+	}
+	var resp GistResponse
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		return nil, fmt.Errorf("decode gist response: %w", err)
+	}
+	return &resp, nil
+}
+
+func (c *GHClient) DeleteGist(ctx context.Context, gistID string) error {
+	if gistID == "" {
+		return fmt.Errorf("delete gist: empty id")
+	}
+	_, err := c.run(ctx, "api", "gists/"+gistID, "-X", "DELETE")
+	if err != nil {
+		// gh exits non-zero for HTTP errors; stderr contains the status
+		// line (e.g. "HTTP 404: Not Found"). Promote 404 to *GitHubAPIError
+		// so share.IsAlreadyGone matches consistently — PATClient.delete()
+		// already returns a typed error for the same case, and the share
+		// service uses errors.As to detect "gist already revoked upstream"
+		// and treat it as a soft success rather than a 502. Use isNotFoundErr
+		// so every gh-CLI 404 format ("HTTP 404", "404 Not Found", "status: 404")
+		// is recognised, not just the most common one.
+		if isNotFoundErr(err) {
+			return &GitHubAPIError{
+				StatusCode: http.StatusNotFound,
+				Endpoint:   "/gists/" + gistID,
+				Body:       err.Error(),
+			}
+		}
+		return fmt.Errorf("delete gist %s: %w", gistID, err)
+	}
+	return nil
+}
+
 const ghCLITimeout = 30 * time.Second
 
 // withDefaultGHTimeout applies a 30s timeout if the context has no deadline.
@@ -637,6 +768,23 @@ func (c *GHClient) run(ctx context.Context, args ...string) (string, error) {
 	ctx, cancel := withDefaultGHTimeout(ctx)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		c.inspectRateStderr(args, stderr.String())
+		return stdout.String(), fmt.Errorf("gh %s: %w: %s", args[0], err, stderr.String())
+	}
+	return stdout.String(), nil
+}
+
+// runWithStdin is like run but pipes stdin into the gh CLI process.
+// Useful for `gh api --input -` calls where the body comes from JSON.
+func (c *GHClient) runWithStdin(ctx context.Context, stdin []byte, args ...string) (string, error) {
+	ctx, cancel := withDefaultGHTimeout(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.Stdin = bytes.NewReader(stdin)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

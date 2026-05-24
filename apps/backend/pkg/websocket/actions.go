@@ -237,9 +237,13 @@ const (
 	ActionSessionShellOutput = "session.shell.output" // Shell output notification (also used for exit with type: "exit")
 
 	// User shell actions (independent terminal tabs)
-	ActionUserShellList   = "user_shell.list"   // List running user shells for a session
-	ActionUserShellCreate = "user_shell.create" // Create a new user shell terminal (assigns ID and label)
-	ActionUserShellStop   = "user_shell.stop"   // Stop a user shell terminal
+	ActionUserShellList    = "user_shell.list"    // List user shells for a task (DB rows + agentctl probes)
+	ActionUserShellCreate  = "user_shell.create"  // Create a new user shell terminal (assigns ID + seq)
+	ActionUserShellStop    = "user_shell.stop"    // Legacy alias of destroy; kept for one release
+	ActionUserShellRename  = "user_shell.rename"  // Rename an ordinary user shell (set/clear custom_name)
+	ActionUserShellPark    = "user_shell.park"    // Hide tab; PTY continues running
+	ActionUserShellResume  = "user_shell.resume"  // Unhide a parked tab
+	ActionUserShellDestroy = "user_shell.destroy" // Stop the PTY and delete the row
 
 	// Session file review actions
 	ActionSessionFileReviewGet    = "session.file_review.get"    // Get all file reviews for a session
@@ -398,6 +402,11 @@ const (
 	ActionGitHubActionPresetsList   = "github.action_presets.list"
 	ActionGitHubActionPresetsUpdate = "github.action_presets.update"
 	ActionGitHubActionPresetsReset  = "github.action_presets.reset"
+
+	// Manual cleanup sweeps over all dedup rows (review/issue). Used by the
+	// settings-page button so users can drain piled-up tasks on demand.
+	ActionGitHubCleanupReviewTasks = "github.cleanup.review_tasks"
+	ActionGitHubCleanupIssueTasks  = "github.cleanup.issue_tasks"
 )
 
 // Jira integration actions
@@ -454,6 +463,24 @@ const (
 	ActionOfficeProviderHealthChanged  = "office.provider.health_changed"
 	ActionOfficeRouteAttemptAppended   = "office.route_attempt.appended"
 	ActionOfficeRoutingSettingsUpdated = "office.routing.settings_updated"
+)
+
+// Automation actions
+const (
+	ActionAutomationList                = "automation.list"
+	ActionAutomationGet                 = "automation.get"
+	ActionAutomationCreate              = "automation.create"
+	ActionAutomationUpdate              = "automation.update"
+	ActionAutomationDelete              = "automation.delete"
+	ActionAutomationEnable              = "automation.enable"
+	ActionAutomationDisable             = "automation.disable"
+	ActionAutomationTrigger             = "automation.trigger"
+	ActionAutomationRunsList            = "automation.runs.list"
+	ActionAutomationTriggerAdd          = "automation.trigger.add"
+	ActionAutomationTriggerUpdate       = "automation.trigger.update"
+	ActionAutomationTriggerDelete       = "automation.trigger.delete"
+	ActionAutomationTriggerTypes        = "automation.trigger_types"
+	ActionAutomationWebhookRevealSecret = "automation.webhook.reveal_secret"
 )
 
 // Error codes

@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	acp "github.com/coder/acp-go-sdk"
 )
 
 // delayRange returns min/max delay in milliseconds based on model name.
@@ -70,19 +72,47 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitSpecificTool(e, strings.TrimSpace(toolName), model)
 	case strings.HasPrefix(cmd, "/subagent"):
 		emitSubagentSequence(e, model)
+	case strings.EqualFold(cmd, "/subtask") || strings.HasPrefix(strings.ToLower(cmd), "/subtask "):
+		emitCreateSubtask(e, cmd, model)
 	case strings.HasPrefix(cmd, "/e2e:"):
 		rest := strings.TrimPrefix(cmd, "/e2e:")
 		scenarioName, _, _ := strings.Cut(strings.TrimSpace(rest), " ")
 		emitPredefinedScenario(e, scenarioName)
+	// Friendly aliases for the two clarification e2e scenarios so the slash menu
+	// exposes them without forcing users to type /e2e:clarification(-multi).
+	case strings.EqualFold(cmd, "/ask-single"):
+		emitPredefinedScenario(e, "clarification")
+	case strings.EqualFold(cmd, "/ask-multiple"):
+		emitPredefinedScenario(e, "clarification-multi")
 	case strings.EqualFold(cmd, "/crash"):
 		emitCrash(e, model)
 	case strings.HasPrefix(cmd, "/todo"):
 		emitTodoSequence(e, model)
 	case strings.EqualFold(cmd, "/mermaid"):
 		emitMermaidSequence(e, model)
+	case strings.EqualFold(cmd, "/markdown"):
+		emitMarkdownShowcase(e, model)
+	case strings.EqualFold(cmd, "/sleep") || strings.HasPrefix(strings.ToLower(cmd), "/sleep "):
+		emitSleep(e, cmd)
 	default:
 		emitRandomResponse(e, cmd, model)
 	}
+}
+
+// emitSleep sleeps for the requested duration (default 10s) then responds.
+// Useful for simulating a slow agent turn without any tool calls.
+func emitSleep(e *emitter, cmd string) {
+	d := 10 * time.Second
+	parts := strings.Fields(cmd)
+	if len(parts) >= 2 {
+		if secs, err := time.ParseDuration(parts[1] + "s"); err == nil && secs > 0 {
+			d = secs
+		} else if parsed, err2 := time.ParseDuration(parts[1]); err2 == nil && parsed > 0 {
+			d = parsed
+		}
+	}
+	time.Sleep(d)
+	e.text(fmt.Sprintf("Slept for %s.", d))
 }
 
 // emitError emits an error message.
@@ -238,4 +268,47 @@ func emitSubagentSequence(e *emitter, model string) {
 	emitSubagent(e, model)
 	randomDelay(model)
 	e.text("Subagent task completed successfully.")
+}
+
+// emitCreateSubtask calls the kandev MCP `create_task_kandev` tool with
+// parent_id="self" to create a subtask of the current task. Useful for
+// manually exercising sidebar subtask UI in dev with KANDEV_MOCK_AGENT=true.
+// Usage: `/subtask` or `/subtask My subtask title`.
+func emitCreateSubtask(e *emitter, cmd, model string) {
+	title := parseSubtaskTitle(cmd)
+
+	args := map[string]any{
+		"title":       title,
+		"parent_id":   "self",
+		"start_agent": false,
+	}
+
+	toolID := nextToolID()
+	e.startTool(toolID, "create_task_kandev", acp.ToolKindOther, args)
+	randomDelay(model)
+
+	result, err := callMCPTool("kandev", "create_task_kandev", args)
+	if err != nil {
+		e.completeTool(toolID, map[string]any{"error": "MCP error: " + err.Error()})
+		e.text(fmt.Sprintf("Failed to create subtask: %v", err))
+		return
+	}
+	e.completeTool(toolID, map[string]any{"result": result})
+	e.text(fmt.Sprintf("Created subtask %q under the current task.", title))
+}
+
+// parseSubtaskTitle extracts the title from a /subtask command. The dispatch
+// matches case-insensitively, so we slice by prefix length rather than using
+// strings.TrimPrefix (which would no-op on "/SubTask foo" and leak the prefix
+// into the title). Returns an auto-generated title when no title is supplied.
+func parseSubtaskTitle(cmd string) string {
+	const prefix = "/subtask"
+	title := ""
+	if len(cmd) >= len(prefix) {
+		title = strings.TrimSpace(cmd[len(prefix):])
+	}
+	if title == "" {
+		title = fmt.Sprintf("Mock subtask %d", time.Now().Unix()%10000)
+	}
+	return title
 }

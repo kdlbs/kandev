@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	v1 "github.com/kandev/kandev/pkg/api/v1"
+
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
@@ -406,5 +408,57 @@ func assertSessionState(t *testing.T, ctx context.Context, repo sessionExecutorS
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// Regression for #985: an on_turn_complete engine transition flips the
+// session to WAITING_FOR_INPUT and moves the task to the next step, but the
+// pre-fix code path forgot to write tasks.state = REVIEW. That left the
+// kanban card stuck in IN_PROGRESS — with a spinning loader — even though
+// the agent had paused and the card had already moved into the "Review"
+// column. Mirrors what setSessionWaitingForInput (the non-engine path)
+// has always done via writeTaskReviewState.
+//
+// The chosen transition is "New Step" → "Done": "Done" has no on_enter, so
+// no follow-up action can mask the missing write (e.g. auto_start_agent
+// would otherwise overwrite tasks.state back to IN_PROGRESS via
+// setSessionRunning).
+func TestProcessOnTurnCompleteViaEngine_WritesTaskStateReview(t *testing.T) {
+	ctx := context.Background()
+
+	sg, nameToID := buildWorkflowFromJSON(t, developmentWorkflowJSON)
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", nameToID["New Step"])
+	setSessionExecID(t, repo, "s1", "exec-1")
+	setSessionState(t, ctx, repo, "s1", models.TaskSessionStateRunning)
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	taskRepo := newMockTaskRepo()
+	svc := createEngineService(t, repo, sg, agentMgr)
+	svc.taskRepo = taskRepo
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+
+	transitioned := svc.processOnTurnCompleteViaEngine(ctx, "t1", session)
+	if !transitioned {
+		t.Fatalf("expected a transition from New Step → Done, got none")
+	}
+
+	// writeTaskReviewState and ApplyTransition both run synchronously inside
+	// applyEngineTransition (before processOnEnter's goroutine), so the
+	// task-state and step assertions need no async wait. assertSessionState
+	// has its own polling loop for the WAITING_FOR_INPUT flip.
+	assertStepByName(t, ctx, repo, "s1", "Done", nameToID)
+	assertSessionState(t, ctx, repo, "s1", models.TaskSessionStateWaitingForInput)
+
+	got, ok := taskRepo.updatedStates["t1"]
+	if !ok {
+		t.Fatalf("expected tasks.state to be updated, but UpdateTaskState was never called")
+	}
+	if got != v1.TaskStateReview {
+		t.Errorf("tasks.state = %q, want %q (the kanban card would still show the spinner)", got, v1.TaskStateReview)
 	}
 }

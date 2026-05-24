@@ -159,7 +159,7 @@ func (m *mockSessionLauncher) getRequest() *orchestrator.LaunchSessionRequest {
 func (m *mockSessionLauncher) PromptTask(context.Context, string, string, string, string, bool, []v1.MessageAttachment, bool) (*orchestrator.PromptResult, error) {
 	return nil, nil
 }
-func (m *mockSessionLauncher) StartCreatedSession(context.Context, string, string, string, string, bool, bool, []v1.MessageAttachment) (*executor.TaskExecution, error) {
+func (m *mockSessionLauncher) StartCreatedSession(context.Context, string, string, string, string, bool, bool, bool, []v1.MessageAttachment) (*executor.TaskExecution, error) {
 	return nil, nil
 }
 func (m *mockSessionLauncher) ResumeTaskSession(context.Context, string, string) (*executor.TaskExecution, error) {

@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@kandev/ui/button";
+import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
-import { Badge } from "@kandev/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -21,20 +21,34 @@ import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
-import { listLinearTeams, listLinearStates } from "@/lib/api/domains/linear-api";
 import {
   ScriptEditor,
   computeEditorHeight,
 } from "@/components/settings/profile-edit/script-editor";
 import {
-  LINEAR_ISSUE_WATCH_PLACEHOLDERS,
-  DEFAULT_LINEAR_ISSUE_WATCH_PROMPT,
-} from "./linear-issue-watch-placeholders";
+  LabelMultiSelect,
+  PriorityMultiSelect,
+  StateMultiSelect,
+  useTeamsAndStates,
+} from "./linear-issue-watch-fields";
+import { LINEAR_ISSUE_WATCH_PLACEHOLDERS } from "./linear-issue-watch-placeholders";
+import {
+  ASSIGNED_ANY,
+  CREATOR_ANY,
+  type FormState,
+  type LinearPriority,
+  buildFilterPayload,
+  creatorPlaceholder,
+  filterIsEmpty,
+  formStateFromWatch,
+  makeEmptyForm,
+  userOptionLabel,
+} from "./linear-issue-watch-form";
 import type {
   CreateLinearIssueWatchInput,
   LinearIssueWatch,
   LinearTeam,
-  LinearWorkflowState,
+  LinearUser,
   UpdateLinearIssueWatchInput,
 } from "@/lib/types/linear";
 
@@ -46,57 +60,6 @@ type Props = {
   onCreate: (req: CreateLinearIssueWatchInput) => Promise<unknown>;
   onUpdate: (id: string, req: UpdateLinearIssueWatchInput) => Promise<unknown>;
 };
-
-type FormState = {
-  workspaceId: string;
-  query: string;
-  teamKey: string;
-  stateIds: string[];
-  assigned: string;
-  workflowId: string;
-  workflowStepId: string;
-  agentProfileId: string;
-  executorProfileId: string;
-  prompt: string;
-  enabled: boolean;
-  pollInterval: number;
-};
-
-const ASSIGNED_ANY = "__any__";
-
-function makeEmptyForm(workspaceId: string): FormState {
-  return {
-    workspaceId,
-    query: "",
-    teamKey: "",
-    stateIds: [],
-    assigned: "",
-    workflowId: "",
-    workflowStepId: "",
-    agentProfileId: "",
-    executorProfileId: "",
-    prompt: DEFAULT_LINEAR_ISSUE_WATCH_PROMPT,
-    enabled: true,
-    pollInterval: 300,
-  };
-}
-
-function formStateFromWatch(w: LinearIssueWatch): FormState {
-  return {
-    workspaceId: w.workspaceId,
-    query: w.filter?.query ?? "",
-    teamKey: w.filter?.teamKey ?? "",
-    stateIds: w.filter?.stateIds ?? [],
-    assigned: w.filter?.assigned ?? "",
-    workflowId: w.workflowId,
-    workflowStepId: w.workflowStepId,
-    agentProfileId: w.agentProfileId,
-    executorProfileId: w.executorProfileId,
-    prompt: w.prompt || DEFAULT_LINEAR_ISSUE_WATCH_PROMPT,
-    enabled: w.enabled,
-    pollInterval: w.pollIntervalSeconds,
-  };
-}
 
 function useFormData(workspaceId: string) {
   useSettingsData(true);
@@ -152,100 +115,6 @@ function SelectField(props: {
   );
 }
 
-function StateMultiSelect({
-  states,
-  loading,
-  selected,
-  onToggle,
-  disabled,
-}: {
-  states: LinearWorkflowState[];
-  loading: boolean;
-  selected: string[];
-  onToggle: (id: string) => void;
-  disabled: boolean;
-}) {
-  if (disabled) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        Pick a team to choose specific workflow states.
-      </p>
-    );
-  }
-  if (loading) {
-    return <p className="text-xs text-muted-foreground">Loading states…</p>;
-  }
-  if (states.length === 0) {
-    return <p className="text-xs text-muted-foreground">No workflow states available.</p>;
-  }
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {states.map((s) => {
-        const active = selected.includes(s.id);
-        return (
-          <Badge
-            key={s.id}
-            variant={active ? "default" : "outline"}
-            className="cursor-pointer"
-            onClick={() => onToggle(s.id)}
-          >
-            {s.name}
-          </Badge>
-        );
-      })}
-    </div>
-  );
-}
-
-// useTeamsAndStates loads the team list once Linear is configured, plus the
-// states for the currently-selected team. The states map is keyed by teamKey
-// so switching teams renders an empty list without us having to setState in
-// an effect — only the lookup expression changes.
-function useTeamsAndStates(teamKey: string) {
-  const [teams, setTeams] = useState<LinearTeam[]>([]);
-  const [statesByTeam, setStatesByTeam] = useState<Record<string, LinearWorkflowState[]>>({});
-  // Track which teams we've already kicked off a fetch for so the effect
-  // doesn't list `statesByTeam` as a dep (which would re-fire whenever any
-  // team's states load). A ref mutation isn't reactive, so the sole input
-  // that schedules a fetch is `teamKey`.
-  const fetchedTeams = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    let cancelled = false;
-    listLinearTeams()
-      .then((res) => {
-        if (!cancelled) setTeams(res.teams ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setTeams([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!teamKey || fetchedTeams.current.has(teamKey)) return;
-    fetchedTeams.current.add(teamKey);
-    let cancelled = false;
-    listLinearStates(teamKey)
-      .then((res) => {
-        if (!cancelled) setStatesByTeam((prev) => ({ ...prev, [teamKey]: res.states ?? [] }));
-      })
-      .catch(() => {
-        if (!cancelled) setStatesByTeam((prev) => ({ ...prev, [teamKey]: [] }));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [teamKey]);
-
-  const states = teamKey ? (statesByTeam[teamKey] ?? []) : [];
-  // "loading" = a team is selected but we haven't received a result yet.
-  const loadingStates = !!teamKey && statesByTeam[teamKey] === undefined;
-  return { teams, states, loadingStates };
-}
-
 function FilterFields({
   form,
   setForm,
@@ -253,7 +122,8 @@ function FilterFields({
   form: FormState;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
 }) {
-  const { teams, states, loadingStates } = useTeamsAndStates(form.teamKey);
+  const { teams, states, labels, users, loadingStates, loadingLabels, loadingUsers } =
+    useTeamsAndStates(form.teamKey);
   const toggleState = useCallback(
     (id: string) =>
       setForm((p) => ({
@@ -264,35 +134,49 @@ function FilterFields({
       })),
     [setForm],
   );
+  const toggleLabel = useCallback(
+    (id: string) =>
+      setForm((p) => ({
+        ...p,
+        labelIds: p.labelIds.includes(id)
+          ? p.labelIds.filter((l) => l !== id)
+          : [...p.labelIds, id],
+      })),
+    [setForm],
+  );
+  const togglePriority = useCallback(
+    (priority: LinearPriority) =>
+      setForm((p) => ({
+        ...p,
+        priorities: p.priorities.includes(priority)
+          ? p.priorities.filter((x) => x !== priority)
+          : [...p.priorities, priority],
+      })),
+    [setForm],
+  );
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-4">
-        <SelectField
-          label="Team"
-          description="Restrict matches to one team."
-          value={form.teamKey}
-          onChange={(v) => setForm((p) => ({ ...p, teamKey: v, stateIds: [] }))}
-          placeholder="(any team)"
-          items={teams.map((t) => ({ id: t.key, label: `${t.name} (${t.key})` }))}
-        />
-        <SelectField
-          label="Assignee"
-          description="Filter by who an issue is assigned to."
-          value={form.assigned || ASSIGNED_ANY}
-          onChange={(v) => setForm((p) => ({ ...p, assigned: v === ASSIGNED_ANY ? "" : v }))}
-          placeholder="(any)"
-          items={[
-            { id: ASSIGNED_ANY, label: "(any)" },
-            { id: "me", label: "Me" },
-            { id: "unassigned", label: "Unassigned" },
-          ]}
-        />
+      <TeamRow form={form} setForm={setForm} teams={teams} />
+      <AssigneeAndCreatorRow
+        form={form}
+        setForm={setForm}
+        users={users}
+        loadingUsers={loadingUsers}
+      />
+      <div className="space-y-1.5">
+        <Label>Priority</Label>
+        <p className="text-xs text-muted-foreground">
+          Click to toggle. Matches issues at ANY of the selected priorities.
+        </p>
+        <PriorityMultiSelect selected={form.priorities} onToggle={togglePriority} />
       </div>
       <div className="space-y-1.5">
         <Label>States</Label>
         <p className="text-xs text-muted-foreground">
-          Click states to toggle. Empty matches every state on the team.
+          {form.teamKey
+            ? "Click states to toggle. Empty matches every state on the team."
+            : "Pick a team to choose specific workflow states."}
         </p>
         <StateMultiSelect
           states={states}
@@ -303,17 +187,136 @@ function FilterFields({
         />
       </div>
       <div className="space-y-1.5">
-        <Label>Query</Label>
+        <Label>Labels</Label>
         <p className="text-xs text-muted-foreground">
-          Free-text match across title and description (optional).
+          {form.teamKey
+            ? "Click to toggle. Matches ANY of the selected labels."
+            : "Pick a team to choose specific labels."}
         </p>
-        <Input
-          value={form.query}
-          onChange={(e) => setForm((p) => ({ ...p, query: e.target.value }))}
-          placeholder="auth bug"
+        <LabelMultiSelect
+          labels={labels}
+          loading={loadingLabels}
+          selected={form.labelIds}
+          onToggle={toggleLabel}
+          disabled={!form.teamKey}
         />
       </div>
+      <EstimateRow form={form} setForm={setForm} />
+      <QueryField form={form} setForm={setForm} />
     </>
+  );
+}
+
+type FormSetter = React.Dispatch<React.SetStateAction<FormState>>;
+
+function TeamRow({
+  form,
+  setForm,
+  teams,
+}: {
+  form: FormState;
+  setForm: FormSetter;
+  teams: LinearTeam[];
+}) {
+  return (
+    <SelectField
+      label="Team"
+      description="Restrict matches to one team."
+      value={form.teamKey}
+      onChange={(v) =>
+        setForm((p) => ({ ...p, teamKey: v, stateIds: [], labelIds: [], creatorId: "" }))
+      }
+      placeholder="(any team)"
+      items={teams.map((t) => ({ id: t.key, label: `${t.name} (${t.key})` }))}
+    />
+  );
+}
+
+function AssigneeAndCreatorRow({
+  form,
+  setForm,
+  users,
+  loadingUsers,
+}: {
+  form: FormState;
+  setForm: FormSetter;
+  users: LinearUser[];
+  loadingUsers: boolean;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      <SelectField
+        label="Assignee"
+        description="Filter by who an issue is assigned to."
+        value={form.assigned || ASSIGNED_ANY}
+        onChange={(v) => setForm((p) => ({ ...p, assigned: v === ASSIGNED_ANY ? "" : v }))}
+        placeholder="(any)"
+        items={[
+          { id: ASSIGNED_ANY, label: "(any)" },
+          { id: "me", label: "Me" },
+          { id: "unassigned", label: "Unassigned" },
+        ]}
+      />
+      <SelectField
+        label="Creator"
+        description="Match issues created by one user."
+        value={form.creatorId || CREATOR_ANY}
+        onChange={(v) => setForm((p) => ({ ...p, creatorId: v === CREATOR_ANY ? "" : v }))}
+        placeholder={creatorPlaceholder(form.teamKey, loadingUsers)}
+        items={[
+          { id: CREATOR_ANY, label: "(any)" },
+          ...users.map((u) => ({ id: u.id, label: userOptionLabel(u) })),
+        ]}
+        disabled={!form.teamKey || loadingUsers}
+      />
+    </div>
+  );
+}
+
+function EstimateRow({ form, setForm }: { form: FormState; setForm: FormSetter }) {
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      <div className="space-y-1.5">
+        <Label>Estimate min</Label>
+        <p className="text-xs text-muted-foreground">Lower bound in points (optional).</p>
+        <Input
+          type="number"
+          value={form.estimateMin}
+          onChange={(e) => setForm((p) => ({ ...p, estimateMin: e.target.value }))}
+          min={0}
+          step="0.5"
+          placeholder="e.g. 1"
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Estimate max</Label>
+        <p className="text-xs text-muted-foreground">Upper bound in points (optional).</p>
+        <Input
+          type="number"
+          value={form.estimateMax}
+          onChange={(e) => setForm((p) => ({ ...p, estimateMax: e.target.value }))}
+          min={0}
+          step="0.5"
+          placeholder="e.g. 5"
+        />
+      </div>
+    </div>
+  );
+}
+
+function QueryField({ form, setForm }: { form: FormState; setForm: FormSetter }) {
+  return (
+    <div className="space-y-1.5">
+      <Label>Query</Label>
+      <p className="text-xs text-muted-foreground">
+        Free-text match across title and description (optional).
+      </p>
+      <Input
+        value={form.query}
+        onChange={(e) => setForm((p) => ({ ...p, query: e.target.value }))}
+        placeholder="auth bug"
+      />
+    </div>
   );
 }
 
@@ -481,15 +484,6 @@ function savingLabel(saving: boolean, isEdit: boolean): string {
   return isEdit ? "Update" : "Create";
 }
 
-function filterIsEmpty(form: FormState): boolean {
-  return (
-    form.query.trim() === "" &&
-    form.teamKey.trim() === "" &&
-    form.assigned.trim() === "" &&
-    form.stateIds.length === 0
-  );
-}
-
 export function LinearIssueWatchDialog({
   open,
   onOpenChange,
@@ -522,12 +516,7 @@ export function LinearIssueWatchDialog({
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      const filter = {
-        query: form.query.trim() || undefined,
-        teamKey: form.teamKey.trim() || undefined,
-        stateIds: form.stateIds.length > 0 ? form.stateIds : undefined,
-        assigned: form.assigned.trim() || undefined,
-      };
+      const filter = buildFilterPayload(form);
       const payload = {
         filter,
         workflowId: form.workflowId,
@@ -570,12 +559,20 @@ export function LinearIssueWatchDialog({
             }
             disabled={workspaceLocked}
           />
+          {/* Hairlines separate the five conceptual blocks (Destination /
+              Filter / Automation / Prompt / Settings). Each block answers a
+              different question, so a consistent rhythm helps users navigate
+              the form visually instead of reading it as one long stack. */}
+          <Separator />
           <FilterFields form={form} setForm={setForm} />
+          <Separator />
           <AutomationFields form={form} setForm={setForm} />
+          <Separator />
           <PromptField
             value={form.prompt}
             onChange={(v) => setForm((p) => ({ ...p, prompt: v }))}
           />
+          <Separator />
           <SettingsFields form={form} setForm={setForm} />
         </div>
         <DialogFooter>

@@ -254,7 +254,14 @@ export function setFilesPanelScrollPosition(sessionId: string, position: number)
 // --- Dockview per-session layout (sessionStorage) ---
 // Dockview layout is keyed by `taskEnvironmentId` so sessions sharing a task
 // env reuse one layout (the env owns the workspace, terminals, files, etc.).
-const DOCKVIEW_ENV_LAYOUT_PREFIX = "kandev.dockview.env-layout.";
+//
+// v2: bumped when the sidebar/right viewport-proportional caps shipped.
+// Layouts saved by older builds capture column widths that may exceed the
+// new initial-default caps; loading them would resurface the very behaviour
+// users complained about (sidebar "maxed out" by default after upgrade).
+// Bumping the prefix invalidates legacy saves so every env opens at the
+// preset defaults once, then resumes per-env persistence under v2.
+const DOCKVIEW_ENV_LAYOUT_PREFIX = "kandev.dockview.env-layout-v2.";
 
 /**
  * Get the saved dockview layout for a task environment.
@@ -282,7 +289,10 @@ export function setEnvLayout(envId: string, layout: object): void {
 }
 
 // --- Dockview per-env maximize state (sessionStorage) ---
-const DOCKVIEW_ENV_MAXIMIZE_PREFIX = "kandev.dockview.env-maximize.";
+// v2: bumped alongside DOCKVIEW_ENV_LAYOUT_PREFIX. The maximize blob
+// references the pre-maximize layout, which can carry the same oversized
+// widths as the env layout.
+const DOCKVIEW_ENV_MAXIMIZE_PREFIX = "kandev.dockview.env-maximize-v2.";
 
 export type EnvMaximizeState = {
   /** The pre-maximize (normal) layout to restore on exit-maximize. */
@@ -580,6 +590,11 @@ export function cleanupTaskStorage(
     setStoredOrderedTaskIds(ordered.filter((id) => id !== taskId));
   }
 
+  // Per-parent subtask order: drop the deleted task as a parent key, and strip
+  // it from any other parent's subtask-order list (in case it was a subtask).
+  const subOrder = getStoredSubtaskOrderByParentId();
+  if (pruneSubtaskOrder(subOrder, taskId)) setStoredSubtaskOrderByParentId(subOrder);
+
   // Env-keyed storage — dockview layout + maximize live under task envs.
   for (const envId of envIds) {
     removeEnvMaximizeState(envId);
@@ -695,6 +710,48 @@ export function getStoredOrderedTaskIds(): string[] {
 
 export function setStoredOrderedTaskIds(ids: string[]): void {
   setLocalStorage(SIDEBAR_TASK_ORDER_KEY, ids);
+}
+
+const SIDEBAR_SUBTASK_ORDER_KEY = "kandev.sidebar.subtaskOrderByParentId";
+
+export function getStoredSubtaskOrderByParentId(): Record<string, string[]> {
+  const raw = getLocalStorage<Record<string, string[]>>(SIDEBAR_SUBTASK_ORDER_KEY, {}) as unknown;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [parentId, ids] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof parentId !== "string" || !Array.isArray(ids)) continue;
+    const filtered = ids.filter((id): id is string => typeof id === "string");
+    if (filtered.length > 0) out[parentId] = filtered;
+  }
+  return out;
+}
+
+export function setStoredSubtaskOrderByParentId(map: Record<string, string[]>): void {
+  setLocalStorage(SIDEBAR_SUBTASK_ORDER_KEY, map);
+}
+
+/**
+ * Strip a task id from a subtask-order map: drop it as a parent key, and
+ * remove it from every other parent's subtask list (cleaning up the parent
+ * entry if its list becomes empty). Mutates `map` in place and returns
+ * `true` if anything changed. Used by both `cleanupTaskStorage` (plain
+ * object) and `removeTaskFromSidebarPrefs` (Immer draft) to keep the two
+ * cleanup paths in lockstep.
+ */
+export function pruneSubtaskOrder(map: Record<string, string[]>, taskId: string): boolean {
+  let changed = false;
+  if (taskId in map) {
+    delete map[taskId];
+    changed = true;
+  }
+  for (const [parentId, ids] of Object.entries(map)) {
+    if (!ids.includes(taskId)) continue;
+    const next = ids.filter((id) => id !== taskId);
+    if (next.length === 0) delete map[parentId];
+    else map[parentId] = next;
+    changed = true;
+  }
+  return changed;
 }
 
 // --- Sidebar collapsed subtask parents (sessionStorage, tab-scoped) ---

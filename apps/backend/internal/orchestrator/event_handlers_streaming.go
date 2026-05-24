@@ -514,16 +514,47 @@ func isTerminalSessionState(s models.TaskSessionState) bool {
 }
 
 func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, sessionID string, preloadedSession ...*models.TaskSession) {
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false, preloadedSession...)
+	// Resolve session up front so we can skip the redundant task-state write
+	// when the session was already WAITING_FOR_INPUT. Without this guard, every
+	// caller (workflow on_turn_complete + handleCompleteStreamEvent + other
+	// terminal paths) writes tasks.state=REVIEW on every turn even though the
+	// state hasn't changed, producing duplicate "task moved to REVIEW" logs and
+	// unnecessary DB churn.
+	var session *models.TaskSession
+	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
+		session = preloadedSession[0]
+	} else {
+		var err error
+		session, err = s.repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			// Fall back to legacy behavior — still attempt the task-state
+			// write so a transient lookup failure doesn't drop a needed
+			// REVIEW transition.
+			s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false)
+			s.writeTaskReviewState(ctx, taskID)
+			return
+		}
+	}
 
+	wasAlreadyWaiting := session.State == models.TaskSessionStateWaitingForInput
+	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false, session)
+
+	if wasAlreadyWaiting {
+		return
+	}
+
+	s.writeTaskReviewState(ctx, taskID)
+}
+
+func (s *Service) writeTaskReviewState(ctx context.Context, taskID string) {
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
 		s.logger.Error("failed to update task state to REVIEW",
 			zap.String("task_id", taskID),
 			zap.Error(err))
-	} else {
-		s.logger.Info("task moved to REVIEW state",
-			zap.String("task_id", taskID))
+		return
 	}
+	s.logger.Info("task moved to REVIEW state",
+		zap.String("task_id", taskID))
 }
 
 func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID string, preloadedSession ...*models.TaskSession) {
@@ -545,7 +576,17 @@ func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID strin
 		return
 	}
 
+	// Skip the redundant task-state write when the session is already RUNNING.
+	// Tool calls fire many events per turn and each was triggering an
+	// UpdateTaskState(IN_PROGRESS) write that produced no actual state change
+	// (2,000+ redundant writes observed on long-running turns).
+	wasAlreadyRunning := session.State == models.TaskSessionStateRunning
+
 	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true, session)
+
+	if wasAlreadyRunning {
+		return
+	}
 
 	// Office tasks do NOT transition to IN_PROGRESS when their agent's
 	// session enters RUNNING. The user-facing task status (todo /

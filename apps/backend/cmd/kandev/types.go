@@ -3,9 +3,11 @@ package main
 import (
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
+	"github.com/kandev/kandev/internal/automation"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
 	notificationservice "github.com/kandev/kandev/internal/notifications/service"
@@ -19,6 +21,9 @@ import (
 	"github.com/kandev/kandev/internal/slack"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/task/share"
+	terminalrepo "github.com/kandev/kandev/internal/terminal/repository"
+	terminalservice "github.com/kandev/kandev/internal/terminal/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
 	userstore "github.com/kandev/kandev/internal/user/store"
 	utilityservice "github.com/kandev/kandev/internal/utility/service"
@@ -40,6 +45,7 @@ type Repositories struct {
 	Workflow      *workflowrepository.Repository
 	Secrets       secrets.SecretStore
 	Office        *officesqlite.Repository
+	Terminal      *terminalrepo.Repository
 }
 
 type Services struct {
@@ -51,9 +57,11 @@ type Services struct {
 	Utility      *utilityservice.Service
 	Workflow     *workflowservice.Service
 	GitHub       *github.Service
+	GitLab       *gitlab.Service
 	Jira         *jira.Service
 	Linear       *linear.Service
 	Slack        *slack.Service
+	Share        *share.HTTPHandlers
 	Office       *officeservice.Service
 	OfficeSvcs   *office.Services
 	// OrchScheduler is the office SchedulerIntegration constructed by
@@ -63,4 +71,12 @@ type Services struct {
 	// WorktreeMgr is the worktree manager. Exposed so the office GC can
 	// consult it as the authoritative inventory of live worktrees.
 	WorktreeMgr *worktree.Manager
+	// Terminal is the first-class user-terminal service (rename, park, etc.).
+	// Wired into the gateway once lifecycle.Manager is up so the PTY backend
+	// is available.
+	Terminal *terminalservice.Service
+	// Automation is the trigger-based automation subsystem (cron, GitHub PR
+	// events, webhooks). Independent of Office — has its own scheduler and
+	// creates tasks via the task service.
+	Automation *automation.Components
 }

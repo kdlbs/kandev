@@ -1,10 +1,17 @@
 package lifecycle
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -251,6 +258,123 @@ func TestAggregator_FlushSessionMode_QueriesHubWhenWired(t *testing.T) {
 	}
 	if cachedMode != WorkspacePollModeFast {
 		t.Errorf("FlushSessionMode should update sessionModes to hub-queried mode; got %q, want fast", cachedMode)
+	}
+}
+
+// addExecutionWithClient is like addExecution but wires a real agentctl.Client
+// pointing at the supplied URL. Needed for tests that observe the HTTP RPC.
+func addExecutionWithClient(t *testing.T, mgr *Manager, sessionID, workspacePath, agentctlURL string) {
+	t.Helper()
+	host, port := parseHTTPURL(t, agentctlURL)
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	c := agentctl.NewClient(host, port, log)
+	if err := mgr.executionStore.Add(&AgentExecution{
+		ID:            "exec-" + sessionID,
+		SessionID:     sessionID,
+		WorkspacePath: workspacePath,
+		agentctl:      c,
+	}); err != nil {
+		t.Fatalf("executionStore.Add: %v", err)
+	}
+}
+
+func parseHTTPURL(t *testing.T, raw string) (host string, port int) {
+	t.Helper()
+	stripped := strings.TrimPrefix(raw, "http://")
+	parts := strings.Split(stripped, ":")
+	if len(parts) != 2 {
+		t.Fatalf("unexpected URL shape: %q", raw)
+	}
+	host = parts[0]
+	port, err := strconv.Atoi(parts[1])
+	if err != nil {
+		t.Fatalf("port parse: %v", err)
+	}
+	return host, port
+}
+
+// Regression for #982: slow-then-fast mode events must not leave the tracker stuck in slow.
+func TestAggregator_PushAsync_LastWriteWinsUnderRace(t *testing.T) {
+	type call struct {
+		Mode string
+		At   time.Time
+	}
+	var (
+		mu         sync.Mutex
+		calls      []call
+		slowCalls  atomic.Int32
+		slowDelay  = 80 * time.Millisecond
+		serverSeen string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Mode string `json:"mode"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Mode == "slow" {
+			slowCalls.Add(1)
+			time.Sleep(slowDelay)
+		}
+		mu.Lock()
+		calls = append(calls, call{Mode: body.Mode, At: time.Now()})
+		serverSeen = body.Mode
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	mgr := newTestManagerForAggregator(t)
+	addExecutionWithClient(t, mgr, "s1", "/tmp/ws1", srv.URL)
+
+	// Fire subscribe (slow) then focus (fast) microseconds apart, matching
+	// what the gateway does when a page loads.
+	mgr.pollAggregator.HandleSessionMode("s1", WorkspacePollModeSlow)
+	mgr.pollAggregator.HandleSessionMode("s1", WorkspacePollModeFast)
+
+	// Wait for both pushes to land — the server records each call, so we
+	// can poll the recorded length instead of sleeping a fixed amount. The
+	// old fire-and-forget impl sent both slow and fast (2 calls); the fix
+	// may collapse slow before dispatch (1 call). Either way we wait until
+	// the pusher goroutine has drained, plus a brief settle window for any
+	// in-flight slow request to complete.
+	deadline := time.NewTimer(slowDelay + 2*time.Second)
+	defer deadline.Stop()
+waitLoop:
+	for {
+		mu.Lock()
+		n := len(calls)
+		seen := serverSeen
+		mu.Unlock()
+		// 1 call is enough only when it's already "fast" — in the buggy
+		// path a late-arriving slow can still overwrite, so wait for the
+		// drain window or until both arrived.
+		if n >= 2 || (n >= 1 && seen == "fast") {
+			break
+		}
+		select {
+		case <-deadline.C:
+			break waitLoop
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	// Add a brief settle so any racing slow push has time to overwrite if
+	// the bug is present.
+	time.Sleep(slowDelay + 100*time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if serverSeen != "fast" {
+		t.Errorf("agentctl tracker final mode = %q, want fast (calls: %+v)", serverSeen, calls)
+	}
+	// The fix collapses back-to-back slow→fast in the pending queue when the
+	// pusher hasn't dispatched yet, so we expect at most one slow push. More
+	// than one would mean the queue stopped collapsing (a regression).
+	if n := slowCalls.Load(); n > 1 {
+		t.Errorf("slow push count = %d, want <= 1 (queue should collapse duplicates)", n)
 	}
 }
 

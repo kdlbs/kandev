@@ -28,6 +28,7 @@ import { ChangesTab } from "./changes-tab";
 import { PlanTab } from "./plan-tab";
 import { PreviewFileTab, PreviewDiffTab, PreviewCommitTab, PinnedDefaultTab } from "./preview-tab";
 import { SessionTab } from "./session-tab";
+import { TerminalTab } from "./terminal-tab";
 import { TerminalPanel } from "./terminal-panel";
 import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
@@ -135,6 +136,7 @@ export const dockviewTabComponents: Record<
   changesTab: ChangesTab,
   planTab: PlanTab,
   sessionTab: SessionTab,
+  terminalTab: TerminalTab,
   previewFileTab: PreviewFileTab,
   previewDiffTab: PreviewDiffTab,
   previewCommitTab: PreviewCommitTab,

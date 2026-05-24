@@ -27,6 +27,12 @@ export interface Task {
   repositories?: Array<{ id: string; repository_id: string; position: number }>;
   sessionCount?: number | null;
   primarySessionId?: string | null;
+  /**
+   * Primary session's runtime state. Decoupled from `state` (the workflow
+   * column). Used to suppress the running-spinner when the agent has already
+   * finished — the workflow may leave the task in IN_PROGRESS for review.
+   */
+  primarySessionState?: string | null;
   reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primaryExecutorId?: string | null;
   primaryExecutorType?: string | null;
@@ -55,8 +61,8 @@ interface KanbanCardProps {
   repositoryNames?: string[];
   onClick?: (task: Task) => void;
   onEdit?: (task: Task) => void;
-  onDelete?: (task: Task) => void;
-  onArchive?: (task: Task) => void;
+  onDelete?: (task: Task, opts?: { cascade?: boolean }) => void;
+  onArchive?: (task: Task, opts?: { cascade?: boolean }) => void;
   onOpenFullPage?: (task: Task) => void;
   onMove?: (task: Task, targetStepId: string) => void;
   steps?: WorkflowStep[];
@@ -243,15 +249,17 @@ export function KanbanCard({
         open={showDeleteConfirm}
         onOpenChange={setShowDeleteConfirm}
         taskTitle={task.title}
+        taskId={task.id}
         isDeleting={isDeleting}
-        onConfirm={() => onDelete?.(task)}
+        onConfirm={({ cascade }) => onDelete?.(task, { cascade })}
       />
       <TaskArchiveConfirmDialog
         open={showArchiveConfirm}
         onOpenChange={setShowArchiveConfirm}
         taskTitle={task.title}
+        taskId={task.id}
         isArchiving={isArchiving}
-        onConfirm={() => onArchive?.(task)}
+        onConfirm={({ cascade }) => onArchive?.(task, { cascade })}
       />
     </>
   );

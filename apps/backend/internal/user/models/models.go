@@ -37,6 +37,7 @@ type UserSettings struct {
 	TerminalLinkBehavior        string                            `json:"terminal_link_behavior"`   // "new_tab" | "browser_panel"
 	TerminalFontFamily          string                            `json:"terminal_font_family"`
 	TerminalFontSize            int                               `json:"terminal_font_size"`
+	ChangesPanelLayout          string                            `json:"changes_panel_layout"` // "flat" | "tree"
 	CreatedAt                   time.Time                         `json:"created_at"`
 	UpdatedAt                   time.Time                         `json:"updated_at"`
 }

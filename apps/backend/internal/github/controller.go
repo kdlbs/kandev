@@ -2,6 +2,7 @@ package github
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -32,6 +33,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.DELETE("/token", c.httpClearToken)
 
 	api.GET("/task-prs", c.httpListTaskPRs)
+	api.POST("/task-prs", c.httpCreateTaskPR)
 	api.GET("/task-prs/:taskId", c.httpGetTaskPR)
 
 	api.GET("/prs/:owner/:repo/:number", c.httpGetPRFeedback)
@@ -39,6 +41,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/prs/:owner/:repo/:number/status", c.httpGetPRStatus)
 	api.POST("/prs/statuses", c.httpGetPRStatusesBatch)
 	api.POST("/prs/:owner/:repo/:number/reviews", c.httpSubmitReview)
+	api.PUT("/prs/:owner/:repo/:number/merge", c.httpMergePR)
 
 	api.GET("/watches/pr", c.httpListPRWatches)
 	api.DELETE("/watches/pr/:id", c.httpDeletePRWatch)
@@ -57,9 +60,13 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.POST("/watches/issue/:id/trigger", c.httpTriggerIssueWatch)
 	api.POST("/watches/issue/trigger-all", c.httpTriggerAllIssueChecks)
 
+	api.POST("/cleanup/review-tasks", c.httpCleanupReviewTasks)
+	api.POST("/cleanup/issue-tasks", c.httpCleanupIssueTasks)
+
 	api.GET("/orgs", c.httpListUserOrgs)
 	api.GET("/repos/search", c.httpSearchRepos)
 	api.GET("/repos/:owner/:repo/branches", c.httpListRepoBranches)
+	api.GET("/repos/:owner/:repo/merge-methods", c.httpGetRepoMergeMethods)
 
 	api.GET("/user/prs", c.httpSearchUserPRs)
 	api.GET("/user/issues", c.httpSearchUserIssues)
@@ -134,6 +141,37 @@ func (c *Controller) httpListTaskPRs(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"task_prs": result})
+}
+
+// httpCreateTaskPR creates a task-PR association from a known PR URL. Used
+// by the GitHub PR list "+ Task" flow: the PR is already known, so we
+// persist the linkage immediately instead of waiting for branch-based
+// discovery (which fails for review tasks that use synthetic worktree
+// branches that don't exist on GitHub).
+func (c *Controller) httpCreateTaskPR(ctx *gin.Context) {
+	var req struct {
+		TaskID       string `json:"task_id"`
+		RepositoryID string `json:"repository_id"`
+		PRURL        string `json:"pr_url"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if req.TaskID == "" || req.PRURL == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "task_id and pr_url are required"})
+		return
+	}
+	tp, err := c.service.AssociateExistingPRByURL(ctx.Request.Context(), req.TaskID, req.RepositoryID, req.PRURL)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrInvalidPRURL) {
+			status = http.StatusBadRequest
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, tp)
 }
 
 func (c *Controller) httpGetTaskPR(ctx *gin.Context) {
@@ -259,16 +297,72 @@ func (c *Controller) httpSubmitReview(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	validEvents := map[string]bool{"APPROVE": true, "COMMENT": true, "REQUEST_CHANGES": true}
+	validEvents := map[string]bool{reviewEventApprove: true, "COMMENT": true, "REQUEST_CHANGES": true}
 	if !validEvents[req.Event] {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "event must be APPROVE, COMMENT, or REQUEST_CHANGES"})
 		return
 	}
 	if err := c.service.SubmitReview(ctx.Request.Context(), owner, repo, number, req.Event, req.Body); err != nil {
+		if errors.Is(err, ErrSelfApprove) {
+			ctx.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+			return
+		}
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"submitted": true})
+}
+
+func (c *Controller) httpMergePR(ctx *gin.Context) {
+	owner := ctx.Param("owner")
+	repo := ctx.Param("repo")
+	numberStr := ctx.Param("number")
+	number, err := strconv.Atoi(numberStr)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid PR number"})
+		return
+	}
+	var req struct {
+		MergeMethod string `json:"merge_method"`
+	}
+	// Body is optional — an empty body (io.EOF) means "use the repo default
+	// merge method". A non-empty but malformed body is a client bug, not a
+	// silent "use default", so reject it with 400.
+	if bindErr := ctx.ShouldBindJSON(&req); bindErr != nil && !errors.Is(bindErr, io.EOF) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	validMethods := map[string]bool{"": true, "merge": true, "squash": true, "rebase": true}
+	if !validMethods[req.MergeMethod] {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "merge_method must be merge, squash, or rebase"})
+		return
+	}
+	if err := c.service.MergePR(ctx.Request.Context(), owner, repo, number, req.MergeMethod); err != nil {
+		if errors.Is(err, ErrNoClient) {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "GitHub is not configured. Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",
+				"code":  "github_not_configured",
+			})
+			return
+		}
+		status := http.StatusInternalServerError
+		var apiErr *GitHubAPIError
+		if errors.As(err, &apiErr) {
+			switch apiErr.StatusCode {
+			case http.StatusMethodNotAllowed, http.StatusConflict:
+				status = http.StatusConflict
+			case http.StatusUnauthorized:
+				status = http.StatusUnauthorized
+			case http.StatusForbidden:
+				status = http.StatusForbidden
+			case http.StatusNotFound:
+				status = http.StatusNotFound
+			}
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"merged": true})
 }
 
 func (c *Controller) httpListPRWatches(ctx *gin.Context) {
@@ -434,6 +528,36 @@ func (c *Controller) httpListRepoBranches(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"branches": branches})
+}
+
+func (c *Controller) httpGetRepoMergeMethods(ctx *gin.Context) {
+	owner := ctx.Param("owner")
+	repo := ctx.Param("repo")
+	methods, err := c.service.GetRepoMergeMethods(ctx.Request.Context(), owner, repo)
+	if err != nil {
+		if errors.Is(err, ErrNoClient) {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "GitHub is not configured. Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",
+				"code":  "github_not_configured",
+			})
+			return
+		}
+		status := http.StatusInternalServerError
+		var apiErr *GitHubAPIError
+		if errors.As(err, &apiErr) {
+			switch apiErr.StatusCode {
+			case http.StatusNotFound:
+				status = http.StatusNotFound
+			case http.StatusUnauthorized:
+				status = http.StatusUnauthorized
+			case http.StatusForbidden:
+				status = http.StatusForbidden
+			}
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, methods)
 }
 
 // httpSearchUserPRs searches for pull requests. Accepts:
@@ -692,4 +816,34 @@ func (c *Controller) httpResetActionPresets(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, presets)
+}
+
+// httpCleanupReviewTasks runs a sweep over every review-PR dedup row
+// (including rows under enabled watches) applying each watch's cleanup
+// policy. Manual trigger for users to drain a pile of merged-PR tasks
+// without waiting for the next 5-minute poller cycle.
+//
+// SCOPE: install-wide — walks dedup rows across all workspaces. The
+// trigger-all endpoints (httpTriggerAllReviewChecks /
+// httpTriggerAllIssueChecks) take a required workspace_id, but cleanup
+// is install-wide on purpose so a user can drain orphans whose original
+// watch lived in a workspace they no longer have open. A future
+// multi-tenant rollout would add an optional workspace_id query param.
+func (c *Controller) httpCleanupReviewTasks(ctx *gin.Context) {
+	deleted, err := c.service.CleanupAllReviewTasks(ctx.Request.Context())
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"deleted": deleted})
+}
+
+// httpCleanupIssueTasks mirrors httpCleanupReviewTasks for issue watches.
+func (c *Controller) httpCleanupIssueTasks(ctx *gin.Context) {
+	deleted, err := c.service.CleanupAllIssueTasks(ctx.Request.Context())
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"deleted": deleted})
 }

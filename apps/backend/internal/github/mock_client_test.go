@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -190,6 +191,54 @@ func TestMockClient_SubmitReview(t *testing.T) {
 	}
 	if reviews[0].Event != "APPROVE" || reviews[0].Body != "LGTM" {
 		t.Fatalf("unexpected review: %+v", reviews[0])
+	}
+}
+
+func TestMockClient_CreateAndDeleteGist(t *testing.T) {
+	m := NewMockClient()
+	ctx := context.Background()
+
+	resp, err := m.CreateGist(ctx, CreateGistInput{
+		Description: "snapshot",
+		Public:      false,
+		Files: map[string]GistFile{
+			"snapshot.json": {Content: `{"x":1}`},
+			"README.md":     {Content: "hi"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateGist error: %v", err)
+	}
+	if resp.ID == "" || resp.HTMLURL == "" {
+		t.Fatalf("expected non-empty id/url, got %+v", resp)
+	}
+
+	gists := m.Gists()
+	g, ok := gists[resp.ID]
+	if !ok {
+		t.Fatalf("gist %s not stored", resp.ID)
+	}
+	if g.Public {
+		t.Fatal("gist should default to secret (Public=false)")
+	}
+	if _, ok := g.Files["snapshot.json"]; !ok {
+		t.Fatal("snapshot.json missing from stored gist")
+	}
+
+	if err := m.DeleteGist(ctx, resp.ID); err != nil {
+		t.Fatalf("DeleteGist error: %v", err)
+	}
+	if _, ok := m.Gists()[resp.ID]; ok {
+		t.Fatal("gist still present after delete")
+	}
+	if got := m.DeletedGists(); len(got) != 1 || got[0] != resp.ID {
+		t.Fatalf("expected DeletedGists=[%q], got %v", resp.ID, got)
+	}
+
+	err = m.DeleteGist(ctx, resp.ID)
+	var apiErr *GitHubAPIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 404 {
+		t.Fatalf("expected 404 GitHubAPIError on second delete, got %v", err)
 	}
 }
 

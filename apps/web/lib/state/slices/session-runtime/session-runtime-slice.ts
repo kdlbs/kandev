@@ -6,6 +6,9 @@ import type {
   GitStatusEntry,
   FileInfo,
 } from "./types";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+
+const debugGit = createDebugLogger("git-status:store");
 
 const maxProcessOutputBytes = 2 * 1024 * 1024;
 
@@ -236,6 +239,19 @@ function buildUserShellActions(set: ImmerSet) {
           (s) => s.terminalId !== terminalId,
         );
       }),
+    updateUserShell: (
+      environmentId: string,
+      terminalId: string,
+      patch: Parameters<SessionRuntimeSlice["updateUserShell"]>[2],
+    ) =>
+      set((draft) => {
+        if (!environmentId) return;
+        const existing = draft.userShells.byEnvironmentId[environmentId];
+        if (!existing) return;
+        draft.userShells.byEnvironmentId[environmentId] = existing.map((s) =>
+          s.terminalId === terminalId ? { ...s, ...patch } : s,
+        );
+      }),
     setSessionPollMode: (sessionId: string, mode: SessionPollMode) =>
       set((draft) => {
         draft.sessionPollMode.bySessionId[sessionId] = mode;
@@ -290,6 +306,18 @@ export const createSessionRuntimeSlice: StateCreator<
       // empty key so consumers using only byEnvironmentRepo still see it.
       const repoName = gitStatus.repository_name ?? "";
       const existing = draft.gitStatus.byEnvironmentId[envKey];
+      if (IS_DEBUG) {
+        debugGit("setGitStatus", {
+          sessionId,
+          envKey,
+          usingFallbackKey: envKey === sessionId,
+          repoName,
+          prevFileCount: Object.keys(existing?.files ?? {}).length,
+          nextFileCount: Object.keys(gitStatus.files ?? {}).length,
+          prevRepoKeys: Object.keys(draft.gitStatus.byEnvironmentRepo[envKey] ?? {}),
+          willOverwriteByEnv: !existing || hasGitStatusChanged(existing, gitStatus),
+        });
+      }
       if (!existing || hasGitStatusChanged(existing, gitStatus)) {
         draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
       }

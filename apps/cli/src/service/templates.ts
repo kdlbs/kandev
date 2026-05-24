@@ -1,3 +1,6 @@
+import os from "node:os";
+import path from "node:path";
+
 import type { LauncherInfo } from "./paths";
 
 export type UnitInputs = {
@@ -16,9 +19,33 @@ export type UnitInputs = {
   mode: "user" | "system";
 };
 
-const SYSTEMD_PATH =
+// User-mode PATH includes ~/.local/bin so user-installed agent CLIs (npm user
+// prefix, pipx, fnm, etc.) are discoverable.
+const SYSTEMD_SYSTEM_PATH =
   "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin";
-const LAUNCHD_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
+const SYSTEMD_USER_PATH = `%h/.local/bin:${SYSTEMD_SYSTEM_PATH}`;
+const LAUNCHD_SYSTEM_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
+const launchdUserPath = (): string => `${os.homedir()}/.local/bin:${LAUNCHD_SYSTEM_PATH}`;
+
+// Prepend the launcher node's bin dir so `npm`/`npx` resolve under per-user
+// node managers (fnm, nvm, asdf, volta, mise), where node lives in a versioned
+// subdirectory not covered by the system PATH. ExecStart already points at this
+// node, so its parent dir is exactly where the matching npm/npx live — without
+// this, npx-based ACP agents (claude, codex, opencode) fail to spawn.
+//
+// The isAbsolute guard exists because `path.dirname` on POSIX returns `'.'`
+// for a path with no `/` separator (e.g. a Windows-style `C:\…\node.exe`
+// passed through). Prepending `.` would put CWD ahead of system dirs in the
+// daemon's PATH — a privilege-escalation footgun. Production callers always
+// pass `process.execPath` (absolute on Linux/macOS), so the guard only kicks
+// in for non-POSIX or relative inputs from future callers / tests.
+function pathWithNodeBinDir(basePath: string, nodePath: string): string {
+  const nodeBinDir = path.dirname(nodePath);
+  if (!path.isAbsolute(nodeBinDir)) return basePath;
+  const parts = basePath.split(":");
+  if (parts.includes(nodeBinDir)) return basePath;
+  return `${nodeBinDir}:${basePath}`;
+}
 
 /**
  * Marker substring baked into every unit/plist kandev writes. Used to safely
@@ -42,10 +69,11 @@ export function looksLikeManagedUnit(content: string): boolean {
  * `npm i -g` installs don't get spurious env vars.
  */
 export function renderSystemdUnit(input: UnitInputs): string {
+  const basePath = input.mode === "system" ? SYSTEMD_SYSTEM_PATH : SYSTEMD_USER_PATH;
   const env: string[] = [
     envLine("KANDEV_HOME_DIR", input.homeDir),
     envLine("KANDEV_LOG_LEVEL", "info"),
-    envLine("PATH", SYSTEMD_PATH),
+    envLine("PATH", pathWithNodeBinDir(basePath, input.launcher.nodePath)),
   ];
   if (input.port !== undefined) {
     env.push(envLine("KANDEV_SERVER_PORT", String(input.port)));
@@ -91,10 +119,11 @@ WantedBy=${wantedBy}
  * get a LaunchDaemon that runs at boot regardless of login.
  */
 export function renderLaunchdPlist(input: UnitInputs): string {
+  const basePath = input.mode === "system" ? LAUNCHD_SYSTEM_PATH : launchdUserPath();
   const envEntries: Array<[string, string]> = [
     ["KANDEV_HOME_DIR", input.homeDir],
     ["KANDEV_LOG_LEVEL", "info"],
-    ["PATH", LAUNCHD_PATH],
+    ["PATH", pathWithNodeBinDir(basePath, input.launcher.nodePath)],
   ];
   if (input.port !== undefined) {
     envEntries.push(["KANDEV_SERVER_PORT", String(input.port)]);

@@ -8,8 +8,9 @@ import {
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
   TERMINAL_DEFAULT_ID,
-  LAYOUT_SIDEBAR_MAX_PX,
 } from "./constants";
+import { computePinnedMaxPxFor, LAYOUT_PINNED_MIN_PX } from "./caps";
+import { setPinnedTarget } from "./pinned-targets";
 
 export type LayoutGroupIds = {
   centerGroupId: string;
@@ -61,38 +62,97 @@ export function resolveGroupIds(api: DockviewApi): LayoutGroupIds {
 /**
  * Apply a LayoutState to DockviewApi via fromJSON.
  * Computes sizes, serializes, applies, and returns group IDs.
+ *
+ * `totalWidth` / `totalHeight` default to `api.width` / `api.height`, but
+ * callers should pass measured container dimensions when available — relying
+ * on `api.width` causes a proportional rescale on the next `api.layout` call
+ * (the pinned-column max widths no longer enforce the legacy hard caps, so
+ * the rescale grows sidebar/right past their intended defaults).
  */
 export function applyLayout(
   api: DockviewApi,
   state: LayoutState,
   pinnedWidths: Map<string, number>,
+  totalWidth?: number,
+  totalHeight?: number,
 ): LayoutGroupIds {
-  const serialized = toSerializedDockview(state, api.width, api.height, pinnedWidths);
+  const w = totalWidth ?? api.width;
+  const h = totalHeight ?? api.height;
+  const serialized = toSerializedDockview(state, w, h, pinnedWidths);
 
   api.fromJSON(serialized);
 
-  // Lock sidebar group and enforce max-width constraint.
-  // Constraints are not serialized with layouts, so we must reapply after fromJSON.
-  const sb = api.getPanel("sidebar");
-  if (sb) {
-    sb.group.locked = SIDEBAR_LOCK;
-    sb.group.header.hidden = false;
-    sb.group.api.setConstraints({ maximumWidth: LAYOUT_SIDEBAR_MAX_PX });
-  }
-
-  // Enforce max-width on other pinned columns (e.g. right panel group).
-  for (const col of state.columns) {
-    if (col.id === "sidebar" || !col.pinned || !col.maxWidth) continue;
-    for (const group of col.groups) {
-      for (const p of group.panels) {
-        const pnl = api.getPanel(p.id);
-        if (pnl) {
-          pnl.group.api.setConstraints({ maximumWidth: col.maxWidth });
-          break;
-        }
-      }
-    }
-  }
+  // Apply loose constraints (runtime cap) so the user can drag freely; the
+  // actual pinning happens via `setPinnedTarget` + `enforcePinnedTargets`
+  // (wired in `setupSashDragCapToggle`) — after every layout-change event
+  // we force the live column back to its target width via `sv.resizeView`.
+  // This avoids the "lock to current" ratchet bug where transient container
+  // shrinks would permanently pin the sidebar at the smaller size.
+  const sv = getRootSplitview(api);
+  configureSidebarPinned(api, state, sv);
+  configureRightPinned(api, state, sv);
 
   return resolveGroupIds(api);
+}
+
+function configureSidebarPinned(
+  api: DockviewApi,
+  state: LayoutState,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sv: any,
+): void {
+  const sidebarCol = state.columns.find((c) => c.id === "sidebar");
+  const sb = api.getPanel("sidebar");
+  if (!sb) return;
+  sb.group.locked = SIDEBAR_LOCK;
+  sb.group.header.hidden = false;
+  sb.group.api.setConstraints({
+    maximumWidth: sidebarCol?.maxWidth ?? computePinnedMaxPxFor("sidebar"),
+    minimumWidth: LAYOUT_PINNED_MIN_PX,
+  });
+  if (!sidebarCol) return;
+  const live = sv?.getViewSize?.(0);
+  if (typeof live === "number" && live > 0) setPinnedTarget("sidebar", live);
+}
+
+function configureRightPinned(
+  api: DockviewApi,
+  state: LayoutState,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sv: any,
+): void {
+  for (let i = 0; i < state.columns.length; i++) {
+    const col = state.columns[i];
+    if (col.id === "sidebar" || !col.pinned) continue;
+    const cap = col.maxWidth ?? computePinnedMaxPxFor(col.id);
+    applyConstraintsToAllPanelGroups(api, col, cap);
+    if (col.id !== "right") continue;
+    const live = sv?.getViewSize?.(i);
+    if (typeof live === "number" && live > 0) setPinnedTarget("right", live);
+  }
+}
+
+/** Constrain every dockview group in the column. The default right column
+ *  has separate top (files+changes) and bottom (terminal) groups — applying
+ *  the cap to only the first group would leave the bottom unbounded and let
+ *  the column grow on rebalance via the bottom group. */
+function applyConstraintsToAllPanelGroups(
+  api: DockviewApi,
+  col: LayoutState["columns"][number],
+  cap: number,
+): void {
+  const seen = new Set<string>();
+  for (const group of col.groups) {
+    for (const p of group.panels) {
+      const pnl = api.getPanel(p.id);
+      if (!pnl) continue;
+      if (seen.has(pnl.group.id)) break;
+      seen.add(pnl.group.id);
+      pnl.group.api.setConstraints({
+        maximumWidth: cap,
+        minimumWidth: LAYOUT_PINNED_MIN_PX,
+      });
+      break;
+    }
+  }
 }

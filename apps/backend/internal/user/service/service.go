@@ -21,6 +21,11 @@ var (
 	ErrValidation   = errors.New("validation error")
 )
 
+const (
+	changesPanelLayoutFlat = "flat"
+	changesPanelLayoutTree = "tree"
+)
+
 type Service struct {
 	repo        store.Repository
 	eventBus    bus.EventBus
@@ -52,6 +57,7 @@ type UpdateUserSettingsRequest struct {
 	TerminalLinkBehavior        *string
 	TerminalFontFamily          *string
 	TerminalFontSize            *int
+	ChangesPanelLayout          *string
 }
 
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
@@ -174,6 +180,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	if err := applyTerminalLinkBehavior(settings, req.TerminalLinkBehavior); err != nil {
 		return err
 	}
+	if err := applyChangesPanelLayout(settings, req.ChangesPanelLayout); err != nil {
+		return err
+	}
 	if req.TerminalFontFamily != nil {
 		settings.TerminalFontFamily = strings.TrimSpace(*req.TerminalFontFamily)
 	}
@@ -196,6 +205,18 @@ func applyTerminalLinkBehavior(settings *models.UserSettings, value *string) err
 		return errors.New("terminal_link_behavior must be 'new_tab' or 'browser_panel'")
 	}
 	settings.TerminalLinkBehavior = v
+	return nil
+}
+
+func applyChangesPanelLayout(settings *models.UserSettings, value *string) error {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	if v != changesPanelLayoutFlat && v != changesPanelLayoutTree {
+		return errors.New("changes_panel_layout must be 'flat' or 'tree'")
+	}
+	settings.ChangesPanelLayout = v
 	return nil
 }
 
@@ -310,6 +331,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"terminal_link_behavior":          settings.TerminalLinkBehavior,
 		"terminal_font_family":            settings.TerminalFontFamily,
 		"terminal_font_size":              settings.TerminalFontSize,
+		"changes_panel_layout":            settings.ChangesPanelLayout,
 		"updated_at":                      settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {

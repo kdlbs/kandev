@@ -279,7 +279,7 @@ func startServices( //nolint:cyclop
 		return false
 	}
 
-	services, agentSettingsController, err := provideServices(cfg, log, repos, dbPool, eventBus, agentRegistry)
+	services, agentSettingsController, err := provideServices(cfg, log, repos, dbPool, eventBus, agentRegistry, Version)
 	if err != nil {
 		log.Error("Failed to initialize services", zap.Error(err))
 		return false
@@ -467,6 +467,17 @@ func startAgentInfrastructure(
 		addCleanup(func() error { slackTrigger.Stop(); return nil })
 	}
 
+	// Wire automation service into orchestrator for trigger-based task creation.
+	// The Automation subsystem is independent of the Office feature flag — it
+	// has its own cron scheduler, GitHub poller, and webhook handler, and
+	// creates tasks via the task service directly.
+	if services.Automation != nil {
+		orchestratorSvc.SetAutomationService(services.Automation.Service)
+		services.Automation.Start(ctx)
+		addCleanup(func() error { services.Automation.Stop(); return nil })
+		log.Info("Automation scheduler and evaluator started")
+	}
+
 	return startGatewayAndServe(ctx, cfg, log, eventBus, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath, addCleanup, runCleanups)
 }
@@ -494,12 +505,15 @@ func startGatewayAndServe(
 	// WEBSOCKET GATEWAY
 	// ============================================
 	log.Info("Initializing WebSocket Gateway...")
-	gateway, _, notificationCtrl, err := provideGateway(
+	gateway, _, notificationCtrl, terminalSvc, err := provideGateway(
 		ctx, log, eventBus, services.Task, services.User,
 		orchestratorSvc, lifecycleMgr, agentRegistry,
-		repos.Notification, repos.Task, services.GitHub,
+		repos.Notification, repos.Task, repos.Terminal, services.GitHub,
 		cfg.ResolvedHomeDir(),
 	)
+	if terminalSvc != nil {
+		services.Terminal = terminalSvc
+	}
 	if err != nil {
 		log.Error("Failed to initialize WebSocket gateway", zap.Error(err))
 		return false
@@ -874,7 +888,7 @@ func (a *schedulerTaskStarterAdapter) StartTask(
 ) error {
 	_, err := a.orch.StartTask(ctx, taskID, agentProfileID,
 		executorID, executorProfileID, priority, prompt,
-		workflowStepID, planMode, nil)
+		workflowStepID, planMode, false, nil)
 	return err
 }
 
@@ -1271,7 +1285,7 @@ func newOfficeTaskStarter(orchestratorSvc *orchestrator.Service) officeservice.T
 			planMode bool, attachments []v1.MessageAttachment, env map[string]string) error {
 			_, err := orchestratorSvc.StartTaskWithEnv(ctx, taskID, agentProfileID,
 				executorID, executorProfileID, priority, prompt,
-				workflowStepID, planMode, attachments, env)
+				workflowStepID, planMode, false, attachments, env)
 			return err
 		},
 	)

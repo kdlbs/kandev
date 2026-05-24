@@ -30,6 +30,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	analyticshandlers "github.com/kandev/kandev/internal/analytics/handlers"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -40,6 +41,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/health"
 	"github.com/kandev/kandev/internal/improvekandev"
 	"github.com/kandev/kandev/internal/jira"
@@ -644,6 +646,10 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
 	analyticshandlers.RegisterStatsRoutes(p.router, p.analyticsRepo, p.log)
 	agenthandlers.RegisterShellRoutes(p.router, p.lifecycleMgr, p.log)
+	if p.services.Share != nil {
+		p.services.Share.RegisterRoutes(p.router)
+		p.log.Debug("Registered Public Share Links handlers (HTTP)")
+	}
 	p.log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
 }
 
@@ -724,6 +730,11 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered GitHub handlers (HTTP + WebSocket)")
 	}
 
+	if p.services.GitLab != nil {
+		gitlab.RegisterRoutes(p.router, p.services.GitLab, p.log)
+		p.log.Debug("Registered GitLab handlers (HTTP)")
+	}
+
 	if p.services.Jira != nil {
 		jira.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Jira, p.log)
 		jira.RegisterMockRoutes(p.router, p.services.Jira, p.log)
@@ -739,6 +750,11 @@ func registerSecondaryRoutes(
 	if p.services.Slack != nil {
 		slack.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Slack, p.log)
 		p.log.Debug("Registered Slack handlers (HTTP + WebSocket)")
+	}
+
+	if p.services.Automation != nil {
+		automation.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Automation.Service, p.log)
+		p.log.Debug("Registered Automation handlers (HTTP + WebSocket)")
 	}
 
 	docker.RegisterDockerRoutes(p.router, p.lifecycleMgr.DockerClientProvider(), dockerTaskTitleProvider(p.taskRepo, p.log), p.log)
@@ -757,7 +773,11 @@ func registerSecondaryRoutes(
 
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService, handoffSvc)
 
-	registerE2EResetRoutes(p.router, p.taskRepo, p.taskSvc, p.log)
+	var automationSvc *automation.Service
+	if p.services.Automation != nil {
+		automationSvc = p.services.Automation.Service
+	}
+	registerE2EResetRoutes(p.router, p.taskRepo, p.taskSvc, automationSvc, p.log)
 
 	if officetestharness.Enabled() {
 		var officeAgentSvc *officeagents.AgentService

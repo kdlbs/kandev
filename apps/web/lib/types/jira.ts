@@ -1,9 +1,23 @@
-export type JiraAuthMethod = "api_token" | "session_cookie";
+/**
+ * Authentication methods supported by the Jira integration.
+ * - `api_token` — Atlassian Cloud only (Basic auth with email + token from id.atlassian.com).
+ * - `pat` — Jira Server / Data Center only (Personal Access Token, sent as Bearer).
+ * - `session_cookie` — works on both Cloud and Server (wraps the session JWT cookie).
+ */
+export type JiraAuthMethod = "api_token" | "pat" | "session_cookie";
+
+/**
+ * Jira deployment kind. Cloud uses REST v3 and the token-paginated search
+ * endpoint; Server / Data Center expose only REST v2 with legacy `startAt`
+ * pagination. The backend client picks endpoints based on this field.
+ */
+export type JiraInstanceType = "cloud" | "server";
 
 export interface JiraConfig {
   siteUrl: string;
   email: string;
   authMethod: JiraAuthMethod;
+  instanceType: JiraInstanceType;
   defaultProjectKey: string;
   hasSecret: boolean;
   /** ISO timestamp when the session cookie's JWT expires, or null for api_token / opaque cookies. */
@@ -22,6 +36,7 @@ export interface SetJiraConfigRequest {
   siteUrl: string;
   email: string;
   authMethod: JiraAuthMethod;
+  instanceType: JiraInstanceType;
   defaultProjectKey?: string;
   secret?: string;
 }

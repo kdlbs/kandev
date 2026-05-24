@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -6,11 +6,50 @@ import {
   type Message,
   type MessageType,
 } from "@/lib/types/http";
-import type { ToolCallMetadata } from "@/components/task/chat/types";
+import type { RichMetadata, ToolCallMetadata, TodoSnapshot } from "@/components/task/chat/types";
 import {
   findPendingClarification,
   findPendingClarificationGroup,
 } from "@/lib/utils/pending-clarification";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+
+const debug = createDebugLogger("messages:process");
+
+function countByType(messages: Message[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const m of messages) {
+    const t = m.type ?? "unknown";
+    out[t] = (out[t] ?? 0) + 1;
+  }
+  return out;
+}
+
+function useDebugProcessedPipeline(args: {
+  sessionId: string | null;
+  messages: Message[];
+  visibleMessages: Message[];
+  footerActionCount: number;
+  groupedItems: RenderItem[];
+}) {
+  const { sessionId, messages, visibleMessages, footerActionCount, groupedItems } = args;
+  useEffect(() => {
+    if (!IS_DEBUG) return;
+    debug("pipeline", {
+      sessionId,
+      input: { count: messages.length, byType: countByType(messages) },
+      afterFilter: { count: visibleMessages.length, byType: countByType(visibleMessages) },
+      droppedByFilter: messages.length - visibleMessages.length,
+      footerActionCount,
+      groupedItemKinds: groupedItems.reduce<Record<string, number>>((acc, item) => {
+        acc[item.type] = (acc[item.type] ?? 0) + 1;
+        return acc;
+      }, {}),
+      turnGroupSizes: groupedItems
+        .filter((i): i is TurnGroup => i.type === "turn_group")
+        .map((g) => ({ turnId: g.turnId, size: g.messages.length })),
+    });
+  }, [sessionId, messages, visibleMessages, footerActionCount, groupedItems]);
+}
 
 const ACTIVITY_MESSAGE_TYPES: Set<MessageType> = new Set([
   "thinking",
@@ -182,7 +221,59 @@ function filterVisibleMessages(
     return false;
   });
 
-  return deduplicateAgentBootResumes(deduplicateRecoveryMessages(filtered));
+  return collapseTodoSnapshotsPerTurn(
+    deduplicateAgentBootResumes(deduplicateRecoveryMessages(filtered)),
+  );
+}
+
+function findLatestTodoIdsByTurn(messages: Message[]): Map<string, string> {
+  const latest = new Map<string, string>();
+  for (const message of messages) {
+    if (message.type === "todo" && message.turn_id) {
+      latest.set(message.turn_id, message.id);
+    }
+  }
+  return latest;
+}
+
+function collectPriorSnapshotsByLatestId(
+  messages: Message[],
+  latestTodoIdByTurn: Map<string, string>,
+): Map<string, TodoSnapshot[]> {
+  const previousByLatestId = new Map<string, TodoSnapshot[]>();
+  for (const message of messages) {
+    if (message.type !== "todo" || !message.turn_id) continue;
+    const latestId = latestTodoIdByTurn.get(message.turn_id);
+    if (!latestId || latestId === message.id) continue;
+    const snapshot: TodoSnapshot = {
+      todos: (message.metadata as RichMetadata | undefined)?.todos ?? [],
+      created_at: message.created_at,
+    };
+    if (!previousByLatestId.has(latestId)) previousByLatestId.set(latestId, []);
+    previousByLatestId.get(latestId)!.push(snapshot);
+  }
+  return previousByLatestId;
+}
+
+/** Some agents (Claude Opus/Sonnet) emit a fresh `todo` message every time
+ *  they update their plan, producing a long stack of "Updated Todos" rows in
+ *  the chat. Each todo message is a full snapshot of the list, so all but the
+ *  latest in a turn are strictly stale. Collapse them: keep only the latest
+ *  per `turn_id` and attach the earlier snapshots to its metadata as
+ *  `previous_todo_snapshots` so the UI can show the progression on expand. */
+export function collapseTodoSnapshotsPerTurn(messages: Message[]): Message[] {
+  const latestTodoIdByTurn = findLatestTodoIdsByTurn(messages);
+  if (latestTodoIdByTurn.size === 0) return messages;
+
+  const previousByLatestId = collectPriorSnapshotsByLatestId(messages, latestTodoIdByTurn);
+
+  return messages.flatMap((message) => {
+    if (message.type !== "todo" || !message.turn_id) return [message];
+    if (latestTodoIdByTurn.get(message.turn_id) !== message.id) return [];
+    const previous = previousByLatestId.get(message.id);
+    if (!previous || previous.length === 0) return [message];
+    return [{ ...message, metadata: { ...message.metadata, previous_todo_snapshots: previous } }];
+  });
 }
 
 function groupActivityMessages(allMessages: Message[]): RenderItem[] {
@@ -324,6 +415,14 @@ export function useProcessedMessages(
   const groupedItems = useMemo<RenderItem[]>(() => {
     return injectPrepareProgressItem(groupActivityMessages(regularMessages), resolvedSessionId);
   }, [regularMessages, resolvedSessionId]);
+
+  useDebugProcessedPipeline({
+    sessionId: resolvedSessionId,
+    messages,
+    visibleMessages,
+    footerActionCount: footerActionMessages.length,
+    groupedItems,
+  });
 
   return {
     visibleMessages,

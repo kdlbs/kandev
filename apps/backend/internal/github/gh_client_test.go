@@ -52,6 +52,38 @@ func TestIsForbiddenErr(t *testing.T) {
 	}
 }
 
+func TestGhMergeStatusCode(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		wantOK   bool
+		wantCode int
+	}{
+		{"nil", nil, false, 0},
+		{"unrelated", errors.New("connection refused"), false, 0},
+		{"HTTP 404", errors.New("HTTP 404: Not Found"), true, 404},
+		{"404 Not Found phrase", errors.New("404 Not Found"), true, 404},
+		{"status 404", errors.New("request failed (status: 404)"), true, 404},
+		{"HTTP 403", errors.New("HTTP 403: Forbidden"), true, 403},
+		{"HTTP 405", errors.New("gh: HTTP 405: Method Not Allowed"), true, 405},
+		{"status 405", errors.New("status: 405"), true, 405},
+		{"405 phrase", errors.New("405 Method Not Allowed"), true, 405},
+		{"HTTP 409", errors.New("HTTP 409: Conflict"), true, 409},
+		{"status 409", errors.New("status: 409"), true, 409},
+		{"409 phrase", errors.New("409 Conflict"), true, 409},
+		{"500 not mapped", errors.New("HTTP 500: server error"), false, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, ok := ghMergeStatusCode(tc.err)
+			if ok != tc.wantOK || code != tc.wantCode {
+				t.Fatalf("ghMergeStatusCode(%v) = (%d, %v), want (%d, %v)",
+					tc.err, code, ok, tc.wantCode, tc.wantOK)
+			}
+		})
+	}
+}
+
 func TestParseTimePtr(t *testing.T) {
 	tests := []struct {
 		name    string

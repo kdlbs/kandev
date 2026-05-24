@@ -59,6 +59,13 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "list_agents_kandev")
 	assert.Contains(t, tools, "list_executor_profiles_kandev")
 
+	// Task mode keeps list_related_tasks_kandev (sibling discovery) but
+	// drops the task-document tools — those are office-only.
+	assert.Contains(t, tools, "list_related_tasks_kandev")
+	assert.NotContains(t, tools, "list_task_documents_kandev")
+	assert.NotContains(t, tools, "get_task_document_kandev")
+	assert.NotContains(t, tools, "write_task_document_kandev")
+
 	// Task mode should NOT have config/mutation tools
 	assert.NotContains(t, tools, "create_workflow_kandev")
 	assert.NotContains(t, tools, "update_workflow_kandev")
@@ -197,8 +204,9 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	tools := getRegisteredToolNames(s)
-	// 11 kanban + 1 interaction + 4 plan + 4 handoff = 20
-	assert.Equal(t, 20, len(tools))
+	// 11 kanban + 1 interaction + 4 plan + 1 related-tasks = 17.
+	// Task-document tools (list/get/write) are office-only.
+	assert.Equal(t, 17, len(tools))
 }
 
 func TestServerModeConfig_ToolCount(t *testing.T) {
@@ -279,8 +287,8 @@ func TestServerModeOffice_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeOffice)
 	tools := getRegisteredToolNames(s)
-	// 4 plan + 1 interaction + 4 handoff = 9 (delegate_task_kandev
-	// retired in favour of `agentctl kandev task create …`).
+	// 4 plan + 1 interaction + 1 related-tasks + 3 task-documents = 9
+	// (delegate_task_kandev retired in favour of `agentctl kandev task create …`).
 	assert.Equal(t, 9, len(tools))
 }
 
@@ -298,7 +306,7 @@ func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
 	// delegate_task_kandev was retired from ModeOffice (now lives in
 	// the agentctl CLI as `agentctl kandev task create --parent …`).
 	assert.NotContains(t, tools, "delegate_task_kandev")
-	// 4 plan + 4 handoff = 8 (no ask_user_question, no delegate)
+	// 4 plan + 1 related-tasks + 3 task-documents = 8 (no ask_user_question, no delegate)
 	assert.Equal(t, 8, len(tools))
 }
 

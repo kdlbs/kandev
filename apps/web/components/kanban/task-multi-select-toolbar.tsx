@@ -20,19 +20,21 @@ interface TaskMultiSelectToolbarProps {
   isProcessing: boolean;
   canMove?: boolean;
   onClearSelection: () => void;
-  onBulkDelete: () => Promise<void>;
-  onBulkArchive: () => Promise<void>;
+  onBulkDelete: (opts?: { cascade?: boolean }) => Promise<void>;
+  onBulkArchive: (opts?: { cascade?: boolean }) => Promise<void>;
   onBulkMove: (targetStepId: string) => Promise<void>;
 }
 
 function BulkArchiveDialog({
   count,
+  taskIds,
   isProcessing,
   onConfirm,
 }: {
   count: number;
+  taskIds: string[];
   isProcessing: boolean;
-  onConfirm: () => void;
+  onConfirm: (opts: { cascade: boolean }) => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -54,6 +56,7 @@ function BulkArchiveDialog({
         onOpenChange={setOpen}
         isBulkOperation
         count={count}
+        taskIds={taskIds}
         isArchiving={isProcessing}
         onConfirm={onConfirm}
         confirmTestId="bulk-archive-confirm"
@@ -64,12 +67,14 @@ function BulkArchiveDialog({
 
 function BulkDeleteDialog({
   count,
+  taskIds,
   isProcessing,
   onConfirm,
 }: {
   count: number;
+  taskIds: string[];
   isProcessing: boolean;
-  onConfirm: () => void;
+  onConfirm: (opts: { cascade: boolean }) => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -91,6 +96,7 @@ function BulkDeleteDialog({
         onOpenChange={setOpen}
         isBulkOperation
         count={count}
+        taskIds={taskIds}
         isDeleting={isProcessing}
         onConfirm={onConfirm}
         confirmTestId="bulk-delete-confirm"
@@ -157,14 +163,16 @@ export function TaskMultiSelectToolbar({
 
       <BulkArchiveDialog
         count={count}
+        taskIds={[...selectedIds]}
         isProcessing={isProcessing}
-        onConfirm={() => onBulkArchive()}
+        onConfirm={({ cascade }) => onBulkArchive({ cascade })}
       />
 
       <BulkDeleteDialog
         count={count}
+        taskIds={[...selectedIds]}
         isProcessing={isProcessing}
-        onConfirm={() => onBulkDelete()}
+        onConfirm={({ cascade }) => onBulkDelete({ cascade })}
       />
 
       <Button

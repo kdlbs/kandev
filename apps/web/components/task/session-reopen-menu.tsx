@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { IconStar } from "@tabler/icons-react";
+import { IconMessagePlus, IconStar } from "@tabler/icons-react";
 import {
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -33,7 +33,19 @@ function resolveAgentInfo(
  * Each item shows session number, agent label, primary star, and state icon.
  * Clicking focuses an existing tab or re-opens a closed one.
  */
-export function SessionReopenMenuItems({ taskId, groupId }: { taskId: string; groupId?: string }) {
+export function SessionReopenMenuItems({
+  taskId,
+  groupId,
+  onNewSession,
+}: {
+  taskId: string;
+  groupId?: string;
+  /**
+   * Click handler for the leading "New Agent" item rendered as the
+   * first row under the section label. Omit to hide the row.
+   */
+  onNewSession?: () => void;
+}) {
   const { sessions } = useTaskSessions(taskId);
   const api = useDockviewStore((s) => s.api);
   const centerGroupId = useDockviewStore((s) => s.centerGroupId);
@@ -66,11 +78,25 @@ export function SessionReopenMenuItems({ taskId, groupId }: { taskId: string; gr
     [api, centerGroupId],
   );
 
-  if (sortedSessions.length === 0) return null;
+  // Render the section even when there are no sessions yet — the leading
+  // "New Agent" row should still be reachable from the menu. Hide the
+  // whole block only when neither the create handler nor any sessions
+  // are present (e.g. unmounted contexts).
+  if (sortedSessions.length === 0 && !onNewSession) return null;
 
   return (
     <>
       <DropdownMenuLabel className="text-xs text-muted-foreground">Agents</DropdownMenuLabel>
+      {onNewSession && (
+        <DropdownMenuItem
+          onClick={onNewSession}
+          className="cursor-pointer text-xs gap-1.5"
+          data-testid="new-session-button"
+        >
+          <IconMessagePlus className="h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1 truncate">New Agent</span>
+        </DropdownMenuItem>
+      )}
       {sortedSessions.map((session, index) => {
         const info = resolveAgentInfo(session, profilesById);
         const isPrimary = session.id === primarySessionId;
@@ -82,7 +108,12 @@ export function SessionReopenMenuItems({ taskId, groupId }: { taskId: string; gr
             className={`cursor-pointer text-xs gap-1.5 ${isOpen ? "opacity-50" : ""}`}
             data-testid={`reopen-session-${session.id}`}
           >
-            <span className="w-5 shrink-0 text-muted-foreground text-right">#{index + 1}</span>
+            <span
+              data-testid={`reopen-session-seq-${index + 1}`}
+              className="shrink-0 text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5"
+            >
+              #{index + 1}
+            </span>
             {info.agentName && (
               <AgentLogo agentName={info.agentName} size={14} className="shrink-0" />
             )}

@@ -332,6 +332,36 @@ function TabletHeader({
   );
 }
 
+function CreateTaskTopbarButton({
+  onCreateTask,
+  compact,
+}: {
+  onCreateTask: () => void;
+  compact: boolean;
+}) {
+  const button = (
+    <Button
+      onClick={onCreateTask}
+      size={compact ? "icon-lg" : "lg"}
+      className="cursor-pointer"
+      data-testid="create-task-button"
+      aria-label={compact ? "Add task" : undefined}
+    >
+      <IconPlus className="h-4 w-4" />
+      {!compact && "Add task"}
+    </Button>
+  );
+
+  if (!compact) return button;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent>Add task</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function DesktopHeader({
   onCreateTask,
   workspaceId,
@@ -371,7 +401,7 @@ function DesktopHeader({
       onChange={onSearchChange}
       placeholder="Search tasks..."
       isLoading={isSearchLoading}
-      className="w-72 xl:w-80 [&_input]:h-8"
+      className={`${isNarrow ? "w-44" : "w-72 xl:w-80"} [&_input]:h-8`}
     />
   ) : null;
   const isHome = title === "Home";
@@ -379,6 +409,7 @@ function DesktopHeader({
     isHome && searchInput && !isNarrow ? (
       <div data-testid="kanban-header-search">{searchInput}</div>
     ) : null;
+  const actionsSearch = !isHome || isNarrow ? searchInput : null;
   const leftActions = isHome ? (
     <HomeLeftActions workspaceId={workspaceId} />
   ) : (
@@ -396,17 +427,9 @@ function DesktopHeader({
       leftActions={leftActions}
       actions={
         <>
-          {!isHome && searchInput}
-          <Button
-            onClick={onCreateTask}
-            size="lg"
-            className="cursor-pointer"
-            data-testid="create-task-button"
-          >
-            <IconPlus className="h-4 w-4" />
-            Add task
-          </Button>
-          <QuickChatButton workspaceId={workspaceId} size="lg" />
+          {actionsSearch}
+          <CreateTaskTopbarButton onCreateTask={onCreateTask} compact={isNarrow} />
+          <QuickChatButton workspaceId={workspaceId} size="lg" compact={isNarrow} />
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>

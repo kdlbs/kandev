@@ -29,6 +29,8 @@ import {
   isSessionDeletable as isDeletable,
   isSessionResumable as isResumable,
 } from "@/hooks/domains/session/use-session-actions";
+import { shareableSessionStateClient } from "@/components/task/share/share-button";
+import { ShareDialog } from "@/components/task/share/share-dialog";
 import type { TaskSessionState } from "@/lib/types/http";
 import { isSessionActive } from "./session-sort";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
@@ -163,13 +165,17 @@ function DeleteSessionDialog({
 function SessionContextMenuItems({
   sessionState,
   isPrimary,
+  canShare,
   actions,
   onDelete,
+  onShare,
 }: {
   sessionState: TaskSessionState | null;
   isPrimary: boolean;
+  canShare: boolean;
   actions: ReturnType<typeof useSessionTabActions>;
   onDelete: () => void;
+  onShare: () => void;
 }) {
   return (
     <ContextMenuContent>
@@ -196,6 +202,14 @@ function SessionContextMenuItems({
           Delete
         </ContextMenuItem>
       )}
+      {canShare && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem className="cursor-pointer" onSelect={onShare}>
+            Share
+          </ContextMenuItem>
+        </>
+      )}
       <ContextMenuSeparator />
       <ContextMenuItem className="cursor-pointer" onSelect={actions.handleCloseOthers}>
         Close Others
@@ -216,7 +230,9 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   const actions = useSessionTabActions(sessionId, taskId, api, containerApi);
   const onDoubleClick = useTabMaximizeOnDoubleClick(api);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [isActive, setIsActive] = useState(api.isActive);
+  const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
 
   useEffect(() => {
     const disposable = api.onDidActiveChange((e) => setIsActive(e.isActive));
@@ -264,8 +280,10 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
         <SessionContextMenuItems
           sessionState={sessionState}
           isPrimary={isPrimary}
+          canShare={canShare}
           actions={actions}
           onDelete={() => setConfirmDelete(true)}
+          onShare={() => setShareOpen(true)}
         />
       </ContextMenu>
       <DeleteSessionDialog
@@ -275,6 +293,14 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
         sessionCount={sessionCount}
         onConfirm={actions.handleDelete}
       />
+      {taskId && sessionId && (
+        <ShareDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          taskId={taskId}
+          sessionId={sessionId}
+        />
+      )}
     </>
   );
 }

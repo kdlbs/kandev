@@ -26,6 +26,7 @@ export type GroupedSidebarList = {
 export type SidebarTaskPrefs = {
   pinnedTaskIds: string[];
   orderedTaskIds: string[];
+  subtaskOrderByParentId?: Record<string, string[]>;
 };
 
 type DimensionExtractor = (task: TaskSwitcherItem) => FilterValue | undefined;
@@ -310,6 +311,28 @@ function buildIndex(ids: string[]): Map<string, number> {
   return m;
 }
 
+/**
+ * Sort subtasks of a single parent by the user's manual order. Listed
+ * subtasks come first in their stored order; unlisted ones keep their incoming
+ * order (which reflects the active sort) afterwards.
+ */
+function applySubtaskOrder(
+  subtasks: TaskSwitcherItem[],
+  orderedSubtaskIds: string[],
+): TaskSwitcherItem[] {
+  const orderIndex = buildIndex(orderedSubtaskIds);
+  const withSortIndex = subtasks.map((t, i) => ({ t, sortIdx: i }));
+  withSortIndex.sort((a, b) => {
+    const ai = orderIndex.get(a.t.id);
+    const bi = orderIndex.get(b.t.id);
+    if (ai !== undefined && bi !== undefined) return ai - bi;
+    if (ai !== undefined) return -1;
+    if (bi !== undefined) return 1;
+    return a.sortIdx - b.sortIdx;
+  });
+  return withSortIndex.map((x) => x.t);
+}
+
 export function applyView(
   tasks: TaskSwitcherItem[],
   view: SidebarView,
@@ -318,6 +341,14 @@ export function applyView(
   const filtered = applyFilters(tasks, view.filters);
   const sorted = applySort(filtered, view.sort, prefs?.orderedTaskIds);
   const grouped = applyGroup(sorted, view.group);
+  const subOrderMap = prefs?.subtaskOrderByParentId;
+  if (subOrderMap) {
+    for (const [parentId, orderedIds] of Object.entries(subOrderMap)) {
+      const subs = grouped.subTasksByParentId.get(parentId);
+      if (!subs) continue;
+      grouped.subTasksByParentId.set(parentId, applySubtaskOrder(subs, orderedIds));
+    }
+  }
   if (!prefs || prefs.pinnedTaskIds.length === 0) return grouped;
   const pinnedSet = new Set(prefs.pinnedTaskIds);
   const pinIndex = buildIndex(prefs.pinnedTaskIds);

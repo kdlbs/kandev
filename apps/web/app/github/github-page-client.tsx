@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { IconBrandGithub } from "@tabler/icons-react";
+import { IconBrandGithub, IconMenu2 } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
+import { Button } from "@kandev/ui/button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { PageTopbar } from "@/components/page-topbar";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
+import { usePRKeyToTasks } from "@/hooks/domains/github/use-pr-key-to-tasks";
 import type { Repository, Workflow, WorkflowStep } from "@/lib/types/http";
-import type { GitHubIssue, GitHubPR } from "@/lib/types/github";
+import type { GitHubIssue, GitHubPR, TaskPR } from "@/lib/types/github";
 import { PRList } from "@/components/github/my-github/pr-list";
 import { IssueList } from "@/components/github/my-github/issue-list";
 import {
@@ -40,6 +43,7 @@ import {
   resolveIssuePresets,
 } from "@/components/github/my-github/action-presets";
 import { useGitHubActionPresets } from "@/hooks/domains/github/use-github-action-presets";
+import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 
 type GitHubPageClientProps = {
   workspaceId?: string;
@@ -48,12 +52,26 @@ type GitHubPageClientProps = {
   repositories: Repository[];
 };
 
-function PageHeader() {
+function PageHeader({ onOpenMobileSidebar }: { onOpenMobileSidebar?: () => void }) {
   return (
     <PageTopbar
       title="GitHub"
       subtitle="Pull requests and issues across your repos."
       icon={<IconBrandGithub className="h-4 w-4" />}
+      actions={
+        onOpenMobileSidebar && (
+          <Button
+            variant="outline"
+            size="icon-lg"
+            onClick={onOpenMobileSidebar}
+            className="md:hidden cursor-pointer"
+            data-testid="github-mobile-menu-button"
+            aria-label="Open GitHub filters"
+          >
+            <IconMenu2 className="h-4 w-4" />
+          </Button>
+        )
+      }
     />
   );
 }
@@ -109,6 +127,7 @@ function ResultsList({
   prPresets,
   issuePresets,
   onStartTask,
+  prKeyToTasks,
 }: {
   selection: SidebarSelection;
   items: Array<GitHubPR | GitHubIssue>;
@@ -117,6 +136,7 @@ function ResultsList({
   prPresets: TaskPreset[];
   issuePresets: TaskPreset[];
   onStartTask: (payload: LaunchPayload) => void;
+  prKeyToTasks: Map<string, TaskPR[]>;
 }) {
   if (selection.kind === "pr") {
     return (
@@ -126,6 +146,7 @@ function ResultsList({
         error={error}
         presets={prPresets}
         onStartTask={onStartTask}
+        prKeyToTasks={prKeyToTasks}
       />
     );
   }
@@ -286,9 +307,14 @@ function AuthenticatedLayout({
   onStartTask: (payload: LaunchPayload) => void;
 }) {
   const { selection, search, repoOptions, title } = state;
+  const prKeyToTasks = usePRKeyToTasks(workspaceId ?? null);
+  useAllWorkflowSnapshots(workspaceId ?? null);
   return (
     <div className="flex-1 flex min-h-0">
-      <aside className="w-60 border-r overflow-y-auto shrink-0">
+      <aside
+        className="hidden md:flex md:flex-col w-60 border-r overflow-y-auto shrink-0"
+        data-testid="github-presets-sidebar-inline"
+      >
         <PresetsSidebar
           selected={selection}
           onSelect={state.onSelect}
@@ -325,6 +351,7 @@ function AuthenticatedLayout({
             prPresets={prPresets}
             issuePresets={issuePresets}
             onStartTask={onStartTask}
+            prKeyToTasks={prKeyToTasks}
           />
         </div>
         <ResultsPagination
@@ -346,6 +373,7 @@ export function GitHubPageClient({
 }: GitHubPageClientProps) {
   const { status, loaded } = useGitHubStatus();
   const [launchPayload, setLaunchPayload] = useState<LaunchPayload | null>(null);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const state = useGitHubPageState();
   const { presets: storedPresets } = useGitHubActionPresets(workspaceId ?? null);
   const prPresets = useMemo(() => resolvePRPresets(storedPresets), [storedPresets]);
@@ -358,10 +386,24 @@ export function GitHubPageClient({
   const onStartTask = useCallback((payload: LaunchPayload) => setLaunchPayload(payload), []);
   const onCloseLaunch = useCallback(() => setLaunchPayload(null), []);
   const authed = !!status?.authenticated;
+  const onOpenMobileSidebar = useCallback(() => setMobileSidebarOpen(true), []);
+  // Close the mobile sheet after any sidebar selection. KindToggle clicks also
+  // route through onSelect — closing on every selection is acceptable UX since
+  // the user always wants to see the list after picking a kind or preset.
+  // No useCallback: `state` is a fresh object every render, so memoizing
+  // these handlers would be deceptive — they'd still be new refs each pass.
+  const onMobileSidebarSelect = (s: Parameters<typeof state.onSelect>[0]) => {
+    state.onSelect(s);
+    setMobileSidebarOpen(false);
+  };
+  const onMobileSaveCurrent = () => {
+    setMobileSidebarOpen(false);
+    state.onOpenSaveDialog();
+  };
 
   return (
     <div className="h-screen w-full flex flex-col bg-background">
-      <PageHeader />
+      <PageHeader onOpenMobileSidebar={loaded && authed ? onOpenMobileSidebar : undefined} />
       {!loaded && <div className="p-6 text-sm text-muted-foreground">Checking GitHub status…</div>}
       {loaded && !authed && (
         <div className="p-6 max-w-2xl">
@@ -377,6 +419,27 @@ export function GitHubPageClient({
           onStartTask={onStartTask}
         />
       )}
+      <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+        <SheetContent
+          side="right"
+          className="w-full sm:max-w-sm overflow-y-auto p-0"
+          data-testid="github-mobile-sidebar"
+        >
+          <SheetHeader className="px-4 pt-4 pb-2">
+            <SheetTitle>Filters</SheetTitle>
+          </SheetHeader>
+          <PresetsSidebar
+            selected={state.selection}
+            onSelect={onMobileSidebarSelect}
+            savedPresets={state.savedPresets}
+            onDeleteSaved={state.onDeleteSaved}
+            canSaveCurrent={state.canSaveCurrent}
+            onSaveCurrent={onMobileSaveCurrent}
+            prPresets={state.resolvedPrPresets}
+            issuePresets={state.resolvedIssuePresets}
+          />
+        </SheetContent>
+      </Sheet>
       <QuickTaskLauncher
         workspaceId={workspaceId ?? null}
         workflows={workflows}

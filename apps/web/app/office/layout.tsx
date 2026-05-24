@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateHydrator } from "@/components/state-hydrator";
 import { getFeatureFlagsAction } from "@/app/actions/features";
@@ -15,6 +16,19 @@ import type { AppState } from "@/lib/state/store";
 import { WorkspaceRail } from "./components/workspace-rail";
 import { OfficeSidebar } from "./components/office-sidebar";
 import { OfficeTopbar } from "./components/office-topbar";
+
+function resolveActiveOfficeWorkspaceId(
+  workspaceItems: { id: string }[],
+  cookieWorkspaceId: string | null,
+  settingsWorkspaceId: string | null,
+): string | null {
+  return (
+    workspaceItems.find((w) => w.id === cookieWorkspaceId)?.id ??
+    workspaceItems.find((w) => w.id === settingsWorkspaceId)?.id ??
+    workspaceItems[0]?.id ??
+    null
+  );
+}
 
 function mapWorkspaceItem(ws: {
   id: string;
@@ -64,10 +78,11 @@ export default async function OfficeLayout({ children }: { children: React.React
     return <>{children}</>;
   }
 
-  const [workspacesResponse, userSettingsResponse, metaResponse] = await Promise.all([
+  const [workspacesResponse, userSettingsResponse, metaResponse, cookieStore] = await Promise.all([
     listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
     fetchUserSettings({ cache: "no-store" }).catch(() => null),
     getMeta({ cache: "no-store" }).catch(() => null),
+    cookies().catch(() => null),
   ]);
 
   // Only show office workspaces (those with an office_workflow_id) in the rail.
@@ -75,8 +90,15 @@ export default async function OfficeLayout({ children }: { children: React.React
   const officeWorkspaces = workspacesResponse.workspaces.filter((ws) => ws.office_workflow_id);
   const workspaceItems = officeWorkspaces.map(mapWorkspaceItem);
   const settingsWorkspaceId = userSettingsResponse?.settings?.workspace_id || null;
-  const activeWorkspaceId =
-    workspaceItems.find((w) => w.id === settingsWorkspaceId)?.id ?? workspaceItems[0]?.id ?? null;
+  // office-active-workspace cookie is set by the setup wizard and workspace rail so the
+  // layout can load the correct workspace even when userSettings.workspace_id still points
+  // to a kanban workspace (we never write to userSettings from office).
+  const cookieWorkspaceId = cookieStore?.get("office-active-workspace")?.value ?? null;
+  const activeWorkspaceId = resolveActiveOfficeWorkspaceId(
+    workspaceItems,
+    cookieWorkspaceId,
+    settingsWorkspaceId,
+  );
 
   // Fetch agents + projects + inbox for the active workspace so the
   // sidebar renders them — including the inbox count badge — on first

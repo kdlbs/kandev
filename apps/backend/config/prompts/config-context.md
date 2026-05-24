@@ -44,7 +44,7 @@ TASK TOOLS:
 - update_task_state_kandev: Update task state. Required: task_id, state (TODO, CREATED, SCHEDULING, IN_PROGRESS, REVIEW, BLOCKED, WAITING_FOR_INPUT, COMPLETED, FAILED, CANCELLED).
 
 INTERACTION:
-- ask_user_question_kandev: Ask the user a clarifying question with multiple-choice options. Required: prompt, options.
+- ask_user_question_kandev: Ask the user one or more clarifying questions in a single tool call. Required: questions (array of 1-4 question objects; each has prompt and options (2-6 {label, description})). Optional: context.
 
 EXAMPLE REQUESTS the user might ask:
 - "Create a new workflow called 'Feature Development'"

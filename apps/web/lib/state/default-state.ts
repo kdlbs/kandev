@@ -6,10 +6,12 @@ import {
   defaultSessionRuntimeState,
   defaultUIState,
   defaultGitHubState,
+  defaultGitLabState,
   defaultJiraState,
   defaultLinearState,
   defaultOfficeState,
   defaultFeaturesState,
+  defaultAutomationsState,
 } from "./slices";
 
 export const defaultState = {
@@ -66,10 +68,13 @@ export const defaultState = {
   reviewWatches: defaultGitHubState.reviewWatches,
   issueWatches: defaultGitHubState.issueWatches,
   actionPresets: defaultGitHubState.actionPresets,
+  taskMRs: defaultGitLabState.taskMRs,
   jiraIssueWatches: defaultJiraState.jiraIssueWatches,
   linearIssueWatches: defaultLinearState.linearIssueWatches,
   office: defaultOfficeState.office,
   features: defaultFeaturesState.features,
+  automations: defaultAutomationsState.automations,
+  automationRuns: defaultAutomationsState.automationRuns,
   previewPanel: defaultUIState.previewPanel,
   rightPanel: defaultUIState.rightPanel,
   diffs: defaultUIState.diffs,
@@ -154,6 +159,7 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     reviewWatches: { ...defaultState.reviewWatches, ...initialState.reviewWatches },
     issueWatches: { ...defaultState.issueWatches, ...initialState.issueWatches },
     actionPresets: { ...defaultState.actionPresets, ...initialState.actionPresets },
+    taskMRs: { ...defaultState.taskMRs, ...initialState.taskMRs },
     jiraIssueWatches: { ...defaultState.jiraIssueWatches, ...initialState.jiraIssueWatches },
     linearIssueWatches: {
       ...defaultState.linearIssueWatches,
@@ -161,6 +167,8 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     },
     office: { ...defaultState.office, ...initialState.office },
     features: { ...defaultState.features, ...initialState.features },
+    automations: { ...defaultState.automations, ...initialState.automations },
+    automationRuns: { ...defaultState.automationRuns, ...initialState.automationRuns },
     previewPanel: { ...defaultState.previewPanel, ...initialState.previewPanel },
     rightPanel: { ...defaultState.rightPanel, ...initialState.rightPanel },
     diffs: { ...defaultState.diffs, ...initialState.diffs },

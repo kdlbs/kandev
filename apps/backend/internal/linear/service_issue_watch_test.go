@@ -3,8 +3,36 @@ package linear
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 )
+
+func TestService_CreateIssueWatch_AcceptsRichFilters(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	min := 1.0
+	cases := map[string]SearchFilter{
+		"priority":    {Priorities: []int{1}},
+		"labels":      {LabelIDs: []string{"l1"}},
+		"creator":     {CreatorID: "u1"},
+		"estimateMin": {EstimateMin: &min},
+	}
+	for name, filter := range cases {
+		w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+			WorkspaceID:    "ws-1",
+			WorkflowID:     "wf",
+			WorkflowStepID: "step",
+			Filter:         filter,
+		})
+		if err != nil {
+			t.Errorf("%s: create rejected: %v", name, err)
+			continue
+		}
+		if w.ID == "" {
+			t.Errorf("%s: expected ID assigned", name)
+		}
+	}
+}
 
 // withSearchResults returns a fakeClient that always returns the given issues
 // for SearchIssues, ignoring the filter.
@@ -93,6 +121,28 @@ func TestService_UpdateIssueWatch_PartialPatch(t *testing.T) {
 	empty := SearchFilter{}
 	if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{Filter: &empty}); !errors.Is(err, ErrInvalidConfig) {
 		t.Errorf("expected ErrInvalidConfig for empty filter patch, got %v", err)
+	}
+}
+
+func TestValidateFilterBounds_RejectsNonFiniteAndNegativeEstimates(t *testing.T) {
+	nan := math.NaN()
+	posInf := math.Inf(1)
+	negInf := math.Inf(-1)
+	neg := -1.0
+	cases := map[string]SearchFilter{
+		"estimateMin NaN":  {EstimateMin: &nan},
+		"estimateMax NaN":  {EstimateMax: &nan},
+		"estimateMin +Inf": {EstimateMin: &posInf},
+		"estimateMax -Inf": {EstimateMax: &negInf},
+		"estimateMin < 0":  {EstimateMin: &neg},
+		"estimateMax < 0":  {EstimateMax: &neg},
+	}
+	for name, f := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := validateFilterBounds(f); !errors.Is(err, ErrInvalidConfig) {
+				t.Errorf("expected ErrInvalidConfig, got %v", err)
+			}
+		})
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -25,7 +26,7 @@ import (
 type OrchestratorService interface {
 	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error)
 	ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error
-	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool, attachments []v1.MessageAttachment) error
+	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment) error
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
 }
 
@@ -216,10 +217,28 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		WithAttachments(req.Attachments).
 		WithContextFiles(req.ContextFiles)
 
+	// First message on a CREATED session is the kanban "type in chat to start
+	// the agent" path. Wrap with the Kandev MCP system block before persisting
+	// so the DB row matches what the agent receives (and "Show formatted"
+	// reveals it). The orchestrator's wrap in StartCreatedSession is
+	// idempotent (HasKandevContext guard), so passing the wrapped content
+	// through dispatchPromptAsync does not double-wrap downstream.
+	// NOTE: req.Content is user-controlled — do NOT guard this wrap on
+	// HasKandevContext. A malicious or naive client could craft a body
+	// containing a fake "<kandev-system>KANDEV MCP TOOLS</kandev-system>"
+	// block and bypass server-side injection of the canonical task/session/
+	// tool context. Wrap unconditionally; the orchestrator's own guard sees
+	// our wrap downstream and skips its second pass.
+	storedContent := req.Content
+	if isCreatedSession && (req.Content != "" || len(req.Attachments) > 0) {
+		storedContent = sysprompt.InjectKandevContext(req.TaskID, req.TaskSessionID, req.Content)
+		req.Content = storedContent
+	}
+
 	message, err := h.service.CreateMessage(ctx, &service.CreateMessageRequest{
 		TaskSessionID: req.TaskSessionID,
 		TaskID:        req.TaskID,
-		Content:       req.Content,
+		Content:       storedContent,
 		AuthorType:    "user",
 		AuthorID:      req.AuthorID,
 		Metadata:      meta.ToMap(),
@@ -344,7 +363,7 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 ) {
 	// For CREATED sessions, start the agent with this message as the initial prompt
 	if startCreated {
-		if err := h.orchestrator.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, content, true, planMode, attachments); err != nil {
+		if err := h.orchestrator.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, content, true, planMode, false, attachments); err != nil {
 			h.logger.Warn("failed to start created session from message",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),

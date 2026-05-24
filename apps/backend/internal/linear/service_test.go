@@ -61,6 +61,8 @@ type fakeClient struct {
 	listStatesFn   func(teamKey string) ([]LinearWorkflowState, error)
 	transitionLog  []string
 	searchIssuesFn func(filter SearchFilter, pageToken string, max int) (*SearchResult, error)
+	listLabelsFn   func(teamKey string) ([]LinearLabel, error)
+	listUsersFn    func(teamKey string) ([]LinearUser, error)
 }
 
 func (c *fakeClient) TestAuth(_ context.Context) (*TestConnectionResult, error) {
@@ -104,6 +106,20 @@ func (c *fakeClient) SearchIssues(_ context.Context, filter SearchFilter, pageTo
 		return c.searchIssuesFn(filter, pageToken, max)
 	}
 	return &SearchResult{}, nil
+}
+
+func (c *fakeClient) ListLabels(_ context.Context, teamKey string) ([]LinearLabel, error) {
+	if c.listLabelsFn != nil {
+		return c.listLabelsFn(teamKey)
+	}
+	return nil, nil
+}
+
+func (c *fakeClient) ListUsers(_ context.Context, teamKey string) ([]LinearUser, error) {
+	if c.listUsersFn != nil {
+		return c.listUsersFn(teamKey)
+	}
+	return nil, nil
 }
 
 type svcFixture struct {

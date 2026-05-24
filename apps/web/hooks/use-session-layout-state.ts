@@ -2,8 +2,7 @@
 
 import { useState, useCallback, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
+import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import { getPlanLastSeen } from "@/lib/local-storage";
 import { executeApprove } from "@/lib/services/session-approve";
 import type { OpenFileTab } from "@/lib/types/backend";
@@ -74,15 +73,10 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
   const { openFileRequest, handleOpenFile, handleFileOpenHandled } = useOpenFileRequestState();
 
   // --- Git status for badges ---
-  const gitStatus = useSessionGitStatus(effectiveSessionId);
-  const { commits } = useSessionCommits(effectiveSessionId);
-
-  const uncommittedCount = useMemo(() => {
-    if (!gitStatus?.files) return 0;
-    return Object.keys(gitStatus.files).length;
-  }, [gitStatus]);
-
-  const totalChangesCount = uncommittedCount + commits.length;
+  // `useSessionChangesCount` reads the per-repo statuses so the badge count
+  // stays correct in multi-repo workspaces and doesn't flicker as sibling
+  // repos overwrite the legacy single-status map.
+  const totalChangesCount = useSessionChangesCount(effectiveSessionId);
 
   // --- Mobile session state (computed before plan badge to use in badge logic) ---
   const activePanelBySessionId = useAppStore((state) => state.mobileSession.activePanelBySessionId);
@@ -158,9 +152,6 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
     handleFileOpenHandled,
 
     // Git status
-    gitStatus,
-    commits,
-    uncommittedCount,
     totalChangesCount,
 
     // Plan

@@ -233,6 +233,25 @@ func (s *Service) ListStates(ctx context.Context, teamKey string) ([]LinearWorkf
 	return client.ListStates(ctx, teamKey)
 }
 
+// ListLabels returns the issue labels for a team identified by its key.
+func (s *Service) ListLabels(ctx context.Context, teamKey string) ([]LinearLabel, error) {
+	client, err := s.clientFor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return client.ListLabels(ctx, teamKey)
+}
+
+// ListUsers returns the members of a team identified by its key. Used to
+// populate creator / assignee selectors on the watcher filter UI.
+func (s *Service) ListUsers(ctx context.Context, teamKey string) ([]LinearUser, error) {
+	client, err := s.clientFor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return client.ListUsers(ctx, teamKey)
+}
+
 // SearchIssues runs a filtered search.
 func (s *Service) SearchIssues(ctx context.Context, filter SearchFilter, pageToken string, maxResults int) (*SearchResult, error) {
 	client, err := s.clientFor(ctx)

@@ -1,10 +1,17 @@
 import type { LayoutPanel } from "./types";
 
-// Layout sizing constants (single source of truth)
-export const LAYOUT_SIDEBAR_RATIO = 2.5 / 10;
-export const LAYOUT_RIGHT_RATIO = 2.5 / 10;
-export const LAYOUT_SIDEBAR_MAX_PX = 350;
-export const LAYOUT_RIGHT_MAX_PX = 450;
+// Layout sizing constants (single source of truth).
+// Pinned column max width is computed at runtime — see ./caps.ts.
+//
+// Ratio applied to viewport width to compute the initial default for any
+// pinned column when no user override exists. Sidebar and right pane share
+// the same initial fraction today; if they need to diverge later, split this
+// into per-column ratios at that time.
+export const LAYOUT_INITIAL_RATIO = 2.5 / 10;
+/** @deprecated use LAYOUT_INITIAL_RATIO. */
+export const LAYOUT_SIDEBAR_RATIO = LAYOUT_INITIAL_RATIO;
+/** @deprecated use LAYOUT_INITIAL_RATIO. */
+export const LAYOUT_RIGHT_RATIO = LAYOUT_INITIAL_RATIO;
 
 // Well-known group/panel IDs
 export const SIDEBAR_GROUP = "group-sidebar";
@@ -52,6 +59,12 @@ export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id">> = {
   vscode: { component: "vscode", title: "VS Code" },
   [TERMINAL_DEFAULT_ID]: {
     component: "terminal",
+    // terminalTab is the custom dockview tab that adds the `#N` badge
+    // and a right-click rename/destroy menu. The hook
+    // useEnsureDefaultTerminalOrdinary migrates the legacy
+    // `shell-default` PTY into a DB-backed ordinary terminal on
+    // session-page mount so the badge logic has a seq to display.
+    tabComponent: "terminalTab",
     title: "Terminal",
     params: { terminalId: "shell-default" },
   },

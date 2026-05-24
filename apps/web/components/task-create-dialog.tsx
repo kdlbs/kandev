@@ -330,6 +330,7 @@ function useSubmitHandlersWiring({
     useGitHubUrl: fs.useGitHubUrl,
     githubUrl: fs.githubUrl,
     githubPrHeadBranch: fs.githubPrHeadBranch,
+    githubPrBaseBranch: fs.githubPrBaseBranch,
     githubBranch: fs.githubBranch,
     agentProfileId: computed.effectiveAgentProfileId,
     executorId: fs.executorId,
@@ -408,6 +409,7 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     toast,
     workflows,
     isLocalExecutor: computed.isLocalExecutor,
+    preserveBranch: initialValues?.checkoutBranch || initialValues?.branch,
   });
   useLockedFieldSync(open, workflowId, initialValues, fs);
   const handlers = useDialogHandlers(fs, repositories);

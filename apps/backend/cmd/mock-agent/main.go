@@ -260,10 +260,15 @@ func mockAvailableCommands() []acp.AvailableCommand {
 		{Name: "todo", Description: "Emit a todo list"},
 		{Name: "mermaid", Description: "Emit a mermaid diagram"},
 		{Name: "subagent", Description: "Emit a subagent sequence"},
+		{Name: "subtask", Description: "Create a subtask of the current task via MCP", Input: hint("subtask title (optional)")},
 		{Name: "tool:read", Description: "Emit a read file tool call"},
 		{Name: "tool:edit", Description: "Emit an edit file tool call"},
 		{Name: "tool:exec", Description: "Emit a shell exec tool call"},
 		{Name: "tool:search", Description: "Emit a search tool call"},
+		{Name: "markdown", Description: "Render all markdown/text types"},
+		{Name: "sleep", Description: "Sleep without output (default 10s)", Input: hint("seconds (e.g. 30)")},
+		{Name: "ask-single", Description: "Ask a single clarification question"},
+		{Name: "ask-multiple", Description: "Ask multiple clarification questions"},
 	}
 }
 

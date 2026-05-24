@@ -11,12 +11,14 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/integrations/secretadapter"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
@@ -25,13 +27,14 @@ import (
 	"github.com/kandev/kandev/internal/slack"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/task/share"
 	userservice "github.com/kandev/kandev/internal/user/service"
 	utilityservice "github.com/kandev/kandev/internal/utility/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
 
-func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, dbPool *db.Pool, eventBus bus.EventBus, agentRegistry *registry.Registry) (*Services, *agentsettingscontroller.Controller, error) {
+func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, dbPool *db.Pool, eventBus bus.EventBus, agentRegistry *registry.Registry, version string) (*Services, *agentsettingscontroller.Controller, error) {
 	// Load custom TUI agents from DB into registry before discovery
 	loadCustomTUIAgents(context.Background(), repos, agentRegistry, log)
 
@@ -89,9 +92,11 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	)
 
 	githubSvc := initGitHubService(dbPool, eventBus, repos.Secrets, log)
+	gitlabSvc := initGitLabService(dbPool, repos.Secrets, log)
 	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
 	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
 	slackSvc := initSlackService(dbPool, repos.Secrets, log)
+	shareHTTP := initShareHandlers(dbPool, repos.Task, githubSvc, log, version)
 
 	// Plumb GitHub branch listing into the task service so provider-backed
 	// ("Remote") repos serve branches from the GitHub API rather than relying
@@ -101,17 +106,26 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		taskSvc.SetRemoteBranchLister(githubBranchListerAdapter{svc: githubSvc})
 	}
 
+	// Initialize Automation service
+	automationComponents, automationErr := automation.Provide(dbPool.Writer(), dbPool.Reader(), eventBus, githubSvc, log)
+	if automationErr != nil {
+		log.Warn("Automation service initialization failed (non-fatal)", zap.Error(automationErr))
+	}
+
 	return &Services{
-		Task:     taskSvc,
-		User:     userSvc,
-		Editor:   editorSvc,
-		Prompts:  promptSvc,
-		Utility:  utilitySvc,
-		Workflow: workflowSvc,
-		GitHub:   githubSvc,
-		Jira:     jiraSvc,
-		Linear:   linearSvc,
-		Slack:    slackSvc,
+		Task:       taskSvc,
+		User:       userSvc,
+		Editor:     editorSvc,
+		Prompts:    promptSvc,
+		Utility:    utilitySvc,
+		Workflow:   workflowSvc,
+		GitHub:     githubSvc,
+		GitLab:     gitlabSvc,
+		Jira:       jiraSvc,
+		Linear:     linearSvc,
+		Slack:      slackSvc,
+		Share:      shareHTTP,
+		Automation: automationComponents,
 		// Office is constructed later in initOfficeServices once all
 		// of its dependencies (config loader, task integrations, etc.) are available.
 		Office: nil,
@@ -245,6 +259,76 @@ func initGitHubService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secr
 	return svc
 }
 
+// gitlabSecretAdapter adapts secrets.SecretStore to the GitLab integration's
+// SecretProvider and SecretManager interfaces. Mirrors githubSecretAdapter
+// — kept separate so the two packages can evolve independently.
+type gitlabSecretAdapter struct {
+	store secrets.SecretStore
+}
+
+func (a *gitlabSecretAdapter) List(ctx context.Context) ([]*gitlab.SecretListItem, error) {
+	items, err := a.store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*gitlab.SecretListItem, len(items))
+	for i, item := range items {
+		result[i] = &gitlab.SecretListItem{
+			ID:       item.ID,
+			Name:     item.Name,
+			HasValue: item.HasValue,
+		}
+	}
+	return result, nil
+}
+
+func (a *gitlabSecretAdapter) Reveal(ctx context.Context, id string) (string, error) {
+	return a.store.Reveal(ctx, id)
+}
+
+func (a *gitlabSecretAdapter) Create(ctx context.Context, name, value string) (string, error) {
+	secret := &secrets.SecretWithValue{
+		Secret: secrets.Secret{Name: name},
+		Value:  value,
+	}
+	if err := a.store.Create(ctx, secret); err != nil {
+		return "", err
+	}
+	return secret.ID, nil
+}
+
+func (a *gitlabSecretAdapter) Update(ctx context.Context, id, value string) error {
+	return a.store.Update(ctx, id, &secrets.UpdateSecretRequest{Value: &value})
+}
+
+func (a *gitlabSecretAdapter) Delete(ctx context.Context, id string) error {
+	return a.store.Delete(ctx, id)
+}
+
+// initGitLabService wires up the GitLab integration. Failures are non-fatal:
+// the rest of the backend still boots without GitLab configured.
+func initGitLabService(dbPool *db.Pool, secretsStore secrets.SecretStore, log *logger.Logger) *gitlab.Service {
+	adapter := &gitlabSecretAdapter{store: secretsStore}
+	// Host persistence (per-workspace gitlab_host) is deferred to a
+	// follow-up; v1 reads from DefaultHost on every boot.
+	svc, _, err := gitlab.Provide(context.Background(), adapter, nil, log)
+	if err != nil {
+		log.Warn("GitLab service initialization failed (non-fatal)", zap.Error(err))
+	}
+	if svc != nil {
+		svc.SetSecretManager(adapter)
+		// Task↔MR association store backs the topbar review surface.
+		// Non-fatal: if the table fails to create the rest of the
+		// integration (status, configure, MR feedback) still works.
+		if store, storeErr := gitlab.NewStore(dbPool.Writer(), dbPool.Reader()); storeErr == nil {
+			svc.SetStore(store)
+		} else {
+			log.Warn("GitLab task-mr store unavailable (non-fatal)", zap.Error(storeErr))
+		}
+	}
+	return svc
+}
+
 // initJiraService wires up the Jira integration. Failures are non-fatal.
 func initJiraService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *jira.Service {
 	svc, _, err := jira.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
@@ -261,6 +345,32 @@ func initLinearService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secr
 		log.Warn("Linear service initialization failed (non-fatal)", zap.Error(err))
 	}
 	return svc
+}
+
+// initShareHandlers wires up the public-share-links HTTP surface. Failures
+// are non-fatal: the rest of the backend boots without the share endpoints.
+// The github.Client may be nil; CreateShare will fail at the IsAuthenticated
+// probe with a 412 in that case.
+func initShareHandlers(
+	dbPool *db.Pool,
+	taskRepo share.TaskReader,
+	githubSvc *github.Service,
+	log *logger.Logger,
+	version string,
+) *share.HTTPHandlers {
+	var ghClient github.Client
+	if githubSvc != nil {
+		ghClient = githubSvc.Client()
+	}
+	if ghClient == nil {
+		ghClient = &github.NoopClient{}
+	}
+	h, _, err := share.Provide(dbPool.Writer(), dbPool.Reader(), taskRepo, ghClient, log, share.Config{KandevVersion: version})
+	if err != nil {
+		log.Warn("Share handlers initialization failed (non-fatal)", zap.Error(err))
+		return nil
+	}
+	return h
 }
 
 // initSlackService wires up the Slack integration. Failures are non-fatal.

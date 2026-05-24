@@ -63,6 +63,144 @@ async function openExpansionFileDiff(testPage: Page) {
 test.describe("Diff expansion — Pierre Diffs provider", () => {
   test.describe.configure({ retries: 2, timeout: 120_000 });
 
+  test("diff viewer background matches app --background (regression for pierre 1.1.22 selector rename)", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedExpansionTask(testPage, apiClient, seedData);
+    await openChangesTab(testPage);
+    await openExpansionFileDiff(testPage);
+
+    await expect(testPage.locator("diffs-container")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 60_000 });
+
+    // Pierre's <pre data-diff> uses var(--diffs-bg); our unsafeCSS overrides
+    // that variable to var(--background) on :host. If the selector ever stops
+    // matching (as happened on the 1.0.11 -> 1.1.22 bump that renamed
+    // data-diffs -> data-diff), pierre's dark default (#0a0c10) leaks through.
+    const colors = await testPage.evaluate(() => {
+      const container = document.querySelector("diffs-container");
+      if (!container) throw new Error("diffs-container element not found");
+      const shadow = container.shadowRoot;
+      if (!shadow) throw new Error("diffs-container shadow root is closed or not yet attached");
+      const pre = shadow.querySelector<HTMLElement>("pre[data-diff]");
+      if (!pre) throw new Error("pre[data-diff] not found in diffs-container shadow root");
+      // Resolve var(--background) to a concrete rgb() via a probe element so we
+      // can compare it byte-for-byte to the shadow-DOM pre's computed bg.
+      const probe = document.createElement("div");
+      probe.style.backgroundColor = `var(--background)`;
+      document.body.appendChild(probe);
+      const expected = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return {
+        pre: getComputedStyle(pre).backgroundColor,
+        expected,
+      };
+    });
+
+    await testPage.screenshot({ path: "test-results/diff-bg-regression.png", fullPage: false });
+    expect(colors.pre).toBe(colors.expected);
+  });
+
+  test("Add-comment hover button is vertically centered in the line gutter", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedExpansionTask(testPage, apiClient, seedData);
+    await openChangesTab(testPage);
+    await openExpansionFileDiff(testPage);
+
+    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 60_000 });
+
+    // Pierre 1.1.22 declares [data-gutter-utility-slot] as display:flex with
+    // top:0/bottom:0 but no align-items, so a fixed-size hover button pins to
+    // the top of the line cell instead of centering on the line number.
+    // We override align-items: center in unsafeCSS — verify the rule actually
+    // reaches the shadow DOM's adopted stylesheets.
+    const slotAlignItems = await testPage.evaluate(() => {
+      const container = document.querySelector("diffs-container");
+      if (!container?.shadowRoot) throw new Error("diffs-container shadow root missing");
+
+      // Inject a probe with the slot's data attribute into the shadow root and
+      // read its computed style — this measures the actual cascade end result
+      // without depending on lazy hover-triggered slot creation.
+      const probe = document.createElement("div");
+      probe.setAttribute("data-gutter-utility-slot", "");
+      container.shadowRoot.appendChild(probe);
+      const computed = getComputedStyle(probe).alignItems;
+      probe.remove();
+      return computed;
+    });
+
+    await testPage.screenshot({ path: "test-results/diff-hover-button-regression.png" });
+    expect(slotAlignItems).toBe("center");
+  });
+
+  test("Add-comment hover button extrudes past the line-number cell", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedExpansionTask(testPage, apiClient, seedData);
+    await openChangesTab(testPage);
+    await openExpansionFileDiff(testPage);
+
+    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 60_000 });
+
+    // Pierre appends the gutter-utility slot wrapper INSIDE the line's
+    // numberElement on pointer-move (InteractionManager.js: target.numberElement
+    // .appendChild(this.gutterUtilityContainer)). The wrapper is right:0 of
+    // that cell, so a button with default 0 margin sits inside the cell and
+    // overlaps the line number digits. We compensate with margin-right:
+    // calc(1ch - 1lh) on our slotted button — same trick pierre uses on its
+    // built-in [data-utility-button] — to push it outside the cell into the
+    // code area. Verify the button's right edge ends up past the cell's right.
+    const lineCentre = await testPage.evaluate(() => {
+      const container = document.querySelector("diffs-container");
+      const shadow = container?.shadowRoot;
+      if (!shadow) throw new Error("diffs-container shadow root missing");
+      const line = shadow.querySelector<HTMLElement>("[data-line]");
+      if (!line) throw new Error("no [data-line] found to hover");
+      const r = line.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    });
+    await testPage.mouse.move(lineCentre.x, lineCentre.y);
+
+    const geometry = await testPage.evaluate(async () => {
+      const container = document.querySelector("diffs-container")!;
+      const shadow = container.shadowRoot!;
+      const deadline = Date.now() + 5_000;
+      let slotWrapper: HTMLElement | null = null;
+      while (Date.now() < deadline) {
+        slotWrapper = shadow.querySelector<HTMLElement>("[data-gutter-utility-slot]");
+        if (slotWrapper && slotWrapper.parentElement) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      if (!slotWrapper) throw new Error("gutter-utility-slot did not appear after hover");
+      const numberCell = slotWrapper.parentElement!;
+      // The slot wrapper is appended INTO numberCell; our React-rendered button
+      // is projected through the named <slot>. Its computed marginRight must
+      // resolve to a negative px value for the extrusion to work.
+      const slottedLight = document.querySelector<HTMLElement>('[slot="gutter-utility-slot"]');
+      if (!slottedLight) throw new Error("light-DOM [slot=gutter-utility-slot] not found");
+      const button = slottedLight.firstElementChild as HTMLElement | null;
+      if (!button) throw new Error("no button rendered inside slot");
+      const buttonRect = button.getBoundingClientRect();
+      const cellRect = numberCell.getBoundingClientRect();
+      return {
+        marginRight: parseFloat(getComputedStyle(button).marginRight),
+        buttonRight: buttonRect.right,
+        cellRight: cellRect.right,
+      };
+    });
+
+    await testPage.screenshot({ path: "test-results/diff-hover-button-extrusion.png" });
+    expect(geometry.marginRight).toBeLessThan(0);
+    expect(geometry.buttonRight).toBeGreaterThan(geometry.cellRight);
+  });
+
   test("renders Pierre Diffs viewer and shows both hunks", async ({
     testPage,
     apiClient,

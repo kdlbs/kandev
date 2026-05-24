@@ -9,6 +9,9 @@ import type {
   GitBranchSwitchedEvent,
 } from "@/lib/types/git-events";
 import { invalidateCumulativeDiffCache } from "@/hooks/domains/session/use-cumulative-diff";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+
+const debug = createDebugLogger("git-status:ws");
 
 // Handler functions for each event type
 type GitEventHandlers = {
@@ -25,6 +28,22 @@ function resolveEnvKey(store: StoreApi<AppState>, sessionId: string): string {
 
 const gitEventHandlers: GitEventHandlers = {
   status_update: (store, event) => {
+    if (IS_DEBUG) {
+      debug("status_update", {
+        sessionId: event.session_id,
+        repositoryName: event.status.repository_name ?? null,
+        branch: event.status.branch,
+        fileCount: Object.keys(event.status.files ?? {}).length,
+        modified: event.status.modified?.length ?? 0,
+        added: event.status.added?.length ?? 0,
+        deleted: event.status.deleted?.length ?? 0,
+        untracked: event.status.untracked?.length ?? 0,
+        ahead: event.status.ahead,
+        behind: event.status.behind,
+        envKey: resolveEnvKey(store, event.session_id),
+        envMapped: event.session_id in store.getState().environmentIdBySessionId,
+      });
+    }
     store.getState().setGitStatus(event.session_id, {
       branch: event.status.branch,
       remote_branch: event.status.remote_branch,
@@ -48,6 +67,14 @@ const gitEventHandlers: GitEventHandlers = {
   },
 
   commit_created: (store, event) => {
+    if (IS_DEBUG) {
+      debug("commit_created", {
+        sessionId: event.session_id,
+        sha: event.commit.commit_sha,
+        repositoryName: event.commit.repository_name ?? null,
+        filesChanged: event.commit.files_changed,
+      });
+    }
     store.getState().addSessionCommit(event.session_id, {
       id: event.commit.id,
       session_id: event.session_id,
@@ -69,6 +96,7 @@ const gitEventHandlers: GitEventHandlers = {
   },
 
   commits_reset: (store, event) => {
+    if (IS_DEBUG) debug("commits_reset", { sessionId: event.session_id });
     // Clear commits to trigger refetch in useSessionCommits hook
     store.getState().clearSessionCommits(event.session_id);
     // Invalidate cumulative diff cache when commits are reset
@@ -76,6 +104,7 @@ const gitEventHandlers: GitEventHandlers = {
   },
 
   branch_switched: (store, event) => {
+    if (IS_DEBUG) debug("branch_switched", { sessionId: event.session_id });
     // Clear commits to trigger refetch with new base commit
     store.getState().clearSessionCommits(event.session_id);
     // Invalidate cumulative diff cache when branch switches

@@ -15,8 +15,6 @@ export type {
 export {
   LAYOUT_SIDEBAR_RATIO,
   LAYOUT_RIGHT_RATIO,
-  LAYOUT_SIDEBAR_MAX_PX,
-  LAYOUT_RIGHT_MAX_PX,
   SIDEBAR_GROUP,
   CENTER_GROUP,
   RIGHT_TOP_GROUP,
@@ -28,8 +26,31 @@ export {
   panel,
 } from "./constants";
 
+// Runtime caps for pinned columns
+export {
+  computeSidebarMaxPx,
+  computeRightMaxPx,
+  computePinnedMaxPxFor,
+  LAYOUT_PINNED_MIN_PX,
+} from "./caps";
+
+// Pinned-column target widths (enforced after every layout-change)
+export {
+  setPinnedTarget,
+  getPinnedTarget,
+  clearPinnedTarget,
+  clearAllPinnedTargets,
+} from "./pinned-targets";
+
 // Presets
-export { defaultLayout, planLayout, previewLayout, getPresetLayout } from "./presets";
+export {
+  defaultLayout,
+  compactLayout,
+  planLayout,
+  previewLayout,
+  getPresetLayout,
+  getPresetSidebarColumn,
+} from "./presets";
 export type { BuiltInPreset } from "./presets";
 
 // Sizing
@@ -50,6 +71,7 @@ export { layoutStructuresMatch, savedLayoutMatchesLive } from "./comparator";
 
 // Intent
 export {
+  INTENT_COMPACT,
   INTENT_PLAN,
   INTENT_PR_REVIEW,
   injectIntentPanels,

@@ -17,7 +17,11 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { useTaskPendingClarification } from "@/hooks/use-task-pending-clarification";
-import { getTaskStateIcon, shouldUseQuestionTaskIcon } from "@/lib/ui/state-icons";
+import {
+  getTaskStateIcon,
+  shouldShowTaskRunningSpinner,
+  shouldUseQuestionTaskIcon,
+} from "@/lib/ui/state-icons";
 import { cn } from "@/lib/utils";
 import { needsAction } from "@/lib/utils/needs-action";
 import type { Task } from "@/components/kanban-card";
@@ -188,14 +192,14 @@ function KanbanCardActions({
   const effectiveMenuOpen = menuOpen || Boolean(isDeleting) || Boolean(isArchiving);
   const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId);
   const showQuestionIcon = shouldUseQuestionTaskIcon(task.state, hasPendingClarificationRequest);
+  const showRunningSpinner = shouldShowTaskRunningSpinner(task.state, task.primarySessionState);
   const statusIcon = getTaskStateIcon(task.state, "h-4 w-4", hasPendingClarificationRequest);
   const hasKnownSession =
     Boolean(task.primarySessionId) || Boolean(task.sessionCount && task.sessionCount > 0);
 
   return (
     <div className="flex items-center gap-2">
-      {(task.state === "IN_PROGRESS" || task.state === "SCHEDULING" || showQuestionIcon) &&
-        statusIcon}
+      {(showRunningSpinner || showQuestionIcon) && statusIcon}
       {showMaximizeButton && onOpenFullPage && hasKnownSession && (
         <button
           type="button"

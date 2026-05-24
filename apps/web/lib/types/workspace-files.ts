@@ -35,6 +35,8 @@ export type FileChangeEvent = {
   session_id: string;
   task_id: string;
   agent_id: string;
+  // Set for multi-repo task roots so the frontend can scope refreshes to the right repo branch.
+  repository_name?: string;
 };
 
 export type FileChangeNotificationPayload = {

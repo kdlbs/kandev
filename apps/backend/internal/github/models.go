@@ -207,6 +207,42 @@ const (
 	ReviewScopeUserAndTeams = "user_and_teams"
 )
 
+// CleanupPolicy controls how a review or issue watch handles its auto-created
+// tasks once the underlying PR / issue reaches a terminal state.
+const (
+	// CleanupPolicyAuto deletes the task once the PR/issue is merged or closed
+	// UNLESS the user authored at least one message in the task (the agent's
+	// auto-start prompt does not count).
+	CleanupPolicyAuto = "auto"
+	// CleanupPolicyAlways deletes the task on terminal state regardless of
+	// user interaction. Use when the watch is purely informational and the
+	// user never expects a banner / history for merged PRs.
+	CleanupPolicyAlways = "always"
+	// CleanupPolicyNever disables automatic cleanup. Tasks pile up until the
+	// user invokes manual cleanup or deletes them by hand.
+	CleanupPolicyNever = "never"
+)
+
+// IsValidCleanupPolicy reports whether s is one of the recognized policies.
+// Empty string is treated as valid so legacy rows (pre-migration) and zero
+// values default to "auto" downstream.
+func IsValidCleanupPolicy(s string) bool {
+	switch s {
+	case "", CleanupPolicyAuto, CleanupPolicyAlways, CleanupPolicyNever:
+		return true
+	}
+	return false
+}
+
+// NormalizeCleanupPolicy maps the empty string to CleanupPolicyAuto. Unknown
+// values are returned unchanged so the caller can surface a validation error.
+func NormalizeCleanupPolicy(s string) string {
+	if s == "" {
+		return CleanupPolicyAuto
+	}
+	return s
+}
+
 // ReviewWatch configures periodic polling for PRs needing the user's review.
 // Repos holds the list of repositories to monitor. An empty list means all repos.
 type ReviewWatch struct {
@@ -223,6 +259,7 @@ type ReviewWatch struct {
 	CustomQuery         string       `json:"custom_query" db:"custom_query"`
 	Enabled             bool         `json:"enabled" db:"enabled"`
 	PollIntervalSeconds int          `json:"poll_interval_seconds" db:"poll_interval_seconds"`
+	CleanupPolicy       string       `json:"cleanup_policy" db:"cleanup_policy"`
 	LastPolledAt        *time.Time   `json:"last_polled_at,omitempty" db:"last_polled_at"`
 	CreatedAt           time.Time    `json:"created_at" db:"created_at"`
 	UpdatedAt           time.Time    `json:"updated_at" db:"updated_at"`
@@ -257,6 +294,14 @@ type GitHubRepo struct {
 // RepoBranch represents a branch in a GitHub repository.
 type RepoBranch struct {
 	Name string `json:"name"`
+}
+
+// RepoMergeMethods reports which merge methods a repository allows. Mirrors
+// the allow_*_merge booleans from GET /repos/{owner}/{repo}.
+type RepoMergeMethods struct {
+	Merge  bool `json:"merge"`
+	Squash bool `json:"squash"`
+	Rebase bool `json:"rebase"`
 }
 
 // GitHubStatus represents GitHub connection status.
@@ -303,6 +348,7 @@ type CreateReviewWatchRequest struct {
 	ReviewScope         string       `json:"review_scope"`
 	CustomQuery         string       `json:"custom_query"`
 	PollIntervalSeconds int          `json:"poll_interval_seconds"`
+	CleanupPolicy       string       `json:"cleanup_policy"`
 }
 
 // UpdateReviewWatchRequest is the request body for updating a review watch.
@@ -317,6 +363,7 @@ type UpdateReviewWatchRequest struct {
 	CustomQuery         *string       `json:"custom_query,omitempty"`
 	Enabled             *bool         `json:"enabled,omitempty"`
 	PollIntervalSeconds *int          `json:"poll_interval_seconds,omitempty"`
+	CleanupPolicy       *string       `json:"cleanup_policy,omitempty"`
 }
 
 // PRFeedbackEvent is published to the event bus when a PR has new feedback.
@@ -424,6 +471,7 @@ type IssueWatch struct {
 	CustomQuery         string       `json:"custom_query" db:"custom_query"`
 	Enabled             bool         `json:"enabled" db:"enabled"`
 	PollIntervalSeconds int          `json:"poll_interval_seconds" db:"poll_interval_seconds"`
+	CleanupPolicy       string       `json:"cleanup_policy" db:"cleanup_policy"`
 	LastPolledAt        *time.Time   `json:"last_polled_at,omitempty" db:"last_polled_at"`
 	CreatedAt           time.Time    `json:"created_at" db:"created_at"`
 	UpdatedAt           time.Time    `json:"updated_at" db:"updated_at"`
@@ -465,6 +513,7 @@ type CreateIssueWatchRequest struct {
 	Labels              []string     `json:"labels"`
 	CustomQuery         string       `json:"custom_query"`
 	PollIntervalSeconds int          `json:"poll_interval_seconds"`
+	CleanupPolicy       string       `json:"cleanup_policy"`
 }
 
 // UpdateIssueWatchRequest is the request body for updating an issue watch.
@@ -479,6 +528,7 @@ type UpdateIssueWatchRequest struct {
 	CustomQuery         *string       `json:"custom_query,omitempty"`
 	Enabled             *bool         `json:"enabled,omitempty"`
 	PollIntervalSeconds *int          `json:"poll_interval_seconds,omitempty"`
+	CleanupPolicy       *string       `json:"cleanup_policy,omitempty"`
 }
 
 // --- Action presets (quick-launch prompts on the /github page) ---

@@ -544,6 +544,7 @@ func (h *TerminalHandler) handleAgentPassthroughWS(
 
 	// Create WebSocket writer for output
 	wsw := newWsWriter(conn)
+	interactiveRunner.TrackSessionWebSocket(sessionID, wsw)
 
 	// Run the terminal bridge
 	h.runTerminalBridge(conn, sessionID, processID, interactiveRunner, wsw)

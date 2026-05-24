@@ -102,10 +102,12 @@ func TestHealTaskEnvironmentWorkspacePaths_BackfillsEmpty(t *testing.T) {
 	}
 }
 
-// TestHealTaskEnvironmentWorkspacePaths_LeavesPopulatedAlone — a row that
-// already has a workspace_path must not be touched. Otherwise the heal could
-// stamp on task-dir-mode envs whose workspace_path is the worktree's parent.
-func TestHealTaskEnvironmentWorkspacePaths_LeavesPopulatedAlone(t *testing.T) {
+// TestHealTaskEnvironmentWorkspacePaths_RepairsCollapsedParent — a row where
+// workspace_path was the task-root parent of worktree_path (the pre-fix value
+// left by legacy computeWorkspacePath's filepath.Dir) must be repaired:
+// workspace_path becomes worktree_path so ACP session/load finds the agent's
+// saved jsonl on cold start.
+func TestHealTaskEnvironmentWorkspacePaths_RepairsCollapsedParent(t *testing.T) {
 	repo := newRepoForHealTests(t)
 	insertTask(t, repo.db, "task-B")
 	insertEnv(t, repo.db, &models.TaskEnvironment{
@@ -113,7 +115,7 @@ func TestHealTaskEnvironmentWorkspacePaths_LeavesPopulatedAlone(t *testing.T) {
 		TaskID:        "task-B",
 		ExecutorType:  "worktree",
 		WorktreePath:  "/home/user/.kandev/tasks/foo_abc/repo",
-		WorkspacePath: "/home/user/.kandev/tasks/foo_abc",
+		WorkspacePath: "/home/user/.kandev/tasks/foo_abc", // legacy collapsed parent
 	})
 
 	if err := repo.healTaskEnvironmentWorkspacePaths(); err != nil {
@@ -124,16 +126,41 @@ func TestHealTaskEnvironmentWorkspacePaths_LeavesPopulatedAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get env: %v", err)
 	}
-	if got.WorkspacePath != "/home/user/.kandev/tasks/foo_abc" {
+	if got.WorkspacePath != "/home/user/.kandev/tasks/foo_abc/repo" {
+		t.Errorf("workspace_path = %q, want repaired to worktree_path subdir", got.WorkspacePath)
+	}
+}
+
+// TestHealTaskEnvironmentWorkspacePaths_LeavesAlreadyCorrectAlone — a row that
+// already has workspace_path == worktree_path must not be touched.
+func TestHealTaskEnvironmentWorkspacePaths_LeavesAlreadyCorrectAlone(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	insertTask(t, repo.db, "task-B2")
+	insertEnv(t, repo.db, &models.TaskEnvironment{
+		ID:            "env-B2",
+		TaskID:        "task-B2",
+		ExecutorType:  "worktree",
+		WorktreePath:  "/home/user/.kandev/tasks/foo_abc/repo",
+		WorkspacePath: "/home/user/.kandev/tasks/foo_abc/repo",
+	})
+
+	if err := repo.healTaskEnvironmentWorkspacePaths(); err != nil {
+		t.Fatalf("heal: %v", err)
+	}
+
+	got, err := repo.GetTaskEnvironment(context.Background(), "env-B2")
+	if err != nil {
+		t.Fatalf("get env: %v", err)
+	}
+	if got.WorkspacePath != "/home/user/.kandev/tasks/foo_abc/repo" {
 		t.Errorf("workspace_path = %q, must not be overwritten", got.WorkspacePath)
 	}
 }
 
 // TestHealTaskEnvironmentWorkspacePaths_TaskDirMode — task-dir-mode envs
 // place the worktree at <root>/.kandev/tasks/<name>/<repo>; workspace_path
-// must be the per-task root (Dir of worktree_path), not the repo subdir.
-// The naive heal would have stamped worktree_path here and corrupted the
-// row in a different way.
+// must equal worktree_path (the repo subdir), matching the agent process cwd
+// so ACP session/load on cold start hits the same sanitised-cwd folder.
 func TestHealTaskEnvironmentWorkspacePaths_TaskDirMode(t *testing.T) {
 	repo := newRepoForHealTests(t)
 	insertTask(t, repo.db, "task-T")
@@ -152,8 +179,8 @@ func TestHealTaskEnvironmentWorkspacePaths_TaskDirMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get env: %v", err)
 	}
-	if got.WorkspacePath != "/home/u/.kandev/tasks/fix-something_abc" {
-		t.Errorf("workspace_path = %q, want task root (parent of worktree_path)", got.WorkspacePath)
+	if got.WorkspacePath != "/home/u/.kandev/tasks/fix-something_abc/kandev" {
+		t.Errorf("workspace_path = %q, want worktree_path (subdir) — process cwd parity", got.WorkspacePath)
 	}
 }
 

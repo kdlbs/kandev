@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/persistence"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/repository"
+	terminalrepo "github.com/kandev/kandev/internal/terminal/repository"
 	utilitystore "github.com/kandev/kandev/internal/utility/store"
 	workflowrepository "github.com/kandev/kandev/internal/workflow/repository"
 
@@ -72,6 +73,11 @@ func provideRepositories(cfg *config.Config, log *logger.Logger, version string)
 	}
 	cleanups = append(cleanups, officeCleanup)
 
+	terminalRepoImpl, err := terminalrepo.NewWithDB(writer, reader, log)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("terminal repo: %w", err)
+	}
+
 	masterKeyProvider, err := secrets.NewMasterKeyProvider(cfg.ResolvedDataDir())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("master key: %w", err)
@@ -98,6 +104,7 @@ func provideRepositories(cfg *config.Config, log *logger.Logger, version string)
 		Workflow:      workflowRepo,
 		Secrets:       secretStore,
 		Office:        officeRepo,
+		Terminal:      terminalRepoImpl,
 	}
 	return pool, repos, cleanups, nil
 }

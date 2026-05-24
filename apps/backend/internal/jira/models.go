@@ -8,17 +8,36 @@ import "time"
 
 // Auth method identifiers persisted in JiraConfig.AuthMethod.
 const (
-	AuthMethodAPIToken      = "api_token"
+	// AuthMethodAPIToken is Atlassian Cloud's Basic auth with email + API token
+	// minted at id.atlassian.com. Cloud-only — Server/DC instances reject it.
+	AuthMethodAPIToken = "api_token"
+	// AuthMethodSessionCookie wraps a JWT session cookie copied from DevTools.
+	// Works against both Cloud and Server/DC since the cookie is the same shape.
 	AuthMethodSessionCookie = "session_cookie"
+	// AuthMethodPAT is Server/DC's Personal Access Token, sent as Bearer.
+	// Created from the user's profile on the Jira instance. Server/DC-only —
+	// Cloud doesn't accept Bearer for the Jira REST API.
+	AuthMethodPAT = "pat"
+)
+
+// Instance type identifiers persisted in JiraConfig.InstanceType. Cloud sites
+// (acme.atlassian.net) expose REST v3 and the token-paginated `/search/jql`;
+// Server / Data Center (self-hosted) instances expose only REST v2 and the
+// legacy `startAt`-paginated `/search`. The client branches on this field to
+// pick the right endpoints — there is no autodetect.
+const (
+	InstanceTypeCloud  = "cloud"
+	InstanceTypeServer = "server"
 )
 
 // JiraConfig is the install-wide configuration for the Jira integration. The
-// secret value (API token or session cookie) is stored separately in the
+// secret value (API token, PAT, or session cookie) is stored separately in the
 // encrypted secret store under SecretKey.
 type JiraConfig struct {
 	SiteURL           string `json:"siteUrl" db:"site_url"`
 	Email             string `json:"email" db:"email"`
 	AuthMethod        string `json:"authMethod" db:"auth_method"`
+	InstanceType      string `json:"instanceType" db:"instance_type"`
 	DefaultProjectKey string `json:"defaultProjectKey" db:"default_project_key"`
 	HasSecret         bool   `json:"hasSecret" db:"-"`
 	// SecretExpiresAt is populated for session_cookie auth when the cookie is
@@ -42,6 +61,7 @@ type SetConfigRequest struct {
 	SiteURL           string `json:"siteUrl"`
 	Email             string `json:"email"`
 	AuthMethod        string `json:"authMethod"`
+	InstanceType      string `json:"instanceType"`
 	DefaultProjectKey string `json:"defaultProjectKey"`
 	Secret            string `json:"secret"`
 }

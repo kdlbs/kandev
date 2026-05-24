@@ -51,6 +51,7 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/fs/list-dir", h.httpListDirectory)
 	api.GET("/repositories/:id", h.httpGetRepository)
 	api.GET("/repositories/:id/branches", h.httpListRepositoryBranches)
+	api.GET("/repositories/:id/active-session-count", h.httpGetRepositoryActiveSessionCount)
 	api.PATCH("/repositories/:id", h.httpUpdateRepository)
 	api.DELETE("/repositories/:id", h.httpDeleteRepository)
 	api.GET("/repositories/:id/scripts", h.httpListRepositoryScripts)
@@ -445,6 +446,15 @@ func (h *RepositoryHandlers) httpDeleteRepository(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func (h *RepositoryHandlers) httpGetRepositoryActiveSessionCount(c *gin.Context) {
+	count, err := h.service.CountActiveSessionsByRepository(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		handleNotFound(c, h.logger, err, "repository not found")
+		return
+	}
+	c.JSON(http.StatusOK, dto.RepositoryActiveSessionCountResponse{ActiveSessionCount: count})
 }
 
 // WS handlers

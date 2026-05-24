@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -247,13 +248,17 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 			return fmt.Errorf("repository %q listed more than once for the task", repositoryID)
 		}
 		seen[repositoryID] = true
+		metadata := make(map[string]interface{})
+		if prNum := resolvePRNumber(repoInput); prNum > 0 {
+			metadata["pr_number"] = prNum
+		}
 		taskRepo := &models.TaskRepository{
 			TaskID:         taskID,
 			RepositoryID:   repositoryID,
 			BaseBranch:     baseBranch,
 			CheckoutBranch: repoInput.CheckoutBranch,
 			Position:       i,
-			Metadata:       make(map[string]interface{}),
+			Metadata:       metadata,
 		}
 		if err := s.taskRepos.CreateTaskRepository(ctx, taskRepo); err != nil {
 			s.logger.Error("failed to create task repository", zap.Error(err))
@@ -394,6 +399,34 @@ func parseGitHubRepoURL(rawURL string) (owner, name string, err error) {
 	}
 
 	return parts[0], parts[1], nil
+}
+
+// resolvePRNumber returns the GitHub PR number for a repository input. Prefers
+// the explicit PRNumber field; falls back to parsing a /pull/<N> path out of
+// GitHubURL when present. Returns 0 when no PR is identified.
+//
+// The PR number is needed at worktree-creation time so fork PRs (whose head
+// branch only exists on the contributor's fork) can be materialized via the
+// refs/pull/<N>/head refspec on the base repo instead of a branch-name fetch
+// that would 404 against origin.
+func resolvePRNumber(input TaskRepositoryInput) int {
+	if input.PRNumber > 0 {
+		return input.PRNumber
+	}
+	rawURL := strings.TrimSpace(input.GitHubURL)
+	idx := strings.Index(rawURL, "/pull/")
+	if idx < 0 {
+		return 0
+	}
+	numStr := rawURL[idx+len("/pull/"):]
+	if i := strings.IndexAny(numStr, "/?#"); i >= 0 {
+		numStr = numStr[:i]
+	}
+	n, err := strconv.Atoi(numStr)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 // ReplaceTaskRepositories deletes all existing task-repository associations

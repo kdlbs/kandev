@@ -14,7 +14,12 @@
 # Run:
 #   docker run -p 38429:38429 -v kandev-data:/data ghcr.io/kdlbs/kandev:latest
 
+ARG PNPM_VERSION=9.15.9
+
 FROM node:24-bookworm-slim
+
+ARG PNPM_VERSION
+LABEL org.opencontainers.image.pnpm-version="${PNPM_VERSION}"
 
 # Install runtime dependencies. gh is included because the GitHub integration
 # (PR review, webhooks) shells out to it for auth fallback when GITHUB_TOKEN

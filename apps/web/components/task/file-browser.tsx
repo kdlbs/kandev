@@ -21,7 +21,7 @@ import {
   useFileBrowserSearch,
   useFileBrowserTree,
   useScrollPersistence,
-  loadNodeChildren,
+  toggleFolderExpand,
   fetchAndOpenFile,
 } from "./file-browser-hooks";
 import { getVisiblePaths, moveNodesInTree, computeMoveTargets } from "./file-tree-utils";
@@ -126,18 +126,7 @@ function useFileBrowserHandlers(
   );
 
   const toggleExpand = useCallback(
-    async (node: FileTreeNode) => {
-      if (!node.is_dir) return;
-      setActiveFolderPath(node.path);
-      const newExpanded = new Set(treeState.expandedPaths);
-      if (newExpanded.has(node.path)) {
-        newExpanded.delete(node.path);
-      } else {
-        await loadNodeChildren(node, sessionId, treeState);
-        newExpanded.add(node.path);
-      }
-      treeState.setExpandedPaths(newExpanded);
-    },
+    (node: FileTreeNode) => toggleFolderExpand({ node, sessionId, treeState, setActiveFolderPath }),
     [treeState, sessionId],
   );
 

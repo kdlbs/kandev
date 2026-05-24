@@ -121,6 +121,31 @@ func TestInjectKandevContext_SystemContentStrippable(t *testing.T) {
 	assert.Equal(t, "Do something", stripped)
 }
 
+func TestHasKandevContext_DetectsInjectedWrap(t *testing.T) {
+	// Any prompt produced by InjectKandevContext must be detectable so call
+	// sites can make the wrap step idempotent.
+	wrapped := InjectKandevContext("task-abc", "session-xyz", "Do something")
+	assert.True(t, HasKandevContext(wrapped))
+
+	// A bare user message has no marker.
+	assert.False(t, HasKandevContext("Do something"))
+
+	// A different <kandev-system> block (e.g. active-document context from
+	// the frontend) must NOT trigger a false positive — otherwise the
+	// orchestrator's idempotency guard would skip the real kandev-context
+	// wrap.
+	other := Wrap("ACTIVE DOCUMENT: some file") + "\n\nuser text"
+	assert.False(t, HasKandevContext(other))
+
+	// A user message body that happens to mention the marker phrase must
+	// NOT short-circuit the wrap — only an actual <kandev-system> block
+	// containing the marker counts. Without the regex scope, "how do I use
+	// the KANDEV MCP TOOLS?" would falsely register as already wrapped and
+	// the first-turn injection would be skipped.
+	userMentions := "how do I use the KANDEV MCP TOOLS?"
+	assert.False(t, HasKandevContext(userMentions))
+}
+
 // --- StripSystemContent tests ---
 
 func TestStripSystemContent_NoTags(t *testing.T) {
@@ -226,6 +251,25 @@ func TestInterpolatePlaceholders_NoPlaceholders(t *testing.T) {
 func TestInterpolatePlaceholders_MultiplePlaceholders(t *testing.T) {
 	result := InterpolatePlaceholders("{task_id} and {task_id}", testTaskID)
 	assert.Equal(t, "task-123 and task-123", result)
+}
+
+// --- ask_user_question schema documentation ---
+
+func TestContexts_DocumentCurrentAskUserQuestionSchema(t *testing.T) {
+	// Regression: the embedded prompt context used to document a legacy
+	// top-level `prompt` / `options` schema for ask_user_question_kandev.
+	// The real MCP tool requires a `questions` array of 1-4 question objects.
+	// Stale docs caused agents to send malformed payloads that landed in the
+	// approval layer as "0 questions" and were ultimately cancelled.
+	for name, ctx := range map[string]string{
+		"ConfigContext": ConfigContext(),
+		"KandevContext": KandevContext(),
+	} {
+		assert.Contains(t, ctx, "questions", "%s should mention the questions array param", name)
+		assert.Contains(t, ctx, "1-4 question objects", "%s should document the 1-4 question limit", name)
+		assert.NotContains(t, ctx, "Required params: prompt (string), options", "%s leaks the legacy ask_user_question schema", name)
+		assert.NotContains(t, ctx, "Required: prompt, options", "%s leaks the legacy ask_user_question schema", name)
+	}
 }
 
 // --- ConfigContext vs KandevContext distinction ---

@@ -5,13 +5,15 @@ import { vscodeDark } from "@uiw/codemirror-theme-vscode";
 import { EditorView } from "@codemirror/view";
 import type { Extension } from "@codemirror/state";
 import { getCodeMirrorExtensionFromPath } from "@/lib/languages";
+import { cn } from "@/lib/utils";
 
 type FileViewerContentProps = {
   path: string;
   content: string;
+  className?: string;
 };
 
-export function FileViewerContent({ path, content }: FileViewerContentProps) {
+export function FileViewerContent({ path, content, className }: FileViewerContentProps) {
   const langExt = getCodeMirrorExtensionFromPath(path);
   const extensions: Extension[] = [EditorView.lineWrapping, EditorView.editable.of(false)];
   if (langExt) {
@@ -31,7 +33,15 @@ export function FileViewerContent({ path, content }: FileViewerContentProps) {
         highlightActiveLine: false,
         highlightSelectionMatches: true,
       }}
-      className="h-full overflow-auto text-xs"
+      className={cn(
+        // Wrapper must have a bounded height so CodeMirror's internal .cm-scroller
+        // scrolls instead of expanding to content height. touch-pan-y on
+        // .cm-scroller is what makes vertical touch scroll work on mobile —
+        // without it, .cm-content captures the gesture for selection.
+        "h-full overflow-hidden text-xs",
+        "[&_.cm-scroller]:touch-pan-y [&_.cm-scroller]:overscroll-contain",
+        className,
+      )}
     />
   );
 }

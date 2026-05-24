@@ -114,6 +114,7 @@ func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*JiraCo
 		SiteURL:           normalizeSiteURL(req.SiteURL),
 		Email:             req.Email,
 		AuthMethod:        req.AuthMethod,
+		InstanceType:      req.InstanceType,
 		DefaultProjectKey: req.DefaultProjectKey,
 	}
 	if err := s.store.UpsertConfig(ctx, cfg); err != nil {
@@ -333,56 +334,135 @@ func (s *Service) invalidateClient() {
 // (post-save re-test).
 func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest) (*JiraConfig, string, error) {
 	cfg := &JiraConfig{
-		SiteURL:    normalizeSiteURL(req.SiteURL),
-		Email:      req.Email,
-		AuthMethod: req.AuthMethod,
+		SiteURL:      normalizeSiteURL(req.SiteURL),
+		Email:        req.Email,
+		AuthMethod:   req.AuthMethod,
+		InstanceType: req.InstanceType,
 	}
+	var secret string
 	if req.Secret != "" {
-		return cfg, req.Secret, nil
-	}
-	if s.secrets == nil {
-		return nil, "", errors.New("no secret store configured")
-	}
-	secret, err := s.secrets.Reveal(ctx, SecretKey)
-	if err != nil {
-		// Don't conflate a transient secret-store failure with "no token
-		// stored". Surfacing the real error gives the user a path to retry
-		// instead of telling them to paste a token they already have.
-		s.log.Warn("jira: secret reveal failed", zap.Error(err))
-		return nil, "", fmt.Errorf("read jira secret: %w", err)
-	}
-	if secret == "" {
-		return nil, "", errors.New("no token stored — paste one to test")
-	}
-	// Merge with persisted config so the test uses saved site/email if the
-	// caller only passed a partial request.
-	if stored, _ := s.store.GetConfig(ctx); stored != nil {
-		if cfg.SiteURL == "" {
-			cfg.SiteURL = stored.SiteURL
+		secret = req.Secret
+	} else {
+		if s.secrets == nil {
+			return nil, "", errors.New("no secret store configured")
 		}
-		if cfg.Email == "" {
-			cfg.Email = stored.Email
+		var err error
+		secret, err = s.secrets.Reveal(ctx, SecretKey)
+		if err != nil {
+			// Don't conflate a transient secret-store failure with "no token
+			// stored". Surfacing the real error gives the user a path to retry
+			// instead of telling them to paste a token they already have.
+			s.log.Warn("jira: secret reveal failed", zap.Error(err))
+			return nil, "", fmt.Errorf("read jira secret: %w", err)
 		}
-		if cfg.AuthMethod == "" {
-			cfg.AuthMethod = stored.AuthMethod
+		if secret == "" {
+			return nil, "", errors.New("no token stored — paste one to test")
 		}
+	}
+	// Merge with persisted config only when the caller didn't pass enough on
+	// its own. A fully-specified pre-save TestConnection request needs no DB
+	// read — keeping the call gated avoids a transient DB error blocking auth
+	// testing for a request that doesn't depend on persisted state. When a
+	// read does happen, surface its error so a real DB failure isn't masked
+	// as an opaque "missing field" validation message later on.
+	needsStoredConfig := cfg.SiteURL == "" ||
+		cfg.AuthMethod == "" ||
+		cfg.InstanceType == "" ||
+		(cfg.AuthMethod == AuthMethodAPIToken && cfg.Email == "")
+	if needsStoredConfig {
+		if err := s.fillConfigFromStored(ctx, cfg); err != nil {
+			return nil, "", err
+		}
+	}
+	if cfg.InstanceType == "" {
+		cfg.InstanceType = InstanceTypeCloud
+	}
+	// Run the same auth/instance check the save path runs, so TestConnection
+	// reports invalid combos (e.g. pat+cloud, api_token+server) with a clear
+	// validation error instead of letting Jira return an opaque 401.
+	if err := validateAuthInstance(cfg.AuthMethod, cfg.InstanceType, cfg.Email); err != nil {
+		return nil, "", err
 	}
 	return cfg, secret, nil
+}
+
+// fillConfigFromStored reads the persisted singleton config and copies any
+// fields the caller left blank onto cfg. A real read failure is returned so
+// callers don't mask DB errors as opaque "missing field" validation errors;
+// a missing row (stored == nil) is treated as "nothing to fill" rather than
+// an error so first-time TestConnection requests still go through.
+func (s *Service) fillConfigFromStored(ctx context.Context, cfg *JiraConfig) error {
+	stored, err := s.store.GetConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("read jira config: %w", err)
+	}
+	if stored == nil {
+		return nil
+	}
+	if cfg.SiteURL == "" {
+		cfg.SiteURL = stored.SiteURL
+	}
+	if cfg.Email == "" {
+		cfg.Email = stored.Email
+	}
+	if cfg.AuthMethod == "" {
+		cfg.AuthMethod = stored.AuthMethod
+	}
+	if cfg.InstanceType == "" {
+		cfg.InstanceType = stored.InstanceType
+	}
+	return nil
 }
 
 func validateConfigRequest(req *SetConfigRequest) error {
 	if req.SiteURL == "" {
 		return errors.New("siteUrl required")
 	}
-	switch req.AuthMethod {
+	// Require an explicit instanceType — defaulting to cloud here would let a
+	// stale client (one that pre-dates Server/DC support) silently downgrade
+	// a saved Server config back to Cloud on the next partial save.
+	switch req.InstanceType {
+	case InstanceTypeCloud, InstanceTypeServer:
+	case "":
+		return errors.New("instanceType required (cloud or server)")
+	default:
+		return fmt.Errorf("unknown instance type: %q", req.InstanceType)
+	}
+	return validateAuthInstance(req.AuthMethod, req.InstanceType, req.Email)
+}
+
+// validateAuthInstance enforces the supported (auth method, instance type)
+// combinations. Shared by config-save and the test-connection flow so a
+// pre-save test surfaces the same diagnostic the eventual save would, instead
+// of letting Jira return an opaque 401 for an unsupported combo.
+func validateAuthInstance(authMethod, instanceType, email string) error {
+	switch authMethod {
 	case AuthMethodAPIToken:
-		if req.Email == "" {
+		// API tokens are Cloud-only — Atlassian Server/DC rejects Basic auth
+		// with `id.atlassian.com` tokens and redirects to a login page, which
+		// makes the failure mode opaque. Catch it at config time.
+		if instanceType != InstanceTypeCloud {
+			return errors.New("api_token auth is supported only on Atlassian Cloud — use pat for Server/DC")
+		}
+		if email == "" {
 			return errors.New("email required for api_token auth")
 		}
+	case AuthMethodPAT:
+		// Personal Access Tokens are a Server/DC concept; Cloud expects
+		// id.atlassian.com tokens via Basic, not Bearer.
+		if instanceType != InstanceTypeServer {
+			return errors.New("pat auth is supported only on Jira Server/Data Center — use api_token for Cloud")
+		}
 	case AuthMethodSessionCookie:
-		// email is optional for session cookies.
+		// The client wraps the session secret under cloud.session.token and
+		// tenant.session.token — both Atlassian-Cloud-specific cookie names.
+		// Server/DC uses JSESSIONID, so the current wrapping is a no-op there;
+		// reject the combo until we add a Server-aware session-cookie path.
+		if instanceType != InstanceTypeCloud {
+			return errors.New("session_cookie auth is supported only on Atlassian Cloud — use pat for Server/DC")
+		}
 	default:
-		return fmt.Errorf("unknown auth method: %q", req.AuthMethod)
+		return fmt.Errorf("unknown auth method: %q", authMethod)
 	}
 	return nil
 }

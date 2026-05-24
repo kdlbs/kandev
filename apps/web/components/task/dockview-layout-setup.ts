@@ -3,33 +3,187 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { getRootSplitview } from "@/lib/state/dockview-layout-builders";
+import {
+  computeSidebarMaxPx,
+  computeRightMaxPx,
+  LAYOUT_PINNED_MIN_PX,
+  RIGHT_TOP_GROUP,
+  RIGHT_BOTTOM_GROUP,
+  setPinnedTarget,
+  getPinnedTarget,
+} from "@/lib/state/layout-manager";
 import { setEnvLayout } from "@/lib/local-storage";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
-import { stopUserShell } from "@/lib/api/domains/user-shell-api";
+import { parkUserShell, stopUserShell } from "@/lib/api/domains/user-shell-api";
 
-const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
+// v2: bumped alongside DOCKVIEW_ENV_LAYOUT_PREFIX so the no-env fallback
+// also invalidates layouts saved under the previous caps.
+const LAYOUT_STORAGE_KEY = "dockview-layout-v2";
+const terminalTerminateClosePanelIds = new Set<string>();
+
+export function markTerminalPanelTerminateClose(panelId: string): void {
+  terminalTerminateClosePanelIds.add(panelId);
+}
+
+/**
+ * Pinned-column target enforcement.
+ *
+ * Dockview's splitview rebalances proportionally on any `api.layout` call,
+ * which would otherwise grow pinned columns past their initial defaults on
+ * container expansion and shrink them on container contraction. We treat
+ * sidebar/right as having a *target width* (stored in `pinned-targets.ts`)
+ * that is updated only by explicit user actions (drag, initial layout,
+ * restore from saved); after every layout-change event we force the live
+ * columns back to their targets via `sv.resizeView`.
+ */
+
+/** Enforcement-in-progress guard to prevent infinite loops when our own
+ *  `sv.resizeView` triggers `onDidLayoutChange`. */
+let enforcing = false;
+
+/** True while the user is actively dragging a `.dv-sash`. We pause target
+ *  enforcement during the drag so the in-progress resize doesn't get
+ *  reverted to the previous target on every intermediate layout change. */
+let sashDragging = false;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function restoreColumnToTarget(sv: any, idx: number, target: number | undefined): void {
+  if (target === undefined) return;
+  const cur = sv.getViewSize(idx);
+  if (Math.abs(cur - target) <= 1) return;
+  try {
+    sv.resizeView(idx, target);
+  } catch {
+    /* dockview rejects unreachable sizes — ignore */
+  }
+}
+
+function enforcePinnedTargets(api: DockviewReadyEvent["api"]): void {
+  if (enforcing || sashDragging) return;
+  const store = useDockviewStore.getState();
+  if (store.isRestoringLayout) return;
+  if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
+  const sv = getRootSplitview(api);
+  if (!sv || sv.length < 2) return;
+  enforcing = true;
+  try {
+    if (store.sidebarVisible) restoreColumnToTarget(sv, 0, getPinnedTarget("sidebar"));
+    if (store.rightPanelsVisible) {
+      restoreColumnToTarget(sv, sv.length - 1, getPinnedTarget("right"));
+    }
+  } finally {
+    enforcing = false;
+  }
+}
+
+/** Set the loose runtime cap so the user can drag the column past its target. */
+function setLooseConstraints(api: DockviewReadyEvent["api"]): void {
+  const store = useDockviewStore.getState();
+  if (store.isRestoringLayout) return;
+  if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
+
+  const sb = api.getPanel("sidebar");
+  if (sb && store.sidebarVisible) {
+    sb.group.api.setConstraints({
+      maximumWidth: computeSidebarMaxPx(),
+      minimumWidth: LAYOUT_PINNED_MIN_PX,
+    });
+  }
+
+  if (store.rightPanelsVisible) {
+    for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
+      const group = api.groups.find((g) => g.id === gid);
+      if (group) {
+        group.api.setConstraints({
+          maximumWidth: computeRightMaxPx(),
+          minimumWidth: LAYOUT_PINNED_MIN_PX,
+        });
+      }
+    }
+  }
+}
+
+/**
+ * Wire sash-drag handlers + per-layout-change enforcement.
+ *
+ * On `mousedown` on a `.dv-sash` we let dockview drive the drag freely.
+ * On `mouseup`, we record the new column width as the target so future
+ * rebalances restore to it. The `onDidLayoutChange` subscription enforces
+ * the target after any non-user rebalance.
+ */
+export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => void {
+  // Apply loose constraints once so the user can resize freely; targets are
+  // enforced post-hoc via `enforcePinnedTargets`.
+  setLooseConstraints(api);
+
+  const layoutSub = api.onDidLayoutChange(() => enforcePinnedTargets(api));
+
+  if (typeof document === "undefined") {
+    return () => layoutSub.dispose();
+  }
+
+  const onMouseDown = (e: MouseEvent): void => {
+    // Only track primary-button drags. A right/middle mousedown that didn't
+    // start a drag must not leave `sashDragging` permanently set (cubic P2).
+    if (e.button !== 0) return;
+    const t = e.target as HTMLElement | null;
+    if (t?.closest(".dv-sash")) sashDragging = true;
+  };
+  const onMouseUp = (e: MouseEvent): void => {
+    if (e.button !== 0 || !sashDragging) return;
+    sashDragging = false;
+    // Capture the post-drag width as the new target.
+    requestAnimationFrame(() => {
+      const sv = getRootSplitview(api);
+      if (!sv) return;
+      const store = useDockviewStore.getState();
+      if (store.sidebarVisible) setPinnedTarget("sidebar", sv.getViewSize(0));
+      if (store.rightPanelsVisible) setPinnedTarget("right", sv.getViewSize(sv.length - 1));
+    });
+  };
+  document.addEventListener("mousedown", onMouseDown, true);
+  document.addEventListener("mouseup", onMouseUp, true);
+
+  return () => {
+    layoutSub.dispose();
+    document.removeEventListener("mousedown", onMouseDown, true);
+    document.removeEventListener("mouseup", onMouseUp, true);
+    // Reset the module-scope flag so an unmount mid-drag (e.g. user navigates
+    // away while holding a sash) doesn't leave enforcement permanently paused
+    // for the next mount (claude).
+    sashDragging = false;
+  };
+}
 
 function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
-  if (useDockviewStore.getState().isRestoringLayout) return;
-  if (api.hasMaximizedGroup() || useDockviewStore.getState().preMaximizeLayout !== null) return;
+  const store = useDockviewStore.getState();
+  if (store.isRestoringLayout) return;
+  if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
   try {
-    const sidebarW = sv.getViewSize(0);
-    if (sidebarW > 50) {
-      const current = useDockviewStore.getState().pinnedWidths.get("sidebar");
-      if (current !== sidebarW) {
-        useDockviewStore.getState().setPinnedWidth("sidebar", sidebarW);
+    // Sidebar is grid index 0 *only when sidebar is visible*. Without the
+    // visibility guard, hiding the sidebar makes index 0 the center column,
+    // and we'd persist the center width as the sidebar's preferred width.
+    if (store.sidebarVisible) {
+      const sidebarW = sv.getViewSize(0);
+      if (sidebarW > 50) {
+        const current = store.pinnedWidths.get("sidebar");
+        if (current !== sidebarW) {
+          store.setPinnedWidth("sidebar", sidebarW);
+        }
       }
     }
-    if (sv.length >= 3) {
+    // Right column is the last grid index when present. Skip when there is
+    // no right column (compact preset, rightPanelsVisible=false).
+    if (store.rightPanelsVisible) {
       const rightIdx = sv.length - 1;
       const rightW = sv.getViewSize(rightIdx);
       if (rightW > 50) {
-        const current = useDockviewStore.getState().pinnedWidths.get("right");
+        const current = store.pinnedWidths.get("right");
         if (current !== rightW) {
-          useDockviewStore.getState().setPinnedWidth("right", rightW);
+          store.setPinnedWidth("right", rightW);
         }
       }
     }
@@ -61,6 +215,9 @@ export function setupContainerResizeSync(api: DockviewReadyEvent["api"]): () => 
     if (w <= 0 || h <= 0) return;
     if (w === api.width && h === api.height) return;
     api.layout(w, h);
+    // `enforcePinnedTargets` (wired in `setupSashDragCapToggle`) restores
+    // sidebar/right to their target widths via `onDidLayoutChange`, so we
+    // don't need to redo that here.
   });
   ro.observe(parent);
   return () => ro.disconnect();
@@ -83,8 +240,30 @@ export function setupLayoutPersistence(
   api: DockviewReadyEvent["api"],
   saveTimerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>,
   envIdRef: React.MutableRefObject<string | null>,
-): void {
-  api.onDidLayoutChange(() => {
+): () => void {
+  const persistNow = (): void => {
+    const live = useDockviewStore.getState();
+    if (live.preMaximizeLayout !== null || live.isRestoringLayout) return;
+    try {
+      const json = api.toJSON();
+      const envId = envIdRef.current;
+      localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
+      if (envId) {
+        setEnvLayout(envId, json);
+      }
+    } catch {
+      // Ignore serialization errors
+    }
+  };
+  // Expose `persistNow` to e2e tests so the helper can flush the saved layout
+  // after a programmatic `sv.resizeView` (which doesn't emit
+  // `onDidLayoutChange` and therefore can't ride the debounced auto-save).
+  if (typeof window !== "undefined") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__persistDockviewLayout__ = persistNow;
+  }
+
+  const sub = api.onDidLayoutChange(() => {
     if (useDockviewStore.getState().isRestoringLayout) return;
     // While maximized, the live layout is the 2-column overlay. Persisting it
     // as the env's regular layout would mean: if we ever fall back to that
@@ -99,23 +278,103 @@ export function setupLayoutPersistence(
       // started after this timer was scheduled. Persisting api.toJSON() now
       // would write the maximize overlay as the env's regular layout — the
       // bug this guard is meant to prevent.
-      const live = useDockviewStore.getState();
-      if (live.preMaximizeLayout !== null || live.isRestoringLayout) {
-        saveTimerRef.current = null;
-        return;
-      }
-      try {
-        const json = api.toJSON();
-        const envId = envIdRef.current;
-        localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
-        if (envId) {
-          setEnvLayout(envId, json);
-        }
-      } catch {
-        // Ignore serialization errors
-      }
+      saveTimerRef.current = null;
+      persistNow();
     }, 300);
   });
+
+  // Flush a pending debounced save on tab close / reload — otherwise a
+  // resize completed less than 300ms before unload is lost.
+  const onBeforeUnload = (): void => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      persistNow();
+    }
+  };
+  if (typeof window !== "undefined") {
+    window.addEventListener("beforeunload", onBeforeUnload);
+  }
+
+  return () => {
+    sub.dispose();
+    if (typeof window !== "undefined") {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (window as any).__persistDockviewLayout__;
+    }
+    // Cancel any in-flight debounce so a pending fire can't race with
+    // teardown and write a stale layout to storage.
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+  };
+}
+
+/** When the last non-sidebar panel is closed while maximized, exit maximize
+ *  and drop the closed panel from the restored pre-maximize layout. */
+function handleMaximizeExitOnLastClose(
+  api: DockviewReadyEvent["api"],
+  removedId: string,
+  nonSidebarRemaining: number,
+): void {
+  if (!(useDockviewStore.getState().preMaximizeLayout !== null) || nonSidebarRemaining > 0) return;
+  requestAnimationFrame(() => {
+    useDockviewStore.getState().exitMaximizedLayout();
+    requestAnimationFrame(() => {
+      const restoredPanel = api.getPanel(removedId);
+      if (restoredPanel) restoredPanel.api.close();
+    });
+  });
+}
+
+/** Resolve a session id whose env matches the closed panel's env, used for
+ *  session-scoped stops like stopVscode. */
+function resolveSessionForEntry(
+  appStore: StoreApi<AppState>,
+  entryEnvId: string | undefined,
+): string | null {
+  const state = appStore.getState();
+  const active = state.tasks.activeSessionId;
+  if (!entryEnvId) return active;
+  if (active && state.environmentIdBySessionId[active] === entryEnvId) return active;
+  const match = Object.entries(state.environmentIdBySessionId).find(
+    ([, eid]) => eid === entryEnvId,
+  );
+  return match?.[0] ?? active;
+}
+
+/** Tab close → ordinary terminals park (PTY + DB row survive, reappear in
+ *  the "+" menu); scripts/bottom-panel/legacy passthrough still destroy. */
+function handleTerminalPanelClosed(
+  appStore: StoreApi<AppState>,
+  panelId: string,
+  params: Record<string, unknown>,
+): void {
+  if (terminalTerminateClosePanelIds.delete(panelId)) return;
+  const terminalId = params.terminalId as string | undefined;
+  if (!terminalId) return;
+  const stampedEnv = params.environmentId as string | undefined;
+  const stampedTaskID = params.taskID as string | undefined;
+  const state = appStore.getState();
+  const active = state.tasks.activeSessionId;
+  const fallbackEnv = active ? (state.environmentIdBySessionId[active] ?? null) : null;
+  const envForTerminal = stampedEnv || fallbackEnv;
+  if (!envForTerminal) return;
+  const shell = state.userShells.byEnvironmentId[envForTerminal]?.find(
+    (s) => s.terminalId === terminalId,
+  );
+  if (shell?.kind === "ordinary") {
+    parkUserShell(terminalId, stampedTaskID).then(
+      () => state.updateUserShell(envForTerminal, terminalId, { state: "parked" }),
+      (err: unknown) => console.error("park terminal on tab close:", err),
+    );
+  } else {
+    stopUserShell(envForTerminal, terminalId, stampedTaskID).catch((err: unknown) =>
+      console.warn("stop terminal on tab close:", err),
+    );
+  }
 }
 
 export function setupPortalCleanup(
@@ -124,53 +383,15 @@ export function setupPortalCleanup(
 ): void {
   api.onDidRemovePanel((panel) => {
     if (useDockviewStore.getState().isRestoringLayout) return;
-    const isMax = useDockviewStore.getState().preMaximizeLayout !== null;
-    const remaining = api.panels.filter((p) => p.id !== panel.id);
-    const nonSidebar = remaining.filter((p) => p.api.component !== "sidebar");
-    // If we're in maximize mode and the last non-sidebar panel was just closed,
-    // exit maximize to restore the pre-maximize layout (avoids empty view).
-    // Then remove the closed panel from the restored layout so it doesn't reappear.
-    if (isMax && nonSidebar.length === 0) {
-      const removedId = panel.id;
-      requestAnimationFrame(() => {
-        useDockviewStore.getState().exitMaximizedLayout();
-        // exitMaximizedLayout schedules a rAF to finalize — wait for that, then
-        // remove the panel that was closed (it was re-created from preMaximizeLayout).
-        requestAnimationFrame(() => {
-          const restoredPanel = api.getPanel(removedId);
-          if (restoredPanel) {
-            restoredPanel.api.close();
-          }
-        });
-      });
-    }
+    const nonSidebarRemaining = api.panels.filter(
+      (p) => p.id !== panel.id && p.api.component !== "sidebar",
+    ).length;
+    handleMaximizeExitOnLastClose(api, panel.id, nonSidebarRemaining);
     const entry = panelPortalManager.get(panel.id);
-    // vscode is session-scoped; resolve to a session in the entry's env (or
-    // the active session) for the stop call.
-    const sessionForApi = (() => {
-      const state = appStore.getState();
-      const active = state.tasks.activeSessionId;
-      if (!entry?.envId) return active;
-      if (active && state.environmentIdBySessionId[active] === entry.envId) return active;
-      const match = Object.entries(state.environmentIdBySessionId).find(
-        ([, eid]) => eid === entry.envId,
-      );
-      return match?.[0] ?? active;
-    })();
+    const sessionForApi = resolveSessionForEntry(appStore, entry?.envId);
     if (entry?.component === "vscode" && sessionForApi) stopVscode(sessionForApi);
-    if (entry?.component === "terminal") {
-      const terminalId = entry.params.terminalId as string | undefined;
-      // Prefer the env id stamped into params at creation time — this
-      // survives task switches that happen between open and close. Fall
-      // back to the active session's env for legacy panels created before
-      // the param was added (e.g. layouts persisted from older releases).
-      const stampedEnv = entry.params.environmentId as string | undefined;
-      const state = appStore.getState();
-      const active = state.tasks.activeSessionId;
-      const fallbackEnv = active ? (state.environmentIdBySessionId[active] ?? null) : null;
-      const envForTerminal = stampedEnv || fallbackEnv;
-      if (terminalId && envForTerminal) stopUserShell(envForTerminal, terminalId);
-    }
+    if (entry?.component === "terminal")
+      handleTerminalPanelClosed(appStore, panel.id, entry.params);
     panelPortalManager.release(panel.id);
   });
 }

@@ -5,7 +5,12 @@ export const defaultKanbanState: KanbanSliceState = {
   kanban: { workflowId: null, steps: [], tasks: [] },
   kanbanMulti: { snapshots: {}, isLoading: false },
   workflows: { items: [], activeId: null },
-  tasks: { activeTaskId: null, activeSessionId: null, pinnedSessionId: null },
+  tasks: {
+    activeTaskId: null,
+    activeSessionId: null,
+    pinnedSessionId: null,
+    lastSessionByTaskId: {},
+  },
 };
 
 export const createKanbanSlice: StateCreator<
@@ -49,12 +54,14 @@ export const createKanbanSlice: StateCreator<
       draft.tasks.activeSessionId = sessionId;
       // User-initiated selection: pin so WS auto-replace handoff respects it.
       draft.tasks.pinnedSessionId = sessionId;
+      draft.tasks.lastSessionByTaskId[taskId] = sessionId;
     }),
   setActiveSessionAuto: (taskId, sessionId) =>
     set((draft) => {
       draft.tasks.activeTaskId = taskId;
       draft.tasks.activeSessionId = sessionId;
       // Auto-driven (WS) selection: don't touch pinnedSessionId.
+      draft.tasks.lastSessionByTaskId[taskId] = sessionId;
     }),
   clearActiveSession: () =>
     set((draft) => {

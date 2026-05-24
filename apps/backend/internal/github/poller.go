@@ -538,16 +538,17 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 		p.logger.Error("failed to list review watches", zap.Error(err))
 		return
 	}
-	if len(watches) == 0 {
-		return
-	}
+	// Note: do NOT early-return on len(watches) == 0 — the global orphan
+	// sweep below is precisely what handles the "user disabled / deleted
+	// every watch" case. Fall through to the no-op loop and run the sweep.
 	p.logger.Debug("checking review watches", zap.Int("count", len(watches)))
 	for _, watch := range watches {
 		// A previous iteration in this same cycle may have exhausted the
-		// search bucket. Stop early instead of issuing another doomed search
-		// that would only deepen the secondary-limit penalty.
+		// search bucket. Skip remaining per-watch checks instead of issuing
+		// another doomed search, but fall through to the orphan sweep below
+		// since it doesn't touch the search API.
 		if p.searchBucketExhausted("review_watch") {
-			return
+			break
 		}
 		p.logger.Debug("polling review watch",
 			zap.String("watch_id", watch.ID),
@@ -582,6 +583,15 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 				zap.String("watch_id", watch.ID), zap.Int("deleted", cleaned))
 		}
 	}
+	// Global orphan sweep: catches dedup rows whose watch was deleted or
+	// disabled. Without this pass those rows (and the tasks they reference)
+	// would never be re-examined, since the per-watch loop only iterates
+	// enabled watches.
+	if cleaned, err := p.service.CleanupAllOrphanedReviewTasks(ctx); err != nil {
+		p.logger.Warn("failed to sweep orphaned review tasks", zap.Error(err))
+	} else if cleaned > 0 {
+		p.logger.Info("swept orphaned review tasks", zap.Int("deleted", cleaned))
+	}
 }
 
 // issueWatchLoop polls issue watches for new GitHub issues.
@@ -614,13 +624,12 @@ func (p *Poller) checkIssueWatches(ctx context.Context) {
 		p.logger.Error("failed to list issue watches", zap.Error(err))
 		return
 	}
-	if len(watches) == 0 {
-		return
-	}
+	// Note: do NOT early-return on len(watches) == 0 — the orphan sweep
+	// below is what reaps tasks for disabled/deleted watches. Fall through.
 	p.logger.Debug("checking issue watches", zap.Int("count", len(watches)))
 	for _, watch := range watches {
 		if p.searchBucketExhausted("issue_watch") {
-			return
+			break
 		}
 		p.logger.Debug("polling issue watch",
 			zap.String("watch_id", watch.ID),
@@ -653,5 +662,10 @@ func (p *Poller) checkIssueWatches(ctx context.Context) {
 			p.logger.Info("cleaned up closed issue tasks",
 				zap.String("watch_id", watch.ID), zap.Int("deleted", cleaned))
 		}
+	}
+	if cleaned, err := p.service.CleanupAllOrphanedIssueTasks(ctx); err != nil {
+		p.logger.Warn("failed to sweep orphaned issue tasks", zap.Error(err))
+	} else if cleaned > 0 {
+		p.logger.Info("swept orphaned issue tasks", zap.Int("deleted", cleaned))
 	}
 }

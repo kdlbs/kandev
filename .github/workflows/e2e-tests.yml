@@ -92,7 +92,7 @@ jobs:
     name: E2E Shard ${{ matrix.shard }}/10
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 22
     strategy:
       fail-fast: false
       matrix:

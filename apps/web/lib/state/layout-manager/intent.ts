@@ -2,11 +2,13 @@ import type { LayoutState, LayoutIntent, LayoutIntentPanel, LayoutPanel } from "
 import { CENTER_GROUP, RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP } from "./constants";
 
 /** Well-known intent name constants (used as URL ?layout= values). */
+export const INTENT_COMPACT = "compact";
 export const INTENT_PLAN = "plan";
 export const INTENT_PR_REVIEW = "pr-review";
 
 /** Registry of named layout intents, keyed by URL param value. */
 const NAMED_INTENTS: Record<string, LayoutIntent> = {
+  [INTENT_COMPACT]: { preset: "compact" },
   [INTENT_PLAN]: { preset: "plan" },
   [INTENT_PR_REVIEW]: {
     panels: [

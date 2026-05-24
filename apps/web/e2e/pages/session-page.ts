@@ -329,6 +329,11 @@ export class SessionPage {
     return this.clarificationQuestionCardById(questionId).getByTestId("clarification-input");
   }
 
+  /** Container around the custom text input — exposes data-active for selection state. */
+  clarificationCustomInputContainerForQuestion(questionId: string): Locator {
+    return this.clarificationQuestionCardById(questionId).getByTestId("clarification-custom-input");
+  }
+
   /** Option button (by visible label text) inside a specific question card. */
   clarificationOptionForQuestion(questionId: string, text: string): Locator {
     return this.clarificationQuestionCardById(questionId)
@@ -358,7 +363,7 @@ export class SessionPage {
     return this.clarificationOverlay().getByTestId("clarification-next");
   }
 
-  /** Final "Submit answers" button (rendered only on the last step). */
+  /** Sticky "Submit" button in the overlay header (multi-question only). */
   clarificationSubmit(): Locator {
     return this.clarificationOverlay().getByTestId("clarification-submit");
   }
@@ -400,10 +405,15 @@ export class SessionPage {
 
   /**
    * Delete a task via the sidebar context menu.
-   * Hovers to reveal the menu trigger, opens it, and clicks "Delete".
+   * Hovers to reveal the menu trigger, opens it, clicks "Delete",
+   * and confirms the delete dialog.
    */
   async deleteTaskInSidebar(title: string): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Delete");
+    const confirmButton = this.page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Delete" });
+    await confirmButton.click();
   }
 
   /**
@@ -425,11 +435,7 @@ export class SessionPage {
    * Retries the full open-click sequence if the menu gets detached by a
    * React re-render (e.g. WS-driven sidebar update) between open and click.
    */
-  private async openSidebarMenuAndClick(
-    title: string,
-    itemName: string,
-    retries = 3,
-  ): Promise<void> {
+  async openSidebarMenuAndClick(title: string, itemName: string, retries = 3): Promise<void> {
     const taskRow = this.sidebar.locator('[role="button"]').filter({ hasText: title });
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
@@ -471,11 +477,37 @@ export class SessionPage {
     return this.page.getByTestId("pr-approve-button");
   }
 
-  // --- CI hover popover accessors (kept here so the spec stays declarative) ---
+  // --- PR CI accessors: desktop hover popover + chip + mobile chip drawer ---
 
   /** The single-PR hover popover content (visible after hovering the topbar button). */
   prTopbarPopover(): Locator {
     return this.page.getByTestId("pr-topbar-popover");
+  }
+
+  /** Compact PR/CI status chip rendered in the chat status bar. */
+  prStatusChip(): Locator {
+    return this.page.getByTestId("pr-status-chip");
+  }
+
+  /** Mobile bottom-sheet drawer that hosts the PR CI popover. */
+  prStatusChipDrawer(): Locator {
+    return this.page.getByTestId("pr-status-chip-drawer");
+  }
+
+  /** Close button inside the chip's mobile drawer. */
+  prStatusChipDrawerClose(): Locator {
+    return this.page.getByTestId("pr-status-chip-drawer-close");
+  }
+
+  /** PRCIPopover body when rendered inside the mobile chip drawer. */
+  prStatusChipPopoverInner(): Locator {
+    return this.prStatusChipDrawer().getByTestId("pr-topbar-popover-inner");
+  }
+
+  /** Tap the chip and wait for the mobile drawer to be visible. */
+  async tapPRStatusChip(): Promise<void> {
+    await this.prStatusChip().tap();
+    await expect(this.prStatusChipDrawer()).toBeVisible({ timeout: 5_000 });
   }
 
   /** Multi-PR aggregate popover content. */
@@ -939,7 +971,7 @@ export class SessionPage {
 
   /** All session reopen items in the + dropdown. */
   sessionReopenItems(): Locator {
-    return this.page.locator("[data-testid^='reopen-session-']");
+    return this.page.locator("[role='menuitem'][data-testid^='reopen-session-']");
   }
 
   /** All session tabs in dockview (panels using the sessionTab tab component). */
@@ -1021,6 +1053,32 @@ export class SessionPage {
   /** All selected file rows in the changes panel. */
   changesSelectedRows(): Locator {
     return this.changes.locator("[data-selected='true']");
+  }
+
+  /** All file rows in the changes panel currently marked as the active tab. */
+  changesActiveRows(): Locator {
+    return this.changes.locator("[data-active='true']");
+  }
+
+  /**
+   * Close every file-diff panel in dockview: the `preview:file-diff` slot AND
+   * any pinned `diff:file:<path>` panels created by promoting the preview.
+   * After this resolves, no diff tab is active so the changes-panel rows
+   * settle to `data-active="false"`.
+   */
+  async closeFileDiffPreview(): Promise<void> {
+    await this.page.evaluate(() => {
+      type PanelApi = { close: () => void };
+      type Panel = { id: string; api: PanelApi };
+      type Api = { panels: Panel[]; getPanel: (i: string) => Panel | undefined };
+      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+      if (!api) return;
+      api.getPanel("preview:file-diff")?.api.close();
+      // Snapshot before iterating: panel.api.close() mutates api.panels in
+      // place, so iterating the live array would skip every other panel.
+      const pinned = [...api.panels].filter((p) => p.id.startsWith("diff:file:"));
+      for (const panel of pinned) panel.api.close();
+    });
   }
 
   /** Bulk action bar for a variant (unstaged/staged). */

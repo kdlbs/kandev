@@ -23,6 +23,7 @@ import { getMarkdownText, textToHtml, handleEditorPaste } from "./tiptap-helpers
 import { CodeBlockView } from "./tiptap-code-block-view";
 import { ContextMention } from "./tiptap-mention-extension";
 import type { ContextFile } from "@/lib/state/context-files-store";
+import type { TaskMentionData } from "@/hooks/use-inline-mention";
 
 export type TipTapInputHandle = {
   focus: () => void;
@@ -34,6 +35,7 @@ export type TipTapInputHandle = {
   getTextareaElement: () => HTMLElement | null;
   insertText: (text: string, from: number, to: number) => void;
   getMentions: () => ContextFile[];
+  getTaskMentions: () => TaskMentionData[];
 };
 
 const lowlightInstance = createLowlight(common);
@@ -493,6 +495,26 @@ function useEditorImperativeHandle(
             if (kind === "file") mentions.push({ path, name: label, pinned: false });
             else if (kind === "prompt") mentions.push({ path, name: label, pinned: false });
           }
+        });
+        return mentions;
+      },
+      getTaskMentions: () => {
+        if (!editor) return [];
+        const seen = new Set<string>();
+        const mentions: TaskMentionData[] = [];
+        editor.state.doc.descendants((node) => {
+          if (node.type.name !== "contextMention") return;
+          const { kind, label, taskId, workflowId, workflowStepId, taskState } = node.attrs;
+          if (kind !== "task" || !taskId || !workflowId || !workflowStepId || seen.has(taskId))
+            return;
+          seen.add(taskId);
+          mentions.push({
+            taskId,
+            title: label ?? taskId,
+            workflowId,
+            workflowStepId,
+            state: taskState ?? null,
+          });
         });
         return mentions;
       },

@@ -38,6 +38,7 @@ type UserSettingsDTO struct {
 	TerminalLinkBehavior        string                            `json:"terminal_link_behavior"`
 	TerminalFontFamily          string                            `json:"terminal_font_family"`
 	TerminalFontSize            int                               `json:"terminal_font_size"`
+	ChangesPanelLayout          string                            `json:"changes_panel_layout"`
 	UpdatedAt                   string                            `json:"updated_at"`
 }
 
@@ -80,6 +81,7 @@ type UpdateUserSettingsRequest struct {
 	TerminalLinkBehavior        *string                            `json:"terminal_link_behavior,omitempty"`
 	TerminalFontFamily          *string                            `json:"terminal_font_family,omitempty"`
 	TerminalFontSize            *int                               `json:"terminal_font_size,omitempty"`
+	ChangesPanelLayout          *string                            `json:"changes_panel_layout,omitempty"`
 }
 
 func FromUser(user *models.User) UserDTO {
@@ -117,6 +119,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		TerminalLinkBehavior:        settings.TerminalLinkBehavior,
 		TerminalFontFamily:          settings.TerminalFontFamily,
 		TerminalFontSize:            settings.TerminalFontSize,
+		ChangesPanelLayout:          settings.ChangesPanelLayout,
 		UpdatedAt:                   settings.UpdatedAt.Format(time.RFC3339),
 	}
 }

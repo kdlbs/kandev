@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from "@kandev/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { IconGitBranch, IconUpload } from "@tabler/icons-react";
+import { IconGitBranch, IconPaperclip } from "@tabler/icons-react";
 import { AgentLogo } from "@/components/agent-logo";
 import {
   processFile,
@@ -251,7 +251,7 @@ export function AttachButton({ onClick, disabled }: { onClick: () => void; disab
             onClick={onClick}
             disabled={disabled}
           >
-            <IconUpload className="h-4 w-4" />
+            <IconPaperclip className="h-4 w-4" />
           </button>
         </TooltipTrigger>
         <TooltipContent>Attach files</TooltipContent>

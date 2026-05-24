@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -366,7 +365,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	startAgent := opts.StartAgent
 	// Serialise concurrent launches for the same session. Two callers reach
 	// this path on every task: PrepareTaskSession spawns a background launch
-	// (workspace only) the moment a session is created, and StartTaskWithSession
+	// (workspace only) the moment a session is created, and StartCreatedSession
 	// is called when the agent is actually started (auto-start, user click).
 	// Without this lock both run env-prep + executionStore.Add in parallel and
 	// the second one fails at register with "already has an agent running
@@ -614,6 +613,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		SessionID:         sessionID,
 		TaskEnvironmentID: session.TaskEnvironmentID,
 		IsEphemeral:       task.IsEphemeral,
+		IsPassthrough:     session.IsPassthrough,
 		WorkspacePath:     session.WorkspacePath,
 	}
 
@@ -697,6 +697,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			RepositoryPath:       info.RepositoryPath,
 			BaseBranch:           info.BaseBranch,
 			CheckoutBranch:       info.CheckoutBranch,
+			PRNumber:             info.PRNumber,
 			WorktreeBranchPrefix: info.WorktreeBranchPrefix,
 			PullBeforeWorktree:   info.PullBeforeWorktree,
 		}
@@ -722,9 +723,11 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task, repoInfo *repoInfo, execConfig executorConfig, metadata map[string]interface{}) (map[string]interface{}, error) {
 	if repoInfo.RepositoryPath != "" {
 		req.UseWorktree = shouldUseWorktree(execConfig.ExecutorType)
+		req.RepositoryID = repoInfo.RepositoryID
 		req.RepositoryPath = repoInfo.RepositoryPath
 		req.BaseBranch = repoInfo.BaseBranch
 		req.CheckoutBranch = repoInfo.CheckoutBranch
+		req.PRNumber = repoInfo.PRNumber
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
 		if repoInfo.Repository != nil {
@@ -962,35 +965,27 @@ func (e *Executor) injectHandoverIfNeeded(ctx context.Context, taskID, currentSe
 }
 
 // computeWorkspacePath derives the env's workspace_path from the launch
-// request and response. Used for both create and update branches of
-// persistTaskEnvironment so the rule lives in exactly one place — without
-// this, the update branch silently leaves workspace_path empty, which
-// produces ErrSessionWorkspaceNotReady forever in the env terminal handler.
+// request and response. The value must mirror the agent process cwd
+// (cfg.WorkDir set from execution.WorkspacePath in utility.go) so that ACP
+// session/load on cold start finds the jsonl saved under the same
+// sanitized-cwd folder on hot start. Collapsing single-repo worktree paths
+// to the task root via filepath.Dir would diverge hot vs cold cwd and break
+// resume with -32002 Resource not found.
 //
-// In task-directory mode the desired value is always the task root that holds
-// every per-repo worktree as a sibling. The legacy single-repo path passes
-// resp.WorktreePath as that repo's subdir, so the parent is the task root.
-// The multi-repo path on the lifecycle adapter mirrors agentctl's WorkDir
-// (already the task root) into resp.WorktreePath, so it must be used as-is —
-// applying filepath.Dir would walk up one level too far and point at the
-// /tasks holder instead.
+// resp.WorktreePath here already mirrors what executor_standalone.go writes
+// into metadata["worktree_path"] (= req.WorkspacePath from the env preparer),
+// which is also what becomes cmd.Dir of the agent process. So persisting it
+// as-is keeps a single source of truth.
 func computeWorkspacePath(req *LaunchAgentRequest, resp *LaunchAgentResponse) string {
-	workspacePath := resp.WorktreePath
-	if workspacePath == "" {
-		workspacePath = req.RepositoryPath
+	if resp.WorktreePath != "" {
+		return resp.WorktreePath
+	}
+	if req.RepositoryPath != "" {
+		return req.RepositoryPath
 	}
 	// Quick-chat sessions have no worktree/repo but the lifecycle manager
 	// creates a workspace directory — use it as fallback.
-	if workspacePath == "" && resp.WorkspacePath != "" {
-		workspacePath = resp.WorkspacePath
-	}
-	if req.TaskDirName == "" || resp.WorktreePath == "" {
-		return workspacePath
-	}
-	if len(resp.Worktrees) > 1 {
-		return resp.WorktreePath
-	}
-	return filepath.Dir(resp.WorktreePath)
+	return resp.WorkspacePath
 }
 
 // persistTaskEnvironment creates or updates the task environment record after a successful launch.

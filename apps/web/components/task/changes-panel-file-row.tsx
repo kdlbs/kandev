@@ -13,8 +13,9 @@ import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { LineStat } from "@/components/diff-stat";
-import type { FileInfo } from "@/lib/state/store";
+import { FileIcon } from "@/components/ui/file-icon";
 import { FileStatusIcon } from "./file-status-icon";
+import type { ChangedFile } from "./changes-panel-helpers";
 import type { OpenDiffOptions } from "./changes-diff-target";
 
 const splitPath = (path: string) => {
@@ -26,21 +27,12 @@ const splitPath = (path: string) => {
   };
 };
 
-type ChangedFile = {
-  path: string;
-  status: FileInfo["status"];
-  staged: boolean;
-  plus: number | undefined;
-  minus: number | undefined;
-  oldPath: string | undefined;
-  /** Multi-repo: name of the repo this file lives in. Empty for single-repo. */
-  repositoryName?: string;
-};
-
 type FileRowProps = {
   file: ChangedFile;
   isPending: boolean;
   isSelected?: boolean;
+  /** True when this file's diff/editor tab is the currently active dockview panel. */
+  isActive?: boolean;
   onSelect?: (path: string, e: React.MouseEvent) => boolean;
   onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
   // Multi-repo: handlers receive the file's repository_name so the per-file
@@ -50,20 +42,33 @@ type FileRowProps = {
   onUnstage: (path: string, repo?: string) => void;
   onDiscard: (path: string, repo?: string) => void;
   onEditFile: (path: string) => void;
+  /**
+   * Tree mode: skip the folder prefix, swap the left-side stage button for a
+   * filetype icon, and surface the stage action only on row hover (VS Code-
+   * style). The Unstaged / Staged section split keeps the staged state
+   * visually obvious even without the always-on left chip.
+   */
+  treeMode?: boolean;
+  /** Tree mode: left padding in pixels driven by depth. */
+  indentPx?: number;
 };
 
 export function FileRow({
   file,
   isPending,
   isSelected,
+  isActive,
   onSelect,
   onOpenDiff,
   onStage,
   onUnstage,
   onDiscard,
   onEditFile,
+  treeMode,
+  indentPx,
 }: FileRowProps) {
   const { folder, file: name } = splitPath(file.path);
+  const showFolder = !treeMode && folder;
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.button === 2) return;
@@ -81,25 +86,35 @@ export function FileRow({
       data-testid={`file-row-${file.path.replace(/[/\\]/g, "-")}`}
       data-changes-file={file.path}
       data-selected={isSelected ? "true" : "false"}
+      data-active={isActive ? "true" : "false"}
       className={cn(
         "group flex items-center justify-between gap-2 text-sm rounded-md px-2 py-1.5 -mx-1 cursor-pointer",
         "md:px-1 md:py-0.5",
-        isSelected ? "bg-accent/60 text-accent-foreground hover:bg-accent/50" : "hover:bg-muted/60",
+        isSelected || isActive
+          ? "bg-accent/60 text-accent-foreground hover:bg-accent/50"
+          : "hover:bg-muted/60",
       )}
       onClick={handleClick}
     >
-      <div className="flex items-center gap-2 min-w-0">
-        <StageButton
-          isPending={isPending}
-          staged={file.staged}
-          path={file.path}
-          repo={file.repositoryName}
-          onStage={onStage}
-          onUnstage={onUnstage}
-        />
+      <div
+        className="flex items-center gap-2 min-w-0"
+        style={indentPx ? { paddingLeft: indentPx } : undefined}
+      >
+        {treeMode ? (
+          <FileIcon fileName={name} className="size-4 shrink-0" />
+        ) : (
+          <StageButton
+            isPending={isPending}
+            staged={file.staged}
+            path={file.path}
+            repo={file.repositoryName}
+            onStage={onStage}
+            onUnstage={onUnstage}
+          />
+        )}
         <button type="button" className="min-w-0 text-left cursor-pointer" title={file.path}>
           <p className="flex text-foreground text-xs min-w-0">
-            {folder && (
+            {showFolder && (
               <span className="text-foreground/60 truncate min-w-0 [flex-shrink:9999]">
                 {folder}/
               </span>
@@ -114,6 +129,18 @@ export function FileRow({
           repo={file.repositoryName}
           onDiscard={onDiscard}
           onEditFile={onEditFile}
+          stageButton={
+            treeMode ? (
+              <StageButton
+                isPending={isPending}
+                staged={file.staged}
+                path={file.path}
+                repo={file.repositoryName}
+                onStage={onStage}
+                onUnstage={onUnstage}
+              />
+            ) : null
+          }
         />
         <LineStat added={file.plus} removed={file.minus} />
         <FileStatusIcon status={file.status} />
@@ -180,11 +207,14 @@ function FileRowActions({
   repo,
   onDiscard,
   onEditFile,
+  stageButton,
 }: {
   path: string;
   repo?: string;
   onDiscard: (path: string, repo?: string) => void;
   onEditFile: (path: string) => void;
+  /** Tree mode: stage/unstage control rendered alongside the other hover actions. */
+  stageButton?: React.ReactNode;
 }) {
   return (
     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
@@ -218,6 +248,7 @@ function FileRowActions({
         </TooltipTrigger>
         <TooltipContent>Edit</TooltipContent>
       </Tooltip>
+      {stageButton}
     </div>
   );
 }

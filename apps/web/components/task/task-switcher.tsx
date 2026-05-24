@@ -23,8 +23,7 @@ import { TaskItem } from "./task-item";
 import { TaskItemWithContextMenu, type StepDef } from "./task-switcher-context-menu";
 import type { GroupedSidebarList, SidebarGroup } from "@/lib/sidebar/apply-view";
 import { type TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
-
-const DRAG_ACTIVATION_DISTANCE = 8;
+import { DRAG_ACTIVATION_DISTANCE, SortableSubtaskList } from "./task-switcher-subtask-dnd";
 
 export type TaskSwitcherItem = {
   id: string;
@@ -73,6 +72,7 @@ type TaskSwitcherProps = {
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   onReorderGroup?: (groupTaskIds: string[]) => void;
+  onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
   pinnedTaskIds?: string[];
   deletingTaskId?: string | null;
   isLoading?: boolean;
@@ -283,6 +283,7 @@ type GroupSectionProps = {
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   onReorderGroup?: (groupTaskIds: string[]) => void;
+  onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
   pinnedSet: Set<string>;
   deletingTaskId?: string | null;
 };
@@ -318,6 +319,7 @@ function GroupTaskList({
   onToggleSubtasks,
   pinnedSet,
   rowProps,
+  onReorderSubtasks,
 }: {
   group: SidebarGroup;
   subTasksByParentId: Map<string, TaskSwitcherItem[]>;
@@ -325,6 +327,7 @@ function GroupTaskList({
   onToggleSubtasks?: (parentTaskId: string) => void;
   pinnedSet: Set<string>;
   rowProps: Omit<TaskRowProps, "task" | "subtaskToggle" | "isPinned" | "isSubTask">;
+  onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
 }) {
   return (
     <>
@@ -353,14 +356,19 @@ function GroupTaskList({
               />
             }
             subTasks={
-              !subsHidden &&
-              subs?.map((sub) => (
-                // Subtasks aren't independently sortable or pinnable — pinning
-                // would show an icon but `floatPinnedToTop` only operates on
-                // root tasks, so the row wouldn't move. Drop both props to
-                // avoid the misleading no-op menu item.
-                <TaskRow key={sub.id} task={sub} isSubTask {...rowProps} onTogglePin={undefined} />
-              ))
+              !subsHidden && subs && subs.length > 0 ? (
+                <SortableSubtaskList
+                  parentTaskId={task.id}
+                  subtasks={subs}
+                  onReorderSubtasks={onReorderSubtasks}
+                  // Subtasks aren't pinnable — pinning would show an icon but
+                  // `floatPinnedToTop` only operates on root tasks, so the row
+                  // wouldn't move. Drop the prop to avoid the no-op menu item.
+                  renderRow={(sub) => (
+                    <TaskRow task={sub} isSubTask {...rowProps} onTogglePin={undefined} />
+                  )}
+                />
+              ) : undefined
             }
           />
         );
@@ -388,6 +396,7 @@ function GroupSection({
   onMoveToStep,
   onTogglePin,
   onReorderGroup,
+  onReorderSubtasks,
   pinnedSet,
   deletingTaskId,
 }: GroupSectionProps) {
@@ -432,6 +441,7 @@ function GroupSection({
               onToggleSubtasks={onToggleSubtasks}
               pinnedSet={pinnedSet}
               rowProps={rowProps}
+              onReorderSubtasks={onReorderSubtasks}
             />
           </SortableContext>
         </DndContext>
@@ -457,6 +467,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   onMoveToStep,
   onTogglePin,
   onReorderGroup,
+  onReorderSubtasks,
   pinnedTaskIds,
   deletingTaskId,
   isLoading = false,
@@ -497,6 +508,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           onMoveToStep={onMoveToStep}
           onTogglePin={onTogglePin}
           onReorderGroup={onReorderGroup}
+          onReorderSubtasks={onReorderSubtasks}
           pinnedSet={pinnedSet}
           deletingTaskId={deletingTaskId}
         />

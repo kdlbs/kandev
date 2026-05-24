@@ -18,6 +18,7 @@ import { useKanbanData, useKanbanActions, useKanbanNavigation } from "@/hooks/do
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
+import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTaskMultiSelect } from "@/hooks/use-task-multi-select";
 import { HomepageCommands } from "./homepage-commands";
@@ -246,6 +247,7 @@ function useKanbanBoardSetup(
 
   useAllWorkflowSnapshots(workspaceState.activeId);
   useWorkspacePRs(workspaceState.activeId);
+  useWorkspaceMRs(workspaceState.activeId);
 
   const hooks = useKanbanBoardHooks(searchQuery, workspaceState, workflowsState);
   const { handleOpenTask, handleCardClick } = useKanbanNavigation({

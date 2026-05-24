@@ -3,6 +3,8 @@ package linear
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -36,6 +38,8 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.POST("/config/test", c.httpTestConfig)
 	api.GET("/teams", c.httpListTeams)
 	api.GET("/states", c.httpListStates)
+	api.GET("/labels", c.httpListLabels)
+	api.GET("/users", c.httpListUsers)
 	api.GET("/issues", c.httpSearchIssues)
 	api.GET("/issues/:id", c.httpGetIssue)
 	api.POST("/issues/:id/state", c.httpSetIssueState)
@@ -112,9 +116,9 @@ func (c *Controller) httpListTeams(ctx *gin.Context) {
 }
 
 func (c *Controller) httpListStates(ctx *gin.Context) {
-	teamKey := ctx.Query("team_key")
+	teamKey := ctx.Query(teamKeyParam)
 	if teamKey == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "team_key required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": teamKeyRequired})
 		return
 	}
 	states, err := c.service.ListStates(ctx.Request.Context(), teamKey)
@@ -125,14 +129,50 @@ func (c *Controller) httpListStates(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"states": states})
 }
 
+func (c *Controller) httpListLabels(ctx *gin.Context) {
+	teamKey := ctx.Query(teamKeyParam)
+	if teamKey == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": teamKeyRequired})
+		return
+	}
+	labels, err := c.service.ListLabels(ctx.Request.Context(), teamKey)
+	if err != nil {
+		c.writeClientError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"labels": labels})
+}
+
+func (c *Controller) httpListUsers(ctx *gin.Context) {
+	teamKey := ctx.Query(teamKeyParam)
+	if teamKey == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": teamKeyRequired})
+		return
+	}
+	users, err := c.service.ListUsers(ctx.Request.Context(), teamKey)
+	if err != nil {
+		c.writeClientError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"users": users})
+}
+
 func (c *Controller) httpSearchIssues(ctx *gin.Context) {
 	filter := SearchFilter{
-		Query:    ctx.Query("query"),
-		TeamKey:  ctx.Query("team_key"),
-		Assigned: ctx.Query("assigned"),
+		Query:     ctx.Query("query"),
+		TeamKey:   ctx.Query(teamKeyParam),
+		Assigned:  ctx.Query("assigned"),
+		CreatorID: ctx.Query("creator_id"),
 	}
 	if states := ctx.Query("state_ids"); states != "" {
 		filter.StateIDs = splitCSV(states)
+	}
+	if labels := ctx.Query("label_ids"); labels != "" {
+		filter.LabelIDs = splitCSV(labels)
+	}
+	if err := parseSearchNumericFilters(ctx, &filter); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 	pageToken := ctx.Query("page_token")
 	maxResults, _ := strconv.Atoi(ctx.Query("max_results"))
@@ -142,6 +182,58 @@ func (c *Controller) httpSearchIssues(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, result)
+}
+
+// parseSearchNumericFilters parses priority + estimate query params onto the
+// filter and returns a 400-worthy error when any are malformed. Invalid input
+// is rejected rather than silently dropped so callers don't accidentally widen
+// the search by typoing a number.
+func parseSearchNumericFilters(ctx *gin.Context, filter *SearchFilter) error {
+	priorities, err := parseSearchPriorities(ctx.Query("priorities"))
+	if err != nil {
+		return err
+	}
+	filter.Priorities = priorities
+	if filter.EstimateMin, err = parseEstimateBound(ctx.Query("estimate_min"), "estimate_min"); err != nil {
+		return err
+	}
+	if filter.EstimateMax, err = parseEstimateBound(ctx.Query("estimate_max"), "estimate_max"); err != nil {
+		return err
+	}
+	if filter.EstimateMin != nil && filter.EstimateMax != nil && *filter.EstimateMin > *filter.EstimateMax {
+		return fmt.Errorf("estimate_min cannot be greater than estimate_max")
+	}
+	return nil
+}
+
+func parseSearchPriorities(raw string) ([]int, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	parts := splitCSV(raw)
+	priorities := make([]int, 0, len(parts))
+	for _, p := range parts {
+		v, err := strconv.Atoi(p)
+		if err != nil || v < 0 || v > 4 {
+			return nil, fmt.Errorf("priorities must be integers between 0 and 4")
+		}
+		priorities = append(priorities, v)
+	}
+	return priorities, nil
+}
+
+// parseEstimateBound parses a non-negative float query param. strconv.ParseFloat
+// accepts "NaN", "Inf", "-Inf" without error, but json.Marshal rejects them
+// later (turning a 400 into a 500), so we filter them out here.
+func parseEstimateBound(raw, name string) (*float64, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	f, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {
+		return nil, fmt.Errorf("%s must be a non-negative number", name)
+	}
+	return &f, nil
 }
 
 func (c *Controller) httpGetIssue(ctx *gin.Context) {
@@ -173,6 +265,13 @@ func (c *Controller) httpSetIssueState(ctx *gin.Context) {
 // errCodeLinearNotConfigured is the wire-level code surfaced to the UI when
 // Linear has no saved credentials.
 const errCodeLinearNotConfigured = "LINEAR_NOT_CONFIGURED"
+
+// Wire-format constants for the team_key query parameter that scopes
+// per-team endpoints (states / labels / users / search).
+const (
+	teamKeyParam    = "team_key"
+	teamKeyRequired = "team_key required"
+)
 
 // writeClientError maps service-level errors to HTTP responses.
 func (c *Controller) writeClientError(ctx *gin.Context, err error) {

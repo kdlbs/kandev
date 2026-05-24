@@ -41,6 +41,8 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   };
 }
 
+const SKY_400 = "text-sky-400";
+
 describe("isPRReadyToMerge", () => {
   it("is true when open + approved + success + clean", () => {
     expect(
@@ -140,6 +142,57 @@ describe("isPRReadyToMerge", () => {
   );
 });
 
+describe("isPRReadyToMerge — required_reviews gate", () => {
+  it("is false when required_reviews is unmet even if mergeable_state is clean", () => {
+    // GitHub's stored mergeable_state can lag branch-protection state (e.g.
+    // after a dismissed approval); the required_reviews gate guarantees the
+    // button matches GitHub's merge box.
+    expect(
+      isPRReadyToMerge(
+        makePR({
+          state: "open",
+          review_state: "approved",
+          checks_state: "success",
+          mergeable_state: "clean",
+          required_reviews: 2,
+          review_count: 1,
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("is true when required_reviews equals review_count and everything else is clean", () => {
+    expect(
+      isPRReadyToMerge(
+        makePR({
+          state: "open",
+          review_state: "approved",
+          checks_state: "success",
+          mergeable_state: "clean",
+          required_reviews: 2,
+          review_count: 2,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("is true when required_reviews is zero (protected branch with no approval requirement)", () => {
+    expect(
+      isPRReadyToMerge(
+        makePR({
+          state: "open",
+          review_state: "",
+          checks_state: "success",
+          mergeable_state: "clean",
+          required_reviews: 0,
+          review_count: 0,
+          pending_review_count: 0,
+        }),
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("getPRStatusColor", () => {
   it("returns ready-to-merge color when all conditions are met", () => {
     const pr = makePR({
@@ -172,7 +225,22 @@ describe("getPRStatusColor", () => {
       mergeable_state: "blocked",
       pending_review_count: 1,
     });
-    expect(getPRStatusColor(pr)).toBe("text-sky-400");
+    expect(getPRStatusColor(pr)).toBe(SKY_400);
+  });
+
+  it("returns sky-400 when required_reviews is unmet but mergeable_state is clean (bug repro)", () => {
+    // The stale-snapshot bug: GitHub still reports mergeable_state="clean" while
+    // branch protection has recorded one fewer approval than required. The icon
+    // must downgrade to "awaiting review" instead of the emerald "ready to merge".
+    const pr = makePR({
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "clean",
+      required_reviews: 2,
+      review_count: 1,
+    });
+    expect(getPRStatusColor(pr)).toBe(SKY_400);
   });
 
   it("returns plain green when mergeable_state is empty (backfilled row)", () => {
@@ -193,7 +261,7 @@ describe("getPRStatusColor", () => {
       mergeable_state: "clean",
       pending_review_count: 2,
     });
-    expect(getPRStatusColor(pr)).toBe("text-sky-400");
+    expect(getPRStatusColor(pr)).toBe(SKY_400);
   });
 
   it("returns sky-400 when CI passed and reviewers are requested but no review state set", () => {
@@ -204,7 +272,7 @@ describe("getPRStatusColor", () => {
       mergeable_state: "blocked",
       pending_review_count: 1,
     });
-    expect(getPRStatusColor(pr)).toBe("text-sky-400");
+    expect(getPRStatusColor(pr)).toBe(SKY_400);
   });
 
   it("returns emerald when CI passed and no reviewers are required", () => {
@@ -298,6 +366,23 @@ describe("isPRAwaitingReview", () => {
         }),
       ),
     ).toBe(false);
+  });
+
+  it("is true when required_reviews is unmet even with no pending reviewers", () => {
+    // 1 of 2 approvals; the second reviewer is no longer requested but branch
+    // protection still demands two approvals — surface as awaiting review.
+    expect(
+      isPRAwaitingReview(
+        makePR({
+          state: "open",
+          review_state: "approved",
+          checks_state: "success",
+          pending_review_count: 0,
+          required_reviews: 2,
+          review_count: 1,
+        }),
+      ),
+    ).toBe(true);
   });
 });
 

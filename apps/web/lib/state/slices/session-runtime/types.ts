@@ -236,13 +236,39 @@ export type PromptUsageState = {
   bySessionId: Record<string, PromptUsageEntry>;
 };
 
+/**
+ * User shell terminal info. Discriminated by `kind`:
+ * - `ordinary` — a DB-backed first-class terminal. Carries seq + custom_name
+ *   + state. Renameable, parkable, gets a `#N` badge.
+ * - `fixed` — the hardcoded `bottom-panel` terminal (cmd+J). No badge, no
+ *   rename, never parked.
+ * - `script` — a script-driven terminal. Lifecycle tied to the script.
+ *
+ * Legacy fields (processId, running, label, closable) are kept optional so
+ * old wire shapes still parse cleanly during the transition; new UI reads
+ * the discriminated fields below.
+ */
+export type UserShellKind = "ordinary" | "fixed" | "script";
+export type UserShellState = "open" | "parked";
+export type UserShellPTYStatus = "running" | "stopped";
+
 export type UserShellInfo = {
   terminalId: string;
-  processId: string;
-  running: boolean;
-  label: string; // Display name (e.g., "Terminal" or script name)
-  closable: boolean; // Whether the terminal can be closed (first terminal is not closable)
-  initialCommand?: string; // Command that was run (empty for plain shells)
+  kind?: UserShellKind;
+
+  // Ordinary-only metadata.
+  seq?: number;
+  customName?: string | null;
+  displayName?: string;
+  state?: UserShellState;
+  ptyStatus?: UserShellPTYStatus;
+
+  // Legacy / common fields.
+  processId?: string;
+  running?: boolean;
+  label?: string;
+  closable?: boolean;
+  initialCommand?: string;
 };
 
 export type UserShellsState = {
@@ -362,6 +388,14 @@ export type SessionRuntimeSliceActions = {
   setUserShellsLoading: (environmentId: string, loading: boolean) => void;
   addUserShell: (environmentId: string, shell: UserShellInfo) => void;
   removeUserShell: (environmentId: string, terminalId: string) => void;
+  updateUserShell: (
+    environmentId: string,
+    terminalId: string,
+    // `terminalId` is the row key — patching it would silently break
+    // future lookups while leaving the array index pointing at the old
+    // entry. `Omit` removes it from the patch surface.
+    patch: Partial<Omit<UserShellInfo, "terminalId">>,
+  ) => void;
   setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
 };
 

@@ -24,6 +24,10 @@ export function isPRReadyToMerge(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
   if (pr.checks_state !== "success") return false;
   if (pr.mergeable_state !== "clean") return false;
+  // Guard against stale mergeable_state: enforce required_reviews to match GitHub's gate.
+  if (pr.required_reviews != null && pr.review_count < pr.required_reviews) {
+    return false;
+  }
   if (pr.review_state === "approved") return true;
   // No review process: no requested reviewers and no submitted reviews. GitHub
   // sets mergeable_state=clean when branch protection is satisfied, so this
@@ -39,6 +43,10 @@ export function isPRReadyToMerge(pr: TaskPR): boolean {
 export function isPRAwaitingReview(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
   if (pr.checks_state !== "success") return false;
+  // Shortfall is "awaiting review" even when no reviewer is currently requested.
+  if (pr.required_reviews != null && pr.review_count < pr.required_reviews) {
+    return true;
+  }
   if (pr.review_state === "approved") return pr.pending_review_count > 0;
   return pr.review_state === "pending" || pr.pending_review_count > 0;
 }

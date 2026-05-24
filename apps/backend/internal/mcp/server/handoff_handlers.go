@@ -9,24 +9,31 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-// registerHandoffTools registers the office task-handoff MCP tools:
-// list_related_tasks_kandev, list_task_documents_kandev,
-// get_task_document_kandev, write_task_document_kandev. These are
-// available in ModeOffice and ModeTask so both office coordinators and
-// task assignees can read parent / sibling documents and write
-// child→parent coordination docs.
-func (s *Server) registerHandoffTools() {
+// registerRelatedTasksTool registers list_related_tasks_kandev, which lets an
+// agent discover parent / child / sibling / blocker task IDs. Useful in both
+// kanban (ModeTask) and office (ModeOffice) modes — kanban agents commonly use
+// it to find a sibling task to send a follow-up to via message_task_kandev.
+func (s *Server) registerRelatedTasksTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_related_tasks_kandev",
 			mcp.WithDescription(
 				`List parent, children, siblings, blockers, and blocked tasks for the current task.
-Use this to discover task IDs you can read documents from. Document keys are included so you can pick
-the document to fetch with get_task_document_kandev. Pass task_id to inspect a different task in the same workspace.`,
+Use this to discover task IDs you can reach via message_task_kandev. In office mode, document keys are
+also included so you can fetch documents with get_task_document_kandev.
+Pass task_id to inspect a different task in the same workspace.`,
 			),
 			mcp.WithString("task_id", mcp.Description("Defaults to the current task.")),
 		),
 		s.wrapHandler("list_related_tasks_kandev", s.listRelatedTasksHandler()),
 	)
+}
+
+// registerTaskDocumentTools registers the cross-task document tools used for
+// office parent/child coordination: list_task_documents_kandev,
+// get_task_document_kandev, write_task_document_kandev. These are office-only
+// — kanban tasks don't use the document handoff pattern, so the surface is
+// kept lean.
+func (s *Server) registerTaskDocumentTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_task_documents_kandev",
 			mcp.WithDescription(

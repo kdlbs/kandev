@@ -25,7 +25,7 @@ func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, er
 	if err != nil {
 		return nil, err
 	}
-	result := toAgentDTO(agent, profiles)
+	result := toAgentDTO(agent, filterGlobalProfiles(profiles))
 	c.applyCapabilityStatus(&result, agent.Name)
 	c.applyBillingType(&result, agent.Name)
 	return &result, nil
@@ -42,12 +42,27 @@ func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, e
 		if err != nil {
 			return nil, err
 		}
-		entry := toAgentDTO(agent, profiles)
+		entry := toAgentDTO(agent, filterGlobalProfiles(profiles))
 		c.applyCapabilityStatus(&entry, agent.Name)
 		c.applyBillingType(&entry, agent.Name)
 		payload = append(payload, entry)
 	}
 	return &dto.ListAgentsResponse{Agents: payload, Total: len(payload)}, nil
+}
+
+// filterGlobalProfiles drops workspace-scoped (office) rows from a profile
+// list so the kanban-facing GET /api/v1/agents endpoints only surface global
+// CLI profiles. Office agents live in the same agent_profiles table since
+// ADR 0005 Wave G but are scoped by workspace_id; the kanban task picker
+// must not show them.
+func filterGlobalProfiles(profiles []*models.AgentProfile) []*models.AgentProfile {
+	out := make([]*models.AgentProfile, 0, len(profiles))
+	for _, p := range profiles {
+		if p.WorkspaceID == "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 type CreateAgentRequest struct {
@@ -209,7 +224,7 @@ func (c *Controller) UpdateAgent(ctx context.Context, req UpdateAgentRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	result := toAgentDTO(agent, profiles)
+	result := toAgentDTO(agent, filterGlobalProfiles(profiles))
 	return &result, nil
 }
 

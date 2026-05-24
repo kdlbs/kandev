@@ -71,7 +71,7 @@ test.describe("Dockview repository scripts in + menu", () => {
     const session = await seedTaskWithSession(testPage, apiClient, seedData, "No Scripts");
     await session.addPanelButton().click();
 
-    await expect(testPage.getByRole("menuitem", { name: "Terminal" })).toBeVisible();
+    await expect(testPage.getByTestId("new-terminal-button")).toBeVisible();
     await expect(testPage.getByText("Scripts", { exact: true })).toHaveCount(0);
     await expect(testPage.getByTestId("run-dev-script")).toHaveCount(0);
   });

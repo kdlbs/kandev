@@ -161,6 +161,11 @@ export type MessageAction = {
 
 export type TodoMetadata = { text: string; done?: boolean } | string;
 
+export type TodoSnapshot = {
+  todos: TodoMetadata[];
+  created_at: string;
+};
+
 export type ContentBlock = {
   type: string; // "text", "image", "audio", "resource_link", "resource"
   text?: string;
@@ -176,6 +181,7 @@ export type ContentBlock = {
 export type RichMetadata = {
   thinking?: string;
   todos?: TodoMetadata[];
+  previous_todo_snapshots?: TodoSnapshot[];
   diff?: unknown;
   content_blocks?: ContentBlock[];
 };

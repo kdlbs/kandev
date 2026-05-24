@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClarificationAnswer, ClarificationRequestMetadata, Message } from "@/lib/types/http";
 import { getBackendConfig } from "@/lib/config";
+import { useAppStoreApi } from "@/components/state-provider";
 
 type SubmitState = "idle" | "submitting" | "ok" | "error";
 
@@ -13,6 +14,7 @@ export type ClarificationGroupApi = {
   answers: Record<string, ClarificationAnswer>;
   submitState: SubmitState;
   recordAnswer: (questionId: string, answer: ClarificationAnswer) => void;
+  clearAnswer: (questionId: string) => void;
   // Submits every recorded answer in a single batch. An optional `override`
   // map is merged into the current answers right before the POST so callers
   // can safely auto-submit immediately after recording an answer (the React
@@ -56,6 +58,44 @@ async function postClarificationBatch(
   return "error";
 }
 
+// Mark each bundle message as resolved so the overlay closes regardless of
+// whether the backend's WS confirmation event arrives. A long-idle tab can
+// leave the WebSocket half-dead (NAT/throttle); the HTTP POST still succeeds
+// but the session.message.updated broadcast never lands, which would otherwise
+// strand the carousel on "pending" until the user refreshes.
+function applyResolvedStatusToBundle(
+  bundle: readonly Message[],
+  status: "answered" | "rejected",
+  answersByQuestionId: Record<string, ClarificationAnswer>,
+  update: (message: Message) => void,
+) {
+  for (const msg of bundle) {
+    const meta = (msg.metadata ?? {}) as ClarificationRequestMetadata;
+    const questionId = meta.question_id ?? meta.question?.id ?? "";
+    const nextMeta: ClarificationRequestMetadata = { ...meta, status };
+    const matched = questionId ? answersByQuestionId[questionId] : undefined;
+    if (matched) nextMeta.response = matched;
+    update({ ...msg, metadata: nextMeta });
+  }
+}
+
+// Best-effort optimistic update — isolated from the submit's own try/catch so
+// a thrown store action (missing handler, immer freeze, etc.) can't downgrade
+// a successful HTTP submit to submitState === "error".
+function safeApplyResolvedStatus(
+  bundle: readonly Message[],
+  status: "answered" | "rejected",
+  answersByQuestionId: Record<string, ClarificationAnswer>,
+  update: (message: Message) => void,
+) {
+  if (bundle.length === 0) return;
+  try {
+    applyResolvedStatusToBundle(bundle, status, answersByQuestionId, update);
+  } catch (err) {
+    console.error("Clarification optimistic update threw:", err);
+  }
+}
+
 async function postClarificationSkip(pendingId: string, reason: string): Promise<SubmitState> {
   const { apiBaseUrl } = getBackendConfig();
   const res = await fetch(`${apiBaseUrl}/api/v1/clarification/${pendingId}/respond`, {
@@ -82,12 +122,18 @@ async function postClarificationSkip(pendingId: string, reason: string): Promise
 export function useClarificationGroup(
   messages: readonly Message[] | null | undefined,
 ): ClarificationGroupApi {
+  const storeApi = useAppStoreApi();
   const [answers, setAnswers] = useState<Record<string, ClarificationAnswer>>({});
   const answersRef = useRef(answers);
   useEffect(() => {
     answersRef.current = answers;
   }, [answers]);
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
+  // Re-entry guard: multiple submit paths can race (Cmd+Enter inside the
+  // custom input fires both the input's onSubmit and onRequestFinalSubmit;
+  // a double-click on the Submit button can also race). The hook owns the
+  // guarantee that only one POST is in flight at a time.
+  const inflightRef = useRef(false);
 
   const pendingId = useMemo(() => {
     if (!messages || messages.length === 0) return null;
@@ -106,38 +152,71 @@ export function useClarificationGroup(
     setAnswers((prev) => ({ ...prev, [questionId]: answer }));
   }, []);
 
+  const clearAnswer = useCallback((questionId: string) => {
+    setAnswers((prev) => {
+      if (!(questionId in prev)) return prev;
+      const next = { ...prev };
+      delete next[questionId];
+      return next;
+    });
+  }, []);
+
+  // Snapshot the bundle at submit time so a re-render that swaps `messages`
+  // mid-flight (e.g. the next clarification streaming in) can't make the
+  // optimistic update target the wrong messages once the await resolves.
+  const submitBundleRef = useRef<readonly Message[]>([]);
+  submitBundleRef.current = messages ?? [];
+
   const submitCollected = useCallback(
     async (override?: Record<string, ClarificationAnswer>) => {
       if (!pendingId) return;
+      if (inflightRef.current) return;
       const current = { ...answersRef.current, ...(override ?? {}) };
       const haveAll = questionIds.every((id) => Boolean(current[id]));
       if (!haveAll) return;
+      const bundle = submitBundleRef.current.slice();
+      inflightRef.current = true;
       setSubmitState("submitting");
       const ordered = questionIds
         .map((id) => current[id])
         .filter((a): a is ClarificationAnswer => Boolean(a));
       try {
-        setSubmitState(await postClarificationBatch(pendingId, ordered));
+        const next = await postClarificationBatch(pendingId, ordered);
+        setSubmitState(next);
+        if (next === "ok") {
+          safeApplyResolvedStatus(bundle, "answered", current, storeApi.getState().updateMessage);
+        }
       } catch (err) {
         console.error("Clarification submit threw:", err);
         setSubmitState("error");
+      } finally {
+        inflightRef.current = false;
       }
     },
-    [pendingId, questionIds],
+    [pendingId, questionIds, storeApi],
   );
 
   const skipAll = useCallback(
     async (reason?: string) => {
       if (!pendingId) return;
+      if (inflightRef.current) return;
+      const bundle = submitBundleRef.current.slice();
+      inflightRef.current = true;
       setSubmitState("submitting");
       try {
-        setSubmitState(await postClarificationSkip(pendingId, reason ?? "User skipped"));
+        const next = await postClarificationSkip(pendingId, reason ?? "User skipped");
+        setSubmitState(next);
+        if (next === "ok") {
+          safeApplyResolvedStatus(bundle, "rejected", {}, storeApi.getState().updateMessage);
+        }
       } catch (err) {
         console.error("Clarification skip threw:", err);
         setSubmitState("error");
+      } finally {
+        inflightRef.current = false;
       }
     },
-    [pendingId],
+    [pendingId, storeApi],
   );
 
   return {
@@ -147,6 +226,7 @@ export function useClarificationGroup(
     answers,
     submitState,
     recordAnswer,
+    clearAnswer,
     submitCollected,
     skipAll,
   };

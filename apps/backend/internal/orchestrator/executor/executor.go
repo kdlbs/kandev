@@ -261,6 +261,14 @@ type LaunchAgentRequest struct {
 	IsEphemeral         bool              // Ephemeral task (quick chat) — enables fallback workspace creation
 	WorkspacePath       string            // Optional host folder for repo-less tasks (overrides scratch fallback)
 
+	// IsPassthrough is the session's mode snapshot (TaskSession.IsPassthrough)
+	// at session-creation time. Forwarded to the lifecycle manager so
+	// StartAgentProcess routes to the passthrough vs ACP path based on the
+	// session's original mode, not on live profile state — preventing
+	// existing sessions from getting stranded when a profile's
+	// CLIPassthrough flag is toggled after the session was created.
+	IsPassthrough bool
+
 	// Setup script from executor profile (runs in execution environment before agent starts)
 	SetupScript string
 
@@ -272,6 +280,7 @@ type LaunchAgentRequest struct {
 	BaseBranch           string // Base branch for the worktree (e.g., "main")
 	DefaultBranch        string // Repository's default_branch, used as a fallback when BaseBranch is missing
 	CheckoutBranch       string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
+	PRNumber             int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	WorktreeBranchPrefix string // Branch prefix for worktree branches
 	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
 
@@ -303,6 +312,7 @@ type RepoSpec struct {
 	BaseBranch           string
 	DefaultBranch        string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch       string
+	PRNumber             int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	WorktreeID           string
 	WorktreeBranchPrefix string
 	PullBeforeWorktree   bool

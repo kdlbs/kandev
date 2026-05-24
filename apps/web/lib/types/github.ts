@@ -123,6 +123,14 @@ export type GitHubPRStatus = {
   checks_passing: number;
 };
 
+export type MergeMethod = "merge" | "squash" | "rebase";
+
+export type RepoMergeMethods = {
+  merge: boolean;
+  squash: boolean;
+  rebase: boolean;
+};
+
 export type MergeableState =
   | "clean"
   | "blocked"
@@ -207,6 +215,17 @@ export type GitHubRepoInfo = {
 
 export type ReviewScope = "user" | "user_and_teams";
 
+/**
+ * CleanupPolicy controls how a review or issue watch handles its
+ * auto-created tasks once the underlying PR / issue is merged or closed.
+ *
+ * - "auto":   delete only when the user hasn't authored any messages on the
+ *             task (the agent's auto-start prompt does not count).
+ * - "always": delete on terminal state regardless of user interaction.
+ * - "never":  never auto-delete; rely on the manual cleanup button.
+ */
+export type CleanupPolicy = "auto" | "always" | "never";
+
 export type ReviewWatch = {
   id: string;
   workspace_id: string;
@@ -220,6 +239,7 @@ export type ReviewWatch = {
   custom_query: string;
   enabled: boolean;
   poll_interval_seconds: number;
+  cleanup_policy: CleanupPolicy;
   last_polled_at: string | null;
   created_at: string;
   updated_at: string;
@@ -275,9 +295,14 @@ export type CreateReviewWatchRequest = {
   custom_query?: string;
   enabled?: boolean;
   poll_interval_seconds?: number;
+  cleanup_policy?: CleanupPolicy;
 };
 
 export type UpdateReviewWatchRequest = Partial<Omit<CreateReviewWatchRequest, "workspace_id">>;
+
+export type CleanupTasksResponse = {
+  deleted: number;
+};
 
 // Issue watch types
 
@@ -294,6 +319,7 @@ export type IssueWatch = {
   custom_query: string;
   enabled: boolean;
   poll_interval_seconds: number;
+  cleanup_policy: CleanupPolicy;
   last_polled_at: string | null;
   created_at: string;
   updated_at: string;
@@ -318,6 +344,7 @@ export type CreateIssueWatchRequest = {
   labels?: string[];
   custom_query?: string;
   poll_interval_seconds?: number;
+  cleanup_policy?: CleanupPolicy;
 };
 
 export type UpdateIssueWatchRequest = Partial<Omit<CreateIssueWatchRequest, "workspace_id">> & {

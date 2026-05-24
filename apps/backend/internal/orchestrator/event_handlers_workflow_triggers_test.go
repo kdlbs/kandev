@@ -3,10 +3,12 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -413,6 +415,12 @@ func TestProcessOnEnter(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, newMockStepGetter(), taskRepo)
+		attachments := []messagequeue.MessageAttachment{
+			{Type: "image", Data: "base64-data", MimeType: "image/png"},
+		}
+		if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "handoff prompt", "", "user", false, attachments); err != nil {
+			t.Fatalf("failed to seed queued handoff: %v", err)
+		}
 
 		step := &wfmodels.WorkflowStep{
 			ID: "step2", WorkflowID: "wf1", Name: "In Progress",
@@ -430,11 +438,18 @@ func TestProcessOnEnter(t *testing.T) {
 		for {
 			status := svc.messageQueue.GetStatus(ctx, "s1")
 			if status.Count > 0 {
-				if status.Entries[0].TaskID != "t1" {
-					t.Fatalf("expected queued task_id t1, got %s", status.Entries[0].TaskID)
+				entry := status.Entries[0]
+				if entry.TaskID != "t1" {
+					t.Fatalf("expected queued task_id t1, got %s", entry.TaskID)
 				}
-				if status.Entries[0].Content == "" {
+				if entry.Content == "" {
 					t.Fatal("expected queued content to be populated")
+				}
+				if !strings.Contains(entry.Content, "handoff prompt") {
+					t.Fatalf("expected queued content to include handoff prompt, got %q", entry.Content)
+				}
+				if len(entry.Attachments) != 1 || entry.Attachments[0].MimeType != "image/png" {
+					t.Fatalf("expected queued handoff attachment to be preserved, got %+v", entry.Attachments)
 				}
 				break
 			}

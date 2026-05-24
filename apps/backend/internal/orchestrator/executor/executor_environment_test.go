@@ -475,3 +475,35 @@ func TestExtractSandboxID(t *testing.T) {
 		})
 	}
 }
+
+// TestApplyRepositoryConfig_PropagatesRepositoryID asserts that
+// applyRepositoryConfig copies RepositoryID from the resolved repoInfo onto
+// the launch request. The lifecycle layer carries this field through to the
+// worktree manager's runWorktreeSetupScript, which uses it to look up the
+// repository's setup script. When the field is empty the manager silently
+// skips the script — manifesting as "the start script is not run" for the
+// user who configured one on their repo.
+func TestApplyRepositoryConfig_PropagatesRepositoryID(t *testing.T) {
+	e := newEnvTestExecutor(t)
+	req := &LaunchAgentRequest{TaskID: "task-1"}
+	task := &v1.Task{ID: "task-1", WorkspaceID: "workspace-1", Title: "Some task"}
+	info := &repoInfo{
+		RepositoryID:   "repo-abc",
+		RepositoryPath: "/repos/myrepo",
+		BaseBranch:     "main",
+		Repository: &models.Repository{
+			ID:          "repo-abc",
+			Name:        "myrepo",
+			SetupScript: "npm install",
+		},
+	}
+	execCfg := executorConfig{ExecutorID: "exec-1", ExecutorType: string(models.ExecutorTypeLocal)}
+
+	if _, err := e.applyRepositoryConfig(req, task, info, execCfg, nil); err != nil {
+		t.Fatalf("applyRepositoryConfig: %v", err)
+	}
+
+	if req.RepositoryID != "repo-abc" {
+		t.Errorf("req.RepositoryID = %q, want %q", req.RepositoryID, "repo-abc")
+	}
+}

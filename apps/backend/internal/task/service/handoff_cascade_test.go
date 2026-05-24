@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -159,7 +160,7 @@ func TestArchiveTaskTree_StampsCascadeAcrossDescendants(t *testing.T) {
 	groups := newCascadeWSGroupRepo()
 	svc := newCascadeService(t, tasks, groups)
 
-	out, err := svc.ArchiveTaskTree(context.Background(), "root")
+	out, err := svc.ArchiveTaskTree(context.Background(), "root", true)
 	if err != nil {
 		t.Fatalf("archive: %v", err)
 	}
@@ -192,7 +193,7 @@ func TestUnarchiveTaskTree_LeavesPriorlyArchivedDescendantsAlone(t *testing.T) {
 	groups := newCascadeWSGroupRepo()
 	svc := newCascadeService(t, tasks, groups)
 
-	archive, err := svc.ArchiveTaskTree(context.Background(), "root")
+	archive, err := svc.ArchiveTaskTree(context.Background(), "root", true)
 	if err != nil {
 		t.Fatalf("archive: %v", err)
 	}
@@ -236,7 +237,7 @@ func TestArchiveTaskTree_ReleasesGroupMemberships(t *testing.T) {
 	}
 	svc := newCascadeService(t, tasks, groups)
 
-	out, err := svc.ArchiveTaskTree(context.Background(), "root")
+	out, err := svc.ArchiveTaskTree(context.Background(), "root", true)
 	if err != nil {
 		t.Fatalf("archive: %v", err)
 	}
@@ -340,7 +341,7 @@ func TestDeleteTaskTree_IncludesArchivedDescendants(t *testing.T) {
 	tr := &fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}
 	svc := NewHandoffService(tr, nil, nil, nil, groups, nil)
 
-	out, err := svc.DeleteTaskTree(context.Background(), "root")
+	out, err := svc.DeleteTaskTree(context.Background(), "root", true)
 	if err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -370,7 +371,7 @@ func TestDeleteTaskTree_RemovesAllAndCancelsRuns(t *testing.T) {
 	canceller := &fakeRunCanceller{}
 	svc.SetRunCanceller(canceller)
 
-	out, err := svc.DeleteTaskTree(context.Background(), "root")
+	out, err := svc.DeleteTaskTree(context.Background(), "root", true)
 	if err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -403,7 +404,7 @@ func TestArchiveTaskTree_CancelsRunsBeforeArchive(t *testing.T) {
 	canceller := &fakeRunCanceller{}
 	svc.SetRunCanceller(canceller)
 
-	if _, err := svc.ArchiveTaskTree(context.Background(), "root"); err != nil {
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root", true); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
 	if len(canceller.calls) != 2 {
@@ -466,7 +467,7 @@ func TestArchiveTaskTree_RaceFree(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = svc.ArchiveTaskTree(context.Background(), "root")
+			_, _ = svc.ArchiveTaskTree(context.Background(), "root", true)
 		}()
 	}
 	wg.Wait()
@@ -524,7 +525,7 @@ func TestArchiveTaskTree_PublishesTaskUpdatedPerTask(t *testing.T) {
 	pub := &fakeEventPublisher{}
 	svc.SetTaskEventPublisher(pub)
 
-	if _, err := svc.ArchiveTaskTree(context.Background(), "root"); err != nil {
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root", true); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
 
@@ -564,7 +565,7 @@ func TestDeleteTaskTree_PublishesTaskDeletedPerTask(t *testing.T) {
 	pub := &fakeEventPublisher{}
 	svc.SetTaskEventPublisher(pub)
 
-	if _, err := svc.DeleteTaskTree(context.Background(), "root"); err != nil {
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", true); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
@@ -596,10 +597,10 @@ func TestCascade_NilEventPublisher_NoCrash(t *testing.T) {
 	svc := NewHandoffService(tr, nil, nil, nil, groups, nil)
 	// Intentionally NOT calling SetTaskEventPublisher.
 
-	if _, err := svc.ArchiveTaskTree(context.Background(), "root"); err != nil {
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root", true); err != nil {
 		t.Fatalf("archive with nil publisher: %v", err)
 	}
-	if _, err := svc.DeleteTaskTree(context.Background(), "root"); err != nil {
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", true); err != nil {
 		t.Fatalf("delete with nil publisher: %v", err)
 	}
 }
@@ -640,7 +641,7 @@ func TestArchiveTaskTree_InvokesResourceCleanerPerTask(t *testing.T) {
 	cleaner := &fakeResourceCleaner{}
 	svc.SetTaskResourceCleaner(cleaner)
 
-	if _, err := svc.ArchiveTaskTree(context.Background(), "root"); err != nil {
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root", true); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
 
@@ -675,7 +676,7 @@ func TestDeleteTaskTree_InvokesResourceCleanerPerTask(t *testing.T) {
 	cleaner := &fakeResourceCleaner{}
 	svc.SetTaskResourceCleaner(cleaner)
 
-	if _, err := svc.DeleteTaskTree(context.Background(), "root"); err != nil {
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", true); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
@@ -709,10 +710,156 @@ func TestCascade_NilResourceCleaner_NoCrash(t *testing.T) {
 	svc := NewHandoffService(tr, nil, nil, nil, groups, nil)
 	// Intentionally NOT calling SetTaskResourceCleaner.
 
-	if _, err := svc.ArchiveTaskTree(context.Background(), "root"); err != nil {
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root", true); err != nil {
 		t.Fatalf("archive with nil cleaner: %v", err)
 	}
-	if _, err := svc.DeleteTaskTree(context.Background(), "root"); err != nil {
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", true); err != nil {
 		t.Fatalf("delete with nil cleaner: %v", err)
+	}
+}
+
+// TestArchiveTaskTree_NoCascade_LeavesChildrenActive pins the new
+// default: archiving a parent must NOT touch its subtasks unless the
+// caller explicitly opts in. The subtasks might still be in progress
+// and the user just wanted the parent off the board.
+func TestArchiveTaskTree_NoCascade_LeavesChildrenActive(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("c1", "root", "ws-1")
+	tasks.addTask("c2", "root", "ws-1")
+	groups := newCascadeWSGroupRepo()
+	svc := newCascadeService(t, tasks, groups)
+
+	out, err := svc.ArchiveTaskTree(context.Background(), "root", false)
+	if err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	if len(out.ArchivedTaskIDs) != 1 || out.ArchivedTaskIDs[0] != "root" {
+		t.Errorf("ArchivedTaskIDs = %v, want [root]", out.ArchivedTaskIDs)
+	}
+	rootRow, _ := tasks.GetTask(context.Background(), "root")
+	if rootRow.ArchivedAt == nil {
+		t.Error("root should be archived")
+	}
+	for _, id := range []string{"c1", "c2"} {
+		child, _ := tasks.GetTask(context.Background(), id)
+		if child.ArchivedAt != nil {
+			t.Errorf("%s should remain active, got archived_at=%v", id, child.ArchivedAt)
+		}
+	}
+}
+
+// TestDeleteTaskTree_NoCascade_PublishesUpdatedForReparentedChildren
+// pins the WS-event contract for the reparent step: after children are
+// reparented to root, the bus must carry one task.updated per child so
+// WS-driven clients refresh their cached parent_id pointers. Without
+// the publish, the kanban / sidebar would keep displaying the children
+// nested under the (now-deleted) parent until a manual reload.
+func TestDeleteTaskTree_NoCascade_PublishesUpdatedForReparentedChildren(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("c1", "root", "ws-1")
+	tasks.addTask("c2", "root", "ws-1")
+	groups := newCascadeWSGroupRepo()
+	tr := &fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}
+	svc := NewHandoffService(tr, nil, nil, nil, groups, nil)
+	pub := &fakeEventPublisher{}
+	svc.SetTaskEventPublisher(pub)
+
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", false); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	pub.mu.Lock()
+	defer pub.mu.Unlock()
+	// We expect one update per direct child (c1, c2). The deleted root
+	// goes via PublishTaskDeleted, not PublishTaskUpdated.
+	want := map[string]bool{"c1": true, "c2": true}
+	for _, id := range pub.updated {
+		delete(want, id)
+	}
+	if len(want) > 0 {
+		t.Errorf("missing PublishTaskUpdated for reparented children: %v", want)
+	}
+	if len(pub.deleted) != 1 || pub.deleted[0] != "root" {
+		t.Errorf("expected exactly one task.deleted for root, got %v", pub.deleted)
+	}
+}
+
+// TestDeleteTaskTree_NoCascade_ReparentFailureAborts pins the safety
+// invariant: when the no-cascade reparent step fails we MUST refuse to
+// delete the parent. Continuing past a reparent error would leave
+// children pointing at a row we're about to remove — exactly the
+// dangling pointer the no-cascade path is designed to prevent.
+func TestDeleteTaskTree_NoCascade_ReparentFailureAborts(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("c1", "root", "ws-1")
+	groups := newCascadeWSGroupRepo()
+	tr := &fakeReparentErrRepo{fakeDeleteRepo: &fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}}
+	svc := NewHandoffService(tr, nil, nil, nil, groups, nil)
+
+	_, err := svc.DeleteTaskTree(context.Background(), "root", false)
+	if err == nil {
+		t.Fatal("expected error from failed reparent, got nil")
+	}
+	if _, exists := tasks.tasks["root"]; !exists {
+		t.Error("root should NOT be deleted when reparent fails")
+	}
+	if _, exists := tasks.tasks["c1"]; !exists {
+		t.Error("c1 should still exist")
+	}
+}
+
+// fakeReparentErrRepo overrides ReparentDirectChildren to simulate a DB
+// failure so the no-cascade abort path can be exercised in tests.
+type fakeReparentErrRepo struct {
+	*fakeDeleteRepo
+}
+
+func (r *fakeReparentErrRepo) ReparentDirectChildren(_ context.Context, _, _ string) error {
+	return errors.New("simulated DB failure")
+}
+
+// TestDeleteTaskTree_NoCascade_ReparentsDirectChildren verifies the
+// orphaning step: when the user deletes a parent without cascade, the
+// direct subtasks have their parent_id cleared so the deleted-row
+// pointer doesn't dangle. The subtask rows themselves survive.
+func TestDeleteTaskTree_NoCascade_ReparentsDirectChildren(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("c1", "root", "ws-1")
+	tasks.addTask("c2", "root", "ws-1")
+	tasks.addTask("g1", "c1", "ws-1") // grandchild — should NOT be reparented
+	groups := newCascadeWSGroupRepo()
+	tr := &fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}
+	svc := NewHandoffService(tr, nil, nil, nil, groups, nil)
+
+	out, err := svc.DeleteTaskTree(context.Background(), "root", false)
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if len(out.ArchivedTaskIDs) != 1 || out.ArchivedTaskIDs[0] != "root" {
+		t.Errorf("ArchivedTaskIDs = %v, want [root]", out.ArchivedTaskIDs)
+	}
+	if _, exists := tasks.tasks["root"]; exists {
+		t.Error("root should be removed")
+	}
+	for _, id := range []string{"c1", "c2"} {
+		child, ok := tasks.tasks[id]
+		if !ok {
+			t.Errorf("%s should NOT be deleted (cascade=false)", id)
+			continue
+		}
+		if child.ParentID != "" {
+			t.Errorf("%s.parent_id = %q, want empty (reparented to root)", id, child.ParentID)
+		}
+	}
+	g1, ok := tasks.tasks["g1"]
+	if !ok {
+		t.Fatal("g1 should not be deleted")
+	}
+	if g1.ParentID != "c1" {
+		t.Errorf("g1.parent_id = %q, want c1 (only direct children of root are reparented)", g1.ParentID)
 	}
 }

@@ -23,8 +23,8 @@ interface ColumnsConfig {
   workflows: Workflow[];
   steps: WorkflowStep[];
   repositories: Repository[];
-  onArchive: (taskId: string) => void;
-  onDelete: (taskId: string) => void;
+  onArchive: (taskId: string, opts?: { cascade?: boolean }) => void;
+  onDelete: (taskId: string, opts?: { cascade?: boolean }) => void;
   deletingTaskId: string | null;
 }
 
@@ -61,8 +61,8 @@ function TitleCell({
 }
 
 type ActionsCtx = {
-  onArchive: (id: string) => void;
-  onDelete: (id: string) => void;
+  onArchive: (id: string, opts?: { cascade?: boolean }) => void;
+  onDelete: (id: string, opts?: { cascade?: boolean }) => void;
   deletingTaskId: string | null;
 };
 
@@ -117,14 +117,16 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
         open={showDeleteConfirm}
         onOpenChange={setShowDeleteConfirm}
         taskTitle={task.title}
+        taskId={task.id}
         isDeleting={isDeleting}
-        onConfirm={() => ctx.onDelete(task.id)}
+        onConfirm={({ cascade }) => ctx.onDelete(task.id, { cascade })}
       />
       <TaskArchiveConfirmDialog
         open={showArchiveConfirm}
         onOpenChange={setShowArchiveConfirm}
         taskTitle={task.title}
-        onConfirm={() => ctx.onArchive(task.id)}
+        taskId={task.id}
+        onConfirm={({ cascade }) => ctx.onArchive(task.id, { cascade })}
       />
     </div>
   );

@@ -1,3 +1,4 @@
+import type React from "react";
 import type { LocalRepository, Repository, Executor, Branch, Task } from "@/lib/types/http";
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import type {
@@ -128,6 +129,13 @@ export type TaskCreateEffectsArgs = {
    * worktree run that would trigger a destructive `git checkout` on submit.
    */
   isLocalExecutor: boolean;
+  /**
+   * Branch the caller wants preserved across the local-switch reset (e.g. the
+   * PR head branch when launching from a GitHub PR). The reset effect skips
+   * rows whose branch matches this value so the explicit caller choice isn't
+   * clobbered by the executor's async settle on mount.
+   */
+  preserveBranch?: string;
 };
 
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
@@ -158,7 +166,7 @@ export type DialogFormState = {
    * order is the position the backend sees. There is no "primary" concept.
    */
   repositories: TaskRepoRow[];
-  setRepositories: (v: TaskRepoRow[]) => void;
+  setRepositories: React.Dispatch<React.SetStateAction<TaskRepoRow[]>>;
   addRepository: () => void;
   removeRepository: (key: string) => void;
   updateRepository: (key: string, patch: Partial<TaskRepoRow>) => void;
@@ -197,6 +205,14 @@ export type DialogFormState = {
   setGitHubUrlError: (v: string | null) => void;
   githubPrHeadBranch: string | null;
   setGitHubPrHeadBranch: (v: string | null) => void;
+  /**
+   * PR's target/base branch from the GitHub API (e.g. "main"). Captured so the
+   * payload can send a base_branch that resolves on origin, even when the PR
+   * head only lives on a fork. Without this, fork PRs would propagate the
+   * head-branch name into base_branch and the worktree would fail to anchor.
+   */
+  githubPrBaseBranch: string | null;
+  setGitHubPrBaseBranch: (v: string | null) => void;
   /** When non-empty, the selected workflow overrides the agent profile */
   workflowAgentProfileId: string;
   setWorkflowAgentProfileId: (v: string) => void;
@@ -237,6 +253,7 @@ export type SubmitHandlersDeps = {
   useGitHubUrl: boolean;
   githubUrl: string;
   githubPrHeadBranch: string | null;
+  githubPrBaseBranch: string | null;
   /** Branch for the GitHub URL flow. Per-row branches live on `repositories[i].branch`. */
   githubBranch: string;
   agentProfileId: string;
@@ -265,7 +282,7 @@ export type SubmitHandlersDeps = {
   setHasTitle: (v: boolean) => void;
   setHasDescription: (v: boolean) => void;
   setTaskName: (v: string) => void;
-  setRepositories: (v: TaskRepoRow[]) => void;
+  setRepositories: React.Dispatch<React.SetStateAction<TaskRepoRow[]>>;
   setGitHubBranch: (v: string) => void;
   setAgentProfileId: (v: string) => void;
   setExecutorId: (v: string) => void;

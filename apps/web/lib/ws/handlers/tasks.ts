@@ -197,6 +197,10 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         if (isActive) {
           next = { ...next, tasks: { ...next.tasks, activeTaskId: null, activeSessionId: null } };
         }
+        if (next.tasks.lastSessionByTaskId[deletedId]) {
+          const { [deletedId]: _, ...rest } = next.tasks.lastSessionByTaskId;
+          next = { ...next, tasks: { ...next.tasks, lastSessionByTaskId: rest } };
+        }
         return next;
       });
     },

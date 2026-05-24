@@ -4,9 +4,11 @@ import type {
   LinearConfig,
   LinearIssue,
   LinearIssueWatch,
+  LinearLabel,
   LinearSearchFilter,
   LinearSearchResult,
   LinearTeam,
+  LinearUser,
   LinearWorkflowState,
   SetLinearConfigRequest,
   TestLinearConnectionResult,
@@ -57,22 +59,55 @@ export async function listLinearStates(teamKey: string, options?: ApiRequestOpti
   );
 }
 
+export async function listLinearLabels(teamKey: string, options?: ApiRequestOptions) {
+  return fetchJson<{ labels: LinearLabel[] }>(
+    `/api/v1/linear/labels?team_key=${encodeURIComponent(teamKey)}`,
+    options,
+  );
+}
+
+export async function listLinearUsers(teamKey: string, options?: ApiRequestOptions) {
+  return fetchJson<{ users: LinearUser[] }>(
+    `/api/v1/linear/users?team_key=${encodeURIComponent(teamKey)}`,
+    options,
+  );
+}
+
 export async function getLinearIssue(identifier: string, options?: ApiRequestOptions) {
   return fetchJson<LinearIssue>(`/api/v1/linear/issues/${encodeURIComponent(identifier)}`, options);
+}
+
+function buildSearchIssuesQuery(
+  params: LinearSearchFilter & { pageToken?: string; maxResults?: number },
+): string {
+  // Mapping table keeps the function flat — the complexity linter complains
+  // about a long chain of ifs, but a `[wire, value]` array reads as a single
+  // pass over the fields.
+  const entries: [string, string | undefined][] = [
+    ["query", params.query],
+    ["team_key", params.teamKey],
+    ["assigned", params.assigned],
+    ["creator_id", params.creatorId],
+    ["state_ids", params.stateIds?.length ? params.stateIds.join(",") : undefined],
+    ["label_ids", params.labelIds?.length ? params.labelIds.join(",") : undefined],
+    ["priorities", params.priorities?.length ? params.priorities.join(",") : undefined],
+    ["estimate_min", params.estimateMin !== undefined ? String(params.estimateMin) : undefined],
+    ["estimate_max", params.estimateMax !== undefined ? String(params.estimateMax) : undefined],
+    ["page_token", params.pageToken],
+    ["max_results", params.maxResults ? String(params.maxResults) : undefined],
+  ];
+  const search = new URLSearchParams();
+  for (const [key, value] of entries) {
+    if (value) search.set(key, value);
+  }
+  return search.toString();
 }
 
 export async function searchLinearIssues(
   params: LinearSearchFilter & { pageToken?: string; maxResults?: number },
   options?: ApiRequestOptions,
 ) {
-  const search = new URLSearchParams();
-  if (params.query) search.set("query", params.query);
-  if (params.teamKey) search.set("team_key", params.teamKey);
-  if (params.stateIds?.length) search.set("state_ids", params.stateIds.join(","));
-  if (params.assigned) search.set("assigned", params.assigned);
-  if (params.pageToken) search.set("page_token", params.pageToken);
-  if (params.maxResults) search.set("max_results", String(params.maxResults));
-  const qs = search.toString();
+  const qs = buildSearchIssuesQuery(params);
   return fetchJson<LinearSearchResult>(`/api/v1/linear/issues${qs ? `?${qs}` : ""}`, options);
 }
 

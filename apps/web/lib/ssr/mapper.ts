@@ -89,6 +89,7 @@ export function taskToState(
       activeTaskId: task.id,
       activeSessionId: resolvedSessionId,
       pinnedSessionId: null,
+      lastSessionByTaskId: resolvedSessionId ? { [task.id]: resolvedSessionId } : {},
     },
     messages:
       resolvedSessionId && messages

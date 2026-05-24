@@ -441,6 +441,18 @@ func (s *Service) ListRepositories(ctx context.Context, workspaceID string) ([]*
 	return s.repoEntities.ListRepositories(ctx, workspaceID)
 }
 
+// CountActiveSessionsByRepository returns the number of agent sessions in an
+// active state (CREATED / STARTING / RUNNING / WAITING_FOR_INPUT) that are
+// attached to the given repository. Used by the UI to warn users before they
+// attempt to delete a repository that would otherwise be blocked by
+// DeleteRepository's ErrActiveTaskSessions sentinel.
+func (s *Service) CountActiveSessionsByRepository(ctx context.Context, id string) (int, error) {
+	if _, err := s.repoEntities.GetRepository(ctx, id); err != nil {
+		return 0, err
+	}
+	return s.sessions.CountActiveTaskSessionsByRepository(ctx, id)
+}
+
 // Repository script operations
 
 func (s *Service) CreateRepositoryScript(ctx context.Context, req *CreateRepositoryScriptRequest) (*models.RepositoryScript, error) {

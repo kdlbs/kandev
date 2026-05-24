@@ -19,6 +19,58 @@ import (
 	"github.com/kandev/kandev/internal/task/service"
 )
 
+type captureCreateTaskRepo struct {
+	mockRepository
+	captured *models.Task
+}
+
+func (m *captureCreateTaskRepo) GetWorkspaceTaskPrefix(_ context.Context, _ string) (string, string, error) {
+	return "KAN", "wf-office", nil
+}
+
+func (m *captureCreateTaskRepo) CreateTask(_ context.Context, task *models.Task) error {
+	m.captured = task
+	return nil
+}
+
+// TestHTTPCreateTask_ProjectIDReachesOfficePath guards the wiring that broke
+// the office "New Task" dialog: when the request body sets project_id (and
+// omits workflow_id), the handler must forward it to the service so
+// isOfficeRequest() returns true and the workflow is auto-resolved. Without
+// this, requests fall through to the kanban validator with
+// "workflow_id is required for non-ephemeral tasks".
+func TestHTTPCreateTask_ProjectIDReachesOfficePath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &TaskHandlers{service: svc, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id": "ws-1",
+		"title": "Analyse integrations",
+		"project_id": "proj-1",
+		"priority": "medium"
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.NotNil(t, repo.captured, "service.CreateTask was not called")
+	assert.Equal(t, "proj-1", repo.captured.ProjectID)
+	assert.Equal(t, "wf-office", repo.captured.WorkflowID, "office workflow should be auto-resolved")
+}
+
 func newTestLogger(t *testing.T) *logger.Logger {
 	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{
@@ -30,6 +82,74 @@ func newTestLogger(t *testing.T) *logger.Logger {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
 	return log
+}
+
+// subtaskCountRepo lets the subtask-count handler test drive
+// ListChildren to specific values / errors without standing up a real
+// SQLite repo.
+type subtaskCountRepo struct {
+	mockRepository
+	children []*models.Task
+	err      error
+}
+
+func (r *subtaskCountRepo) ListChildren(_ context.Context, _ string) ([]*models.Task, error) {
+	return r.children, r.err
+}
+
+func (r *subtaskCountRepo) CountToolCallMessagesBySession(
+	_ context.Context, _ []string,
+) (map[string]int, error) {
+	return nil, nil
+}
+
+func TestHTTPTaskSubtaskCount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+
+	t.Run("returns count for task with subtasks", func(t *testing.T) {
+		repo := &subtaskCountRepo{children: []*models.Task{{ID: "c1"}, {ID: "c2"}, {ID: "c3"}}}
+		h := &TaskHandlers{repo: repo, logger: log}
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodGet, "/tasks/root/subtask-count", nil)
+		c.Params = gin.Params{{Key: "id", Value: "root"}}
+
+		h.httpTaskSubtaskCount(c)
+
+		require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+		assert.JSONEq(t, `{"count":3}`, rec.Body.String())
+	})
+
+	t.Run("returns zero for task with no subtasks", func(t *testing.T) {
+		repo := &subtaskCountRepo{children: nil}
+		h := &TaskHandlers{repo: repo, logger: log}
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodGet, "/tasks/root/subtask-count", nil)
+		c.Params = gin.Params{{Key: "id", Value: "root"}}
+
+		h.httpTaskSubtaskCount(c)
+
+		require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+		assert.JSONEq(t, `{"count":0}`, rec.Body.String())
+	})
+
+	t.Run("returns 500 with a generic error on repo failure", func(t *testing.T) {
+		repo := &subtaskCountRepo{err: errors.New("sql: connection refused: postgres://user@host/db")}
+		h := &TaskHandlers{repo: repo, logger: log}
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodGet, "/tasks/root/subtask-count", nil)
+		c.Params = gin.Params{{Key: "id", Value: "root"}}
+
+		h.httpTaskSubtaskCount(c)
+
+		require.Equal(t, http.StatusInternalServerError, rec.Code)
+		// Must NOT leak the raw error (would expose DSN / driver details).
+		assert.NotContains(t, rec.Body.String(), "postgres://")
+		assert.Contains(t, rec.Body.String(), "failed to count subtasks")
+	})
 }
 
 func TestHandleSelectedMoveError(t *testing.T) {
@@ -82,16 +202,40 @@ func TestHandleSelectedMoveError(t *testing.T) {
 
 type moveTaskConflictRepo struct {
 	mockRepository
-	task     *models.Task
-	sessions []*models.TaskSession
+	task      *models.Task
+	sessions  []*models.TaskSession
+	workflows map[string]*models.Workflow
 }
 
 func (m *moveTaskConflictRepo) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	return m.task, nil
 }
 
+func (m *moveTaskConflictRepo) UpdateTask(ctx context.Context, task *models.Task) error {
+	m.task = task
+	return nil
+}
+
+func (m *moveTaskConflictRepo) GetWorkflow(ctx context.Context, id string) (*models.Workflow, error) {
+	if m.workflows != nil {
+		if workflow, ok := m.workflows[id]; ok {
+			return workflow, nil
+		}
+	}
+	return &models.Workflow{ID: id, WorkspaceID: m.task.WorkspaceID}, nil
+}
+
 func (m *moveTaskConflictRepo) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	return m.sessions, nil
+}
+
+func (m *moveTaskConflictRepo) GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
+	for _, session := range m.sessions {
+		if session.TaskID == taskID && session.IsPrimary {
+			return session, nil
+		}
+	}
+	return nil, nil
 }
 
 func TestHTTPMoveTaskMapsMoveConflict(t *testing.T) {
@@ -115,7 +259,7 @@ func TestHTTPMoveTaskMapsMoveConflict(t *testing.T) {
 			},
 		},
 		{
-			name: "active session",
+			name: "active non-primary session",
 			task: &models.Task{
 				ID:             "task-running",
 				WorkspaceID:    "workspace-1",
@@ -156,6 +300,49 @@ func TestHTTPMoveTaskMapsMoveConflict(t *testing.T) {
 			assert.Equal(t, http.StatusConflict, rec.Code)
 		})
 	}
+}
+
+func TestHTTPMoveTaskAllowsRunningPrimarySession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+	task := &models.Task{
+		ID:             "task-running-primary",
+		WorkspaceID:    "workspace-1",
+		WorkflowID:     "wf-source",
+		WorkflowStepID: "step-source",
+	}
+	repo := &moveTaskConflictRepo{
+		task: task,
+		sessions: []*models.TaskSession{{
+			ID:        "session-running-primary",
+			TaskID:    task.ID,
+			State:     models.TaskSessionStateRunning,
+			IsPrimary: true,
+		}},
+	}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &TaskHandlers{service: svc, logger: log}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Params = gin.Params{{Key: "id", Value: task.ID}}
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/move", strings.NewReader(`{
+		"workflow_id": "wf-target",
+		"workflow_step_id": "step-target",
+		"position": 0
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpMoveTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	assert.Equal(t, "wf-target", repo.task.WorkflowID)
+	assert.Equal(t, "step-target", repo.task.WorkflowStepID)
 }
 
 func TestResolveFreshBranchName(t *testing.T) {

@@ -108,9 +108,8 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	// Create process manager
 	procMgr := process.NewManager(instanceCfg, m.logger)
 
-	// Start workspace tracker immediately so process output can be streamed
-	// even without an agent running (for dev server, etc.)
-	procMgr.GetWorkspaceTracker().Start(context.Background())
+	// Start root + per-repo trackers so file-change events fire even in passthrough mode.
+	procMgr.StartAllWorkspaceTrackers(context.Background())
 
 	handler := m.buildHTTPHandler(instanceCfg, procMgr)
 	httpServer := m.startHTTPServer(port, listener, handler, id)
