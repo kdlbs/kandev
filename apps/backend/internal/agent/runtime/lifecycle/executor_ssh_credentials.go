@@ -82,10 +82,12 @@ func (r *SSHExecutor) runAuthSetupScripts(
 }
 
 // runOneAuthSetupScript executes a single env-credential setup script over
-// SSH. Sets the agent's env vars via the inline `KEY=value KEY=value <shell>
-// -lc '...'` form so the script can read them and so `$HOME`/PATH are set up
-// the same way an interactive login would. Best-effort: failures log a
-// warning and return.
+// SSH. The agent's env vars are piped to the remote shell via stdin and
+// sourced under `set -a` so they're exported into the script's environment
+// without ever appearing on the remote shell's argv — the alternative
+// (`KEY=val ... bash -lc '...'`) leaks secrets via `ps aux` /
+// `/proc/PID/cmdline` for the brief window the setup script runs.
+// Best-effort: failures log a warning and return.
 func (r *SSHExecutor) runOneAuthSetupScript(
 	ctx context.Context,
 	client *ssh.Client,
@@ -93,10 +95,17 @@ func (r *SSHExecutor) runOneAuthSetupScript(
 	displayName string,
 	method remoteauth.Method,
 ) {
-	envPrefix := buildSSHEnvPrefix(req.Env)
 	shell := sshShellFromMetadata(req.Metadata)
-	wrapped := envPrefix + WrapLoginShell(shell, method.SetupScript)
-	out, stderr, err := runSSHCommand(ctx, client, wrapped)
+	envScript := buildSSHEnvInitScript(req.Env)
+	// `. /dev/stdin` sources the env lines fed via session.Stdin; `set -a`
+	// makes those assignments automatically exported so the user's setup
+	// script sees them in env without a per-key `export`. The script body
+	// itself runs in the same shell after stdin EOF, which means scripts
+	// that need their own stdin are unsupported here — none of the
+	// env-type SetupScripts in the catalog (gh_cli_env etc.) consume
+	// stdin, so this is fine in practice.
+	wrapped := WrapLoginShell(shell, "set -a; . /dev/stdin; set +a\n"+method.SetupScript)
+	out, stderr, err := runSSHCommandStdin(ctx, client, wrapped, strings.NewReader(envScript))
 	if err != nil {
 		r.logger.Warn("auth setup script failed",
 			zap.String("display_name", displayName),
@@ -229,10 +238,12 @@ func selectFileMethods(
 	return out
 }
 
-// buildSSHEnvPrefix returns a `KEY=value KEY=value ` prefix suitable for
-// prepending to a shell command. Values are shell-quoted to survive embedded
-// quotes/spaces. Empty input returns "".
-func buildSSHEnvPrefix(env map[string]string) string {
+// buildSSHEnvInitScript returns a multi-line shell snippet of
+// `KEY='value'` assignments, one per line. Designed to be piped to a
+// remote shell via stdin and sourced under `set -a` — assignments stay
+// out of the shell's argv (and therefore out of `ps aux`) but still get
+// exported into the script's environment. Empty input returns "".
+func buildSSHEnvInitScript(env map[string]string) string {
 	if len(env) == 0 {
 		return ""
 	}
@@ -241,7 +252,7 @@ func buildSSHEnvPrefix(env map[string]string) string {
 		b.WriteString(k)
 		b.WriteString("=")
 		b.WriteString(shellQuote(v))
-		b.WriteString(" ")
+		b.WriteString("\n")
 	}
 	return b.String()
 }

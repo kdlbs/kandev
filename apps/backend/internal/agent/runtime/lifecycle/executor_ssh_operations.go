@@ -87,6 +87,15 @@ func SSHCheckAgentctlCached(ctx context.Context, client *ssh.Client, resolver *A
 // stdout, stderr, and any error. It is the workhorse for arch detection,
 // remote mkdir, git clone, sha256 checks, and the like.
 func runSSHCommand(ctx context.Context, client *ssh.Client, cmd string) (stdout, stderr string, err error) {
+	return runSSHCommandStdin(ctx, client, cmd, nil)
+}
+
+// runSSHCommandStdin is like runSSHCommand but feeds stdin to the remote
+// process. Used for the auth-setup path, where secret env vars are written
+// to stdin (and sourced by the wrapped shell) instead of inlined into the
+// command string — that keeps them out of the remote shell's argv and out
+// of `ps aux` / `/proc/PID/cmdline` for the brief window the script runs.
+func runSSHCommandStdin(ctx context.Context, client *ssh.Client, cmd string, stdin io.Reader) (stdout, stderr string, err error) {
 	session, err := client.NewSession()
 	if err != nil {
 		return "", "", fmt.Errorf("ssh: new session: %w", err)
@@ -96,6 +105,9 @@ func runSSHCommand(ctx context.Context, client *ssh.Client, cmd string) (stdout,
 	var outBuf, errBuf bytes.Buffer
 	session.Stdout = &outBuf
 	session.Stderr = &errBuf
+	if stdin != nil {
+		session.Stdin = stdin
+	}
 
 	done := make(chan error, 1)
 	go func() {

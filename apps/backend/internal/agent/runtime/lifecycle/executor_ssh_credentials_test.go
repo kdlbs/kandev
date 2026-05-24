@@ -69,31 +69,33 @@ func TestParentDir(t *testing.T) {
 	}
 }
 
-func TestBuildSSHEnvPrefix(t *testing.T) {
+func TestBuildSSHEnvInitScript(t *testing.T) {
 	t.Run("empty map returns empty string", func(t *testing.T) {
-		if got := buildSSHEnvPrefix(nil); got != "" {
-			t.Errorf("buildSSHEnvPrefix(nil) = %q, want \"\"", got)
+		if got := buildSSHEnvInitScript(nil); got != "" {
+			t.Errorf("buildSSHEnvInitScript(nil) = %q, want \"\"", got)
 		}
-		if got := buildSSHEnvPrefix(map[string]string{}); got != "" {
-			t.Errorf("buildSSHEnvPrefix(empty) = %q, want \"\"", got)
+		if got := buildSSHEnvInitScript(map[string]string{}); got != "" {
+			t.Errorf("buildSSHEnvInitScript(empty) = %q, want \"\"", got)
 		}
 	})
 
-	t.Run("single env var is shell-quoted", func(t *testing.T) {
-		got := buildSSHEnvPrefix(map[string]string{"FOO": "bar baz"})
-		// shellQuote wraps in single quotes; the prefix should end with a
-		// trailing space so the next token (sh -c '...') doesn't run into
-		// the value.
-		if !strings.HasPrefix(got, "FOO='bar baz' ") {
-			t.Errorf("buildSSHEnvPrefix = %q, want prefix \"FOO='bar baz' \"", got)
+	t.Run("single env var is shell-quoted on its own line", func(t *testing.T) {
+		got := buildSSHEnvInitScript(map[string]string{"FOO": "bar baz"})
+		// Each line is a POSIX shell assignment; the line break separates
+		// entries so `. /dev/stdin` under `set -a` exports each one.
+		if got != "FOO='bar baz'\n" {
+			t.Errorf("buildSSHEnvInitScript = %q, want \"FOO='bar baz'\\n\"", got)
 		}
 	})
 
 	t.Run("values with embedded single quotes are escaped", func(t *testing.T) {
-		got := buildSSHEnvPrefix(map[string]string{"TOKEN": "it's-a-secret"})
+		got := buildSSHEnvInitScript(map[string]string{"TOKEN": "it's-a-secret"})
 		// shellQuote replaces ' with '\'' for POSIX-safe escaping.
-		if !strings.Contains(got, `TOKEN='it'\''s-a-secret' `) {
-			t.Errorf("buildSSHEnvPrefix did not escape single quote: %q", got)
+		if !strings.Contains(got, `TOKEN='it'\''s-a-secret'`) {
+			t.Errorf("buildSSHEnvInitScript did not escape single quote: %q", got)
+		}
+		if !strings.HasSuffix(got, "\n") {
+			t.Errorf("buildSSHEnvInitScript missing trailing newline: %q", got)
 		}
 	})
 }
