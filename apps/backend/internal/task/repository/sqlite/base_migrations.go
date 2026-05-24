@@ -655,9 +655,17 @@ func (r *Repository) healSessionTaskEnvironmentIDs() error {
 func (r *Repository) backfillSingleTask(tx *sql.Tx, row backfillRow) error {
 	envID := uuid.New().String()
 
-	// Look up executor type from executors table, default to "local_pc"
+	// Look up executor type from executors table. Default to "local_pc" ONLY
+	// when the executor row genuinely doesn't exist (e.g. legacy session whose
+	// executor was deleted). Any other scan error — driver failure, schema
+	// mismatch, type assertion bug — must abort the migration so the operator
+	// sees the underlying problem instead of every backfilled environment
+	// silently getting the wrong executor_type.
 	var executorType string
 	if err := tx.QueryRow(`SELECT type FROM executors WHERE id = ?`, row.executorID).Scan(&executorType); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("backfill: lookup executor type for task %s: %w", row.taskID, err)
+		}
 		executorType = "local_pc"
 	}
 
