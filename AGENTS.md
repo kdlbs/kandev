@@ -107,4 +107,16 @@ For developing in ephemeral cloud VMs (Cursor Cloud, Codex, GitHub Codespaces, e
 
 ---
 
+## Cursor Cloud specific instructions
+
+Setup details are in [`docs/remote-cloud-environment.md`](docs/remote-cloud-environment.md). Key caveats for cloud agents:
+
+- **golangci-lint** is installed to `~/go/bin/` via `go install`. The update script ensures `~/go/bin` is on `PATH` via `~/.bashrc`, but in-session shells may need `export PATH="$PATH:$HOME/go/bin"` if the profile hasn't been sourced.
+- **Generated files before typecheck**: `make typecheck` requires two gitignored files. Run `node apps/web/scripts/generate-release-notes.mjs && node apps/web/scripts/generate-changelog.mjs` before `make typecheck` (the update script handles this automatically).
+- **`make dev`** starts both backend (`:38429`) and web (`:37429`) via the CLI launcher. No external services needed — SQLite is embedded, event bus is in-memory, mock agent is auto-registered in dev profile. First page load may be slow (~25s) due to Turbopack compilation.
+- **CLI test flake**: `src/ports.test.ts > isPortInUse > returns false within the timeout when the host black-holes packets` fails in cloud VMs due to network environment differences (192.0.2.1 behaves differently). This is a known environment-specific flake, not a code issue.
+- **Key commands** (all from repo root): `make dev` (run), `make test` (all tests), `make lint` (all linters), `make typecheck` (tsc), `make fmt` (format). See root `Makefile` for full list.
+
+---
+
 **Last Updated**: 2026-05-24
