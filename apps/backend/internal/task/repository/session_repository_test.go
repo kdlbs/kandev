@@ -2,9 +2,11 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
 // TaskSession CRUD tests
@@ -629,37 +631,25 @@ func TestGetPrimarySessionInfoByTaskIDs_PopulatesExecutorJoinFields(t *testing.T
 	}
 }
 
-// TestBatchGetSessionsByTaskIDs covers the batch loader used by the task-list
-// endpoint: three tasks each with two sessions must come back grouped by task
-// ID, and the empty-input case must short-circuit with an empty map (no
-// query, no error).
-func TestBatchGetSessionsByTaskIDs(t *testing.T) {
-	repo, cleanup := createTestSQLiteRepo(t)
-	defer cleanup()
-	ctx := context.Background()
-
+// seedBatchSessions creates `taskIDs`, two sessions per task (s1 Completed,
+// s2 Running and marked primary). Shared fixture for the
+// BatchGetSessionsByTaskIDs subtests below.
+func seedBatchSessions(t *testing.T, repo *sqlite.Repository, ctx context.Context, taskIDs []string) {
+	t.Helper()
 	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-batch", Name: "WF"}); err != nil {
 		t.Fatalf("CreateWorkflow: %v", err)
 	}
-
-	taskIDs := []string{"task-A", "task-B", "task-C"}
 	for _, tid := range taskIDs {
 		if err := repo.CreateTask(ctx, &models.Task{
 			ID: tid, WorkflowID: "wf-batch", WorkflowStepID: "step-1", Title: "T-" + tid,
 		}); err != nil {
 			t.Fatalf("CreateTask %s: %v", tid, err)
 		}
-		// Two sessions per task; the second one is primary so the handler
-		// derivation of "primary session id" has something to find.
-		s1 := &models.TaskSession{
-			ID: tid + "-s1", TaskID: tid, State: models.TaskSessionStateCompleted,
-		}
+		s1 := &models.TaskSession{ID: tid + "-s1", TaskID: tid, State: models.TaskSessionStateCompleted}
 		if err := repo.CreateTaskSession(ctx, s1); err != nil {
 			t.Fatalf("CreateTaskSession %s: %v", s1.ID, err)
 		}
-		s2 := &models.TaskSession{
-			ID: tid + "-s2", TaskID: tid, State: models.TaskSessionStateRunning,
-		}
+		s2 := &models.TaskSession{ID: tid + "-s2", TaskID: tid, State: models.TaskSessionStateRunning}
 		if err := repo.CreateTaskSession(ctx, s2); err != nil {
 			t.Fatalf("CreateTaskSession %s: %v", s2.ID, err)
 		}
@@ -667,68 +657,117 @@ func TestBatchGetSessionsByTaskIDs(t *testing.T) {
 			t.Fatalf("SetSessionPrimary %s: %v", s2.ID, err)
 		}
 	}
+}
 
-	// Empty input must not query the DB and must return an empty (non-nil) map.
-	empty, err := repo.BatchGetSessionsByTaskIDs(ctx, nil)
-	if err != nil {
-		t.Fatalf("BatchGetSessionsByTaskIDs(nil): %v", err)
+// TestBatchGetSessionsByTaskIDs covers the batch loader used by the task-list
+// endpoint. Split into focused subtests so the parent function stays under the
+// 80-line limit and each scenario fails in isolation.
+func TestBatchGetSessionsByTaskIDs(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+	taskIDs := []string{"task-A", "task-B", "task-C"}
+	seedBatchSessions(t, repo, ctx, taskIDs)
+
+	t.Run("empty input returns non-nil empty map", func(t *testing.T) {
+		got, err := repo.BatchGetSessionsByTaskIDs(ctx, nil)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if got == nil {
+			t.Error("expected non-nil empty map, got nil")
+		}
+		if len(got) != 0 {
+			t.Errorf("expected empty map, got %d entries", len(got))
+		}
+	})
+
+	t.Run("multi-task grouping with primary derivation", func(t *testing.T) {
+		got, err := repo.BatchGetSessionsByTaskIDs(ctx, taskIDs)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if len(got) != len(taskIDs) {
+			t.Fatalf("expected %d tasks, got %d", len(taskIDs), len(got))
+		}
+		for _, tid := range taskIDs {
+			assertTwoSessionsWithSinglePrimary(t, got, tid)
+		}
+	})
+
+	t.Run("asked-for-but-missing task is absent from map", func(t *testing.T) {
+		got, err := repo.BatchGetSessionsByTaskIDs(ctx, []string{"task-A", "task-missing"})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if _, exists := got["task-missing"]; exists {
+			t.Error("expected missing task to be absent from result map")
+		}
+		if len(got["task-A"]) != 2 {
+			t.Errorf("expected 2 sessions for task-A, got %d", len(got["task-A"]))
+		}
+	})
+}
+
+// assertTwoSessionsWithSinglePrimary checks the per-task invariant the handler
+// relies on: exactly two sessions, all sessions belong to the requested task,
+// and exactly one is marked primary — the `-s2` one promoted by the seed.
+func assertTwoSessionsWithSinglePrimary(
+	t *testing.T,
+	got map[string][]*models.TaskSession,
+	tid string,
+) {
+	t.Helper()
+	sessions, ok := got[tid]
+	if !ok {
+		t.Errorf("task %s: missing from result map", tid)
+		return
 	}
-	if empty == nil {
-		t.Error("expected non-nil empty map, got nil")
+	if len(sessions) != 2 {
+		t.Errorf("task %s: expected 2 sessions, got %d", tid, len(sessions))
+		return
 	}
-	if len(empty) != 0 {
-		t.Errorf("expected empty map, got %d entries", len(empty))
+	for _, s := range sessions {
+		if s.TaskID != tid {
+			t.Errorf("task %s: cross-task bleed — got TaskID %q", tid, s.TaskID)
+		}
+	}
+	var primaries []string
+	for _, s := range sessions {
+		if s.IsPrimary {
+			primaries = append(primaries, s.ID)
+		}
+	}
+	if len(primaries) != 1 || primaries[0] != tid+"-s2" {
+		t.Errorf("task %s: expected single primary %s-s2, got %v", tid, tid, primaries)
+	}
+}
+
+// TestListWorktreesBySessionIDs_ChunksOverPlaceholderLimit verifies the
+// internal chunking added to ListWorktreesBySessionIDs: passing more than
+// sqliteMaxHostParams session IDs in one call must not exceed SQLite's
+// SQLITE_MAX_VARIABLE_NUMBER (999 on older builds). Without chunking, the
+// query bind step errors with SQLITE_RANGE; with chunking it returns cleanly.
+// Boundary case for BatchGetSessionsByTaskIDs's worktree-load step which can
+// reach 500 tasks × N sessions/task in a single chunk.
+func TestListWorktreesBySessionIDs_ChunksOverPlaceholderLimit(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	const n = 1001 // > 999 ceiling; would fail a single-batch IN(...)
+	sessionIDs := make([]string, n)
+	for i := range sessionIDs {
+		sessionIDs[i] = fmt.Sprintf("sess-chunk-%d", i)
 	}
 
-	// Multi-task case.
-	got, err := repo.BatchGetSessionsByTaskIDs(ctx, taskIDs)
+	// Pass IDs that don't exist in the DB — we only need to prove the query
+	// executes (binding the placeholders). The result will be an empty map.
+	got, err := repo.ListWorktreesBySessionIDs(ctx, sessionIDs)
 	if err != nil {
-		t.Fatalf("BatchGetSessionsByTaskIDs: %v", err)
+		t.Fatalf("ListWorktreesBySessionIDs(%d IDs): %v (chunking guard regressed?)", n, err)
 	}
-	if len(got) != len(taskIDs) {
-		t.Errorf("expected %d tasks in result, got %d", len(taskIDs), len(got))
-	}
-	for _, tid := range taskIDs {
-		sessions, ok := got[tid]
-		if !ok {
-			t.Errorf("missing sessions for task %s", tid)
-			continue
-		}
-		if len(sessions) != 2 {
-			t.Errorf("task %s: expected 2 sessions, got %d", tid, len(sessions))
-			continue
-		}
-		// Verify every returned session actually belongs to the right task
-		// (guards against accidental cross-task bleed in the WHERE clause).
-		for _, s := range sessions {
-			if s.TaskID != tid {
-				t.Errorf("task %s: got session with TaskID %q", tid, s.TaskID)
-			}
-		}
-		// Exactly one session per task must be marked primary, and it must
-		// be the one we promoted (s2). The handler relies on this to derive
-		// primary_session_id without a second query.
-		var primaries []string
-		for _, s := range sessions {
-			if s.IsPrimary {
-				primaries = append(primaries, s.ID)
-			}
-		}
-		if len(primaries) != 1 || primaries[0] != tid+"-s2" {
-			t.Errorf("task %s: expected single primary %s-s2, got %v", tid, tid, primaries)
-		}
-	}
-
-	// Tasks the caller asks about but that have no sessions must not appear
-	// in the map (callers treat absence as "0 sessions").
-	withMissing, err := repo.BatchGetSessionsByTaskIDs(ctx, []string{"task-A", "task-missing"})
-	if err != nil {
-		t.Fatalf("BatchGetSessionsByTaskIDs(with missing): %v", err)
-	}
-	if _, exists := withMissing["task-missing"]; exists {
-		t.Error("expected missing task to be absent from result map")
-	}
-	if len(withMissing["task-A"]) != 2 {
-		t.Errorf("expected 2 sessions for task-A, got %d", len(withMissing["task-A"]))
+	if len(got) != 0 {
+		t.Errorf("expected empty map for non-existent session IDs, got %d entries", len(got))
 	}
 }

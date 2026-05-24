@@ -1001,44 +1001,56 @@ func (r *Repository) ListTaskSessionWorktrees(ctx context.Context, sessionID str
 }
 
 // ListWorktreesBySessionIDs returns all worktrees for the given session IDs,
-// grouped by session ID. This eliminates N+1 queries when loading worktrees for multiple sessions.
+// grouped by session ID. This eliminates N+1 queries when loading worktrees
+// for multiple sessions. Chunks input above sqliteMaxHostParams (500) because
+// callers like loadWorktreesBatch — invoked from BatchGetSessionsByTaskIDs —
+// can pass `chunk_size_tasks × avg_sessions_per_task` IDs, which crosses
+// SQLite's SQLITE_MAX_VARIABLE_NUMBER (999 on older builds) at modest task
+// volumes (500 tasks × 2 sessions = 1000 placeholders).
 func (r *Repository) ListWorktreesBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]*models.TaskSessionWorktree, error) {
 	result := make(map[string][]*models.TaskSessionWorktree, len(sessionIDs))
 	if len(sessionIDs) == 0 {
 		return result, nil
 	}
-
-	placeholders := make([]string, len(sessionIDs))
-	args := make([]interface{}, len(sessionIDs))
-	for i, id := range sessionIDs {
-		placeholders[i] = "?"
-		args[i] = id
+	for _, chunk := range chunkIDs(sessionIDs, sqliteMaxHostParams) {
+		if err := r.appendWorktreesForSessionChunk(ctx, chunk, result); err != nil {
+			return nil, err
+		}
 	}
+	return result, nil
+}
 
-	query := fmt.Sprintf(`
-		SELECT tsw.id, tsw.session_id, tsw.worktree_id, tsw.repository_id, tsw.position,
-			tsw.worktree_path, tsw.worktree_branch, tsw.created_at
+// appendWorktreesForSessionChunk runs the worktree SELECT for one chunk of
+// session IDs and merges the rows into result. Extracted from
+// ListWorktreesBySessionIDs so the public method stays inside the funlen cap
+// after the chunking loop was added.
+func (r *Repository) appendWorktreesForSessionChunk(
+	ctx context.Context,
+	sessionIDs []string,
+	result map[string][]*models.TaskSessionWorktree,
+) error {
+	placeholders, args := buildInPlaceholders(sessionIDs)
+	query := `SELECT tsw.id, tsw.session_id, tsw.worktree_id, tsw.repository_id, tsw.position,
+		tsw.worktree_path, tsw.worktree_branch, tsw.created_at
 		FROM task_session_worktrees tsw
-		WHERE tsw.session_id IN (%s)
-		ORDER BY tsw.position ASC, tsw.created_at ASC
-	`, strings.Join(placeholders, ","))
+		WHERE tsw.session_id IN (` + placeholders + `)
+		ORDER BY tsw.position ASC, tsw.created_at ASC`
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var wt models.TaskSessionWorktree
-		err := rows.Scan(&wt.ID, &wt.SessionID, &wt.WorktreeID, &wt.RepositoryID,
-			&wt.Position, &wt.WorktreePath, &wt.WorktreeBranch, &wt.CreatedAt)
-		if err != nil {
-			return nil, err
+		if err := rows.Scan(&wt.ID, &wt.SessionID, &wt.WorktreeID, &wt.RepositoryID,
+			&wt.Position, &wt.WorktreePath, &wt.WorktreeBranch, &wt.CreatedAt); err != nil {
+			return err
 		}
 		result[wt.SessionID] = append(result[wt.SessionID], &wt)
 	}
-	return result, rows.Err()
+	return rows.Err()
 }
 
 func (r *Repository) DeleteTaskSessionWorktree(ctx context.Context, id string) error {
