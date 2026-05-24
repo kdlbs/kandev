@@ -153,7 +153,7 @@ jobs:
           # enough for the action to post review comments. Author will be
           # github-actions[bot] on this path.
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          track_progress: true
+          track_progress: ${{ github.event.action != 'labeled' }}
           allowed_bots: "*"
           prompt: |
             REPO: ${{ github.repository }}
