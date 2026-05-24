@@ -6,22 +6,30 @@ import (
 	"fmt"
 	"net"
 	"testing"
-	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/task/service"
 )
 
 // TestErrorsAreClassifiable verifies that the package's error-classification
 // helpers detect typed sentinels through any depth of wrapping, so HTTP
 // status mapping survives downstream wrap/unwrap changes.
 func TestErrorsAreClassifiable(t *testing.T) {
-	t.Run("isNotFound recognizes taskrepo.ErrTaskNotFound", func(t *testing.T) {
-		wrapped := fmt.Errorf("look up failed: %w", taskrepo.ErrTaskNotFound)
-		if !isNotFound(wrapped) {
-			t.Errorf("expected wrapped ErrTaskNotFound to classify as not-found")
-		}
-	})
+	notFoundSentinels := map[string]error{
+		"taskrepo.ErrTaskNotFound":    taskrepo.ErrTaskNotFound,
+		"service.ErrDocumentNotFound": service.ErrDocumentNotFound,
+		"service.ErrTaskPlanNotFound": service.ErrTaskPlanNotFound,
+		"service.ErrRevisionNotFound": service.ErrRevisionNotFound,
+	}
+	for name, sentinel := range notFoundSentinels {
+		t.Run("isNotFound recognizes "+name, func(t *testing.T) {
+			wrapped := fmt.Errorf("look up failed: %w", sentinel)
+			if !isNotFound(wrapped) {
+				t.Errorf("expected wrapped %s to classify as not-found", name)
+			}
+		})
+	}
 
 	t.Run("isAgentReportedError uses lifecycle.ErrAgentReported", func(t *testing.T) {
 		wrapped := fmt.Errorf("waitForPromptDone: %w", lifecycle.ErrAgentReported)
@@ -53,9 +61,9 @@ func TestIsTimeoutError(t *testing.T) {
 		// health waits, agent-stream connect waits. No typed Timeout() method.
 		{"session-ready timeout (substring fallback)", errors.New("timeout waiting for session to become ready after resume"), true},
 		{"agent-stream timeout (substring fallback)", errors.New("timeout waiting for agent stream to connect after restart"), true},
-		// context.DeadlineExceeded itself implements Timeout() so it matches
-		// via the typed path; createPromptErrorMessage also calls errors.Is
-		// against it directly — covered here for completeness.
+		// context.DeadlineExceeded is itself a net.Error with Timeout()==true,
+		// so it matches via the typed path — no separate errors.Is needed in
+		// createPromptErrorMessage.
 		{"context.DeadlineExceeded", context.DeadlineExceeded, true},
 	}
 	for _, tc := range cases {
@@ -69,9 +77,8 @@ func TestIsTimeoutError(t *testing.T) {
 
 type timeoutNetErr struct{}
 
-func (timeoutNetErr) Error() string        { return "i/o timeout" }
-func (timeoutNetErr) Timeout() bool        { return true }
-func (timeoutNetErr) Temporary() bool      { return false }
-func (timeoutNetErr) Deadline() *time.Time { return nil }
+func (timeoutNetErr) Error() string   { return "i/o timeout" }
+func (timeoutNetErr) Timeout() bool   { return true }
+func (timeoutNetErr) Temporary() bool { return false }
 
 var _ net.Error = timeoutNetErr{}

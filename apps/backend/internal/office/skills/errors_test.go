@@ -2,13 +2,13 @@ package skills
 
 import (
 	"errors"
-	"fmt"
 	"testing"
 )
 
-// TestErrorsAreClassifiable verifies that GetSkill and the file-accessor
-// helpers wrap their not-found errors with the package sentinels so HTTP
-// callers (handler.getSkillFile) can classify via errors.Is.
+// TestErrorsAreClassifiable verifies that the file-accessor helper wraps its
+// not-found error with the package sentinel so HTTP callers
+// (handler.getSkillFile) can classify via errors.Is. The GetSkillFromConfig
+// wrap is covered separately in service_test.go's external-package test.
 func TestErrorsAreClassifiable(t *testing.T) {
 	t.Run("readUserHomeSkillInventoryFile returns ErrSkillFileNotFound", func(t *testing.T) {
 		_, err := readUserHomeSkillInventoryFile(`[]`, "missing.md")
@@ -17,13 +17,6 @@ func TestErrorsAreClassifiable(t *testing.T) {
 		}
 		if !errors.Is(err, ErrSkillFileNotFound) {
 			t.Errorf("error not classifiable as ErrSkillFileNotFound: %v", err)
-		}
-	})
-
-	t.Run("ErrSkillNotFound is reachable via errors.Is on wrapped errors", func(t *testing.T) {
-		wrapped := fmt.Errorf("lookup failed: %w", ErrSkillNotFound)
-		if !errors.Is(wrapped, ErrSkillNotFound) {
-			t.Errorf("wrapped ErrSkillNotFound failed to classify")
 		}
 	})
 }

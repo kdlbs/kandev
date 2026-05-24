@@ -20,7 +20,6 @@ import (
 var (
 	ErrSchedulerAlreadyRunning = errors.New("scheduler is already running")
 	ErrSchedulerNotRunning     = errors.New("scheduler is not running")
-	ErrTaskNotFound            = errors.New("task not found")
 )
 
 // SchedulerConfig holds scheduler configuration
