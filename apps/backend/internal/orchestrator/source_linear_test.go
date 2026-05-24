@@ -151,6 +151,18 @@ func TestLinearSource_Release(t *testing.T) {
 	}
 }
 
+func TestLinearSource_Release_ErrorIsLoggedNotPropagated(t *testing.T) {
+	svc := &fakeLinearService{releaseErr: errors.New("dedup store down")}
+	src := &LinearWatcherSource{service: svc, logger: nopLogger(t)}
+	// Release returns no value: failure must be swallowed and logged.
+	// We only assert it does not panic and that the underlying service
+	// was still asked to release.
+	src.Release(context.Background(), sampleLinearEvent())
+	if len(svc.gotRelease) != 1 {
+		t.Fatalf("expected release call to be attempted, got %d", len(svc.gotRelease))
+	}
+}
+
 func TestLinearSource_AutoStartParams(t *testing.T) {
 	src := &LinearWatcherSource{}
 	p := src.AutoStartParams(sampleLinearEvent())

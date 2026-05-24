@@ -139,6 +139,16 @@ func TestJiraSource_Release(t *testing.T) {
 	}
 }
 
+func TestJiraSource_Release_ErrorIsLoggedNotPropagated(t *testing.T) {
+	svc := &fakeJiraService{releaseErr: errors.New("dedup store down")}
+	src := &JiraWatcherSource{service: svc, logger: nopLogger(t)}
+	// Release returns no value: failure must be swallowed and logged.
+	src.Release(context.Background(), sampleJiraEvent())
+	if len(svc.gotRelease) != 1 {
+		t.Fatalf("expected release call to be attempted, got %d", len(svc.gotRelease))
+	}
+}
+
 func TestJiraSource_AutoStartParams(t *testing.T) {
 	src := &JiraWatcherSource{}
 	p := src.AutoStartParams(sampleJiraEvent())

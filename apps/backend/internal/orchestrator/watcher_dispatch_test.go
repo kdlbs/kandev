@@ -259,4 +259,31 @@ func TestCoordinator_Dispatch_AttachError_LogsButContinues(t *testing.T) {
 	if starter.called != 1 {
 		t.Fatalf("expected auto-start to still run after attach error, got %d", starter.called)
 	}
+	// Attach failure is best-effort: the task was already created, so we
+	// MUST NOT Release the dedup row — that would orphan the task.
+	if src.recordedRelease != 0 {
+		t.Fatalf("expected no Release after attach error, got %d", src.recordedRelease)
+	}
+}
+
+func TestCoordinator_Dispatch_AutoStartError_LogsAndReturns(t *testing.T) {
+	src := &fakeWatcherSource{
+		name:      "linear",
+		reserveOK: true,
+		buildReq:  &IssueTaskRequest{WorkspaceID: "ws-1", WorkflowStepID: "step-1"},
+	}
+	tc := &fakeTaskCreator{}
+	starter := &fakeTaskStarter{err: errors.New("start failed")}
+	c := newTestCoordinator(t, tc, true, starter)
+
+	c.Dispatch(context.Background(), src, "evt")
+
+	if starter.called != 1 {
+		t.Fatalf("expected auto-start to be attempted, got %d", starter.called)
+	}
+	// Auto-start failure is terminal: the task exists and the dedup row is
+	// already attached. We must not Release.
+	if src.recordedRelease != 0 {
+		t.Fatalf("expected no Release after auto-start error, got %d", src.recordedRelease)
+	}
 }
