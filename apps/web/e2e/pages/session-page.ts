@@ -484,6 +484,32 @@ export class SessionPage {
     return this.page.getByTestId("pr-topbar-popover");
   }
 
+  /** Compact PR/CI status chip rendered in the chat status bar. */
+  prStatusChip(): Locator {
+    return this.page.getByTestId("pr-status-chip");
+  }
+
+  /** Mobile bottom-sheet drawer that hosts the PR CI popover. */
+  prStatusChipDrawer(): Locator {
+    return this.page.getByTestId("pr-status-chip-drawer");
+  }
+
+  /** Close button inside the chip's mobile drawer. */
+  prStatusChipDrawerClose(): Locator {
+    return this.page.getByTestId("pr-status-chip-drawer-close");
+  }
+
+  /** PRCIPopover body when rendered inside the mobile chip drawer. */
+  prStatusChipPopoverInner(): Locator {
+    return this.prStatusChipDrawer().getByTestId("pr-topbar-popover-inner");
+  }
+
+  /** Tap the chip and wait for the mobile drawer to be visible. */
+  async tapPRStatusChip(): Promise<void> {
+    await this.prStatusChip().tap();
+    await expect(this.prStatusChipDrawer()).toBeVisible({ timeout: 5_000 });
+  }
+
   /** Multi-PR aggregate popover content. */
   prTopbarPopoverAggregate(): Locator {
     return this.page.getByTestId("pr-topbar-popover-aggregate");
