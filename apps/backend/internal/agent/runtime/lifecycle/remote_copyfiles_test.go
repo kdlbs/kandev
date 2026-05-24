@@ -166,6 +166,102 @@ func TestRunRemoteCopyfiles_ShipFailure_StillEmitsWarning(t *testing.T) {
 	}
 }
 
+func TestShipRemoteCopyfilesForLaunch_SingleRepoUsesTopLevelSpec(t *testing.T) {
+	src := t.TempDir()
+	_ = os.WriteFile(filepath.Join(src, ".env"), []byte("X=1"), 0o600)
+
+	var received []client.CopyFilesRequest
+	url := stubCopyFilesServer(t, func(req client.CopyFilesRequest) client.CopyFilesResponse {
+		received = append(received, req)
+		out := make([]string, len(req.Entries))
+		for i, e := range req.Entries {
+			out[i] = e.RelPath
+		}
+		return client.CopyFilesResponse{Copied: out}
+	})
+
+	rec := newPrepareProgressRecorder(nil)
+	cli := clientForStub(t, url)
+	shipRemoteCopyfilesForLaunch(context.Background(), logger.Default(),
+		&LaunchRequest{RepositoryPath: src, CopyFiles: ".env"}, cli,
+		rec.Callback(0), rec)
+
+	if len(received) != 1 {
+		t.Fatalf("expected 1 ship call, got %d", len(received))
+	}
+	if received[0].Repo != "" {
+		t.Errorf("single-repo Repo subpath = %q, want empty", received[0].Repo)
+	}
+	if len(received[0].Entries) != 1 || received[0].Entries[0].RelPath != ".env" {
+		t.Errorf("entries = %+v, expected [.env]", received[0].Entries)
+	}
+	steps := rec.Steps()
+	if len(steps) != 1 || steps[0].Name != "Copy 1 ignored file" {
+		t.Errorf("steps = %+v, want one 'Copy 1 ignored file'", steps)
+	}
+}
+
+func TestShipRemoteCopyfilesForLaunch_MultiRepoSkipsEmptySpecs(t *testing.T) {
+	srcA := t.TempDir()
+	srcB := t.TempDir()
+	_ = os.WriteFile(filepath.Join(srcA, ".env.a"), []byte("A"), 0o600)
+	_ = os.WriteFile(filepath.Join(srcB, ".env.b"), []byte("B"), 0o600)
+
+	var received []client.CopyFilesRequest
+	url := stubCopyFilesServer(t, func(req client.CopyFilesRequest) client.CopyFilesResponse {
+		received = append(received, req)
+		out := make([]string, len(req.Entries))
+		for i, e := range req.Entries {
+			out[i] = e.RelPath
+		}
+		return client.CopyFilesResponse{Copied: out}
+	})
+
+	rec := newPrepareProgressRecorder(nil)
+	cli := clientForStub(t, url)
+	shipRemoteCopyfilesForLaunch(context.Background(), logger.Default(),
+		&LaunchRequest{
+			// Top-level fields should be ignored when Repositories is set —
+			// the multi-repo loop is the source of truth.
+			RepositoryPath: "/should/not/be/used",
+			CopyFiles:      "ignored",
+			Repositories: []RepoLaunchSpec{
+				{RepositoryPath: srcA, RepoName: "alpha", CopyFiles: ".env.a"},
+				{RepositoryPath: srcB, RepoName: "beta", CopyFiles: ""}, // empty spec → skip
+				{RepositoryPath: srcB, RepoName: "gamma", CopyFiles: ".env.b"},
+			},
+		}, cli, rec.Callback(0), rec)
+
+	if len(received) != 2 {
+		t.Fatalf("expected 2 ship calls (alpha + gamma), got %d", len(received))
+	}
+	if received[0].Repo != "alpha" || received[1].Repo != "gamma" {
+		t.Errorf("subpaths = [%q, %q], want [alpha, gamma]", received[0].Repo, received[1].Repo)
+	}
+
+	// Each per-repo job should land in its own recorder slot — verifies the
+	// per-job Callback(progressRecorder.Len()) wiring (the original
+	// double-offset bug emitted both steps at the same index, clobbering one).
+	steps := rec.Steps()
+	if len(steps) != 2 {
+		t.Fatalf("expected 2 distinct steps, got %d (steps=%+v)", len(steps), steps)
+	}
+	if steps[0].Name != "Copy 1 ignored file (alpha)" || steps[1].Name != "Copy 1 ignored file (gamma)" {
+		t.Errorf("step names = [%q, %q], want [Copy 1 ignored file (alpha), Copy 1 ignored file (gamma)]",
+			steps[0].Name, steps[1].Name)
+	}
+}
+
+func TestShipRemoteCopyfilesForLaunch_NoSpec_NoOp(t *testing.T) {
+	rec := newPrepareProgressRecorder(nil)
+	shipRemoteCopyfilesForLaunch(context.Background(), logger.Default(),
+		&LaunchRequest{RepositoryPath: t.TempDir(), CopyFiles: ""}, nil,
+		rec.Callback(0), rec)
+	if got := len(rec.Steps()); got != 0 {
+		t.Errorf("expected zero steps for empty spec, got %d", got)
+	}
+}
+
 func stubCopyFilesServerErr(t *testing.T) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

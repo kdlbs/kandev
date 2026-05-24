@@ -15,9 +15,9 @@ import (
 // shipRemoteCopyfilesForLaunch fires runRemoteCopyfiles once for the
 // single-repo top-level spec, or once per RepoLaunchSpec for multi-repo
 // launches. Each invocation gets its own progressRecorder.Callback so
-// the step ends up at the recorder's current tail without the
-// double-offset bug that prompted CodeRabbit's "double-offset in remote
-// copy-files progress indexing" feedback.
+// the step ends up at the recorder's current tail; passing StepIndex=0
+// and TotalSteps=1 then resolves to absolute positions correctly,
+// regardless of where the prior steps left the recorder.
 func shipRemoteCopyfilesForLaunch(
 	ctx context.Context,
 	log *logger.Logger,

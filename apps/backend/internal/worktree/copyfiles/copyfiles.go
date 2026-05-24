@@ -183,14 +183,10 @@ func WriteEntries(ctx context.Context, containmentRoot, targetDir string, entrie
 		return nil, nil, fmt.Errorf("copyfiles: %w", err)
 	}
 	// Explicit containment check: targetDir must lie inside containmentRoot
-	// after both are canonicalized via EvalSymlinks. This is the standard
-	// path-injection sanitizer CodeQL recognises (`strings.HasPrefix` on
-	// canonicalized paths), and it gives the WriteEntries surface a
-	// machine-checkable trust boundary: callers pass the workspace root
-	// they control + a candidate subdir, and we refuse anything that
-	// escapes. Without this check CodeQL flagged the downstream
-	// os.Stat / os.WriteFile sinks as path-injection on any flow that
-	// originated from a JSON body.
+	// after both are canonicalized via EvalSymlinks. Gives the WriteEntries
+	// surface a machine-checkable trust boundary — callers pass the workspace
+	// root they control plus a candidate subdir, and any target that escapes
+	// the root is rejected before any filesystem sink (os.Stat, os.WriteFile).
 	canonRoot, err := filepath.EvalSymlinks(containmentRoot)
 	if err != nil {
 		return nil, nil, fmt.Errorf("copyfiles: resolve containment root: %w", err)
@@ -230,8 +226,8 @@ func WriteEntries(ctx context.Context, containmentRoot, targetDir string, entrie
 // writeOneEntry validates a single Entry, refusing paths that escape
 // targetDir, then writes it (skip-if-exists for idempotency). Resolves
 // symlinks on the destination's parent directory so a pre-existing
-// `config -> /etc` symlink can't smuggle the write outside absTarget
-// (flagged as a Critical by CodeRabbit on PR #950).
+// `config -> /etc` symlink in the target can't smuggle the write
+// outside absTarget.
 func writeOneEntry(absTarget string, e Entry, log *zap.Logger) (written bool, warning string, err error) {
 	rel := filepath.FromSlash(e.RelPath)
 	if rel == "" {
@@ -292,18 +288,20 @@ func pathInsideRoot(candidate, root string) bool {
 }
 
 // secureDestination resolves the destination path for a relative entry,
-// creating parent directories and verifying via EvalSymlinks that the
-// final path still lies inside absTarget after any symlinks in parent
-// components are followed. Returns:
+// creating parent directories only after every existing component along
+// the chain has been verified to be a regular directory (not a symlink).
+// Returns:
 //
 //   - (cleanDst, "", nil) on success — safe to write.
 //   - ("", warn, nil)     when the path is rejected (warn surfaced to caller).
 //   - ("", "", err)       only on mkdir IO failure — fatal for the batch.
 //
-// Closes the symlink-target-escape hole CodeRabbit flagged on PR #950:
-// without the post-MkdirAll EvalSymlinks, a pre-existing component like
-// `config -> /etc` could allow a write at /etc/passwd via a `config/x`
-// relative path despite the lexical Rel check passing.
+// Two-step validation closes the symlink-target-escape vector: a
+// pre-existing component like `config -> /etc` would cause MkdirAll to
+// silently create directories at /etc/... because Go's MkdirAll follows
+// symlinks via Stat. validateParentChain refuses to proceed if any
+// existing component is a symlink, and a final EvalSymlinks check on
+// the parent re-confirms containment after the dirs are created.
 func secureDestination(absTarget, rel string) (cleanDst, warning string, err error) {
 	lexical := filepath.Join(absTarget, rel)
 	cleanDst, absErr := filepath.Abs(lexical)
@@ -316,6 +314,9 @@ func secureDestination(absTarget, rel string) (cleanDst, warning string, err err
 		return "", fmt.Sprintf("rejected %q: escapes target", rel), nil
 	}
 	parent := filepath.Dir(cleanDst)
+	if warn, ok := validateParentChain(absTarget, parent); !ok {
+		return "", fmt.Sprintf("rejected %q: %s", rel, warn), nil
+	}
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return "", "", fmt.Errorf("copyfiles: mkdir %s: %w", parent, err)
 	}
@@ -330,6 +331,36 @@ func secureDestination(absTarget, rel string) (cleanDst, warning string, err err
 		return "", fmt.Sprintf("rejected %q: symlink in parent escapes target", rel), nil
 	}
 	return final, "", nil
+}
+
+// validateParentChain walks from absTarget down to parent (the directory
+// that will host the final file). For every existing component, if it
+// is a symlink the function refuses by returning ok=false plus a human
+// warning. Non-existent components are fine — MkdirAll will create
+// them. Skipping symlinks is intentional: it gives a simple,
+// machine-checkable guarantee that no subsequent MkdirAll call can
+// reach a directory outside absTarget through a pre-planted symlink.
+func validateParentChain(absTarget, parent string) (warning string, ok bool) {
+	rel, err := filepath.Rel(absTarget, parent)
+	if err != nil {
+		return fmt.Sprintf("rel %q: %v", parent, err), false
+	}
+	if rel == "." || rel == "" {
+		return "", true
+	}
+	cur := absTarget
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		cur = filepath.Join(cur, part)
+		info, lerr := os.Lstat(cur)
+		if lerr != nil {
+			// Doesn't exist yet — MkdirAll handles the tail safely from here.
+			return "", true
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Sprintf("symlink in parent path at %q", cur), false
+		}
+	}
+	return "", true
 }
 
 func (s *copyState) warn(format string, args ...any) {
