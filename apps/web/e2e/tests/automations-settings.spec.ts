@@ -154,9 +154,7 @@ test.describe("Automations settings page", () => {
     await expect(testPage.getByTestId("webhook-created-dialog")).toBeVisible({ timeout: 10_000 });
 
     // Verify the webhook URL is shown in the dialog
-    await expect(
-      testPage.locator('input[value*="/api/v1/automations/webhook/"]'),
-    ).toBeVisible();
+    await expect(testPage.locator('input[value*="/api/v1/automations/webhook/"]')).toBeVisible();
 
     // Verify a non-empty secret input is shown
     const secretInputs = testPage.locator("input[readonly]");
