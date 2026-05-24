@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -82,7 +81,7 @@ func wsGet(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.M
 	}
 }
 
-func wsCreate(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+func wsCreate(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 		var req CreateAutomationRequest
 		if err := msg.ParsePayload(&req); err != nil {
@@ -92,14 +91,14 @@ func wsCreate(svc *Service, log *logger.Logger) func(ctx context.Context, msg *w
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		// One-time reveal of the webhook secret. The Automation struct hides
-		// it via `json:"-"` so list/get stay safe; the response DTO wraps it
-		// alongside the plaintext value for the client to display once.
-		secret, secretErr := svc.GetWebhookSecret(ctx, a.ID)
-		if secretErr != nil {
-			log.Warn("failed to load webhook secret for create response", zap.String("automation_id", a.ID), zap.Error(secretErr))
-		}
-		return ws.NewResponse(msg.ID, msg.Action, &CreateAutomationResponse{Automation: a, WebhookSecret: secret})
+		// One-time reveal of the webhook secret. Service.CreateAutomation
+		// re-reads the row before returning, so a.WebhookSecret is already
+		// populated — no second DB round-trip needed (and avoiding one keeps
+		// us from silently shipping an empty secret on a transient failure).
+		// The Automation struct hides it via `json:"-"` so list/get stay safe;
+		// the response DTO surfaces the plaintext value for the client to
+		// display once.
+		return ws.NewResponse(msg.ID, msg.Action, &CreateAutomationResponse{Automation: a, WebhookSecret: a.WebhookSecret})
 	}
 }
 
