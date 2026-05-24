@@ -95,13 +95,29 @@ function EnvironmentFields({
   return (
     <dl className="space-y-1 text-xs">
       {fields.map((f) => (
-        <Field key={f.label} label={f.label} value={f.value} copy={f.copy} />
+        <Field
+          key={f.label}
+          label={f.label}
+          value={f.value}
+          copy={f.copy}
+          copyValue={f.copyValue}
+        />
       ))}
     </dl>
   );
 }
 
-function Field({ label, value, copy }: { label: string; value: string; copy?: boolean }) {
+function Field({
+  label,
+  value,
+  copy,
+  copyValue,
+}: {
+  label: string;
+  value: string;
+  copy?: boolean;
+  copyValue?: string;
+}) {
   return (
     <div className="flex items-start gap-2">
       <dt className="text-muted-foreground min-w-[80px]">{label}</dt>
@@ -114,7 +130,7 @@ function Field({ label, value, copy }: { label: string; value: string; copy?: bo
             aria-label={`Copy ${label}`}
             onClick={() => {
               void navigator.clipboard
-                .writeText(value)
+                .writeText(copyValue ?? value)
                 .then(() => toast.success(`${label} copied`));
             }}
           >
@@ -126,7 +142,10 @@ function Field({ label, value, copy }: { label: string; value: string; copy?: bo
   );
 }
 
-type FieldRow = { label: string; value: string; copy?: boolean };
+// copyValue overrides the clipboard payload when the displayed value is a
+// truncated representation (fingerprint hash suffix, …) — copying the
+// truncation is useless. Omit to copy `value` verbatim.
+type FieldRow = { label: string; value: string; copy?: boolean; copyValue?: string };
 
 function buildFields(
   env: TaskEnvironment,
@@ -183,7 +202,12 @@ function addSshRows(rows: FieldRow[], ssh: SSHLiveStatus) {
     rows.push({ label: "Agentctl", value: agentctl });
   }
   if (ssh.fingerprint) {
-    rows.push({ label: "Fingerprint", value: formatFingerprint(ssh.fingerprint), copy: true });
+    rows.push({
+      label: "Fingerprint",
+      value: formatFingerprint(ssh.fingerprint),
+      copy: true,
+      copyValue: ssh.fingerprint,
+    });
   }
   // Shell affordance: paste-ready ssh command that mirrors how kandev
   // connects. Helpful when the user wants to inspect the remote dir by hand.
