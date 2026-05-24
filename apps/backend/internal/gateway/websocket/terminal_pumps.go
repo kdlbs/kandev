@@ -280,23 +280,14 @@ func (h *TerminalHandler) writeToUnreadyPty(
 // detectInputSubmission checks if the input contains Enter key and notifies
 // the lifecycle manager to update the execution state to Running.
 func (h *TerminalHandler) detectInputSubmission(sessionID string, data []byte) {
-	// Check for Enter key (CR or LF)
-	hasEnter := false
-	for _, b := range data {
-		if b == '\n' || b == '\r' {
-			hasEnter = true
-			break
-		}
+	if !bytes.ContainsAny(data, "\n\r") {
+		return
 	}
-
-	if hasEnter {
-		// Notify lifecycle manager that user submitted input
-		if err := h.lifecycleMgr.MarkPassthroughRunning(sessionID); err != nil {
-			// Log at debug level - may fail if session ended or not in passthrough mode
-			h.logger.Debug("failed to mark passthrough as running",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		}
+	if err := h.lifecycleMgr.MarkPassthroughRunning(sessionID); err != nil {
+		// May fail if session ended or not in passthrough mode.
+		h.logger.Debug("failed to mark passthrough as running",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 	}
 }
 
