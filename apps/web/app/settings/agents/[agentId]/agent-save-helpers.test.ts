@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { agentProfileId as toAgentProfileId, type AgentProfile } from "@/lib/types/http";
-import { isProfileDirty, type DraftProfile } from "./agent-save-helpers";
+import { isProfileDirty, toAgentProfilePatch, type DraftProfile } from "./agent-save-helpers";
+import type { ProfileFormData } from "@/components/settings/profile-form-fields";
 
 const baseProfile: AgentProfile = {
   id: toAgentProfileId("p1"),
@@ -22,6 +23,32 @@ const draftFrom = (saved: AgentProfile, overrides: Partial<DraftProfile> = {}): 
 });
 
 const ALLOW_ALL_TOOLS_FLAG = "--allow-all-tools";
+
+describe("toAgentProfilePatch", () => {
+  it("maps snake_case form keys to camelCase AgentProfile fields", () => {
+    const patch: Partial<ProfileFormData> = {
+      name: "CLI",
+      model: "claude-sonnet",
+      mode: "default",
+      allow_indexing: true,
+      cli_passthrough: true,
+      cli_flags: [{ flag: ALLOW_ALL_TOOLS_FLAG, enabled: true, description: "" }],
+    };
+    expect(toAgentProfilePatch(patch)).toEqual({
+      name: "CLI",
+      model: "claude-sonnet",
+      mode: "default",
+      allowIndexing: true,
+      cliPassthrough: true,
+      cliFlags: [{ flag: ALLOW_ALL_TOOLS_FLAG, enabled: true, description: "" }],
+    });
+  });
+
+  it("omits undefined keys so partial patches do not clobber unrelated fields", () => {
+    expect(toAgentProfilePatch({ cli_passthrough: false })).toEqual({ cliPassthrough: false });
+    expect(toAgentProfilePatch({})).toEqual({});
+  });
+});
 
 describe("isProfileDirty", () => {
   it("returns false when draft equals saved", () => {

@@ -75,6 +75,7 @@ export function PassthroughComposer({
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === "Enter" && !e.shiftKey) {
+        if (e.nativeEvent.isComposing) return;
         e.preventDefault();
         void submit();
         return;

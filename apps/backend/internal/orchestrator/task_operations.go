@@ -359,7 +359,7 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	// Passthrough profiles skip the wrap: the prompt is typed straight into the
 	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
 	// MCP-tool boilerplate prepended to "hello".
-	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) && !s.isPassthroughProfile(ctx, effectiveProfileID) {
+	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) && !session.IsPassthrough {
 		effectivePrompt = sysprompt.InjectKandevContext(taskID, sessionID, effectivePrompt)
 	}
 
@@ -571,10 +571,15 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// recordAutoStartMessage) wrap before recording the user message so the DB
 	// row carries the block; the HasKandevContext guard makes this orchestrator
 	// pass a no-op in those cases instead of double-wrapping.
-	// Passthrough profiles skip the wrap: the prompt is typed straight into the
+	// Passthrough sessions skip the wrap: the prompt is typed straight into the
 	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
-	// MCP-tool boilerplate prepended to "hello".
-	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) && !s.isPassthroughProfile(ctx, agentProfileID) {
+	// MCP-tool boilerplate prepended to "hello". Use the session snapshot, not a
+	// live profile lookup, so a mid-run profile edit cannot change wrap behavior.
+	skipKandevMCPWrap := false
+	if launchSession, sessErr := s.repo.GetTaskSession(ctx, sessionID); sessErr == nil {
+		skipKandevMCPWrap = launchSession.IsPassthrough
+	}
+	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) && !skipKandevMCPWrap {
 		effectivePrompt = sysprompt.InjectKandevContext(task.ID, sessionID, effectivePrompt)
 	}
 

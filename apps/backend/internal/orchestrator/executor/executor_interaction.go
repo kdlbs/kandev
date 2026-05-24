@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -201,7 +202,7 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID, sessionID, pro
 	if err != nil {
 		return nil, fmt.Errorf("resolve passthrough config: %w", err)
 	}
-	payload := buildPassthroughPayload(prompt, pt.SubmitSequence)
+	payload := buildPassthroughPayload(prompt, agents.EffectiveSubmitSequence(pt.SubmitSequence))
 	if err := e.agentManager.WritePassthroughStdin(ctx, sessionID, payload); err != nil {
 		return nil, fmt.Errorf("failed to write to passthrough stdin: %w", err)
 	}
@@ -222,6 +223,7 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID, sessionID, pro
 // The submit sequence is appended outside the paste bracket so the agent sees "end of paste,
 // then submit" as two distinct events.
 func buildPassthroughPayload(prompt, submitSequence string) string {
+	submitSequence = agents.EffectiveSubmitSequence(submitSequence)
 	if !strings.Contains(prompt, "\n") {
 		return prompt + submitSequence
 	}

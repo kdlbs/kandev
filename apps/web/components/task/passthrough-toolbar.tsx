@@ -21,6 +21,7 @@ import { useNextWorkflowStep } from "@/hooks/domains/kanban/use-plan-actions";
 import { usePendingDiffCommentsByFile } from "@/hooks/domains/comments/use-diff-comments";
 import { useCommentsStore } from "@/lib/state/slices/comments/comments-store";
 import { useFileEditors } from "@/hooks/use-file-editors";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
 import type { DiffComment } from "@/lib/diff/types";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -47,7 +48,7 @@ export function PassthroughToolbar({
   taskId: string | null;
 }) {
   const [composerOpen, setComposerOpen] = useState(false);
-  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [commentsOpenState, setCommentsOpen] = useState(false);
 
   const sessionState = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId]?.state ?? null) : null,
@@ -58,6 +59,12 @@ export function PassthroughToolbar({
   const showProceed = !!nextStep.proceedStepName && !isAgentBusy;
 
   const { pendingComments, pendingCount } = usePendingPassthroughComments(sessionId);
+  const { isMobile } = useResponsiveBreakpoint();
+  const { openFile } = useFileEditors();
+
+  // Derive open state: auto-close when pending comments are cleared
+  const commentsOpen = commentsOpenState && pendingCount > 0;
+
   const handleSendMessage = useSendPassthroughMessage({
     taskId,
     sessionId,
@@ -68,19 +75,18 @@ export function PassthroughToolbar({
     },
   });
 
-  // If a panel was open and all its content vanished, auto-close it.
-  if (commentsOpen && pendingCount === 0) {
-    setCommentsOpen(false);
-  }
-
   return (
     <div className="flex h-full flex-col bg-card" data-testid="passthrough-toolbar">
       <div className="flex-1 min-h-0">
-        <PassthroughTerminal sessionId={sessionId} mode="agent" />
+        <PassthroughTerminal sessionId={sessionId} mode="agent" enableTouchScroll={isMobile} />
       </div>
 
       {commentsOpen && pendingCount > 0 && (
-        <CommentsPanel comments={pendingComments} onSend={() => handleSendMessage("")} />
+        <CommentsPanel
+          comments={pendingComments}
+          openFile={openFile}
+          onSend={() => handleSendMessage("")}
+        />
       )}
 
       {composerOpen && (
@@ -331,9 +337,11 @@ function PendingCommentsHint({ count }: { count: number }) {
 
 function CommentsPanel({
   comments,
+  openFile,
   onSend,
 }: {
   comments: DiffComment[];
+  openFile: (path: string) => void;
   onSend: () => Promise<void> | void;
 }) {
   const [isSending, setIsSending] = useState(false);
@@ -386,7 +394,7 @@ function CommentsPanel({
       </div>
       <div className="flex-1 space-y-2 overflow-y-auto px-2 py-2">
         {comments.map((comment) => (
-          <CommentCard key={comment.id} comment={comment} />
+          <CommentCard key={comment.id} comment={comment} openFile={openFile} />
         ))}
       </div>
     </div>
@@ -399,10 +407,15 @@ function formatLineRange(comment: DiffComment): string {
     : `${comment.startLine}-${comment.endLine}`;
 }
 
-function CommentCard({ comment }: { comment: DiffComment }) {
+function CommentCard({
+  comment,
+  openFile,
+}: {
+  comment: DiffComment;
+  openFile: (path: string) => void;
+}) {
   const updateComment = useCommentsStore((s) => s.updateComment);
   const removeComment = useCommentsStore((s) => s.removeComment);
-  const { openFile } = useFileEditors();
   const lineRange = formatLineRange(comment);
 
   const handleOpenFile = useCallback(() => {

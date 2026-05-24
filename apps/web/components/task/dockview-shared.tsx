@@ -192,7 +192,12 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
   const paramSessionId = params?.sessionId as string | undefined;
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionId = paramSessionId ?? storeSessionId;
-  const taskId = useAppStore((state) => state.tasks.activeTaskId);
+  const taskId = useAppStore((state) => {
+    if (sessionId) {
+      return state.taskSessions.items[sessionId]?.task_id ?? state.tasks.activeTaskId;
+    }
+    return state.tasks.activeTaskId;
+  });
   const { openFile } = useFileEditors();
   const isPassthrough = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,

@@ -257,7 +257,7 @@ type PassthroughConfig struct {
 	AutoInjectPrompt bool
 	// SubmitSequence is appended after the prompt text when auto-injecting
 	// and when routing chat-compose messages to the PTY. "\r" for most TUIs.
-	// Empty means "write text only, no submit".
+	// Empty inherits DefaultPassthroughSubmitSequence at PTY write sites.
 	SubmitSequence string
 }
 
