@@ -159,4 +159,34 @@ export const qk = {
     /** All pending (unsent) comments. */
     pending: () => ["comments", "pending"] as const,
   },
+
+  // -------------------------------------------------------------------------
+  // Settings
+  // Invalidate together with prefix ["settings"]
+  // -------------------------------------------------------------------------
+  settings: {
+    prefix: () => ["settings"] as const,
+    executors: () => ["settings", "executors"] as const,
+    agents: () => ["settings", "agents"] as const,
+    agentProfiles: () => ["settings", "agentProfiles"] as const,
+    agentDiscovery: () => ["settings", "agentDiscovery"] as const,
+    availableAgents: () => ["settings", "availableAgents"] as const,
+    editors: () => ["settings", "editors"] as const,
+    prompts: () => ["settings", "prompts"] as const,
+    secrets: () => ["settings", "secrets"] as const,
+    sprites: (secretId?: string) =>
+      secretId !== undefined
+        ? (["settings", "sprites", secretId] as const)
+        : (["settings", "sprites"] as const),
+    notificationProviders: () => ["settings", "notificationProviders"] as const,
+    userSettings: () => ["settings", "userSettings"] as const,
+    installJobs: (id?: string) =>
+      id !== undefined
+        ? (["settings", "installJobs", id] as const)
+        : (["settings", "installJobs"] as const),
+    systemHealth: () => ["settings", "systemHealth"] as const,
+    remoteAuthSpecs: () => ["settings", "remoteAuthSpecs"] as const,
+    dynamicModels: (agentName: string) =>
+      ["settings", "dynamicModels", agentName] as const,
+  },
 } as const;

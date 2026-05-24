@@ -1,38 +1,40 @@
 "use client";
 
-import { useEffect } from "react";
-import { getSpritesStatus, listSpritesInstances } from "@/lib/api/domains/sprites-api";
-import { useAppStore } from "@/components/state-provider";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
+import { qk } from "@/lib/query/keys";
+import { destroySprite } from "@/lib/api/domains/sprites-api";
+import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
 
 export function useSprites(secretId?: string) {
-  const status = useAppStore((state) => state.sprites.status);
-  const instances = useAppStore((state) => state.sprites.instances);
-  const loaded = useAppStore((state) => state.sprites.loaded);
-  const loading = useAppStore((state) => state.sprites.loading);
-  const setSpritesStatus = useAppStore((state) => state.setSpritesStatus);
-  const setSpritesInstances = useAppStore((state) => state.setSpritesInstances);
-  const setSpritesLoading = useAppStore((state) => state.setSpritesLoading);
+  const query = useQuery(settingsQueryOptions.sprites(secretId));
+  return {
+    status: query.data?.status ?? null,
+    instances: query.data?.instances ?? [],
+    loaded: query.isSuccess,
+    loading: query.isFetching,
+  };
+}
 
-  useEffect(() => {
-    if (!secretId || loaded || loading) return;
-    setSpritesLoading(true);
-
-    Promise.all([
-      getSpritesStatus(secretId, { cache: "no-store" }),
-      listSpritesInstances(secretId, { cache: "no-store" }),
-    ])
-      .then(([statusRes, instancesRes]) => {
-        setSpritesStatus(statusRes);
-        setSpritesInstances(instancesRes ?? []);
-      })
-      .catch(() => {
-        setSpritesStatus({ connected: false, token_configured: false, instance_count: 0 });
-        setSpritesInstances([]);
-      })
-      .finally(() => {
-        setSpritesLoading(false);
-      });
-  }, [loaded, loading, secretId, setSpritesStatus, setSpritesInstances, setSpritesLoading]);
-
-  return { status, instances, loaded, loading };
+export function useDestroySprite(secretId?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => destroySprite(name, secretId),
+    onSuccess: (_result, name) => {
+      qc.setQueryData(
+        qk.settings.sprites(secretId),
+        (prev: { status: SpritesStatus; instances: SpritesInstance[] } | undefined) => {
+          if (!prev) return prev;
+          const instances = prev.instances.filter((i) => i.name !== name);
+          return {
+            ...prev,
+            instances,
+            status: prev.status
+              ? { ...prev.status, instance_count: instances.length }
+              : prev.status,
+          };
+        },
+      );
+    },
+  });
 }
