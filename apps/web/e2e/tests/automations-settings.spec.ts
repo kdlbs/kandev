@@ -82,9 +82,11 @@ test.describe("Automations settings page", () => {
     await automations.saveButton.click();
 
     // After create we land on the listings page — open the new automation
-    // by clicking its row.
+    // by clicking its row. Wait for the table to render before locating
+    // the row so the click doesn't race the listings hydration.
     await expect(testPage).toHaveURL(/automations$/, { timeout: 15_000 });
-    await testPage.locator("tr", { hasText: "Original Name" }).click();
+    await expect(automations.table).toBeVisible({ timeout: 10_000 });
+    await automations.table.locator("tr", { hasText: "Original Name" }).click();
     await expect(testPage).toHaveURL(/automations\/[a-f0-9-]+$/, { timeout: 10_000 });
     await expect(automations.editor).toBeVisible();
 
@@ -113,7 +115,8 @@ test.describe("Automations settings page", () => {
 
     // Land on listings, click into the new row to reach the editor.
     await expect(testPage).toHaveURL(/automations$/, { timeout: 15_000 });
-    await testPage.locator("tr", { hasText: "To Be Deleted" }).click();
+    await expect(automations.table).toBeVisible({ timeout: 10_000 });
+    await automations.table.locator("tr", { hasText: "To Be Deleted" }).click();
     await expect(testPage).toHaveURL(/automations\/[a-f0-9-]+$/, { timeout: 10_000 });
 
     // Delete it
@@ -142,7 +145,7 @@ test.describe("Automations settings page", () => {
 
     // Find the toggle — automations are enabled by default.
     // The table row containing "Toggle Test" has a switch inside it.
-    const row = testPage.locator("tr", { hasText: "Toggle Test" });
+    const row = automations.table.locator("tr", { hasText: "Toggle Test" });
     const toggle = row.locator('[role="switch"]');
     await expect(toggle).toBeChecked();
 
@@ -153,7 +156,7 @@ test.describe("Automations settings page", () => {
     // Reload and verify it persisted
     await testPage.reload();
     await expect(automations.table).toBeVisible({ timeout: 10_000 });
-    const rowAfterReload = testPage.locator("tr", { hasText: "Toggle Test" });
+    const rowAfterReload = automations.table.locator("tr", { hasText: "Toggle Test" });
     const toggleAfterReload = rowAfterReload.locator('[role="switch"]');
     await expect(toggleAfterReload).not.toBeChecked();
   });
