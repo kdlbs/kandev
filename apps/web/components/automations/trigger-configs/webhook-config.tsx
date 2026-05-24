@@ -77,9 +77,8 @@ export function WebhookConfig({ automationId, initialSecret }: WebhookConfigProp
       <p className="text-xs text-muted-foreground">
         Send a POST request with a JSON body and the secret in the{" "}
         <code className="bg-muted px-1 rounded">X-Webhook-Secret</code> header. Reference fields
-        from the payload with{" "}
-        <code className="bg-muted px-1 rounded">{`{{webhook.<path>}}`}</code>, e.g.{" "}
-        <code className="bg-muted px-1 rounded">{`{{webhook.pull_request.number}}`}</code>.
+        from the payload with <code className="bg-muted px-1 rounded">{`{{webhook.<path>}}`}</code>,
+        e.g. <code className="bg-muted px-1 rounded">{`{{webhook.pull_request.number}}`}</code>.
       </p>
       <SamplePayloadSection
         samplePayload={samplePayload}
@@ -90,26 +89,13 @@ export function WebhookConfig({ automationId, initialSecret }: WebhookConfigProp
   );
 }
 
-function UrlField({
-  url,
-  copied,
-  onCopy,
-}: {
-  url: string;
-  copied: boolean;
-  onCopy: () => void;
-}) {
+function UrlField({ url, copied, onCopy }: { url: string; copied: boolean; onCopy: () => void }) {
   return (
     <div className="space-y-1.5">
       <Label className="text-xs">Webhook URL</Label>
       <div className="flex gap-2">
         <Input value={url} readOnly className="font-mono text-xs" />
-        <Button
-          variant="outline"
-          size="sm"
-          className="cursor-pointer shrink-0"
-          onClick={onCopy}
-        >
+        <Button variant="outline" size="sm" className="cursor-pointer shrink-0" onClick={onCopy}>
           {copied ? <IconCheck className="h-3.5 w-3.5" /> : <IconCopy className="h-3.5 w-3.5" />}
         </Button>
       </div>

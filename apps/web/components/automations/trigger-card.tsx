@@ -96,9 +96,7 @@ export function TriggerCard({
 }: TriggerCardProps) {
   // Webhook configs open by default when there's a fresh secret to show —
   // otherwise a user who just created an automation has to hunt for it.
-  const [expanded, setExpanded] = useState(
-    trigger.type === "webhook" && !!oneTimeWebhookSecret,
-  );
+  const [expanded, setExpanded] = useState(trigger.type === "webhook" && !!oneTimeWebhookSecret);
   const Icon = TRIGGER_ICON[trigger.type];
   const color = TRIGGER_COLOR[trigger.type];
 
@@ -176,10 +174,7 @@ function TriggerConfigForm({
       return <GitHubCIConfig config={trigger.config} onUpdate={onUpdate} />;
     case "webhook":
       return (
-        <WebhookConfig
-          automationId={automationId}
-          initialSecret={oneTimeWebhookSecret ?? null}
-        />
+        <WebhookConfig automationId={automationId} initialSecret={oneTimeWebhookSecret ?? null} />
       );
     default:
       return <p className="text-sm text-muted-foreground">Unknown trigger type</p>;
