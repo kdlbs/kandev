@@ -65,7 +65,9 @@ func TestHandleCreate_Returns202WithJobID(t *testing.T) {
 		t.Fatalf("status = %d", w.Code)
 	}
 	var resp map[string]string
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	if resp["job_id"] == "" {
 		t.Errorf("expected job_id, body = %s", w.Body.String())
 	}
@@ -191,7 +193,9 @@ func TestHandlerRoundTrip_CreateThenList(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	var created map[string]string
-	_ = json.Unmarshal(w.Body.Bytes(), &created)
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	waitForJob(t, svc.jobs, created["job_id"], jobs.StateSucceeded)
 
 	// Confirm file appears on disk.
@@ -213,7 +217,9 @@ func TestHandlerRoundTrip_CreateThenList(t *testing.T) {
 	var listResp struct {
 		Snapshots []Snapshot `json:"snapshots"`
 	}
-	_ = json.Unmarshal(w2.Body.Bytes(), &listResp)
+	if err := json.Unmarshal(w2.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	if len(listResp.Snapshots) < 1 {
 		t.Errorf("expected >=1 snapshot, got %+v", listResp.Snapshots)
 	}
