@@ -238,6 +238,16 @@ func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *exec
 	if workdirRoot := profile.Config["ssh_workdir_root"]; workdirRoot != "" {
 		metadata["ssh_workdir_root"] = workdirRoot
 	}
+	// ssh_shell selects the login shell used by every remote command at
+	// launch time (preflight, agentctl exec). The settings UI saves it on
+	// profile.Config; without this propagation sshShellFromMetadata returns
+	// empty and WrapLoginShell silently falls back to bash — so a user who
+	// installed npx under zsh+nvm gets a misleading "npx not found" error
+	// while the readiness probe (which takes shell straight from the
+	// request body) reports the agent as available.
+	if sshShell := profile.Config["ssh_shell"]; sshShell != "" {
+		metadata[lifecycle.MetadataKeySSHShell] = sshShell
+	}
 }
 
 // resolveProfileEnvVars resolves profile env vars, dereferencing secret IDs to their values.

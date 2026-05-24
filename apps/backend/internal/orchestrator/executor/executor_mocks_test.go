@@ -188,6 +188,7 @@ type mockRepository struct {
 	taskRepositories     map[string]*models.TaskRepository
 	repositories         map[string]*models.Repository
 	executors            map[string]*models.Executor
+	executorProfiles     map[string]*models.ExecutorProfile
 	executorsRunning     map[string]*models.ExecutorRunning
 	taskEnvironments     map[string]*models.TaskEnvironment
 	taskEnvironmentRepos map[string][]*models.TaskEnvironmentRepo // env_id → rows
@@ -212,6 +213,7 @@ func newMockRepository() *mockRepository {
 		taskRepositories:     make(map[string]*models.TaskRepository),
 		repositories:         make(map[string]*models.Repository),
 		executors:            make(map[string]*models.Executor),
+		executorProfiles:     make(map[string]*models.ExecutorProfile),
 		executorsRunning:     make(map[string]*models.ExecutorRunning),
 		taskEnvironments:     make(map[string]*models.TaskEnvironment),
 		taskEnvironmentRepos: make(map[string][]*models.TaskEnvironmentRepo),
@@ -749,6 +751,9 @@ func (m *mockRepository) CreateExecutorProfile(ctx context.Context, profile *mod
 	return nil
 }
 func (m *mockRepository) GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error) {
+	if p, ok := m.executorProfiles[id]; ok {
+		return p, nil
+	}
 	return nil, nil
 }
 func (m *mockRepository) UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error {
