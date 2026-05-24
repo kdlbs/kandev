@@ -133,6 +133,7 @@ test.describe("mobile PR CI chip drawer", () => {
       .prStatusChipDrawer()
       .locator("[data-testid='pr-check-group'][data-kind='failed']");
     await expect(failedGroup).toBeVisible();
+    // 3 checks_total − 2 checks_passing = 1 in the failed bucket.
     await expect(failedGroup.getByTestId("pr-check-group-count")).toHaveText("1");
   });
 

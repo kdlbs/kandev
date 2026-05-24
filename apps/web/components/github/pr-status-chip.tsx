@@ -10,7 +10,14 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
-import { Drawer, DrawerClose, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+} from "@kandev/ui/drawer";
 import { Button } from "@kandev/ui/button";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
@@ -132,13 +139,22 @@ function PRStatusChipDrawer({ pr }: { pr: TaskPR }) {
   const [open, setOpen] = useState(false);
   return (
     <Drawer open={open} onOpenChange={setOpen}>
-      <button type="button" onClick={() => setOpen(true)} {...chipButtonAttrs(pr, status)}>
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen(true)}
+        {...chipButtonAttrs(pr, status)}
+      >
         <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
         <ChipStatusGlyph status={status} />
       </button>
       <DrawerContent data-testid="pr-status-chip-drawer" className="max-h-[80vh] flex flex-col">
         <DrawerHeader className="flex flex-row items-center justify-between border-b py-2">
           <DrawerTitle className="text-sm">PR #{pr.pr_number}</DrawerTitle>
+          <DrawerDescription className="sr-only">
+            Pull request CI status, reviews, and checks summary.
+          </DrawerDescription>
           <DrawerClose asChild>
             <Button
               data-testid="pr-status-chip-drawer-close"
