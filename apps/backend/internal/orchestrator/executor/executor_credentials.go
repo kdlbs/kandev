@@ -111,7 +111,7 @@ func (e *Executor) resolveRemoteCredentials(ctx context.Context, req *LaunchAgen
 // resolveAuthSecrets reads remote_auth_secrets from metadata and resolves secret values
 // into environment variables (e.g., gh_cli_env -> GITHUB_TOKEN).
 func (e *Executor) resolveAuthSecrets(ctx context.Context, req *LaunchAgentRequest, metadata map[string]interface{}) {
-	authSecretsJSON, _ := metadata["remote_auth_secrets"].(string)
+	authSecretsJSON, _ := metadata[profileKeyRemoteAuthSecrets].(string)
 	if authSecretsJSON == "" {
 		return
 	}
@@ -181,7 +181,7 @@ func (e *Executor) resolveGHCLIToken(req *LaunchAgentRequest, metadata map[strin
 		return
 	}
 
-	credsJSON, _ := metadata["remote_credentials"].(string)
+	credsJSON, _ := metadata[profileKeyRemoteCredentials].(string)
 	if credsJSON == "" {
 		return
 	}
