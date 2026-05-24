@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { toast } from "sonner";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -11,10 +11,6 @@ import { revealWebhookSecret } from "@/lib/api/domains/automation-api";
 
 type WebhookConfigProps = {
   automationId: string | null;
-  // initialSecret is the plaintext secret returned by the create response.
-  // Shown unmasked exactly once; absent on later edits, where the user
-  // must click "Reveal" to fetch it from the dedicated endpoint.
-  initialSecret?: string | null;
 };
 
 function extractKeys(json: string): string[] {
@@ -29,7 +25,7 @@ function extractKeys(json: string): string[] {
   return [];
 }
 
-export function WebhookConfig({ automationId, initialSecret }: WebhookConfigProps) {
+export function WebhookConfig({ automationId }: WebhookConfigProps) {
   const [copied, setCopied] = useState<"url" | "secret" | null>(null);
   const [samplePayload, setSamplePayload] = useState("");
 
@@ -70,7 +66,6 @@ export function WebhookConfig({ automationId, initialSecret }: WebhookConfigProp
       />
       <SecretField
         automationId={automationId}
-        initialSecret={initialSecret ?? null}
         copied={copied === "secret"}
         onCopy={(value) => copyValue(value, "secret")}
       />
@@ -103,91 +98,87 @@ function UrlField({ url, copied, onCopy }: { url: string; copied: boolean; onCop
   );
 }
 
+type SecretState = { status: "loading" } | { status: "ready"; value: string } | { status: "error" };
+
+function inputValueFor(
+  status: SecretState["status"],
+  secret: string | null,
+  hidden: boolean,
+  masked: string,
+): string {
+  if (status === "loading") return "Loading…";
+  if (!secret || hidden) return masked;
+  return secret;
+}
+
 function SecretField({
   automationId,
-  initialSecret,
   copied,
   onCopy,
 }: {
   automationId: string;
-  initialSecret: string | null;
   copied: boolean;
   onCopy: (value: string) => void;
 }) {
-  // secret holds the plaintext value when known. Starts populated when the
-  // editor just created the automation (one-time reveal); null afterwards
-  // so the user has to actively click Reveal to load it.
-  const [secret, setSecret] = useState<string | null>(initialSecret);
-  const [revealing, setRevealing] = useState(false);
+  // The secret is revealable any time — fetch it once on mount so users
+  // landing on a saved automation can see/copy it without an extra click.
+  // Combining status + value in one state avoids a setState(true) inside
+  // the effect body (which the React linter flags as a cascading render).
+  const [state, setState] = useState<SecretState>({ status: "loading" });
+  const [hidden, setHidden] = useState(false);
 
-  const handleReveal = async () => {
-    setRevealing(true);
-    try {
-      const result = await revealWebhookSecret(automationId);
-      setSecret(result.webhook_secret);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error(`Failed to reveal secret: ${msg}`);
-    } finally {
-      setRevealing(false);
-    }
-  };
+  useEffect(() => {
+    let cancelled = false;
+    revealWebhookSecret(automationId)
+      .then((result) => {
+        if (cancelled) return;
+        setState({ status: "ready", value: result.webhook_secret });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        toast.error(`Failed to load webhook secret: ${msg}`);
+        setState({ status: "error" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [automationId]);
 
-  const handleHide = () => setSecret(null);
+  const secret = state.status === "ready" ? state.value : null;
   const masked = "•".repeat(32);
-  const justCreated = initialSecret !== null && secret === initialSecret;
+  const inputValue = inputValueFor(state.status, secret, hidden, masked);
 
   return (
     <div className="space-y-1.5">
       <Label className="text-xs">Webhook secret</Label>
       <div className="flex gap-2">
         <Input
-          value={secret ?? masked}
+          value={inputValue}
           readOnly
           className="font-mono text-xs"
           data-testid="automation-webhook-secret-input"
         />
-        {secret === null ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="cursor-pointer shrink-0"
-            onClick={handleReveal}
-            disabled={revealing}
-            data-testid="automation-webhook-secret-reveal"
-          >
-            <IconEye className="h-3.5 w-3.5" />
-          </Button>
-        ) : (
-          <>
-            <Button
-              variant="outline"
-              size="sm"
-              className="cursor-pointer shrink-0"
-              onClick={() => onCopy(secret)}
-            >
-              {copied ? (
-                <IconCheck className="h-3.5 w-3.5" />
-              ) : (
-                <IconCopy className="h-3.5 w-3.5" />
-              )}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="cursor-pointer shrink-0"
-              onClick={handleHide}
-            >
-              <IconEyeOff className="h-3.5 w-3.5" />
-            </Button>
-          </>
-        )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="cursor-pointer shrink-0"
+          onClick={() => secret && onCopy(secret)}
+          disabled={!secret}
+        >
+          {copied ? <IconCheck className="h-3.5 w-3.5" /> : <IconCopy className="h-3.5 w-3.5" />}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="cursor-pointer shrink-0"
+          onClick={() => setHidden((v) => !v)}
+          disabled={!secret}
+          data-testid="automation-webhook-secret-toggle"
+        >
+          {hidden ? <IconEye className="h-3.5 w-3.5" /> : <IconEyeOff className="h-3.5 w-3.5" />}
+        </Button>
       </div>
-      {justCreated && (
-        <p className="text-xs text-amber-500">
-          Copy this secret now — once you leave this page you&apos;ll need to reveal it again.
-        </p>
-      )}
     </div>
   );
 }

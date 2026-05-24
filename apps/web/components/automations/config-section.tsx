@@ -16,9 +16,12 @@ import type { ExecutionMode, TriggerType } from "@/lib/types/automation";
 // registered workspace repository (keyed by id) OR a filesystem-discovered
 // repo not yet registered (keyed by local path). The form holds whichever
 // the user picked; save-time logic registers the discovered repo first to
-// land an id on the automation row.
+// land an id on the automation row. "none" leaves the repository unset on
+// the automation row — the orchestrator runs the task without a repo,
+// which is the right choice for notification-style or side-effect-only
+// automations.
 export type RepositorySelection =
-  | { kind: "auto" }
+  | { kind: "none" }
   | { kind: "registered"; id: string }
   | { kind: "discovered"; path: string; name: string; defaultBranch: string };
 
@@ -39,13 +42,13 @@ type ConfigSectionProps = {
   onExecutionModeChange: (mode: ExecutionMode) => void;
 };
 
-const REPO_AUTO_OPTION_ID = "__auto__";
+const REPO_NONE_OPTION_ID = "__none__";
 const DISCOVERED_PREFIX = "path:";
 
 function selectionToOptionId(sel: RepositorySelection): string {
   if (sel.kind === "registered") return sel.id;
   if (sel.kind === "discovered") return DISCOVERED_PREFIX + sel.path;
-  return REPO_AUTO_OPTION_ID;
+  return REPO_NONE_OPTION_ID;
 }
 
 function buildRepositoryItems(
@@ -59,7 +62,7 @@ function buildRepositoryItems(
       .map((p) => p.replace(/\/+$/, "")),
   );
   const items: Array<{ id: string; label: string }> = [
-    { id: REPO_AUTO_OPTION_ID, label: "Auto — first workspace repo" },
+    { id: REPO_NONE_OPTION_ID, label: "None — no repository" },
   ];
   for (const r of workspaceRepos) {
     items.push({ id: r.id, label: r.name || `${r.provider_owner}/${r.provider_name}` });
@@ -76,7 +79,7 @@ function pickSelectionFromOptionId(
   workspaceRepos: Repository[],
   discoveredRepos: LocalRepository[],
 ): RepositorySelection {
-  if (optionId === REPO_AUTO_OPTION_ID) return { kind: "auto" };
+  if (optionId === REPO_NONE_OPTION_ID) return { kind: "none" };
   if (optionId.startsWith(DISCOVERED_PREFIX)) {
     const path = optionId.slice(DISCOVERED_PREFIX.length);
     const match = discoveredRepos.find((r) => r.path === path);
@@ -88,7 +91,7 @@ function pickSelectionFromOptionId(
     };
   }
   const reg = workspaceRepos.find((r) => r.id === optionId);
-  return reg ? { kind: "registered", id: reg.id } : { kind: "auto" };
+  return reg ? { kind: "registered", id: reg.id } : { kind: "none" };
 }
 
 const EXECUTION_MODE_ITEMS = [
@@ -255,6 +258,9 @@ function WorkflowFields({
   onWorkflowChange: (id: string) => void;
   onStepChange: (id: string) => void;
 }) {
+  // The step list is empty until a workflow is picked. Showing an empty
+  // dropdown next to the workflow select invites users to click it first
+  // and bounce off — render the step field only once the workflow is set.
   return (
     <>
       <SelectField
@@ -265,14 +271,18 @@ function WorkflowFields({
         placeholder="Select workflow"
         items={workflows.map((w) => ({ id: w.id, label: w.name }))}
       />
-      <SelectField
-        testId="workflow-step-selector"
-        label="Workflow Step"
-        value={workflowStepId}
-        onChange={onStepChange}
-        placeholder="Select step"
-        items={steps.map((s) => ({ id: s.id, label: s.name }))}
-      />
+      {workflowId ? (
+        <SelectField
+          testId="workflow-step-selector"
+          label="Workflow Step"
+          value={workflowStepId}
+          onChange={onStepChange}
+          placeholder="Select step"
+          items={steps.map((s) => ({ id: s.id, label: s.name }))}
+        />
+      ) : (
+        <div />
+      )}
     </>
   );
 }
