@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { IconCheck, IconChevronDown } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -12,17 +12,117 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
+import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { setSessionMode } from "@/lib/api/domains/session-api";
+import type { Agent, AgentProfile, AvailableAgent } from "@/lib/types/http";
+
+type ModeOption = {
+  id: string;
+  name: string;
+  description?: string;
+};
 
 type ModeSelectorProps = {
   sessionId: string | null;
 };
 
-export const ModeSelector = memo(function ModeSelector({ sessionId }: ModeSelectorProps) {
-  const modeState = useAppStore((state) =>
+function resolveSnapshotMode(snapshot: unknown): string | null {
+  if (!snapshot || typeof snapshot !== "object") return null;
+  const mode = (snapshot as Record<string, unknown>).mode;
+  return typeof mode === "string" && mode ? mode : null;
+}
+
+function resolveProfileMode(profileId: string | null | undefined, agents: Agent[]): string | null {
+  if (!profileId) return null;
+  for (const agent of agents) {
+    const profile = agent.profiles.find((p: AgentProfile) => p.id === profileId);
+    if (profile?.mode) return profile.mode;
+  }
+  return null;
+}
+
+function resolveStaticModes(
+  agents: Agent[],
+  profileId: string | null | undefined,
+  availableAgents: AvailableAgent[],
+): ModeOption[] {
+  if (!profileId) return [];
+  for (const agent of agents) {
+    const profile = agent.profiles.find((p: AgentProfile) => p.id === profileId);
+    if (!profile) continue;
+    const available = availableAgents.find((a: AvailableAgent) => a.name === agent.name);
+    return available?.model_config?.available_modes ?? [];
+  }
+  return [];
+}
+
+function formatModeName(modeId: string): string {
+  return modeId
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function buildModeState(
+  currentModeId: string | null,
+  liveModes: ModeOption[] | undefined,
+  staticModes: ModeOption[],
+) {
+  const availableModes = liveModes?.length ? liveModes : staticModes;
+  if (!currentModeId) return undefined;
+  if (availableModes.length === 0) {
+    if (currentModeId === "default") return undefined;
+    return {
+      currentModeId,
+      availableModes: [{ id: currentModeId, name: formatModeName(currentModeId) }],
+    };
+  }
+  if (availableModes.length <= 1) return undefined;
+  if (availableModes.some((m) => m.id === currentModeId)) {
+    return { currentModeId, availableModes };
+  }
+  return {
+    currentModeId,
+    availableModes: [{ id: currentModeId, name: formatModeName(currentModeId) }, ...availableModes],
+  };
+}
+
+function useModeSelectorState(sessionId: string | null) {
+  useSettingsData(true);
+
+  const liveModeState = useAppStore((state) =>
     sessionId ? state.sessionMode.bySessionId[sessionId] : undefined,
   );
+  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+  const taskSessions = useAppStore((state) => state.taskSessions.items);
+  const { items: availableAgents } = useAvailableAgents();
 
+  const session = sessionId ? (taskSessions[sessionId] ?? null) : null;
+  const snapshotMode = resolveSnapshotMode(session?.agent_profile_snapshot);
+  const profileMode = useMemo(
+    () => resolveProfileMode(session?.agent_profile_id, settingsAgents as Agent[]),
+    [session?.agent_profile_id, settingsAgents],
+  );
+  const staticModes = useMemo(
+    () => resolveStaticModes(settingsAgents as Agent[], session?.agent_profile_id, availableAgents),
+    [availableAgents, session?.agent_profile_id, settingsAgents],
+  );
+
+  return useMemo(
+    () =>
+      buildModeState(
+        liveModeState?.currentModeId || snapshotMode || profileMode,
+        liveModeState?.availableModes,
+        staticModes,
+      ),
+    [liveModeState, profileMode, snapshotMode, staticModes],
+  );
+}
+
+export const ModeSelector = memo(function ModeSelector({ sessionId }: ModeSelectorProps) {
+  const modeState = useModeSelectorState(sessionId);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const recentlyClosedRef = useRef(false);
@@ -58,12 +158,7 @@ export const ModeSelector = memo(function ModeSelector({ sessionId }: ModeSelect
     [dropdownOpen],
   );
 
-  if (
-    !sessionId ||
-    !modeState ||
-    !modeState.availableModes ||
-    modeState.availableModes.length <= 1
-  ) {
+  if (!sessionId || !modeState) {
     return null;
   }
 

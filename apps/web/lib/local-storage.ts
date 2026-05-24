@@ -254,7 +254,14 @@ export function setFilesPanelScrollPosition(sessionId: string, position: number)
 // --- Dockview per-session layout (sessionStorage) ---
 // Dockview layout is keyed by `taskEnvironmentId` so sessions sharing a task
 // env reuse one layout (the env owns the workspace, terminals, files, etc.).
-const DOCKVIEW_ENV_LAYOUT_PREFIX = "kandev.dockview.env-layout.";
+//
+// v2: bumped when the sidebar/right viewport-proportional caps shipped.
+// Layouts saved by older builds capture column widths that may exceed the
+// new initial-default caps; loading them would resurface the very behaviour
+// users complained about (sidebar "maxed out" by default after upgrade).
+// Bumping the prefix invalidates legacy saves so every env opens at the
+// preset defaults once, then resumes per-env persistence under v2.
+const DOCKVIEW_ENV_LAYOUT_PREFIX = "kandev.dockview.env-layout-v2.";
 
 /**
  * Get the saved dockview layout for a task environment.
@@ -282,7 +289,10 @@ export function setEnvLayout(envId: string, layout: object): void {
 }
 
 // --- Dockview per-env maximize state (sessionStorage) ---
-const DOCKVIEW_ENV_MAXIMIZE_PREFIX = "kandev.dockview.env-maximize.";
+// v2: bumped alongside DOCKVIEW_ENV_LAYOUT_PREFIX. The maximize blob
+// references the pre-maximize layout, which can carry the same oversized
+// widths as the env layout.
+const DOCKVIEW_ENV_MAXIMIZE_PREFIX = "kandev.dockview.env-maximize-v2.";
 
 export type EnvMaximizeState = {
   /** The pre-maximize (normal) layout to restore on exit-maximize. */

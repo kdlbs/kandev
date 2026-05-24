@@ -3,24 +3,37 @@ import {
   SIDEBAR_LOCK,
   SIDEBAR_GROUP,
   CENTER_GROUP,
-  LAYOUT_SIDEBAR_MAX_PX,
-  LAYOUT_RIGHT_MAX_PX,
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
+  LAYOUT_PINNED_MIN_PX,
+  computeSidebarMaxPx,
+  computeRightMaxPx,
+  getRootSplitview as getRootSplitviewImpl,
   resolveGroupIds,
+  setPinnedTarget,
 } from "./layout-manager";
 import type { LayoutGroupIds } from "./layout-manager";
 
 // Re-export for consumers that import from this module
 export { getRootSplitview } from "./layout-manager";
 
-/** After fromJSON() restores a session layout, apply fixups and return group IDs. */
+/** After fromJSON() restores a session layout, apply fixups and return group IDs.
+ *
+ *  Apply loose runtime caps so the user can drag freely; the just-restored
+ *  widths become the new pinned targets, and `enforcePinnedTargets` restores
+ *  the column to that target on every subsequent rebalance. */
 export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
+  const sv = getRootSplitviewImpl(api);
   const sb = api.getPanel("sidebar");
   if (sb) {
     sb.group.locked = SIDEBAR_LOCK;
     sb.group.header.hidden = false;
-    sb.group.api.setConstraints({ maximumWidth: LAYOUT_SIDEBAR_MAX_PX });
+    sb.group.api.setConstraints({
+      maximumWidth: computeSidebarMaxPx(),
+      minimumWidth: LAYOUT_PINNED_MIN_PX,
+    });
+    const live = sv?.getViewSize?.(0) ?? sb.group.width;
+    if (typeof live === "number" && live > 0) setPinnedTarget("sidebar", live);
   }
 
   const oldChanges = api.getPanel("diff-files");
@@ -31,11 +44,19 @@ export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
   // Constrain right column groups by their well-known IDs.
   // Groups created from presets carry stable IDs (e.g. "group-right-top"),
   // so this works regardless of which panels are in them.
+  const rightCap = computeRightMaxPx();
   for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
     const group = api.groups.find((g) => g.id === gid);
     if (group) {
-      group.api.setConstraints({ maximumWidth: LAYOUT_RIGHT_MAX_PX });
+      group.api.setConstraints({
+        maximumWidth: rightCap,
+        minimumWidth: LAYOUT_PINNED_MIN_PX,
+      });
     }
+  }
+  if (sv && sv.length >= 2) {
+    const liveRight = sv.getViewSize(sv.length - 1);
+    if (typeof liveRight === "number" && liveRight > 0) setPinnedTarget("right", liveRight);
   }
 
   return resolveGroupIds(api);

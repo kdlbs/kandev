@@ -291,10 +291,10 @@ function RightPanelContent({
       defaultLayout={rightLayout}
       onLayoutChanged={onRightLayoutChange}
     >
-      <Panel id="top" minSize={30} className="min-h-0">
+      <Panel id="top" minSize={15} className="min-h-0">
         {topPanel}
       </Panel>
-      <Panel id="bottom" minSize={20} className="min-h-0">
+      <Panel id="bottom" minSize={15} className="min-h-0">
         <SessionPanel borderSide="left" margin="top">
           <SessionTabs
             tabs={tabs}

@@ -222,18 +222,6 @@ function usePreviewStateRestore({
   ]);
 }
 
-function useIsRemoteExecutor(): boolean {
-  return useAppStore((state) => {
-    const taskId = state.tasks.activeTaskId;
-    if (!taskId) return false;
-    for (const snapshot of Object.values(state.kanbanMulti.snapshots)) {
-      const task = snapshot.tasks.find((t) => t.id === taskId);
-      if (task) return task.isRemoteExecutor ?? false;
-    }
-    return false;
-  });
-}
-
 function usePreviewPanelStore(sessionId: string | null) {
   const processState = useAppStore((state) => state.processes);
   const upsertProcessStatus = useAppStore((state) => state.upsertProcessStatus);
@@ -245,7 +233,6 @@ function usePreviewPanelStore(sessionId: string | null) {
     sessionId ? state.columnsBySessionId[sessionId] : null,
   );
   const previewStore = usePreviewStore(sessionId);
-  const isRemote = useIsRemoteExecutor();
   const devProcessId = useMemo(
     () => (sessionId ? processState.devProcessBySessionId[sessionId] : undefined),
     [processState.devProcessBySessionId, sessionId],
@@ -255,10 +242,8 @@ function usePreviewPanelStore(sessionId: string | null) {
   const rawDetectedUrl = useMemo(() => detectPreviewUrlFromOutput(devOutput), [devOutput]);
   const detectedUrl = useMemo(
     () =>
-      rawDetectedUrl && sessionId
-        ? rewritePreviewUrlForProxy(rawDetectedUrl, sessionId, isRemote)
-        : null,
-    [rawDetectedUrl, sessionId, isRemote],
+      rawDetectedUrl && sessionId ? rewritePreviewUrlForProxy(rawDetectedUrl, sessionId) : null,
+    [rawDetectedUrl, sessionId],
   );
   return {
     ...previewStore,
@@ -273,7 +258,6 @@ function usePreviewPanelStore(sessionId: string | null) {
     devProcess,
     devOutput,
     detectedUrl,
-    isRemote,
   };
 }
 
@@ -340,7 +324,6 @@ export function usePreviewPanel({ sessionId, hasDevScript = false }: UsePreviewP
     detectedUrl: s.detectedUrl,
     isRunning,
     isStopping,
-    isRemote: s.isRemote,
     handleStop,
   };
 }

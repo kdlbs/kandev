@@ -134,11 +134,15 @@ test.describe("Agent profile — ACP-first", () => {
       await testPage.goto(`/t/${task.id}`);
       const session = new SessionPage(testPage);
       await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 45_000 });
 
-      // 5. Assert the mode selector is visible and shows the profile mode
-      const modeSelector = testPage.getByTestId("session-mode-selector");
+      // 5. Assert the mode selector is visible and shows the profile mode.
+      const overflowToggle = testPage.getByTestId("toolbar-overflow-menu");
+      if (await overflowToggle.isVisible({ timeout: 1_000 }).catch(() => false)) {
+        await overflowToggle.click();
+      }
+      const modeSelector = testPage.getByRole("button", { name: "Plan Mock" });
       await expect(modeSelector).toBeVisible({ timeout: 15_000 });
-      await expect(modeSelector).toContainText("Plan Mock");
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true);
     }

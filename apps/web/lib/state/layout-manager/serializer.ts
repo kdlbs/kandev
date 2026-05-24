@@ -1,13 +1,7 @@
 import type { DockviewApi, SerializedDockview } from "dockview-react";
 import type { LayoutState, LayoutColumn, LayoutGroup, LayoutPanel, LayoutNode } from "./types";
 import { computeColumnWidths, computeGroupHeights } from "./sizing";
-import {
-  SIDEBAR_LOCK,
-  KNOWN_PANEL_IDS,
-  STRUCTURAL_COMPONENTS,
-  LAYOUT_SIDEBAR_MAX_PX,
-  LAYOUT_RIGHT_MAX_PX,
-} from "./constants";
+import { SIDEBAR_LOCK, KNOWN_PANEL_IDS, STRUCTURAL_COMPONENTS } from "./constants";
 
 // Dockview serialized grid node types (internal format)
 type SerializedLeafNode = {
@@ -287,12 +281,7 @@ export function fromDockviewApi(api: DockviewApi): LayoutState {
 
     columns.push({
       id: columnId,
-      ...(isPinned
-        ? {
-            pinned: true,
-            maxWidth: columnId === "right" ? LAYOUT_RIGHT_MAX_PX : LAYOUT_SIDEBAR_MAX_PX,
-          }
-        : {}),
+      ...(isPinned ? { pinned: true } : {}),
       width,
       groups: flatGroups,
       // Only store tree for columns with nested structure (branches)

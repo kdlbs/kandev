@@ -11,7 +11,14 @@ import type { DockviewApi, SerializedDockview } from "dockview-react";
 import { getEnvLayout } from "@/lib/local-storage";
 import { applyLayoutFixups } from "./dockview-layout-builders";
 import { isLayoutShapeHealthy } from "./dockview-layout-health";
-import { fromDockviewApi, savedLayoutMatchesLive, layoutStructuresMatch } from "./layout-manager";
+import {
+  fromDockviewApi,
+  savedLayoutMatchesLive,
+  layoutStructuresMatch,
+  getPinnedWidth,
+  getRootSplitview,
+  setPinnedTarget,
+} from "./layout-manager";
 import type { LayoutState, LayoutGroupIds } from "./layout-manager";
 import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
@@ -323,8 +330,68 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
   // them from the saved layout to match what `fromJSON` would have done.
   if (saved) restoreSavedActiveViews(api, saved as SerializedDockview);
 
+  // Column widths from the outgoing env stay live across the switch because
+  // we skipped fromJSON. Apply the target env's widths explicitly:
+  //   - saved layout exists → use its serialized sizes
+  //   - no saved layout (brand-new env) → compute fresh defaults via
+  //     getPinnedWidth (ratio-based, clamped to legacy initial cap)
+  applyPinnedColumnSizes(api, saved as SerializedDockview | null, params.safeWidth);
+
   api.layout(params.safeWidth, params.safeHeight);
   return applyLayoutFixups(api);
+}
+
+/** Extract per-column sizes from a saved SerializedDockview grid root. */
+function extractSavedColumnSizes(saved: SerializedDockview): number[] | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const root = (saved as any).grid?.root;
+  if (!root?.data || !Array.isArray(root.data)) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return root.data.map((child: any) => (typeof child?.size === "number" ? child.size : NaN));
+}
+
+/** Compute the target width for a pinned column from saved sizes or fall
+ *  back to the preset's ratio-based default. */
+function targetPinnedWidth(
+  col: LayoutState["columns"][number],
+  index: number,
+  savedSizes: number[] | null,
+  totalWidth: number,
+): number | undefined {
+  if (savedSizes && Number.isFinite(savedSizes[index])) return savedSizes[index];
+  return getPinnedWidth(col, totalWidth, undefined);
+}
+
+/**
+ * After a fast-path env switch, override the inherited column widths with
+ * the target env's values. Without this, the outgoing env's user-resized
+ * widths bleed into the new env — a brand-new task would open at whatever
+ * width the user last dragged the previous task's sidebar/right to.
+ */
+function applyPinnedColumnSizes(
+  api: DockviewApi,
+  saved: SerializedDockview | null,
+  totalWidth: number,
+): void {
+  const sv = getRootSplitview(api);
+  if (!sv || sv.length < 2) return;
+
+  const savedSizes = saved ? extractSavedColumnSizes(saved) : null;
+  const liveLayout = fromDockviewApi(api);
+  for (let i = 0; i < liveLayout.columns.length && i < sv.length; i++) {
+    const col = liveLayout.columns[i];
+    if (col.id !== "sidebar" && col.id !== "right") continue;
+    const target = targetPinnedWidth(col, i, savedSizes, totalWidth);
+    if (typeof target !== "number" || target <= 0) continue;
+    try {
+      sv.resizeView(i, target);
+      // Update the pinned-target so enforcement keeps the new env's width
+      // through subsequent rebalances.
+      setPinnedTarget(col.id, target);
+    } catch {
+      /* dockview rejects out-of-range sizes — ignore */
+    }
+  }
 }
 
 /**

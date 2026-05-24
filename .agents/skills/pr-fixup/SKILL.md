@@ -160,56 +160,52 @@ Every comment must get a response — either a fix or a reply explaining why it 
 - **Do not mark task 4 completed until every previously-unresolved review thread is either resolved or has an explicit reason documented in a reply.** If you finish the pass and the `isResolved == false` set is still non-empty, you are not done.
 
 **Important: issue comments vs review comments use different APIs:**
-- **Review comments** (inline, from `gh api repos/:owner/:repo/pulls/<number>/comments`) — reply via `/pulls/<number>/comments/<comment_id>/replies`, react via `/pulls/comments/<comment_id>/reactions`
-- **Issue comments** (conversation timeline, from `gh pr view --json comments` — e.g., CodeRabbit walkthrough) — reply by posting a new comment via `gh pr comment <number> --body "..."`, react via `/issues/comments/<comment_id>/reactions`
+- **Review comments** (inline, from `gh api repos/:owner/:repo/pulls/<number>/comments`) — use `scripts/pr-resolve` (below).
+- **Issue comments** (conversation timeline, from `gh pr view --json comments` — e.g., CodeRabbit walkthrough) — reply by posting a new comment via `gh pr comment <number> --body "..."`, react via `gh api repos/:owner/:repo/issues/comments/<comment_id>/reactions -f content="+1"`. There's no "resolve" concept for issue comments.
 
-**For valid comments:**
-1. Read the file at the referenced line
-2. Implement the fix
-3. React with thumbs up:
-   ```bash
-   # For review comments:
-   gh api repos/:owner/:repo/pulls/comments/<comment_id>/reactions -f content="+1"
-   # For issue comments:
-   gh api repos/:owner/:repo/issues/comments/<comment_id>/reactions -f content="+1"
-   ```
-4. Resolve the review thread (see below for thread ID retrieval)
+### Review comments: `scripts/pr-resolve`
 
-**For skipped comments** (already addressed, nitpick, wrong, or outdated):
-1. Reply to the comment explaining why it was skipped:
-   ```bash
-   # For review comments:
-   gh api repos/:owner/:repo/pulls/<number>/comments/<comment_id>/replies -f body="<explanation>"
-   # For issue comments:
-   gh pr comment <number> --body "<explanation>"
-   ```
-   Examples:
-   - "This is already handled by X on line Y."
-   - "This is a style preference not enforced by our linters — keeping as-is."
-   - "This refers to code that was changed in a later commit."
-2. Resolve the review thread
+Use the script for every review thread, not just batches — it collapses reply + resolve + +1 reaction into a single call so you don't re-derive the graphql mutation each session.
 
-**Resolving threads:** First fetch thread node IDs to map comment IDs to threads:
 ```bash
-gh api graphql -f query='
-query($owner: String!, $repo: String!, $number: Int!) {
-  repository(owner: $owner, name: $repo) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 100) {
-        nodes {
-          id
-          comments(first: 1) {
-            nodes { databaseId }
-          }
-        }
-      }
-    }
-  }
-}' -f owner=":owner" -f repo=":repo" -F number=<number>
+# Dump every unresolved thread, TAB-separated (tid, cid, author, path, body_first_120):
+scripts/pr-resolve list <PR>
+
+# Reply + resolve + +1 (same call whether you're agreeing or pushing back —
+# the body text conveys which):
+scripts/pr-resolve reply <PR> <CID> <TID> "Fixed — monotonic counter via useRef. See commit abc1234."
+scripts/pr-resolve reply <PR> <CID> <TID> "Acknowledged; the strict source check was relaxed for E2E. Tracking as a follow-up."
 ```
-Then resolve using the thread `id`:
+
+For valid comments: read the file, implement the fix, then call `pr-resolve reply` with a body that names the commit or the file:line of the fix.
+
+For skipped comments (already addressed, nitpick, wrong, outdated): call `pr-resolve reply` with a body that explains why. Examples:
+- "This is already handled by X on line Y."
+- "This is a style preference not enforced by our linters — keeping as-is."
+- "Refers to code that was changed in a later commit."
+
+For dozens of threads grouped by topic, declare a bash associative array mapping thread IDs → category, then a `reply_for` case that returns the right body per category. Avoids retyping the same explanation across duplicate threads from multiple bots:
+
 ```bash
-gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<thread_node_id>"}) { thread { isResolved } } }'
+declare -A CAT=(
+  [PRRT_xxx1]=fixed_counter
+  [PRRT_xxx2]=fixed_counter
+  [PRRT_xxx3]=skipped_source_guard
+)
+declare -A CID=(
+  [PRRT_xxx1]=3253164429
+  [PRRT_xxx2]=3253168996
+  [PRRT_xxx3]=3253164669
+)
+reply_for() {
+  case "$1" in
+    fixed_counter) echo "Fixed — monotonic counter via useRef. See commit abc1234." ;;
+    skipped_source_guard) echo "Acknowledged; the strict source check was relaxed for E2E. Tracking as a follow-up." ;;
+  esac
+}
+for TID in "${!CAT[@]}"; do
+  scripts/pr-resolve reply <PR> "${CID[$TID]}" "$TID" "$(reply_for "${CAT[$TID]}")"
+done
 ```
 
 Mark task 4 as completed.
@@ -244,12 +240,6 @@ After the push, CI restarts and bots may re-review. Delegate to `pr-poller` agai
 - If new CI failures appeared from the latest commit → loop back to task 2 and reset task 2-5 to `in_progress` as needed.
 - If new review comments appeared after the push → loop back to task 3.
 - If the poller hit its cap (`recommendation:` mentions "timed out") → surface the remaining pending items to the user and stop.
-
-**Force-push (rebase) can re-open previously resolved inline threads.** GitHub treats the new commit's diff as a fresh review surface, so threads you already replied-to-and-resolved may come back unresolved with their original bodies. Before re-fixing, fetch the comments and check the body — if the issue is already addressed in the new tip, reply "Already fixed in `<sha>`" and resolve again rather than re-implementing.
-
-**Mergeable status lags after a force-push.** `gh pr view --json mergeable` can show `CONFLICTING` / `mergeStateStatus: DIRTY` for ~5-10s while GitHub recomputes against the new tip. Wait briefly before deciding there's a real conflict, and confirm with `git fetch origin main && git diff --name-only HEAD origin/main` locally.
-
-**Polling that times out is often a "main moved" signal.** A 20-min E2E window is long enough for `main` to ship one or two PRs. Before the next iteration, run `git fetch origin main && git log HEAD..origin/main --oneline` — a non-empty result means a rebase is coming. Rebase, force-push, and re-poll once rather than chasing flaky test reruns.
 
 Cap re-check loops at **3 iterations** to prevent runaway sessions. After 3, surface the remaining state to the user and stop.
 

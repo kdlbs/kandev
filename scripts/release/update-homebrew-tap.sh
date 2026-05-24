@@ -24,6 +24,8 @@ VERSION="${1:?Usage: $0 <version> <tag>}"
 TAG="${2:?Usage: $0 <version> <tag>}"
 TAP_REPO="${HOMEBREW_TAP_REPO:-kdlbs/homebrew-kandev}"
 PUSH_DIRECT="${HOMEBREW_TAP_PUSH:-0}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FORMULA_TEMPLATE="$SCRIPT_DIR/kandev.rb"
 
 bold()  { printf '\033[1m%s\033[0m' "$*"; }
 green() { printf '\033[32m%s\033[0m' "$*"; }
@@ -115,54 +117,14 @@ mkdir -p "$(dirname "$FORMULA_PATH")"
 
 GITHUB_BASE="https://github.com/kdlbs/kandev/releases/download/${TAG}"
 
-cat > "$FORMULA_PATH" <<EOF
-class Kandev < Formula
-  desc "Manage tasks, orchestrate agents, review changes, and ship value"
-  homepage "https://github.com/kdlbs/kandev"
-  license "AGPL-3.0-only"
-  version "$VERSION"
-
-  # Node is required: the CLI launcher and Next.js standalone server both need it.
-  depends_on "node"
-
-  on_macos do
-    if Hardware::CPU.arm?
-      url "${GITHUB_BASE}/kandev-macos-arm64.tar.gz"
-      sha256 "$SHA_MACOS_ARM64"
-    else
-      url "${GITHUB_BASE}/kandev-macos-x64.tar.gz"
-      sha256 "$SHA_MACOS_X64"
-    end
-  end
-
-  on_linux do
-    if Hardware::CPU.arm?
-      url "${GITHUB_BASE}/kandev-linux-arm64.tar.gz"
-      sha256 "$SHA_LINUX_ARM64"
-    else
-      url "${GITHUB_BASE}/kandev-linux-x64.tar.gz"
-      sha256 "$SHA_LINUX_X64"
-    end
-  end
-
-  def install
-    libexec.install Dir["*"]
-    # cli/bin/cli.js has #!/usr/bin/env node shebang. (bin/"kandev").write_env_script
-    # creates a wrapper at \$HOMEBREW_PREFIX/bin/kandev that sets KANDEV_BUNDLE_DIR
-    # (so the CLI launcher finds bin/ and web/ in the Cellar) and KANDEV_VERSION
-    # (read by run.ts at startup so the launcher logs "release: X.Y.Z" instead of
-    # "release: (env)"). Calling write_env_script on the bin directory itself would
-    # name the wrapper after the target's basename (cli.js), giving the wrong name.
-    (bin/"kandev").write_env_script libexec/"cli/bin/cli.js",
-      KANDEV_BUNDLE_DIR: libexec.to_s,
-      KANDEV_VERSION:    version.to_s
-  end
-
-  test do
-    assert_match "kandev launcher", shell_output("#{bin}/kandev --help")
-  end
-end
-EOF
+sed \
+  -e "s|__VERSION__|$VERSION|g" \
+  -e "s|__GITHUB_BASE__|$GITHUB_BASE|g" \
+  -e "s|__SHA_MACOS_ARM64__|$SHA_MACOS_ARM64|g" \
+  -e "s|__SHA_MACOS_X64__|$SHA_MACOS_X64|g" \
+  -e "s|__SHA_LINUX_ARM64__|$SHA_LINUX_ARM64|g" \
+  -e "s|__SHA_LINUX_X64__|$SHA_LINUX_X64|g" \
+  "$FORMULA_TEMPLATE" > "$FORMULA_PATH"
 
 log_ok "Formula written to Formula/kandev.rb"
 

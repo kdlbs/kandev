@@ -7,6 +7,7 @@ import {
   setEnvMaximizeState,
   removeEnvMaximizeState,
 } from "@/lib/local-storage";
+import { setPinnedTarget } from "./layout-manager";
 import { applyLayoutFixups, focusOrAddPanel } from "./dockview-layout-builders";
 import {
   SIDEBAR_GROUP,
@@ -53,8 +54,9 @@ export type { BuiltInPreset } from "./layout-manager";
 export {
   LAYOUT_SIDEBAR_RATIO,
   LAYOUT_RIGHT_RATIO,
-  LAYOUT_SIDEBAR_MAX_PX,
-  LAYOUT_RIGHT_MAX_PX,
+  computeSidebarMaxPx,
+  computeRightMaxPx,
+  LAYOUT_PINNED_MIN_PX,
 } from "./layout-manager";
 export { applyLayoutFixups } from "./dockview-layout-builders";
 
@@ -256,7 +258,11 @@ function applyLayoutAndSet(
   pinnedWidths: Map<string, number>,
   set: StoreSet,
 ): LayoutGroupIds {
-  const ids = applyLayout(api, state, pinnedWidths);
+  // Pass measured container dims so fromJSON's grid.width matches the live
+  // container — avoids the proportional rescale that would otherwise grow
+  // pinned columns past their legacy initial caps on the next api.layout.
+  const measured = measureDockviewContainer(api);
+  const ids = applyLayout(api, state, pinnedWidths, measured.width, measured.height);
   set(ids);
   return ids;
 }
@@ -387,7 +393,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       for (const key of cleanedWidths.keys()) {
         if (!targetColumnIds.has(key)) cleanedWidths.delete(key);
       }
-      const ids = applyLayout(api, state, cleanedWidths);
+      const ids = applyLayout(api, state, cleanedWidths, safeWidth, safeHeight);
       set({
         ...ids,
         sidebarVisible: true,
@@ -416,7 +422,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
           console.warn("applyCustomLayout: old-format restore failed:", e);
         }
       } else {
-        const ids = applyLayout(api, state, liveWidths);
+        const ids = applyLayout(api, state, liveWidths, safeWidth, safeHeight);
         set(ids);
       }
       const hasSidebar = !!api.getPanel("sidebar");
@@ -691,7 +697,7 @@ function performBuildDefault(
     state = applyActivePanelOverrides(state, intent.activePanels);
   }
 
-  const ids = applyLayout(api, state, freshPinned);
+  const ids = applyLayout(api, state, freshPinned, safeWidth, safeHeight);
   const hasSidebar = state.columns.some((c) => c.id === "sidebar");
   const hasRight = state.columns.length > (hasSidebar ? 2 : 1);
   set({ ...ids, sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
@@ -717,7 +723,15 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
     if (typeof window !== "undefined") {
       // Exposed for E2E tests to assert on panel/group placement. Harmless in
       // prod; the DockviewApi is already reachable via the store in devtools.
-      (window as unknown as { __dockviewApi__: DockviewApi | null }).__dockviewApi__ = api;
+      type TestWindow = {
+        __dockviewApi__: DockviewApi | null;
+        __setPinnedTarget__?: typeof setPinnedTarget;
+      };
+      const w = window as unknown as TestWindow;
+      w.__dockviewApi__ = api;
+      // E2E test helpers: let `resizeColumnViaSplitview` update the target
+      // width after a programmatic resize (mirroring the sash-drag mouseup).
+      w.__setPinnedTarget__ = setPinnedTarget;
     }
     if (api) {
       const resolveFilePath = (panelId: string | undefined): string | null => {

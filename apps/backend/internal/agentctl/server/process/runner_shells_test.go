@@ -94,6 +94,63 @@ func TestInteractiveRunner_IsUserShellIsolation(t *testing.T) {
 	_ = runner.Stop(ctx, shellInfo.ID)
 }
 
+func TestInteractiveRunner_TrackSessionWebSocketBeforePtyAccess(t *testing.T) {
+	log := newTestLogger(t)
+	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
+
+	const sessionID = "pre-pty-session"
+	writer := &mockDirectWriter{}
+	runner.TrackSessionWebSocket(sessionID, writer)
+
+	if !runner.HasActiveWebSocketBySession(sessionID) {
+		t.Fatal("TrackSessionWebSocket should set session-level WebSocket tracking")
+	}
+
+	cmd, env := fixtureExec("cat")
+	req := InteractiveStartRequest{
+		SessionID:      sessionID,
+		Command:        cmd,
+		Env:            env,
+		ImmediateStart: true,
+		DefaultCols:    80,
+		DefaultRows:    24,
+	}
+	info, err := runner.Start(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	if !runner.ConnectSessionWebSocket(info.ID) {
+		t.Fatal("ConnectSessionWebSocket should attach the tracked writer to the process")
+	}
+	if !runner.HasActiveWebSocket(info.ID) {
+		t.Fatal("process should have an active WebSocket after session-level connect")
+	}
+
+	if err := runner.WriteToDirectOutputBySession(sessionID, []byte("fallback banner")); err != nil {
+		t.Fatalf("WriteToDirectOutputBySession() error = %v", err)
+	}
+
+	writer.mu.Lock()
+	got := string(writer.data)
+	writer.mu.Unlock()
+	if got != "fallback banner" {
+		t.Fatalf("writer data = %q, want fallback banner", got)
+	}
+
+	runner.ClearDirectOutputBySession(sessionID)
+	if runner.HasActiveWebSocketBySession(sessionID) {
+		t.Fatal("ClearDirectOutputBySession should clear session-level tracking")
+	}
+	if runner.HasActiveWebSocket(info.ID) {
+		t.Fatal("ClearDirectOutputBySession should clear process direct output")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = runner.Stop(ctx, info.ID)
+}
+
 func TestInteractiveRunner_CreateUserShell_First(t *testing.T) {
 	log := newTestLogger(t)
 	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
