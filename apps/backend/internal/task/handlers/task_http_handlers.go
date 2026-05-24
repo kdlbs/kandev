@@ -80,9 +80,14 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	})
 }
 
-// buildTaskDTOsWithSessionInfo converts tasks to DTOs enriched with primary session IDs,
-// session counts, and review status. Fetches every task's sessions in a single
-// batched query and derives primary/count/info in-memory.
+// buildTaskDTOsWithSessionInfo converts tasks to DTOs enriched with primary
+// session IDs, session counts, and review status. Uses BatchGetSessionsForTasks
+// to derive the primary session ID and session count in a single round trip,
+// then calls GetPrimarySessionInfoForTasks for the executor type/name fields
+// — those are populated by a LEFT JOIN to the executors table inside that
+// method (the persisted ExecutorSnapshot JSON uses different keys), so the
+// batch loader alone can't supply them without a regression. Two queries
+// total, down from three pre-batch.
 func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tasks []*models.Task) ([]dto.TaskDTO, error) {
 	if len(tasks) == 0 {
 		return []dto.TaskDTO{}, nil
@@ -95,16 +100,18 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 	if err != nil {
 		return nil, err
 	}
+	primarySessionInfoMap, err := svc.GetPrimarySessionInfoForTasks(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		sessions := sessionsByTask[task.ID]
 		var primarySessionID *string
-		var primary *models.TaskSession
 		for _, s := range sessions {
 			if s.IsPrimary {
 				id := s.ID
 				primarySessionID = &id
-				primary = s
 				break
 			}
 		}
@@ -112,7 +119,7 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 		if n := len(sessions); n > 0 {
 			sessionCount = &n
 		}
-		si := extractSessionInfo(primary)
+		si := extractSessionInfo(primarySessionInfoMap[task.ID])
 		result = append(result, dto.FromTaskWithSessionInfo(
 			task,
 			primarySessionID,

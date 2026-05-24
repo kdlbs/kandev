@@ -573,6 +573,62 @@ func TestGetPrimarySessionInfoByTaskIDs_PopulatesID(t *testing.T) {
 	}
 }
 
+// TestGetPrimarySessionInfoByTaskIDs_PopulatesExecutorJoinFields locks in the
+// LEFT JOIN to the executors table that buildTaskDTOsWithSessionInfo (and
+// publishTaskEvent) relies on for the per-task `executor_type` /
+// `executor_name` fields in WS payloads and the task-list response. The
+// persisted ExecutorSnapshot JSON uses different keys (e.g. "type"), so a
+// future refactor that drops the JOIN would silently emit empty executor
+// fields. This test fails loudly in that scenario.
+func TestGetPrimarySessionInfoByTaskIDs_PopulatesExecutorJoinFields(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	exec := &models.Executor{
+		ID: "exec-join-1", Name: "my-docker", Type: "local_docker",
+		Status: "active",
+	}
+	if err := repo.CreateExecutor(ctx, exec); err != nil {
+		t.Fatalf("CreateExecutor: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-join", Name: "WF"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-join", WorkflowID: "wf-join", WorkflowStepID: "step-1", Title: "T",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "sess-join", TaskID: "task-join", ExecutorID: exec.ID,
+		State: models.TaskSessionStateRunning,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.SetSessionPrimary(ctx, "sess-join"); err != nil {
+		t.Fatalf("SetSessionPrimary: %v", err)
+	}
+
+	info, err := repo.GetPrimarySessionInfoByTaskIDs(ctx, []string{"task-join"})
+	if err != nil {
+		t.Fatalf("GetPrimarySessionInfoByTaskIDs: %v", err)
+	}
+	got := info["task-join"]
+	if got == nil {
+		t.Fatalf("expected primary session info for task-join, got nil")
+	}
+	if got.ExecutorSnapshot == nil {
+		t.Fatalf("expected ExecutorSnapshot populated from JOIN, got nil")
+	}
+	if v, _ := got.ExecutorSnapshot["executor_type"].(string); v != "local_docker" {
+		t.Errorf("expected executor_type 'local_docker' from JOIN, got %q (JOIN to executors removed?)", v)
+	}
+	if v, _ := got.ExecutorSnapshot["executor_name"].(string); v != "my-docker" {
+		t.Errorf("expected executor_name 'my-docker' from JOIN, got %q (JOIN to executors removed?)", v)
+	}
+}
+
 // TestBatchGetSessionsByTaskIDs covers the batch loader used by the task-list
 // endpoint: three tasks each with two sessions must come back grouped by task
 // ID, and the empty-input case must short-circuit with an empty map (no
