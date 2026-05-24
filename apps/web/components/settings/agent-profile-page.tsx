@@ -19,11 +19,15 @@ import {
   AgentProfileDeleteConflictDialog,
 } from "@/components/settings/agent-profile-delete-dialog";
 import {
-  EnvVarsField,
-  envVarsToRows,
-  rowsToEnvVars,
-  type EnvVarRow,
-} from "@/components/settings/profile-edit/env-vars-card";
+  ProfileEnvVarsSection,
+  areEnvVarsEqual,
+} from "@/components/settings/profile-edit/profile-env-vars-section";
+import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
+
+export {
+  ProfileEnvVarsEditor,
+  ProfileEnvVarsSection,
+} from "@/components/settings/profile-edit/profile-env-vars-section";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import type {
   Agent,
@@ -31,7 +35,6 @@ import type {
   ModelConfig,
   PermissionSetting,
   PassthroughConfig,
-  ProfileEnvVar,
 } from "@/lib/types/http";
 import { useAppStore } from "@/components/state-provider";
 import { AgentLogo } from "@/components/agent-logo";
@@ -161,101 +164,11 @@ function ProfileSettingsCard({
           passthroughConfig={passthroughConfig}
           agentName={agent.name}
           lockPassthrough={Boolean(agent.tui_config)}
+          hideCustomCLIFlags
         />
-        <ProfileEnvVarsSection envVars={draft.envVars} onChange={onDraftChange} />
       </CardContent>
     </Card>
   );
-}
-
-function areEnvVarsEqual(a?: ProfileEnvVar[], b?: ProfileEnvVar[]): boolean {
-  const left = a ?? [];
-  const right = b ?? [];
-  if (left.length !== right.length) return false;
-  return left.every(
-    (ev, i) =>
-      ev.key === right[i]?.key &&
-      (ev.value ?? "") === (right[i]?.value ?? "") &&
-      (ev.secret_id ?? "") === (right[i]?.secret_id ?? ""),
-  );
-}
-
-type ProfileEnvVarsEditorProps = {
-  envVars?: ProfileEnvVar[];
-  secrets: { id: string; name: string }[];
-  onChange: (envVars: ProfileEnvVar[]) => void;
-};
-
-export function ProfileEnvVarsEditor({ envVars, secrets, onChange }: ProfileEnvVarsEditorProps) {
-  // `synced` is what we've acknowledged from the parent (either via the prop
-  // or our own last emission). When the prop diverges from it we re-seed
-  // local row state; that's how external prop resets propagate without
-  // wiping in-progress draft rows on every echo.
-  const [synced, setSynced] = useState<ProfileEnvVar[]>(envVars ?? []);
-  const [rows, setRows] = useState<EnvVarRow[]>(() => envVarsToRows(envVars));
-
-  const incoming = envVars ?? [];
-  if (!areEnvVarsEqual(incoming, synced)) {
-    setSynced(incoming);
-    setRows(envVarsToRows(incoming));
-  }
-
-  const commit = useCallback(
-    (next: EnvVarRow[]) => {
-      setRows(next);
-      const cleaned = rowsToEnvVars(next);
-      if (areEnvVarsEqual(cleaned, synced)) return;
-      setSynced(cleaned);
-      onChange(cleaned);
-    },
-    [synced, onChange],
-  );
-
-  const handleAdd = useCallback(
-    (row: EnvVarRow) => {
-      commit([...rows, row]);
-    },
-    [rows, commit],
-  );
-
-  const handleUpdate = useCallback(
-    (index: number, field: keyof EnvVarRow, val: string) => {
-      commit(rows.map((row, i) => (i === index ? { ...row, [field]: val } : row)));
-    },
-    [rows, commit],
-  );
-
-  const handleRemove = useCallback(
-    (index: number) => {
-      commit(rows.filter((_, i) => i !== index));
-    },
-    [rows, commit],
-  );
-
-  return (
-    <EnvVarsField
-      rows={rows}
-      secrets={secrets}
-      onAdd={handleAdd}
-      onUpdate={handleUpdate}
-      onRemove={handleRemove}
-    />
-  );
-}
-
-type ProfileEnvVarsSectionProps = {
-  envVars?: ProfileEnvVar[];
-  onChange: (patch: Partial<AgentProfile>) => void;
-};
-
-export function ProfileEnvVarsSection({ envVars, onChange }: ProfileEnvVarsSectionProps) {
-  const { items: secrets } = useSecrets();
-  const handleChange = useCallback(
-    (next: ProfileEnvVar[]) => onChange({ envVars: next }),
-    [onChange],
-  );
-
-  return <ProfileEnvVarsEditor envVars={envVars} secrets={secrets} onChange={handleChange} />;
 }
 
 function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<AgentProfile> {
@@ -480,6 +393,68 @@ function ProfileDeleteDialogs({
   );
 }
 
+type ProfileEditorBodyProps = {
+  agent: Agent;
+  draft: AgentProfile;
+  updateDraft: (patch: Partial<AgentProfile>) => void;
+  modelConfig: ModelConfig;
+  permissionSettings: Record<string, PermissionSetting>;
+  passthroughConfig: PassthroughConfig | null;
+  secrets: { id: string; name: string }[];
+  initialMcpConfig?: AgentProfileMcpConfig | null;
+  onToastError: (error: unknown) => void;
+};
+
+function ProfileEditorBody({
+  agent,
+  draft,
+  updateDraft,
+  modelConfig,
+  permissionSettings,
+  passthroughConfig,
+  secrets,
+  initialMcpConfig,
+  onToastError,
+}: ProfileEditorBodyProps) {
+  return (
+    <>
+      <ProfileSettingsCard
+        agent={agent}
+        draft={draft}
+        onDraftChange={updateDraft}
+        modelConfig={modelConfig}
+        permissionSettings={permissionSettings}
+        passthroughConfig={passthroughConfig}
+      />
+
+      <CustomCLIFlagsCard
+        flags={draft.cliFlags ?? []}
+        onChange={(next) => updateDraft({ cliFlags: next })}
+        permissionSettings={permissionSettings}
+      />
+
+      <ProfileEnvVarsSection envVars={draft.envVars} onChange={updateDraft} />
+
+      <CommandPreviewCard
+        agentName={agent.name}
+        model={draft.model}
+        permissionSettings={{ allow_indexing: draft.allowIndexing }}
+        cliPassthrough={draft.cliPassthrough}
+        cliFlags={draft.cliFlags ?? []}
+        envVars={draft.envVars}
+        secrets={secrets}
+      />
+
+      <ProfileMcpConfigCard
+        profileId={draft.id}
+        supportsMcp={agent.supports_mcp}
+        initialConfig={initialMcpConfig}
+        onToastError={onToastError}
+      />
+    </>
+  );
+}
+
 function ProfileEditor({
   agent,
   profile,
@@ -539,31 +514,15 @@ function ProfileEditor({
 
       <Separator />
 
-      <ProfileSettingsCard
+      <ProfileEditorBody
         agent={agent}
         draft={draft}
-        onDraftChange={updateDraft}
+        updateDraft={updateDraft}
         modelConfig={modelConfig}
         permissionSettings={permissionSettings}
         passthroughConfig={passthroughConfig}
-      />
-
-      <CommandPreviewCard
-        agentName={agent.name}
-        model={draft.model}
-        permissionSettings={{
-          allow_indexing: draft.allowIndexing,
-        }}
-        cliPassthrough={draft.cliPassthrough}
-        cliFlags={draft.cliFlags ?? []}
-        envVars={draft.envVars}
         secrets={secrets}
-      />
-
-      <ProfileMcpConfigCard
-        profileId={profile.id}
-        supportsMcp={agent.supports_mcp}
-        initialConfig={initialMcpConfig}
+        initialMcpConfig={initialMcpConfig}
         onToastError={(error) =>
           toast({
             title: "Failed to save MCP config",

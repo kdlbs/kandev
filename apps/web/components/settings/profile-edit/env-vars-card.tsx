@@ -3,7 +3,7 @@
 import { useCallback, useId, useState } from "react";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
@@ -88,10 +88,7 @@ function EnvVarRowComponent({
   onRemove: (index: number) => void;
 }) {
   return (
-    <li
-      className="flex items-center gap-2 rounded-md border p-3"
-      data-testid={`env-var-row-${index}`}
-    >
+    <li className="flex items-center gap-2" data-testid={`env-var-row-${index}`}>
       <Input
         value={row.key}
         onChange={(e) => onUpdate(index, "key", e.target.value)}
@@ -225,19 +222,7 @@ type EnvVarsFieldProps = {
 
 function EnvVarsFieldBody({ rows, secrets, onAdd, onUpdate, onRemove }: EnvVarsFieldProps) {
   return (
-    <div className="space-y-2" data-testid="env-vars-field">
-      <div className="flex items-center justify-between">
-        <Label>Environment Variables</Label>
-        {rows.length > 0 && (
-          <span className="text-[10px] text-muted-foreground" data-testid="env-vars-count">
-            {rows.length} configured
-          </span>
-        )}
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Injected into the execution environment. Use Secret mode for tokens and API keys; literal
-        values are stored in the profile JSON.
-      </p>
+    <div className="space-y-3" data-testid="env-vars-field">
       {rows.length === 0 ? (
         <p className="text-xs italic text-muted-foreground" data-testid="env-vars-empty">
           No environment variables configured. Add one below.
@@ -261,10 +246,6 @@ function EnvVarsFieldBody({ rows, secrets, onAdd, onUpdate, onRemove }: EnvVarsF
   );
 }
 
-export function EnvVarsField(props: EnvVarsFieldProps) {
-  return <EnvVarsFieldBody {...props} />;
-}
-
 export function useEnvVarRows(initialEnvVars?: ProfileEnvVar[]) {
   const [envVarRows, setEnvVarRows] = useState<EnvVarRow[]>(() => envVarsToRows(initialEnvVars));
 
@@ -286,7 +267,23 @@ export function useEnvVarRows(initialEnvVars?: ProfileEnvVar[]) {
 export function EnvVarsCard(props: EnvVarsFieldProps) {
   return (
     <Card>
-      <CardContent className="pt-6">
+      <CardHeader>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <CardTitle>Environment Variables</CardTitle>
+            <CardDescription>
+              Injected into the execution environment. Use Secret mode for tokens and API keys;
+              literal values are stored in the profile JSON.
+            </CardDescription>
+          </div>
+          {props.rows.length > 0 && (
+            <span className="text-[10px] text-muted-foreground" data-testid="env-vars-count">
+              {props.rows.length} configured
+            </span>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
         <EnvVarsFieldBody {...props} />
       </CardContent>
     </Card>

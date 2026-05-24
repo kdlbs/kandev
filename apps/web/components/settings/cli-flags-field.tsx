@@ -3,10 +3,50 @@
 import { useId, useMemo, useState } from "react";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import type { CLIFlag, PermissionSetting } from "@/lib/types/http";
+
+/**
+ * Editor-side representation of a single custom CLI flag. The persisted
+ * `CLIFlag.flag` string is shell-tokenised by the backend, so a single
+ * stored value like `--add-dir /shared` becomes two argv tokens. We
+ * surface that split as separate Flag + Value inputs so the user doesn't
+ * have to think about quoting, and re-concatenate on save. Description
+ * is preserved through the round-trip but no longer shown in the UI.
+ */
+type CustomFlagRow = {
+  flag: string;
+  value: string;
+  description: string;
+  enabled: boolean;
+};
+
+function flagToRow(f: CLIFlag): CustomFlagRow {
+  const trimmed = f.flag.trim();
+  const ws = trimmed.search(/\s/);
+  if (ws === -1) {
+    return { flag: trimmed, value: "", description: f.description, enabled: f.enabled };
+  }
+  return {
+    flag: trimmed.slice(0, ws),
+    value: trimmed.slice(ws + 1).trim(),
+    description: f.description,
+    enabled: f.enabled,
+  };
+}
+
+function rowToFlag(r: CustomFlagRow): CLIFlag {
+  const flagText = r.flag.trim();
+  const valueText = r.value.trim();
+  return {
+    flag: valueText ? `${flagText} ${valueText}` : flagText,
+    description: r.description,
+    enabled: r.enabled,
+  };
+}
 
 type CLIFlagsFieldProps = {
   flags: CLIFlag[];
@@ -80,12 +120,11 @@ export function CLIFlagsField({
     onChange([...flags, { flag: setting.flag, description: setting.description, enabled }]);
   };
 
-  const toggleAt = (index: number, enabled: boolean) => {
-    onChange(flags.map((f, i) => (i === index ? { ...f, enabled } : f)));
+  const updateRowAt = (index: number, next: CLIFlag) => {
+    onChange(flags.map((f, i) => (i === index ? next : f)));
   };
   const removeAt = (index: number) => onChange(flags.filter((_, i) => i !== index));
-  const appendCustom = (flag: string, description: string) =>
-    onChange([...flags, { flag, description, enabled: true }]);
+  const appendCustom = (next: CLIFlag) => onChange([...flags, next]);
 
   return (
     <div className={isCompact ? "space-y-3" : "space-y-4"} data-testid="cli-flags-field">
@@ -100,10 +139,9 @@ export function CLIFlagsField({
       {!hideCustomFlags && (
         <CustomFlagsSection
           customFlags={customFlags}
-          onToggle={toggleAt}
+          onUpdateRow={updateRowAt}
           onRemove={removeAt}
           onAdd={appendCustom}
-          compact={isCompact}
         />
       )}
     </div>
@@ -175,34 +213,17 @@ function CuratedFlagsSection({
 
 function CustomFlagsSection({
   customFlags,
-  onToggle,
+  onUpdateRow,
   onRemove,
   onAdd,
-  compact,
 }: {
   customFlags: Array<{ flag: CLIFlag; index: number }>;
-  onToggle: (index: number, enabled: boolean) => void;
+  onUpdateRow: (index: number, next: CLIFlag) => void;
   onRemove: (index: number) => void;
-  onAdd: (flag: string, description: string) => void;
-  compact: boolean;
+  onAdd: (next: CLIFlag) => void;
 }) {
-  const labelCls = compact ? "text-xs" : undefined;
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <Label className={labelCls}>Agent CLI flags</Label>
-        {customFlags.length > 0 && (
-          <span className="text-[10px] text-muted-foreground" data-testid="cli-flags-count">
-            {customFlags.filter((e) => e.flag.enabled).length} of {customFlags.length} enabled
-          </span>
-        )}
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Flags passed to the agent CLI on launch. Only enabled entries are applied. Use quotes for
-        values with spaces, e.g.{" "}
-        <code className="bg-muted px-1 rounded">{`--msg "hello world"`}</code>.
-      </p>
-
+    <div className="space-y-3">
       {customFlags.length === 0 ? (
         <p className="text-xs italic text-muted-foreground" data-testid="cli-flags-empty">
           No CLI flags configured. Add one below.
@@ -211,10 +232,10 @@ function CustomFlagsSection({
         <ul className="space-y-2" data-testid="cli-flags-list">
           {customFlags.map(({ flag, index }) => (
             <CLIFlagRow
-              key={`${flag.flag}-${index}`}
+              key={index}
               flag={flag}
               index={index}
-              onToggle={onToggle}
+              onUpdateRow={onUpdateRow}
               onRemove={onRemove}
             />
           ))}
@@ -228,60 +249,67 @@ function CustomFlagsSection({
 function CLIFlagRow({
   flag,
   index,
-  onToggle,
+  onUpdateRow,
   onRemove,
 }: {
   flag: CLIFlag;
   index: number;
-  onToggle: (i: number, enabled: boolean) => void;
-  onRemove: (i: number) => void;
+  onUpdateRow: (index: number, next: CLIFlag) => void;
+  onRemove: (index: number) => void;
 }) {
+  const row = flagToRow(flag);
+  const update = (patch: Partial<CustomFlagRow>) => {
+    onUpdateRow(index, rowToFlag({ ...row, ...patch }));
+  };
   return (
-    <li
-      className="flex items-start justify-between gap-3 rounded-md border p-3"
-      data-testid={`cli-flag-row-${index}`}
-    >
-      <div className="flex-1 min-w-0 space-y-1">
-        <code className="text-sm font-semibold break-all" data-testid={`cli-flag-text-${index}`}>
-          {flag.flag}
-        </code>
-        {flag.description && <p className="text-xs text-muted-foreground">{flag.description}</p>}
-      </div>
-      <div className="flex items-center gap-2 shrink-0">
-        <Switch
-          checked={flag.enabled}
-          onCheckedChange={(checked) => onToggle(index, checked)}
-          data-testid={`cli-flag-enabled-${index}`}
-          aria-label={`${flag.enabled ? "Disable" : "Enable"} ${flag.flag}`}
-        />
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={() => onRemove(index)}
-          className="cursor-pointer"
-          data-testid={`cli-flag-remove-${index}`}
-          aria-label={`Remove ${flag.flag}`}
-        >
-          <IconTrash className="h-4 w-4" />
-        </Button>
-      </div>
+    <li className="flex items-center gap-2" data-testid={`cli-flag-row-${index}`}>
+      <Input
+        value={row.flag}
+        onChange={(e) => update({ flag: e.target.value })}
+        placeholder="--my-flag"
+        className="flex-[2] font-mono text-xs"
+        data-testid={`cli-flag-flag-${index}`}
+      />
+      <Input
+        value={row.value}
+        onChange={(e) => update({ value: e.target.value })}
+        placeholder="value (optional)"
+        className="flex-[3] font-mono text-xs"
+        data-testid={`cli-flag-value-${index}`}
+      />
+      <Switch
+        checked={row.enabled}
+        onCheckedChange={(checked) => update({ enabled: checked })}
+        data-testid={`cli-flag-enabled-${index}`}
+        aria-label={`${row.enabled ? "Disable" : "Enable"} ${row.flag}`}
+      />
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        onClick={() => onRemove(index)}
+        className="h-8 w-8 shrink-0 cursor-pointer"
+        data-testid={`cli-flag-remove-${index}`}
+        aria-label={`Remove ${row.flag || "flag"}`}
+      >
+        <IconTrash className="h-3.5 w-3.5 text-muted-foreground" />
+      </Button>
     </li>
   );
 }
 
-function CLIFlagsAddForm({ onAdd }: { onAdd: (flag: string, description: string) => void }) {
+function CLIFlagsAddForm({ onAdd }: { onAdd: (next: CLIFlag) => void }) {
   const uid = useId();
   const flagId = `${uid}-flag`;
-  const descId = `${uid}-desc`;
+  const valueId = `${uid}-value`;
   const [newFlag, setNewFlag] = useState("");
-  const [newDesc, setNewDesc] = useState("");
+  const [newValue, setNewValue] = useState("");
   const commit = () => {
     const trimmed = newFlag.trim();
     if (trimmed === "") return;
-    onAdd(trimmed, newDesc.trim());
+    onAdd(rowToFlag({ flag: trimmed, value: newValue, description: "", enabled: true }));
     setNewFlag("");
-    setNewDesc("");
+    setNewValue("");
   };
   const onEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && newFlag.trim() !== "") {
@@ -291,7 +319,7 @@ function CLIFlagsAddForm({ onAdd }: { onAdd: (flag: string, description: string)
   };
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-      <div className="flex-1 space-y-1">
+      <div className="flex-[2] space-y-1">
         <Label className="text-xs" htmlFor={flagId}>
           Flag
         </Label>
@@ -299,21 +327,23 @@ function CLIFlagsAddForm({ onAdd }: { onAdd: (flag: string, description: string)
           id={flagId}
           value={newFlag}
           onChange={(e) => setNewFlag(e.target.value)}
-          placeholder="--my-flag or --key=value"
+          placeholder="--my-flag"
+          className="font-mono text-xs"
           data-testid="cli-flag-new-flag-input"
           onKeyDown={onEnter}
         />
       </div>
-      <div className="flex-1 space-y-1">
-        <Label className="text-xs" htmlFor={descId}>
-          Description (optional)
+      <div className="flex-[3] space-y-1">
+        <Label className="text-xs" htmlFor={valueId}>
+          Value (optional)
         </Label>
         <Input
-          id={descId}
-          value={newDesc}
-          onChange={(e) => setNewDesc(e.target.value)}
-          placeholder="What this flag does"
-          data-testid="cli-flag-new-desc-input"
+          id={valueId}
+          value={newValue}
+          onChange={(e) => setNewValue(e.target.value)}
+          placeholder="value"
+          className="font-mono text-xs"
+          data-testid="cli-flag-new-value-input"
           onKeyDown={onEnter}
         />
       </div>
@@ -326,9 +356,74 @@ function CLIFlagsAddForm({ onAdd }: { onAdd: (flag: string, description: string)
         className="cursor-pointer"
         data-testid="cli-flag-add-button"
       >
-        <IconPlus className="h-4 w-4 mr-1" />
+        <IconPlus className="h-3.5 w-3.5 mr-1" />
         Add
       </Button>
     </div>
+  );
+}
+
+type CustomCLIFlagsCardProps = {
+  flags: CLIFlag[];
+  onChange: (next: CLIFlag[]) => void;
+  permissionSettings?: Record<string, PermissionSetting>;
+};
+
+/**
+ * Standalone card surfacing only the user-authored (custom) CLI flags,
+ * with their values exposed as a dedicated input. Curated flags
+ * (Switch toggles derived from PermissionSettings) stay inline within
+ * ProfileFormFields so they sit alongside the related profile fields.
+ */
+export function CustomCLIFlagsCard({
+  flags,
+  onChange,
+  permissionSettings,
+}: CustomCLIFlagsCardProps) {
+  const curatedFlagTexts = useMemo(
+    () => new Set(extractCuratedSettings(permissionSettings).map((s) => s.flag)),
+    [permissionSettings],
+  );
+  const customFlags = useMemo(
+    () =>
+      flags
+        .map((f, i) => ({ flag: f, index: i }))
+        .filter((e) => !curatedFlagTexts.has(e.flag.flag)),
+    [flags, curatedFlagTexts],
+  );
+  const enabledCount = customFlags.filter((e) => e.flag.enabled).length;
+
+  const onUpdateRow = (index: number, next: CLIFlag) => {
+    onChange(flags.map((f, i) => (i === index ? next : f)));
+  };
+  const onRemove = (index: number) => onChange(flags.filter((_, i) => i !== index));
+  const onAdd = (next: CLIFlag) => onChange([...flags, next]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <CardTitle>Agent CLI flags</CardTitle>
+            <CardDescription>
+              Flags passed to the agent CLI on launch. Only enabled entries are applied.
+            </CardDescription>
+          </div>
+          {customFlags.length > 0 && (
+            <span className="text-[10px] text-muted-foreground" data-testid="cli-flags-count">
+              {enabledCount} of {customFlags.length} enabled
+            </span>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        <CustomFlagsSection
+          customFlags={customFlags}
+          onUpdateRow={onUpdateRow}
+          onRemove={onRemove}
+          onAdd={onAdd}
+        />
+      </CardContent>
+    </Card>
   );
 }
