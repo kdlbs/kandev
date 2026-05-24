@@ -202,7 +202,7 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID, sessionID, pro
 	if err != nil {
 		return nil, fmt.Errorf("resolve passthrough config: %w", err)
 	}
-	payload := buildPassthroughPayload(prompt, agents.EffectiveSubmitSequence(pt.SubmitSequence))
+	payload := buildPassthroughPayload(prompt, pt.SubmitSequence)
 	if err := e.agentManager.WritePassthroughStdin(ctx, sessionID, payload); err != nil {
 		return nil, fmt.Errorf("failed to write to passthrough stdin: %w", err)
 	}

@@ -34,16 +34,26 @@ test.describe("CLI mode: message.add submits to PTY", () => {
   async function openPassthroughTask(
     testPage: Page,
     apiClient: ApiClient,
-    seedData: { workspaceId: string; workflowId: string; startStepId: string; repositoryId: string },
+    seedData: {
+      workspaceId: string;
+      workflowId: string;
+      startStepId: string;
+      repositoryId: string;
+    },
     profileId: string,
     taskTitle: string,
   ): Promise<{ session: SessionPage; taskId: string; sessionId: string }> {
-    const created = await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profileId, {
-      description: "seed passthrough prompt",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
+    const created = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      taskTitle,
+      profileId,
+      {
+        description: "seed passthrough prompt",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
     if (!created.session_id) throw new Error("createTaskWithAgent did not return session_id");
 
     const kanban = new KanbanPage(testPage);
@@ -86,8 +96,7 @@ test.describe("CLI mode: message.add submits to PTY", () => {
     await textarea.press("Enter");
 
     await expect(testPage.getByTestId("passthrough-composer")).toBeHidden({ timeout: 10_000 });
-    await session.expectPassthroughHasText(followUp, 20_000);
-    await session.expectPassthroughHasText("Processed:", 20_000);
+    await session.expectPassthroughHasText(`Processed: ${followUp}`, 20_000);
   });
 
   test("message.add via API (comment Run path) shows Processed in terminal", async ({
@@ -109,7 +118,6 @@ test.describe("CLI mode: message.add submits to PTY", () => {
     const commentText = "passthrough comment run via message.add";
     await apiClient.addUserMessage(taskId, sessionId, commentText);
 
-    await session.expectPassthroughHasText(commentText, 20_000);
-    await session.expectPassthroughHasText("Processed:", 20_000);
+    await session.expectPassthroughHasText(`Processed: ${commentText}`, 20_000);
   });
 });
