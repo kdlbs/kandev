@@ -36,9 +36,11 @@ export async function createAutomation(
 
 export async function revealWebhookSecret(
   automationId: string,
+  workspaceId: string,
 ): Promise<RevealWebhookSecretResponse> {
   return requireClient().request<RevealWebhookSecretResponse>("automation.webhook.reveal_secret", {
     id: automationId,
+    workspace_id: workspaceId,
   });
 }
 

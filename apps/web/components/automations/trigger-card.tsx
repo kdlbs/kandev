@@ -23,6 +23,7 @@ import { WebhookConfig } from "./trigger-configs/webhook-config";
 type TriggerCardProps = {
   trigger: AutomationTrigger;
   automationId: string | null;
+  workspaceId: string;
   onUpdate: (config: Record<string, unknown>) => void;
   onToggleEnabled: (enabled: boolean) => void;
   onDelete: () => void;
@@ -86,6 +87,7 @@ function getTriggerSummary(trigger: AutomationTrigger): string {
 export function TriggerCard({
   trigger,
   automationId,
+  workspaceId,
   onUpdate,
   onToggleEnabled,
   onDelete,
@@ -134,7 +136,12 @@ export function TriggerCard({
       </div>
       {expanded && (
         <div className="px-4 pb-4 pt-1 border-t">
-          <TriggerConfigForm trigger={trigger} automationId={automationId} onUpdate={onUpdate} />
+          <TriggerConfigForm
+            trigger={trigger}
+            automationId={automationId}
+            workspaceId={workspaceId}
+            onUpdate={onUpdate}
+          />
         </div>
       )}
     </div>
@@ -144,10 +151,12 @@ export function TriggerCard({
 function TriggerConfigForm({
   trigger,
   automationId,
+  workspaceId,
   onUpdate,
 }: {
   trigger: AutomationTrigger;
   automationId: string | null;
+  workspaceId: string;
   onUpdate: (config: Record<string, unknown>) => void;
 }) {
   switch (trigger.type) {
@@ -160,7 +169,7 @@ function TriggerConfigForm({
     case "github_ci":
       return <GitHubCIConfig config={trigger.config} onUpdate={onUpdate} />;
     case "webhook":
-      return <WebhookConfig automationId={automationId} />;
+      return <WebhookConfig automationId={automationId} workspaceId={workspaceId} />;
     default:
       return <p className="text-sm text-muted-foreground">Unknown trigger type</p>;
   }

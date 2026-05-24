@@ -11,6 +11,7 @@ import { TriggerPicker } from "./trigger-picker";
 type TriggersSectionProps = {
   triggers: AutomationTrigger[];
   automationId: string | null;
+  workspaceId: string;
   triggerTypes: TriggerTypeInfo[];
   onAddTrigger: (type: TriggerType, config: Record<string, unknown>) => void;
   onUpdateTrigger: (triggerId: string, config: Record<string, unknown>) => void;
@@ -21,6 +22,7 @@ type TriggersSectionProps = {
 export function TriggersSection({
   triggers,
   automationId,
+  workspaceId,
   triggerTypes,
   onAddTrigger,
   onUpdateTrigger,
@@ -63,6 +65,7 @@ export function TriggersSection({
         <TriggerCard
           trigger={webhookTrigger}
           automationId={automationId}
+          workspaceId={workspaceId}
           onUpdate={(config) => onUpdateTrigger(webhookTrigger.id, config)}
           onToggleEnabled={(enabled) => onToggleTrigger(webhookTrigger.id, enabled)}
           onDelete={handleRemoveWebhook}
@@ -78,6 +81,7 @@ export function TriggersSection({
       <ConditionArea
         trigger={conditionTrigger}
         automationId={automationId}
+        workspaceId={workspaceId}
         triggerTypes={triggerTypes}
         onAddTrigger={onAddTrigger}
         onUpdateTrigger={onUpdateTrigger}
@@ -107,6 +111,7 @@ function ScheduleArea({
 function ConditionArea({
   trigger,
   automationId,
+  workspaceId,
   triggerTypes,
   onAddTrigger,
   onUpdateTrigger,
@@ -115,6 +120,7 @@ function ConditionArea({
 }: {
   trigger: AutomationTrigger | undefined;
   automationId: string | null;
+  workspaceId: string;
   triggerTypes: TriggerTypeInfo[];
   onAddTrigger: (type: TriggerType, config: Record<string, unknown>) => void;
   onUpdateTrigger: (triggerId: string, config: Record<string, unknown>) => void;
@@ -129,6 +135,7 @@ function ConditionArea({
           <TriggerCard
             trigger={trigger}
             automationId={automationId}
+            workspaceId={workspaceId}
             onUpdate={(config) => onUpdateTrigger(trigger.id, config)}
             onToggleEnabled={(enabled) => onToggleTrigger(trigger.id, enabled)}
             onDelete={() => onDeleteTrigger(trigger.id)}

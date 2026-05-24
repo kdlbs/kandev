@@ -247,6 +247,28 @@ function getSaveLabel(saving: boolean, isNew: boolean): string {
   return isNew ? "Create Automation" : "Save Changes";
 }
 
+/** Loads an existing automation on mount and populates form + trigger state. */
+function useLoadAutomation(
+  automationId: string | null,
+  workspaceId: string,
+  setForm: React.Dispatch<React.SetStateAction<FormState>>,
+  setTriggers: (triggers: AutomationTrigger[]) => void,
+  router: ReturnType<typeof useRouter>,
+) {
+  useEffect(() => {
+    if (!automationId) return;
+    getAutomation(automationId)
+      .then((a) => {
+        setForm(formFromAutomation(a));
+        setTriggers(a.triggers ?? []);
+      })
+      .catch(() => {
+        router.push(`/settings/workspace/${workspaceId}/automations`);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [automationId]);
+}
+
 function useConditionMetadata(triggers: AutomationTrigger[], triggerTypes: TriggerTypeInfo[]) {
   const conditionType = getConditionType(triggers);
   const activeTriggerInfo = useMemo(
@@ -297,19 +319,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     triggerTypes,
   );
   useAutoPromptUpdate(activeTriggerInfo, conditionType, triggerTypes, setForm);
-
-  useEffect(() => {
-    if (!automationId) return;
-    getAutomation(automationId)
-      .then((a) => {
-        setForm(formFromAutomation(a));
-        triggerActions.setTriggers(a.triggers ?? []);
-      })
-      .catch(() => {
-        router.push(`/settings/workspace/${workspaceId}/automations`);
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [automationId]);
+  useLoadAutomation(automationId, workspaceId, setForm, triggerActions.setTriggers, router);
 
   const updateField = useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -358,6 +368,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         triggerActions={triggerActions}
         triggerTypes={triggerTypes}
         currentId={currentId}
+        workspaceId={workspaceId}
       />
       <Separator />
       <ThenSection
@@ -414,10 +425,12 @@ function WhenSection({
   triggerActions,
   triggerTypes,
   currentId,
+  workspaceId,
 }: {
   triggerActions: TriggerActionsResult;
   triggerTypes: TriggerTypeInfo[];
   currentId: string | null;
+  workspaceId: string;
 }) {
   return (
     <div className="space-y-2">
@@ -429,6 +442,7 @@ function WhenSection({
         <TriggersSection
           triggers={triggerActions.allTriggers}
           automationId={currentId}
+          workspaceId={workspaceId}
           triggerTypes={triggerTypes}
           onAddTrigger={triggerActions.handleAdd}
           onUpdateTrigger={triggerActions.handleUpdate}

@@ -11,6 +11,7 @@ import { revealWebhookSecret } from "@/lib/api/domains/automation-api";
 
 type WebhookConfigProps = {
   automationId: string | null;
+  workspaceId: string;
 };
 
 function extractKeys(json: string): string[] {
@@ -25,7 +26,7 @@ function extractKeys(json: string): string[] {
   return [];
 }
 
-export function WebhookConfig({ automationId }: WebhookConfigProps) {
+export function WebhookConfig({ automationId, workspaceId }: WebhookConfigProps) {
   const [copied, setCopied] = useState<"url" | "secret" | null>(null);
   const [samplePayload, setSamplePayload] = useState("");
 
@@ -66,6 +67,7 @@ export function WebhookConfig({ automationId }: WebhookConfigProps) {
       />
       <SecretField
         automationId={automationId}
+        workspaceId={workspaceId}
         copied={copied === "secret"}
         onCopy={(value) => copyValue(value, "secret")}
       />
@@ -113,10 +115,12 @@ function inputValueFor(
 
 function SecretField({
   automationId,
+  workspaceId,
   copied,
   onCopy,
 }: {
   automationId: string;
+  workspaceId: string;
   copied: boolean;
   onCopy: (value: string) => void;
 }) {
@@ -125,11 +129,11 @@ function SecretField({
   // Combining status + value in one state avoids a setState(true) inside
   // the effect body (which the React linter flags as a cascading render).
   const [state, setState] = useState<SecretState>({ status: "loading" });
-  const [hidden, setHidden] = useState(false);
+  const [hidden, setHidden] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    revealWebhookSecret(automationId)
+    revealWebhookSecret(automationId, workspaceId)
       .then((result) => {
         if (cancelled) return;
         setState({ status: "ready", value: result.webhook_secret });
@@ -143,7 +147,7 @@ function SecretField({
     return () => {
       cancelled = true;
     };
-  }, [automationId]);
+  }, [automationId, workspaceId]);
 
   const secret = state.status === "ready" ? state.value : null;
   const masked = "•".repeat(32);
