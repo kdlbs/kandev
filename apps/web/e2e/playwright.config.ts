@@ -21,9 +21,8 @@ export default defineConfig({
   retries: CI ? 2 : 0,
   workers: 1,
   timeout: 60_000,
-  // CI keeps blob output for cross-shard merge-reports and also prints the
-  // list reporter so timeout cancellations show the last running spec.
-  reporter: CI ? [["list"], ["blob", { outputDir: "./blob-report" }]] : "list",
+  // CI uses blob reporter for cross-shard merge-reports; local uses list.
+  reporter: CI ? [["blob", { outputDir: "./blob-report" }]] : "list",
   outputDir: "./test-results",
 
   use: {
