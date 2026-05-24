@@ -54,8 +54,11 @@ func TestCreateAutomationResponse_IncludesWebhookSecret(t *testing.T) {
 	if err := json.Unmarshal(resp.Payload, &got); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if got.Automation == nil || got.Automation.ID == "" {
+	if got.Automation == nil {
 		t.Fatalf("expected automation in response, got %+v", got)
+	}
+	if got.ID == "" {
+		t.Fatalf("expected non-empty automation id, got %+v", got)
 	}
 	if got.WebhookSecret == "" {
 		t.Fatal("expected non-empty webhook secret in create response")
