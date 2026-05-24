@@ -133,6 +133,18 @@ export function buildLogDownloadUrl(name: string, baseUrl?: string): string {
   return `${root}${SYSTEM_BASE}/logs/${encodeURIComponent(name)}/download`;
 }
 
+// --- Jobs ---------------------------------------------------------------
+
+export function fetchSystemJob(
+  jobId: string,
+  options?: ApiRequestOptions,
+): Promise<import("@/lib/types/system").SystemJob> {
+  return fetchJson<import("@/lib/types/system").SystemJob>(
+    `${SYSTEM_BASE}/jobs/${encodeURIComponent(jobId)}`,
+    { cache: "no-store", ...options },
+  );
+}
+
 // --- Updates ------------------------------------------------------------
 
 export function fetchUpdates(options?: ApiRequestOptions): Promise<UpdatesResponse> {

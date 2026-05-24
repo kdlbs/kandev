@@ -119,6 +119,8 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	g.GET("/updates", updates.HandleGet(s.Updates))
 	g.POST("/updates/check", updates.HandleCheck(s.Updates))
 
+	g.GET("/jobs/:id", jobs.HandleGet(s.Jobs))
+
 	log.Debug("Registered System routes (HTTP)")
 }
 
