@@ -3,6 +3,7 @@ package backups
 import (
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -94,7 +95,17 @@ func HandleDelete(svc *Service) gin.HandlerFunc {
 			return
 		}
 		if err := svc.Delete(name); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			// Differentiate by cause: pre-reset rejections and not-found
+			// map to client-visible statuses; anything else (filesystem
+			// errors etc.) is a 500 so we don't leak raw storage detail.
+			switch {
+			case strings.Contains(err.Error(), "cannot delete pre-reset"):
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			case errors.Is(err, os.ErrNotExist):
+				c.JSON(http.StatusNotFound, gin.H{"error": "snapshot not found"})
+			default:
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "delete failed"})
+			}
 			return
 		}
 		c.Status(http.StatusNoContent)

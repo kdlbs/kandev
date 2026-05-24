@@ -86,12 +86,12 @@ func (s *Service) Get(ctx context.Context) GetResult {
 	shouldKick := !computing && (value == nil || stale)
 	if shouldKick {
 		s.computing = true
-	}
-	s.mu.Unlock()
-
-	if shouldKick {
+		// Dispatch inside the lock so activeJobID is published before any
+		// concurrent Refresh can observe (computing==true, activeJobID=="")
+		// and start a duplicate walk.
 		s.startWalk(ctx)
 	}
+	s.mu.Unlock()
 
 	if value == nil {
 		return GetResult{Data: nil, Computing: true, HomeDir: s.homeDir}
@@ -108,38 +108,45 @@ func (s *Service) HomeDir() string {
 // Refresh kicks off a walk and returns the job ID. If a walk is already in
 // flight the in-flight job ID is returned and no new walk is started — a
 // concurrent recompute would race on the cache and waste IO.
+//
+// Single-flight is preserved across the brief window between
+// `computing = true` and `activeJobID = <id>` by holding the mutex through
+// the kickJob call: a second Refresh that arrives while we are dispatching
+// blocks here, then observes computing==true on the next lock and coalesces
+// onto our job ID.
 func (s *Service) Refresh(ctx context.Context) string {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.computing && s.activeJobID != "" {
-		id := s.activeJobID
-		s.mu.Unlock()
-		return id
+		return s.activeJobID
 	}
 	s.computing = true
-	s.mu.Unlock()
-	return s.kickJob(ctx)
+	return s.kickJobLocked(ctx)
 }
 
 // startWalk schedules an async walk; intended for Get's lazy path where we
-// only want the side-effect (no job ID returned).
+// only want the side-effect (no job ID returned). Caller must hold s.mu.
 func (s *Service) startWalk(ctx context.Context) {
-	_ = s.kickJob(ctx)
+	_ = s.kickJobLocked(ctx)
 }
 
-// kickJob hands the walk off to the jobs.Tracker so progress flows through
-// the standard system.job.update channel. The fn updates the cache before
-// returning so observers reading Service state after the job completes see
-// the fresh value. The active job ID is tracked so concurrent Refresh
-// callers can be coalesced onto the in-flight walk.
-func (s *Service) kickJob(ctx context.Context) string {
+// kickJobLocked hands the walk off to the jobs.Tracker so progress flows
+// through the standard system.job.update channel. The fn updates the cache
+// before returning so observers reading Service state after the job
+// completes see the fresh value. The active job ID is tracked so concurrent
+// Refresh callers can be coalesced onto the in-flight walk.
+//
+// Locked-variant: caller must already hold s.mu so the activeJobID
+// assignment happens before the lock is released. This closes the race
+// where a second Refresh could observe (computing==true, activeJobID=="")
+// and start a duplicate walk.
+func (s *Service) kickJobLocked(ctx context.Context) string {
 	id := s.jobs.Start(ctx, jobKind, func(jobCtx context.Context) (map[string]interface{}, error) {
 		breakdown := s.computeBreakdown(jobCtx)
 		s.storeBreakdown(breakdown)
 		return map[string]interface{}{"total_bytes": breakdown.Total}, nil
 	})
-	s.mu.Lock()
 	s.activeJobID = id
-	s.mu.Unlock()
 	return id
 }
 

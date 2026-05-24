@@ -130,7 +130,10 @@ func (s *Service) runCreate(_ context.Context) (map[string]interface{}, error) {
 	if err := s.ensureBackupsDir(); err != nil {
 		return nil, err
 	}
-	name := fmt.Sprintf("%s%d%s", manualPrefix, time.Now().UTC().Unix(), dbSuffix)
+	// Nanosecond precision so double-clicks or concurrent /backups POSTs do
+	// not collide on the same filename and silently overwrite one job's
+	// snapshot with another.
+	name := fmt.Sprintf("%s%d%s", manualPrefix, time.Now().UTC().UnixNano(), dbSuffix)
 	path := filepath.Join(s.backupsDir(), name)
 	size, err := persistence.SnapshotSQLite(s.pool.Writer(), path)
 	if err != nil {
@@ -244,8 +247,10 @@ func (s *Service) OpenForDownload(name string) (*os.File, int64, error) {
 }
 
 // resolveSnapshotPath validates that name is a bare filename (no
-// separators, no "..", no absolute prefix), confirms it lives inside the
-// backups directory after path resolution, and returns the absolute path.
+// separators, no "..", no absolute prefix), confirms it matches a
+// recognised snapshot prefix (so unrelated files dropped into the backups
+// directory cannot be restored/downloaded/deleted), and that it resolves
+// inside the backups directory. Returns the absolute path.
 func (s *Service) resolveSnapshotPath(name string) (string, error) {
 	if name == "" || name == "." || name == ".." {
 		return "", ErrInvalidName
@@ -262,6 +267,12 @@ func (s *Service) resolveSnapshotPath(name string) (string, error) {
 	// Defensive: filepath.Clean strips any tricks before we join.
 	clean := filepath.Clean(name)
 	if clean != name {
+		return "", ErrInvalidName
+	}
+	// Allow-list by prefix + suffix. classify() returns "" for anything
+	// that isn't a manual/auto snapshot; pre-reset recovery snapshots use
+	// the auto prefix and are accepted here too (Delete blocks them later).
+	if classify(name) == "" && !isPreResetSnapshot(name) {
 		return "", ErrInvalidName
 	}
 	abs := filepath.Join(s.backupsDir(), clean)

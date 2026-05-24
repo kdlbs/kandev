@@ -57,6 +57,13 @@ func HandleOpenFolder(s *Service) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		// Release the OS process descriptor so we don't leak a zombie when the
+		// reveal helper (open/xdg-open/explorer) exits. We don't care about
+		// its exit code or wait for completion - the user just wanted Finder
+		// to open.
+		if cmd.Process != nil {
+			_ = cmd.Process.Release()
+		}
 		c.JSON(http.StatusOK, gin.H{"path": path})
 	}
 }

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { StateProvider } from "@/components/state-provider";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
 import { UpdatesCard } from "@/components/settings/system/updates-card";
@@ -20,7 +21,15 @@ export default async function SystemUpdatesPage() {
         description="Current vs latest release plus the full kandev changelog."
       >
         <UpdatesCard />
-        <ChangelogList />
+        {/*
+         * ChangelogList reads ?page=N via useSearchParams, which forces the
+         * client subtree to deopt out of static prerender. The Suspense
+         * boundary lets the rest of the page prerender while the list
+         * hydrates on the client.
+         */}
+        <Suspense fallback={null}>
+          <ChangelogList />
+        </Suspense>
       </SystemPageShell>
     </StateProvider>
   );

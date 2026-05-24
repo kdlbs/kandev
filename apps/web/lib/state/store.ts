@@ -22,7 +22,6 @@ import type {
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
 import type * as UISliceTypes from "./slices/ui/types";
-import type { Automation, AutomationRun } from "@/lib/types/automation";
 import { mergeInitialState } from "./default-state";
 import {
   createKanbanSlice,
@@ -75,6 +74,7 @@ import {
   type PreviewDevicePreset,
   type ConnectionState,
   type SystemSliceActions,
+  type AutomationsSliceActions,
 } from "./slices";
 import type {
   AvailableCommand,
@@ -268,14 +268,7 @@ export type AppState = {
   removeLinearIssueWatch: (id: string) => void;
   resetLinearIssueWatches: () => void;
 
-  // Automations actions
-  setAutomations: (items: Automation[]) => void;
-  setAutomationsLoading: (loading: boolean) => void;
-  addAutomation: (automation: Automation) => void;
-  updateAutomation: (automation: Automation) => void;
-  removeAutomation: (id: string) => void;
-  setAutomationRuns: (automationId: string, runs: AutomationRun[]) => void;
-  setAutomationRunsLoading: (automationId: string, loading: boolean) => void;
+  // Automations actions merged via AutomationsSliceActions intersection below.
 
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
@@ -545,7 +538,8 @@ export type AppState = {
   setRunAttempts: (runId: string, attempts: RouteAttempt[]) => void;
   appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
-} & SystemSliceActions;
+} & SystemSliceActions &
+  AutomationsSliceActions;
 
 export function createAppStore(initialState?: Partial<AppState>) {
   const merged = mergeInitialState(initialState);
