@@ -77,7 +77,11 @@ func resolvePathPlaceholders(s string, data map[string]interface{}) string {
 
 // lookupPath resolves a dot-separated path against the parsed JSON payload.
 // Numeric segments index into JSON arrays; non-numeric segments key into
-// objects. Returns ("", false) for any missing or non-leaf path.
+// objects. Returns ("", false) when a segment can't be resolved (missing
+// key, out-of-range index, or a scalar reached before the path ends).
+// Non-leaf nodes (intermediate objects/arrays) are JSON-marshalled to a
+// string via toString — same convention as {{webhook.body}} returning the
+// whole payload.
 func lookupPath(data map[string]interface{}, path string) (string, bool) {
 	if path == "" {
 		return "", false

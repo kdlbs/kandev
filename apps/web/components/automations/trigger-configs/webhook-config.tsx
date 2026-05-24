@@ -14,16 +14,47 @@ type WebhookConfigProps = {
   workspaceId: string;
 };
 
+// extractPaths walks a parsed JSON object two levels deep and returns the
+// dot-paths to leaf scalars (string/number/bool). For nested objects it
+// returns the children's full paths so the badges suggest
+// `{{webhook.pull_request.number}}` rather than `{{webhook.pull_request}}`
+// (which resolves to the entire blob). Arrays surface as their root path
+// only — indexing across every element would explode the badge count.
+const MAX_DEPTH = 2;
+function isScalar(v: unknown): boolean {
+  return typeof v === "string" || typeof v === "number" || typeof v === "boolean";
+}
+function walkPaths(value: unknown, prefix: string, depth: number, out: string[]) {
+  if (isScalar(value) || value === null) {
+    out.push(prefix);
+    return;
+  }
+  if (Array.isArray(value)) {
+    // Stop at the array root — listing every index isn't useful for badges.
+    out.push(prefix);
+    return;
+  }
+  if (typeof value !== "object") return;
+  if (depth >= MAX_DEPTH) {
+    out.push(prefix);
+    return;
+  }
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    walkPaths(v, prefix ? `${prefix}.${k}` : k, depth + 1, out);
+  }
+}
 function extractKeys(json: string): string[] {
   try {
     const parsed = JSON.parse(json);
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      return Object.keys(parsed);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return [];
     }
+    const out: string[] = [];
+    walkPaths(parsed, "", 0, out);
+    return out;
   } catch {
-    // ignore parse errors
+    return [];
   }
-  return [];
 }
 
 export function WebhookConfig({ automationId, workspaceId }: WebhookConfigProps) {

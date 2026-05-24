@@ -142,7 +142,9 @@ func TestWsRevealWebhookSecret_RequiresID(t *testing.T) {
 		t.Fatalf("expected error, got %v: %s", resp.Type, string(resp.Payload))
 	}
 	var ep ws.ErrorPayload
-	_ = json.Unmarshal(resp.Payload, &ep)
+	if err := json.Unmarshal(resp.Payload, &ep); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if ep.Code != ws.ErrorCodeBadRequest {
 		t.Errorf("expected BAD_REQUEST, got %q", ep.Code)
 	}
