@@ -1,6 +1,45 @@
 package utility
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
+
+func TestResolveProbeCommand_AllowsNativeACPBinaries(t *testing.T) {
+	t.Parallel()
+
+	allowed := []string{
+		"auggie",
+		"cursor-agent",
+		"kimi",
+		"kiro-cli-chat",
+		"mock-agent",
+		"npx",
+		"omp",
+		"opencode",
+		"qodercli",
+		"traecli",
+	}
+	for _, name := range allowed {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got := resolveProbeCommand(name); got != name {
+				t.Fatalf("resolveProbeCommand(%q) = %q, want %q", name, got, name)
+			}
+			path := filepath.Join("/usr/local/bin", name)
+			if got := resolveProbeCommand(path); got != name {
+				t.Fatalf("resolveProbeCommand(%q) = %q, want %q", path, got, name)
+			}
+		})
+	}
+}
+
+func TestResolveProbeCommand_RejectsUnknown(t *testing.T) {
+	t.Parallel()
+	if got := resolveProbeCommand("claude"); got != "" {
+		t.Fatalf("resolveProbeCommand(claude) = %q, want empty", got)
+	}
+}
 
 func TestSanitizeInferenceChunk_DropsPiVersionBanner(t *testing.T) {
 	t.Parallel()
