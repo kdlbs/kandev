@@ -145,7 +145,7 @@ type Adapter struct {
 
 	// Available auth methods captured from the ACP initialize response.
 	// Re-emitted via EventTypeAuthRequired when session/new fails with the
-	// AuthenticationRequired error code so the frontend can drive a picker
+	// AuthenticationRequired error code so the frontend can surface a picker
 	// without re-running initialize.
 	availableAuthMethods []streams.AuthMethodInfo
 
