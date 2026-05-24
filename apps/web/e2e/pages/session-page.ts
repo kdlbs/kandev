@@ -945,7 +945,7 @@ export class SessionPage {
 
   /** All session reopen items in the + dropdown. */
   sessionReopenItems(): Locator {
-    return this.page.locator("[data-testid^='reopen-session-']");
+    return this.page.locator("[role='menuitem'][data-testid^='reopen-session-']");
   }
 
   /** All session tabs in dockview (panels using the sessionTab tab component). */

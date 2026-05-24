@@ -112,7 +112,7 @@ export function SessionReopenMenuItems({
               data-testid={`reopen-session-seq-${index + 1}`}
               className="shrink-0 text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5"
             >
-              {index + 1}
+              #{index + 1}
             </span>
             {info.agentName && (
               <AgentLogo agentName={info.agentName} size={14} className="shrink-0" />

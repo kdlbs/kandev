@@ -145,7 +145,7 @@ export const SessionTabletLayout = memo(function SessionTabletLayout({
     });
 
   return (
-    <div className="flex-1 min-h-0 px-2 pb-2">
+    <div className="flex-1 min-h-0 px-2 pb-2" data-testid="tablet-task-layout">
       <PreviewController sessionId={sessionForPreview} hasDevScript={hasDevScript} />
       <Group
         orientation="horizontal"

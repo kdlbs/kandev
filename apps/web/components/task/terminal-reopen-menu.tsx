@@ -237,7 +237,7 @@ function TerminalReopenRow({
           data-testid={`reopen-terminal-seq-${shell.seq}`}
           className="shrink-0 text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5"
         >
-          {shell.seq}
+          #{shell.seq}
         </span>
       )}
       <IconTerminal2 className="h-3.5 w-3.5 shrink-0" />
