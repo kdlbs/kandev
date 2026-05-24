@@ -112,7 +112,13 @@ func (r *ChannelRelay) sendWithRetry(
 			select {
 			case <-timer.C:
 			case <-ctx.Done():
-				timer.Stop()
+				// Stop() returns false if the timer already fired between
+				// the select winning and Stop running; drain timer.C in
+				// that case so the buffered value does not strand on the
+				// channel.
+				if !timer.Stop() {
+					<-timer.C
+				}
 				return ctx.Err()
 			}
 		}

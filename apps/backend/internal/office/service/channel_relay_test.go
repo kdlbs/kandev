@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -189,8 +190,15 @@ func TestRelayComment_TelegramPayload(t *testing.T) {
 func TestRelayComment_CancelDuringBackoff(t *testing.T) {
 	svc := newTestService(t)
 
+	// Signal once when the first HTTP attempt lands; the test then cancels
+	// the context so we deterministically land inside the backoff sleep
+	// between attempt 1 and attempt 2 rather than relying on a wall-clock
+	// delay (which can flake under loaded CI).
+	firstAttemptDone := make(chan struct{})
+	var once sync.Once
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
+		once.Do(func() { close(firstAttemptDone) })
 	}))
 	defer ts.Close()
 
@@ -208,11 +216,11 @@ func TestRelayComment_CancelDuringBackoff(t *testing.T) {
 		ReplyChannelID: channel.ID,
 	}
 
-	// The first attempt fires immediately and fails; the second attempt
-	// waits 1s. Cancelling at 100ms should land us inside that backoff
-	// window so sendWithRetry returns ctx.Err() rather than waiting it out.
-	ctx, cancel := context.WithCancel(t.Context())
-	time.AfterFunc(100*time.Millisecond, cancel)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-firstAttemptDone
+		cancel()
+	}()
 
 	start := time.Now()
 	err := relay.RelayComment(ctx, comment)
