@@ -18,6 +18,9 @@ ARG PNPM_VERSION=9.15.9
 
 FROM node:24-bookworm-slim
 
+ARG PNPM_VERSION
+LABEL org.opencontainers.image.pnpm-version="${PNPM_VERSION}"
+
 # Install runtime dependencies. gh is included because the GitHub integration
 # (PR review, webhooks) shells out to it for auth fallback when GITHUB_TOKEN
 # is not set. apprise is installed via pipx for notification fan-out.
