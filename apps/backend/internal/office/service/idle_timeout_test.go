@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -15,7 +16,7 @@ func TestIdleTimeout_TerminalTaskStartsTimer(t *testing.T) {
 		VALUES ('task-done', 'ws-1', 'COMPLETED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
 
 	mgr := service.NewIdleTimeoutManager(svc, 50*time.Millisecond)
-	mgr.OnRunFinished("sess-1", "task-done")
+	mgr.OnRunFinished(t.Context(), "sess-1", "task-done")
 
 	if mgr.PendingCount() != 1 {
 		t.Fatalf("expected 1 pending timer, got %d", mgr.PendingCount())
@@ -36,7 +37,7 @@ func TestIdleTimeout_ViewerConnectedCancelsTimer(t *testing.T) {
 		VALUES ('task-cancelled', 'ws-1', 'CANCELLED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
 
 	mgr := service.NewIdleTimeoutManager(svc, 1*time.Second)
-	mgr.OnRunFinished("sess-2", "task-cancelled")
+	mgr.OnRunFinished(t.Context(), "sess-2", "task-cancelled")
 
 	if mgr.PendingCount() != 1 {
 		t.Fatalf("expected 1 pending timer, got %d", mgr.PendingCount())
@@ -57,7 +58,7 @@ func TestIdleTimeout_NonTerminalTaskNoTimer(t *testing.T) {
 		VALUES ('task-progress', 'ws-1', 'IN_PROGRESS', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
 
 	mgr := service.NewIdleTimeoutManager(svc, 50*time.Millisecond)
-	mgr.OnRunFinished("sess-3", "task-progress")
+	mgr.OnRunFinished(t.Context(), "sess-3", "task-progress")
 
 	if mgr.PendingCount() != 0 {
 		t.Errorf("expected 0 pending timers for non-terminal task, got %d", mgr.PendingCount())
@@ -94,10 +95,34 @@ func TestIdleTimeout_ViewerDisconnectedNonTerminal(t *testing.T) {
 func TestIdleTimeout_EmptySessionOrTaskIgnored(t *testing.T) {
 	mgr := service.NewIdleTimeoutManager(newTestService(t), 50*time.Millisecond)
 
-	mgr.OnRunFinished("", "task-1")
-	mgr.OnRunFinished("sess-1", "")
+	mgr.OnRunFinished(t.Context(), "", "task-1")
+	mgr.OnRunFinished(t.Context(), "sess-1", "")
 
 	if mgr.PendingCount() != 0 {
 		t.Errorf("expected 0 pending timers for empty IDs, got %d", mgr.PendingCount())
+	}
+}
+
+// TestIdleTimeout_CancelledContextDoesNotStartTimer verifies that when the
+// caller's context is already cancelled, the task-state lookup short-circuits
+// and the manager does not schedule an idle timer. Without ctx propagation
+// the lookup would run against context.Background() and could block on a
+// stalled database before falsely tripping (or not tripping) the timer.
+func TestIdleTimeout_CancelledContextDoesNotStartTimer(t *testing.T) {
+	svc := newTestService(t)
+
+	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, state, created_at, updated_at)
+		VALUES ('task-ctx', 'ws-1', 'COMPLETED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+
+	mgr := service.NewIdleTimeoutManager(svc, 50*time.Millisecond)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	mgr.OnRunFinished(ctx, "sess-cancelled", "task-ctx")
+
+	if mgr.PendingCount() != 0 {
+		t.Errorf("expected 0 pending timers when ctx is already cancelled, got %d",
+			mgr.PendingCount())
 	}
 }
