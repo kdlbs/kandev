@@ -1021,7 +1021,7 @@ func TestErrorClassificationFunctions(t *testing.T) {
 			{"unrelated error", errors.New("something else"), false},
 			{"exact match", ErrAgentPromptInProgress, true},
 			{"wrapped error", fmt.Errorf("outer: %w", ErrAgentPromptInProgress), true},
-			{"string contains match", errors.New("prefix: agent is currently processing a prompt, try later"), true},
+			{"untyped string match no longer accepted", errors.New("prefix: agent is currently processing a prompt, try later"), false},
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
@@ -1042,7 +1042,7 @@ func TestErrorClassificationFunctions(t *testing.T) {
 			{"unrelated error", errors.New("something else"), false},
 			{"exact match", ErrSessionResetInProgress, true},
 			{"wrapped error", fmt.Errorf("outer: %w", ErrSessionResetInProgress), true},
-			{"string contains match", errors.New("prefix: session reset in progress, please wait"), true},
+			{"untyped string match no longer accepted", errors.New("prefix: session reset in progress, please wait"), false},
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
@@ -1061,8 +1061,8 @@ func TestErrorClassificationFunctions(t *testing.T) {
 		}{
 			{"nil error", nil, false},
 			{"unrelated error", errors.New("something else"), false},
-			{"lifecycle manager error", fmt.Errorf("session %q already has an agent running (execution: %s)", "s1", "exec-1"), true},
-			{"wrapped error", fmt.Errorf("failed to resume session: %w", fmt.Errorf("session %q already has an agent running (execution: %s)", "s1", "exec-1")), true},
+			{"lifecycle manager error", fmt.Errorf("%w: session %q (execution: %s)", lifecycle.ErrAgentAlreadyRunning, "s1", "exec-1"), true},
+			{"wrapped error", fmt.Errorf("failed to resume session: %w", fmt.Errorf("%w: session %q (execution: %s)", lifecycle.ErrAgentAlreadyRunning, "s1", "exec-1")), true},
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {

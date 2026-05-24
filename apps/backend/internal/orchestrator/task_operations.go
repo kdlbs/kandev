@@ -41,11 +41,11 @@ var ErrAgentPromptInProgress = errors.New("agent is currently processing a promp
 var ErrSessionResetInProgress = errors.New("session reset in progress")
 
 func isAgentPromptInProgressError(err error) bool {
-	return err != nil && (errors.Is(err, ErrAgentPromptInProgress) || strings.Contains(err.Error(), ErrAgentPromptInProgress.Error()))
+	return err != nil && errors.Is(err, ErrAgentPromptInProgress)
 }
 
 func isSessionResetInProgressError(err error) bool {
-	return err != nil && (errors.Is(err, ErrSessionResetInProgress) || strings.Contains(err.Error(), ErrSessionResetInProgress.Error()))
+	return err != nil && errors.Is(err, ErrSessionResetInProgress)
 }
 
 // isTransientPromptError reports whether a prompt error is worth retrying via
@@ -65,7 +65,7 @@ func isTransientPromptError(err error) bool {
 }
 
 func isAgentAlreadyRunningError(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "already has an agent running")
+	return err != nil && errors.Is(err, lifecycle.ErrAgentAlreadyRunning)
 }
 
 func validateSessionWorktrees(session *models.TaskSession) error {

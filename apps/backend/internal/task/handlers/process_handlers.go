@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -390,13 +391,13 @@ func (h *ProcessHandlers) httpListProcesses(c *gin.Context) {
 	if err != nil {
 		var netErr net.Error
 		// Handle expected "no processes" conditions gracefully:
-		// - no execution found: agent hasn't started yet (async launch)
+		// - ErrNoExecutionForSession: agent hasn't started yet (async launch)
 		// - connection refused: agent not running
 		// - deadline exceeded: agent not responding
 		if errors.Is(err, context.DeadlineExceeded) ||
-			errors.As(err, &netErr) ||
-			strings.Contains(err.Error(), "connection refused") ||
-			strings.Contains(err.Error(), "no execution found") {
+			errors.Is(err, syscall.ECONNREFUSED) ||
+			errors.Is(err, lifecycle.ErrNoExecutionForSession) ||
+			errors.As(err, &netErr) {
 			h.logger.Debug("process list unavailable (agent not ready)", zap.String("session_id", sessionID), zap.Error(err))
 			c.JSON(http.StatusOK, []agentctlclient.ProcessInfo{})
 			return

@@ -4,7 +4,6 @@ package scheduler
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -286,7 +286,7 @@ func (s *Scheduler) processTasks(ctx context.Context) {
 				zap.Error(err))
 
 			// Don't re-enqueue if task was deleted from DB
-			if strings.Contains(err.Error(), "not found") {
+			if errors.Is(err, taskrepo.ErrTaskNotFound) {
 				s.logger.Warn("task no longer exists, dropping from queue",
 					zap.String("task_id", task.ID))
 				continue

@@ -50,9 +50,10 @@ func TestCleanupMergedReviewTasks_TaskAlreadyDeleted(t *testing.T) {
 		RepoName:  "widget",
 	})
 
-	// Stub: DeleteTask returns "not found" as the real service does.
+	// Stub: DeleteTask returns the sentinel-wrapped not-found error as the
+	// real adapter (see cmd/kandev/turn_adapters.go's taskDeleterAdapter) does.
 	svc.SetTaskDeleter(&stubTaskDeleter{
-		err: fmt.Errorf("task not found: %s", taskID),
+		err: fmt.Errorf("%w: %s", ErrTaskNotFound, taskID),
 	})
 
 	deleted, err := svc.CleanupMergedReviewTasks(ctx, watch)

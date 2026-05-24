@@ -770,7 +770,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 			if existingExecution.AgentCommand == "" {
 				return existingExecution, nil
 			}
-			return nil, fmt.Errorf("session %q already has an agent running (execution: %s)", req.SessionID, existingExecution.ID)
+			return nil, fmt.Errorf("%w: session %q (execution: %s)", ErrAgentAlreadyRunning, req.SessionID, existingExecution.ID)
 		}
 	}
 
@@ -877,7 +877,7 @@ func (m *Manager) registerAndPublishExecution(
 	if addErr := m.executionStore.Add(execution); addErr != nil {
 		if errors.Is(addErr, ErrExecutionAlreadyExistsForSession) {
 			m.rollbackRacedExecution(ctx, rt, execInstance, execution)
-			return fmt.Errorf("session %q already has an agent running (race resolved during register)", sessionID)
+			return fmt.Errorf("%w: session %q (race resolved during register)", ErrAgentAlreadyRunning, sessionID)
 		}
 		return fmt.Errorf("failed to register execution: %w", addErr)
 	}

@@ -446,7 +446,7 @@ func (m *Manager) restartPassthroughProcess(ctx context.Context, execution *Agen
 func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string) error {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
-		return fmt.Errorf("no execution found for session: %s", sessionID)
+		return fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 	}
 
 	resolved, err := m.resolvePassthroughAgent(ctx, execution)

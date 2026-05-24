@@ -1,8 +1,8 @@
 package skills
 
 import (
+	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -183,7 +183,7 @@ func (h *Handler) getSkillFile(c *gin.Context) {
 	content, err := h.svc.GetSkillFile(c.Request.Context(), c.Param("id"), path)
 	if err != nil {
 		status := http.StatusInternalServerError
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, ErrSkillFileNotFound) || errors.Is(err, ErrSkillNotFound) {
 			status = http.StatusNotFound
 		}
 		c.JSON(status, gin.H{"error": err.Error()})

@@ -2,8 +2,8 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -21,7 +21,7 @@ import (
 // without proper cleanup). Callers must probe IsAgentRunningForSession to
 // distinguish live from stale before deciding to clean up.
 func isAgentAlreadyRunningError(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "already has an agent running")
+	return err != nil && errors.Is(err, lifecycle.ErrAgentAlreadyRunning)
 }
 
 // isTerminalSessionState reports whether a session state implies the agent

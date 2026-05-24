@@ -185,7 +185,7 @@ func (r *Repository) GetTask(ctx context.Context, id string) (*models.Task, erro
 		`SELECT `+taskSelectColumns("t")+` FROM tasks t WHERE t.id = ?`), id)
 	task, err := r.scanSingleTask(row)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("task not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	return task, err
 }
@@ -217,7 +217,7 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("task not found: %s", task.ID)
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
 
 	if err := syncRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
@@ -236,7 +236,7 @@ func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("task not found: %s", id)
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	return nil
 }
@@ -661,7 +661,7 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("task not found: %s", id)
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	return nil
 }
@@ -739,7 +739,7 @@ func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.Ta
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("task not found: %s", id)
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	return nil
 }

@@ -28,30 +28,12 @@ const (
 	AuthMethodPAT  = "pat"
 )
 
-// ErrInvalidPRURL signals that a caller-supplied PR URL could not be parsed.
-// Used by AssociateExistingPRByURL so HTTP callers can translate the failure
-// into a 400 instead of a generic 500.
-var ErrInvalidPRURL = errors.New("invalid PR URL")
-
 // defaultBranchMain and defaultBranchMaster are the conventional default branch
 // names sorted to the top of branch pickers.
 const (
 	defaultBranchMain   = "main"
 	defaultBranchMaster = "master"
 )
-
-// ErrTaskNotFound is the sentinel cleanup paths check for to distinguish
-// "the task is already gone — fine, mop up the dedup row" from a real
-// upstream failure. Adapter implementations of TaskDeleter wrap this when
-// the task domain reports a missing row so the github layer can recognize
-// the case without string-matching the underlying error message.
-var ErrTaskNotFound = errors.New("github: task not found for cleanup")
-
-// ErrSelfApprove is returned by SubmitReview when the authenticated user
-// attempts to APPROVE their own PR. GitHub rejects this with a 422; we
-// catch it server-side so the UI sees a clean, typed error rather than a
-// generic upstream failure when the frontend's visibility guard is bypassed.
-var ErrSelfApprove = errors.New("cannot approve your own pull request")
 
 // reviewEventApprove is the GitHub Reviews API event value for a positive
 // review. Extracted because it appears in the controller validator, the
@@ -65,18 +47,11 @@ type TaskDeleter interface {
 	DeleteTask(ctx context.Context, taskID string) error
 }
 
-// isTaskNotFound recognizes both the typed sentinel and the legacy
-// "not found" substring used by older adapters that haven't migrated yet.
-// String matching stays as a fallback so this PR doesn't regress installs
-// where the adapter wasn't updated in lockstep.
+// isTaskNotFound reports whether an error from TaskDeleter signals the task
+// was already gone. Adapters wrap their underlying not-found error with
+// ErrTaskNotFound — see cmd/kandev/turn_adapters.go's taskDeleterAdapter.
 func isTaskNotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, ErrTaskNotFound) {
-		return true
-	}
-	return strings.Contains(err.Error(), "not found")
+	return err != nil && errors.Is(err, ErrTaskNotFound)
 }
 
 // TaskSessionChecker checks whether the user genuinely engaged with a task
@@ -378,7 +353,7 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 	testClient := s.newPATClient(token)
 	user, err := testClient.GetAuthenticatedUser(ctx)
 	if err != nil {
-		return fmt.Errorf("invalid token: %w", err)
+		return fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 	s.logger.Info("validated GitHub token", zap.String("user", user))
 
@@ -748,7 +723,7 @@ func (s *Service) AssociateExistingPRByURL(ctx context.Context, taskID, reposito
 	}
 	owner, repo, prNumber, err := parsePRURL(prURL)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidPRURL, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidPRURL, err)
 	}
 	pr, err := s.client.GetPR(ctx, owner, repo, prNumber)
 	if err != nil {

@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
+	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
@@ -79,4 +83,23 @@ func (a *taskSessionCheckerAdapter) HasUserAuthoredMessage(ctx context.Context, 
 func metaFlag(meta map[string]interface{}, key string) bool {
 	v, ok := meta[key].(bool)
 	return ok && v
+}
+
+// taskDeleterAdapter satisfies github.TaskDeleter and translates the task
+// repository's ErrTaskNotFound sentinel to github.ErrTaskNotFound so the
+// github cleanup paths can classify the "already gone" case via errors.Is
+// without importing the task repository's package.
+type taskDeleterAdapter struct {
+	svc *taskservice.Service
+}
+
+func (a *taskDeleterAdapter) DeleteTask(ctx context.Context, taskID string) error {
+	err := a.svc.DeleteTask(ctx, taskID)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, taskrepo.ErrTaskNotFound) {
+		return fmt.Errorf("%w: %w", github.ErrTaskNotFound, err)
+	}
+	return err
 }

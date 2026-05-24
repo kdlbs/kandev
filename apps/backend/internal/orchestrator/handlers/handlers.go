@@ -3,11 +3,12 @@ package handlers
 
 import (
 	"context"
-	"strings"
+	"errors"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -114,8 +115,8 @@ func (h *Handlers) wsEnsureSession(ctx context.Context, msg *ws.Message) (*ws.Me
 			zap.Error(err))
 		// Mirror httpEnsureTaskSession's NotFound mapping so the frontend can
 		// distinguish unknown task ids from real server errors. EnsureSession
-		// wraps the repo error as "task not found: %w".
-		if strings.Contains(err.Error(), "task not found") {
+		// wraps the repo's ErrTaskNotFound.
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to ensure session: "+err.Error(), nil)

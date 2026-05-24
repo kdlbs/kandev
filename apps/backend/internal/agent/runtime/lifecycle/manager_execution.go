@@ -231,7 +231,7 @@ func (m *Manager) GetExecutionIDForSession(_ context.Context, sessionID string) 
 	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
 		return execution.ID, nil
 	}
-	return "", fmt.Errorf("no execution found for session %s", sessionID)
+	return "", fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 }
 
 // EnsurePassthroughExecution ensures an execution exists for a passthrough session

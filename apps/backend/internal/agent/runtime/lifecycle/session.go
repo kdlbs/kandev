@@ -481,9 +481,9 @@ func (sm *SessionManager) waitForPromptDone(ctx context.Context, execution *Agen
 				// skip the REVIEW task-state transition — the user is cancelling, not
 				// hitting a real agent failure.
 				if strings.HasPrefix(signal.Error, "cancel escalated") {
-					return nil, fmt.Errorf("agent error: %s: %w", signal.Error, ErrCancelEscalated)
+					return nil, fmt.Errorf("%w: %s: %w", ErrAgentReported, signal.Error, ErrCancelEscalated)
 				}
-				return nil, fmt.Errorf("agent error: %s", signal.Error)
+				return nil, fmt.Errorf("%w: %s", ErrAgentReported, signal.Error)
 			}
 
 			// Peek at buffer for return value

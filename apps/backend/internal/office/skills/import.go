@@ -406,7 +406,7 @@ func readLocalSkillFile(basePath, relPath string) (string, error) {
 	data, err := os.ReadFile(safePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("file not found: %s", relPath)
+			return "", fmt.Errorf("%w: %s", ErrSkillFileNotFound, relPath)
 		}
 		return "", err
 	}
@@ -424,7 +424,7 @@ func readUserHomeSkillInventoryFile(inventory, relPath string) (string, error) {
 			return file.Content, nil
 		}
 	}
-	return "", fmt.Errorf("file not found: %s", relPath)
+	return "", fmt.Errorf("%w: %s", ErrSkillFileNotFound, relPath)
 }
 
 // basePath returns the kandev base path (for ownership checks in local import).

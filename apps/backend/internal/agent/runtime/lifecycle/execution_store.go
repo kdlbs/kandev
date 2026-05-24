@@ -21,6 +21,21 @@ var ErrExecutionNotFound = errors.New("execution not found")
 // adding a replacement.
 var ErrExecutionAlreadyExistsForSession = errors.New("execution already exists for session")
 
+// ErrAgentAlreadyRunning is returned by LaunchAgent when an agent execution is
+// already tracked for the requested session. The error fires both when the
+// execution is live (a concurrent caller raced us) and when it is stale (a
+// prior registration whose process never started or exited without cleanup);
+// callers must probe IsAgentRunningForSession to decide. Wrapped at producer
+// sites with %w so callers can use errors.Is rather than string-match the
+// surrounding context.
+var ErrAgentAlreadyRunning = errors.New("session already has an agent running")
+
+// ErrAgentReported is returned when the agent subprocess publishes an error
+// event during a prompt turn. Distinguished from infrastructure errors
+// (network, timeout) so callers can suppress duplicate error-message creation
+// — the agent failure path already records the error in the session.
+var ErrAgentReported = errors.New("agent error")
+
 // ExecutionStore provides thread-safe storage and retrieval of agent executions.
 // It maintains three indexes for efficient lookup by execution ID, session ID, and container ID.
 type ExecutionStore struct {

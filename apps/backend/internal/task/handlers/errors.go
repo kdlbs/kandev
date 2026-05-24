@@ -1,11 +1,14 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/task/service"
 	"go.uber.org/zap"
 )
 
@@ -40,6 +43,14 @@ func isNotFound(err error) bool {
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, taskrepo.ErrTaskNotFound) ||
+		errors.Is(err, service.ErrDocumentNotFound) ||
+		errors.Is(err, service.ErrTaskPlanNotFound) ||
+		errors.Is(err, service.ErrRevisionNotFound) {
+		return true
+	}
+	// Legacy fallback for repository methods (sessions, environments, etc.)
+	// that have not yet adopted a typed sentinel.
 	return strings.Contains(strings.ToLower(err.Error()), "not found")
 }
 

@@ -24,7 +24,7 @@ func (m *Manager) StartProcess(ctx context.Context, req StartProcessRequest) (*a
 	}
 	execution, ok := m.executionStore.GetBySessionID(req.SessionID)
 	if !ok {
-		return nil, fmt.Errorf("no execution found for session %s", req.SessionID)
+		return nil, fmt.Errorf("%w: %s", ErrNoExecutionForSession, req.SessionID)
 	}
 	client := execution.GetAgentCtlClient()
 	if client == nil {
@@ -48,7 +48,7 @@ func (m *Manager) WaitForAgentctlReadyForSession(ctx context.Context, sessionID 
 	}
 	execution, ok := m.executionStore.GetBySessionID(sessionID)
 	if !ok {
-		return fmt.Errorf("no execution found for session %s", sessionID)
+		return fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 	}
 	client := execution.GetAgentCtlClient()
 	if client == nil {
@@ -83,7 +83,7 @@ func (m *Manager) StopProcessForSession(ctx context.Context, sessionID, processI
 	}
 	execution, ok := m.executionStore.GetBySessionID(sessionID)
 	if !ok {
-		return fmt.Errorf("no execution found for session %s", sessionID)
+		return fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 	}
 	client := execution.GetAgentCtlClient()
 	if client == nil {
@@ -98,7 +98,7 @@ func (m *Manager) ListProcesses(ctx context.Context, sessionID string) ([]agentc
 	}
 	execution, ok := m.executionStore.GetBySessionID(sessionID)
 	if !ok {
-		return nil, fmt.Errorf("no execution found for session %s", sessionID)
+		return nil, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 	}
 	client := execution.GetAgentCtlClient()
 	if client == nil {

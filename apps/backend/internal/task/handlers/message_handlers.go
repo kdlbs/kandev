@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -404,9 +405,18 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 }
 
 // isAgentReportedError returns true when the error originated from the agent's
-// own error event (surfaced via waitForPromptDone as "agent error: ...").
+// own error event (surfaced via waitForPromptDone with the ErrAgentReported
+// sentinel wrapped in).
 func isAgentReportedError(err error) bool {
-	return strings.Contains(err.Error(), "agent error: ")
+	return errors.Is(err, lifecycle.ErrAgentReported)
+}
+
+// isTimeoutError reports whether err is a net.Error with Timeout() == true.
+// Used to recognize HTTP / transport-level timeouts whose context.DeadlineExceeded
+// has already been absorbed by the http client.
+func isTimeoutError(err error) bool {
+	var netErr interface{ Timeout() bool }
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 // handlePromptWithResume attempts to resume a session and retry a prompt when the
@@ -450,7 +460,7 @@ func (h *MessageHandlers) createPromptErrorMessage(ctx context.Context, taskID, 
 		zap.Error(promptErr))
 
 	errorMsg := "Failed to send message to agent"
-	if strings.Contains(promptErr.Error(), "context deadline exceeded") || strings.Contains(promptErr.Error(), "timeout") {
+	if errors.Is(promptErr, context.DeadlineExceeded) || isTimeoutError(promptErr) {
 		errorMsg = "Request timed out. The agent may be processing a complex task. Please try again."
 	} else if errors.Is(promptErr, executor.ErrExecutionNotFound) {
 		errorMsg = "Agent is not running. Please restart the session."

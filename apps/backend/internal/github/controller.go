@@ -95,8 +95,7 @@ func (c *Controller) httpConfigureToken(ctx *gin.Context) {
 	}
 
 	if err := c.service.ConfigureToken(ctx.Request.Context(), req.Token); err != nil {
-		// Check if it's a validation error (invalid token)
-		if strings.Contains(err.Error(), "invalid token") {
+		if errors.Is(err, ErrInvalidToken) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}

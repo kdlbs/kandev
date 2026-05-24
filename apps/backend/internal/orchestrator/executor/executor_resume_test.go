@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -83,7 +84,7 @@ func TestResumeSession_LiveAgentReturnsAlreadyRunning(t *testing.T) {
 
 	agentMgr := &mockAgentManager{
 		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
-			return nil, fmt.Errorf("session %q already has an agent running (execution: %s)", req.SessionID, "exec-live")
+			return nil, fmt.Errorf("%w: session %q (execution: %s)", lifecycle.ErrAgentAlreadyRunning, req.SessionID, "exec-live")
 		},
 		isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool {
 			return true
@@ -123,7 +124,7 @@ func TestResumeSession_StaleExecutionCleansUpAndRetries(t *testing.T) {
 		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			launchCalls++
 			if launchCalls == 1 {
-				return nil, fmt.Errorf("session %q already has an agent running (execution: %s)", req.SessionID, "exec-stale")
+				return nil, fmt.Errorf("%w: session %q (execution: %s)", lifecycle.ErrAgentAlreadyRunning, req.SessionID, "exec-stale")
 			}
 			return &LaunchAgentResponse{
 				AgentExecutionID: "exec-new",
@@ -329,7 +330,7 @@ func TestResumeSession_TerminalStateSkipsLivenessProbeOnFallback(t *testing.T) {
 		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			launchCalls++
 			if launchCalls == 1 {
-				return nil, fmt.Errorf("session %q already has an agent running (execution: %s)", req.SessionID, "exec-stale")
+				return nil, fmt.Errorf("%w: session %q (execution: %s)", lifecycle.ErrAgentAlreadyRunning, req.SessionID, "exec-stale")
 			}
 			return &LaunchAgentResponse{
 				AgentExecutionID: "exec-new",

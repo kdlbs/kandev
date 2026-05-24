@@ -420,7 +420,7 @@ func startAgentInfrastructure(
 	// Wire GitHub service into orchestrator for PR auto-detection on push
 	if services.GitHub != nil {
 		orchestratorSvc.SetGitHubService(services.GitHub)
-		services.GitHub.SetTaskDeleter(services.Task)
+		services.GitHub.SetTaskDeleter(&taskDeleterAdapter{svc: services.Task})
 		services.GitHub.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
 		log.Info("GitHub service configured for orchestrator (PR auto-detection enabled)")
 

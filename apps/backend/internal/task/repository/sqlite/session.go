@@ -265,6 +265,12 @@ func (r *Repository) CreateTaskSession(ctx context.Context, session *models.Task
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID)
 
+	if err != nil && strings.Contains(err.Error(), "uniq_office_task_session") {
+		// Two callers raced past their SELECT-then-INSERT for the same
+		// (task_id, agent_profile_id) — surface a typed sentinel so callers
+		// can classify with errors.Is rather than driver-message matching.
+		return fmt.Errorf("%w: %w", ErrOfficeSessionRaceConflict, err)
+	}
 	return err
 }
 
