@@ -91,6 +91,7 @@ function makeDeps(overrides: Partial<SubmitHandlersDeps>): SubmitHandlersDeps {
     useGitHubUrl: false,
     githubUrl: "",
     githubPrHeadBranch: null,
+    githubPrBaseBranch: null,
     githubBranch: "",
     agentProfileId: "agent-1",
     executorId: "exec-1",

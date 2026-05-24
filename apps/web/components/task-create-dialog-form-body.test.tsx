@@ -111,6 +111,8 @@ function makeFs(): DialogFormState {
     setGitHubUrlError: () => {},
     githubPrHeadBranch: null,
     setGitHubPrHeadBranch: () => {},
+    githubPrBaseBranch: null,
+    setGitHubPrBaseBranch: () => {},
     workflowAgentProfileId: "",
     setWorkflowAgentProfileId: () => {},
     clearDraft: () => {},

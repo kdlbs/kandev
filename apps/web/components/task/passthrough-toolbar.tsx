@@ -5,6 +5,7 @@ import {
   IconArrowRight,
   IconMessageCircle,
   IconMessageDots,
+  IconSend,
   IconTrash,
   IconX,
 } from "@tabler/icons-react";
@@ -78,7 +79,9 @@ export function PassthroughToolbar({
         <PassthroughTerminal sessionId={sessionId} mode="agent" />
       </div>
 
-      {commentsOpen && pendingCount > 0 && <CommentsPanel comments={pendingComments} />}
+      {commentsOpen && pendingCount > 0 && (
+        <CommentsPanel comments={pendingComments} onSend={() => handleSendMessage("")} />
+      )}
 
       {composerOpen && (
         <PassthroughComposer
@@ -174,10 +177,6 @@ function useSendPassthroughMessage({
   );
 }
 
-function chatToggleTooltipLabel(composerOpen: boolean): string {
-  return composerOpen ? "Close compose box (Esc)" : "Open compose box to type a follow-up";
-}
-
 function ChatToggleButton({
   composerOpen,
   onToggle,
@@ -205,25 +204,35 @@ function ChatToggleButton({
           Chat
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{chatToggleTooltipLabel(composerOpen)}</TooltipContent>
+      <TooltipContent className="max-w-xs">
+        {composerOpen ? (
+          <p>
+            Close the compose box (or press <kbd>Esc</kbd> inside it). The CLI agent terminal keeps
+            focus.
+          </p>
+        ) : (
+          <div className="space-y-1">
+            <p>
+              Open a kandev-controlled compose box above the terminal to type a follow-up message.
+              Press <kbd>Enter</kbd> to send, <kbd>Shift+Enter</kbd> for a newline.
+            </p>
+            <p className="text-muted-foreground">
+              The text is delivered straight to the CLI agent&apos;s stdin — pending review comments
+              (if any) are prepended automatically.
+            </p>
+          </div>
+        )}
+      </TooltipContent>
     </Tooltip>
   );
 }
 
-function commentsToggleTooltipLabel(commentsOpen: boolean, count: number): string {
-  if (count === 0) return "No pending review comments";
-  if (commentsOpen) return "Hide pending comments";
-  const plural = count === 1 ? "" : "s";
-  return `${count} pending review comment${plural} — open to review or edit`;
-}
-
-function commentsToggleVariant(
-  commentsOpen: boolean,
-  count: number,
-): "default" | "outline" | "ghost" {
-  if (commentsOpen) return "default";
-  if (count > 0) return "outline";
-  return "ghost";
+function commentsToggleClassName(count: number, commentsOpen: boolean): string {
+  // Vivid amber when there are pending comments so the user sees "something
+  // to do" — washes back to plain outline once they're cleared / sent.
+  if (count === 0) return "h-6 gap-1 px-2.5 text-xs cursor-pointer";
+  if (commentsOpen) return "h-6 gap-1 px-2.5 text-xs cursor-pointer";
+  return "h-6 gap-1 px-2.5 text-xs cursor-pointer border-amber-500/60 bg-amber-500/15 text-amber-700 hover:bg-amber-500/25 hover:text-amber-700 dark:text-amber-300 dark:hover:text-amber-200";
 }
 
 function CommentsToggleButton({
@@ -241,9 +250,9 @@ function CommentsToggleButton({
       <TooltipTrigger asChild>
         <Button
           type="button"
-          variant={commentsToggleVariant(commentsOpen, pendingCommentsCount)}
+          variant={commentsOpen ? "default" : "outline"}
           size="sm"
-          className="h-6 gap-1 px-2.5 text-xs cursor-pointer"
+          className={commentsToggleClassName(pendingCommentsCount, commentsOpen)}
           onClick={onToggle}
           disabled={disabled}
           data-testid="passthrough-toggle-comments"
@@ -258,17 +267,51 @@ function CommentsToggleButton({
           {pendingCommentsCount > 0 && (
             <span
               data-testid="passthrough-pending-count"
-              className="ml-1 rounded-full bg-amber-500/30 px-1.5 py-0 text-[10px] font-semibold"
+              className="ml-1 rounded-full bg-amber-500/40 px-1.5 py-0 text-[10px] font-semibold text-amber-900 dark:text-amber-100"
             >
               {pendingCommentsCount}
             </span>
           )}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>
-        {commentsToggleTooltipLabel(commentsOpen, pendingCommentsCount)}
+      <TooltipContent className="max-w-xs">
+        <CommentsTooltipBody commentsOpen={commentsOpen} count={pendingCommentsCount} />
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+function CommentsTooltipBody({ commentsOpen, count }: { commentsOpen: boolean; count: number }) {
+  if (count === 0) {
+    return (
+      <div className="space-y-1">
+        <p>No pending review comments.</p>
+        <p className="text-muted-foreground">
+          Add a comment from the diff or file view, then come back here to review and send it.
+        </p>
+      </div>
+    );
+  }
+  if (commentsOpen) {
+    return (
+      <p>
+        Hide the comment list. The comments stay queued and will still be sent next time you submit
+        (here or from the chat box).
+      </p>
+    );
+  }
+  const plural = count === 1 ? "" : "s";
+  return (
+    <div className="space-y-1">
+      <p>
+        {count} pending review comment{plural}. Click to expand the list — you can edit each
+        comment, click the file path to jump to the source, or remove a comment with the trash icon.
+      </p>
+      <p className="text-muted-foreground">
+        Hit <strong>Send to agent</strong> inside the panel to deliver them to the CLI agent right
+        away, or just open the chat box and type a follow-up — the comments will be prepended.
+      </p>
+    </div>
   );
 }
 
@@ -286,15 +329,66 @@ function PendingCommentsHint({ count }: { count: number }) {
   );
 }
 
-function CommentsPanel({ comments }: { comments: DiffComment[] }) {
+function CommentsPanel({
+  comments,
+  onSend,
+}: {
+  comments: DiffComment[];
+  onSend: () => Promise<void> | void;
+}) {
+  const [isSending, setIsSending] = useState(false);
+  const handleSend = useCallback(async () => {
+    if (isSending) return;
+    setIsSending(true);
+    try {
+      await onSend();
+    } catch {
+      // onSend already toasted the error; keep panel open so the user can retry.
+    } finally {
+      setIsSending(false);
+    }
+  }, [isSending, onSend]);
+
+  const count = comments.length;
+  const plural = count === 1 ? "" : "s";
   return (
     <div
       data-testid="passthrough-comments-panel"
-      className="max-h-64 overflow-y-auto border-t bg-amber-500/5 px-2 py-2 space-y-2"
+      className="flex max-h-72 flex-col border-t bg-amber-500/5"
     >
-      {comments.map((comment) => (
-        <CommentCard key={comment.id} comment={comment} />
-      ))}
+      <div className="flex items-center justify-between gap-2 border-b border-amber-500/20 bg-amber-500/10 px-2 py-1 text-xs">
+        <span className="font-medium text-amber-700 dark:text-amber-300">
+          {count} review comment{plural} ready to send
+        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              size="sm"
+              variant="default"
+              onClick={handleSend}
+              disabled={isSending}
+              className="h-6 gap-1 px-2.5 text-xs cursor-pointer"
+              data-testid="passthrough-send-comments"
+            >
+              <IconSend className="h-3.5 w-3.5" />
+              Send to agent
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs">
+            <p>
+              Deliver these comments to the CLI agent&apos;s stdin as a single message — no need to
+              open the chat box. The agent receives the same markdown that prepending to a typed
+              message would produce.
+            </p>
+          </TooltipContent>
+        </Tooltip>
+      </div>
+      <div className="flex-1 space-y-2 overflow-y-auto px-2 py-2">
+        {comments.map((comment) => (
+          <CommentCard key={comment.id} comment={comment} />
+        ))}
+      </div>
     </div>
   );
 }

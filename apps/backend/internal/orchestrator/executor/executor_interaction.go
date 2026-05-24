@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -200,7 +201,8 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID, sessionID, pro
 	if err != nil {
 		return nil, fmt.Errorf("resolve passthrough config: %w", err)
 	}
-	if err := e.agentManager.WritePassthroughStdin(ctx, sessionID, prompt+pt.SubmitSequence); err != nil {
+	payload := buildPassthroughPayload(prompt, pt.SubmitSequence)
+	if err := e.agentManager.WritePassthroughStdin(ctx, sessionID, payload); err != nil {
 		return nil, fmt.Errorf("failed to write to passthrough stdin: %w", err)
 	}
 	if err := e.agentManager.MarkPassthroughRunning(sessionID); err != nil {
@@ -210,6 +212,22 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID, sessionID, pro
 			zap.Error(err))
 	}
 	return &PromptResult{StopReason: stopReasonPassthrough}, nil
+}
+
+// buildPassthroughPayload assembles the bytes to write to a passthrough PTY session.
+// Single-line prompts are written as-is with the submit sequence appended.
+// Multi-line prompts are wrapped in bracketed-paste markers (ESC[200~ … ESC[201~) so
+// that TUI agents (Claude Code, Codex, OpenCode, Cursor) interpret embedded newlines as
+// literal line-breaks inside the input buffer rather than as premature submit key-presses.
+// The submit sequence is appended outside the paste bracket so the agent sees "end of paste,
+// then submit" as two distinct events.
+func buildPassthroughPayload(prompt, submitSequence string) string {
+	if !strings.Contains(prompt, "\n") {
+		return prompt + submitSequence
+	}
+	const bracketedPasteStart = "\x1b[200~"
+	const bracketedPasteEnd = "\x1b[201~"
+	return bracketedPasteStart + prompt + bracketedPasteEnd + submitSequence
 }
 
 // SwitchModel switches the model for a running session. It first attempts an in-place switch
