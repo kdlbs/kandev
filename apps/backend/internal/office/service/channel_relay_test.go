@@ -178,6 +178,14 @@ func TestRelayComment_TelegramPayload(t *testing.T) {
 // caller's context while sendWithRetry is sleeping between attempts
 // causes the function to return promptly with ctx.Err(), without
 // waiting for the backoff timer to fire.
+//
+// Scope note: this is a regression test for the cancellation contract,
+// not a direct probe of the timer.Stop() change in the same commit.
+// The pre-fix time.After path also returned promptly on cancel; what
+// it leaked was a runtime timer-heap slot, which is not observable
+// from user code without synctest or runtime instrumentation. The
+// timer.Stop() change rests on the canonical Go pattern, verified by
+// inspection.
 func TestRelayComment_CancelDuringBackoff(t *testing.T) {
 	svc := newTestService(t)
 
