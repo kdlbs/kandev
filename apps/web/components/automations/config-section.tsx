@@ -260,7 +260,10 @@ function WorkflowFields({
 }) {
   // The step list is empty until a workflow is picked. Showing an empty
   // dropdown next to the workflow select invites users to click it first
-  // and bounce off — render the step field only once the workflow is set.
+  // and bounce off — keep the field in the DOM (so its testid is stable
+  // for tooling) but disable it and surface a hint until a workflow is
+  // chosen.
+  const hasWorkflow = !!workflowId;
   return (
     <>
       <SelectField
@@ -271,18 +274,16 @@ function WorkflowFields({
         placeholder="Select workflow"
         items={workflows.map((w) => ({ id: w.id, label: w.name }))}
       />
-      {workflowId ? (
-        <SelectField
-          testId="workflow-step-selector"
-          label="Workflow Step"
-          value={workflowStepId}
-          onChange={onStepChange}
-          placeholder="Select step"
-          items={steps.map((s) => ({ id: s.id, label: s.name }))}
-        />
-      ) : (
-        <div />
-      )}
+      <SelectField
+        testId="workflow-step-selector"
+        label="Workflow Step"
+        value={workflowStepId}
+        onChange={onStepChange}
+        placeholder={hasWorkflow ? "Select step" : "Pick a workflow first"}
+        items={steps.map((s) => ({ id: s.id, label: s.name }))}
+        disabled={!hasWorkflow}
+        helpText={hasWorkflow ? undefined : "Pick a workflow above to load its steps."}
+      />
     </>
   );
 }
