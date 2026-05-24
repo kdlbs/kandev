@@ -199,10 +199,6 @@ export function ProfileEnvVarsEditor({ envVars, secrets, onChange }: ProfileEnvV
     setRows(envVarsToRows(incoming));
   }
 
-  const handleAdd = useCallback(() => {
-    setRows((prev) => [...prev, { key: "", mode: "value", value: "", secretId: "" }]);
-  }, []);
-
   const commit = useCallback(
     (next: EnvVarRow[]) => {
       setRows(next);
@@ -212,6 +208,13 @@ export function ProfileEnvVarsEditor({ envVars, secrets, onChange }: ProfileEnvV
       onChange(cleaned);
     },
     [synced, onChange],
+  );
+
+  const handleAdd = useCallback(
+    (row: EnvVarRow) => {
+      commit([...rows, row]);
+    },
+    [rows, commit],
   );
 
   const handleUpdate = useCallback(
@@ -487,6 +490,7 @@ function ProfileEditor({
   const { toast } = useToast();
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const syncAgentsToStore = useSyncAgentsToStore();
+  const { items: secrets } = useSecrets();
   const { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty } =
     useProfileEditorState(profile);
   const updateDraft = useCallback(
@@ -553,6 +557,8 @@ function ProfileEditor({
         }}
         cliPassthrough={draft.cliPassthrough}
         cliFlags={draft.cliFlags ?? []}
+        envVars={draft.envVars}
+        secrets={secrets}
       />
 
       <ProfileMcpConfigCard

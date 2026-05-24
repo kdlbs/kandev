@@ -32,11 +32,11 @@ describe("ProfileEnvVarsEditor", () => {
     expect(screen.getByTestId("change-count").textContent).toBe("0");
   });
 
-  it("emits a row edit once without looping through parent state", async () => {
+  it("emits exactly one change when adding a row via the add form", async () => {
     render(<EnvVarsHarness />);
 
-    fireEvent.click(screen.getByRole("button", { name: /add/i }));
-    fireEvent.change(screen.getByPlaceholderText("KEY"), { target: { value: "FOO" } });
+    fireEvent.change(screen.getByTestId("env-var-new-key-input"), { target: { value: "FOO" } });
+    fireEvent.click(screen.getByTestId("env-var-add-button"));
 
     await waitFor(() => expect(screen.getByTestId("change-count").textContent).toBe("1"));
   });

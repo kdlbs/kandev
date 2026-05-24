@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { Skeleton } from "@kandev/ui/skeleton";
 import { previewAgentCommandAction, type CommandPreviewResponse } from "@/app/actions/agents";
-import type { CLIFlag } from "@/lib/types/http";
+import type { CLIFlag, ProfileEnvVar } from "@/lib/types/http";
 
 type CommandPreviewCardProps = {
   agentName: string;
@@ -14,7 +14,36 @@ type CommandPreviewCardProps = {
   permissionSettings: Record<string, boolean>;
   cliPassthrough: boolean;
   cliFlags: CLIFlag[];
+  envVars?: ProfileEnvVar[];
+  secrets?: { id: string; name: string }[];
 };
+
+/**
+ * POSIX-style single-quote escaping: wrap in single quotes and escape
+ * embedded single quotes via `'\''`. Used so the previewed env-var prefix
+ * is copy-pasteable into a shell.
+ */
+function shellQuote(value: string): string {
+  if (value === "") return "''";
+  if (/^[A-Za-z0-9_\-./:=@]+$/.test(value)) return value;
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function buildEnvPrefix(
+  envVars: ProfileEnvVar[] | undefined,
+  secrets: { id: string; name: string }[] | undefined,
+): string {
+  if (!envVars || envVars.length === 0) return "";
+  const secretNameById = new Map((secrets ?? []).map((s) => [s.id, s.name]));
+  const parts = envVars.map((ev) => {
+    if (ev.secret_id) {
+      const name = secretNameById.get(ev.secret_id) ?? "secret";
+      return `${ev.key}=$${name}`;
+    }
+    return `${ev.key}=${shellQuote(ev.value ?? "")}`;
+  });
+  return `${parts.join(" ")} `;
+}
 
 function CommandPreviewLoading() {
   return (
@@ -44,21 +73,23 @@ function CommandPreviewEmpty() {
 type CommandPreviewContentProps = {
   preview: CommandPreviewResponse;
   cliPassthrough: boolean;
+  envPrefix: string;
 };
 
-function CommandPreviewContent({ preview, cliPassthrough }: CommandPreviewContentProps) {
+function CommandPreviewContent({ preview, cliPassthrough, envPrefix }: CommandPreviewContentProps) {
   const [copied, setCopied] = useState(false);
+  const displayCommand = `${envPrefix}${preview.command_string ?? ""}`;
 
   const handleCopy = async () => {
-    if (!preview.command_string) return;
+    if (!displayCommand) return;
 
     try {
-      await navigator.clipboard.writeText(preview.command_string);
+      await navigator.clipboard.writeText(displayCommand);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
       const textArea = document.createElement("textarea");
-      textArea.value = preview.command_string;
+      textArea.value = displayCommand;
       document.body.appendChild(textArea);
       textArea.select();
       document.execCommand("copy");
@@ -72,7 +103,7 @@ function CommandPreviewContent({ preview, cliPassthrough }: CommandPreviewConten
     <>
       <div className="relative">
         <pre className="overflow-x-auto rounded-md bg-muted p-4 pr-12 font-mono text-xs">
-          <code className="whitespace-pre-wrap break-all">{preview.command_string}</code>
+          <code className="whitespace-pre-wrap break-all">{displayCommand}</code>
         </pre>
         <Button
           variant="ghost"
@@ -105,7 +136,10 @@ export function CommandPreviewCard({
   permissionSettings,
   cliPassthrough,
   cliFlags,
+  envVars,
+  secrets,
 }: CommandPreviewCardProps) {
+  const envPrefix = useMemo(() => buildEnvPrefix(envVars, secrets), [envVars, secrets]);
   const [preview, setPreview] = useState<CommandPreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -157,7 +191,11 @@ export function CommandPreviewCard({
         {loading && <CommandPreviewLoading />}
         {error && <CommandPreviewError error={error} />}
         {!loading && !error && preview && (
-          <CommandPreviewContent preview={preview} cliPassthrough={cliPassthrough} />
+          <CommandPreviewContent
+            preview={preview}
+            cliPassthrough={cliPassthrough}
+            envPrefix={envPrefix}
+          />
         )}
         {!loading && !error && !preview && <CommandPreviewEmpty />}
       </CardContent>
