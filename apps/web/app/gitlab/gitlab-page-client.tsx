@@ -18,6 +18,7 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Spinner } from "@kandev/ui/spinner";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@kandev/ui/tabs";
+import { PageTopbar } from "@/components/page-topbar";
 import { fetchGitLabStatus } from "@/lib/api/domains/gitlab-api";
 import { useGitLabUserIssues, useGitLabUserMRs } from "@/hooks/domains/gitlab/use-user-search";
 import type { GitLabStatus, Issue, MR } from "@/lib/types/gitlab";
@@ -242,56 +243,40 @@ export function GitLabPageClient({ workspaceId: _workspaceId }: { workspaceId?: 
   const connected = status?.authenticated || status?.token_configured;
 
   return (
-    <div className="space-y-4 p-4 md:p-6">
-      <PageHeader status={status} statusLoading={statusLoading} onRefresh={reloadStatus} />
-      {!statusLoading && !connected ? (
-        <NotConnectedNotice />
-      ) : (
-        <BrowseTabs
-          search={search}
-          setSearch={setSearch}
-          mrFilter={mrFilter}
-          setMrFilter={setMrFilter}
-          issueFilter={issueFilter}
-          setIssueFilter={setIssueFilter}
-          customQuery={customQuery}
-        />
-      )}
-    </div>
-  );
-}
-
-function PageHeader({
-  status,
-  statusLoading,
-  onRefresh,
-}: {
-  status: GitLabStatus | null;
-  statusLoading: boolean;
-  onRefresh: () => void;
-}) {
-  return (
-    <header className="flex items-center justify-between gap-3">
-      <div className="flex items-center gap-3">
-        <IconBrandGitlab className="h-5 w-5 text-orange-500" />
-        <div>
-          <h2 className="text-xl font-bold">GitLab</h2>
-          <p className="text-xs text-muted-foreground">
-            {status?.host ?? "https://gitlab.com"} · merge requests and issues
-          </p>
-        </div>
+    <div className="flex flex-col h-full">
+      <PageTopbar
+        title="GitLab"
+        subtitle={`${status?.host ?? "https://gitlab.com"} · merge requests and issues`}
+        icon={<IconBrandGitlab className="h-4 w-4" />}
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={reloadStatus}
+            disabled={statusLoading}
+            className="gap-1 cursor-pointer"
+          >
+            <IconRefresh className="h-3 w-3" />
+            Refresh
+          </Button>
+        }
+      />
+      <div className="space-y-4 p-4 md:p-6">
+        {!statusLoading && !connected ? (
+          <NotConnectedNotice />
+        ) : (
+          <BrowseTabs
+            search={search}
+            setSearch={setSearch}
+            mrFilter={mrFilter}
+            setMrFilter={setMrFilter}
+            issueFilter={issueFilter}
+            setIssueFilter={setIssueFilter}
+            customQuery={customQuery}
+          />
+        )}
       </div>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={onRefresh}
-        disabled={statusLoading}
-        className="gap-1 cursor-pointer"
-      >
-        <IconRefresh className="h-3 w-3" />
-        Refresh
-      </Button>
-    </header>
+    </div>
   );
 }
 
