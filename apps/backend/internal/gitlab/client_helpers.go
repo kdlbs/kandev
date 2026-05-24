@@ -404,10 +404,16 @@ func buildIssueSearchQuery(filter, customQuery string) string {
 	return values.Encode()
 }
 
+// filterTokenReviewRequested is the /gitlab page tab value that maps to
+// GitLab's reviewer_username param. Defined as a constant because it appears
+// in multiple spots across the package (translator, MR controller, issues
+// controller) and goconst enforces consistency for 3+ occurrences.
+const filterTokenReviewRequested = "review_requested"
+
 // userSearchScopeTokens is the set of frontend filter tokens that map
 // directly to GitLab's `scope` query param value on /merge_requests and
-// /issues. "review_requested" is intentionally absent — GitLab has no
-// scope=review_requested; that case routes through reviewer_username=<me>
+// /issues. filterTokenReviewRequested is intentionally absent — GitLab has
+// no scope=review_requested; that case routes through reviewer_username=<me>
 // instead and is handled in translateUserSearchFilter.
 var userSearchScopeTokens = map[string]bool{
 	"assigned_to_me": true,
@@ -432,7 +438,7 @@ func translateUserSearchFilter(token, username string) string {
 	if userSearchScopeTokens[token] {
 		return "scope=" + token
 	}
-	if token == "review_requested" {
+	if token == filterTokenReviewRequested {
 		if username == "" {
 			return ""
 		}

@@ -253,13 +253,19 @@ func (c *Controller) httpSearchUserMRs(ctx *gin.Context) {
 
 // httpSearchUserIssues surfaces the configured user's issue queue. filter
 // supports "assigned_to_me" and "created_by_me" (the /gitlab page's issue
-// tabs); GitLab has no review-requested concept for issues so that token
-// is intentionally not recognized here.
+// tabs). "review_requested" is explicitly rejected with 400 — GitLab has no
+// reviewer-assigned concept for issues, and silently serving the global
+// unscoped listing would re-introduce the bug this translator layer was
+// added to prevent.
 func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 	page, perPage := paginationFromQuery(ctx)
 	filter := ctx.Query("filter")
 	customQuery := ctx.Query("custom_query")
 	if customQuery == "" {
+		if filter == filterTokenReviewRequested {
+			ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "review_requested is not supported for issues"})
+			return
+		}
 		if translated := translateUserSearchFilter(filter, ""); translated != "" {
 			filter = translated
 		}

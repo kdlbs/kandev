@@ -227,9 +227,25 @@ func TestHttpSearchUserMRs_ReviewRequestedWithoutUsername_Returns500(t *testing.
 	}
 }
 
+// review_requested must be rejected with 400 on the issues endpoint — GitLab
+// has no reviewer-assigned concept for issues. Accepting it and silently
+// falling through to an unscoped listing would re-introduce the same bug
+// this PR fixes for MRs.
+func TestHttpSearchUserIssues_ReviewRequestedReturns400(t *testing.T) {
+	router, rec, stop := newControllerFixture(t, "alice")
+	defer stop()
+
+	resp := hit(router, "/api/v1/gitlab/user/issues?filter=review_requested")
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body: %s)", resp.Code, resp.Body.String())
+	}
+	if req := rec.findByPath("/api/v4/issues"); req != nil {
+		t.Errorf("/api/v4/issues was called with query %v — controller should short-circuit", req.Query)
+	}
+}
+
 // Issues counterpart — same regression guarantee plus confirmation that
-// review_requested is intentionally not recognized for issues (no
-// equivalent GitLab API concept).
+// review_requested is explicitly rejected (no equivalent GitLab API concept).
 func TestHttpSearchUserIssues_TranslatesTabFilters(t *testing.T) {
 	cases := []struct {
 		name      string
