@@ -9,6 +9,11 @@ import { stopVscode } from "@/lib/api/domains/vscode-api";
 import { parkUserShell, stopUserShell } from "@/lib/api/domains/user-shell-api";
 
 const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
+const terminalTerminateClosePanelIds = new Set<string>();
+
+export function markTerminalPanelTerminateClose(panelId: string): void {
+  terminalTerminateClosePanelIds.add(panelId);
+}
 
 function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
   if (useDockviewStore.getState().isRestoringLayout) return;
@@ -155,8 +160,10 @@ function resolveSessionForEntry(
  *  the "+" menu); scripts/bottom-panel/legacy passthrough still destroy. */
 function handleTerminalPanelClosed(
   appStore: StoreApi<AppState>,
+  panelId: string,
   params: Record<string, unknown>,
 ): void {
+  if (terminalTerminateClosePanelIds.delete(panelId)) return;
   const terminalId = params.terminalId as string | undefined;
   if (!terminalId) return;
   const stampedEnv = params.environmentId as string | undefined;
@@ -194,7 +201,8 @@ export function setupPortalCleanup(
     const entry = panelPortalManager.get(panel.id);
     const sessionForApi = resolveSessionForEntry(appStore, entry?.envId);
     if (entry?.component === "vscode" && sessionForApi) stopVscode(sessionForApi);
-    if (entry?.component === "terminal") handleTerminalPanelClosed(appStore, entry.params);
+    if (entry?.component === "terminal")
+      handleTerminalPanelClosed(appStore, panel.id, entry.params);
     panelPortalManager.release(panel.id);
   });
 }

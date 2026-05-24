@@ -10,7 +10,8 @@ import {
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
 import { useAppStore } from "@/components/state-provider";
-import { renameUserShell } from "@/lib/api/domains/user-shell-api";
+import { destroyUserShell, renameUserShell } from "@/lib/api/domains/user-shell-api";
+import { markTerminalPanelTerminateClose } from "./dockview-layout-setup";
 
 /**
  * Custom dockview tab for terminal panels.
@@ -124,10 +125,15 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
       </ContextMenuTrigger>
       <TerminalTabMenu
         terminalId={terminalId}
+        taskID={taskID}
         environmentId={stampedEnv ?? null}
         canMutate={isOrdinary}
         onStartRename={() => setIsRenaming(true)}
         onClosePanel={() => props.api.close()}
+        onTerminatePanel={() => {
+          markTerminalPanelTerminateClose(props.api.id);
+          props.api.close();
+        }}
       />
     </ContextMenu>
   );
@@ -251,26 +257,45 @@ function TerminalTabRenameInput({
 
 function TerminalTabMenu({
   terminalId,
+  taskID,
   environmentId,
   canMutate,
   onStartRename,
   onClosePanel,
+  onTerminatePanel,
 }: {
   terminalId: string;
+  taskID: string | null;
   environmentId: string | null;
   canMutate: boolean;
   onStartRename: () => void;
   onClosePanel: () => void;
+  onTerminatePanel: () => void;
 }) {
   const removeUserShellStore = useAppStore((s) => s.removeUserShell);
 
-  const handleTerminate = useCallback(() => {
+  const handleTerminate = useCallback(async () => {
     if (!environmentId) return;
-    // Remove from store FIRST so the dockview onDidRemovePanel cleanup
-    // sees no shell record and chooses the legacy destroy path, not park.
-    removeUserShellStore(environmentId, terminalId);
-    onClosePanel();
-  }, [environmentId, terminalId, removeUserShellStore, onClosePanel]);
+    if (!canMutate) {
+      onClosePanel();
+      return;
+    }
+    try {
+      await destroyUserShell(environmentId, terminalId, taskID ?? undefined);
+      removeUserShellStore(environmentId, terminalId);
+      onTerminatePanel();
+    } catch (error) {
+      console.error("terminate terminal:", error);
+    }
+  }, [
+    canMutate,
+    environmentId,
+    terminalId,
+    taskID,
+    removeUserShellStore,
+    onClosePanel,
+    onTerminatePanel,
+  ]);
 
   return (
     <ContextMenuContent>

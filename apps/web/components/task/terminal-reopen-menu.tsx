@@ -13,6 +13,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { UserShellInfo } from "@/lib/state/slices";
 import { destroyUserShell, resumeUserShell } from "@/lib/api/domains/user-shell-api";
 import { useEnvironmentId } from "@/hooks/use-environment-session-id";
+import { markTerminalPanelTerminateClose } from "./dockview-layout-setup";
 
 const EMPTY_SHELLS: UserShellInfo[] = [];
 
@@ -113,23 +114,25 @@ function useDestroyTerminalRow({
   removeUserShellStore,
 }: DestroyTerminalRowOptions) {
   return useCallback(
-    async (event: React.MouseEvent, terminalId: string, seq: number | undefined) => {
+    async (event: React.MouseEvent, shell: UserShellInfo) => {
       event.preventDefault();
       event.stopPropagation();
       if (!environmentId) return;
-      const label = seq != null ? `terminal #${seq}` : "this terminal";
+      const label = shell.seq != null ? `terminal #${shell.seq}` : "this terminal";
       if (!window.confirm(`Terminate ${label}? This kills the running PTY.`)) return;
 
-      const existing = api ? findExistingTerminalPanel(api, terminalId) : null;
-      removeUserShellStore(environmentId, terminalId);
-      if (existing) {
-        existing.api.close();
-        return;
-      }
       try {
-        await destroyUserShell(environmentId, terminalId, taskID ?? undefined);
+        await destroyUserShell(environmentId, shell.terminalId, taskID ?? undefined);
       } catch (error) {
         console.error("terminate terminal from reopen menu:", error);
+        return;
+      }
+
+      removeUserShellStore(environmentId, shell.terminalId);
+      const existing = api ? findExistingTerminalPanel(api, shell.terminalId) : null;
+      if (existing) {
+        markTerminalPanelTerminateClose(existing.api.id);
+        existing.api.close();
       }
     },
     [api, environmentId, taskID, removeUserShellStore],
@@ -206,13 +209,7 @@ function findExistingTerminalPanel(api: DockviewApi, terminalId: string) {
   );
 }
 
-type ShellRow = {
-  terminalId: string;
-  seq?: number;
-  customName?: string | null;
-  displayName?: string;
-  state?: string;
-};
+type ShellRow = UserShellInfo;
 
 function TerminalReopenRow({
   shell,
@@ -223,7 +220,7 @@ function TerminalReopenRow({
   shell: ShellRow;
   isOpen: boolean;
   onClick: (terminalId: string, state: string | undefined, label: string) => void;
-  onDestroy: (event: React.MouseEvent, terminalId: string, seq: number | undefined) => void;
+  onDestroy: (event: React.MouseEvent, shell: ShellRow) => void;
 }) {
   // Ordinary terminals don't need the backend "Terminal {seq}" suffix
   // in the label — the seq lives in the adjacent badge, so the row
@@ -251,7 +248,7 @@ function TerminalReopenRow({
         title="Terminate"
         className="shrink-0 ml-1 rounded p-0.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive cursor-pointer"
         data-testid="destroy-terminal-row"
-        onClick={(e) => onDestroy(e, shell.terminalId, shell.seq)}
+        onClick={(e) => onDestroy(e, shell)}
       >
         <IconX className="h-3 w-3" />
       </button>
