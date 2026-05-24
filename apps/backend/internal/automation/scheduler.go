@@ -131,8 +131,8 @@ func (cs *CronScheduler) shouldFire(t *AutomationTrigger, now time.Time) bool {
 
 func (cs *CronScheduler) fire(ctx context.Context, t *AutomationTrigger, now time.Time) {
 	data, _ := json.Marshal(map[string]string{
-		"source":    "scheduled",
-		"timestamp": now.Format(time.RFC3339),
+		triggerDataSourceKey: string(TriggerTypeScheduled),
+		"timestamp":          now.Format(time.RFC3339),
 	})
 	dedupKey := fmt.Sprintf("scheduled:%s:%d", t.ID, now.Unix()/60) // Dedup by minute
 
@@ -163,11 +163,11 @@ func parseCronShorthand(expr string) (time.Duration, bool) {
 	}
 	// Common presets.
 	switch expr {
-	case "@hourly", "0 * * * *":
+	case triggerCronHourlyShorthand, triggerCronHourlyExpression:
 		return time.Hour, true
-	case "@daily", "0 0 * * *":
+	case triggerCronDailyShorthand, triggerCronDailyExpression:
 		return 24 * time.Hour, true
-	case "@weekly", "0 0 * * 0":
+	case triggerCronWeeklyShorthand, triggerCronWeeklyExpression:
 		return 7 * 24 * time.Hour, true
 	}
 	return 0, false

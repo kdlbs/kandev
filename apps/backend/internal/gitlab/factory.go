@@ -48,7 +48,7 @@ func NewClient(ctx context.Context, host string, secrets SecretProvider, log *lo
 		log.Debug("glab CLI available but not authenticated", zap.Error(err))
 	}
 
-	if token := os.Getenv("GITLAB_TOKEN"); token != "" {
+	if token := os.Getenv(secretNameToken); token != "" {
 		log.Info("using GITLAB_TOKEN from environment for GitLab integration")
 		return NewPATClient(host, token), AuthMethodPAT, nil
 	}
@@ -67,7 +67,7 @@ func NewClient(ctx context.Context, host string, secrets SecretProvider, log *lo
 	return NewNoopClient(host), AuthMethodNone, nil
 }
 
-// findPAT looks for a secret named "GITLAB_TOKEN" or "gitlab_token".
+// findPAT looks for a GitLab PAT secret.
 func findPAT(ctx context.Context, secrets SecretProvider) (string, error) {
 	items, err := secrets.List(ctx)
 	if err != nil {
@@ -77,7 +77,7 @@ func findPAT(ctx context.Context, secrets SecretProvider) (string, error) {
 		if !item.HasValue {
 			continue
 		}
-		if item.Name == "GITLAB_TOKEN" || item.Name == "gitlab_token" {
+		if item.Name == secretNameToken || item.Name == secretNameTokenLower {
 			return secrets.Reveal(ctx, item.ID)
 		}
 	}

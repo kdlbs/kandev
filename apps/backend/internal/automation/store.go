@@ -210,6 +210,22 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 	if a == nil {
 		return fmt.Errorf("automation not found: %s", id)
 	}
+	applyAutomationUpdate(a, req)
+	a.UpdatedAt = time.Now().UTC()
+	_, err = s.db.ExecContext(ctx, `
+		UPDATE automations SET name = ?, description = ?, workflow_id = ?, workflow_step_id = ?,
+			agent_profile_id = ?, executor_profile_id = ?, repository_id = ?,
+			prompt = ?, task_title_template = ?,
+			execution_mode = ?, enabled = ?, max_concurrent_runs = ?, updated_at = ?
+		WHERE id = ?`,
+		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
+		a.AgentProfileID, a.ExecutorProfileID, a.RepositoryID,
+		a.Prompt, a.TaskTitleTemplate,
+		string(a.ExecutionMode), a.Enabled, a.MaxConcurrentRuns, a.UpdatedAt, id)
+	return err
+}
+
+func applyAutomationUpdate(a *Automation, req *UpdateAutomationRequest) {
 	if req.Name != nil {
 		a.Name = *req.Name
 	}
@@ -249,18 +265,6 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 	if !a.ExecutionMode.Valid() {
 		a.ExecutionMode = ExecutionModeTask
 	}
-	a.UpdatedAt = time.Now().UTC()
-	_, err = s.db.ExecContext(ctx, `
-		UPDATE automations SET name = ?, description = ?, workflow_id = ?, workflow_step_id = ?,
-			agent_profile_id = ?, executor_profile_id = ?, repository_id = ?,
-			prompt = ?, task_title_template = ?,
-			execution_mode = ?, enabled = ?, max_concurrent_runs = ?, updated_at = ?
-		WHERE id = ?`,
-		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
-		a.AgentProfileID, a.ExecutorProfileID, a.RepositoryID,
-		a.Prompt, a.TaskTitleTemplate,
-		string(a.ExecutionMode), a.Enabled, a.MaxConcurrentRuns, a.UpdatedAt, id)
-	return err
 }
 
 // DeleteAutomation removes an automation and its triggers/runs (CASCADE).

@@ -25,7 +25,7 @@ type TriggerTypeInfo struct {
 
 // Common placeholders available for every trigger type.
 var commonPlaceholders = []PlaceholderInfo{
-	{Key: "trigger.type", Description: "Trigger type (scheduled, github_pr, webhook, etc.)", Example: "scheduled"},
+	{Key: "trigger.type", Description: "Trigger type (scheduled, github_pr, webhook, etc.)", Example: string(TriggerTypeScheduled)},
 	{Key: "trigger.timestamp", Description: "When the trigger fired", Example: "2026-03-08T12:00:00Z"},
 	{Key: "data.*", Description: "Access any field from trigger data", Example: "data.action"},
 }
@@ -46,16 +46,16 @@ var triggerTypeRegistry = []TriggerTypeInfo{
 		Type:        TriggerTypeGitHubPR,
 		Label:       "New pull requests",
 		Description: "Polls GitHub for PRs matching your filters (repo, branch, author, labels)",
-		Category:    "github",
+		Category:    triggerCategoryGitHub,
 		Enabled:     true,
 		Placeholders: append([]PlaceholderInfo{
 			{Key: "pr.number", Description: "Pull request number", Example: "42"},
 			{Key: "pr.title", Description: "Pull request title", Example: "Fix the bug"},
 			{Key: "pr.url", Description: "Pull request URL", Example: "https://github.com/org/repo/pull/42"},
 			{Key: "pr.author", Description: "PR author login", Example: "alice"},
-			{Key: "pr.repo", Description: "Repository (owner/name)", Example: "org/repo"},
+			{Key: "pr.repo", Description: placeholderRepositoryOwner, Example: exampleRepositoryOwner},
 			{Key: "pr.branch", Description: "Head branch name", Example: "fix-bug"},
-			{Key: "pr.base_branch", Description: "Base branch name", Example: "main"},
+			{Key: "pr.base_branch", Description: "Base branch name", Example: defaultBranchMain},
 			{Key: "pr.body", Description: "Pull request body text", Example: "Fixes #123"},
 		}, commonPlaceholders...),
 		DefaultPrompt:    "Review PR #{{pr.number}} in {{pr.repo}}: {{pr.title}}\n\n{{pr.body}}\n\nBranch: {{pr.branch}} → {{pr.base_branch}}",
@@ -66,11 +66,11 @@ var triggerTypeRegistry = []TriggerTypeInfo{
 		Type:        TriggerTypeGitHubPush,
 		Label:       "Push to branch",
 		Description: "Triggers when commits are pushed to matching branches",
-		Category:    "github",
+		Category:    triggerCategoryGitHub,
 		Enabled:     false,
 		Placeholders: append([]PlaceholderInfo{
-			{Key: "push.branch", Description: "Branch that was pushed to", Example: "main"},
-			{Key: "push.repo", Description: "Repository (owner/name)", Example: "org/repo"},
+			{Key: "push.branch", Description: "Branch that was pushed to", Example: defaultBranchMain},
+			{Key: "push.repo", Description: placeholderRepositoryOwner, Example: exampleRepositoryOwner},
 			{Key: "push.sha", Description: "Commit SHA", Example: "abc1234"},
 			{Key: "push.message", Description: "Commit message", Example: "feat: add feature"},
 		}, commonPlaceholders...),
@@ -82,12 +82,12 @@ var triggerTypeRegistry = []TriggerTypeInfo{
 		Type:        TriggerTypeGitHubCI,
 		Label:       "CI check result",
 		Description: "Triggers when a CI check completes with matching conclusion",
-		Category:    "github",
+		Category:    triggerCategoryGitHub,
 		Enabled:     false,
 		Placeholders: append([]PlaceholderInfo{
 			{Key: "ci.check_name", Description: "CI check/workflow name", Example: "build"},
 			{Key: "ci.conclusion", Description: "CI conclusion", Example: "failure"},
-			{Key: "ci.repo", Description: "Repository (owner/name)", Example: "org/repo"},
+			{Key: "ci.repo", Description: placeholderRepositoryOwner, Example: exampleRepositoryOwner},
 			{Key: "ci.url", Description: "CI run URL", Example: "https://github.com/..."},
 		}, commonPlaceholders...),
 		DefaultPrompt:    "CI check '{{ci.check_name}}' {{ci.conclusion}} in {{ci.repo}}\n\n{{ci.url}}",

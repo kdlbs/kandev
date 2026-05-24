@@ -10,6 +10,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+const responseErrorKey = "error"
+
 // Controller handles HTTP endpoints for GitLab integration.
 type Controller struct {
 	service *Service
@@ -49,7 +51,7 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 func (c *Controller) httpGetStatus(ctx *gin.Context) {
 	status, err := c.service.GetStatus(ctx.Request.Context())
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, status)
@@ -58,17 +60,17 @@ func (c *Controller) httpGetStatus(ctx *gin.Context) {
 func (c *Controller) httpConfigureToken(ctx *gin.Context) {
 	var req ConfigureTokenRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload: token is required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "invalid payload: token is required"})
 		return
 	}
 	if err := c.service.ConfigureToken(ctx.Request.Context(), req.Token); err != nil {
 		// errors.Is against the package-level sentinel — durable across
 		// future rewording / wrapping of the ConfigureToken error message.
 		if errors.Is(err, ErrInvalidToken) {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: err.Error()})
 			return
 		}
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"configured": true})
@@ -76,7 +78,7 @@ func (c *Controller) httpConfigureToken(ctx *gin.Context) {
 
 func (c *Controller) httpClearToken(ctx *gin.Context) {
 	if err := c.service.ClearToken(ctx.Request.Context()); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"cleared": true})
@@ -85,11 +87,11 @@ func (c *Controller) httpClearToken(ctx *gin.Context) {
 func (c *Controller) httpConfigureHost(ctx *gin.Context) {
 	var req ConfigureHostRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload: host is required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "invalid payload: host is required"})
 		return
 	}
 	if err := c.service.ConfigureHost(ctx.Request.Context(), req.Host); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"configured": true, "host": c.service.Host()})
@@ -98,12 +100,12 @@ func (c *Controller) httpConfigureHost(ctx *gin.Context) {
 func (c *Controller) httpGetMRFeedback(ctx *gin.Context) {
 	projectPath, iid, err := parseProjectAndIID(ctx)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: err.Error()})
 		return
 	}
 	feedback, err := c.service.GetMRFeedback(ctx.Request.Context(), projectPath, iid)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, feedback)
@@ -117,12 +119,12 @@ func (c *Controller) httpCreateDiscussionNote(ctx *gin.Context) {
 		Body         string `json:"body" binding:"required"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "invalid payload"})
 		return
 	}
 	note, err := c.service.CreateMRDiscussionNote(ctx.Request.Context(), req.Project, req.IID, req.DiscussionID, req.Body)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, note)
@@ -135,11 +137,11 @@ func (c *Controller) httpResolveDiscussion(ctx *gin.Context) {
 		DiscussionID string `json:"discussion_id" binding:"required"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "invalid payload"})
 		return
 	}
 	if err := c.service.ResolveMRDiscussion(ctx.Request.Context(), req.Project, req.IID, req.DiscussionID); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"resolved": true})
@@ -176,12 +178,12 @@ type SyncTaskMRRequest struct {
 func (c *Controller) httpListWorkspaceTaskMRs(ctx *gin.Context) {
 	wsID := ctx.Param("workspaceID")
 	if wsID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspaceID required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "workspaceID required"})
 		return
 	}
 	taskMRs, err := c.service.ListTaskMRsByWorkspace(ctx.Request.Context(), wsID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, TaskMRsResponse{TaskMRs: taskMRs})
@@ -190,12 +192,12 @@ func (c *Controller) httpListWorkspaceTaskMRs(ctx *gin.Context) {
 func (c *Controller) httpListTaskMRs(ctx *gin.Context) {
 	taskID := ctx.Param("taskID")
 	if taskID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "taskID required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "taskID required"})
 		return
 	}
 	mrs, err := c.service.ListTaskMRsByTask(ctx.Request.Context(), taskID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"task_mrs": mrs})
@@ -204,17 +206,17 @@ func (c *Controller) httpListTaskMRs(ctx *gin.Context) {
 func (c *Controller) httpSyncTaskMR(ctx *gin.Context) {
 	taskID := ctx.Param("taskID")
 	if taskID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "taskID required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "taskID required"})
 		return
 	}
 	var req SyncTaskMRRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload: project_path and iid required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "invalid payload: project_path and iid required"})
 		return
 	}
 	row, err := c.service.SyncTaskMR(ctx.Request.Context(), taskID, req.RepositoryID, req.ProjectPath, req.IID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, row)
@@ -232,7 +234,7 @@ func (c *Controller) httpSearchUserMRs(ctx *gin.Context) {
 		page, perPage,
 	)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, result)
@@ -248,7 +250,7 @@ func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 		page, perPage,
 	)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, result)

@@ -272,9 +272,9 @@ const mrStateOpen = "open"
 // alone so the UI shares the GitHub vocabulary.
 func normalizeMRState(state string) string {
 	switch state {
-	case "opened":
+	case gitlabStateOpened:
 		return mrStateOpen
-	case "merged", "closed", "locked":
+	case gitlabStateMerged, gitlabStateClosed, gitlabStateLocked:
 		return state
 	default:
 		return state
@@ -315,7 +315,7 @@ func hasOpenDiscussions(discussions []MRDiscussion) bool {
 
 func pipelineFailing(pipelines []Pipeline) bool {
 	state, _, _ := summarizePipelines(pipelines)
-	return state == "failure"
+	return state == pipelineStateFailure
 }
 
 // Computed status strings shared by pipeline + approval summarizers.
@@ -332,10 +332,10 @@ func summarizePipelines(pipelines []Pipeline) (state string, jobsTotal, jobsPass
 	jobsTotal = latest.JobsTotal
 	jobsPassing = latest.JobsPassing
 	switch latest.Status {
-	case "success":
-		state = "success"
-	case "failed", "canceled":
-		state = "failure"
+	case pipelineStatusSuccess:
+		state = pipelineStatusSuccess
+	case pipelineStatusFailed, "canceled":
+		state = pipelineStateFailure
 	case "skipped":
 		state = ""
 	default:
@@ -347,12 +347,12 @@ func summarizePipelines(pipelines []Pipeline) (state string, jobsTotal, jobsPass
 func summarizeApprovals(have, required int) string {
 	if required == 0 {
 		if have > 0 {
-			return "approved"
+			return approvalStateApproved
 		}
 		return ""
 	}
 	if have >= required {
-		return "approved"
+		return approvalStateApproved
 	}
 	return statusPending
 }
@@ -363,13 +363,13 @@ func summarizeApprovals(have, required int) string {
 // GitLab's /merge_requests endpoint scopes to the authenticated user when
 // `scope=assigned_to_me` or `reviewer_username=<me>`; we pass
 // `reviewer_username=` resolution to the caller via filter (e.g.
-// "reviewer_username=octocat"). state defaults to "opened".
+// "reviewer_username=octocat"). state defaults to GitLab's opened state.
 func buildReviewMRQuery(filter, customQuery string) string {
 	if customQuery != "" {
 		return customQuery
 	}
 	values := url.Values{}
-	values.Set("state", "opened")
+	values.Set("state", gitlabStateOpened)
 	values.Set("scope", "all")
 	values.Set("per_page", "50")
 	if filter != "" {
@@ -383,7 +383,7 @@ func buildMRSearchQuery(filter, customQuery string) string {
 		return customQuery
 	}
 	values := url.Values{}
-	values.Set("state", "opened")
+	values.Set("state", gitlabStateOpened)
 	values.Set("scope", "all")
 	if filter != "" {
 		appendFilter(values, filter)
@@ -396,7 +396,7 @@ func buildIssueSearchQuery(filter, customQuery string) string {
 		return customQuery
 	}
 	values := url.Values{}
-	values.Set("state", "opened")
+	values.Set("state", gitlabStateOpened)
 	values.Set("scope", "all")
 	if filter != "" {
 		appendFilter(values, filter)

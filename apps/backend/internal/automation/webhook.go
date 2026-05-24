@@ -12,6 +12,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+const responseErrorKey = "error"
+
 // WebhookHandler handles incoming webhook requests that fire automation triggers.
 type WebhookHandler struct {
 	svc    *Service
@@ -28,17 +30,17 @@ func NewWebhookHandler(svc *Service, log *logger.Logger) *WebhookHandler {
 func (h *WebhookHandler) Handle(c *gin.Context) {
 	automationID := c.Param("id")
 	if automationID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "automation id required"})
+		c.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "automation id required"})
 		return
 	}
 
 	a, err := h.svc.GetAutomation(c.Request.Context(), automationID)
 	if err != nil || a == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "automation not found"})
+		c.JSON(http.StatusNotFound, gin.H{responseErrorKey: "automation not found"})
 		return
 	}
 	if !a.Enabled {
-		c.JSON(http.StatusConflict, gin.H{"error": "automation is disabled"})
+		c.JSON(http.StatusConflict, gin.H{responseErrorKey: "automation is disabled"})
 		return
 	}
 
@@ -47,7 +49,7 @@ func (h *WebhookHandler) Handle(c *gin.Context) {
 	// by byte from timing differences.
 	secret := c.GetHeader("X-Webhook-Secret")
 	if subtle.ConstantTimeCompare([]byte(secret), []byte(a.WebhookSecret)) != 1 {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid webhook secret"})
+		c.JSON(http.StatusUnauthorized, gin.H{responseErrorKey: "invalid webhook secret"})
 		return
 	}
 
@@ -61,14 +63,14 @@ func (h *WebhookHandler) Handle(c *gin.Context) {
 		}
 	}
 	if triggerID == "" {
-		c.JSON(http.StatusConflict, gin.H{"error": "no enabled webhook trigger"})
+		c.JSON(http.StatusConflict, gin.H{responseErrorKey: "no enabled webhook trigger"})
 		return
 	}
 
 	// Read body as trigger data.
 	body, readErr := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20)) // 1MB limit
 	if readErr != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read body"})
+		c.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "failed to read body"})
 		return
 	}
 
@@ -82,7 +84,7 @@ func (h *WebhookHandler) Handle(c *gin.Context) {
 		h.logger.Error("failed to fire webhook trigger",
 			zap.String("automation_id", automationID),
 			zap.Error(fireErr))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "trigger failed"})
+		c.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: "trigger failed"})
 		return
 	}
 

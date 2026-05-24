@@ -167,7 +167,7 @@ func wsManualTrigger(svc *Service, log *logger.Logger) func(ctx context.Context,
 		if err != nil || a == nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "automation not found", nil)
 		}
-		data, _ := json.Marshal(map[string]string{"source": "manual"})
+		data, _ := json.Marshal(map[string]string{triggerDataSourceKey: triggerDataSourceManual})
 		triggerID := ""
 		if len(a.Triggers) > 0 {
 			triggerID = a.Triggers[0].ID

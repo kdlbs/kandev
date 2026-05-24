@@ -16,6 +16,8 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
+const automationDefaultBaseBranch = "main"
+
 // AutomationService is the interface the orchestrator uses for automation operations.
 type AutomationService interface {
 	GetAutomation(ctx context.Context, id string) (*automation.Automation, error)
@@ -117,13 +119,13 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 		Description:    prompt,
 		Repositories:   repositories,
 		Metadata: map[string]interface{}{
-			"automation_id":       a.ID,
-			"automation_name":     a.Name,
-			"trigger_id":          evt.TriggerID,
-			"trigger_type":        string(evt.TriggerType),
-			"agent_profile_id":    a.AgentProfileID,
-			"executor_profile_id": a.ExecutorProfileID,
-			"execution_mode":      string(a.ExecutionMode),
+			"automation_id":                 a.ID,
+			"automation_name":               a.Name,
+			"trigger_id":                    evt.TriggerID,
+			"trigger_type":                  string(evt.TriggerType),
+			models.MetaKeyAgentProfileID:    a.AgentProfileID,
+			models.MetaKeyExecutorProfileID: a.ExecutorProfileID,
+			"execution_mode":                string(a.ExecutionMode),
 		},
 		IsEphemeral: isRunMode,
 		Origin:      models.TaskOriginAutomationRun,
@@ -219,7 +221,7 @@ func (s *Service) resolveExplicitRepository(
 	}
 	baseBranch := repo.DefaultBranch
 	if baseBranch == "" {
-		baseBranch = "main"
+		baseBranch = automationDefaultBaseBranch
 	}
 	return []ReviewTaskRepository{{
 		RepositoryID:   repo.ID,
@@ -287,7 +289,7 @@ func (s *Service) resolveWorkspaceRepository(
 	repo := repos[0]
 	baseBranch := repo.DefaultBranch
 	if baseBranch == "" {
-		baseBranch = "main"
+		baseBranch = automationDefaultBaseBranch
 	}
 	return []ReviewTaskRepository{{
 		RepositoryID: repo.ID,

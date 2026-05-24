@@ -327,7 +327,7 @@ func (s *Service) findTokenSecret(ctx context.Context) (bool, string, error) {
 		if !item.HasValue {
 			continue
 		}
-		if item.Name == secretNameToken || item.Name == "gitlab_token" {
+		if item.Name == secretNameToken || item.Name == secretNameTokenLower {
 			return true, item.ID, nil
 		}
 	}

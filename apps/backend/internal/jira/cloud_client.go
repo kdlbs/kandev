@@ -411,9 +411,11 @@ type serverSearchResponse struct {
 // searchFields is the list of issue fields we ask Jira to return. Kept short
 // because tickets are listed in dense table rows; the rest is fetched lazily
 // on click.
+const jiraFieldUpdated = "updated"
+
 var searchFields = []string{
 	"summary", "status", "project", "issuetype",
-	"priority", "assignee", "reporter", "updated",
+	"priority", "assignee", "reporter", jiraFieldUpdated,
 }
 
 // SearchTickets runs a JQL search and returns a page of tickets. The transport

@@ -21,6 +21,11 @@ var (
 	ErrValidation   = errors.New("validation error")
 )
 
+const (
+	changesPanelLayoutFlat = "flat"
+	changesPanelLayoutTree = "tree"
+)
+
 type Service struct {
 	repo        store.Repository
 	eventBus    bus.EventBus
@@ -208,7 +213,7 @@ func applyChangesPanelLayout(settings *models.UserSettings, value *string) error
 		return nil
 	}
 	v := strings.TrimSpace(*value)
-	if v != "flat" && v != "tree" {
+	if v != changesPanelLayoutFlat && v != changesPanelLayoutTree {
 		return errors.New("changes_panel_layout must be 'flat' or 'tree'")
 	}
 	settings.ChangesPanelLayout = v

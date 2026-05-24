@@ -122,7 +122,10 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 // supported in passthrough mode (Claude, Codex, OpenCode, Cursor, Auggie, …).
 // If a future agent needs a different sequence, lift this into a per-agent
 // PassthroughConfig field — see the plan for issue #989.
-const passthroughSubmitSequence = "\r"
+const (
+	passthroughSubmitSequence = "\r"
+	stopReasonPassthrough     = "passthrough_dispatched"
+)
 
 // Prompt sends a follow-up prompt to a running agent for a task
 // Returns PromptResult indicating if the agent needs input
@@ -202,7 +205,7 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID, sessionID, pro
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
-	return &PromptResult{StopReason: "passthrough_dispatched"}, nil
+	return &PromptResult{StopReason: stopReasonPassthrough}, nil
 }
 
 // SwitchModel switches the model for a running session. It first attempts an in-place switch
