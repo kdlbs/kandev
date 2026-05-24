@@ -24,6 +24,7 @@ const (
 	repositoryFlagBody                   = "--body"
 	repositoryFlagDescription            = "--description"
 	repositoryFlagHead                   = "--head"
+	redactedLogValue                     = "[REDACTED]"
 )
 
 type azureRepoInfo struct {
@@ -40,10 +41,18 @@ type azurePRCreateResponse struct {
 }
 
 func detectPRProvider(remoteURL string) prProvider {
-	if isAzureReposHost(remoteHostFromURL(remoteURL)) {
+	host := remoteHostFromURL(remoteURL)
+	if isAzureReposHost(host) {
 		return prProviderAzureRepos
 	}
-	return prProviderGitHub
+	if isGitHubHost(host) {
+		return prProviderGitHub
+	}
+	return ""
+}
+
+func isGitHubHost(host string) bool {
+	return host == "github.com" || strings.HasSuffix(host, ".github.com")
 }
 
 func isAzureReposHost(host string) bool {
@@ -85,39 +94,26 @@ func remoteHostFromURL(remoteURL string) string {
 	return strings.ToLower(host)
 }
 
-// extractJSONObject returns the first balanced {...} object in output. Some az
-// versions prefix stdout with status text before the JSON payload.
-func extractJSONObject(output string) (string, bool) {
-	start := strings.Index(output, "{")
-	if start < 0 {
-		return "", false
+func parseAzurePRCreateResponse(stdoutOutput string) (azurePRCreateResponse, error) {
+	trimmed := strings.TrimSpace(stdoutOutput)
+	var response azurePRCreateResponse
+	if err := json.Unmarshal([]byte(trimmed), &response); err == nil {
+		return response, nil
 	}
 
-	depth := 0
-	for i := start; i < len(output); i++ {
-		switch output[i] {
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return output[start : i+1], true
-			}
+	// az may prefix stdout with status lines; parse JSON lines so braces inside
+	// string values do not confuse a naive brace balancer.
+	lines := strings.Split(trimmed, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+		if err := json.Unmarshal([]byte(line), &response); err == nil {
+			return response, nil
 		}
 	}
-	return "", false
-}
-
-func parseAzurePRCreateResponse(stdoutOutput string) (azurePRCreateResponse, error) {
-	jsonPayload, ok := extractJSONObject(stdoutOutput)
-	if !ok {
-		return azurePRCreateResponse{}, fmt.Errorf("no JSON object in output")
-	}
-	var response azurePRCreateResponse
-	if err := json.Unmarshal([]byte(jsonPayload), &response); err != nil {
-		return azurePRCreateResponse{}, err
-	}
-	return response, nil
+	return azurePRCreateResponse{}, fmt.Errorf("no JSON object in output")
 }
 
 func parseAzureRepoInfo(remoteURL string) (*azureRepoInfo, error) {
@@ -268,7 +264,7 @@ func sanitizeRepositoryArgs(args []string) []string {
 	redactNext := false
 	for _, arg := range args {
 		if redactNext {
-			sanitized = append(sanitized, "[REDACTED]")
+			sanitized = append(sanitized, redactedLogValue)
 			redactNext = false
 			continue
 		}
@@ -281,11 +277,11 @@ func sanitizeRepositoryArgs(args []string) []string {
 
 		switch {
 		case strings.HasPrefix(arg, repositoryFlagTitle+"="):
-			sanitized = append(sanitized, repositoryFlagTitle+"=[REDACTED]")
+			sanitized = append(sanitized, repositoryFlagTitle+"="+redactedLogValue)
 		case strings.HasPrefix(arg, repositoryFlagBody+"="):
-			sanitized = append(sanitized, repositoryFlagBody+"=[REDACTED]")
+			sanitized = append(sanitized, repositoryFlagBody+"="+redactedLogValue)
 		case strings.HasPrefix(arg, repositoryFlagDescription+"="):
-			sanitized = append(sanitized, repositoryFlagDescription+"=[REDACTED]")
+			sanitized = append(sanitized, repositoryFlagDescription+"="+redactedLogValue)
 		default:
 			sanitized = append(sanitized, arg)
 		}

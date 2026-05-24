@@ -173,6 +173,11 @@ func TestDetectPRProvider(t *testing.T) {
 	}{
 		{name: "azure https", remote: "https://dev.azure.com/acme/platform/_git/widgets", want: prProviderAzureRepos},
 		{name: "azure ssh", remote: "git@ssh.dev.azure.com:v3/acme/platform/widgets", want: prProviderAzureRepos},
+		{
+			name:   "azure ssh url scheme",
+			remote: "ssh://ssh.dev.azure.com:22/v3/acme/platform/widgets",
+			want:   prProviderAzureRepos,
+		},
 		{name: "visualstudio", remote: "https://acme.visualstudio.com/platform/_git/widgets", want: prProviderAzureRepos},
 		{name: "github", remote: "https://github.com/acme/widgets.git", want: prProviderGitHub},
 		{
@@ -199,6 +204,11 @@ func TestRemoteHostFromURL(t *testing.T) {
 	}{
 		{name: "https", remote: "https://dev.azure.com/acme/platform/_git/widgets", want: "dev.azure.com"},
 		{name: "scp", remote: "git@ssh.dev.azure.com:v3/acme/platform/widgets", want: "ssh.dev.azure.com"},
+		{
+			name:   "ssh url scheme",
+			remote: "ssh://ssh.dev.azure.com:22/v3/acme/platform/widgets",
+			want:   "ssh.dev.azure.com",
+		},
 		{name: "github", remote: "https://github.com/acme/widgets.git", want: "github.com"},
 	}
 
@@ -211,17 +221,9 @@ func TestRemoteHostFromURL(t *testing.T) {
 	}
 }
 
-func TestExtractJSONObject(t *testing.T) {
+func TestParseAzurePRCreateResponse(t *testing.T) {
 	payload := `{"pullRequestId":42,"repository":{"remoteUrl":"https://dev.azure.com/acme/platform/_git/widgets"}}`
 	stdout := "Creating pull request...\n" + payload
-
-	got, ok := extractJSONObject(stdout)
-	if !ok {
-		t.Fatal("extractJSONObject() = false")
-	}
-	if got != payload {
-		t.Fatalf("extractJSONObject() = %q, want %q", got, payload)
-	}
 
 	response, err := parseAzurePRCreateResponse(stdout)
 	if err != nil {
@@ -229,6 +231,19 @@ func TestExtractJSONObject(t *testing.T) {
 	}
 	if response.PullRequestID != 42 {
 		t.Fatalf("PullRequestID = %d, want 42", response.PullRequestID)
+	}
+}
+
+func TestParseAzurePRCreateResponse_bracesInString(t *testing.T) {
+	// Braces inside JSON string values must not break line-based parsing.
+	stdout := "status line\n" + `{"pullRequestId":7,"repository":{"remoteUrl":"https://dev.azure.com/o/p/_git/r","note":"} not end"}}`
+
+	response, err := parseAzurePRCreateResponse(stdout)
+	if err != nil {
+		t.Fatalf("parseAzurePRCreateResponse() error = %v", err)
+	}
+	if response.PullRequestID != 7 {
+		t.Fatalf("PullRequestID = %d, want 7", response.PullRequestID)
 	}
 }
 
@@ -257,6 +272,13 @@ func TestParseAzureRepoInfo(t *testing.T) {
 		{
 			name:     "azure ssh",
 			remote:   "git@ssh.dev.azure.com:v3/acme/platform/widgets",
+			wantOrg:  "https://dev.azure.com/acme",
+			wantProj: "platform",
+			wantRepo: "widgets",
+		},
+		{
+			name:     "azure ssh url scheme",
+			remote:   "ssh://ssh.dev.azure.com:22/v3/acme/platform/widgets",
 			wantOrg:  "https://dev.azure.com/acme",
 			wantProj: "platform",
 			wantRepo: "widgets",

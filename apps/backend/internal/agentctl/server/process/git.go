@@ -994,8 +994,14 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 	switch detectPRProvider(remoteURL) {
 	case prProviderAzureRepos:
 		return g.createAzureReposPR(ctx, result, remoteURL, branch, title, body, baseBranch, draft)
-	default:
+	case prProviderGitHub:
 		return g.createGitHubPR(ctx, result, branch, title, body, baseBranch, draft)
+	default:
+		result.Error = fmt.Sprintf(
+			"unsupported git remote for PR creation: %s (GitHub and Azure Repos are supported)",
+			redactRemoteURL(remoteURL),
+		)
+		return result, nil
 	}
 }
 
