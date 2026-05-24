@@ -111,9 +111,25 @@ export const qk = {
 
   // -------------------------------------------------------------------------
   // Integrations (health pollers — jira, linear, slack, etc.)
+  //
+  // health(kind)        — HTTP probe result from the 90s backend poller.
+  //                       Fetched with refetchInterval: 90_000 to match
+  //                       the backend cadence. Kind is e.g. "jira", "linear".
+  // availability(kind?) — Combined auth+enabled signal. Optional kind for
+  //                       scope (all integrations when omitted).
+  // enabled(kind)       — Install-wide on/off toggle. This key is NOT backed
+  //                       by a real HTTP endpoint — `useIntegrationEnabled`
+  //                       reads localStorage synchronously. Declared here so
+  //                       wave 2 workers can invalidate it from mutations
+  //                       (setEnabled → qc.setQueryData) if they need to.
   // -------------------------------------------------------------------------
   integrations: {
     health: (kind: string) => ["integrations", "health", kind] as const,
+    availability: (kind?: string) =>
+      kind !== undefined
+        ? (["integrations", "availability", kind] as const)
+        : (["integrations", "availability"] as const),
+    enabled: (kind: string) => ["integrations", "enabled", kind] as const,
   },
 
   // -------------------------------------------------------------------------

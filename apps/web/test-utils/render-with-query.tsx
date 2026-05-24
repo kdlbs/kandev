@@ -1,5 +1,6 @@
 import React from "react";
 import { render, type RenderOptions, type RenderResult } from "@testing-library/react";
+import { renderHook, type RenderHookOptions, type RenderHookResult } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 /**
@@ -56,5 +57,45 @@ export function renderWithQueryClient(
   }
 
   const result = render(ui, { wrapper: Wrapper, ...options });
+  return { client: queryClient, ...result };
+}
+
+/**
+ * Options for renderHookWithQueryClient.
+ * `client` defaults to a test-friendly QueryClient with retry and gcTime disabled.
+ */
+export interface RenderHookWithQueryOptions<TProps>
+  extends Omit<RenderHookOptions<TProps>, "wrapper"> {
+  client?: QueryClient;
+}
+
+export interface RenderHookWithQueryResult<TResult, TProps>
+  extends RenderHookResult<TResult, TProps> {
+  client: QueryClient;
+}
+
+/**
+ * Renders a hook inside a QueryClientProvider.
+ *
+ * Usage:
+ *   const { result, client } = renderHookWithQueryClient(() => useMyHook());
+ *   await waitFor(() => expect(result.current).toBe(true));
+ *
+ * Pass a custom `client` to inspect the cache after the hook runs:
+ *   const client = createTestQueryClient();
+ *   const { result } = renderHookWithQueryClient(() => useMyHook(), { client });
+ *   expect(client.getQueryData(qk.X())).toEqual(...);
+ */
+export function renderHookWithQueryClient<TResult, TProps = undefined>(
+  renderFn: (props: TProps) => TResult,
+  { client, ...options }: RenderHookWithQueryOptions<TProps> = {},
+): RenderHookWithQueryResult<TResult, TProps> {
+  const queryClient = client ?? createTestQueryClient();
+
+  function Wrapper({ children }: { children: React.ReactNode }) {
+    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  }
+
+  const result = renderHook(renderFn, { wrapper: Wrapper, ...options });
   return { client: queryClient, ...result };
 }

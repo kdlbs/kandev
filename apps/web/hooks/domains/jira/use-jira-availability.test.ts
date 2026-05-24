@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { waitFor } from "@testing-library/react";
 import type { JiraConfig } from "@/lib/types/jira";
+import { renderHookWithQueryClient } from "@/test-utils/render-with-query";
 
 const getJiraConfigMock = vi.fn<[], Promise<JiraConfig | null>>();
 
@@ -58,22 +59,22 @@ describe("useJiraAvailable", () => {
 
   it("returns true when enabled, configured, and auth is healthy", async () => {
     getJiraConfigMock.mockResolvedValue(makeConfig({ hasSecret: true, lastOk: true }));
-    const { result } = renderHook(() => useJiraAvailable());
+    const { result } = renderHookWithQueryClient(() => useJiraAvailable());
     await waitFor(() => expect(result.current).toBe(true));
   });
 
   it("returns false when the user toggle is disabled", async () => {
     window.localStorage.setItem("kandev:jira:enabled:v1", "false");
     getJiraConfigMock.mockResolvedValue(makeConfig({ hasSecret: true, lastOk: true }));
-    const { result } = renderHook(() => useJiraAvailable());
-    // The toggle is install-wide now; an off-toggle keeps `enabled` at false
-    // while the auth probe still runs in the background.
-    await waitFor(() => expect(result.current).toBe(false));
+    const { result } = renderHookWithQueryClient(() => useJiraAvailable());
+    // Toggle is off → active=false → fetch skipped, returns false immediately
+    await new Promise((r) => setTimeout(r, 50));
+    expect(result.current).toBe(false);
   });
 
   it("returns false when no secret is configured", async () => {
     getJiraConfigMock.mockResolvedValue(makeConfig({ hasSecret: false, lastOk: true }));
-    const { result } = renderHook(() => useJiraAvailable());
+    const { result } = renderHookWithQueryClient(() => useJiraAvailable());
     await waitFor(() => expect(getJiraConfigMock).toHaveBeenCalled());
     expect(result.current).toBe(false);
   });
@@ -82,14 +83,14 @@ describe("useJiraAvailable", () => {
     getJiraConfigMock.mockResolvedValue(
       makeConfig({ hasSecret: true, lastOk: false, lastError: "401 Unauthorized" }),
     );
-    const { result } = renderHook(() => useJiraAvailable());
+    const { result } = renderHookWithQueryClient(() => useJiraAvailable());
     await waitFor(() => expect(getJiraConfigMock).toHaveBeenCalled());
     expect(result.current).toBe(false);
   });
 
   it("returns false when the config request rejects", async () => {
     getJiraConfigMock.mockRejectedValue(new Error("network down"));
-    const { result } = renderHook(() => useJiraAvailable());
+    const { result } = renderHookWithQueryClient(() => useJiraAvailable());
     await waitFor(() => expect(getJiraConfigMock).toHaveBeenCalled());
     expect(result.current).toBe(false);
   });
@@ -99,7 +100,7 @@ describe("useJiraAvailable", () => {
     try {
       getJiraConfigMock.mockResolvedValue(makeConfig({ hasSecret: true, lastOk: true }));
       const seen: boolean[] = [];
-      const { result } = renderHook(() => {
+      const { result } = renderHookWithQueryClient(() => {
         const v = useJiraAvailable();
         seen.push(v);
         return v;
@@ -107,9 +108,8 @@ describe("useJiraAvailable", () => {
       // Wait for the first probe to resolve and flip the value to true.
       await vi.waitFor(() => expect(result.current).toBe(true));
       const beforeTick = [...seen];
-      // Advance past one 90s poll. If the hook reset auth at the start of
-      // every tick, we'd observe a false in `seen` between this tick and
-      // the next probe response.
+      // Advance past one 90s poll. TanStack Query keeps stale data visible
+      // during refetch, so no false should appear between ticks.
       await vi.advanceTimersByTimeAsync(95_000);
       expect(result.current).toBe(true);
       const newRenders = seen.slice(beforeTick.length);
@@ -121,7 +121,7 @@ describe("useJiraAvailable", () => {
 
   it("returns false when no config exists yet (backend 204)", async () => {
     getJiraConfigMock.mockResolvedValue(null);
-    const { result } = renderHook(() => useJiraAvailable());
+    const { result } = renderHookWithQueryClient(() => useJiraAvailable());
     await waitFor(() => expect(getJiraConfigMock).toHaveBeenCalled());
     expect(result.current).toBe(false);
   });
