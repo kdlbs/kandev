@@ -477,7 +477,7 @@ export class SessionPage {
     return this.page.getByTestId("pr-approve-button");
   }
 
-  // --- CI hover popover accessors (kept here so the spec stays declarative) ---
+  // --- PR CI accessors: desktop hover popover + chip + mobile chip drawer ---
 
   /** The single-PR hover popover content (visible after hovering the topbar button). */
   prTopbarPopover(): Locator {
