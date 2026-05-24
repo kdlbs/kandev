@@ -115,7 +115,9 @@ Setup details are in [`docs/remote-cloud-environment.md`](docs/remote-cloud-envi
 - **Generated files before typecheck**: `make typecheck` requires two gitignored files. Run `node apps/web/scripts/generate-release-notes.mjs && node apps/web/scripts/generate-changelog.mjs` before `make typecheck` (the update script handles this automatically).
 - **`make dev`** starts both backend (`:38429`) and web (`:37429`) via the CLI launcher. No external services needed — SQLite is embedded, event bus is in-memory, mock agent is auto-registered in dev profile. First page load may be slow (~25s) due to Turbopack compilation.
 - **CLI test flake**: `src/ports.test.ts > isPortInUse > returns false within the timeout when the host black-holes packets` fails in cloud VMs due to network environment differences (192.0.2.1 behaves differently). This is a known environment-specific flake, not a code issue.
-- **Key commands** (all from repo root): `make dev` (run), `make test` (all tests), `make lint` (all linters), `make typecheck` (tsc), `make fmt` (format). See root `Makefile` for full list.
+- **Playwright browser installation**: `playwright install chromium` hangs during zip extraction in Firecracker-based cloud VMs (Node.js io_uring incompatibility). Workaround: download the zip with Playwright, then kill the stuck extraction process, manually `unzip` the archive into `~/.cache/ms-playwright/<browser>-<revision>/`, and write an `INSTALLATION_COMPLETE` marker file. The update script handles this automatically. System deps are pre-installed; if not, run `playwright install-deps chromium`.
+- **E2E tests**: require a production build first (`make build-backend && make build-web`), then `make test-e2e`. Tests use `e2e/playwright.config.ts` (not the root config). 1000+ specs.
+- **Key commands** (all from repo root): `make dev` (run), `make test` (all tests), `make lint` (all linters), `make typecheck` (tsc), `make fmt` (format), `make test-e2e` (E2E). See root `Makefile` for full list.
 
 ---
 
