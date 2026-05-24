@@ -122,7 +122,10 @@ func (s *Service) GetSSHLiveStatus(ctx context.Context, taskID string) (*SSHLive
 	if env.ExecutorType != string(models.ExecutorTypeSSH) {
 		return nil, nil
 	}
-	running := s.latestRunningForTask(ctx, taskID)
+	running, err := s.latestRunningForTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
 	if running == nil || running.Metadata == nil {
 		return nil, nil
 	}
@@ -134,10 +137,16 @@ func (s *Service) GetSSHLiveStatus(ctx context.Context, taskID string) (*SSHLive
 // today; if that ever changes the popover would silently surface stale
 // data, so this helper is defensive: it walks every session and keeps
 // the row with the latest StartedAt.
-func (s *Service) latestRunningForTask(ctx context.Context, taskID string) *models.ExecutorRunning {
+//
+// Repository errors are surfaced so the popover handler can log + omit
+// the ssh block instead of silently rendering "no SSH live status" on
+// every poll after a transient storage blip. The one "expected
+// missing" case (a session with no running row) is matched against
+// models.ErrExecutorRunningNotFound and skipped quietly.
+func (s *Service) latestRunningForTask(ctx context.Context, taskID string) (*models.ExecutorRunning, error) {
 	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("list task sessions: %w", err)
 	}
 	var latest *models.ExecutorRunning
 	for _, sess := range sessions {
@@ -145,14 +154,20 @@ func (s *Service) latestRunningForTask(ctx context.Context, taskID string) *mode
 			continue
 		}
 		running, err := s.executors.GetExecutorRunningBySessionID(ctx, sess.ID)
-		if err != nil || running == nil {
+		if err != nil {
+			if errors.Is(err, models.ErrExecutorRunningNotFound) {
+				continue
+			}
+			return nil, fmt.Errorf("get executor running for session %s: %w", sess.ID, err)
+		}
+		if running == nil {
 			continue
 		}
 		if latest == nil || running.CreatedAt.After(latest.CreatedAt) {
 			latest = running
 		}
 	}
-	return latest
+	return latest, nil
 }
 
 // buildSSHLiveStatus projects the SSH metadata keys onto the live-status
