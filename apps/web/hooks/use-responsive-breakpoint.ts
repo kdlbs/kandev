@@ -71,11 +71,9 @@ const SERVER_SNAPSHOT = buildResponsiveBreakpoint(DESKTOP_BREAKPOINT, true);
 let cachedClientSnapshot: ResponsiveBreakpoint | null = null;
 
 function breakpointsEqual(a: ResponsiveBreakpoint, b: ResponsiveBreakpoint): boolean {
-  return (
-    a.breakpoint === b.breakpoint &&
-    a.isFinePointer === b.isFinePointer &&
-    a.usesDesktopWorkbench === b.usesDesktopWorkbench
-  );
+  // breakpoint + isFinePointer fully determine every other field (see
+  // buildResponsiveBreakpoint), so equality on those two is sufficient.
+  return a.breakpoint === b.breakpoint && a.isFinePointer === b.isFinePointer;
 }
 
 function getClientSnapshot(): ResponsiveBreakpoint {
