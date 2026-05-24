@@ -24,6 +24,21 @@ type CustomFlagRow = {
   enabled: boolean;
 };
 
+// Strip surrounding single or double quotes added by shellQuoteValue for display.
+function stripOuterQuotes(s: string): string {
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    return s.slice(1, -1);
+  }
+  return s;
+}
+
+// POSIX single-quote a value that contains whitespace so the backend's
+// shell tokeniser treats it as one argv token.
+function shellQuoteValue(v: string): string {
+  if (!v || !/\s/.test(v)) return v;
+  return `'${v.replace(/'/g, "'\\''")}'`;
+}
+
 function flagToRow(f: CLIFlag): CustomFlagRow {
   const trimmed = f.flag.trim();
   const ws = trimmed.search(/\s/);
@@ -32,7 +47,8 @@ function flagToRow(f: CLIFlag): CustomFlagRow {
   }
   return {
     flag: trimmed.slice(0, ws),
-    value: trimmed.slice(ws + 1).trim(),
+    // Strip surrounding quotes added by shellQuoteValue so the input shows the raw value.
+    value: stripOuterQuotes(trimmed.slice(ws + 1)),
     description: f.description,
     enabled: f.enabled,
   };
@@ -40,9 +56,12 @@ function flagToRow(f: CLIFlag): CustomFlagRow {
 
 function rowToFlag(r: CustomFlagRow): CLIFlag {
   const flagText = r.flag.trim();
-  const valueText = r.value.trim();
+  // Do not trim value here — trailing spaces must survive inline editing.
+  // shellQuoteValue wraps values containing whitespace so the backend shell
+  // tokeniser produces a single argv token.
+  const quotedValue = shellQuoteValue(r.value);
   return {
-    flag: valueText ? `${flagText} ${valueText}` : flagText,
+    flag: quotedValue.trim() ? `${flagText} ${quotedValue}` : flagText,
     description: r.description,
     enabled: r.enabled,
   };
@@ -307,7 +326,7 @@ function CLIFlagsAddForm({ onAdd }: { onAdd: (next: CLIFlag) => void }) {
   const commit = () => {
     const trimmed = newFlag.trim();
     if (trimmed === "") return;
-    onAdd(rowToFlag({ flag: trimmed, value: newValue, description: "", enabled: true }));
+    onAdd(rowToFlag({ flag: trimmed, value: newValue.trim(), description: "", enabled: true }));
     setNewFlag("");
     setNewValue("");
   };
@@ -400,7 +419,7 @@ export function CustomCLIFlagsCard({
   const onAdd = (next: CLIFlag) => onChange([...flags, next]);
 
   return (
-    <Card>
+    <Card data-testid="custom-cli-flags-card">
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <div>

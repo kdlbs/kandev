@@ -473,7 +473,10 @@ function ProfileEditor({
     (patch: Partial<AgentProfile>) => {
       setDraft((current) => {
         if (patch.envVars !== undefined && areEnvVarsEqual(patch.envVars, current.envVars)) {
-          return current;
+          // envVars unchanged — apply the rest of the patch (if any) but skip envVars.
+          const { envVars: _ignored, ...rest } = patch;
+          if (Object.keys(rest).length === 0) return current;
+          return { ...current, ...rest };
         }
         return { ...current, ...patch };
       });
