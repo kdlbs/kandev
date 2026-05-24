@@ -285,12 +285,10 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	r.report(req.OnProgress, "Starting agent controller", PrepareStepCompleted,
 		fmt.Sprintf("pid=%d control_port=%d", pid, controlPort))
 
-	// Override req.WorkspacePath to the remote task dir so the per-instance
-	// server's workspace points at the SSH workspace, not the host one.
-	origWorkspace := req.WorkspacePath
-	req.WorkspacePath = taskDir
-	instancePort, ierr := createRemoteAgentInstance(ctx, client, controlPort, req, r.logger)
-	req.WorkspacePath = origWorkspace
+	// The per-instance server's workspace is the remote task dir, not the
+	// host-side req.WorkspacePath (which is meaningless on the remote).
+	// Passed explicitly so we don't briefly mutate the caller's request.
+	instancePort, ierr := createRemoteAgentInstance(ctx, client, controlPort, taskDir, req, r.logger)
 	if ierr != nil {
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
 		r.report(req.OnProgress, "Creating agent instance", PrepareStepFailed, ierr.Error())

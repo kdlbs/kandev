@@ -450,12 +450,13 @@ func createRemoteAgentInstance(
 	ctx context.Context,
 	client *ssh.Client,
 	controlPort int,
+	workspacePath string,
 	req *ExecutorCreateRequest,
 	log *logger.Logger,
 ) (int, error) {
 	body, err := json.Marshal(agentctl.CreateInstanceRequest{
 		ID:            req.InstanceID,
-		WorkspacePath: req.WorkspacePath,
+		WorkspacePath: workspacePath,
 		SessionID:     req.SessionID,
 		TaskID:        req.TaskID,
 		Protocol:      req.Protocol,
