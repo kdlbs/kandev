@@ -3,10 +3,12 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
@@ -169,6 +171,55 @@ func TestRelayComment_TelegramPayload(t *testing.T) {
 	}
 	if receivedBody["text"] != "Hello from agent!" {
 		t.Errorf("text = %q, want %q", receivedBody["text"], "Hello from agent!")
+	}
+}
+
+// TestRelayComment_CancelDuringBackoff verifies that cancelling the
+// caller's context while sendWithRetry is sleeping between attempts
+// causes the function to return promptly with ctx.Err(), without
+// waiting for the backoff timer to fire.
+func TestRelayComment_CancelDuringBackoff(t *testing.T) {
+	svc := newTestService(t)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	config := `{"webhook_url":"` + ts.URL + `"}`
+	channel, _ := setupChannelForRelay(t, svc, "webhook", config)
+
+	relay := service.NewChannelRelayWithClient(svc, ts.Client())
+
+	comment := &models.TaskComment{
+		ID:             "c-cancel",
+		TaskID:         channel.TaskID,
+		AuthorType:     "agent",
+		AuthorID:       "some-agent",
+		Body:           "Cancel me",
+		ReplyChannelID: channel.ID,
+	}
+
+	// The first attempt fires immediately and fails; the second attempt
+	// waits 1s. Cancelling at 100ms should land us inside that backoff
+	// window so sendWithRetry returns ctx.Err() rather than waiting it out.
+	ctx, cancel := context.WithCancel(t.Context())
+	time.AfterFunc(100*time.Millisecond, cancel)
+
+	start := time.Now()
+	err := relay.RelayComment(ctx, comment)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected error after context cancel, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+	// Allow generous slack for slow CI; the key signal is that we did not
+	// sit through the full 1s backoff.
+	if elapsed > 800*time.Millisecond {
+		t.Errorf("expected prompt return after cancel, elapsed=%v", elapsed)
 	}
 }
 
