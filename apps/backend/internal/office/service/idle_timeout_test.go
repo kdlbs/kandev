@@ -108,6 +108,12 @@ func TestIdleTimeout_EmptySessionOrTaskIgnored(t *testing.T) {
 // and the manager does not schedule an idle timer. Without ctx propagation
 // the lookup would run against context.Background() and could block on a
 // stalled database before falsely tripping (or not tripping) the timer.
+//
+// The elapsed-time assertion guards against a future refactor that drops
+// ctx propagation but happens to fall through some other no-timer path:
+// in that regression the lookup would either still run to completion or
+// hit the 5s isTaskTerminalLookupTimeout, both of which take far longer
+// than this bound.
 func TestIdleTimeout_CancelledContextDoesNotStartTimer(t *testing.T) {
 	svc := newTestService(t)
 
@@ -116,13 +122,18 @@ func TestIdleTimeout_CancelledContextDoesNotStartTimer(t *testing.T) {
 
 	mgr := service.NewIdleTimeoutManager(svc, 50*time.Millisecond)
 
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
+	start := time.Now()
 	mgr.OnRunFinished(ctx, "sess-cancelled", "task-ctx")
+	elapsed := time.Since(start)
 
 	if mgr.PendingCount() != 0 {
 		t.Errorf("expected 0 pending timers when ctx is already cancelled, got %d",
 			mgr.PendingCount())
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("expected prompt return when ctx is cancelled, elapsed=%v", elapsed)
 	}
 }
