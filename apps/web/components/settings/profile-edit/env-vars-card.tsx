@@ -3,7 +3,7 @@
 import { useCallback, useId, useState } from "react";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
+import { Card, CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
@@ -215,13 +215,55 @@ function EnvVarAddForm({ onAdd }: { onAdd: (row: EnvVarRow) => void }) {
   );
 }
 
-type EnvVarsCardProps = {
+type EnvVarsFieldProps = {
   rows: EnvVarRow[];
   secrets: { id: string; name: string }[];
   onAdd: (row: EnvVarRow) => void;
   onUpdate: (index: number, field: keyof EnvVarRow, val: string) => void;
   onRemove: (index: number) => void;
 };
+
+function EnvVarsFieldBody({ rows, secrets, onAdd, onUpdate, onRemove }: EnvVarsFieldProps) {
+  return (
+    <div className="space-y-2" data-testid="env-vars-field">
+      <div className="flex items-center justify-between">
+        <Label>Environment Variables</Label>
+        {rows.length > 0 && (
+          <span className="text-[10px] text-muted-foreground" data-testid="env-vars-count">
+            {rows.length} configured
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Injected into the execution environment. Use Secret mode for tokens and API keys; literal
+        values are stored in the profile JSON.
+      </p>
+      {rows.length === 0 ? (
+        <p className="text-xs italic text-muted-foreground" data-testid="env-vars-empty">
+          No environment variables configured. Add one below.
+        </p>
+      ) : (
+        <ul className="space-y-2" data-testid="env-vars-list">
+          {rows.map((row, idx) => (
+            <EnvVarRowComponent
+              key={idx}
+              row={row}
+              index={idx}
+              secrets={secrets}
+              onUpdate={onUpdate}
+              onRemove={onRemove}
+            />
+          ))}
+        </ul>
+      )}
+      <EnvVarAddForm onAdd={onAdd} />
+    </div>
+  );
+}
+
+export function EnvVarsField(props: EnvVarsFieldProps) {
+  return <EnvVarsFieldBody {...props} />;
+}
 
 export function useEnvVarRows(initialEnvVars?: ProfileEnvVar[]) {
   const [envVarRows, setEnvVarRows] = useState<EnvVarRow[]>(() => envVarsToRows(initialEnvVars));
@@ -241,46 +283,11 @@ export function useEnvVarRows(initialEnvVars?: ProfileEnvVar[]) {
   return { envVarRows, addEnvVar, removeEnvVar, updateEnvVar };
 }
 
-export function EnvVarsCard({ rows, secrets, onAdd, onUpdate, onRemove }: EnvVarsCardProps) {
+export function EnvVarsCard(props: EnvVarsFieldProps) {
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle>Environment Variables</CardTitle>
-            <CardDescription>
-              Injected into the execution environment. Use Secret mode for tokens and API keys;
-              literal values are stored in the profile JSON.
-            </CardDescription>
-          </div>
-          {rows.length > 0 && (
-            <span className="text-[10px] text-muted-foreground" data-testid="env-vars-count">
-              {rows.length} configured
-            </span>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {rows.length === 0 && (
-          <p className="text-xs italic text-muted-foreground" data-testid="env-vars-empty">
-            No environment variables configured. Add one below.
-          </p>
-        )}
-        {rows.length > 0 && (
-          <ul className="space-y-2" data-testid="env-vars-list">
-            {rows.map((row, idx) => (
-              <EnvVarRowComponent
-                key={idx}
-                row={row}
-                index={idx}
-                secrets={secrets}
-                onUpdate={onUpdate}
-                onRemove={onRemove}
-              />
-            ))}
-          </ul>
-        )}
-        <EnvVarAddForm onAdd={onAdd} />
+      <CardContent className="pt-6">
+        <EnvVarsFieldBody {...props} />
       </CardContent>
     </Card>
   );

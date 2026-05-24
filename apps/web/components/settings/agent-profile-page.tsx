@@ -19,7 +19,7 @@ import {
   AgentProfileDeleteConflictDialog,
 } from "@/components/settings/agent-profile-delete-dialog";
 import {
-  EnvVarsCard,
+  EnvVarsField,
   envVarsToRows,
   rowsToEnvVars,
   type EnvVarRow,
@@ -162,6 +162,7 @@ function ProfileSettingsCard({
           agentName={agent.name}
           lockPassthrough={Boolean(agent.tui_config)}
         />
+        <ProfileEnvVarsSection envVars={draft.envVars} onChange={onDraftChange} />
       </CardContent>
     </Card>
   );
@@ -232,7 +233,7 @@ export function ProfileEnvVarsEditor({ envVars, secrets, onChange }: ProfileEnvV
   );
 
   return (
-    <EnvVarsCard
+    <EnvVarsField
       rows={rows}
       secrets={secrets}
       onAdd={handleAdd}
@@ -546,8 +547,6 @@ function ProfileEditor({
         permissionSettings={permissionSettings}
         passthroughConfig={passthroughConfig}
       />
-
-      <ProfileEnvVarsSection envVars={draft.envVars} onChange={updateDraft} />
 
       <CommandPreviewCard
         agentName={agent.name}
